@@ -17,6 +17,7 @@ import {
   type CaseRequestType,
   type CaseStatus,
   type CaseType,
+  type EscalationLevel,
   type NoteVisibility,
 } from '@/features/cases/types';
 
@@ -224,6 +225,8 @@ export const caseService = {
       cancellationReason?: string;
       thirdPartyId?: string;
       thirdPartyName?: string;
+      escalationLevel?: EscalationLevel;
+      escalationReason?: string;
     },
   ): Promise<Case | undefined> {
     if (USE_MOCK) {
@@ -255,6 +258,34 @@ export const caseService = {
         nextSlaPausedAt = undefined;
       }
 
+      const enteringEscalation = nextStatus === 'Eskalasyon';
+      const newEscalationLevel = enteringEscalation
+        ? payload?.escalationLevel ?? prev.escalationLevel
+        : prev.escalationLevel;
+
+      const extraHistory: typeof prev.history = [];
+      if (enteringEscalation && payload?.escalationLevel && payload.escalationLevel !== prev.escalationLevel) {
+        extraHistory.push({
+          id: uid('H'),
+          caseId: prev.id,
+          action: 'Eskalasyon seviyesi',
+          fromValue: prev.escalationLevel,
+          toValue: payload.escalationLevel,
+          actor: 'Mock User',
+          at: nowIso(),
+        });
+      }
+      if (enteringEscalation && payload?.escalationReason) {
+        extraHistory.push({
+          id: uid('H'),
+          caseId: prev.id,
+          action: 'Eskalasyon gerekçesi',
+          toValue: payload.escalationReason,
+          actor: 'Mock User',
+          at: nowIso(),
+        });
+      }
+
       const updated: Case = {
         ...prev,
         status: nextStatus,
@@ -263,6 +294,7 @@ export const caseService = {
         cancellationReason: payload?.cancellationReason ?? prev.cancellationReason,
         thirdPartyId: enteringPause ? payload?.thirdPartyId ?? prev.thirdPartyId : prev.thirdPartyId,
         thirdPartyName: enteringPause ? payload?.thirdPartyName ?? prev.thirdPartyName : prev.thirdPartyName,
+        escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
@@ -279,6 +311,7 @@ export const caseService = {
             actor: 'Mock User',
             at: nowIso(),
           },
+          ...extraHistory,
         ],
       };
       store[idx] = updated;
@@ -289,6 +322,50 @@ export const caseService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nextStatus, ...payload }),
     });
+    return r.json();
+  },
+
+  // Spec section 15 — CaseActivity her değişiklik: field_name, old_value, new_value
+  async update(
+    id: string,
+    patch: Partial<Case>,
+    actor = 'Mock User',
+  ): Promise<Case | undefined> {
+    if (USE_MOCK) {
+      await delay(80);
+      const idx = store.findIndex((c) => c.id === id);
+      if (idx < 0) return undefined;
+      const prev = store[idx];
+      const historyAdds = (Object.keys(patch) as (keyof Case)[]).flatMap((key) => {
+        const oldVal = prev[key];
+        const newVal = patch[key];
+        if (oldVal === newVal) return [];
+        return [{
+          id: uid('H'),
+          caseId: prev.id,
+          action: 'Alan güncellendi',
+          fieldName: String(key),
+          fromValue: oldVal == null ? '—' : String(oldVal),
+          toValue: newVal == null ? '—' : String(newVal),
+          actor,
+          at: nowIso(),
+        }];
+      });
+      const updated: Case = {
+        ...prev,
+        ...patch,
+        updatedAt: nowIso(),
+        history: [...prev.history, ...historyAdds],
+      };
+      store[idx] = updated;
+      return clone(updated);
+    }
+    const r = await fetch(`${API_BASE}/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!r.ok) return undefined;
     return r.json();
   },
 

@@ -38,6 +38,7 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
       setQuery('');
       setSelectedId(null);
       setOpenCases([]);
+      // Modal açıldığında arama input'una otomatik focus
       const t = window.setTimeout(() => inputRef.current?.focus(), 80);
       return () => window.clearTimeout(t);
     }
@@ -85,7 +86,9 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
     <Modal
       open={open}
       onClose={onClose}
-      size="lg"
+      size="3xl"
+      height="85vh"
+      bodyClassName=""
       title={
         <div className="flex items-center gap-2">
           <Search size={16} className="text-brand-600" />
@@ -93,24 +96,28 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
         </div>
       }
     >
-      <div className="space-y-4">
-        <div className="relative">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <TextInput
-            ref={inputRef}
-            placeholder="İsim, telefon (ör. 212 555), e-posta veya yetkili adı…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-8"
-          />
-        </div>
+      <div className="flex h-full min-h-0">
+        {/* Sol sütun — 380px sabit */}
+        <div className="flex w-[380px] shrink-0 flex-col border-r border-slate-200">
+          {/* Arama input — sabit, scroll etmez */}
+          <div className="shrink-0 border-b border-slate-100 bg-white p-3">
+            <div className="relative">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <TextInput
+                ref={inputRef}
+                placeholder="İsim, telefon (ör. 212 555), e-posta veya yetkili adı…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            <div className="mt-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Sonuçlar ({results.length})
+            </div>
+          </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* Sol — sonuç listesi */}
-          <div>
-            <h4 className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <span>Sonuçlar ({results.length})</span>
-            </h4>
+          {/* Sonuç listesi — kalan alanı doldurur, kendi içinde scroll */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 scrollbar-thin">
             {results.length === 0 ? (
               <EmptyState
                 size="sm"
@@ -119,7 +126,7 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
                 description="Farklı arama terimi deneyin."
               />
             ) : (
-              <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
+              <ul className="space-y-1">
                 {results.map((a) => {
                   const active = a.id === selectedId;
                   return (
@@ -160,96 +167,114 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
             )}
           </div>
 
-          {/* Sağ — seçili müşterinin açık vakaları */}
-          <div>
-            {!selectedAccount ? (
+          {/* Yeni vaka butonu — sticky bottom, scroll dışı */}
+          {selectedAccount && (
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 p-3">
+              <Button
+                className="w-full justify-center"
+                leftIcon={<Plus size={14} />}
+                onClick={() => {
+                  onNewCase(selectedAccount.id);
+                  onClose();
+                }}
+              >
+                Bu müşteri için yeni vaka aç
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Sağ sütun — flex-1 */}
+        <div className="flex flex-1 min-w-0 flex-col">
+          {!selectedAccount ? (
+            <div className="flex flex-1 items-center justify-center p-8">
               <EmptyState
-                size="sm"
-                icon={<Building2 size={18} />}
-                title="Müşteri seçin"
+                icon={<Building2 size={22} />}
+                title="Listeden bir müşteri seçin"
                 description="Açık vakaları ve hızlı aksiyonlar burada görünür."
               />
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">{selectedAccount.name}</div>
-                  <div className="font-mono text-[11px] text-slate-500">{selectedAccount.id}</div>
-                </div>
-
-                <div>
-                  <h4 className="mb-1.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    <span>Açık Vakalar</span>
-                    {!loading && (
-                      <Badge tint={openCases.length > 0 ? 'amber' : 'slate'}>{openCases.length}</Badge>
-                    )}
-                  </h4>
-                  {loading ? (
-                    <div className="space-y-1.5">
-                      <Skeleton height={36} />
-                      <Skeleton height={36} />
-                    </div>
-                  ) : openCases.length === 0 ? (
-                    <p className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800 ring-1 ring-emerald-200">
-                      Bu müşterinin açık vakası yok.
-                    </p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {openCases.slice(0, 5).map((c) => (
-                        <li
-                          key={c.id}
-                          className="rounded-md bg-white px-2.5 py-1.5 ring-1 ring-slate-200"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-[10px] text-slate-500">
-                              {c.caseNumber}
-                            </span>
-                            <span className="flex-1 truncate text-xs font-medium text-slate-800">
-                              {c.title}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onShowCase(c.id);
-                                onClose();
-                              }}
-                              className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50"
-                              title="Vakayı detaydan aç"
-                            >
-                              <ExternalLink size={11} /> Aç
-                            </button>
-                          </div>
-                          <div className="mt-1 flex items-center gap-1.5">
-                            <CaseTypeBadge type={c.caseType} />
-                            <StatusPill status={c.status} />
-                            <span className="ml-auto text-[10px] text-slate-500">
-                              {formatRelative(c.createdAt)}
-                            </span>
-                          </div>
-                        </li>
-                      ))}
-                      {openCases.length > 5 && (
-                        <li className="text-[11px] text-slate-500">
-                          +{openCases.length - 5} vaka daha…
-                        </li>
-                      )}
-                    </ul>
+            </div>
+          ) : (
+            <>
+              {/* Müşteri başlığı + Açık Vakalar header — sabit */}
+              <div className="shrink-0 border-b border-slate-100 bg-white p-4">
+                <div className="text-base font-semibold text-slate-900">{selectedAccount.name}</div>
+                <div className="font-mono text-[11px] text-slate-500">{selectedAccount.id}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                  <span className="inline-flex items-center gap-1">
+                    <Phone size={12} />
+                    {selectedAccount.phone}
+                  </span>
+                  {selectedAccount.contactPerson && (
+                    <span className="inline-flex items-center gap-1">
+                      <UserCircle2 size={12} />
+                      {selectedAccount.contactPerson}
+                    </span>
+                  )}
+                  {selectedAccount.email && (
+                    <span className="truncate text-slate-500">{selectedAccount.email}</span>
                   )}
                 </div>
-
-                <div className="border-t border-slate-200 pt-3">
-                  <Button
-                    leftIcon={<Plus size={14} />}
-                    onClick={() => {
-                      onNewCase(selectedAccount.id);
-                      onClose();
-                    }}
-                  >
-                    Bu müşteri için yeni vaka aç
-                  </Button>
+                <div className="mt-3 flex items-center justify-between">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Açık Vakalar
+                  </h3>
+                  {!loading && (
+                    <Badge tint={openCases.length > 0 ? 'amber' : 'slate'}>{openCases.length}</Badge>
+                  )}
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* Vaka listesi — kalan alanı doldurur, kendi içinde scroll */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 scrollbar-thin">
+                {loading ? (
+                  <div className="space-y-2">
+                    <Skeleton height={56} />
+                    <Skeleton height={56} />
+                    <Skeleton height={56} />
+                  </div>
+                ) : openCases.length === 0 ? (
+                  <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 ring-1 ring-emerald-200">
+                    Bu müşterinin açık vakası yok.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {openCases.map((c) => (
+                      <li
+                        key={c.id}
+                        className="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-slate-500">{c.caseNumber}</span>
+                          <span className="flex-1 truncate text-sm font-medium text-slate-800">
+                            {c.title}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onShowCase(c.id);
+                              onClose();
+                            }}
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50"
+                            title="Vakayı detaydan aç"
+                          >
+                            <ExternalLink size={11} /> Aç
+                          </button>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <CaseTypeBadge type={c.caseType} />
+                          <StatusPill status={c.status} />
+                          <span className="ml-auto text-[10px] text-slate-500">
+                            {formatRelative(c.createdAt)}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </Modal>

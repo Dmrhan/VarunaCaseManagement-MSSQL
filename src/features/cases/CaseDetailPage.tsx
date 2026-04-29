@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle,
-  ArchiveX,
   ArrowLeft,
   Bot,
   Brain,
   Building2,
   Calendar,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -38,15 +35,21 @@ import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
 import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
+import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService } from '@/services/caseService';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
+  CASE_ORIGINS,
+  CASE_REQUEST_TYPES,
   ESCALATION_LEVEL_LABELS,
-  STATUS_TRANSITIONS,
+  FINANCIAL_STATUSES,
+  OFFER_OUTCOMES,
+  PRODUCT_USAGES,
+  RESPONSE_LEVELS,
+  USAGE_CHANGE_ALERTS,
   type Case,
-  type CaseStatus,
   type NoteVisibility,
 } from './types';
 
@@ -63,31 +66,37 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [loading, setLoading] = useState(false);
   const [activeId, setActiveId] = useState(caseId);
 
+  // Breadcrumb stack — geçmiş vaka navigasyonu için (max 3 level)
+  // Eski item'lar burada birikir; ana breadcrumb item'ı = activeId
+  const [navStack, setNavStack] = useState<{ id: string; caseNumber: string; accountName: string }[]>([]);
+
   const [tab, setTab] = useState<TabKey>('detail');
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
 
-  // Status transition workflow
-  const [pendingStatus, setPendingStatus] = useState<CaseStatus | ''>('');
-  const [resolutionNote, setResolutionNote] = useState('');
-  const [cancelReason, setCancelReason] = useState('');
-  const [thirdPartyId, setThirdPartyId] = useState('');
-  const [transitionError, setTransitionError] = useState<string | null>(null);
+  // Inline edit / drafts
+  const [drafts, setDrafts] = useState<Partial<Case>>({});
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [savingDrafts, setSavingDrafts] = useState(false);
+
+  // Status transition artık StatusTransitionPanel içinde (header popover kaldırıldı)
 
   // New note state
   const [noteText, setNoteText] = useState('');
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>('Internal');
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
-  const thirdParties = useMemo(() => lookupService.thirdParties(), []);
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
   const { toast } = useToast();
 
-  // Parent caseId değişirse içerideki state senkronlanır
+  // Parent caseId değişirse içerideki state ve breadcrumb sıfırlanır
   useEffect(() => {
     setActiveId(caseId);
+    setNavStack([]);
+    setDrafts({});
+    setEditingField(null);
   }, [caseId]);
 
   useEffect(() => {
@@ -98,11 +107,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
       if (alive) {
         setItem(c ?? null);
         setLoading(false);
-        setPendingStatus('');
-        setResolutionNote('');
-        setCancelReason('');
-        setThirdPartyId('');
-        setTransitionError(null);
         setNoteText('');
         setNoteVisibility('Internal');
         setTab('detail');
@@ -145,58 +149,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
     [item, accounts],
   );
 
-  const allowedTransitions = useMemo(
-    () => (item ? STATUS_TRANSITIONS[item.status] : []),
-    [item],
-  );
-
-  const requiresSupervisor = useMemo(() => {
-    if (!item || pendingStatus !== 'Çözüldü') return false;
-    return (
-      item.priority === 'Critical' ||
-      item.slaViolation ||
-      item.escalationLevel === 'Direktör' ||
-      item.escalationLevel === 'ÜstYönetim'
-    );
-  }, [item, pendingStatus]);
-
-  async function handleApplyTransition(closePopover: () => void) {
-    if (!item || !pendingStatus) return;
-    setTransitionError(null);
-    if (pendingStatus === 'Çözüldü' && !resolutionNote.trim()) {
-      setTransitionError('Çözüldü statüsüne geçiş için Çözüm Notu zorunludur.');
-      return;
-    }
-    if (pendingStatus === 'İptalEdildi' && !cancelReason.trim()) {
-      setTransitionError('İptal için iptal gerekçesi zorunludur.');
-      return;
-    }
-    if (pendingStatus === '3rdPartyBekleniyor' && !thirdPartyId) {
-      setTransitionError('3. parti bekleniyorsa hangi tarafın beklendiği seçilmelidir.');
-      return;
-    }
-    const tp = thirdParties.find((t) => t.id === thirdPartyId);
-    const updated = await caseService.transitionStatus(item.id, pendingStatus, {
-      resolutionNote: pendingStatus === 'Çözüldü' ? resolutionNote.trim() : undefined,
-      cancellationReason: pendingStatus === 'İptalEdildi' ? cancelReason.trim() : undefined,
-      thirdPartyId: pendingStatus === '3rdPartyBekleniyor' ? tp?.id : undefined,
-      thirdPartyName: pendingStatus === '3rdPartyBekleniyor' ? tp?.name : undefined,
-    });
-    if (updated) {
-      setItem(updated);
-      setPendingStatus('');
-      setResolutionNote('');
-      setCancelReason('');
-      setThirdPartyId('');
-      closePopover();
-      toast({
-        type: pendingStatus === 'Çözüldü' ? 'success' : pendingStatus === 'İptalEdildi' ? 'warn' : 'info',
-        title: 'Statü güncellendi',
-        message: `${updated.caseNumber} → ${pendingStatus}`,
-      });
-    }
-  }
-
   async function handleAddNote() {
     if (!item || !noteText.trim()) return;
     const created = await caseService.addNote(item.id, {
@@ -219,6 +171,79 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
     setTab('notes');
     setTimeout(() => noteRef.current?.focus(), 50);
   }
+
+  // Breadcrumb stack üzerinden geçmiş vakaya geçiş — Spec UX 4
+  function navigateToCase(targetId: string) {
+    if (!item || targetId === activeId) return;
+    setNavStack((prev) => {
+      const next = [...prev, { id: item.id, caseNumber: item.caseNumber, accountName: item.accountName }];
+      // Max 3 level: en eski item düşer
+      return next.length > 3 ? next.slice(next.length - 3) : next;
+    });
+    setActiveId(targetId);
+    setDrafts({});
+    setEditingField(null);
+    setTab('detail');
+  }
+
+  function navigateToStackItem(index: number) {
+    const target = navStack[index];
+    if (!target) return;
+    setActiveId(target.id);
+    setNavStack((prev) => prev.slice(0, index));
+    setDrafts({});
+    setEditingField(null);
+    setTab('detail');
+  }
+
+  // Inline edit handlers
+  function commitDraft(field: keyof Case, value: unknown) {
+    setDrafts((prev) => {
+      // Mevcut değerle aynıysa draft'ı kaldır
+      if ((item as Record<string, unknown> | null)?.[field as string] === value) {
+        const { [field as string]: _omit, ...rest } = prev as Record<string, unknown>;
+        void _omit;
+        return rest as Partial<Case>;
+      }
+      return { ...prev, [field]: value } as Partial<Case>;
+    });
+    setEditingField(null);
+  }
+
+  function cancelEdit() {
+    setEditingField(null);
+  }
+
+  async function handleSaveDrafts() {
+    if (!item || Object.keys(drafts).length === 0 || savingDrafts) return;
+    setSavingDrafts(true);
+    const updated = await caseService.update(item.id, drafts);
+    setSavingDrafts(false);
+    if (updated) {
+      setItem(updated);
+      setDrafts({});
+      setEditingField(null);
+      toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${Object.keys(drafts).length} alan kaydedildi.` });
+    }
+  }
+
+  function handleDiscardDrafts() {
+    setDrafts({});
+    setEditingField(null);
+  }
+
+  // ESC = açık edit'i iptal et (ya da pending draft'ları sıfırla — kullanıcı seçimi)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        if (editingField) {
+          setEditingField(null);
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editingField]);
 
   function handleStartCall() {
     setCallActive(true);
@@ -278,12 +303,25 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           </button>
 
           <div className="min-w-0 flex-1">
-            <nav className="flex items-center gap-1 text-xs text-slate-500">
+            <nav className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
               <button type="button" onClick={onBack} className="hover:text-brand-700 hover:underline">
                 Vakalar
               </button>
+              {navStack.map((entry, i) => (
+                <span key={`${entry.id}-${i}`} className="flex items-center gap-1">
+                  <ChevronRight size={11} className="text-slate-400" />
+                  <button
+                    type="button"
+                    onClick={() => navigateToStackItem(i)}
+                    className="font-mono text-slate-600 hover:text-brand-700 hover:underline"
+                    title={entry.accountName}
+                  >
+                    {entry.caseNumber}
+                  </button>
+                </span>
+              ))}
               <ChevronRight size={11} className="text-slate-400" />
-              <span className="font-mono text-slate-600">{item.caseNumber}</span>
+              <span className="font-mono text-slate-700">{item.caseNumber}</span>
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
@@ -300,109 +338,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 </button>
               )}
 
-              <Popover
-                align="start"
-                width={360}
-                trigger={({ toggle }) => (
-                  <button
-                    type="button"
-                    onClick={toggle}
-                    className="inline-flex items-center gap-1 rounded transition-opacity hover:opacity-80"
-                    title="Durumu değiştir"
-                  >
-                    <StatusPill status={item.status} />
-                    <ChevronDown size={11} className="text-slate-400" />
-                  </button>
-                )}
-              >
-                {({ close }) => (
-                  <div className="space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Statü Geçişi
-                    </div>
-                    {allowedTransitions.length === 0 ? (
-                      <p className="text-sm text-slate-600">
-                        <strong>{item.status}</strong> terminal durumdur — geçiş yapılamaz.
-                      </p>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-slate-600">Hedef:</span>
-                          <Select
-                            className="h-8 py-1"
-                            value={pendingStatus}
-                            onChange={(e) => setPendingStatus(e.target.value as CaseStatus | '')}
-                          >
-                            <option value="">Seçin…</option>
-                            {allowedTransitions.map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
-                        {pendingStatus === 'Çözüldü' && (
-                          <Field label="Çözüm Notu" required>
-                            <TextArea
-                              value={resolutionNote}
-                              onChange={(e) => setResolutionNote(e.target.value)}
-                              placeholder="Sorunun nasıl çözüldüğünü açıklayın…"
-                              rows={3}
-                            />
-                          </Field>
-                        )}
-                        {pendingStatus === 'İptalEdildi' && (
-                          <Field label="İptal Gerekçesi" required>
-                            <TextArea
-                              value={cancelReason}
-                              onChange={(e) => setCancelReason(e.target.value)}
-                              placeholder="İptal sebebini yazın…"
-                              rows={2}
-                            />
-                          </Field>
-                        )}
-                        {pendingStatus === '3rdPartyBekleniyor' && (
-                          <Field label="Beklenen 3. Parti" required hint="Bu süreçte SLA sayacı duraklatılır.">
-                            <Select value={thirdPartyId} onChange={(e) => setThirdPartyId(e.target.value)}>
-                              <option value="">Seçin…</option>
-                              {thirdParties.map((tp) => (
-                                <option key={tp.id} value={tp.id}>
-                                  {tp.name}
-                                </option>
-                              ))}
-                            </Select>
-                          </Field>
-                        )}
-                        {requiresSupervisor && (
-                          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
-                            <span>
-                              Çözüldü geçişi <strong>Supervisor onayı</strong> gerektiriyor (Critical / SLA
-                              ihlali / yüksek eskalasyon). FAZ 0'da onay simülasyonludur.
-                            </span>
-                          </div>
-                        )}
-                        {transitionError && (
-                          <p className="text-xs font-medium text-rose-600">{transitionError}</p>
-                        )}
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={close}>
-                            Vazgeç
-                          </Button>
-                          <Button
-                            size="sm"
-                            disabled={!pendingStatus}
-                            onClick={() => void handleApplyTransition(close)}
-                            rightIcon={<ChevronRight size={14} />}
-                          >
-                            Uygula
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </Popover>
+              {/* StatusPill artık görsel/display-only — geçişler StatusTransitionPanel ile yapılıyor */}
+              <StatusPill status={item.status} />
 
               <PriorityBadge priority={item.priority} />
               {item.slaViolation && (
@@ -421,14 +358,27 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {Object.keys(drafts).length > 0 && (
+              <button
+                type="button"
+                onClick={handleDiscardDrafts}
+                className="text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                title="Taslak değişiklikleri sil"
+              >
+                Taslakları sil
+              </button>
+            )}
             <Button
-              variant="outline"
+              variant={Object.keys(drafts).length > 0 ? 'primary' : 'outline'}
               size="sm"
               leftIcon={<Save size={12} />}
-              disabled
-              title="Düzenleme FAZ 4'te aktif olur"
+              disabled={Object.keys(drafts).length === 0 || savingDrafts}
+              onClick={handleSaveDrafts}
+              title={Object.keys(drafts).length > 0
+                ? `${Object.keys(drafts).length} alan kaydedilecek`
+                : 'Düzenlenmiş alan yok'}
             >
-              Kaydet
+              {savingDrafts ? 'Kaydediliyor…' : `Kaydet${Object.keys(drafts).length > 0 ? ` (${Object.keys(drafts).length})` : ''}`}
             </Button>
             <Button
               size="sm"
@@ -509,8 +459,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           accountPhone={account?.phone}
           accountEmail={account?.email}
           accountContact={account?.contactPerson}
-          previousCases={previousCases}
-          onSelectPrevious={(id) => setActiveId(id)}
           onStartCall={handleStartCall}
           onTransfer={() => toast({ type: 'info', message: 'Vaka devir akışı FAZ 4\'te eklenecek.' })}
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
@@ -562,7 +510,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           </nav>
 
           <div className="flex-1 overflow-y-auto p-6">
-            {tab === 'detail' && <DetailTab item={item} offeredSolutions={offeredSolutions} />}
+            {tab === 'detail' && (
+              <DetailTab
+                item={item}
+                offeredSolutions={offeredSolutions}
+                previousCases={previousCases}
+                onSelectPrevious={navigateToCase}
+                drafts={drafts}
+                editingField={editingField}
+                onStartEdit={(f) => setEditingField(f)}
+                onCancelEdit={cancelEdit}
+                onCommitDraft={commitDraft}
+                onTransitionApplied={(updated) => setItem(updated)}
+              />
+            )}
             {tab === 'activity' && <ActivityTab item={item} />}
             {tab === 'notes' && (
               <NotesTab
@@ -581,7 +542,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         </main>
 
         {/* Right panel — AI + type-specific summary */}
-        <RightPanel item={item} offeredSolutions={offeredSolutions} />
+        {/* Sağ panel — yalnızca AI önerisi varsa görünür; yoksa orta alan tüm kalan yeri alır */}
+        {item.aiGeneratedFlag && (
+          <RightPanel item={item} offeredSolutions={offeredSolutions} />
+        )}
       </div>
     </div>
   );
@@ -642,8 +606,6 @@ function LeftPanel({
   accountPhone,
   accountEmail,
   accountContact,
-  previousCases,
-  onSelectPrevious,
   onStartCall,
   onTransfer,
   onNoteAdded,
@@ -656,8 +618,6 @@ function LeftPanel({
   accountPhone?: string;
   accountEmail?: string;
   accountContact?: string;
-  previousCases: Case[];
-  onSelectPrevious: (id: string) => void;
   onStartCall: () => void;
   onTransfer: () => void;
   onNoteAdded: (note: import('./types').CaseNote) => void;
@@ -691,36 +651,6 @@ function LeftPanel({
         </div>
       </PanelSection>
 
-      <PanelSection
-        title={`Önceki Vakalar (${previousCases.length})`}
-        icon={<ArchiveX size={12} />}
-        hidden={previousCases.length === 0}
-      >
-        <ul className="space-y-1.5">
-          {previousCases.slice(0, 3).map((p) => {
-            const refDate = p.resolvedAt ?? p.updatedAt;
-            return (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectPrevious(p.id)}
-                  className="flex w-full flex-col items-start gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left transition hover:border-brand-300 hover:bg-brand-50/40"
-                >
-                  <div className="flex w-full items-center gap-1">
-                    <span className="font-mono text-[10px] text-slate-500">{p.caseNumber}</span>
-                    <span className="ml-auto text-[10px] text-slate-500">{formatRelative(refDate)}</span>
-                  </div>
-                  <div className="line-clamp-2 text-xs font-medium text-slate-800">{p.title}</div>
-                  <StatusPill status={p.status} />
-                </button>
-              </li>
-            );
-          })}
-          {previousCases.length > 3 && (
-            <li className="text-[11px] text-slate-500">+{previousCases.length - 3} vaka daha…</li>
-          )}
-        </ul>
-      </PanelSection>
 
       <PanelSection title="SLA Durumu" icon={<Clock size={12} />}>
         <div className="space-y-1.5 text-xs">
@@ -796,21 +726,18 @@ function LeftPanel({
         </div>
       </PanelSection>
 
-      <PanelSection title="KPI Özeti" icon={<Target size={12} />}>
-        <KpiCompact item={item} />
-      </PanelSection>
     </div>
   );
 
   return (
     <>
-      <aside className="hidden w-[280px] shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50/40 p-4 lg:block">
+      <aside className="hidden w-[320px] shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50/40 p-4 lg:block">
         {content}
       </aside>
       {drawerOpen && (
         <div className="fixed inset-0 z-30 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/30" onClick={onCloseDrawer} />
-          <aside className="absolute left-0 top-0 h-full w-[280px] overflow-y-auto bg-white p-4 shadow-xl">
+          <aside className="absolute left-0 top-0 h-full w-[320px] overflow-y-auto bg-white p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Müşteri Özeti</span>
               <button
@@ -831,7 +758,7 @@ function LeftPanel({
 
 function RightPanel({ item, offeredSolutions }: { item: Case; offeredSolutions: { id: string; name: string }[] }) {
   return (
-    <aside className="hidden w-[300px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
+    <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
       <div className="space-y-4">
         <PanelSection
           title="AI Paneli"
@@ -842,60 +769,75 @@ function RightPanel({ item, offeredSolutions }: { item: Case; offeredSolutions: 
             ) : undefined
           }
         >
-          {item.aiGeneratedFlag ? (
-            <div className="space-y-2 text-xs">
-              {item.aiSummary && (
-                <div className="rounded-md bg-indigo-50 px-2 py-1.5 text-indigo-900 ring-1 ring-indigo-200">
-                  {item.aiSummary}
-                </div>
-              )}
-              {item.aiCategoryPrediction && (
-                <Row label="Kategori önerisi" value={item.aiCategoryPrediction} />
-              )}
-              {item.aiPriorityPrediction && (
-                <Row label="Öncelik önerisi" value={item.aiPriorityPrediction} />
-              )}
-              {item.aiDuplicateScore != null && (
-                <Row label="Duplicate skoru" value={item.aiDuplicateScore.toFixed(2)} />
-              )}
-              {item.aiCallBrief && (
-                <div className="rounded-md bg-slate-50 px-2 py-1.5 text-slate-700 ring-1 ring-slate-200">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Çağrı Özeti
-                  </div>
-                  {item.aiCallBrief}
-                </div>
-              )}
-              {item.aiFollowupRecommendation && (
-                <div className="rounded-md bg-slate-50 px-2 py-1.5 text-slate-700 ring-1 ring-slate-200">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Takip Önerisi
-                  </div>
-                  {item.aiFollowupRecommendation}
-                </div>
-              )}
-              {item.aiRetentionOfferSuggestion && (
-                <div className="rounded-md bg-rose-50 px-2 py-1.5 text-rose-900 ring-1 ring-rose-200">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">
-                    Retention Teklif Önerisi
-                  </div>
-                  {item.aiRetentionOfferSuggestion}
-                </div>
-              )}
-              <Button size="sm" variant="outline" leftIcon={<Bot size={12} />} disabled className="w-full">
-                Taslak Üret (FAZ 1+)
-              </Button>
-              {item.aiRejectReason && (
-                <div className="rounded-md bg-slate-50 px-2 py-1 text-[11px] text-slate-600 ring-1 ring-slate-200">
-                  <strong>Önceki red:</strong> {item.aiRejectReason}
-                </div>
-              )}
+          <div className="space-y-3 text-xs">
+            {/* AI Özeti — tam genişlik */}
+            {item.aiSummary && (
+              <div className="rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-900 ring-1 ring-indigo-200">
+                {item.aiSummary}
+              </div>
+            )}
+
+            {/* 4 öneri tile'ı — 2x2 grid */}
+            <div className="grid grid-cols-2 gap-2">
+              <AiTile
+                label="Kategori önerisi"
+                value={item.aiCategoryPrediction ?? '—'}
+                tint="indigo"
+              />
+              <AiTile
+                label="Öncelik önerisi"
+                value={item.aiPriorityPrediction ?? '—'}
+                tint="indigo"
+              />
+              <AiTile
+                label="Duplicate skoru"
+                value={item.aiDuplicateScore != null ? item.aiDuplicateScore.toFixed(2) : '—'}
+                tint="slate"
+              />
+              <AiTile
+                label="Güven skoru"
+                value={item.aiConfidenceScore != null ? `${Math.round(item.aiConfidenceScore * 100)}%` : '—'}
+                tint="slate"
+              />
             </div>
-          ) : (
-            <p className="text-[11px] text-slate-500">
-              Bu vaka için AI önerisi henüz üretilmedi.
-            </p>
-          )}
+
+            {/* Tam genişlik öneri kartları */}
+            {item.aiCallBrief && (
+              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Çağrı Özeti
+                </div>
+                {item.aiCallBrief}
+              </div>
+            )}
+            {item.aiFollowupRecommendation && (
+              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Takip Önerisi
+                </div>
+                {item.aiFollowupRecommendation}
+              </div>
+            )}
+            {item.aiRetentionOfferSuggestion && (
+              <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  Retention Teklif Önerisi
+                </div>
+                {item.aiRetentionOfferSuggestion}
+              </div>
+            )}
+
+            {/* Taslak Üret — tam genişlik */}
+            <Button size="md" variant="outline" leftIcon={<Bot size={14} />} disabled className="w-full justify-center">
+              Taslak Üret (FAZ 1+)
+            </Button>
+
+            {item.aiRejectReason && (
+              <div className="rounded-md bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200">
+                <strong>Önceki red:</strong> {item.aiRejectReason}
+              </div>
+            )}
+          </div>
         </PanelSection>
 
         {item.caseType === 'ProactiveTracking' && (
@@ -994,6 +936,24 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function AiTile({
+  label,
+  value,
+  tint = 'slate',
+}: {
+  label: string;
+  value: string;
+  tint?: 'slate' | 'indigo';
+}) {
+  const cls = tint === 'indigo' ? 'bg-indigo-50 ring-indigo-200' : 'bg-white ring-slate-200';
+  return (
+    <div className={`rounded-md px-2.5 py-2 ring-1 ring-inset ${cls}`}>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-0.5 text-sm font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
 function SlaRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -1003,104 +963,175 @@ function SlaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function KpiCompact({ item }: { item: Case }) {
-  const minutes = (a: string, b: string) =>
-    Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
-  const fmt = (m: number) => {
-    if (m < 60) return `${m}dk`;
-    const h = Math.round(m / 60);
-    if (h < 48) return `${h}sa`;
-    return `${Math.round(h / 24)}g`;
-  };
-  const firstReview = item.history.find(
-    (h) => h.action === 'Statü değişti' && h.toValue === 'İncelemede',
-  );
-  const responseMin = firstReview ? minutes(item.createdAt, firstReview.at) : null;
-  const resolutionMin = item.resolvedAt ? minutes(item.createdAt, item.resolvedAt) : null;
-  const fcr = responseMin != null && resolutionMin != null && resolutionMin <= 24 * 60;
-  const reopened = item.history.some(
-    (h) => h.action === 'Statü değişti' && h.fromValue === 'Çözüldü' && h.toValue === 'YenidenAcildi',
-  );
-
-  return (
-    <div className="grid grid-cols-2 gap-1.5">
-      <KpiMini icon={<TrendingUp size={10} />} label="Müdahale" value={responseMin != null ? fmt(responseMin) : '—'} />
-      <KpiMini icon={<CheckCircle2 size={10} />} label="Çözüm" value={resolutionMin != null ? fmt(resolutionMin) : '—'} />
-      <KpiMini
-        icon={<Target size={10} />}
-        label="FCR"
-        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : '—'}
-        tone={fcr ? 'good' : 'neutral'}
-      />
-      <KpiMini
-        icon={<HistoryIcon size={10} />}
-        label="Y.Açılma"
-        value={reopened ? 'Var' : 'Yok'}
-        tone={reopened ? 'warn' : 'neutral'}
-      />
-    </div>
-  );
-}
-
-function KpiMini({
-  icon,
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone?: 'neutral' | 'good' | 'warn';
-}) {
-  const cls =
-    tone === 'good' ? 'bg-emerald-50 ring-emerald-200' :
-    tone === 'warn' ? 'bg-amber-50 ring-amber-200' :
-                       'bg-slate-50 ring-slate-200';
-  return (
-    <div className={`rounded-md px-2 py-1 ring-1 ring-inset ${cls}`}>
-      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-600">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-0.5 text-sm font-semibold text-slate-900">{value}</div>
-    </div>
-  );
-}
+// KpiCompact + KpiMini kaldırıldı — KPI artık Detay sekmesinin üstünde KpiInlineRow ile gösteriliyor
 
 // ----------------------------------------------------------------
 // Tab Components
 // ----------------------------------------------------------------
 
-function DetailTab({ item, offeredSolutions }: { item: Case; offeredSolutions: { id: string; name: string }[] }) {
+function DetailTab({
+  item,
+  offeredSolutions,
+  previousCases,
+  onSelectPrevious,
+  drafts,
+  editingField,
+  onStartEdit,
+  onCancelEdit,
+  onCommitDraft,
+  onTransitionApplied,
+}: {
+  item: Case;
+  offeredSolutions: { id: string; name: string }[];
+  previousCases: Case[];
+  onSelectPrevious: (id: string) => void;
+  drafts: Partial<Case>;
+  editingField: string | null;
+  onStartEdit: (field: string) => void;
+  onCancelEdit: () => void;
+  onCommitDraft: (field: keyof Case, value: unknown) => void;
+  onTransitionApplied: (updated: Case) => void;
+}) {
+  // Aktif değer = pending draft varsa onu göster, yoksa item değeri
+  const v = <K extends keyof Case>(key: K): Case[K] =>
+    (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
+
   return (
     <div className="space-y-5">
+      {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
+      <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+
+      {/* KPI 4-tile satırı (sol panelden buraya taşındı) */}
+      <KpiInlineRow item={item} />
+
       <Section title="Açıklama">
-        <p className="whitespace-pre-wrap text-sm text-slate-700">{item.description}</p>
+        <InlineEdit
+          fieldKey="description"
+          type="textarea"
+          value={v('description') ?? ''}
+          editing={editingField === 'description'}
+          isDraft={drafts.description !== undefined}
+          onStart={() => onStartEdit('description')}
+          onCommit={(val) => onCommitDraft('description', val)}
+          onCancel={onCancelEdit}
+          renderDisplay={(val) => (
+            <p className="whitespace-pre-wrap text-sm text-slate-700">{String(val ?? '—')}</p>
+          )}
+        />
       </Section>
 
       <Section title="Müşteri & Sınıflandırma">
-        <DetailGrid
+        <EditableGrid
           rows={[
-            ['Şirket', item.companyName],
-            ['Müşteri', item.accountName],
-            ['Kategori', `${item.category} / ${item.subCategory}`],
-            ['Talep Türü', item.requestType],
-            ['Ürün Grubu', item.productGroup ?? '—'],
-            ['Origin', item.origin + (item.originDescription ? ` — ${item.originDescription}` : '')],
-            ['3. Parti Bekleniyor', item.thirdPartyName ?? '—'],
+            { label: 'Şirket', node: <span className="px-2 py-1 text-sm text-slate-800">{item.companyName}</span> },
+            { label: 'Müşteri', node: <span className="px-2 py-1 text-sm text-slate-800">{item.accountName}</span> },
+            { label: 'Kategori', node: <span className="px-2 py-1 text-sm text-slate-800">{item.category} / {item.subCategory}</span> },
+            { label: 'Talep Türü', node: (
+              <InlineEdit
+                fieldKey="requestType"
+                type="select"
+                value={v('requestType')}
+                editing={editingField === 'requestType'}
+                isDraft={drafts.requestType !== undefined}
+                onStart={() => onStartEdit('requestType')}
+                onCommit={(val) => onCommitDraft('requestType', val)}
+                onCancel={onCancelEdit}
+                options={CASE_REQUEST_TYPES.map((r) => ({ value: r, label: r }))}
+              />
+            )},
+            { label: 'Ürün Grubu', node: (
+              <InlineEdit
+                fieldKey="productGroup"
+                type="text"
+                value={v('productGroup')}
+                editing={editingField === 'productGroup'}
+                isDraft={drafts.productGroup !== undefined}
+                onStart={() => onStartEdit('productGroup')}
+                onCommit={(val) => onCommitDraft('productGroup', String(val))}
+                onCancel={onCancelEdit}
+                placeholder="ör. ERP - Kasa"
+              />
+            )},
+            { label: 'Origin', node: (
+              <InlineEdit
+                fieldKey="origin"
+                type="select"
+                value={v('origin')}
+                editing={editingField === 'origin'}
+                isDraft={drafts.origin !== undefined}
+                onStart={() => onStartEdit('origin')}
+                onCommit={(val) => onCommitDraft('origin', val)}
+                onCancel={onCancelEdit}
+                options={CASE_ORIGINS.map((o) => ({ value: o, label: o }))}
+              />
+            )},
+            { label: 'Origin Açıklama', node: (
+              <InlineEdit
+                fieldKey="originDescription"
+                type="text"
+                value={v('originDescription')}
+                editing={editingField === 'originDescription'}
+                isDraft={drafts.originDescription !== undefined}
+                onStart={() => onStartEdit('originDescription')}
+                onCommit={(val) => onCommitDraft('originDescription', String(val))}
+                onCancel={onCancelEdit}
+                disabled={v('origin') !== 'Diğer'}
+                placeholder={v('origin') === 'Diğer' ? 'Origin = Diğer için zorunlu' : 'Yalnızca origin = Diğer'}
+              />
+            )},
+            { label: '3. Parti Bekleniyor', node: <span className="px-2 py-1 text-sm text-slate-800">{item.thirdPartyName ?? '—'}</span> },
           ]}
         />
       </Section>
 
       {item.caseType === 'ProactiveTracking' && (
         <Section title="Proaktif Takip Bilgileri" tint="violet">
-          <DetailGrid
+          <EditableGrid
             rows={[
-              ['Finansal Risk', item.financialStatus ?? '—'],
-              ['Ürün Kullanımı', item.productUsage ?? '—'],
-              ['Kullanım Trendi', item.usageChangeAlert ?? '—'],
-              ['Müdahale Önceliği', item.responseLevel ?? '—'],
+              { label: 'Finansal Risk', node: (
+                <InlineEdit
+                  fieldKey="financialStatus" type="select" value={v('financialStatus')}
+                  editing={editingField === 'financialStatus'}
+                  isDraft={drafts.financialStatus !== undefined}
+                  onStart={() => onStartEdit('financialStatus')}
+                  onCommit={(val) => onCommitDraft('financialStatus', val)}
+                  onCancel={onCancelEdit}
+                  options={FINANCIAL_STATUSES.map((s) => ({ value: s, label: s }))}
+                />
+              )},
+              { label: 'Ürün Kullanımı', node: (
+                <InlineEdit
+                  fieldKey="productUsage" type="select" value={v('productUsage')}
+                  editing={editingField === 'productUsage'}
+                  isDraft={drafts.productUsage !== undefined}
+                  onStart={() => onStartEdit('productUsage')}
+                  onCommit={(val) => onCommitDraft('productUsage', val)}
+                  onCancel={onCancelEdit}
+                  options={PRODUCT_USAGES.map((s) => ({ value: s, label: s }))}
+                />
+              )},
+              { label: 'Kullanım Trendi', node: (
+                <InlineEdit
+                  fieldKey="usageChangeAlert" type="select" value={v('usageChangeAlert')}
+                  editing={editingField === 'usageChangeAlert'}
+                  isDraft={drafts.usageChangeAlert !== undefined}
+                  onStart={() => onStartEdit('usageChangeAlert')}
+                  onCommit={(val) => onCommitDraft('usageChangeAlert', val)}
+                  onCancel={onCancelEdit}
+                  options={USAGE_CHANGE_ALERTS.map((s) => ({ value: s, label: s }))}
+                />
+              )},
+              { label: 'Müdahale Önceliği', node: (
+                <InlineEdit
+                  fieldKey="responseLevel" type="select" value={v('responseLevel')}
+                  editing={editingField === 'responseLevel'}
+                  isDraft={drafts.responseLevel !== undefined}
+                  onStart={() => onStartEdit('responseLevel')}
+                  onCommit={(val) => onCommitDraft('responseLevel', val)}
+                  onCancel={onCancelEdit}
+                  options={RESPONSE_LEVELS.map((s) => ({ value: s, label: s }))}
+                />
+              )},
             ]}
           />
         </Section>
@@ -1108,16 +1139,94 @@ function DetailTab({ item, offeredSolutions }: { item: Case; offeredSolutions: {
 
       {item.caseType === 'Churn' && (
         <Section title="Churn Yönetimi" tint="rose">
-          <DetailGrid
+          <EditableGrid
             rows={[
-              ['İptal Talebi', item.cancellationRequest ? 'Var' : 'Yok'],
-              ['Teklif Sonucu', item.offerOutcome ?? '—'],
-              ['Teklif Geçerlilik', item.offerExpiryDate ? formatDateTime(item.offerExpiryDate) : '—'],
-              ['Takip Tarihi', item.followUpDate ? formatDateTime(item.followUpDate) : '—'],
-              ['Churn Sonucu', item.churnResult ?? '—'],
-              ['Retention Durumu', item.retentionStatus ?? '—'],
+              { label: 'İptal Talebi', node: (
+                <InlineEdit
+                  fieldKey="cancellationRequest" type="checkbox" value={v('cancellationRequest')}
+                  editing={editingField === 'cancellationRequest'}
+                  isDraft={drafts.cancellationRequest !== undefined}
+                  onStart={() => onStartEdit('cancellationRequest')}
+                  onCommit={(val) => onCommitDraft('cancellationRequest', val)}
+                  onCancel={onCancelEdit}
+                  renderDisplay={(val) => <span className="px-2 py-1 text-sm text-slate-800">{val ? 'Var' : 'Yok'}</span>}
+                />
+              )},
+              { label: 'Teklif Sonucu', node: (
+                <InlineEdit
+                  fieldKey="offerOutcome" type="select" value={v('offerOutcome')}
+                  editing={editingField === 'offerOutcome'}
+                  isDraft={drafts.offerOutcome !== undefined}
+                  onStart={() => onStartEdit('offerOutcome')}
+                  onCommit={(val) => onCommitDraft('offerOutcome', val)}
+                  onCancel={onCancelEdit}
+                  options={[{ value: '', label: '—' }, ...OFFER_OUTCOMES.map((o) => ({ value: o, label: o }))]}
+                />
+              )},
+              { label: 'Teklif Geçerlilik', node: (
+                <InlineEdit
+                  fieldKey="offerExpiryDate" type="date" value={v('offerExpiryDate')}
+                  editing={editingField === 'offerExpiryDate'}
+                  isDraft={drafts.offerExpiryDate !== undefined}
+                  onStart={() => onStartEdit('offerExpiryDate')}
+                  onCommit={(val) => onCommitDraft('offerExpiryDate', val)}
+                  onCancel={onCancelEdit}
+                  renderDisplay={(val) => <span className="px-2 py-1 text-sm text-slate-800">{val ? formatDateTime(String(val)) : '—'}</span>}
+                />
+              )},
+              { label: 'Takip Tarihi', node: (
+                <InlineEdit
+                  fieldKey="followUpDate" type="date" value={v('followUpDate')}
+                  editing={editingField === 'followUpDate'}
+                  isDraft={drafts.followUpDate !== undefined}
+                  onStart={() => onStartEdit('followUpDate')}
+                  onCommit={(val) => onCommitDraft('followUpDate', val)}
+                  onCancel={onCancelEdit}
+                  renderDisplay={(val) => <span className="px-2 py-1 text-sm text-slate-800">{val ? formatDateTime(String(val)) : '—'}</span>}
+                />
+              )},
+              { label: 'Churn Sonucu', node: <span className="px-2 py-1 text-sm text-slate-800">{item.churnResult ?? '—'}</span> },
+              { label: 'Retention Durumu', node: <span className="px-2 py-1 text-sm text-slate-800">{item.retentionStatus ?? '—'}</span> },
             ]}
           />
+
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            <div>
+              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Yapılan Aksiyon
+              </h4>
+              <InlineEdit
+                fieldKey="actionTaken" type="textarea" value={v('actionTaken') ?? ''}
+                editing={editingField === 'actionTaken'}
+                isDraft={drafts.actionTaken !== undefined}
+                onStart={() => onStartEdit('actionTaken')}
+                onCommit={(val) => onCommitDraft('actionTaken', String(val))}
+                onCancel={onCancelEdit}
+                renderDisplay={(val) => (
+                  <p className="whitespace-pre-wrap text-sm text-slate-700">{val ? String(val) : <span className="text-slate-400">— eklenmemiş —</span>}</p>
+                )}
+              />
+            </div>
+            {(v('offerOutcome') === 'Reddedildi' || drafts.offerOutcome === 'Reddedildi') && (
+              <div>
+                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                  Red Gerekçesi
+                </h4>
+                <InlineEdit
+                  fieldKey="offerRejectionReason" type="textarea" value={v('offerRejectionReason') ?? ''}
+                  editing={editingField === 'offerRejectionReason'}
+                  isDraft={drafts.offerRejectionReason !== undefined}
+                  onStart={() => onStartEdit('offerRejectionReason')}
+                  onCommit={(val) => onCommitDraft('offerRejectionReason', String(val))}
+                  onCancel={onCancelEdit}
+                  renderDisplay={(val) => (
+                    <p className="whitespace-pre-wrap text-sm text-slate-700">{val ? String(val) : <span className="text-slate-400">— eklenmemiş —</span>}</p>
+                  )}
+                />
+              </div>
+            )}
+          </div>
+
           {item.offeredSolutions && item.offeredSolutions.length > 0 && (
             <div className="mt-3">
               <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1136,16 +1245,6 @@ function DetailTab({ item, offeredSolutions }: { item: Case; offeredSolutions: {
                   );
                 })}
               </ul>
-            </div>
-          )}
-          {item.actionTaken && (
-            <div className="mt-3">
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Yapılan Aksiyon
-              </h4>
-              <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                {item.actionTaken}
-              </p>
             </div>
           )}
         </Section>
@@ -1180,7 +1279,283 @@ function DetailTab({ item, offeredSolutions }: { item: Case; offeredSolutions: {
           </p>
         </Section>
       )}
+
+      {/* Sol panelden buraya taşındı — bu müşteriye ait kapalı/çözülmüş vakalar */}
+      {previousCases.length > 0 && (
+        <Section title={`Önceki Vakalar (${previousCases.length})`}>
+          <ul className="space-y-1.5">
+            {previousCases.slice(0, 3).map((p) => {
+              const refDate = p.resolvedAt ?? p.updatedAt;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPrevious(p.id)}
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40"
+                  >
+                    <span className="font-mono text-[11px] text-slate-500">{p.caseNumber}</span>
+                    <span className="flex-1 truncate text-sm font-medium text-slate-800">{p.title}</span>
+                    <StatusPill status={p.status} />
+                    <span className="text-[11px] text-slate-500">{formatRelative(refDate)}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {previousCases.length > 3 && (
+              <li className="pl-2 text-[11px] text-slate-500">
+                +{previousCases.length - 3} vaka daha…
+              </li>
+            )}
+          </ul>
+        </Section>
+      )}
     </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// KPI Inline Row — Detay sekmesinin üstünde 4-tile satır
+// ----------------------------------------------------------------
+function KpiInlineRow({ item }: { item: Case }) {
+  const minutes = (a: string, b: string) =>
+    Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
+  const fmt = (m: number) => {
+    if (m < 60) return `${m} dk`;
+    const h = Math.round(m / 60);
+    if (h < 48) return `${h} sa`;
+    return `${Math.round(h / 24)} gün`;
+  };
+  const firstReview = item.history.find(
+    (h) => h.action === 'Statü değişti' && h.toValue === 'İncelemede',
+  );
+  const responseMin = firstReview ? minutes(item.createdAt, firstReview.at) : null;
+  const resolutionMin = item.resolvedAt ? minutes(item.createdAt, item.resolvedAt) : null;
+  const fcr = responseMin != null && resolutionMin != null && resolutionMin <= 24 * 60;
+  const reopened = item.history.some(
+    (h) => h.action === 'Statü değişti' && h.fromValue === 'Çözüldü' && h.toValue === 'YenidenAcildi',
+  );
+
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <KpiInlineTile icon={<TrendingUp size={12} />} label="Müdahale Süresi" value={responseMin != null ? fmt(responseMin) : '—'} />
+      <KpiInlineTile icon={<CheckCircle2 size={12} />} label="Çözüm Süresi"   value={resolutionMin != null ? fmt(resolutionMin) : '—'} />
+      <KpiInlineTile
+        icon={<Target size={12} />}
+        label="İlk Temas Çözüm"
+        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : '—'}
+        tone={fcr ? 'good' : resolutionMin != null ? 'warn' : 'neutral'}
+      />
+      <KpiInlineTile
+        icon={<HistoryIcon size={12} />}
+        label="Yeniden Açılma"
+        value={reopened ? 'Var' : 'Yok'}
+        tone={reopened ? 'warn' : 'neutral'}
+      />
+    </div>
+  );
+}
+
+function KpiInlineTile({
+  icon,
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone?: 'neutral' | 'good' | 'warn';
+}) {
+  const cls =
+    tone === 'good' ? 'bg-emerald-50 ring-emerald-200' :
+    tone === 'warn' ? 'bg-amber-50 ring-amber-200' :
+                       'bg-slate-50 ring-slate-200';
+  return (
+    <div className={`rounded-lg p-3 ring-1 ring-inset ${cls}`}>
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-600">
+        {icon}
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Inline edit (click-to-edit; ESC/click outside iptal eder; commit draft state'e gider,
+// header'daki Kaydet butonu drafts'ı caseService.update ile flush eder)
+// ----------------------------------------------------------------
+type InlineEditType = 'text' | 'textarea' | 'select' | 'checkbox' | 'date';
+
+function InlineEdit({
+  fieldKey,
+  type,
+  value,
+  options,
+  editing,
+  isDraft,
+  onStart,
+  onCommit,
+  onCancel,
+  renderDisplay,
+  placeholder,
+  disabled,
+}: {
+  fieldKey: string;
+  type: InlineEditType;
+  value: unknown;
+  options?: { value: string; label: string }[];
+  editing: boolean;
+  isDraft: boolean;
+  onStart: () => void;
+  onCommit: (newValue: unknown) => void;
+  onCancel: () => void;
+  renderDisplay?: (val: unknown) => React.ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState<unknown>(value);
+
+  // editing açıldığında draft'ı resetle
+  useEffect(() => {
+    if (editing) setDraft(value);
+  }, [editing, value]);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          if (disabled) return;
+          e.preventDefault();
+          onStart();
+        }}
+        title={disabled ? '' : `${fieldKey} alanını düzenle`}
+        className={`group relative w-full rounded-md text-left transition ${
+          disabled
+            ? 'cursor-default'
+            : 'cursor-text hover:bg-slate-100/70 hover:ring-1 hover:ring-slate-200'
+        } ${isDraft ? 'bg-amber-50 ring-1 ring-amber-300' : ''}`}
+      >
+        <span className="block px-2 py-1">
+          {renderDisplay ? renderDisplay(value) : (value ? String(value) : <span className="text-slate-400">—</span>)}
+        </span>
+        {isDraft && (
+          <span className="absolute right-1 top-1 rounded bg-amber-200 px-1 text-[9px] font-semibold text-amber-900">
+            taslak
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  function handleKey(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+    } else if (e.key === 'Enter' && type !== 'textarea' && !(e.shiftKey)) {
+      e.preventDefault();
+      onCommit(draft);
+    }
+  }
+
+  if (type === 'textarea') {
+    return (
+      <div className="rounded-md ring-2 ring-brand-300">
+        <TextArea
+          autoFocus
+          value={String(draft ?? '')}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => {
+            // Click outside iptal — eğer relatedTarget Kaydet butonuna gitmiyorsa
+            const next = e.relatedTarget as HTMLElement | null;
+            if (next?.dataset?.role === 'commit-draft') {
+              onCommit(draft);
+            } else {
+              onCancel();
+            }
+          }}
+          onKeyDown={handleKey}
+          placeholder={placeholder}
+          rows={4}
+        />
+        <div className="flex justify-end gap-2 px-2 py-1 text-[11px] text-slate-500">
+          <span>ESC iptal</span>
+          <button
+            type="button"
+            data-role="commit-draft"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onCommit(draft);
+            }}
+            className="font-medium text-brand-700 hover:underline"
+          >
+            Onayla (taslağa al)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (type === 'select') {
+    return (
+      <Select
+        autoFocus
+        value={String(draft ?? '')}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onCommit(e.target.value);
+        }}
+        onBlur={onCancel}
+        onKeyDown={handleKey}
+      >
+        {options?.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    );
+  }
+
+  if (type === 'checkbox') {
+    return (
+      <label className="flex items-center gap-2 px-2 py-1 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          autoFocus
+          checked={Boolean(draft)}
+          onChange={(e) => {
+            setDraft(e.target.checked);
+            onCommit(e.target.checked);
+          }}
+          onKeyDown={handleKey}
+          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+        />
+        <span className="text-[11px] text-slate-500">(ESC iptal)</span>
+      </label>
+    );
+  }
+
+  // text / date
+  return (
+    <input
+      autoFocus
+      type={type === 'date' ? 'date' : 'text'}
+      value={String(draft ?? '')}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => {
+        const next = e.relatedTarget as HTMLElement | null;
+        if (next?.dataset?.role === 'commit-draft') {
+          onCommit(draft);
+        } else {
+          onCancel();
+        }
+      }}
+      onKeyDown={handleKey}
+      placeholder={placeholder}
+      className="w-full rounded-md border border-brand-300 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-brand-200 focus:outline-none"
+    />
   );
 }
 
@@ -1427,6 +1802,24 @@ function DetailGrid({ rows }: { rows: [string, React.ReactNode][] }) {
         >
           <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</dt>
           <dd className="text-sm text-slate-800">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }[] }) {
+  return (
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2">
+      {rows.map((r, i) => (
+        <div
+          key={r.label}
+          className={`flex flex-col gap-0.5 px-2 py-1.5 ${
+            i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
+          }`}
+        >
+          <dt className="px-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">{r.label}</dt>
+          <dd>{r.node}</dd>
         </div>
       ))}
     </dl>

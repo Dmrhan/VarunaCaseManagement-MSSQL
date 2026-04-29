@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Inbox, Keyboard, LayoutDashboard, Settings2 } from 'lucide-react';
+import {
+  ChevronsLeft,
+  ChevronsRight,
+  Inbox,
+  Keyboard,
+  LayoutDashboard,
+  Search,
+  Settings2,
+} from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
+import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { Badge } from './components/ui/Badge';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
@@ -16,12 +25,28 @@ const NAV: { key: View; label: string; icon: React.ReactNode; available: boolean
   { key: 'admin',     label: 'Tanım Ekranları',  icon: <Settings2 size={16} />,       available: false },
 ];
 
+const SIDEBAR_KEY = 'varuna-sidebar-collapsed';
+
 export default function App() {
   const [view, setView] = useState<View>('cases');
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(SIDEBAR_KEY) === '1';
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0');
+    } catch {
+      /* localStorage erişilemez — yoksay */
+    }
+  }, [sidebarCollapsed]);
 
   useHotkey('?', () => setHelpOpen(true));
 
@@ -106,7 +131,36 @@ export default function App() {
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>
-        <aside className="w-56 shrink-0 border-r border-slate-200 bg-white px-3 py-4">
+        <aside
+          className={`shrink-0 border-r border-slate-200 bg-white py-3 transition-all duration-200 ${
+            sidebarCollapsed ? 'w-16 px-2' : 'w-64 px-3'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className={`mb-3 flex h-7 w-full items-center gap-1.5 rounded-md text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 ${
+              sidebarCollapsed ? 'justify-center px-0' : 'justify-end px-2'
+            }`}
+            title={sidebarCollapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
+          >
+            {sidebarCollapsed ? <ChevronsRight size={14} /> : <><ChevronsLeft size={14} /> Daralt</>}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCustomerSearchOpen(true)}
+            className={`mb-2 flex w-full items-center gap-2 rounded-md bg-brand-600 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 ${
+              sidebarCollapsed ? 'h-10 justify-center px-0' : 'px-3 py-2'
+            }`}
+            title="Müşteri Ara"
+          >
+            <Search size={16} />
+            {!sidebarCollapsed && <span className="flex-1 text-left">Müşteri Ara</span>}
+          </button>
+
+          <div className={`my-3 ${sidebarCollapsed ? 'mx-0' : 'mx-1'} border-t border-slate-200`} />
+
           <nav className="space-y-1">
             {NAV.map((item) => {
               const active = view === item.key || (isDetail && item.key === 'cases');
@@ -115,18 +169,25 @@ export default function App() {
                   key={item.key}
                   disabled={!item.available}
                   onClick={() => item.available && handleNavSelect(item.key)}
-                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                    sidebarCollapsed ? 'h-10 justify-center px-0' : 'px-3 py-2'
+                  } ${
                     active
                       ? 'bg-brand-50 font-medium text-brand-700'
                       : item.available
                         ? 'text-slate-700 hover:bg-slate-100'
                         : 'cursor-not-allowed text-slate-400'
                   }`}
+                  title={item.label}
                 >
                   {item.icon}
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {!item.available && (
-                    <span className="text-[10px] uppercase tracking-wide text-slate-400">soon</span>
+                  {!sidebarCollapsed && (
+                    <>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {!item.available && (
+                        <span className="text-[10px] uppercase tracking-wide text-slate-400">soon</span>
+                      )}
+                    </>
                   )}
                 </button>
               );
@@ -139,6 +200,8 @@ export default function App() {
             <CasesListPage
               onSelectCase={openCase}
               onShowCustomer={(id) => setCustomerCardId(id)}
+              pendingQuickPrefill={pendingQuickPrefill}
+              onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
             />
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
@@ -159,6 +222,24 @@ export default function App() {
         onShowCase={(id) => {
           setCustomerCardId(null);
           openCase(id);
+        }}
+      />
+
+      <CustomerSearchModal
+        open={customerSearchOpen}
+        onClose={() => setCustomerSearchOpen(false)}
+        onShowCase={(id) => {
+          setCustomerSearchOpen(false);
+          openCase(id);
+        }}
+        onNewCase={(accountId) => {
+          setCustomerSearchOpen(false);
+          // Detay sayfasındayken liste sayfasına dön + quick case modal'ı tetikle
+          if (view !== 'cases') {
+            setView('cases');
+            setSelectedCaseId(null);
+          }
+          setPendingQuickPrefill(accountId);
         }}
       />
     </div>

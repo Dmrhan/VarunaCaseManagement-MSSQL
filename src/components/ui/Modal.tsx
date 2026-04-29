@@ -6,9 +6,13 @@ interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
   children: ReactNode;
   footer?: ReactNode;
+  /** Verilirse modal sabit yükseklikte olur, içerik flex column ile sığar (örn. '85vh') */
+  height?: string;
+  /** Body wrapper className'i (varsayılan p-5 py-4 yerine kendi padding/scroll yönetimi) */
+  bodyClassName?: string;
 }
 
 const SIZES = {
@@ -17,9 +21,19 @@ const SIZES = {
   lg:    'max-w-2xl',
   xl:    'max-w-3xl',
   '2xl': 'max-w-5xl',
+  '3xl': 'max-w-6xl',
 };
 
-export function Modal({ open, onClose, title, size = 'lg', children, footer }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  size = 'lg',
+  children,
+  footer,
+  height,
+  bodyClassName,
+}: ModalProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -29,10 +43,29 @@ export function Modal({ open, onClose, title, size = 'lg', children, footer }: M
 
   if (!open) return null;
 
+  const fixedHeight = Boolean(height);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 sm:p-8">
-      <div className={cn('relative w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-200', SIZES[size])}>
-        <header className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+    <div
+      className={cn(
+        'fixed inset-0 z-50 flex justify-center bg-slate-900/40 p-4 sm:p-8',
+        fixedHeight ? 'items-center' : 'items-start overflow-y-auto',
+      )}
+    >
+      <div
+        className={cn(
+          'relative w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-200',
+          fixedHeight && 'flex flex-col overflow-hidden',
+          SIZES[size],
+        )}
+        style={fixedHeight ? { height } : undefined}
+      >
+        <header
+          className={cn(
+            'flex items-center justify-between border-b border-slate-200 px-5 py-3',
+            fixedHeight && 'shrink-0',
+          )}
+        >
           {title && <h2 className="text-base font-semibold text-slate-900">{title}</h2>}
           <button
             type="button"
@@ -43,8 +76,24 @@ export function Modal({ open, onClose, title, size = 'lg', children, footer }: M
             <X size={18} />
           </button>
         </header>
-        <div className="px-5 py-4">{children}</div>
-        {footer && <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">{footer}</div>}
+        <div
+          className={cn(
+            fixedHeight ? 'flex-1 min-h-0' : '',
+            bodyClassName ?? (fixedHeight ? '' : 'px-5 py-4'),
+          )}
+        >
+          {children}
+        </div>
+        {footer && (
+          <div
+            className={cn(
+              'border-t border-slate-200 bg-slate-50 px-5 py-3',
+              fixedHeight && 'shrink-0',
+            )}
+          >
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

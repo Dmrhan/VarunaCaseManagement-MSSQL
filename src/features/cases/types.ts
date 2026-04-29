@@ -87,9 +87,31 @@ export interface CaseHistoryEntry {
   action: string;
   fromValue?: string;
   toValue?: string;
+  fieldName?: string;     // inline edit kayıtları için (Spec section 15 — CaseActivity.field_name)
   actor: string;
   at: string;
 }
+
+// Inline edit ile düzenlenebilen Case alanları
+export type EditableCaseField =
+  | 'title'
+  | 'description'
+  | 'requestType'
+  | 'productGroup'
+  | 'origin'
+  | 'originDescription'
+  | 'category'
+  | 'subCategory'
+  | 'financialStatus'
+  | 'productUsage'
+  | 'usageChangeAlert'
+  | 'responseLevel'
+  | 'cancellationRequest'
+  | 'offerOutcome'
+  | 'offerExpiryDate'
+  | 'followUpDate'
+  | 'actionTaken'
+  | 'offerRejectionReason';
 
 export interface Case {
   id: string;

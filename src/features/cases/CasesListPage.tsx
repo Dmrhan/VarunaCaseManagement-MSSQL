@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Filter,
   Inbox,
-  Phone,
   Plus,
   RotateCw,
   Search,
@@ -22,7 +21,6 @@ import { caseService, lookupService } from '@/services/caseService';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { CustomerSearchModal } from '@/features/customers/CustomerSearchModal';
 import {
   CASE_PRIORITIES,
   CASE_PRIORITY_LABELS,
@@ -41,6 +39,9 @@ import { QuickCaseModal } from './QuickCaseModal';
 interface CasesListPageProps {
   onSelectCase: (caseId: string) => void;
   onShowCustomer?: (accountId: string) => void;
+  /** App seviyesinden gelen account ID — varsa QuickCaseModal pre-fill ile açılır */
+  pendingQuickPrefill?: string | null;
+  onQuickPrefillConsumed?: () => void;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -66,7 +67,12 @@ const initialFilters: CaseFilters = {
   dateTo: '',
 };
 
-export function CasesListPage({ onSelectCase, onShowCustomer }: CasesListPageProps) {
+export function CasesListPage({
+  onSelectCase,
+  onShowCustomer,
+  pendingQuickPrefill,
+  onQuickPrefillConsumed,
+}: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
@@ -75,9 +81,18 @@ export function CasesListPage({ onSelectCase, onShowCustomer }: CasesListPagePro
   const [pageSize, setPageSize] = useState(25);
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickPrefillAccount, setQuickPrefillAccount] = useState<string | null>(null);
-  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const { toast } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // App seviyesi pendingQuickPrefill geldiğinde QuickCaseModal'ı aç
+  useEffect(() => {
+    if (pendingQuickPrefill) {
+      setQuickPrefillAccount(pendingQuickPrefill);
+      setQuickOpen(true);
+      onQuickPrefillConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuickPrefill]);
 
   // Klavye kısayolları
   useHotkey('/', (e) => {
@@ -228,15 +243,6 @@ export function CasesListPage({ onSelectCase, onShowCustomer }: CasesListPagePro
                 /
               </kbd>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Phone size={12} />}
-              onClick={() => setCustomerSearchOpen(true)}
-              title="Telefon veya isim ile müşteri ara"
-            >
-              Müşteri Ara
-            </Button>
             <FilterSelect
               label="Tip"
               value={filters.caseType ?? 'Tümü'}
@@ -515,20 +521,6 @@ export function CasesListPage({ onSelectCase, onShowCustomer }: CasesListPagePro
         onCreated={(c) => {
           void load();
           onSelectCase(c.id);
-        }}
-      />
-
-      <CustomerSearchModal
-        open={customerSearchOpen}
-        onClose={() => setCustomerSearchOpen(false)}
-        onShowCase={(id) => {
-          setCustomerSearchOpen(false);
-          onSelectCase(id);
-        }}
-        onNewCase={(accountId) => {
-          setCustomerSearchOpen(false);
-          setQuickPrefillAccount(accountId);
-          setQuickOpen(true);
         }}
       />
     </div>
