@@ -60,15 +60,19 @@ const COMPANY_HEX: Record<string, string> = {
   FINROTA:  '#10b981', // emerald-500
 };
 
+const COMPANY_OPTIONS = ['Tümü', 'PARAM', 'UNIVERA', 'FINROTA'] as const;
+type CompanyFilter = typeof COMPANY_OPTIONS[number];
+
 export function CaseAnalyticsPage() {
-  const [items, setItems] = useState<Case[]>([]);
+  const [allItems, setAllItems] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
+  const [companyFilter, setCompanyFilter] = useState<CompanyFilter>('Tümü');
 
   useEffect(() => {
     let alive = true;
     void caseService.list().then(({ items }) => {
       if (alive) {
-        setItems(items);
+        setAllItems(items);
         setLoading(false);
       }
     });
@@ -77,20 +81,54 @@ export function CaseAnalyticsPage() {
     };
   }, []);
 
+  const items = useMemo(
+    () => (companyFilter === 'Tümü' ? allItems : allItems.filter((c) => c.companyName === companyFilter)),
+    [allItems, companyFilter],
+  );
+
   const stats = useMemo(() => computeStats(items), [items]);
 
   if (loading) {
-    return <div className="p-6 text-sm text-slate-500">Analytics yükleniyor…</div>;
+    return <div className="p-6 text-sm text-slate-500">Raporlar yükleniyor…</div>;
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Case Analytics</h1>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Vaka yönetiminin genel performansını izle. Veriler son 30 gün penceresinde.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Vaka Raporları</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Tüm vakaların özet metrikleri ve trendi. Trend grafiği son 30 gün penceresini gösterir.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-slate-500">Şirket:</span>
+          {COMPANY_OPTIONS.map((opt) => {
+            const active = companyFilter === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setCompanyFilter(opt)}
+                className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition ${
+                  active
+                    ? 'bg-brand-600 text-white ring-brand-600 hover:bg-brand-700'
+                    : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {companyFilter !== 'Tümü' && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          <strong>{companyFilter}</strong> şirketine ait <strong>{items.length}</strong> vaka filtrelendi.
+          Tüm metrikler bu seçim üzerinden hesaplanıyor.
+        </div>
+      )}
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
@@ -192,18 +230,20 @@ export function CaseAnalyticsPage() {
       </div>
 
       {/* Şirket + Priority */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Building2 size={16} className="text-slate-500" />
-              <h2 className="text-sm font-semibold text-slate-800">Şirkete Göre Vakalar</h2>
-            </div>
-          </CardHeader>
-          <CardBody>
-            <BarList items={stats.byCompany} showPct />
-          </CardBody>
-        </Card>
+      <div className={`grid grid-cols-1 gap-4 ${companyFilter === 'Tümü' ? 'lg:grid-cols-2' : ''}`}>
+        {companyFilter === 'Tümü' && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Building2 size={16} className="text-slate-500" />
+                <h2 className="text-sm font-semibold text-slate-800">Şirkete Göre Vakalar</h2>
+              </div>
+            </CardHeader>
+            <CardBody>
+              <BarList items={stats.byCompany} showPct />
+            </CardBody>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

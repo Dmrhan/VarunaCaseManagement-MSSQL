@@ -8,7 +8,7 @@ type View = 'cases' | 'dashboard' | 'admin';
 
 const NAV: { key: View; label: string; icon: React.ReactNode; available: boolean }[] = [
   { key: 'cases',     label: 'Vakalar',          icon: <Inbox size={16} />,           available: true },
-  { key: 'dashboard', label: 'Case Analytics',   icon: <LayoutDashboard size={16} />, available: true },
+  { key: 'dashboard', label: 'Vaka Raporları',   icon: <LayoutDashboard size={16} />, available: true },
   { key: 'admin',     label: 'Tanım Ekranları',  icon: <Settings2 size={16} />,       available: false },
 ];
 
