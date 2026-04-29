@@ -1,32 +1,33 @@
 import type { CasePriority, CaseStatus, CaseType } from '@/features/cases/types';
-import { CASE_TYPE_LABELS } from '@/features/cases/types';
+import { CASE_PRIORITY_LABELS, CASE_TYPE_LABELS } from '@/features/cases/types';
 import { Badge, type BadgeTint } from './Badge';
 
+// Spec 11.1 renk paleti
 const STATUS_TINT: Record<CaseStatus, BadgeTint> = {
-  'Açık':                'sky',
-  'İncelemede':          'indigo',
-  '3rdPartyBekleniyor':  'amber',
-  'Eskalasyon':          'violet',
+  'Açık':                'blue',
+  'İncelemede':          'amber',
+  '3rdPartyBekleniyor':  'slate',
+  'Eskalasyon':          'rose',
   'Çözüldü':             'emerald',
-  'YenidenAcildi':       'blue',
+  'YenidenAcildi':       'violet',
   'İptalEdildi':         'slate',
 };
 
 const STATUS_DOT: Record<CaseStatus, string> = {
-  'Açık':                'bg-sky-500',
-  'İncelemede':          'bg-indigo-500',
-  '3rdPartyBekleniyor':  'bg-amber-500',
-  'Eskalasyon':          'bg-violet-500',
+  'Açık':                'bg-blue-500',
+  'İncelemede':          'bg-amber-500',
+  '3rdPartyBekleniyor':  'bg-slate-500',
+  'Eskalasyon':          'bg-rose-500',
   'Çözüldü':             'bg-emerald-500',
-  'YenidenAcildi':       'bg-blue-500',
-  'İptalEdildi':         'bg-slate-400',
+  'YenidenAcildi':       'bg-violet-500',
+  'İptalEdildi':         'bg-slate-300',
 };
 
 const PRIORITY_TINT: Record<CasePriority, BadgeTint> = {
-  'Düşük':    'slate',
-  'Orta':     'blue',
-  'Yüksek':   'amber',
-  'Critical': 'rose',
+  Low:      'slate',
+  Medium:   'blue',
+  High:     'amber',
+  Critical: 'rose',
 };
 
 const TYPE_TINT: Record<CaseType, BadgeTint> = {
@@ -55,7 +56,7 @@ export function StatusPill({ status }: { status: CaseStatus }) {
 }
 
 export function PriorityBadge({ priority }: { priority: CasePriority }) {
-  return <Badge tint={PRIORITY_TINT[priority]}>{priority}</Badge>;
+  return <Badge tint={PRIORITY_TINT[priority]}>{CASE_PRIORITY_LABELS[priority]}</Badge>;
 }
 
 export function CaseTypeBadge({ type }: { type: CaseType }) {
