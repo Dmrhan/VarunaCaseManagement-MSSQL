@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Inbox, LayoutDashboard, Settings2 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
+import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { Badge } from './components/ui/Badge';
 
 type View = 'cases' | 'dashboard' | 'admin';
 
 const NAV: { key: View; label: string; icon: React.ReactNode; available: boolean }[] = [
   { key: 'cases',     label: 'Vakalar',          icon: <Inbox size={16} />,           available: true },
-  { key: 'dashboard', label: 'Case Analytics',   icon: <LayoutDashboard size={16} />, available: false },
+  { key: 'dashboard', label: 'Case Analytics',   icon: <LayoutDashboard size={16} />, available: true },
   { key: 'admin',     label: 'Tanım Ekranları',  icon: <Settings2 size={16} />,       available: false },
 ];
 
@@ -60,6 +61,7 @@ export default function App() {
 
         <main className="flex-1 px-6 py-6">
           {view === 'cases' && <CasesListPage />}
+          {view === 'dashboard' && <CaseAnalyticsPage />}
         </main>
       </div>
     </div>
