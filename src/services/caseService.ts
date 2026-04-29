@@ -448,4 +448,11 @@ export const lookupService = {
   requestTypes:     () => [...CASE_REQUEST_TYPES],
   thirdParties:     () => clone(MOCK_THIRD_PARTIES).filter((tp) => tp.isActive),
   offeredSolutions: () => clone(MOCK_OFFERED_SOLUTIONS).filter((o) => o.isActive),
+  productGroups:    (): string[] => {
+    const set = new Set<string>();
+    MOCK_CASES.forEach((c) => {
+      if (c.productGroup) set.add(c.productGroup);
+    });
+    return Array.from(set).sort();
+  },
 };

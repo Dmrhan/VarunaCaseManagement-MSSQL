@@ -5,6 +5,7 @@ import {
   Brain,
   Building2,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -16,6 +17,7 @@ import {
   Mic,
   MoreHorizontal,
   Paperclip,
+  Pencil,
   Phone,
   Save,
   Send,
@@ -27,6 +29,7 @@ import {
   User,
   UserPlus,
   Wallet,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -43,6 +46,7 @@ import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
   CASE_ORIGINS,
   CASE_REQUEST_TYPES,
+  ESCALATION_LEVELS,
   ESCALATION_LEVEL_LABELS,
   FINANCIAL_STATUSES,
   OFFER_OUTCOMES,
@@ -50,6 +54,7 @@ import {
   RESPONSE_LEVELS,
   USAGE_CHANGE_ALERTS,
   type Case,
+  type EscalationLevel,
   type NoteVisibility,
 } from './types';
 
@@ -89,6 +94,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
 
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
+  const categories = useMemo(() => lookupService.categories(), []);
+  const teams = useMemo(() => lookupService.teams(), []);
+  const persons = useMemo(() => lookupService.persons(), []);
+  const thirdParties = useMemo(() => lookupService.thirdParties(), []);
   const { toast } = useToast();
 
   // Parent caseId değişirse içerideki state ve breadcrumb sıfırlanır
@@ -199,13 +208,47 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   // Inline edit handlers
   function commitDraft(field: keyof Case, value: unknown) {
     setDrafts((prev) => {
+      let next: Record<string, unknown> = { ...(prev as Record<string, unknown>) };
       // Mevcut değerle aynıysa draft'ı kaldır
       if ((item as Record<string, unknown> | null)?.[field as string] === value) {
-        const { [field as string]: _omit, ...rest } = prev as Record<string, unknown>;
-        void _omit;
-        return rest as Partial<Case>;
+        delete next[field as string];
+      } else {
+        next[field as string] = value;
       }
-      return { ...prev, [field]: value } as Partial<Case>;
+
+      // Cascade temizleme: kategori değişince eskimiş alt kategori'yi düşür
+      if (field === 'category') {
+        const cat = categories.find((c) => c.category === value);
+        const currentSub = (next.subCategory ?? item?.subCategory) as string | undefined;
+        if (cat && currentSub && !cat.subCategories.includes(currentSub)) {
+          // Alt kategori artık geçersiz — taslakta sıfırla (boş)
+          next.subCategory = '';
+        }
+      }
+      // Takım değişince eski kişi'yi düşür
+      if (field === 'assignedTeamId') {
+        const teamPersons = persons.filter((p) => p.teamId === value);
+        const currentPersonId = (next.assignedPersonId ?? item?.assignedPersonId) as string | undefined;
+        if (currentPersonId && !teamPersons.find((p) => p.id === currentPersonId)) {
+          next.assignedPersonId = '';
+          next.assignedPersonName = '';
+        }
+        // Takım adını da senkronize et (denormalized)
+        const team = teams.find((t) => t.id === value);
+        next.assignedTeamName = team?.name ?? '';
+      }
+      // Kişi değişince adını senkronize et
+      if (field === 'assignedPersonId') {
+        const person = persons.find((p) => p.id === value);
+        next.assignedPersonName = person?.name ?? '';
+      }
+      // 3. parti seçilince adını senkronize et
+      if (field === 'thirdPartyId') {
+        const tp = thirdParties.find((t) => t.id === value);
+        next.thirdPartyName = tp?.name ?? '';
+      }
+
+      return next as Partial<Case>;
     });
     setEditingField(null);
   }
@@ -514,6 +557,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               <DetailTab
                 item={item}
                 offeredSolutions={offeredSolutions}
+                categories={categories}
+                teams={teams}
+                persons={persons}
+                thirdParties={thirdParties}
                 previousCases={previousCases}
                 onSelectPrevious={navigateToCase}
                 drafts={drafts}
@@ -972,6 +1019,10 @@ function SlaRow({ label, value }: { label: string; value: string }) {
 function DetailTab({
   item,
   offeredSolutions,
+  categories,
+  teams,
+  persons,
+  thirdParties,
   previousCases,
   onSelectPrevious,
   drafts,
@@ -983,6 +1034,10 @@ function DetailTab({
 }: {
   item: Case;
   offeredSolutions: { id: string; name: string }[];
+  categories: { category: string; subCategories: string[] }[];
+  teams: { id: string; name: string }[];
+  persons: { id: string; name: string; teamId: string }[];
+  thirdParties: { id: string; name: string }[];
   previousCases: Case[];
   onSelectPrevious: (id: string) => void;
   drafts: Partial<Case>;
@@ -992,6 +1047,12 @@ function DetailTab({
   onCommitDraft: (field: keyof Case, value: unknown) => void;
   onTransitionApplied: (updated: Case) => void;
 }) {
+  // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
+  const activeCategory = (drafts.category ?? item.category) as string;
+  const subCategoryOptions = categories.find((c) => c.category === activeCategory)?.subCategories ?? [];
+  // Takım cascade — seçili takıma göre kişi opsiyonları
+  const activeTeamId = (drafts.assignedTeamId ?? item.assignedTeamId) as string | undefined;
+  const personOptions = activeTeamId ? persons.filter((p) => p.teamId === activeTeamId) : persons;
   // Aktif değer = pending draft varsa onu göster, yoksa item değeri
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
@@ -1000,6 +1061,12 @@ function DetailTab({
     <div className="space-y-5">
       {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
       <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+
+      {/* Inline edit bilgi notu */}
+      <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
+        <Pencil size={11} className="text-slate-400" />
+        Alanlara tıklayarak düzenleyebilirsiniz. Değişiklikleri üst köşedeki <strong>Kaydet</strong> butonuyla saklayın.
+      </p>
 
       {/* KPI 4-tile satırı (sol panelden buraya taşındı) */}
       <KpiInlineRow item={item} />
@@ -1023,9 +1090,35 @@ function DetailTab({
       <Section title="Müşteri & Sınıflandırma">
         <EditableGrid
           rows={[
-            { label: 'Şirket', node: <span className="px-2 py-1 text-sm text-slate-800">{item.companyName}</span> },
-            { label: 'Müşteri', node: <span className="px-2 py-1 text-sm text-slate-800">{item.accountName}</span> },
-            { label: 'Kategori', node: <span className="px-2 py-1 text-sm text-slate-800">{item.category} / {item.subCategory}</span> },
+            { label: 'Şirket', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.companyName}</span> },
+            { label: 'Müşteri', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.accountName}</span> },
+            { label: 'Kategori', node: (
+              <InlineEdit
+                fieldKey="category"
+                type="select"
+                value={v('category') ?? ''}
+                editing={editingField === 'category'}
+                isDraft={drafts.category !== undefined}
+                onStart={() => onStartEdit('category')}
+                onCommit={(val) => onCommitDraft('category', val)}
+                onCancel={onCancelEdit}
+                options={categories.map((c) => ({ value: c.category, label: c.category }))}
+              />
+            )},
+            { label: 'Alt Kategori', node: (
+              <InlineEdit
+                fieldKey="subCategory"
+                type="select"
+                value={v('subCategory') ?? ''}
+                editing={editingField === 'subCategory'}
+                isDraft={drafts.subCategory !== undefined}
+                onStart={() => onStartEdit('subCategory')}
+                onCommit={(val) => onCommitDraft('subCategory', val)}
+                onCancel={onCancelEdit}
+                options={[{ value: '', label: '— Seçin —' }, ...subCategoryOptions.map((s) => ({ value: s, label: s }))]}
+                disabled={!activeCategory}
+              />
+            )},
             { label: 'Talep Türü', node: (
               <InlineEdit
                 fieldKey="requestType"
@@ -1042,14 +1135,14 @@ function DetailTab({
             { label: 'Ürün Grubu', node: (
               <InlineEdit
                 fieldKey="productGroup"
-                type="text"
-                value={v('productGroup')}
+                type="select"
+                value={v('productGroup') ?? ''}
                 editing={editingField === 'productGroup'}
                 isDraft={drafts.productGroup !== undefined}
                 onStart={() => onStartEdit('productGroup')}
-                onCommit={(val) => onCommitDraft('productGroup', String(val))}
+                onCommit={(val) => onCommitDraft('productGroup', val)}
                 onCancel={onCancelEdit}
-                placeholder="ör. ERP - Kasa"
+                options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
               />
             )},
             { label: 'Origin', node: (
@@ -1079,7 +1172,91 @@ function DetailTab({
                 placeholder={v('origin') === 'Diğer' ? 'Origin = Diğer için zorunlu' : 'Yalnızca origin = Diğer'}
               />
             )},
-            { label: '3. Parti Bekleniyor', node: <span className="px-2 py-1 text-sm text-slate-800">{item.thirdPartyName ?? '—'}</span> },
+            { label: '3. Parti Bekleniyor', node: (
+              <InlineEdit
+                fieldKey="thirdPartyId"
+                type="select"
+                value={v('thirdPartyId') ?? ''}
+                editing={editingField === 'thirdPartyId'}
+                isDraft={drafts.thirdPartyId !== undefined}
+                onStart={() => onStartEdit('thirdPartyId')}
+                onCommit={(val) => onCommitDraft('thirdPartyId', val)}
+                onCancel={onCancelEdit}
+                options={[{ value: '', label: '— Yok —' }, ...thirdParties.map((tp) => ({ value: tp.id, label: tp.name }))]}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {(drafts.thirdPartyName as string | undefined) ?? item.thirdPartyName ?? '—'}
+                  </span>
+                )}
+              />
+            )},
+          ]}
+        />
+      </Section>
+
+      {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar */}
+      <Section title="Atama & Eskalasyon">
+        <EditableGrid
+          rows={[
+            { label: 'Atanan Takım', node: (
+              <InlineEdit
+                fieldKey="assignedTeamId"
+                type="select"
+                value={v('assignedTeamId') ?? ''}
+                editing={editingField === 'assignedTeamId'}
+                isDraft={drafts.assignedTeamId !== undefined}
+                onStart={() => onStartEdit('assignedTeamId')}
+                onCommit={(val) => onCommitDraft('assignedTeamId', val)}
+                onCancel={onCancelEdit}
+                options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {(drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName ?? '—'}
+                  </span>
+                )}
+              />
+            )},
+            { label: 'Atanan Kişi', node: (
+              <InlineEdit
+                fieldKey="assignedPersonId"
+                type="select"
+                value={v('assignedPersonId') ?? ''}
+                editing={editingField === 'assignedPersonId'}
+                isDraft={drafts.assignedPersonId !== undefined}
+                onStart={() => onStartEdit('assignedPersonId')}
+                onCommit={(val) => onCommitDraft('assignedPersonId', val)}
+                onCancel={onCancelEdit}
+                options={[
+                  { value: '', label: activeTeamId ? '— Atanmadı —' : '— Önce takım seçin —' },
+                  ...personOptions.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                disabled={!activeTeamId}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {(drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName ?? '—'}
+                  </span>
+                )}
+              />
+            )},
+            { label: 'Eskalasyon', node: (
+              <InlineEdit
+                fieldKey="escalationLevel"
+                type="select"
+                value={v('escalationLevel')}
+                editing={editingField === 'escalationLevel'}
+                isDraft={drafts.escalationLevel !== undefined}
+                onStart={() => onStartEdit('escalationLevel')}
+                onCommit={(val) => onCommitDraft('escalationLevel', val)}
+                onCancel={onCancelEdit}
+                options={ESCALATION_LEVELS.map((l) => ({ value: l, label: ESCALATION_LEVEL_LABELS[l] }))}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {ESCALATION_LEVEL_LABELS[(drafts.escalationLevel as EscalationLevel | undefined) ?? item.escalationLevel]}
+                  </span>
+                )}
+              />
+            )},
+            { label: 'Vaka Sahibi', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-500" title="Otomatik atanır">{item.assignedPersonName ?? 'Atanmadı'}</span> },
           ]}
         />
       </Section>
@@ -1431,15 +1608,23 @@ function InlineEdit({
           onStart();
         }}
         title={disabled ? '' : `${fieldKey} alanını düzenle`}
-        className={`group relative w-full rounded-md text-left transition ${
+        aria-label={disabled ? undefined : `${fieldKey} alanını düzenle`}
+        className={`group relative w-full rounded-md border text-left transition ${
           disabled
-            ? 'cursor-default'
-            : 'cursor-text hover:bg-slate-100/70 hover:ring-1 hover:ring-slate-200'
-        } ${isDraft ? 'bg-amber-50 ring-1 ring-amber-300' : ''}`}
+            ? 'cursor-default border-transparent'
+            : 'cursor-pointer border-transparent hover:border-slate-200 hover:bg-slate-50'
+        } ${isDraft ? 'border-amber-300 bg-amber-50' : ''}`}
       >
-        <span className="block px-2 py-1">
+        <span className="block px-2 py-1 pr-7">
           {renderDisplay ? renderDisplay(value) : (value ? String(value) : <span className="text-slate-400">—</span>)}
         </span>
+        {!disabled && !isDraft && (
+          <Pencil
+            size={12}
+            aria-hidden
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+          />
+        )}
         {isDraft && (
           <span className="absolute right-1 top-1 rounded bg-amber-200 px-1 text-[9px] font-semibold text-amber-900">
             taslak
@@ -1459,9 +1644,40 @@ function InlineEdit({
     }
   }
 
+  // Aktif edit durumunda kullanılan ✓ ve ✗ butonları
+  const editControls = (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        data-role="commit-draft"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onCommit(draft);
+        }}
+        className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300 hover:bg-emerald-200"
+        title="Onayla (Enter)"
+        aria-label="Onayla"
+      >
+        <Check size={14} />
+      </button>
+      <button
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onCancel();
+        }}
+        className="flex h-6 w-6 items-center justify-center rounded-md bg-rose-50 text-rose-600 ring-1 ring-rose-200 hover:bg-rose-100"
+        title="İptal (ESC)"
+        aria-label="İptal"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+
   if (type === 'textarea') {
     return (
-      <div className="rounded-md ring-2 ring-brand-300">
+      <div className="rounded-md ring-2 ring-blue-500">
         <TextArea
           autoFocus
           value={String(draft ?? '')}
@@ -1479,19 +1695,9 @@ function InlineEdit({
           placeholder={placeholder}
           rows={4}
         />
-        <div className="flex justify-end gap-2 px-2 py-1 text-[11px] text-slate-500">
+        <div className="flex items-center justify-end gap-2 px-2 py-1 text-[11px] text-slate-500">
           <span>ESC iptal</span>
-          <button
-            type="button"
-            data-role="commit-draft"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onCommit(draft);
-            }}
-            className="font-medium text-brand-700 hover:underline"
-          >
-            Onayla (taslağa al)
-          </button>
+          {editControls}
         </div>
       </div>
     );
@@ -1499,28 +1705,37 @@ function InlineEdit({
 
   if (type === 'select') {
     return (
-      <Select
-        autoFocus
-        value={String(draft ?? '')}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          onCommit(e.target.value);
-        }}
-        onBlur={onCancel}
-        onKeyDown={handleKey}
-      >
-        {options?.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 rounded-md ring-2 ring-blue-500">
+          <Select
+            autoFocus
+            value={String(draft ?? '')}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              onCommit(e.target.value);
+            }}
+            onBlur={(e) => {
+              const next = e.relatedTarget as HTMLElement | null;
+              if (next?.dataset?.role === 'commit-draft') return; // commit zaten onChange'de
+              onCancel();
+            }}
+            onKeyDown={handleKey}
+          >
+            {options?.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        {editControls}
+      </div>
     );
   }
 
   if (type === 'checkbox') {
     return (
-      <label className="flex items-center gap-2 px-2 py-1 text-sm text-slate-700">
+      <div className="flex items-center gap-2 rounded-md px-2 py-1 ring-2 ring-blue-500">
         <input
           type="checkbox"
           autoFocus
@@ -1532,30 +1747,34 @@ function InlineEdit({
           onKeyDown={handleKey}
           className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
         />
-        <span className="text-[11px] text-slate-500">(ESC iptal)</span>
-      </label>
+        <span className="flex-1 text-sm text-slate-700">{Boolean(draft) ? 'Var' : 'Yok'}</span>
+        {editControls}
+      </div>
     );
   }
 
   // text / date
   return (
-    <input
-      autoFocus
-      type={type === 'date' ? 'date' : 'text'}
-      value={String(draft ?? '')}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={(e) => {
-        const next = e.relatedTarget as HTMLElement | null;
-        if (next?.dataset?.role === 'commit-draft') {
-          onCommit(draft);
-        } else {
-          onCancel();
-        }
-      }}
-      onKeyDown={handleKey}
-      placeholder={placeholder}
-      className="w-full rounded-md border border-brand-300 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-brand-200 focus:outline-none"
-    />
+    <div className="flex items-center gap-1.5">
+      <input
+        autoFocus
+        type={type === 'date' ? 'date' : 'text'}
+        value={String(draft ?? '')}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={(e) => {
+          const next = e.relatedTarget as HTMLElement | null;
+          if (next?.dataset?.role === 'commit-draft') {
+            onCommit(draft);
+          } else {
+            onCancel();
+          }
+        }}
+        onKeyDown={handleKey}
+        placeholder={placeholder}
+        className="flex-1 rounded-md border border-blue-500 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-blue-500/40 focus:outline-none"
+      />
+      {editControls}
+    </div>
   );
 }
 
