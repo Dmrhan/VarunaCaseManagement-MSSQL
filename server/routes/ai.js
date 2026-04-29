@@ -1,26 +1,26 @@
 import { Router } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 const router = Router();
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'gpt-4o-mini';
 const MAX_TOKENS = 1000;
 const TIMEOUT_MS = 30_000;
 const RATE_LIMIT_PER_MIN = 20;
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
-const client = apiKey ? new Anthropic({ apiKey }) : null;
+const apiKey = process.env.OPENAI_API_KEY;
+const client = apiKey ? new OpenAI({ apiKey }) : null;
 
-console.log('[ai] API Key loaded:', !!process.env.ANTHROPIC_API_KEY);
+console.log('[ai] API Key loaded:', !!process.env.OPENAI_API_KEY);
 
 if (!client) {
   console.warn(
-    '[ai] ANTHROPIC_API_KEY tanımlı değil — /api/ai/* endpoint\'leri 503 döner. ' +
-      '.env dosyasına ANTHROPIC_API_KEY ekleyin (örnek: .env.example).',
+    '[ai] OPENAI_API_KEY tanımlı değil — /api/ai/* endpoint\'leri 503 döner. ' +
+      '.env dosyasına OPENAI_API_KEY ekleyin (örnek: .env.example).',
   );
 } else {
   console.log(
-    `[ai] Key format — length=${apiKey.length}, prefix=${apiKey.slice(0, 12)}, suffix=...${apiKey.slice(-4)}`,
+    `[ai] Key format — length=${apiKey.length}, prefix=${apiKey.slice(0, 7)}, suffix=...${apiKey.slice(-4)}`,
   );
   console.log(`[ai] Model: ${MODEL}, max_tokens: ${MAX_TOKENS}, rate limit: ${RATE_LIMIT_PER_MIN}/dk`);
 }
@@ -28,7 +28,7 @@ if (!client) {
 // ----------------------------------------------------------------
 // IP başına dakikada N istek — basit sliding window (in-memory)
 // ----------------------------------------------------------------
-const ipBuckets = new Map(); // ip → number[] of request timestamps (ms)
+const ipBuckets = new Map();
 
 function rateLimit(req, res, next) {
   const ip = req.ip ?? req.headers['x-forwarded-for'] ?? 'unknown';
@@ -44,9 +44,9 @@ function rateLimit(req, res, next) {
 }
 
 // ----------------------------------------------------------------
-// Anthropic çağrısı (timeout + JSON parse + standart hata cevabı)
+// OpenAI çağrısı (timeout + JSON parse + standart hata cevabı)
 // ----------------------------------------------------------------
-async function callClaude({ system, user, expectJson = false }) {
+async function callOpenAI({ system, user, expectJson = false }) {
   if (!client) {
     const err = new Error('AI servisi yapılandırılmamış (API key yok).');
     err.status = 503;
@@ -56,24 +56,23 @@ async function callClaude({ system, user, expectJson = false }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const resp = await client.messages.create(
+    const resp = await client.chat.completions.create(
       {
         model: MODEL,
         max_tokens: MAX_TOKENS,
-        system,
-        messages: [{ role: 'user', content: user }],
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        ...(expectJson ? { response_format: { type: 'json_object' } } : {}),
       },
       { signal: ctrl.signal },
     );
-    const text = resp.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const text = (resp.choices?.[0]?.message?.content ?? '').trim();
 
     if (!expectJson) return { text };
 
-    // JSON modu: kod-fence kaldır, parse et
+    // JSON modu: response_format=json_object ile gelen ama defansif kod-fence kaldır
     const cleaned = text
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/```\s*$/i, '')
@@ -149,7 +148,7 @@ router.post(
       '}',
     ].join('\n');
 
-    const { json } = await callClaude({ system, user, expectJson: true });
+    const { json } = await callOpenAI({ system, user, expectJson: true });
     res.json(json);
   }),
 );
@@ -191,7 +190,7 @@ router.post(
       'Çözüm notu 2-4 cümle olsun.',
     ].join('\n');
 
-    const { text } = await callClaude({ system, user });
+    const { text } = await callOpenAI({ system, user });
     res.json({ draft: text });
   }),
 );
@@ -232,7 +231,7 @@ router.post(
       '}',
     ].join('\n');
 
-    const { json } = await callClaude({ system, user, expectJson: true });
+    const { json } = await callOpenAI({ system, user, expectJson: true });
     res.json(json);
   }),
 );
@@ -274,7 +273,7 @@ router.post(
       '}',
     ].join('\n');
 
-    const { json } = await callClaude({ system, user, expectJson: true });
+    const { json } = await callOpenAI({ system, user, expectJson: true });
     res.json(json);
   }),
 );
@@ -320,6 +319,7 @@ router.post(
     // History'yi son 6 mesajla sınırla, role/content olarak normalize et
     const recent = Array.isArray(history) ? history.slice(-6) : [];
     const messages = [
+      { role: 'system', content: system },
       ...recent
         .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && m.content)
         .map((m) => ({ role: m.role, content: String(m.content) })),
@@ -335,20 +335,15 @@ router.post(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-      const resp = await client.messages.create(
+      const resp = await client.chat.completions.create(
         {
           model: MODEL,
           max_tokens: MAX_TOKENS,
-          system,
           messages,
         },
         { signal: ctrl.signal },
       );
-      const text = resp.content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-        .trim();
+      const text = (resp.choices?.[0]?.message?.content ?? '').trim();
       res.json({ reply: text });
     } finally {
       clearTimeout(timer);
@@ -381,7 +376,7 @@ router.post(
       `Çağrı Notu: ${callLog.note ?? callLog.transcript ?? callLog.content ?? '-'}`,
     ].join('\n');
 
-    const { text } = await callClaude({ system, user });
+    const { text } = await callOpenAI({ system, user });
     res.json({ summary: text });
   }),
 );
