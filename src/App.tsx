@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   ClipboardCheck,
   FileText,
   FolderTree,
@@ -69,7 +67,6 @@ const NAV: NavItem[] = [
   { key: 'cases', /* dummy parent key, tıklamaz */ label: 'Tanım Ekranları', icon: <Settings2 size={16} />, available: true, children: ADMIN_CHILDREN },
 ];
 
-const SIDEBAR_KEY = 'varuna-sidebar-collapsed';
 const ADMIN_MENU_KEY = 'varuna-admin-menu-open';
 
 function isAdminView(v: View): v is AdminView {
@@ -84,10 +81,8 @@ export default function App() {
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(SIDEBAR_KEY) === '1';
-  });
+  // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(ADMIN_MENU_KEY) === '1';
@@ -98,14 +93,6 @@ export default function App() {
     if (isAdminView(view) && !adminMenuOpen) setAdminMenuOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0');
-    } catch {
-      /* yoksay */
-    }
-  }, [sidebarCollapsed]);
 
   useEffect(() => {
     try {
@@ -199,21 +186,12 @@ export default function App() {
 
       <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>
         <aside
+          onMouseEnter={() => setSidebarExpanded(true)}
+          onMouseLeave={() => setSidebarExpanded(false)}
           className={`shrink-0 border-r border-slate-200 bg-white py-3 transition-all duration-200 ${
-            sidebarCollapsed ? 'w-16 px-2' : 'w-64 px-3'
+            sidebarExpanded ? 'w-64 px-3' : 'w-16 px-2'
           }`}
         >
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed((v) => !v)}
-            className={`mb-3 flex h-7 w-full items-center gap-1.5 rounded-md text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 ${
-              sidebarCollapsed ? 'justify-center px-0' : 'justify-end px-2'
-            }`}
-            title={sidebarCollapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
-          >
-            {sidebarCollapsed ? <ChevronsRight size={14} /> : <><ChevronsLeft size={14} /> Daralt</>}
-          </button>
-
           <nav className="space-y-1">
             {NAV.map((item, navIdx) => {
               const isParent = !!item.children && item.children.length > 0;
@@ -224,17 +202,9 @@ export default function App() {
                   <div key={`group-${navIdx}`}>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (sidebarCollapsed) {
-                          // Collapsed iken parent tıklaması sidebar'ı genişletip menüyü açar
-                          setSidebarCollapsed(false);
-                          setAdminMenuOpen(true);
-                        } else {
-                          setAdminMenuOpen((v) => !v);
-                        }
-                      }}
+                      onClick={() => setAdminMenuOpen((v) => !v)}
                       className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                        sidebarCollapsed ? 'h-10 justify-center px-0' : 'px-3 py-2'
+                        sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
                       } ${
                         hasActiveChild
                           ? 'bg-brand-50 font-medium text-brand-700'
@@ -243,7 +213,7 @@ export default function App() {
                       title={item.label}
                     >
                       {item.icon}
-                      {!sidebarCollapsed && (
+                      {sidebarExpanded && (
                         <>
                           <span className="flex-1 text-left">{item.label}</span>
                           {expanded ? (
@@ -254,7 +224,7 @@ export default function App() {
                         </>
                       )}
                     </button>
-                    {!sidebarCollapsed && expanded && (
+                    {sidebarExpanded && expanded && (
                       <div className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4">
                         {item.children!.map((child) => {
                           const active = view === child.key;
@@ -289,7 +259,7 @@ export default function App() {
                   disabled={!item.available}
                   onClick={() => item.available && handleNavSelect(item.key)}
                   className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                    sidebarCollapsed ? 'h-10 justify-center px-0' : 'px-3 py-2'
+                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
                   } ${
                     active
                       ? 'bg-brand-50 font-medium text-brand-700'
@@ -300,7 +270,7 @@ export default function App() {
                   title={item.label}
                 >
                   {item.icon}
-                  {!sidebarCollapsed && (
+                  {sidebarExpanded && (
                     <>
                       <span className="flex-1 text-left">{item.label}</span>
                       {!item.available && (

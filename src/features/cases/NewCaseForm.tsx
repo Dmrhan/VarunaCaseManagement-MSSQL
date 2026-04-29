@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -6,7 +6,10 @@ import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
+import { RunaAiCard } from '@/components/ui/RunaAiCard';
+import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
+import { aiService, aiErrorMessage, type CategorySuggestion } from '@/services/aiService';
 import {
   CASE_ORIGINS,
   CASE_PRIORITIES,
@@ -76,6 +79,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const [duplicateCase, setDuplicateCase] = useState<Case | undefined>(undefined);
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
 
+  // RUNA AI — kategori önerisi state'i
+  const [aiSuggestion, setAiSuggestion] = useState<CategorySuggestion | null>(null);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiDismissed, setAiDismissed] = useState(false);
+  const [aiApplied, setAiApplied] = useState(false);
+  const aiReqIdRef = useRef(0);
+  const { toast } = useToast();
+
   const companies = useMemo(() => lookupService.companies(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
   const categories = useMemo(() => lookupService.categories(), []);
@@ -130,6 +142,78 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       alive = false;
     };
   }, [form.accountId, form.caseType]);
+
+  // RUNA AI — açıklama 1200ms debounce + min 20 karakter → kategori önerisi
+  // Kart 20+ karakterde sürekli görünür; içerik state'e göre değişir
+  // (loading / suggestion / error). Hata anında kart kaybolmaz.
+  useEffect(() => {
+    if (!open) return;
+    if (aiDismissed || aiApplied) return;
+    const desc = form.description.trim();
+    if (desc.length < 20) {
+      // 20 altına inerse temizle (kart zaten görünmüyor)
+      setAiSuggestion(null);
+      setAiSuggesting(false);
+      setAiError(null);
+      return;
+    }
+    const reqId = ++aiReqIdRef.current;
+    // Loading state'i hemen aç (debounce sırasında bile kart loading gösterir,
+    // böylece kart kaybolup tekrar belirme flash'ı olmaz)
+    setAiSuggesting(true);
+    const handle = window.setTimeout(async () => {
+      const r = await aiService.suggestCategory({
+        description: desc,
+        caseType: form.caseType,
+        companyName: companies.find((c) => c.id === form.companyId)?.name,
+        availableCategories: categories,
+      });
+      // Stale request — daha yeni istek tetiklendiyse sonucu yoksay
+      if (reqId !== aiReqIdRef.current) return;
+      setAiSuggesting(false);
+      if (r.ok) {
+        setAiSuggestion(r.data);
+        setAiError(null);
+      } else {
+        // Önceki suggestion'ı koru — sadece üzerine error overlay'i ekle
+        // Böylece "alıamadı" durumunda bile kart sabit kalır
+        setAiError(aiErrorMessage(r.error));
+        if (r.error.kind !== 'unconfigured') {
+          toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
+        }
+      }
+    }, 1200);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, form.description, form.caseType, form.companyId, aiDismissed, aiApplied]);
+
+  // Modal her açıldığında AI state'ini sıfırla
+  useEffect(() => {
+    if (open) {
+      setAiSuggestion(null);
+      setAiSuggesting(false);
+      setAiError(null);
+      setAiDismissed(false);
+      setAiApplied(false);
+    }
+  }, [open]);
+
+  function handleAiApply() {
+    if (!aiSuggestion) return;
+    setForm((f) => ({
+      ...f,
+      category: aiSuggestion.category,
+      subCategory: aiSuggestion.subCategory ?? '',
+      priority: aiSuggestion.priority,
+    }));
+    setAiApplied(true);
+    toast({ type: 'success', message: 'AI önerisi uygulandı.', duration: 1800 });
+  }
+
+  function handleAiDismiss() {
+    setAiSuggestion(null);
+    setAiDismissed(true);
+  }
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -199,6 +283,13 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       offerRejectionReason: form.offerRejectionReason.trim() || undefined,
       actionTaken:         form.actionTaken.trim() || undefined,
       followUpDate:        form.followUpDate    || undefined,
+
+      // RUNA AI — kullanıcı "Uygula" derse aiGeneratedFlag=true olur
+      aiGeneratedFlag:      aiApplied || undefined,
+      aiCategoryPrediction: aiApplied && aiSuggestion ? aiSuggestion.category : undefined,
+      aiPriorityPrediction: aiApplied && aiSuggestion ? aiSuggestion.priority : undefined,
+      aiConfidenceScore:    aiApplied && aiSuggestion ? aiSuggestion.confidence : undefined,
+      aiRejectReason:       aiDismissed ? 'Kullanıcı reddetti' : undefined,
     };
     const created = await caseService.create(input);
     setSubmitting(false);
@@ -445,6 +536,42 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
             rows={5}
           />
         </Field>
+
+        {/* RUNA AI — kategori önerisi
+            Kart açıklama 20+ karakter olunca SABİT görünür (loading/result/error state'inde içerik değişir).
+            Kullanıcı "Yoksay" veya "Uygula" derse tamamen gizlenir. */}
+        {form.description.trim().length >= 20 && !aiDismissed && !aiApplied && (
+          <RunaAiCard
+            title={aiError ? 'Kategori Önerisi' : 'Kategori Önerisi'}
+            body={
+              aiSuggesting
+                ? ''
+                : aiSuggestion
+                  ? `"${aiSuggestion.category}${aiSuggestion.subCategory ? ` / ${aiSuggestion.subCategory}` : ''}" — ${aiSuggestion.reasoning}`
+                  : aiError
+                    ? `${aiError} — yazmaya devam edince yeniden denenecek.`
+                    : 'Açıklama yazıldıkça öneri hazırlanıyor…'
+            }
+            badges={
+              aiSuggestion && !aiSuggesting
+                ? [`%${Math.round(aiSuggestion.confidence * 100)} güven`, aiSuggestion.priority]
+                : []
+            }
+            isLoading={aiSuggesting}
+            primaryAction={
+              aiSuggestion && !aiSuggesting
+                ? { label: 'Uygula', onClick: handleAiApply }
+                : undefined
+            }
+            secondaryAction={{ label: 'Yoksay', onClick: handleAiDismiss }}
+          />
+        )}
+
+        {aiApplied && aiSuggestion && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            ✦ AI önerisi uygulandı (%{Math.round(aiSuggestion.confidence * 100)} güven). Kategori, alt kategori ve öncelik otomatik dolduruldu — istediğiniz gibi düzenleyebilirsiniz.
+          </div>
+        )}
 
         {/* Spec 11.2 + KURAL-3 — tip değişince state silinmiyor, sadece görünürlük değişiyor */}
         {form.caseType === 'ProactiveTracking' && (

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  Bot,
   Brain,
   Building2,
   Calendar,
@@ -33,17 +32,22 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Field, Select, TextArea } from '@/components/ui/Field';
+import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { Modal } from '@/components/ui/Modal';
 import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
 import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
+import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService } from '@/services/caseService';
+import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
+  CALL_DISPOSITIONS,
+  CALL_OUTCOMES,
   CASE_FIELD_LABELS,
   CASE_ORIGINS,
   CASE_REQUEST_TYPES,
@@ -54,6 +58,8 @@ import {
   PRODUCT_USAGES,
   RESPONSE_LEVELS,
   USAGE_CHANGE_ALERTS,
+  type CallDisposition,
+  type CallOutcome,
   type Case,
   type EscalationLevel,
   type NoteVisibility,
@@ -585,15 +591,19 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               />
             )}
             {tab === 'files' && <FilesTab item={item} />}
-            {tab === 'callLogs' && <CallLogsTab item={item} />}
+            {tab === 'callLogs' && (
+              <CallLogsTab item={item} onItemUpdated={(c) => setItem(c)} />
+            )}
           </div>
         </main>
 
-        {/* Right panel — AI + type-specific summary */}
-        {/* Sağ panel — yalnızca AI önerisi varsa görünür; yoksa orta alan tüm kalan yeri alır */}
-        {item.aiGeneratedFlag && (
-          <RightPanel item={item} offeredSolutions={offeredSolutions} />
-        )}
+        {/* Right panel — RUNA AI + type-specific summary (her vakada görünür) */}
+        <RightPanel
+          item={item}
+          offeredSolutions={offeredSolutions}
+          onCaseUpdated={(updated) => setItem(updated)}
+        />
+
       </div>
     </div>
   );
@@ -804,100 +814,218 @@ function LeftPanel({
   );
 }
 
-function RightPanel({ item, offeredSolutions }: { item: Case; offeredSolutions: { id: string; name: string }[] }) {
+function RightPanel({
+  item,
+  offeredSolutions,
+  onCaseUpdated,
+}: {
+  item: Case;
+  offeredSolutions: { id: string; name: string }[];
+  onCaseUpdated: (updated: Case) => void;
+}) {
+  const { toast } = useToast();
+  const [analyzing, setAnalyzing] = useState(false);
+  const [churnAnalyzing, setChurnAnalyzing] = useState(false);
+  const [churnResult, setChurnResult] = useState<ChurnConversion | null>(null);
+  const [converting, setConverting] = useState(false);
+
+  // Vaka değişince churn preview state'ini sıfırla
+  useEffect(() => {
+    setChurnResult(null);
+  }, [item.id]);
+
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    const r = await aiService.supervisorSummary({
+      case: {
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        subCategory: item.subCategory,
+        status: item.status,
+        priority: item.priority,
+        slaViolation: item.slaViolation,
+      },
+      history: item.history,
+      notes: item.notes,
+      callLogs: item.callLogs,
+    });
+    if (!r.ok) {
+      setAnalyzing(false);
+      toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
+      return;
+    }
+    const updated = await caseService.update(item.id, {
+      aiSummary: r.data.summary,
+      aiFollowupRecommendation: r.data.recommendation,
+    });
+    setAnalyzing(false);
+    if (updated) {
+      onCaseUpdated(updated);
+      toast({ type: 'success', message: 'Vaka analizi tamamlandı.', duration: 2000 });
+    }
+  }
+
+  async function handleChurnAnalysis() {
+    setChurnAnalyzing(true);
+    const r = await aiService.churnConversion({
+      case: { title: item.title, companyName: item.companyName, accountName: item.accountName },
+      callLogs: item.callLogs,
+      financialStatus: item.financialStatus,
+      productUsage: item.productUsage,
+      usageChangeAlert: item.usageChangeAlert,
+    });
+    setChurnAnalyzing(false);
+    if (r.ok) {
+      setChurnResult(r.data);
+    } else {
+      toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
+    }
+  }
+
+  async function handleConvertToChurn() {
+    if (!churnResult) return;
+    if (!window.confirm('Vakayı Churn tipine dönüştürmek istediğinizden emin misiniz?')) return;
+    setConverting(true);
+    const updated = await caseService.update(item.id, {
+      caseType: 'Churn',
+      aiRetentionOfferSuggestion: churnResult.suggestedAction,
+    });
+    setConverting(false);
+    if (updated) {
+      onCaseUpdated(updated);
+      toast({ type: 'success', message: 'Vaka Churn tipine dönüştürüldü.', duration: 2200 });
+    }
+  }
+
   return (
     <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
       <div className="space-y-4">
-        <PanelSection
-          title="AI Paneli"
-          icon={<Brain size={12} />}
-          badge={
-            item.aiConfidenceScore != null ? (
-              <Badge tint="indigo">{Math.round(item.aiConfidenceScore * 100)}% güven</Badge>
-            ) : undefined
+        {/* RUNA AI — Vaka özeti / analiz */}
+        <RunaAiCard
+          title={item.aiSummary ? 'Vaka Özeti' : 'RUNA AI Hazır'}
+          body={item.aiSummary ?? 'Bu vaka için henüz AI analizi yapılmadı.'}
+          isLoading={analyzing}
+          badges={
+            item.aiConfidenceScore != null
+              ? [`%${Math.round(item.aiConfidenceScore * 100)} güven`]
+              : []
           }
-        >
-          <div className="space-y-3 text-xs">
-            {/* AI Özeti — tam genişlik */}
-            {item.aiSummary && (
-              <div className="rounded-md bg-indigo-50 px-3 py-2 text-sm text-indigo-900 ring-1 ring-indigo-200">
-                {item.aiSummary}
-              </div>
-            )}
+          primaryAction={
+            !analyzing
+              ? {
+                  label: item.aiSummary ? '✦ Yeniden Analiz Et' : '✦ Analiz Et',
+                  onClick: () => void handleAnalyze(),
+                }
+              : undefined
+          }
+        />
 
-            {/* 4 öneri tile'ı — 2x2 grid */}
-            <div className="grid grid-cols-2 gap-2">
-              <AiTile
-                label="Kategori önerisi"
-                value={item.aiCategoryPrediction ?? '—'}
-                tint="indigo"
-              />
-              <AiTile
-                label="Öncelik önerisi"
-                value={item.aiPriorityPrediction ?? '—'}
-                tint="indigo"
-              />
-              <AiTile
-                label="Duplicate skoru"
-                value={item.aiDuplicateScore != null ? item.aiDuplicateScore.toFixed(2) : '—'}
-                tint="slate"
-              />
-              <AiTile
-                label="Güven skoru"
-                value={item.aiConfidenceScore != null ? `${Math.round(item.aiConfidenceScore * 100)}%` : '—'}
-                tint="slate"
-              />
-            </div>
-
-            {/* Tam genişlik öneri kartları */}
-            {item.aiCallBrief && (
-              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Çağrı Özeti
+        {/* AI ek detaylar (varsa) — RUNA AI'ın altında ek context olarak */}
+        {(item.aiCategoryPrediction ||
+          item.aiPriorityPrediction ||
+          item.aiCallBrief ||
+          item.aiFollowupRecommendation ||
+          item.aiRetentionOfferSuggestion ||
+          item.aiRejectReason) && (
+          <PanelSection title="AI Detayları" icon={<Brain size={12} />}>
+            <div className="space-y-3 text-xs">
+              {(item.aiCategoryPrediction || item.aiPriorityPrediction) && (
+                <div className="grid grid-cols-2 gap-2">
+                  <AiTile
+                    label="Kategori önerisi"
+                    value={item.aiCategoryPrediction ?? '—'}
+                    tint="indigo"
+                  />
+                  <AiTile
+                    label="Öncelik önerisi"
+                    value={item.aiPriorityPrediction ?? '—'}
+                    tint="indigo"
+                  />
                 </div>
-                {item.aiCallBrief}
-              </div>
-            )}
-            {item.aiFollowupRecommendation && (
-              <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Takip Önerisi
+              )}
+              {item.aiCallBrief && (
+                <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Çağrı Özeti
+                  </div>
+                  {item.aiCallBrief}
                 </div>
-                {item.aiFollowupRecommendation}
-              </div>
-            )}
-            {item.aiRetentionOfferSuggestion && (
-              <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
-                  Retention Teklif Önerisi
+              )}
+              {item.aiFollowupRecommendation && (
+                <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Takip Önerisi
+                  </div>
+                  {item.aiFollowupRecommendation}
                 </div>
-                {item.aiRetentionOfferSuggestion}
-              </div>
-            )}
-
-            {/* Taslak Üret — tam genişlik */}
-            <Button size="md" variant="outline" leftIcon={<Bot size={14} />} disabled className="w-full justify-center">
-              Taslak Üret (FAZ 1+)
-            </Button>
-
-            {item.aiRejectReason && (
-              <div className="rounded-md bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200">
-                <strong>Önceki red:</strong> {item.aiRejectReason}
-              </div>
-            )}
-          </div>
-        </PanelSection>
-
-        {item.caseType === 'ProactiveTracking' && (
-          <PanelSection title="Proaktif Takip" icon={<TrendingDown size={12} />} tint="violet">
-            <div className="space-y-1 text-xs">
-              <Row label="Finansal Risk"      value={item.financialStatus ?? '—'} />
-              <Row label="Ürün Kullanımı"     value={item.productUsage ?? '—'} />
-              <Row label="Kullanım Trendi"    value={item.usageChangeAlert ?? '—'} />
-              <Row label="Müdahale Önceliği"  value={item.responseLevel ?? '—'} />
-              <Row label="Toplam Çağrı"       value={String(item.callLogs.length)} />
+              )}
+              {item.aiRetentionOfferSuggestion && (
+                <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                    Retention Teklif Önerisi
+                  </div>
+                  {item.aiRetentionOfferSuggestion}
+                </div>
+              )}
+              {item.aiRejectReason && (
+                <div className="rounded-md bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200">
+                  <strong>Önceki red:</strong> {item.aiRejectReason}
+                </div>
+              )}
             </div>
           </PanelSection>
+        )}
+
+        {item.caseType === 'ProactiveTracking' && (
+          <>
+            <PanelSection title="Proaktif Takip" icon={<TrendingDown size={12} />} tint="violet">
+              <div className="space-y-1 text-xs">
+                <Row label="Finansal Risk"      value={item.financialStatus ?? '—'} />
+                <Row label="Ürün Kullanımı"     value={item.productUsage ?? '—'} />
+                <Row label="Kullanım Trendi"    value={item.usageChangeAlert ?? '—'} />
+                <Row label="Müdahale Önceliği"  value={item.responseLevel ?? '—'} />
+                <Row label="Toplam Çağrı"       value={String(item.callLogs.length)} />
+              </div>
+            </PanelSection>
+
+            {/* RUNA AI — Churn risk değerlendirmesi */}
+            <RunaAiCard
+              title="Churn Risk Değerlendirmesi"
+              body={
+                churnResult?.reasoning ??
+                'Churn riskini değerlendirmek için analiz başlatın. Finansal durum, ürün kullanımı ve arama geçmişi incelenir.'
+              }
+              badges={
+                churnResult
+                  ? [
+                      `Risk: ${churnResult.churnRisk}`,
+                      churnResult.shouldConvert ? 'Dönüşüm önerilir' : 'Bekle',
+                    ]
+                  : []
+              }
+              isLoading={churnAnalyzing}
+              primaryAction={
+                !churnResult && !churnAnalyzing
+                  ? { label: '✦ Değerlendir', onClick: () => void handleChurnAnalysis() }
+                  : undefined
+              }
+              dangerAction={
+                churnResult?.shouldConvert
+                  ? {
+                      label: converting ? 'Dönüştürülüyor…' : "Churn'e Dönüştür",
+                      onClick: () => void handleConvertToChurn(),
+                      disabled: converting,
+                    }
+                  : undefined
+              }
+              secondaryAction={
+                churnResult
+                  ? { label: 'Yeniden', onClick: () => void handleChurnAnalysis() }
+                  : undefined
+              }
+            />
+          </>
         )}
 
         {item.caseType === 'Churn' && (
@@ -1961,15 +2089,22 @@ function FilesTab({ item }: { item: Case }) {
   );
 }
 
-function CallLogsTab({ item }: { item: Case }) {
+function CallLogsTab({
+  item,
+  onItemUpdated,
+}: {
+  item: Case;
+  onItemUpdated: (c: Case) => void;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
           Çağrı kayıtları — toplam <strong>{item.callLogs.length}</strong>.
         </p>
-        <Button size="sm" variant="outline" leftIcon={<Mic size={12} />} disabled>
-          Çağrı Kaydı Ekle (FAZ 1+)
+        <Button size="sm" variant="outline" leftIcon={<Mic size={12} />} onClick={() => setOpen(true)}>
+          Çağrı Kaydı Ekle
         </Button>
       </div>
       {item.callLogs.length === 0 ? (
@@ -2000,7 +2135,164 @@ function CallLogsTab({ item }: { item: Case }) {
           ))}
         </ul>
       )}
+
+      <NewCallLogModal
+        open={open}
+        item={item}
+        onClose={() => setOpen(false)}
+        onCreated={onItemUpdated}
+      />
     </div>
+  );
+}
+
+function NewCallLogModal({
+  open,
+  item,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  item: Case;
+  onClose: () => void;
+  onCreated: (c: Case) => void;
+}) {
+  const [callerName, setCallerName] = useState('');
+  const [durationMin, setDurationMin] = useState(5);
+  const [disposition, setDisposition] = useState<CallDisposition>('Cevapladı');
+  const [outcome, setOutcome] = useState<CallOutcome>('Memnun');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (open) {
+      setCallerName('');
+      setDurationMin(5);
+      setDisposition('Cevapladı');
+      setOutcome('Memnun');
+      setDescription('');
+    }
+  }, [open]);
+
+  async function handleSave() {
+    if (!callerName.trim()) {
+      toast({ type: 'warn', message: 'Arayan / muhatap adı zorunlu.' });
+      return;
+    }
+    setSubmitting(true);
+    const r = await caseService.addCallLog(item.id, {
+      callerName: callerName.trim(),
+      durationMin,
+      callDisposition: disposition,
+      callOutcome: outcome,
+      description: description.trim() || undefined,
+    });
+    if (!r) {
+      setSubmitting(false);
+      toast({ type: 'error', message: 'Çağrı kaydı eklenemedi.' });
+      return;
+    }
+    onCreated(r.caseUpdated);
+    onClose();
+    setSubmitting(false);
+    toast({ type: 'success', message: 'Çağrı kaydedildi. AI özet hazırlanıyor…', duration: 1800 });
+
+    // Auto-summarize: arka planda; sonuç gelince case'in aiCallBrief alanı güncellenir.
+    void (async () => {
+      const aiR = await aiService.callSummary({
+        callLog: {
+          note: r.callLog.description,
+          outcome: r.callLog.callOutcome,
+          disposition: r.callLog.callDisposition,
+        },
+        caseSubject: item.title,
+        customerName: item.accountName,
+      });
+      if (aiR.ok && aiR.data.summary) {
+        const updated = await caseService.update(item.id, { aiCallBrief: aiR.data.summary });
+        if (updated) {
+          onCreated(updated);
+          toast({ type: 'success', message: 'Çağrı özeti AI tarafından hazırlandı.', duration: 2000 });
+        }
+      } else if (!aiR.ok) {
+        // Sessiz fail — UI'da call log zaten var
+        if (aiR.error.kind !== 'unconfigured') {
+          toast({ type: 'warn', message: aiErrorMessage(aiR.error), duration: 2200 });
+        }
+      }
+    })();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      title="Çağrı Kaydı Ekle"
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          <Button onClick={handleSave} disabled={submitting || !callerName.trim()}>
+            {submitting ? 'Kaydediliyor…' : 'Kaydet'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Muhatap" required>
+          <TextInput
+            autoFocus
+            placeholder="ör. Ayşe Yılmaz"
+            value={callerName}
+            onChange={(e) => setCallerName(e.target.value)}
+          />
+        </Field>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Field label="Süre (dk)" required>
+            <TextInput
+              type="number"
+              min={1}
+              value={durationMin}
+              onChange={(e) => setDurationMin(Number(e.target.value) || 0)}
+            />
+          </Field>
+          <Field label="Çağrı Sonucu" required>
+            <Select
+              value={disposition}
+              onChange={(e) => setDisposition(e.target.value as CallDisposition)}
+            >
+              {CALL_DISPOSITIONS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Müşteri Tepkisi" required>
+            <Select value={outcome} onChange={(e) => setOutcome(e.target.value as CallOutcome)}>
+              {CALL_OUTCOMES.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <Field label="Açıklama" hint="AI bu metni özetleyerek aiCallBrief alanına yazacak.">
+          <TextArea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            placeholder="Çağrıda ne konuşuldu, hangi karar verildi…"
+          />
+        </Field>
+      </div>
+    </Modal>
   );
 }
 

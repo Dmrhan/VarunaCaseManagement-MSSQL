@@ -60,6 +60,9 @@ function formatHistoryValue(field: string, value: unknown): string {
 import {
   CASE_REQUEST_TYPES,
   type Case,
+  type CallDisposition,
+  type CallOutcome,
+  type CaseCallLog,
   type CaseFilters,
   type CaseListPagination,
   type CaseNote,
@@ -158,6 +161,13 @@ export interface NewCaseInput {
   offerRejectionReason?: string;
   actionTaken?:         string;
   followUpDate?:        string;
+
+  // RUNA AI — kullanıcı "Uygula" derse set edilir, "Yoksay" derse rejectReason set edilir
+  aiGeneratedFlag?: boolean;
+  aiCategoryPrediction?: string;
+  aiPriorityPrediction?: Case['priority'];
+  aiConfidenceScore?: number;
+  aiRejectReason?: string;
 }
 
 export const caseService = {
@@ -235,7 +245,11 @@ export const caseService = {
         slaViolation: false,
         slaPausedDurationMin: 0,
         slaThirdPartyWaitMin: 0,
-        aiGeneratedFlag: false,
+        aiGeneratedFlag: input.aiGeneratedFlag ?? false,
+        aiCategoryPrediction: input.aiCategoryPrediction,
+        aiPriorityPrediction: input.aiPriorityPrediction,
+        aiConfidenceScore: input.aiConfidenceScore,
+        aiRejectReason: input.aiRejectReason,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         notes: [],
@@ -423,6 +437,57 @@ export const caseService = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+    });
+    if (!r.ok) return undefined;
+    return r.json();
+  },
+
+  /**
+   * Yeni çağrı logu ekler. UI tarafında oluşturulan log'u case.callLogs'a önder.
+   * AI özetlemesi caller tarafında yapılır (aiService.callSummary → ardından
+   * caseService.update ile aiCallBrief set edilir).
+   */
+  async addCallLog(
+    id: string,
+    input: {
+      callerName: string;
+      callDate?: string;
+      durationMin: number;
+      callDisposition: CallDisposition;
+      callOutcome: CallOutcome;
+      description?: string;
+      nextFollowupDate?: string;
+    },
+  ): Promise<{ caseUpdated: Case; callLog: CaseCallLog } | undefined> {
+    if (USE_MOCK) {
+      await delay(80);
+      const idx = store.findIndex((c) => c.id === id);
+      if (idx < 0) return undefined;
+      const newLog: CaseCallLog = {
+        id: uid('CALL'),
+        caseId: id,
+        callDate: input.callDate ?? nowIso(),
+        durationMin: input.durationMin,
+        callDisposition: input.callDisposition,
+        callOutcome: input.callOutcome,
+        description: input.description?.trim() || undefined,
+        callerId: 'mock-user',
+        callerName: input.callerName,
+        nextFollowupDate: input.nextFollowupDate,
+        lastInteractionDate: nowIso(),
+      };
+      const updated: Case = {
+        ...store[idx],
+        callLogs: [newLog, ...store[idx].callLogs],
+        updatedAt: nowIso(),
+      };
+      store[idx] = updated;
+      return { caseUpdated: clone(updated), callLog: clone(newLog) };
+    }
+    const r = await fetch(`${API_BASE}/${id}/call-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
     });
     if (!r.ok) return undefined;
     return r.json();

@@ -846,6 +846,36 @@ Faz 0 tamamlanmış sayılır:
 
 Son güncelleme: Nisan 2025 Versiyon: FAZ 0 — Mock UI Bu dosya değiştirildiğinde Claude Code'a yeni oturumda bildir.
 
+## 19a. FAZ 1 AI — RUNA AI (Anthropic Entegrasyonu)
+
+Gerçek Anthropic API entegrasyonu aktif (mock değil).
+
+```
+USE_MOCK_AI = false
+Model: claude-haiku-4-5-20251001
+Max tokens: 1000
+Timeout: 30 saniye
+Rate limit: IP başına dakikada 20 istek
+```
+
+BFF endpoint'leri (server/routes/ai.js):
+- POST /api/ai/suggest-category   → kategori + öncelik önerisi (NewCaseForm)
+- POST /api/ai/draft-resolution   → çözüm notu taslağı (StatusTransitionPanel "Çözüldü")
+- POST /api/ai/supervisor-summary → vaka analizi + risk + öneri (CaseDetailPage sağ panel)
+- POST /api/ai/churn-conversion   → churn riski + dönüşüm önerisi (ProactiveTracking)
+- POST /api/ai/call-summary       → çağrı notu özeti (otomatik, aiCallBrief)
+
+Frontend servisi: src/services/aiService.ts
+RUNA AI bileşeni: src/components/ui/RunaAiCard.tsx
+
+Hata yönetimi:
+- API hatası / timeout / rate limit → toast uyarısı, UI sessizce devam eder
+- aiGeneratedFlag yalnızca kullanıcı "Uygula" derse true olur, "Yoksay" → aiRejectReason
+
+Konfigürasyon:
+- .env dosyasına ANTHROPIC_API_KEY eklenmeli (.env.example referans)
+- Server start: `node --watch --env-file-if-exists=.env server/index.js`
+
 ## 19. Agent UX İyileştirmeleri (Gelecek Geliştirmeler)
 
 1. Hızlı Vaka Açma — 3 alan, 10 saniyede minimal form

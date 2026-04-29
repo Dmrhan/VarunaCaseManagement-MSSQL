@@ -17,7 +17,9 @@ import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
+import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { caseService, lookupService } from '@/services/caseService';
+import { aiService, aiErrorMessage } from '@/services/aiService';
 import {
   CASE_STATUSES,
   ESCALATION_LEVELS,
@@ -126,6 +128,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
   const [escalationReason, setEscalationReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const { toast } = useToast();
 
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
@@ -140,6 +143,25 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setEscalationReason('');
     setError(null);
   }, [item.id]);
+
+  async function handleDraftResolution() {
+    setDrafting(true);
+    const r = await aiService.draftResolution({
+      caseSubject: item.title,
+      description: item.description,
+      caseType: item.caseType,
+      category: item.category,
+      history: item.history,
+      notes: item.notes,
+    });
+    setDrafting(false);
+    if (r.ok) {
+      setResolutionNote(r.data.draft);
+      toast({ type: 'success', message: 'Çözüm taslağı oluşturuldu.', duration: 1800 });
+    } else {
+      toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
+    }
+  }
 
   const requiresSupervisor =
     pending === 'Çözüldü' &&
@@ -290,24 +312,40 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
           </div>
 
           {pending === 'Çözüldü' && (
-            <Field
-              label="Çözüm Notu"
-              required
-              actions={
-                <VoiceNoteButton
-                  onTranscript={(chunk) =>
-                    setResolutionNote((t) => (t ? `${t} ${chunk}` : chunk))
-                  }
-                />
-              }
-            >
-              <TextArea
-                value={resolutionNote}
-                onChange={(e) => setResolutionNote(e.target.value)}
-                placeholder="Sorunun nasıl çözüldüğünü açıklayın…"
-                rows={3}
+            <>
+              <RunaAiCard
+                title="Çözüm Notu Taslağı"
+                body={
+                  resolutionNote
+                    ? 'Taslak alana yazıldı; düzenleyebilirsiniz veya yeni bir taslak üretebilirsiniz.'
+                    : 'Vaka geçmişine ve notlara bakarak müşteri dostu bir çözüm notu önerilir.'
+                }
+                isLoading={drafting}
+                primaryAction={{
+                  label: resolutionNote ? '✦ Yeniden Üret' : '✦ Taslak Üret',
+                  onClick: () => void handleDraftResolution(),
+                  disabled: drafting,
+                }}
               />
-            </Field>
+              <Field
+                label="Çözüm Notu"
+                required
+                actions={
+                  <VoiceNoteButton
+                    onTranscript={(chunk) =>
+                      setResolutionNote((t) => (t ? `${t} ${chunk}` : chunk))
+                    }
+                  />
+                }
+              >
+                <TextArea
+                  value={resolutionNote}
+                  onChange={(e) => setResolutionNote(e.target.value)}
+                  placeholder="Sorunun nasıl çözüldüğünü açıklayın…"
+                  rows={3}
+                />
+              </Field>
+            </>
           )}
 
           {pending === 'İptalEdildi' && (

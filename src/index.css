@@ -5,6 +5,9 @@
 @layer base {
   html, body, #root {
     height: 100%;
+    /* Defensive: React/CSS mount olmadan önce ya da geçişlerde
+       koyu/mor flash olmasın diye baseline bg. */
+    background-color: rgb(248 250 252);
   }
   body {
     @apply bg-slate-50 text-slate-800 antialiased;
