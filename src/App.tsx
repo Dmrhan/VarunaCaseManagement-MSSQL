@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Inbox, LayoutDashboard, Settings2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Inbox, Keyboard, LayoutDashboard, Settings2 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { Badge } from './components/ui/Badge';
+import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
+import { useHotkey } from './lib/useHotkey';
 
 type View = 'cases' | 'dashboard' | 'admin';
 
@@ -14,6 +16,31 @@ const NAV: { key: View; label: string; icon: React.ReactNode; available: boolean
 
 export default function App() {
   const [view, setView] = useState<View>('cases');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [gPressed, setGPressed] = useState(false);
+
+  useHotkey('?', () => setHelpOpen(true));
+
+  // 'g' + ikinci tuş kombinasyonu için kısa pencere
+  useEffect(() => {
+    if (!gPressed) return;
+    const t = window.setTimeout(() => setGPressed(false), 800);
+    return () => window.clearTimeout(t);
+  }, [gPressed]);
+
+  useHotkey('g', () => setGPressed(true));
+  useHotkey('v', () => {
+    if (gPressed) {
+      setView('cases');
+      setGPressed(false);
+    }
+  });
+  useHotkey('r', () => {
+    if (gPressed) {
+      setView('dashboard');
+      setGPressed(false);
+    }
+  });
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -27,8 +54,20 @@ export default function App() {
             <div className="text-[11px] text-slate-500">FAZ 0 — Mock UI</div>
           </div>
         </div>
-        <Badge tint="amber">USE_MOCK = true</Badge>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            title="Klavye kısayolları (?)"
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <Keyboard size={16} />
+          </button>
+          <Badge tint="amber">USE_MOCK = true</Badge>
+        </div>
       </header>
+
+      <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <div className="flex flex-1">
         <aside className="w-56 shrink-0 border-r border-slate-200 bg-white px-3 py-4">

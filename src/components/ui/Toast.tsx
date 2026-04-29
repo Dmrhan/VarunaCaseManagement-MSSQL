@@ -1,0 +1,138 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
+import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
+import { cn } from './cn';
+
+export type ToastType = 'success' | 'error' | 'info' | 'warn';
+
+export interface ToastEntry {
+  id: string;
+  type: ToastType;
+  title?: string;
+  message: string;
+  duration?: number;
+  action?: { label: string; onClick: () => void };
+}
+
+interface ToastApi {
+  toast: (t: Omit<ToastEntry, 'id'>) => string;
+  dismiss: (id: string) => void;
+}
+
+const ToastContext = createContext<ToastApi>({ toast: () => '', dismiss: () => {} });
+
+export function useToast() {
+  return useContext(ToastContext);
+}
+
+const TYPE_STYLE: Record<ToastType, { bg: string; ring: string; icon: ReactNode; iconColor: string }> = {
+  success: {
+    bg: 'bg-emerald-50',
+    ring: 'ring-emerald-200',
+    icon: <CheckCircle2 size={18} />,
+    iconColor: 'text-emerald-600',
+  },
+  error: {
+    bg: 'bg-rose-50',
+    ring: 'ring-rose-200',
+    icon: <AlertCircle size={18} />,
+    iconColor: 'text-rose-600',
+  },
+  info: {
+    bg: 'bg-blue-50',
+    ring: 'ring-blue-200',
+    icon: <Info size={18} />,
+    iconColor: 'text-blue-600',
+  },
+  warn: {
+    bg: 'bg-amber-50',
+    ring: 'ring-amber-200',
+    icon: <TriangleAlert size={18} />,
+    iconColor: 'text-amber-600',
+  },
+};
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<ToastEntry[]>([]);
+
+  const dismiss = useCallback((id: string) => {
+    setItems((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const toast = useCallback(
+    (t: Omit<ToastEntry, 'id'>) => {
+      const id = Math.random().toString(36).slice(2, 10);
+      const entry: ToastEntry = { duration: 4000, ...t, id };
+      setItems((prev) => [...prev, entry]);
+      if (entry.duration && entry.duration > 0) {
+        setTimeout(() => dismiss(id), entry.duration);
+      }
+      return id;
+    },
+    [dismiss],
+  );
+
+  return (
+    <ToastContext.Provider value={{ toast, dismiss }}>
+      {children}
+      <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2">
+        {items.map((t) => (
+          <ToastCard key={t.id} entry={t} onClose={() => dismiss(t.id)} />
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+function ToastCard({ entry, onClose }: { entry: ToastEntry; onClose: () => void }) {
+  const style = TYPE_STYLE[entry.type];
+  const [enter, setEnter] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setEnter(true), 10);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  return (
+    <div
+      role="status"
+      className={cn(
+        'pointer-events-auto flex items-start gap-2 rounded-lg p-3 shadow-md ring-1 ring-inset transition-all duration-200',
+        style.bg,
+        style.ring,
+        enter ? 'translate-x-0 opacity-100' : 'translate-x-2 opacity-0',
+      )}
+    >
+      <span className={cn('mt-0.5 flex-shrink-0', style.iconColor)}>{style.icon}</span>
+      <div className="flex-1 min-w-0">
+        {entry.title && <div className="text-sm font-semibold text-slate-900">{entry.title}</div>}
+        <div className="text-sm text-slate-700">{entry.message}</div>
+        {entry.action && (
+          <button
+            type="button"
+            onClick={() => {
+              entry.action!.onClick();
+              onClose();
+            }}
+            className="mt-1 text-xs font-medium text-brand-700 underline hover:text-brand-800"
+          >
+            {entry.action.label}
+          </button>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex-shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600"
+        aria-label="Kapat"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}

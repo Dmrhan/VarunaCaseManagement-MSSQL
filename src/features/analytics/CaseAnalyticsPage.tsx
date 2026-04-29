@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Skeleton, MetricTileSkeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { BarList } from '@/components/charts/BarList';
 import { Donut } from '@/components/charts/Donut';
 import { TrendLine } from '@/components/charts/TrendLine';
@@ -89,7 +91,50 @@ export function CaseAnalyticsPage() {
   const stats = useMemo(() => computeStats(items), [items]);
 
   if (loading) {
-    return <div className="p-6 text-sm text-slate-500">Raporlar yükleniyor…</div>;
+    return (
+      <div className="space-y-5">
+        <div>
+          <Skeleton width={220} height={28} />
+          <Skeleton width={400} height={12} className="mt-2" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <MetricTileSkeleton key={i} />
+          ))}
+        </div>
+        <Card>
+          <CardBody>
+            <Skeleton height={140} />
+          </CardBody>
+        </Card>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <CardBody>
+              <Skeleton height={200} />
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Skeleton height={200} />
+            </CardBody>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (allItems.length === 0) {
+    return (
+      <Card>
+        <CardBody>
+          <EmptyState
+            icon={<Inbox size={22} />}
+            title="Veri yok"
+            description="Henüz raporlanacak vaka oluşturulmamış."
+          />
+        </CardBody>
+      </Card>
+    );
   }
 
   return (

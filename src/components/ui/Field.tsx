@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import type {
   InputHTMLAttributes,
   ReactNode,
@@ -34,14 +35,26 @@ const baseControl =
   'placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 ' +
   'focus:ring-brand-500/20 disabled:bg-slate-50 disabled:text-slate-500';
 
-export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cn(baseControl, props.className)} />;
-}
+export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function TextInput(props, ref) {
+    return <input ref={ref} {...props} className={cn(baseControl, props.className)} />;
+  },
+);
 
-export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={cn(baseControl, 'min-h-[88px] resize-y', props.className)} />;
-}
+export const TextArea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  function TextArea(props, ref) {
+    return (
+      <textarea
+        ref={ref}
+        {...props}
+        className={cn(baseControl, 'min-h-[88px] resize-y', props.className)}
+      />
+    );
+  },
+);
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cn(baseControl, 'pr-8', props.className)} />;
-}
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
+  function Select(props, ref) {
+    return <select ref={ref} {...props} className={cn(baseControl, 'pr-8', props.className)} />;
+  },
+);

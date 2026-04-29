@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useHotkey } from '@/lib/useHotkey';
 import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Inbox,
   Plus,
   RotateCw,
   Search,
+  SearchX,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +17,10 @@ import { Select, TextInput } from '@/components/ui/Field';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { Badge } from '@/components/ui/Badge';
 import { caseService, lookupService } from '@/services/caseService';
+import { useToast } from '@/components/ui/Toast';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { TableRowSkeleton } from '@/components/ui/Skeleton';
+import { CustomerCardModal } from '@/features/customers/CustomerCardModal';
 import {
   CASE_PRIORITIES,
   CASE_PRIORITY_LABELS,
@@ -60,6 +67,16 @@ export function CasesListPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [customerCardId, setCustomerCardId] = useState<string | null>(null);
+  const { toast } = useToast();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Klavye kısayolları
+  useHotkey('/', (e) => {
+    e.preventDefault();
+    searchInputRef.current?.focus();
+  });
+  useHotkey('n', () => setNewOpen(true));
 
   const teams = useMemo(() => lookupService.teams(), []);
   const personsAll = useMemo(() => lookupService.persons(), []);
@@ -140,8 +157,8 @@ export function CasesListPage() {
 
   function handleAccountClick(e: React.MouseEvent, account: { id: string; name: string }) {
     e.stopPropagation();
-    // Spec: müşteri linkin → müşteri kartı. Customer Card modülü FAZ 1+ kapsamında.
-    alert(`Müşteri Kartı: ${account.name}\n(${account.id})\n\nMüşteri Kartı modülü FAZ 1+ ile gelecek.`);
+    // Spec: müşteri linki → müşteri kartı. Tam modül FAZ 1+ kapsamında; FAZ 0 önizleme modali.
+    setCustomerCardId(account.id);
   }
 
   return (
@@ -178,11 +195,15 @@ export function CasesListPage() {
             <div className="relative flex-1 min-w-[220px]">
               <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <TextInput
-                placeholder="Vaka no, başlık veya müşteri ara..."
+                ref={searchInputRef}
+                placeholder="Vaka no, başlık veya müşteri ara... (/ ile odak)"
                 value={filters.search ?? ''}
                 onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-                className="pl-8"
+                className="pl-8 pr-12"
               />
+              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+                /
+              </kbd>
             </div>
             <FilterSelect
               label="Tip"
@@ -306,17 +327,34 @@ export function CasesListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading && (
-                <tr>
-                  <td colSpan={9} className="p-6 text-center text-sm text-slate-500">
-                    Yükleniyor…
-                  </td>
-                </tr>
-              )}
+              {loading &&
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={9} />)}
               {!loading && allFiltered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-10 text-center text-sm text-slate-500">
-                    Sonuç bulunamadı.
+                  <td colSpan={9} className="px-4">
+                    {hasActiveFilters ? (
+                      <EmptyState
+                        icon={<SearchX size={22} />}
+                        title="Filtrelere uyan vaka bulunamadı"
+                        description="Daha geniş bir arama için filtreleri gözden geçirebilirsin."
+                        action={
+                          <Button size="sm" variant="outline" leftIcon={<X size={12} />} onClick={clearFilters}>
+                            Filtreleri Temizle
+                          </Button>
+                        }
+                      />
+                    ) : (
+                      <EmptyState
+                        icon={<Inbox size={22} />}
+                        title="Henüz vaka yok"
+                        description="İlk vakayı oluşturarak başlayın."
+                        action={
+                          <Button size="sm" leftIcon={<Plus size={12} />} onClick={() => setNewOpen(true)}>
+                            Yeni Vaka
+                          </Button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
@@ -431,9 +469,24 @@ export function CasesListPage() {
           setNewOpen(false);
           setSelectedId(c.id);
           void load();
+          toast({
+            type: 'success',
+            title: 'Vaka oluşturuldu',
+            message: `${c.caseNumber} — ${c.title}`,
+          });
         }}
         onShowExisting={(id) => {
           setNewOpen(false);
+          setSelectedId(id);
+        }}
+      />
+
+      <CustomerCardModal
+        open={customerCardId !== null}
+        accountId={customerCardId}
+        onClose={() => setCustomerCardId(null)}
+        onShowCase={(id) => {
+          setCustomerCardId(null);
           setSelectedId(id);
         }}
       />

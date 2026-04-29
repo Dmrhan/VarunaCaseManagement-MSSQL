@@ -28,6 +28,7 @@ import { Popover } from '@/components/ui/Popover';
 import { Field, Select, TextArea } from '@/components/ui/Field';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { caseService, lookupService } from '@/services/caseService';
+import { useToast } from '@/components/ui/Toast';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
   ESCALATION_LEVEL_LABELS,
@@ -60,6 +61,7 @@ export function CaseDetailDrawer({ caseId, onClose, onChanged }: CaseDetailDrawe
 
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
+  const { toast } = useToast();
 
   const open = Boolean(caseId);
 
@@ -132,6 +134,11 @@ export function CaseDetailDrawer({ caseId, onClose, onChanged }: CaseDetailDrawe
       setThirdPartyId('');
       onChanged();
       closePopover();
+      toast({
+        type: pendingStatus === 'Çözüldü' ? 'success' : pendingStatus === 'İptalEdildi' ? 'warn' : 'info',
+        title: 'Statü güncellendi',
+        message: `${updated.caseNumber} → ${pendingStatus}`,
+      });
     }
   }
 
@@ -146,6 +153,11 @@ export function CaseDetailDrawer({ caseId, onClose, onChanged }: CaseDetailDrawe
       setItem({ ...item, notes: [created, ...item.notes] });
       setNoteText('');
       onChanged();
+      toast({
+        type: 'success',
+        message: noteVisibility === 'Internal' ? 'İç not eklendi.' : 'Müşteriye görünür not eklendi.',
+        duration: 2500,
+      });
     }
   }
 
