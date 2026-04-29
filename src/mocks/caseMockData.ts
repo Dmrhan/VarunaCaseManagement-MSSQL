@@ -72,21 +72,29 @@ export const MOCK_PERSONS: { id: string; name: string; teamId: string }[] = [
   { id: 'USR-021', name: 'Pelin Yalçın',    teamId: 'TEAM-EGITIM' },
 ];
 
-export const MOCK_ACCOUNTS: { id: string; name: string }[] = [
-  { id: 'ACC-1001', name: 'Yıldız Market A.Ş.' },
-  { id: 'ACC-1042', name: 'Anadolu Holding' },
-  { id: 'ACC-1108', name: 'Demir Çelik San.' },
-  { id: 'ACC-1155', name: 'Mavi Tekstil Ltd.' },
-  { id: 'ACC-1199', name: 'Akın Lojistik' },
-  { id: 'ACC-1230', name: 'Ege Gıda Üretim' },
-  { id: 'ACC-1301', name: 'Karadeniz İnşaat' },
-  { id: 'ACC-1402', name: 'Bursa Tekstil A.Ş.' },
-  { id: 'ACC-1503', name: 'Konya Otomotiv' },
-  { id: 'ACC-1604', name: 'Antalya Turizm' },
-  { id: 'ACC-1705', name: 'İstanbul Plastik' },
-  { id: 'ACC-1806', name: 'İzmir Kimya' },
-  { id: 'ACC-1907', name: 'Adana Tarım Ürünleri' },
-  { id: 'ACC-2008', name: 'Trabzon Balıkçılık' },
+export interface CaseAccount {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  contactPerson?: string;
+}
+
+export const MOCK_ACCOUNTS: CaseAccount[] = [
+  { id: 'ACC-1001', name: 'Yıldız Market A.Ş.',     phone: '+90 212 555 0001', email: 'iletisim@yildizmarket.com.tr',  contactPerson: 'Ali Demir' },
+  { id: 'ACC-1042', name: 'Anadolu Holding',         phone: '+90 312 555 0042', email: 'finans@anadoluholding.com.tr',   contactPerson: 'Selma Kaya' },
+  { id: 'ACC-1108', name: 'Demir Çelik San.',        phone: '+90 232 555 0108', email: 'destek@demircelik.com.tr',       contactPerson: 'Hakan Öz' },
+  { id: 'ACC-1155', name: 'Mavi Tekstil Ltd.',       phone: '+90 224 555 0155', email: 'info@mavitekstil.com.tr',         contactPerson: 'Ebru Tan' },
+  { id: 'ACC-1199', name: 'Akın Lojistik',           phone: '+90 322 555 0199', email: 'ops@akinlojistik.com.tr',         contactPerson: 'Mehmet Akın' },
+  { id: 'ACC-1230', name: 'Ege Gıda Üretim',         phone: '+90 232 555 0230', email: 'satis@egegida.com.tr',            contactPerson: 'Pınar Yıldız' },
+  { id: 'ACC-1301', name: 'Karadeniz İnşaat',        phone: '+90 462 555 0301', email: 'proje@karadenizinsaat.com.tr',    contactPerson: 'Cengiz Tekin' },
+  { id: 'ACC-1402', name: 'Bursa Tekstil A.Ş.',      phone: '+90 224 555 0402', email: 'iletisim@bursatekstil.com.tr',    contactPerson: 'Aslı Kara' },
+  { id: 'ACC-1503', name: 'Konya Otomotiv',          phone: '+90 332 555 0503', email: 'satis@konyaotomotiv.com.tr',      contactPerson: 'Burak Şen' },
+  { id: 'ACC-1604', name: 'Antalya Turizm',          phone: '+90 242 555 0604', email: 'rezervasyon@antalyaturizm.com.tr',contactPerson: 'Deniz Polat' },
+  { id: 'ACC-1705', name: 'İstanbul Plastik',        phone: '+90 216 555 0705', email: 'destek@istanbulplastik.com.tr',   contactPerson: 'Onur Avcı' },
+  { id: 'ACC-1806', name: 'İzmir Kimya',             phone: '+90 232 555 0806', email: 'iletisim@izmirkimya.com.tr',      contactPerson: 'Ayşe Yalçın' },
+  { id: 'ACC-1907', name: 'Adana Tarım Ürünleri',    phone: '+90 322 555 0907', email: 'satis@adanatarim.com.tr',         contactPerson: 'Murat Erdoğan' },
+  { id: 'ACC-2008', name: 'Trabzon Balıkçılık',      phone: '+90 462 555 1008', email: 'siparis@trabzonbalik.com.tr',     contactPerson: 'Kerim Aksoy' },
 ];
 
 export const MOCK_CATEGORIES: { category: string; subCategories: string[] }[] = [

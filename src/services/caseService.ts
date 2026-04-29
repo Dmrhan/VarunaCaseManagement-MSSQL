@@ -337,6 +337,28 @@ export const caseService = {
     const data = await r.json();
     return data?.case ?? undefined;
   },
+
+  async findByAccount(
+    accountId: string,
+    options?: { excludeId?: string; statusIn?: CaseStatus[]; statusNotIn?: CaseStatus[] },
+  ): Promise<Case[]> {
+    if (USE_MOCK) {
+      await delay(40);
+      let out = store.filter((c) => c.accountId === accountId);
+      if (options?.excludeId)    out = out.filter((c) => c.id !== options.excludeId);
+      if (options?.statusIn)     out = out.filter((c) => options.statusIn!.includes(c.status));
+      if (options?.statusNotIn)  out = out.filter((c) => !options.statusNotIn!.includes(c.status));
+      return out.map((c) => clone(c));
+    }
+    const params = new URLSearchParams();
+    params.set('accountId', accountId);
+    if (options?.excludeId) params.set('excludeId', options.excludeId);
+    if (options?.statusIn)  params.set('statusIn', options.statusIn.join(','));
+    const r = await fetch(`${API_BASE}/by-account?${params.toString()}`);
+    if (!r.ok) return [];
+    const data = await r.json();
+    return data?.value ?? [];
+  },
 };
 
 export const lookupService = {

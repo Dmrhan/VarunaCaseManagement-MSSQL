@@ -5,11 +5,13 @@ import {
   ChevronRight,
   Filter,
   Inbox,
+  Phone,
   Plus,
   RotateCw,
   Search,
   SearchX,
   X,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -20,7 +22,7 @@ import { caseService, lookupService } from '@/services/caseService';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
-import { CustomerCardModal } from '@/features/customers/CustomerCardModal';
+import { CustomerSearchModal } from '@/features/customers/CustomerSearchModal';
 import {
   CASE_PRIORITIES,
   CASE_PRIORITY_LABELS,
@@ -33,8 +35,13 @@ import {
   type CaseStatus,
 } from './types';
 import { formatDateTime, formatRelative } from '@/lib/format';
-import { CaseDetailDrawer } from './CaseDetailDrawer';
 import { NewCaseForm } from './NewCaseForm';
+import { QuickCaseModal } from './QuickCaseModal';
+
+interface CasesListPageProps {
+  onSelectCase: (caseId: string) => void;
+  onShowCustomer?: (accountId: string) => void;
+}
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -59,15 +66,16 @@ const initialFilters: CaseFilters = {
   dateTo: '',
 };
 
-export function CasesListPage() {
+export function CasesListPage({ onSelectCase, onShowCustomer }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [customerCardId, setCustomerCardId] = useState<string | null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickPrefillAccount, setQuickPrefillAccount] = useState<string | null>(null);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const { toast } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,6 +85,10 @@ export function CasesListPage() {
     searchInputRef.current?.focus();
   });
   useHotkey('n', () => setNewOpen(true));
+  useHotkey('q', () => {
+    setQuickPrefillAccount(null);
+    setQuickOpen(true);
+  });
 
   const teams = useMemo(() => lookupService.teams(), []);
   const personsAll = useMemo(() => lookupService.persons(), []);
@@ -158,7 +170,7 @@ export function CasesListPage() {
   function handleAccountClick(e: React.MouseEvent, account: { id: string; name: string }) {
     e.stopPropagation();
     // Spec: müşteri linki → müşteri kartı. Tam modül FAZ 1+ kapsamında; FAZ 0 önizleme modali.
-    setCustomerCardId(account.id);
+    onShowCustomer?.(account.id);
   }
 
   return (
@@ -173,6 +185,17 @@ export function CasesListPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" leftIcon={<RotateCw size={14} />} onClick={() => void load()}>
             Yenile
+          </Button>
+          <Button
+            variant="outline"
+            leftIcon={<Zap size={14} className="text-amber-500" />}
+            onClick={() => {
+              setQuickPrefillAccount(null);
+              setQuickOpen(true);
+            }}
+            title="Hızlı vaka aç (q)"
+          >
+            Hızlı Vaka
           </Button>
           <Button leftIcon={<Plus size={14} />} onClick={() => setNewOpen(true)}>
             Yeni Vaka
@@ -205,6 +228,15 @@ export function CasesListPage() {
                 /
               </kbd>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Phone size={12} />}
+              onClick={() => setCustomerSearchOpen(true)}
+              title="Telefon veya isim ile müşteri ara"
+            >
+              Müşteri Ara
+            </Button>
             <FilterSelect
               label="Tip"
               value={filters.caseType ?? 'Tümü'}
@@ -362,7 +394,7 @@ export function CasesListPage() {
                 pageItems.map((c) => (
                   <tr
                     key={c.id}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => onSelectCase(c.id)}
                     className="cursor-pointer text-sm hover:bg-slate-50"
                   >
                     <Td className="font-mono text-xs text-slate-600">{c.caseNumber}</Td>
@@ -457,18 +489,13 @@ export function CasesListPage() {
         )}
       </Card>
 
-      <CaseDetailDrawer
-        caseId={selectedId}
-        onClose={() => setSelectedId(null)}
-        onChanged={() => void load()}
-      />
       <NewCaseForm
         open={newOpen}
         onClose={() => setNewOpen(false)}
         onCreated={(c) => {
           setNewOpen(false);
-          setSelectedId(c.id);
           void load();
+          onSelectCase(c.id);
           toast({
             type: 'success',
             title: 'Vaka oluşturuldu',
@@ -477,17 +504,31 @@ export function CasesListPage() {
         }}
         onShowExisting={(id) => {
           setNewOpen(false);
-          setSelectedId(id);
+          onSelectCase(id);
         }}
       />
 
-      <CustomerCardModal
-        open={customerCardId !== null}
-        accountId={customerCardId}
-        onClose={() => setCustomerCardId(null)}
+      <QuickCaseModal
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        prefillAccountId={quickPrefillAccount}
+        onCreated={(c) => {
+          void load();
+          onSelectCase(c.id);
+        }}
+      />
+
+      <CustomerSearchModal
+        open={customerSearchOpen}
+        onClose={() => setCustomerSearchOpen(false)}
         onShowCase={(id) => {
-          setCustomerCardId(null);
-          setSelectedId(id);
+          setCustomerSearchOpen(false);
+          onSelectCase(id);
+        }}
+        onNewCase={(accountId) => {
+          setCustomerSearchOpen(false);
+          setQuickPrefillAccount(accountId);
+          setQuickOpen(true);
         }}
       />
     </div>
