@@ -562,7 +562,23 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
               </div>
 
               {form.offerOutcome === 'Reddedildi' && (
-                <Field label="Red Gerekçesi" required error={errors.offerRejectionReason}>
+                <Field
+                  label="Red Gerekçesi"
+                  required
+                  error={errors.offerRejectionReason}
+                  actions={
+                    <VoiceNoteButton
+                      onTranscript={(chunk) =>
+                        update(
+                          'offerRejectionReason',
+                          form.offerRejectionReason
+                            ? `${form.offerRejectionReason} ${chunk}`
+                            : chunk,
+                        )
+                      }
+                    />
+                  }
+                >
                   <TextArea
                     rows={2}
                     placeholder="Müşteri neden teklifi reddetti?"
@@ -572,7 +588,20 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                 </Field>
               )}
 
-              <Field label="Yapılan Aksiyon" hint="Süreçte alınan ana aksiyon notu">
+              <Field
+                label="Yapılan Aksiyon"
+                hint="Süreçte alınan ana aksiyon notu"
+                actions={
+                  <VoiceNoteButton
+                    onTranscript={(chunk) =>
+                      update(
+                        'actionTaken',
+                        form.actionTaken ? `${form.actionTaken} ${chunk}` : chunk,
+                      )
+                    }
+                  />
+                }
+              >
                 <TextArea
                   rows={3}
                   placeholder="ör. İndirim teklifi sunuldu, takip görüşmesi planlandı…"

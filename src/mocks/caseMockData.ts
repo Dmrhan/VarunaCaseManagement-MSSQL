@@ -1,13 +1,18 @@
 import type {
   Case,
   CaseCallLog,
+  CaseCategoryDef,
+  CaseChecklistTemplate,
   CaseCompany,
+  CaseEvrakType,
   CaseHistoryEntry,
   CaseNote,
   CaseOrigin,
+  CasePerson,
   CasePriority,
   CaseRequestType,
   CaseStatus,
+  CaseTeam,
   CaseThirdParty,
   CaseType,
   CallDisposition,
@@ -19,6 +24,7 @@ import type {
   ProductUsage,
   ResponseLevel,
   RetentionStatus,
+  SlaPolicy,
   UsageChangeAlert,
 } from '@/features/cases/types';
 
@@ -41,7 +47,18 @@ export const MOCK_THIRD_PARTIES: CaseThirdParty[] = [
   { id: 'TP-INTEGRATR', name: 'Entegratör',         description: 'Müşteri tarafı entegrasyon ekibi', isActive: true },
 ];
 
-// Spec 12 — admin tablosu
+// Spec 12 — CaseEvrakType admin tablosu
+export const MOCK_EVRAK_TYPES: CaseEvrakType[] = [
+  { id: 'EVRAK-CONTRACT', name: 'Sözleşme',  description: 'Müşteri ile imzalanan sözleşme belgeleri',     isActive: true },
+  { id: 'EVRAK-INVOICE',  name: 'Fatura',    description: 'Müşteri faturaları ve fatura ekleri',          isActive: true },
+  { id: 'EVRAK-LETTER',   name: 'Yazışma',   description: 'E-posta, mektup, dilekçe gibi yazışmalar',     isActive: true },
+  { id: 'EVRAK-FORM',     name: 'Form',      description: 'Başvuru ve talep formları',                    isActive: true },
+  { id: 'EVRAK-OFFER',    name: 'Teklif',    description: 'Müşteriye sunulan teklif dokümanları',         isActive: true },
+  { id: 'EVRAK-REPORT',   name: 'Rapor',     description: 'Teknik / iş analiz raporları',                 isActive: true },
+  { id: 'EVRAK-OTHER',    name: 'Diğer',     description: 'Yukarıdaki kategorilere girmeyen belgeler',    isActive: true },
+];
+
+// Spec 12 — CaseOfferedSolutionDef admin tablosu
 export const MOCK_OFFERED_SOLUTIONS: OfferedSolutionDef[] = [
   { id: 'OFFER-DISCOUNT-10',  name: '%10 İndirim',                description: '12 ay süreli abonelik üzerinde sabit indirim', isActive: true },
   { id: 'OFFER-DISCOUNT-25',  name: '%25 İndirim (kısa süreli)',  description: 'İlk 3 ay geçerli kademeli indirim',            isActive: true },
@@ -51,25 +68,25 @@ export const MOCK_OFFERED_SOLUTIONS: OfferedSolutionDef[] = [
   { id: 'OFFER-CUSTOM-DEV',   name: 'Talep Üzerine Geliştirme',   description: 'Müşteriye özel modül/rapor',                   isActive: true },
 ];
 
-export const MOCK_TEAMS: { id: string; name: string }[] = [
-  { id: 'TEAM-DESTEK',  name: 'Destek Takımı' },
-  { id: 'TEAM-FINANS',  name: 'Finans Takımı' },
-  { id: 'TEAM-CS',      name: 'Customer Success' },
-  { id: 'TEAM-MOBIL',   name: 'Mobil Takımı' },
-  { id: 'TEAM-EGITIM',  name: 'Eğitim Takımı' },
+export const MOCK_TEAMS: CaseTeam[] = [
+  { id: 'TEAM-DESTEK',  name: 'Destek Takımı',     description: '1. seviye teknik destek ve genel sorun çözümü',     isActive: true },
+  { id: 'TEAM-FINANS',  name: 'Finans Takımı',     description: 'Fatura, ödeme ve finansal süreç yönetimi',          isActive: true },
+  { id: 'TEAM-CS',      name: 'Customer Success',  description: 'Müşteri başarısı, proaktif takip ve churn önleme',  isActive: true },
+  { id: 'TEAM-MOBIL',   name: 'Mobil Takımı',      description: 'iOS/Android uygulama hataları ve mobil özellikler', isActive: true },
+  { id: 'TEAM-EGITIM',  name: 'Eğitim Takımı',     description: 'Müşteri onboarding, eğitim ve dokümantasyon',       isActive: true },
 ];
 
-export const MOCK_PERSONS: { id: string; name: string; teamId: string }[] = [
-  { id: 'USR-001', name: 'Burak Demir',     teamId: 'TEAM-DESTEK' },
-  { id: 'USR-002', name: 'Mert Aydın',      teamId: 'TEAM-DESTEK' },
-  { id: 'USR-003', name: 'Esra Yıldırım',   teamId: 'TEAM-FINANS' },
-  { id: 'USR-004', name: 'Kerem Öz',        teamId: 'TEAM-FINANS' },
-  { id: 'USR-005', name: 'Selin Gümüş',     teamId: 'TEAM-CS' },
-  { id: 'USR-006', name: 'Deniz Kaya',      teamId: 'TEAM-CS' },
-  { id: 'USR-007', name: 'Ahmet Sönmez',    teamId: 'TEAM-CS' },
-  { id: 'USR-011', name: 'Cem Ergin',       teamId: 'TEAM-MOBIL' },
-  { id: 'USR-012', name: 'Aslı Tan',        teamId: 'TEAM-MOBIL' },
-  { id: 'USR-021', name: 'Pelin Yalçın',    teamId: 'TEAM-EGITIM' },
+export const MOCK_PERSONS: CasePerson[] = [
+  { id: 'USR-001', name: 'Burak Demir',     teamId: 'TEAM-DESTEK', email: 'burak.demir@param.com.tr',     isActive: true },
+  { id: 'USR-002', name: 'Mert Aydın',      teamId: 'TEAM-DESTEK', email: 'mert.aydin@param.com.tr',      isActive: true },
+  { id: 'USR-003', name: 'Esra Yıldırım',   teamId: 'TEAM-FINANS', email: 'esra.yildirim@param.com.tr',   isActive: true },
+  { id: 'USR-004', name: 'Kerem Öz',        teamId: 'TEAM-FINANS', email: 'kerem.oz@param.com.tr',        isActive: true },
+  { id: 'USR-005', name: 'Selin Gümüş',     teamId: 'TEAM-CS',     email: 'selin.gumus@param.com.tr',     isActive: true },
+  { id: 'USR-006', name: 'Deniz Kaya',      teamId: 'TEAM-CS',     email: 'deniz.kaya@param.com.tr',      isActive: true },
+  { id: 'USR-007', name: 'Ahmet Sönmez',    teamId: 'TEAM-CS',     email: 'ahmet.sonmez@param.com.tr',    isActive: true },
+  { id: 'USR-011', name: 'Cem Ergin',       teamId: 'TEAM-MOBIL',  email: 'cem.ergin@param.com.tr',       isActive: true },
+  { id: 'USR-012', name: 'Aslı Tan',        teamId: 'TEAM-MOBIL',  email: 'asli.tan@param.com.tr',        isActive: true },
+  { id: 'USR-021', name: 'Pelin Yalçın',    teamId: 'TEAM-EGITIM', email: 'pelin.yalcin@param.com.tr',    isActive: true },
 ];
 
 export interface CaseAccount {
@@ -97,12 +114,164 @@ export const MOCK_ACCOUNTS: CaseAccount[] = [
   { id: 'ACC-2008', name: 'Trabzon Balıkçılık',      phone: '+90 462 555 1008', email: 'siparis@trabzonbalik.com.tr',     contactPerson: 'Kerim Aksoy' },
 ];
 
-export const MOCK_CATEGORIES: { category: string; subCategories: string[] }[] = [
-  { category: 'Yazılım',           subCategories: ['Raporlama', 'Mobil', 'Entegrasyon', 'Performans'] },
-  { category: 'Finans',            subCategories: ['Faturalama', 'Tahsilat', 'Vade'] },
-  { category: 'Sözleşme',          subCategories: ['İptal Talebi', 'Yenileme', 'Revizyon'] },
-  { category: 'Eğitim',            subCategories: ['Online Eğitim', 'Yerinde Eğitim'] },
-  { category: 'Müşteri Sağlığı',   subCategories: ['Kullanım Düşüşü', 'Finansal Risk'] },
+export const MOCK_CATEGORIES: CaseCategoryDef[] = [
+  {
+    id: 'CAT-YAZILIM',
+    name: 'Yazılım',
+    description: 'Uygulama hataları, performans, entegrasyon ve geliştirme talepleri',
+    isActive: true,
+    subCategories: [
+      { id: 'SUB-YAZILIM-RAPOR',   name: 'Raporlama',     isActive: true },
+      { id: 'SUB-YAZILIM-MOBIL',   name: 'Mobil',         isActive: true },
+      { id: 'SUB-YAZILIM-ENTEG',   name: 'Entegrasyon',   isActive: true },
+      { id: 'SUB-YAZILIM-PERF',    name: 'Performans',    isActive: true },
+    ],
+  },
+  {
+    id: 'CAT-FINANS',
+    name: 'Finans',
+    description: 'Fatura, tahsilat ve vade ile ilgili işlemler',
+    isActive: true,
+    subCategories: [
+      { id: 'SUB-FINANS-FATURA',   name: 'Faturalama',    isActive: true },
+      { id: 'SUB-FINANS-TAHSILAT', name: 'Tahsilat',      isActive: true },
+      { id: 'SUB-FINANS-VADE',     name: 'Vade',          isActive: true },
+    ],
+  },
+  {
+    id: 'CAT-SOZLESME',
+    name: 'Sözleşme',
+    description: 'Sözleşme yönetimi: iptal, yenileme, revizyon',
+    isActive: true,
+    subCategories: [
+      { id: 'SUB-SOZLESME-IPTAL',    name: 'İptal Talebi', isActive: true },
+      { id: 'SUB-SOZLESME-YENILEME', name: 'Yenileme',     isActive: true },
+      { id: 'SUB-SOZLESME-REVIZE',   name: 'Revizyon',     isActive: true },
+    ],
+  },
+  {
+    id: 'CAT-EGITIM',
+    name: 'Eğitim',
+    description: 'Müşteri onboarding ve eğitim talepleri',
+    isActive: true,
+    subCategories: [
+      { id: 'SUB-EGITIM-ONLINE',  name: 'Online Eğitim',  isActive: true },
+      { id: 'SUB-EGITIM-YERINDE', name: 'Yerinde Eğitim', isActive: true },
+    ],
+  },
+  {
+    id: 'CAT-MS',
+    name: 'Müşteri Sağlığı',
+    description: 'Proaktif takip — kullanım/finansal risk göstergeleri',
+    isActive: true,
+    subCategories: [
+      { id: 'SUB-MS-KULLANIM', name: 'Kullanım Düşüşü', isActive: true },
+      { id: 'SUB-MS-FINANSAL', name: 'Finansal Risk',   isActive: true },
+    ],
+  },
+];
+
+// PRODUCT_SPEC — Kontrol Listesi. 3-tuple match (company + productGroup + category).
+// Vaka detayında bu kombinasyon eşleşince otomatik yüklenir.
+export const MOCK_CHECKLIST_TEMPLATES: CaseChecklistTemplate[] = [
+  {
+    id: 'CHK-001',
+    name: 'Sanal POS Yazılım Vakaları',
+    companyId: 'COMP-PARAM',
+    companyName: 'PARAM',
+    productGroup: 'Sanal POS',
+    categoryName: 'Yazılım',
+    description: 'Sanal POS yazılım hatalarında ilk müdahale öncesi yapılması gerekenler',
+    isActive: true,
+    items: [
+      { id: 'CHKI-001-1', label: 'Hata kodu / log loglandı mı?',                                required: true,  isActive: true },
+      { id: 'CHKI-001-2', label: 'Müşteriye geçici çözüm sağlandı mı?',                          required: true,  isActive: true },
+      { id: 'CHKI-001-3', label: 'BIN/MCC kombinasyonu ekran görüntüsü alındı mı?',              required: false, isActive: true },
+      { id: 'CHKI-001-4', label: 'Test ortamında reprodüksiyon denendi mi?',                     required: true,  isActive: true },
+      { id: 'CHKI-001-5', label: 'İlgili 3D Secure ekibi bilgilendirildi mi?',                   required: false, isActive: true },
+    ],
+  },
+  {
+    id: 'CHK-002',
+    name: 'Fiziki POS Entegrasyon Talepleri',
+    companyId: 'COMP-PARAM',
+    companyName: 'PARAM',
+    productGroup: 'Fiziki POS',
+    categoryName: 'Yazılım',
+    description: 'Fiziki POS başvuruları ve entegrasyon talepleri için çekme listesi',
+    isActive: true,
+    items: [
+      { id: 'CHKI-002-1', label: 'Müşteri sözleşmesi imzalanmış mı?',           required: true,  isActive: true },
+      { id: 'CHKI-002-2', label: 'POS modeli ve cihaz seri no kayıtlı mı?',     required: true,  isActive: true },
+      { id: 'CHKI-002-3', label: 'Kurulum adresi doğrulandı mı?',                required: true,  isActive: true },
+      { id: 'CHKI-002-4', label: 'Jira talebi açıldı mı?',                       required: true,  isActive: true },
+      { id: 'CHKI-002-5', label: 'Tahmini kurulum tarihi müşteriye iletildi mi?', required: false, isActive: true },
+    ],
+  },
+  {
+    id: 'CHK-003',
+    name: 'UNIVERA Stok Raporlama',
+    companyId: 'COMP-UNIVERA',
+    companyName: 'UNIVERA',
+    productGroup: 'ERP - Stok',
+    categoryName: 'Yazılım',
+    description: 'Stok raporu hatalarında veri doğrulama akışı',
+    isActive: true,
+    items: [
+      { id: 'CHKI-003-1', label: 'Etkilenen rapor adı ve filtreleri belirlendi mi?', required: true,  isActive: true },
+      { id: 'CHKI-003-2', label: 'Veri tabanı tarafında ham veri kontrol edildi mi?', required: true,  isActive: true },
+      { id: 'CHKI-003-3', label: 'Müşteri ekran görüntüsü/örnek dosya alındı mı?',    required: false, isActive: true },
+      { id: 'CHKI-003-4', label: 'Cache temizleme denendi mi?',                       required: false, isActive: true },
+    ],
+  },
+  {
+    id: 'CHK-004',
+    name: 'FINROTA Faturalama Hataları',
+    companyId: 'COMP-FINROTA',
+    companyName: 'FINROTA',
+    productGroup: 'ERP - Finans',
+    categoryName: 'Finans',
+    description: 'Faturalama hatalarında finansal doğrulama adımları',
+    isActive: true,
+    items: [
+      { id: 'CHKI-004-1', label: 'Fatura numarası ve tarihi alındı mı?',                 required: true,  isActive: true },
+      { id: 'CHKI-004-2', label: 'KDV oranı ve tutar müşteri ile teyit edildi mi?',      required: true,  isActive: true },
+      { id: 'CHKI-004-3', label: 'Mali müşavir bilgilendirildi mi?',                      required: false, isActive: true },
+      { id: 'CHKI-004-4', label: 'Düzeltici fatura/iade prosedürü başlatıldı mı?',        required: false, isActive: true },
+    ],
+  },
+  {
+    id: 'CHK-005',
+    name: 'Eski Genel Yazılım Akışı',
+    companyId: 'COMP-PARAM',
+    companyName: 'PARAM',
+    productGroup: 'PayByLink',
+    categoryName: 'Yazılım',
+    description: 'Yeni sürümle değiştirildi — pasif',
+    isActive: false,
+    items: [
+      { id: 'CHKI-005-1', label: 'Müşteri ile telefon görüşmesi yapıldı mı?', required: false, isActive: true },
+      { id: 'CHKI-005-2', label: 'Eski log formatına bakıldı mı?',           required: false, isActive: false },
+    ],
+  },
+];
+
+// PRODUCT_SPEC §6 — SLA Motoru. 5-tuple match (company + productGroup + category + subCategory + requestType).
+// Mevcut vakalardaki ad-bazlı alanlarla doğrudan eşleşmesi için ad-bazlı saklanır.
+export const MOCK_SLA_POLICIES: SlaPolicy[] = [
+  // PARAM (fintech) — Sanal POS / Fiziki POS odaklı
+  { id: 'SLA-001', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: 'Sanal POS',          categoryName: 'Yazılım', subCategoryName: 'Performans',    requestType: 'Hata',     responseHours: 1,  resolutionHours: 4,  description: 'Kritik ödeme akışı — yüksek öncelik',         isActive: true },
+  { id: 'SLA-002', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: 'Sanal POS',          categoryName: 'Yazılım', subCategoryName: 'Performans',    requestType: 'Şikayet',  responseHours: 6,  resolutionHours: 12, description: 'Performans şikayetleri — orta öncelik',       isActive: true },
+  { id: 'SLA-003', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: 'Sanal POS',          categoryName: 'Yazılım', subCategoryName: 'Performans',    requestType: 'Bilgi',    responseHours: 2,  resolutionHours: 8,                                                                isActive: true },
+  { id: 'SLA-004', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: 'Fiziki POS',         categoryName: 'Yazılım', subCategoryName: 'Entegrasyon',   requestType: 'Talep',    responseHours: 12, resolutionHours: 48, description: 'Fiziki POS başvuru — Jira üzerinden ilerler',  isActive: true },
+  { id: 'SLA-005', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: '3D Secure Servisi',  categoryName: 'Yazılım', subCategoryName: 'Entegrasyon',   requestType: 'Hata',     responseHours: 1,  resolutionHours: 6,  description: '3DS hataları — ödeme reddi etkisi',            isActive: true },
+  // UNIVERA / FINROTA — ERP / CRM odaklı
+  { id: 'SLA-006', companyId: 'COMP-UNIVERA',  companyName: 'UNIVERA', productGroup: 'ERP - Stok',         categoryName: 'Yazılım', subCategoryName: 'Raporlama',     requestType: 'Hata',     responseHours: 4,  resolutionHours: 24, description: 'Stok raporu hataları — operasyonu etkiler',    isActive: true },
+  { id: 'SLA-007', companyId: 'COMP-UNIVERA',  companyName: 'UNIVERA', productGroup: 'CRM Satış',          categoryName: 'Yazılım', subCategoryName: 'Mobil',         requestType: 'Talep',    responseHours: 12, resolutionHours: 72,                                                                isActive: true },
+  { id: 'SLA-008', companyId: 'COMP-FINROTA',  companyName: 'FINROTA', productGroup: 'ERP - Finans',       categoryName: 'Finans',  subCategoryName: 'Faturalama',    requestType: 'Hata',     responseHours: 2,  resolutionHours: 8,  description: 'Faturalama hatası — finansal etki',            isActive: true },
+  { id: 'SLA-009', companyId: 'COMP-FINROTA',  companyName: 'FINROTA', productGroup: 'ERP - Finans',       categoryName: 'Finans',  subCategoryName: 'Tahsilat',      requestType: 'Şikayet',  responseHours: 4,  resolutionHours: 24,                                                                isActive: true },
+  // Pasif örnek
+  { id: 'SLA-010', companyId: 'COMP-PARAM',    companyName: 'PARAM',   productGroup: 'PayByLink',          categoryName: 'Yazılım', subCategoryName: 'Performans',    requestType: 'Öneri',    responseHours: 24, resolutionHours: 168, description: 'Eski politika — yeni sürümle değiştirildi',  isActive: false },
 ];
 
 // =========================================================================
@@ -410,8 +579,15 @@ function buildHistory(
   status: CaseStatus,
   createdAtMs: number,
   ownerName: string,
+  slot: number,
+  caseType: CaseType,
 ): CaseHistoryEntry[] {
   const at = (offsetMin: number) => isoFrom(createdAtMs, offsetMin);
+  const fmtDate = (offsetMin: number) =>
+    new Date(createdAtMs + offsetMin * 60 * 1000).toLocaleString('tr-TR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
   const h: CaseHistoryEntry[] = [];
   let n = 1;
   const push = (e: Omit<CaseHistoryEntry, 'id' | 'caseId'>) => {
@@ -419,42 +595,80 @@ function buildHistory(
     n++;
   };
 
+  // --- Base entries (4) ---
   push({ action: 'Vaka oluşturuldu', actor: 'Sistem', at: at(0) });
-  push({ action: 'Atama yapıldı', toValue: ownerName, actor: 'Sistem', at: at(15) });
+  push({ action: 'Atama yapıldı', fieldName: 'assignedPersonId', toValue: ownerName, actor: 'Sistem', at: at(15) });
   push({ action: 'İlk değerlendirme', actor: ownerName, at: at(45) });
   push({ action: 'Müşteri kontağı kuruldu', actor: ownerName, at: at(90) });
-  push({ action: 'Notlandı', actor: ownerName, at: at(120) });
 
-  if (status === 'Açık') return h; // 5
+  // --- Slot tabanlı 'Alan güncellendi' örneği (1 ek entry) ---
+  // 5 farklı senaryo dönüşümlü olarak yerleşir; toplam history 5-8 arasında kalır.
+  const variant = slot % 5;
+  if (variant === 0) {
+    push({
+      action: 'Alan güncellendi', fieldName: 'priority',
+      fromValue: 'Orta', toValue: 'Yüksek',
+      actor: ownerName, at: at(110),
+    });
+  } else if (variant === 1) {
+    const prevPerson = MOCK_PERSONS[(slot + 1) % MOCK_PERSONS.length].name;
+    push({
+      action: 'Alan güncellendi', fieldName: 'assignedPersonId',
+      fromValue: prevPerson, toValue: ownerName,
+      actor: 'Sistem', at: at(110),
+    });
+  } else if (variant === 2) {
+    push({
+      action: 'Alan güncellendi', fieldName: 'slaResolutionDueAt',
+      fromValue: fmtDate(48 * 60), toValue: fmtDate(72 * 60),
+      actor: 'Sistem', at: at(110),
+    });
+  } else if (variant === 3) {
+    push({
+      action: 'Alan güncellendi', fieldName: 'slaViolation',
+      fromValue: 'Hayır', toValue: 'Evet',
+      actor: 'Sistem', at: at(110),
+    });
+  }
+  // variant 4 → ek alan güncellemesi yok (kayıt sade kalsın)
 
-  push({ action: 'Statü değişti', fromValue: 'Açık', toValue: 'İncelemede', actor: ownerName, at: at(150) });
+  if (status === 'Açık') return h; // 4-5
 
-  if (status === 'İncelemede') return h; // 6
+  push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'Açık', toValue: 'İncelemede', actor: ownerName, at: at(150) });
+
+  if (status === 'İncelemede') return h; // 5-6
 
   if (status === '3rdPartyBekleniyor') {
-    push({ action: 'Statü değişti', fromValue: 'İncelemede', toValue: '3rdPartyBekleniyor', actor: ownerName, at: at(240) });
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'İncelemede', toValue: '3. Parti Bekleniyor', actor: ownerName, at: at(240) });
     push({ action: '3. parti talebi gönderildi', actor: ownerName, at: at(245) });
-    return h; // 8
+    return h; // 7-8
   }
   if (status === 'Eskalasyon') {
-    push({ action: 'Statü değişti', fromValue: 'İncelemede', toValue: 'Eskalasyon', actor: ownerName, at: at(240) });
-    push({ action: 'Eskalasyon: Takım Lideri', actor: 'Sistem', at: at(241) });
-    return h; // 8
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'İncelemede', toValue: 'Eskalasyon', actor: ownerName, at: at(240) });
+    push({ action: 'Alan güncellendi', fieldName: 'escalationLevel', fromValue: 'Yok', toValue: 'Takım Lideri', actor: 'Sistem', at: at(241) });
+    return h; // 7-8
   }
   if (status === 'Çözüldü') {
-    push({ action: 'Çözüm hazırlandı', actor: ownerName, at: at(240) });
-    push({ action: 'Statü değişti', fromValue: 'İncelemede', toValue: 'Çözüldü', actor: ownerName, at: at(280) });
-    return h; // 8
+    if (caseType === 'Churn') {
+      // Churn için teklif sonucu da bir kayıt olarak gözüksün
+      push({
+        action: 'Alan güncellendi', fieldName: 'offerOutcome',
+        fromValue: 'Beklemede', toValue: 'Kabul Edildi',
+        actor: ownerName, at: at(220),
+      });
+    }
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'İncelemede', toValue: 'Çözüldü', actor: ownerName, at: at(280) });
+    return h; // 7-9 (Churn için 8)
   }
   if (status === 'YenidenAcildi') {
-    push({ action: 'Statü değişti', fromValue: 'İncelemede', toValue: 'Çözüldü', actor: ownerName, at: at(280) });
-    push({ action: 'Statü değişti', fromValue: 'Çözüldü', toValue: 'YenidenAcildi', actor: 'Müşteri', at: at(381) });
-    return h; // 8
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'İncelemede', toValue: 'Çözüldü', actor: ownerName, at: at(280) });
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'Çözüldü', toValue: 'Yeniden Açıldı', actor: 'Müşteri', at: at(381) });
+    return h; // 7-8
   }
   if (status === 'İptalEdildi') {
     push({ action: 'İptal kararı verildi', actor: 'Supervisor', at: at(240) });
-    push({ action: 'Statü değişti', fromValue: 'İncelemede', toValue: 'İptalEdildi', actor: 'Supervisor', at: at(241) });
-    return h; // 8
+    push({ action: 'Statü değişti', fieldName: 'status', fromValue: 'İncelemede', toValue: 'İptal Edildi', actor: 'Supervisor', at: at(241) });
+    return h; // 7-8
   }
   return h;
 }
@@ -664,7 +878,7 @@ function buildCase(typeIdx: number, slot: number): Case {
   const originDescription = origin === 'Diğer' ? 'Sistem otomatik tetik' : undefined;
 
   // History
-  const history = buildHistory(id, status, createdAtMs, person.name);
+  const history = buildHistory(id, status, createdAtMs, person.name, slot, caseType);
 
   // Notes
   const notes = buildNotes(id, createdAtMs, person.name, slot);
@@ -698,8 +912,8 @@ function buildCase(typeIdx: number, slot: number): Case {
     companyName: company.name,
     accountId: account.id,
     accountName: account.name,
-    category: cat.category,
-    subCategory: subCat,
+    category: cat.name,
+    subCategory: subCat.name,
     requestType,
     productGroup,
     assignedTeamId: unassigned ? undefined : team.id,
@@ -734,7 +948,7 @@ function buildCase(typeIdx: number, slot: number): Case {
     updatedAt,
     resolvedAt,
     aiSummary:            aiOn ? `${title} için ön özet hazırlandı.` : undefined,
-    aiCategoryPrediction: aiOn ? cat.category : undefined,
+    aiCategoryPrediction: aiOn ? cat.name : undefined,
     aiPriorityPrediction: aiOn ? priority : undefined,
     aiDuplicateScore:     aiOn ? Number(((slot % 7) / 10 + 0.2).toFixed(2)) : undefined,
     aiConfidenceScore:    aiOn ? Number(((slot % 5) / 10 + 0.5).toFixed(2)) : undefined,

@@ -62,6 +62,84 @@ export interface CaseThirdParty {
   isActive: boolean;
 }
 
+export interface CaseEvrakType {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export interface CaseTeam {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export interface CasePerson {
+  id: string;
+  name: string;
+  teamId: string;
+  email?: string;
+  isActive: boolean;
+}
+
+export interface CaseSubCategoryDef {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface CaseCategoryDef {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  subCategories: CaseSubCategoryDef[];
+}
+
+/**
+ * Kontrol Listesi (Checklist) — PRODUCT_SPEC.
+ * 3-tuple eşleşme: company + productGroup + category. Vaka detayında otomatik yüklenir.
+ */
+export interface CaseChecklistItem {
+  id: string;
+  label: string;
+  required: boolean;
+  isActive: boolean;
+}
+
+export interface CaseChecklistTemplate {
+  id: string;
+  name: string;
+  companyId: string;
+  companyName: string;
+  productGroup: string;
+  categoryName: string;
+  description?: string;
+  isActive: boolean;
+  items: CaseChecklistItem[];
+}
+
+/**
+ * SLA Policy — PRODUCT_SPEC §6.
+ * Eşleşme anahtarı: company + productGroup + category + subCategory + requestType.
+ * Tüm boyutlar ad-bazlı tutulur (vakalar denormalized ad sakladığı için).
+ */
+export interface SlaPolicy {
+  id: string;
+  companyId: string;
+  companyName: string;
+  productGroup: string;
+  categoryName: string;
+  subCategoryName: string;
+  requestType: CaseRequestType;
+  responseHours: number;
+  resolutionHours: number;
+  description?: string;
+  isActive: boolean;
+}
+
 export interface CaseNote {
   id: string;
   caseId: string;
@@ -91,6 +169,72 @@ export interface CaseHistoryEntry {
   actor: string;
   at: string;
 }
+
+// CaseHistoryEntry.fieldName için Türkçe karşılıklar (Aktivite timeline gösterimi)
+export const CASE_FIELD_LABELS: Record<string, string> = {
+  // Temel
+  title:                'Konu',
+  description:          'Açıklama',
+  status:               'Statü',
+  priority:             'Öncelik',
+  origin:               'Origin',
+  originDescription:    'Origin Açıklama',
+
+  // Sınıflandırma
+  category:             'Kategori',
+  subCategory:          'Alt Kategori',
+  requestType:          'Talep Türü',
+  productGroup:         'Ürün Grubu',
+
+  // FK / atama
+  companyId:            'Şirket',
+  companyName:          'Şirket',
+  accountId:            'Müşteri',
+  accountName:          'Müşteri',
+  assignedTeamId:       'Atanan Takım',
+  assignedTeamName:     'Atanan Takım',
+  assignedPersonId:     'Atanan Kişi',
+  assignedPersonName:   'Atanan Kişi',
+
+  // Eskalasyon / 3rd party
+  escalationLevel:      'Eskalasyon Seviyesi',
+  thirdPartyId:         '3. Parti',
+  thirdPartyName:       '3. Parti',
+
+  // SLA
+  slaResponseDueAt:     'SLA Yanıt Tarihi',
+  slaResolutionDueAt:   'SLA Çözüm Tarihi',
+  slaViolation:         'SLA İhlali',
+  slaPausedAt:          'SLA Duraklatma',
+  slaPausedDurationMin: 'SLA Pause Süresi',
+
+  // Çözüm / İptal
+  resolutionNote:       'Çözüm Notu',
+  cancellationReason:   'İptal Gerekçesi',
+
+  // ProactiveTracking
+  financialStatus:      'Finansal Durum',
+  productUsage:         'Ürün Kullanımı',
+  usageChangeAlert:     'Kullanım Trendi',
+  responseLevel:        'Müdahale Önceliği',
+
+  // Churn
+  cancellationRequest:  'İptal Talebi',
+  offeredSolutions:     'Sunulan Teklifler',
+  offerExpiryDate:      'Teklif Geçerlilik',
+  offerOutcome:         'Teklif Sonucu',
+  offerRejectionReason: 'Red Gerekçesi',
+  actionTaken:          'Yapılan Aksiyon',
+  churnResult:          'Churn Sonucu',
+  retentionStatus:      'Elde Tutma Durumu',
+  followUpDate:         'Takip Tarihi',
+
+  // AI
+  aiSummary:            'AI Özeti',
+  aiCategoryPrediction: 'AI Kategori Önerisi',
+  aiPriorityPrediction: 'AI Öncelik Önerisi',
+  aiGeneratedFlag:      'AI Önerisi',
+};
 
 // Inline edit ile düzenlenebilen Case alanları
 export type EditableCaseField =

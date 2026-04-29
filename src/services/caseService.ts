@@ -2,12 +2,61 @@ import {
   MOCK_ACCOUNTS,
   MOCK_CASES,
   MOCK_CATEGORIES,
+  MOCK_CHECKLIST_TEMPLATES,
   MOCK_COMPANIES,
+  MOCK_EVRAK_TYPES,
   MOCK_OFFERED_SOLUTIONS,
   MOCK_PERSONS,
+  MOCK_SLA_POLICIES,
   MOCK_TEAMS,
   MOCK_THIRD_PARTIES,
 } from '@/mocks/caseMockData';
+
+// History entry'leri için insan-okur değer formatlayıcı
+// Boolean → Evet/Hayır, ISO date → DD.MM.YYYY HH:mm, FK → ad, null/empty → '—'
+function formatHistoryValue(field: string, value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Evet' : 'Hayır';
+  if (typeof value === 'string') {
+    // FK alanlarını ad'a çevir
+    if (field === 'assignedPersonId' || field === 'assignedPersonName') {
+      const found = MOCK_PERSONS.find((p) => p.id === value || p.name === value);
+      return found ? found.name : value;
+    }
+    if (field === 'assignedTeamId' || field === 'assignedTeamName') {
+      const found = MOCK_TEAMS.find((t) => t.id === value || t.name === value);
+      return found ? found.name : value;
+    }
+    if (field === 'thirdPartyId' || field === 'thirdPartyName') {
+      const found = MOCK_THIRD_PARTIES.find((tp) => tp.id === value || tp.name === value);
+      return found ? found.name : value;
+    }
+    if (field === 'companyId' || field === 'companyName') {
+      const found = MOCK_COMPANIES.find((c) => c.id === value || c.name === value);
+      return found ? found.name : value;
+    }
+    if (field === 'accountId' || field === 'accountName') {
+      const found = MOCK_ACCOUNTS.find((a) => a.id === value || a.name === value);
+      return found ? found.name : value;
+    }
+    // ISO datetime tespiti
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+      try {
+        return new Date(value).toLocaleString('tr-TR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        });
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0 ? '—' : `${value.length} öğe`;
+  }
+  return String(value);
+}
 import {
   CASE_REQUEST_TYPES,
   type Case,
@@ -19,6 +68,8 @@ import {
   type CaseType,
   type EscalationLevel,
   type NoteVisibility,
+  type SlaPolicy,
+  type CaseChecklistTemplate,
 } from '@/features/cases/types';
 
 export const USE_MOCK = true;
@@ -340,13 +391,21 @@ export const caseService = {
         const oldVal = prev[key];
         const newVal = patch[key];
         if (oldVal === newVal) return [];
+        // Denormalized name alanları (assignedTeamName vs.) sessiz tutulur — id alanı zaten log'lanır
+        if (
+          key === 'assignedPersonName' ||
+          key === 'assignedTeamName' ||
+          key === 'thirdPartyName' ||
+          key === 'companyName' ||
+          key === 'accountName'
+        ) return [];
         return [{
           id: uid('H'),
           caseId: prev.id,
           action: 'Alan güncellendi',
           fieldName: String(key),
-          fromValue: oldVal == null ? '—' : String(oldVal),
-          toValue: newVal == null ? '—' : String(newVal),
+          fromValue: formatHistoryValue(String(key), oldVal),
+          toValue:   formatHistoryValue(String(key), newVal),
           actor,
           at: nowIso(),
         }];
@@ -415,6 +474,142 @@ export const caseService = {
     return data?.case ?? undefined;
   },
 
+  /**
+   * Admin ekranlarının kullandığı sync helper'lar — performansı kritik değil,
+   * await beklenmesin diye sync. FAZ 2 BFF için ayrı endpoint'lere mapping yapılır.
+   */
+  countByThirdParty(thirdPartyId: string): number {
+    return store.filter((c) => c.thirdPartyId === thirdPartyId).length;
+  },
+
+  /**
+   * FAZ 4'te dosya/evrak yükleme eklendiğinde gerçek sayım buraya gelecek.
+   * Şimdilik admin tablosunda her satır 0 kullanım gösterir.
+   */
+  countByEvrakType(_evrakTypeId: string): number {
+    return 0;
+  },
+
+  /** Bu takıma atanmış (her statüde) kaç vaka var? Admin silme uyarısı için. */
+  countByTeam(teamId: string): number {
+    return store.filter((c) => c.assignedTeamId === teamId).length;
+  },
+
+  /** Sadece açık (henüz çözülmemiş/iptal olmamış) vaka sayısı. Pasifleştirme uyarısı için. */
+  countOpenByTeam(teamId: string): number {
+    return store.filter(
+      (c) => c.assignedTeamId === teamId && c.status !== 'Çözüldü' && c.status !== 'İptalEdildi',
+    ).length;
+  },
+
+  /** Bu kişiye atanmış (her statüde) kaç vaka var? */
+  countByPerson(personId: string): number {
+    return store.filter((c) => c.assignedPersonId === personId).length;
+  },
+
+  /** Sadece açık vaka sayısı (kişi). */
+  countOpenByPerson(personId: string): number {
+    return store.filter(
+      (c) => c.assignedPersonId === personId && c.status !== 'Çözüldü' && c.status !== 'İptalEdildi',
+    ).length;
+  },
+
+  /**
+   * Vakalarda category alanı denormalized ad olarak saklı (ID yok),
+   * dolayısıyla sayım ada göre yapılır. Admin'de kategori adı değiştirilirse
+   * eski vakalardaki ad korunur ama bu helper o adla artık eşleşmez —
+   * bu kabul edilebilir (eski adı değiştiren kullanıcı bilinçli karar verir).
+   */
+  countByCategory(categoryName: string): number {
+    return store.filter((c) => c.category === categoryName).length;
+  },
+
+  countBySubCategory(categoryName: string, subCategoryName: string): number {
+    return store.filter(
+      (c) => c.category === categoryName && c.subCategory === subCategoryName,
+    ).length;
+  },
+
+  /**
+   * PRODUCT_SPEC §6 — SLA 5-tuple match. Sadece aktif policy'ler arasında arar.
+   * FAZ 2'de BFF SLA motoru bu fonksiyonu kullanmayacak; admin preview için.
+   */
+  getSlaPolicyFor(c: {
+    companyId: string;
+    productGroup?: string;
+    category: string;
+    subCategory: string;
+    requestType: CaseRequestType;
+  }): SlaPolicy | undefined {
+    if (!c.productGroup) return undefined;
+    return MOCK_SLA_POLICIES.find(
+      (p) =>
+        p.isActive &&
+        p.companyId === c.companyId &&
+        p.productGroup === c.productGroup &&
+        p.categoryName === c.category &&
+        p.subCategoryName === c.subCategory &&
+        p.requestType === c.requestType,
+    );
+  },
+
+  /**
+   * Bir SLA policy kaç vakaya tam eşleşiyor — admin tablosunda "kullanım" kolonu.
+   * Pasif policy'ler de saysın (silme uyarısı için).
+   */
+  countCasesMatchingPolicy(policyId: string): number {
+    const p = MOCK_SLA_POLICIES.find((x) => x.id === policyId);
+    if (!p) return 0;
+    return store.filter(
+      (c) =>
+        c.companyId === p.companyId &&
+        c.productGroup === p.productGroup &&
+        c.category === p.categoryName &&
+        c.subCategory === p.subCategoryName &&
+        c.requestType === p.requestType,
+    ).length;
+  },
+
+  /**
+   * Kontrol Listesi 3-tuple match (company + productGroup + category).
+   * Vaka detayında otomatik yüklenir — sadece aktif template'lerde arar.
+   */
+  getChecklistFor(c: {
+    companyId: string;
+    productGroup?: string;
+    category: string;
+  }): CaseChecklistTemplate | undefined {
+    if (!c.productGroup) return undefined;
+    return MOCK_CHECKLIST_TEMPLATES.find(
+      (t) =>
+        t.isActive &&
+        t.companyId === c.companyId &&
+        t.productGroup === c.productGroup &&
+        t.categoryName === c.category,
+    );
+  },
+
+  /** Bu checklist template kaç vakaya tam eşleşiyor — admin "kullanım" kolonu. */
+  countCasesMatchingChecklist(templateId: string): number {
+    const t = MOCK_CHECKLIST_TEMPLATES.find((x) => x.id === templateId);
+    if (!t) return 0;
+    return store.filter(
+      (c) =>
+        c.companyId === t.companyId &&
+        c.productGroup === t.productGroup &&
+        c.category === t.categoryName,
+    ).length;
+  },
+
+  /**
+   * Bu teklif kaç vakada sunulmuş — vakanın offeredSolutions: string[]
+   * alanı ID listesi içerir (denormalized ad yok, silinince eski vakalarda
+   * "Bilinmeyen teklif" görünür).
+   */
+  countCasesUsingOffer(offerId: string): number {
+    return store.filter((c) => c.offeredSolutions?.includes(offerId)).length;
+  },
+
   async findByAccount(
     accountId: string,
     options?: { excludeId?: string; statusIn?: CaseStatus[]; statusNotIn?: CaseStatus[] },
@@ -440,13 +635,26 @@ export const caseService = {
 
 export const lookupService = {
   companies:        () => clone(MOCK_COMPANIES),
-  teams:            () => clone(MOCK_TEAMS),
-  persons:          () => clone(MOCK_PERSONS),
-  personsByTeam:    (teamId: string) => MOCK_PERSONS.filter((p) => p.teamId === teamId).map((p) => ({ ...p })),
+  teams:            () => clone(MOCK_TEAMS).filter((t) => t.isActive),
+  persons:          () => clone(MOCK_PERSONS).filter((p) => p.isActive),
+  personsByTeam:    (teamId: string) =>
+    MOCK_PERSONS.filter((p) => p.teamId === teamId && p.isActive).map((p) => ({ ...p })),
   accounts:         () => clone(MOCK_ACCOUNTS),
-  categories:       () => clone(MOCK_CATEGORIES),
+  /**
+   * Aktif kategoriler + her birinin aktif alt kategorileri.
+   * Legacy shape ({ category, subCategories: string[] }) korunur — NewCaseForm /
+   * CaseDetailPage gibi consumer'lar henüz id-bazlı modele geçmedi.
+   */
+  categories: () =>
+    MOCK_CATEGORIES
+      .filter((c) => c.isActive)
+      .map((c) => ({
+        category: c.name,
+        subCategories: c.subCategories.filter((s) => s.isActive).map((s) => s.name),
+      })),
   requestTypes:     () => [...CASE_REQUEST_TYPES],
   thirdParties:     () => clone(MOCK_THIRD_PARTIES).filter((tp) => tp.isActive),
+  evrakTypes:       () => clone(MOCK_EVRAK_TYPES).filter((e) => e.isActive),
   offeredSolutions: () => clone(MOCK_OFFERED_SOLUTIONS).filter((o) => o.isActive),
   productGroups:    (): string[] => {
     const set = new Set<string>();

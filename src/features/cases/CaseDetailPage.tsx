@@ -44,6 +44,7 @@ import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService } from '@/services/caseService';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
+  CASE_FIELD_LABELS,
   CASE_ORIGINS,
   CASE_REQUEST_TYPES,
   ESCALATION_LEVELS,
@@ -1683,9 +1684,9 @@ function InlineEdit({
           value={String(draft ?? '')}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => {
-            // Click outside iptal — eğer relatedTarget Kaydet butonuna gitmiyorsa
+            // Click outside iptal — eğer relatedTarget Kaydet/Voice butonuna gitmiyorsa
             const next = e.relatedTarget as HTMLElement | null;
-            if (next?.dataset?.role === 'commit-draft') {
+            if (next?.dataset?.role === 'commit-draft' || next?.dataset?.role === 'voice-input') {
               onCommit(draft);
             } else {
               onCancel();
@@ -1695,9 +1696,19 @@ function InlineEdit({
           placeholder={placeholder}
           rows={4}
         />
-        <div className="flex items-center justify-end gap-2 px-2 py-1 text-[11px] text-slate-500">
-          <span>ESC iptal</span>
-          {editControls}
+        <div className="flex items-center justify-between gap-2 px-2 py-1 text-[11px] text-slate-500">
+          <VoiceNoteButton
+            onTranscript={(chunk) =>
+              setDraft((prev: unknown) => {
+                const cur = String(prev ?? '');
+                return cur ? `${cur} ${chunk}` : chunk;
+              })
+            }
+          />
+          <div className="flex items-center gap-2">
+            <span>ESC iptal</span>
+            {editControls}
+          </div>
         </div>
       </div>
     );
@@ -1781,28 +1792,38 @@ function InlineEdit({
 function ActivityTab({ item }: { item: Case }) {
   return (
     <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
-      {item.history.map((h) => (
-        <li key={h.id} className="relative">
-          <span className="absolute -left-[22px] top-1 inline-block h-3 w-3 rounded-full bg-brand-500 ring-4 ring-white" />
-          <div className="text-sm font-medium text-slate-800">
-            {h.action}
-            {h.fromValue && h.toValue && (
-              <span className="ml-2 text-xs font-normal text-slate-500">
-                {h.fromValue} → {h.toValue}
-              </span>
-            )}
-            {!h.fromValue && h.toValue && (
-              <span className="ml-2 text-xs font-normal text-slate-500">→ {h.toValue}</span>
-            )}
-          </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-            <Calendar size={12} />
-            {formatDateTime(h.at)}
-            <span>·</span>
-            <span>{h.actor}</span>
-          </div>
-        </li>
-      ))}
+      {item.history.map((h) => {
+        const fieldLabel = h.fieldName ? CASE_FIELD_LABELS[h.fieldName] ?? h.fieldName : null;
+        const hasFrom = h.fromValue != null && h.fromValue !== '' && h.fromValue !== '—';
+        const hasTo = h.toValue != null && h.toValue !== '';
+        return (
+          <li key={h.id} className="relative">
+            <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-brand-500 ring-4 ring-white" />
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+              <span className="font-medium text-slate-800">{h.action}</span>
+              {fieldLabel && (
+                <span className="text-xs font-medium text-slate-500">{fieldLabel}{hasTo ? ':' : ''}</span>
+              )}
+              {hasFrom && hasTo && (
+                <span className="inline-flex items-baseline gap-1.5 text-xs">
+                  <span className="text-slate-500 line-through decoration-slate-300">{h.fromValue}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="font-medium text-slate-800">{h.toValue}</span>
+                </span>
+              )}
+              {!hasFrom && hasTo && (
+                <span className="text-xs font-medium text-slate-800">{h.toValue}</span>
+              )}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+              <Calendar size={11} />
+              <span>{formatDateTime(h.at)}</span>
+              <span>·</span>
+              <span>{h.actor}</span>
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }
