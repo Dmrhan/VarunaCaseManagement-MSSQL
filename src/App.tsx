@@ -5,7 +5,6 @@ import {
   Inbox,
   Keyboard,
   LayoutDashboard,
-  Search,
   Settings2,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
@@ -147,20 +146,6 @@ export default function App() {
             {sidebarCollapsed ? <ChevronsRight size={14} /> : <><ChevronsLeft size={14} /> Daralt</>}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setCustomerSearchOpen(true)}
-            className={`mb-2 flex w-full items-center gap-2 rounded-md bg-brand-600 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 ${
-              sidebarCollapsed ? 'h-10 justify-center px-0' : 'px-3 py-2'
-            }`}
-            title="Müşteri Ara"
-          >
-            <Search size={16} />
-            {!sidebarCollapsed && <span className="flex-1 text-left">Müşteri Ara</span>}
-          </button>
-
-          <div className={`my-3 ${sidebarCollapsed ? 'mx-0' : 'mx-1'} border-t border-slate-200`} />
-
           <nav className="space-y-1">
             {NAV.map((item) => {
               const active = view === item.key || (isDetail && item.key === 'cases');
@@ -200,6 +185,7 @@ export default function App() {
             <CasesListPage
               onSelectCase={openCase}
               onShowCustomer={(id) => setCustomerCardId(id)}
+              onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
               pendingQuickPrefill={pendingQuickPrefill}
               onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
             />

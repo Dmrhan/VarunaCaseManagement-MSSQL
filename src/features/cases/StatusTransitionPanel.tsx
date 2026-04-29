@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { caseService, lookupService } from '@/services/caseService';
 import {
   CASE_STATUSES,
@@ -289,7 +290,17 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
           </div>
 
           {pending === 'Çözüldü' && (
-            <Field label="Çözüm Notu" required>
+            <Field
+              label="Çözüm Notu"
+              required
+              actions={
+                <VoiceNoteButton
+                  onTranscript={(chunk) =>
+                    setResolutionNote((t) => (t ? `${t} ${chunk}` : chunk))
+                  }
+                />
+              }
+            >
               <TextArea
                 value={resolutionNote}
                 onChange={(e) => setResolutionNote(e.target.value)}
@@ -300,7 +311,17 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
           )}
 
           {pending === 'İptalEdildi' && (
-            <Field label="İptal Gerekçesi" required>
+            <Field
+              label="İptal Gerekçesi"
+              required
+              actions={
+                <VoiceNoteButton
+                  onTranscript={(chunk) =>
+                    setCancelReason((t) => (t ? `${t} ${chunk}` : chunk))
+                  }
+                />
+              }
+            >
               <TextArea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
@@ -338,7 +359,18 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                   ))}
                 </Select>
               </Field>
-              <Field label="Gerekçe" required className="sm:row-span-1">
+              <Field
+                label="Gerekçe"
+                required
+                className="sm:row-span-1"
+                actions={
+                  <VoiceNoteButton
+                    onTranscript={(chunk) =>
+                      setEscalationReason((t) => (t ? `${t} ${chunk}` : chunk))
+                    }
+                  />
+                }
+              >
                 <TextArea
                   value={escalationReason}
                   onChange={(e) => setEscalationReason(e.target.value)}

@@ -79,21 +79,19 @@ function QuickNoteForm({
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hızlı Not</div>
-      <div className="relative">
-        <TextArea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
-          rows={3}
-          className="pr-10"
-        />
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hızlı Not</div>
         <VoiceNoteButton
           onTranscript={(chunk) => setText((t) => (t ? `${t} ${chunk}` : chunk))}
           onListeningChange={setVoiceListening}
-          className="absolute bottom-2 right-2"
         />
       </div>
+      <TextArea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
+        rows={3}
+      />
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-[11px]">
           <span className="text-slate-500">Görünürlük:</span>

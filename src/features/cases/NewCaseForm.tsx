@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
 import {
   CASE_ORIGINS,
@@ -425,7 +426,18 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
           </Field>
         </div>
 
-        <Field label="Açıklama" required error={errors.description}>
+        <Field
+          label="Açıklama"
+          required
+          error={errors.description}
+          actions={
+            <VoiceNoteButton
+              onTranscript={(chunk) =>
+                update('description', form.description ? `${form.description} ${chunk}` : chunk)
+              }
+            />
+          }
+        >
           <TextArea
             placeholder="Sorun veya talebin detayını yazın…"
             value={form.description}

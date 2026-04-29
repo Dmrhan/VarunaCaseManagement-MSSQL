@@ -14,15 +14,20 @@ interface FieldProps {
   required?: boolean;
   children: ReactNode;
   className?: string;
+  /** Label satırının sağına yerleştirilen aksiyon (örn. VoiceNoteButton) */
+  actions?: ReactNode;
 }
 
-export function Field({ label, hint, error, required, children, className }: FieldProps) {
+export function Field({ label, hint, error, required, children, className, actions }: FieldProps) {
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <label className="text-xs font-medium text-slate-700">
-        {label}
-        {required && <span className="ml-0.5 text-rose-500">*</span>}
-      </label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-xs font-medium text-slate-700">
+          {label}
+          {required && <span className="ml-0.5 text-rose-500">*</span>}
+        </label>
+        {actions && <div className="shrink-0">{actions}</div>}
+      </div>
       {children}
       {hint && !error && <span className="text-[11px] text-slate-500">{hint}</span>}
       {error && <span className="text-[11px] font-medium text-rose-600">{error}</span>}

@@ -39,6 +39,7 @@ import { QuickCaseModal } from './QuickCaseModal';
 interface CasesListPageProps {
   onSelectCase: (caseId: string) => void;
   onShowCustomer?: (accountId: string) => void;
+  onOpenCustomerSearch?: () => void;
   /** App seviyesinden gelen account ID — varsa QuickCaseModal pre-fill ile açılır */
   pendingQuickPrefill?: string | null;
   onQuickPrefillConsumed?: () => void;
@@ -70,6 +71,7 @@ const initialFilters: CaseFilters = {
 export function CasesListPage({
   onSelectCase,
   onShowCustomer,
+  onOpenCustomerSearch,
   pendingQuickPrefill,
   onQuickPrefillConsumed,
 }: CasesListPageProps) {
@@ -201,6 +203,16 @@ export function CasesListPage({
           <Button variant="outline" leftIcon={<RotateCw size={14} />} onClick={() => void load()}>
             Yenile
           </Button>
+          {onOpenCustomerSearch && (
+            <Button
+              variant="outline"
+              leftIcon={<Search size={14} />}
+              onClick={onOpenCustomerSearch}
+              title="Telefon veya isim ile müşteri ara"
+            >
+              Müşteri Ara
+            </Button>
+          )}
           <Button
             variant="outline"
             leftIcon={<Zap size={14} className="text-amber-500" />}

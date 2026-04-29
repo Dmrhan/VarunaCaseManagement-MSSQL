@@ -1828,22 +1828,22 @@ function NotesTab({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <Field label="Yeni Not">
-          <div className="relative">
-            <TextArea
-              ref={inputRef}
-              value={noteText}
-              onChange={(e) => onChangeText(e.target.value)}
-              placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
-              rows={3}
-              className="pr-10"
-            />
+        <Field
+          label="Yeni Not"
+          actions={
             <VoiceNoteButton
               onTranscript={(chunk) => onChangeText(noteText ? `${noteText} ${chunk}` : chunk)}
               onListeningChange={setVoiceListening}
-              className="absolute bottom-2 right-2"
             />
-          </div>
+          }
+        >
+          <TextArea
+            ref={inputRef}
+            value={noteText}
+            onChange={(e) => onChangeText(e.target.value)}
+            placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
+            rows={3}
+          />
         </Field>
         <div className="mt-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs">

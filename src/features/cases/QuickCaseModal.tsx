@@ -4,7 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/Field';
 import { Badge } from '@/components/ui/Badge';
-import { CaseTypeBadge } from '@/components/ui/StatusPill';
+import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
 import {
@@ -20,6 +20,14 @@ interface QuickCaseModalProps {
   onCreated: (c: Case) => void;
   prefillAccountId?: string | null;
 }
+
+const TITLE_MAX = 255;
+
+const CASE_TYPE_HINTS: Record<CaseType, string> = {
+  GeneralSupport:    'Destek, şikayet veya bilgi talebi',
+  ProactiveTracking: 'Kullanım düşüşü veya finansal risk takibi',
+  Churn:             'Müşteri iptal talebi yönetimi',
+};
 
 // Quick mode için sabit defaultlar — detaylar drawer'da düzenlenebilir
 const QUICK_DEFAULTS = {
@@ -42,7 +50,6 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
   const [title, setTitle] = useState('');
   const [accountQuery, setAccountQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const titleRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -52,8 +59,6 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
       setCaseType('GeneralSupport');
       setTitle('');
       setAccountQuery('');
-      setErrors({});
-      // Pre-fill varsa odak title'a, yoksa müşteri aramasına otomatik
       const t = window.setTimeout(() => {
         if (prefillAccountId) titleRef.current?.focus();
       }, 80);
@@ -65,7 +70,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
 
   const filteredAccounts = useMemo(() => {
     const q = accountQuery.trim().toLowerCase();
-    if (!q) return accounts.slice(0, 6);
+    if (!q) return accounts;
     return accounts.filter(
       (a) =>
         a.name.toLowerCase().includes(q) ||
@@ -74,16 +79,10 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
     );
   }, [accounts, accountQuery]);
 
-  function validate(): boolean {
-    const e: Record<string, string> = {};
-    if (!accountId)        e.accountId = 'Müşteri seçilmeli';
-    if (!title.trim())     e.title     = 'Vaka konusu zorunlu';
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }
+  const canSubmit = Boolean(selectedAccount) && title.trim().length > 0 && !submitting;
 
   async function handleSubmit() {
-    if (!validate() || !selectedAccount) return;
+    if (!canSubmit || !selectedAccount) return;
     setSubmitting(true);
     const input: NewCaseInput = {
       title: title.trim(),
@@ -112,11 +111,20 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
     });
   }
 
+  function appendVoiceToTitle(chunk: string) {
+    setTitle((prev) => {
+      const next = prev ? `${prev} ${chunk}` : chunk;
+      return next.length > TITLE_MAX ? next.slice(0, TITLE_MAX) : next;
+    });
+  }
+
   return (
     <Modal
       open={open}
       onClose={onClose}
-      size="md"
+      size="xl"
+      height="580px"
+      bodyClassName="flex-1 overflow-y-auto px-5 py-4 scrollbar-thin"
       title={
         <div className="flex items-center gap-2">
           <Zap size={16} className="text-amber-500" />
@@ -134,7 +142,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
             <Button variant="outline" onClick={onClose} disabled={submitting}>
               Vazgeç
             </Button>
-            <Button onClick={handleSubmit} disabled={submitting}>
+            <Button onClick={handleSubmit} disabled={!canSubmit}>
               {submitting ? 'Oluşturuluyor…' : 'Vakayı Aç'}
             </Button>
           </div>
@@ -142,17 +150,17 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
       }
     >
       <div className="space-y-4">
-        <Field label="Müşteri" required error={errors.accountId}>
+        {/* Müşteri */}
+        <Field label="Müşteri" required>
           {selectedAccount ? (
             <div className="flex items-center justify-between gap-2 rounded-md border border-brand-300 bg-brand-50/40 px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
                 <Building2 size={14} className="text-brand-600" />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-800">{selectedAccount.name}</div>
-                  <div className="text-[11px] text-slate-500">
-                    {selectedAccount.phone}
-                    {selectedAccount.contactPerson && ` · ${selectedAccount.contactPerson}`}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-slate-800">
+                    {selectedAccount.name}
                   </div>
+                  <div className="truncate text-[11px] text-slate-500">{selectedAccount.phone}</div>
                 </div>
               </div>
               <button
@@ -161,14 +169,14 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
                   setAccountId('');
                   setAccountQuery('');
                 }}
-                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Müşteriyi kaldır"
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Müşteriyi değiştir"
               >
-                <X size={14} />
+                <X size={12} /> Değiştir
               </button>
             </div>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="relative">
                 <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <TextInput
@@ -179,7 +187,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
                   autoFocus
                 />
               </div>
-              <ul className="max-h-44 overflow-y-auto rounded-md border border-slate-200 bg-white">
+              <ul className="max-h-[160px] overflow-y-auto rounded-md border border-slate-200 bg-white scrollbar-thin">
                 {filteredAccounts.length === 0 ? (
                   <li className="px-3 py-2 text-xs text-slate-500">Sonuç yok.</li>
                 ) : (
@@ -191,11 +199,11 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
                           setAccountId(a.id);
                           setAccountQuery('');
                         }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                        className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-slate-50"
                       >
-                        <Building2 size={12} className="text-slate-400" />
+                        <Building2 size={13} className="text-slate-400" />
                         <span className="flex-1 truncate font-medium text-slate-800">{a.name}</span>
-                        <span className="text-[11px] text-slate-500">{a.phone}</span>
+                        <span className="font-mono text-[11px] text-slate-500">{a.phone}</span>
                       </button>
                     </li>
                   ))
@@ -205,6 +213,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
           )}
         </Field>
 
+        {/* Vaka Tipi */}
         <Field label="Vaka Tipi" required>
           <div className="flex flex-wrap gap-1.5">
             {CASE_TYPES.map((t) => {
@@ -214,7 +223,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
                   key={t}
                   type="button"
                   onClick={() => setCaseType(t)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition ${
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
                     active
                       ? 'bg-brand-600 text-white ring-brand-600'
                       : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
@@ -225,34 +234,39 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
               );
             })}
           </div>
+          <p className="mt-1.5 text-[11px] text-slate-500">{CASE_TYPE_HINTS[caseType]}</p>
         </Field>
 
-        <Field label="Vaka Konusu" required error={errors.title}>
+        {/* Vaka Konusu */}
+        <Field
+          label="Vaka Konusu"
+          required
+          actions={<VoiceNoteButton onTranscript={appendVoiceToTitle} />}
+        >
           <TextInput
             ref={titleRef}
             placeholder="Kısa, özetleyici bir konu yaz…"
             value={title}
+            maxLength={TITLE_MAX}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                void handleSubmit();
+                if (canSubmit) void handleSubmit();
               }
             }}
           />
+          <div className="flex justify-end text-[11px] text-slate-400">
+            <span className={title.length > TITLE_MAX * 0.9 ? 'text-amber-600' : ''}>
+              {title.length}/{TITLE_MAX}
+            </span>
+          </div>
         </Field>
 
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-          <div className="mb-1 font-medium text-slate-700">Otomatik atanan varsayılanlar</div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <CaseTypeBadge type={caseType} />
-            <Badge tint="slate">Öncelik: Orta</Badge>
-            <Badge tint="slate">Şirket: PARAM</Badge>
-            <Badge tint="slate">Origin: Diğer</Badge>
-            <Badge tint="slate">Kategori: Yazılım / Raporlama</Badge>
-            <Badge tint="slate">Talep Türü: Talep</Badge>
-          </div>
-        </div>
+        {/* Otomatik atananlar — tek satır muted */}
+        <p className="text-[11px] text-slate-500">
+          ℹ Öncelik, şirket ve kategori vaka açıldıktan sonra ayarlanabilir.
+        </p>
       </div>
     </Modal>
   );

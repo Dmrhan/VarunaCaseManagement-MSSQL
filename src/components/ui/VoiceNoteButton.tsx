@@ -14,16 +14,7 @@ interface VoiceNoteButtonProps {
 
 export function VoiceNoteButton({ onTranscript, onListeningChange, className }: VoiceNoteButtonProps) {
   const { toast } = useToast();
-  const {
-    isListening,
-    isSupported,
-    transcript,
-    interimTranscript,
-    start,
-    stop,
-    reset,
-    error,
-  } = useSpeechRecognition();
+  const { isListening, isSupported, transcript, start, stop, reset, error } = useSpeechRecognition();
 
   const lastEmittedRef = useRef('');
   const wasListeningRef = useRef(false);
@@ -64,33 +55,27 @@ export function VoiceNoteButton({ onTranscript, onListeningChange, className }: 
   }
 
   return (
-    <div className={cn('relative inline-flex', className)}>
-      <button
-        type="button"
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            toggle();
-          }
-        }}
-        aria-label={isListening ? 'Sesli notu durdur' : 'Sesli not başlat'}
-        aria-pressed={isListening}
-        className={cn(
-          'flex h-7 w-7 items-center justify-center rounded-full transition focus:outline-none focus:ring-2 focus:ring-offset-1',
-          isListening
-            ? 'animate-pulse bg-rose-100 text-rose-600 ring-2 ring-rose-300 focus:ring-rose-400'
-            : 'bg-slate-100 text-slate-500 hover:bg-brand-100 hover:text-brand-600 focus:ring-brand-400',
-        )}
-      >
-        {isListening ? <MicOff size={14} /> : <Mic size={14} />}
-      </button>
-      {isListening && (
-        <div className="pointer-events-none absolute right-0 top-full z-10 mt-1 max-w-[260px] rounded-md bg-slate-900/90 px-2 py-1 text-[11px] text-white shadow">
-          <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />
-          {interimTranscript ? <em className="italic">{interimTranscript}…</em> : 'Dinleniyor…'}
-        </div>
+    <button
+      type="button"
+      onClick={toggle}
+      onKeyDown={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+      aria-label={isListening ? 'Sesli notu durdur' : 'Sesli not başlat'}
+      aria-pressed={isListening}
+      className={cn(
+        'inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1',
+        isListening
+          ? 'animate-pulse border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-400'
+          : 'border-slate-300 bg-white text-slate-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 focus:ring-brand-400',
+        className,
       )}
-    </div>
+    >
+      {isListening ? <MicOff size={13} /> : <Mic size={13} />}
+      <span>{isListening ? 'Duraksatmak için tıkla' : 'Sesli yaz'}</span>
+    </button>
   );
 }
