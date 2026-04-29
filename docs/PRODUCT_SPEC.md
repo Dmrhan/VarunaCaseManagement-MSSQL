@@ -846,3 +846,13 @@ Faz 0 tamamlanmış sayılır:
 
 Son güncelleme: Nisan 2025 Versiyon: FAZ 0 — Mock UI Bu dosya değiştirildiğinde Claude Code'a yeni oturumda bildir.
 
+## 19. Agent UX İyileştirmeleri (Gelecek Geliştirmeler)
+
+1. Hızlı Vaka Açma — 3 alan, 10 saniyede minimal form
+2. Telefon numarasıyla müşteri arama
+3. Aktif Çağrı Modu — kronometre, hızlı not, call log
+4. Önceki Vakalar Özeti — drawer'da müşterinin son 3 vakası
+5. Script/Senaryo Desteği — kategoriye göre konuşma akışı
+6. F2/F3/F4/F5 kısayol tuşları
+7. After Call Work (ACW) sayacı
+
