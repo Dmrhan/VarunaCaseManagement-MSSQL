@@ -48,13 +48,13 @@ export function Modal({
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex justify-center bg-slate-900/40 p-4 sm:p-8',
+        'fixed inset-0 z-50 flex justify-center bg-slate-900/40 p-4 sm:p-8 dark:bg-black/60',
         fixedHeight ? 'items-center' : 'items-start overflow-y-auto',
       )}
     >
       <div
         className={cn(
-          'relative w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-200',
+          'relative w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-text dark:ring-ndark-border',
           fixedHeight && 'flex flex-col overflow-hidden',
           SIZES[size],
         )}
@@ -62,15 +62,15 @@ export function Modal({
       >
         <header
           className={cn(
-            'flex items-center justify-between border-b border-slate-200 px-5 py-3',
+            'flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-ndark-border',
             fixedHeight && 'shrink-0',
           )}
         >
-          {title && <h2 className="text-base font-semibold text-slate-900">{title}</h2>}
+          {title && <h2 className="text-base font-semibold text-slate-900 dark:text-ndark-text">{title}</h2>}
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
             aria-label="Kapat"
           >
             <X size={18} />
@@ -87,7 +87,7 @@ export function Modal({
         {footer && (
           <div
             className={cn(
-              'border-t border-slate-200 bg-slate-50 px-5 py-3',
+              'border-t border-slate-200 bg-slate-50 px-5 py-3 dark:border-ndark-border dark:bg-ndark-card',
               fixedHeight && 'shrink-0',
             )}
           >

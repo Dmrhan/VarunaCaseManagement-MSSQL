@@ -22,17 +22,17 @@ export function EmptyState({ icon, title, description, action, size = 'md', clas
       {icon && (
         <div
           className={cn(
-            'flex items-center justify-center rounded-full bg-slate-100 text-slate-400',
+            'flex items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-ndark-card dark:text-ndark-muted',
             size === 'sm' ? 'h-10 w-10' : 'h-14 w-14',
           )}
         >
           {icon}
         </div>
       )}
-      <div className={cn('font-medium text-slate-700', size === 'sm' ? 'text-sm' : 'text-base')}>
+      <div className={cn('font-medium text-slate-700 dark:text-ndark-text', size === 'sm' ? 'text-sm' : 'text-base')}>
         {title}
       </div>
-      {description && <div className="max-w-sm text-xs text-slate-500">{description}</div>}
+      {description && <div className="max-w-sm text-xs text-slate-500 dark:text-ndark-muted">{description}</div>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   );

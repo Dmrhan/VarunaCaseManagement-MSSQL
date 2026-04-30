@@ -24,7 +24,15 @@ export function Donut({ slices, size = 140, thickness = 22, centerLabel, centerV
   return (
     <div className="flex items-center gap-4">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f1f5f9" strokeWidth={thickness} />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke="currentColor"
+          className="text-slate-100 dark:text-ndark-card"
+          strokeWidth={thickness}
+        />
         {slices.map((s) => {
           const dash = (s.value / total) * C;
           const offset = (-acc / total) * C;
@@ -51,7 +59,7 @@ export function Donut({ slices, size = 140, thickness = 22, centerLabel, centerV
             y={cy - 2}
             textAnchor="middle"
             dominantBaseline="middle"
-            className="fill-slate-800 text-lg font-semibold"
+            className="fill-slate-800 text-lg font-semibold dark:fill-ndark-text"
           >
             {centerValue}
           </text>
@@ -62,7 +70,7 @@ export function Donut({ slices, size = 140, thickness = 22, centerLabel, centerV
             y={cy + 14}
             textAnchor="middle"
             dominantBaseline="middle"
-            className="fill-slate-500 text-[10px]"
+            className="fill-slate-500 text-[10px] dark:fill-ndark-muted"
           >
             {centerLabel}
           </text>

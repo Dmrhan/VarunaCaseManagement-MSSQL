@@ -33,28 +33,28 @@ export function useToast() {
 
 const TYPE_STYLE: Record<ToastType, { bg: string; ring: string; icon: ReactNode; iconColor: string }> = {
   success: {
-    bg: 'bg-emerald-50',
-    ring: 'ring-emerald-200',
+    bg: 'bg-emerald-50 dark:bg-emerald-950/40',
+    ring: 'ring-emerald-200 dark:ring-emerald-800',
     icon: <CheckCircle2 size={18} />,
-    iconColor: 'text-emerald-600',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
   },
   error: {
-    bg: 'bg-rose-50',
-    ring: 'ring-rose-200',
+    bg: 'bg-rose-50 dark:bg-rose-950/40',
+    ring: 'ring-rose-200 dark:ring-rose-800',
     icon: <AlertCircle size={18} />,
-    iconColor: 'text-rose-600',
+    iconColor: 'text-rose-600 dark:text-rose-400',
   },
   info: {
-    bg: 'bg-blue-50',
-    ring: 'ring-blue-200',
+    bg: 'bg-blue-50 dark:bg-blue-950/40',
+    ring: 'ring-blue-200 dark:ring-blue-800',
     icon: <Info size={18} />,
-    iconColor: 'text-blue-600',
+    iconColor: 'text-blue-600 dark:text-blue-400',
   },
   warn: {
-    bg: 'bg-amber-50',
-    ring: 'ring-amber-200',
+    bg: 'bg-amber-50 dark:bg-amber-950/40',
+    ring: 'ring-amber-200 dark:ring-amber-800',
     icon: <TriangleAlert size={18} />,
-    iconColor: 'text-amber-600',
+    iconColor: 'text-amber-600 dark:text-amber-400',
   },
 };
 
@@ -110,8 +110,8 @@ function ToastCard({ entry, onClose }: { entry: ToastEntry; onClose: () => void 
     >
       <span className={cn('mt-0.5 flex-shrink-0', style.iconColor)}>{style.icon}</span>
       <div className="flex-1 min-w-0">
-        {entry.title && <div className="text-sm font-semibold text-slate-900">{entry.title}</div>}
-        <div className="text-sm text-slate-700">{entry.message}</div>
+        {entry.title && <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">{entry.title}</div>}
+        <div className="text-sm text-slate-700 dark:text-ndark-text">{entry.message}</div>
         {entry.action && (
           <button
             type="button"
@@ -119,7 +119,7 @@ function ToastCard({ entry, onClose }: { entry: ToastEntry; onClose: () => void 
               entry.action!.onClick();
               onClose();
             }}
-            className="mt-1 text-xs font-medium text-brand-700 underline hover:text-brand-800"
+            className="mt-1 text-xs font-medium text-brand-700 underline hover:text-brand-800 dark:text-ndark-link dark:hover:text-blue-300"
           >
             {entry.action.label}
           </button>
@@ -128,7 +128,7 @@ function ToastCard({ entry, onClose }: { entry: ToastEntry; onClose: () => void 
       <button
         type="button"
         onClick={onClose}
-        className="flex-shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600"
+        className="flex-shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200/50 hover:text-slate-600 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
         aria-label="Kapat"
       >
         <X size={14} />

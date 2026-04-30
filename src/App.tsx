@@ -8,8 +8,10 @@ import {
   Inbox,
   Keyboard,
   LayoutDashboard,
+  Moon,
   Network,
   Settings2,
+  Sun,
   Tag,
   Timer,
   Users2,
@@ -29,6 +31,7 @@ import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolution
 import { Badge } from './components/ui/Badge';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
+import { useTheme } from './lib/useTheme';
 
 type AdminView =
   | 'admin-categories'
@@ -94,6 +97,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
+  const { theme, toggle: toggleTheme } = useTheme();
+
   useEffect(() => {
     try {
       window.localStorage.setItem(ADMIN_MENU_KEY, adminMenuOpen ? '1' : '0');
@@ -158,15 +163,15 @@ export default function App() {
   const isDetail = view === 'case-detail';
 
   return (
-    <div className={`flex flex-col ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
+    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />
           <div>
-            <div className="text-sm font-semibold text-slate-900">
+            <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
               VARUNA AI-Assisted Case Management
             </div>
-            <div className="text-[11px] text-slate-500">FAZ 0 — Mock UI</div>
+            <div className="text-[11px] text-slate-500 dark:text-ndark-muted">FAZ 0 — Mock UI</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -174,7 +179,7 @@ export default function App() {
             type="button"
             onClick={() => setHelpOpen(true)}
             title="Klavye kısayolları (?)"
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
           >
             <Keyboard size={16} />
           </button>
@@ -188,11 +193,11 @@ export default function App() {
         <aside
           onMouseEnter={() => setSidebarExpanded(true)}
           onMouseLeave={() => setSidebarExpanded(false)}
-          className={`shrink-0 border-r border-slate-200 bg-white py-3 transition-all duration-200 ${
+          className={`flex shrink-0 flex-col border-r border-slate-200 bg-white py-3 transition-all duration-200 dark:border-ndark-border dark:bg-ndark-card ${
             sidebarExpanded ? 'w-64 px-3' : 'w-16 px-2'
           }`}
         >
-          <nav className="space-y-1">
+          <nav className="flex-1 space-y-1">
             {NAV.map((item, navIdx) => {
               const isParent = !!item.children && item.children.length > 0;
               if (isParent) {
@@ -207,8 +212,8 @@ export default function App() {
                         sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
                       } ${
                         hasActiveChild
-                          ? 'bg-brand-50 font-medium text-brand-700'
-                          : 'text-slate-700 hover:bg-slate-100'
+                          ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                          : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
                       }`}
                       title={item.label}
                     >
@@ -225,7 +230,7 @@ export default function App() {
                       )}
                     </button>
                     {sidebarExpanded && expanded && (
-                      <div className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4">
+                      <div className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4 dark:border-ndark-border">
                         {item.children!.map((child) => {
                           const active = view === child.key;
                           return (
@@ -235,13 +240,13 @@ export default function App() {
                               onClick={() => child.available && handleNavSelect(child.key)}
                               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                                 active
-                                  ? 'bg-brand-50 font-medium text-brand-700'
+                                  ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
                                   : child.available
-                                    ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                                    : 'cursor-not-allowed text-slate-400'
+                                    ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-800 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text'
+                                    : 'cursor-not-allowed text-slate-400 dark:text-ndark-dim'
                               }`}
                             >
-                              <span className="text-slate-400">{child.icon}</span>
+                              <span className="text-slate-400 dark:text-ndark-dim">{child.icon}</span>
                               <span className="flex-1 text-left">{child.label}</span>
                             </button>
                           );
@@ -262,10 +267,10 @@ export default function App() {
                     sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
                   } ${
                     active
-                      ? 'bg-brand-50 font-medium text-brand-700'
+                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
                       : item.available
-                        ? 'text-slate-700 hover:bg-slate-100'
-                        : 'cursor-not-allowed text-slate-400'
+                        ? 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                        : 'cursor-not-allowed text-slate-400 dark:text-ndark-dim'
                   }`}
                   title={item.label}
                 >
@@ -274,7 +279,7 @@ export default function App() {
                     <>
                       <span className="flex-1 text-left">{item.label}</span>
                       {!item.available && (
-                        <span className="text-[10px] uppercase tracking-wide text-slate-400">soon</span>
+                        <span className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-ndark-dim">soon</span>
                       )}
                     </>
                   )}
@@ -282,6 +287,26 @@ export default function App() {
               );
             })}
           </nav>
+
+          {/* Theme toggle — sidebar'ın altında, hover-expand ile etkileşimli */}
+          <div className="mt-2 border-t border-slate-200 pt-2 dark:border-ndark-border">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Açık moda geç' : 'Koyu moda geç'}
+              aria-label={theme === 'dark' ? 'Açık moda geç' : 'Koyu moda geç'}
+              className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text ${
+                sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+              }`}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              {sidebarExpanded && (
+                <span className="flex-1 text-left">
+                  {theme === 'dark' ? 'Açık Mod' : 'Koyu Mod'}
+                </span>
+              )}
+            </button>
+          </div>
         </aside>
 
         <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'flex-1 px-6 py-6'}>

@@ -291,7 +291,7 @@ export function CaseAnalyticsPage() {
               { label: 'Çözülen',  color: '#10b981', values: stats.trend.resolved },
             ]}
             xLabels={stats.trend.labels}
-            height={140}
+            height={280}
           />
         </CardBody>
       </Card>

@@ -6,12 +6,28 @@
   html, body, #root {
     height: 100%;
     /* Defensive: React/CSS mount olmadan önce ya da geçişlerde
-       koyu/mor flash olmasın diye baseline bg. */
+       koyu/mor flash olmasın diye baseline bg. Dark mode'da koyu zemin. */
     background-color: rgb(248 250 252);
+  }
+  html.dark, html.dark body, html.dark #root {
+    background-color: #0D1117;
   }
   body {
     @apply bg-slate-50 text-slate-800 antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  html.dark body {
+    background-color: #0D1117;
+    color: #E6EDF3;
+  }
+
+  /* Theme geçişi yumuşatma */
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: 200ms;
+    transition-timing-function: ease;
   }
 }
 
@@ -21,4 +37,230 @@
     background-color: rgb(203 213 225);
     border-radius: 9999px;
   }
+  html.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #30363D;
+  }
+}
+
+/* ----------------------------------------------------------------
+   CSS variables — RunaAiCard ve diğer inline-style bileşenler için
+   light/dark değerler. Tailwind'in design token'larıyla uyumlu.
+   ---------------------------------------------------------------- */
+:root {
+  --color-background-primary:    #ffffff;
+  --color-background-secondary:  #f1f5f9;
+  --color-background-tertiary:   #f8fafc;
+  --color-border-secondary:      #cbd5e1;
+  --color-border-tertiary:       #e2e8f0;
+  --color-text-primary:          #1e293b;
+  --color-text-secondary:        #64748b;
+  --color-text-tertiary:         #94a3b8;
+  --color-runa-brand:            #4B0FAE;
+  --color-runa-brand-soft:       #F0EAFF;
+}
+
+html.dark {
+  --color-background-primary:    #161B22;
+  --color-background-secondary:  #1C2128;
+  --color-background-tertiary:   #0D1117;
+  --color-border-secondary:      #30363D;
+  --color-border-tertiary:       #21262D;
+  --color-text-primary:          #E6EDF3;
+  --color-text-secondary:        #7D8590;
+  --color-text-tertiary:         #484F58;
+  --color-runa-brand:            #6E40C9;
+  --color-runa-brand-soft:       rgba(110, 64, 201, 0.15);
+}
+
+/* ----------------------------------------------------------------
+   Dark mode global fallback — komponente özel `dark:` sınıfı eklenmemiş
+   yüzlerce yerde otomatik dönüşüm sağlar. Tailwind specificity'sine eşit
+   seçicilerle (single class) çalışır; explicit `dark:` sınıfı gelirse
+   onu ezmez (Tailwind 'dark' variant'ı child selector specificity ile
+   gelir, override'ı geçer).
+   ---------------------------------------------------------------- */
+/* Sayfa bg = #0D1117. Kart/surface bg'lerini sayfaya göre belirgin
+   şekilde ayrıştırmak için 2 katman:
+   - bg-white (kartlar) → #1C2128 (sayfa+15 ton açık)
+   - bg-slate-50 (header/secondary surface) → #161B22
+   - bg-slate-100 → #21262D (iç kartlar/tile'lar) */
+html.dark .bg-white {
+  background-color: #1C2128;
+}
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/60 {
+  background-color: #161B22;
+}
+html.dark .bg-slate-100 {
+  background-color: #21262D;
+}
+html.dark .bg-slate-200 {
+  background-color: #2D333B;
+}
+
+html.dark .text-slate-900 {
+  color: #E6EDF3;
+}
+html.dark .text-slate-800 {
+  color: #E6EDF3;
+}
+html.dark .text-slate-700 {
+  color: #C9D1D9;
+}
+html.dark .text-slate-600 {
+  color: #8B949E;
+}
+html.dark .text-slate-500 {
+  color: #7D8590;
+}
+html.dark .text-slate-400 {
+  color: #6E7681;
+}
+html.dark .text-slate-300 {
+  color: #484F58;
+}
+
+html.dark .border-slate-100 {
+  border-color: #21262D;
+}
+html.dark .border-slate-200 {
+  border-color: #30363D;
+}
+html.dark .border-slate-300 {
+  border-color: #30363D;
+}
+
+html.dark .ring-slate-100 {
+  --tw-ring-color: #21262D;
+}
+html.dark .ring-slate-200 {
+  --tw-ring-color: #30363D;
+}
+html.dark .ring-slate-300 {
+  --tw-ring-color: #30363D;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #21262D;
+}
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #30363D;
+}
+
+/* Hover varyantları yaygın kullanılıyor */
+html.dark .hover\:bg-slate-50:hover {
+  background-color: #1C2128;
+}
+html.dark .hover\:bg-slate-100:hover {
+  background-color: #21262D;
+}
+
+/* Tablo zebra için bazen bg-slate-50/40 vb. transparency kullanılır */
+html.dark [class*="bg-slate-50/"] {
+  background-color: rgba(13, 17, 23, 0.4);
+}
+
+/* Brand 50 (mavi açık) — light bg vurguları dark'ta nötr kalsın */
+html.dark .bg-brand-50,
+html.dark .bg-brand-50\/60 {
+  background-color: rgba(31, 111, 235, 0.15);
+}
+html.dark .text-brand-700,
+html.dark .text-brand-600 {
+  color: #58A6FF;
+}
+
+/* Stripe/highlight ring renkleri dark'ta yumuşat */
+html.dark .ring-brand-200 {
+  --tw-ring-color: #1F6FEB;
+}
+
+/* Form input default (Field.tsx zaten dark variants ekledi ama serbest input'lar olabilir) */
+html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+/* ----------------------------------------------------------------
+   Renkli tint fallback'ler — case detay panel'leri, dashboard kartları
+   gibi yerlerde kullanılan açık renkli arka planlar dark'ta nötralize
+   olur (~%10-15 alpha ile koyu surface üzerinde hafif renk vurgusu).
+   Mevcut text/border-XXX-700/200 sınıfları açık tonlarda yine
+   okunaklıdır; gerekirse text fallback'i de eklenir.
+   ---------------------------------------------------------------- */
+html.dark .bg-rose-50,
+html.dark .bg-rose-50\/30,
+html.dark .bg-rose-50\/40,
+html.dark .bg-rose-50\/60 { background-color: rgba(244, 63, 94, 0.10); }
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/30,
+html.dark .bg-emerald-50\/40,
+html.dark .bg-emerald-50\/60 { background-color: rgba(16, 185, 129, 0.10); }
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/30,
+html.dark .bg-amber-50\/40,
+html.dark .bg-amber-50\/60 { background-color: rgba(245, 158, 11, 0.10); }
+html.dark .bg-violet-50,
+html.dark .bg-violet-50\/30,
+html.dark .bg-violet-50\/40,
+html.dark .bg-violet-50\/60 { background-color: rgba(139, 92, 246, 0.10); }
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/30,
+html.dark .bg-indigo-50\/40,
+html.dark .bg-indigo-50\/60 { background-color: rgba(99, 102, 241, 0.10); }
+html.dark .bg-blue-50,
+html.dark .bg-blue-50\/30,
+html.dark .bg-blue-50\/40,
+html.dark .bg-blue-50\/60 { background-color: rgba(59, 130, 246, 0.10); }
+html.dark .bg-sky-50,
+html.dark .bg-sky-50\/40,
+html.dark .bg-sky-50\/60 { background-color: rgba(14, 165, 233, 0.10); }
+html.dark .bg-teal-50,
+html.dark .bg-teal-50\/40,
+html.dark .bg-teal-50\/60 { background-color: rgba(20, 184, 166, 0.10); }
+
+/* Renkli ring/border'lar dark'ta daha doygun (görünür kalsın) */
+html.dark .ring-rose-200    { --tw-ring-color: rgba(244, 63, 94, 0.30); }
+html.dark .ring-emerald-200 { --tw-ring-color: rgba(16, 185, 129, 0.30); }
+html.dark .ring-amber-200   { --tw-ring-color: rgba(245, 158, 11, 0.30); }
+html.dark .ring-violet-200  { --tw-ring-color: rgba(139, 92, 246, 0.30); }
+html.dark .ring-indigo-200  { --tw-ring-color: rgba(99, 102, 241, 0.30); }
+html.dark .ring-blue-200    { --tw-ring-color: rgba(59, 130, 246, 0.30); }
+html.dark .border-rose-200    { border-color: rgba(244, 63, 94, 0.40); }
+html.dark .border-emerald-200 { border-color: rgba(16, 185, 129, 0.40); }
+html.dark .border-amber-200   { border-color: rgba(245, 158, 11, 0.40); }
+html.dark .border-violet-200  { border-color: rgba(139, 92, 246, 0.40); }
+html.dark .border-blue-200    { border-color: rgba(59, 130, 246, 0.40); }
+
+/* Açık renkli text-XXX-700 / -800 / -900 — dark'ta -300 / -400 ile değiştir */
+html.dark .text-rose-700    { color: #fda4af; }
+html.dark .text-rose-800    { color: #fda4af; }
+html.dark .text-rose-900    { color: #fecdd3; }
+html.dark .text-emerald-700 { color: #6ee7b7; }
+html.dark .text-emerald-800 { color: #6ee7b7; }
+html.dark .text-amber-700   { color: #fcd34d; }
+html.dark .text-amber-800   { color: #fcd34d; }
+html.dark .text-amber-900   { color: #fde68a; }
+html.dark .text-violet-700  { color: #c4b5fd; }
+html.dark .text-violet-800  { color: #c4b5fd; }
+html.dark .text-blue-700    { color: #93c5fd; }
+html.dark .text-blue-800    { color: #93c5fd; }
+html.dark .text-blue-900    { color: #bfdbfe; }
+html.dark .text-indigo-700  { color: #a5b4fc; }
+html.dark .text-indigo-800  { color: #a5b4fc; }
+html.dark .text-indigo-900  { color: #c7d2fe; }
+
+/* Brand-700 (mavi koyu) zaten ekli — brand-50 bg vurgusu da yumuşar */
+html.dark .text-brand-800,
+html.dark .text-brand-900 { color: #93c5fd; }
+
+/* Tablo zebra için /60 benzeri yarı-saydam slate tonları */
+html.dark .bg-slate-50\/30,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/60 {
+  background-color: rgba(13, 17, 23, 0.5);
+}
+html.dark .bg-slate-100\/40,
+html.dark .bg-slate-100\/60 {
+  background-color: rgba(28, 33, 40, 0.6);
 }

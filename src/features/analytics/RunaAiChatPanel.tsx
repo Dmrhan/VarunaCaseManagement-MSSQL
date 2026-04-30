@@ -30,14 +30,15 @@ const PRESET_QUESTIONS = [
   'En sorunlu kategori hangisi ve neden?',
 ];
 
+// CSS variables ile light/dark uyumlu (index.css'te tanımlı)
 const RUNA = {
-  brand: '#4B0FAE',
+  brand: 'var(--color-runa-brand, #4B0FAE)',
   brandText: '#FFFFFF',
   // Soft user balon: badge tonu (RunaAiCard standartı)
-  userBubbleBg: '#F0EAFF',
-  userBubbleText: '#4B0FAE',
+  userBubbleBg: 'var(--color-runa-brand-soft, #F0EAFF)',
+  userBubbleText: 'var(--color-runa-brand, #4B0FAE)',
   assistantBubbleBg: 'var(--color-background-secondary, #f1f5f9)',
-  assistantBubbleBorder: '#4B0FAE',
+  assistantBubbleBorder: 'var(--color-runa-brand, #4B0FAE)',
   errorBubbleBg: '#FEF3C7',
   errorBubbleText: '#92400E',
   errorBubbleBorder: '#F59E0B',
@@ -381,7 +382,7 @@ function EmptyHint() {
       <div>
         <div
           className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full"
-          style={{ background: '#F0EAFF' }}
+          style={{ background: 'var(--color-runa-brand-soft, #F0EAFF)' }}
         >
           <RunaAiIcon size={20} />
         </div>

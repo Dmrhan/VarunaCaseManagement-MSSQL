@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
@@ -15,6 +16,24 @@ export default {
           700: '#2237a8',
           800: '#1f3088',
           900: '#1d2c70',
+        },
+        // Navy Dark palette — dark mode için Tailwind extension'ı
+        // (Tailwind'in mevcut slate ailesi yeterli olmadığında bu değerler kullanılır)
+        ndark: {
+          bg:      '#0D1117',  // en koyu — html/body
+          surface: '#161B22',  // kartlar, paneller
+          card:    '#1C2128',  // iç kartlar
+          border:  '#30363D',
+          text:    '#E6EDF3',
+          muted:   '#7D8590',
+          dim:     '#484F58',
+          accent:  '#1F6FEB',
+          link:    '#58A6FF',
+        },
+        runa: {
+          DEFAULT: '#4B0FAE',
+          dark:    '#6E40C9',  // dark mode sol kenar
+          text:    '#A78BFA',  // dark mode brand text
         },
       },
       boxShadow: {

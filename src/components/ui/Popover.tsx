@@ -40,7 +40,7 @@ export function Popover({ trigger, children, align = 'start', width = 320, class
             maxWidth: 'calc(100vw - 1rem)',
           }}
           className={cn(
-            'absolute top-full z-30 mt-1 rounded-lg border border-slate-200 bg-white p-3 shadow-lg',
+            'absolute top-full z-30 mt-1 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-text',
             align === 'end' ? 'right-0' : 'left-0',
             className,
           )}
