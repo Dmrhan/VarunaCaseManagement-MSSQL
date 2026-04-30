@@ -1,12 +1,12 @@
 /**
- * Vercel serverless catch-all — tüm /api/* istekleri Express app'e yönlendirilir.
+ * Vercel serverless entry — tüm /api/* istekleri Express app'e yönlendirilir.
  *
- * Vercel'de `api/[...slug].js` dosya adı /api/* için otomatik catch-all yapar
- * (vercel.json rewrite'a gerek yok). Express app server/app.js'ten import edilir.
+ * vercel.json'da `/api/(.*)` → `/api` rewrite kuralı bu dosyayı catch-all
+ * yapar. Express app server/app.js'ten import edilir (listen yok).
  *
  * Production'da:
  *   - frontend Vite static build (dist/) → Vercel CDN
- *   - /api/* istekleri → bu function → Express → routes/cases.js & routes/ai.js
+ *   - /api/* istekleri → rewrite → bu function → Express → routes/*
  *
  * Environment variables (Vercel dashboard → Settings → Environment Variables):
  *   - OPENAI_API_KEY (zorunlu, RUNA AI için)
