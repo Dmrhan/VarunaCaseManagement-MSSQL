@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react';
 import { Send, Trash2, X } from 'lucide-react';
 import { aiService, aiErrorMessage, type DashboardContext } from '@/services/aiService';
 
@@ -10,10 +16,11 @@ interface ChatMessage {
   isError?: boolean;
 }
 
-interface RunaAiChatPanelProps {
+interface RunaAiChatProps {
   context: DashboardContext;
-  onClose: () => void;
 }
+
+const STORAGE_KEY = 'varuna-runa-chat-open';
 
 const PRESET_QUESTIONS = [
   'Bu haftanın en kritik vakası hangisi?',
@@ -25,9 +32,10 @@ const PRESET_QUESTIONS = [
 
 const RUNA = {
   brand: '#4B0FAE',
-  brandText: '#4B0FAE',
-  userBubbleBg: '#4B0FAE',
-  userBubbleText: '#FFFFFF',
+  brandText: '#FFFFFF',
+  // Soft user balon: badge tonu (RunaAiCard standartı)
+  userBubbleBg: '#F0EAFF',
+  userBubbleText: '#4B0FAE',
   assistantBubbleBg: 'var(--color-background-secondary, #f1f5f9)',
   assistantBubbleBorder: '#4B0FAE',
   errorBubbleBg: '#FEF3C7',
@@ -35,14 +43,42 @@ const RUNA = {
   errorBubbleBorder: '#F59E0B',
 };
 
-const RunaAiIcon = ({ size = 14 }: { size?: number }) => (
+const RunaAiIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
     <circle cx="8" cy="8" r="7" fill="#4B0FAE" />
-    <text x="8" y="12" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#00C8A0" textAnchor="middle">
+    <text
+      x="8"
+      y="12"
+      fontFamily="Arial"
+      fontSize="9"
+      fontWeight="700"
+      fill="#00C8A0"
+      textAnchor="middle"
+    >
       R
     </text>
     <circle cx="12" cy="4" r="2" fill="#00C8A0" />
     <circle cx="12" cy="4" r="1" fill="#4B0FAE" />
+  </svg>
+);
+
+// White-fill version for use on the brand-color floating button background
+const RunaAiIconLight = ({ size = 24 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <circle cx="8" cy="8" r="7" fill="#FFFFFF" />
+    <text
+      x="8"
+      y="12"
+      fontFamily="Arial"
+      fontSize="9"
+      fontWeight="700"
+      fill="#4B0FAE"
+      textAnchor="middle"
+    >
+      R
+    </text>
+    <circle cx="12" cy="4" r="2" fill="#00C8A0" />
+    <circle cx="12" cy="4" r="1" fill="#FFFFFF" />
   </svg>
 );
 
@@ -54,7 +90,88 @@ function formatTs(d: Date): string {
   return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 }
 
-export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
+/**
+ * RUNA AI floating chat — sayfanın sağ alt köşesinde sabit buton + popup panel.
+ * Buton kapalıyken yuvarlak mor; açıkken X (kapat) ikonuna döner ve panel butonun
+ * üzerinde belirir. localStorage ile açık/kapalı durumu sayfa yenilemeleri arasında
+ * korunur. Mobilde panel calc(100vw - 48px) genişliğinde.
+ */
+export function RunaAiChat({ context }: RunaAiChatProps) {
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(STORAGE_KEY) === '1';
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, open ? '1' : '0');
+    } catch {
+      /* yoksay */
+    }
+  }, [open]);
+
+  return (
+    <>
+      {open && <FloatingPanel context={context} onClose={() => setOpen(false)} />}
+      <FloatingButton open={open} onClick={() => setOpen((v) => !v)} />
+    </>
+  );
+}
+
+/**
+ * Geriye dönük uyumluluk: RunaAiChatPanel adıyla bu modülü import eden
+ * eski kodlar olabilir; aynı bileşeni RunaAiChat olarak yeniden export ediyoruz.
+ */
+export const RunaAiChatPanel = RunaAiChat;
+
+// ----------------------------------------------------------------
+// Floating Button (sağ alt köşe — yuvarlak)
+// ----------------------------------------------------------------
+
+function FloatingButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  const buttonStyle: CSSProperties = {
+    position: 'fixed',
+    bottom: 24,
+    right: 24,
+    zIndex: 50,
+    background: RUNA.brand,
+    color: '#FFFFFF',
+    borderRadius: '50%',
+    width: 56,
+    height: 56,
+    border: 'none',
+    cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(75, 15, 174, 0.4)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={buttonStyle}
+      title={open ? 'RUNA AI panelini kapat' : 'RUNA AI panelini aç'}
+      aria-label={open ? 'RUNA AI panelini kapat' : 'RUNA AI panelini aç'}
+    >
+      {open ? <X size={24} color="#FFFFFF" /> : <RunaAiIconLight size={24} />}
+    </button>
+  );
+}
+
+// ----------------------------------------------------------------
+// Floating Panel (butonun üzerinde belirir)
+// ----------------------------------------------------------------
+
+function FloatingPanel({
+  context,
+  onClose,
+}: {
+  context: DashboardContext;
+  onClose: () => void;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -134,17 +251,39 @@ export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
     inputRef.current?.focus();
   }
 
+  const panelStyle: CSSProperties = {
+    position: 'fixed',
+    bottom: 90,
+    right: 24,
+    width: 380,
+    maxWidth: 'calc(100vw - 48px)',
+    height: 500,
+    maxHeight: 'calc(100vh - 120px)',
+    zIndex: 50,
+    background: 'var(--color-background-primary, #ffffff)',
+    border: '0.5px solid var(--color-border-tertiary, #e2e8f0)',
+    borderRadius: 16,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  };
+
+  const headerStyle: CSSProperties = {
+    background: RUNA.brand,
+    color: RUNA.brandText,
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  };
+
   return (
-    <aside
-      className="sticky top-0 flex h-screen w-[360px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
-    >
-      {/* Header */}
-      <div
-        className="flex items-center justify-between gap-2 px-4 py-3"
-        style={{ background: RUNA.brand, color: '#FFFFFF' }}
-      >
+    <aside style={panelStyle} role="complementary" aria-label="RUNA AI sohbet paneli">
+      {/* Header — mor */}
+      <div style={headerStyle}>
         <div className="flex items-center gap-2">
-          <RunaAiIcon size={16} />
+          <RunaAiIconLight size={18} />
           <span className="text-sm font-semibold tracking-wide">RUNA AI</span>
         </div>
         <div className="flex items-center gap-1">
@@ -154,6 +293,7 @@ export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
               onClick={handleClear}
               className="rounded p-1 text-white/80 hover:bg-white/15 hover:text-white"
               title="Sohbeti temizle"
+              aria-label="Sohbeti temizle"
             >
               <Trash2 size={14} />
             </button>
@@ -163,13 +303,14 @@ export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
             onClick={onClose}
             className="rounded p-1 text-white/80 hover:bg-white/15 hover:text-white"
             title="Paneli kapat"
+            aria-label="Paneli kapat"
           >
             <X size={14} />
           </button>
         </div>
       </div>
 
-      {/* Mesajlar — scroll edilebilir alan */}
+      {/* Mesajlar */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         {messages.length === 0 && !sending ? (
           <EmptyHint />
@@ -183,7 +324,7 @@ export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
         )}
       </div>
 
-      {/* Hazır sorular — sadece chat boşken */}
+      {/* Hazır sorular */}
       {messages.length === 0 && !sending && (
         <div className="border-t border-slate-200 px-3 py-2.5">
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -221,6 +362,7 @@ export function RunaAiChatPanel({ context, onClose }: RunaAiChatPanelProps) {
           className="flex h-8 w-8 items-center justify-center rounded-md text-white transition disabled:cursor-not-allowed disabled:opacity-40"
           style={{ background: RUNA.brand }}
           title="Gönder"
+          aria-label="Gönder"
         >
           <Send size={14} />
         </button>
@@ -237,7 +379,10 @@ function EmptyHint() {
   return (
     <div className="flex h-full items-center justify-center px-2 text-center">
       <div>
-        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full" style={{ background: '#F0EAFF' }}>
+        <div
+          className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full"
+          style={{ background: '#F0EAFF' }}
+        >
           <RunaAiIcon size={20} />
         </div>
         <p className="text-sm font-medium text-slate-800">Dashboard verilerinizi sorgulayın</p>
@@ -275,10 +420,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
-        <div
-          style={isUser ? userStyle : assistantStyle}
-          className="px-3 py-2 text-[13px] leading-relaxed"
-        >
+        <div style={isUser ? userStyle : assistantStyle} className="px-3 py-2 text-[13px] leading-relaxed">
           <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
         </div>
         <span className="mt-0.5 text-[10px] text-slate-400">{formatTs(message.timestamp)}</span>

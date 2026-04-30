@@ -7,14 +7,13 @@ import {
   Inbox,
   Layers,
   ShieldAlert,
-  Sparkles,
   Target,
   TrendingDown,
   TrendingUp,
   Users,
   Wallet,
 } from 'lucide-react';
-import { RunaAiChatPanel } from './RunaAiChatPanel';
+import { RunaAiChat } from './RunaAiChatPanel';
 import type { DashboardContext } from '@/services/aiService';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -68,25 +67,10 @@ const COMPANY_HEX: Record<string, string> = {
 const COMPANY_OPTIONS = ['Tümü', 'PARAM', 'UNIVERA', 'FINROTA'] as const;
 type CompanyFilter = typeof COMPANY_OPTIONS[number];
 
-const RUNA_CHAT_KEY = 'varuna-runa-chat-open';
-
 export function CaseAnalyticsPage() {
   const [allItems, setAllItems] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [companyFilter, setCompanyFilter] = useState<CompanyFilter>('Tümü');
-
-  const [chatOpen, setChatOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(RUNA_CHAT_KEY) === '1';
-  });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(RUNA_CHAT_KEY, chatOpen ? '1' : '0');
-    } catch {
-      /* yoksay */
-    }
-  }, [chatOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -109,8 +93,43 @@ export function CaseAnalyticsPage() {
   const stats = useMemo(() => computeStats(items), [items]);
 
   // RUNA AI chat panel için canlı dashboard verileri
+  // İlginç vakaların kompakt listesi: AI detaylı sorulara
+  // ("hangi vaka kritik?", "kim üzerinde yığılmış?") yanıt verebilsin diye
+  // top 30 açık vakanın snapshot'ı eklenir.
   const dashboardContext: DashboardContext = useMemo(() => {
     const topCategoryEntry = stats.byCategory[0];
+    const isOpen = (c: Case) => c.status !== 'Çözüldü' && c.status !== 'İptalEdildi';
+    const priorityWeight: Record<string, number> = { Critical: 100, High: 50, Medium: 20, Low: 5 };
+    const now = Date.now();
+
+    const interesting = items
+      .filter(isOpen)
+      .map((c) => ({
+        c,
+        score:
+          (priorityWeight[c.priority] ?? 10) +
+          (c.slaViolation ? 50 : 0) +
+          // Eskime bonusu: 7 günden eski vakalara öncelik (max 20 puan)
+          Math.min(20, (now - new Date(c.createdAt).getTime()) / (24 * 3600 * 1000) / 7 * 20),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30)
+      .map((s) => ({
+        caseNumber: s.c.caseNumber,
+        title: s.c.title,
+        priority: s.c.priority,
+        status: s.c.status,
+        caseType: s.c.caseType,
+        category: s.c.category,
+        subCategory: s.c.subCategory,
+        slaViolation: s.c.slaViolation,
+        accountName: s.c.accountName,
+        companyName: s.c.companyName,
+        ageHours: Math.round((now - new Date(s.c.createdAt).getTime()) / 3600000),
+        assignedPersonName: s.c.assignedPersonName,
+        assignedTeamName: s.c.assignedTeamName,
+      }));
+
     return {
       totalCases: stats.total,
       openCases: stats.open,
@@ -121,8 +140,9 @@ export function CaseAnalyticsPage() {
       retentionRate: Math.round(stats.retentionRate * 10) / 10,
       topCategory: topCategoryEntry?.category ?? '-',
       teamLoads: stats.byTeam.map((t) => ({ teamName: t.label, caseCount: t.value })),
+      interestingCases: interesting,
     };
-  }, [stats]);
+  }, [stats, items]);
 
   if (loading) {
     return (
@@ -172,9 +192,7 @@ export function CaseAnalyticsPage() {
   }
 
   return (
-    <div className="flex items-start gap-4">
-      {/* Sol: dashboard içeriği — block scroll (browser-level), uzun içerik akışta */}
-      <div className="min-w-0 flex-1 space-y-5">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Vaka Raporları</h1>
@@ -201,18 +219,6 @@ export function CaseAnalyticsPage() {
               </button>
             );
           })}
-          {!chatOpen && (
-            <button
-              type="button"
-              onClick={() => setChatOpen(true)}
-              className="ml-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
-              style={{ background: '#4B0FAE' }}
-              title="RUNA AI chat panelini aç"
-            >
-              <Sparkles size={13} />
-              RUNA AI
-            </button>
-          )}
         </div>
       </div>
 
@@ -449,15 +455,9 @@ export function CaseAnalyticsPage() {
           </CardBody>
         </Card>
       </div>
-      </div>
 
-      {/* Sağ: RUNA AI Chat paneli (toggle ile açılır/kapanır) */}
-      {chatOpen && (
-        <RunaAiChatPanel
-          context={dashboardContext}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
+      {/* RUNA AI floating chat — sayfanın sağ alt köşesinde sabit buton + popup panel */}
+      <RunaAiChat context={dashboardContext} />
     </div>
   );
 }

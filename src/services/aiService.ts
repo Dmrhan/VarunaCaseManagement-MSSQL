@@ -143,6 +143,22 @@ export interface ChurnConversion {
 
 // ---- 6) Dashboard chat ----
 
+export interface DashboardCaseSnapshot {
+  caseNumber: string;
+  title: string;
+  priority: string;
+  status: string;
+  caseType: string;
+  category: string;
+  subCategory: string;
+  slaViolation: boolean;
+  accountName: string;
+  companyName: string;
+  ageHours: number;
+  assignedPersonName?: string;
+  assignedTeamName?: string;
+}
+
 export interface DashboardContext {
   totalCases: number;
   openCases: number;
@@ -153,6 +169,8 @@ export interface DashboardContext {
   retentionRate: number;
   topCategory: string;
   teamLoads: { teamName: string; caseCount: number }[];
+  /** En ilginç / kritik açık vakaların kompakt snapshot'ı (max 30) — AI detaylı sorulara yanıt verebilsin diye. */
+  interestingCases?: DashboardCaseSnapshot[];
 }
 
 export interface DashboardChatHistoryItem {

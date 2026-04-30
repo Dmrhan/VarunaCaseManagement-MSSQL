@@ -295,6 +295,20 @@ router.post(
       ? ctx.teamLoads.map((t) => `${t.teamName}: ${t.caseCount}`).join(', ')
       : '(yok)';
 
+    // İlginç vakaları kompakt formatta dök — token bütçesinde kalır (~30 vaka × ~150 char)
+    const casesStr = Array.isArray(ctx.interestingCases) && ctx.interestingCases.length > 0
+      ? ctx.interestingCases
+          .map((c) => {
+            const flags = [c.priority];
+            if (c.slaViolation) flags.push('SLA-İHLAL');
+            const flagStr = `[${flags.join(', ')}]`;
+            const assigned = c.assignedPersonName ?? '(atanmamış)';
+            const team = c.assignedTeamName ?? '-';
+            return `- ${c.caseNumber} ${flagStr} "${c.title}" | ${c.companyName}/${c.accountName} | ${c.category}/${c.subCategory} | ${c.status} | ${c.ageHours}saat | ${assigned} (${team})`;
+          })
+          .join('\n')
+      : '(vaka snapshot\'ı verilmedi)';
+
     const system = [
       "Sen Varuna CRM'in dashboard analisti RUNA AI'sın.",
       'Müşteri hizmetleri ve operasyon yöneticilerine vaka yönetimi verileri hakkında',
@@ -302,9 +316,10 @@ router.post(
       '',
       'Türkçe yaz. Kısa ve net ol — maksimum 3-4 cümle.',
       'Rakamları kullan. Soyut tavsiye verme, somut aksiyon öner.',
+      'Spesifik vaka sorulduğunda CASE-XXXXX numarasını VE konusunu mutlaka belirt.',
       'Eğer veri yetersizse bunu açıkça söyle.',
       '',
-      'Mevcut dashboard verileri:',
+      '=== ÖZET METRİKLER ===',
       `Toplam Vaka: ${ctx.totalCases ?? '-'}`,
       `Açık Vaka: ${ctx.openCases ?? '-'}`,
       `SLA İhlal Oranı: %${ctx.slaViolationRate ?? '-'}`,
@@ -314,6 +329,10 @@ router.post(
       `Retention Başarı: %${ctx.retentionRate ?? '-'}`,
       `En Yoğun Kategori: ${ctx.topCategory ?? '-'}`,
       `Takım Yükleri: ${teamLoadStr}`,
+      '',
+      '=== EN İLGİNÇ AÇIK VAKALAR (skor: priority + SLA ihlali + yaş; max 30) ===',
+      'Format: CASE-NO [Priority, opsiyonel SLA-İHLAL] "Konu" | Şirket/Müşteri | Kategori/Alt | Statü | Yaş(saat) | Atanan (Takım)',
+      casesStr,
     ].join('\n');
 
     // History'yi son 6 mesajla sınırla, role/content olarak normalize et
