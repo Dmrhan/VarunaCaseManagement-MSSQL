@@ -64,6 +64,7 @@ import {
   type CallOutcome,
   type CaseCallLog,
   type CaseFilters,
+  type CaseHistoryActionType,
   type CaseListPagination,
   type CaseNote,
   type CaseRequestType,
@@ -566,6 +567,57 @@ export const caseService = {
       return { caseUpdated: clone(updated), callLog: clone(newLog) };
     }
     const r = await fetch(`${API_BASE}/${id}/call-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!r.ok) return undefined;
+    return r.json();
+  },
+
+  /**
+   * Vakaya manuel aktivite kaydı ekler (Transfer, FieldUpdate, vb.).
+   * `update()` zaten alan değişimlerini otomatik loglar; bu helper transfer
+   * gibi özel akışlarda actionType + note ile zenginleştirilmiş entry üretir.
+   */
+  async addActivity(
+    caseId: string,
+    input: {
+      actionType: CaseHistoryActionType;
+      action: string;                  // Human-readable başlık
+      fieldName?: string;
+      oldValue?: string;
+      newValue?: string;
+      note?: string;
+      actor?: string;
+    },
+  ): Promise<Case | undefined> {
+    if (USE_MOCK) {
+      await delay(40);
+      const idx = store.findIndex((c) => c.id === caseId);
+      if (idx < 0) return undefined;
+      const prev = store[idx];
+      const entry = {
+        id: uid('H'),
+        caseId,
+        action: input.action,
+        actionType: input.actionType,
+        fieldName: input.fieldName,
+        fromValue: input.oldValue,
+        toValue: input.newValue,
+        note: input.note,
+        actor: input.actor ?? 'Mock User',
+        at: nowIso(),
+      };
+      const updated: Case = {
+        ...prev,
+        history: [...prev.history, entry],
+        updatedAt: nowIso(),
+      };
+      store[idx] = updated;
+      return clone(updated);
+    }
+    const r = await fetch(`${API_BASE}/${caseId}/activity`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),

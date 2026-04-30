@@ -159,13 +159,27 @@ export interface CaseFile {
   uploadedAt: string;
 }
 
+export type CaseHistoryActionType =
+  | 'Transfer'         // Vaka başka kişiye devredildi
+  | 'StatusChange'     // Statü geçişi
+  | 'FieldUpdate'      // Inline alan güncellendi
+  | 'ChecklistToggle'  // Kontrol maddesi işaretlendi
+  | 'NoteAdded'        // Not eklendi
+  | 'CallLogAdded'     // Çağrı kaydı eklendi
+  | 'CaseCreated'      // Vaka oluşturuldu
+  | 'SLAApplied';      // SLA kuralı/fallback uygulandı
+
 export interface CaseHistoryEntry {
   id: string;
   caseId: string;
-  action: string;
+  action: string;                       // Human-readable başlık (eski + yeni kayıtlar için)
+  /** Semantik aksiyon tipi (ActivityTab'de farklı render için). Eski kayıtlarda yok. */
+  actionType?: CaseHistoryActionType;
   fromValue?: string;
   toValue?: string;
-  fieldName?: string;     // inline edit kayıtları için (Spec section 15 — CaseActivity.field_name)
+  fieldName?: string;                   // inline edit kayıtları için (Spec section 15 — CaseActivity.field_name)
+  /** Kullanıcının eklediği serbest açıklama (örn. devir notu) */
+  note?: string;
   actor: string;
   at: string;
 }

@@ -40,6 +40,7 @@ import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
+import { TransferCaseModal } from './TransferCaseModal';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService } from '@/services/caseService';
@@ -86,6 +87,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   // Inline edit / drafts
   const [drafts, setDrafts] = useState<Partial<Case>>({});
@@ -442,7 +444,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               variant="outline"
               size="sm"
               leftIcon={<UserPlus size={12} />}
-              onClick={() => toast({ type: 'info', message: 'Vaka devir akışı FAZ 4\'te eklenecek.' })}
+              onClick={() => setTransferOpen(true)}
             >
               Devret
             </Button>
@@ -510,7 +512,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           accountEmail={account?.email}
           accountContact={account?.contactPerson}
           onStartCall={handleStartCall}
-          onTransfer={() => toast({ type: 'info', message: 'Vaka devir akışı FAZ 4\'te eklenecek.' })}
+          onTransfer={() => setTransferOpen(true)}
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
           onTabFocusNote={handleQuickActionAddNote}
           callActive={callActive}
@@ -605,6 +607,16 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         />
 
       </div>
+
+      {/* Vaka devret modal'ı */}
+      <TransferCaseModal
+        isOpen={transferOpen}
+        caseId={item.id}
+        currentAssignedPersonId={item.assignedPersonId}
+        currentAssignedPersonName={item.assignedPersonName}
+        onClose={() => setTransferOpen(false)}
+        onTransferred={(updated) => setItem(updated)}
+      />
     </div>
   );
 }
@@ -2201,6 +2213,34 @@ function ActivityTab({ item }: { item: Case }) {
   return (
     <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
       {item.history.map((h) => {
+        // Transfer aksiyonları için amber-tint custom render — diğer log'lardan ayrışsın.
+        if (h.actionType === 'Transfer') {
+          return (
+            <li key={h.id} className="relative">
+              <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-amber-500 ring-4 ring-white" />
+              <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+                <div className="flex flex-wrap items-baseline gap-x-1.5 text-sm">
+                  <span className="font-medium text-amber-900">↪ Devredildi:</span>
+                  <span className="text-slate-700 line-through decoration-slate-300">{h.fromValue ?? '—'}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className="font-semibold text-slate-800">{h.toValue}</span>
+                </div>
+                {h.note && (
+                  <p className="mt-1 text-xs italic text-amber-800">
+                    “{h.note}”
+                  </p>
+                )}
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <Calendar size={11} />
+                  <span>{formatDateTime(h.at)}</span>
+                  <span>·</span>
+                  <span>{h.actor}</span>
+                </div>
+              </div>
+            </li>
+          );
+        }
+
         const fieldLabel = h.fieldName ? CASE_FIELD_LABELS[h.fieldName] ?? h.fieldName : null;
         const hasFrom = h.fromValue != null && h.fromValue !== '' && h.fromValue !== '—';
         const hasTo = h.toValue != null && h.toValue !== '';
