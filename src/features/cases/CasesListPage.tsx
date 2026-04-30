@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkey } from '@/lib/useHotkey';
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronLeft,
   ChevronRight,
   Filter,
@@ -47,6 +50,80 @@ interface CasesListPageProps {
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
+// ----------------------------------------------------------------
+// Sıralama
+// ----------------------------------------------------------------
+type SortKey =
+  | 'caseNumber'
+  | 'title'
+  | 'accountName'
+  | 'caseType'
+  | 'status'
+  | 'priority'
+  | 'assignment'
+  | 'sla'
+  | 'createdAt'
+  | 'updatedAt';
+type SortDir = 'asc' | 'desc';
+
+const TYPE_ORDER: Record<string, number> = { GeneralSupport: 0, ProactiveTracking: 1, Churn: 2 };
+const STATUS_ORDER: Record<string, number> = {
+  'Açık': 0,
+  'İncelemede': 1,
+  '3rdPartyBekleniyor': 2,
+  'Eskalasyon': 3,
+  'Çözüldü': 4,
+  'YenidenAcildi': 5,
+  'İptalEdildi': 6,
+};
+// Spec: Critical → High → Medium → Low (kritik önce)
+const PRIORITY_ORDER: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+
+function compareCases(a: Case, b: Case, key: SortKey): number {
+  switch (key) {
+    case 'caseNumber':
+      return a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true });
+    case 'title':
+      return a.title.localeCompare(b.title, 'tr');
+    case 'accountName':
+      return a.accountName.localeCompare(b.accountName, 'tr');
+    case 'caseType':
+      return (TYPE_ORDER[a.caseType] ?? 99) - (TYPE_ORDER[b.caseType] ?? 99);
+    case 'status':
+      return (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+    case 'priority':
+      return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+    case 'assignment': {
+      // Atanmamışlar her durumda en sona — desc'te de sonda kalır
+      const av = a.assignedPersonName ?? a.assignedTeamName ?? '';
+      const bv = b.assignedPersonName ?? b.assignedTeamName ?? '';
+      if (!av && !bv) return 0;
+      if (!av) return 1;
+      if (!bv) return -1;
+      return av.localeCompare(bv, 'tr');
+    }
+    case 'sla': {
+      const av = a.slaResolutionDueAt ? new Date(a.slaResolutionDueAt).getTime() : Infinity;
+      const bv = b.slaResolutionDueAt ? new Date(b.slaResolutionDueAt).getTime() : Infinity;
+      return av - bv;
+    }
+    case 'createdAt':
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    case 'updatedAt':
+      return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+  }
+}
+
+const SORT_DROPDOWN_OPTIONS: Array<{ key: SortKey; dir: SortDir; label: string }> = [
+  { key: 'updatedAt', dir: 'desc', label: 'Son Güncelleme (yeni → eski)' },
+  { key: 'updatedAt', dir: 'asc', label: 'Son Güncelleme (eski → yeni)' },
+  { key: 'createdAt', dir: 'desc', label: 'Açılış Tarihi (yeni → eski)' },
+  { key: 'createdAt', dir: 'asc', label: 'Açılış Tarihi (eski → yeni)' },
+  { key: 'sla', dir: 'asc', label: 'SLA (yaklaşan önce)' },
+  { key: 'priority', dir: 'asc', label: 'Öncelik (kritik önce)' },
+  { key: 'caseNumber', dir: 'asc', label: 'Vaka No (A→Z)' },
+];
+
 const STATUS_LABELS_SHORT: Record<CaseStatus, string> = {
   'Açık':                'Açık',
   'İncelemede':          'İncelemede',
@@ -76,6 +153,8 @@ export function CasesListPage({
   onQuickPrefillConsumed,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
   const [newOpen, setNewOpen] = useState(false);
@@ -144,15 +223,37 @@ export function CasesListPage({
     return { total, open, slaBreach, critical };
   }, [allFiltered]);
 
+  // Sıralama — kolon başlığı tıklaması ve dropdown ile senkronize
+  const sortedFiltered = useMemo(() => {
+    const arr = [...allFiltered];
+    arr.sort((a, b) => {
+      const cmp = compareCases(a, b, sortKey);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [allFiltered, sortKey, sortDir]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      // Aynı kolona tıkla → yön değiş (asc ↔ desc)
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      // Yeni kolon → varsayılan yön (tarih kolonları için desc daha mantıklı)
+      setSortKey(key);
+      setSortDir(key === 'updatedAt' || key === 'createdAt' ? 'desc' : 'asc');
+    }
+    setPage(1);
+  }
+
   // Pagination — client-side slice (FAZ 0; FAZ 2'de service pagination gerçek BFF üzerinden gelir)
-  const totalPages = Math.max(1, Math.ceil(allFiltered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageItems = useMemo(
-    () => allFiltered.slice((safePage - 1) * pageSize, safePage * pageSize),
-    [allFiltered, safePage, pageSize],
+    () => sortedFiltered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [sortedFiltered, safePage, pageSize],
   );
-  const startIdx = allFiltered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIdx = Math.min(safePage * pageSize, allFiltered.length);
+  const startIdx = sortedFiltered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const endIdx = Math.min(safePage * pageSize, sortedFiltered.length);
 
   const hasActiveFilters =
     Boolean(filters.search) ||
@@ -358,6 +459,33 @@ export function CasesListPage({
                 className="h-8 py-1"
               />
             </div>
+
+            {/* Sırala — kolon başlığı tıklamasıyla senkron */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-slate-500">Sırala:</span>
+              <Select
+                value={`${sortKey}:${sortDir}`}
+                onChange={(e) => {
+                  const [k, d] = e.target.value.split(':');
+                  setSortKey(k as SortKey);
+                  setSortDir(d as SortDir);
+                  setPage(1);
+                }}
+                className="h-8 py-1 text-xs"
+              >
+                {SORT_DROPDOWN_OPTIONS.map((opt) => (
+                  <option key={`${opt.key}:${opt.dir}`} value={`${opt.key}:${opt.dir}`}>
+                    {opt.label}
+                  </option>
+                ))}
+                {/* Eğer aktif kolon dropdown'da yoksa, mevcut seçimi koruyabilen bir görünüm */}
+                {!SORT_DROPDOWN_OPTIONS.some((o) => o.key === sortKey && o.dir === sortDir) && (
+                  <option value={`${sortKey}:${sortDir}`}>
+                    Özel: {sortKey} ({sortDir === 'asc' ? 'artan' : 'azalan'})
+                  </option>
+                )}
+              </Select>
+            </div>
           </div>
         </div>
 
@@ -365,23 +493,24 @@ export function CasesListPage({
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                <Th>Vaka No</Th>
-                <Th>Başlık</Th>
-                <Th>Müşteri</Th>
-                <Th>Tip</Th>
-                <Th>Statü</Th>
-                <Th>Öncelik</Th>
-                <Th>Atama</Th>
-                <Th>SLA</Th>
-                <Th>Açılış</Th>
+                <SortableTh label="Vaka No"        sortKey="caseNumber"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Başlık"         sortKey="title"       currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Müşteri"        sortKey="accountName" currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Tip"            sortKey="caseType"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Statü"          sortKey="status"      currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Öncelik"        sortKey="priority"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Atama"          sortKey="assignment"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="SLA"            sortKey="sla"         currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Açılış"         sortKey="createdAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Son Güncelleme" sortKey="updatedAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading &&
-                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={9} />)}
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={10} />)}
               {!loading && allFiltered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4">
+                  <td colSpan={10} className="px-4">
                     {hasActiveFilters ? (
                       <EmptyState
                         icon={<SearchX size={22} />}
@@ -450,6 +579,9 @@ export function CasesListPage({
                       )}
                     </Td>
                     <Td className="text-xs text-slate-500">{formatDateTime(c.createdAt)}</Td>
+                    <Td className="text-xs text-slate-500">
+                      <span title={formatDateTime(c.updatedAt)}>{formatRelative(c.updatedAt)}</span>
+                    </Td>
                   </tr>
                 ))}
             </tbody>
@@ -539,8 +671,44 @@ export function CasesListPage({
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="whitespace-nowrap px-4 py-2.5">{children}</th>;
+function SortableTh({
+  label,
+  sortKey,
+  currentKey,
+  currentDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = currentKey === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`group cursor-pointer select-none whitespace-nowrap px-4 py-2.5 transition-colors ${
+        isActive
+          ? 'bg-blue-50 text-brand-700'
+          : 'hover:bg-slate-100 hover:text-slate-700'
+      }`}
+      aria-sort={isActive ? (currentDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <div className="flex items-center gap-1">
+        <span>{label}</span>
+        {isActive ? (
+          currentDir === 'asc' ? (
+            <ArrowUp size={11} className="text-brand-600" />
+          ) : (
+            <ArrowDown size={11} className="text-brand-600" />
+          )
+        ) : (
+          <ArrowUpDown size={11} className="text-slate-300 group-hover:text-slate-400" />
+        )}
+      </div>
+    </th>
+  );
 }
 
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {

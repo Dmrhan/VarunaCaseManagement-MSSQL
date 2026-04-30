@@ -161,11 +161,11 @@ export default function App() {
     <div className={`flex flex-col ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-600 text-white">
-            <span className="font-semibold">V</span>
-          </div>
+          <BrandLogo />
           <div>
-            <div className="text-sm font-semibold text-slate-900">Varuna Case Management</div>
+            <div className="text-sm font-semibold text-slate-900">
+              VARUNA AI-Assisted Case Management
+            </div>
             <div className="text-[11px] text-slate-500">FAZ 0 — Mock UI</div>
           </div>
         </div>
@@ -342,5 +342,30 @@ export default function App() {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Brand logosu — public/varuna-logo.png varsa onu gösterir, yoksa "V"
+ * placeholder'a düşer. Logo değiştirmek için public/varuna-logo.png
+ * dosyasını ekleyin/değiştirin (SVG kullanmak için src uzantısını
+ * .svg yapın).
+ */
+function BrandLogo() {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-600 text-white">
+        <span className="text-sm font-semibold">V</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src="/varuna-logo.png"
+      alt="Varuna"
+      className="h-9 w-9 shrink-0 rounded-md object-contain"
+      onError={() => setFailed(true)}
+    />
   );
 }

@@ -1533,26 +1533,13 @@ function DetailTab({
             )}
           </div>
 
-          {item.offeredSolutions && item.offeredSolutions.length > 0 && (
-            <div className="mt-3">
-              <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Sunulan Teklifler
-              </h4>
-              <ul className="space-y-1">
-                {item.offeredSolutions.map((id) => {
-                  const def = offeredSolutions.find((o) => o.id === id);
-                  return (
-                    <li
-                      key={id}
-                      className="rounded-md bg-rose-50/60 px-3 py-1.5 text-sm ring-1 ring-rose-200"
-                    >
-                      <span className="font-medium text-slate-800">{def?.name ?? id}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
+          {/* Sunulan Teklifler — her zaman görünür; ekle/çıkar butonları taslağa yazar */}
+          <OfferedSolutionsBlock
+            currentIds={(v('offeredSolutions') ?? []) as string[]}
+            options={offeredSolutions}
+            isDraft={drafts.offeredSolutions !== undefined}
+            onChange={(newIds) => onCommitDraft('offeredSolutions', newIds)}
+          />
         </Section>
       )}
 
@@ -1616,6 +1603,183 @@ function DetailTab({
         </Section>
       )}
     </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Sunulan Teklifler — Churn yönetimindeki çoklu teklif seçim alanı
+// ----------------------------------------------------------------
+
+function OfferedSolutionsBlock({
+  currentIds,
+  options,
+  isDraft,
+  onChange,
+}: {
+  currentIds: string[];
+  options: { id: string; name: string; description?: string }[];
+  isDraft: boolean;
+  onChange: (newIds: string[]) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  function handleRemove(id: string) {
+    onChange(currentIds.filter((x) => x !== id));
+  }
+
+  return (
+    <>
+      <div className="mt-3">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Sunulan Teklifler
+            {isDraft && (
+              <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                Taslak
+              </span>
+            )}
+          </h4>
+          <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
+            + Teklif Sun
+          </Button>
+        </div>
+        {currentIds.length === 0 ? (
+          <div className="rounded-md border border-dashed border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-500">
+            Henüz teklif sunulmadı. <strong>+ Teklif Sun</strong> ile listeden seçim yapabilirsiniz.
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {currentIds.map((id) => {
+              const def = options.find((o) => o.id === id);
+              return (
+                <li
+                  key={id}
+                  className="flex items-center justify-between gap-2 rounded-md bg-rose-50/60 px-3 py-1.5 text-sm ring-1 ring-rose-200"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-slate-800">{def?.name ?? `Bilinmeyen teklif (${id})`}</div>
+                    {def?.description && (
+                      <div className="truncate text-[11px] text-slate-500">{def.description}</div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(id)}
+                    className="shrink-0 rounded p-1 text-rose-500 hover:bg-rose-100 hover:text-rose-700"
+                    title="Tekliften çıkar"
+                    aria-label={`${def?.name ?? id} teklifini çıkar`}
+                  >
+                    <X size={12} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <OfferedSolutionsPickerModal
+        open={pickerOpen}
+        currentIds={currentIds}
+        options={options}
+        onClose={() => setPickerOpen(false)}
+        onSave={(newIds) => {
+          onChange(newIds);
+          setPickerOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
+function OfferedSolutionsPickerModal({
+  open,
+  currentIds,
+  options,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  currentIds: string[];
+  options: { id: string; name: string; description?: string }[];
+  onClose: () => void;
+  onSave: (newIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(currentIds);
+
+  // Modal her açılışında mevcut seçimi başlangıç olarak yükle
+  useEffect(() => {
+    if (open) setSelected(currentIds);
+  }, [open, currentIds]);
+
+  function toggle(id: string) {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      title="Müşteriye Teklif Sun"
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">
+            {selected.length} teklif seçildi
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Vazgeç
+            </Button>
+            <Button onClick={() => onSave(selected)}>Uygula</Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-2">
+        <p className="text-xs text-slate-500">
+          Müşteriyi tutabilmek için sunulacak retention teklif(ler)ini seçin. Çoklu seçim
+          mümkündür; mevcut listeye eklenir/çıkarılır.
+        </p>
+        {options.length === 0 ? (
+          <div className="rounded-md border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-500">
+            Tanımlı teklif yok. Admin → Teklif Tanımları'ndan ekleyin.
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {options.map((o) => {
+              const checked = selected.includes(o.id);
+              return (
+                <li key={o.id}>
+                  <label
+                    className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition ${
+                      checked
+                        ? 'border-rose-300 bg-rose-50/60'
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(o.id)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-slate-800">{o.name}</div>
+                      {o.description && (
+                        <div className="text-[11px] text-slate-500">{o.description}</div>
+                      )}
+                    </div>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Modal>
   );
 }
 

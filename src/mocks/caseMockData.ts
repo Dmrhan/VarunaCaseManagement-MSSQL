@@ -828,7 +828,23 @@ function buildCase(typeIdx: number, slot: number): Case {
 
   const createdAtMs = now.getTime() - sla.ageMinutes * 60 * 1000;
   const createdAt = new Date(createdAtMs).toISOString();
-  const updatedAt = isoFrom(createdAtMs, sla.ageMinutes - 30);
+  // updatedAt — 4 zaman bandı (sıralama testi için dengeli dağılım):
+  //   slot%4==0 → bugün (0-8 saat önce)
+  //   slot%4==1 → 1-3 gün önce
+  //   slot%4==2 → 1-2 hafta önce (8-14 gün önce)
+  //   slot%4==3 → 3-4 hafta önce (21-28 gün önce)
+  // updatedAt asla createdAt'tan eski olmasın → max ile clamp.
+  const seed = (slot * 9301 + 49297) % 233280; // deterministic pseudo-random
+  const rand = seed / 233280;
+  let updatedOffsetMin: number;
+  switch (slot % 4) {
+    case 0: updatedOffsetMin = -Math.floor(rand * 8 * 60); break;
+    case 1: updatedOffsetMin = -((1 + Math.floor(rand * 3)) * 24 * 60); break;
+    case 2: updatedOffsetMin = -((8 + Math.floor(rand * 7)) * 24 * 60); break;
+    default: updatedOffsetMin = -((21 + Math.floor(rand * 8)) * 24 * 60);
+  }
+  const updatedAtMs = Math.max(createdAtMs, now.getTime() + updatedOffsetMin * 60 * 1000);
+  const updatedAt = new Date(updatedAtMs).toISOString();
 
   // 3rdPartyBekleniyor için slaPausedAt set edilir
   const slaPausedAt = status === '3rdPartyBekleniyor'
