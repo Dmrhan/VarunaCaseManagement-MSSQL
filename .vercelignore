@@ -1,0 +1,20 @@
+# Vercel deploy'a dahil edilmeyecekler.
+# node_modules ve .env zaten Vercel default'ta hariç tutuluyor;
+# burada güvenlik amaçlı tekrar belirtiyoruz + geliştirme dosyalarını ekliyoruz.
+
+.env
+.env.local
+.env.*.local
+
+# Build artifact'ları (Vercel kendi build'ini yapar)
+dist
+dist-ssr
+
+# Geliştirme/test
+.DS_Store
+*.log
+*.tsbuildinfo
+.vscode
+
+# Git
+.git
