@@ -33,7 +33,12 @@ export function Popover({ trigger, children, align = 'start', width = 320, class
       {trigger({ open, toggle: () => setOpen((v) => !v) })}
       {open && (
         <div
-          style={{ width }}
+          style={{
+            width,
+            // Sadece viewport'tan büyük olamaz — parent'a sınırlama yok ki dar
+            // wrapper'larda (ör. ActiveCallBanner butonu) panel kendi width'ini koruyabilsin.
+            maxWidth: 'calc(100vw - 1rem)',
+          }}
           className={cn(
             'absolute top-full z-30 mt-1 rounded-lg border border-slate-200 bg-white p-3 shadow-lg',
             align === 'end' ? 'right-0' : 'left-0',

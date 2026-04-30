@@ -761,7 +761,7 @@ function LeftPanel({
           <QuickNotePopover
             caseId={item.id}
             align="start"
-            width={340}
+            width={280}
             onAdded={onNoteAdded}
             trigger={({ toggle }) => (
               <Button
@@ -2283,7 +2283,17 @@ function NewCallLogModal({
           </Field>
         </div>
 
-        <Field label="Açıklama" hint="AI bu metni özetleyerek aiCallBrief alanına yazacak.">
+        <Field
+          label="Açıklama"
+          hint="AI bu metni özetleyerek aiCallBrief alanına yazacak."
+          actions={
+            <VoiceNoteButton
+              onTranscript={(chunk) =>
+                setDescription((t) => (t ? `${t} ${chunk}` : chunk))
+              }
+            />
+          }
+        >
           <TextArea
             value={description}
             onChange={(e) => setDescription(e.target.value)}

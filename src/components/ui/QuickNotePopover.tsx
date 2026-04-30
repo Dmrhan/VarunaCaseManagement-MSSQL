@@ -92,7 +92,7 @@ function QuickNoteForm({
         placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
         rows={3}
       />
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
         <div className="flex items-center gap-1 text-[11px]">
           <span className="text-slate-500">Görünürlük:</span>
           <button
@@ -118,7 +118,7 @@ function QuickNoteForm({
             Müşteri
           </button>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={submitting}>
             Vazgeç
           </Button>
