@@ -337,10 +337,30 @@ export interface Case {
   aiFollowupRecommendation?: string;
   aiRetentionOfferSuggestion?: string;
 
+  /**
+   * FAZ 4 — Vaka açılırken `getChecklistFor()` 3-tuple match'inden gelen
+   * checklist template item'larının snapshot'ı. Admin tarafında template
+   * sonradan değiştirilirse vaka etkilenmez (denormalized). `undefined` =
+   * eşleşen template yok.
+   */
+  checklistItems?: CaseChecklistItemInstance[];
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];
   callLogs: CaseCallLog[];
+}
+
+export interface CaseChecklistItemInstance {
+  /** Vakaya özel benzersiz id (snapshot kayıt) */
+  id: string;
+  /** Kaynak template item id'si (template silinirse de buradan görünür) */
+  templateItemId: string;
+  label: string;
+  required: boolean;
+  checked: boolean;
+  checkedAt?: string;   // ISO datetime
+  checkedBy?: string;   // actor name
 }
 
 export interface CaseFilters {

@@ -190,9 +190,15 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setEscalationReason('');
   }
 
+  // FAZ 4 — Çözüldü transition için zorunlu kontrol listesi maddelerinin
+  // tamamlanmış olması gerekir. Eksik varsa transition bloklanır.
+  const requiredChecklistPending =
+    item.checklistItems?.filter((it) => it.required && !it.checked) ?? [];
+
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
+    if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
@@ -310,6 +316,23 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
               {STATUS_LABELS[pending]} için zorunlu alanlar
             </span>
           </div>
+
+          {pending === 'Çözüldü' && requiredChecklistPending.length > 0 && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+              <div className="mb-1 font-semibold">
+                Vaka çözülmeden önce {requiredChecklistPending.length} zorunlu kontrol maddesi
+                tamamlanmalı:
+              </div>
+              <ul className="ml-4 list-disc space-y-0.5">
+                {requiredChecklistPending.map((it) => (
+                  <li key={it.id}>{it.label}</li>
+                ))}
+              </ul>
+              <div className="mt-1.5 text-[11px] text-rose-700 dark:text-rose-300">
+                Detay sekmesindeki <strong>Kontrol Listesi</strong> bölümünden işaretleyebilirsiniz.
+              </div>
+            </div>
+          )}
 
           {pending === 'Çözüldü' && (
             <>

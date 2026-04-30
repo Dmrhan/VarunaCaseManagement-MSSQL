@@ -845,6 +845,10 @@ function RightPanel({
         status: item.status,
         priority: item.priority,
         slaViolation: item.slaViolation,
+        slaResponseDueAt: item.slaResponseDueAt,
+        slaResolutionDueAt: item.slaResolutionDueAt,
+        slaPausedAt: item.slaPausedAt,
+        createdAt: item.createdAt,
       },
       history: item.history,
       notes: item.notes,
@@ -1390,6 +1394,11 @@ function DetailTab({
         />
       </Section>
 
+      {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
+      {item.checklistItems && item.checklistItems.length > 0 && (
+        <ChecklistSection item={item} onCaseUpdated={onTransitionApplied} />
+      )}
+
       {item.caseType === 'ProactiveTracking' && (
         <Section title="Proaktif Takip Bilgileri" tint="violet">
           <EditableGrid
@@ -1780,6 +1789,113 @@ function OfferedSolutionsPickerModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+// ----------------------------------------------------------------
+// Kontrol Listesi section — FAZ 4
+// 3-tuple match'ten gelen snapshot item'ları gösterir; check/uncheck
+// caseService.toggleChecklistItem ile persist edilir, parent'a bildirilir.
+// ----------------------------------------------------------------
+
+function ChecklistSection({
+  item,
+  onCaseUpdated,
+}: {
+  item: Case;
+  onCaseUpdated: (updated: Case) => void;
+}) {
+  const items = item.checklistItems ?? [];
+  const total = items.length;
+  const checkedCount = items.filter((i) => i.checked).length;
+  const requiredItems = items.filter((i) => i.required);
+  const requiredPending = requiredItems.filter((i) => !i.checked).length;
+  const allRequiredDone = requiredPending === 0;
+  const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
+
+  async function handleToggle(itemId: string, currentlyChecked: boolean) {
+    const updated = await caseService.toggleChecklistItem(item.id, itemId, !currentlyChecked);
+    if (updated) onCaseUpdated(updated);
+  }
+
+  return (
+    <Section title="Kontrol Listesi" tint={allRequiredDone ? 'emerald' : 'default'}>
+      {/* Progress header */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="font-medium text-slate-800">
+            {checkedCount} / {total}
+          </span>
+          <span>· %{pct} tamamlandı</span>
+          {requiredItems.length > 0 && (
+            <Badge tint={allRequiredDone ? 'emerald' : 'rose'}>
+              {requiredPending === 0
+                ? 'Zorunlu maddeler tamam'
+                : `${requiredPending} zorunlu eksik`}
+            </Badge>
+          )}
+        </div>
+        <div className="hidden sm:block min-w-[120px] flex-1 max-w-[220px]">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div
+              className={`h-full transition-all ${allRequiredDone ? 'bg-emerald-500' : 'bg-brand-500'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <ul className="space-y-1.5">
+        {items.map((it) => (
+          <li
+            key={it.id}
+            className={`flex items-start gap-2.5 rounded-md border px-3 py-2 transition ${
+              it.checked
+                ? 'border-emerald-200 bg-emerald-50/60'
+                : it.required
+                  ? 'border-rose-200 bg-rose-50/40'
+                  : 'border-slate-200 bg-white'
+            }`}
+          >
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={it.checked}
+              onClick={() => void handleToggle(it.id, it.checked)}
+              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                it.checked
+                  ? 'border-emerald-500 bg-emerald-500 text-white'
+                  : 'border-slate-300 bg-white hover:border-slate-400'
+              }`}
+              title={it.checked ? 'İşareti kaldır' : 'Tamamlandı olarak işaretle'}
+            >
+              {it.checked && <Check size={12} />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-sm ${
+                    it.checked ? 'text-slate-500 line-through' : 'text-slate-800'
+                  }`}
+                >
+                  {it.label}
+                </span>
+                {it.required && !it.checked && (
+                  <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700">
+                    Zorunlu
+                  </span>
+                )}
+              </div>
+              {it.checked && it.checkedAt && (
+                <div className="mt-0.5 text-[10px] text-slate-400">
+                  {it.checkedBy ?? 'Bilinmiyor'} · {formatDateTime(it.checkedAt)}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }
 

@@ -79,6 +79,17 @@ export const USE_MOCK = true;
 
 const API_BASE = '/api/cases';
 
+/**
+ * SLA fallback saatleri — Sprint F SlaPolicy 5-tuple match'i bulunamadığında
+ * priority bazlı varsayılan değerler kullanılır.
+ */
+const SLA_FALLBACK_HOURS: Record<Case['priority'], number> = {
+  Critical: 4,
+  High: 24,
+  Medium: 72,
+  Low: 168,
+};
+
 let store: Case[] = MOCK_CASES.map((c) => ({
   ...c,
   notes:    [...c.notes],
@@ -219,6 +230,75 @@ export const caseService = {
     if (USE_MOCK) {
       await delay(150);
       const idx = store.length + 1;
+
+      // SLA motoru — Sprint F kuralları (5-tuple match), yoksa priority fallback.
+      // Eşleşme bulunursa policy.responseHours/resolutionHours kullanılır,
+      // yoksa SLA_FALLBACK_HOURS[priority] devreye girer (eski mock davranışı).
+      const matchedPolicy = caseService.getSlaPolicyFor({
+        companyId: input.companyId,
+        productGroup: input.productGroup,
+        category: input.category,
+        subCategory: input.subCategory,
+        requestType: input.requestType,
+      });
+      const resolutionHours = matchedPolicy?.resolutionHours ?? SLA_FALLBACK_HOURS[input.priority];
+      const responseHours = matchedPolicy?.responseHours ?? Math.max(1, Math.round(resolutionHours * 0.3));
+      const createdAtMs = Date.now();
+      const slaResponseDueAt = new Date(createdAtMs + responseHours * 3600_000).toISOString();
+      const slaResolutionDueAt = new Date(createdAtMs + resolutionHours * 3600_000).toISOString();
+
+      // Kontrol Listesi — 3-tuple match (company + productGroup + category).
+      // Eşleşme varsa template item'ları snapshot olarak kopyalanır
+      // (admin sonradan değiştirse vaka etkilenmez).
+      const matchedChecklist = caseService.getChecklistFor({
+        companyId: input.companyId,
+        productGroup: input.productGroup,
+        category: input.category,
+      });
+      const checklistItems = matchedChecklist
+        ? matchedChecklist.items
+            .filter((it) => it.isActive)
+            .map((it) => ({
+              id: uid('CHKR'),
+              templateItemId: it.id,
+              label: it.label,
+              required: it.required,
+              checked: false,
+              checkedAt: undefined,
+              checkedBy: undefined,
+            }))
+        : undefined;
+
+      const initialHistory: typeof MOCK_CASES[number]['history'] = [
+        { id: uid('H'), caseId: '', action: 'Vaka oluşturuldu', actor: 'Mock User', at: nowIso() },
+      ];
+      if (matchedPolicy) {
+        initialHistory.push({
+          id: uid('H'),
+          caseId: '',
+          action: `SLA kuralı uygulandı: ${matchedPolicy.id} (${responseHours}sa yanıt / ${resolutionHours}sa çözüm)`,
+          actor: 'Sistem',
+          at: nowIso(),
+        });
+      } else {
+        initialHistory.push({
+          id: uid('H'),
+          caseId: '',
+          action: `SLA varsayılan: ${input.priority} öncelik (${responseHours}sa yanıt / ${resolutionHours}sa çözüm)`,
+          actor: 'Sistem',
+          at: nowIso(),
+        });
+      }
+      if (matchedChecklist) {
+        initialHistory.push({
+          id: uid('H'),
+          caseId: '',
+          action: `Kontrol listesi yüklendi: ${matchedChecklist.name} (${checklistItems!.length} madde)`,
+          actor: 'Sistem',
+          at: nowIso(),
+        });
+      }
+
       const newCase: Case = {
         id: uid('CASE'),
         caseNumber: `CASE-2026-${String(10000 + idx).padStart(5, '0')}`,
@@ -242,6 +322,8 @@ export const caseService = {
         assignedPersonId: input.assignedPersonId,
         assignedPersonName: input.assignedPersonName,
         escalationLevel: 'Yok',
+        slaResponseDueAt,
+        slaResolutionDueAt,
         slaViolation: false,
         slaPausedDurationMin: 0,
         slaThirdPartyWaitMin: 0,
@@ -250,14 +332,13 @@ export const caseService = {
         aiPriorityPrediction: input.aiPriorityPrediction,
         aiConfidenceScore: input.aiConfidenceScore,
         aiRejectReason: input.aiRejectReason,
+        checklistItems,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         notes: [],
         files: [],
         callLogs: [],
-        history: [
-          { id: uid('H'), caseId: '', action: 'Vaka oluşturuldu', actor: 'Mock User', at: nowIso() },
-        ],
+        history: initialHistory,
         // Type-spesifik alanlar (yalnızca seçili tipe ait olanlar set edilir)
         financialStatus:      input.caseType === 'ProactiveTracking' ? input.financialStatus    : undefined,
         productUsage:         input.caseType === 'ProactiveTracking' ? input.productUsage       : undefined,
@@ -488,6 +569,59 @@ export const caseService = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
+    });
+    if (!r.ok) return undefined;
+    return r.json();
+  },
+
+  /**
+   * Kontrol listesi item'ını işaretle/işareti kaldır.
+   * checked=true → checkedAt/checkedBy doldurulur, history'e log atılır.
+   * checked=false → tüm meta alanlar undefined olur.
+   */
+  async toggleChecklistItem(
+    caseId: string,
+    itemId: string,
+    checked: boolean,
+    actor = 'Mock User',
+  ): Promise<Case | undefined> {
+    if (USE_MOCK) {
+      await delay(50);
+      const idx = store.findIndex((c) => c.id === caseId);
+      if (idx < 0) return undefined;
+      const prev = store[idx];
+      if (!prev.checklistItems) return clone(prev);
+      const items = prev.checklistItems.map((it) => {
+        if (it.id !== itemId) return it;
+        return checked
+          ? { ...it, checked: true, checkedAt: nowIso(), checkedBy: actor }
+          : { ...it, checked: false, checkedAt: undefined, checkedBy: undefined };
+      });
+      const target = prev.checklistItems.find((it) => it.id === itemId);
+      const updated: Case = {
+        ...prev,
+        checklistItems: items,
+        updatedAt: nowIso(),
+        history: [
+          ...prev.history,
+          {
+            id: uid('H'),
+            caseId: prev.id,
+            action: checked ? 'Kontrol maddesi işaretlendi' : 'Kontrol maddesi işareti kaldırıldı',
+            fieldName: 'checklist',
+            toValue: target?.label ?? itemId,
+            actor,
+            at: nowIso(),
+          },
+        ],
+      };
+      store[idx] = updated;
+      return clone(updated);
+    }
+    const r = await fetch(`${API_BASE}/${caseId}/checklist/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checked }),
     });
     if (!r.ok) return undefined;
     return r.json();

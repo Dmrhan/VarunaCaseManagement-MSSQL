@@ -110,7 +110,17 @@ export interface ResolutionDraftInput {
 export interface SupervisorSummaryInput {
   case: Pick<
     Case,
-    'title' | 'description' | 'category' | 'subCategory' | 'status' | 'priority' | 'slaViolation'
+    | 'title'
+    | 'description'
+    | 'category'
+    | 'subCategory'
+    | 'status'
+    | 'priority'
+    | 'slaViolation'
+    | 'slaResponseDueAt'
+    | 'slaResolutionDueAt'
+    | 'slaPausedAt'
+    | 'createdAt'
   >;
   history?: CaseHistoryEntry[];
   notes?: CaseNote[];
@@ -152,6 +162,9 @@ export interface DashboardCaseSnapshot {
   category: string;
   subCategory: string;
   slaViolation: boolean;
+  slaResponseDueAt?: string;
+  slaResolutionDueAt?: string;
+  slaPausedAt?: string;
   accountName: string;
   companyName: string;
   ageHours: number;

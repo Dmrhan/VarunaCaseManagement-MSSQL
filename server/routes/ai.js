@@ -209,13 +209,18 @@ router.post(
       'Türkçe yaz. SADECE JSON formatında yanıt ver.',
     ].join('\n');
 
+    // SLA bilgisini human-readable formata çevir (now'a göre kalan/geçen süre)
+    const slaSummary = formatSlaInfo(c);
+
     const user = [
       'Vaka bilgileri:',
       `- Konu: ${c?.title ?? '-'}`,
       `- Kategori: ${c?.category ?? '-'} / ${c?.subCategory ?? '-'}`,
       `- Statü: ${c?.status ?? '-'}`,
       `- Öncelik: ${c?.priority ?? '-'}`,
-      `- SLA İhlali: ${c?.slaViolation ? 'Evet' : 'Hayır'}`,
+      `- SLA Yanıt: ${slaSummary.response}`,
+      `- SLA Çözüm: ${slaSummary.resolution}`,
+      `- SLA Durum: ${slaSummary.status}`,
       `- Açıklama: ${c?.description ?? '-'}`,
       '',
       `History (son 5): ${(Array.isArray(history) ? history.slice(-5) : []).map((h) => h.action ?? h.fieldName).join(' / ')}`,
@@ -295,7 +300,8 @@ router.post(
       ? ctx.teamLoads.map((t) => `${t.teamName}: ${t.caseCount}`).join(', ')
       : '(yok)';
 
-    // İlginç vakaları kompakt formatta dök — token bütçesinde kalır (~30 vaka × ~150 char)
+    // İlginç vakaları kompakt formatta dök — token bütçesinde kalır (~30 vaka × ~180 char)
+    const now = Date.now();
     const casesStr = Array.isArray(ctx.interestingCases) && ctx.interestingCases.length > 0
       ? ctx.interestingCases
           .map((c) => {
@@ -304,7 +310,18 @@ router.post(
             const flagStr = `[${flags.join(', ')}]`;
             const assigned = c.assignedPersonName ?? '(atanmamış)';
             const team = c.assignedTeamName ?? '-';
-            return `- ${c.caseNumber} ${flagStr} "${c.title}" | ${c.companyName}/${c.accountName} | ${c.category}/${c.subCategory} | ${c.status} | ${c.ageHours}saat | ${assigned} (${team})`;
+            // SLA çözüm süresi — kalan/geçen
+            let slaInfo = '';
+            if (c.slaResolutionDueAt) {
+              const ms = new Date(c.slaResolutionDueAt).getTime();
+              const diff = ms - now;
+              const absH = Math.abs(diff) / 3600_000;
+              const human = absH < 24
+                ? `${Math.round(absH)}sa`
+                : `${Math.round(absH / 24)}g`;
+              slaInfo = ` | SLA: ${diff < 0 ? `${human} GEÇTİ` : `${human} kaldı`}`;
+            }
+            return `- ${c.caseNumber} ${flagStr} "${c.title}" | ${c.companyName}/${c.accountName} | ${c.category}/${c.subCategory} | ${c.status} | ${c.ageHours}saat${slaInfo} | ${assigned} (${team})`;
           })
           .join('\n')
       : '(vaka snapshot\'ı verilmedi)';
@@ -331,7 +348,7 @@ router.post(
       `Takım Yükleri: ${teamLoadStr}`,
       '',
       '=== EN İLGİNÇ AÇIK VAKALAR (skor: priority + SLA ihlali + yaş; max 30) ===',
-      'Format: CASE-NO [Priority, opsiyonel SLA-İHLAL] "Konu" | Şirket/Müşteri | Kategori/Alt | Statü | Yaş(saat) | Atanan (Takım)',
+      'Format: CASE-NO [Priority, opsiyonel SLA-İHLAL] "Konu" | Şirket/Müşteri | Kategori/Alt | Statü | Yaş(saat) | SLA: <kalan veya GEÇTİ> | Atanan (Takım)',
       casesStr,
     ].join('\n');
 
@@ -399,5 +416,48 @@ router.post(
     res.json({ summary: text });
   }),
 );
+
+// ----------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------
+
+/**
+ * Vaka SLA bilgilerini human-readable forma çevirir.
+ * Returns: { response, resolution, status }
+ */
+function formatSlaInfo(c) {
+  const now = Date.now();
+  const fmt = (iso) => {
+    if (!iso) return 'tanımlı değil';
+    const ms = new Date(iso).getTime();
+    if (Number.isNaN(ms)) return 'geçersiz tarih';
+    const diffMs = ms - now;
+    const absHours = Math.abs(diffMs) / 3600_000;
+    const dt = new Date(iso).toLocaleString('tr-TR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+    if (diffMs < 0) {
+      return `${dt} (${absHours < 24 ? Math.round(absHours) + ' saat' : Math.round(absHours / 24) + ' gün'} GEÇTİ)`;
+    }
+    return `${dt} (${absHours < 24 ? Math.round(absHours) + ' saat' : Math.round(absHours / 24) + ' gün'} kaldı)`;
+  };
+
+  let status = 'Normal';
+  if (c?.slaViolation) status = 'İhlal edildi';
+  else if (c?.slaPausedAt) status = 'Duraklatıldı (3rdParty)';
+  else if (c?.slaResolutionDueAt) {
+    const remainMs = new Date(c.slaResolutionDueAt).getTime() - now;
+    const totalMs = new Date(c.slaResolutionDueAt).getTime() -
+      (c.createdAt ? new Date(c.createdAt).getTime() : now);
+    if (totalMs > 0 && remainMs / totalMs < 0.2) status = 'Riskli (kalan süre <%20)';
+  }
+
+  return {
+    response: fmt(c?.slaResponseDueAt),
+    resolution: fmt(c?.slaResolutionDueAt),
+    status,
+  };
+}
 
 export default router;
