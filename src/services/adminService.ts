@@ -121,6 +121,52 @@ export interface ChecklistUsageInfo {
   itemCount: number;
 }
 
+export type FieldType = 'Text' | 'Number' | 'Date' | 'Select' | 'Boolean' | 'Textarea';
+
+export interface FieldDefinition {
+  id: string;
+  companyId: string;
+  label: string;
+  fieldKey: string;
+  fieldType: FieldType;
+  caseType?: string | null;
+  isRequired: boolean;
+  displayOrder: number;
+  options?: { value: string; label: string }[] | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FieldDefinitionInput {
+  companyId: string;
+  label: string;
+  fieldKey: string;
+  fieldType: FieldType;
+  caseType?: string | null;
+  isRequired?: boolean;
+  displayOrder?: number;
+  options?: { value: string; label: string }[] | null;
+  isActive?: boolean;
+}
+
+export interface CompanySettings {
+  companyId: string;
+  logoUrl?: string | null;
+  primaryColor?: string | null;
+  appName?: string | null;
+  supportEmail?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanySettingsInput {
+  logoUrl?: string | null;
+  primaryColor?: string | null;
+  appName?: string | null;
+  supportEmail?: string | null;
+}
+
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
 
 // ─────────────────────────────────────────────────────────────────
@@ -388,6 +434,69 @@ export const adminService = {
     ...crud<OfferedSolutionDef, OfferedSolutionInput>('offered-solutions'),
     usage(id: string): UsageInfo {
       return { count: caseService.countCasesUsingOffer(id) };
+    },
+  },
+
+  fieldDefinitions: {
+    async list(companyId?: string): Promise<FieldDefinition[]> {
+      const path = companyId
+        ? `${ADMIN_BASE}/field-definitions?companyId=${encodeURIComponent(companyId)}`
+        : `${ADMIN_BASE}/field-definitions`;
+      const data = await apiFetch<{ value: FieldDefinition[] }>(path, undefined, 'Custom Fields yüklenemedi');
+      return data?.value ?? [];
+    },
+    async create(input: FieldDefinitionInput): Promise<AdminResult<FieldDefinition>> {
+      const item = await apiFetch<FieldDefinition>(
+        `${ADMIN_BASE}/field-definitions`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Custom Field oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<FieldDefinitionInput>): Promise<AdminResult<FieldDefinition>> {
+      const item = await apiFetch<FieldDefinition>(
+        `${ADMIN_BASE}/field-definitions/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Custom Field güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<FieldDefinition>> {
+      return adminService.fieldDefinitions.update(id, { isActive });
+    },
+    async remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const result = await apiFetch<FieldDefinition>(
+        `${ADMIN_BASE}/field-definitions/${id}`,
+        { method: 'DELETE' },
+        'Custom Field silinemedi',
+      );
+      if (!result) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true };
+    },
+  },
+
+  companySettings: {
+    async get(companyId: string): Promise<CompanySettings | null> {
+      const data = await apiFetch<CompanySettings | null>(
+        `${ADMIN_BASE}/company-settings/${companyId}`,
+        undefined,
+        'Şirket ayarları yüklenemedi',
+      );
+      return data ?? null;
+    },
+    async upsert(companyId: string, patch: CompanySettingsInput): Promise<AdminResult<CompanySettings>> {
+      const item = await apiFetch<CompanySettings>(
+        `${ADMIN_BASE}/company-settings/${companyId}`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Şirket ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
     },
   },
 };

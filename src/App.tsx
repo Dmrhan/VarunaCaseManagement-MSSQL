@@ -1,21 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  ChevronDown,
-  ChevronRight,
-  ClipboardCheck,
-  FileText,
-  FolderTree,
   Inbox,
   Keyboard,
   LayoutDashboard,
+  LogOut,
   Moon,
-  Network,
   Settings2,
   Sun,
-  Tag,
-  Timer,
-  Users2,
-  LogOut,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
@@ -34,14 +25,9 @@ import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
 import { useAuth } from './services/AuthContext';
 
-type AdminView =
-  | 'admin-categories'
-  | 'admin-sla'
-  | 'admin-thirdparty'
-  | 'admin-documents'
-  | 'admin-checklist'
-  | 'admin-teams'
-  | 'admin-offered-solutions';
+import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
+import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
+import { AdminCompanySettingsPage } from './features/admin/AdminCompanySettingsPage';
 
 type View = 'cases' | 'dashboard' | 'case-detail' | AdminView;
 
@@ -50,32 +36,12 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   available: boolean;
-  /** Sub-item ise hangi parent'a ait olduğunu işaretler (sidebar group expand kontrolü için) */
-  children?: NavItem[];
 }
-
-const ADMIN_CHILDREN: NavItem[] = [
-  { key: 'admin-categories',         label: 'Kategori & Alt Kategori', icon: <FolderTree size={14} />,    available: true },
-  { key: 'admin-sla',                label: 'SLA Kuralları',           icon: <Timer size={14} />,         available: true },
-  { key: 'admin-thirdparty',         label: '3. Parti Tanımları',      icon: <Network size={14} />,       available: true },
-  { key: 'admin-documents',              label: 'Belge Türü Tanımları',    icon: <FileText size={14} />,      available: true },
-  { key: 'admin-checklist',          label: 'Kontrol Listesi',         icon: <ClipboardCheck size={14} />,available: true },
-  { key: 'admin-teams',              label: 'Takım Tanımları',         icon: <Users2 size={14} />,        available: true },
-  { key: 'admin-offered-solutions',  label: 'Teklif Tanımları',        icon: <Tag size={14} />,           available: true },
-];
 
 const NAV: NavItem[] = [
-  { key: 'cases',     label: 'Vakalar',          icon: <Inbox size={16} />,           available: true },
-  { key: 'dashboard', label: 'Vaka Raporları',   icon: <LayoutDashboard size={16} />, available: true },
-  // 'admin' artık parent group — child seçimle gerçek view set edilir
-  { key: 'cases', /* dummy parent key, tıklamaz */ label: 'Tanım Ekranları', icon: <Settings2 size={16} />, available: true, children: ADMIN_CHILDREN },
+  { key: 'cases',     label: 'Vakalar',        icon: <Inbox size={16} />,           available: true },
+  { key: 'dashboard', label: 'Vaka Raporları', icon: <LayoutDashboard size={16} />, available: true },
 ];
-
-const ADMIN_MENU_KEY = 'varuna-admin-menu-open';
-
-function isAdminView(v: View): v is AdminView {
-  return v.startsWith('admin-');
-}
 
 export default function App() {
   const [view, setView] = useState<View>('cases');
@@ -87,27 +53,9 @@ export default function App() {
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const [adminMenuOpen, setAdminMenuOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(ADMIN_MENU_KEY) === '1';
-  });
-
-  // Admin view'a girince menüyü otomatik aç (refresh sonrası vb.)
-  useEffect(() => {
-    if (isAdminView(view) && !adminMenuOpen) setAdminMenuOpen(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
 
   const { theme, toggle: toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(ADMIN_MENU_KEY, adminMenuOpen ? '1' : '0');
-    } catch {
-      /* yoksay */
-    }
-  }, [adminMenuOpen]);
 
   useHotkey('?', () => setHelpOpen(true));
 
@@ -163,6 +111,27 @@ export default function App() {
   }
 
   const isDetail = view === 'case-detail';
+
+  // Admin view → AdminLayout. Ana app sidebar/header'dan tamamen ayrış.
+  if (isAdminView(view)) {
+    return (
+      <AdminLayout
+        view={view}
+        onSelectView={(v) => setView(v)}
+        onExit={() => setView('cases')}
+      >
+        {view === 'admin-categories' && <AdminCategoriesPage />}
+        {view === 'admin-sla' && <AdminSlaPage />}
+        {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
+        {view === 'admin-documents' && <AdminDocumentsPage />}
+        {view === 'admin-checklist' && <AdminChecklistPage />}
+        {view === 'admin-teams' && <AdminTeamsPage />}
+        {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
+        {view === 'admin-fields' && <AdminFieldsPage />}
+        {view === 'admin-company-settings' && <AdminCompanySettingsPage />}
+      </AdminLayout>
+    );
+  }
 
   return (
     <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
@@ -233,65 +202,7 @@ export default function App() {
           }`}
         >
           <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-            {NAV.map((item, navIdx) => {
-              const isParent = !!item.children && item.children.length > 0;
-              if (isParent) {
-                const expanded = adminMenuOpen;
-                const hasActiveChild = item.children!.some((c) => c.key === view);
-                return (
-                  <div key={`group-${navIdx}`}>
-                    <button
-                      type="button"
-                      onClick={() => setAdminMenuOpen((v) => !v)}
-                      className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                        sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
-                      } ${
-                        hasActiveChild
-                          ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                          : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
-                      }`}
-                      title={item.label}
-                    >
-                      {item.icon}
-                      {sidebarExpanded && (
-                        <>
-                          <span className="flex-1 text-left">{item.label}</span>
-                          {expanded ? (
-                            <ChevronDown size={14} className="text-slate-400" />
-                          ) : (
-                            <ChevronRight size={14} className="text-slate-400" />
-                          )}
-                        </>
-                      )}
-                    </button>
-                    {sidebarExpanded && expanded && (
-                      <div className="mt-1 space-y-0.5 border-l border-slate-200 pl-3 ml-4 dark:border-ndark-border">
-                        {item.children!.map((child) => {
-                          const active = view === child.key;
-                          return (
-                            <button
-                              key={child.key}
-                              disabled={!child.available}
-                              onClick={() => child.available && handleNavSelect(child.key)}
-                              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors ${
-                                active
-                                  ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                                  : child.available
-                                    ? 'text-slate-600 hover:bg-slate-100 hover:text-slate-800 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text'
-                                    : 'cursor-not-allowed text-slate-400 dark:text-ndark-dim'
-                              }`}
-                            >
-                              <span className="text-slate-400 dark:text-ndark-dim">{child.icon}</span>
-                              <span className="flex-1 text-left">{child.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-
+            {NAV.map((item) => {
               const active = view === item.key || (isDetail && item.key === 'cases');
               return (
                 <button
@@ -321,6 +232,21 @@ export default function App() {
                 </button>
               );
             })}
+
+            {/* Yönetim girişi — yalnızca SystemAdmin görür */}
+            {user?.role === 'SystemAdmin' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('admin-categories')}
+                className={`mt-2 flex w-full items-center gap-2 rounded-md border-t border-slate-200 pt-3 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:border-ndark-border dark:text-ndark-text dark:hover:bg-ndark-card ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                }`}
+                title="Yönetim Paneli"
+              >
+                <Settings2 size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Yönetim</span>}
+              </button>
+            )}
           </nav>
 
         </aside>
@@ -343,15 +269,6 @@ export default function App() {
               onShowCustomer={(id) => setCustomerCardId(id)}
             />
           )}
-
-          {/* Admin views — Sprint A placeholder'ları, B-G'de gerçek bileşenlerle replace edilecek */}
-          {view === 'admin-categories' && <AdminCategoriesPage />}
-          {view === 'admin-sla' && <AdminSlaPage />}
-          {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
-          {view === 'admin-documents' && <AdminDocumentsPage />}
-          {view === 'admin-checklist' && <AdminChecklistPage />}
-          {view === 'admin-teams' && <AdminTeamsPage />}
-          {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
         </main>
       </div>
 

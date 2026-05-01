@@ -11,7 +11,7 @@ import { supabase } from './supabase';
  *  4. 401 dispatchEvent'inde session'ı sıfırla
  */
 
-export type UserRole = 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin';
+export type UserRole = 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin' | 'SystemAdmin';
 
 export interface AppUser {
   id: string;

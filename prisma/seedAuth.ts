@@ -39,6 +39,7 @@ const DEMO_USERS = [
   { email: 'supervisor@varuna.dev', fullName: 'Demo Supervisor', role: 'Supervisor' as const },
   { email: 'csm@varuna.dev',        fullName: 'Demo CSM',        role: 'CSM' as const },
   { email: 'admin@varuna.dev',      fullName: 'Demo Admin',      role: 'Admin' as const },
+  { email: 'sysadmin@varuna.dev',   fullName: 'Demo SysAdmin',   role: 'SystemAdmin' as const },
 ];
 
 async function findOrCreateAuthUser(email: string, fullName: string): Promise<string> {

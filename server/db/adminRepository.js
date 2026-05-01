@@ -451,4 +451,100 @@ export const offeredSolutionRepo = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────
+// Field Definitions (custom fields per company)
+// ─────────────────────────────────────────────────────────────────
+export const fieldDefinitionRepo = {
+  async list(companyId) {
+    const where = companyId ? { companyId } : {};
+    return prisma.fieldDefinition.findMany({
+      where,
+      orderBy: [{ companyId: 'asc' }, { displayOrder: 'asc' }, { label: 'asc' }],
+    });
+  },
+  async create(input) {
+    if (!input.companyId) throw new AdminError('companyId gerekli.');
+    if (!input.label?.trim()) throw new AdminError('label gerekli.');
+    if (!input.fieldKey?.trim()) throw new AdminError('fieldKey gerekli.');
+    const dup = await prisma.fieldDefinition.findFirst({
+      where: { companyId: input.companyId, fieldKey: input.fieldKey.trim() },
+    });
+    if (dup) throw new AdminError('Bu şirkette aynı fieldKey ile başka tanım var.');
+    return prisma.fieldDefinition.create({
+      data: {
+        companyId: input.companyId,
+        label: input.label.trim(),
+        fieldKey: input.fieldKey.trim(),
+        fieldType: input.fieldType,
+        caseType: input.caseType ?? null,
+        isRequired: input.isRequired ?? false,
+        displayOrder: input.displayOrder ?? 0,
+        options: input.options ?? null,
+        isActive: input.isActive ?? true,
+      },
+    });
+  },
+  async update(id, patch) {
+    if (patch.fieldKey) {
+      const cur = await prisma.fieldDefinition.findUnique({ where: { id } });
+      if (!cur) throw new AdminError('Tanım bulunamadı.');
+      const dup = await prisma.fieldDefinition.findFirst({
+        where: {
+          id: { not: id },
+          companyId: cur.companyId,
+          fieldKey: patch.fieldKey.trim(),
+        },
+      });
+      if (dup) throw new AdminError('Bu fieldKey aynı şirkette başka tanımda kullanılıyor.');
+    }
+    return prisma.fieldDefinition.update({
+      where: { id },
+      data: {
+        ...(patch.label !== undefined && { label: patch.label.trim() }),
+        ...(patch.fieldKey !== undefined && { fieldKey: patch.fieldKey.trim() }),
+        ...(patch.fieldType !== undefined && { fieldType: patch.fieldType }),
+        ...(patch.caseType !== undefined && { caseType: patch.caseType }),
+        ...(patch.isRequired !== undefined && { isRequired: patch.isRequired }),
+        ...(patch.displayOrder !== undefined && { displayOrder: patch.displayOrder }),
+        ...(patch.options !== undefined && { options: patch.options }),
+        ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+      },
+    });
+  },
+  async remove(id) {
+    // Vakaların customFields'ında kullanılıyor olabilir — pasifleştir, hard delete yok
+    return prisma.fieldDefinition.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Company Settings (1-1 with Company, upsert tabanlı)
+// ─────────────────────────────────────────────────────────────────
+export const companySettingsRepo = {
+  async get(companyId) {
+    return prisma.companySettings.findUnique({ where: { companyId } });
+  },
+  async upsert(companyId, patch) {
+    return prisma.companySettings.upsert({
+      where: { companyId },
+      update: {
+        ...(patch.logoUrl !== undefined && { logoUrl: patch.logoUrl }),
+        ...(patch.primaryColor !== undefined && { primaryColor: patch.primaryColor }),
+        ...(patch.appName !== undefined && { appName: patch.appName }),
+        ...(patch.supportEmail !== undefined && { supportEmail: patch.supportEmail }),
+      },
+      create: {
+        companyId,
+        logoUrl: patch.logoUrl ?? null,
+        primaryColor: patch.primaryColor ?? null,
+        appName: patch.appName ?? null,
+        supportEmail: patch.supportEmail ?? null,
+      },
+    });
+  },
+};
+
 export { AdminError };

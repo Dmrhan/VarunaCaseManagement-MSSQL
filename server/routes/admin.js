@@ -3,7 +3,9 @@ import {
   AdminError,
   categoryRepo,
   checklistRepo,
+  companySettingsRepo,
   documentTypeRepo,
+  fieldDefinitionRepo,
   offeredSolutionRepo,
   personRepo,
   slaPolicyRepo,
@@ -14,8 +16,9 @@ import { verifyJwt, requireRole } from '../db/auth.js';
 
 const router = Router();
 
-// Spec §13 — Tüm admin endpoint'leri sadece Admin rolüne açık.
-router.use(verifyJwt, requireRole('Admin'));
+// Tüm admin endpoint'leri sadece SystemAdmin rolüne açık.
+// Admin rolü §13 operasyonel akışlar için kalır (supervisor onayı vb.).
+router.use(verifyJwt, requireRole('SystemAdmin'));
 
 function asyncRoute(handler) {
   return async (req, res) => {
@@ -64,6 +67,38 @@ mountCrud('offered-solutions', offeredSolutionRepo);
 // ─────────────────────────────────────────────────────────────────
 // Categories — parent + sub ayrı endpoint'ler
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Field Definitions (Custom Fields)
+// ─────────────────────────────────────────────────────────────────
+router.get('/field-definitions', asyncRoute(async (req, res) => {
+  const items = await fieldDefinitionRepo.list(req.query.companyId);
+  res.json({ value: items });
+}));
+router.post('/field-definitions', asyncRoute(async (req, res) => {
+  const item = await fieldDefinitionRepo.create(req.body ?? {});
+  res.status(201).json(item);
+}));
+router.patch('/field-definitions/:id', asyncRoute(async (req, res) => {
+  const item = await fieldDefinitionRepo.update(req.params.id, req.body ?? {});
+  res.json(item);
+}));
+router.delete('/field-definitions/:id', asyncRoute(async (req, res) => {
+  const item = await fieldDefinitionRepo.remove(req.params.id);
+  res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Company Settings (per-company branding)
+// ─────────────────────────────────────────────────────────────────
+router.get('/company-settings/:companyId', asyncRoute(async (req, res) => {
+  const settings = await companySettingsRepo.get(req.params.companyId);
+  res.json(settings ?? null);
+}));
+router.put('/company-settings/:companyId', asyncRoute(async (req, res) => {
+  const item = await companySettingsRepo.upsert(req.params.companyId, req.body ?? {});
+  res.json(item);
+}));
+
 router.get('/categories', asyncRoute(async (_req, res) => {
   const items = await categoryRepo.list();
   res.json({ value: items });
