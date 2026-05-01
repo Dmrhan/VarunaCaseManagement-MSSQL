@@ -29,7 +29,6 @@ import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
 import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
 import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
-import { Badge } from './components/ui/Badge';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
@@ -174,7 +173,7 @@ export default function App() {
             <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
               VARUNA AI-Assisted Case Management
             </div>
-            <div className="text-[11px] text-slate-500 dark:text-ndark-muted">FAZ 0 — Mock UI</div>
+            <div className="text-[11px] text-slate-500 dark:text-ndark-muted">Vaka Yönetim Sistemi</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -186,7 +185,6 @@ export default function App() {
           >
             <Keyboard size={16} />
           </button>
-          <Badge tint="amber">USE_MOCK = true</Badge>
         </div>
       </header>
 
@@ -200,7 +198,7 @@ export default function App() {
             sidebarExpanded ? 'w-64 px-3' : 'w-16 px-2'
           }`}
         >
-          <nav className="flex-1 space-y-1">
+          <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {NAV.map((item, navIdx) => {
               const isParent = !!item.children && item.children.length > 0;
               if (isParent) {
