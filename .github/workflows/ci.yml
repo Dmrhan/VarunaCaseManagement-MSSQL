@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Type Check + Build + Schema Validate
+    runs-on: ubuntu-latest
+
+    env:
+      # Prisma validate ve client generate placeholder DATABASE_URL ile çalışır.
+      # Gerçek DB'ye bağlanmaz — sadece schema parse + type üretimi için.
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        # postinstall hook otomatik prisma generate çağırır → @prisma/client
+        # tipleri tsc'den önce hazır olur.
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: TypeScript type check
+        run: npx tsc -b
+
+      - name: Vite build
+        # Build script'i (`prisma migrate deploy && tsc -b && vite build`) CI'da
+        # DB'ye bağlanmaya çalışıyor. Burada sadece vite build'i çalıştırıyoruz —
+        # migration'lar Vercel deploy'ında uygulanır, type check + schema doğrulamasını
+        # önceki adımlarda yaptık.
+        run: npx vite build
