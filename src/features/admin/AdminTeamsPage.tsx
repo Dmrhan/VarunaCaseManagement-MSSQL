@@ -30,11 +30,21 @@ export function AdminTeamsPage() {
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [membersOf, setMembersOf] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function refresh() {
-    const list = await adminService.teams.list();
-    setTeams(list);
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await adminService.teams.list();
+      setTeams(list);
+    } catch (e) {
+      setError((e as Error).message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -115,6 +125,9 @@ export function AdminTeamsPage() {
         addLabel="Yeni Takım"
         helpTitle={TEAMS_HELP.title}
         helpSections={TEAMS_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         {filtered.length === 0 ? (
           <CardBody>

@@ -16,10 +16,20 @@ export function AdminOfferedSolutionsPage() {
   const [items, setItems] = useState<OfferedSolutionDef[]>([]);
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function refresh() {
-    setItems(await adminService.offeredSolutions.list());
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await adminService.offeredSolutions.list());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -78,6 +88,9 @@ export function AdminOfferedSolutionsPage() {
         addLabel="Yeni Teklif"
         helpTitle={OFFERED_SOLUTIONS_HELP.title}
         helpSections={OFFERED_SOLUTIONS_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         {filtered.length === 0 ? (
           <CardBody>

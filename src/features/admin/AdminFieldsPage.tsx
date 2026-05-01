@@ -32,11 +32,21 @@ export function AdminFieldsPage() {
   const [items, setItems] = useState<FieldDefinition[]>([]);
   const [filterCompany, setFilterCompany] = useState<string>('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const companies = useMemo(() => lookupService.companies(), []);
 
   async function refresh() {
-    setItems(await adminService.fieldDefinitions.list(filterCompany || undefined));
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await adminService.fieldDefinitions.list(filterCompany || undefined));
+    } catch (e) {
+      setError((e as Error).message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -77,6 +87,9 @@ export function AdminFieldsPage() {
         addLabel="Yeni Alan"
         helpTitle={FIELDS_HELP.title}
         helpSections={FIELDS_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         <div className="border-b border-slate-200 px-4 py-2 dark:border-ndark-border">
           <div className="flex items-center gap-2 text-xs">

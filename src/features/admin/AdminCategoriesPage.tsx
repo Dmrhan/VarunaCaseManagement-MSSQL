@@ -34,10 +34,20 @@ export function AdminCategoriesPage() {
     | { mode: 'edit'; categoryId: string; subId: string }
     | null
   >(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function refresh() {
-    setItems(await adminService.categories.list());
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await adminService.categories.list());
+    } catch (e) {
+      setError((e as Error).message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -157,6 +167,9 @@ export function AdminCategoriesPage() {
         addLabel="Yeni Kategori"
         helpTitle={CATEGORIES_HELP.title}
         helpSections={CATEGORIES_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         {filtered.length === 0 ? (
           <CardBody>

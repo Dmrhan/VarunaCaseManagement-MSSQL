@@ -186,7 +186,8 @@ function crud<T, I>(path: string) {
   return {
     async list(): Promise<T[]> {
       const data = await apiFetch<{ value: T[] }>(`${ADMIN_BASE}/${path}`, undefined, 'Liste yüklenemedi');
-      return data?.value ?? [];
+      if (!data) throw new Error('Liste yüklenemedi');
+      return data.value ?? [];
     },
     async get(id: string): Promise<T | undefined> {
       const list = await this.list();
@@ -287,7 +288,8 @@ export const adminService = {
         undefined,
         'Kategoriler yüklenemedi',
       );
-      return data?.value ?? [];
+      if (!data) throw new Error('Kategoriler yüklenemedi');
+      return data.value ?? [];
     },
     async get(id: string): Promise<CaseCategoryDef | undefined> {
       const list = await this.list();
@@ -443,7 +445,8 @@ export const adminService = {
         ? `${ADMIN_BASE}/field-definitions?companyId=${encodeURIComponent(companyId)}`
         : `${ADMIN_BASE}/field-definitions`;
       const data = await apiFetch<{ value: FieldDefinition[] }>(path, undefined, 'Dinamik alanlar yüklenemedi');
-      return data?.value ?? [];
+      if (!data) throw new Error('Dinamik alanlar yüklenemedi');
+      return data.value ?? [];
     },
     async create(input: FieldDefinitionInput): Promise<AdminResult<FieldDefinition>> {
       const item = await apiFetch<FieldDefinition>(

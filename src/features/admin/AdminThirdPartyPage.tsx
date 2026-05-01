@@ -16,10 +16,20 @@ export function AdminThirdPartyPage() {
   const [items, setItems] = useState<CaseThirdParty[]>([]);
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function refresh() {
-    setItems(await adminService.thirdParties.list());
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await adminService.thirdParties.list());
+    } catch (e) {
+      setError((e as Error).message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { void refresh(); }, []);
 
@@ -76,6 +86,9 @@ export function AdminThirdPartyPage() {
         addLabel="Yeni 3. Parti"
         helpTitle={THIRD_PARTY_HELP.title}
         helpSections={THIRD_PARTY_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         {filtered.length === 0 ? (
           <CardBody>

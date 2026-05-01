@@ -33,6 +33,8 @@ import { CHECKLIST_HELP } from './helpContents';
 
 export function AdminChecklistPage() {
   const [items, setItems] = useState<CaseChecklistTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tplEditor, setTplEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
@@ -44,7 +46,15 @@ export function AdminChecklistPage() {
   const { toast } = useToast();
 
   async function refresh() {
-    setItems(await adminService.checklists.list());
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await adminService.checklists.list());
+    } catch (e) {
+      setError((e as Error).message ?? 'Bilinmeyen hata');
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -158,6 +168,9 @@ export function AdminChecklistPage() {
         addLabel="Yeni Şablon"
         helpTitle={CHECKLIST_HELP.title}
         helpSections={CHECKLIST_HELP.sections}
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
       >
         {filtered.length === 0 ? (
           <CardBody>

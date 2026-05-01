@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { AlertCircle, Loader2, Plus, Search } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/Field';
@@ -26,6 +26,11 @@ interface AdminListLayoutProps {
   /** Yardım drawer'ı için içerik. Verilirse "? Yardım" butonu render edilir. */
   helpTitle?: string;
   helpSections?: HelpSection[];
+  /** Loading state — true iken children yerine skeleton gösterilir */
+  loading?: boolean;
+  /** Error state — set edilirse children yerine hata + retry butonu gösterilir */
+  error?: string | null;
+  onRetry?: () => void;
   /** Ana içerik — tablo, liste veya empty state */
   children: ReactNode;
 }
@@ -52,6 +57,9 @@ export function AdminListLayout({
   headerActions,
   helpTitle,
   helpSections,
+  loading = false,
+  error = null,
+  onRetry,
   children,
 }: AdminListLayoutProps) {
   const [helpOpen, setHelpOpen] = useState(false);
@@ -101,7 +109,13 @@ export function AdminListLayout({
               </div>
             </div>
           )}
-          {children}
+          {loading ? (
+            <ListLoadingSkeleton />
+          ) : error ? (
+            <ListErrorState message={error} onRetry={onRetry} />
+          ) : (
+            children
+          )}
         </Card>
       </div>
 
@@ -113,6 +127,49 @@ export function AdminListLayout({
           sections={helpSections!}
           onClose={() => setHelpOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+function ListLoadingSkeleton() {
+  return (
+    <div className="space-y-2 p-4">
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Loader2 size={14} className="animate-spin" />
+        <span>Yükleniyor…</span>
+      </div>
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="h-9 animate-pulse rounded-md bg-slate-100 dark:bg-ndark-bg/40"
+          style={{ animationDelay: `${i * 80}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ListErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-50 text-rose-600 ring-1 ring-rose-200">
+        <AlertCircle size={18} />
+      </div>
+      <div>
+        <div className="text-sm font-medium text-slate-800">Yüklenemedi</div>
+        <div className="mt-1 text-xs text-slate-500">{message}</div>
+      </div>
+      {onRetry && (
+        <Button size="sm" variant="outline" onClick={onRetry}>
+          Yeniden dene
+        </Button>
       )}
     </div>
   );

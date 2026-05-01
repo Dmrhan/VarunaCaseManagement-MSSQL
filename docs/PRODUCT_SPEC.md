@@ -243,5 +243,88 @@ v1.0 — Nisan 2025
 İlk versiyon oluşturuldu
 
 
-Son güncelleme: Nisan 2025 | Versiyon: 2.0
+Yeni Ekran Standartları (zorunlu kontrol listesi)
+
+Her yeni ekran (admin tanım, vaka tabı, dashboard widget, modal, drawer)
+canlıya alınmadan önce aşağıdaki 5 maddenin tamamını sağlamalıdır.
+Eksik olan ekran review'dan geçmez.
+
+1. Sayfa başlığı + açıklama
+   - Üstte tek satırlık başlık (sayfanın amacını net söyleyen).
+   - Altında 1-2 cümlelik kısa açıklama (kim, neden kullanır).
+   - Sayım gerektiren ekranlarda başlığın yanında count badge.
+
+2. Help dokümanı
+   - "?" ikonu ile açılan HelpDrawer (helpContents.ts içinde HelpContent objesi).
+   - 3 alt başlık zorunlu:
+       a) "Bu ekran ne işe yarar?" — net amaç tanımı
+       b) "Nasıl yapılandırılır / kullanılır?" — adım adım
+       c) Örnek kutu (example) — somut bir kullanım senaryosu
+   - Opsiyonel: tip (yeşil), warning (sarı), gotcha (kırmızı).
+   - Help olmayan ekran "tamamlanmamış" sayılır.
+
+3. Empty state
+   - Liste boşken (henüz veri yok / aramaya uyan kayıt yok) anlamlı mesaj.
+   - Empty state ikon + başlık + açıklama + (mümkünse) primary action.
+   - "Henüz X yok. İlk X'i oluşturarak başla." formatı tercih edilir.
+   - Bileşen: src/components/ui/EmptyState.tsx
+
+4. Error state
+   - Veri yüklemesi başarısızsa inline gösterim (toast yetmez).
+   - Bileşen: ListErrorState (AdminListLayout) veya benzeri inline kart.
+   - Mesaj + "Yeniden dene" butonu.
+   - Toast ek olarak çıkar (apiFetch otomatik) ama ekranın kendisi de
+     hatayı yansıtmalı, "boş gibi" görünmemeli.
+
+5. Loading state
+   - İlk yükleme sırasında skeleton veya spinner.
+   - Boş listeyle karıştırılamaz — kullanıcı "veri yok" sanmamalı.
+   - Mutation sırasında ilgili buton disabled + spinner ikonu.
+   - Bileşen: ListLoadingSkeleton (AdminListLayout) veya Loader2 (lucide).
+
+Wiring pattern (admin liste ekranları için kanonik):
+
+```tsx
+const [items, setItems] = useState<T[]>([]);
+const [loading, setLoading] = useState(true);
+const [error, setError] = useState<string | null>(null);
+
+async function refresh() {
+  setLoading(true);
+  setError(null);
+  try {
+    setItems(await adminService.X.list());
+  } catch (e) {
+    setError((e as Error).message ?? 'Bilinmeyen hata');
+  } finally {
+    setLoading(false);
+  }
+}
+useEffect(() => { void refresh(); }, []);
+
+return (
+  <AdminListLayout
+    title="..."
+    description="..."
+    helpTitle={X_HELP.title}
+    helpSections={X_HELP.sections}
+    loading={loading}
+    error={error}
+    onRetry={() => void refresh()}
+    ...
+  >
+    {items.length === 0 ? <EmptyState ... /> : <table>...</table>}
+  </AdminListLayout>
+);
+```
+
+Bu pattern AdminListLayout kullanan tüm ekranlara uygulandı (FAZ 2 sonu).
+Custom layout kullanan ekranlar (örn. AdminCompanySettingsPage form ekranı)
+HelpButton + HelpDrawer'ı manuel telleyip aynı 5 kuralı sağlamalı.
+
+Yeni özellik geliştirmeye başlamadan önce bu listeyi kontrol et — sonradan
+eklemek 3-5 kat daha pahalı.
+
+
+Son güncelleme: Mayıs 2026 | Versiyon: 2.1
 Bu dosya değiştirildiğinde Claude Code'a yeni oturumda bildir.
