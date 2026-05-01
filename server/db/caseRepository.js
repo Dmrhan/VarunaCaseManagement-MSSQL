@@ -16,10 +16,11 @@ import crypto from 'node:crypto';
  */
 
 // Frontend Case shape'i tek bir SELECT'te hazırla — ilişkili tabloları include et
+// History desc: yeni en üstte (uzun yaşayan vakada scroll etmeden son durumu gör)
 const CASE_INCLUDE = {
   notes:        { orderBy: { createdAt: 'desc' } },
   attachments:  { orderBy: { uploadedAt: 'desc' } },
-  history:      { orderBy: { at: 'asc' } },
+  history:      { orderBy: { at: 'desc' } },
   callLogs:     { orderBy: { callDate: 'desc' } },
 };
 

@@ -67,6 +67,7 @@ import {
   type CallOutcome,
   type Case,
   type CaseFile,
+  type CaseHistoryActionType,
   type EscalationLevel,
   type NoteVisibility,
 } from './types';
@@ -2216,10 +2217,86 @@ function InlineEdit({
   );
 }
 
+type ActivityFilter = 'all' | 'status' | 'assign' | 'files' | 'notes' | 'calls' | 'fields' | 'checklist';
+
+const ACTIVITY_FILTERS: { key: ActivityFilter; label: string; types: CaseHistoryActionType[] }[] = [
+  { key: 'all',       label: 'Hepsi',     types: [] },
+  { key: 'status',    label: 'Statü',     types: ['StatusChange', 'CaseCreated', 'SLAApplied'] },
+  { key: 'assign',    label: 'Atama',     types: ['Transfer'] },
+  { key: 'files',     label: 'Dosya',     types: ['FileUploaded', 'FileRemoved'] },
+  { key: 'notes',     label: 'Not',       types: ['NoteAdded'] },
+  { key: 'calls',     label: 'Çağrı',     types: ['CallLogAdded'] },
+  { key: 'fields',    label: 'Alan',      types: ['FieldUpdate'] },
+  { key: 'checklist', label: 'Kontrol',   types: ['ChecklistToggle'] },
+];
+
 function ActivityTab({ item }: { item: Case }) {
+  const [filter, setFilter] = useState<ActivityFilter>('all');
+
+  // Her filtre için sayım — chip'in yanında badge olarak gösterilir
+  const counts = useMemo(() => {
+    const map: Record<ActivityFilter, number> = {
+      all: item.history.length, status: 0, assign: 0, files: 0,
+      notes: 0, calls: 0, fields: 0, checklist: 0,
+    };
+    for (const h of item.history) {
+      for (const f of ACTIVITY_FILTERS) {
+        if (f.key === 'all') continue;
+        if (h.actionType && f.types.includes(h.actionType)) map[f.key]++;
+      }
+    }
+    return map;
+  }, [item.history]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return item.history;
+    const def = ACTIVITY_FILTERS.find((f) => f.key === filter);
+    if (!def) return item.history;
+    return item.history.filter((h) => h.actionType && def.types.includes(h.actionType));
+  }, [item.history, filter]);
+
   return (
-    <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
-      {item.history.map((h) => {
+    <div className="space-y-3">
+      {/* Filtre chip'leri — her birinin sayım rozeti var, sıfır olan gri */}
+      <div className="flex flex-wrap gap-1.5">
+        {ACTIVITY_FILTERS.map((f) => {
+          const n = counts[f.key];
+          const isActive = filter === f.key;
+          const isDisabled = n === 0 && f.key !== 'all';
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => !isDisabled && setFilter(f.key)}
+              disabled={isDisabled}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+                isActive
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : isDisabled
+                    ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              {f.label}
+              <span
+                className={`rounded-full px-1.5 py-0 text-[10px] ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-500'
+                }`}
+              >
+                {n}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="py-8 text-center text-sm text-slate-500">
+          Bu filtreyle eşleşen kayıt yok.
+        </p>
+      ) : (
+        <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
+          {filtered.map((h) => {
         // Dosya yüklendi/silindi — özel render: kâğıt ikonu, dosya adı vurgulu.
         if (h.actionType === 'FileUploaded' || h.actionType === 'FileRemoved') {
           const isUpload = h.actionType === 'FileUploaded';
@@ -2320,8 +2397,10 @@ function ActivityTab({ item }: { item: Case }) {
             </div>
           </li>
         );
-      })}
-    </ol>
+          })}
+        </ol>
+      )}
+    </div>
   );
 }
 
