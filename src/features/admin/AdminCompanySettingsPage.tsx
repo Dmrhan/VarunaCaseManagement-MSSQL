@@ -3,8 +3,10 @@ import { Building2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextInput } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { HelpButton, HelpDrawer } from '@/components/ui/HelpDrawer';
 import { adminService, type CompanySettings, type CompanySettingsInput } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
+import { COMPANY_SETTINGS_HELP } from './helpContents';
 
 /**
  * Şirket bazında marka/yapılandırma ayarları.
@@ -21,6 +23,7 @@ export function AdminCompanySettingsPage() {
   });
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -57,15 +60,24 @@ export function AdminCompanySettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <Building2 size={18} className="text-slate-500" />
-        <h1 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
-          Şirket Ayarları
-        </h1>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Building2 size={18} className="text-slate-500" />
+          <h1 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
+            Şirket Ayarları
+          </h1>
+        </div>
+        <HelpButton onClick={() => setHelpOpen(true)} active={helpOpen} />
       </div>
       <p className="text-sm text-slate-500 dark:text-ndark-muted">
         Seçili şirket için marka kimliği, destek e-postası ve renk paleti.
       </p>
+      <HelpDrawer
+        open={helpOpen}
+        title={COMPANY_SETTINGS_HELP.title}
+        sections={COMPANY_SETTINGS_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+      />
 
       <div className="max-w-xl space-y-4 rounded-lg bg-white p-6 ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
         <Field label="Şirket" required>

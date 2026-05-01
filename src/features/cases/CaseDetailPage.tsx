@@ -1678,7 +1678,7 @@ function CustomFieldsCaseSection({
   }
 
   return (
-    <Section title="Ek Alanlar" tint="default">
+    <Section title="Dinamik Alanlar" tint="default">
       <div className="space-y-3 px-3 py-3">
         {defs.map((def) => (
           <CustomFieldRenderer

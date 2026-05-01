@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/Toast';
 import { adminService, type FieldDefinition, type FieldDefinitionInput, type FieldType } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
 import { AdminListLayout } from './AdminListLayout';
+import { FIELDS_HELP } from './helpContents';
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: 'Text',     label: 'Metin (kısa)' },
@@ -55,7 +56,7 @@ export function AdminFieldsPage() {
   }
 
   async function handleDelete(item: FieldDefinition) {
-    if (!window.confirm(`"${item.label}" custom field pasifleştirilsin mi? (Kullanılmış kayıtlardaki veri korunur.)`)) return;
+    if (!window.confirm(`"${item.label}" dinamik alan pasifleştirilsin mi? (Kullanılmış kayıtlardaki veri korunur.)`)) return;
     const r = await adminService.fieldDefinitions.remove(item.id);
     if (r.ok) {
       await refresh();
@@ -66,14 +67,16 @@ export function AdminFieldsPage() {
   return (
     <>
       <AdminListLayout
-        title="Custom Fields"
-        description="Şirket bazında vakalara dinamik olarak eklenecek alanları tanımla. Vaka açma formunda otomatik görünür."
+        title="Dinamik Alanlar"
+        description="Şirket bazında vakalara eklenecek özel alanları tanımla. Vaka açma formunda ve detayında otomatik görünür."
         count={items.length}
         searchPlaceholder=""
         searchValue=""
         onSearchChange={() => {}}
         onAdd={() => setEditor({ mode: 'create' })}
         addLabel="Yeni Alan"
+        helpTitle={FIELDS_HELP.title}
+        helpSections={FIELDS_HELP.sections}
       >
         <div className="border-b border-slate-200 px-4 py-2 dark:border-ndark-border">
           <div className="flex items-center gap-2 text-xs">
@@ -301,7 +304,7 @@ function FieldEditModal({
       open={open}
       onClose={onClose}
       size="md"
-      title={mode === 'create' ? 'Yeni Custom Field' : 'Custom Field Düzenle'}
+      title={mode === 'create' ? 'Yeni Dinamik Alan' : 'Dinamik Alanı Düzenle'}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>Vazgeç</Button>

@@ -189,3 +189,86 @@ export const OFFERED_SOLUTIONS_HELP: HelpContent = {
     },
   ],
 };
+
+export const FIELDS_HELP: HelpContent = {
+  title: 'Dinamik Alanlar',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Şirket bazında vakalara eklenecek özel alanları tanımla. Tanımlanan alanlar yeni vaka açma formunda ve vaka detayında otomatik olarak görünür ve düzenlenebilir.',
+    },
+    {
+      heading: 'Alan tipi seçenekleri',
+      content:
+        'Doğru tip seçimi formdaki davranışı belirler. Yanlış tip seçilirse veri tutarsız olur.',
+      example: `Metin (kısa)    → tek satır metin (örn. "Şube Kodu")
+Metin (uzun)    → çok satır textarea
+Sayı            → numerik değer (örn. "Tahmini Tutar")
+Tarih           → takvim seçici (örn. "Sözleşme Bitiş")
+Seçim listesi   → dropdown (örn. "Müşteri Segmenti")
+Evet/Hayır      → checkbox`,
+    },
+    {
+      heading: 'Field Key vs Etiket',
+      content:
+        'Etiket kullanıcının gördüğü ad. Field Key DB\'ye kaydedilen anahtar — değiştirilirse o anahtarla yazılmış mevcut veri görünmez olur. İlk tanımlamada doğru seçin.',
+      example: `Etiket    : "Müşteri Segmenti"
+Field Key : "customer_segment"`,
+      warning:
+        'Field Key oluşturduktan sonra değiştirmeyin. Değiştirirseniz eski vakalarda alan boş görünür (veri kaybolmuş gibi).',
+    },
+    {
+      heading: 'Vaka tipi filtresi',
+      content:
+        'Bir alanı yalnızca belirli vaka tiplerinde (Genel Destek / Proaktif Takip / Churn) göstermek istersen bu filtreyi kullan. "Tüm vaka tipleri" seçilirse her formda görünür.',
+    },
+    {
+      heading: 'Sıra ve zorunluluk',
+      content:
+        'Display Order küçükten büyüğe sıralar — formda yukarıdan aşağıya bu sıraya göre çıkar. Zorunlu işaretli alanlar boş bırakılırsa vaka kaydedilmez.',
+      tip:
+        'Aynı şirkette aynı Field Key ile iki tanım olamaz. Farklı şirketlerde aynı key kullanılabilir.',
+    },
+    {
+      heading: 'Pasifleştirme / silme',
+      content:
+        'Sil butonu hard delete yapmaz — alanı pasifleştirir. Yeni vakalarda görünmez, ama mevcut vakalardaki değerler DB\'de korunur. Tamamen silinmesi istenirse Supabase Dashboard\'dan manuel.',
+    },
+  ],
+};
+
+export const COMPANY_SETTINGS_HELP: HelpContent = {
+  title: 'Şirket Ayarları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Her şirket için marka kimliği ve operasyonel yapılandırma. Logo, accent renk ve uygulama adı şirket bazında özelleştirilir; çok kiracılı (multi-tenant) görsel ayrım sağlar.',
+    },
+    {
+      heading: 'Birincil renk',
+      content:
+        'Buton, link, vurgu rengi olarak kullanılır. Hex formatında girin (#7C3AED, #14B8A6 vb.). Aktif şirket değişince UI accent rengi otomatik güncellenir.',
+      example: `PARAM    → #1E40AF (mavi)
+UNIVERA  → #D97706 (amber)
+FINROTA  → #059669 (emerald)`,
+    },
+    {
+      heading: 'Logo URL',
+      content:
+        'Şu an dış URL kabul ediyor (örn. CDN linki). İlerleyen sürümde Supabase Storage upload\'ı eklenecek — dosyayı doğrudan buradan yükleyebileceksin.',
+      tip: 'PNG veya SVG, kare oran (örn. 64×64), şeffaf arka plan önerilir.',
+    },
+    {
+      heading: 'Destek e-postası',
+      content:
+        'Müşteriye giden vaka bildirimi mail\'lerinde "From" adresi olarak görünecek. Bu e-postanın Resend\'da doğrulanmış olması gerekir (FAZ 2 — bildirim sistemi).',
+    },
+    {
+      heading: 'Uygulama adı',
+      content:
+        'Aktif şirketin header\'ında "VARUNA" yerine bu ad görünür (örn. "PARAM Vaka Yönetim"). Boş bırakılırsa default "VARUNA" kullanılır.',
+    },
+  ],
+};

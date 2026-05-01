@@ -442,14 +442,14 @@ export const adminService = {
       const path = companyId
         ? `${ADMIN_BASE}/field-definitions?companyId=${encodeURIComponent(companyId)}`
         : `${ADMIN_BASE}/field-definitions`;
-      const data = await apiFetch<{ value: FieldDefinition[] }>(path, undefined, 'Custom Fields yüklenemedi');
+      const data = await apiFetch<{ value: FieldDefinition[] }>(path, undefined, 'Dinamik alanlar yüklenemedi');
       return data?.value ?? [];
     },
     async create(input: FieldDefinitionInput): Promise<AdminResult<FieldDefinition>> {
       const item = await apiFetch<FieldDefinition>(
         `${ADMIN_BASE}/field-definitions`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
-        'Custom Field oluşturulamadı',
+        'Dinamik alan oluşturulamadı',
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       await refreshBootstrap();
@@ -459,7 +459,7 @@ export const adminService = {
       const item = await apiFetch<FieldDefinition>(
         `${ADMIN_BASE}/field-definitions/${id}`,
         { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
-        'Custom Field güncellenemedi',
+        'Dinamik alan güncellenemedi',
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       await refreshBootstrap();
@@ -472,7 +472,7 @@ export const adminService = {
       const result = await apiFetch<FieldDefinition>(
         `${ADMIN_BASE}/field-definitions/${id}`,
         { method: 'DELETE' },
-        'Custom Field silinemedi',
+        'Dinamik alan silinemedi',
       );
       if (!result) return { ok: false, error: 'Sunucu hatası' };
       await refreshBootstrap();

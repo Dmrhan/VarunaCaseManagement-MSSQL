@@ -70,7 +70,7 @@ const NAV: NavGroup[] = [
   {
     label: 'Yapılandırma',
     items: [
-      { key: 'admin-fields', label: 'Custom Fields', icon: <Sliders size={14} /> },
+      { key: 'admin-fields', label: 'Dinamik Alanlar', icon: <Sliders size={14} /> },
     ],
   },
   {

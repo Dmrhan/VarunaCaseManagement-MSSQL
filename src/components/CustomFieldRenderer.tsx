@@ -144,7 +144,7 @@ export function CustomFieldsSection({
   return (
     <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50/50 p-3 dark:border-ndark-border dark:bg-ndark-card/40">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-ndark-muted">
-        Ek Alanlar
+        Dinamik Alanlar
       </div>
       {applicable.map((def) => (
         <CustomFieldRenderer
