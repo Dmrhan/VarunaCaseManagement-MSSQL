@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { caseRepository } from '../db/caseRepository.js';
+import { verifyJwt } from '../db/auth.js';
 
 const router = Router();
+
+// Spec §13 — Tüm case endpoint'leri auth gerekli. Rol-spesifik kısıtlar
+// (örn. iptal için Supervisor) ileri sprint'te eklenir.
+router.use(verifyJwt);
 
 /**
  * Hata wrapper'ı — async route'lardaki throw'ları 500'e çevirir.

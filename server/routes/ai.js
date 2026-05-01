@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
+import { verifyJwt } from '../db/auth.js';
 
 const router = Router();
+
+router.use(verifyJwt);
 
 const MODEL = 'gpt-4o-mini';
 const MAX_TOKENS = 1000;

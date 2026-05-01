@@ -36,9 +36,13 @@ async function postJson<T>(
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   console.log(`[ai] → POST ${API_BASE}${path}`);
   try {
+    const { getAccessToken } = await import('./supabase');
+    const token = await getAccessToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
     const r = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });

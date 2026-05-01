@@ -15,6 +15,7 @@ import {
   Tag,
   Timer,
   Users2,
+  LogOut,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
@@ -32,6 +33,7 @@ import { Badge } from './components/ui/Badge';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
+import { useAuth } from './services/AuthContext';
 
 type AdminView =
   | 'admin-categories'
@@ -98,6 +100,7 @@ export default function App() {
   }, [view]);
 
   const { theme, toggle: toggleTheme } = useTheme();
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     try {
@@ -287,6 +290,46 @@ export default function App() {
               );
             })}
           </nav>
+
+          {/* Kullanıcı kartı + logout */}
+          {user && (
+            <div className="mt-2 border-t border-slate-200 pt-2 dark:border-ndark-border">
+              {sidebarExpanded ? (
+                <div className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                      {user.fullName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-slate-800 dark:text-ndark-text">
+                        {user.fullName}
+                      </div>
+                      <div className="truncate text-[10px] text-slate-500 dark:text-ndark-muted">
+                        {user.role}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void signOut()}
+                      title="Çıkış Yap"
+                      className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
+                    >
+                      <LogOut size={14} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  title={`${user.fullName} (${user.role}) — Çıkış Yap`}
+                  className="flex h-10 w-full items-center justify-center text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
+                >
+                  <LogOut size={16} />
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Theme toggle — sidebar'ın altında, hover-expand ile etkileşimli */}
           <div className="mt-2 border-t border-slate-200 pt-2 dark:border-ndark-border">

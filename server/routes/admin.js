@@ -10,8 +10,12 @@ import {
   teamRepo,
   thirdPartyRepo,
 } from '../db/adminRepository.js';
+import { verifyJwt, requireRole } from '../db/auth.js';
 
 const router = Router();
+
+// Spec §13 — Tüm admin endpoint'leri sadece Admin rolüne açık.
+router.use(verifyJwt, requireRole('Admin'));
 
 function asyncRoute(handler) {
   return async (req, res) => {

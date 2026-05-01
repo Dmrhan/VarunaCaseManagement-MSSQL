@@ -12,6 +12,7 @@ import {
   MOCK_THIRD_PARTIES,
 } from '@/mocks/caseMockData';
 import { getBootstrap } from '@/services/lookupBootstrap';
+import { getAccessToken } from '@/services/supabase';
 import { notify } from '@/components/ui/Toast';
 
 // History entry'leri için insan-okur değer formatlayıcı
@@ -130,9 +131,17 @@ export async function apiFetch<T = unknown>(
   init?: RequestInit,
   errorContext = 'İşlem',
 ): Promise<T | undefined> {
+  // Auth: aktif Supabase oturumundan access token'ı çek, Authorization header'a ekle
+  const token = await getAccessToken();
+  const headers = new Headers(init?.headers);
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  const finalInit: RequestInit = { ...init, headers };
+
   let r: Response;
   try {
-    r = await fetch(path, init);
+    r = await fetch(path, finalInit);
   } catch (err) {
     notify({
       type: 'error',
@@ -154,6 +163,10 @@ export async function apiFetch<T = unknown>(
       } catch {
         // sessiz: hiçbir gövde yok
       }
+    }
+    // 401: oturum geçersiz → AuthContext dinleyicileri haberdar olsun
+    if (r.status === 401) {
+      window.dispatchEvent(new CustomEvent('app:unauthenticated'));
     }
     notify({
       type: 'error',

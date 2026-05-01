@@ -4,6 +4,7 @@ import casesRouter from './routes/cases.js';
 import aiRouter from './routes/ai.js';
 import lookupsRouter from './routes/lookups.js';
 import adminRouter from './routes/admin.js';
+import authRouter from './routes/auth.js';
 
 /**
  * Express app factory — listen yok.
@@ -28,6 +29,7 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+app.use('/api/auth', authRouter);
 app.use('/api/cases', casesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/lookups', lookupsRouter);

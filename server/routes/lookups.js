@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { lookupRepository } from '../db/lookupRepository.js';
+import { verifyJwt } from '../db/auth.js';
 
 const router = Router();
+
+router.use(verifyJwt);
 
 /**
  * GET /api/lookups/bootstrap

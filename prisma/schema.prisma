@@ -159,9 +159,33 @@ enum NotificationChannel {
   SMS
 }
 
+// Spec §13 — 5 rol yetki matrisi
+enum UserRole {
+  Agent
+  Backoffice
+  Supervisor
+  CSM
+  Admin
+}
+
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
+
+// Spec §13 — Auth + RBAC.
+// id = Supabase Auth user UUID (sync). email Supabase ile sync.
+// Person ile ayrı: Person operasyonel kayıt (vaka atama hedefi),
+// User auth kimliği. personId opsiyonel FK ile bağlanabilir.
+model User {
+  id        String   @id // Supabase Auth UUID
+  email     String   @unique
+  fullName  String
+  role      UserRole @default(Agent)
+  isActive  Boolean  @default(true)
+  personId  String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
 model Company {
   id        String   @id @default(cuid())

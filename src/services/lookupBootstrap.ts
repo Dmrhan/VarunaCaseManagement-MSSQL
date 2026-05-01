@@ -21,6 +21,7 @@ import type {
   CaseChecklistTemplate,
 } from '@/features/cases/types';
 import type { CaseAccount } from '@/mocks/caseMockData';
+import { getAccessToken } from './supabase';
 
 interface CategoryShape {
   id: string;
@@ -54,16 +55,18 @@ export async function loadBootstrap(options?: { force?: boolean }): Promise<Boot
   if (cache) return cache;
   if (inflight) return inflight;
 
-  inflight = fetch('/api/lookups/bootstrap')
-    .then(async (r) => {
-      if (!r.ok) throw new Error(`Bootstrap başarısız: ${r.status}`);
-      const data = (await r.json()) as BootstrapData;
-      cache = data;
-      return data;
-    })
-    .finally(() => {
-      inflight = null;
+  inflight = (async () => {
+    const token = await getAccessToken();
+    const r = await fetch('/api/lookups/bootstrap', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+    if (!r.ok) throw new Error(`Bootstrap başarısız: ${r.status}`);
+    const data = (await r.json()) as BootstrapData;
+    cache = data;
+    return data;
+  })().finally(() => {
+    inflight = null;
+  });
 
   return inflight;
 }
