@@ -9,6 +9,7 @@
     "dev:server": "node --watch --env-file-if-exists=.env server/index.js",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
