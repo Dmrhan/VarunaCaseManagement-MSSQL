@@ -176,7 +176,7 @@ export default function App() {
             <div className="text-[11px] text-slate-500 dark:text-ndark-muted">Vaka Yönetim Sistemi</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
@@ -185,6 +185,40 @@ export default function App() {
           >
             <Keyboard size={16} />
           </button>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Açık moda geç' : 'Koyu moda geç'}
+            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          {user && (
+            <>
+              <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-ndark-border" />
+              <div className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                  {user.fullName.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="hidden text-right md:block">
+                  <div className="text-xs font-medium leading-tight text-slate-800 dark:text-ndark-text">
+                    {user.fullName}
+                  </div>
+                  <div className="text-[10px] leading-tight text-slate-500 dark:text-ndark-muted">
+                    {user.role}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                title="Çıkış Yap"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:text-ndark-muted dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
+              >
+                <LogOut size={16} />
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -289,65 +323,6 @@ export default function App() {
             })}
           </nav>
 
-          {/* Kullanıcı kartı + logout */}
-          {user && (
-            <div className="mt-2 border-t border-slate-200 pt-2 dark:border-ndark-border">
-              {sidebarExpanded ? (
-                <div className="px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-                      {user.fullName.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium text-slate-800 dark:text-ndark-text">
-                        {user.fullName}
-                      </div>
-                      <div className="truncate text-[10px] text-slate-500 dark:text-ndark-muted">
-                        {user.role}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void signOut()}
-                      title="Çıkış Yap"
-                      className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
-                    >
-                      <LogOut size={14} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void signOut()}
-                  title={`${user.fullName} (${user.role}) — Çıkış Yap`}
-                  className="flex h-10 w-full items-center justify-center text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
-                >
-                  <LogOut size={16} />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Theme toggle — sidebar'ın altında, hover-expand ile etkileşimli */}
-          <div className="mt-2 border-t border-slate-200 pt-2 dark:border-ndark-border">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Açık moda geç' : 'Koyu moda geç'}
-              aria-label={theme === 'dark' ? 'Açık moda geç' : 'Koyu moda geç'}
-              className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text ${
-                sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
-              }`}
-            >
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-              {sidebarExpanded && (
-                <span className="flex-1 text-left">
-                  {theme === 'dark' ? 'Açık Mod' : 'Koyu Mod'}
-                </span>
-              )}
-            </button>
-          </div>
         </aside>
 
         <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'flex-1 px-6 py-6'}>
