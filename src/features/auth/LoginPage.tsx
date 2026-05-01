@@ -134,6 +134,12 @@ export function LoginPage() {
                 disabled={isLoading}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoading) {
+                    e.preventDefault();
+                    void handleSubmit(e);
+                  }
+                }}
                 placeholder="ornek@firma.com"
                 className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#7C3AED] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
               />
@@ -154,6 +160,12 @@ export function LoginPage() {
                 disabled={isLoading}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoading) {
+                    e.preventDefault();
+                    void handleSubmit(e);
+                  }
+                }}
                 placeholder="••••••••"
                 className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#7C3AED] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
               />
