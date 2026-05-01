@@ -144,11 +144,16 @@ async function main() {
   for (const a of MOCK_ACCOUNTS) {
     await prisma.account.upsert({
       where: { id: a.id },
-      update: { name: a.name, companyId: a.companyId },
+      update: {
+        name: a.name,
+        phone: a.phone,
+        email: a.email ?? null,
+      },
       create: {
         id: a.id,
         name: a.name,
-        companyId: a.companyId,
+        phone: a.phone,
+        email: a.email ?? null,
         isActive: true,
       },
     });

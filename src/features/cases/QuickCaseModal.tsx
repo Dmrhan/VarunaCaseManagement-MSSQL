@@ -71,11 +71,12 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
   const filteredAccounts = useMemo(() => {
     const q = accountQuery.trim().toLowerCase();
     if (!q) return accounts;
+    const qNoSpace = q.replace(/\s/g, '');
     return accounts.filter(
       (a) =>
         a.name.toLowerCase().includes(q) ||
         a.id.toLowerCase().includes(q) ||
-        a.phone.replace(/\s/g, '').includes(q.replace(/\s/g, '')),
+        (a.phone ?? '').replace(/\s/g, '').includes(qNoSpace),
     );
   }, [accounts, accountQuery]);
 

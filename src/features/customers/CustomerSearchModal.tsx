@@ -67,13 +67,13 @@ export function CustomerSearchModal({ open, onClose, onShowCase, onNewCase }: Cu
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return accounts;
-    const norm = (s: string) => s.replace(/\s/g, '').toLowerCase();
+    const norm = (s: string | null | undefined) => (s ?? '').replace(/\s/g, '').toLowerCase();
     return accounts.filter((a) => {
       const phoneNorm = norm(a.phone);
       return (
         a.name.toLowerCase().includes(q) ||
         a.id.toLowerCase().includes(q) ||
-        phoneNorm.includes(norm(q)) ||
+        (phoneNorm && phoneNorm.includes(norm(q))) ||
         (a.contactPerson && a.contactPerson.toLowerCase().includes(q)) ||
         (a.email && a.email.toLowerCase().includes(q))
       );
