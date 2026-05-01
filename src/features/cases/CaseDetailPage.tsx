@@ -2220,6 +2220,48 @@ function ActivityTab({ item }: { item: Case }) {
   return (
     <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
       {item.history.map((h) => {
+        // Dosya yüklendi/silindi — özel render: kâğıt ikonu, dosya adı vurgulu.
+        if (h.actionType === 'FileUploaded' || h.actionType === 'FileRemoved') {
+          const isUpload = h.actionType === 'FileUploaded';
+          const fileName = isUpload ? h.toValue : h.fromValue;
+          return (
+            <li key={h.id} className="relative">
+              <span
+                className={`absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full ring-4 ring-white ${
+                  isUpload ? 'bg-blue-500' : 'bg-rose-500'
+                }`}
+              />
+              <div
+                className={`rounded-md border px-3 py-2 ${
+                  isUpload ? 'border-blue-200 bg-blue-50/60' : 'border-rose-200 bg-rose-50/60'
+                }`}
+              >
+                <div className="flex flex-wrap items-baseline gap-x-1.5 text-sm">
+                  <Paperclip size={12} className={isUpload ? 'text-blue-700' : 'text-rose-700'} />
+                  <span className={`font-medium ${isUpload ? 'text-blue-900' : 'text-rose-900'}`}>
+                    {isUpload ? 'Dosya yüklendi:' : 'Dosya silindi:'}
+                  </span>
+                  <span
+                    className={
+                      isUpload
+                        ? 'font-semibold text-slate-800'
+                        : 'text-slate-700 line-through decoration-slate-300'
+                    }
+                  >
+                    {fileName ?? '—'}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <Calendar size={11} />
+                  <span>{formatDateTime(h.at)}</span>
+                  <span>·</span>
+                  <span>{h.actor}</span>
+                </div>
+              </div>
+            </li>
+          );
+        }
+
         // Transfer aksiyonları için amber-tint custom render — diğer log'lardan ayrışsın.
         if (h.actionType === 'Transfer') {
           return (
