@@ -2402,15 +2402,6 @@ function FilesTab({
   const remainingSlots = CASE_FILE_MAX_COUNT - item.files.length;
   const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
 
-  async function readAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function uploadFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (list.length === 0) return;
@@ -2436,13 +2427,8 @@ function FilesTab({
     let lastCase: Case | null = null;
     let successCount = 0;
     for (const file of list) {
-      const dataUrl = await readAsDataUrl(file);
-      const result = await caseService.addFile(item.id, {
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type || 'application/octet-stream',
-        dataUrl,
-      });
+      // FAZ 2: caseService.addFile File nesnesi alır, signed URL ile direct upload yapar
+      const result = await caseService.addFile(item.id, file);
       if (!result) continue;
       if ('error' in result) {
         toast({ type: 'error', message: result.error });
@@ -2559,16 +2545,14 @@ function FilesTab({
               <span className="hidden text-xs text-slate-500 md:inline">
                 {formatDateTime(f.uploadedAt)}
               </span>
-              {f.dataUrl && (
-                <a
-                  href={f.dataUrl}
-                  download={f.fileName}
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
-                  title="İndir"
-                >
-                  <Download size={12} />
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={() => void caseService.downloadFile(item.id, f.id)}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                title="İndir"
+              >
+                <Download size={12} />
+              </button>
               <button
                 type="button"
                 onClick={() => handleRemove(f)}

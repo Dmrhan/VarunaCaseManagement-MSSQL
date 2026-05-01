@@ -32,10 +32,13 @@ export function AdminTeamsPage() {
   const [membersOf, setMembersOf] = useState<string | null>(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setTeams(adminService.teams.list());
+  async function refresh() {
+    const list = await adminService.teams.list();
+    setTeams(list);
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -47,9 +50,9 @@ export function AdminTeamsPage() {
     );
   }, [teams, search]);
 
-  function handleToggleActive(team: CaseTeam) {
+  async function handleToggleActive(team: CaseTeam) {
     if (team.isActive) {
-      const open = adminService.teams.usage(team.id).openCases;
+      const open = adminService.teams.usage(team.id).openCount;
       if (open > 0) {
         const ok = window.confirm(
           `"${team.name}" takımında ${open} açık vaka var. Pasifleştirilirse yeni vaka geçişlerinde dropdown'da görünmez (mevcut vakalardaki ad korunur). Devam edilsin mi?`,
@@ -57,9 +60,9 @@ export function AdminTeamsPage() {
         if (!ok) return;
       }
     }
-    const r = adminService.teams.setActive(team.id, !team.isActive);
+    const r = await adminService.teams.setActive(team.id, !team.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -70,7 +73,7 @@ export function AdminTeamsPage() {
     }
   }
 
-  function handleDelete(team: CaseTeam) {
+  async function handleDelete(team: CaseTeam) {
     const u = adminService.teams.usage(team.id);
     if (u.memberCount > 0) {
       window.alert(
@@ -78,21 +81,21 @@ export function AdminTeamsPage() {
       );
       return;
     }
-    if (u.openCases > 0) {
+    if (u.openCount > 0) {
       window.alert(
-        `"${team.name}" takımına atanmış ${u.openCases} açık vaka var. Önce vakaları başka takıma transfer edin.`,
+        `"${team.name}" takımına atanmış ${u.openCount} açık vaka var. Önce vakaları başka takıma transfer edin.`,
       );
       return;
     }
     const msg =
-      u.totalCases > 0
-        ? `"${team.name}" toplam ${u.totalCases} (kapalı) vakada referans veriliyor. Silinince vakalardaki ad korunur. Devam edilsin mi?`
+      u.count > 0
+        ? `"${team.name}" toplam ${u.count} (kapalı) vakada referans veriliyor. Silinince vakalardaki ad korunur. Devam edilsin mi?`
         : `"${team.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
 
-    const r = adminService.teams.remove(team.id);
+    const r = await adminService.teams.remove(team.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${team.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -165,8 +168,8 @@ export function AdminTeamsPage() {
                         )}
                       </Td>
                       <Td align="right">
-                        {u.openCases > 0 ? (
-                          <Badge tint="amber">{u.openCases}</Badge>
+                        {u.openCount > 0 ? (
+                          <Badge tint="amber">{u.openCount}</Badge>
                         ) : (
                           <span className="text-xs text-slate-400">0</span>
                         )}
@@ -198,7 +201,7 @@ export function AdminTeamsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleToggleActive(t)}
+                            onClick={() => void handleToggleActive(t)}
                             className={`rounded p-1.5 hover:bg-slate-100 ${
                               t.isActive
                                 ? 'text-amber-600 hover:text-amber-700'
@@ -210,7 +213,7 @@ export function AdminTeamsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(t)}
+                            onClick={() => void handleDelete(t)}
                             className="rounded p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
                             title="Sil"
                           >
@@ -232,14 +235,16 @@ export function AdminTeamsPage() {
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
         onClose={() => setEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
 
       <TeamMembersModal
         teamId={membersOf}
         onClose={() => {
           setMembersOf(null);
-          refresh();
+          void refresh();
         }}
       />
     </>
@@ -272,10 +277,17 @@ function TeamEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.teams.get(editingId);
-      if (item) {
-        setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
-      }
+      let cancelled = false;
+      void (async () => {
+        const item = await adminService.teams.get(editingId);
+        if (cancelled) return;
+        if (item) {
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     } else {
       setForm({ name: '', description: '', isActive: true });
     }
@@ -292,9 +304,9 @@ function TeamEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.teams.create(trimmed)
+        ? await adminService.teams.create(trimmed)
         : editingId
-          ? adminService.teams.update(editingId, trimmed)
+          ? await adminService.teams.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);
@@ -398,35 +410,41 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
 
   const open = teamId !== null;
 
-  function refresh() {
+  async function refresh() {
     if (!teamId) return;
-    setTeam(adminService.teams.get(teamId) ?? null);
-    setMembers(adminService.teams.members(teamId));
-    setOutsiders(adminService.persons.listOutsideTeam(teamId));
-    setAllTeams(adminService.teams.list());
+    const [t, m, o, ts] = await Promise.all([
+      adminService.teams.get(teamId),
+      adminService.teams.members(teamId),
+      adminService.persons.listOutsideTeam(teamId),
+      adminService.teams.list(),
+    ]);
+    setTeam(t ?? null);
+    setMembers(m);
+    setOutsiders(o);
+    setAllTeams(ts);
   }
 
   useEffect(() => {
-    if (open) refresh();
+    if (open) void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, teamId]);
 
-  function handleAddExisting(personId: string) {
+  async function handleAddExisting(personId: string) {
     if (!teamId || !personId) return;
-    const r = adminService.persons.moveToTeam(personId, teamId);
+    const r = await adminService.persons.moveToTeam(personId, teamId);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'success', message: `"${r.item.name}" takıma eklendi.`, duration: 2000 });
     } else {
       toast({ type: 'error', message: r.error });
     }
   }
 
-  function handleMoveOut(person: CasePerson, targetTeamId: string) {
+  async function handleMoveOut(person: CasePerson, targetTeamId: string) {
     if (!targetTeamId || targetTeamId === person.teamId) return;
-    const r = adminService.persons.moveToTeam(person.id, targetTeamId);
+    const r = await adminService.persons.moveToTeam(person.id, targetTeamId);
     if (r.ok) {
-      refresh();
+      await refresh();
       const target = allTeams.find((t) => t.id === targetTeamId);
       toast({
         type: 'success',
@@ -438,33 +456,33 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
     }
   }
 
-  function handleRemovePerson(person: CasePerson) {
+  async function handleRemovePerson(person: CasePerson) {
     const u = adminService.persons.usage(person.id);
-    if (u.openCases > 0) {
+    if (u.openCount > 0) {
       window.alert(
-        `"${person.name}" kullanıcısına atanmış ${u.openCases} açık vaka var. Önce vakaları başka kullanıcıya transfer edin.`,
+        `"${person.name}" kullanıcısına atanmış ${u.openCount} açık vaka var. Önce vakaları başka kullanıcıya transfer edin.`,
       );
       return;
     }
     const msg =
-      u.totalCases > 0
-        ? `"${person.name}" toplam ${u.totalCases} (kapalı) vakada referans veriliyor. Silinince vakalardaki ad korunur. Devam edilsin mi?`
+      u.count > 0
+        ? `"${person.name}" toplam ${u.count} (kapalı) vakada referans veriliyor. Silinince vakalardaki ad korunur. Devam edilsin mi?`
         : `"${person.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
 
-    const r = adminService.persons.remove(person.id);
+    const r = await adminService.persons.remove(person.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${person.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
     }
   }
 
-  function handleTogglePersonActive(person: CasePerson) {
-    const r = adminService.persons.setActive(person.id, !person.isActive);
+  async function handleTogglePersonActive(person: CasePerson) {
+    const r = await adminService.persons.setActive(person.id, !person.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -480,7 +498,9 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
       <PersonEditModal
         editor={personEditor}
         onClose={() => setPersonEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
     );
   }
@@ -524,7 +544,7 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v) {
-                    handleAddExisting(v);
+                    void handleAddExisting(v);
                     e.target.value = '';
                   }
                 }}
@@ -578,8 +598,8 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
                           {p.email ?? <span className="text-slate-400">—</span>}
                         </Td>
                         <Td align="right">
-                          {u.openCases > 0 ? (
-                            <Badge tint="amber">{u.openCases}</Badge>
+                          {u.openCount > 0 ? (
+                            <Badge tint="amber">{u.openCount}</Badge>
                           ) : (
                             <span className="text-xs text-slate-400">0</span>
                           )}
@@ -604,11 +624,11 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
                             <MoveToTeamButton
                               currentTeamId={team.id}
                               teams={allTeams}
-                              onSelect={(targetId) => handleMoveOut(p, targetId)}
+                              onSelect={(targetId) => void handleMoveOut(p, targetId)}
                             />
                             <button
                               type="button"
-                              onClick={() => handleTogglePersonActive(p)}
+                              onClick={() => void handleTogglePersonActive(p)}
                               className={`rounded p-1.5 hover:bg-slate-100 ${
                                 p.isActive
                                   ? 'text-amber-600 hover:text-amber-700'
@@ -620,7 +640,7 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleRemovePerson(p)}
+                              onClick={() => void handleRemovePerson(p)}
                               className="rounded p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
                               title="Sil"
                             >
@@ -641,7 +661,9 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
       <PersonEditModal
         editor={personEditor}
         onClose={() => setPersonEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
     </>
   );
@@ -722,20 +744,29 @@ function PersonEditModal({
   useEffect(() => {
     if (!open || !editor) return;
     setError(null);
-    setTeams(adminService.teams.list());
-    if (editor.mode === 'edit') {
-      const p = adminService.persons.get(editor.id);
-      if (p) {
-        setForm({
-          name: p.name,
-          teamId: p.teamId,
-          email: p.email ?? '',
-          isActive: p.isActive,
-        });
+    let cancelled = false;
+    void (async () => {
+      const ts = await adminService.teams.list();
+      if (cancelled) return;
+      setTeams(ts);
+      if (editor.mode === 'edit') {
+        const p = await adminService.persons.get(editor.id);
+        if (cancelled) return;
+        if (p) {
+          setForm({
+            name: p.name,
+            teamId: p.teamId,
+            email: p.email ?? '',
+            isActive: p.isActive,
+          });
+        }
+      } else {
+        setForm({ name: '', teamId: editor.teamId, email: '', isActive: true });
       }
-    } else {
-      setForm({ name: '', teamId: editor.teamId, email: '', isActive: true });
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, editor]);
 
   async function handleSave() {
@@ -751,8 +782,8 @@ function PersonEditModal({
 
     const r =
       editor.mode === 'create'
-        ? adminService.persons.create(trimmed)
-        : adminService.persons.update(editor.id, trimmed);
+        ? await adminService.persons.create(trimmed)
+        : await adminService.persons.update(editor.id, trimmed);
 
     setSubmitting(false);
 

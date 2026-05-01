@@ -18,10 +18,10 @@ export function AdminThirdPartyPage() {
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.thirdParties.list());
+  async function refresh() {
+    setItems(await adminService.thirdParties.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => { void refresh(); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,10 +33,10 @@ export function AdminThirdPartyPage() {
     );
   }, [items, search]);
 
-  function handleToggleActive(item: CaseThirdParty) {
-    const r = adminService.thirdParties.setActive(item.id, !item.isActive);
+  async function handleToggleActive(item: CaseThirdParty) {
+    const r = await adminService.thirdParties.setActive(item.id, !item.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -47,16 +47,16 @@ export function AdminThirdPartyPage() {
     }
   }
 
-  function handleDelete(item: CaseThirdParty) {
+  async function handleDelete(item: CaseThirdParty) {
     const usage = adminService.thirdParties.usage(item.id).count;
     const msg =
       usage > 0
         ? `"${item.name}" toplam ${usage} vakada kullanılıyor. Silinince yeni vaka geçişlerinde görünmez (mevcut vakalardaki ad korunur). Devam edilsin mi?`
         : `"${item.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.thirdParties.remove(item.id);
+    const r = await adminService.thirdParties.remove(item.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${item.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -210,10 +210,12 @@ function ThirdPartyEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.thirdParties.get(editingId);
-      if (item) {
-        setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
-      }
+      void (async () => {
+        const item = await adminService.thirdParties.get(editingId);
+        if (item) {
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+        }
+      })();
     } else {
       setForm({ name: '', description: '', isActive: true });
     }
@@ -230,9 +232,9 @@ function ThirdPartyEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.thirdParties.create(trimmed)
+        ? await adminService.thirdParties.create(trimmed)
         : editingId
-          ? adminService.thirdParties.update(editingId, trimmed)
+          ? await adminService.thirdParties.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);

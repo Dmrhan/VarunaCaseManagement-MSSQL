@@ -19,7 +19,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
   adminService,
-  type ChecklistItemInput,
   type ChecklistTemplateInput,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
@@ -44,10 +43,12 @@ export function AdminChecklistPage() {
   >(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.checklists.list());
+  async function refresh() {
+    setItems(await adminService.checklists.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   // İlk yüklemede ilk template'i seç
   useEffect(() => {
@@ -75,10 +76,10 @@ export function AdminChecklistPage() {
     [items, selectedId],
   );
 
-  function handleToggleTplActive(t: CaseChecklistTemplate) {
-    const r = adminService.checklists.setActive(t.id, !t.isActive);
+  async function handleToggleTplActive(t: CaseChecklistTemplate) {
+    const r = await adminService.checklists.setActive(t.id, !t.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -89,27 +90,27 @@ export function AdminChecklistPage() {
     }
   }
 
-  function handleDeleteTemplate(t: CaseChecklistTemplate) {
+  async function handleDeleteTemplate(t: CaseChecklistTemplate) {
     const usage = adminService.checklists.usage(t.id);
     const tuple = `${t.companyName} / ${t.productGroup} / ${t.categoryName}`;
     const msg =
-      usage.totalCases > 0
-        ? `"${t.name}" şablonu (${tuple}) ${usage.totalCases} vakaya eşleşiyor. Silinince yeni vakalarda checklist yüklenmez. Devam edilsin mi?`
+      usage.count > 0
+        ? `"${t.name}" şablonu (${tuple}) ${usage.count} vakaya eşleşiyor. Silinince yeni vakalarda checklist yüklenmez. Devam edilsin mi?`
         : `"${t.name}" şablonu silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.checklists.remove(t.id);
+    const r = await adminService.checklists.remove(t.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${t.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
     }
   }
 
-  function handleToggleItemActive(templateId: string, item: CaseChecklistItem) {
-    const r = adminService.checklists.setItemActive(templateId, item.id, !item.isActive);
+  async function handleToggleItemActive(templateId: string, item: CaseChecklistItem) {
+    const r = await adminService.checklists.setItemActive(templateId, item.id, !item.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? 'Madde aktif edildi.' : 'Madde pasif edildi.',
@@ -120,21 +121,25 @@ export function AdminChecklistPage() {
     }
   }
 
-  function handleDeleteItem(templateId: string, item: CaseChecklistItem) {
+  async function handleDeleteItem(templateId: string, item: CaseChecklistItem) {
     if (!window.confirm(`"${item.label}" silinsin mi?`)) return;
-    const r = adminService.checklists.removeItem(templateId, item.id);
+    const r = await adminService.checklists.removeItem(templateId, item.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: 'Madde silindi.', duration: 1800 });
     } else {
       toast({ type: 'error', message: r.error });
     }
   }
 
-  function handleMoveItem(templateId: string, itemId: string, direction: -1 | 1) {
-    const r = adminService.checklists.moveItem(templateId, itemId, direction);
+  async function handleMoveItem(templateId: string, itemId: string, direction: -1 | 1) {
+    const r = await adminService.checklists.moveItem(
+      templateId,
+      itemId,
+      direction === -1 ? 'up' : 'down',
+    );
     if (r.ok) {
-      refresh();
+      await refresh();
     } else {
       toast({ type: 'error', message: r.error });
     }
@@ -250,7 +255,7 @@ export function AdminChecklistPage() {
         editingId={tplEditor?.mode === 'edit' ? tplEditor.id : null}
         onClose={() => setTplEditor(null)}
         onSaved={(newId) => {
-          refresh();
+          void refresh();
           if (newId) setSelectedId(newId);
         }}
       />
@@ -258,7 +263,9 @@ export function AdminChecklistPage() {
       <ChecklistItemEditModal
         editor={itemEditor}
         onClose={() => setItemEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
     </>
   );
@@ -315,7 +322,7 @@ function ChecklistDetail({
           <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
             <span className="font-mono text-slate-400">{template.id}</span>
             <span>·</span>
-            <span>{usage.totalCases} eşleşen vaka</span>
+            <span>{usage.count} eşleşen vaka</span>
             <span>·</span>
             <span>{usage.itemCount} madde</span>
           </div>
@@ -484,6 +491,7 @@ const EMPTY_TPL_FORM: ChecklistTemplateInput = {
   productGroup: '',
   categoryName: '',
   description: '',
+  items: [],
   isActive: true,
 };
 
@@ -513,24 +521,28 @@ function ChecklistTemplateEditModal({
     setError(null);
     setCompanies(lookupService.companies());
     setProductGroups(lookupService.productGroups());
-    setCategories(adminService.categories.list());
 
-    if (mode === 'edit' && editingId) {
-      const t = adminService.checklists.get(editingId);
-      if (t) {
-        setForm({
-          name: t.name,
-          companyId: t.companyId,
-          companyName: t.companyName,
-          productGroup: t.productGroup,
-          categoryName: t.categoryName,
-          description: t.description ?? '',
-          isActive: t.isActive,
-        });
+    void (async () => {
+      setCategories(await adminService.categories.list());
+
+      if (mode === 'edit' && editingId) {
+        const t = await adminService.checklists.get(editingId);
+        if (t) {
+          setForm({
+            name: t.name,
+            companyId: t.companyId,
+            companyName: t.companyName,
+            productGroup: t.productGroup,
+            categoryName: t.categoryName,
+            description: t.description ?? '',
+            items: t.items,
+            isActive: t.isActive,
+          });
+        }
+      } else {
+        setForm(EMPTY_TPL_FORM);
       }
-    } else {
-      setForm(EMPTY_TPL_FORM);
-    }
+    })();
   }, [open, mode, editingId]);
 
   function handleCompanyChange(companyId: string) {
@@ -550,9 +562,9 @@ function ChecklistTemplateEditModal({
     };
     const r =
       mode === 'create'
-        ? adminService.checklists.create(trimmed)
+        ? await adminService.checklists.create(trimmed)
         : editingId
-          ? adminService.checklists.update(editingId, trimmed)
+          ? await adminService.checklists.update(editingId, trimmed)
           : null;
     setSubmitting(false);
 
@@ -703,7 +715,7 @@ function ChecklistItemEditModal({
   onSaved: () => void;
 }) {
   const open = editor !== null;
-  const [form, setForm] = useState<ChecklistItemInput>({
+  const [form, setForm] = useState<Omit<CaseChecklistItem, 'id'>>({
     label: '',
     required: false,
     isActive: true,
@@ -716,11 +728,13 @@ function ChecklistItemEditModal({
     if (!open || !editor) return;
     setError(null);
     if (editor.mode === 'edit') {
-      const t = adminService.checklists.get(editor.templateId);
-      const item = t?.items.find((i) => i.id === editor.itemId);
-      if (item) {
-        setForm({ label: item.label, required: item.required, isActive: item.isActive });
-      }
+      void (async () => {
+        const t = await adminService.checklists.get(editor.templateId);
+        const item = t?.items.find((i) => i.id === editor.itemId);
+        if (item) {
+          setForm({ label: item.label, required: item.required, isActive: item.isActive });
+        }
+      })();
     } else {
       setForm({ label: '', required: false, isActive: true });
     }
@@ -730,15 +744,15 @@ function ChecklistItemEditModal({
     if (!editor) return;
     setSubmitting(true);
     setError(null);
-    const trimmed: ChecklistItemInput = {
+    const trimmed: Omit<CaseChecklistItem, 'id'> = {
       label: form.label.trim(),
       required: form.required,
       isActive: form.isActive,
     };
     const r =
       editor.mode === 'create'
-        ? adminService.checklists.addItem(editor.templateId, trimmed)
-        : adminService.checklists.updateItem(editor.templateId, editor.itemId, trimmed);
+        ? await adminService.checklists.addItem(editor.templateId, trimmed)
+        : await adminService.checklists.updateItem(editor.templateId, editor.itemId, trimmed);
     setSubmitting(false);
     if (!r.ok) {
       setError(r.error);

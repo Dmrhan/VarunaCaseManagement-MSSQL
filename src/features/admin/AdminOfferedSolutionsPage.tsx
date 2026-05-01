@@ -18,10 +18,12 @@ export function AdminOfferedSolutionsPage() {
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.offeredSolutions.list());
+  async function refresh() {
+    setItems(await adminService.offeredSolutions.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,10 +35,10 @@ export function AdminOfferedSolutionsPage() {
     );
   }, [items, search]);
 
-  function handleToggleActive(item: OfferedSolutionDef) {
-    const r = adminService.offeredSolutions.setActive(item.id, !item.isActive);
+  async function handleToggleActive(item: OfferedSolutionDef) {
+    const r = await adminService.offeredSolutions.setActive(item.id, !item.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -47,16 +49,16 @@ export function AdminOfferedSolutionsPage() {
     }
   }
 
-  function handleDelete(item: OfferedSolutionDef) {
+  async function handleDelete(item: OfferedSolutionDef) {
     const usage = adminService.offeredSolutions.usage(item.id).count;
     const msg =
       usage > 0
         ? `"${item.name}" toplam ${usage} vakada sunulmuş. Silinince eski vakalardaki referans "Bilinmeyen teklif" olarak görünür. Silmek yerine pasifleştirme önerilir. Yine de silinsin mi?`
         : `"${item.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.offeredSolutions.remove(item.id);
+    const r = await adminService.offeredSolutions.remove(item.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${item.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -144,7 +146,7 @@ export function AdminOfferedSolutionsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleToggleActive(it)}
+                            onClick={() => { void handleToggleActive(it); }}
                             className={`rounded p-1.5 hover:bg-slate-100 ${
                               it.isActive
                                 ? 'text-amber-600 hover:text-amber-700'
@@ -156,7 +158,7 @@ export function AdminOfferedSolutionsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(it)}
+                            onClick={() => { void handleDelete(it); }}
                             className="rounded p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
                             title="Sil"
                           >
@@ -178,7 +180,7 @@ export function AdminOfferedSolutionsPage() {
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
         onClose={() => setEditor(null)}
-        onSaved={refresh}
+        onSaved={() => { void refresh(); }}
       />
     </>
   );
@@ -210,10 +212,12 @@ function OfferedSolutionEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.offeredSolutions.get(editingId);
-      if (item) {
-        setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
-      }
+      void (async () => {
+        const item = await adminService.offeredSolutions.get(editingId);
+        if (item) {
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+        }
+      })();
     } else {
       setForm({ name: '', description: '', isActive: true });
     }
@@ -230,9 +234,9 @@ function OfferedSolutionEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.offeredSolutions.create(trimmed)
+        ? await adminService.offeredSolutions.create(trimmed)
         : editingId
-          ? adminService.offeredSolutions.update(editingId, trimmed)
+          ? await adminService.offeredSolutions.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);

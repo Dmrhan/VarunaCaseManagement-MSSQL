@@ -1,5 +1,7 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters } from './enumMap.js';
+import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
+import crypto from 'node:crypto';
 
 /**
  * Case repository — vaka CRUD + ilişkili tablolar (notes, files, history, callLogs).
@@ -248,7 +250,12 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async addFile(id, input) {
+  /**
+   * Adım 1 — Upload talebi: limit kontrolü + storage'da signed PUT URL üret.
+   * Frontend bu URL'e doğrudan PUT eder (Vercel 4.5MB body limiti bypass).
+   * DB satırı henüz yazılmaz; finalize() ile yazılır.
+   */
+  async requestUpload(id, input) {
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
     const FILE_MAX_COUNT = 20;
 
@@ -264,14 +271,26 @@ export const caseRepository = {
       return { error: `Dosya boyutu üst sınırı ${Math.round(FILE_MAX_SIZE / (1024 * 1024))} MB.` };
     }
 
+    // Önceden id üret — Storage path'i bunu kullanır (henüz DB'de yok).
+    const attachmentId = `cmsa_${crypto.randomBytes(12).toString('hex')}`;
+    const { signedUrl, path } = await createUploadUrl(id, attachmentId, input.fileName);
+    return { uploadUrl: signedUrl, path, attachmentId };
+  },
+
+  /**
+   * Adım 2 — Finalize: storage upload başarılı → DB satırını yaz + history log.
+   * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
+   */
+  async finalizeUpload(id, input) {
     const actor = input.uploadedBy ?? 'Mock User';
     const file = await prisma.caseAttachment.create({
       data: {
+        id: input.attachmentId,
         caseId: id,
         fileName: input.fileName,
         fileSize: input.fileSize,
         mimeType: input.mimeType,
-        fileUrl: input.dataUrl, // FAZ 2: Supabase Storage URL'i olacak
+        fileUrl: input.path, // Storage path — download'da signed URL'e dönüşür
         uploadedBy: actor,
       },
     });
@@ -294,11 +313,23 @@ export const caseRepository = {
     return { caseUpdated: shape(caseUpdated), file };
   },
 
+  /** Download için kısa ömürlü signed URL üret. */
+  async getDownloadUrl(caseId, fileId) {
+    const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
+    if (!target || target.caseId !== caseId || !target.fileUrl) return null;
+    const url = await createDownloadUrl(target.fileUrl);
+    return { url, fileName: target.fileName };
+  },
+
   async removeFile(id, fileId, actor = 'Mock User') {
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
       return shape(c);
+    }
+    // Önce Storage'dan sil — başarısız olursa DB satırı yine silinir, orphan log'lanır.
+    if (target.fileUrl) {
+      await removeObject(target.fileUrl);
     }
     await prisma.caseAttachment.delete({ where: { id: fileId } });
     const updated = await prisma.case.update({

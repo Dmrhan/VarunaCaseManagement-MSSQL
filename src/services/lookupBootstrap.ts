@@ -40,12 +40,17 @@ export interface BootstrapData {
   offeredSolutions: OfferedSolutionDef[];
   slaPolicies: SlaPolicy[];
   checklists: CaseChecklistTemplate[];
+  productGroups: string[];
 }
 
 let cache: BootstrapData | null = null;
 let inflight: Promise<BootstrapData> | null = null;
 
-export async function loadBootstrap(): Promise<BootstrapData> {
+export async function loadBootstrap(options?: { force?: boolean }): Promise<BootstrapData> {
+  if (options?.force) {
+    cache = null;
+    inflight = null;
+  }
   if (cache) return cache;
   if (inflight) return inflight;
 

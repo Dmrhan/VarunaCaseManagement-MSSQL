@@ -1,6 +1,21 @@
 import { prisma } from './client.js';
 
 /**
+ * Vakalardaki distinct productGroup değerleri — admin productGroup tanımı
+ * yapmıyor, vaka açılışında serbest yazılıyor; bu yüzden DB'den distinct
+ * çekiyoruz. Dropdown autocomplete için.
+ */
+async function listProductGroups() {
+  const rows = await prisma.case.findMany({
+    where: { productGroup: { not: null } },
+    select: { productGroup: true },
+    distinct: ['productGroup'],
+    orderBy: { productGroup: 'asc' },
+  });
+  return rows.map((r) => r.productGroup).filter(Boolean);
+}
+
+/**
  * Lookup repository — kategori, takım, kişi vb. referans verileri.
  *
  * Frontend'in lookupService bootstrap'ı tek istekle (`bootstrap()`) yapıp
@@ -39,6 +54,8 @@ export const lookupRepository = {
         .map((s) => ({ id: s.id, name: s.name, isActive: s.isActive })),
     }));
 
+    const productGroups = await listProductGroups();
+
     return {
       companies,
       accounts,
@@ -50,6 +67,9 @@ export const lookupRepository = {
       offeredSolutions,
       slaPolicies,
       checklists,
+      productGroups,
     };
   },
+
+  productGroups: listProductGroups,
 };

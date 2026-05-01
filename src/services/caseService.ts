@@ -125,7 +125,7 @@ const uid = (prefix: string) =>
  * zaten uyarıldı — UI ek aksiyon yapmaya gerek duymaz, sadece state'ini
  * geri almasın.
  */
-async function apiFetch<T = unknown>(
+export async function apiFetch<T = unknown>(
   path: string,
   init?: RequestInit,
   errorContext = 'İşlem',
@@ -801,20 +801,18 @@ export const caseService = {
   },
 
   /**
-   * Vakaya dosya ekler. Boyut (CASE_FILE_MAX_SIZE) ve sayı (CASE_FILE_MAX_COUNT)
-   * limitlerini koruyup history'e FileUploaded entry'si atar.
-   * Mock'ta dataUrl olarak base64 saklanır → indirme için anchor href kullanılır.
-   * FAZ 2'de multipart/form-data ile S3 presigned URL akışına dönüşür.
+   * Vakaya dosya ekler. 3 adımlı orchestration:
+   *  1. BFF'den signed upload URL al
+   *  2. Doğrudan Supabase Storage'a PUT (Vercel 4.5MB body limitini bypass)
+   *  3. BFF'ye finalize çağrısı → DB satırı + history log
+   *
+   * Mock'ta tek adımda in-memory store'a yazar.
    */
   async addFile(
     id: string,
-    input: {
-      fileName: string;
-      fileSize: number;
-      mimeType: string;
-      dataUrl?: string;
-      uploadedBy?: string;
-    },
+    fileOrInput:
+      | File
+      | { fileName: string; fileSize: number; mimeType: string; dataUrl?: string; uploadedBy?: string },
   ): Promise<{ caseUpdated: Case; file: CaseFile } | { error: string } | undefined> {
     if (USE_MOCK) {
       await delay(60);
@@ -824,19 +822,24 @@ export const caseService = {
       if (prev.files.length >= CASE_FILE_MAX_COUNT) {
         return { error: `Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.` };
       }
-      if (input.fileSize > CASE_FILE_MAX_SIZE) {
+      const meta =
+        fileOrInput instanceof File
+          ? { fileName: fileOrInput.name, fileSize: fileOrInput.size, mimeType: fileOrInput.type || 'application/octet-stream' }
+          : fileOrInput;
+      if (meta.fileSize > CASE_FILE_MAX_SIZE) {
         return { error: `Dosya boyutu üst sınırı ${Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024))} MB.` };
       }
-      const actor = input.uploadedBy ?? 'Mock User';
+      const actor = ('uploadedBy' in meta && meta.uploadedBy) || 'Mock User';
+      const dataUrl = 'dataUrl' in meta ? meta.dataUrl : undefined;
       const file: CaseFile = {
         id: uid('FILE'),
         caseId: id,
-        fileName: input.fileName,
-        fileSize: input.fileSize,
-        mimeType: input.mimeType,
+        fileName: meta.fileName,
+        fileSize: meta.fileSize,
+        mimeType: meta.mimeType,
         uploadedBy: actor,
         uploadedAt: nowIso(),
-        dataUrl: input.dataUrl,
+        dataUrl,
       };
       const updated: Case = {
         ...prev,
@@ -859,15 +862,102 @@ export const caseService = {
       store[idx] = updated;
       return { caseUpdated: clone(updated), file: clone(file) };
     }
-    return apiFetch<{ caseUpdated: Case; file: CaseFile } | { error: string }>(
-      `${API_BASE}/${id}/files`,
+
+    // FAZ 2: BFF + Supabase Storage 3-step orchestration
+    if (!(fileOrInput instanceof File)) {
+      return { error: 'Dosya yüklemek için File nesnesi gerekli.' };
+    }
+    const file = fileOrInput;
+    if (file.size > CASE_FILE_MAX_SIZE) {
+      return { error: `Dosya boyutu üst sınırı ${Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024))} MB.` };
+    }
+
+    // Adım 1 — signed upload URL al
+    const upload = await apiFetch<{ uploadUrl: string; path: string; attachmentId: string } | { error: string }>(
+      `${API_BASE}/${id}/files/upload-url`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || 'application/octet-stream',
+        }),
       },
-      'Dosya yüklenemedi',
+      'Yükleme adresi alınamadı',
     );
+    if (!upload) return undefined;
+    if ('error' in upload) return upload;
+
+    // Adım 2 — doğrudan Supabase Storage'a PUT
+    try {
+      const putResp = await fetch(upload.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+      if (!putResp.ok) {
+        notify({
+          type: 'error',
+          title: 'Dosya yüklenemedi',
+          message: `Storage hatası (${putResp.status}). Tekrar dener misin?`,
+        });
+        return undefined;
+      }
+    } catch (err) {
+      notify({
+        type: 'error',
+        title: 'Dosya yüklenemedi',
+        message: 'Storage\'a bağlanılamadı.',
+      });
+      console.error('[caseService] storage put', err);
+      return undefined;
+    }
+
+    // Adım 3 — finalize: DB satırı + history
+    return apiFetch<{ caseUpdated: Case; file: CaseFile }>(
+      `${API_BASE}/${id}/files/finalize`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attachmentId: upload.attachmentId,
+          path: upload.path,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || 'application/octet-stream',
+        }),
+      },
+      'Dosya kaydedilemedi',
+    );
+  },
+
+  /** Dosya indirme için kısa ömürlü signed URL al + tarayıcıda aç. */
+  async downloadFile(caseId: string, fileId: string): Promise<void> {
+    if (USE_MOCK) {
+      // Mock: dataUrl zaten dosyada
+      const c = store.find((x) => x.id === caseId);
+      const f = c?.files.find((x) => x.id === fileId);
+      if (f?.dataUrl) {
+        const a = document.createElement('a');
+        a.href = f.dataUrl;
+        a.download = f.fileName;
+        a.click();
+      }
+      return;
+    }
+    const result = await apiFetch<{ url: string; fileName: string }>(
+      `${API_BASE}/${caseId}/files/${fileId}/download`,
+      undefined,
+      'Dosya indirilemedi',
+    );
+    if (!result) return;
+    const a = document.createElement('a');
+    a.href = result.url;
+    a.download = result.fileName;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.click();
   },
 
   /** Vakadan dosya siler ve history'e FileRemoved entry'si atar. */
@@ -1175,10 +1265,9 @@ export const lookupService = {
              : clone(MOCK_OFFERED_SOLUTIONS).filter((o) => o.isActive);
   },
   productGroups: (): string[] => {
-    // FAZ 2 BFF: ilerde dedicated endpoint olur. Şimdilik mock'tan distinct
-    // alıyoruz çünkü Case tablosundan distinct DB sorgusu için ayrı endpoint
-    // gerekiyor. Yeni vakalar açıldıkça bu liste eskimese de NewCaseForm'da
-    // serbest yazım da kabul edilir.
+    const b = getCache();
+    if (b) return [...b.productGroups];
+    // Fallback: mock'tan distinct (USE_MOCK=true ya da bootstrap fail durumunda)
     const set = new Set<string>();
     MOCK_CASES.forEach((c) => {
       if (c.productGroup) set.add(c.productGroup);

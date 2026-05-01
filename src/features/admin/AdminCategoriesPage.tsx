@@ -36,10 +36,12 @@ export function AdminCategoriesPage() {
   >(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.categories.list());
+  async function refresh() {
+    setItems(await adminService.categories.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   // İlk yüklemede ilk kategoriyi seç
   useEffect(() => {
@@ -67,19 +69,19 @@ export function AdminCategoriesPage() {
     [items, selectedId],
   );
 
-  function handleToggleCatActive(cat: CaseCategoryDef) {
+  async function handleToggleCatActive(cat: CaseCategoryDef) {
     if (cat.isActive) {
       const u = adminService.categories.usage(cat.id);
-      if (u.totalCases > 0) {
+      if (u.count > 0) {
         const ok = window.confirm(
-          `"${cat.name}" toplam ${u.totalCases} vakada referans veriliyor. Pasifleştirilirse yeni vaka oluşturmada dropdown'da görünmez (mevcut vakalar etkilenmez). Devam edilsin mi?`,
+          `"${cat.name}" toplam ${u.count} vakada referans veriliyor. Pasifleştirilirse yeni vaka oluşturmada dropdown'da görünmez (mevcut vakalar etkilenmez). Devam edilsin mi?`,
         );
         if (!ok) return;
       }
     }
-    const r = adminService.categories.setActive(cat.id, !cat.isActive);
+    const r = await adminService.categories.setActive(cat.id, !cat.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -90,7 +92,7 @@ export function AdminCategoriesPage() {
     }
   }
 
-  function handleDeleteCategory(cat: CaseCategoryDef) {
+  async function handleDeleteCategory(cat: CaseCategoryDef) {
     if (cat.subCategories.length > 0) {
       window.alert(
         `"${cat.name}" altında ${cat.subCategories.length} alt kategori var. Önce alt kategorileri silin.`,
@@ -99,23 +101,23 @@ export function AdminCategoriesPage() {
     }
     const u = adminService.categories.usage(cat.id);
     const msg =
-      u.totalCases > 0
-        ? `"${cat.name}" toplam ${u.totalCases} vakada referans veriliyor. Silinince vakalardaki ad korunur, sadece dropdown'dan kalkar. Devam edilsin mi?`
+      u.count > 0
+        ? `"${cat.name}" toplam ${u.count} vakada referans veriliyor. Silinince vakalardaki ad korunur, sadece dropdown'dan kalkar. Devam edilsin mi?`
         : `"${cat.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.categories.remove(cat.id);
+    const r = await adminService.categories.remove(cat.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${cat.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
     }
   }
 
-  function handleToggleSubActive(categoryId: string, subId: string, isActive: boolean) {
-    const r = adminService.categories.setSubCategoryActive(categoryId, subId, !isActive);
+  async function handleToggleSubActive(_categoryId: string, subId: string, isActive: boolean) {
+    const r = await adminService.categories.setSubCategoryActive(subId, !isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -126,16 +128,16 @@ export function AdminCategoriesPage() {
     }
   }
 
-  function handleDeleteSub(categoryId: string, subId: string, subName: string) {
-    const u = adminService.categories.subCategoryUsage(categoryId, subId).count;
+  async function handleDeleteSub(_categoryId: string, subId: string, subName: string) {
+    const u = adminService.categories.subCategoryUsage(subId).count;
     const msg =
       u > 0
         ? `"${subName}" toplam ${u} vakada kullanılıyor. Silinince vakalardaki ad korunur. Devam edilsin mi?`
         : `"${subName}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.categories.removeSubCategory(categoryId, subId);
+    const r = await adminService.categories.removeSubCategory(subId);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${subName}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -255,7 +257,7 @@ export function AdminCategoriesPage() {
         editingId={catEditor?.mode === 'edit' ? catEditor.id : null}
         onClose={() => setCatEditor(null)}
         onSaved={(newId) => {
-          refresh();
+          void refresh();
           if (newId) setSelectedId(newId);
         }}
       />
@@ -263,7 +265,9 @@ export function AdminCategoriesPage() {
       <SubCategoryEditModal
         editor={subEditor}
         onClose={() => setSubEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
     </>
   );
@@ -313,7 +317,7 @@ function CategoryDetail({
           <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
             <span className="font-mono text-slate-400">{category.id}</span>
             <span>·</span>
-            <span>{usage.totalCases} vaka</span>
+            <span>{usage.count} vaka</span>
             <span>·</span>
             <span>{category.subCategories.length} alt kategori</span>
           </div>
@@ -382,7 +386,7 @@ function CategoryDetail({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {category.subCategories.map((s) => {
-                const u = adminService.categories.subCategoryUsage(category.id, s.id).count;
+                const u = adminService.categories.subCategoryUsage(s.id).count;
                 return (
                   <tr key={s.id} className="hover:bg-slate-50">
                     <Td>
@@ -474,10 +478,12 @@ function CategoryEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.categories.get(editingId);
-      if (item) {
-        setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
-      }
+      void (async () => {
+        const item = await adminService.categories.get(editingId);
+        if (item) {
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+        }
+      })();
     } else {
       setForm({ name: '', description: '', isActive: true });
     }
@@ -493,9 +499,9 @@ function CategoryEditModal({
     };
     const r =
       mode === 'create'
-        ? adminService.categories.create(trimmed)
+        ? await adminService.categories.create(trimmed)
         : editingId
-          ? adminService.categories.update(editingId, trimmed)
+          ? await adminService.categories.update(editingId, trimmed)
           : null;
     setSubmitting(false);
     if (!r) {
@@ -605,11 +611,15 @@ function SubCategoryEditModal({
     if (!open || !editor) return;
     setError(null);
     if (editor.mode === 'edit') {
-      const cat = adminService.categories.get(editor.categoryId);
-      const sub = cat?.subCategories.find((s) => s.id === editor.subId);
-      if (sub) {
-        setForm({ name: sub.name, isActive: sub.isActive });
-      }
+      const editingSubId = editor.subId;
+      const editingCategoryId = editor.categoryId;
+      void (async () => {
+        const cat = await adminService.categories.get(editingCategoryId);
+        const sub = cat?.subCategories.find((s) => s.id === editingSubId);
+        if (sub) {
+          setForm({ name: sub.name, isActive: sub.isActive });
+        }
+      })();
     } else {
       setForm({ name: '', isActive: true });
     }
@@ -625,8 +635,8 @@ function SubCategoryEditModal({
     };
     const r =
       editor.mode === 'create'
-        ? adminService.categories.addSubCategory(editor.categoryId, trimmed)
-        : adminService.categories.updateSubCategory(editor.categoryId, editor.subId, trimmed);
+        ? await adminService.categories.addSubCategory(editor.categoryId, trimmed)
+        : await adminService.categories.updateSubCategory(editor.subId, trimmed);
     setSubmitting(false);
     if (!r.ok) {
       setError(r.error);

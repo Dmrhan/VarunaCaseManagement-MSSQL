@@ -65,12 +65,29 @@ Doğrulama: Supabase Dashboard → **Table Editor**'da 19 tablo (16 spec + Compa
 
 ---
 
-## Sonraki adımlar (sonraki oturumda)
+## 5. Supabase Storage credentials (dosya yükleme için zorunlu)
 
-- [ ] Frontend: `lookupService` bootstrap pattern'e dönüştür (1 endpoint, React Context)
-- [ ] `caseService.ts` `USE_MOCK = false` flip
-- [ ] Production'da `prisma migrate deploy` (Vercel build sırasında)
-- [ ] Supabase Storage bucket → file upload S3 URL'i (şu an dataUrl in DB)
+**Project Settings → API** sayfasında:
+- **Project URL** → `.env`'de `SUPABASE_URL`
+- **service_role secret** → `.env`'de `SUPABASE_SERVICE_ROLE_KEY` (⚠️ secret, prod'da Vercel env var, public yapma)
+
+```env
+SUPABASE_URL=https://mkrrnvsiwfitqltdlsur.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
+```
+
+Bu iki anahtar Supabase Storage bucket yönetimi + signed upload URL üretimi için BFF tarafında kullanılır (frontend'e ASLA gönderilmez).
+
+**`case-attachments` bucket'ı** ilk dosya yüklemesinde otomatik oluşur (private, 25MB limit). Manuel oluşturmana gerek yok.
+
+**Vercel için:** Project Settings → Environment Variables'a `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` ekle, redeploy.
+
+---
+
+## Sonraki adımlar
+
+- [ ] Auth/RBAC: Supabase Auth + 5 rol matrisi
+- [ ] Bildirim sistemi (§14): in-app toast + Resend mail
 
 ---
 

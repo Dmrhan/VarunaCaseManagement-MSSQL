@@ -159,14 +159,41 @@ router.patch(
   }),
 );
 
-/** POST /api/cases/:id/files — multipart yerine şimdilik JSON dataUrl */
+/**
+ * Adım 1 — POST /api/cases/:id/files/upload-url
+ * Body: { fileName, fileSize, mimeType }
+ * Yanıt: { uploadUrl, path, attachmentId }
+ */
 router.post(
-  '/:id/files',
+  '/:id/files/upload-url',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.addFile(req.params.id, req.body ?? {});
+    const result = await caseRepository.requestUpload(req.params.id, req.body ?? {});
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     if ('error' in result) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/**
+ * Adım 2 — POST /api/cases/:id/files/finalize
+ * Body: { attachmentId, path, fileName, fileSize, mimeType, uploadedBy? }
+ */
+router.post(
+  '/:id/files/finalize',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.finalizeUpload(req.params.id, req.body ?? {});
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.status(201).json(result);
+  }),
+);
+
+/** GET /api/cases/:id/files/:fileId/download — kısa ömürlü signed URL */
+router.get(
+  '/:id/files/:fileId/download',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.getDownloadUrl(req.params.id, req.params.fileId);
+    if (!result) return res.status(404).json({ error: 'Dosya bulunamadı' });
+    res.json(result);
   }),
 );
 

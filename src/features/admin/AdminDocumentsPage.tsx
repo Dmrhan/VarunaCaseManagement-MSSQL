@@ -18,10 +18,12 @@ export function AdminDocumentsPage() {
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.documentTypes.list());
+  async function refresh() {
+    setItems(await adminService.documentTypes.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -33,10 +35,10 @@ export function AdminDocumentsPage() {
     );
   }, [items, search]);
 
-  function handleToggleActive(item: CaseDocumentType) {
-    const r = adminService.documentTypes.setActive(item.id, !item.isActive);
+  async function handleToggleActive(item: CaseDocumentType) {
+    const r = await adminService.documentTypes.setActive(item.id, !item.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? `"${r.item.name}" aktif edildi.` : `"${r.item.name}" pasif edildi.`,
@@ -47,16 +49,16 @@ export function AdminDocumentsPage() {
     }
   }
 
-  function handleDelete(item: CaseDocumentType) {
+  async function handleDelete(item: CaseDocumentType) {
     const usage = adminService.documentTypes.usage(item.id).count;
     const msg =
       usage > 0
         ? `"${item.name}" toplam ${usage} dosyada kullanılıyor. Silinince yeni dosya yüklemelerinde görünmez (mevcut dosyalardaki tip korunur). Devam edilsin mi?`
         : `"${item.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.documentTypes.remove(item.id);
+    const r = await adminService.documentTypes.remove(item.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: `"${item.name}" silindi.`, duration: 2500 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -210,10 +212,12 @@ function DocumentEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.documentTypes.get(editingId);
-      if (item) {
-        setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
-      }
+      void (async () => {
+        const item = await adminService.documentTypes.get(editingId);
+        if (item) {
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+        }
+      })();
     } else {
       setForm({ name: '', description: '', isActive: true });
     }
@@ -230,9 +234,9 @@ function DocumentEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.documentTypes.create(trimmed)
+        ? await adminService.documentTypes.create(trimmed)
         : editingId
-          ? adminService.documentTypes.update(editingId, trimmed)
+          ? await adminService.documentTypes.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);

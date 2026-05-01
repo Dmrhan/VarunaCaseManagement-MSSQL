@@ -28,10 +28,12 @@ export function AdminSlaPage() {
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const { toast } = useToast();
 
-  function refresh() {
-    setItems(adminService.sla.list());
+  async function refresh() {
+    setItems(await adminService.sla.list());
   }
-  useEffect(refresh, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -51,10 +53,10 @@ export function AdminSlaPage() {
     );
   }, [items, search]);
 
-  function handleToggleActive(p: SlaPolicy) {
-    const r = adminService.sla.setActive(p.id, !p.isActive);
+  async function handleToggleActive(p: SlaPolicy) {
+    const r = await adminService.sla.setActive(p.id, !p.isActive);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({
         type: 'success',
         message: r.item.isActive ? 'Kural aktif edildi.' : 'Kural pasif edildi.',
@@ -65,7 +67,7 @@ export function AdminSlaPage() {
     }
   }
 
-  function handleDelete(p: SlaPolicy) {
+  async function handleDelete(p: SlaPolicy) {
     const usage = adminService.sla.usage(p.id).count;
     const tuple = `${p.companyName} / ${p.productGroup} / ${p.categoryName} / ${p.subCategoryName} / ${p.requestType}`;
     const msg =
@@ -73,9 +75,9 @@ export function AdminSlaPage() {
         ? `Bu kural ${usage} vakaya eşleşiyor (${tuple}). Silinince yeni vakalarda fallback uygulanır. Devam edilsin mi?`
         : `"${tuple}" kuralı silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.sla.remove(p.id);
+    const r = await adminService.sla.remove(p.id);
     if (r.ok) {
-      refresh();
+      await refresh();
       toast({ type: 'warn', message: 'Kural silindi.', duration: 2000 });
     } else {
       toast({ type: 'error', message: r.error });
@@ -213,7 +215,9 @@ export function AdminSlaPage() {
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
         onClose={() => setEditor(null)}
-        onSaved={refresh}
+        onSaved={() => {
+          void refresh();
+        }}
       />
     </>
   );
@@ -262,27 +266,38 @@ function SlaEditModal({
     setError(null);
     setCompanies(lookupService.companies());
     setProductGroups(lookupService.productGroups());
-    setCategories(adminService.categories.list());
 
-    if (mode === 'edit' && editingId) {
-      const p = adminService.sla.get(editingId);
-      if (p) {
-        setForm({
-          companyId: p.companyId,
-          companyName: p.companyName,
-          productGroup: p.productGroup,
-          categoryName: p.categoryName,
-          subCategoryName: p.subCategoryName,
-          requestType: p.requestType,
-          responseHours: p.responseHours,
-          resolutionHours: p.resolutionHours,
-          description: p.description ?? '',
-          isActive: p.isActive,
-        });
+    let cancelled = false;
+    void (async () => {
+      const cats = await adminService.categories.list();
+      if (cancelled) return;
+      setCategories(cats);
+
+      if (mode === 'edit' && editingId) {
+        const p = await adminService.sla.get(editingId);
+        if (cancelled) return;
+        if (p) {
+          setForm({
+            companyId: p.companyId,
+            companyName: p.companyName,
+            productGroup: p.productGroup,
+            categoryName: p.categoryName,
+            subCategoryName: p.subCategoryName,
+            requestType: p.requestType,
+            responseHours: p.responseHours,
+            resolutionHours: p.resolutionHours,
+            description: p.description ?? '',
+            isActive: p.isActive,
+          });
+        }
+      } else {
+        setForm(EMPTY_FORM);
       }
-    } else {
-      setForm(EMPTY_FORM);
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, mode, editingId]);
 
   // Kategori değişince alt kategoriyi sıfırla (cascade)
@@ -318,9 +333,9 @@ function SlaEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.sla.create(trimmed)
+        ? await adminService.sla.create(trimmed)
         : editingId
-          ? adminService.sla.update(editingId, trimmed)
+          ? await adminService.sla.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);

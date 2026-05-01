@@ -3,6 +3,7 @@ import cors from 'cors';
 import casesRouter from './routes/cases.js';
 import aiRouter from './routes/ai.js';
 import lookupsRouter from './routes/lookups.js';
+import adminRouter from './routes/admin.js';
 
 /**
  * Express app factory — listen yok.
@@ -30,6 +31,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/cases', casesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/lookups', lookupsRouter);
+app.use('/api/admin', adminRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
