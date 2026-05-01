@@ -159,13 +159,25 @@ enum NotificationChannel {
   SMS
 }
 
-// Spec §13 — 5 rol yetki matrisi
+// Spec §13 + Custom Fields/CompanySettings yetkisi için 6. rol.
+// SystemAdmin: platform-seviyesi yapılandırma (FieldDefinitions,
+// CompanySettings, admin tanım ekranları). Admin: tek-tenant operasyon.
 enum UserRole {
   Agent
   Backoffice
   Supervisor
   CSM
   Admin
+  SystemAdmin
+}
+
+enum FieldType {
+  Text
+  Number
+  Date
+  Select
+  Boolean
+  Textarea
 }
 
 // ============================================================
@@ -194,12 +206,51 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts    Account[]
-  teams       Team[]
-  cases       Case[]
-  slaPolicies SLAPolicy[]
-  categories  CategoryDef[]
-  checklists  ChecklistTemplate[]
+  accounts         Account[]
+  teams            Team[]
+  cases            Case[]
+  slaPolicies      SLAPolicy[]
+  categories       CategoryDef[]
+  checklists       ChecklistTemplate[]
+  fieldDefinitions FieldDefinition[]
+  settings         CompanySettings?
+}
+
+// Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
+// Vaka kaydı sırasında bu tanımlara göre form alanları çıkar; değerler
+// Case.customFields JSON'una `{ fieldKey: value }` olarak yazılır.
+model FieldDefinition {
+  id           String    @id @default(cuid())
+  companyId    String
+  label        String
+  fieldKey     String // benzersiz tanımlayıcı (örn. "customer_segment")
+  fieldType    FieldType
+  caseType     CaseType? // null = tüm vaka tipleri
+  isRequired   Boolean   @default(false)
+  displayOrder Int       @default(0)
+  /// Select için { value, label }[] dizisi; diğer tipler için null
+  options      Json?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company      Company   @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, fieldKey])
+  @@index([companyId, caseType, isActive])
+}
+
+// Şirket başına UI/marka yapılandırması — multi-tenant beyaz etiket için.
+model CompanySettings {
+  companyId    String   @id
+  logoUrl      String?
+  primaryColor String? // hex (#7C3AED gibi)
+  appName      String?
+  supportEmail String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id])
 }
 
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
@@ -427,6 +478,10 @@ model Case {
   // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
   /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
   checklistItems Json?
+
+  // Custom Fields — şirket FieldDefinition'larına göre dinamik alanlar.
+  /// { [fieldKey: string]: any } — değer tipi FieldType'a bağlı
+  customFields   Json?
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
