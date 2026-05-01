@@ -59,27 +59,22 @@ export function AdminCompanySettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Building2 size={18} className="text-slate-500" />
-          <h1 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
-            Şirket Ayarları
-          </h1>
+    <div className="lg:flex lg:items-start lg:gap-4">
+      <div className="min-w-0 flex-1 space-y-6">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Building2 size={18} className="text-slate-500" />
+            <h1 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
+              Şirket Ayarları
+            </h1>
+          </div>
+          <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
         </div>
-        <HelpButton onClick={() => setHelpOpen(true)} active={helpOpen} />
-      </div>
-      <p className="text-sm text-slate-500 dark:text-ndark-muted">
-        Seçili şirket için marka kimliği, destek e-postası ve renk paleti.
-      </p>
-      <HelpDrawer
-        open={helpOpen}
-        title={COMPANY_SETTINGS_HELP.title}
-        sections={COMPANY_SETTINGS_HELP.sections}
-        onClose={() => setHelpOpen(false)}
-      />
+        <p className="text-sm text-slate-500 dark:text-ndark-muted">
+          Seçili şirket için marka kimliği, destek e-postası ve renk paleti.
+        </p>
 
-      <div className="max-w-xl space-y-4 rounded-lg bg-white p-6 ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
+        <div className="max-w-xl space-y-4 rounded-lg bg-white p-6 ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
         <Field label="Şirket" required>
           <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
             {companies.map((c) => (
@@ -141,7 +136,16 @@ export function AdminCompanySettingsPage() {
             {submitting ? 'Kaydediliyor…' : 'Kaydet'}
           </Button>
         </div>
+        </div>
       </div>
+
+      {/* Help drawer — lg+ flex sibling, lg altı sağdan overlay */}
+      <HelpDrawer
+        open={helpOpen}
+        title={COMPANY_SETTINGS_HELP.title}
+        sections={COMPANY_SETTINGS_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+      />
     </div>
   );
 }
