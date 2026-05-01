@@ -14,6 +14,7 @@ import {
   CASE_ORIGINS,
   CASE_PRIORITIES,
   CASE_PRIORITY_LABELS,
+  CASE_REQUEST_TYPES,
   CASE_TYPES,
   CASE_TYPE_LABELS,
   FINANCIAL_STATUSES,
@@ -167,6 +168,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         caseType: form.caseType,
         companyName: companies.find((c) => c.id === form.companyId)?.name,
         availableCategories: categories,
+        availableRequestTypes: CASE_REQUEST_TYPES,
       });
       // Stale request — daha yeni istek tetiklendiyse sonucu yoksay
       if (reqId !== aiReqIdRef.current) return;
@@ -200,10 +202,16 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
 
   function handleAiApply() {
     if (!aiSuggestion) return;
+    // Defansif: subCategory seçilen kategoriye AİT olmayabilir (model uyumsuz seçtiyse).
+    // Ait değilse alanı boş bırak — kullanıcı manuel seçer, geri kalanı yine doldur.
+    const validSubs =
+      categories.find((c) => c.category === aiSuggestion.category)?.subCategories ?? [];
+    const safeSub = validSubs.includes(aiSuggestion.subCategory) ? aiSuggestion.subCategory : '';
     setForm((f) => ({
       ...f,
       category: aiSuggestion.category,
-      subCategory: aiSuggestion.subCategory ?? '',
+      subCategory: safeSub,
+      requestType: aiSuggestion.requestType,
       priority: aiSuggestion.priority,
     }));
     setAiApplied(true);
@@ -291,9 +299,14 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       aiConfidenceScore:    aiApplied && aiSuggestion ? aiSuggestion.confidence : undefined,
       aiRejectReason:       aiDismissed ? 'Kullanıcı reddetti' : undefined,
     };
-    const created = await caseService.create(input);
-    setSubmitting(false);
-    onCreated(created);
+    try {
+      const created = await caseService.create(input);
+      setSubmitting(false);
+      onCreated(created);
+    } catch {
+      // apiFetch toast'u zaten gösterdi; form'u açık bırak ki kullanıcı yeniden denesin.
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -547,7 +560,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
               aiSuggesting
                 ? ''
                 : aiSuggestion
-                  ? `"${aiSuggestion.category}${aiSuggestion.subCategory ? ` / ${aiSuggestion.subCategory}` : ''}" — ${aiSuggestion.reasoning}`
+                  ? `${aiSuggestion.category} / ${aiSuggestion.subCategory} · ${aiSuggestion.requestType} — ${aiSuggestion.reasoning}`
                   : aiError
                     ? `${aiError} — yazmaya devam edince yeniden denenecek.`
                     : 'Açıklama yazıldıkça öneri hazırlanıyor…'
@@ -569,7 +582,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
 
         {aiApplied && aiSuggestion && (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            ✦ AI önerisi uygulandı (%{Math.round(aiSuggestion.confidence * 100)} güven). Kategori, alt kategori ve öncelik otomatik dolduruldu — istediğiniz gibi düzenleyebilirsiniz.
+            ✦ AI önerisi uygulandı (%{Math.round(aiSuggestion.confidence * 100)} güven). Kategori, alt kategori, talep türü ve öncelik otomatik dolduruldu — istediğiniz gibi düzenleyebilirsiniz.
           </div>
         )}
 

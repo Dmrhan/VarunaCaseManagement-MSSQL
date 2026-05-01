@@ -4,13 +4,15 @@ import {
   MOCK_CATEGORIES,
   MOCK_CHECKLIST_TEMPLATES,
   MOCK_COMPANIES,
-  MOCK_EVRAK_TYPES,
+  MOCK_DOCUMENT_TYPES,
   MOCK_OFFERED_SOLUTIONS,
   MOCK_PERSONS,
   MOCK_SLA_POLICIES,
   MOCK_TEAMS,
   MOCK_THIRD_PARTIES,
 } from '@/mocks/caseMockData';
+import { getBootstrap } from '@/services/lookupBootstrap';
+import { notify } from '@/components/ui/Toast';
 
 // History entry'leri için insan-okur değer formatlayıcı
 // Boolean → Evet/Hayır, ISO date → DD.MM.YYYY HH:mm, FK → ad, null/empty → '—'
@@ -67,6 +69,7 @@ import {
   type CaseHistoryActionType,
   type CaseListPagination,
   type CaseNote,
+  type CaseFile,
   type CaseRequestType,
   type CaseStatus,
   type CaseType,
@@ -75,8 +78,11 @@ import {
   type SlaPolicy,
   type CaseChecklistTemplate,
 } from '@/features/cases/types';
+import { CASE_FILE_MAX_COUNT, CASE_FILE_MAX_SIZE } from '@/features/cases/types';
 
-export const USE_MOCK = true;
+// FAZ 2 — Supabase Postgres üzerinden gerçek BFF entegrasyonu aktif.
+// Mock dalı dev-only fallback olarak kodda kalıyor (test/storybook için).
+export const USE_MOCK = false;
 
 const API_BASE = '/api/cases';
 
@@ -104,6 +110,69 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const nowIso = () => new Date().toISOString();
 const uid = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+/**
+ * Merkezi fetch wrapper — caseService altındaki tüm BFF çağrıları buradan geçer.
+ * Hata olduğunda kullanıcıya MUTLAKA toast gösterir (sessiz fail yok).
+ *
+ * Davranış:
+ *  - 2xx + JSON gövde → parse edilip döner
+ *  - 2xx + boş gövde → null döner
+ *  - 4xx/5xx → toast (server'ın döndüğü `error.message` veya generic) + undefined
+ *  - Network/timeout → toast + undefined
+ *
+ * Caller perspektifinden: sonuç undefined ise işlem başarısız ve kullanıcı
+ * zaten uyarıldı — UI ek aksiyon yapmaya gerek duymaz, sadece state'ini
+ * geri almasın.
+ */
+async function apiFetch<T = unknown>(
+  path: string,
+  init?: RequestInit,
+  errorContext = 'İşlem',
+): Promise<T | undefined> {
+  let r: Response;
+  try {
+    r = await fetch(path, init);
+  } catch (err) {
+    notify({
+      type: 'error',
+      title: `${errorContext} başarısız`,
+      message: 'Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.',
+      duration: 5000,
+    });
+    console.error('[apiFetch] network', path, err);
+    return undefined;
+  }
+  if (!r.ok) {
+    let serverMessage = '';
+    try {
+      const body = await r.json();
+      serverMessage = body?.message ?? body?.error ?? '';
+    } catch {
+      try {
+        serverMessage = await r.text();
+      } catch {
+        // sessiz: hiçbir gövde yok
+      }
+    }
+    notify({
+      type: 'error',
+      title: `${errorContext} başarısız (${r.status})`,
+      message: serverMessage || 'Sunucu hatası — yöneticine bildir.',
+      duration: 6000,
+    });
+    console.error('[apiFetch]', r.status, path, serverMessage);
+    return undefined;
+  }
+  // 204 No Content veya boş gövde
+  if (r.status === 204) return undefined;
+  try {
+    return (await r.json()) as T;
+  } catch {
+    // Beklenen gövde yoksa null/undefined
+    return undefined;
+  }
+}
 
 function applyFilters(items: Case[], f?: CaseFilters): Case[] {
   if (!f) return items;
@@ -211,9 +280,12 @@ export const caseService = {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
     }
-    const r = await fetch(`${API_BASE}?${params.toString()}`);
-    const data = await r.json();
-    return { items: data.value ?? [], total: data['@odata.count'] ?? 0 };
+    const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
+      `${API_BASE}?${params.toString()}`,
+      undefined,
+      'Vakalar yüklenemedi',
+    );
+    return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
   },
 
   async get(id: string): Promise<Case | undefined> {
@@ -222,9 +294,7 @@ export const caseService = {
       const found = store.find((c) => c.id === id);
       return found ? clone(found) : undefined;
     }
-    const r = await fetch(`${API_BASE}/${id}`);
-    if (!r.ok) return undefined;
-    return r.json();
+    return apiFetch<Case>(`${API_BASE}/${id}`, undefined, 'Vaka yüklenemedi');
   },
 
   async create(input: NewCaseInput): Promise<Case> {
@@ -356,12 +426,21 @@ export const caseService = {
       store = [newCase, ...store];
       return clone(newCase);
     }
-    const r = await fetch(API_BASE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    return r.json();
+    const created = await apiFetch<Case>(
+      API_BASE,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      'Vaka oluşturulamadı',
+    );
+    if (!created) {
+      // apiFetch zaten toast gösterdi; tip uyumu için exception fırlat —
+      // çağıran yer try/catch'le veya undefined kontrolüyle koruyabilir.
+      throw new Error('Vaka oluşturulamadı');
+    }
+    return created;
   },
 
   async transitionStatus(
@@ -464,12 +543,15 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    const r = await fetch(`${API_BASE}/${id}/transition`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nextStatus, ...payload }),
-    });
-    return r.json();
+    return apiFetch<Case>(
+      `${API_BASE}/${id}/transition`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextStatus, ...payload }),
+      },
+      'Statü geçişi',
+    );
   },
 
   // Spec section 15 — CaseActivity her değişiklik: field_name, old_value, new_value
@@ -515,13 +597,15 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    const r = await fetch(`${API_BASE}/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    if (!r.ok) return undefined;
-    return r.json();
+    return apiFetch<Case>(
+      `${API_BASE}/${id}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+      'Vaka güncellenemedi',
+    );
   },
 
   /**
@@ -566,13 +650,15 @@ export const caseService = {
       store[idx] = updated;
       return { caseUpdated: clone(updated), callLog: clone(newLog) };
     }
-    const r = await fetch(`${API_BASE}/${id}/call-logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    if (!r.ok) return undefined;
-    return r.json();
+    return apiFetch<{ caseUpdated: Case; callLog: CaseCallLog }>(
+      `${API_BASE}/${id}/call-logs`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      'Çağrı kaydı eklenemedi',
+    );
   },
 
   /**
@@ -617,13 +703,15 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    const r = await fetch(`${API_BASE}/${caseId}/activity`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-    if (!r.ok) return undefined;
-    return r.json();
+    return apiFetch<Case>(
+      `${API_BASE}/${caseId}/activity`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      'Aktivite kaydı eklenemedi',
+    );
   },
 
   /**
@@ -670,13 +758,15 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    const r = await fetch(`${API_BASE}/${caseId}/checklist/${itemId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ checked }),
-    });
-    if (!r.ok) return undefined;
-    return r.json();
+    return apiFetch<Case>(
+      `${API_BASE}/${caseId}/checklist/${itemId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked }),
+      },
+      'Kontrol listesi güncellenemedi',
+    );
   },
 
   async addNote(id: string, note: { content: string; visibility: NoteVisibility; authorName: string }): Promise<CaseNote | undefined> {
@@ -699,12 +789,126 @@ export const caseService = {
       };
       return clone(newNote);
     }
-    const r = await fetch(`${API_BASE}/${id}/notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(note),
-    });
-    return r.json();
+    return apiFetch<CaseNote>(
+      `${API_BASE}/${id}/notes`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(note),
+      },
+      'Not eklenemedi',
+    );
+  },
+
+  /**
+   * Vakaya dosya ekler. Boyut (CASE_FILE_MAX_SIZE) ve sayı (CASE_FILE_MAX_COUNT)
+   * limitlerini koruyup history'e FileUploaded entry'si atar.
+   * Mock'ta dataUrl olarak base64 saklanır → indirme için anchor href kullanılır.
+   * FAZ 2'de multipart/form-data ile S3 presigned URL akışına dönüşür.
+   */
+  async addFile(
+    id: string,
+    input: {
+      fileName: string;
+      fileSize: number;
+      mimeType: string;
+      dataUrl?: string;
+      uploadedBy?: string;
+    },
+  ): Promise<{ caseUpdated: Case; file: CaseFile } | { error: string } | undefined> {
+    if (USE_MOCK) {
+      await delay(60);
+      const idx = store.findIndex((c) => c.id === id);
+      if (idx < 0) return undefined;
+      const prev = store[idx];
+      if (prev.files.length >= CASE_FILE_MAX_COUNT) {
+        return { error: `Bu vakada en fazla ${CASE_FILE_MAX_COUNT} dosya olabilir.` };
+      }
+      if (input.fileSize > CASE_FILE_MAX_SIZE) {
+        return { error: `Dosya boyutu üst sınırı ${Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024))} MB.` };
+      }
+      const actor = input.uploadedBy ?? 'Mock User';
+      const file: CaseFile = {
+        id: uid('FILE'),
+        caseId: id,
+        fileName: input.fileName,
+        fileSize: input.fileSize,
+        mimeType: input.mimeType,
+        uploadedBy: actor,
+        uploadedAt: nowIso(),
+        dataUrl: input.dataUrl,
+      };
+      const updated: Case = {
+        ...prev,
+        files: [file, ...prev.files],
+        updatedAt: nowIso(),
+        history: [
+          ...prev.history,
+          {
+            id: uid('H'),
+            caseId: id,
+            action: 'Dosya yüklendi',
+            actionType: 'FileUploaded',
+            fieldName: 'files',
+            toValue: file.fileName,
+            actor,
+            at: nowIso(),
+          },
+        ],
+      };
+      store[idx] = updated;
+      return { caseUpdated: clone(updated), file: clone(file) };
+    }
+    return apiFetch<{ caseUpdated: Case; file: CaseFile } | { error: string }>(
+      `${API_BASE}/${id}/files`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      'Dosya yüklenemedi',
+    );
+  },
+
+  /** Vakadan dosya siler ve history'e FileRemoved entry'si atar. */
+  async removeFile(
+    id: string,
+    fileId: string,
+    actor = 'Mock User',
+  ): Promise<Case | undefined> {
+    if (USE_MOCK) {
+      await delay(50);
+      const idx = store.findIndex((c) => c.id === id);
+      if (idx < 0) return undefined;
+      const prev = store[idx];
+      const target = prev.files.find((f) => f.id === fileId);
+      if (!target) return clone(prev);
+      const updated: Case = {
+        ...prev,
+        files: prev.files.filter((f) => f.id !== fileId),
+        updatedAt: nowIso(),
+        history: [
+          ...prev.history,
+          {
+            id: uid('H'),
+            caseId: id,
+            action: 'Dosya silindi',
+            actionType: 'FileRemoved',
+            fieldName: 'files',
+            fromValue: target.fileName,
+            actor,
+            at: nowIso(),
+          },
+        ],
+      };
+      store[idx] = updated;
+      return clone(updated);
+    }
+    return apiFetch<Case>(
+      `${API_BASE}/${id}/files/${fileId}`,
+      { method: 'DELETE' },
+      'Dosya silinemedi',
+    );
   },
 
   async findOpenCaseFor(accountId: string, caseType: CaseType): Promise<Case | undefined> {
@@ -719,9 +923,11 @@ export const caseService = {
       );
       return found ? clone(found) : undefined;
     }
-    const r = await fetch(`${API_BASE}/duplicate-check?accountId=${accountId}&caseType=${caseType}`);
-    if (!r.ok) return undefined;
-    const data = await r.json();
+    const data = await apiFetch<{ case?: Case }>(
+      `${API_BASE}/duplicate-check?accountId=${encodeURIComponent(accountId)}&caseType=${encodeURIComponent(caseType)}`,
+      undefined,
+      'Duplicate kontrolü',
+    );
     return data?.case ?? undefined;
   },
 
@@ -734,10 +940,10 @@ export const caseService = {
   },
 
   /**
-   * FAZ 4'te dosya/evrak yükleme eklendiğinde gerçek sayım buraya gelecek.
+   * Belge türü-vaka ilişkisi modellendiğinde gerçek sayım buraya gelecek.
    * Şimdilik admin tablosunda her satır 0 kullanım gösterir.
    */
-  countByEvrakType(_evrakTypeId: string): number {
+  countByDocumentType(_documentTypeId: string): number {
     return 0;
   },
 
@@ -877,37 +1083,102 @@ export const caseService = {
     params.set('accountId', accountId);
     if (options?.excludeId) params.set('excludeId', options.excludeId);
     if (options?.statusIn)  params.set('statusIn', options.statusIn.join(','));
-    const r = await fetch(`${API_BASE}/by-account?${params.toString()}`);
-    if (!r.ok) return [];
-    const data = await r.json();
+    const data = await apiFetch<{ value: Case[] }>(
+      `${API_BASE}/by-account?${params.toString()}`,
+      undefined,
+      'Geçmiş vakalar yüklenemedi',
+    );
     return data?.value ?? [];
   },
 };
 
+/**
+ * lookupService — sync getter API. Kaynak USE_MOCK'a göre değişir:
+ *  - USE_MOCK=true → MOCK_* dizilerinden okur
+ *  - USE_MOCK=false → loadBootstrap() ile çekilmiş cache'den okur
+ *
+ * App boot'ta `<LookupGate>` cache'i doldurur; bu sayede sayfaların
+ * lookupService.X() çağrıları async refactor istemez.
+ */
+function getCache() {
+  if (USE_MOCK) return null;
+  const data = getBootstrap();
+  if (!data) {
+    // LookupGate boot tamamlanmadan render edilmemeli — bu uyarı bootstrap
+    // sırası bozulduğunda geliştiriciye işaret eder.
+    console.warn(
+      '[lookupService] bootstrap cache boş — <LookupGate /> render dışında çağırma yapılmış olabilir.',
+    );
+  }
+  return data;
+}
+
 export const lookupService = {
-  companies:        () => clone(MOCK_COMPANIES),
-  teams:            () => clone(MOCK_TEAMS).filter((t) => t.isActive),
-  persons:          () => clone(MOCK_PERSONS).filter((p) => p.isActive),
-  personsByTeam:    (teamId: string) =>
-    MOCK_PERSONS.filter((p) => p.teamId === teamId && p.isActive).map((p) => ({ ...p })),
-  accounts:         () => clone(MOCK_ACCOUNTS),
+  companies: () => {
+    const b = getCache();
+    return b ? clone(b.companies) : clone(MOCK_COMPANIES);
+  },
+  teams: () => {
+    const b = getCache();
+    return b ? clone(b.teams).filter((t) => t.isActive)
+             : clone(MOCK_TEAMS).filter((t) => t.isActive);
+  },
+  persons: () => {
+    const b = getCache();
+    return b ? clone(b.persons).filter((p) => p.isActive)
+             : clone(MOCK_PERSONS).filter((p) => p.isActive);
+  },
+  personsByTeam: (teamId: string) => {
+    const b = getCache();
+    const src = b ? b.persons : MOCK_PERSONS;
+    return src.filter((p) => p.teamId === teamId && p.isActive).map((p) => ({ ...p }));
+  },
+  accounts: () => {
+    const b = getCache();
+    return b ? clone(b.accounts) : clone(MOCK_ACCOUNTS);
+  },
   /**
    * Aktif kategoriler + her birinin aktif alt kategorileri.
-   * Legacy shape ({ category, subCategories: string[] }) korunur — NewCaseForm /
-   * CaseDetailPage gibi consumer'lar henüz id-bazlı modele geçmedi.
+   * Legacy shape ({ category, subCategories: string[] }) korunur.
    */
-  categories: () =>
-    MOCK_CATEGORIES
+  categories: () => {
+    const b = getCache();
+    if (b) {
+      return b.categories
+        .filter((c) => c.isActive)
+        .map((c) => ({
+          category: c.name,
+          subCategories: c.subCategories.filter((s) => s.isActive).map((s) => s.name),
+        }));
+    }
+    return MOCK_CATEGORIES
       .filter((c) => c.isActive)
       .map((c) => ({
         category: c.name,
         subCategories: c.subCategories.filter((s) => s.isActive).map((s) => s.name),
-      })),
-  requestTypes:     () => [...CASE_REQUEST_TYPES],
-  thirdParties:     () => clone(MOCK_THIRD_PARTIES).filter((tp) => tp.isActive),
-  evrakTypes:       () => clone(MOCK_EVRAK_TYPES).filter((e) => e.isActive),
-  offeredSolutions: () => clone(MOCK_OFFERED_SOLUTIONS).filter((o) => o.isActive),
-  productGroups:    (): string[] => {
+      }));
+  },
+  requestTypes: () => [...CASE_REQUEST_TYPES],
+  thirdParties: () => {
+    const b = getCache();
+    return b ? clone(b.thirdParties).filter((tp) => tp.isActive)
+             : clone(MOCK_THIRD_PARTIES).filter((tp) => tp.isActive);
+  },
+  documentTypes: () => {
+    const b = getCache();
+    return b ? clone(b.documentTypes).filter((e) => e.isActive)
+             : clone(MOCK_DOCUMENT_TYPES).filter((e) => e.isActive);
+  },
+  offeredSolutions: () => {
+    const b = getCache();
+    return b ? clone(b.offeredSolutions).filter((o) => o.isActive)
+             : clone(MOCK_OFFERED_SOLUTIONS).filter((o) => o.isActive);
+  },
+  productGroups: (): string[] => {
+    // FAZ 2 BFF: ilerde dedicated endpoint olur. Şimdilik mock'tan distinct
+    // alıyoruz çünkü Case tablosundan distinct DB sorgusu için ayrı endpoint
+    // gerekiyor. Yeni vakalar açıldıkça bu liste eskimese de NewCaseForm'da
+    // serbest yazım da kabul edilir.
     const set = new Set<string>();
     MOCK_CASES.forEach((c) => {
       if (c.productGroup) set.add(c.productGroup);

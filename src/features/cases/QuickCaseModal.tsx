@@ -99,16 +99,21 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
       subCategory: QUICK_DEFAULTS.subCategory,
       requestType: QUICK_DEFAULTS.requestType,
     };
-    const created = await caseService.create(input);
-    setSubmitting(false);
-    onClose();
-    toast({
-      type: 'success',
-      title: 'Hızlı vaka oluşturuldu',
-      message: `${created.caseNumber} — ${created.title}`,
-      duration: 6000,
-      action: { label: 'Detayı Aç', onClick: () => onCreated(created) },
-    });
+    try {
+      const created = await caseService.create(input);
+      setSubmitting(false);
+      onClose();
+      toast({
+        type: 'success',
+        title: 'Hızlı vaka oluşturuldu',
+        message: `${created.caseNumber} — ${created.title}`,
+        duration: 6000,
+        action: { label: 'Detayı Aç', onClick: () => onCreated(created) },
+      });
+    } catch {
+      // apiFetch toast'u gösterdi; modal açık kalsın yeniden denensin.
+      setSubmitting(false);
+    }
   }
 
   function appendVoiceToTitle(chunk: string) {

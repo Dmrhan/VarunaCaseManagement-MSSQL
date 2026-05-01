@@ -4,6 +4,7 @@ import type {
   CaseHistoryEntry,
   CaseNote,
   CasePriority,
+  CaseRequestType,
   CaseType,
   FinancialStatus,
   ProductUsage,
@@ -83,12 +84,17 @@ export interface CategorySuggestionInput {
   description: string;
   caseType: CaseType;
   companyName?: string;
-  availableCategories?: { category: string; subCategories: string[] }[];
+  /** Strict json_schema mode için zorunlu — kategori + alt kategori enum'ları */
+  availableCategories: { category: string; subCategories: string[] }[];
+  /** Strict json_schema mode için zorunlu — talep türü enum'u */
+  availableRequestTypes: CaseRequestType[];
 }
 
 export interface CategorySuggestion {
   category: string;
-  subCategory: string | null;
+  /** Strict mode artık null dönmez — her zaman geçerli bir alt kategori */
+  subCategory: string;
+  requestType: CaseRequestType;
   priority: CasePriority;
   confidence: number;
   reasoning: string;

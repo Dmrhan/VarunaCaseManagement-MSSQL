@@ -62,7 +62,7 @@ export interface CaseThirdParty {
   isActive: boolean;
 }
 
-export interface CaseEvrakType {
+export interface CaseDocumentType {
   id: string;
   name: string;
   description?: string;
@@ -157,7 +157,12 @@ export interface CaseFile {
   mimeType: string;
   uploadedBy: string;
   uploadedAt: string;
+  /** Mock'ta indirme için base64 data URL. FAZ 2 BFF'te S3/blob URL'i olur. */
+  dataUrl?: string;
 }
+
+export const CASE_FILE_MAX_SIZE = 25 * 1024 * 1024; // 25 MB
+export const CASE_FILE_MAX_COUNT = 20;
 
 export type CaseHistoryActionType =
   | 'Transfer'         // Vaka başka kişiye devredildi
@@ -166,6 +171,8 @@ export type CaseHistoryActionType =
   | 'ChecklistToggle'  // Kontrol maddesi işaretlendi
   | 'NoteAdded'        // Not eklendi
   | 'CallLogAdded'     // Çağrı kaydı eklendi
+  | 'FileUploaded'     // Dosya yüklendi
+  | 'FileRemoved'      // Dosya silindi
   | 'CaseCreated'      // Vaka oluşturuldu
   | 'SLAApplied';      // SLA kuralı/fallback uygulandı
 

@@ -7,19 +7,19 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextArea, TextInput } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
-import { adminService, type EvrakTypeInput } from '@/services/adminService';
-import type { CaseEvrakType } from '@/features/cases/types';
+import { adminService, type DocumentTypeInput } from '@/services/adminService';
+import type { CaseDocumentType } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
-import { EVRAK_HELP } from './helpContents';
+import { DOCUMENT_HELP } from './helpContents';
 
-export function AdminEvrakPage() {
-  const [items, setItems] = useState<CaseEvrakType[]>([]);
+export function AdminDocumentsPage() {
+  const [items, setItems] = useState<CaseDocumentType[]>([]);
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const { toast } = useToast();
 
   function refresh() {
-    setItems(adminService.evrakTypes.list());
+    setItems(adminService.documentTypes.list());
   }
   useEffect(refresh, []);
 
@@ -33,8 +33,8 @@ export function AdminEvrakPage() {
     );
   }, [items, search]);
 
-  function handleToggleActive(item: CaseEvrakType) {
-    const r = adminService.evrakTypes.setActive(item.id, !item.isActive);
+  function handleToggleActive(item: CaseDocumentType) {
+    const r = adminService.documentTypes.setActive(item.id, !item.isActive);
     if (r.ok) {
       refresh();
       toast({
@@ -47,14 +47,14 @@ export function AdminEvrakPage() {
     }
   }
 
-  function handleDelete(item: CaseEvrakType) {
-    const usage = adminService.evrakTypes.usage(item.id).count;
+  function handleDelete(item: CaseDocumentType) {
+    const usage = adminService.documentTypes.usage(item.id).count;
     const msg =
       usage > 0
-        ? `"${item.name}" toplam ${usage} dosyada kullanılıyor. Silinince yeni evrak yüklemelerinde görünmez (mevcut dosyalardaki tip korunur). Devam edilsin mi?`
+        ? `"${item.name}" toplam ${usage} dosyada kullanılıyor. Silinince yeni dosya yüklemelerinde görünmez (mevcut dosyalardaki tip korunur). Devam edilsin mi?`
         : `"${item.name}" silinsin mi?`;
     if (!window.confirm(msg)) return;
-    const r = adminService.evrakTypes.remove(item.id);
+    const r = adminService.documentTypes.remove(item.id);
     if (r.ok) {
       refresh();
       toast({ type: 'warn', message: `"${item.name}" silindi.`, duration: 2500 });
@@ -66,16 +66,16 @@ export function AdminEvrakPage() {
   return (
     <>
       <AdminListLayout
-        title="Evrak Tipi Tanımları"
-        description="Vakalara yüklenen dosyaların evrak tipi listesi (Sözleşme, Fatura, Yazışma...). FAZ 4 ile dosya yükleme ekranlarında dropdown olarak gösterilir."
+        title="Belge Türü Tanımları"
+        description="Vakalara yüklenen dosyaların belge türü listesi (Sözleşme, Fatura, Yazışma...). Dosya yükleme ekranlarında dropdown olarak gösterilir."
         count={items.length}
         searchPlaceholder="İsim veya açıklamaya göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
         onAdd={() => setEditor({ mode: 'create' })}
-        addLabel="Yeni Evrak Tipi"
-        helpTitle={EVRAK_HELP.title}
-        helpSections={EVRAK_HELP.sections}
+        addLabel="Yeni Belge Türü"
+        helpTitle={DOCUMENT_HELP.title}
+        helpSections={DOCUMENT_HELP.sections}
       >
         {filtered.length === 0 ? (
           <CardBody>
@@ -85,12 +85,12 @@ export function AdminEvrakPage() {
               description={
                 search
                   ? 'Farklı bir terim deneyin.'
-                  : 'İlk evrak tipi tanımını oluşturarak başlayın.'
+                  : 'İlk belge türü tanımını oluşturarak başlayın.'
               }
               action={
                 !search ? (
                   <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
-                    Yeni Evrak Tipi
+                    Yeni Belge Türü
                   </Button>
                 ) : undefined
               }
@@ -110,7 +110,7 @@ export function AdminEvrakPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filtered.map((it) => {
-                  const usage = adminService.evrakTypes.usage(it.id).count;
+                  const usage = adminService.documentTypes.usage(it.id).count;
                   return (
                     <tr key={it.id} className="hover:bg-slate-50">
                       <Td>
@@ -173,7 +173,7 @@ export function AdminEvrakPage() {
         )}
       </AdminListLayout>
 
-      <EvrakEditModal
+      <DocumentEditModal
         open={editor !== null}
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
@@ -188,7 +188,7 @@ export function AdminEvrakPage() {
 // Edit Modal
 // ----------------------------------------------------------------
 
-function EvrakEditModal({
+function DocumentEditModal({
   open,
   mode,
   editingId,
@@ -201,7 +201,7 @@ function EvrakEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<EvrakTypeInput>({ name: '', description: '', isActive: true });
+  const [form, setForm] = useState<DocumentTypeInput>({ name: '', description: '', isActive: true });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -210,7 +210,7 @@ function EvrakEditModal({
     if (!open) return;
     setError(null);
     if (mode === 'edit' && editingId) {
-      const item = adminService.evrakTypes.get(editingId);
+      const item = adminService.documentTypes.get(editingId);
       if (item) {
         setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
       }
@@ -222,7 +222,7 @@ function EvrakEditModal({
   async function handleSave() {
     setSubmitting(true);
     setError(null);
-    const trimmed: EvrakTypeInput = {
+    const trimmed: DocumentTypeInput = {
       name: form.name.trim(),
       description: form.description?.trim() || undefined,
       isActive: form.isActive,
@@ -230,9 +230,9 @@ function EvrakEditModal({
 
     const r =
       mode === 'create'
-        ? adminService.evrakTypes.create(trimmed)
+        ? adminService.documentTypes.create(trimmed)
         : editingId
-          ? adminService.evrakTypes.update(editingId, trimmed)
+          ? adminService.documentTypes.update(editingId, trimmed)
           : null;
 
     setSubmitting(false);
@@ -263,7 +263,7 @@ function EvrakEditModal({
       open={open}
       onClose={onClose}
       size="md"
-      title={mode === 'create' ? 'Yeni Evrak Tipi' : 'Evrak Tipini Düzenle'}
+      title={mode === 'create' ? 'Yeni Belge Türü' : 'Belge Türünü Düzenle'}
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
@@ -293,7 +293,7 @@ function EvrakEditModal({
 
         <Field label="Açıklama" hint="Opsiyonel — kısa not">
           <TextArea
-            placeholder="Bu evrak tipinin hangi dokümanları kapsadığını açıklayın…"
+            placeholder="Bu belge türünün hangi dokümanları kapsadığını açıklayın…"
             value={form.description ?? ''}
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             rows={2}
@@ -307,7 +307,7 @@ function EvrakEditModal({
             onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
             className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
           />
-          Aktif — yeni evrak yüklemelerinde dropdown'da görünür
+          Aktif — yeni dosya yüklemelerinde dropdown'da görünür
         </label>
 
         {error && (

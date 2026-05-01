@@ -46,11 +46,23 @@ function rateLimit(req, res, next) {
 // ----------------------------------------------------------------
 // OpenAI çağrısı (timeout + JSON parse + standart hata cevabı)
 // ----------------------------------------------------------------
-async function callOpenAI({ system, user, expectJson = false }) {
+async function callOpenAI({ system, user, expectJson = false, schema = null, schemaName = 'response' }) {
   if (!client) {
     const err = new Error('AI servisi yapılandırılmamış (API key yok).');
     err.status = 503;
     throw err;
+  }
+
+  // schema verilmişse strict json_schema modu (decoding-time enum kilidi).
+  // Aksi halde expectJson → json_object (soft) veya düz metin.
+  let responseFormat;
+  if (schema) {
+    responseFormat = {
+      type: 'json_schema',
+      json_schema: { name: schemaName, schema, strict: true },
+    };
+  } else if (expectJson) {
+    responseFormat = { type: 'json_object' };
   }
 
   const ctrl = new AbortController();
@@ -64,15 +76,16 @@ async function callOpenAI({ system, user, expectJson = false }) {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        ...(expectJson ? { response_format: { type: 'json_object' } } : {}),
+        ...(responseFormat ? { response_format: responseFormat } : {}),
       },
       { signal: ctrl.signal },
     );
     const text = (resp.choices?.[0]?.message?.content ?? '').trim();
 
-    if (!expectJson) return { text };
+    if (!expectJson && !schema) return { text };
 
-    // JSON modu: response_format=json_object ile gelen ama defansif kod-fence kaldır
+    // JSON modu: response_format=json_object/json_schema ile gelen
+    // ama defansif kod-fence kaldır (json_object modunda model bazen ekliyor)
     const cleaned = text
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/```\s*$/i, '')
@@ -113,42 +126,84 @@ router.post(
   '/suggest-category',
   rateLimit,
   aiHandler(async (req, res) => {
-    const { description, caseType, companyName, availableCategories } = req.body ?? {};
+    const { description, caseType, companyName, availableCategories, availableRequestTypes } = req.body ?? {};
     if (!description || typeof description !== 'string') {
       return res.status(400).json({ error: 'description gerekli.' });
     }
+    if (!Array.isArray(availableCategories) || availableCategories.length === 0) {
+      return res.status(400).json({ error: 'availableCategories gerekli (kategori enum kilidi için).' });
+    }
+    if (!Array.isArray(availableRequestTypes) || availableRequestTypes.length === 0) {
+      return res.status(400).json({ error: 'availableRequestTypes gerekli (talep türü enum kilidi için).' });
+    }
+
+    // Enum'lar — strict mode model'i decoding-time'da bu listelere kilitler.
+    const categoryEnum = availableCategories.map((c) => c.category);
+    const subCategoryEnum = Array.from(
+      new Set(availableCategories.flatMap((c) => c.subCategories ?? [])),
+    );
+    const requestTypeEnum = availableRequestTypes;
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['category', 'subCategory', 'requestType', 'priority', 'confidence', 'reasoning'],
+      properties: {
+        category:    { type: 'string', enum: categoryEnum },
+        subCategory: { type: 'string', enum: subCategoryEnum },
+        requestType: { type: 'string', enum: requestTypeEnum },
+        priority:    { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'] },
+        confidence:  { type: 'number' },
+        reasoning:   { type: 'string' },
+      },
+    };
 
     const system = [
       "Sen Varuna CRM'de çalışan bir vaka sınıflandırma asistanısın.",
-      'Türkçe müşteri şikayetlerini analiz edip doğru kategori ve öncelik belirlersin.',
-      'Yanıtını SADECE JSON olarak ver, başka hiçbir şey yazma.',
+      'Türkçe müşteri açıklamalarını analiz edip kategori, alt kategori, talep türü ve önceliği belirlersin.',
+      'KURAL: subCategory MUTLAKA seçilen category\'nin alt kategori listesinde yer almalıdır (aşağıdaki haritaya bak).',
+      'KURAL: requestType MUTLAKA verilen listeden olmalıdır.',
+      'KURAL: Her alanı doldur — boş/null/atla yok. Açıklamadan emin olamadığın yerde en olası seçeneği seç ve confidence değerini düşür.',
     ].join('\n');
 
-    const catList = Array.isArray(availableCategories)
-      ? availableCategories
-          .map((c) => `- ${c.category}: ${(c.subCategories ?? []).join(', ')}`)
-          .join('\n')
-      : '(verilmedi)';
+    const catMap = availableCategories
+      .map((c) => `- ${c.category} → [${(c.subCategories ?? []).join(', ')}]`)
+      .join('\n');
 
     const user = [
-      'Aşağıdaki vaka açıklamasını analiz et:',
-      `Şirket: ${companyName ?? '-'}`,
-      `Vaka Tipi: ${caseType ?? '-'}`,
-      `Açıklama: ${description}`,
-      'Mevcut kategoriler:',
-      catList,
+      'Vaka bilgisi:',
+      `- Şirket: ${companyName ?? '-'}`,
+      `- Vaka Tipi: ${caseType ?? '-'}`,
+      `- Açıklama: ${description}`,
       '',
-      'JSON formatı:',
-      '{',
-      '  "category": "en uygun kategori adı",',
-      '  "subCategory": "en uygun alt kategori adı veya null",',
-      '  "priority": "Low|Medium|High|Critical",',
-      '  "confidence": 0.0-1.0,',
-      '  "reasoning": "kısa Türkçe gerekçe (1 cümle)"',
-      '}',
+      'Kategori → alt kategori haritası (subCategory bu eşlemeye uygun olmalı):',
+      catMap,
+      '',
+      `Talep Türü seçenekleri: ${requestTypeEnum.join(' | ')}`,
+      '',
+      'Talep türü ipuçları:',
+      '- "bilgi/öğrenmek/sormak/açıklama" → Bilgi',
+      '- "öneri/tavsiye/iyileştirme fikri" → Öneri',
+      '- "talep/istiyorum/açtırmak/yapılmasını" → Talep',
+      '- "şikayet/memnun değil/kötü/sinirli" → Şikayet',
+      '- "hata/çalışmıyor/arıza/bozuk/açılmıyor" → Hata',
+      '',
+      'Öncelik ipuçları:',
+      '- Critical: hizmet kesintisi, mali kayıp, yasal/güvenlik riski, anahtar müşteri',
+      '- High: aktif iş bloğu, SLA tehlikede, eskalasyon riski',
+      '- Medium: çözülmesi gereken ama acil olmayan',
+      '- Low: bilgi/iyileştirme/sorgu',
+      '',
+      'confidence 0.0-1.0 arası, en uygun kategori-altkategori-talep türü kombinasyonuna ne kadar emin olduğun.',
+      'reasoning: 1 kısa cümle Türkçe gerekçe.',
     ].join('\n');
 
-    const { json } = await callOpenAI({ system, user, expectJson: true });
+    const { json } = await callOpenAI({
+      system,
+      user,
+      schema,
+      schemaName: 'category_suggestion',
+    });
     res.json(json);
   }),
 );

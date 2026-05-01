@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
-  ExternalLink,
+  Download,
   FileText,
   History as HistoryIcon,
   Inbox,
@@ -23,8 +23,10 @@ import {
   ShieldAlert,
   Sparkles,
   Target,
+  Trash2,
   TrendingDown,
   TrendingUp,
+  UploadCloud,
   User,
   UserPlus,
   Wallet,
@@ -50,6 +52,8 @@ import {
   CALL_DISPOSITIONS,
   CALL_OUTCOMES,
   CASE_FIELD_LABELS,
+  CASE_FILE_MAX_COUNT,
+  CASE_FILE_MAX_SIZE,
   CASE_ORIGINS,
   CASE_REQUEST_TYPES,
   ESCALATION_LEVELS,
@@ -62,6 +66,7 @@ import {
   type CallDisposition,
   type CallOutcome,
   type Case,
+  type CaseFile,
   type EscalationLevel,
   type NoteVisibility,
 } from './types';
@@ -592,7 +597,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 inputRef={noteRef}
               />
             )}
-            {tab === 'files' && <FilesTab item={item} />}
+            {tab === 'files' && (
+              <FilesTab item={item} onItemUpdated={(c) => setItem(c)} />
+            )}
             {tab === 'callLogs' && (
               <CallLogsTab item={item} onItemUpdated={(c) => setItem(c)} />
             )}
@@ -2380,27 +2387,196 @@ function NotesTab({
   );
 }
 
-function FilesTab({ item }: { item: Case }) {
+function FilesTab({
+  item,
+  onItemUpdated,
+}: {
+  item: Case;
+  onItemUpdated: (c: Case) => void;
+}) {
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const remainingSlots = CASE_FILE_MAX_COUNT - item.files.length;
+  const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
+
+  async function readAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    if (list.length > remainingSlots) {
+      toast({
+        type: 'warn',
+        message: `Bu vakaya en fazla ${remainingSlots} dosya daha eklenebilir (toplam limit ${CASE_FILE_MAX_COUNT}).`,
+      });
+      return;
+    }
+
+    const oversized = list.filter((f) => f.size > CASE_FILE_MAX_SIZE);
+    if (oversized.length > 0) {
+      toast({
+        type: 'error',
+        message: `${oversized.length} dosya ${maxMb} MB sınırını aşıyor: ${oversized.map((f) => f.name).join(', ')}`,
+      });
+      return;
+    }
+
+    setUploading(true);
+    let lastCase: Case | null = null;
+    let successCount = 0;
+    for (const file of list) {
+      const dataUrl = await readAsDataUrl(file);
+      const result = await caseService.addFile(item.id, {
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        dataUrl,
+      });
+      if (!result) continue;
+      if ('error' in result) {
+        toast({ type: 'error', message: result.error });
+        continue;
+      }
+      lastCase = result.caseUpdated;
+      successCount += 1;
+    }
+    setUploading(false);
+
+    if (lastCase) onItemUpdated(lastCase);
+    if (successCount > 0) {
+      toast({
+        type: 'success',
+        message:
+          successCount === 1
+            ? 'Dosya yüklendi ✓'
+            : `${successCount} dosya yüklendi ✓`,
+        duration: 2000,
+      });
+    }
+  }
+
+  async function handleRemove(file: CaseFile) {
+    if (!window.confirm(`"${file.fileName}" dosyasını silmek istediğinizden emin misiniz?`)) {
+      return;
+    }
+    const updated = await caseService.removeFile(item.id, file.id);
+    if (updated) {
+      onItemUpdated(updated);
+      toast({ type: 'success', message: 'Dosya silindi.', duration: 2000 });
+    }
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer.files?.length) {
+      void uploadFiles(e.dataTransfer.files);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
-          Maks. 25MB / dosya · 20 dosya / vaka. <em>FAZ 0'da yükleme devre dışı.</em>
+          Maks. {maxMb} MB / dosya · {CASE_FILE_MAX_COUNT} dosya / vaka.{' '}
+          <span className="text-slate-400">
+            ({item.files.length}/{CASE_FILE_MAX_COUNT})
+          </span>
         </p>
-        <Button size="sm" variant="outline" leftIcon={<ExternalLink size={12} />} disabled>
-          Yükle (FAZ 4+)
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={<UploadCloud size={12} />}
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading || remainingSlots <= 0}
+        >
+          {uploading ? 'Yükleniyor…' : 'Dosya Seç'}
         </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) void uploadFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
       </div>
+
+      <div
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
+        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed px-4 py-6 text-center text-sm transition ${
+          dragActive
+            ? 'border-brand-500 bg-brand-50 text-brand-700'
+            : 'border-slate-300 bg-slate-50/50 text-slate-500 hover:border-brand-400 hover:bg-brand-50/40'
+        }`}
+      >
+        <UploadCloud size={20} className={dragActive ? 'text-brand-600' : 'text-slate-400'} />
+        <span>
+          Dosyaları buraya sürükleyin veya{' '}
+          <span className="font-medium text-brand-700">tıklayın</span>
+        </span>
+        <span className="text-[11px] text-slate-400">
+          Birden fazla dosya seçilebilir
+        </span>
+      </div>
+
       {item.files.length === 0 ? (
-        <p className="py-8 text-center text-sm text-slate-500">Henüz dosya yok.</p>
+        <p className="py-6 text-center text-sm text-slate-500">Henüz dosya yok.</p>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-md ring-1 ring-slate-200">
           {item.files.map((f) => (
             <li key={f.id} className="flex items-center gap-3 px-3 py-2 text-sm">
               <Paperclip size={14} className="text-slate-400" />
-              <span className="flex-1 truncate text-slate-800">{f.fileName}</span>
-              <span className="text-xs text-slate-500">{formatBytes(f.fileSize)}</span>
-              <span className="text-xs text-slate-500">{formatDateTime(f.uploadedAt)}</span>
+              <span className="flex-1 truncate text-slate-800" title={f.fileName}>
+                {f.fileName}
+              </span>
+              <span className="hidden text-xs text-slate-500 sm:inline">
+                {formatBytes(f.fileSize)}
+              </span>
+              <span className="hidden text-xs text-slate-500 md:inline">
+                {formatDateTime(f.uploadedAt)}
+              </span>
+              {f.dataUrl && (
+                <a
+                  href={f.dataUrl}
+                  download={f.fileName}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                  title="İndir"
+                >
+                  <Download size={12} />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => handleRemove(f)}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
+                title="Sil"
+              >
+                <Trash2 size={12} />
+              </button>
             </li>
           ))}
         </ul>

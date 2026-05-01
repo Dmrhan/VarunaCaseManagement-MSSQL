@@ -87,24 +87,24 @@ export const THIRD_PARTY_HELP: HelpContent = {
   ],
 };
 
-export const EVRAK_HELP: HelpContent = {
-  title: 'Evrak Tipi Tanımları',
+export const DOCUMENT_HELP: HelpContent = {
+  title: 'Belge Türü Tanımları',
   sections: [
     {
       heading: 'Bu ekran ne işe yarar?',
       content:
-        'Vakalara dosya yüklenirken hangi evrak tipinin yüklendiği bu listeden seçilir. FAZ 4 ile birlikte dosya yükleme ekranında aktif olacak.',
+        'Vakalara dosya yüklenirken hangi belge türünün yüklendiği bu listeden seçilir. Dosya yükleme ekranında dropdown olarak görünür.',
     },
     {
       heading: 'Örnek tipler',
       content:
-        'Aşağıdaki gibi yaygın doküman tipleri tanımlanabilir. Her tip vaka detayında dropdown olarak listelenir.',
+        'Aşağıdaki gibi yaygın doküman tipleri tanımlanabilir. Her tür vaka detayında dropdown olarak listelenir.',
       example: `✓ Kimlik Fotokopisi
 ✓ İmza Sirküleri
 ✓ Banka Ekstresi
 ✓ Sözleşme Kopyası
 ✓ Yazışma Kaydı`,
-      tip: 'Tüm aktif evrak tipleri tüm vakalarda görünür. Şirket veya kategoriye göre filtreleme FAZ 2 kapsamındadır.',
+      tip: 'Tüm aktif belge türleri tüm vakalarda görünür. Şirket veya kategoriye göre filtreleme ileri faz kapsamındadır.',
     },
   ],
 };

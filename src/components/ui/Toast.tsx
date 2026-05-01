@@ -31,6 +31,24 @@ export function useToast() {
   return useContext(ToastContext);
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Module-level singleton — React Context dışından (örn. caseService
+// fetch wrapper'ları) toast tetiklemek için. ToastProvider ilk
+// mount'ta kendini buraya register eder.
+// ─────────────────────────────────────────────────────────────────
+let _toastSingleton: ToastApi | null = null;
+
+/** caseService gibi React dışı modüllerden toast göster. */
+export function notify(t: Omit<ToastEntry, 'id'>): void {
+  if (_toastSingleton) {
+    _toastSingleton.toast(t);
+  } else {
+    // ToastProvider henüz mount olmadıysa console'a düş — kullanıcı bunu
+    // göremez ama sessiz fail değil; geliştirici init sırasını fark eder.
+    console.warn('[notify] ToastProvider mount edilmeden toast tetiklendi:', t);
+  }
+}
+
 const TYPE_STYLE: Record<ToastType, { bg: string; ring: string; icon: ReactNode; iconColor: string }> = {
   success: {
     bg: 'bg-emerald-50 dark:bg-emerald-950/40',
@@ -77,6 +95,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [dismiss],
   );
+
+  // Module singleton'ı bu provider'a bağla — React dışı modüller (caseService
+  // gibi) `notify(...)` ile toast tetikleyebilsin.
+  useEffect(() => {
+    _toastSingleton = { toast, dismiss };
+    return () => {
+      _toastSingleton = null;
+    };
+  }, [toast, dismiss]);
 
   return (
     <ToastContext.Provider value={{ toast, dismiss }}>

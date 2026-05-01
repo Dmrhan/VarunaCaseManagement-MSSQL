@@ -4,7 +4,7 @@ import type {
   CaseCategoryDef,
   CaseChecklistTemplate,
   CaseCompany,
-  CaseEvrakType,
+  CaseDocumentType,
   CaseHistoryEntry,
   CaseNote,
   CaseOrigin,
@@ -47,15 +47,15 @@ export const MOCK_THIRD_PARTIES: CaseThirdParty[] = [
   { id: 'TP-INTEGRATR', name: 'Entegratör',         description: 'Müşteri tarafı entegrasyon ekibi', isActive: true },
 ];
 
-// Spec 12 — CaseEvrakType admin tablosu
-export const MOCK_EVRAK_TYPES: CaseEvrakType[] = [
-  { id: 'EVRAK-CONTRACT', name: 'Sözleşme',  description: 'Müşteri ile imzalanan sözleşme belgeleri',     isActive: true },
-  { id: 'EVRAK-INVOICE',  name: 'Fatura',    description: 'Müşteri faturaları ve fatura ekleri',          isActive: true },
-  { id: 'EVRAK-LETTER',   name: 'Yazışma',   description: 'E-posta, mektup, dilekçe gibi yazışmalar',     isActive: true },
-  { id: 'EVRAK-FORM',     name: 'Form',      description: 'Başvuru ve talep formları',                    isActive: true },
-  { id: 'EVRAK-OFFER',    name: 'Teklif',    description: 'Müşteriye sunulan teklif dokümanları',         isActive: true },
-  { id: 'EVRAK-REPORT',   name: 'Rapor',     description: 'Teknik / iş analiz raporları',                 isActive: true },
-  { id: 'EVRAK-OTHER',    name: 'Diğer',     description: 'Yukarıdaki kategorilere girmeyen belgeler',    isActive: true },
+// Spec 12 — CaseDocumentType admin tablosu (belge türleri: Sözleşme, Fatura, Yazışma...)
+export const MOCK_DOCUMENT_TYPES: CaseDocumentType[] = [
+  { id: 'DOC-CONTRACT', name: 'Sözleşme',  description: 'Müşteri ile imzalanan sözleşme belgeleri',     isActive: true },
+  { id: 'DOC-INVOICE',  name: 'Fatura',    description: 'Müşteri faturaları ve fatura ekleri',          isActive: true },
+  { id: 'DOC-LETTER',   name: 'Yazışma',   description: 'E-posta, mektup, dilekçe gibi yazışmalar',     isActive: true },
+  { id: 'DOC-FORM',     name: 'Form',      description: 'Başvuru ve talep formları',                    isActive: true },
+  { id: 'DOC-OFFER',    name: 'Teklif',    description: 'Müşteriye sunulan teklif dokümanları',         isActive: true },
+  { id: 'DOC-REPORT',   name: 'Rapor',     description: 'Teknik / iş analiz raporları',                 isActive: true },
+  { id: 'DOC-OTHER',    name: 'Diğer',     description: 'Yukarıdaki kategorilere girmeyen belgeler',    isActive: true },
 ];
 
 // Spec 12 — CaseOfferedSolutionDef admin tablosu

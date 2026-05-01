@@ -2,7 +2,7 @@
  * Admin tanım ekranlarının CRUD servisleri.
  *
  * Sprint A altyapısı; Sprint B–H itibarıyla tüm namespace dolu:
- * `thirdParties`, `evrakTypes`, `teams`, `persons`, `categories`, `sla`,
+ * `thirdParties`, `documentTypes`, `teams`, `persons`, `categories`, `sla`,
  * `checklists`, `offeredSolutions`. FAZ 1 admin ekranları tamamlandı.
  *
  * USE_MOCK = true (mock store doğrudan mutate edilir).
@@ -12,7 +12,7 @@
 import {
   MOCK_CATEGORIES,
   MOCK_CHECKLIST_TEMPLATES,
-  MOCK_EVRAK_TYPES,
+  MOCK_DOCUMENT_TYPES,
   MOCK_OFFERED_SOLUTIONS,
   MOCK_PERSONS,
   MOCK_SLA_POLICIES,
@@ -24,7 +24,7 @@ import type {
   CaseCategoryDef,
   CaseChecklistItem,
   CaseChecklistTemplate,
-  CaseEvrakType,
+  CaseDocumentType,
   CasePerson,
   CaseRequestType,
   CaseSubCategoryDef,
@@ -54,7 +54,7 @@ export interface ThirdPartyInput {
   isActive: boolean;
 }
 
-export interface EvrakTypeInput {
+export interface DocumentTypeInput {
   name: string;
   description?: string;
   isActive: boolean;
@@ -231,17 +231,17 @@ export const adminService = {
   },
 
   // ----------------------------------------------------------------
-  // Evrak Types
+  // Document Types
   // ----------------------------------------------------------------
 
-  evrakTypes: {
+  documentTypes: {
     /** Tüm kayıtlar (active + inactive). Admin tablosu için. */
-    list(): CaseEvrakType[] {
-      return clone(MOCK_EVRAK_TYPES);
+    list(): CaseDocumentType[] {
+      return clone(MOCK_DOCUMENT_TYPES);
     },
 
-    get(id: string): CaseEvrakType | undefined {
-      const found = MOCK_EVRAK_TYPES.find((e) => e.id === id);
+    get(id: string): CaseDocumentType | undefined {
+      const found = MOCK_DOCUMENT_TYPES.find((e) => e.id === id);
       return found ? clone(found) : undefined;
     },
 
@@ -249,21 +249,21 @@ export const adminService = {
      * Yeni kayıt ekler. Aynı isimde başka kayıt varsa hata fırlatır.
      * Boş veya yalnızca whitespace isim kabul edilmez.
      */
-    create(input: EvrakTypeInput): { ok: true; item: CaseEvrakType } | { ok: false; error: string } {
+    create(input: DocumentTypeInput): { ok: true; item: CaseDocumentType } | { ok: false; error: string } {
       const name = input.name.trim();
       if (!name) return { ok: false, error: 'İsim zorunludur.' };
-      const exists = MOCK_EVRAK_TYPES.some(
+      const exists = MOCK_DOCUMENT_TYPES.some(
         (e) => e.name.trim().toLowerCase() === name.toLowerCase(),
       );
       if (exists) return { ok: false, error: 'Bu isimde başka bir kayıt zaten var.' };
 
-      const item: CaseEvrakType = {
+      const item: CaseDocumentType = {
         id: nextId('EVRAK'),
         name,
         description: input.description?.trim() || undefined,
         isActive: input.isActive,
       };
-      MOCK_EVRAK_TYPES.push(item);
+      MOCK_DOCUMENT_TYPES.push(item);
       return { ok: true, item: clone(item) };
     },
 
@@ -272,16 +272,16 @@ export const adminService = {
      */
     update(
       id: string,
-      patch: Partial<EvrakTypeInput>,
-    ): { ok: true; item: CaseEvrakType } | { ok: false; error: string } {
-      const idx = MOCK_EVRAK_TYPES.findIndex((e) => e.id === id);
+      patch: Partial<DocumentTypeInput>,
+    ): { ok: true; item: CaseDocumentType } | { ok: false; error: string } {
+      const idx = MOCK_DOCUMENT_TYPES.findIndex((e) => e.id === id);
       if (idx < 0) return { ok: false, error: 'Kayıt bulunamadı.' };
 
-      const next: CaseEvrakType = { ...MOCK_EVRAK_TYPES[idx] };
+      const next: CaseDocumentType = { ...MOCK_DOCUMENT_TYPES[idx] };
       if (patch.name != null) {
         const name = patch.name.trim();
         if (!name) return { ok: false, error: 'İsim zorunludur.' };
-        const dup = MOCK_EVRAK_TYPES.some(
+        const dup = MOCK_DOCUMENT_TYPES.some(
           (e) => e.id !== id && e.name.trim().toLowerCase() === name.toLowerCase(),
         );
         if (dup) return { ok: false, error: 'Bu isimde başka bir kayıt zaten var.' };
@@ -293,12 +293,12 @@ export const adminService = {
       if (patch.isActive !== undefined) {
         next.isActive = patch.isActive;
       }
-      MOCK_EVRAK_TYPES[idx] = next;
+      MOCK_DOCUMENT_TYPES[idx] = next;
       return { ok: true, item: clone(next) };
     },
 
     setActive(id: string, isActive: boolean) {
-      return adminService.evrakTypes.update(id, { isActive });
+      return adminService.documentTypes.update(id, { isActive });
     },
 
     /**
@@ -306,15 +306,15 @@ export const adminService = {
      * kullanım kontrolü yapmalı; şimdilik referans yok, doğrudan silinir.
      */
     remove(id: string): { ok: true } | { ok: false; error: string } {
-      const idx = MOCK_EVRAK_TYPES.findIndex((e) => e.id === id);
+      const idx = MOCK_DOCUMENT_TYPES.findIndex((e) => e.id === id);
       if (idx < 0) return { ok: false, error: 'Kayıt bulunamadı.' };
-      MOCK_EVRAK_TYPES.splice(idx, 1);
+      MOCK_DOCUMENT_TYPES.splice(idx, 1);
       return { ok: true };
     },
 
-    /** Bu evrak tipi kaç dosyada/vakada referans veriliyor? FAZ 4'e kadar 0 döner. */
+    /** Bu belge türü kaç dosyada/vakada referans veriliyor? Dosya-belge ilişkisi modellenince gerçek sayım gelir. */
     usage(id: string): UsageInfo {
-      return { count: caseService.countByEvrakType(id) };
+      return { count: caseService.countByDocumentType(id) };
     },
   },
 

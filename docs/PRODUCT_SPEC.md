@@ -209,7 +209,7 @@ Endpoint: POST /api/ai/dashboard-chat
 Hazır sorular: 5 adet chip
 
 13. Tanım Ekranları (Admin — 7 ekran)
-EkranPage KeyKategori & Alt Kategoriadmin-categoriesSLA Kuralları (5-tuple)admin-sla3rd Party Tanımlarıadmin-thirdpartyEvrak Tipi Tanımlarıadmin-evrakKontrol Listesi (3-tuple+items)admin-checklistTakım Tanımları + Üye Yönetimiadmin-teamsTeklif Tanımlarıadmin-offered-solutions
+EkranPage KeyKategori & Alt Kategoriadmin-categoriesSLA Kuralları (5-tuple)admin-sla3rd Party Tanımlarıadmin-thirdpartyBelge Türü Tanımlarıadmin-documentsKontrol Listesi (3-tuple+items)admin-checklistTakım Tanımları + Üye Yönetimiadmin-teamsTeklif Tanımlarıadmin-offered-solutions
 Her ekranda HelpDrawer: "? Yardım" butonu, sağdan 320px, ESC kapanır.
 
 14. AI Endpoint'leri (BFF — /api/ai/*)

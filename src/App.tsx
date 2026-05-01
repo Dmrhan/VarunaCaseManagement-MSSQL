@@ -22,7 +22,7 @@ import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
-import { AdminEvrakPage } from './features/admin/AdminEvrakPage';
+import { AdminDocumentsPage } from './features/admin/AdminDocumentsPage';
 import { AdminTeamsPage } from './features/admin/AdminTeamsPage';
 import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
@@ -37,7 +37,7 @@ type AdminView =
   | 'admin-categories'
   | 'admin-sla'
   | 'admin-thirdparty'
-  | 'admin-evrak'
+  | 'admin-documents'
   | 'admin-checklist'
   | 'admin-teams'
   | 'admin-offered-solutions';
@@ -57,7 +57,7 @@ const ADMIN_CHILDREN: NavItem[] = [
   { key: 'admin-categories',         label: 'Kategori & Alt Kategori', icon: <FolderTree size={14} />,    available: true },
   { key: 'admin-sla',                label: 'SLA Kuralları',           icon: <Timer size={14} />,         available: true },
   { key: 'admin-thirdparty',         label: '3. Parti Tanımları',      icon: <Network size={14} />,       available: true },
-  { key: 'admin-evrak',              label: 'Evrak Tipi Tanımları',    icon: <FileText size={14} />,      available: true },
+  { key: 'admin-documents',              label: 'Belge Türü Tanımları',    icon: <FileText size={14} />,      available: true },
   { key: 'admin-checklist',          label: 'Kontrol Listesi',         icon: <ClipboardCheck size={14} />,available: true },
   { key: 'admin-teams',              label: 'Takım Tanımları',         icon: <Users2 size={14} />,        available: true },
   { key: 'admin-offered-solutions',  label: 'Teklif Tanımları',        icon: <Tag size={14} />,           available: true },
@@ -332,7 +332,7 @@ export default function App() {
           {view === 'admin-categories' && <AdminCategoriesPage />}
           {view === 'admin-sla' && <AdminSlaPage />}
           {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
-          {view === 'admin-evrak' && <AdminEvrakPage />}
+          {view === 'admin-documents' && <AdminDocumentsPage />}
           {view === 'admin-checklist' && <AdminChecklistPage />}
           {view === 'admin-teams' && <AdminTeamsPage />}
           {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}

@@ -1,0 +1,569 @@
+// Varuna Case Management — Veri Modeli (PRODUCT_SPEC §15)
+//
+// Mimari karar: schema MSSQL'e taşınabilir kalmalı. Bu yüzden:
+// - String ID + cuid() (autoincrement değil)
+// - Json tipi (Postgres'te jsonb, MSSQL'de nvarchar(max))
+// - Postgres-spesifik tip yok (TSVECTOR, ARRAY, vb.)
+// - Enum'lar Prisma enum (her iki DB'de desteklenir)
+//
+// MSSQL geçişinde sadece `provider = "sqlserver"` ve DATABASE_URL değişir.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase'in connection pooler'ı (port 6543) DDL desteklemez.
+  // Migration için direct connection (port 5432) gerekli.
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// Enum'lar — types.ts ile birebir
+// ============================================================
+
+enum CaseType {
+  GeneralSupport
+  ProactiveTracking
+  Churn
+}
+
+enum CaseStatus {
+  Acik              @map("Açık")
+  Incelemede        @map("İncelemede")
+  ThirdPartyWaiting @map("3rdPartyBekleniyor")
+  Eskalasyon
+  Cozuldu           @map("Çözüldü")
+  YenidenAcildi
+  IptalEdildi       @map("İptalEdildi")
+}
+
+enum CasePriority {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum CaseOrigin {
+  Telefon
+  Eposta  @map("E-posta")
+  Web
+  Chatbot
+  Diger   @map("Diğer")
+}
+
+enum CaseRequestType {
+  Bilgi
+  Oneri   @map("Öneri")
+  Talep
+  Sikayet @map("Şikayet")
+  Hata
+}
+
+enum EscalationLevel {
+  Yok
+  TakimLideri @map("TakımLideri")
+  Direktor    @map("Direktör")
+  UstYonetim  @map("ÜstYönetim")
+}
+
+enum NoteVisibility {
+  Internal
+  Customer
+}
+
+enum FinancialStatus {
+  Dusuk  @map("Düşük")
+  Orta
+  Yuksek @map("Yüksek")
+  Kritik
+}
+
+enum ProductUsage {
+  Yuksek @map("Yüksek")
+  Orta
+  Dusuk  @map("Düşük")
+  Yok
+}
+
+enum UsageChangeAlert {
+  Artis  @map("Artış")
+  Azalma
+  Sabit
+}
+
+enum ResponseLevel {
+  YuksekOncelik @map("Yüksek Öncelik")
+  OrtaOncelik   @map("Orta Öncelik")
+  DusukOncelik  @map("Düşük Öncelik")
+}
+
+enum CallDisposition {
+  Cevapladi        @map("Cevapladı")
+  Cevaplamadi      @map("Cevaplamadı")
+  NumaraHatali     @map("NumaraHatalı")
+  GorusmekIstemedi @map("GörüşmekIstemedi")
+  TekrarAranacak
+}
+
+enum CallOutcome {
+  Memnun
+  MemnunDegil @map("MemnunDeğil")
+  Tarafsiz    @map("Tarafsız")
+  Ulasilamadi @map("Ulaşılamadı")
+}
+
+enum OfferOutcome {
+  KabulEdildi
+  Reddedildi
+  Beklemede
+}
+
+enum ChurnResult {
+  IptalEdildi       @map("İptalEdildi")
+  DevamEdiyor
+  TeklifKabulEdildi
+}
+
+enum RetentionStatus {
+  Basarili    @map("Başarılı")
+  Basarisiz   @map("Başarısız")
+  DevamEdiyor
+}
+
+enum CaseHistoryActionType {
+  Transfer
+  StatusChange
+  FieldUpdate
+  ChecklistToggle
+  NoteAdded
+  CallLogAdded
+  FileUploaded
+  FileRemoved
+  CaseCreated
+  SLAApplied
+}
+
+enum ApprovalDecision {
+  Bekliyor
+  Onaylandi  @map("Onaylandı")
+  Reddedildi
+}
+
+enum NotificationChannel {
+  InApp
+  Email
+  SMS
+}
+
+// ============================================================
+// Lookup / referans tabloları
+// ============================================================
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts    Account[]
+  teams       Team[]
+  cases       Case[]
+  slaPolicies SLAPolicy[]
+  categories  CategoryDef[]
+  checklists  ChecklistTemplate[]
+}
+
+// CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
+// companyId opsiyonel: aynı müşteri birden fazla şirketin (PARAM/UNIVERA/FINROTA)
+// vakası olabilir; gerçek CRM entegrasyonunda canonical bağlama gelecek.
+model Account {
+  id        String   @id @default(cuid())
+  name      String
+  companyId String?
+  email     String?
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id])
+  cases   Case[]
+
+  @@index([companyId])
+  @@index([name])
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  companyId   String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id])
+  members Person[]
+  cases   Case[]
+}
+
+model Person {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  teamId    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team  Team?  @relation(fields: [teamId], references: [id])
+  cases Case[] @relation("CaseAssignedPerson")
+}
+
+model ThirdParty {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cases Case[]
+}
+
+model DocumentType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// CategoryDef — kategori + alt kategori (self-relation ile parent/child)
+model CategoryDef {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  parentId    String?
+  companyId   String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children CategoryDef[] @relation("CategoryHierarchy")
+  company  Company?      @relation(fields: [companyId], references: [id])
+
+  @@index([parentId])
+  @@index([companyId])
+}
+
+model OfferedSolutionDef {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  caseOffers CaseOfferedSolution[]
+}
+
+// SLAPolicy — 5-tuple eşleşme: company + productGroup + category + subCategory + requestType
+model SLAPolicy {
+  id              String          @id @default(cuid())
+  companyId       String
+  companyName     String
+  productGroup    String
+  categoryName    String
+  subCategoryName String
+  requestType     CaseRequestType
+  responseHours   Int
+  resolutionHours Int
+  description     String?
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, productGroup, categoryName, subCategoryName, requestType])
+}
+
+// ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
+model ChecklistTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  companyId    String
+  companyName  String
+  productGroup String
+  categoryName String
+  description  String?
+  /// CaseChecklistItem[] — { id, label, required, isActive }
+  items        Json
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, productGroup, categoryName])
+}
+
+// ============================================================
+// Vaka çekirdek tabloları
+// ============================================================
+
+model Case {
+  id         String @id @default(cuid())
+  caseNumber String @unique
+
+  title       String
+  description String
+
+  caseType          CaseType
+  status            CaseStatus   @default(Acik)
+  priority          CasePriority
+  origin            CaseOrigin
+  originDescription String?
+
+  // Şirket / Müşteri (denormalized — ad alanları arşiv için)
+  companyId   String
+  companyName String
+  accountId   String
+  accountName String
+
+  // Sınıflandırma (denormalized — kategori adları)
+  category     String
+  subCategory  String
+  requestType  CaseRequestType
+  productGroup String?
+
+  // Atama (FK + denormalized name)
+  assignedTeamId     String?
+  assignedTeamName   String?
+  assignedPersonId   String?
+  assignedPersonName String?
+
+  // Eskalasyon
+  escalationLevel EscalationLevel @default(Yok)
+
+  // 3rd party
+  thirdPartyId   String?
+  thirdPartyName String?
+
+  // ProactiveTracking alanları
+  financialStatus  FinancialStatus?
+  productUsage     ProductUsage?
+  usageChangeAlert UsageChangeAlert?
+  responseLevel    ResponseLevel?
+
+  // Churn alanları
+  cancellationRequest  Boolean?
+  /// String[] — OfferedSolutionDef.id listesi
+  offeredSolutions     Json?
+  offerExpiryDate      DateTime?
+  offerOutcome         OfferOutcome?
+  offerRejectionReason String?
+  actionTaken          String?
+  churnResult          ChurnResult?
+  retentionStatus      RetentionStatus?
+  followUpDate         DateTime?
+
+  // Çözüm / iptal
+  resolutionNote     String?
+  cancellationReason String?
+
+  // SLA
+  slaResponseDueAt     DateTime?
+  slaResolutionDueAt   DateTime?
+  slaViolation         Boolean   @default(false)
+  slaPausedAt          DateTime?
+  slaPausedDurationMin Int       @default(0)
+  slaThirdPartyWaitMin Int       @default(0)
+
+  // AI alanları
+  aiSummary                  String?
+  aiCategoryPrediction       String?
+  aiPriorityPrediction       CasePriority?
+  aiDuplicateScore           Float?
+  aiConfidenceScore          Float?
+  aiGeneratedFlag            Boolean       @default(false)
+  aiRejectReason             String?
+  aiCallBrief                String?
+  aiFollowupRecommendation   String?
+  aiRetentionOfferSuggestion String?
+
+  // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
+  /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
+  checklistItems Json?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  // Relations
+  company        Company     @relation(fields: [companyId], references: [id])
+  account        Account     @relation(fields: [accountId], references: [id])
+  assignedTeam   Team?       @relation(fields: [assignedTeamId], references: [id])
+  assignedPerson Person?     @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
+  thirdParty     ThirdParty? @relation(fields: [thirdPartyId], references: [id])
+
+  notes         CaseNote[]
+  attachments   CaseAttachment[]
+  history       CaseActivity[]
+  callLogs      CaseCallLog[]
+  caseOffers    CaseOfferedSolution[]
+  approvals     CaseApproval[]
+  notifications CaseNotification[]
+  aiSuggestions AISuggestion[]
+
+  @@index([accountId])
+  @@index([companyId])
+  @@index([assignedPersonId])
+  @@index([assignedTeamId])
+  @@index([status])
+  @@index([caseType])
+  @@index([createdAt])
+  @@index([slaResolutionDueAt])
+}
+
+// CaseActivity — her değişiklik kaydı (audit trail)
+model CaseActivity {
+  id         String                 @id @default(cuid())
+  caseId     String
+  action     String // human-readable
+  actionType CaseHistoryActionType?
+  fieldName  String?
+  fromValue  String?
+  toValue    String?
+  note       String?
+  actor      String
+  at         DateTime               @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([at])
+}
+
+model CaseNote {
+  id         String         @id @default(cuid())
+  caseId     String
+  authorName String
+  content    String
+  visibility NoteVisibility @default(Internal)
+  createdAt  DateTime       @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model CaseAttachment {
+  id         String   @id @default(cuid())
+  caseId     String
+  fileName   String
+  fileSize   Int
+  mimeType   String
+  fileUrl    String? // Supabase Storage URL (mock'ta dataUrl)
+  uploadedBy String
+  uploadedAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model CaseCallLog {
+  id                  String          @id @default(cuid())
+  caseId              String
+  callDate            DateTime
+  durationMin         Int
+  callDisposition     CallDisposition
+  callOutcome         CallOutcome
+  description         String?
+  callerId            String
+  callerName          String
+  nextFollowupDate    DateTime?
+  lastInteractionDate DateTime?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([callDate])
+}
+
+// CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)
+model CaseOfferedSolution {
+  id              String       @id @default(cuid())
+  caseId          String
+  solutionDefId   String
+  offeredAt       DateTime     @default(now())
+  offeredBy       String
+  outcome         OfferOutcome @default(Beklemede)
+  expiryDate      DateTime?
+  rejectionReason String?
+
+  case     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id])
+
+  @@index([caseId])
+}
+
+// CaseApproval — Supervisor onay akışı
+model CaseApproval {
+  id             String           @id @default(cuid())
+  caseId         String
+  approvalType   String // "ResolveCritical", "EscalateDirector", vb.
+  requestedBy    String
+  requestedAt    DateTime         @default(now())
+  decision       ApprovalDecision @default(Bekliyor)
+  decidedBy      String?
+  decidedAt      DateTime?
+  decisionReason String? // Onay/red gerekçesi (red için zorunlu)
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([decision])
+}
+
+// CaseNotification — bildirim logları
+model CaseNotification {
+  id        String              @id @default(cuid())
+  caseId    String
+  eventType String // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
+  channel   NotificationChannel
+  recipient String // Person.id veya email
+  payload   Json? // Bildirim içeriği snapshot
+  sentAt    DateTime            @default(now())
+  readAt    DateTime?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([recipient, readAt])
+}
+
+// AISuggestion — AI önerilerinin audit kaydı
+model AISuggestion {
+  id              String   @id @default(cuid())
+  caseId          String
+  suggestionType  String // "category", "priority", "resolution", vb.
+  suggestedValue  String
+  confidenceScore Float?
+  accepted        Boolean? // null=henüz değerlendirilmedi, true=uygula, false=yoksay
+  rejectReason    String?
+  createdAt       DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
