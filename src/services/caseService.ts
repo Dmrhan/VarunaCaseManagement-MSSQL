@@ -806,6 +806,7 @@ export const caseService = {
    *  2. Doğrudan Supabase Storage'a PUT (Vercel 4.5MB body limitini bypass)
    *  3. BFF'ye finalize çağrısı → DB satırı + history log
    *
+   * onProgress callback (opsiyonel) — XHR ile yükleme yüzdesi raporlar.
    * Mock'ta tek adımda in-memory store'a yazar.
    */
   async addFile(
@@ -813,6 +814,7 @@ export const caseService = {
     fileOrInput:
       | File
       | { fileName: string; fileSize: number; mimeType: string; dataUrl?: string; uploadedBy?: string },
+    onProgress?: (percent: number) => void,
   ): Promise<{ caseUpdated: Case; file: CaseFile } | { error: string } | undefined> {
     if (USE_MOCK) {
       await delay(60);
@@ -889,26 +891,35 @@ export const caseService = {
     if (!upload) return undefined;
     if ('error' in upload) return upload;
 
-    // Adım 2 — doğrudan Supabase Storage'a PUT
+    // Adım 2 — doğrudan Supabase Storage'a PUT (XHR ile progress takibi)
     try {
-      const putResp = await fetch(upload.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        body: file,
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', upload.uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            onProgress?.(100);
+            resolve();
+          } else {
+            reject(new Error(`Storage ${xhr.status}: ${xhr.responseText}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Storage bağlantı hatası'));
+        xhr.onabort = () => reject(new Error('Yükleme iptal edildi'));
+        xhr.send(file);
       });
-      if (!putResp.ok) {
-        notify({
-          type: 'error',
-          title: 'Dosya yüklenemedi',
-          message: `Storage hatası (${putResp.status}). Tekrar dener misin?`,
-        });
-        return undefined;
-      }
     } catch (err) {
+      const msg = (err as Error).message ?? 'Storage hatası';
       notify({
         type: 'error',
         title: 'Dosya yüklenemedi',
-        message: 'Storage\'a bağlanılamadı.',
+        message: msg.startsWith('Storage') ? msg : `Storage hatası: ${msg}`,
       });
       console.error('[caseService] storage put', err);
       return undefined;

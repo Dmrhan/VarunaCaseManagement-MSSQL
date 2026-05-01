@@ -2429,6 +2429,14 @@ function NotesTab({
   );
 }
 
+interface UploadProgress {
+  fileName: string;
+  fileSize: number;
+  percent: number;
+  status: 'queued' | 'uploading' | 'finalizing' | 'done' | 'error';
+  errorMessage?: string;
+}
+
 function FilesTab({
   item,
   onItemUpdated,
@@ -2440,6 +2448,7 @@ function FilesTab({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
 
   const remainingSlots = CASE_FILE_MAX_COUNT - item.files.length;
   const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
@@ -2466,19 +2475,51 @@ function FilesTab({
     }
 
     setUploading(true);
+    // Kuyruk başlangıç durumu
+    setUploadQueue(
+      list.map((f) => ({
+        fileName: f.name,
+        fileSize: f.size,
+        percent: 0,
+        status: 'queued',
+      })),
+    );
+
     let lastCase: Case | null = null;
     let successCount = 0;
-    for (const file of list) {
-      // FAZ 2: caseService.addFile File nesnesi alır, signed URL ile direct upload yapar
-      const result = await caseService.addFile(item.id, file);
-      if (!result) continue;
-      if ('error' in result) {
-        toast({ type: 'error', message: result.error });
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      // Bu dosya yüklenmeye başladı
+      setUploadQueue((q) =>
+        q.map((u, idx) => (idx === i ? { ...u, status: 'uploading' } : u)),
+      );
+
+      const result = await caseService.addFile(item.id, file, (percent) => {
+        setUploadQueue((q) =>
+          q.map((u, idx) =>
+            idx === i ? { ...u, percent, status: percent >= 100 ? 'finalizing' : 'uploading' } : u,
+          ),
+        );
+      });
+
+      if (!result || 'error' in result) {
+        const errMsg = result && 'error' in result ? result.error : 'Yükleme başarısız';
+        setUploadQueue((q) =>
+          q.map((u, idx) => (idx === i ? { ...u, status: 'error', errorMessage: errMsg } : u)),
+        );
+        if (result && 'error' in result) {
+          toast({ type: 'error', message: result.error });
+        }
         continue;
       }
+
+      setUploadQueue((q) =>
+        q.map((u, idx) => (idx === i ? { ...u, status: 'done', percent: 100 } : u)),
+      );
       lastCase = result.caseUpdated;
       successCount += 1;
     }
+
     setUploading(false);
 
     if (lastCase) onItemUpdated(lastCase);
@@ -2492,6 +2533,9 @@ function FilesTab({
         duration: 2000,
       });
     }
+
+    // Kuyruk 3 saniye sonra otomatik temizlenir (kullanıcı sonucu görsün)
+    window.setTimeout(() => setUploadQueue([]), 3000);
   }
 
   async function handleRemove(file: CaseFile) {
@@ -2570,6 +2614,62 @@ function FilesTab({
           Birden fazla dosya seçilebilir
         </span>
       </div>
+
+      {/* Yükleme kuyruğu — her dosya için canlı progress bar */}
+      {uploadQueue.length > 0 && (
+        <ul className="space-y-2 rounded-md bg-slate-50/80 p-2 ring-1 ring-slate-200">
+          {uploadQueue.map((u, i) => {
+            const statusLabel: Record<UploadProgress['status'], string> = {
+              queued: 'Sırada bekliyor',
+              uploading: `Yükleniyor… %${u.percent}`,
+              finalizing: 'Kaydediliyor…',
+              done: 'Yüklendi ✓',
+              error: u.errorMessage ?? 'Hata',
+            };
+            const barColor =
+              u.status === 'error'
+                ? 'bg-rose-500'
+                : u.status === 'done'
+                  ? 'bg-emerald-500'
+                  : 'bg-brand-500';
+            return (
+              <li key={`${u.fileName}-${i}`} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 truncate text-slate-700">
+                    <Paperclip size={11} className="flex-shrink-0 text-slate-400" />
+                    <span className="truncate font-medium">{u.fileName}</span>
+                    <span className="flex-shrink-0 text-slate-400">({formatBytes(u.fileSize)})</span>
+                  </span>
+                  <span
+                    className={`flex-shrink-0 font-medium ${
+                      u.status === 'error'
+                        ? 'text-rose-600'
+                        : u.status === 'done'
+                          ? 'text-emerald-600'
+                          : 'text-brand-700'
+                    }`}
+                  >
+                    {statusLabel[u.status]}
+                  </span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className={`h-full ${barColor} transition-all duration-200`}
+                    style={{
+                      width:
+                        u.status === 'finalizing' || u.status === 'done'
+                          ? '100%'
+                          : u.status === 'error'
+                            ? '100%'
+                            : `${u.percent}%`,
+                    }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {item.files.length === 0 ? (
         <p className="py-6 text-center text-sm text-slate-500">Henüz dosya yok.</p>
