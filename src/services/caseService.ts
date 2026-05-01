@@ -262,6 +262,9 @@ export interface NewCaseInput {
   aiPriorityPrediction?: Case['priority'];
   aiConfidenceScore?: number;
   aiRejectReason?: string;
+
+  // Custom Fields — şirket FieldDefinition'larına göre dinamik
+  customFields?: Record<string, unknown>;
 }
 
 export const caseService = {
@@ -1297,5 +1300,9 @@ export const lookupService = {
       if (c.productGroup) set.add(c.productGroup);
     });
     return Array.from(set).sort();
+  },
+  fieldDefinitions: () => {
+    const b = getCache();
+    return b ? clone(b.fieldDefinitions) : [];
   },
 };

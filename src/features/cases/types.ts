@@ -366,6 +366,13 @@ export interface Case {
    */
   checklistItems?: CaseChecklistItemInstance[];
 
+  /**
+   * Custom Fields — şirket FieldDefinition'larına göre dinamik alanlar.
+   * `{ fieldKey: value }` mapping. value tipi FieldType'a bağlı (string/number/
+   * boolean/ISO-date string).
+   */
+  customFields?: Record<string, unknown>;
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];

@@ -41,6 +41,7 @@ import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
 import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
+import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { TransferCaseModal } from './TransferCaseModal';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
@@ -1631,7 +1632,64 @@ function DetailTab({
           </ul>
         </Section>
       )}
+
+      {/* Custom Fields — şirket FieldDefinition'larına göre dinamik */}
+      <CustomFieldsCaseSection item={item} onCommitDraft={onCommitDraft} drafts={drafts} />
     </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Custom Fields — vakanın bağlı olduğu şirketin FieldDefinition'larını
+// gösterir; inline edit ile değer güncellenir, drafts üzerinden Kaydet'e kadar
+// commit edilir.
+// ----------------------------------------------------------------
+
+function CustomFieldsCaseSection({
+  item,
+  drafts,
+  onCommitDraft,
+}: {
+  item: Case;
+  drafts: Partial<Case>;
+  onCommitDraft: (field: keyof Case, value: unknown) => void;
+}) {
+  const allDefs = useMemo(() => lookupService.fieldDefinitions(), []);
+  const defs = useMemo(
+    () =>
+      allDefs
+        .filter((d) => d.companyId === item.companyId)
+        .filter((d) => d.isActive)
+        .filter((d) => !d.caseType || d.caseType === item.caseType)
+        .sort((a, b) => a.displayOrder - b.displayOrder),
+    [allDefs, item.companyId, item.caseType],
+  );
+
+  if (defs.length === 0) return null;
+
+  const currentValues =
+    (drafts.customFields as Record<string, unknown> | undefined) ??
+    (item.customFields as Record<string, unknown> | undefined) ??
+    {};
+
+  function update(fieldKey: string, value: unknown) {
+    const next = { ...currentValues, [fieldKey]: value };
+    onCommitDraft('customFields', next);
+  }
+
+  return (
+    <Section title="Ek Alanlar" tint="default">
+      <div className="space-y-3 px-3 py-3">
+        {defs.map((def) => (
+          <CustomFieldRenderer
+            key={def.id}
+            definition={def}
+            value={currentValues[def.fieldKey]}
+            onChange={(v) => update(def.fieldKey, v)}
+          />
+        ))}
+      </div>
+    </Section>
   );
 }
 

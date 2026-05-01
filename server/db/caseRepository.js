@@ -113,6 +113,8 @@ export const caseRepository = {
         aiPriorityPrediction: m.aiPriorityPrediction,
         aiConfidenceScore: m.aiConfidenceScore,
         aiRejectReason: m.aiRejectReason,
+        // Custom Fields (şirket FieldDefinition'larına göre dinamik)
+        customFields: m.customFields ?? undefined,
         // Açılış log'u
         history: {
           create: {

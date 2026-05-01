@@ -29,7 +29,7 @@ export const lookupRepository = {
    * gönderir. Cold start'ta ~5 sorgu, sıcak DB'de < 100ms.
    */
   async bootstrap() {
-    const [companies, accounts, teams, persons, thirdParties, documentTypes, categories, offeredSolutions, slaPolicies, checklists] =
+    const [companies, accounts, teams, persons, thirdParties, documentTypes, categories, offeredSolutions, slaPolicies, checklists, fieldDefinitions] =
       await Promise.all([
         prisma.company.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
         prisma.account.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
@@ -41,6 +41,10 @@ export const lookupRepository = {
         prisma.offeredSolutionDef.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
         prisma.sLAPolicy.findMany({ where: { isActive: true } }),
         prisma.checklistTemplate.findMany({ where: { isActive: true } }),
+        prisma.fieldDefinition.findMany({
+          where: { isActive: true },
+          orderBy: [{ companyId: 'asc' }, { displayOrder: 'asc' }],
+        }),
       ]);
 
     // Frontend legacy shape: { category, subCategories: string[] }
@@ -68,6 +72,7 @@ export const lookupRepository = {
       slaPolicies,
       checklists,
       productGroups,
+      fieldDefinitions,
     };
   },
 

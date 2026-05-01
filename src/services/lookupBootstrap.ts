@@ -21,6 +21,7 @@ import type {
   CaseChecklistTemplate,
 } from '@/features/cases/types';
 import type { CaseAccount } from '@/mocks/caseMockData';
+import type { FieldDefinition } from '@/services/adminService';
 import { getAccessToken } from './supabase';
 
 interface CategoryShape {
@@ -42,6 +43,7 @@ export interface BootstrapData {
   slaPolicies: SlaPolicy[];
   checklists: CaseChecklistTemplate[];
   productGroups: string[];
+  fieldDefinitions: FieldDefinition[];
 }
 
 let cache: BootstrapData | null = null;

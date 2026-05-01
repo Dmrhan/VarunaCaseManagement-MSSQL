@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
+import { CustomFieldsSection, validateCustomFields } from '@/components/CustomFieldRenderer';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
 import { aiService, aiErrorMessage, type CategorySuggestion } from '@/services/aiService';
@@ -95,6 +96,16 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const teams = useMemo(() => lookupService.teams(), []);
   const requestTypes = useMemo(() => lookupService.requestTypes(), []);
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
+  const allFieldDefinitions = useMemo(() => lookupService.fieldDefinitions(), []);
+
+  // Şirkete + caseType'a göre filtrelenmiş aktif custom field'lar
+  const customFieldDefs = useMemo(
+    () => allFieldDefinitions.filter((f) => f.companyId === form.companyId),
+    [allFieldDefinitions, form.companyId],
+  );
+
+  // customFields state — her render'da reset edilmeden parent state olarak tutulur
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   const subCategories = useMemo(
     () => categories.find((c) => c.category === form.category)?.subCategories ?? [],
@@ -108,6 +119,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   useEffect(() => {
     if (!open) {
       setForm(emptyForm);
+      setCustomFields({});
       setErrors({});
       setDuplicateCase(undefined);
       setOverrideDuplicate(false);
@@ -247,6 +259,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         e.followUpDate = 'Beklemede outcome\'da takip tarihi zorunludur';
       }
     }
+    // Custom fields zorunlu kontrolü
+    const cfCheck = validateCustomFields(customFieldDefs, form.caseType, customFields);
+    if (!cfCheck.ok) {
+      e.customFields = `Zorunlu alanlar boş: ${cfCheck.missing.join(', ')}`;
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -298,6 +315,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       aiPriorityPrediction: aiApplied && aiSuggestion ? aiSuggestion.priority : undefined,
       aiConfidenceScore:    aiApplied && aiSuggestion ? aiSuggestion.confidence : undefined,
       aiRejectReason:       aiDismissed ? 'Kullanıcı reddetti' : undefined,
+
+      // Custom Fields — şirket FieldDefinition'larına göre dinamik
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     };
     try {
       const created = await caseService.create(input);
@@ -584,6 +604,18 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
             ✦ AI önerisi uygulandı (%{Math.round(aiSuggestion.confidence * 100)} güven). Kategori, alt kategori, talep türü ve öncelik otomatik dolduruldu — istediğiniz gibi düzenleyebilirsiniz.
           </div>
+        )}
+
+        {/* Custom Fields — şirket FieldDefinition'larına göre dinamik */}
+        <CustomFieldsSection
+          definitions={customFieldDefs}
+          caseType={form.caseType}
+          values={customFields}
+          onChange={(key, val) => setCustomFields((cf) => ({ ...cf, [key]: val }))}
+          disabled={submitting}
+        />
+        {errors.customFields && (
+          <p className="text-xs text-rose-600">{errors.customFields}</p>
         )}
 
         {/* Spec 11.2 + KURAL-3 — tip değişince state silinmiyor, sadece görünürlük değişiyor */}
