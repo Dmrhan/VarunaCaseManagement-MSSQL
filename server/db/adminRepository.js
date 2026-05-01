@@ -235,12 +235,25 @@ export const personRepo = {
 // ─────────────────────────────────────────────────────────────────
 export const categoryRepo = {
   async list() {
-    // Tüm root + child kategoriler — frontend tree shape'i kendi kurar
+    // Tüm root + child kategoriler — frontend `subCategories` adıyla bekliyor
     const all = await prisma.categoryDef.findMany({
       orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
       include: { children: { orderBy: { name: 'asc' } } },
     });
-    return all.filter((c) => c.parentId === null);
+    return all
+      .filter((c) => c.parentId === null)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        isActive: c.isActive,
+        // Prisma relation `children` → frontend `subCategories`
+        subCategories: (c.children ?? []).map((s) => ({
+          id: s.id,
+          name: s.name,
+          isActive: s.isActive,
+        })),
+      }));
   },
   async createParent(input) {
     const exists = await prisma.categoryDef.findFirst({
