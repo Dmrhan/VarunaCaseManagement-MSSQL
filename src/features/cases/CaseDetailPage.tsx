@@ -2219,16 +2219,60 @@ function InlineEdit({
 
 type ActivityFilter = 'all' | 'status' | 'assign' | 'files' | 'notes' | 'calls' | 'fields' | 'checklist';
 
-const ACTIVITY_FILTERS: { key: ActivityFilter; label: string; types: CaseHistoryActionType[] }[] = [
-  { key: 'all',       label: 'Hepsi',     types: [] },
-  { key: 'status',    label: 'Statü',     types: ['StatusChange', 'CaseCreated', 'SLAApplied'] },
-  { key: 'assign',    label: 'Atama',     types: ['Transfer'] },
-  { key: 'files',     label: 'Dosya',     types: ['FileUploaded', 'FileRemoved'] },
-  { key: 'notes',     label: 'Not',       types: ['NoteAdded'] },
-  { key: 'calls',     label: 'Çağrı',     types: ['CallLogAdded'] },
-  { key: 'fields',    label: 'Alan',      types: ['FieldUpdate'] },
-  { key: 'checklist', label: 'Kontrol',   types: ['ChecklistToggle'] },
+interface FilterDef {
+  key: ActivityFilter;
+  label: string;
+  types: CaseHistoryActionType[];
+  /** Tailwind class'ları — chip aktif iken arka plan + nokta rengi */
+  active: string;
+  dot: string;
+  /** Tailwind class'ları — chip pasif (renkli ama tonlu) */
+  inactive: string;
+}
+
+const ACTIVITY_FILTERS: FilterDef[] = [
+  { key: 'all',       label: 'Hepsi',   types: [],
+    active:   'bg-slate-700 text-white shadow-sm',
+    inactive: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+    dot:      'bg-slate-500' },
+  { key: 'status',    label: 'Statü',   types: ['StatusChange', 'CaseCreated', 'SLAApplied'],
+    active:   'bg-brand-600 text-white shadow-sm',
+    inactive: 'bg-brand-50 text-brand-700 hover:bg-brand-100',
+    dot:      'bg-brand-500' },
+  { key: 'assign',    label: 'Atama',   types: ['Transfer'],
+    active:   'bg-amber-600 text-white shadow-sm',
+    inactive: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
+    dot:      'bg-amber-500' },
+  { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileRemoved'],
+    active:   'bg-blue-600 text-white shadow-sm',
+    inactive: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+    dot:      'bg-blue-500' },
+  { key: 'notes',     label: 'Not',     types: ['NoteAdded'],
+    active:   'bg-emerald-600 text-white shadow-sm',
+    inactive: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+    dot:      'bg-emerald-500' },
+  { key: 'calls',     label: 'Çağrı',   types: ['CallLogAdded'],
+    active:   'bg-violet-600 text-white shadow-sm',
+    inactive: 'bg-violet-50 text-violet-700 hover:bg-violet-100',
+    dot:      'bg-violet-500' },
+  { key: 'fields',    label: 'Alan',    types: ['FieldUpdate'],
+    active:   'bg-slate-600 text-white shadow-sm',
+    inactive: 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+    dot:      'bg-slate-400' },
+  { key: 'checklist', label: 'Kontrol', types: ['ChecklistToggle'],
+    active:   'bg-teal-600 text-white shadow-sm',
+    inactive: 'bg-teal-50 text-teal-700 hover:bg-teal-100',
+    dot:      'bg-teal-500' },
 ];
+
+/** Bir actionType'a göre dot rengi — timeline noktasını chip rengiyle eşleştir */
+function dotColorFor(actionType?: CaseHistoryActionType): string {
+  if (!actionType) return 'bg-slate-400';
+  const def = ACTIVITY_FILTERS.find(
+    (f) => f.key !== 'all' && f.types.includes(actionType),
+  );
+  return def?.dot ?? 'bg-slate-400';
+}
 
 function ActivityTab({ item }: { item: Case }) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
@@ -2257,7 +2301,7 @@ function ActivityTab({ item }: { item: Case }) {
 
   return (
     <div className="space-y-3">
-      {/* Filtre chip'leri — her birinin sayım rozeti var, sıfır olan gri */}
+      {/* Filtre chip'leri — her tipin kendi rengi, aktif iken doygun, pasifte tonlu */}
       <div className="flex flex-wrap gap-1.5">
         {ACTIVITY_FILTERS.map((f) => {
           const n = counts[f.key];
@@ -2271,16 +2315,16 @@ function ActivityTab({ item }: { item: Case }) {
               disabled={isDisabled}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
                 isActive
-                  ? 'bg-brand-600 text-white shadow-sm'
+                  ? f.active
                   : isDisabled
                     ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    : f.inactive
               }`}
             >
               {f.label}
               <span
                 className={`rounded-full px-1.5 py-0 text-[10px] ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-500'
+                  isActive ? 'bg-white/25 text-white' : 'bg-white/80 text-slate-600'
                 }`}
               >
                 {n}
@@ -2372,7 +2416,9 @@ function ActivityTab({ item }: { item: Case }) {
         const hasTo = h.toValue != null && h.toValue !== '';
         return (
           <li key={h.id} className="relative">
-            <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-brand-500 ring-4 ring-white" />
+            <span
+              className={`absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full ring-4 ring-white ${dotColorFor(h.actionType)}`}
+            />
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
               <span className="font-medium text-slate-800">{h.action}</span>
               {fieldLabel && (
