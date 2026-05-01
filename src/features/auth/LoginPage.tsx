@@ -58,10 +58,12 @@ export function LoginPage() {
         <div className="absolute inset-0 [background:radial-gradient(ellipse_at_top_right,#14B8A630,transparent_60%)] [animation:meshShift_24s_ease-in-out_infinite_reverse]" />
 
         {/* Üst — logo */}
-        <div className="relative z-10 flex items-center gap-2 px-10 pt-10">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[#7C3AED] to-[#14B8A6] text-sm font-bold text-white shadow-lg">
-            V
-          </div>
+        <div className="relative z-10 flex items-center gap-2.5 px-10 pt-10">
+          <img
+            src="/varuna-logo.png"
+            alt="Varuna"
+            className="h-10 w-10 object-contain drop-shadow-[0_0_18px_rgba(124,58,237,0.35)]"
+          />
           <span className="text-base font-semibold tracking-wide text-white">VARUNA</span>
         </div>
 
