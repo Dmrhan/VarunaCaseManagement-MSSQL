@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Zap, Sparkles, BarChart3, AlertCircle, Loader2 } from 'lucide-react';
+import { Zap, Sparkles, BarChart3, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -11,6 +11,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isLoading = submitting || oauthLoading;
@@ -152,23 +153,35 @@ export function LoginPage() {
               >
                 Şifre
               </label>
-              <input
-                id="login-password"
-                type="password"
-                required
-                autoComplete="current-password"
-                disabled={isLoading}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isLoading) {
-                    e.preventDefault();
-                    void handleSubmit(e);
-                  }
-                }}
-                placeholder="••••••••"
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#7C3AED] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-              />
+              <div className="relative">
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="current-password"
+                  disabled={isLoading}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !isLoading) {
+                      e.preventDefault();
+                      void handleSubmit(e);
+                    }
+                  }}
+                  placeholder="••••••••"
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 pr-10 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#7C3AED] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((s) => !s)}
+                  disabled={isLoading}
+                  aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60 dark:text-ndark-muted dark:hover:text-ndark-text"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
               {error && (
                 <p className="mt-1.5 flex items-center gap-1 text-xs text-rose-600">
                   <AlertCircle size={12} />
