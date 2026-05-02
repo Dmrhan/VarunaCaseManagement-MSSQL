@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { prisma } from './client.js';
+import { withDbRetry } from './retry.js';
 
 /**
  * BFF auth — Supabase JWT doğrulama + DB'deki User satırına çözümleme.
@@ -49,7 +50,11 @@ export async function verifyJwt(req, res, next) {
       return res.status(401).json({ error: 'invalid_token', message: 'Oturum geçersiz, tekrar giriş yap.' });
     }
 
-    let user = await prisma.user.findUnique({ where: { id: data.user.id } });
+    // Geçici pooler aksaklıklarında 1x retry (300ms). User lookup idempotent.
+    let user = await withDbRetry(
+      () => prisma.user.findUnique({ where: { id: data.user.id } }),
+      { retries: 1, delayMs: 300, label: 'auth' },
+    );
 
     // Auto-provision: Supabase Auth (örn. Google OAuth) ile ilk kez giren
     // kullanıcı için DB'de User satırı yoksa default Agent rolüyle oluştur.

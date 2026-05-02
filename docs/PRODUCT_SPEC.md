@@ -1,6 +1,6 @@
 Varuna CRM — AI-Assisted Case Management
 PRODUCT_SPEC.md — Claude Code için Tek Kaynak Doküman
-Versiyon: 2.0 | Güncelleme: Nisan 2025
+Versiyon: 2.1 | Güncelleme: Mayıs 2026
 
 Bu dosya Claude Code'un her oturumda önce okuması gereken ürün spesifikasyonudur.
 İş kuralları, alan tanımları, durum makinesi, SLA mantığı ve AI davranışı burada tanımlıdır.
@@ -21,17 +21,20 @@ Bu bir helpdesk ticket sistemi DEĞİLDİR.
 
 2. Teknik Altyapı
 Frontend : React + TypeScript + Vite — port 5273
-BFF      : Node.js + Express — port 3101
-DB       : SQLite (varuna.db) — MSSQL uyumlu şema
-State    : USE_MOCK flag → src/services/caseService.ts
-Mock     : src/mocks/caseMockData.ts
+BFF      : Node.js + Express — port 3101 (local) / Vercel serverless (prod)
+DB       : Supabase Postgres (Frankfurt EU) — MSSQL portable şema (cuid, Json, repository pattern)
+ORM      : Prisma 6 — schema.prisma + prisma/migrations/
+Auth     : Supabase Auth (email/password + Google OAuth) — verifyJwt middleware (server/db/auth.js)
+Storage  : Supabase Storage — case-attachments private bucket, 3-step signed upload URL (Vercel 4.5MB body limit bypass)
+State    : /api/lookups/bootstrap (LookupGate + AuthContext) — USE_MOCK kaldırıldı
 Routing  : key-based (URL routing yok)
 UI Kit   : Tailwind + lucide-react + clsx
 Deploy   : Vercel — varuna-case-management.vercel.app
+CI       : GitHub Actions — type check + Prisma validate + Vite build (.github/workflows/ci.yml)
 AI Servisi:
-Model    : gpt-4o-mini (OpenAI)
+Model    : gpt-4o-mini (OpenAI) — structured output (JSON Schema strict mode, enum constraints)
 SDK      : openai (server/node_modules)
-Key      : process.env.OPENAI_API_KEY (.env dosyasında)
+Key      : process.env.OPENAI_API_KEY (Vercel env vars)
 BFF      : /api/ai/* endpoint'leri (server/routes/ai.js)
 Rate     : IP başına 20 istek/dakika
 Timeout  : 30 saniye
@@ -48,13 +51,14 @@ text     : primary #E6EDF3 / secondary #7D8590 / link #58A6FF
 Toggle   : Sidebar altında Sun/Moon butonu
 Storage  : localStorage key: 'varuna-theme'
 Faz planı:
-FAZ 0 — Mock UI              ✅ TAMAMLANDI
-FAZ 1 — Tanım Ekranları      ✅ TAMAMLANDI
-FAZ 2 — BFF + DB             ❌ BAŞLANMADI
-FAZ 3 — Dosya Yükleme        ❌ BAŞLANMADI
-FAZ 4 — Drawer İyileştirme   🟡 KISMİ (Transfer + Checklist tamamlandı)
-FAZ 5 — KPI Dashboard        ✅ TAMAMLANDI
-Auth/RBAC                    ❌ BAŞLANMADI
+FAZ 0 — Mock UI                       ✅ TAMAMLANDI
+FAZ 1 — Tanım Ekranları               ✅ TAMAMLANDI
+FAZ 2 — BFF + DB                      ✅ TAMAMLANDI (Supabase Postgres + Prisma 6, 19 tablo)
+FAZ 3 — Dosya Yükleme                 ✅ TAMAMLANDI (Supabase Storage, signed upload URL)
+FAZ 4 — Drawer İyileştirme            🟡 KISMİ (Transfer + Checklist tamamlandı)
+FAZ 5 — KPI Dashboard                 ✅ TAMAMLANDI
+Auth/RBAC                             ✅ TAMAMLANDI (Supabase Auth + 6 rol)
+Custom Fields + Şirket Ayarları       ✅ TAMAMLANDI (FieldDefinition + CompanySettings)
 
 3. Vaka Tipleri (CaseType)
 3.1 GeneralSupport — Genel Destek
@@ -208,9 +212,10 @@ Context: Top 30 vaka snapshot + 9 KPI + SLA durumu
 Endpoint: POST /api/ai/dashboard-chat
 Hazır sorular: 5 adet chip
 
-13. Tanım Ekranları (Admin — 7 ekran)
-EkranPage KeyKategori & Alt Kategoriadmin-categoriesSLA Kuralları (5-tuple)admin-sla3rd Party Tanımlarıadmin-thirdpartyBelge Türü Tanımlarıadmin-documentsKontrol Listesi (3-tuple+items)admin-checklistTakım Tanımları + Üye Yönetimiadmin-teamsTeklif Tanımlarıadmin-offered-solutions
+13. Tanım Ekranları (Admin — 9 ekran, /admin layout, SystemAdmin gate)
+EkranPage KeyKategori & Alt Kategoriadmin-categoriesSLA Kuralları (5-tuple)admin-sla3rd Party Tanımlarıadmin-thirdpartyBelge Türü Tanımlarıadmin-documentsKontrol Listesi (3-tuple+items)admin-checklistTakım Tanımları + Üye Yönetimiadmin-teamsTeklif Tanımlarıadmin-offered-solutionsDinamik Alanlar (Custom Fields)admin-fieldsŞirket Ayarlarıadmin-company-settings
 Her ekranda HelpDrawer: "? Yardım" butonu, sağdan 320px, ESC kapanır.
+/admin layout SystemAdmin rolüne kapalı; AdminLayout.tsx role gate uygular.
 
 14. AI Endpoint'leri (BFF — /api/ai/*)
 suggest-category   → kategori + öncelik + güven skoru (JSON)
@@ -221,9 +226,20 @@ call-summary       → çağrı notu özeti (otomatik)
 dashboard-chat     → top 30 + KPI context soru-cevap
 
 15. Açık Karar Noktaları
-KonuDurumSLA 7/24✅ KararlandıAI modeli (OpenAI)✅ AktifJira → SLA pause⚠️ NetleştirilmeliDuplicate override✅ KararlandıFAZ 2 DB stack⚠️ Vercel Postgres önerisi — karar bekleniyorAuth çözümü⚠️ Clerk önerisi — karar bekleniyorDosya storage⚠️ Vercel Blob önerisi — karar bekleniyorOpenAI DPA (KVKK)⚠️ Hukuk ekibi
+KonuDurumSLA 7/24✅ KararlandıAI modeli (OpenAI)✅ AktifJira → SLA pause⚠️ NetleştirilmeliDuplicate override✅ KararlandıFAZ 2 DB stack✅ Supabase Postgres (Frankfurt EU) + Prisma 6Auth çözümü✅ Supabase Auth (email/password + Google OAuth)Dosya storage✅ Supabase Storage (signed upload URL pattern)OpenAI DPA (KVKK)⚠️ Hukuk ekibi
 
 16. Değişiklik Kaydı
+v2.1 — Mayıs 2026
+
+FAZ 2 BFF + DB tamamlandı: Supabase Postgres (Frankfurt EU) + Prisma 6, 19 tablo, repository pattern (MSSQL portable)
+FAZ 3 Dosya Yükleme tamamlandı: Supabase Storage 3-step signed upload URL pattern (Vercel 4.5MB body limit bypass)
+Auth/RBAC tamamlandı: Supabase Auth (email/password + Google OAuth), 6 rol (Agent/Backoffice/Supervisor/CSM/Admin/SystemAdmin), verifyJwt middleware
+Custom Fields + Şirket Ayarları eklendi: FieldDefinition (per-company, 6 tip) + CompanySettings, /admin layout (SystemAdmin gate)
+AI structured output: response_format JSON Schema strict mode (enum constraints) — null/empty alan sorunu çözüldü
+GitHub Actions CI eklendi: type check + Prisma validate + Vite build
+Yeni Ekran Standartları bölümü eklendi (5 zorunlu madde + kanonik wiring pattern)
+USE_MOCK kaldırıldı, lookupService bootstrap pattern (LookupGate) ile çalışıyor
+
 v2.0 — Nisan 2025
 
 AI modeli: Anthropic → OpenAI gpt-4o-mini

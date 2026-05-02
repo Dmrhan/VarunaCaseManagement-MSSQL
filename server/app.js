@@ -5,6 +5,7 @@ import aiRouter from './routes/ai.js';
 import lookupsRouter from './routes/lookups.js';
 import adminRouter from './routes/admin.js';
 import authRouter from './routes/auth.js';
+import { prisma } from './db/client.js';
 
 /**
  * Express app factory — listen yok.
@@ -27,6 +28,25 @@ app.get('/api/health', (_req, res) => {
     service: 'varuna-case-management-bff',
     time: new Date().toISOString(),
   });
+});
+
+// DB-touching health probe. UptimeRobot/cron-job.org buraya 5dk ping atar:
+// (1) Supabase auto-pause'u tetiklemez (hareket sayılır),
+// (2) Pooler aksaklığını biz fark etmeden 5dk içinde alarm üretir.
+// Auth yok — public endpoint, sadece "DB erişilebilir mi" kontrolü.
+app.get('/api/health/deep', async (_req, res) => {
+  const t0 = Date.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'reachable', latencyMs: Date.now() - t0 });
+  } catch (err) {
+    res.status(503).json({
+      status: 'degraded',
+      db: 'unreachable',
+      latencyMs: Date.now() - t0,
+      error: err?.message?.split('\n')[0],
+    });
+  }
 });
 
 app.use('/api/auth', authRouter);

@@ -1,4 +1,5 @@
 import { prisma } from './client.js';
+import { withDbRetry } from './retry.js';
 
 /**
  * Vakalardaki distinct productGroup değerleri — admin productGroup tanımı
@@ -29,6 +30,19 @@ export const lookupRepository = {
    * gönderir. Cold start'ta ~5 sorgu, sıcak DB'de < 100ms.
    */
   async bootstrap() {
+    // Geçici pooler aksaklıklarında 2x retry (300ms + 800ms). Tüm Promise.all
+    // bloğu sarmalanır — herhangi biri P1001/P1017/P2024 atarsa hepsi retry.
+    return withDbRetry(() => bootstrapInner(), {
+      retries: 2,
+      delayMs: [300, 800],
+      label: 'bootstrap',
+    });
+  },
+
+  productGroups: listProductGroups,
+};
+
+async function bootstrapInner() {
     const [companies, accounts, teams, persons, thirdParties, documentTypes, categories, offeredSolutions, slaPolicies, checklists, fieldDefinitions] =
       await Promise.all([
         prisma.company.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
@@ -74,7 +88,4 @@ export const lookupRepository = {
       productGroups,
       fieldDefinitions,
     };
-  },
-
-  productGroups: listProductGroups,
-};
+}
