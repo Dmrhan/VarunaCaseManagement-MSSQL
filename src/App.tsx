@@ -27,7 +27,8 @@ import { useAuth } from './services/AuthContext';
 
 import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
-import { AdminCompanySettingsPage } from './features/admin/AdminCompanySettingsPage';
+import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
+import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
 type View = 'cases' | 'dashboard' | 'case-detail' | AdminView;
 
@@ -128,7 +129,8 @@ export default function App() {
         {view === 'admin-teams' && <AdminTeamsPage />}
         {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
         {view === 'admin-fields' && <AdminFieldsPage />}
-        {view === 'admin-company-settings' && <AdminCompanySettingsPage />}
+        {view === 'admin-companies' && <AdminCompaniesPage />}
+        {view === 'admin-users' && <AdminUsersPage />}
       </AdminLayout>
     );
   }

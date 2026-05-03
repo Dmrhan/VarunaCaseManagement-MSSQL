@@ -108,7 +108,30 @@ export async function verifyJwt(req, res, next) {
       });
     }
 
-    req.user = user;
+    // Multi-tenant izolasyon (Phase 2):
+    //  - allowedCompanyIds: tüm liste sorguları bu set ile filtrelenir.
+    //  - companyRoles: per-company yetki kararları (admin endpoint'leri için).
+    //  - SystemAdmin: UserCompany kaydı olmasa bile tüm aktif şirketlere erişir
+    //    (yeni şirket eklenince otomatik kapsanır — UserCompany seed gerekmez).
+    let allowedCompanyIds;
+    let companyRoles;
+    if (user.role === 'SystemAdmin') {
+      const all = await prisma.company.findMany({
+        where: { isActive: true },
+        select: { id: true },
+      });
+      allowedCompanyIds = all.map((c) => c.id);
+      companyRoles = allowedCompanyIds.map((companyId) => ({ companyId, role: 'SystemAdmin' }));
+    } else {
+      const links = await prisma.userCompany.findMany({
+        where: { userId: user.id, isActive: true },
+        select: { companyId: true, role: true },
+      });
+      allowedCompanyIds = links.map((l) => l.companyId);
+      companyRoles = links;
+    }
+
+    req.user = { ...user, allowedCompanyIds, companyRoles };
     next();
   } catch (err) {
     console.error('[auth] verifyJwt', err);

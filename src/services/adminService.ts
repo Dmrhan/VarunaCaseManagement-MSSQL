@@ -150,21 +150,48 @@ export interface FieldDefinitionInput {
   isActive?: boolean;
 }
 
-export interface CompanySettings {
+// Phase 5B — User management types.
+export type CompanyRole = 'Agent' | 'Supervisor' | 'Admin' | 'SystemAdmin';
+
+export interface UserAssignment {
   companyId: string;
-  logoUrl?: string | null;
-  primaryColor?: string | null;
-  appName?: string | null;
-  supportEmail?: string | null;
-  createdAt: string;
-  updatedAt: string;
+  companyName: string;
+  companyActive: boolean;
+  role: CompanyRole;
 }
 
-export interface CompanySettingsInput {
-  logoUrl?: string | null;
-  primaryColor?: string | null;
-  appName?: string | null;
-  supportEmail?: string | null;
+export interface AdminUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin' | 'SystemAdmin';
+  isActive: boolean;
+  personId: string | null;
+  assignments: UserAssignment[];
+}
+
+// Phase 5A — Company management. CompanySettings (per-company branding) ile
+// birleştirilmiş okuma görünümü; create/update tek payload kabul eder.
+export interface Company {
+  id: string;
+  name: string;
+  isActive: boolean;
+  logoUrl: string | null;
+  primaryColor: string | null;
+  appName: string | null;
+  supportEmail: string | null;
+  userCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CompanyInput {
+  name: string;
+  isActive?: boolean;
+  logoUrl?: string;
+  primaryColor?: string;
+  appName?: string;
+  supportEmail?: string;
 }
 
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
@@ -483,23 +510,79 @@ export const adminService = {
     },
   },
 
-  companySettings: {
-    async get(companyId: string): Promise<CompanySettings | null> {
-      const data = await apiFetch<CompanySettings | null>(
-        `${ADMIN_BASE}/company-settings/${companyId}`,
+  // Phase 5B — Users + per-company assignment yönetimi.
+  users: {
+    async list(): Promise<AdminUser[]> {
+      const data = await apiFetch<{ value: AdminUser[] }>(
+        `${ADMIN_BASE}/users`,
         undefined,
-        'Şirket ayarları yüklenemedi',
+        'Kullanıcılar yüklenemedi',
       );
-      return data ?? null;
+      if (!data) throw new Error('Kullanıcılar yüklenemedi');
+      return data.value ?? [];
     },
-    async upsert(companyId: string, patch: CompanySettingsInput): Promise<AdminResult<CompanySettings>> {
-      const item = await apiFetch<CompanySettings>(
-        `${ADMIN_BASE}/company-settings/${companyId}`,
-        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
-        'Şirket ayarları kaydedilemedi',
+    async replaceCompanies(
+      userId: string,
+      assignments: { companyId: string; role: CompanyRole }[],
+    ): Promise<AdminResult<{ id: string }>> {
+      const item = await apiFetch<{ id: string }>(
+        `${ADMIN_BASE}/users/${userId}/companies`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignments }),
+        },
+        'Şirket atamaları güncellenemedi',
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true, item };
+    },
+  },
+
+  // Phase 5A — Companies CRUD. Backend list endpoint'i kullanıcının
+  // allowedCompanyIds'iyle filtrelenmiş döner; UI tarafında ek scope yok.
+  companies: {
+    async list(): Promise<Company[]> {
+      const data = await apiFetch<{ value: Company[] }>(
+        `${ADMIN_BASE}/companies`,
+        undefined,
+        'Şirketler yüklenemedi',
+      );
+      if (!data) throw new Error('Şirketler yüklenemedi');
+      return data.value ?? [];
+    },
+    async create(input: CompanyInput): Promise<AdminResult<Company>> {
+      const item = await apiFetch<Company>(
+        `${ADMIN_BASE}/companies`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Şirket oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<CompanyInput>): Promise<AdminResult<Company>> {
+      const item = await apiFetch<Company>(
+        `${ADMIN_BASE}/companies/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Şirket güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<Company>> {
+      return this.update(id, { isActive });
+    },
+    async remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const result = await apiFetch<{ deactivated?: boolean }>(
+        `${ADMIN_BASE}/companies/${id}`,
+        { method: 'DELETE' },
+        'Pasifleştirme başarısız',
+      );
+      if (!result) return { ok: false, error: 'Sunucu hatası' };
+      await refreshBootstrap();
+      return { ok: true };
     },
   },
 };

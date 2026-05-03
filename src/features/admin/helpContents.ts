@@ -148,6 +148,13 @@ export const TEAMS_HELP: HelpContent = {
         'Vaka atama ekranında görünen takımlar ve takım üyeleri buradan yönetilir. Bir takım seçildiğinde Atanan Kişi listesi otomatik o takımın üyelerine filtrelenir.',
     },
     {
+      heading: 'Şirket bağlılığı',
+      content:
+        'Takımlar şirkete özeldir — her takım tek bir şirkete bağlıdır. Takım oluştururken şirket seçimi zorunludur. Bir kullanıcı yalnızca yetkili olduğu şirketlerin takımlarını görür ve yönetir.',
+      warning:
+        'Bir takımı başka bir şirkete taşımak şu anda desteklenmiyor. Yanlış şirkete oluşturulan takım pasifleştirilip yeni şirkette tekrar oluşturulmalı.',
+    },
+    {
       heading: 'Üye yönetimi',
       content:
         'Bir kişi aynı anda yalnızca bir takımda yer alabilir. Başka takımdan transfer ederek üye ekleyebilirsiniz.',
@@ -161,6 +168,89 @@ export const TEAMS_HELP: HelpContent = {
 Backoffice       → Eskalasyon vakaları
 CS Ekibi         → Proaktif Takip + Churn
 Teknik Ekip      → Hata kategorisi vakaları`,
+    },
+  ],
+};
+
+export const COMPANIES_HELP: HelpContent = {
+  title: 'Şirketler',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Holding altındaki şirketleri (PARAM / UNIVERA / FINROTA gibi) buradan yönetin. Her şirketin kendi takımları, kategorileri, SLA kuralları ve marka kimliği olur. Kullanıcılar birden fazla şirkete atanabilir; her şirkette farklı rol taşıyabilir.',
+    },
+    {
+      heading: 'Yeni Şirket',
+      content:
+        'Sağ üstteki "Yeni Şirket" butonuyla holding altına yeni bir şirket eklersiniz. Şirket adı (zorunlu) tek tanımlayıcıdır; aynı isimde iki şirket oluşturulamaz. Yaratıldığı anda boş bir Şirket Ayarları kaydı da otomatik oluşturulur.',
+      tip: 'Yeni şirket eklendiği an Kullanıcılar atama modal\'ında ve takım oluşturma dropdown\'larında görünür hale gelir.',
+    },
+    {
+      heading: 'Düzenle',
+      content:
+        'Tablodaki "Düzenle" butonuyla şirketin tüm marka ayarları tek modal\'dan değiştirilir: ad, birincil renk (hex), uygulama adı, logo URL, destek e-postası. Birincil renk vaka detay ve atama rozetlerinde vurgulanır.',
+      example: `Şirket Adı     : PARAM
+Birincil Renk  : #7C3AED
+Marka Adı      : PARAM Vaka
+Destek E-posta : destek@param.com.tr`,
+    },
+    {
+      heading: 'Pasif Yap',
+      content:
+        'Pasifleştirilmiş şirket yeni vaka/kullanıcı atamalarında dropdown\'larda görünmez. Mevcut vakalar etkilenmez (denormalize companyName alanı korunur). İşlem geri alınabilir — "Aktif Yap" ile tekrar açılır.',
+      warning:
+        'Şirketi tamamen silme (hard delete) yok. Çok sayıda FK referansı (Cases, Teams, SLA, ...) var — silmek yerine pasifleştirmek bilinçli bir mimari karar.',
+    },
+    {
+      heading: 'SystemAdmin vs Admin',
+      content:
+        'SystemAdmin: tüm şirketleri görür, yeni şirket oluşturabilir, herhangi birini düzenler/pasifleştirir. Admin: yalnızca atandığı şirketleri görür ve düzenleyebilir; oluşturma ve pasifleştirme yetkisi yok (butonlar görünmez).',
+    },
+  ],
+};
+
+export const USERS_HELP: HelpContent = {
+  title: 'Kullanıcılar',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Sistemdeki kullanıcıları ve her birinin hangi şirket(ler)e hangi rolde atandığını yönetir. Bir kullanıcı aynı anda birden fazla şirkete atanabilir ve her şirkette farklı rol taşıyabilir (örn. PARAM\'da Agent, UNIVERA\'da Supervisor).',
+    },
+    {
+      heading: 'Yeni kullanıcı eklemek',
+      content:
+        'Şu an ekrandan doğrudan oluşturma yok. Yeni bir Supabase Auth kullanıcısı ilk girişinde sistem otomatik DB kaydı oluşturur (auto-provision). Sonra bu ekrandan "Düzenle" diyerek şirket atamalarını yaparsınız.',
+      tip: 'Auto-provision sırasında e-postası Person tablosundaki bir kayıtla birebir eşleşirse personId otomatik bağlanır — vaka atama hedefi olarak kullanılabilir.',
+    },
+    {
+      heading: 'Şirket Atama',
+      content:
+        '"Düzenle" modal\'ında tüm şirketler checkbox listesi olarak gösterilir. Seçilen her şirket için bir rol dropdown\'ı açılır. Pasif şirketler disabled görünür ama mevcut atama kalabilir.',
+      warning:
+        'En az bir şirket ataması zorunludur. Tüm atamaları kaldırırsanız Kaydet butonu disabled olur — son atama silinemez. Yetkisiz şirkete atama yapma denemeleri backend tarafında 403 ile reddedilir.',
+    },
+    {
+      heading: 'Roller — Agent / Supervisor / Admin',
+      content:
+        'Per-company roller kullanıcının o şirket içindeki yetkisini belirler. Sistem-seviyesi rol (User.role) login akışı için kalır; per-company rol günlük operasyonu yönlendirir.',
+      example: `Agent       — Vaka açar, kendi atandığı vakalara
+              müdahale eder. Admin paneline giremez.
+
+Supervisor  — Tüm vakaları görür, transfer/eskalasyon
+              kararlarını verir. Admin paneline giremez.
+
+Admin       — Şirket içi yapılandırma (takım, kategori,
+              SLA, çek-list, kendi kullanıcılarını
+              atama). Şirket yaratamaz/silemez.`,
+    },
+    {
+      heading: 'SystemAdmin kullanıcıları',
+      content:
+        'Sistem rolü SystemAdmin olan kullanıcılar bu ekrandan yönetilemez (Düzenle butonu disabled). SystemAdmin verifyJwt sırasında runtime\'da tüm aktif şirketlere otomatik erişir — UserCompany kaydı bu rol için anlamsız.',
+      warning:
+        'Bir kullanıcıyı SystemAdmin yapmak için sistem rolünü değiştirmek gerekir; bu bilinçli olarak UI\'dan kapalı (yalnızca seedAuth.ts ya da DB\'den).',
     },
   ],
 };
@@ -238,37 +328,3 @@ Field Key : "customer_segment"`,
   ],
 };
 
-export const COMPANY_SETTINGS_HELP: HelpContent = {
-  title: 'Şirket Ayarları',
-  sections: [
-    {
-      heading: 'Bu ekran ne işe yarar?',
-      content:
-        'Her şirket için marka kimliği ve operasyonel yapılandırma. Logo, accent renk ve uygulama adı şirket bazında özelleştirilir; çok kiracılı (multi-tenant) görsel ayrım sağlar.',
-    },
-    {
-      heading: 'Birincil renk',
-      content:
-        'Buton, link, vurgu rengi olarak kullanılır. Hex formatında girin (#7C3AED, #14B8A6 vb.). Aktif şirket değişince UI accent rengi otomatik güncellenir.',
-      example: `PARAM    → #1E40AF (mavi)
-UNIVERA  → #D97706 (amber)
-FINROTA  → #059669 (emerald)`,
-    },
-    {
-      heading: 'Logo URL',
-      content:
-        'Şu an dış URL kabul ediyor (örn. CDN linki). İlerleyen sürümde Supabase Storage upload\'ı eklenecek — dosyayı doğrudan buradan yükleyebileceksin.',
-      tip: 'PNG veya SVG, kare oran (örn. 64×64), şeffaf arka plan önerilir.',
-    },
-    {
-      heading: 'Destek e-postası',
-      content:
-        'Müşteriye giden vaka bildirimi mail\'lerinde "From" adresi olarak görünecek. Bu e-postanın Resend\'da doğrulanmış olması gerekir (FAZ 2 — bildirim sistemi).',
-    },
-    {
-      heading: 'Uygulama adı',
-      content:
-        'Aktif şirketin header\'ında "VARUNA" yerine bu ad görünür (örn. "PARAM Vaka Yönetim"). Boş bırakılırsa default "VARUNA" kullanılır.',
-    },
-  ],
-};

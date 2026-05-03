@@ -7,6 +7,7 @@ import {
   FolderTree,
   Network,
   Settings2,
+  Shield,
   Sliders,
   Tag,
   Timer,
@@ -31,7 +32,8 @@ export type AdminView =
   | 'admin-teams'
   | 'admin-offered-solutions'
   | 'admin-fields'
-  | 'admin-company-settings';
+  | 'admin-companies'
+  | 'admin-users';
 
 export const ADMIN_VIEWS: AdminView[] = [
   'admin-categories',
@@ -42,7 +44,8 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-teams',
   'admin-offered-solutions',
   'admin-fields',
-  'admin-company-settings',
+  'admin-companies',
+  'admin-users',
 ];
 
 export function isAdminView(v: string): v is AdminView {
@@ -76,7 +79,8 @@ const NAV: NavGroup[] = [
   {
     label: 'Şirket',
     items: [
-      { key: 'admin-company-settings', label: 'Şirket Ayarları', icon: <Building2 size={14} /> },
+      { key: 'admin-companies', label: 'Şirketler',    icon: <Building2 size={14} /> },
+      { key: 'admin-users',     label: 'Kullanıcılar', icon: <Shield size={14} /> },
     ],
   },
 ];
@@ -94,14 +98,16 @@ export function AdminLayout({
 }) {
   const { user } = useAuth();
 
-  // Rol guard: SystemAdmin değilse anaya dön
-  if (user && user.role !== 'SystemAdmin') {
+  // Rol guard: Admin VEYA SystemAdmin değilse anaya dön (Phase 4 — multi-tenant
+  // admin yetkisi). Admin'ler kendi şirketlerinde sınırlı işlemler yapar; backend
+  // her endpoint'te companyId scope kontrolü zaten uyguluyor.
+  if (user && user.role !== 'SystemAdmin' && user.role !== 'Admin') {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-ndark-bg">
-        <div className="max-w-md rounded-md border border-rose-200 bg-rose-50 p-6 text-center">
-          <p className="mb-2 font-medium text-rose-900">Yetkiniz yok</p>
-          <p className="mb-4 text-sm text-rose-700">
-            Bu alan yalnızca SystemAdmin rolüyle erişilebilir.
+        <div className="max-w-md rounded-md border border-rose-200 bg-rose-50 p-6 text-center dark:border-rose-900/50 dark:bg-rose-950/40">
+          <p className="mb-2 font-medium text-rose-900 dark:text-rose-200">Yetkiniz yok</p>
+          <p className="mb-4 text-sm text-rose-700 dark:text-rose-300">
+            Bu alan yalnızca Admin veya SystemAdmin rolüyle erişilebilir.
           </p>
           <button
             type="button"

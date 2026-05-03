@@ -33,19 +33,46 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const DEMO_PASSWORD = 'Test1234!';
 
-// Demo user → Person bridging.
-// User.personId Person tablosuna FK; Inbox "Later" sekmesi gibi "me" filter
-// gerektiren akışlar bu eşleşme üzerinden çalışıyor. personId boşsa ilgili
-// kullanıcı kendi atandığı vakaları göremez. Seed çalıştırılmadan önce
-// Person tablosundaki USR-xxx id'lerinin var olduğu varsayılır (seed.ts'in
-// önce çalışmış olması gerekiyor).
+// Demo user → Person bridging + Multi-company assignment (Phase 1).
+//
+// User.personId: Inbox "Ertelendi" gibi "me" filter akışları için Person bağı.
+// companies: holding modeli — her demo user belirli şirket(ler)e atanmış.
+//   - SystemAdmin'e companies array'i bırakıldı; runtime'da tüm şirketler
+//     fetch edilip atanıyor (yeni company eklenince otomatik kapsanır).
+//   - CompanyRole enum: Agent | Supervisor | Admin | SystemAdmin (4 değer).
+//     CSM/Backoffice gibi sistem rolleri Agent'a indirgenir (per-company yetki).
 const DEMO_USERS = [
-  { email: 'agent@varuna.dev',      fullName: 'Demo Agent',      role: 'Agent' as const,       personId: 'USR-001' },
-  { email: 'backoffice@varuna.dev', fullName: 'Demo Backoffice', role: 'Backoffice' as const,  personId: 'USR-006' },
-  { email: 'supervisor@varuna.dev', fullName: 'Demo Supervisor', role: 'Supervisor' as const,  personId: 'USR-002' },
-  { email: 'csm@varuna.dev',        fullName: 'Demo CSM',        role: 'CSM' as const,         personId: 'USR-003' },
-  { email: 'admin@varuna.dev',      fullName: 'Demo Admin',      role: 'Admin' as const,       personId: 'USR-004' },
-  { email: 'sysadmin@varuna.dev',   fullName: 'Demo SysAdmin',   role: 'SystemAdmin' as const, personId: 'USR-005' },
+  {
+    email: 'agent@varuna.dev', fullName: 'Demo Agent', role: 'Agent' as const, personId: 'USR-001',
+    companies: [{ companyId: 'COMP-PARAM', role: 'Agent' as const }],
+  },
+  {
+    email: 'backoffice@varuna.dev', fullName: 'Demo Backoffice', role: 'Backoffice' as const, personId: 'USR-006',
+    companies: [{ companyId: 'COMP-PARAM', role: 'Agent' as const }],
+  },
+  {
+    email: 'supervisor@varuna.dev', fullName: 'Demo Supervisor', role: 'Supervisor' as const, personId: 'USR-002',
+    companies: [
+      { companyId: 'COMP-PARAM', role: 'Supervisor' as const },
+      { companyId: 'COMP-UNIVERA', role: 'Supervisor' as const },
+    ],
+  },
+  {
+    email: 'csm@varuna.dev', fullName: 'Demo CSM', role: 'CSM' as const, personId: 'USR-003',
+    companies: [{ companyId: 'COMP-PARAM', role: 'Agent' as const }],
+  },
+  {
+    email: 'admin@varuna.dev', fullName: 'Demo Admin', role: 'Admin' as const, personId: 'USR-004',
+    companies: [
+      { companyId: 'COMP-PARAM', role: 'Admin' as const },
+      { companyId: 'COMP-UNIVERA', role: 'Admin' as const },
+      { companyId: 'COMP-FINROTA', role: 'Admin' as const },
+    ],
+  },
+  {
+    email: 'sysadmin@varuna.dev', fullName: 'Demo SysAdmin', role: 'SystemAdmin' as const, personId: 'USR-005',
+    companies: 'ALL' as const, // Runtime'da prisma.company.findMany ile tüm şirketler atanır
+  },
 ];
 
 async function findOrCreateAuthUser(email: string, fullName: string): Promise<string> {
@@ -107,6 +134,23 @@ async function main() {
       },
     });
     console.log(`  ✓ User kaydı senkronize edildi${personId ? ` → Person ${personId}` : ''}.`);
+
+    // UserCompany kayıtları — multi-tenant erişim. SystemAdmin için
+    // tüm şirketler runtime'da fetch ediliyor (yeni şirket otomatik kapsanır).
+    const companyAssignments =
+      u.companies === 'ALL'
+        ? (await prisma.company.findMany({ where: { isActive: true }, select: { id: true } }))
+            .map((c) => ({ companyId: c.id, role: 'SystemAdmin' as const }))
+        : u.companies;
+
+    for (const a of companyAssignments) {
+      await prisma.userCompany.upsert({
+        where: { userId_companyId: { userId: authId, companyId: a.companyId } },
+        update: { role: a.role, isActive: true },
+        create: { userId: authId, companyId: a.companyId, role: a.role, isActive: true },
+      });
+    }
+    console.log(`  ✓ Şirket atamaları: ${companyAssignments.map((a) => `${a.companyId}/${a.role}`).join(', ')}`);
   }
 
   console.log('\n✅ Tamamlandı.\n');

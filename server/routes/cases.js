@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { caseRepository } from '../db/caseRepository.js';
+import { caseRepository, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 
@@ -43,12 +43,16 @@ router.use(verifyJwt);
 /**
  * Hata wrapper'ı — async route'lardaki throw'ları 500'e çevirir.
  * caseRepository null/undefined dönerse 404 gönderilir.
+ * CaseAccessError (multi-tenant scope ihlali) → 403.
  */
 function asyncRoute(handler) {
   return async (req, res) => {
     try {
       await handler(req, res);
     } catch (err) {
+      if (err instanceof CaseAccessError) {
+        return res.status(403).json({ error: 'forbidden', message: err.message });
+      }
       console.error('[cases]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
     }
@@ -76,7 +80,11 @@ router.get(
     const pagination = f.page
       ? { page: Number(f.page), pageSize: Number(f.pageSize ?? 25) }
       : undefined;
-    const { items, total } = await caseRepository.list({ filters, pagination });
+    const { items, total } = await caseRepository.list({
+      filters,
+      pagination,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
     res.json({ value: items, '@odata.count': total });
   }),
 );
@@ -89,7 +97,7 @@ router.get(
     if (!accountId || !caseType) {
       return res.status(400).json({ error: 'accountId ve caseType gerekli' });
     }
-    const found = await caseRepository.findOpenCaseFor(accountId, caseType);
+    const found = await caseRepository.findOpenCaseFor(accountId, caseType, req.user.allowedCompanyIds);
     res.json({ case: found });
   }),
 );
@@ -102,7 +110,10 @@ router.get(
 router.get(
   '/snoozed',
   asyncRoute(async (req, res) => {
-    const { items, total } = await caseRepository.listSnoozedForUser(req.user.personId);
+    const { items, total } = await caseRepository.listSnoozedForUser(
+      req.user.personId,
+      req.user.allowedCompanyIds,
+    );
     res.json({ value: items, '@odata.count': total });
   }),
 );
@@ -113,11 +124,15 @@ router.get(
   asyncRoute(async (req, res) => {
     const { accountId, excludeId, statusIn, statusNotIn } = req.query;
     if (!accountId) return res.status(400).json({ error: 'accountId gerekli' });
-    const cases = await caseRepository.findByAccount(accountId, {
-      excludeId,
-      statusIn: statusIn ? statusIn.split(',') : undefined,
-      statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
-    });
+    const cases = await caseRepository.findByAccount(
+      accountId,
+      {
+        excludeId,
+        statusIn: statusIn ? statusIn.split(',') : undefined,
+        statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
+      },
+      req.user.allowedCompanyIds,
+    );
     res.json({ value: cases });
   }),
 );
@@ -126,17 +141,21 @@ router.get(
 router.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    const c = await caseRepository.get(req.params.id);
+    const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
     res.json(c);
   }),
 );
 
-/** POST /api/cases — yeni vaka */
+/** POST /api/cases — yeni vaka. companyId body'den; kullanıcının allowedCompanyIds'inde olmalı. */
 router.post(
   '/',
   asyncRoute(async (req, res) => {
-    const created = await caseRepository.create(req.body ?? {});
+    const body = req.body ?? {};
+    if (body.companyId && !req.user.allowedCompanyIds.includes(body.companyId)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Bu şirkette vaka oluşturma yetkin yok.' });
+    }
+    const created = await caseRepository.create(body);
     res.status(201).json(created);
   }),
 );
@@ -145,7 +164,12 @@ router.post(
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
-    const updated = await caseRepository.update(req.params.id, req.body ?? {});
+    const updated = await caseRepository.update(
+      req.params.id,
+      req.body ?? {},
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
   }),
@@ -160,7 +184,13 @@ router.post(
   asyncRoute(async (req, res) => {
     const { nextStatus, ...payload } = req.body ?? {};
     if (!nextStatus) return res.status(400).json({ error: 'nextStatus gerekli' });
-    const updated = await caseRepository.transitionStatus(req.params.id, nextStatus, payload);
+    const updated = await caseRepository.transitionStatus(
+      req.params.id,
+      nextStatus,
+      payload,
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
   }),
@@ -170,7 +200,12 @@ router.post(
 router.post(
   '/:id/notes',
   asyncRoute(async (req, res) => {
-    const note = await caseRepository.addNote(req.params.id, req.body ?? {});
+    const note = await caseRepository.addNote(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+    );
+    if (!note) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.status(201).json(note);
   }),
 );
@@ -179,7 +214,12 @@ router.post(
 router.post(
   '/:id/call-logs',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.addCallLog(req.params.id, req.body ?? {});
+    const result = await caseRepository.addCallLog(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+    );
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.status(201).json(result);
   }),
 );
@@ -188,7 +228,11 @@ router.post(
 router.post(
   '/:id/activity',
   asyncRoute(async (req, res) => {
-    const updated = await caseRepository.addActivity(req.params.id, req.body ?? {});
+    const updated = await caseRepository.addActivity(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+    );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
   }),
@@ -209,6 +253,7 @@ router.post(
       req.params.id,
       { snoozeUntil, snoozeReason },
       req.user.fullName,
+      req.user.allowedCompanyIds,
     );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     if ('error' in result) return res.status(400).json(result);
@@ -220,7 +265,11 @@ router.post(
 router.delete(
   '/:id/snooze',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.unsnoozeCase(req.params.id, req.user.fullName);
+    const result = await caseRepository.unsnoozeCase(
+      req.params.id,
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(result);
   }),
@@ -235,6 +284,8 @@ router.patch(
       req.params.id,
       req.params.itemId,
       Boolean(checked),
+      req.user.fullName,
+      req.user.allowedCompanyIds,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
@@ -249,7 +300,11 @@ router.patch(
 router.post(
   '/:id/files/upload-url',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.requestUpload(req.params.id, req.body ?? {});
+    const result = await caseRepository.requestUpload(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+    );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     if ('error' in result) return res.status(400).json(result);
     res.json(result);
@@ -263,7 +318,11 @@ router.post(
 router.post(
   '/:id/files/finalize',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.finalizeUpload(req.params.id, req.body ?? {});
+    const result = await caseRepository.finalizeUpload(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+    );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.status(201).json(result);
   }),
@@ -273,7 +332,11 @@ router.post(
 router.get(
   '/:id/files/:fileId/download',
   asyncRoute(async (req, res) => {
-    const result = await caseRepository.getDownloadUrl(req.params.id, req.params.fileId);
+    const result = await caseRepository.getDownloadUrl(
+      req.params.id,
+      req.params.fileId,
+      req.user.allowedCompanyIds,
+    );
     if (!result) return res.status(404).json({ error: 'Dosya bulunamadı' });
     res.json(result);
   }),
@@ -283,7 +346,12 @@ router.get(
 router.delete(
   '/:id/files/:fileId',
   asyncRoute(async (req, res) => {
-    const updated = await caseRepository.removeFile(req.params.id, req.params.fileId);
+    const updated = await caseRepository.removeFile(
+      req.params.id,
+      req.params.fileId,
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
   }),

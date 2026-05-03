@@ -112,31 +112,65 @@ export const documentTypeRepo = {
 };
 
 // ─────────────────────────────────────────────────────────────────
-// Teams
+// Teams — multi-tenant: her takım tek bir şirkete bağlı (Phase 1).
+// list/create/update operasyonları allowedCompanyIds scope'u içinde çalışır.
 // ─────────────────────────────────────────────────────────────────
 export const teamRepo = {
-  async list() {
-    return prisma.team.findMany({ orderBy: { name: 'asc' } });
+  async list(companyId, allowedCompanyIds) {
+    const where = {};
+    if (companyId) {
+      // Explicit companyId verilmişse, kullanıcının erişebildiği şirketler
+      // arasında olduğunu doğrula.
+      if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+        throw new AdminError('Bu şirket için yetki yok.');
+      }
+      where.companyId = companyId;
+    } else if (allowedCompanyIds) {
+      where.companyId = { in: allowedCompanyIds };
+    }
+    return prisma.team.findMany({ where, orderBy: [{ companyId: 'asc' }, { name: 'asc' }] });
   },
-  async create(input) {
+  async create(input, allowedCompanyIds) {
+    if (!input.companyId) throw new AdminError('companyId gerekli.');
+    if (allowedCompanyIds && !allowedCompanyIds.includes(input.companyId)) {
+      throw new AdminError('Bu şirkete takım eklemeye yetkin yok.');
+    }
+    // Aynı şirket içinde aynı isimde takım kontrolü (cross-company duplicates ok)
     const exists = await prisma.team.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: {
+        companyId: input.companyId,
+        name: { equals: input.name.trim(), mode: 'insensitive' },
+      },
     });
-    if (exists) throw new AdminError('Aynı isimde takım zaten mevcut.');
+    if (exists) throw new AdminError('Bu şirkette aynı isimde takım zaten mevcut.');
     return prisma.team.create({
       data: {
         name: input.name.trim(),
         description: input.description?.trim() || null,
+        companyId: input.companyId,
         isActive: input.isActive ?? true,
       },
     });
   },
-  async update(id, patch) {
+  async update(id, patch, allowedCompanyIds) {
+    // Önce target team'in companyId'sini al, scope check
+    const target = await prisma.team.findUnique({
+      where: { id },
+      select: { id: true, companyId: true },
+    });
+    if (!target) throw new AdminError('Takım bulunamadı.');
+    if (allowedCompanyIds && !allowedCompanyIds.includes(target.companyId)) {
+      throw new AdminError('Bu takıma erişim yetkin yok.');
+    }
     if (patch.name) {
       const dup = await prisma.team.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim(), mode: 'insensitive' } },
+        where: {
+          id: { not: id },
+          companyId: target.companyId,
+          name: { equals: patch.name.trim(), mode: 'insensitive' },
+        },
       });
-      if (dup) throw new AdminError('Aynı isimde başka takım var.');
+      if (dup) throw new AdminError('Bu şirkette aynı isimde başka takım var.');
     }
     return prisma.team.update({
       where: { id },
@@ -147,7 +181,15 @@ export const teamRepo = {
       },
     });
   },
-  async remove(id) {
+  async remove(id, allowedCompanyIds) {
+    const target = await prisma.team.findUnique({
+      where: { id },
+      select: { id: true, companyId: true },
+    });
+    if (!target) throw new AdminError('Takım bulunamadı.');
+    if (allowedCompanyIds && !allowedCompanyIds.includes(target.companyId)) {
+      throw new AdminError('Bu takıma erişim yetkin yok.');
+    }
     const openCases = await prisma.case.count({
       where: {
         assignedTeamId: id,
@@ -536,6 +578,255 @@ export const fieldDefinitionRepo = {
 // ─────────────────────────────────────────────────────────────────
 // Company Settings (1-1 with Company, upsert tabanlı)
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Users — Phase 5B: user-company assignment UI için.
+//
+// Erişim kuralları (route layer):
+//   list:          Admin/SystemAdmin (Admin sadece allowedCompanyIds'indeki
+//                  şirketlere atanmış kullanıcıları görür).
+//   replace assg:  Requesting user'ın hedef assignment'lardaki TÜM companyId'lere
+//                  Admin/SystemAdmin yetkisi olmalı.
+//
+// SystemAdmin (sistem rolü): UserCompany kayıtları kalsın ama UI bunu
+// salt-okunur gösterir; verifyJwt zaten tüm aktif şirketleri runtime'da ekliyor.
+// ─────────────────────────────────────────────────────────────────
+const VALID_COMPANY_ROLES = new Set(['Agent', 'Supervisor', 'Admin', 'SystemAdmin']);
+
+export const userRepo = {
+  async list(allowedCompanyIds) {
+    // Admin/SystemAdmin: SystemAdmin için allowedCompanyIds undefined (route
+    // layer öyle gönderir), Admin için kendi şirketleri.
+    const where = allowedCompanyIds
+      ? {
+          OR: [
+            { role: 'SystemAdmin' }, // SystemAdmin'ler her zaman görünür (Admin onları görüp pasifleştiremez ama listede)
+            { companies: { some: { companyId: { in: allowedCompanyIds }, isActive: true } } },
+          ],
+        }
+      : {};
+    const users = await prisma.user.findMany({
+      where,
+      orderBy: [{ isActive: 'desc' }, { fullName: 'asc' }],
+      include: {
+        companies: {
+          where: { isActive: true },
+          select: { companyId: true, role: true, company: { select: { name: true, isActive: true } } },
+        },
+      },
+    });
+    return users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      fullName: u.fullName,
+      role: u.role,
+      isActive: u.isActive,
+      personId: u.personId,
+      assignments: u.companies.map((uc) => ({
+        companyId: uc.companyId,
+        companyName: uc.company.name,
+        companyActive: uc.company.isActive,
+        role: uc.role,
+      })),
+    }));
+  },
+
+  /**
+   * Replace user's company assignments — full diff: gelen liste tek doğru.
+   * Caller (route) yetki kontrolü:
+   *   - assignments[].companyId TÜMÜ requestingUser.allowedCompanyIds'inde
+   *     OLMALI (route'ta verify edilir).
+   *   - assignments[].role 'Agent' | 'Supervisor' | 'Admin' (SystemAdmin atama
+   *     yalnızca seedAuth-equivalent — UI/route burayı engellesin).
+   * Edge: empty assignments → AdminError (en az 1 şirket).
+   */
+  async replaceCompanies(userId, assignments, allowedCompanyIds) {
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      throw new AdminError('En az bir şirket ataması gerekli.');
+    }
+    for (const a of assignments) {
+      if (!a.companyId) throw new AdminError('Atamalardan birinde companyId eksik.');
+      if (!VALID_COMPANY_ROLES.has(a.role)) {
+        throw new AdminError(`Geçersiz rol: ${a.role}`);
+      }
+      // 'SystemAdmin' atamayı UI'dan kabul etmiyoruz — sadece sistem-rolü
+      // SystemAdmin user'lar için seedAuth'da yapılır, runtime'da verifyJwt
+      // tüm şirketlere otomatik ekler.
+      if (a.role === 'SystemAdmin') {
+        throw new AdminError('SystemAdmin per-company atanamaz; sistem rolüyle yönetilir.');
+      }
+      if (allowedCompanyIds && !allowedCompanyIds.includes(a.companyId)) {
+        throw new AdminError(`${a.companyId} için yetkin yok.`, 403);
+      }
+    }
+    // Hedef user var mı + SystemAdmin değil mi (sistem rolü değiştirilemez)
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, fullName: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin') {
+      throw new AdminError('SystemAdmin sistem rolüne sahip kullanıcının ataması değiştirilemez.', 403);
+    }
+
+    // Diff: aynı companyId ise role update; yeni ise create; eski ama yeni yoksa deactivate.
+    // Mevcut atamalar (aktif olanlar)
+    const existing = await prisma.userCompany.findMany({
+      where: { userId, isActive: true },
+      select: { companyId: true, role: true },
+    });
+    const desiredMap = new Map(assignments.map((a) => [a.companyId, a.role]));
+    const existingMap = new Map(existing.map((e) => [e.companyId, e.role]));
+
+    await prisma.$transaction(async (tx) => {
+      // Yeni veya güncel → upsert
+      for (const [companyId, role] of desiredMap) {
+        await tx.userCompany.upsert({
+          where: { userId_companyId: { userId, companyId } },
+          update: { role, isActive: true },
+          create: { userId, companyId, role, isActive: true },
+        });
+      }
+      // Eski ama yeni listede yok → deactivate
+      for (const [companyId] of existingMap) {
+        if (!desiredMap.has(companyId)) {
+          await tx.userCompany.updateMany({
+            where: { userId, companyId },
+            data: { isActive: false },
+          });
+        }
+      }
+    });
+
+    return { id: userId, fullName: target.fullName, assignments };
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Companies — Phase 5A: company management UI için CRUD
+//
+// Erişim kuralları (route layer'da uygulanır):
+//   list   → tüm Admin/SystemAdmin (kendi allowedCompanyIds'i)
+//   create → SystemAdmin only
+//   update → o şirkette Admin/SystemAdmin yetkisi (assertCompanyAdmin)
+//   remove → SystemAdmin only (soft delete: isActive=false)
+//
+// Create akışında: Company satırı + boş CompanySettings tek transaction'da.
+// CompanySettings.companyId @id (1-1) olduğu için Company silindiğinde manuel
+// cleanup gerekir; ama soft delete (isActive=false) FK kalır, settings kalır.
+// ─────────────────────────────────────────────────────────────────
+export const companyRepo = {
+  async list(allowedCompanyIds) {
+    const where = allowedCompanyIds ? { id: { in: allowedCompanyIds } } : {};
+    const companies = await prisma.company.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      include: { settings: true, _count: { select: { userCompanies: true } } },
+    });
+    return companies.map((c) => ({
+      id: c.id,
+      name: c.name,
+      isActive: c.isActive,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      logoUrl: c.settings?.logoUrl ?? null,
+      primaryColor: c.settings?.primaryColor ?? null,
+      appName: c.settings?.appName ?? null,
+      supportEmail: c.settings?.supportEmail ?? null,
+      userCount: c._count.userCompanies,
+    }));
+  },
+
+  async create(input) {
+    if (!input.name?.trim()) throw new AdminError('Şirket adı gerekli.');
+    const dup = await prisma.company.findFirst({
+      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+    });
+    if (dup) throw new AdminError('Bu isimde şirket zaten var.');
+
+    // Company + CompanySettings tek transaction
+    const created = await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({
+        data: {
+          name: input.name.trim(),
+          isActive: input.isActive ?? true,
+        },
+      });
+      await tx.companySettings.create({
+        data: {
+          companyId: company.id,
+          logoUrl: input.logoUrl?.trim() || null,
+          primaryColor: input.primaryColor?.trim() || null,
+          appName: input.appName?.trim() || null,
+          supportEmail: input.supportEmail?.trim() || null,
+        },
+      });
+      return company;
+    });
+    return { id: created.id, name: created.name, isActive: created.isActive };
+  },
+
+  async update(id, patch) {
+    const target = await prisma.company.findUnique({ where: { id } });
+    if (!target) throw new AdminError('Şirket bulunamadı.', 404);
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim();
+      if (!trimmed) throw new AdminError('Şirket adı boş olamaz.');
+      const dup = await prisma.company.findFirst({
+        where: { id: { not: id }, name: { equals: trimmed, mode: 'insensitive' } },
+      });
+      if (dup) throw new AdminError('Bu isimde başka şirket var.');
+    }
+
+    // Company alanları (name, isActive) + CompanySettings (branding) ayrı tablolar.
+    // Tek transaction'da güncelle.
+    const updated = await prisma.$transaction(async (tx) => {
+      const c = await tx.company.update({
+        where: { id },
+        data: {
+          ...(patch.name !== undefined && { name: patch.name.trim() }),
+          ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        },
+      });
+      const hasBranding =
+        patch.logoUrl !== undefined ||
+        patch.primaryColor !== undefined ||
+        patch.appName !== undefined ||
+        patch.supportEmail !== undefined;
+      if (hasBranding) {
+        await tx.companySettings.upsert({
+          where: { companyId: id },
+          update: {
+            ...(patch.logoUrl !== undefined && { logoUrl: patch.logoUrl?.trim() || null }),
+            ...(patch.primaryColor !== undefined && { primaryColor: patch.primaryColor?.trim() || null }),
+            ...(patch.appName !== undefined && { appName: patch.appName?.trim() || null }),
+            ...(patch.supportEmail !== undefined && { supportEmail: patch.supportEmail?.trim() || null }),
+          },
+          create: {
+            companyId: id,
+            logoUrl: patch.logoUrl?.trim() || null,
+            primaryColor: patch.primaryColor?.trim() || null,
+            appName: patch.appName?.trim() || null,
+            supportEmail: patch.supportEmail?.trim() || null,
+          },
+        });
+      }
+      return c;
+    });
+    return { id: updated.id, name: updated.name, isActive: updated.isActive };
+  },
+
+  async remove(id) {
+    // Soft delete — isActive=false. Hard delete tehlikeli (Cases, Teams, vs FK).
+    const target = await prisma.company.findUnique({ where: { id } });
+    if (!target) throw new AdminError('Şirket bulunamadı.', 404);
+    if (!target.isActive) {
+      return { id, deactivated: true, alreadyInactive: true };
+    }
+    await prisma.company.update({ where: { id }, data: { isActive: false } });
+    return { id, deactivated: true };
+  },
+};
+
 export const companySettingsRepo = {
   async get(companyId) {
     return prisma.companySettings.findUnique({ where: { companyId } });
