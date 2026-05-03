@@ -340,6 +340,7 @@ export function MyCalendarPage({ onSelectCase }: MyCalendarPageProps) {
         open={reminderOpen}
         presetRemindAt={presetRemindAt}
         editTarget={editTarget}
+        onOpenCase={onSelectCase}
         onClose={() => {
           setReminderOpen(false);
           setPresetRemindAt(null);
