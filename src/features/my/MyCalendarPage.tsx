@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  ExternalLink,
   Phone,
   Plus,
 } from 'lucide-react';
@@ -486,23 +487,40 @@ function EventCard({
   // Reminder → her zaman tıklanabilir (edit). Vaka kaynaklı → caseId varsa case detay.
   const isReminder = ev.type === 'reminder';
   const clickable = isReminder || !!ev.caseId;
+  // Vakaya bağlı reminder'larda ekstra "Aç" butonu — kart click'i edit'e gitse de
+  // kullanıcı tek tıkla vakaya gidebilsin. Vaka kaynaklı (snooze/sla/followup)
+  // event'lerde gerek yok — kartın kendisi zaten vakaya götürüyor.
+  const showOpenCaseAction = isReminder && !!ev.caseId;
+
+  // Outer = div (a11y: role+tabIndex). Inner buttons stopPropagation ile bağımsız.
+  // Nested <button> sorunundan kaçınmak için outer button değil.
+  function handleMainClick() {
+    if (!clickable) return;
+    if (isReminder) {
+      onEditReminder(ev);
+    } else if (ev.caseId) {
+      onSelectCase(ev.caseId);
+    }
+  }
   return (
-    <button
-      type="button"
+    <div
       onClick={(e) => {
-        if (!clickable) return;
         e.stopPropagation();
-        if (isReminder) {
-          onEditReminder(ev);
-        } else if (ev.caseId) {
-          onSelectCase(ev.caseId);
+        handleMainClick();
+      }}
+      onKeyDown={(e) => {
+        if (!clickable) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleMainClick();
         }
       }}
-      // min-w-0 + max-w-full: parent flex/grid'in daraltma izni (uzun mesaj taşmasın).
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
       className={cn(
         'group flex w-full min-w-0 max-w-full items-start gap-2 overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors',
         style.cardClass,
-        !clickable && 'cursor-default',
+        clickable ? 'cursor-pointer' : 'cursor-default',
       )}
       title={`${style.label}${ev.caseNumber ? ' · ' + ev.caseNumber : ''}${ev.customerName ? ' · ' + ev.customerName : ''}${ev.notes && !ev.caseNumber ? ' · ' + ev.notes : ''}`}
     >
@@ -520,7 +538,24 @@ function EventCard({
           <div className="truncate opacity-80">{ev.customerName}</div>
         )}
       </div>
-    </button>
+      {showOpenCaseAction && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectCase(ev.caseId!);
+          }}
+          title="Vakayı aç"
+          className={cn(
+            'shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-violet-200 hover:opacity-100 dark:hover:bg-violet-800',
+            compact && 'p-0.5',
+          )}
+        >
+          <ExternalLink size={compact ? 11 : 12} />
+          {!compact && <span className="sr-only">Aç</span>}
+        </button>
+      )}
+    </div>
   );
 }
 
