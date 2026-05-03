@@ -6,6 +6,7 @@ import lookupsRouter from './routes/lookups.js';
 import adminRouter from './routes/admin.js';
 import analyticsRouter from './routes/analytics.js';
 import authRouter from './routes/auth.js';
+import cronRouter from './routes/cron.js';
 import { prisma } from './db/client.js';
 
 /**
@@ -56,6 +57,7 @@ app.use('/api/ai', aiRouter);
 app.use('/api/lookups', lookupsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/cron', cronRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

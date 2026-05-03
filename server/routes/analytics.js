@@ -110,4 +110,54 @@ router.get('/ai-usage', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/analytics/patterns?status=active|all
+ * Default: status=active. allowedCompanyIds scope. Faz 1.5 Madde 5.
+ */
+router.get('/patterns', async (req, res) => {
+  try {
+    const status = req.query.status === 'all' ? undefined : 'active';
+    const where = { companyId: { in: req.user.allowedCompanyIds } };
+    if (status) where.status = status;
+    const items = await prisma.patternAlert.findMany({
+      where,
+      orderBy: { detectedAt: 'desc' },
+      take: 100,
+    });
+    res.json({ value: items, '@odata.count': items.length });
+  } catch (e) {
+    console.error('[analytics:patterns]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+/**
+ * PATCH /api/analytics/patterns/:id/dismiss — yönetici alarmı kapatır.
+ * Yetki: companyId scope (Supervisor/Admin/SystemAdmin guard zaten router'da).
+ */
+router.patch('/patterns/:id/dismiss', async (req, res) => {
+  try {
+    const target = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(target.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (target.status === 'dismissed') {
+      return res.json({ id: target.id, status: target.status, alreadyDismissed: true });
+    }
+    const updated = await prisma.patternAlert.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'dismissed',
+        dismissedBy: req.user.id,
+        dismissedAt: new Date(),
+      },
+    });
+    res.json({ id: updated.id, status: updated.status });
+  } catch (e) {
+    console.error('[analytics:patterns:dismiss]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
 export default router;

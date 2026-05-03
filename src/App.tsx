@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   BrainCircuit,
   Inbox,
   Keyboard,
@@ -14,6 +15,8 @@ import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
+import { PatternsPage } from './features/analytics/PatternsPage';
+import { analyticsService } from './services/analyticsService';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
@@ -33,7 +36,7 @@ import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'case-detail' | AdminView;
+type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -57,6 +60,8 @@ export default function App() {
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  // Aktif örüntü alarm sayısı — sidebar badge için 60s polling.
+  const [activePatternCount, setActivePatternCount] = useState(0);
 
   const { theme, toggle: toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
@@ -69,6 +74,33 @@ export default function App() {
     const t = window.setTimeout(() => setGPressed(false), 800);
     return () => window.clearTimeout(t);
   }, [gPressed]);
+
+  // Active pattern alert sayısı — Supervisor/Admin/SystemAdmin için 60s polling.
+  // 'app:patterns-changed' custom event ile dismiss sonrası anında refresh.
+  useEffect(() => {
+    if (!user || !['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role)) {
+      setActivePatternCount(0);
+      return;
+    }
+    let alive = true;
+    async function fetchCount() {
+      try {
+        const list = await analyticsService.listPatterns('active');
+        if (alive) setActivePatternCount(list.length);
+      } catch {
+        // apiFetch toast gösterdi; sessiz devam.
+      }
+    }
+    void fetchCount();
+    const id = window.setInterval(fetchCount, 60_000);
+    const onChanged = () => void fetchCount();
+    window.addEventListener('app:patterns-changed', onChanged);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      window.removeEventListener('app:patterns-changed', onChanged);
+    };
+  }, [user?.id, user?.role]);
 
   useHotkey('g', () => setGPressed(true));
   useHotkey('v', () => {
@@ -258,6 +290,45 @@ export default function App() {
               </button>
             )}
 
+            {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-patterns')}
+                className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-patterns'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title={
+                  activePatternCount > 0
+                    ? `Örüntü Alarmları (${activePatternCount} aktif)`
+                    : 'Örüntü Alarmları'
+                }
+              >
+                <span className="relative">
+                  <AlertTriangle size={16} />
+                  {activePatternCount > 0 && !sidebarExpanded && (
+                    <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
+                      {activePatternCount > 9 ? '9+' : activePatternCount}
+                    </span>
+                  )}
+                </span>
+                {sidebarExpanded && (
+                  <>
+                    <span className="flex-1 text-left">Örüntü Alarmları</span>
+                    {activePatternCount > 0 && (
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold text-white">
+                        {activePatternCount > 99 ? '99+' : activePatternCount}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
             {user?.role === 'SystemAdmin' && (
               <button
@@ -288,6 +359,7 @@ export default function App() {
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
           {view === 'analytics-ai-usage' && <AIUsagePage />}
+          {view === 'analytics-patterns' && <PatternsPage onShowCases={() => setView('cases')} />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
