@@ -8,20 +8,23 @@ const router = Router();
 /**
  * Cron tetikleyicisi — verifyJwt'den ÖNCE mount edilir.
  *
- * Vercel cron jobs otomatik olarak `Authorization: Bearer ${CRON_SECRET}` ekler
- * (vercel.json'daki `crons` config tetiklenince). Manuel/UptimeRobot çağrıları
- * için aynı header'ı set etmek yeterli.
+ * Vercel Hobby plan günde 1'den fazla cron desteklemediği için bu endpoint
+ * UptimeRobot tarafından (her 5 dk) tetikleniyor. İki auth header kabul:
+ *   - Authorization: Bearer ${CRON_SECRET}  (Vercel Cron — ileride Pro plan)
+ *   - x-uptime-secret: ${CRON_SECRET}       (UptimeRobot custom header)
  *
  * CRON_SECRET env'de yoksa endpoint kapalı (503) — production'da set edilmeli.
+ * Detaylar: docs/INCIDENTS.md §5 (Operational Notes).
  */
 router.post('/cron/snooze-wakeup', async (req, res) => {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
     return res.status(503).json({ error: 'cron_disabled', message: 'CRON_SECRET tanımlı değil.' });
   }
-  const auth = req.headers.authorization || '';
-  const m = /^Bearer (.+)$/i.exec(auth);
-  if (!m || m[1] !== expected) {
+  const bearerMatch = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
+  const bearerOk = bearerMatch && bearerMatch[1] === expected;
+  const uptimeOk = req.headers['x-uptime-secret'] === expected;
+  if (!bearerOk && !uptimeOk) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   try {
