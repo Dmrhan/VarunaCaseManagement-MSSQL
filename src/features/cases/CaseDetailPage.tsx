@@ -492,7 +492,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 size="sm"
                 leftIcon={<Clock3 size={12} />}
                 onClick={() => setSnoozeOpen(true)}
-                title="Vakayı belirli bir zamana ertele"
+                title="Vakayı ertele — opsiyonel olarak kişisel takvime de düşer"
               >
                 Ertele
               </Button>
@@ -698,7 +698,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         onTransferred={(updated) => setItem(updated)}
       />
 
-      {/* Vaka erteleme modal'ı */}
+      {/* Vaka erteleme modal'ı — içinde "Takvime ekle" checkbox'ı default ON,
+          ayrı bir "Bana Hatırlat" akışına gerek bırakmıyor. */}
       <SnoozeModal
         open={snoozeOpen}
         caseId={item.id}

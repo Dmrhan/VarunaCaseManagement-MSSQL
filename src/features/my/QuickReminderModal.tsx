@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Trash2 } from 'lucide-react';
+import { ExternalLink, Search, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput, TextArea } from '@/components/ui/Field';
@@ -32,6 +32,8 @@ interface QuickReminderModalProps {
   presetRemindAt?: Date | null;
   /** Edit modu — verilirse modal mevcut reminder'ı yükler, kaydet/sil sunar. */
   editTarget?: ReminderEditTarget | null;
+  /** Verilirse seçili vakanın yanında "Aç" link butonu görünür → vaka detayı. */
+  onOpenCase?: (caseId: string) => void;
 }
 
 /**
@@ -55,6 +57,7 @@ export function QuickReminderModal({
   presetCaseLabel,
   presetRemindAt,
   editTarget,
+  onOpenCase,
 }: QuickReminderModalProps) {
   const { toast } = useToast();
   const isEdit = Boolean(editTarget);
@@ -233,15 +236,31 @@ export function QuickReminderModal({
       <div className="space-y-4 px-5 py-4">
         <Field label="Vaka" hint="İsteğe bağlı — vakasız (kişisel) hatırlatıcı için boş bırak; not zorunlu olur.">
           {selectedCase ? (
-            <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text">
-              <span className="truncate">{selectedCase.label}</span>
-              <button
-                type="button"
-                onClick={() => setSelectedCase(null)}
-                className="text-xs text-slate-500 underline hover:text-slate-700 dark:text-ndark-muted dark:hover:text-ndark-text"
-              >
-                Kaldır
-              </button>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text">
+              <span className="min-w-0 truncate">{selectedCase.label}</span>
+              <div className="flex shrink-0 items-center gap-3">
+                {onOpenCase && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenCase(selectedCase.id);
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:text-brand-800 hover:underline dark:text-brand-300 dark:hover:text-brand-200"
+                    title="Vaka detayını aç"
+                  >
+                    <ExternalLink size={12} />
+                    Aç
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCase(null)}
+                  className="text-xs text-slate-500 underline hover:text-slate-700 dark:text-ndark-muted dark:hover:text-ndark-text"
+                >
+                  Kaldır
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-1.5">
