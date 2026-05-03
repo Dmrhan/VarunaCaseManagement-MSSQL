@@ -63,21 +63,32 @@ export class CaseAccessError extends Error {
 }
 
 /**
- * Mutation guard — mutation öncesi çağrılır. allowedCompanyIds verilmediyse
- * bypass (cron, internal job). Verildiyse case.companyId IN check; case yoksa
- * null döner (route 404 yapar), scope dışındaysa CaseAccessError fırlatır.
+ * Mutation guard + companyId resolver.
+ *
+ * Davranış:
+ *   - Case yok → null döner (route 404'e çevirir).
+ *   - allowedCompanyIds verilmiş + scope dışı → CaseAccessError fırlatır.
+ *   - Aksi halde → case.companyId döner.
+ *
+ * Caller'lar bu companyId'yi child satırlar (history, note, call log, vb.)
+ * yaratırken denormalize için kullanır — Faz 1.5 multi-tenant child
+ * denormalization işi.
+ *
+ * NOT: Önceki versiyonda allowedCompanyIds yokken fetch atlanıyordu (bypass);
+ * artık her zaman fetch yapılır çünkü companyId döndürmek gerekiyor. Maliyet
+ * ihmal edilebilir (zaten case mutation'larının çoğu kendi findUnique'ini
+ * yapıyor); cron yolu (processSnoozeWakeups) bu helper'ı çağırmıyor zaten.
  */
 async function assertCaseInScope(caseId, allowedCompanyIds) {
-  if (!allowedCompanyIds) return true; // bypass — internal/cron caller
   const found = await prisma.case.findUnique({
     where: { id: caseId },
     select: { id: true, companyId: true },
   });
   if (!found) return null;
-  if (!allowedCompanyIds.includes(found.companyId)) {
+  if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
     throw new CaseAccessError();
   }
-  return true;
+  return found.companyId;
 }
 
 export const caseRepository = {
@@ -163,6 +174,7 @@ export const caseRepository = {
         // Açılış log'u
         history: {
           create: {
+            companyId: m.companyId,
             action: 'Vaka oluşturuldu',
             actionType: 'CaseCreated',
             actor: m.createdBy ?? 'Mock User',
@@ -175,7 +187,8 @@ export const caseRepository = {
   },
 
   async update(id, patch, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     // Otomatik alan değişim log'u: değişen her alan için CaseActivity entry'si
     const before = await prisma.case.findUnique({ where: { id } });
     if (!before) return null;
@@ -189,6 +202,7 @@ export const caseRepository = {
       if (oldVal === dbPatch[field]) continue; // db karşılığı eşitse skip
       if (oldVal == null && newVal == null) continue;
       historyEntries.push({
+        companyId,
         action: 'Alan güncellendi',
         actionType: 'FieldUpdate',
         fieldName: field,
@@ -211,10 +225,12 @@ export const caseRepository = {
   },
 
   async addNote(id, note, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const created = await prisma.caseNote.create({
       data: {
         caseId: id,
+        companyId,
         authorName: note.authorName,
         content: note.content,
         visibility: note.visibility,
@@ -225,11 +241,13 @@ export const caseRepository = {
   },
 
   async addCallLog(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const m = toDb(input);
     const log = await prisma.caseCallLog.create({
       data: {
         caseId: id,
+        companyId,
         callDate: m.callDate ? new Date(m.callDate) : new Date(),
         durationMin: m.durationMin,
         callDisposition: m.callDisposition,
@@ -250,10 +268,12 @@ export const caseRepository = {
   },
 
   async addActivity(caseId, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
     await prisma.caseActivity.create({
       data: {
         caseId,
+        companyId,
         action: input.action,
         actionType: input.actionType,
         fieldName: input.fieldName,
@@ -272,7 +292,8 @@ export const caseRepository = {
   },
 
   async toggleChecklistItem(caseId, itemId, checked, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
     if (!c?.checklistItems) return shape(c);
 
@@ -290,6 +311,7 @@ export const caseRepository = {
         checklistItems: items,
         history: {
           create: {
+            companyId,
             action: checked ? 'Kontrol maddesi işaretlendi' : 'Kontrol maddesi işareti kaldırıldı',
             actionType: 'ChecklistToggle',
             fieldName: 'checklist',
@@ -309,7 +331,7 @@ export const caseRepository = {
    * DB satırı henüz yazılmaz; finalize() ile yazılır.
    */
   async requestUpload(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    if (!(await assertCaseInScope(id, allowedCompanyIds))) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
     const FILE_MAX_COUNT = 20;
 
@@ -336,12 +358,14 @@ export const caseRepository = {
    * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
    */
   async finalizeUpload(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const actor = input.uploadedBy ?? 'Mock User';
     const file = await prisma.caseAttachment.create({
       data: {
         id: input.attachmentId,
         caseId: id,
+        companyId,
         fileName: input.fileName,
         fileSize: input.fileSize,
         mimeType: input.mimeType,
@@ -355,6 +379,7 @@ export const caseRepository = {
         updatedAt: new Date(),
         history: {
           create: {
+            companyId,
             action: 'Dosya yüklendi',
             actionType: 'FileUploaded',
             fieldName: 'files',
@@ -370,7 +395,7 @@ export const caseRepository = {
 
   /** Download için kısa ömürlü signed URL üret. */
   async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = await createDownloadUrl(target.fileUrl);
@@ -378,7 +403,8 @@ export const caseRepository = {
   },
 
   async removeFile(id, fileId, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
@@ -395,6 +421,7 @@ export const caseRepository = {
         updatedAt: new Date(),
         history: {
           create: {
+            companyId,
             action: 'Dosya silindi',
             actionType: 'FileRemoved',
             fieldName: 'files',
@@ -522,6 +549,7 @@ export const caseRepository = {
           const fieldLabel = FIELD_LABELS[field] ?? field;
           const valueLabel = VALUE_LABELS[field] ?? String(newVal);
           historyEntries.push({
+            companyId: c.companyId,
             action: `Toplu işlem: ${fieldLabel} → ${valueLabel} (${cases.length} vakadan biri)`,
             actionType: field === 'status' ? 'StatusChange' : 'FieldUpdate',
             fieldName: field,
@@ -559,7 +587,8 @@ export const caseRepository = {
    * geçen süre slaPausedDurationMin'e eklenip slaResolutionDueAt ileri kaydırılır.
    */
   async transitionStatus(id, nextStatus, payload = {}, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const prev = await prisma.case.findUnique({ where: { id } });
     if (!prev) return null;
 
@@ -596,6 +625,7 @@ export const caseRepository = {
 
     const historyEntries = [
       {
+        companyId,
         action: 'Statü değişti',
         actionType: 'StatusChange',
         fromValue: prevStatusTr,
@@ -608,6 +638,7 @@ export const caseRepository = {
       const prevLevelTr = fromDb({ escalationLevel: prev.escalationLevel }).escalationLevel;
       if (payload.escalationLevel !== prevLevelTr) {
         historyEntries.push({
+          companyId,
           action: 'Eskalasyon seviyesi',
           actionType: 'FieldUpdate',
           fieldName: 'escalationLevel',
@@ -619,6 +650,7 @@ export const caseRepository = {
     }
     if (enteringEscalation && payload.escalationReason) {
       historyEntries.push({
+        companyId,
         action: 'Eskalasyon gerekçesi',
         toValue: payload.escalationReason,
         actor,
@@ -651,7 +683,8 @@ export const caseRepository = {
    * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
    */
   async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const target = new Date(snoozeUntil);
     if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
       return { error: 'snoozeUntil gelecek bir tarih olmalı.' };
@@ -674,6 +707,7 @@ export const caseRepository = {
         snoozePreviousStatus: exists.snoozePreviousStatus ?? exists.status,
         history: {
           create: {
+            companyId,
             action: `Vaka ertelendi → ${TR_DATETIME.format(target)} — ${reasonLabel}`,
             actionType: 'FieldUpdate',
             fieldName: 'snoozeUntil',
@@ -692,7 +726,8 @@ export const caseRepository = {
    * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
    */
   async unsnoozeCase(id, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const exists = await prisma.case.findUnique({ where: { id } });
     if (!exists) return null;
     if (!exists.snoozeUntil) {
@@ -710,6 +745,7 @@ export const caseRepository = {
         status: restored,
         history: {
           create: {
+            companyId,
             action: `Erteleme kaldırıldı → ${restoredTr}`,
             actionType: 'FieldUpdate',
             fieldName: 'snoozeUntil',
@@ -770,7 +806,7 @@ export const caseRepository = {
         snoozeUntil: { lte: new Date() },
         NOT: { snoozeUntil: null },
       },
-      select: { id: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+      select: { id: true, companyId: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
@@ -788,6 +824,7 @@ export const caseRepository = {
           status: restored,
           history: {
             create: {
+              companyId: c.companyId,
               action: `Erteleme süresi doldu → ${restoredTr} (${reasonLabel})`,
               actionType: 'FieldUpdate',
               fieldName: 'snoozeUntil',
