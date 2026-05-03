@@ -47,6 +47,8 @@ import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { TransferCaseModal } from './TransferCaseModal';
 import { SnoozeModal } from './components/SnoozeModal';
+import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
+import { MentionContent } from './components/MentionContent';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
@@ -111,7 +113,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   // New note state
   const [noteText, setNoteText] = useState('');
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>('Internal');
-  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const noteRef = useRef<MentionTextareaHandle>(null);
 
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
@@ -141,6 +143,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         setNoteVisibility('Internal');
         setTab('detail');
       }
+    });
+    // Faz 1.5 Madde 3: vaka açıldığı an kullanıcının buradaki @mention'larını
+    // seen yap. Header bell badge'i bu çağrıdan sonra refresh ile sayıyı düşürür.
+    void caseService.markMentionsSeen(activeId).then(() => {
+      window.dispatchEvent(new CustomEvent('app:mentions-changed'));
     });
     return () => {
       alive = false;
@@ -2595,7 +2602,7 @@ function NotesTab({
   onChangeText: (s: string) => void;
   onChangeVisibility: (v: NoteVisibility) => void;
   onSubmit: () => void;
-  inputRef: React.RefObject<HTMLTextAreaElement>;
+  inputRef: React.RefObject<MentionTextareaHandle>;
 }) {
   const [voiceListening, setVoiceListening] = useState(false);
   return (
@@ -2610,11 +2617,12 @@ function NotesTab({
             />
           }
         >
-          <TextArea
+          <MentionTextarea
             ref={inputRef}
+            caseId={item.id}
             value={noteText}
-            onChange={(e) => onChangeText(e.target.value)}
-            placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın veya mikrofona basın…'}
+            onChange={onChangeText}
+            placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın — @ ile kişi etiketleyebilirsiniz…'}
             rows={3}
           />
         </Field>
@@ -2674,7 +2682,7 @@ function NotesTab({
                     <span className="text-slate-500">{formatDateTime(n.createdAt)}</span>
                   </div>
                 </div>
-                <p className="whitespace-pre-wrap text-sm text-slate-800">{n.content}</p>
+                <MentionContent content={n.content} className="text-sm text-slate-800 dark:text-ndark-text" />
               </li>
             );
           })}

@@ -74,6 +74,8 @@ import {
   type CasePriority,
   type CaseRequestType,
   type CaseStatus,
+  type MentionableUser,
+  type UnreadMention,
   type CaseType,
   type EscalationLevel,
   type NoteVisibility,
@@ -1183,6 +1185,42 @@ export const caseService = {
    */
   countCasesUsingOffer(offerId: string): number {
     return store.filter((c) => c.offeredSolutions?.includes(offerId)).length;
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // @mention — Faz 1.5 Madde 3
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Vakaya not yazarken @mention dropdown için aday liste.
+   * Vakanın şirketine bağlı + Person'a bağlı aktif User'lar.
+   */
+  async listMentionableUsers(caseId: string): Promise<MentionableUser[]> {
+    const data = await apiFetch<{ value: MentionableUser[] }>(
+      `${API_BASE}/${caseId}/mentionable-users`,
+      undefined,
+      'Etiketlenebilir kullanıcılar yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  /** Bell badge için kullanıcının okunmamış mention listesi. */
+  async listUnreadMentions(): Promise<{ items: UnreadMention[]; total: number }> {
+    const data = await apiFetch<{ value: UnreadMention[]; '@odata.count': number }>(
+      `${API_BASE}/me/mentions/unread`,
+      undefined,
+      'Bildirimler yüklenemedi',
+    );
+    return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
+  },
+
+  /** Vaka açıldığında o vakadaki kullanıcının mention'larını seen yapar. */
+  async markMentionsSeen(caseId: string): Promise<{ updated: number } | undefined> {
+    return apiFetch(
+      `${API_BASE}/${caseId}/mentions/seen`,
+      { method: 'POST' },
+      'Mention seen güncellenemedi',
+    );
   },
 
   /**

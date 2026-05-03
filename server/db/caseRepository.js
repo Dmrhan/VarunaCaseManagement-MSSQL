@@ -224,9 +224,49 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async addNote(id, note, allowedCompanyIds) {
+  /**
+   * Not ekle — Faz 1.5 Madde 3 ile @mention parse + CaseMention satırları.
+   *
+   * Format: not içinde `@[Name](userId)` tag'leri. Parse edip:
+   *  - Max 10 farklı kullanıcı (spec)
+   *  - Hepsi aynı şirkette aktif User olmalı (cross-tenant mention engellenir)
+   *  - Her başarılı mention için CaseMention satırı + bell badge sinyali
+   *
+   * mentionedBy req.user.id (route'tan geçer); aktor'un User.id'si yoksa
+   * (cron, test) mention skip — note yine kaydedilir.
+   */
+  async addNote(id, note, allowedCompanyIds, mentionedBy) {
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
+
+    // Parse @[Name](userId) tag'leri (dedup userId)
+    const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+    const matches = [...(note.content ?? '').matchAll(mentionRegex)];
+    const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
+
+    if (mentionedUserIds.length > 10) {
+      return { error: 'Bir notta en fazla 10 kişi etiketlenebilir.' };
+    }
+
+    // Cross-tenant koruma: tüm mention'lar aynı şirkette + aktif olmalı.
+    if (mentionedUserIds.length > 0) {
+      const valid = await prisma.user.findMany({
+        where: {
+          id: { in: mentionedUserIds },
+          isActive: true,
+          companies: { some: { companyId, isActive: true } },
+        },
+        select: { id: true },
+      });
+      const validIds = new Set(valid.map((v) => v.id));
+      const invalid = mentionedUserIds.filter((uid) => !validIds.has(uid));
+      if (invalid.length > 0) {
+        return {
+          error: `Etiketlenen ${invalid.length} kullanıcı bu şirkette bulunamadı veya pasif.`,
+        };
+      }
+    }
+
     const created = await prisma.caseNote.create({
       data: {
         caseId: id,
@@ -236,8 +276,63 @@ export const caseRepository = {
         visibility: note.visibility,
       },
     });
+
+    // Mention satırları yaz (mentionedBy yoksa skip — note yine kaydedildi).
+    if (mentionedUserIds.length > 0 && mentionedBy) {
+      await prisma.caseMention.createMany({
+        data: mentionedUserIds.map((uid) => ({
+          caseId: id,
+          noteId: created.id,
+          companyId,
+          mentionedUserId: uid,
+          mentionedBy,
+        })),
+      });
+    }
+
     await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
     return created;
+  },
+
+  /**
+   * Bir vakaya not yazarken @mention dropdown için adaylar.
+   * Vakanın şirketine aktif UserCompany ile bağlı + Person'a bağlı User'lar.
+   * personId yoksa (Person'a bağlanmamış User) liste'de görünmez — atama
+   * hedefi olamadığı için mention'da da anlamsız.
+   */
+  async listMentionableUsers(caseId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        personId: { not: null },
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, email: true, fullName: true, personId: true },
+      orderBy: { fullName: 'asc' },
+    });
+    if (users.length === 0) return [];
+
+    // Person + team adlarını tek query ile topla
+    const personIds = users.map((u) => u.personId).filter(Boolean);
+    const persons = await prisma.person.findMany({
+      where: { id: { in: personIds } },
+      include: { team: { select: { name: true } } },
+    });
+    const personMap = new Map(persons.map((p) => [p.id, p]));
+
+    return users.map((u) => {
+      const p = u.personId ? personMap.get(u.personId) : null;
+      return {
+        userId: u.id,
+        personId: u.personId,
+        name: u.fullName,
+        email: u.email,
+        teamName: p?.team?.name ?? null,
+      };
+    });
   },
 
   async addCallLog(id, input, allowedCompanyIds) {
@@ -850,6 +945,52 @@ export const caseRepository = {
     }
     const items = await prisma.case.findMany({ where, include: CASE_INCLUDE });
     return items.map(shape);
+  },
+};
+
+/**
+ * Mention repository — user-centric mention sorguları (bell badge için).
+ * Multi-tenant scope: yalnızca allowedCompanyIds içindeki mention'ları döner.
+ */
+export const mentionRepo = {
+  async listUnreadForUser(userId, allowedCompanyIds) {
+    if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) {
+      return { items: [], total: 0 };
+    }
+    const items = await prisma.caseMention.findMany({
+      where: {
+        mentionedUserId: userId,
+        seenAt: null,
+        companyId: { in: allowedCompanyIds },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50, // bell drawer için pratik üst sınır
+      select: {
+        id: true,
+        caseId: true,
+        noteId: true,
+        mentionedBy: true,
+        createdAt: true,
+        case: { select: { caseNumber: true, title: true, accountName: true } },
+      },
+    });
+    return { items, total: items.length };
+  },
+
+  /** Vaka açıldığında o vakadaki mention'ları seen yap (route caller'ı tetikler). */
+  async markCaseAsSeen(userId, caseId, allowedCompanyIds) {
+    if (!userId) return { updated: 0 };
+    const where = {
+      mentionedUserId: userId,
+      caseId,
+      seenAt: null,
+    };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    const result = await prisma.caseMention.updateMany({
+      where,
+      data: { seenAt: new Date() },
+    });
+    return { updated: result.count };
   },
 };
 
