@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { runPatternDetect } from '../cron/patternDetect.js';
+import { runQaScoreBatch, runScoreCase } from '../cron/qaScoreBatch.js';
 
 /**
  * /api/cron/* — uzaktan tetiklenen periyodik işler.
@@ -38,6 +39,39 @@ router.post('/pattern-detect', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[cron:pattern-detect]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * QA score batch — Faz 1.5 Madde 4. Her gece 02:00 UTC GitHub Actions
+ * tarafından tetiklenir. Tek run'da max 10 kapalı vaka skor.
+ */
+router.post('/qa-score-batch', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const result = await runQaScoreBatch();
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:qa-score-batch]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * Tek vaka skor — manuel/test için. Auth: x-uptime-secret veya Bearer.
+ * Body: { caseId }
+ */
+router.post('/qa-score', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  const caseId = req.body?.caseId;
+  if (!caseId) return res.status(400).json({ error: 'caseId gerekli.' });
+  try {
+    const result = await runScoreCase(caseId);
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:qa-score]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

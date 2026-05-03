@@ -111,6 +111,100 @@ router.get('/ai-usage', async (req, res) => {
 });
 
 /**
+ * GET /api/analytics/qa-scores?period=7d|30d
+ * Faz 1.5 Madde 4 — agent başına ortalama empati/clarity/speed + companyAvg
+ * + top/bottom agent. allowedCompanyIds scope.
+ */
+router.get('/qa-scores', async (req, res) => {
+  try {
+    const period = req.query.period === '30d' ? 30 : 7;
+    const since = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
+
+    const rows = await prisma.case.findMany({
+      where: {
+        companyId: { in: req.user.allowedCompanyIds },
+        qaScoredAt: { gte: since, not: null },
+      },
+      select: {
+        assignedPersonId: true,
+        assignedPersonName: true,
+        qaEmpathyScore: true,
+        qaClarityScore: true,
+        qaSpeedScore: true,
+      },
+    });
+
+    if (rows.length === 0) {
+      return res.json({
+        scoredCaseCount: 0,
+        byAgent: [],
+        companyAvg: { empathy: null, clarity: null, speed: null, overall: null },
+        topAgent: null,
+        bottomAgent: null,
+      });
+    }
+
+    // Agent groupBy + ortalama (JS-side; Prisma groupBy multi-field _avg sınırlı)
+    const byAgentMap = new Map();
+    let totalEmp = 0, totalCla = 0, totalSpd = 0;
+    for (const c of rows) {
+      const emp = c.qaEmpathyScore ?? 0;
+      const cla = c.qaClarityScore ?? 0;
+      const spd = c.qaSpeedScore ?? 0;
+      totalEmp += emp; totalCla += cla; totalSpd += spd;
+      const k = c.assignedPersonId ?? '__unassigned__';
+      if (!byAgentMap.has(k)) {
+        byAgentMap.set(k, {
+          agentId: c.assignedPersonId,
+          agentName: c.assignedPersonName ?? 'Atanmamış',
+          caseCount: 0,
+          empSum: 0,
+          claSum: 0,
+          spdSum: 0,
+        });
+      }
+      const a = byAgentMap.get(k);
+      a.caseCount++;
+      a.empSum += emp;
+      a.claSum += cla;
+      a.spdSum += spd;
+    }
+    const byAgent = [...byAgentMap.values()].map((a) => ({
+      agentId: a.agentId,
+      agentName: a.agentName,
+      caseCount: a.caseCount,
+      avgEmpathy: round1(a.empSum / a.caseCount),
+      avgClarity: round1(a.claSum / a.caseCount),
+      avgSpeed: round1(a.spdSum / a.caseCount),
+      avgOverall: round1((a.empSum + a.claSum + a.spdSum) / (a.caseCount * 3)),
+    })).sort((a, b) => b.avgOverall - a.avgOverall);
+
+    const n = rows.length;
+    const companyAvg = {
+      empathy: round1(totalEmp / n),
+      clarity: round1(totalCla / n),
+      speed: round1(totalSpd / n),
+      overall: round1((totalEmp + totalCla + totalSpd) / (n * 3)),
+    };
+
+    res.json({
+      scoredCaseCount: n,
+      byAgent,
+      companyAvg,
+      topAgent: byAgent[0] ?? null,
+      bottomAgent: byAgent.length > 1 ? byAgent[byAgent.length - 1] : null,
+    });
+  } catch (e) {
+    console.error('[analytics:qa-scores]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
+}
+
+/**
  * GET /api/analytics/patterns?status=active|all
  * Default: status=active. allowedCompanyIds scope. Faz 1.5 Madde 5.
  */

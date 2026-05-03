@@ -553,6 +553,15 @@ model Case {
   snoozeReason         SnoozeReason?
   snoozePreviousStatus CaseStatus?
 
+  // QA Skor — Faz 1.5 Madde 4 (Smart QA Lite). Kapatılmış vakalarda AI 3 kriter
+  // üzerinden 1-5 puan üretir + kısa feedback. null = henüz skorlanmadı (cron
+  // sıraya girmemiş veya Cozuldu değil).
+  qaEmpathyScore Int?
+  qaClarityScore Int?
+  qaSpeedScore   Int?
+  qaFeedback     String?
+  qaScoredAt     DateTime?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
@@ -736,6 +745,24 @@ model KnowledgeSource {
   createdAt    DateTime            @default(now())
 
   @@index([companyId])
+}
+
+// QAScoreLog — Faz 1.5 Madde 4 (Smart QA Lite).
+// Her kapatılmış vakaya bir kez AI 3 kriter (empati/netlik/hız) puanlar.
+// Case tablosunda da snapshot tutulur (qaXxxScore alanları); bu tablo ek
+// audit + per-agent rapor için. caseId @unique → tek vaka tek log.
+model QAScoreLog {
+  id        String   @id @default(cuid())
+  caseId    String   @unique
+  companyId String
+  scoredAt  DateTime @default(now())
+  empathy   Int
+  clarity   Int
+  speed     Int
+  feedback  String?
+
+  @@index([companyId])
+  @@index([companyId, scoredAt])
 }
 
 // PatternAlert — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).

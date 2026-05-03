@@ -1,0 +1,17 @@
+name: QA Score Batch
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger QA score batch
+        run: |
+          curl -X POST \
+            -H "x-uptime-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            https://varuna-case-management.vercel.app/api/cron/qa-score-batch

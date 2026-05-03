@@ -378,6 +378,14 @@ export interface Case {
   snoozeUntil?: string | null;
   snoozeReason?: SnoozeReason | null;
 
+  // QA Skor — Faz 1.5 Madde 4 (Smart QA Lite). Kapatılmış vakalarda AI
+  // 3 kriterde 1-5 puan + kısa feedback üretir. null = henüz skorlanmadı.
+  qaEmpathyScore?: number | null;
+  qaClarityScore?: number | null;
+  qaSpeedScore?: number | null;
+  qaFeedback?: string | null;
+  qaScoredAt?: string | null;
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];
