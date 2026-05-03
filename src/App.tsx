@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  BrainCircuit,
   Inbox,
   Keyboard,
   LayoutDashboard,
@@ -12,6 +13,7 @@ import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
+import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
@@ -31,7 +33,7 @@ import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'cases' | 'dashboard' | 'case-detail' | AdminView;
+type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -237,6 +239,25 @@ export default function App() {
               );
             })}
 
+            {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-ai-usage')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-ai-usage'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="AI Kullanım Panosu"
+              >
+                <BrainCircuit size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">AI Kullanımı</span>}
+              </button>
+            )}
+
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
             {user?.role === 'SystemAdmin' && (
               <button
@@ -266,6 +287,7 @@ export default function App() {
             />
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
+          {view === 'analytics-ai-usage' && <AIUsagePage />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
