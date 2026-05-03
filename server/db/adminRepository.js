@@ -827,6 +827,139 @@ export const companyRepo = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────
+// Knowledge Sources — Faz 1.5 Madde 6.
+// "AI neye bakıyor?" şeffaflık paneli için kayıt defteri. Otomatik
+// ingestion/embedding YOK — sadece kaynak kataloğu. contentCount admin'in
+// raporladığı veya seed sırasında ilgili tablodan sayılan değer.
+// ─────────────────────────────────────────────────────────────────
+
+const VALID_SOURCE_TYPES = new Set([
+  'PastCases',
+  'ProductDocs',
+  'SLARules',
+  'Checklists',
+  'ManualEntry',
+]);
+
+/**
+ * autoPopulateIfEmpty: o şirkette hiç kaynak yoksa ilgili tablolardan
+ * sayım çekip 4 default kaynak yarat. CategoryDef için null companyId'leri
+ * de dahil (sistem geneli kategoriler her şirkete dahildir).
+ */
+async function autoPopulateIfEmpty(companyId) {
+  const existing = await prisma.knowledgeSource.count({ where: { companyId } });
+  if (existing > 0) return 0;
+
+  const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
+    prisma.case.count({ where: { companyId } }),
+    prisma.sLAPolicy.count({ where: { companyId } }),
+    prisma.checklistTemplate.count({ where: { companyId } }),
+    prisma.categoryDef.count({
+      where: { OR: [{ companyId }, { companyId: null }] },
+    }),
+  ]);
+
+  await prisma.knowledgeSource.createMany({
+    data: [
+      {
+        companyId,
+        name: 'Geçmiş Vakalar',
+        sourceType: 'PastCases',
+        contentCount: caseCount,
+        description: 'Çözülmüş vakalar — AI Araştırıcı rolü benzer geçmiş vakalardan öneri çıkarır.',
+      },
+      {
+        companyId,
+        name: 'Kategori Tanımları',
+        sourceType: 'ProductDocs',
+        contentCount: categoryCount,
+        description: 'Şirkete özel + sistem geneli kategori/alt kategori yapısı.',
+      },
+      {
+        companyId,
+        name: 'SLA Kuralları',
+        sourceType: 'SLARules',
+        contentCount: slaCount,
+        description: 'Kategori + alt kategori + talep türü bazında yanıt/çözüm süresi kuralları.',
+      },
+      {
+        companyId,
+        name: 'Kontrol Listeleri',
+        sourceType: 'Checklists',
+        contentCount: checklistCount,
+        description: 'Vaka tipine göre tetiklenen zorunlu adım şablonları.',
+      },
+    ],
+  });
+  return 4;
+}
+
+export const knowledgeSourceRepo = {
+  /**
+   * Kullanıcının erişebildiği şirketler için kaynak listesi.
+   * Eğer tek şirket görünüyor ve hiç kaynak yoksa otomatik 4 default yaratılır.
+   * Multi-company kullanıcı için her şirketi ayrı ayrı populate ederiz.
+   */
+  async list(allowedCompanyIds) {
+    if (!allowedCompanyIds || allowedCompanyIds.length === 0) return [];
+    // Her şirket için boşsa auto-populate
+    for (const cid of allowedCompanyIds) {
+      await autoPopulateIfEmpty(cid);
+    }
+    return prisma.knowledgeSource.findMany({
+      where: { companyId: { in: allowedCompanyIds } },
+      orderBy: [{ companyId: 'asc' }, { sourceType: 'asc' }, { name: 'asc' }],
+    });
+  },
+
+  async create(input, allowedCompanyIds) {
+    if (!input.name?.trim()) throw new AdminError('Ad gerekli.');
+    if (!VALID_SOURCE_TYPES.has(input.sourceType)) {
+      throw new AdminError(`Geçersiz kaynak türü: ${input.sourceType}`);
+    }
+    const companyId = input.companyId || allowedCompanyIds?.[0];
+    if (!companyId) throw new AdminError('companyId belirlenemedi.');
+    if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+      throw new AdminError('Bu şirkete kaynak eklemeye yetkin yok.', 403);
+    }
+    return prisma.knowledgeSource.create({
+      data: {
+        companyId,
+        name: input.name.trim(),
+        sourceType: input.sourceType,
+        description: input.description?.trim() || null,
+        contentCount: Number.isFinite(input.contentCount) ? Math.max(0, input.contentCount) : 0,
+        isActive: input.isActive ?? true,
+      },
+    });
+  },
+
+  async update(id, patch, allowedCompanyIds) {
+    const target = await prisma.knowledgeSource.findUnique({ where: { id } });
+    if (!target) throw new AdminError('Kaynak bulunamadı.', 404);
+    if (allowedCompanyIds && !allowedCompanyIds.includes(target.companyId)) {
+      throw new AdminError('Bu kaynağa erişim yetkin yok.', 403);
+    }
+    if (patch.sourceType && !VALID_SOURCE_TYPES.has(patch.sourceType)) {
+      throw new AdminError(`Geçersiz kaynak türü: ${patch.sourceType}`);
+    }
+    return prisma.knowledgeSource.update({
+      where: { id },
+      data: {
+        ...(patch.name !== undefined && { name: patch.name.trim() }),
+        ...(patch.sourceType !== undefined && { sourceType: patch.sourceType }),
+        ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
+        ...(patch.contentCount !== undefined && {
+          contentCount: Math.max(0, Number(patch.contentCount) || 0),
+        }),
+        ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        lastUpdated: new Date(),
+      },
+    });
+  },
+};
+
 export const companySettingsRepo = {
   async get(companyId) {
     return prisma.companySettings.findUnique({ where: { companyId } });

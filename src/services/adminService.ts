@@ -585,4 +585,63 @@ export const adminService = {
       return { ok: true };
     },
   },
+
+  // Phase 1.5 Madde 6 — Bilgi Kaynakları
+  knowledgeSources: {
+    async list(): Promise<KnowledgeSource[]> {
+      const data = await apiFetch<{ value: KnowledgeSource[] }>(
+        `${ADMIN_BASE}/knowledge-sources`,
+        undefined,
+        'Bilgi kaynakları yüklenemedi',
+      );
+      return data?.value ?? [];
+    },
+    async create(input: KnowledgeSourceInput): Promise<AdminResult<KnowledgeSource>> {
+      const item = await apiFetch<KnowledgeSource>(
+        `${ADMIN_BASE}/knowledge-sources`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Kaynak oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<KnowledgeSourceInput>): Promise<AdminResult<KnowledgeSource>> {
+      const item = await apiFetch<KnowledgeSource>(
+        `${ADMIN_BASE}/knowledge-sources/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Kaynak güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<KnowledgeSource>> {
+      return this.update(id, { isActive });
+    },
+  },
 };
+
+// ─────────────────────────────────────────────────────────────────
+// Knowledge Sources types
+// ─────────────────────────────────────────────────────────────────
+export type KnowledgeSourceType = 'PastCases' | 'ProductDocs' | 'SLARules' | 'Checklists' | 'ManualEntry';
+
+export interface KnowledgeSource {
+  id: string;
+  companyId: string;
+  name: string;
+  sourceType: KnowledgeSourceType;
+  contentCount: number;
+  description: string | null;
+  isActive: boolean;
+  lastUpdated: string;
+  createdAt: string;
+}
+
+export interface KnowledgeSourceInput {
+  name?: string;
+  sourceType?: KnowledgeSourceType;
+  contentCount?: number;
+  description?: string;
+  isActive?: boolean;
+  companyId?: string;
+}

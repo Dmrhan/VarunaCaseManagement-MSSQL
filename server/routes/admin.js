@@ -7,6 +7,7 @@ import {
   companySettingsRepo,
   documentTypeRepo,
   fieldDefinitionRepo,
+  knowledgeSourceRepo,
   offeredSolutionRepo,
   personRepo,
   slaPolicyRepo,
@@ -353,6 +354,35 @@ router.put('/users/:id/companies', asyncRoute(async (req, res) => {
   const allowedScope = req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds;
   const result = await userRepo.replaceCompanies(req.params.id, assignments, allowedScope);
   res.json(result);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Knowledge Sources — Faz 1.5 Madde 6
+// ─────────────────────────────────────────────────────────────────
+router.get('/knowledge-sources', asyncRoute(async (req, res) => {
+  const items = await knowledgeSourceRepo.list(req.user.allowedCompanyIds);
+  res.json({ value: items });
+}));
+
+router.post('/knowledge-sources', asyncRoute(async (req, res) => {
+  // companyId body'den ya da kullanıcının allowedCompanyIds[0]'ından
+  const companyId = req.body?.companyId || req.user.allowedCompanyIds?.[0];
+  assertCompanyAdmin(req, companyId);
+  const item = await knowledgeSourceRepo.create(
+    { ...(req.body ?? {}), companyId },
+    req.user.allowedCompanyIds,
+  );
+  res.status(201).json(item);
+}));
+
+router.patch('/knowledge-sources/:id', asyncRoute(async (req, res) => {
+  // assertCompanyAdmin: target.companyId üzerinden — repo yapıyor
+  const item = await knowledgeSourceRepo.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+  );
+  res.json(item);
 }));
 
 export default router;
