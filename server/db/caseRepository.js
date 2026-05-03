@@ -3,6 +3,17 @@ import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
 import crypto from 'node:crypto';
 
+// Snooze sebebi → CaseActivity log'unda görünen TR etiket.
+const SNOOZE_REASON_LABEL = {
+  CustomerWillCall: 'Müşteri tekrar arayacak',
+  WaitingThirdParty: '3. taraf bekleniyor',
+  Reminder: 'Hatırlatıcı',
+};
+
+const TR_DATETIME = new Intl.DateTimeFormat('tr-TR', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
 /**
  * Case repository — vaka CRUD + ilişkili tablolar (notes, files, history, callLogs).
  *
@@ -458,6 +469,156 @@ export const caseRepository = {
     return shape(updated);
   },
 
+  /**
+   * Vakayı ertele — snoozeUntil + snoozeReason + snoozePreviousStatus set,
+   * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
+   */
+  async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User') {
+    const target = new Date(snoozeUntil);
+    if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
+      return { error: 'snoozeUntil gelecek bir tarih olmalı.' };
+    }
+    if (!SNOOZE_REASON_LABEL[snoozeReason]) {
+      return { error: 'snoozeReason geçersiz.' };
+    }
+    const exists = await prisma.case.findUnique({ where: { id } });
+    if (!exists) return null;
+
+    const reasonLabel = SNOOZE_REASON_LABEL[snoozeReason];
+    const updated = await prisma.case.update({
+      where: { id },
+      data: {
+        snoozeUntil: target,
+        snoozeReason,
+        // Mevcut statü tekrar açılırken geri yüklensin diye sakla.
+        // Tekrar erteleme durumunda mevcut snoozePreviousStatus korunmalı:
+        // status zaten ertelemeden beri değişmemiş olmalı.
+        snoozePreviousStatus: exists.snoozePreviousStatus ?? exists.status,
+        history: {
+          create: {
+            action: `Vaka ertelendi → ${TR_DATETIME.format(target)} — ${reasonLabel}`,
+            actionType: 'FieldUpdate',
+            fieldName: 'snoozeUntil',
+            toValue: target.toISOString(),
+            actor,
+          },
+        },
+      },
+      include: CASE_INCLUDE,
+    });
+    return shape(updated);
+  },
+
+  /**
+   * Erteleme kaldır — snooze alanlarını temizle, snoozePreviousStatus'a dön.
+   * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
+   */
+  async unsnoozeCase(id, actor = 'Mock User') {
+    const exists = await prisma.case.findUnique({ where: { id } });
+    if (!exists) return null;
+    if (!exists.snoozeUntil) {
+      return shape(await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE }));
+    }
+
+    const restored = pickRestoreStatus(exists.snoozePreviousStatus, exists.status);
+    const restoredTr = fromDb({ status: restored }).status;
+    const updated = await prisma.case.update({
+      where: { id },
+      data: {
+        snoozeUntil: null,
+        snoozeReason: null,
+        snoozePreviousStatus: null,
+        status: restored,
+        history: {
+          create: {
+            action: `Erteleme kaldırıldı → ${restoredTr}`,
+            actionType: 'FieldUpdate',
+            fieldName: 'snoozeUntil',
+            fromValue: exists.snoozeUntil.toISOString(),
+            toValue: restoredTr,
+            actor,
+          },
+        },
+      },
+      include: CASE_INCLUDE,
+    });
+    return shape(updated);
+  },
+
+  /**
+   * Inbox "Ertelendi" sekmesi — kullanıcının ertelediği vakalar (aktif + süresi
+   * dolmuş ama cron tarafından henüz uyandırılmamış olanlar). Cron 5 dakikada
+   * bir çalıştığı için 0-5 dakikalık bir aralıkta "expired" görünebilir; UI
+   * bunu amber rozetle gösterir ve kullanıcının manuel kaldırmasını sağlar.
+   *
+   * Sıralama: expired olanlar önce (en eski uyanmış en üstte → aciliyet),
+   * sonra aktif erteleler (en yakın uyanacak en üstte).
+   */
+  async listSnoozedForUser(personId) {
+    if (!personId) return { items: [], total: 0 };
+    const rows = await prisma.case.findMany({
+      where: {
+        assignedPersonId: personId,
+        snoozeUntil: { not: null },
+      },
+      include: CASE_INCLUDE,
+    });
+    const now = Date.now();
+    const items = rows.map((row) => {
+      const expired = row.snoozeUntil && row.snoozeUntil.getTime() <= now;
+      return { ...shape(row), expired: Boolean(expired) };
+    });
+    items.sort((a, b) => {
+      if (a.expired !== b.expired) return a.expired ? -1 : 1;
+      return new Date(a.snoozeUntil).getTime() - new Date(b.snoozeUntil).getTime();
+    });
+    return { items, total: items.length };
+  },
+
+  /**
+   * Cron (her 5 dk) — snoozeUntil geçmiş vakaları Acik'e döndür, log üret.
+   * Mutation idempotent: zaten snoozeUntil null olanlar where'de eşleşmez.
+   * Bildirim tetikleme şu aşamada uygulama-içi log; Faz 2 §6 bildirim sistemi
+   * canlı olunca CaseNotification kaydı buradan üretilir.
+   */
+  async processSnoozeWakeups() {
+    const due = await prisma.case.findMany({
+      where: {
+        snoozeUntil: { lte: new Date() },
+        NOT: { snoozeUntil: null },
+      },
+      select: { id: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+    });
+    if (due.length === 0) return { woken: 0, ids: [] };
+
+    const woken = [];
+    for (const c of due) {
+      const restored = pickRestoreStatus(c.snoozePreviousStatus, c.status);
+      const restoredTr = fromDb({ status: restored }).status;
+      const reasonLabel = c.snoozeReason ? SNOOZE_REASON_LABEL[c.snoozeReason] : '—';
+      await prisma.case.update({
+        where: { id: c.id },
+        data: {
+          snoozeUntil: null,
+          snoozeReason: null,
+          snoozePreviousStatus: null,
+          status: restored,
+          history: {
+            create: {
+              action: `Erteleme süresi doldu → ${restoredTr} (${reasonLabel})`,
+              actionType: 'FieldUpdate',
+              fieldName: 'snoozeUntil',
+              toValue: restoredTr,
+              actor: 'Sistem (cron)',
+            },
+          },
+        },
+      });
+      woken.push(c.id);
+    }
+    return { woken: woken.length, ids: woken };
+  },
+
   async findByAccount(accountId, options = {}) {
     const where = { accountId };
     if (options.excludeId) where.NOT = { id: options.excludeId };
@@ -473,19 +634,38 @@ export const caseRepository = {
 
 // ----- helpers -----
 
+// Snooze sonrası dönüş statüsü kararı:
+//  - snoozePreviousStatus varsa ona dön (3rdPartyBekleniyor gibi statüler korunsun)
+//  - Yoksa: mevcut Cozuldu/IptalEdildi'yse oraya bırak, değilse Acik fallback
+//  - Tüm değerler ASCII identifier (Prisma enum), TR mapping caller'ın işi.
+function pickRestoreStatus(previous, current) {
+  if (previous) return previous;
+  if (['Cozuldu', 'IptalEdildi'].includes(current)) return current;
+  return 'Acik';
+}
+
 function buildWhere(f) {
-  if (!f) return {};
+  if (!f) f = {};
   const where = {};
+  const andClauses = [];
+  // Default: snooze aktif vakalar (snoozeUntil > now) listede gizli — "Later"
+  // sekmesi ayrı endpoint kullanıyor. includeSnoozed flag ile override edilir.
+  if (!f.includeSnoozed) {
+    andClauses.push({ OR: [{ snoozeUntil: null }, { snoozeUntil: { lte: new Date() } }] });
+  }
   if (f.search) {
     const q = f.search.trim();
     if (q) {
-      where.OR = [
-        { title: { contains: q, mode: 'insensitive' } },
-        { caseNumber: { contains: q, mode: 'insensitive' } },
-        { accountName: { contains: q, mode: 'insensitive' } },
-      ];
+      andClauses.push({
+        OR: [
+          { title: { contains: q, mode: 'insensitive' } },
+          { caseNumber: { contains: q, mode: 'insensitive' } },
+          { accountName: { contains: q, mode: 'insensitive' } },
+        ],
+      });
     }
   }
+  if (andClauses.length) where.AND = andClauses;
   if (f.statuses?.length) where.status = { in: f.statuses };
   if (f.caseType && f.caseType !== 'Tümü') where.caseType = f.caseType;
   if (f.priorities?.length) where.priority = { in: f.priorities };

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  BellOff,
   Brain,
   Building2,
   Calendar,
@@ -8,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Clock3,
   Download,
   FileText,
   History as HistoryIcon,
@@ -44,9 +46,10 @@ import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { TransferCaseModal } from './TransferCaseModal';
+import { SnoozeModal } from './components/SnoozeModal';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
-import { caseService, lookupService } from '@/services/caseService';
+import { apiFetch, caseService, lookupService } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
@@ -95,6 +98,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [unsnoozing, setUnsnoozing] = useState(false);
 
   // Inline edit / drafts
   const [drafts, setDrafts] = useState<Partial<Case>>({});
@@ -337,6 +342,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
     );
   }
 
+  const isSnoozeActive = Boolean(
+    item.snoozeUntil && new Date(item.snoozeUntil).getTime() > Date.now(),
+  );
+
+  async function handleUnsnooze() {
+    if (!item) return;
+    setUnsnoozing(true);
+    const updated = await apiFetch<Case>(
+      `/api/cases/${item.id}/snooze`,
+      { method: 'DELETE' },
+      'Erteleme kaldırılamadı',
+    );
+    setUnsnoozing(false);
+    if (!updated) return;
+    setItem(updated);
+    toast({ type: 'success', title: 'Erteleme kaldırıldı', message: 'Vaka tekrar açıldı.' });
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header — sticky */}
@@ -455,6 +478,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
             >
               Devret
             </Button>
+            {!isSnoozeActive && (
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Clock3 size={12} />}
+                onClick={() => setSnoozeOpen(true)}
+                title="Vakayı belirli bir zamana ertele"
+              >
+                Ertele
+              </Button>
+            )}
             <Popover
               align="end"
               width={200}
@@ -508,6 +542,35 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
           onEnd={handleEndCall}
         />
+      )}
+
+      {/* Snooze banner — vakayı geçici olarak ertelendiğinde */}
+      {isSnoozeActive && item.snoozeUntil && (
+        <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-sm text-amber-900">
+          <Clock3 size={16} className="shrink-0 text-amber-700" />
+          <div className="flex-1">
+            <span className="font-medium">Bu vaka ertelendi.</span>{' '}
+            <span className="text-amber-800">
+              {new Date(item.snoozeUntil).toLocaleString('tr-TR', {
+                day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+              })}
+              {item.snoozeReason && ` — ${{
+                CustomerWillCall: 'Müşteri tekrar arayacak',
+                WaitingThirdParty: '3. taraf bekleniyor',
+                Reminder: 'Hatırlatıcı',
+              }[item.snoozeReason]}`}
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<BellOff size={12} />}
+            disabled={unsnoozing}
+            onClick={handleUnsnooze}
+          >
+            {unsnoozing ? 'Kaldırılıyor…' : 'Erteleme Kaldır'}
+          </Button>
+        </div>
       )}
 
       {/* Body — 3 columns */}
@@ -625,6 +688,15 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         currentAssignedPersonName={item.assignedPersonName}
         onClose={() => setTransferOpen(false)}
         onTransferred={(updated) => setItem(updated)}
+      />
+
+      {/* Vaka erteleme modal'ı */}
+      <SnoozeModal
+        open={snoozeOpen}
+        caseId={item.id}
+        caseTitle={item.title}
+        onClose={() => setSnoozeOpen(false)}
+        onSnoozed={(updated) => setItem(updated)}
       />
     </div>
   );

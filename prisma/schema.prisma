@@ -180,6 +180,13 @@ enum FieldType {
   Textarea
 }
 
+// Vakanın neden ertelendiği — Inbox Later sekmesinde sebep ipucu için.
+enum SnoozeReason {
+  CustomerWillCall  @map("customer_will_call")
+  WaitingThirdParty @map("waiting_3rd_party")
+  Reminder          @map("reminder")
+}
+
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
@@ -483,6 +490,13 @@ model Case {
   /// { [fieldKey: string]: any } — değer tipi FieldType'a bağlı
   customFields   Json?
 
+  // Snooze — vaka geçici olarak Inbox'tan kaldırılıp Later sekmesine taşınır.
+  // snoozePreviousStatus: erteleme öncesi statü; unsnooze/cron-wakeup'ta buna
+  // dönülür (3rdPartyBekleniyor gibi statüler korunsun diye). Yoksa Acik fallback.
+  snoozeUntil          DateTime?
+  snoozeReason         SnoozeReason?
+  snoozePreviousStatus CaseStatus?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
@@ -511,6 +525,7 @@ model Case {
   @@index([caseType])
   @@index([createdAt])
   @@index([slaResolutionDueAt])
+  @@index([snoozeUntil])
 }
 
 // CaseActivity — her değişiklik kaydı (audit trail)

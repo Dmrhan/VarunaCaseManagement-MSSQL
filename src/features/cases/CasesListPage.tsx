@@ -4,8 +4,10 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   Filter,
   Inbox,
   Plus,
@@ -20,7 +22,7 @@ import { Card } from '@/components/ui/Card';
 import { Select, TextInput } from '@/components/ui/Field';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { Badge } from '@/components/ui/Badge';
-import { caseService, lookupService } from '@/services/caseService';
+import { apiFetch, caseService, lookupService } from '@/services/caseService';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
@@ -49,6 +51,14 @@ interface CasesListPageProps {
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+// Inbox sekmesi — Açık/Later/Kapalı.
+// Açık (default): aktif statüler, snoozed gizli (BE filter).
+// Later: GET /api/cases/snoozed (me) — assignedPersonId = current user.
+// Kapalı: status IN (Çözüldü, İptalEdildi).
+type InboxTab = 'open' | 'later' | 'closed';
+const OPEN_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
+const CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
 // ----------------------------------------------------------------
 // Sıralama
@@ -157,6 +167,7 @@ export function CasesListPage({
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
+  const [inboxTab, setInboxTab] = useState<InboxTab>('open');
   const [newOpen, setNewOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -195,8 +206,21 @@ export function CasesListPage({
 
   const load = async () => {
     setLoading(true);
-    const { items } = await caseService.list(filters);
-    setAllFiltered(items);
+    if (inboxTab === 'later') {
+      // Later sekmesi — kullanıcının ertelediği aktif vakalar.
+      const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
+        '/api/cases/snoozed',
+        undefined,
+        'Ertelenmiş vakalar yüklenemedi',
+      );
+      setAllFiltered(data?.value ?? []);
+    } else {
+      // Açık/Kapalı — chip seçimi varsa onu, yoksa tab default statüsünü kullan.
+      const tabDefault = inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES;
+      const effectiveStatuses = filters.statuses?.length ? filters.statuses : tabDefault;
+      const { items } = await caseService.list({ ...filters, statuses: effectiveStatuses });
+      setAllFiltered(items);
+    }
     setLoading(false);
   };
 
@@ -205,6 +229,7 @@ export function CasesListPage({
     setPage(1); // filtre değişince ilk sayfaya dön
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    inboxTab,
     filters.search,
     filters.statuses,
     filters.caseType,
@@ -223,15 +248,18 @@ export function CasesListPage({
     return { total, open, slaBreach, critical };
   }, [allFiltered]);
 
-  // Sıralama — kolon başlığı tıklaması ve dropdown ile senkronize
+  // Sıralama — kolon başlığı tıklaması ve dropdown ile senkronize.
+  // "Ertelendi" sekmesinde BE zaten "expired önce, snoozeUntil ASC" sırasını
+  // verdiği için frontend sort'u devre dışı (kullanıcı kafa karışıklığı olmasın).
   const sortedFiltered = useMemo(() => {
+    if (inboxTab === 'later') return allFiltered;
     const arr = [...allFiltered];
     arr.sort((a, b) => {
       const cmp = compareCases(a, b, sortKey);
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [allFiltered, sortKey, sortDir]);
+  }, [allFiltered, sortKey, sortDir, inboxTab]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -339,6 +367,28 @@ export function CasesListPage({
       </div>
 
       <Card>
+        {/* Inbox sekmeleri — Açık / Later / Kapalı */}
+        <div className="flex items-center gap-1 border-b border-slate-200 px-3 pt-2">
+          <InboxTabButton
+            label="Açık"
+            icon={<Inbox size={13} />}
+            active={inboxTab === 'open'}
+            onClick={() => setInboxTab('open')}
+          />
+          <InboxTabButton
+            label="Ertelendi"
+            icon={<Clock3 size={13} />}
+            active={inboxTab === 'later'}
+            onClick={() => setInboxTab('later')}
+          />
+          <InboxTabButton
+            label="Kapalı"
+            icon={<Check size={13} />}
+            active={inboxTab === 'closed'}
+            onClick={() => setInboxTab('closed')}
+          />
+        </div>
+
         {/* Filter bar — Spec 11.1 */}
         <div className="space-y-3 border-b border-slate-200 px-4 py-3">
           {/* Row 1 — search + type + clear */}
@@ -538,14 +588,37 @@ export function CasesListPage({
                 </tr>
               )}
               {!loading &&
-                pageItems.map((c) => (
+                pageItems.map((c) => {
+                  // Later sekmesinde BE'den gelen expired flag'i ve snoozeUntil
+                  // ile satır rengi + alt etiket kararı ver. Diğer sekmelerde
+                  // expired her zaman false olarak ele alınır.
+                  const snoozeMeta = inboxTab === 'later'
+                    ? (c as Case & { expired?: boolean })
+                    : null;
+                  const expired = Boolean(snoozeMeta?.expired);
+                  return (
                   <tr
                     key={c.id}
                     onClick={() => onSelectCase(c.id)}
-                    className="cursor-pointer text-sm hover:bg-slate-50"
+                    className={`cursor-pointer text-sm ${
+                      expired ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-slate-50'
+                    }`}
                   >
                     <Td className="font-mono text-xs text-slate-600">{c.caseNumber}</Td>
-                    <Td className="max-w-[360px] truncate font-medium text-slate-800">{c.title}</Td>
+                    <Td className="max-w-[360px] font-medium text-slate-800">
+                      <div className="truncate">{c.title}</div>
+                      {snoozeMeta?.snoozeUntil && (
+                        <div
+                          className={`mt-0.5 text-xs font-normal ${
+                            expired ? 'text-amber-700' : 'text-slate-500'
+                          }`}
+                        >
+                          {expired
+                            ? `⏰ ${formatSnoozeAgo(snoozeMeta.snoozeUntil)}`
+                            : `🕐 ${formatSnoozeIn(snoozeMeta.snoozeUntil)}`}
+                        </div>
+                      )}
+                    </Td>
                     <Td>
                       <button
                         type="button"
@@ -583,7 +656,8 @@ export function CasesListPage({
                       <span title={formatDateTime(c.updatedAt)}>{formatRelative(c.updatedAt)}</span>
                     </Td>
                   </tr>
-                ))}
+                  );
+                })}
             </tbody>
           </table>
         </div>
@@ -713,6 +787,54 @@ function SortableTh({
 
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={`whitespace-nowrap px-4 py-3 ${className ?? ''}`}>{children}</td>;
+}
+
+// Snooze rozetleri için TR-özel relative format. formatRelative'i kullanmadık
+// çünkü "x dakika önce" gibi muğlak çıktılar yerine "uyandı / uyanacak" sonekli
+// netlik istiyoruz.
+function formatSnoozeAgo(when: string): string {
+  const diffMin = Math.max(0, Math.round((Date.now() - new Date(when).getTime()) / 60000));
+  if (diffMin < 1) return 'şimdi uyandı';
+  if (diffMin < 60) return `${diffMin} dakika önce uyandı`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} saat önce uyandı`;
+  return `${Math.round(diffHr / 24)} gün önce uyandı`;
+}
+
+function formatSnoozeIn(when: string): string {
+  const diffMin = Math.max(0, Math.round((new Date(when).getTime() - Date.now()) / 60000));
+  if (diffMin < 1) return 'birazdan uyanacak';
+  if (diffMin < 60) return `${diffMin} dakika sonra uyanacak`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} saat sonra uyanacak`;
+  return `${Math.round(diffHr / 24)} gün sonra uyanacak`;
+}
+
+function InboxTabButton({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative -mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition ${
+        active
+          ? 'border-brand-600 font-medium text-brand-700'
+          : 'border-transparent text-slate-500 hover:text-slate-700'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 function KpiTile({ label, value, tint }: { label: string; value: number; tint: string }) {

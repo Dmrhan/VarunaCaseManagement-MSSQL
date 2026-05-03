@@ -6,5 +6,11 @@
   "installCommand": "npm install",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cases/cron/snooze-wakeup",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
