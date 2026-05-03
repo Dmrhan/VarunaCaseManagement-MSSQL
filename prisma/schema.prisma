@@ -556,6 +556,7 @@ model Case {
   approvals     CaseApproval[]
   notifications CaseNotification[]
   aiSuggestions AISuggestion[]
+  mentions      CaseMention[]
 
   @@index([accountId])
   @@index([companyId])
@@ -700,6 +701,32 @@ model CaseNotification {
   @@index([caseId])
   @@index([companyId])
   @@index([recipient, readAt])
+}
+
+// CaseMention — Faz 1.5 Madde 3.
+// Notlarda @mention edilen kullanıcılar için audit + bildirim kaydı.
+// noteId CaseNote.id; not silinirse mention satırı kalır (raporlama/audit).
+// companyId zorunlu — multi-tenant scope filter (top-level "kullanıcının
+// PARAM mentionları" sorgusu için JOIN gerektirmez).
+//
+// Spec §4'teki `sourceType` (note | comment_reply) bu fazda atlanıyor:
+// yalnızca CaseNote desteği. comment-reply geldiğinde tablo yapısı
+// `sourceType + sourceId` olarak yeniden modellenir (migration ile).
+model CaseMention {
+  id              String    @id @default(cuid())
+  caseId          String
+  noteId          String
+  companyId       String
+  mentionedUserId String // User.id — auth identity (UserCompany erişim sahibi)
+  mentionedBy     String // User.id — etiketleyen kullanıcı
+  seenAt          DateTime? // null = henüz görülmedi → header bell badge
+  createdAt       DateTime  @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([mentionedUserId])
+  @@index([companyId])
 }
 
 // AISuggestion — AI önerilerinin audit kaydı
