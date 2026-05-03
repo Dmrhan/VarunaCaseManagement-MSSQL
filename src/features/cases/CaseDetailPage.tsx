@@ -24,6 +24,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  Star,
   Target,
   Trash2,
   TrendingDown,
@@ -1081,6 +1082,27 @@ function RightPanel({
           </PanelSection>
         )}
 
+        {/* QA Skor — Faz 1.5 Madde 4. Kapatılmış vakada AI değerlendirmesi varsa göster. */}
+        {item.qaScoredAt && item.qaEmpathyScore != null && (
+          <PanelSection title="AI QA Skoru" icon={<Star size={12} />} tint="amber">
+            <div className="space-y-2 text-xs">
+              <div className="grid grid-cols-3 gap-1.5">
+                <QaScorePill label="Empati" value={item.qaEmpathyScore} />
+                <QaScorePill label="Netlik" value={item.qaClarityScore ?? 0} />
+                <QaScorePill label="Hız" value={item.qaSpeedScore ?? 0} />
+              </div>
+              {item.qaFeedback && (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/40">
+                  {item.qaFeedback}
+                </p>
+              )}
+              <div className="text-[10px] text-slate-400 dark:text-ndark-muted">
+                {formatRelative(item.qaScoredAt)} skorlanmış
+              </div>
+            </div>
+          </PanelSection>
+        )}
+
         {item.caseType === 'ProactiveTracking' && (
           <>
             <PanelSection title="Proaktif Takip" icon={<TrendingDown size={12} />} tint="violet">
@@ -1186,12 +1208,13 @@ function PanelSection({
   badge?: React.ReactNode;
   children: React.ReactNode;
   hidden?: boolean;
-  tint?: 'default' | 'violet' | 'rose';
+  tint?: 'default' | 'violet' | 'rose' | 'amber';
 }) {
   if (hidden) return null;
   const ring =
     tint === 'violet' ? 'ring-violet-200' :
     tint === 'rose'   ? 'ring-rose-200' :
+    tint === 'amber'  ? 'ring-amber-200' :
                          'ring-slate-200';
   return (
     <section className={`rounded-lg bg-white p-3 ring-1 ring-inset ${ring}`}>
@@ -1230,6 +1253,21 @@ function AiTile({
     <div className={`rounded-md px-2.5 py-2 ring-1 ring-inset ${cls}`}>
       <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-0.5 text-sm font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+function QaScorePill({ label, value }: { label: string; value: number }) {
+  const tone =
+    value >= 4
+      ? 'bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:ring-emerald-900/40'
+      : value >= 3
+      ? 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/40'
+      : 'bg-rose-50 text-rose-800 ring-rose-200 dark:bg-rose-950/30 dark:text-rose-200 dark:ring-rose-900/40';
+  return (
+    <div className={`rounded-md px-2 py-1.5 text-center ring-1 ring-inset ${tone}`}>
+      <div className="text-[9px] font-medium uppercase tracking-wide opacity-80">{label}</div>
+      <div className="mt-0.5 text-sm font-bold">{value}/5</div>
     </div>
   );
 }

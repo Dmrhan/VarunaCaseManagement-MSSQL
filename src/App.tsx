@@ -8,6 +8,7 @@ import {
   LogOut,
   Moon,
   Settings2,
+  Star,
   Sun,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
@@ -16,6 +17,7 @@ import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
+import { QAScoresPage } from './features/analytics/QAScoresPage';
 import { analyticsService } from './services/analyticsService';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
@@ -37,7 +39,7 @@ import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSource
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'case-detail' | AdminView;
+type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -294,6 +296,25 @@ export default function App() {
               </button>
             )}
 
+            {/* QA Skorları — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-qa-scores')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-qa-scores'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="QA Skorları"
+              >
+                <Star size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">QA Skorları</span>}
+              </button>
+            )}
+
             {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
             {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
               <button
@@ -373,6 +394,7 @@ export default function App() {
               }}
             />
           )}
+          {view === 'analytics-qa-scores' && <QAScoresPage />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
