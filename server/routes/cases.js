@@ -1,8 +1,40 @@
 import { Router } from 'express';
 import { caseRepository } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
+import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 
 const router = Router();
+
+/**
+ * Cron tetikleyicisi — verifyJwt'den ÖNCE mount edilir.
+ *
+ * Vercel Hobby plan günde 1'den fazla cron desteklemediği için bu endpoint
+ * UptimeRobot tarafından (her 5 dk) tetikleniyor. İki auth header kabul:
+ *   - Authorization: Bearer ${CRON_SECRET}  (Vercel Cron — ileride Pro plan)
+ *   - x-uptime-secret: ${CRON_SECRET}       (UptimeRobot custom header)
+ *
+ * CRON_SECRET env'de yoksa endpoint kapalı (503) — production'da set edilmeli.
+ * Detaylar: docs/INCIDENTS.md §5 (Operational Notes).
+ */
+router.post('/cron/snooze-wakeup', async (req, res) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) {
+    return res.status(503).json({ error: 'cron_disabled', message: 'CRON_SECRET tanımlı değil.' });
+  }
+  const bearerMatch = /^Bearer (.+)$/i.exec(req.headers.authorization || '');
+  const bearerOk = bearerMatch && bearerMatch[1] === expected;
+  const uptimeOk = req.headers['x-uptime-secret'] === expected;
+  if (!bearerOk && !uptimeOk) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    const result = await runSnoozeWakeup();
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:snooze-wakeup]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
 
 // Spec §13 — Tüm case endpoint'leri auth gerekli. Rol-spesifik kısıtlar
 // (örn. iptal için Supervisor) ileri sprint'te eklenir.
@@ -59,6 +91,19 @@ router.get(
     }
     const found = await caseRepository.findOpenCaseFor(accountId, caseType);
     res.json({ case: found });
+  }),
+);
+
+/**
+ * GET /api/cases/snoozed — kullanıcının ertelediği aktif vakalar (Inbox Later).
+ * personId User.personId üzerinden çözülür; kullanıcının Person bağlantısı
+ * yoksa boş döner.
+ */
+router.get(
+  '/snoozed',
+  asyncRoute(async (req, res) => {
+    const { items, total } = await caseRepository.listSnoozedForUser(req.user.personId);
+    res.json({ value: items, '@odata.count': total });
   }),
 );
 
@@ -146,6 +191,38 @@ router.post(
     const updated = await caseRepository.addActivity(req.params.id, req.body ?? {});
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
+  }),
+);
+
+/**
+ * POST /api/cases/:id/snooze — vakayı ertele.
+ * Body: { snoozeUntil: ISO string, snoozeReason: 'CustomerWillCall' | 'WaitingThirdParty' | 'Reminder' }
+ */
+router.post(
+  '/:id/snooze',
+  asyncRoute(async (req, res) => {
+    const { snoozeUntil, snoozeReason } = req.body ?? {};
+    if (!snoozeUntil || !snoozeReason) {
+      return res.status(400).json({ error: 'snoozeUntil ve snoozeReason gerekli' });
+    }
+    const result = await caseRepository.snoozeCase(
+      req.params.id,
+      { snoozeUntil, snoozeReason },
+      req.user.fullName,
+    );
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if ('error' in result) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/** DELETE /api/cases/:id/snooze — ertelemeyi kaldır, Acik'e döndür. */
+router.delete(
+  '/:id/snooze',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.unsnoozeCase(req.params.id, req.user.fullName);
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(result);
   }),
 );
 

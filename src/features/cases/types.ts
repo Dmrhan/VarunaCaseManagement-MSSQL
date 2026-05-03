@@ -373,11 +373,25 @@ export interface Case {
    */
   customFields?: Record<string, unknown>;
 
+  // Snooze — Inbox "Later" sekmesi için. snoozeUntil > now ise vaka standart
+  // listeden gizlenir, Later sekmesinde görünür. Cron süre dolunca temizler.
+  snoozeUntil?: string | null;
+  snoozeReason?: SnoozeReason | null;
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];
   callLogs: CaseCallLog[];
 }
+
+// Snooze sebepleri — backend enum identifier ile eşleşir (CaseDetail UI etiketler).
+export type SnoozeReason = 'CustomerWillCall' | 'WaitingThirdParty' | 'Reminder';
+
+export const SNOOZE_REASON_LABELS: Record<SnoozeReason, string> = {
+  CustomerWillCall: 'Müşteri tekrar arayacak',
+  WaitingThirdParty: '3. taraf bekleniyor',
+  Reminder: 'Hatırlatıcı',
+};
 
 export interface CaseChecklistItemInstance {
   /** Vakaya özel benzersiz id (snapshot kayıt) */

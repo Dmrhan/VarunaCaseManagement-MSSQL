@@ -152,4 +152,33 @@ nc -z -w 5 aws-1-eu-central-1.pooler.supabase.com 5432 && echo OK || echo FAIL
 
 ---
 
-**Son güncelleme:** 2026-05-02 — §3.1 olay sonrası oluşturuldu.
+## 5. Operational Notes
+
+### 5.1 Snooze wakeup cron — UptimeRobot tetikliyor (Vercel Cron değil)
+
+**Karar:** `Conversation Snooze` özelliğinin cron'u (`POST /api/cases/cron/snooze-wakeup`)
+**UptimeRobot tarafından her 5 dakikada bir tetikleniyor**, Vercel Cron tarafından **değil**.
+
+**Sebep:** Vercel Hobby plan günde **1 cron job** sınırlı; "her 5 dk" gerektiren bir
+trigger Hobby'de ayarlanamıyor. Pro'ya geçmeden önce UptimeRobot zaten
+`/api/health/deep` için ayarlıydı — aynı altyapı snooze cron için de kullanılıyor.
+
+**Auth:** Endpoint iki header'ı kabul ediyor:
+- `Authorization: Bearer ${CRON_SECRET}`  → Vercel Cron formatı (ileride Pro'ya geçilirse)
+- `x-uptime-secret: ${CRON_SECRET}`       → UptimeRobot custom header
+
+**UptimeRobot konfigürasyonu:**
+- Monitor type: HTTP(s)
+- URL: `https://varuna-case-management.vercel.app/api/cases/cron/snooze-wakeup`
+- HTTP method: `POST`
+- Custom HTTP headers: `x-uptime-secret: <CRON_SECRET değeri>`
+- Interval: 5 dk
+- Keyword (opsiyonel): `"woken"` — response body'sinde her zaman görünür (`{ "woken": N, "ids": [...] }`)
+
+**Pro'ya geçilirse:** `vercel.json`'a `crons` array'i geri eklenir, UptimeRobot monitor'ü
+durdurulur (ya da yedek olarak bırakılır). Endpoint dual-auth desteği zaten var, kod
+değişikliği gerekmez.
+
+---
+
+**Son güncelleme:** 2026-05-03 — §5 Operational Notes eklendi (snooze cron / UptimeRobot kararı).

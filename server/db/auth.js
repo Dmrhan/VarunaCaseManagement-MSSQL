@@ -58,6 +58,9 @@ export async function verifyJwt(req, res, next) {
 
     // Auto-provision: Supabase Auth (örn. Google OAuth) ile ilk kez giren
     // kullanıcı için DB'de User satırı yoksa default Agent rolüyle oluştur.
+    // Person bridging: aynı e-posta ile Person varsa otomatik bağla — Inbox
+    // "Later", "Atandıklarım" gibi me-filter akışları için gerekli. Eşleşme
+    // yoksa personId null kalır (kullanıcı admin tarafından sonradan bağlanır).
     // Production'da: domain whitelist (örn. @univera.com.tr) burada uygulanır.
     if (!user) {
       const fullName =
@@ -66,6 +69,14 @@ export async function verifyJwt(req, res, next) {
         data.user.user_metadata?.name ??
         data.user.email?.split('@')[0] ??
         'Yeni Kullanıcı';
+      let matchedPersonId = null;
+      if (data.user.email) {
+        const person = await prisma.person.findFirst({
+          where: { email: data.user.email, isActive: true },
+          select: { id: true },
+        });
+        matchedPersonId = person?.id ?? null;
+      }
       try {
         user = await prisma.user.create({
           data: {
@@ -74,9 +85,13 @@ export async function verifyJwt(req, res, next) {
             fullName,
             role: 'Agent',
             isActive: true,
+            personId: matchedPersonId,
           },
         });
-        console.log(`[auth] Auto-provisioned: ${user.email} (Agent)`);
+        console.log(
+          `[auth] Auto-provisioned: ${user.email} (Agent)` +
+            (matchedPersonId ? ` → Person ${matchedPersonId}` : ' [no Person match]'),
+        );
       } catch (err) {
         console.error('[auth] auto-provision failed', err);
         return res.status(500).json({

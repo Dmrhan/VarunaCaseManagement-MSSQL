@@ -33,13 +33,19 @@ const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const DEMO_PASSWORD = 'Test1234!';
 
+// Demo user → Person bridging.
+// User.personId Person tablosuna FK; Inbox "Later" sekmesi gibi "me" filter
+// gerektiren akışlar bu eşleşme üzerinden çalışıyor. personId boşsa ilgili
+// kullanıcı kendi atandığı vakaları göremez. Seed çalıştırılmadan önce
+// Person tablosundaki USR-xxx id'lerinin var olduğu varsayılır (seed.ts'in
+// önce çalışmış olması gerekiyor).
 const DEMO_USERS = [
-  { email: 'agent@varuna.dev',      fullName: 'Demo Agent',      role: 'Agent' as const },
-  { email: 'backoffice@varuna.dev', fullName: 'Demo Backoffice', role: 'Backoffice' as const },
-  { email: 'supervisor@varuna.dev', fullName: 'Demo Supervisor', role: 'Supervisor' as const },
-  { email: 'csm@varuna.dev',        fullName: 'Demo CSM',        role: 'CSM' as const },
-  { email: 'admin@varuna.dev',      fullName: 'Demo Admin',      role: 'Admin' as const },
-  { email: 'sysadmin@varuna.dev',   fullName: 'Demo SysAdmin',   role: 'SystemAdmin' as const },
+  { email: 'agent@varuna.dev',      fullName: 'Demo Agent',      role: 'Agent' as const,       personId: 'USR-001' },
+  { email: 'backoffice@varuna.dev', fullName: 'Demo Backoffice', role: 'Backoffice' as const,  personId: 'USR-006' },
+  { email: 'supervisor@varuna.dev', fullName: 'Demo Supervisor', role: 'Supervisor' as const,  personId: 'USR-002' },
+  { email: 'csm@varuna.dev',        fullName: 'Demo CSM',        role: 'CSM' as const,         personId: 'USR-003' },
+  { email: 'admin@varuna.dev',      fullName: 'Demo Admin',      role: 'Admin' as const,       personId: 'USR-004' },
+  { email: 'sysadmin@varuna.dev',   fullName: 'Demo SysAdmin',   role: 'SystemAdmin' as const, personId: 'USR-005' },
 ];
 
 async function findOrCreateAuthUser(email: string, fullName: string): Promise<string> {
@@ -71,6 +77,17 @@ async function main() {
   for (const u of DEMO_USERS) {
     console.log(`→ ${u.email} (${u.role})`);
     const authId = await findOrCreateAuthUser(u.email, u.fullName);
+
+    // Person guard: tanımlı personId Person tablosunda var mı? Yoksa null bırak
+    // (yine de demo personlar seed.ts'ten gelir; eksikse uyarı düş).
+    const personExists = u.personId
+      ? Boolean(await prisma.person.findUnique({ where: { id: u.personId } }))
+      : false;
+    if (u.personId && !personExists) {
+      console.warn(`  ⚠ Person ${u.personId} bulunamadı — personId null bırakılıyor.`);
+    }
+    const personId = personExists ? u.personId : null;
+
     await prisma.user.upsert({
       where: { id: authId },
       update: {
@@ -78,6 +95,7 @@ async function main() {
         fullName: u.fullName,
         role: u.role,
         isActive: true,
+        personId,
       },
       create: {
         id: authId,
@@ -85,9 +103,10 @@ async function main() {
         fullName: u.fullName,
         role: u.role,
         isActive: true,
+        personId,
       },
     });
-    console.log(`  ✓ User kaydı senkronize edildi.`);
+    console.log(`  ✓ User kaydı senkronize edildi${personId ? ` → Person ${personId}` : ''}.`);
   }
 
   console.log('\n✅ Tamamlandı.\n');
