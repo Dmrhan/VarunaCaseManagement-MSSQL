@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  Bell,
   BellOff,
   Brain,
   Building2,
@@ -49,7 +48,6 @@ import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { TransferCaseModal } from './TransferCaseModal';
 import { SnoozeModal } from './components/SnoozeModal';
-import { QuickReminderModal } from '@/features/my/QuickReminderModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
 import { MentionContent } from './components/MentionContent';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
@@ -104,9 +102,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
-  // "Bana Hatırlat" (Faz 2 §6) — vakaya bağlı CaseReminder oluşturur, takvime düşer.
-  // Snooze'dan farklı: vakanın statüsünü değiştirmez, kullanıcı kişisel notu.
-  const [reminderOpen, setReminderOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
 
   // Inline edit / drafts
@@ -497,20 +492,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 size="sm"
                 leftIcon={<Clock3 size={12} />}
                 onClick={() => setSnoozeOpen(true)}
-                title="Vakayı belirli bir zamana ertele"
+                title="Vakayı ertele — opsiyonel olarak kişisel takvime de düşer"
               >
                 Ertele
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Bell size={12} />}
-              onClick={() => setReminderOpen(true)}
-              title="Bu vaka için kendine hatırlatıcı kur — takvimine düşer"
-            >
-              Bana Hatırlat
-            </Button>
             <Popover
               align="end"
               width={200}
@@ -712,24 +698,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         onTransferred={(updated) => setItem(updated)}
       />
 
-      {/* Vaka erteleme modal'ı */}
+      {/* Vaka erteleme modal'ı — içinde "Takvime ekle" checkbox'ı default ON,
+          ayrı bir "Bana Hatırlat" akışına gerek bırakmıyor. */}
       <SnoozeModal
         open={snoozeOpen}
         caseId={item.id}
         caseTitle={item.title}
         onClose={() => setSnoozeOpen(false)}
         onSnoozed={(updated) => setItem(updated)}
-      />
-
-      {/* "Bana Hatırlat" — vakaya bağlı CaseReminder. QuickReminderModal mevcut
-          presetCaseId/Label prop'larıyla pre-fill açılır; create sonrası takvim
-          sidebar badge'i 'app:calendar-changed' event'iyle anında güncellenir. */}
-      <QuickReminderModal
-        open={reminderOpen}
-        presetCaseId={item.id}
-        presetCaseLabel={`${item.caseNumber} · ${item.title} · ${item.accountName}`}
-        onClose={() => setReminderOpen(false)}
-        onCreated={() => setReminderOpen(false)}
       />
     </div>
   );
