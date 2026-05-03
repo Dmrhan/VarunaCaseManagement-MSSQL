@@ -4,6 +4,7 @@ import casesRouter from './routes/cases.js';
 import aiRouter from './routes/ai.js';
 import lookupsRouter from './routes/lookups.js';
 import adminRouter from './routes/admin.js';
+import analyticsRouter from './routes/analytics.js';
 import authRouter from './routes/auth.js';
 import { prisma } from './db/client.js';
 
@@ -54,6 +55,7 @@ app.use('/api/cases', casesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/lookups', lookupsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/analytics', analyticsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

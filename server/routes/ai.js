@@ -1,10 +1,42 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { verifyJwt } from '../db/auth.js';
+import { prisma } from '../db/client.js';
 
 const router = Router();
 
 router.use(verifyJwt);
+
+/**
+ * AI usage telemetry — Faz 1.5 Madde 7.
+ * Her başarılı AI çağrısından sonra AIUsageLog satırı yazar (sessiz fail).
+ * Acceptance rate, response time, token sayımı için ROI panosu altyapısı.
+ *
+ * companyId resolve: handler içinden `req.aiLog = { companyId, caseId,
+ * tokenCount }` ile set edilir; verilmezse fallback olarak kullanıcının
+ * allowedCompanyIds[0]. Multi-company supervisor için %100 doğru değil ama
+ * çoğu çağrı tek vaka context'inde — kullanıcı 1.şirketine atfetmek
+ * pratik kabul.
+ */
+async function logAIUsage({ endpoint, companyId, caseId, userId, responseTimeMs, tokenCount }) {
+  if (!companyId || !endpoint) return; // companyId yoksa log skip
+  try {
+    await prisma.aIUsageLog.create({
+      data: {
+        endpoint,
+        companyId,
+        caseId: caseId ?? null,
+        userId: userId ?? null,
+        responseTimeMs: responseTimeMs ?? null,
+        tokenCount: tokenCount ?? null,
+        accepted: null, // kullanıcı uygula/yoksay tıklayınca PATCH ile set
+      },
+    });
+  } catch (e) {
+    // log yazma hatası ana akışı durdurmasın — sadece warn
+    console.warn('[ai-usage-log]', e?.message ?? e);
+  }
+}
 
 const MODEL = 'gpt-4o-mini';
 const MAX_TOKENS = 1000;
@@ -106,8 +138,33 @@ async function callOpenAI({ system, user, expectJson = false, schema = null, sch
   }
 }
 
-function aiHandler(handler) {
+function aiHandler(endpointName, handler) {
+  // Backward-compat: aiHandler(handler) eski signature'ında endpointName 'other'
+  if (typeof endpointName === 'function') {
+    handler = endpointName;
+    endpointName = 'other';
+  }
   return async (req, res) => {
+    const t0 = Date.now();
+    // Handler içinden set edilen log context'ini yakala
+    req.aiLog = {};
+    let logged = false;
+    res.on('finish', () => {
+      if (logged) return;
+      logged = true;
+      // Yalnızca 2xx (başarılı) yanıtları logla — timeout/hata logları gürültü olur
+      if (res.statusCode < 200 || res.statusCode >= 300) return;
+      const ctx = req.aiLog ?? {};
+      const companyId = ctx.companyId ?? req.user?.allowedCompanyIds?.[0];
+      void logAIUsage({
+        endpoint: endpointName,
+        companyId,
+        caseId: ctx.caseId,
+        userId: req.user?.id,
+        responseTimeMs: Date.now() - t0,
+        tokenCount: ctx.tokenCount,
+      });
+    });
     try {
       await handler(req, res);
     } catch (err) {
@@ -128,8 +185,10 @@ function aiHandler(handler) {
 router.post(
   '/suggest-category',
   rateLimit,
-  aiHandler(async (req, res) => {
-    const { description, caseType, companyName, availableCategories, availableRequestTypes } = req.body ?? {};
+  aiHandler('suggest-category', async (req, res) => {
+    const { description, caseType, companyName, availableCategories, availableRequestTypes, caseId, companyId } = req.body ?? {};
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = companyId;
     if (!description || typeof description !== 'string') {
       return res.status(400).json({ error: 'description gerekli.' });
     }
@@ -217,8 +276,10 @@ router.post(
 router.post(
   '/draft-resolution',
   rateLimit,
-  aiHandler(async (req, res) => {
-    const { caseSubject, description, category, history, notes } = req.body ?? {};
+  aiHandler('draft-resolution', async (req, res) => {
+    const { caseSubject, description, category, history, notes, caseId, companyId } = req.body ?? {};
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = companyId;
 
     const system = [
       "Sen Varuna CRM'de müşteri hizmetleri temsilcilerine yardımcı olan bir asistanısın.",
@@ -259,8 +320,10 @@ router.post(
 router.post(
   '/supervisor-summary',
   rateLimit,
-  aiHandler(async (req, res) => {
+  aiHandler('supervisor-summary', async (req, res) => {
     const { case: c, history, notes, callLogs } = req.body ?? {};
+    req.aiLog.caseId = c?.id;
+    req.aiLog.companyId = c?.companyId;
 
     const system = [
       "Sen Varuna CRM'de supervisor incelemelerine yardımcı olan bir asistanısın.",
@@ -305,8 +368,10 @@ router.post(
 router.post(
   '/churn-conversion',
   rateLimit,
-  aiHandler(async (req, res) => {
+  aiHandler('churn-conversion', async (req, res) => {
     const { case: c, callLogs, financialStatus, productUsage, usageChangeAlert } = req.body ?? {};
+    req.aiLog.caseId = c?.id;
+    req.aiLog.companyId = c?.companyId;
 
     const system = [
       "Sen Varuna CRM'de müşteri elde tutma süreçlerine yardımcı olan bir asistanısın.",
@@ -347,8 +412,9 @@ router.post(
 router.post(
   '/dashboard-chat',
   rateLimit,
-  aiHandler(async (req, res) => {
-    const { message, history, context } = req.body ?? {};
+  aiHandler('dashboard-chat', async (req, res) => {
+    const { message, history, context, companyId } = req.body ?? {};
+    req.aiLog.companyId = companyId; // dashboard chat genelde tek vakaya bağlı değil
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'message gerekli.' });
     }
@@ -451,8 +517,10 @@ router.post(
 router.post(
   '/call-summary',
   rateLimit,
-  aiHandler(async (req, res) => {
-    const { callLog, caseSubject, customerName } = req.body ?? {};
+  aiHandler('call-summary', async (req, res) => {
+    const { callLog, caseSubject, customerName, caseId, companyId } = req.body ?? {};
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = companyId;
     if (!callLog || (!callLog.note && !callLog.transcript && !callLog.content)) {
       return res.status(400).json({ error: 'callLog.note / transcript / content gerekli.' });
     }
@@ -517,5 +585,39 @@ function formatSlaInfo(c) {
     status,
   };
 }
+
+/**
+ * PATCH /api/ai/usage/:id/accept — kullanıcı AI önerisini Uygula/Yoksay
+ * tıklayınca acceptance durumu kaydet. Acceptance rate hesabında bu kullanılır.
+ *
+ * Yetki: log'un companyId'si kullanıcının allowedCompanyIds'inde olmalı +
+ * log'un userId'si kullanıcının id'siyle eşleşmeli (başkasının log'u
+ * işaretlenemesin). userId null ise (eski kayıtlar / fallback) sadece
+ * companyId scope kontrolü yeterli.
+ */
+router.patch('/usage/:id/accept', async (req, res) => {
+  const { accepted } = req.body ?? {};
+  if (typeof accepted !== 'boolean') {
+    return res.status(400).json({ error: 'accepted boolean gerekli.' });
+  }
+  try {
+    const target = await prisma.aIUsageLog.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'Log bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(target.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (target.userId && target.userId !== req.user.id) {
+      return res.status(403).json({ error: 'forbidden — başkasının log kaydı.' });
+    }
+    const updated = await prisma.aIUsageLog.update({
+      where: { id: req.params.id },
+      data: { accepted },
+    });
+    res.json({ id: updated.id, accepted: updated.accepted });
+  } catch (e) {
+    console.error('[ai:usage-accept]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
 
 export default router;

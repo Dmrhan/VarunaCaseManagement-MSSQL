@@ -703,6 +703,30 @@ model CaseNotification {
   @@index([recipient, readAt])
 }
 
+// AIUsageLog — Faz 1.5 Madde 7.
+// Her AI endpoint çağrısı için bir log satırı: kabul/red, yanıt süresi,
+// token sayısı, kullanıcı + vaka referansı. ROI panosu (Analitik → AI Kullanımı)
+// bu logdan agrege istatistik üretir. companyId zorunlu — multi-tenant scope.
+//
+// caseId/userId nullable (örn. dashboard önizlemesi gibi vaka-bağımsız çağrılar
+// için), accepted nullable (kullanıcı henüz uygula/yoksay tıklamadı), tokenCount
+// nullable (provider yanıtında token sayısı dönmeyebilir).
+model AIUsageLog {
+  id             String   @id @default(cuid())
+  companyId      String
+  endpoint       String // 'suggest-category' | 'draft-resolution' | 'churn-conversion' | 'qa-score' | 'other'
+  caseId         String?
+  userId         String?
+  accepted       Boolean? // null = kullanıcı kararı bekliyor (uygula/yoksay)
+  responseTimeMs Int?
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([endpoint])
+}
+
 // CaseMention — Faz 1.5 Madde 3.
 // Notlarda @mention edilen kullanıcılar için audit + bildirim kaydı.
 // noteId CaseNote.id; not silinirse mention satırı kalır (raporlama/audit).
