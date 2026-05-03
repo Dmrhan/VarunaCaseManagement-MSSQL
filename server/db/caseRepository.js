@@ -408,6 +408,140 @@ export const caseRepository = {
     return shape(updated);
   },
 
+  /**
+   * Toplu güncelleme — Faz 1.5 Madde 2 "Bulk Actions".
+   *
+   * Whitelist: yalnızca assignedPersonId, assignedTeamId, priority, status.
+   * Status'te kapatma yasak (Cozuldu/IptalEdildi) — her vaka için ayrı kapatma
+   * log'u/onayı gerekiyor, bulk'ta yapılmamalı.
+   *
+   * Cross-tenant koruma: caseIds'in TÜMÜ allowedCompanyIds içinde değilse
+   * tek bir vaka bile güncellenmez (CaseAccessError fırlatılır). Bu "saldırgan
+   * listede yetkisiz ID gizleyemesin" prensibi — partial-success yok.
+   *
+   * SLA pause/resume mantığı: bulk status değişiminde transitionStatus
+   * çalıştırılmaz — yalnızca basit alan update'i. 3rdPartyBekleniyor'a bulk
+   * geçiş SLA'yı duraklatmaz; kullanıcı SLA pause istiyorsa tek vaka
+   * üzerinden statü geçişi yapsın. Bilinçli sadelik.
+   */
+  async bulkUpdate({ caseIds, updates }, actor = 'Mock User', allowedCompanyIds) {
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde güncellenebilir.' };
+    }
+    if (!updates || typeof updates !== 'object') {
+      return { error: 'updates nesnesi gerekli.' };
+    }
+
+    // Whitelist: yalnızca bu 4 alan kabul.
+    const ALLOWED = ['assignedPersonId', 'assignedTeamId', 'priority', 'status'];
+    const filtered = {};
+    for (const k of ALLOWED) {
+      if (updates[k] !== undefined && updates[k] !== null && updates[k] !== '') {
+        filtered[k] = updates[k];
+      }
+    }
+    if (Object.keys(filtered).length === 0) {
+      return { error: 'En az bir geçerli alan güncellenmeli (assignedPersonId, assignedTeamId, priority, status).' };
+    }
+
+    // Status kapatma yasağı (TR ya da ASCII fark etmez — ikisini de yakala).
+    const dbStatusCandidate = filtered.status
+      ? toDb({ status: filtered.status }).status
+      : undefined;
+    if (dbStatusCandidate === 'Cozuldu' || dbStatusCandidate === 'IptalEdildi') {
+      return { error: 'Toplu işlemde kapatma (Çözüldü/İptalEdildi) yapılamaz.' };
+    }
+
+    // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
+    const cases = await prisma.case.findMany({
+      where: { id: { in: caseIds } },
+      select: { id: true, companyId: true },
+    });
+    if (cases.length !== caseIds.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = caseIds.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu işlem: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    // Denormalize names: assignedPersonId / assignedTeamId verildiyse
+    // Person/Team adını DB'den çek (frontend bulk için sadece ID gönderiyor).
+    let assignedPersonName;
+    if (filtered.assignedPersonId) {
+      const person = await prisma.person.findUnique({
+        where: { id: filtered.assignedPersonId },
+        select: { name: true },
+      });
+      if (!person) return { error: 'Atanan kişi bulunamadı.' };
+      assignedPersonName = person.name;
+    }
+    let assignedTeamName;
+    if (filtered.assignedTeamId) {
+      const team = await prisma.team.findUnique({
+        where: { id: filtered.assignedTeamId },
+        select: { name: true },
+      });
+      if (!team) return { error: 'Atanan takım bulunamadı.' };
+      assignedTeamName = team.name;
+    }
+
+    // DB'ye yazılacak patch (ASCII enum + denormalize names)
+    const dbPatch = toDb(filtered);
+    const dataPatch = { ...dbPatch };
+    if (assignedPersonName !== undefined) dataPatch.assignedPersonName = assignedPersonName;
+    if (assignedTeamName !== undefined) dataPatch.assignedTeamName = assignedTeamName;
+
+    // Activity log: field başına ayrı log per case (spec).
+    const FIELD_LABELS = {
+      assignedPersonId: 'Atanan Kişi',
+      assignedTeamId: 'Atanan Takım',
+      priority: 'Öncelik',
+      status: 'Statü',
+    };
+    const VALUE_LABELS = {
+      assignedPersonId: assignedPersonName,
+      assignedTeamId: assignedTeamName,
+      // priority/status için frontend TR string geliyor; doğrudan göster.
+    };
+
+    let updated = 0;
+    let failed = 0;
+    const errors = [];
+    for (const c of cases) {
+      try {
+        const historyEntries = [];
+        for (const [field, newVal] of Object.entries(filtered)) {
+          const fieldLabel = FIELD_LABELS[field] ?? field;
+          const valueLabel = VALUE_LABELS[field] ?? String(newVal);
+          historyEntries.push({
+            action: `Toplu işlem: ${fieldLabel} → ${valueLabel} (${cases.length} vakadan biri)`,
+            actionType: field === 'status' ? 'StatusChange' : 'FieldUpdate',
+            fieldName: field,
+            toValue: valueLabel,
+            actor,
+          });
+        }
+        await prisma.case.update({
+          where: { id: c.id },
+          data: { ...dataPatch, history: { create: historyEntries } },
+        });
+        updated++;
+      } catch (e) {
+        failed++;
+        errors.push({ caseId: c.id, error: e?.message ?? 'Bilinmeyen' });
+      }
+    }
+    return { updated, failed, errors };
+  },
+
   async findOpenCaseFor(accountId, caseType, allowedCompanyIds) {
     const where = {
       accountId,

@@ -9,11 +9,16 @@ import {
   ChevronRight,
   Clock3,
   Filter,
+  Flag,
   Inbox,
   Plus,
   RotateCw,
   Search,
   SearchX,
+  Tag,
+  Trash2,
+  Users2,
+  User,
   X,
   Zap,
 } from 'lucide-react';
@@ -38,8 +43,15 @@ import {
   type CaseStatus,
 } from './types';
 import { formatDateTime, formatRelative } from '@/lib/format';
+import { Modal } from '@/components/ui/Modal';
 import { NewCaseForm } from './NewCaseForm';
 import { QuickCaseModal } from './QuickCaseModal';
+
+// Bulk action — kullanıcının açabileceği alan tipi (4 buton).
+type BulkField = 'priority' | 'status' | 'assignedPersonId' | 'assignedTeamId';
+
+// Bulk status'te kapatma yasak — backend de reddediyor, UI baştan göstermesin.
+const BULK_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 
 interface CasesListPageProps {
   onSelectCase: (caseId: string) => void;
@@ -173,6 +185,10 @@ export function CasesListPage({
   const [pageSize, setPageSize] = useState(25);
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickPrefillAccount, setQuickPrefillAccount] = useState<string | null>(null);
+  // Bulk select state — Set<string> performans için (kontrol O(1)).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkField, setBulkField] = useState<BulkField | null>(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const { toast } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -206,6 +222,8 @@ export function CasesListPage({
 
   const load = async () => {
     setLoading(true);
+    // Filtre/tab değişikliği veya manuel refresh — selection temizlensin.
+    setSelected(new Set());
     if (inboxTab === 'later') {
       // Later sekmesi — kullanıcının ertelediği aktif vakalar.
       const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
@@ -311,6 +329,52 @@ export function CasesListPage({
 
   function clearFilters() {
     setFilters(initialFilters);
+  }
+
+  // Bulk select helpers
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAllVisible(check: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const c of pageItems) {
+        if (check) next.add(c.id);
+        else next.delete(c.id);
+      }
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  async function applyBulk(field: BulkField, value: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || !value) return;
+    setBulkSubmitting(true);
+    const result = await caseService.bulkUpdate(ids, { [field]: value } as Parameters<typeof caseService.bulkUpdate>[1]);
+    setBulkSubmitting(false);
+    setBulkField(null);
+    if (!result) return; // apiFetch toast gösterdi
+
+    if (result.failed > 0) {
+      toast({
+        type: 'warn',
+        title: 'Kısmi başarı',
+        message: `${result.updated} vaka güncellendi, ${result.failed} başarısız.`,
+        duration: 5000,
+      });
+    } else {
+      toast({ type: 'success', message: `${result.updated} vaka güncellendi.` });
+    }
+    clearSelection();
+    void load();
   }
 
   function handleAccountClick(e: React.MouseEvent, account: { id: string; name: string }) {
@@ -543,6 +607,21 @@ export function CasesListPage({
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <th className="w-10 px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={pageItems.length > 0 && pageItems.every((c) => selected.has(c.id))}
+                    ref={(el) => {
+                      if (!el) return;
+                      const someSel = pageItems.some((c) => selected.has(c.id));
+                      const allSel = pageItems.length > 0 && pageItems.every((c) => selected.has(c.id));
+                      el.indeterminate = someSel && !allSel;
+                    }}
+                    onChange={(e) => toggleSelectAllVisible(e.target.checked)}
+                    className="h-4 w-4 cursor-pointer accent-brand-600"
+                    title="Görünen sayfayı seç / kaldır"
+                  />
+                </th>
                 <SortableTh label="Vaka No"        sortKey="caseNumber"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Başlık"         sortKey="title"       currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Müşteri"        sortKey="accountName" currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
@@ -557,10 +636,10 @@ export function CasesListPage({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading &&
-                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={10} />)}
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)}
               {!loading && allFiltered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4">
+                  <td colSpan={11} className="px-4">
                     {hasActiveFilters ? (
                       <EmptyState
                         icon={<SearchX size={22} />}
@@ -596,14 +675,29 @@ export function CasesListPage({
                     ? (c as Case & { expired?: boolean })
                     : null;
                   const expired = Boolean(snoozeMeta?.expired);
+                  const isSelected = selected.has(c.id);
+                  // Öncelik: expired (amber) > selected (brand) > default
+                  const rowBg = expired
+                    ? 'bg-amber-50 hover:bg-amber-100'
+                    : isSelected
+                    ? 'bg-brand-50/60 hover:bg-brand-50 dark:bg-brand-950/30'
+                    : 'hover:bg-slate-50';
                   return (
                   <tr
                     key={c.id}
                     onClick={() => onSelectCase(c.id)}
-                    className={`cursor-pointer text-sm ${
-                      expired ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-slate-50'
-                    }`}
+                    className={`cursor-pointer text-sm ${rowBg}`}
                   >
+                    <Td className="w-10">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleSelect(c.id)}
+                        className="h-4 w-4 cursor-pointer accent-brand-600"
+                        aria-label={`${c.caseNumber} seç`}
+                      />
+                    </Td>
                     <Td className="font-mono text-xs text-slate-600">{c.caseNumber}</Td>
                     <Td className="max-w-[360px] font-medium text-slate-800">
                       <div className="truncate">{c.title}</div>
@@ -741,6 +835,29 @@ export function CasesListPage({
           onSelectCase(c.id);
         }}
       />
+
+      {/* Bulk action bar — 1+ vaka seçiliyken görünür */}
+      {selected.size > 0 && (
+        <BulkActionBar
+          count={selected.size}
+          onClear={clearSelection}
+          onAction={(field) => setBulkField(field)}
+          submitting={bulkSubmitting}
+        />
+      )}
+
+      {/* Bulk action modal — field bazlı seçim + onay */}
+      {bulkField && (
+        <BulkActionModal
+          field={bulkField}
+          count={selected.size}
+          teams={teams}
+          persons={personsAll}
+          submitting={bulkSubmitting}
+          onClose={() => setBulkField(null)}
+          onApply={(value) => void applyBulk(bulkField, value)}
+        />
+      )}
     </div>
   );
 }
@@ -808,6 +925,181 @@ function formatSnoozeIn(when: string): string {
   const diffHr = Math.round(diffMin / 60);
   if (diffHr < 24) return `${diffHr} saat sonra uyanacak`;
   return `${Math.round(diffHr / 24)} gün sonra uyanacak`;
+}
+
+// Floating action bar — selection > 0 iken bottom-center'da render edilir.
+// Kullanıcı 4 alandan birini seçer; modal o alana göre açılır.
+function BulkActionBar({
+  count,
+  onClear,
+  onAction,
+  submitting,
+}: {
+  count: number;
+  onClear: () => void;
+  onAction: (field: BulkField) => void;
+  submitting: boolean;
+}) {
+  return (
+    <div
+      role="region"
+      aria-label="Toplu işlem barı"
+      className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-2xl ring-1 ring-slate-900/5 dark:border-ndark-border dark:bg-ndark-card dark:ring-white/5"
+    >
+      <span className="px-1 text-sm font-medium text-slate-700 dark:text-ndark-text">
+        <span className="font-semibold text-brand-700 dark:text-brand-400">{count}</span> vaka seçildi
+      </span>
+      <span className="h-5 w-px bg-slate-200 dark:bg-ndark-border" />
+      <Button
+        size="sm"
+        variant="outline"
+        leftIcon={<Users2 size={12} />}
+        disabled={submitting}
+        onClick={() => onAction('assignedTeamId')}
+      >
+        Takım Değiştir
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        leftIcon={<User size={12} />}
+        disabled={submitting}
+        onClick={() => onAction('assignedPersonId')}
+      >
+        Kişi Değiştir
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        leftIcon={<Flag size={12} />}
+        disabled={submitting}
+        onClick={() => onAction('priority')}
+      >
+        Öncelik Değiştir
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        leftIcon={<Tag size={12} />}
+        disabled={submitting}
+        onClick={() => onAction('status')}
+      >
+        Durum Değiştir
+      </Button>
+      <span className="h-5 w-px bg-slate-200 dark:bg-ndark-border" />
+      <Button
+        size="sm"
+        variant="outline"
+        leftIcon={<Trash2 size={12} />}
+        disabled={submitting}
+        onClick={onClear}
+      >
+        Temizle
+      </Button>
+    </div>
+  );
+}
+
+// Bulk action modal — kullanıcı tıkladığı alana göre Select + Uygula.
+// 10'dan fazla vaka için ek confirmation gösterir.
+function BulkActionModal({
+  field,
+  count,
+  teams,
+  persons,
+  submitting,
+  onClose,
+  onApply,
+}: {
+  field: BulkField;
+  count: number;
+  teams: ReturnType<typeof lookupService.teams>;
+  persons: ReturnType<typeof lookupService.persons>;
+  submitting: boolean;
+  onClose: () => void;
+  onApply: (value: string) => void;
+}) {
+  const [value, setValue] = useState<string>('');
+  const [confirmed, setConfirmed] = useState<boolean>(count <= 10); // <=10 ise direkt apply
+  const needsConfirm = count > 10 && !confirmed;
+
+  const config: Record<BulkField, { title: string; label: string; options: { value: string; label: string }[] }> = {
+    priority: {
+      title: 'Toplu — Öncelik Değiştir',
+      label: 'Yeni öncelik',
+      options: CASE_PRIORITIES.map((p) => ({ value: p, label: CASE_PRIORITY_LABELS[p] })),
+    },
+    status: {
+      title: 'Toplu — Durum Değiştir',
+      label: 'Yeni statü',
+      options: BULK_STATUSES.map((s) => ({ value: s, label: s })),
+    },
+    assignedTeamId: {
+      title: 'Toplu — Takım Değiştir',
+      label: 'Yeni takım',
+      options: teams.map((t) => ({ value: t.id, label: t.name })),
+    },
+    assignedPersonId: {
+      title: 'Toplu — Atanan Kişi Değiştir',
+      label: 'Yeni atanan kişi',
+      options: persons.map((p) => ({ value: p.id, label: p.name })),
+    },
+  };
+
+  const c = config[field];
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={c.title}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          {needsConfirm ? (
+            <Button onClick={() => setConfirmed(true)}>Anladım, devam et</Button>
+          ) : (
+            <Button onClick={() => onApply(value)} disabled={!value || submitting}>
+              {submitting ? 'Uygulanıyor…' : 'Uygula'}
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-4 px-5 py-4">
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
+          <strong>{count}</strong> vaka üzerinde işlem yapılacak.
+        </div>
+
+        {needsConfirm ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="font-medium">Dikkat — büyük toplu işlem</div>
+            <p className="mt-1 text-xs">
+              10'dan fazla vaka tek seferde değişecek. İşlem geri alınamaz; her vaka için ayrı
+              activity log yazılır. Yine de devam etmek istiyor musun?
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+              {c.label}
+            </label>
+            <Select value={value} onChange={(e) => setValue(e.target.value)} autoFocus>
+              <option value="">— Seçiniz —</option>
+              {c.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
 }
 
 function InboxTabButton({

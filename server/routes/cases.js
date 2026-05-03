@@ -118,6 +118,25 @@ router.get(
   }),
 );
 
+/**
+ * POST /api/cases/bulk-update — Faz 1.5 Madde 2.
+ * Body: { caseIds: string[] (max 100), updates: { assignedPersonId?, assignedTeamId?, priority?, status? } }
+ * Status'te kapatma yasak. Cross-tenant case ID denenirse 403, hiçbir şey güncellenmez.
+ */
+router.post(
+  '/bulk-update',
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    const result = await caseRepository.bulkUpdate(
+      { caseIds: body.caseIds, updates: body.updates ?? {} },
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
 /** GET /api/cases/by-account?accountId=...&excludeId=...&statusIn=... */
 router.get(
   '/by-account',
