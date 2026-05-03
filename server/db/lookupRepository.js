@@ -22,17 +22,28 @@ async function listProductGroups() {
  * Frontend'in lookupService bootstrap'ı tek istekle (`bootstrap()`) yapıp
  * React Context'te cache'liyor. Admin ekranları yine ayrı endpoint'leri
  * çağırabilsin diye CRUD'lar da burada.
+ *
+ * MULTI-TENANT KURALI: bootstrap() artık allowedCompanyIds parametresi alır.
+ * Şirket-bağlı her tablo (teams, persons, accounts, categories, slaPolicies,
+ * checklists, fieldDefinitions) bu set ile filtrelenir. Yeni bir lookup
+ * tablosu eklendiğinde — özellikle Faz 2 collab tabloları (CaseWatcher
+ * sahip listesi, CaseLink hedef listesi vb.) — companyId scope'unu burada
+ * uygulamak zorunda. Aksi takdirde cross-tenant veri sızıntısı olur.
  */
 
 export const lookupRepository = {
   /**
    * Bootstrap — uygulama açılışında frontend'e tüm lookup'ları tek seferde
    * gönderir. Cold start'ta ~5 sorgu, sıcak DB'de < 100ms.
+   *
+   * @param {string[]} allowedCompanyIds - req.user.allowedCompanyIds
+   *   (verifyJwt middleware'den). Verilmezse (örn. dahili çağrı) tüm
+   *   şirketlerin verisi döner — bunu yalnızca SystemAdmin context'te kullan.
    */
-  async bootstrap() {
+  async bootstrap(allowedCompanyIds) {
     // Geçici pooler aksaklıklarında 2x retry (300ms + 800ms). Tüm Promise.all
     // bloğu sarmalanır — herhangi biri P1001/P1017/P2024 atarsa hepsi retry.
-    return withDbRetry(() => bootstrapInner(), {
+    return withDbRetry(() => bootstrapInner(allowedCompanyIds), {
       retries: 2,
       delayMs: [300, 800],
       label: 'bootstrap',
@@ -42,21 +53,62 @@ export const lookupRepository = {
   productGroups: listProductGroups,
 };
 
-async function bootstrapInner() {
+async function bootstrapInner(allowedCompanyIds) {
+    // Şirket-bağlı tablolar için where helper'ı.
+    // Account ve CategoryDef'te companyId nullable: null = "tüm şirketlerle
+    // paylaşılan kayıt" anlamına gelir; izin matrisine null'lar her zaman dahil.
+    const companyScope = allowedCompanyIds
+      ? { companyId: { in: allowedCompanyIds } }
+      : {};
+    const companyScopeNullable = allowedCompanyIds
+      ? { OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }] }
+      : {};
+
     const [companies, accounts, teams, persons, thirdParties, documentTypes, categories, offeredSolutions, slaPolicies, checklists, fieldDefinitions] =
       await Promise.all([
-        prisma.company.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-        prisma.account.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-        prisma.team.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-        prisma.person.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+        // Company listesi — kullanıcının erişebildiği şirketler (yeni şirket
+        // yaratma UI'sı için tam liste SystemAdmin admin endpoint'inden gelir).
+        prisma.company.findMany({
+          where: allowedCompanyIds ? { isActive: true, id: { in: allowedCompanyIds } } : { isActive: true },
+          orderBy: { name: 'asc' },
+        }),
+        // Account: companyId null = shared (eski yorum: "aynı müşteri birden
+        // fazla şirketin vakası olabilir") — null'ları her zaman dahil.
+        prisma.account.findMany({
+          where: { isActive: true, ...companyScopeNullable },
+          orderBy: { name: 'asc' },
+        }),
+        // Team: companyId zorunlu (Phase 1).
+        prisma.team.findMany({
+          where: { isActive: true, ...companyScope },
+          orderBy: { name: 'asc' },
+        }),
+        // Person: companyId yok, Team üzerinden filter. teamId null Person'lar
+        // hiç dönmez — bu kabul edilebilir (bir takıma bağlı olmayan operasyonel
+        // kayıt zaten işe yaramıyor).
+        prisma.person.findMany({
+          where: allowedCompanyIds
+            ? { isActive: true, team: { companyId: { in: allowedCompanyIds } } }
+            : { isActive: true },
+          orderBy: { name: 'asc' },
+        }),
+        // ThirdParty + DocumentType: şirket-agnostik (system-wide kayıtlar) — filtrelenmez.
         prisma.thirdParty.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
         prisma.documentType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-        prisma.categoryDef.findMany({ where: { isActive: true }, include: { children: true } }),
+        // CategoryDef: companyId nullable (null = sistem geneli) — null'lar dahil.
+        prisma.categoryDef.findMany({
+          where: { isActive: true, ...companyScopeNullable },
+          include: { children: true },
+        }),
+        // OfferedSolutionDef: şirket-agnostik (yorum/karar bekliyor — şu an global).
         prisma.offeredSolutionDef.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-        prisma.sLAPolicy.findMany({ where: { isActive: true } }),
-        prisma.checklistTemplate.findMany({ where: { isActive: true } }),
+        // SLAPolicy: companyId zorunlu.
+        prisma.sLAPolicy.findMany({ where: { isActive: true, ...companyScope } }),
+        // ChecklistTemplate: companyId zorunlu.
+        prisma.checklistTemplate.findMany({ where: { isActive: true, ...companyScope } }),
+        // FieldDefinition: companyId zorunlu.
         prisma.fieldDefinition.findMany({
-          where: { isActive: true },
+          where: { isActive: true, ...companyScope },
           orderBy: [{ companyId: 'asc' }, { displayOrder: 'asc' }],
         }),
       ]);

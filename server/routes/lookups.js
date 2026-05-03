@@ -11,9 +11,9 @@ router.use(verifyJwt);
  * Frontend uygulama açılışında tek istekle tüm lookup verilerini çeker.
  * Cevap React Context'e cache'lenir; sayfa içi `lookupService.X()` sync kalır.
  */
-router.get('/bootstrap', async (_req, res) => {
+router.get('/bootstrap', async (req, res) => {
   try {
-    const data = await lookupRepository.bootstrap();
+    const data = await lookupRepository.bootstrap(req.user.allowedCompanyIds);
     res.json(data);
   } catch (err) {
     console.error('[lookups]', err);

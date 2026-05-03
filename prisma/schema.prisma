@@ -171,6 +171,19 @@ enum UserRole {
   SystemAdmin
 }
 
+// Per-company role — UserCompany join table'da kullanılır. UserRole'dan
+// ayrı tutuldu: User.role sistem-seviyesi default rol (legacy + login akışı),
+// UserCompany.role o şirket içindeki yetkiyi belirler. SystemAdmin sistem
+// rolü olarak kalır; UserCompany'de görünmesi tüm şirketlere erişim demek
+// değil — verifyJwt'de User.role==='SystemAdmin' ise allowedCompanyIds
+// tüm şirketlerle dolduruluyor.
+enum CompanyRole {
+  Agent
+  Supervisor
+  Admin
+  SystemAdmin
+}
+
 enum FieldType {
   Text
   Number
@@ -204,6 +217,28 @@ model User {
   personId  String?  @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  companies UserCompany[]
+}
+
+// User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
+// (holding modeli — supervisor/admin'in PARAM + UNIVERA + FINROTA görmesi).
+// Liste sorguları req.user.allowedCompanyIds üzerinden filtrelenir;
+// SystemAdmin tüm şirketlere otomatik erişir (UserCompany kaydı gerekmez).
+model UserCompany {
+  id        String      @id @default(cuid())
+  userId    String
+  companyId String
+  role      CompanyRole @default(Agent)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
 }
 
 model Company {
@@ -221,6 +256,7 @@ model Company {
   checklists       ChecklistTemplate[]
   fieldDefinitions FieldDefinition[]
   settings         CompanySettings?
+  userCompanies    UserCompany[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -284,14 +320,18 @@ model Team {
   id          String   @id @default(cuid())
   name        String
   description String?
-  companyId   String?
+  // Multi-tenant izolasyon: her takım tek bir şirkete bağlı (holding modeli).
+  // listQueries: WHERE companyId IN req.user.allowedCompanyIds.
+  companyId   String
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company Company? @relation(fields: [companyId], references: [id])
+  company Company  @relation(fields: [companyId], references: [id])
   members Person[]
   cases   Case[]
+
+  @@index([companyId])
 }
 
 model Person {

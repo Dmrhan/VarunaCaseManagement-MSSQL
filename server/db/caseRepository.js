@@ -50,9 +50,39 @@ function shape(c) {
   };
 }
 
+/**
+ * CaseAccessError — repository-seviyesi 403 sinyal.
+ * Mutation'lar başında scope check başarısız olursa fırlatılır; route layer
+ * bunu HTTP 403'e çevirir.
+ */
+export class CaseAccessError extends Error {
+  constructor(message = 'Vaka erişimi yok.') {
+    super(message);
+    this.code = 'CASE_FORBIDDEN';
+  }
+}
+
+/**
+ * Mutation guard — mutation öncesi çağrılır. allowedCompanyIds verilmediyse
+ * bypass (cron, internal job). Verildiyse case.companyId IN check; case yoksa
+ * null döner (route 404 yapar), scope dışındaysa CaseAccessError fırlatır.
+ */
+async function assertCaseInScope(caseId, allowedCompanyIds) {
+  if (!allowedCompanyIds) return true; // bypass — internal/cron caller
+  const found = await prisma.case.findUnique({
+    where: { id: caseId },
+    select: { id: true, companyId: true },
+  });
+  if (!found) return null;
+  if (!allowedCompanyIds.includes(found.companyId)) {
+    throw new CaseAccessError();
+  }
+  return true;
+}
+
 export const caseRepository = {
-  async list({ filters, pagination } = {}) {
-    const where = buildWhere(toDbFilters(filters));
+  async list({ filters, pagination, allowedCompanyIds } = {}) {
+    const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
     const total = await prisma.case.count({ where });
 
     const orderBy = { createdAt: 'desc' };
@@ -73,8 +103,12 @@ export const caseRepository = {
     return { items: items.map(shape), total };
   },
 
-  async get(id) {
+  async get(id, allowedCompanyIds) {
     const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+    if (!c) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
+      throw new CaseAccessError();
+    }
     return shape(c);
   },
 
@@ -140,7 +174,8 @@ export const caseRepository = {
     return shape(created);
   },
 
-  async update(id, patch, actor = 'Mock User') {
+  async update(id, patch, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     // Otomatik alan değişim log'u: değişen her alan için CaseActivity entry'si
     const before = await prisma.case.findUnique({ where: { id } });
     if (!before) return null;
@@ -175,7 +210,8 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async addNote(id, note) {
+  async addNote(id, note, allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const created = await prisma.caseNote.create({
       data: {
         caseId: id,
@@ -188,7 +224,8 @@ export const caseRepository = {
     return created;
   },
 
-  async addCallLog(id, input) {
+  async addCallLog(id, input, allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const m = toDb(input);
     const log = await prisma.caseCallLog.create({
       data: {
@@ -212,7 +249,8 @@ export const caseRepository = {
     return { caseUpdated: shape(caseUpdated), callLog: fromDb(log) };
   },
 
-  async addActivity(caseId, input) {
+  async addActivity(caseId, input, allowedCompanyIds) {
+    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
     await prisma.caseActivity.create({
       data: {
         caseId,
@@ -233,7 +271,8 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async toggleChecklistItem(caseId, itemId, checked, actor = 'Mock User') {
+  async toggleChecklistItem(caseId, itemId, checked, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
     if (!c?.checklistItems) return shape(c);
 
@@ -269,7 +308,8 @@ export const caseRepository = {
    * Frontend bu URL'e doğrudan PUT eder (Vercel 4.5MB body limiti bypass).
    * DB satırı henüz yazılmaz; finalize() ile yazılır.
    */
-  async requestUpload(id, input) {
+  async requestUpload(id, input, allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
     const FILE_MAX_COUNT = 20;
 
@@ -295,7 +335,8 @@ export const caseRepository = {
    * Adım 2 — Finalize: storage upload başarılı → DB satırını yaz + history log.
    * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
    */
-  async finalizeUpload(id, input) {
+  async finalizeUpload(id, input, allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const actor = input.uploadedBy ?? 'Mock User';
     const file = await prisma.caseAttachment.create({
       data: {
@@ -328,14 +369,16 @@ export const caseRepository = {
   },
 
   /** Download için kısa ömürlü signed URL üret. */
-  async getDownloadUrl(caseId, fileId) {
+  async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
+    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = await createDownloadUrl(target.fileUrl);
     return { url, fileName: target.fileName };
   },
 
-  async removeFile(id, fileId, actor = 'Mock User') {
+  async removeFile(id, fileId, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
@@ -365,15 +408,14 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async findOpenCaseFor(accountId, caseType) {
-    const found = await prisma.case.findFirst({
-      where: {
-        accountId,
-        caseType,
-        status: { notIn: ['Cozuldu', 'IptalEdildi'] },
-      },
-      include: CASE_INCLUDE,
-    });
+  async findOpenCaseFor(accountId, caseType, allowedCompanyIds) {
+    const where = {
+      accountId,
+      caseType,
+      status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+    };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    const found = await prisma.case.findFirst({ where, include: CASE_INCLUDE });
     return shape(found);
   },
 
@@ -382,7 +424,8 @@ export const caseRepository = {
    * Spec §6: 3rdPartyBekleniyor'a girilince slaPausedAt set edilir; çıkılınca
    * geçen süre slaPausedDurationMin'e eklenip slaResolutionDueAt ileri kaydırılır.
    */
-  async transitionStatus(id, nextStatus, payload = {}, actor = 'Mock User') {
+  async transitionStatus(id, nextStatus, payload = {}, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const prev = await prisma.case.findUnique({ where: { id } });
     if (!prev) return null;
 
@@ -473,7 +516,8 @@ export const caseRepository = {
    * Vakayı ertele — snoozeUntil + snoozeReason + snoozePreviousStatus set,
    * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
    */
-  async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User') {
+  async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const target = new Date(snoozeUntil);
     if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
       return { error: 'snoozeUntil gelecek bir tarih olmalı.' };
@@ -513,7 +557,8 @@ export const caseRepository = {
    * Erteleme kaldır — snooze alanlarını temizle, snoozePreviousStatus'a dön.
    * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
    */
-  async unsnoozeCase(id, actor = 'Mock User') {
+  async unsnoozeCase(id, actor = 'Mock User', allowedCompanyIds) {
+    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
     const exists = await prisma.case.findUnique({ where: { id } });
     if (!exists) return null;
     if (!exists.snoozeUntil) {
@@ -553,14 +598,18 @@ export const caseRepository = {
    *
    * Sıralama: expired olanlar önce (en eski uyanmış en üstte → aciliyet),
    * sonra aktif erteleler (en yakın uyanacak en üstte).
+   *
+   * Multi-tenant: allowedCompanyIds verildiyse sadece o şirketlerin vakaları.
    */
-  async listSnoozedForUser(personId) {
+  async listSnoozedForUser(personId, allowedCompanyIds) {
     if (!personId) return { items: [], total: 0 };
+    const where = {
+      assignedPersonId: personId,
+      snoozeUntil: { not: null },
+    };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     const rows = await prisma.case.findMany({
-      where: {
-        assignedPersonId: personId,
-        snoozeUntil: { not: null },
-      },
+      where,
       include: CASE_INCLUDE,
     });
     const now = Date.now();
@@ -619,8 +668,9 @@ export const caseRepository = {
     return { woken: woken.length, ids: woken };
   },
 
-  async findByAccount(accountId, options = {}) {
+  async findByAccount(accountId, options = {}, allowedCompanyIds) {
     const where = { accountId };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     if (options.excludeId) where.NOT = { id: options.excludeId };
     const mapStatuses = (arr) => arr.map((s) => toDb({ status: s }).status);
     if (options.statusIn) where.status = { in: mapStatuses(options.statusIn) };
@@ -644,10 +694,17 @@ function pickRestoreStatus(previous, current) {
   return 'Acik';
 }
 
-function buildWhere(f) {
+function buildWhere(f, allowedCompanyIds) {
   if (!f) f = {};
   const where = {};
   const andClauses = [];
+  // Multi-tenant izolasyon: liste sorgusu sadece kullanıcının erişebildiği
+  // şirketlerin vakalarını döner. allowedCompanyIds boş array ise [] dönmez —
+  // Prisma `in: []` ile hiçbir şey döndürmez (doğru davranış: yetkisiz user
+  // hiçbir şey görmez).
+  if (allowedCompanyIds) {
+    andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
   // Default: snooze aktif vakalar (snoozeUntil > now) listede gizli — "Later"
   // sekmesi ayrı endpoint kullanıyor. includeSnoozed flag ile override edilir.
   if (!f.includeSnoozed) {

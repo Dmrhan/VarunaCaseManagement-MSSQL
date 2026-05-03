@@ -101,22 +101,27 @@ async function main() {
   console.log(`  ✓ ${MOCK_COMPANIES.length} şirket`);
 
   // -------------------------------------------------------------
-  // 2. Takımlar (companyId opsiyonel — mock'ta yok)
+  // 2. Takımlar — multi-tenant izolasyon (Phase 1).
+  // Mock'ta companyId hâlâ yok; varsayılan PARAM. İleride mock'a şirket
+  // eklenince burası `t.companyId ?? DEFAULT_TEAM_COMPANY` olarak okunur.
   // -------------------------------------------------------------
   console.log('→ Takımlar...');
+  const DEFAULT_TEAM_COMPANY = 'COMP-PARAM';
   for (const t of MOCK_TEAMS) {
+    const companyId = (t as { companyId?: string }).companyId ?? DEFAULT_TEAM_COMPANY;
     await prisma.team.upsert({
       where: { id: t.id },
-      update: { name: t.name, description: t.description, isActive: t.isActive },
+      update: { name: t.name, description: t.description, isActive: t.isActive, companyId },
       create: {
         id: t.id,
         name: t.name,
         description: t.description,
         isActive: t.isActive,
+        companyId,
       },
     });
   }
-  console.log(`  ✓ ${MOCK_TEAMS.length} takım`);
+  console.log(`  ✓ ${MOCK_TEAMS.length} takım (default companyId: ${DEFAULT_TEAM_COMPANY})`);
 
   // -------------------------------------------------------------
   // 3. Kişiler
