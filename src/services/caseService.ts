@@ -71,6 +71,7 @@ import {
   type CaseListPagination,
   type CaseNote,
   type CaseFile,
+  type CasePriority,
   type CaseRequestType,
   type CaseStatus,
   type CaseType,
@@ -1182,6 +1183,31 @@ export const caseService = {
    */
   countCasesUsingOffer(offerId: string): number {
     return store.filter((c) => c.offeredSolutions?.includes(offerId)).length;
+  },
+
+  /**
+   * Toplu güncelleme — Faz 1.5 Madde 2.
+   * Backend whitelist: assignedPersonId, assignedTeamId, priority, status.
+   * Status'te kapatma yasak (Cozuldu/IptalEdildi). Cross-tenant ID denenirse 403.
+   */
+  async bulkUpdate(
+    caseIds: string[],
+    updates: {
+      assignedPersonId?: string;
+      assignedTeamId?: string;
+      priority?: CasePriority;
+      status?: CaseStatus;
+    },
+  ): Promise<{ updated: number; failed: number; errors: { caseId: string; error: string }[] } | undefined> {
+    return apiFetch(
+      `${API_BASE}/bulk-update`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseIds, updates }),
+      },
+      'Toplu güncelleme başarısız',
+    );
   },
 
   async findByAccount(
