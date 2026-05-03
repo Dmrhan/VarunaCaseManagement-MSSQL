@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkey } from '@/lib/useHotkey';
 import {
+  AlertCircle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Clock3,
   Filter,
   Flag,
@@ -15,6 +18,8 @@ import {
   RotateCw,
   Search,
   SearchX,
+  ShieldAlert,
+  Sparkles,
   Tag,
   Trash2,
   Users2,
@@ -27,7 +32,11 @@ import { Card } from '@/components/ui/Card';
 import { Select, TextInput } from '@/components/ui/Field';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { Badge } from '@/components/ui/Badge';
+import { Popover } from '@/components/ui/Popover';
+import { cn } from '@/components/ui/cn';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
+import { analyticsService, type PatternAlert } from '@/services/analyticsService';
+import { useAuth, type UserRole } from '@/services/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TableRowSkeleton } from '@/components/ui/Skeleton';
@@ -50,6 +59,13 @@ import { QuickCaseModal } from './QuickCaseModal';
 // Bulk action — kullanıcının açabileceği alan tipi (4 buton).
 type BulkField = 'priority' | 'status' | 'assignedPersonId' | 'assignedTeamId';
 
+// Frontline = kişisel KPI'lar; Supervisor+ = global KPI'lar.
+const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
+
+// KPI tıklamasıyla aktive olan client-side display filtresi.
+// 'slaRisk': slaViolation = true | 'resolvedToday': updatedAt bugün ve status 'Çözüldü'
+type QuickFilter = 'slaRisk' | 'resolvedToday' | null;
+
 // Bulk status'te kapatma yasak — backend de reddediyor, UI baştan göstermesin.
 const BULK_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 
@@ -66,6 +82,8 @@ interface CasesListPageProps {
    */
   patternCasesFilter?: { caseIds: string[]; label: string } | null;
   onClearPatternFilter?: () => void;
+  /** AI Briefing — örüntü alarmı için Detay → tıklamasında patterns sayfasına geçiş. */
+  onShowPatterns?: () => void;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -181,6 +199,7 @@ export function CasesListPage({
   onQuickPrefillConsumed,
   patternCasesFilter,
   onClearPatternFilter,
+  onShowPatterns,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
@@ -197,8 +216,26 @@ export function CasesListPage({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkField, setBulkField] = useState<BulkField | null>(null);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  // KPI tıklamasıyla aktive olan client-side filtre (sortedFiltered'de uygulanır).
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(null);
+  // Agent rolü kişisel KPI değerleri — yalnızca frontline kullanıcılarda hesaplanır.
+  const [personalStats, setPersonalStats] = useState<{
+    assigned: number;
+    slaRisk: number;
+    resolvedToday: number;
+    snoozed: number;
+  } | null>(null);
+  // AI briefing strip — pattern (Supervisor+) veya SLA mesajı veya "her şey yolunda".
+  const [activePatterns, setActivePatterns] = useState<PatternAlert[]>([]);
+  const [briefingDismissed, setBriefingDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.sessionStorage.getItem('aiBriefing:dismissed') === '1';
+  });
   const { toast } = useToast();
+  const { user } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const isFrontline = !!user && FRONTLINE_ROLES.includes(user.role);
 
   // App seviyesi pendingQuickPrefill geldiğinde QuickCaseModal'ı aç
   useEffect(() => {
@@ -274,6 +311,80 @@ export function CasesListPage({
     return { total, open, slaBreach, critical };
   }, [allFiltered]);
 
+  // Frontline kullanıcılar için kişisel KPI fetch — sekmeden bağımsız global sayaçlar.
+  // Yenile butonu ve bulk action sonrası tetiklenir; tab/filtre değiştiğinde değil
+  // (counts global, kullanıcının view'ından bağımsız).
+  async function refreshPersonalStats() {
+    if (!isFrontline || !user?.personId) {
+      setPersonalStats(null);
+      return;
+    }
+    const personId = user.personId;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    try {
+      const [openRes, closedTodayRes, snoozedRes] = await Promise.all([
+        caseService.list({ ...initialFilters, personId, statuses: OPEN_STATUSES }),
+        caseService.list({ ...initialFilters, personId, statuses: ['Çözüldü'], dateFrom: startOfDay.toISOString() }),
+        apiFetch<{ value: Case[]; '@odata.count': number }>(
+          '/api/cases/snoozed',
+          undefined,
+          'Ertelenmiş vakalar yüklenemedi',
+        ),
+      ]);
+      const slaRisk = openRes.items.filter((c) => c.slaViolation).length;
+      setPersonalStats({
+        assigned: openRes.items.length,
+        slaRisk,
+        resolvedToday: closedTodayRes.items.length,
+        snoozed: snoozedRes?.value?.length ?? 0,
+      });
+    } catch {
+      // apiFetch toast gösterdi — sayaçları sıfır bırak.
+      setPersonalStats({ assigned: 0, slaRisk: 0, resolvedToday: 0, snoozed: 0 });
+    }
+  }
+
+  // Kullanıcı yüklendiğinde / değiştiğinde personal stats'i bir kez çek.
+  useEffect(() => {
+    void refreshPersonalStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFrontline, user?.personId]);
+
+  // Briefing — örüntü alarmları yalnızca Supervisor+ için. Endpoint frontline'a 403 dönüyor.
+  useEffect(() => {
+    if (!user || !['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role)) {
+      setActivePatterns([]);
+      return;
+    }
+    let alive = true;
+    void analyticsService.listPatterns('active').then((list) => {
+      if (alive) setActivePatterns(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id, user?.role]);
+
+  function dismissBriefing() {
+    try {
+      window.sessionStorage.setItem('aiBriefing:dismissed', '1');
+    } catch {
+      /* incognito vb. — sessize al */
+    }
+    setBriefingDismissed(true);
+  }
+
+  // Briefing içeriği — pattern > SLA > ok sıralaması.
+  const briefingSlaCount = isFrontline ? personalStats?.slaRisk ?? 0 : stats.slaBreach;
+  const briefingState: 'pattern' | 'sla' | 'ok' | null = briefingDismissed
+    ? null
+    : activePatterns.length > 0
+      ? 'pattern'
+      : briefingSlaCount > 0
+        ? 'sla'
+        : 'ok';
+
   // Sıralama — kolon başlığı tıklaması ve dropdown ile senkronize.
   // "Ertelendi" sekmesinde BE zaten "expired önce, snoozeUntil ASC" sırasını
   // verdiği için frontend sort'u devre dışı (kullanıcı kafa karışıklığı olmasın).
@@ -284,6 +395,15 @@ export function CasesListPage({
       const allowed = new Set(patternCasesFilter.caseIds);
       base = base.filter((c) => allowed.has(c.id));
     }
+    // KPI tıklamasıyla aktive olan client-side filtre — backend filter'a ek katman.
+    if (quickFilter === 'slaRisk') {
+      base = base.filter((c) => c.slaViolation);
+    } else if (quickFilter === 'resolvedToday') {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startMs = startOfDay.getTime();
+      base = base.filter((c) => c.status === 'Çözüldü' && new Date(c.updatedAt).getTime() >= startMs);
+    }
     if (inboxTab === 'later') return base;
     const arr = [...base];
     arr.sort((a, b) => {
@@ -291,7 +411,7 @@ export function CasesListPage({
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [allFiltered, sortKey, sortDir, inboxTab, patternCasesFilter]);
+  }, [allFiltered, sortKey, sortDir, inboxTab, patternCasesFilter, quickFilter]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -324,6 +444,17 @@ export function CasesListPage({
     Boolean(filters.personId) ||
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo);
+
+  // "Filtrele" butonu rozetinde gösterilen aktif filtre boyut sayısı.
+  // Search hariç — search bar arayüzde zaten görünür, panel rozetiyle çift saymak gereksiz.
+  const activeFilterCount =
+    ((filters.statuses?.length ?? 0) > 0 ? 1 : 0) +
+    ((filters.priorities?.length ?? 0) > 0 ? 1 : 0) +
+    (filters.caseType && filters.caseType !== 'Tümü' ? 1 : 0) +
+    (filters.teamId ? 1 : 0) +
+    (filters.personId ? 1 : 0) +
+    (filters.dateFrom ? 1 : 0) +
+    (filters.dateTo ? 1 : 0);
 
   function toggleStatus(s: CaseStatus) {
     setFilters((f) => {
@@ -389,6 +520,7 @@ export function CasesListPage({
     }
     clearSelection();
     void load();
+    void refreshPersonalStats();
   }
 
   function handleAccountClick(e: React.MouseEvent, account: { id: string; name: string }) {
@@ -425,7 +557,14 @@ export function CasesListPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" leftIcon={<RotateCw size={14} />} onClick={() => void load()}>
+          <Button
+            variant="outline"
+            leftIcon={<RotateCw size={14} />}
+            onClick={() => {
+              void load();
+              void refreshPersonalStats();
+            }}
+          >
             Yenile
           </Button>
           {onOpenCustomerSearch && (
@@ -455,12 +594,184 @@ export function CasesListPage({
         </div>
       </div>
 
+      {/*
+        KPI'lar — Frontline (Agent/Backoffice/CSM) için kişisel; Supervisor+ için global.
+        Tıklama → ilgili filtre/sekme uygulanır. quickFilter state'i client-side
+        SLA-risk veya bugün-çözüldü daraltması yapar.
+      */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiTile label="Toplam Vaka" value={stats.total}    tint="bg-slate-50 ring-slate-200 text-slate-700" />
-        <KpiTile label="Açık Vaka"   value={stats.open}     tint="bg-blue-50 ring-blue-200 text-blue-700" />
-        <KpiTile label="SLA İhlali"  value={stats.slaBreach} tint="bg-rose-50 ring-rose-200 text-rose-700" />
-        <KpiTile label="Critical"    value={stats.critical} tint="bg-amber-50 ring-amber-200 text-amber-800" />
+        {isFrontline && user?.personId ? (
+          <>
+            <KpiTile
+              label="Bana Atanan"
+              value={personalStats?.assigned ?? 0}
+              icon={<User size={16} />}
+              tone="brand"
+              onClick={() => {
+                setFilters({ ...initialFilters, personId: user.personId! });
+                setInboxTab('open');
+                setQuickFilter(null);
+              }}
+            />
+            <KpiTile
+              label="SLA Riskimde"
+              value={personalStats?.slaRisk ?? 0}
+              icon={<AlertCircle size={16} />}
+              tone={(personalStats?.slaRisk ?? 0) > 0 ? 'rose' : 'slate'}
+              onClick={() => {
+                setFilters({ ...initialFilters, personId: user.personId! });
+                setInboxTab('open');
+                setQuickFilter('slaRisk');
+              }}
+            />
+            <KpiTile
+              label="Bugün Çözdüğüm"
+              value={personalStats?.resolvedToday ?? 0}
+              icon={<CheckCircle2 size={16} />}
+              tone="emerald"
+              onClick={() => {
+                setFilters({ ...initialFilters, personId: user.personId! });
+                setInboxTab('closed');
+                setQuickFilter('resolvedToday');
+              }}
+            />
+            <KpiTile
+              label="Ertelenenlerim"
+              value={personalStats?.snoozed ?? 0}
+              icon={<Clock size={16} />}
+              tone={(personalStats?.snoozed ?? 0) > 0 ? 'amber' : 'slate'}
+              onClick={() => {
+                setFilters(initialFilters);
+                setInboxTab('later');
+                setQuickFilter(null);
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <KpiTile
+              label="Toplam Vaka"
+              value={stats.total}
+              icon={<Inbox size={16} />}
+              tone="slate"
+            />
+            <KpiTile
+              label="Açık Vaka"
+              value={stats.open}
+              hint={stats.total > 0 ? `%${Math.round((stats.open / stats.total) * 100)}` : undefined}
+              icon={<Inbox size={16} />}
+              tone="slate"
+              onClick={() => {
+                setInboxTab('open');
+                setQuickFilter(null);
+              }}
+            />
+            <KpiTile
+              label="SLA İhlali"
+              value={stats.slaBreach}
+              icon={<ShieldAlert size={16} />}
+              tone={stats.slaBreach > 0 ? 'rose' : 'slate'}
+              onClick={() => {
+                setInboxTab('open');
+                setQuickFilter('slaRisk');
+              }}
+            />
+            <KpiTile
+              label="Critical"
+              value={stats.critical}
+              icon={<Flag size={16} />}
+              tone={stats.critical > 0 ? 'rose' : 'slate'}
+              onClick={() => {
+                setFilters({ ...initialFilters, priorities: ['Critical'] });
+                setInboxTab('open');
+                setQuickFilter(null);
+              }}
+            />
+          </>
+        )}
       </div>
+
+      {/*
+        AI Briefing — KPI'ların altında tek satır. 3 olası mesaj:
+          - pattern: Supervisor+ için aktif örüntü alarmı varsa (Detay → patterns sayfası)
+          - sla: SLA ihlali sayısı > 0 (Detay → quickFilter='slaRisk')
+          - ok: hiçbiri yoksa "kontrol altında"
+        sessionStorage'da dismiss kalıcı (sayfa yenilense bile).
+      */}
+      {briefingState && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+          <div className="flex min-w-0 items-center gap-2 text-amber-900 dark:text-amber-200">
+            <Sparkles size={14} className="shrink-0 text-violet-600 dark:text-violet-400" />
+            <span className="truncate">
+              {briefingState === 'pattern' && (
+                <>
+                  📊 Örüntü alarmı: <strong>{activePatterns[0].category}</strong> kategorisinde son{' '}
+                  {activePatterns[0].windowMinutes} dakikada {activePatterns[0].caseCount} vaka açıldı
+                  {activePatterns.length > 1 && (
+                    <span className="ml-1 text-amber-700 dark:text-amber-300">
+                      (+{activePatterns.length - 1} daha)
+                    </span>
+                  )}
+                </>
+              )}
+              {briefingState === 'sla' && (
+                <>
+                  ⚠️ <strong>{briefingSlaCount}</strong>{' '}
+                  {isFrontline ? 'vakanızda' : 'vakada'} SLA ihlali var
+                </>
+              )}
+              {briefingState === 'ok' && <>✓ Tüm vakalar kontrol altında</>}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {briefingState === 'pattern' && onShowPatterns && (
+              <button
+                type="button"
+                onClick={onShowPatterns}
+                className="rounded-md px-2 py-1 text-xs font-medium text-amber-900 underline-offset-2 hover:bg-amber-100 hover:underline dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                Detay →
+              </button>
+            )}
+            {briefingState === 'sla' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (isFrontline && user?.personId) {
+                    setFilters({ ...initialFilters, personId: user.personId });
+                  }
+                  setInboxTab('open');
+                  setQuickFilter('slaRisk');
+                }}
+                className="rounded-md px-2 py-1 text-xs font-medium text-amber-900 underline-offset-2 hover:bg-amber-100 hover:underline dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                Detay →
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={dismissBriefing}
+              title="Bu oturum için kapat"
+              className="rounded-md p-1 text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* QuickFilter aktifken bilgi şeridi — kullanıcı neden filtrelendiğini görsün. */}
+      {quickFilter && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+          <div>
+            <strong className="font-medium">Hızlı filtre:</strong>{' '}
+            {quickFilter === 'slaRisk' ? 'SLA ihlali olan vakalar' : 'Bugün çözülen vakalar'}
+          </div>
+          <Button size="sm" variant="ghost" leftIcon={<X size={12} />} onClick={() => setQuickFilter(null)}>
+            Kaldır
+          </Button>
+        </div>
+      )}
 
       <Card>
         {/* Inbox sekmeleri — Açık / Later / Kapalı */}
@@ -485,11 +796,14 @@ export function CasesListPage({
           />
         </div>
 
-        {/* Filter bar — Spec 11.1 */}
-        <div className="space-y-3 border-b border-slate-200 px-4 py-3">
-          {/* Row 1 — search + type + clear */}
+        {/*
+          Filter bar — kompakt tek satır.
+          Search + Filtrele (popover panel) + Sırala + sonuç sayısı.
+          Önceki 3 satırlık chip + dropdown grid'i panele taşındı.
+        */}
+        <div className="border-b border-slate-200 px-4 py-3 dark:border-ndark-border">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[220px]">
+            <div className="relative min-w-[260px] flex-1">
               <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <TextInput
                 ref={searchInputRef}
@@ -498,117 +812,172 @@ export function CasesListPage({
                 onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
                 className="pl-8 pr-12"
               />
-              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
                 /
               </kbd>
             </div>
-            <FilterSelect
-              label="Tip"
-              value={filters.caseType ?? 'Tümü'}
-              onChange={(v) => setFilters((f) => ({ ...f, caseType: v as CaseFilters['caseType'] }))}
-              options={['Tümü', ...CASE_TYPES]}
-              renderOption={(o) =>
-                o === 'Tümü' ? 'Tümü' : CASE_TYPE_LABELS[o as keyof typeof CASE_TYPE_LABELS]
-              }
-            />
-            <Badge tint="slate" icon={<Filter size={12} />}>
-              {allFiltered.length} sonuç
-            </Badge>
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1 text-xs text-slate-500 underline hover:text-slate-700"
-              >
-                <X size={12} /> Filtreleri Temizle
-              </button>
-            )}
-          </div>
 
-          {/* Row 2 — status + priority chips */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-500">Statü:</span>
-              {CASE_STATUSES.map((s) => {
-                const active = filters.statuses?.includes(s);
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => toggleStatus(s)}
-                    className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition ${
-                      active
-                        ? 'bg-brand-600 text-white ring-brand-600 hover:bg-brand-700'
-                        : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {STATUS_LABELS_SHORT[s]}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-500">Öncelik:</span>
-              {CASE_PRIORITIES.map((p) => {
-                const active = filters.priorities?.includes(p);
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => togglePriority(p)}
-                    className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset transition ${
-                      active
-                        ? 'bg-brand-600 text-white ring-brand-600 hover:bg-brand-700'
-                        : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {CASE_PRIORITY_LABELS[p]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            <Popover
+              align="end"
+              width={380}
+              trigger={({ open, toggle }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                    open || activeFilterCount > 0
+                      ? 'border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:bg-ndark-bg',
+                  )}
+                >
+                  <Filter size={14} />
+                  <span>Filtrele</span>
+                  {activeFilterCount > 0 && (
+                    <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold text-white">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+              )}
+            >
+              {({ close }) => (
+                <div className="space-y-3">
+                  <FilterPanelSection label="Tip">
+                    <Select
+                      value={filters.caseType ?? 'Tümü'}
+                      onChange={(e) =>
+                        setFilters((f) => ({ ...f, caseType: e.target.value as CaseFilters['caseType'] }))
+                      }
+                      className="h-8 w-full py-1"
+                    >
+                      <option value="Tümü">Tümü</option>
+                      {CASE_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {CASE_TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </Select>
+                  </FilterPanelSection>
 
-          {/* Row 3 — team + person + date range */}
-          <div className="flex flex-wrap items-center gap-3">
-            <FilterSelect
-              label="Takım"
-              value={filters.teamId ?? ''}
-              onChange={(v) =>
-                setFilters((f) => ({ ...f, teamId: v, personId: v && f.personId ? '' : f.personId }))
-              }
-              options={['', ...teams.map((t) => t.id)]}
-              renderOption={(id) => (id === '' ? 'Tümü' : teams.find((t) => t.id === id)?.name ?? id)}
-            />
-            <FilterSelect
-              label="Kişi"
-              value={filters.personId ?? ''}
-              onChange={(v) => setFilters((f) => ({ ...f, personId: v }))}
-              options={['', ...personsForFilter.map((p) => p.id)]}
-              renderOption={(id) =>
-                id === '' ? 'Tümü' : personsForFilter.find((p) => p.id === id)?.name ?? id
-              }
-            />
+                  <FilterPanelSection label="Statü">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {CASE_STATUSES.map((s) => (
+                        <label
+                          key={s}
+                          className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-ndark-text"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filters.statuses?.includes(s) ?? false}
+                            onChange={() => toggleStatus(s)}
+                            className="h-4 w-4 cursor-pointer accent-brand-600"
+                          />
+                          <span className="truncate">{STATUS_LABELS_SHORT[s]}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FilterPanelSection>
+
+                  <FilterPanelSection label="Öncelik">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {CASE_PRIORITIES.map((p) => (
+                        <label
+                          key={p}
+                          className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-ndark-text"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filters.priorities?.includes(p) ?? false}
+                            onChange={() => togglePriority(p)}
+                            className="h-4 w-4 cursor-pointer accent-brand-600"
+                          />
+                          <span>{CASE_PRIORITY_LABELS[p]}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FilterPanelSection>
+
+                  <FilterPanelSection label="Takım">
+                    <Select
+                      value={filters.teamId ?? ''}
+                      onChange={(e) =>
+                        setFilters((f) => ({
+                          ...f,
+                          teamId: e.target.value,
+                          personId: e.target.value && f.personId ? '' : f.personId,
+                        }))
+                      }
+                      className="h-8 w-full py-1"
+                    >
+                      <option value="">Tümü</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FilterPanelSection>
+
+                  <FilterPanelSection label="Kişi">
+                    <Select
+                      value={filters.personId ?? ''}
+                      onChange={(e) => setFilters((f) => ({ ...f, personId: e.target.value }))}
+                      className="h-8 w-full py-1"
+                    >
+                      <option value="">Tümü</option>
+                      {personsForFilter.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FilterPanelSection>
+
+                  <FilterPanelSection label="Tarih">
+                    <div className="flex items-center gap-2">
+                      <TextInput
+                        type="date"
+                        value={filters.dateFrom ?? ''}
+                        onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
+                        className="h-8 flex-1 py-1"
+                      />
+                      <span className="text-xs text-slate-400">→</span>
+                      <TextInput
+                        type="date"
+                        value={filters.dateTo ?? ''}
+                        onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
+                        className="h-8 flex-1 py-1"
+                      />
+                    </div>
+                  </FilterPanelSection>
+
+                  <div className="flex items-center justify-between border-t border-slate-200 pt-3 dark:border-ndark-border">
+                    {hasActiveFilters ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        leftIcon={<X size={12} />}
+                        onClick={() => {
+                          clearFilters();
+                          close();
+                        }}
+                      >
+                        Filtreleri Temizle
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-slate-400 dark:text-ndark-muted">Aktif filtre yok</span>
+                    )}
+                    <Button size="sm" onClick={close}>
+                      Kapat
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Popover>
+
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-500">Tarih:</span>
-              <TextInput
-                type="date"
-                value={filters.dateFrom ?? ''}
-                onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
-                className="h-8 py-1"
-              />
-              <span className="text-xs text-slate-400">→</span>
-              <TextInput
-                type="date"
-                value={filters.dateTo ?? ''}
-                onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
-                className="h-8 py-1"
-              />
-            </div>
-
-            {/* Sırala — kolon başlığı tıklamasıyla senkron */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-slate-500">Sırala:</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Sırala:</span>
               <Select
                 value={`${sortKey}:${sortDir}`}
                 onChange={(e) => {
@@ -624,7 +993,6 @@ export function CasesListPage({
                     {opt.label}
                   </option>
                 ))}
-                {/* Eğer aktif kolon dropdown'da yoksa, mevcut seçimi koruyabilen bir görünüm */}
                 {!SORT_DROPDOWN_OPTIONS.some((o) => o.key === sortKey && o.dir === sortDir) && (
                   <option value={`${sortKey}:${sortDir}`}>
                     Özel: {sortKey} ({sortDir === 'asc' ? 'artan' : 'azalan'})
@@ -632,14 +1000,18 @@ export function CasesListPage({
                 )}
               </Select>
             </div>
+
+            <Badge tint="slate" icon={<Filter size={12} />}>
+              {allFiltered.length} sonuç
+            </Badge>
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                <th className="w-10 px-4 py-2.5">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-ndark-border">
+            <thead className="bg-slate-50 dark:bg-ndark-card">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                <th className="w-10 px-3 py-2">
                   <input
                     type="checkbox"
                     checked={pageItems.length > 0 && pageItems.every((c) => selected.has(c.id))}
@@ -655,23 +1027,21 @@ export function CasesListPage({
                   />
                 </th>
                 <SortableTh label="Vaka No"        sortKey="caseNumber"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Başlık"         sortKey="title"       currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Müşteri"        sortKey="accountName" currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <SortableTh label="Başlık / Müşteri" sortKey="title"     currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Tip"            sortKey="caseType"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Statü"          sortKey="status"      currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Öncelik"        sortKey="priority"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Atama"          sortKey="assignment"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="SLA"            sortKey="sla"         currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
-                <SortableTh label="Açılış"         sortKey="createdAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Son Güncelleme" sortKey="updatedAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-ndark-border/60">
               {loading &&
-                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)}
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={9} />)}
               {!loading && allFiltered.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4">
+                  <td colSpan={9} className="px-4">
                     {hasActiveFilters ? (
                       <EmptyState
                         icon={<SearchX size={22} />}
@@ -708,12 +1078,12 @@ export function CasesListPage({
                     : null;
                   const expired = Boolean(snoozeMeta?.expired);
                   const isSelected = selected.has(c.id);
-                  // Öncelik: expired (amber) > selected (brand) > default
+                  // Öncelik: expired (amber) > selected (brand) > default brand-50 hover
                   const rowBg = expired
-                    ? 'bg-amber-50 hover:bg-amber-100'
+                    ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
                     : isSelected
                     ? 'bg-brand-50/60 hover:bg-brand-50 dark:bg-brand-950/30'
-                    : 'hover:bg-slate-50';
+                    : 'hover:bg-brand-50 dark:hover:bg-brand-950/20';
                   return (
                   <tr
                     key={c.id}
@@ -730,13 +1100,22 @@ export function CasesListPage({
                         aria-label={`${c.caseNumber} seç`}
                       />
                     </Td>
-                    <Td className="font-mono text-xs text-slate-600">{c.caseNumber}</Td>
-                    <Td className="max-w-[360px] font-medium text-slate-800">
-                      <div className="truncate">{c.title}</div>
+                    <Td className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{c.caseNumber}</Td>
+                    <Td className="max-w-[360px]">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
+                        {c.title}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleAccountClick(e, { id: c.accountId, name: c.accountName })}
+                        className="mt-0.5 truncate text-left text-xs text-slate-500 underline-offset-2 hover:text-brand-700 hover:underline dark:text-ndark-muted dark:hover:text-brand-300"
+                      >
+                        {c.accountName}
+                      </button>
                       {snoozeMeta?.snoozeUntil && (
                         <div
-                          className={`mt-0.5 text-xs font-normal ${
-                            expired ? 'text-amber-700' : 'text-slate-500'
+                          className={`mt-0.5 text-xs ${
+                            expired ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 dark:text-ndark-muted'
                           }`}
                         >
                           {expired
@@ -744,15 +1123,6 @@ export function CasesListPage({
                             : `🕐 ${formatSnoozeIn(snoozeMeta.snoozeUntil)}`}
                         </div>
                       )}
-                    </Td>
-                    <Td>
-                      <button
-                        type="button"
-                        onClick={(e) => handleAccountClick(e, { id: c.accountId, name: c.accountName })}
-                        className="text-left text-slate-700 underline-offset-2 hover:text-brand-700 hover:underline"
-                      >
-                        {c.accountName}
-                      </button>
                     </Td>
                     <Td>
                       <CaseTypeBadge type={c.caseType} />
@@ -763,22 +1133,17 @@ export function CasesListPage({
                     <Td>
                       <PriorityBadge priority={c.priority} />
                     </Td>
-                    <Td className="text-slate-700">
-                      {c.assignedPersonName ?? c.assignedTeamName ?? <span className="text-slate-400">—</span>}
+                    <Td className="text-slate-700 dark:text-ndark-text">
+                      {c.assignedPersonName ?? c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
                     </Td>
                     <Td>
-                      {c.slaViolation ? (
-                        <Badge tint="rose">İhlal</Badge>
-                      ) : c.slaPausedAt ? (
-                        <Badge tint="amber">Duraklatıldı</Badge>
-                      ) : c.slaResolutionDueAt ? (
-                        <span className="text-xs text-slate-600">{formatRelative(c.slaResolutionDueAt)}</span>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
+                      <SlaPill
+                        slaViolation={c.slaViolation}
+                        slaPausedAt={c.slaPausedAt}
+                        slaResolutionDueAt={c.slaResolutionDueAt}
+                      />
                     </Td>
-                    <Td className="text-xs text-slate-500">{formatDateTime(c.createdAt)}</Td>
-                    <Td className="text-xs text-slate-500">
+                    <Td className="text-xs text-slate-500 dark:text-ndark-muted">
                       <span title={formatDateTime(c.updatedAt)}>{formatRelative(c.updatedAt)}</span>
                     </Td>
                   </tr>
@@ -935,7 +1300,7 @@ function SortableTh({
 }
 
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={`whitespace-nowrap px-4 py-3 ${className ?? ''}`}>{children}</td>;
+  return <td className={`whitespace-nowrap px-3 py-2 ${className ?? ''}`}>{children}</td>;
 }
 
 // Snooze rozetleri için TR-özel relative format. formatRelative'i kullanmadık
@@ -1161,38 +1526,124 @@ function InboxTabButton({
   );
 }
 
-function KpiTile({ label, value, tint }: { label: string; value: number; tint: string }) {
-  return (
-    <div className={`rounded-xl p-4 ring-1 ring-inset ${tint}`}>
-      <div className="text-xs font-medium uppercase tracking-wide opacity-80">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
-  );
-}
+type KpiTone = 'slate' | 'brand' | 'rose' | 'amber' | 'emerald';
 
-function FilterSelect({
+const KPI_TONE: Record<KpiTone, { iconBg: string; valueColor: string }> = {
+  slate: {
+    iconBg: 'bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-400',
+    valueColor: 'text-slate-900 dark:text-ndark-text',
+  },
+  brand: {
+    iconBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
+    valueColor: 'text-slate-900 dark:text-ndark-text',
+  },
+  rose: {
+    iconBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+    valueColor: 'text-rose-700 dark:text-rose-300',
+  },
+  amber: {
+    iconBg: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+    valueColor: 'text-slate-900 dark:text-ndark-text',
+  },
+  emerald: {
+    iconBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+    valueColor: 'text-slate-900 dark:text-ndark-text',
+  },
+};
+
+function KpiTile({
   label,
   value,
-  onChange,
-  options,
-  renderOption,
+  hint,
+  icon,
+  tone = 'slate',
+  onClick,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  renderOption?: (o: string) => string;
+  value: number;
+  hint?: string;
+  icon: React.ReactNode;
+  tone?: KpiTone;
+  onClick?: () => void;
 }) {
+  const t = KPI_TONE[tone];
+  const baseClass = cn(
+    'flex items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-slate-200 shadow-card',
+    'dark:bg-ndark-card dark:ring-ndark-border',
+  );
+  const interactiveClass = onClick
+    ? 'cursor-pointer transition-colors hover:ring-brand-300 hover:bg-slate-50 dark:hover:ring-brand-700 dark:hover:bg-ndark-bg'
+    : '';
+  const inner = (
+    <>
+      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', t.iconBg)}>
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+          {label}
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <span className={cn('text-xl font-semibold tabular-nums', t.valueColor)}>{value}</span>
+          {hint && <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{hint}</span>}
+        </div>
+      </div>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={cn(baseClass, interactiveClass)}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={baseClass}>{inner}</div>;
+}
+
+/**
+ * SLA pill — yalnızca anlamlı durumlarda renkli pill.
+ * - İhlal → RED kalın
+ * - Duraklatıldı → slate
+ * - Kalan süre ≤ 2 saat → AMBER (uyarı)
+ * - Normal süre veya tarihsiz → "—" (pill yok)
+ *
+ * Backend SLA başlangıç süresini göndermediği için "uyarı" eşiği yaklaşık (<2 sa);
+ * gerçek %80 hesabı için backend desteği gerekir.
+ */
+function SlaPill({
+  slaViolation,
+  slaPausedAt,
+  slaResolutionDueAt,
+}: {
+  slaViolation: boolean;
+  slaPausedAt?: string;
+  slaResolutionDueAt?: string;
+}) {
+  if (slaViolation) {
+    return <Badge tint="rose"><span className="font-bold">İhlal</span></Badge>;
+  }
+  if (slaPausedAt) {
+    return <Badge tint="slate">Duraklatıldı</Badge>;
+  }
+  if (!slaResolutionDueAt) {
+    return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;
+  }
+  const remainingMs = new Date(slaResolutionDueAt).getTime() - Date.now();
+  if (remainingMs > 0 && remainingMs <= 2 * 60 * 60 * 1000) {
+    return <Badge tint="amber">{formatRelative(slaResolutionDueAt)}</Badge>;
+  }
+  // Normal aralık — sade dash, pill yok. Sortable kaldı: BE remaining hesaplıyor.
+  return <span className="text-xs text-slate-400 dark:text-ndark-muted">—</span>;
+}
+
+// Filtrele popover'ı içindeki etiketli grup wrapper'ı.
+function FilterPanelSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs font-medium text-slate-500">{label}:</span>
-      <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-8 py-1">
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {renderOption ? renderOption(o) : o || 'Tümü'}
-          </option>
-        ))}
-      </Select>
+    <div>
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        {label}
+      </div>
+      {children}
     </div>
   );
 }

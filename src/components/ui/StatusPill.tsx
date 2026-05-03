@@ -1,39 +1,36 @@
 import type { CasePriority, CaseStatus, CaseType } from '@/features/cases/types';
 import { CASE_PRIORITY_LABELS, CASE_TYPE_LABELS } from '@/features/cases/types';
 import { Badge, type BadgeTint } from './Badge';
+import { cn } from './cn';
 
-// Spec 11.1 renk paleti
+// Renk kuralı: yalnızca anlamlı durumlar renkli (Eskalasyon/Yeniden Açıldı → AMBER,
+// Çözüldü → GREEN). Diğer statüler nötr slate. Tip rozetleri outline-only —
+// sayfada renk gürültüsü çıkarmasınlar.
 const STATUS_TINT: Record<CaseStatus, BadgeTint> = {
-  'Açık':                'blue',
-  'İncelemede':          'amber',
+  'Açık':                'slate',
+  'İncelemede':          'slate',
   '3rdPartyBekleniyor':  'slate',
-  'Eskalasyon':          'rose',
+  'Eskalasyon':          'amber',
   'Çözüldü':             'emerald',
-  'YenidenAcildi':       'violet',
+  'YenidenAcildi':       'amber',
   'İptalEdildi':         'slate',
 };
 
 const STATUS_DOT: Record<CaseStatus, string> = {
-  'Açık':                'bg-blue-500',
-  'İncelemede':          'bg-amber-500',
+  'Açık':                'bg-slate-500',
+  'İncelemede':          'bg-slate-500',
   '3rdPartyBekleniyor':  'bg-slate-500',
-  'Eskalasyon':          'bg-rose-500',
+  'Eskalasyon':          'bg-amber-500',
   'Çözüldü':             'bg-emerald-500',
-  'YenidenAcildi':       'bg-violet-500',
+  'YenidenAcildi':       'bg-amber-500',
   'İptalEdildi':         'bg-slate-300',
 };
 
 const PRIORITY_TINT: Record<CasePriority, BadgeTint> = {
   Low:      'slate',
-  Medium:   'blue',
+  Medium:   'slate',
   High:     'amber',
   Critical: 'rose',
-};
-
-const TYPE_TINT: Record<CaseType, BadgeTint> = {
-  GeneralSupport:    'teal',
-  ProactiveTracking: 'violet',
-  Churn:             'rose',
 };
 
 const STATUS_LABELS: Record<CaseStatus, string> = {
@@ -59,6 +56,18 @@ export function PriorityBadge({ priority }: { priority: CasePriority }) {
   return <Badge tint={PRIORITY_TINT[priority]}>{CASE_PRIORITY_LABELS[priority]}</Badge>;
 }
 
+// Outline-only — fill yok, sadece kenarlık. Type bilgisi alıcı/atayan/SLA'dan
+// daha az önemli; zayıf kontrast bilinçli tercih.
 export function CaseTypeBadge({ type }: { type: CaseType }) {
-  return <Badge tint={TYPE_TINT[type]}>{CASE_TYPE_LABELS[type]}</Badge>;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
+        'border-slate-300 text-slate-600',
+        'dark:border-slate-600 dark:text-slate-400',
+      )}
+    >
+      {CASE_TYPE_LABELS[type]}
+    </span>
+  );
 }
