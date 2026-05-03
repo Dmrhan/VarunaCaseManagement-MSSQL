@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
+import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
@@ -148,6 +149,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {user && <MentionBellBadge onCaseClick={openCase} />}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}

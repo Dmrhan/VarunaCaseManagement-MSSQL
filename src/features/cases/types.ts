@@ -384,6 +384,28 @@ export interface Case {
   callLogs: CaseCallLog[];
 }
 
+// @mention — Faz 1.5 Madde 3
+export interface MentionableUser {
+  userId: string;
+  personId: string | null;
+  name: string;
+  email: string;
+  teamName: string | null;
+}
+
+export interface UnreadMention {
+  id: string;
+  caseId: string;
+  noteId: string;
+  mentionedBy: string;
+  createdAt: string;
+  case: {
+    caseNumber: string;
+    title: string;
+    accountName: string;
+  };
+}
+
 // Snooze sebepleri — backend enum identifier ile eşleşir (CaseDetail UI etiketler).
 export type SnoozeReason = 'CustomerWillCall' | 'WaitingThirdParty' | 'Reminder';
 

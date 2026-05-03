@@ -556,6 +556,7 @@ model Case {
   approvals     CaseApproval[]
   notifications CaseNotification[]
   aiSuggestions AISuggestion[]
+  mentions      CaseMention[]
 
   @@index([accountId])
   @@index([companyId])
@@ -569,9 +570,12 @@ model Case {
 }
 
 // CaseActivity — her değişiklik kaydı (audit trail)
+// companyId Case'den denormalize — top-level audit/raporlama sorgularında
+// JOIN gerektirmesin, multi-tenant scope filter doğrudan uygulansın.
 model CaseActivity {
   id         String                 @id @default(cuid())
   caseId     String
+  companyId  String
   action     String // human-readable
   actionType CaseHistoryActionType?
   fieldName  String?
@@ -584,12 +588,14 @@ model CaseActivity {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([at])
 }
 
 model CaseNote {
   id         String         @id @default(cuid())
   caseId     String
+  companyId  String
   authorName String
   content    String
   visibility NoteVisibility @default(Internal)
@@ -598,11 +604,13 @@ model CaseNote {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 model CaseAttachment {
   id         String   @id @default(cuid())
   caseId     String
+  companyId  String
   fileName   String
   fileSize   Int
   mimeType   String
@@ -613,11 +621,13 @@ model CaseAttachment {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 model CaseCallLog {
   id                  String          @id @default(cuid())
   caseId              String
+  companyId           String
   callDate            DateTime
   durationMin         Int
   callDisposition     CallDisposition
@@ -631,6 +641,7 @@ model CaseCallLog {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([callDate])
 }
 
@@ -638,6 +649,7 @@ model CaseCallLog {
 model CaseOfferedSolution {
   id              String       @id @default(cuid())
   caseId          String
+  companyId       String
   solutionDefId   String
   offeredAt       DateTime     @default(now())
   offeredBy       String
@@ -649,12 +661,14 @@ model CaseOfferedSolution {
   solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id])
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 // CaseApproval — Supervisor onay akışı
 model CaseApproval {
   id             String           @id @default(cuid())
   caseId         String
+  companyId      String
   approvalType   String // "ResolveCritical", "EscalateDirector", vb.
   requestedBy    String
   requestedAt    DateTime         @default(now())
@@ -666,6 +680,7 @@ model CaseApproval {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([decision])
 }
 
@@ -673,6 +688,7 @@ model CaseApproval {
 model CaseNotification {
   id        String              @id @default(cuid())
   caseId    String
+  companyId String
   eventType String // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
   channel   NotificationChannel
   recipient String // Person.id veya email
@@ -683,13 +699,41 @@ model CaseNotification {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([recipient, readAt])
+}
+
+// CaseMention — Faz 1.5 Madde 3.
+// Notlarda @mention edilen kullanıcılar için audit + bildirim kaydı.
+// noteId CaseNote.id; not silinirse mention satırı kalır (raporlama/audit).
+// companyId zorunlu — multi-tenant scope filter (top-level "kullanıcının
+// PARAM mentionları" sorgusu için JOIN gerektirmez).
+//
+// Spec §4'teki `sourceType` (note | comment_reply) bu fazda atlanıyor:
+// yalnızca CaseNote desteği. comment-reply geldiğinde tablo yapısı
+// `sourceType + sourceId` olarak yeniden modellenir (migration ile).
+model CaseMention {
+  id              String    @id @default(cuid())
+  caseId          String
+  noteId          String
+  companyId       String
+  mentionedUserId String // User.id — auth identity (UserCompany erişim sahibi)
+  mentionedBy     String // User.id — etiketleyen kullanıcı
+  seenAt          DateTime? // null = henüz görülmedi → header bell badge
+  createdAt       DateTime  @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([mentionedUserId])
+  @@index([companyId])
 }
 
 // AISuggestion — AI önerilerinin audit kaydı
 model AISuggestion {
   id              String   @id @default(cuid())
   caseId          String
+  companyId       String
   suggestionType  String // "category", "priority", "resolution", vb.
   suggestedValue  String
   confidenceScore Float?
@@ -700,4 +744,5 @@ model AISuggestion {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }
