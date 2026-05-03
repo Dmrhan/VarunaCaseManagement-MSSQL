@@ -29,19 +29,27 @@ const CASE_TYPES: { value: string; label: string }[] = [
 ];
 
 export function AdminFieldsPage() {
+  const companies = useMemo(() => lookupService.companies(), []);
   const [items, setItems] = useState<FieldDefinition[]>([]);
-  const [filterCompany, setFilterCompany] = useState<string>('');
+  // Phase 4c: backend artık companyId zorunlu — "Tümü" seçeneği kaldırıldı.
+  // İlk render'da kullanıcının erişebildiği ilk şirket seçilir; companies boşsa
+  // (auto-provisioned user, henüz atama yok) UI bilgilendirir.
+  const [filterCompany, setFilterCompany] = useState<string>(companies[0]?.id ?? '');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
-  const companies = useMemo(() => lookupService.companies(), []);
 
   async function refresh() {
+    if (!filterCompany) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      setItems(await adminService.fieldDefinitions.list(filterCompany || undefined));
+      setItems(await adminService.fieldDefinitions.list(filterCompany));
     } catch (e) {
       setError((e as Error).message ?? 'Bilinmeyen hata');
     } finally {
@@ -97,9 +105,10 @@ export function AdminFieldsPage() {
             <select
               value={filterCompany}
               onChange={(e) => setFilterCompany(e.target.value)}
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-bg"
+              disabled={companies.length === 0}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs disabled:opacity-50 dark:border-ndark-border dark:bg-ndark-bg"
             >
-              <option value="">Tümü</option>
+              {companies.length === 0 && <option value="">— atanmış şirket yok —</option>}
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
