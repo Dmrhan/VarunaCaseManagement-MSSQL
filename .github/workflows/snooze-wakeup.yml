@@ -1,0 +1,17 @@
+name: Snooze Wakeup Cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  wakeup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger snooze wakeup
+        run: |
+          curl -X POST \
+            -H "x-uptime-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            https://varuna-case-management.vercel.app/api/cases/cron/snooze-wakeup
