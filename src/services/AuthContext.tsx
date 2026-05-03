@@ -19,6 +19,8 @@ export interface AppUser {
   fullName: string;
   role: UserRole;
   isActive: boolean;
+  /** Person bağlantısı — Agent KPI'ları (Bana Atanan vb.) için frontline kullanıcılarda dolu, SystemAdmin'de null. */
+  personId: string | null;
 }
 
 interface AuthState {

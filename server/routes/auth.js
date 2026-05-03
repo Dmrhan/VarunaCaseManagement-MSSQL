@@ -16,6 +16,7 @@ router.get('/me', verifyJwt, (req, res) => {
     fullName: req.user.fullName,
     role: req.user.role,
     isActive: req.user.isActive,
+    personId: req.user.personId ?? null,
   });
 });
 

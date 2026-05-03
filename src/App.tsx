@@ -382,6 +382,7 @@ export default function App() {
               onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
               patternCasesFilter={patternCasesFilter}
               onClearPatternFilter={() => setPatternCasesFilter(null)}
+              onShowPatterns={() => setView('analytics-patterns')}
             />
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
