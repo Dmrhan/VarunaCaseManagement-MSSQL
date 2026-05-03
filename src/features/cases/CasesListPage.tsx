@@ -60,6 +60,12 @@ interface CasesListPageProps {
   /** App seviyesinden gelen account ID — varsa QuickCaseModal pre-fill ile açılır */
   pendingQuickPrefill?: string | null;
   onQuickPrefillConsumed?: () => void;
+  /**
+   * Örüntü alarmından gelen vaka filtresi (Faz 1.5 Madde 5).
+   * Verilirse liste yalnızca bu caseId'leri gösterir + üstte sarı banner.
+   */
+  patternCasesFilter?: { caseIds: string[]; label: string } | null;
+  onClearPatternFilter?: () => void;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -173,6 +179,8 @@ export function CasesListPage({
   onOpenCustomerSearch,
   pendingQuickPrefill,
   onQuickPrefillConsumed,
+  patternCasesFilter,
+  onClearPatternFilter,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
@@ -270,14 +278,20 @@ export function CasesListPage({
   // "Ertelendi" sekmesinde BE zaten "expired önce, snoozeUntil ASC" sırasını
   // verdiği için frontend sort'u devre dışı (kullanıcı kafa karışıklığı olmasın).
   const sortedFiltered = useMemo(() => {
-    if (inboxTab === 'later') return allFiltered;
-    const arr = [...allFiltered];
+    // Örüntü alarmından gelen filter — sadece o caseId'ler kalır.
+    let base = allFiltered;
+    if (patternCasesFilter?.caseIds?.length) {
+      const allowed = new Set(patternCasesFilter.caseIds);
+      base = base.filter((c) => allowed.has(c.id));
+    }
+    if (inboxTab === 'later') return base;
+    const arr = [...base];
     arr.sort((a, b) => {
       const cmp = compareCases(a, b, sortKey);
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [allFiltered, sortKey, sortDir, inboxTab]);
+  }, [allFiltered, sortKey, sortDir, inboxTab, patternCasesFilter]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -385,6 +399,24 @@ export function CasesListPage({
 
   return (
     <div className="space-y-4">
+      {patternCasesFilter && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          <div>
+            <strong>Örüntü filtresi:</strong> {patternCasesFilter.label} —{' '}
+            <span className="font-mono">{patternCasesFilter.caseIds.length}</span> vaka
+          </div>
+          {onClearPatternFilter && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<X size={12} />}
+              onClick={onClearPatternFilter}
+            >
+              Filtreyi Kaldır
+            </Button>
+          )}
+        </div>
+      )}
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Vakalar</h1>

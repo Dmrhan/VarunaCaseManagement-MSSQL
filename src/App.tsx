@@ -56,6 +56,8 @@ export default function App() {
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
+  // Örüntü alarmından "Vakaları Gör" tıklamasında gelen filter (caseId listesi).
+  const [patternCasesFilter, setPatternCasesFilter] = useState<{ caseIds: string[]; label: string } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
@@ -355,11 +357,20 @@ export default function App() {
               onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
               pendingQuickPrefill={pendingQuickPrefill}
               onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
+              patternCasesFilter={patternCasesFilter}
+              onClearPatternFilter={() => setPatternCasesFilter(null)}
             />
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
           {view === 'analytics-ai-usage' && <AIUsagePage />}
-          {view === 'analytics-patterns' && <PatternsPage onShowCases={() => setView('cases')} />}
+          {view === 'analytics-patterns' && (
+            <PatternsPage
+              onShowCases={(caseIds, category) => {
+                setPatternCasesFilter({ caseIds, label: category });
+                setView('cases');
+              }}
+            />
+          )}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
