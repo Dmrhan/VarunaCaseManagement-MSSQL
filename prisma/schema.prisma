@@ -235,6 +235,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   companies UserCompany[]
+  reminders CaseReminder[]
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -582,6 +583,7 @@ model Case {
   notifications CaseNotification[]
   aiSuggestions AISuggestion[]
   mentions      CaseMention[]
+  reminders     CaseReminder[]
 
   @@index([accountId])
   @@index([companyId])
@@ -591,7 +593,36 @@ model Case {
   @@index([caseType])
   @@index([createdAt])
   @@index([slaResolutionDueAt])
+  @@index([slaResponseDueAt])
   @@index([snoozeUntil])
+}
+
+// CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
+// gelecekte hatırlamak istediğinde bu kayıt oluşur. Cron veya kullanıcı oturumu
+// tarafından remindAt anında bildirim üretilir; sentAt sıfırlanma anına işaret eder.
+//
+// caseId opsiyonel — vakaya bağlı değil de kişisel bir notu hatırlatmak için
+// boş bırakılabilir (örn. "Aylık raporları gözden geçir").
+//
+// companyId NOT NULL — Case'den denormalize ya da vakasız reminder'da
+// kullanıcının ilk allowedCompanyId'sinden dolar. Multi-tenant scope filter
+// JOIN'siz çalışabilsin diye (Faz 1.5 child denorm pattern'i).
+model CaseReminder {
+  id        String    @id @default(cuid())
+  caseId    String?
+  userId    String
+  companyId String
+  remindAt  DateTime
+  message   String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, remindAt])
+  @@index([caseId])
+  @@index([companyId])
 }
 
 // CaseActivity — her değişiklik kaydı (audit trail)
@@ -668,6 +699,7 @@ model CaseCallLog {
   @@index([caseId])
   @@index([companyId])
   @@index([callDate])
+  @@index([nextFollowupDate])
 }
 
 // CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)

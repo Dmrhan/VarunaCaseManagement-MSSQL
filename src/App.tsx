@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
+  Calendar,
   Inbox,
   Keyboard,
   LayoutDashboard,
@@ -18,7 +19,9 @@ import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
+import { MyCalendarPage } from './features/my/MyCalendarPage';
 import { analyticsService } from './services/analyticsService';
+import { myService } from './services/myService';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
@@ -39,7 +42,7 @@ import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSource
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-detail' | AdminView;
+type View = 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -67,6 +70,8 @@ export default function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   // Aktif örüntü alarm sayısı — sidebar badge için 60s polling.
   const [activePatternCount, setActivePatternCount] = useState(0);
+  // Bugün için takvim olay sayısı — sidebar Takvimim badge'i.
+  const [todayCalendarCount, setTodayCalendarCount] = useState(0);
 
   const { theme, toggle: toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
@@ -106,6 +111,39 @@ export default function App() {
       window.removeEventListener('app:patterns-changed', onChanged);
     };
   }, [user?.id, user?.role]);
+
+  // Takvim — sidebar badge yalnız BUGÜNÜN MANUEL HATIRLATICI sayısı.
+  // Snooze/SLA/followup endpoint maliyeti yüksek (case JOIN'leri); bu sayım
+  // performans sebebiyle sadece reminder türünü çeker. 10 dk polling +
+  // 'app:calendar-changed' custom event'i ile reminder create sonrası anlık refresh.
+  useEffect(() => {
+    if (!user) {
+      setTodayCalendarCount(0);
+      return;
+    }
+    let alive = true;
+    async function fetchCount() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      try {
+        const events = await myService.getCalendar(today, tomorrow, ['reminder']);
+        if (alive) setTodayCalendarCount(events.length);
+      } catch {
+        /* apiFetch toast gösterdi; sessiz devam */
+      }
+    }
+    void fetchCount();
+    const id = window.setInterval(fetchCount, 10 * 60_000);
+    const onChanged = () => void fetchCount();
+    window.addEventListener('app:calendar-changed', onChanged);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      window.removeEventListener('app:calendar-changed', onChanged);
+    };
+  }, [user?.id]);
 
   useHotkey('g', () => setGPressed(true));
   useHotkey('v', () => {
@@ -277,6 +315,52 @@ export default function App() {
               );
             })}
 
+            {/* ÇALIŞMA ALANIM — kişisel ekranlar (Takvimim). Tüm rollere açık. */}
+            {user && (
+              <>
+                {sidebarExpanded && (
+                  <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
+                    Çalışma Alanım
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('my-calendar')}
+                  className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                  } ${
+                    view === 'my-calendar'
+                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                  }`}
+                  title={
+                    todayCalendarCount > 0
+                      ? `Takvimim (${todayCalendarCount} bugün)`
+                      : 'Takvimim'
+                  }
+                >
+                  <span className="relative">
+                    <Calendar size={16} />
+                    {todayCalendarCount > 0 && !sidebarExpanded && (
+                      <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
+                        {todayCalendarCount > 9 ? '9+' : todayCalendarCount}
+                      </span>
+                    )}
+                  </span>
+                  {sidebarExpanded && (
+                    <>
+                      <span className="flex-1 text-left">Takvimim</span>
+                      {todayCalendarCount > 0 && (
+                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
+                          {todayCalendarCount > 99 ? '99+' : todayCalendarCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+
             {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
             {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
               <button
@@ -396,6 +480,7 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
