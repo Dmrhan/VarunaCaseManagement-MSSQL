@@ -206,6 +206,16 @@ enum PatternAlertStatus {
   dismissed
 }
 
+// KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
+// AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
+enum KnowledgeSourceType {
+  PastCases    // Geçmiş vakalar (Case tablosu)
+  ProductDocs  // Ürün/kategori dokümanları (CategoryDef + manuel doc)
+  SLARules     // SLA kuralları (SLAPolicy)
+  Checklists   // Kontrol listeleri (ChecklistTemplate)
+  ManualEntry  // Admin'in elle eklediği özel kayıtlar
+}
+
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
@@ -707,6 +717,25 @@ model CaseNotification {
   @@index([caseId])
   @@index([companyId])
   @@index([recipient, readAt])
+}
+
+// KnowledgeSource — Faz 1.5 Madde 6.
+// "AI neye bakıyor?" sorusunu şeffaf hale getiren admin kayıt defteri.
+// Ne otomatik ingestion ne embedding — sadece bilgi kaynağı kataloğu.
+// `contentCount` admin'in rapor ettiği veya seed sırasında ilgili tablodan
+// (Case, SLAPolicy, ChecklistTemplate, CategoryDef) sayılan değer.
+model KnowledgeSource {
+  id           String              @id @default(cuid())
+  companyId    String
+  name         String
+  sourceType   KnowledgeSourceType
+  contentCount Int                 @default(0)
+  description  String?
+  isActive     Boolean             @default(true)
+  lastUpdated  DateTime            @default(now())
+  createdAt    DateTime            @default(now())
+
+  @@index([companyId])
 }
 
 // PatternAlert — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
