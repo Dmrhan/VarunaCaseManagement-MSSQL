@@ -23,12 +23,43 @@ export interface AIUsageReport {
 
 export type AIUsagePeriod = '7d' | '30d';
 
+// Pattern alerts — Faz 1.5 Madde 5 (Bekçi rolü §5.5)
+export interface PatternAlert {
+  id: string;
+  companyId: string;
+  category: string;
+  caseCount: number;
+  windowMinutes: number;
+  detectedAt: string;
+  caseIds: string[];
+  status: 'active' | 'dismissed';
+  dismissedBy: string | null;
+  dismissedAt: string | null;
+}
+
 export const analyticsService = {
   async getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport | undefined> {
     return apiFetch<AIUsageReport>(
       `/api/analytics/ai-usage?period=${period}`,
       undefined,
       'AI kullanım raporu yüklenemedi',
+    );
+  },
+
+  async listPatterns(status: 'active' | 'all' = 'active'): Promise<PatternAlert[]> {
+    const data = await apiFetch<{ value: PatternAlert[] }>(
+      `/api/analytics/patterns?status=${status}`,
+      undefined,
+      'Örüntü alarmları yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  async dismissPattern(id: string): Promise<{ id: string; status: string } | undefined> {
+    return apiFetch(
+      `/api/analytics/patterns/${id}/dismiss`,
+      { method: 'PATCH' },
+      'Alarm kapatılamadı',
     );
   },
 };

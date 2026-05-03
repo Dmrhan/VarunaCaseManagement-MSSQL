@@ -200,6 +200,12 @@ enum SnoozeReason {
   Reminder          @map("reminder")
 }
 
+// PatternAlert durumu — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+enum PatternAlertStatus {
+  active
+  dismissed
+}
+
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
@@ -701,6 +707,27 @@ model CaseNotification {
   @@index([caseId])
   @@index([companyId])
   @@index([recipient, readAt])
+}
+
+// PatternAlert — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+// Cron her 15 dk son 60 dk'daki vakaları (companyId, category) ile gruplar;
+// 5+ vaka varsa active alarm yarat. Yönetici dismiss eder. Read-only mode:
+// otomatik parent vaka açma yok — sadece sinyal.
+model PatternAlert {
+  id            String             @id @default(cuid())
+  companyId     String
+  category      String
+  caseCount     Int
+  windowMinutes Int                @default(60)
+  detectedAt    DateTime           @default(now())
+  caseIds       Json // string[] — tetikleyici vaka id'leri
+  status        PatternAlertStatus @default(active)
+  dismissedBy   String? // User.id
+  dismissedAt   DateTime?
+
+  @@index([companyId])
+  @@index([companyId, detectedAt])
+  @@index([status])
 }
 
 // AIUsageLog — Faz 1.5 Madde 7.
