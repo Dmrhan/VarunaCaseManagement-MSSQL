@@ -277,7 +277,9 @@ export const personRepo = {
 // ─────────────────────────────────────────────────────────────────
 export const categoryRepo = {
   async list() {
-    // Tüm root + child kategoriler — frontend `subCategories` adıyla bekliyor
+    // Tüm root + child kategoriler — frontend `subCategories` adıyla bekliyor.
+    // companyId döndürülür; null = sistem geneli (eski seed verisi). Route
+    // handler bu alana göre allowedCompanyIds filtresi uygular.
     const all = await prisma.categoryDef.findMany({
       orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
       include: { children: { orderBy: { name: 'asc' } } },
@@ -288,6 +290,7 @@ export const categoryRepo = {
         id: c.id,
         name: c.name,
         description: c.description,
+        companyId: c.companyId,
         isActive: c.isActive,
         // Prisma relation `children` → frontend `subCategories`
         subCategories: (c.children ?? []).map((s) => ({
@@ -298,14 +301,21 @@ export const categoryRepo = {
       }));
   },
   async createParent(input) {
+    // Aynı şirket × parent yok scope'unda isim duplication kontrol edilir.
+    // Farklı şirketlerin aynı isimde kategorisi olması serbest.
     const exists = await prisma.categoryDef.findFirst({
-      where: { parentId: null, name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: {
+        parentId: null,
+        companyId: input.companyId ?? null,
+        name: { equals: input.name.trim(), mode: 'insensitive' },
+      },
     });
     if (exists) throw new AdminError('Aynı isimde kategori zaten mevcut.');
     return prisma.categoryDef.create({
       data: {
         name: input.name.trim(),
         description: input.description?.trim() || null,
+        companyId: input.companyId ?? null,
         isActive: input.isActive ?? true,
       },
     });

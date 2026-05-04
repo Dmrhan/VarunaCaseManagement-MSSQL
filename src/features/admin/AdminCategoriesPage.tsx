@@ -20,6 +20,8 @@ import {
   type CategoryInput,
   type SubCategoryInput,
 } from '@/services/adminService';
+import { lookupService } from '@/services/caseService';
+import { useAuth } from '@/services/AuthContext';
 import type { CaseCategoryDef } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { CATEGORIES_HELP } from './helpContents';
@@ -482,7 +484,18 @@ function CategoryEditModal({
   onClose: () => void;
   onSaved: (newId: string | null) => void;
 }) {
-  const [form, setForm] = useState<CategoryInput>({ name: '', description: '', isActive: true });
+  const { user } = useAuth();
+  const isSystemAdmin = user?.role === 'SystemAdmin';
+  // Lookup'tan kullanıcının erişebildiği şirketler — Admin için per-company kategori,
+  // SystemAdmin için ek olarak "Sistem geneli" seçeneği (companyId=null) sunulur.
+  const companies = useMemo(() => lookupService.companies(), []);
+
+  const [form, setForm] = useState<CategoryInput>({
+    name: '',
+    description: '',
+    isActive: true,
+    companyId: companies[0]?.id ?? null,
+  });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -494,13 +507,23 @@ function CategoryEditModal({
       void (async () => {
         const item = await adminService.categories.get(editingId);
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+          setForm({
+            name: item.name,
+            description: item.description ?? '',
+            isActive: item.isActive,
+            companyId: item.companyId ?? null,
+          });
         }
       })();
     } else {
-      setForm({ name: '', description: '', isActive: true });
+      setForm({
+        name: '',
+        description: '',
+        isActive: true,
+        companyId: companies[0]?.id ?? null,
+      });
     }
-  }, [open, mode, editingId]);
+  }, [open, mode, editingId, companies]);
 
   async function handleSave() {
     setSubmitting(true);
@@ -509,6 +532,7 @@ function CategoryEditModal({
       name: form.name.trim(),
       description: form.description?.trim() || undefined,
       isActive: form.isActive,
+      companyId: form.companyId ?? null,
     };
     const r =
       mode === 'create'
@@ -534,7 +558,12 @@ function CategoryEditModal({
     });
   }
 
-  const canSubmit = form.name.trim().length > 0 && !submitting;
+  // Şirket seçimi zorunlu — Admin'in companyId olmadan kategori açması yasak (BE 403).
+  // SystemAdmin için form.companyId === null serbest (sistem geneli).
+  const canSubmit =
+    form.name.trim().length > 0 &&
+    (isSystemAdmin || !!form.companyId) &&
+    !submitting;
 
   return (
     <Modal
@@ -554,6 +583,35 @@ function CategoryEditModal({
       }
     >
       <div className="space-y-4">
+        {/*
+          Şirket picker — kategori multi-tenant. Admin yalnız kendi şirket(ler)inde
+          kategori açabilir. SystemAdmin için ek olarak "Sistem geneli" seçeneği
+          (companyId=null) — cross-company şablon.
+        */}
+        <Field label="Şirket" required>
+          <select
+            value={form.companyId ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value || null }))}
+            disabled={mode === 'edit'}
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+          >
+            {isSystemAdmin && <option value="">Sistem geneli (tüm şirketler)</option>}
+            {companies.length === 0 && !isSystemAdmin && (
+              <option value="">— atanmış şirket yok —</option>
+            )}
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          {mode === 'edit' && (
+            <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
+              Var olan kategorinin şirketi değiştirilemez.
+            </p>
+          )}
+        </Field>
+
         <Field label="Kategori Adı" required>
           <TextInput
             autoFocus
