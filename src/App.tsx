@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
@@ -13,105 +13,36 @@ import {
   Star,
   Sun,
 } from 'lucide-react';
-// Eager — sık kullanılan, ilk yükleme kritik:
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
+import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
+import { AIUsagePage } from './features/analytics/AIUsagePage';
+import { PatternsPage } from './features/analytics/PatternsPage';
+import { QAScoresPage } from './features/analytics/QAScoresPage';
+import { MyCalendarPage } from './features/my/MyCalendarPage';
 import { MyHomePage } from './features/my/MyHomePage';
-import { CustomerCardModal } from './features/customers/CustomerCardModal';
-import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
-import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
-import { Skeleton, MetricTileSkeleton } from './components/ui/Skeleton';
-// AdminLayout statik — named export'ları (AdminView tip union, isAdminView)
-// App.tsx tip kontrolünde kullanılıyor; lazy yaparsak tip silsilesi kopar.
-// İçindeki 11 admin page lazy.
-import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { analyticsService } from './services/analyticsService';
 import { myService } from './services/myService';
+import { CustomerCardModal } from './features/customers/CustomerCardModal';
+import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
+import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
+import { AdminDocumentsPage } from './features/admin/AdminDocumentsPage';
+import { AdminTeamsPage } from './features/admin/AdminTeamsPage';
+import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
+import { AdminSlaPage } from './features/admin/AdminSlaPage';
+import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
+import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
+import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
 import { useAuth } from './services/AuthContext';
 
-// ─── Lazy chunk'lar — vite.config.ts manualChunks ile gruplanır ───
-// Named export'lu bileşenler için `.then(m => ({ default: m.X }))` kalıbı şart.
-
-// Analytics chunk (Supervisor+ rolüne özel — frontline indirmesin):
-const CaseAnalyticsPage = lazy(() =>
-  import('./features/analytics/CaseAnalyticsPage').then((m) => ({ default: m.CaseAnalyticsPage })),
-);
-const AIUsagePage = lazy(() =>
-  import('./features/analytics/AIUsagePage').then((m) => ({ default: m.AIUsagePage })),
-);
-const PatternsPage = lazy(() =>
-  import('./features/analytics/PatternsPage').then((m) => ({ default: m.PatternsPage })),
-);
-const QAScoresPage = lazy(() =>
-  import('./features/analytics/QAScoresPage').then((m) => ({ default: m.QAScoresPage })),
-);
-
-// Calendar chunk — modal-benzeri kullanım, az açılır:
-const MyCalendarPage = lazy(() =>
-  import('./features/my/MyCalendarPage').then((m) => ({ default: m.MyCalendarPage })),
-);
-
-// Admin chunk — yalnız Admin/SystemAdmin (11 page tek chunk):
-const AdminThirdPartyPage = lazy(() =>
-  import('./features/admin/AdminThirdPartyPage').then((m) => ({ default: m.AdminThirdPartyPage })),
-);
-const AdminDocumentsPage = lazy(() =>
-  import('./features/admin/AdminDocumentsPage').then((m) => ({ default: m.AdminDocumentsPage })),
-);
-const AdminTeamsPage = lazy(() =>
-  import('./features/admin/AdminTeamsPage').then((m) => ({ default: m.AdminTeamsPage })),
-);
-const AdminCategoriesPage = lazy(() =>
-  import('./features/admin/AdminCategoriesPage').then((m) => ({ default: m.AdminCategoriesPage })),
-);
-const AdminSlaPage = lazy(() =>
-  import('./features/admin/AdminSlaPage').then((m) => ({ default: m.AdminSlaPage })),
-);
-const AdminChecklistPage = lazy(() =>
-  import('./features/admin/AdminChecklistPage').then((m) => ({ default: m.AdminChecklistPage })),
-);
-const AdminOfferedSolutionsPage = lazy(() =>
-  import('./features/admin/AdminOfferedSolutionsPage').then((m) => ({ default: m.AdminOfferedSolutionsPage })),
-);
-const AdminFieldsPage = lazy(() =>
-  import('./features/admin/AdminFieldsPage').then((m) => ({ default: m.AdminFieldsPage })),
-);
-const AdminKnowledgeSourcesPage = lazy(() =>
-  import('./features/admin/AdminKnowledgeSourcesPage').then((m) => ({ default: m.AdminKnowledgeSourcesPage })),
-);
-const AdminCompaniesPage = lazy(() =>
-  import('./features/admin/AdminCompaniesPage').then((m) => ({ default: m.AdminCompaniesPage })),
-);
-const AdminUsersPage = lazy(() =>
-  import('./features/admin/AdminUsersPage').then((m) => ({ default: m.AdminUsersPage })),
-);
-
-/**
- * PageFallback — Suspense fallback'i. Skeleton blokları ile sayfa yapısının
- * kabaca yerini tutar; flicker'ı azaltır. Slow 3G'de < 1s görünür.
- */
-function PageFallback({ label }: { label?: string }) {
-  return (
-    <div className="space-y-4 p-2">
-      {label && (
-        <div className="text-xs uppercase tracking-wide text-slate-400 dark:text-ndark-muted">
-          {label}
-        </div>
-      )}
-      <Skeleton height={32} className="w-1/3" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <MetricTileSkeleton />
-        <MetricTileSkeleton />
-        <MetricTileSkeleton />
-      </div>
-      <Skeleton height={120} className="w-full" />
-      <Skeleton height={80} className="w-full" />
-    </div>
-  );
-}
+import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
+import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
+import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
+import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
+import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
 type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'case-detail' | AdminView;
 
@@ -284,19 +215,17 @@ export default function App() {
         onSelectView={(v) => setView(v)}
         onExit={() => setView('cases')}
       >
-        <Suspense fallback={<PageFallback label="Yönetim paneli yükleniyor" />}>
-          {view === 'admin-categories' && <AdminCategoriesPage />}
-          {view === 'admin-sla' && <AdminSlaPage />}
-          {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
-          {view === 'admin-documents' && <AdminDocumentsPage />}
-          {view === 'admin-checklist' && <AdminChecklistPage />}
-          {view === 'admin-teams' && <AdminTeamsPage />}
-          {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
-          {view === 'admin-fields' && <AdminFieldsPage />}
-          {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
-          {view === 'admin-companies' && <AdminCompaniesPage />}
-          {view === 'admin-users' && <AdminUsersPage />}
-        </Suspense>
+        {view === 'admin-categories' && <AdminCategoriesPage />}
+        {view === 'admin-sla' && <AdminSlaPage />}
+        {view === 'admin-thirdparty' && <AdminThirdPartyPage />}
+        {view === 'admin-documents' && <AdminDocumentsPage />}
+        {view === 'admin-checklist' && <AdminChecklistPage />}
+        {view === 'admin-teams' && <AdminTeamsPage />}
+        {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
+        {view === 'admin-fields' && <AdminFieldsPage />}
+        {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
+        {view === 'admin-companies' && <AdminCompaniesPage />}
+        {view === 'admin-users' && <AdminUsersPage />}
       </AdminLayout>
     );
   }
@@ -566,50 +495,45 @@ export default function App() {
         </aside>
 
         <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'flex-1 px-6 py-6'}>
-          {/* Suspense boundary — lazy chunk'lar (analytics, calendar) burada bekler.
-              Eager bileşenler (MyHomePage, CasesListPage, CaseDetailPage) Suspense
-              tetiklemez; fallback sadece lazy geçişlerde görünür. */}
-          <Suspense fallback={<PageFallback />}>
-            {view === 'my-home' && (
-              <MyHomePage
-                onSelectCase={openCase}
-                onShowCases={() => setView('cases')}
-                onShowCalendar={() => setView('my-calendar')}
-                onShowPatterns={() => setView('analytics-patterns')}
-              />
-            )}
-            {view === 'cases' && (
-              <CasesListPage
-                onSelectCase={openCase}
-                onShowCustomer={(id) => setCustomerCardId(id)}
-                onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
-                pendingQuickPrefill={pendingQuickPrefill}
-                onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
-                patternCasesFilter={patternCasesFilter}
-                onClearPatternFilter={() => setPatternCasesFilter(null)}
-                onShowPatterns={() => setView('analytics-patterns')}
-              />
-            )}
-            {view === 'dashboard' && <CaseAnalyticsPage />}
-            {view === 'analytics-ai-usage' && <AIUsagePage />}
-            {view === 'analytics-patterns' && (
-              <PatternsPage
-                onShowCases={(caseIds, category) => {
-                  setPatternCasesFilter({ caseIds, label: category });
-                  setView('cases');
-                }}
-              />
-            )}
-            {view === 'analytics-qa-scores' && <QAScoresPage />}
-            {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
-            {view === 'case-detail' && selectedCaseId && (
-              <CaseDetailPage
-                caseId={selectedCaseId}
-                onBack={backToList}
-                onShowCustomer={(id) => setCustomerCardId(id)}
-              />
-            )}
-          </Suspense>
+          {view === 'my-home' && (
+            <MyHomePage
+              onSelectCase={openCase}
+              onShowCases={() => setView('cases')}
+              onShowCalendar={() => setView('my-calendar')}
+              onShowPatterns={() => setView('analytics-patterns')}
+            />
+          )}
+          {view === 'cases' && (
+            <CasesListPage
+              onSelectCase={openCase}
+              onShowCustomer={(id) => setCustomerCardId(id)}
+              onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
+              pendingQuickPrefill={pendingQuickPrefill}
+              onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
+              patternCasesFilter={patternCasesFilter}
+              onClearPatternFilter={() => setPatternCasesFilter(null)}
+              onShowPatterns={() => setView('analytics-patterns')}
+            />
+          )}
+          {view === 'dashboard' && <CaseAnalyticsPage />}
+          {view === 'analytics-ai-usage' && <AIUsagePage />}
+          {view === 'analytics-patterns' && (
+            <PatternsPage
+              onShowCases={(caseIds, category) => {
+                setPatternCasesFilter({ caseIds, label: category });
+                setView('cases');
+              }}
+            />
+          )}
+          {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
+          {view === 'case-detail' && selectedCaseId && (
+            <CaseDetailPage
+              caseId={selectedCaseId}
+              onBack={backToList}
+              onShowCustomer={(id) => setCustomerCardId(id)}
+            />
+          )}
         </main>
       </div>
 
