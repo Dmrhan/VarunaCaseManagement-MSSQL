@@ -59,6 +59,11 @@ export interface CategoryInput {
   name: string;
   description?: string;
   isActive: boolean;
+  /**
+   * Hangi şirkete ait? Admin için kendi allowedCompanyIds'inden biri zorunlu.
+   * SystemAdmin için null bırakılabilir = sistem geneli (cross-company şablon).
+   */
+  companyId?: string | null;
 }
 
 export interface SubCategoryInput {

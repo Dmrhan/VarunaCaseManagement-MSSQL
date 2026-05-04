@@ -94,6 +94,8 @@ export interface CaseCategoryDef {
   id: string;
   name: string;
   description?: string;
+  /** null = sistem geneli (cross-company şablon); aksi halde şirket-spesifik. */
+  companyId?: string | null;
   isActive: boolean;
   subCategories: CaseSubCategoryDef[];
 }
