@@ -21,7 +21,106 @@ export interface CalendarEvent {
   notes: string | null;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Dashboard ("Benim Sayfam") — Agent/Supervisor anasayfa veri seti.
+// Tek round-trip; backend allowedCompanyIds + personId scope uygular.
+// ─────────────────────────────────────────────────────────────────
+
+export type UrgentSignal =
+  | { type: 'sla_risk'; count: number; caseIds: string[] }
+  | { type: 'unread_mentions'; count: number }
+  | { type: 'awaiting_reply'; count: number; caseIds?: string[] }
+  | { type: 'pattern_alert'; count: number; category: string };
+
+export interface DashboardStats {
+  assignedToMe: number;
+  resolvedToday: number;
+  snoozed: number;
+  followupToday: number;
+}
+
+export interface DashboardCalendarEvent {
+  id: string;
+  type: CalendarEventType;
+  title: string;
+  caseId: string | null;
+  caseNumber: string | null;
+  customerName: string | null;
+  /** ISO datetime */
+  time: string;
+}
+
+export type PendingApprovalType = 'followup' | 'reminder' | 'sla' | 'awaiting';
+
+export interface PendingApproval {
+  caseId: string | null;
+  caseNumber: string | null;
+  customerName: string | null;
+  type: PendingApprovalType;
+  reason: string;
+  /** ISO; "Ekle" tıklamasında modal'a pre-fill için. */
+  suggestedTime: string;
+}
+
+export interface DashboardTopCase {
+  caseId: string;
+  caseNumber: string;
+  title: string;
+  customerName: string;
+  priority: string;
+  status: string;
+  slaViolation: boolean;
+  /** Kart altındaki vurgu metni (örn. "⚡ SLA 3 saat kaldı"). */
+  aiSignal: string | null;
+}
+
+export interface PerformanceDimension {
+  /** 0-5 arası ondalıklı puan; null = yetersiz veri. */
+  score: number | null;
+  /** Trend ileride zaman serisi gelince doldurulacak. Şimdilik null. */
+  trend: number | null;
+  /** Takım ortalamasından fark (+/-). */
+  vsTeam: number;
+}
+
+export interface DashboardPerformance {
+  period: '30d';
+  empathy: PerformanceDimension;
+  clarity: PerformanceDimension;
+  speed: PerformanceDimension;
+  aiCoachMessage: string;
+}
+
+export interface DashboardDailySummary {
+  resolvedToday: number;
+  newCasesToday: number;
+  avgResolutionHours: number;
+}
+
+export interface DashboardData {
+  greeting: { name: string; timeOfDay: 'morning' | 'afternoon' | 'evening' };
+  urgentSignals: UrgentSignal[];
+  stats: DashboardStats;
+  todayCalendar: DashboardCalendarEvent[];
+  pendingApprovals: PendingApproval[];
+  myTopCases: DashboardTopCase[];
+  performance: DashboardPerformance | null;
+  dailySummary: DashboardDailySummary;
+}
+
 export const myService = {
+  /**
+   * "Benim Sayfam" tek-round-trip dashboard verisi.
+   * BFF tarafı 15 paralel sorgu; FE bir sonuç bekler.
+   */
+  async getDashboard(): Promise<DashboardData | undefined> {
+    return apiFetch<DashboardData>(
+      '/api/my/dashboard',
+      undefined,
+      'Anasayfa yüklenemedi',
+    );
+  },
+
   /**
    * Aralıktaki olayları çek. from/to ISO formatında olmalı.
    * Backend max 90 gün desteğine sahip — UI bunun üstüne çıkmaz.

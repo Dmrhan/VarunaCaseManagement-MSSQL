@@ -6,6 +6,7 @@ import {
   getReminder,
   updateReminder,
   deleteReminder,
+  getDashboard,
 } from '../db/myRepository.js';
 
 /**
@@ -24,6 +25,23 @@ router.use(verifyJwt);
  * Olay türleri: reminder | snooze | sla_response | sla_resolution | followup
  * Performans guard: aralık 90 günden fazla olamaz.
  */
+/**
+ * GET /api/my/dashboard
+ * "Benim Sayfam" tek round-trip veri seti — Agent/Supervisor anasayfası.
+ *
+ * Tüm sorgular allowedCompanyIds + (gerekli yerlerde) personId scope'lu.
+ * Kullanıcı şirkete atanmamışsa boş ama valid shape döner (UI çökmez).
+ */
+router.get('/dashboard', async (req, res) => {
+  try {
+    const data = await getDashboard({ user: req.user });
+    res.json(data);
+  } catch (err) {
+    console.error('[my:dashboard]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
 router.get('/calendar', async (req, res) => {
   try {
     let { from, to, date, types } = req.query;
