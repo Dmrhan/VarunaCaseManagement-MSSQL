@@ -118,6 +118,9 @@ export function MyHomePage({
 
   const today = new Date();
   const greetingPrefix = GREETING_LABEL[data.greeting.timeOfDay] ?? 'Merhaba';
+  // BFF zaten ilk kelimeyi alıyor; defansif olarak FE'de de uyguluyoruz —
+  // eski cache veya farklı kullanıcı tipinde tam adın gelme ihtimaline karşı.
+  const firstName = (data.greeting.name ?? '').trim().split(/\s+/)[0] || data.greeting.name;
   const showDailySummary = data.dailySummary.resolvedToday > 0 || today.getHours() >= 14;
 
   // Approve list filtered by session dismiss state.
@@ -164,7 +167,7 @@ export function MyHomePage({
           />
           <div className="py-1">
             <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-ndark-text">
-              {greetingPrefix}, {data.greeting.name} <span aria-hidden>👋</span>
+              {greetingPrefix}, {firstName} <span aria-hidden>👋</span>
             </h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-ndark-muted">
               {formatDateLong(today)}
@@ -193,14 +196,13 @@ export function MyHomePage({
       {/* TWO COLUMN */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
-          {visibleApprovals.length > 0 && (
-            <AISuggestionsPanel
-              approvals={visibleApprovals}
-              onApply={applyApproval}
-              onDismiss={dismissApproval}
-              originalApprovals={data.pendingApprovals}
-            />
-          )}
+          {/* AI Önerileri her zaman görünür — boş durum bile RUNA AI varlığını ifade eder. */}
+          <AISuggestionsPanel
+            approvals={visibleApprovals}
+            onApply={applyApproval}
+            onDismiss={dismissApproval}
+            originalApprovals={data.pendingApprovals}
+          />
           {data.myTopCases.length > 0 && (
             <TopCasesPanel
               cases={data.myTopCases}
@@ -208,13 +210,13 @@ export function MyHomePage({
               onShowAll={onShowCases}
             />
           )}
-          {visibleApprovals.length === 0 && data.myTopCases.length === 0 && (
-            <Card>
-              <div className="p-6">
+          {data.myTopCases.length === 0 && (
+            <Card className="shadow-md">
+              <div className="px-6 py-8">
                 <EmptyState
                   icon={<CheckCircle2 size={22} />}
-                  title="Aktif vakan yok"
-                  description="Yeni vaka oluşturmak veya genel listeyi görmek için sağ üstteki butonu kullan."
+                  title="Şu an öncelikli vakan yok"
+                  description="Aktif vakaların geldikçe en acil olanlar burada listelenecek."
                 />
               </div>
             </Card>
@@ -488,6 +490,7 @@ function AISuggestionsPanel({
   onApply: (a: PendingApproval) => void;
   onDismiss: (a: PendingApproval, i: number) => void;
 }) {
+  const hasApprovals = approvals.length > 0;
   return (
     <Card className="shadow-md">
       <div className="border-b border-slate-200 px-6 py-4 dark:border-ndark-border">
@@ -498,8 +501,23 @@ function AISuggestionsPanel({
           RUNA AI Önerileri
         </h2>
       </div>
-      <div className="divide-y divide-slate-100 dark:divide-ndark-border/60">
-        {approvals.slice(0, 5).map((a) => {
+      {!hasApprovals ? (
+        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
+            <Sparkles size={22} />
+          </span>
+          <div>
+            <div className="text-sm font-medium text-slate-700 dark:text-ndark-text">
+              Şu an AI önerisi yok
+            </div>
+            <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500 dark:text-ndark-muted">
+              Vakalarındaki gelişmeler takip edildikçe öneriler burada görünecek.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-100 dark:divide-ndark-border/60">
+          {approvals.slice(0, 5).map((a) => {
           // dismissedApprovals key reproducibility için orijinal index'i bul
           const i = originalApprovals.indexOf(a);
           const meta = APPROVAL_META[a.type];
@@ -549,7 +567,8 @@ function AISuggestionsPanel({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </Card>
   );
 }
