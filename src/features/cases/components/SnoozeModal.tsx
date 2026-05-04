@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Phone, Users, BellRing } from 'lucide-react';
+import { Calendar, Clock, Phone, Users, BellRing } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { apiFetch } from '@/services/caseService';
+import { myService } from '@/services/myService';
 import { SNOOZE_REASON_LABELS, type Case, type SnoozeReason } from '../types';
 
 interface SnoozeModalProps {
@@ -57,6 +58,11 @@ export function SnoozeModal({ open, caseId, caseTitle, onClose, onSnoozed }: Sno
   const [customAt, setCustomAt] = useState<string>('');
   const [reason, setReason] = useState<SnoozeReason>('CustomerWillCall');
   const [submitting, setSubmitting] = useState(false);
+  // Snooze ile beraber kişisel takvime düşsün mü? Default ON — çoğu kullanıcı
+  // ertelediği vakayı sonra hatırlamak istiyor; bu sayede ayrı "Bana Hatırlat"
+  // akışı gerekmedi. Snooze "Vaka olayları" filter'ında zaten görünür ama
+  // bu seçenek default "Hatırlatıcılarım" filter'ında violet kart oluşturur.
+  const [addToCalendar, setAddToCalendar] = useState<boolean>(true);
   const { toast } = useToast();
 
   // Modal her açılışta temiz state — son seçim saklamıyoruz
@@ -65,6 +71,7 @@ export function SnoozeModal({ open, caseId, caseTitle, onClose, onSnoozed }: Sno
       setPreset('tomorrow9');
       setCustomAt('');
       setReason('CustomerWillCall');
+      setAddToCalendar(true);
       setSubmitting(false);
     }
   }, [open]);
@@ -110,6 +117,20 @@ export function SnoozeModal({ open, caseId, caseTitle, onClose, onSnoozed }: Sno
     });
     onSnoozed(updated);
     onClose();
+
+    // İkincil: kişisel takvim girdisi. Hata olursa sessizce geç — snooze ana
+    // aksiyon, takvim girdisi yardımcı (apiFetch zaten toast atar).
+    if (addToCalendar) {
+      void myService.createReminder({
+        caseId,
+        remindAt: targetIso,
+        message: SNOOZE_REASON_LABELS[reason],
+      }).then((created) => {
+        if (created) {
+          window.dispatchEvent(new Event('app:calendar-changed'));
+        }
+      });
+    }
   }
 
   return (
@@ -211,6 +232,25 @@ export function SnoozeModal({ open, caseId, caseTitle, onClose, onSnoozed }: Sno
             ))}
           </div>
         </div>
+
+        {/* Takvime ekle — default ON. Kapatırsa snooze tek başına çalışır. */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-card dark:hover:bg-ndark-bg">
+          <input
+            type="checkbox"
+            checked={addToCalendar}
+            onChange={(e) => setAddToCalendar(e.target.checked)}
+            className="mt-0.5 h-4 w-4 cursor-pointer accent-brand-600"
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800 dark:text-ndark-text">
+              <Calendar size={14} />
+              Takvime ekle
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+              Kişisel takvimine bu zaman için bir hatırlatıcı düşer (yalnız sen görürsün).
+            </div>
+          </div>
+        </label>
       </div>
     </Modal>
   );

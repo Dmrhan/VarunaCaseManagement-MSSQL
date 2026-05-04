@@ -63,21 +63,32 @@ export class CaseAccessError extends Error {
 }
 
 /**
- * Mutation guard — mutation öncesi çağrılır. allowedCompanyIds verilmediyse
- * bypass (cron, internal job). Verildiyse case.companyId IN check; case yoksa
- * null döner (route 404 yapar), scope dışındaysa CaseAccessError fırlatır.
+ * Mutation guard + companyId resolver.
+ *
+ * Davranış:
+ *   - Case yok → null döner (route 404'e çevirir).
+ *   - allowedCompanyIds verilmiş + scope dışı → CaseAccessError fırlatır.
+ *   - Aksi halde → case.companyId döner.
+ *
+ * Caller'lar bu companyId'yi child satırlar (history, note, call log, vb.)
+ * yaratırken denormalize için kullanır — Faz 1.5 multi-tenant child
+ * denormalization işi.
+ *
+ * NOT: Önceki versiyonda allowedCompanyIds yokken fetch atlanıyordu (bypass);
+ * artık her zaman fetch yapılır çünkü companyId döndürmek gerekiyor. Maliyet
+ * ihmal edilebilir (zaten case mutation'larının çoğu kendi findUnique'ini
+ * yapıyor); cron yolu (processSnoozeWakeups) bu helper'ı çağırmıyor zaten.
  */
 async function assertCaseInScope(caseId, allowedCompanyIds) {
-  if (!allowedCompanyIds) return true; // bypass — internal/cron caller
   const found = await prisma.case.findUnique({
     where: { id: caseId },
     select: { id: true, companyId: true },
   });
   if (!found) return null;
-  if (!allowedCompanyIds.includes(found.companyId)) {
+  if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
     throw new CaseAccessError();
   }
-  return true;
+  return found.companyId;
 }
 
 export const caseRepository = {
@@ -163,6 +174,7 @@ export const caseRepository = {
         // Açılış log'u
         history: {
           create: {
+            companyId: m.companyId,
             action: 'Vaka oluşturuldu',
             actionType: 'CaseCreated',
             actor: m.createdBy ?? 'Mock User',
@@ -175,7 +187,8 @@ export const caseRepository = {
   },
 
   async update(id, patch, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     // Otomatik alan değişim log'u: değişen her alan için CaseActivity entry'si
     const before = await prisma.case.findUnique({ where: { id } });
     if (!before) return null;
@@ -189,6 +202,7 @@ export const caseRepository = {
       if (oldVal === dbPatch[field]) continue; // db karşılığı eşitse skip
       if (oldVal == null && newVal == null) continue;
       historyEntries.push({
+        companyId,
         action: 'Alan güncellendi',
         actionType: 'FieldUpdate',
         fieldName: field,
@@ -210,26 +224,125 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async addNote(id, note, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+  /**
+   * Not ekle — Faz 1.5 Madde 3 ile @mention parse + CaseMention satırları.
+   *
+   * Format: not içinde `@[Name](userId)` tag'leri. Parse edip:
+   *  - Max 10 farklı kullanıcı (spec)
+   *  - Hepsi aynı şirkette aktif User olmalı (cross-tenant mention engellenir)
+   *  - Her başarılı mention için CaseMention satırı + bell badge sinyali
+   *
+   * mentionedBy req.user.id (route'tan geçer); aktor'un User.id'si yoksa
+   * (cron, test) mention skip — note yine kaydedilir.
+   */
+  async addNote(id, note, allowedCompanyIds, mentionedBy) {
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Parse @[Name](userId) tag'leri (dedup userId)
+    const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+    const matches = [...(note.content ?? '').matchAll(mentionRegex)];
+    const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
+
+    if (mentionedUserIds.length > 10) {
+      return { error: 'Bir notta en fazla 10 kişi etiketlenebilir.' };
+    }
+
+    // Cross-tenant koruma: tüm mention'lar aynı şirkette + aktif olmalı.
+    if (mentionedUserIds.length > 0) {
+      const valid = await prisma.user.findMany({
+        where: {
+          id: { in: mentionedUserIds },
+          isActive: true,
+          companies: { some: { companyId, isActive: true } },
+        },
+        select: { id: true },
+      });
+      const validIds = new Set(valid.map((v) => v.id));
+      const invalid = mentionedUserIds.filter((uid) => !validIds.has(uid));
+      if (invalid.length > 0) {
+        return {
+          error: `Etiketlenen ${invalid.length} kullanıcı bu şirkette bulunamadı veya pasif.`,
+        };
+      }
+    }
+
     const created = await prisma.caseNote.create({
       data: {
         caseId: id,
+        companyId,
         authorName: note.authorName,
         content: note.content,
         visibility: note.visibility,
       },
     });
+
+    // Mention satırları yaz (mentionedBy yoksa skip — note yine kaydedildi).
+    if (mentionedUserIds.length > 0 && mentionedBy) {
+      await prisma.caseMention.createMany({
+        data: mentionedUserIds.map((uid) => ({
+          caseId: id,
+          noteId: created.id,
+          companyId,
+          mentionedUserId: uid,
+          mentionedBy,
+        })),
+      });
+    }
+
     await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
     return created;
   },
 
+  /**
+   * Bir vakaya not yazarken @mention dropdown için adaylar.
+   * Vakanın şirketine aktif UserCompany ile bağlı + Person'a bağlı User'lar.
+   * personId yoksa (Person'a bağlanmamış User) liste'de görünmez — atama
+   * hedefi olamadığı için mention'da da anlamsız.
+   */
+  async listMentionableUsers(caseId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        personId: { not: null },
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, email: true, fullName: true, personId: true },
+      orderBy: { fullName: 'asc' },
+    });
+    if (users.length === 0) return [];
+
+    // Person + team adlarını tek query ile topla
+    const personIds = users.map((u) => u.personId).filter(Boolean);
+    const persons = await prisma.person.findMany({
+      where: { id: { in: personIds } },
+      include: { team: { select: { name: true } } },
+    });
+    const personMap = new Map(persons.map((p) => [p.id, p]));
+
+    return users.map((u) => {
+      const p = u.personId ? personMap.get(u.personId) : null;
+      return {
+        userId: u.id,
+        personId: u.personId,
+        name: u.fullName,
+        email: u.email,
+        teamName: p?.team?.name ?? null,
+      };
+    });
+  },
+
   async addCallLog(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const m = toDb(input);
     const log = await prisma.caseCallLog.create({
       data: {
         caseId: id,
+        companyId,
         callDate: m.callDate ? new Date(m.callDate) : new Date(),
         durationMin: m.durationMin,
         callDisposition: m.callDisposition,
@@ -250,10 +363,12 @@ export const caseRepository = {
   },
 
   async addActivity(caseId, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
     await prisma.caseActivity.create({
       data: {
         caseId,
+        companyId,
         action: input.action,
         actionType: input.actionType,
         fieldName: input.fieldName,
@@ -272,7 +387,8 @@ export const caseRepository = {
   },
 
   async toggleChecklistItem(caseId, itemId, checked, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
     if (!c?.checklistItems) return shape(c);
 
@@ -290,6 +406,7 @@ export const caseRepository = {
         checklistItems: items,
         history: {
           create: {
+            companyId,
             action: checked ? 'Kontrol maddesi işaretlendi' : 'Kontrol maddesi işareti kaldırıldı',
             actionType: 'ChecklistToggle',
             fieldName: 'checklist',
@@ -309,7 +426,7 @@ export const caseRepository = {
    * DB satırı henüz yazılmaz; finalize() ile yazılır.
    */
   async requestUpload(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    if (!(await assertCaseInScope(id, allowedCompanyIds))) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
     const FILE_MAX_COUNT = 20;
 
@@ -336,12 +453,14 @@ export const caseRepository = {
    * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
    */
   async finalizeUpload(id, input, allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const actor = input.uploadedBy ?? 'Mock User';
     const file = await prisma.caseAttachment.create({
       data: {
         id: input.attachmentId,
         caseId: id,
+        companyId,
         fileName: input.fileName,
         fileSize: input.fileSize,
         mimeType: input.mimeType,
@@ -355,6 +474,7 @@ export const caseRepository = {
         updatedAt: new Date(),
         history: {
           create: {
+            companyId,
             action: 'Dosya yüklendi',
             actionType: 'FileUploaded',
             fieldName: 'files',
@@ -370,7 +490,7 @@ export const caseRepository = {
 
   /** Download için kısa ömürlü signed URL üret. */
   async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
-    if ((await assertCaseInScope(caseId, allowedCompanyIds)) === null) return null;
+    if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = await createDownloadUrl(target.fileUrl);
@@ -378,7 +498,8 @@ export const caseRepository = {
   },
 
   async removeFile(id, fileId, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== id) {
       const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
@@ -395,6 +516,7 @@ export const caseRepository = {
         updatedAt: new Date(),
         history: {
           create: {
+            companyId,
             action: 'Dosya silindi',
             actionType: 'FileRemoved',
             fieldName: 'files',
@@ -406,6 +528,141 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
     return shape(updated);
+  },
+
+  /**
+   * Toplu güncelleme — Faz 1.5 Madde 2 "Bulk Actions".
+   *
+   * Whitelist: yalnızca assignedPersonId, assignedTeamId, priority, status.
+   * Status'te kapatma yasak (Cozuldu/IptalEdildi) — her vaka için ayrı kapatma
+   * log'u/onayı gerekiyor, bulk'ta yapılmamalı.
+   *
+   * Cross-tenant koruma: caseIds'in TÜMÜ allowedCompanyIds içinde değilse
+   * tek bir vaka bile güncellenmez (CaseAccessError fırlatılır). Bu "saldırgan
+   * listede yetkisiz ID gizleyemesin" prensibi — partial-success yok.
+   *
+   * SLA pause/resume mantığı: bulk status değişiminde transitionStatus
+   * çalıştırılmaz — yalnızca basit alan update'i. 3rdPartyBekleniyor'a bulk
+   * geçiş SLA'yı duraklatmaz; kullanıcı SLA pause istiyorsa tek vaka
+   * üzerinden statü geçişi yapsın. Bilinçli sadelik.
+   */
+  async bulkUpdate({ caseIds, updates }, actor = 'Mock User', allowedCompanyIds) {
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return { error: 'caseIds dizisi gerekli (boş olamaz).' };
+    }
+    if (caseIds.length > 100) {
+      return { error: 'En fazla 100 vaka tek seferde güncellenebilir.' };
+    }
+    if (!updates || typeof updates !== 'object') {
+      return { error: 'updates nesnesi gerekli.' };
+    }
+
+    // Whitelist: yalnızca bu 4 alan kabul.
+    const ALLOWED = ['assignedPersonId', 'assignedTeamId', 'priority', 'status'];
+    const filtered = {};
+    for (const k of ALLOWED) {
+      if (updates[k] !== undefined && updates[k] !== null && updates[k] !== '') {
+        filtered[k] = updates[k];
+      }
+    }
+    if (Object.keys(filtered).length === 0) {
+      return { error: 'En az bir geçerli alan güncellenmeli (assignedPersonId, assignedTeamId, priority, status).' };
+    }
+
+    // Status kapatma yasağı (TR ya da ASCII fark etmez — ikisini de yakala).
+    const dbStatusCandidate = filtered.status
+      ? toDb({ status: filtered.status }).status
+      : undefined;
+    if (dbStatusCandidate === 'Cozuldu' || dbStatusCandidate === 'IptalEdildi') {
+      return { error: 'Toplu işlemde kapatma (Çözüldü/İptalEdildi) yapılamaz.' };
+    }
+
+    // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
+    const cases = await prisma.case.findMany({
+      where: { id: { in: caseIds } },
+      select: { id: true, companyId: true },
+    });
+    if (cases.length !== caseIds.length) {
+      const foundIds = new Set(cases.map((c) => c.id));
+      const missing = caseIds.filter((id) => !foundIds.has(id));
+      return { error: `Bazı vakalar bulunamadı: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` (+${missing.length - 3})` : ''}` };
+    }
+    if (allowedCompanyIds) {
+      const outsider = cases.find((c) => !allowedCompanyIds.includes(c.companyId));
+      if (outsider) {
+        throw new CaseAccessError('Toplu işlem: erişiminiz olmayan vaka(lar) listede.');
+      }
+    }
+
+    // Denormalize names: assignedPersonId / assignedTeamId verildiyse
+    // Person/Team adını DB'den çek (frontend bulk için sadece ID gönderiyor).
+    let assignedPersonName;
+    if (filtered.assignedPersonId) {
+      const person = await prisma.person.findUnique({
+        where: { id: filtered.assignedPersonId },
+        select: { name: true },
+      });
+      if (!person) return { error: 'Atanan kişi bulunamadı.' };
+      assignedPersonName = person.name;
+    }
+    let assignedTeamName;
+    if (filtered.assignedTeamId) {
+      const team = await prisma.team.findUnique({
+        where: { id: filtered.assignedTeamId },
+        select: { name: true },
+      });
+      if (!team) return { error: 'Atanan takım bulunamadı.' };
+      assignedTeamName = team.name;
+    }
+
+    // DB'ye yazılacak patch (ASCII enum + denormalize names)
+    const dbPatch = toDb(filtered);
+    const dataPatch = { ...dbPatch };
+    if (assignedPersonName !== undefined) dataPatch.assignedPersonName = assignedPersonName;
+    if (assignedTeamName !== undefined) dataPatch.assignedTeamName = assignedTeamName;
+
+    // Activity log: field başına ayrı log per case (spec).
+    const FIELD_LABELS = {
+      assignedPersonId: 'Atanan Kişi',
+      assignedTeamId: 'Atanan Takım',
+      priority: 'Öncelik',
+      status: 'Statü',
+    };
+    const VALUE_LABELS = {
+      assignedPersonId: assignedPersonName,
+      assignedTeamId: assignedTeamName,
+      // priority/status için frontend TR string geliyor; doğrudan göster.
+    };
+
+    let updated = 0;
+    let failed = 0;
+    const errors = [];
+    for (const c of cases) {
+      try {
+        const historyEntries = [];
+        for (const [field, newVal] of Object.entries(filtered)) {
+          const fieldLabel = FIELD_LABELS[field] ?? field;
+          const valueLabel = VALUE_LABELS[field] ?? String(newVal);
+          historyEntries.push({
+            companyId: c.companyId,
+            action: `Toplu işlem: ${fieldLabel} → ${valueLabel} (${cases.length} vakadan biri)`,
+            actionType: field === 'status' ? 'StatusChange' : 'FieldUpdate',
+            fieldName: field,
+            toValue: valueLabel,
+            actor,
+          });
+        }
+        await prisma.case.update({
+          where: { id: c.id },
+          data: { ...dataPatch, history: { create: historyEntries } },
+        });
+        updated++;
+      } catch (e) {
+        failed++;
+        errors.push({ caseId: c.id, error: e?.message ?? 'Bilinmeyen' });
+      }
+    }
+    return { updated, failed, errors };
   },
 
   async findOpenCaseFor(accountId, caseType, allowedCompanyIds) {
@@ -425,7 +682,8 @@ export const caseRepository = {
    * geçen süre slaPausedDurationMin'e eklenip slaResolutionDueAt ileri kaydırılır.
    */
   async transitionStatus(id, nextStatus, payload = {}, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const prev = await prisma.case.findUnique({ where: { id } });
     if (!prev) return null;
 
@@ -462,6 +720,7 @@ export const caseRepository = {
 
     const historyEntries = [
       {
+        companyId,
         action: 'Statü değişti',
         actionType: 'StatusChange',
         fromValue: prevStatusTr,
@@ -474,6 +733,7 @@ export const caseRepository = {
       const prevLevelTr = fromDb({ escalationLevel: prev.escalationLevel }).escalationLevel;
       if (payload.escalationLevel !== prevLevelTr) {
         historyEntries.push({
+          companyId,
           action: 'Eskalasyon seviyesi',
           actionType: 'FieldUpdate',
           fieldName: 'escalationLevel',
@@ -485,6 +745,7 @@ export const caseRepository = {
     }
     if (enteringEscalation && payload.escalationReason) {
       historyEntries.push({
+        companyId,
         action: 'Eskalasyon gerekçesi',
         toValue: payload.escalationReason,
         actor,
@@ -517,7 +778,8 @@ export const caseRepository = {
    * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
    */
   async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const target = new Date(snoozeUntil);
     if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
       return { error: 'snoozeUntil gelecek bir tarih olmalı.' };
@@ -540,6 +802,7 @@ export const caseRepository = {
         snoozePreviousStatus: exists.snoozePreviousStatus ?? exists.status,
         history: {
           create: {
+            companyId,
             action: `Vaka ertelendi → ${TR_DATETIME.format(target)} — ${reasonLabel}`,
             actionType: 'FieldUpdate',
             fieldName: 'snoozeUntil',
@@ -558,7 +821,8 @@ export const caseRepository = {
    * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
    */
   async unsnoozeCase(id, actor = 'Mock User', allowedCompanyIds) {
-    if ((await assertCaseInScope(id, allowedCompanyIds)) === null) return null;
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
     const exists = await prisma.case.findUnique({ where: { id } });
     if (!exists) return null;
     if (!exists.snoozeUntil) {
@@ -576,6 +840,7 @@ export const caseRepository = {
         status: restored,
         history: {
           create: {
+            companyId,
             action: `Erteleme kaldırıldı → ${restoredTr}`,
             actionType: 'FieldUpdate',
             fieldName: 'snoozeUntil',
@@ -636,7 +901,7 @@ export const caseRepository = {
         snoozeUntil: { lte: new Date() },
         NOT: { snoozeUntil: null },
       },
-      select: { id: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
+      select: { id: true, companyId: true, status: true, snoozeReason: true, snoozePreviousStatus: true },
     });
     if (due.length === 0) return { woken: 0, ids: [] };
 
@@ -654,6 +919,7 @@ export const caseRepository = {
           status: restored,
           history: {
             create: {
+              companyId: c.companyId,
               action: `Erteleme süresi doldu → ${restoredTr} (${reasonLabel})`,
               actionType: 'FieldUpdate',
               fieldName: 'snoozeUntil',
@@ -679,6 +945,52 @@ export const caseRepository = {
     }
     const items = await prisma.case.findMany({ where, include: CASE_INCLUDE });
     return items.map(shape);
+  },
+};
+
+/**
+ * Mention repository — user-centric mention sorguları (bell badge için).
+ * Multi-tenant scope: yalnızca allowedCompanyIds içindeki mention'ları döner.
+ */
+export const mentionRepo = {
+  async listUnreadForUser(userId, allowedCompanyIds) {
+    if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) {
+      return { items: [], total: 0 };
+    }
+    const items = await prisma.caseMention.findMany({
+      where: {
+        mentionedUserId: userId,
+        seenAt: null,
+        companyId: { in: allowedCompanyIds },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50, // bell drawer için pratik üst sınır
+      select: {
+        id: true,
+        caseId: true,
+        noteId: true,
+        mentionedBy: true,
+        createdAt: true,
+        case: { select: { caseNumber: true, title: true, accountName: true } },
+      },
+    });
+    return { items, total: items.length };
+  },
+
+  /** Vaka açıldığında o vakadaki mention'ları seen yap (route caller'ı tetikler). */
+  async markCaseAsSeen(userId, caseId, allowedCompanyIds) {
+    if (!userId) return { updated: 0 };
+    const where = {
+      mentionedUserId: userId,
+      caseId,
+      seenAt: null,
+    };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    const result = await prisma.caseMention.updateMany({
+      where,
+      data: { seenAt: new Date() },
+    });
+    return { updated: result.count };
   },
 };
 

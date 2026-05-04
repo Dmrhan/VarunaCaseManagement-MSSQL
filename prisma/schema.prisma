@@ -200,6 +200,22 @@ enum SnoozeReason {
   Reminder          @map("reminder")
 }
 
+// PatternAlert durumu — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+enum PatternAlertStatus {
+  active
+  dismissed
+}
+
+// KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
+// AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
+enum KnowledgeSourceType {
+  PastCases    // Geçmiş vakalar (Case tablosu)
+  ProductDocs  // Ürün/kategori dokümanları (CategoryDef + manuel doc)
+  SLARules     // SLA kuralları (SLAPolicy)
+  Checklists   // Kontrol listeleri (ChecklistTemplate)
+  ManualEntry  // Admin'in elle eklediği özel kayıtlar
+}
+
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
@@ -219,6 +235,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   companies UserCompany[]
+  reminders CaseReminder[]
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -537,6 +554,15 @@ model Case {
   snoozeReason         SnoozeReason?
   snoozePreviousStatus CaseStatus?
 
+  // QA Skor — Faz 1.5 Madde 4 (Smart QA Lite). Kapatılmış vakalarda AI 3 kriter
+  // üzerinden 1-5 puan üretir + kısa feedback. null = henüz skorlanmadı (cron
+  // sıraya girmemiş veya Cozuldu değil).
+  qaEmpathyScore Int?
+  qaClarityScore Int?
+  qaSpeedScore   Int?
+  qaFeedback     String?
+  qaScoredAt     DateTime?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
@@ -556,6 +582,8 @@ model Case {
   approvals     CaseApproval[]
   notifications CaseNotification[]
   aiSuggestions AISuggestion[]
+  mentions      CaseMention[]
+  reminders     CaseReminder[]
 
   @@index([accountId])
   @@index([companyId])
@@ -565,13 +593,45 @@ model Case {
   @@index([caseType])
   @@index([createdAt])
   @@index([slaResolutionDueAt])
+  @@index([slaResponseDueAt])
   @@index([snoozeUntil])
 }
 
+// CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
+// gelecekte hatırlamak istediğinde bu kayıt oluşur. Cron veya kullanıcı oturumu
+// tarafından remindAt anında bildirim üretilir; sentAt sıfırlanma anına işaret eder.
+//
+// caseId opsiyonel — vakaya bağlı değil de kişisel bir notu hatırlatmak için
+// boş bırakılabilir (örn. "Aylık raporları gözden geçir").
+//
+// companyId NOT NULL — Case'den denormalize ya da vakasız reminder'da
+// kullanıcının ilk allowedCompanyId'sinden dolar. Multi-tenant scope filter
+// JOIN'siz çalışabilsin diye (Faz 1.5 child denorm pattern'i).
+model CaseReminder {
+  id        String    @id @default(cuid())
+  caseId    String?
+  userId    String
+  companyId String
+  remindAt  DateTime
+  message   String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, remindAt])
+  @@index([caseId])
+  @@index([companyId])
+}
+
 // CaseActivity — her değişiklik kaydı (audit trail)
+// companyId Case'den denormalize — top-level audit/raporlama sorgularında
+// JOIN gerektirmesin, multi-tenant scope filter doğrudan uygulansın.
 model CaseActivity {
   id         String                 @id @default(cuid())
   caseId     String
+  companyId  String
   action     String // human-readable
   actionType CaseHistoryActionType?
   fieldName  String?
@@ -584,12 +644,14 @@ model CaseActivity {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([at])
 }
 
 model CaseNote {
   id         String         @id @default(cuid())
   caseId     String
+  companyId  String
   authorName String
   content    String
   visibility NoteVisibility @default(Internal)
@@ -598,11 +660,13 @@ model CaseNote {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 model CaseAttachment {
   id         String   @id @default(cuid())
   caseId     String
+  companyId  String
   fileName   String
   fileSize   Int
   mimeType   String
@@ -613,11 +677,13 @@ model CaseAttachment {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 model CaseCallLog {
   id                  String          @id @default(cuid())
   caseId              String
+  companyId           String
   callDate            DateTime
   durationMin         Int
   callDisposition     CallDisposition
@@ -631,13 +697,16 @@ model CaseCallLog {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([callDate])
+  @@index([nextFollowupDate])
 }
 
 // CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)
 model CaseOfferedSolution {
   id              String       @id @default(cuid())
   caseId          String
+  companyId       String
   solutionDefId   String
   offeredAt       DateTime     @default(now())
   offeredBy       String
@@ -649,12 +718,14 @@ model CaseOfferedSolution {
   solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id])
 
   @@index([caseId])
+  @@index([companyId])
 }
 
 // CaseApproval — Supervisor onay akışı
 model CaseApproval {
   id             String           @id @default(cuid())
   caseId         String
+  companyId      String
   approvalType   String // "ResolveCritical", "EscalateDirector", vb.
   requestedBy    String
   requestedAt    DateTime         @default(now())
@@ -666,6 +737,7 @@ model CaseApproval {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([decision])
 }
 
@@ -673,6 +745,7 @@ model CaseApproval {
 model CaseNotification {
   id        String              @id @default(cuid())
   caseId    String
+  companyId String
   eventType String // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
   channel   NotificationChannel
   recipient String // Person.id veya email
@@ -683,13 +756,123 @@ model CaseNotification {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
   @@index([recipient, readAt])
+}
+
+// KnowledgeSource — Faz 1.5 Madde 6.
+// "AI neye bakıyor?" sorusunu şeffaf hale getiren admin kayıt defteri.
+// Ne otomatik ingestion ne embedding — sadece bilgi kaynağı kataloğu.
+// `contentCount` admin'in rapor ettiği veya seed sırasında ilgili tablodan
+// (Case, SLAPolicy, ChecklistTemplate, CategoryDef) sayılan değer.
+model KnowledgeSource {
+  id           String              @id @default(cuid())
+  companyId    String
+  name         String
+  sourceType   KnowledgeSourceType
+  contentCount Int                 @default(0)
+  description  String?
+  isActive     Boolean             @default(true)
+  lastUpdated  DateTime            @default(now())
+  createdAt    DateTime            @default(now())
+
+  @@index([companyId])
+}
+
+// QAScoreLog — Faz 1.5 Madde 4 (Smart QA Lite).
+// Her kapatılmış vakaya bir kez AI 3 kriter (empati/netlik/hız) puanlar.
+// Case tablosunda da snapshot tutulur (qaXxxScore alanları); bu tablo ek
+// audit + per-agent rapor için. caseId @unique → tek vaka tek log.
+model QAScoreLog {
+  id        String   @id @default(cuid())
+  caseId    String   @unique
+  companyId String
+  scoredAt  DateTime @default(now())
+  empathy   Int
+  clarity   Int
+  speed     Int
+  feedback  String?
+
+  @@index([companyId])
+  @@index([companyId, scoredAt])
+}
+
+// PatternAlert — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+// Cron her 15 dk son 60 dk'daki vakaları (companyId, category) ile gruplar;
+// 5+ vaka varsa active alarm yarat. Yönetici dismiss eder. Read-only mode:
+// otomatik parent vaka açma yok — sadece sinyal.
+model PatternAlert {
+  id            String             @id @default(cuid())
+  companyId     String
+  category      String
+  caseCount     Int
+  windowMinutes Int                @default(60)
+  detectedAt    DateTime           @default(now())
+  caseIds       Json // string[] — tetikleyici vaka id'leri
+  status        PatternAlertStatus @default(active)
+  dismissedBy   String? // User.id
+  dismissedAt   DateTime?
+
+  @@index([companyId])
+  @@index([companyId, detectedAt])
+  @@index([status])
+}
+
+// AIUsageLog — Faz 1.5 Madde 7.
+// Her AI endpoint çağrısı için bir log satırı: kabul/red, yanıt süresi,
+// token sayısı, kullanıcı + vaka referansı. ROI panosu (Analitik → AI Kullanımı)
+// bu logdan agrege istatistik üretir. companyId zorunlu — multi-tenant scope.
+//
+// caseId/userId nullable (örn. dashboard önizlemesi gibi vaka-bağımsız çağrılar
+// için), accepted nullable (kullanıcı henüz uygula/yoksay tıklamadı), tokenCount
+// nullable (provider yanıtında token sayısı dönmeyebilir).
+model AIUsageLog {
+  id             String   @id @default(cuid())
+  companyId      String
+  endpoint       String // 'suggest-category' | 'draft-resolution' | 'churn-conversion' | 'qa-score' | 'other'
+  caseId         String?
+  userId         String?
+  accepted       Boolean? // null = kullanıcı kararı bekliyor (uygula/yoksay)
+  responseTimeMs Int?
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([endpoint])
+}
+
+// CaseMention — Faz 1.5 Madde 3.
+// Notlarda @mention edilen kullanıcılar için audit + bildirim kaydı.
+// noteId CaseNote.id; not silinirse mention satırı kalır (raporlama/audit).
+// companyId zorunlu — multi-tenant scope filter (top-level "kullanıcının
+// PARAM mentionları" sorgusu için JOIN gerektirmez).
+//
+// Spec §4'teki `sourceType` (note | comment_reply) bu fazda atlanıyor:
+// yalnızca CaseNote desteği. comment-reply geldiğinde tablo yapısı
+// `sourceType + sourceId` olarak yeniden modellenir (migration ile).
+model CaseMention {
+  id              String    @id @default(cuid())
+  caseId          String
+  noteId          String
+  companyId       String
+  mentionedUserId String // User.id — auth identity (UserCompany erişim sahibi)
+  mentionedBy     String // User.id — etiketleyen kullanıcı
+  seenAt          DateTime? // null = henüz görülmedi → header bell badge
+  createdAt       DateTime  @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([mentionedUserId])
+  @@index([companyId])
 }
 
 // AISuggestion — AI önerilerinin audit kaydı
 model AISuggestion {
   id              String   @id @default(cuid())
   caseId          String
+  companyId       String
   suggestionType  String // "category", "priority", "resolution", vb.
   suggestedValue  String
   confidenceScore Float?
@@ -700,4 +883,5 @@ model AISuggestion {
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
+  @@index([companyId])
 }

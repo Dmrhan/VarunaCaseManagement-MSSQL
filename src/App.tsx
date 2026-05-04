@@ -1,16 +1,29 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
+  BrainCircuit,
+  Calendar,
+  Home,
   Inbox,
   Keyboard,
   LayoutDashboard,
   LogOut,
   Moon,
   Settings2,
+  Star,
   Sun,
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
+import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
+import { AIUsagePage } from './features/analytics/AIUsagePage';
+import { PatternsPage } from './features/analytics/PatternsPage';
+import { QAScoresPage } from './features/analytics/QAScoresPage';
+import { MyCalendarPage } from './features/my/MyCalendarPage';
+import { MyHomePage } from './features/my/MyHomePage';
+import { analyticsService } from './services/analyticsService';
+import { myService } from './services/myService';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
 import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
@@ -27,10 +40,11 @@ import { useAuth } from './services/AuthContext';
 
 import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
+import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'cases' | 'dashboard' | 'case-detail' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -45,20 +59,40 @@ const NAV: NavItem[] = [
 ];
 
 export default function App() {
+  // Default landing — Agent/Supervisor "my-home"a, Admin/SystemAdmin "cases"e iner.
+  // İlk render'da user henüz null → 'cases' geçici default; user yüklenince
+  // useEffect aşağıda bir kez yönlendirme yapar (sadece initialRedirectDoneRef
+  // false iken — manuel nav'ı override etmesin).
   const [view, setView] = useState<View>('cases');
+  const [initialRedirectDone, setInitialRedirectDone] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
+  // Örüntü alarmından "Vakaları Gör" tıklamasında gelen filter (caseId listesi).
+  const [patternCasesFilter, setPatternCasesFilter] = useState<{ caseIds: string[]; label: string } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  // Aktif örüntü alarm sayısı — sidebar badge için 60s polling.
+  const [activePatternCount, setActivePatternCount] = useState(0);
+  // Bugün için takvim olay sayısı — sidebar Takvimim badge'i.
+  const [todayCalendarCount, setTodayCalendarCount] = useState(0);
 
   const { theme, toggle: toggleTheme } = useTheme();
   const { user, signOut } = useAuth();
 
   useHotkey('?', () => setHelpOpen(true));
+
+  // Default landing — kullanıcı yüklendiğinde rol bazlı ilk view.
+  // Tek sefer çalışır (initialRedirectDone), sonraki manuel nav'ı override etmez.
+  useEffect(() => {
+    if (initialRedirectDone || !user) return;
+    const isFrontline = ['Agent', 'Supervisor', 'Backoffice', 'CSM'].includes(user.role);
+    if (isFrontline) setView('my-home');
+    setInitialRedirectDone(true);
+  }, [user, initialRedirectDone]);
 
   // 'g' + ikinci tuş kombinasyonu için kısa pencere
   useEffect(() => {
@@ -66,6 +100,66 @@ export default function App() {
     const t = window.setTimeout(() => setGPressed(false), 800);
     return () => window.clearTimeout(t);
   }, [gPressed]);
+
+  // Active pattern alert sayısı — Supervisor/Admin/SystemAdmin için 60s polling.
+  // 'app:patterns-changed' custom event ile dismiss sonrası anında refresh.
+  useEffect(() => {
+    if (!user || !['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role)) {
+      setActivePatternCount(0);
+      return;
+    }
+    let alive = true;
+    async function fetchCount() {
+      try {
+        const list = await analyticsService.listPatterns('active');
+        if (alive) setActivePatternCount(list.length);
+      } catch {
+        // apiFetch toast gösterdi; sessiz devam.
+      }
+    }
+    void fetchCount();
+    const id = window.setInterval(fetchCount, 60_000);
+    const onChanged = () => void fetchCount();
+    window.addEventListener('app:patterns-changed', onChanged);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      window.removeEventListener('app:patterns-changed', onChanged);
+    };
+  }, [user?.id, user?.role]);
+
+  // Takvim — sidebar badge yalnız BUGÜNÜN MANUEL HATIRLATICI sayısı.
+  // Snooze/SLA/followup endpoint maliyeti yüksek (case JOIN'leri); bu sayım
+  // performans sebebiyle sadece reminder türünü çeker. 10 dk polling +
+  // 'app:calendar-changed' custom event'i ile reminder create sonrası anlık refresh.
+  useEffect(() => {
+    if (!user) {
+      setTodayCalendarCount(0);
+      return;
+    }
+    let alive = true;
+    async function fetchCount() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      try {
+        const events = await myService.getCalendar(today, tomorrow, ['reminder']);
+        if (alive) setTodayCalendarCount(events.length);
+      } catch {
+        /* apiFetch toast gösterdi; sessiz devam */
+      }
+    }
+    void fetchCount();
+    const id = window.setInterval(fetchCount, 10 * 60_000);
+    const onChanged = () => void fetchCount();
+    window.addEventListener('app:calendar-changed', onChanged);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      window.removeEventListener('app:calendar-changed', onChanged);
+    };
+  }, [user?.id]);
 
   useHotkey('g', () => setGPressed(true));
   useHotkey('v', () => {
@@ -129,6 +223,7 @@ export default function App() {
         {view === 'admin-teams' && <AdminTeamsPage />}
         {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
         {view === 'admin-fields' && <AdminFieldsPage />}
+        {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
       </AdminLayout>
@@ -148,6 +243,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {user && <MentionBellBadge onCaseClick={openCase} />}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
@@ -204,6 +300,28 @@ export default function App() {
           }`}
         >
           <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+            {/*
+              Anasayfa — Agent/Supervisor/Backoffice/CSM için kişisel landing.
+              Admin/SystemAdmin görmüyor (onlar 'cases' default'unda kalır).
+            */}
+            {user && ['Agent', 'Supervisor', 'Backoffice', 'CSM'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('my-home')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'my-home'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Anasayfa"
+              >
+                <Home size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Anasayfa</span>}
+              </button>
+            )}
+
             {NAV.map((item) => {
               const active = view === item.key || (isDetail && item.key === 'cases');
               return (
@@ -235,6 +353,129 @@ export default function App() {
               );
             })}
 
+            {/* ÇALIŞMA ALANIM — kişisel ekranlar (Takvimim). Tüm rollere açık. */}
+            {user && (
+              <>
+                {sidebarExpanded && (
+                  <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
+                    Çalışma Alanım
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('my-calendar')}
+                  className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                  } ${
+                    view === 'my-calendar'
+                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                  }`}
+                  title={
+                    todayCalendarCount > 0
+                      ? `Takvimim (${todayCalendarCount} bugün)`
+                      : 'Takvimim'
+                  }
+                >
+                  <span className="relative">
+                    <Calendar size={16} />
+                    {todayCalendarCount > 0 && !sidebarExpanded && (
+                      <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
+                        {todayCalendarCount > 9 ? '9+' : todayCalendarCount}
+                      </span>
+                    )}
+                  </span>
+                  {sidebarExpanded && (
+                    <>
+                      <span className="flex-1 text-left">Takvimim</span>
+                      {todayCalendarCount > 0 && (
+                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
+                          {todayCalendarCount > 99 ? '99+' : todayCalendarCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+
+            {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-ai-usage')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-ai-usage'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="AI Kullanım Panosu"
+              >
+                <BrainCircuit size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">AI Kullanımı</span>}
+              </button>
+            )}
+
+            {/* QA Skorları — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-qa-scores')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-qa-scores'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="QA Skorları"
+              >
+                <Star size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">QA Skorları</span>}
+              </button>
+            )}
+
+            {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('analytics-patterns')}
+                className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'analytics-patterns'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title={
+                  activePatternCount > 0
+                    ? `Örüntü Alarmları (${activePatternCount} aktif)`
+                    : 'Örüntü Alarmları'
+                }
+              >
+                <span className="relative">
+                  <AlertTriangle size={16} />
+                  {activePatternCount > 0 && !sidebarExpanded && (
+                    <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
+                      {activePatternCount > 9 ? '9+' : activePatternCount}
+                    </span>
+                  )}
+                </span>
+                {sidebarExpanded && (
+                  <>
+                    <span className="flex-1 text-left">Örüntü Alarmları</span>
+                    {activePatternCount > 0 && (
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold text-white">
+                        {activePatternCount > 99 ? '99+' : activePatternCount}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
             {user?.role === 'SystemAdmin' && (
               <button
@@ -254,6 +495,14 @@ export default function App() {
         </aside>
 
         <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'flex-1 px-6 py-6'}>
+          {view === 'my-home' && (
+            <MyHomePage
+              onSelectCase={openCase}
+              onShowCases={() => setView('cases')}
+              onShowCalendar={() => setView('my-calendar')}
+              onShowPatterns={() => setView('analytics-patterns')}
+            />
+          )}
           {view === 'cases' && (
             <CasesListPage
               onSelectCase={openCase}
@@ -261,9 +510,23 @@ export default function App() {
               onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
               pendingQuickPrefill={pendingQuickPrefill}
               onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
+              patternCasesFilter={patternCasesFilter}
+              onClearPatternFilter={() => setPatternCasesFilter(null)}
+              onShowPatterns={() => setView('analytics-patterns')}
             />
           )}
           {view === 'dashboard' && <CaseAnalyticsPage />}
+          {view === 'analytics-ai-usage' && <AIUsagePage />}
+          {view === 'analytics-patterns' && (
+            <PatternsPage
+              onShowCases={(caseIds, category) => {
+                setPatternCasesFilter({ caseIds, label: category });
+                setView('cases');
+              }}
+            />
+          )}
+          {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}

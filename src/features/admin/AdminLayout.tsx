@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import {
   ArrowLeft,
+  BookOpen,
   Building2,
   ClipboardCheck,
   FileText,
@@ -32,6 +33,7 @@ export type AdminView =
   | 'admin-teams'
   | 'admin-offered-solutions'
   | 'admin-fields'
+  | 'admin-knowledge'
   | 'admin-companies'
   | 'admin-users';
 
@@ -44,6 +46,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-teams',
   'admin-offered-solutions',
   'admin-fields',
+  'admin-knowledge',
   'admin-companies',
   'admin-users',
 ];
@@ -73,7 +76,8 @@ const NAV: NavGroup[] = [
   {
     label: 'Yapılandırma',
     items: [
-      { key: 'admin-fields', label: 'Dinamik Alanlar', icon: <Sliders size={14} /> },
+      { key: 'admin-fields',    label: 'Dinamik Alanlar', icon: <Sliders size={14} /> },
+      { key: 'admin-knowledge', label: 'Bilgi Kaynakları', icon: <BookOpen size={14} /> },
     ],
   },
   {

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { caseRepository, CaseAccessError } from '../db/caseRepository.js';
+import { caseRepository, mentionRepo, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 
@@ -118,6 +118,25 @@ router.get(
   }),
 );
 
+/**
+ * POST /api/cases/bulk-update — Faz 1.5 Madde 2.
+ * Body: { caseIds: string[] (max 100), updates: { assignedPersonId?, assignedTeamId?, priority?, status? } }
+ * Status'te kapatma yasak. Cross-tenant case ID denenirse 403, hiçbir şey güncellenmez.
+ */
+router.post(
+  '/bulk-update',
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    const result = await caseRepository.bulkUpdate(
+      { caseIds: body.caseIds, updates: body.updates ?? {} },
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
 /** GET /api/cases/by-account?accountId=...&excludeId=...&statusIn=... */
 router.get(
   '/by-account',
@@ -196,7 +215,10 @@ router.post(
   }),
 );
 
-/** POST /api/cases/:id/notes */
+/**
+ * POST /api/cases/:id/notes — content içinde @[Name](userId) tag'leri parse
+ * edilir, CaseMention satırları yazılır. mentionedBy = req.user.id (etiketleyen).
+ */
 router.post(
   '/:id/notes',
   asyncRoute(async (req, res) => {
@@ -204,9 +226,62 @@ router.post(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
+      req.user.id,
     );
     if (!note) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (note.error) return res.status(400).json(note);
     res.status(201).json(note);
+  }),
+);
+
+/**
+ * GET /api/cases/:id/mentionable-users — @mention dropdown için aday liste.
+ * Vakanın şirketine bağlı + Person'a bağlı aktif User'lar (cross-tenant izole).
+ */
+router.get(
+  '/:id/mentionable-users',
+  asyncRoute(async (req, res) => {
+    const users = await caseRepository.listMentionableUsers(
+      req.params.id,
+      req.user.allowedCompanyIds,
+    );
+    if (users === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json({ value: users });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/mentions/seen — vaka açılınca o vakadaki kullanıcının
+ * okunmamış mention'larını seen yapar (bell badge sayacı düşer).
+ */
+router.post(
+  '/:id/mentions/seen',
+  asyncRoute(async (req, res) => {
+    // Önce case scope check (allowedCompanyIds), sonra updateMany.
+    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds))) {
+      return res.status(404).json({ error: 'Vaka bulunamadı' });
+    }
+    const result = await mentionRepo.markCaseAsSeen(
+      req.user.id,
+      req.params.id,
+      req.user.allowedCompanyIds,
+    );
+    res.json(result);
+  }),
+);
+
+/**
+ * GET /api/cases/me/mentions/unread — bell badge için kullanıcının okunmamış
+ * mention listesi (header'da küçük drawer'da göster).
+ */
+router.get(
+  '/me/mentions/unread',
+  asyncRoute(async (req, res) => {
+    const data = await mentionRepo.listUnreadForUser(
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    res.json({ value: data.items, '@odata.count': data.total });
   }),
 );
 
