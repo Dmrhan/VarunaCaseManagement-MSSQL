@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Field, Select, TextArea } from '@/components/ui/Field';
+import { Field, Select } from '@/components/ui/Field';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService } from '@/services/caseService';
+import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
 import type { Case, CasePerson } from './types';
 
 const MIN_NOTE = 10;
@@ -39,6 +40,8 @@ export function TransferCaseModal({
   const [selectedPersonId, setSelectedPersonId] = useState('');
   const [transferNote, setTransferNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // VoiceNoteButton transcript'i textarea'ya cursor pozisyonuna insert için ref.
+  const noteRef = useRef<MentionTextareaHandle | null>(null);
   const { toast } = useToast();
 
   // Modal her açıldığında state'i sıfırla
@@ -164,7 +167,7 @@ export function TransferCaseModal({
         <Field
           label="Devir Notu"
           required
-          hint={`En az ${MIN_NOTE} karakter (mevcut: ${transferNote.trim().length})`}
+          hint={`En az ${MIN_NOTE} karakter (mevcut: ${transferNote.trim().length}). @ ile bir kişiyi etiketleyebilirsin.`}
           actions={
             <VoiceNoteButton
               onTranscript={(chunk) => setTransferNote((t) => (t ? `${t} ${chunk}` : chunk))}
@@ -172,9 +175,11 @@ export function TransferCaseModal({
           }
           error={transferNote.trim().length > 0 && !noteOk ? 'Devir notu çok kısa' : undefined}
         >
-          <TextArea
+          <MentionTextarea
+            ref={noteRef}
+            caseId={caseId}
             value={transferNote}
-            onChange={(e) => setTransferNote(e.target.value)}
+            onChange={setTransferNote}
             placeholder="Yeni atanacak kişinin bilmesi gerekenler: vaka durumu, müşteri ile iletişim, beklemede olan aksiyonlar…"
             rows={4}
           />
