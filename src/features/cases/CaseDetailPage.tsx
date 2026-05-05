@@ -3105,17 +3105,28 @@ function NewCallLogModal({
       return;
     }
     setSubmitting(true);
+    const trimmedDescription = description.trim();
     const r = await caseService.addCallLog(item.id, {
       callerName: callerName.trim(),
       durationMin,
       callDisposition: disposition,
       callOutcome: outcome,
-      description: description.trim() || undefined,
+      description: trimmedDescription || undefined,
     });
     if (!r) {
       setSubmitting(false);
       toast({ type: 'error', message: 'Çağrı kaydı eklenemedi.' });
       return;
+    }
+    // Mention mirror — call log description'da @[Name](userId) varsa BE'nin
+    // CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
+    // (addCallLog endpoint'i mention parse etmiyor; addNote ediyor.)
+    if (trimmedDescription && /@\[[^\]]+\]\([^)]+\)/.test(trimmedDescription)) {
+      await caseService.addNote(item.id, {
+        content: `Çağrı kaydı (${callerName.trim()}): ${trimmedDescription}`,
+        visibility: 'Internal',
+        authorName: 'Mock User',
+      });
     }
     onCreated(r.caseUpdated);
     onClose();
@@ -3209,7 +3220,7 @@ function NewCallLogModal({
 
         <Field
           label="Açıklama"
-          hint="AI bu metni özetleyerek aiCallBrief alanına yazacak."
+          hint="AI bu metni özetleyerek aiCallBrief alanına yazacak. @ ile takım arkadaşını etiketleyebilirsin."
           actions={
             <VoiceNoteButton
               onTranscript={(chunk) =>
@@ -3218,11 +3229,12 @@ function NewCallLogModal({
             />
           }
         >
-          <TextArea
+          <MentionTextarea
+            caseId={item.id}
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={setDescription}
             rows={4}
-            placeholder="Çağrıda ne konuşuldu, hangi karar verildi…"
+            placeholder="Çağrıda ne konuşuldu, hangi karar verildi… (@ekip arkadaşı)"
           />
         </Field>
       </div>

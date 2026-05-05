@@ -20,6 +20,11 @@ import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { caseService, lookupService } from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
+import { MentionTextarea } from './components/MentionTextarea';
+
+// Mention regex — `@[Name](userId)` formatı. Bir text bunu içeriyorsa BE'nin
+// CaseMention parse'ı tetiklensin diye yan-not (addNote) ekleriz.
+const MENTION_RE = /@\[[^\]]+\]\([^)]+\)/;
 import {
   CASE_STATUSES,
   ESCALATION_LEVELS,
@@ -225,6 +230,19 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
         title: 'Statü güncellendi',
         message: `${updated.caseNumber} → ${STATUS_LABELS[pending]}`,
       });
+
+      // Mention mirror — eskalasyon gerekçesi @[Name](userId) içeriyorsa
+      // BE'nin CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
+      // (transitionStatus endpoint'i mention parse etmiyor; addNote ediyor.)
+      if (pending === 'Eskalasyon' && MENTION_RE.test(escalationReason)) {
+        const levelLabel = escalationLevel ? ` (${escalationLevel})` : '';
+        await caseService.addNote(item.id, {
+          content: `Eskalasyon başlatıldı${levelLabel}. Gerekçe: ${escalationReason.trim()}`,
+          visibility: 'Internal',
+          authorName: 'Mock User',
+        });
+      }
+
       setPending(null);
       onApplied(updated);
     } else {
@@ -423,6 +441,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
               <Field
                 label="Gerekçe"
                 required
+                hint="@ ile yöneticiyi etiketle — anında bildirim alır."
                 className="sm:row-span-1"
                 actions={
                   <VoiceNoteButton
@@ -432,10 +451,11 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                   />
                 }
               >
-                <TextArea
+                <MentionTextarea
+                  caseId={item.id}
                   value={escalationReason}
-                  onChange={(e) => setEscalationReason(e.target.value)}
-                  placeholder="Eskalasyon sebebini açıklayın…"
+                  onChange={setEscalationReason}
+                  placeholder="Eskalasyon sebebini açıklayın… (@yönetici)"
                   rows={2}
                 />
               </Field>
