@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Field, Select, TextArea } from '@/components/ui/Field';
+import { Field, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
@@ -231,13 +231,25 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
         message: `${updated.caseNumber} → ${STATUS_LABELS[pending]}`,
       });
 
-      // Mention mirror — eskalasyon gerekçesi @[Name](userId) içeriyorsa
-      // BE'nin CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
+      // Mention mirror — reason/note metni @[Name](userId) içeriyorsa BE'nin
+      // CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
       // (transitionStatus endpoint'i mention parse etmiyor; addNote ediyor.)
       if (pending === 'Eskalasyon' && MENTION_RE.test(escalationReason)) {
         const levelLabel = escalationLevel ? ` (${escalationLevel})` : '';
         await caseService.addNote(item.id, {
           content: `Eskalasyon başlatıldı${levelLabel}. Gerekçe: ${escalationReason.trim()}`,
+          visibility: 'Internal',
+          authorName: 'Mock User',
+        });
+      } else if (pending === 'Çözüldü' && MENTION_RE.test(resolutionNote)) {
+        await caseService.addNote(item.id, {
+          content: `Vaka çözüldü. Çözüm notu: ${resolutionNote.trim()}`,
+          visibility: 'Internal',
+          authorName: 'Mock User',
+        });
+      } else if (pending === 'İptalEdildi' && MENTION_RE.test(cancelReason)) {
+        await caseService.addNote(item.id, {
+          content: `Vaka iptal edildi. Gerekçe: ${cancelReason.trim()}`,
           visibility: 'Internal',
           authorName: 'Mock User',
         });
@@ -371,6 +383,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
               <Field
                 label="Çözüm Notu"
                 required
+                hint="@ ile yardım eden kişi veya QA'yı etiketleyebilirsin."
                 actions={
                   <VoiceNoteButton
                     onTranscript={(chunk) =>
@@ -379,10 +392,11 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                   />
                 }
               >
-                <TextArea
+                <MentionTextarea
+                  caseId={item.id}
                   value={resolutionNote}
-                  onChange={(e) => setResolutionNote(e.target.value)}
-                  placeholder="Sorunun nasıl çözüldüğünü açıklayın…"
+                  onChange={setResolutionNote}
+                  placeholder="Sorunun nasıl çözüldüğünü açıklayın… (@yardım eden)"
                   rows={3}
                 />
               </Field>
@@ -393,6 +407,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
             <Field
               label="İptal Gerekçesi"
               required
+              hint="@ ile onaylayan yöneticiyi veya CSM'yi etiketleyebilirsin."
               actions={
                 <VoiceNoteButton
                   onTranscript={(chunk) =>
@@ -401,10 +416,11 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                 />
               }
             >
-              <TextArea
+              <MentionTextarea
+                caseId={item.id}
                 value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="İptal sebebini yazın…"
+                onChange={setCancelReason}
+                placeholder="İptal sebebini yazın… (@yönetici / @CSM)"
                 rows={2}
               />
             </Field>
