@@ -115,14 +115,16 @@ Production migration deploy:
 npm run db:migrate:deploy
 ```
 
-Local/demo seed:
+Demo seed:
 
 ```bash
 npm run db:seed
 npm run db:seed:auth
 ```
 
-Dikkat: `db:seed` ve ozellikle `db:seed:auth` yalnizca fresh local/demo veritabanlari icin kullanilmalidir. Production veya shared environment uzerinde calistirma; demo veri, mock vaka kayitlari ve bilinen demo credential'lar olusturabilir.
+`db:seed` ve `db:seed:auth`; fresh local, demo veya sandbox veritabanlari icin kullanilabilir. Ekiplerin uygulama akisini test amaciyla gorecegi paylasimli demo ortamlarinda da uygundur, ancak bu ortamlar gercek musteri verisi tasimamali ve production ile ayni Supabase projesini/DB'yi kullanmamalidir.
+
+Production veya gercek veri tasiyan shared environment uzerinde calistirma; demo veri, mock vaka kayitlari ve bilinen demo credential'lar olusturabilir.
 
 Prisma Studio:
 
@@ -140,7 +142,7 @@ Dikkat: `db:reset` destructive bir islemdir. Local disinda kullanilmamalidir.
 
 ## Ilk Kurulum Sirasi
 
-Yeni local veya demo ortam icin onerilen sira:
+Yeni local, demo veya sandbox ortam icin onerilen sira:
 
 ```bash
 npm install
@@ -152,9 +154,9 @@ npm run db:seed:auth
 npm run dev
 ```
 
-Bu seed akisi yalnizca sifirdan kurulan local/demo DB icindir.
+Bu seed akisi yalnizca sifirdan kurulan local/demo/sandbox DB icindir. Ekip testleri icin paylasimli demo ortam kurulacaksa once ayri Supabase project veya ayri non-production DB kullanildigini dogrula.
 
-Production veya shared environment icin seed komutlarini calistirma. Sadece migration deploy uygula ve gerekiyorsa ortam icin ozel, denetlenmis bir bootstrap proseduru kullan:
+Production veya gercek veri tasiyan shared environment icin seed komutlarini calistirma. Sadece migration deploy uygula ve gerekiyorsa ortam icin ozel, denetlenmis bir bootstrap proseduru kullan:
 
 ```bash
 npm run db:migrate:deploy
@@ -614,7 +616,8 @@ Kod veya schema degisikligi iceren release icin:
 - `npm run build` basarili
 - Prisma migration dosyalari commitlenmis
 - `npm run db:migrate:deploy` staging ortamda denenmis
-- Production/shared ortamda `db:seed` veya `db:seed:auth` calistirilmeyecegi onaylanmis
+- Production veya gercek veri tasiyan shared ortamda `db:seed` / `db:seed:auth` calistirilmeyecegi onaylanmis
+- Demo/sandbox ortamda seed gerekiyorsa ortamın production'dan izole oldugu ve gercek musteri verisi tasimadigi dogrulanmis
 - Production bootstrap gerekiyorsa demo veri/credential olusturmayan ayri prosedur hazirlanmis
 - Yeni env degiskenleri `.env.example` ve Vercel env panelinde mevcut
 - Auth/tenant etkisi olan degisikliklerde Admin ve Agent kullanicilarla smoke test yapilmis
