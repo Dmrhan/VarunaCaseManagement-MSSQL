@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { CompanySelector } from '@/components/ui/CompanySelector';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -21,6 +22,7 @@ import {
   type PersonInput,
   type TeamInput,
 } from '@/services/adminService';
+import { lookupService } from '@/services/caseService';
 import type { CasePerson, CaseTeam } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { TEAMS_HELP } from './helpContents';
@@ -28,10 +30,19 @@ import { TEAMS_HELP } from './helpContents';
 export function AdminTeamsPage() {
   const [teams, setTeams] = useState<CaseTeam[]>([]);
   const [search, setSearch] = useState('');
+  // Sayfa filtresi — null = tüm erişilebilir şirketler. Phase 5C.
+  const [filterCompanyId, setFilterCompanyId] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [membersOf, setMembersOf] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // companyId → name map'i list kolonunda kullanılır.
+  const companies = useMemo(() => lookupService.companies(), []);
+  const companyNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of companies) m.set(c.id, c.name);
+    return m;
+  }, [companies]);
   const { toast } = useToast();
 
   async function refresh() {
@@ -52,13 +63,15 @@ export function AdminTeamsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return teams;
-    return teams.filter(
+    let arr = teams;
+    if (filterCompanyId) arr = arr.filter((t) => t.companyId === filterCompanyId);
+    if (!q) return arr;
+    return arr.filter(
       (t) =>
         t.name.toLowerCase().includes(q) ||
         (t.description ?? '').toLowerCase().includes(q),
     );
-  }, [teams, search]);
+  }, [teams, search, filterCompanyId]);
 
   async function handleToggleActive(team: CaseTeam) {
     if (team.isActive) {
@@ -117,7 +130,7 @@ export function AdminTeamsPage() {
       <AdminListLayout
         title="Takım Tanımları"
         description="Vaka atamasında kullanılan takım listesi ve takım üyeleri (kullanıcı yönetimi). Pasif takımlar yeni atamalarda görünmez."
-        count={teams.length}
+        count={filtered.length}
         searchPlaceholder="Takım adı veya açıklamaya göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
@@ -128,6 +141,16 @@ export function AdminTeamsPage() {
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        filters={
+          <div className="w-56">
+            <CompanySelector
+              label="Şirket Filtresi"
+              value={filterCompanyId}
+              onChange={setFilterCompanyId}
+              allowAll
+            />
+          </div>
+        }
       >
         {filtered.length === 0 ? (
           <CardBody>
@@ -154,6 +177,7 @@ export function AdminTeamsPage() {
               <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <Th>Takım</Th>
+                  <Th>Şirket</Th>
                   <Th>Açıklama</Th>
                   <Th align="right">Üye</Th>
                   <Th align="right">Açık Vaka</Th>
@@ -169,6 +193,11 @@ export function AdminTeamsPage() {
                       <Td>
                         <div className="font-medium text-slate-800">{t.name}</div>
                         <div className="font-mono text-[10px] text-slate-400">{t.id}</div>
+                      </Td>
+                      <Td className="text-slate-600">
+                        {companyNameById.get(t.companyId) ?? (
+                          <span className="font-mono text-xs text-slate-400">{t.companyId}</span>
+                        )}
                       </Td>
                       <Td className="text-slate-600">
                         {t.description ?? <span className="text-slate-400">—</span>}
@@ -281,7 +310,18 @@ function TeamEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<TeamInput>({ name: '', description: '', isActive: true });
+  // Phase 5C — companyId zorunlu. lookupService.companies() user'ın
+  // erişebildiği şirketler (bootstrap allowedCompanyIds scope'lu).
+  // Default: kullanıcının ilk şirketi seçili — single-company Admin için
+  // dropdown tek seçenekli ama valid form.
+  const companies = useMemo(() => lookupService.companies(), []);
+  const defaultCompanyId = companies[0]?.id ?? '';
+  const [form, setForm] = useState<TeamInput>({
+    name: '',
+    description: '',
+    companyId: defaultCompanyId,
+    isActive: true,
+  });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -295,16 +335,26 @@ function TeamEditModal({
         const item = await adminService.teams.get(editingId);
         if (cancelled) return;
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+          setForm({
+            name: item.name,
+            description: item.description ?? '',
+            companyId: item.companyId,
+            isActive: item.isActive,
+          });
         }
       })();
       return () => {
         cancelled = true;
       };
     } else {
-      setForm({ name: '', description: '', isActive: true });
+      setForm({
+        name: '',
+        description: '',
+        companyId: defaultCompanyId,
+        isActive: true,
+      });
     }
-  }, [open, mode, editingId]);
+  }, [open, mode, editingId, defaultCompanyId]);
 
   async function handleSave() {
     setSubmitting(true);
@@ -312,6 +362,7 @@ function TeamEditModal({
     const trimmed: TeamInput = {
       name: form.name.trim(),
       description: form.description?.trim() || undefined,
+      companyId: form.companyId,
       isActive: form.isActive,
     };
 
@@ -343,7 +394,8 @@ function TeamEditModal({
     });
   }
 
-  const canSubmit = form.name.trim().length > 0 && !submitting;
+  // companyId zorunlu — backend 400 atar (Phase 5C).
+  const canSubmit = form.name.trim().length > 0 && !!form.companyId && !submitting;
 
   return (
     <Modal
@@ -363,6 +415,18 @@ function TeamEditModal({
       }
     >
       <div className="space-y-4">
+        <CompanySelector
+          value={form.companyId || null}
+          onChange={(id) => setForm((f) => ({ ...f, companyId: id ?? '' }))}
+          required
+          disabled={mode === 'edit'}
+          hint={
+            mode === 'edit'
+              ? 'Var olan takımın şirketi değiştirilemez.'
+              : undefined
+          }
+        />
+
         <Field label="Takım Adı" required>
           <TextInput
             autoFocus

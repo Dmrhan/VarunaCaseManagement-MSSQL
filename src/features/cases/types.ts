@@ -73,6 +73,8 @@ export interface CaseTeam {
   id: string;
   name: string;
   description?: string;
+  /** Phase 5C — multi-tenant scope. BE prisma.team.companyId String (NOT NULL). */
+  companyId: string;
   isActive: boolean;
 }
 

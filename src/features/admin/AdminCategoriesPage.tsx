@@ -12,7 +12,8 @@ import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
-import { Field, TextArea, TextInput } from '@/components/ui/Field';
+import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { CompanySelector } from '@/components/ui/CompanySelector';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -26,9 +27,20 @@ import type { CaseCategoryDef } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { CATEGORIES_HELP } from './helpContents';
 
+// Kategori filtresinde "Sistem Geneli" özel değer (companyId === null).
+// CompanySelector null'ı SYSTEM_WIDE olarak alır, ancak Categories filter'ı
+// hem null (sistem geneli) hem belirli bir companyId hem "Tümü" desteklemeli.
+// Bu yüzden filter state'i string | null | 'all' yerine alternatif key:
+//   null   → "Sistem Geneli" yalnız
+//   ''     → "Tümü" (filtrelemez)
+//   string → o şirket
+type CategoryFilter = string | null | 'all';
+
 export function AdminCategoriesPage() {
   const [items, setItems] = useState<CaseCategoryDef[]>([]);
   const [search, setSearch] = useState('');
+  // Phase 5C — sayfa filtresi (varsayılan: tümü).
+  const [filterCompany, setFilterCompany] = useState<CategoryFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [catEditor, setCatEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [subEditor, setSubEditor] = useState<
@@ -67,14 +79,22 @@ export function AdminCategoriesPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
+    let arr = items;
+    // Şirket filtresi: 'all' → atla, null → sistem geneli (companyId == null),
+    // string → o companyId.
+    if (filterCompany === null) {
+      arr = arr.filter((c) => c.companyId == null);
+    } else if (filterCompany !== 'all') {
+      arr = arr.filter((c) => c.companyId === filterCompany);
+    }
+    if (!q) return arr;
+    return arr.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         (c.description ?? '').toLowerCase().includes(q) ||
         c.subCategories.some((s) => s.name.toLowerCase().includes(q)),
     );
-  }, [items, search]);
+  }, [items, search, filterCompany]);
 
   const selected = useMemo(
     () => items.find((c) => c.id === selectedId) ?? null,
@@ -161,7 +181,7 @@ export function AdminCategoriesPage() {
       <AdminListLayout
         title="Kategori & Alt Kategori"
         description="Vaka oluşturmada ve atamada kullanılan iki seviyeli kategori yapısı. Pasif kategoriler/alt kategoriler yeni vakalarda görünmez (mevcut vakalardaki ad korunur)."
-        count={items.length}
+        count={filtered.length}
         searchPlaceholder="Kategori veya alt kategori ara…"
         searchValue={search}
         onSearchChange={setSearch}
@@ -172,6 +192,12 @@ export function AdminCategoriesPage() {
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        filters={
+          <CategoryCompanyFilter
+            value={filterCompany}
+            onChange={setFilterCompany}
+          />
+        }
       >
         {filtered.length === 0 ? (
           <CardBody>
@@ -218,7 +244,9 @@ export function AdminCategoriesPage() {
                           {c.description && (
                             <div className="mt-0.5 truncate text-xs text-slate-500">{c.description}</div>
                           )}
-                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                            <CompanyBadge companyId={c.companyId ?? null} />
+                            <span>·</span>
                             <span>{c.subCategories.length} alt kategori</span>
                             <span>·</span>
                             <span>{c.subCategories.filter((s) => s.isActive).length} aktif</span>
@@ -585,32 +613,22 @@ function CategoryEditModal({
       <div className="space-y-4">
         {/*
           Şirket picker — kategori multi-tenant. Admin yalnız kendi şirket(ler)inde
-          kategori açabilir. SystemAdmin için ek olarak "Sistem geneli" seçeneği
-          (companyId=null) — cross-company şablon.
+          kategori açabilir. SystemAdmin için ek olarak "Sistem geneli" (null) —
+          cross-company şablon. CompanySelector allowSystemWide=true yalnız
+          SystemAdmin için bu option'ı gösterir.
         */}
-        <Field label="Şirket" required>
-          <select
-            value={form.companyId ?? ''}
-            onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value || null }))}
-            disabled={mode === 'edit'}
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-          >
-            {isSystemAdmin && <option value="">Sistem geneli (tüm şirketler)</option>}
-            {companies.length === 0 && !isSystemAdmin && (
-              <option value="">— atanmış şirket yok —</option>
-            )}
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          {mode === 'edit' && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
-              Var olan kategorinin şirketi değiştirilemez.
-            </p>
-          )}
-        </Field>
+        <CompanySelector
+          value={form.companyId ?? null}
+          onChange={(id) => setForm((f) => ({ ...f, companyId: id }))}
+          required
+          allowSystemWide
+          disabled={mode === 'edit'}
+          hint={
+            mode === 'edit'
+              ? 'Var olan kategorinin şirketi değiştirilemez.'
+              : undefined
+          }
+        />
 
         <Field label="Kategori Adı" required>
           <TextInput
@@ -806,5 +824,71 @@ function Td({
     >
       {children}
     </td>
+  );
+}
+
+// ----------------------------------------------------------------
+// Sayfa-spesifik şirket filtresi — 3 seçenek (Tümü / Sistem Geneli / Şirket).
+// CompanySelector ikili (allowAll VE allowSystemWide) durumu desteklemiyor —
+// kategoriler için custom inline select.
+// ----------------------------------------------------------------
+
+function CategoryCompanyFilter({
+  value,
+  onChange,
+}: {
+  value: string | null | 'all';
+  onChange: (v: string | null | 'all') => void;
+}) {
+  const { user } = useAuth();
+  const isSystemAdmin = user?.role === 'SystemAdmin';
+  const companies = useMemo(() => lookupService.companies(), []);
+
+  // Encode/decode: 'all' → "__all__", null → "__system__", string → string
+  const raw = value === 'all' ? '__all__' : value === null ? '__system__' : value;
+
+  return (
+    <div className="w-56">
+      <Field label="Şirket Filtresi">
+        <Select
+          value={raw}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === '__all__') onChange('all');
+            else if (v === '__system__') onChange(null);
+            else onChange(v);
+          }}
+        >
+          <option value="__all__">Tümü</option>
+          {isSystemAdmin && <option value="__system__">Sistem Geneli</option>}
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Liste satırında şirket bilgisi — küçük badge.
+// ----------------------------------------------------------------
+
+function CompanyBadge({ companyId }: { companyId: string | null }) {
+  const companies = useMemo(() => lookupService.companies(), []);
+  if (companyId == null) {
+    return (
+      <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+        Sistem Geneli
+      </span>
+    );
+  }
+  const company = companies.find((c) => c.id === companyId);
+  return (
+    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+      {company?.name ?? companyId}
+    </span>
   );
 }

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { CompanySelector } from '@/components/ui/CompanySelector';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -25,6 +26,8 @@ import { SLA_HELP } from './helpContents';
 export function AdminSlaPage() {
   const [items, setItems] = useState<SlaPolicy[]>([]);
   const [search, setSearch] = useState('');
+  // Phase 5C — sayfa şirket filtresi (null = tümü).
+  const [filterCompanyId, setFilterCompanyId] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +50,10 @@ export function AdminSlaPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((p) =>
+    let arr = items;
+    if (filterCompanyId) arr = arr.filter((p) => p.companyId === filterCompanyId);
+    if (!q) return arr;
+    return arr.filter((p) =>
       [
         p.companyName,
         p.productGroup,
@@ -61,7 +66,7 @@ export function AdminSlaPage() {
         .toLowerCase()
         .includes(q),
     );
-  }, [items, search]);
+  }, [items, search, filterCompanyId]);
 
   async function handleToggleActive(p: SlaPolicy) {
     const r = await adminService.sla.setActive(p.id, !p.isActive);
@@ -99,7 +104,7 @@ export function AdminSlaPage() {
       <AdminListLayout
         title="SLA Kuralları"
         description="5-tuple eşleşme: Şirket + Ürün Grubu + Kategori + Alt Kategori + Talep Türü → Yanıt/Çözüm saatleri (PRODUCT_SPEC §6)."
-        count={items.length}
+        count={filtered.length}
         searchPlaceholder="Şirket / ürün grubu / kategori / talep türüne göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
@@ -110,6 +115,16 @@ export function AdminSlaPage() {
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        filters={
+          <div className="w-56">
+            <CompanySelector
+              label="Şirket Filtresi"
+              value={filterCompanyId}
+              onChange={setFilterCompanyId}
+              allowAll
+            />
+          </div>
+        }
       >
         {filtered.length === 0 ? (
           <CardBody>
@@ -402,19 +417,18 @@ function SlaEditModal({
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Şirket" required>
-            <Select
-              value={form.companyId}
-              onChange={(e) => handleCompanyChange(e.target.value)}
-            >
-              <option value="">Şirket seçin…</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <CompanySelector
+            value={form.companyId || null}
+            onChange={(id) => handleCompanyChange(id ?? '')}
+            required
+            disabled={mode === 'edit'}
+            hint={
+              mode === 'edit'
+                ? 'Var olan kuralın şirketi değiştirilemez.'
+                : undefined
+            }
+          />
+          {/* productGroup ve sonraki alanlar Field'ları aşağıda */}
 
           <Field label="Ürün Grubu" required>
             <Select

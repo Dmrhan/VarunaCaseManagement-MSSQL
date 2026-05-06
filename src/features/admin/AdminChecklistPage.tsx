@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { CompanySelector } from '@/components/ui/CompanySelector';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -36,6 +37,8 @@ export function AdminChecklistPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // Phase 5C — sayfa şirket filtresi.
+  const [filterCompanyId, setFilterCompanyId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tplEditor, setTplEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [itemEditor, setItemEditor] = useState<
@@ -72,14 +75,16 @@ export function AdminChecklistPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((t) =>
+    let arr = items;
+    if (filterCompanyId) arr = arr.filter((t) => t.companyId === filterCompanyId);
+    if (!q) return arr;
+    return arr.filter((t) =>
       [t.name, t.companyName, t.productGroup, t.categoryName, t.description ?? '']
         .join(' ')
         .toLowerCase()
         .includes(q),
     );
-  }, [items, search]);
+  }, [items, search, filterCompanyId]);
 
   const selected = useMemo(
     () => items.find((t) => t.id === selectedId) ?? null,
@@ -160,7 +165,7 @@ export function AdminChecklistPage() {
       <AdminListLayout
         title="Kontrol Listesi"
         description="Şirket + Ürün Grubu + Kategori (3-tuple) eşleşmesinde vaka detayında otomatik yüklenen kontrol listeleri."
-        count={items.length}
+        count={filtered.length}
         searchPlaceholder="Şablon adı / şirket / ürün grubu / kategoriye göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
@@ -171,6 +176,16 @@ export function AdminChecklistPage() {
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        filters={
+          <div className="w-56">
+            <CompanySelector
+              label="Şirket Filtresi"
+              value={filterCompanyId}
+              onChange={setFilterCompanyId}
+              allowAll
+            />
+          </div>
+        }
       >
         {filtered.length === 0 ? (
           <CardBody>
@@ -638,19 +653,17 @@ function ChecklistTemplateEditModal({
         </Field>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Şirket" required>
-            <Select
-              value={form.companyId}
-              onChange={(e) => handleCompanyChange(e.target.value)}
-            >
-              <option value="">Şirket seçin…</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <CompanySelector
+            value={form.companyId || null}
+            onChange={(id) => handleCompanyChange(id ?? '')}
+            required
+            disabled={mode === 'edit'}
+            hint={
+              mode === 'edit'
+                ? 'Var olan şablonun şirketi değiştirilemez.'
+                : undefined
+            }
+          />
 
           <Field label="Ürün Grubu" required>
             <Select
