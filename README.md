@@ -43,14 +43,18 @@ Proje gerçek BFF, Supabase ve Prisma entegrasyonları kullandığı için `.env
 
 Beklenen temel değişkenler:
 
-```bash
 DATABASE_URL=
 DIRECT_URL=
+
 SUPABASE_URL=
-SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+
 CRON_SECRET=
 OPENAI_API_KEY=
+
 ```
 
 `DATABASE_URL` uygulama bağlantısı için, `DIRECT_URL` ise Prisma migration işlemleri için kullanılır.
