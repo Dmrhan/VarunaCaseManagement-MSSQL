@@ -115,12 +115,14 @@ Production migration deploy:
 npm run db:migrate:deploy
 ```
 
-Seed:
+Local/demo seed:
 
 ```bash
 npm run db:seed
 npm run db:seed:auth
 ```
+
+Dikkat: `db:seed` ve ozellikle `db:seed:auth` yalnizca fresh local/demo veritabanlari icin kullanilmalidir. Production veya shared environment uzerinde calistirma; demo veri, mock vaka kayitlari ve bilinen demo credential'lar olusturabilir.
 
 Prisma Studio:
 
@@ -138,7 +140,7 @@ Dikkat: `db:reset` destructive bir islemdir. Local disinda kullanilmamalidir.
 
 ## Ilk Kurulum Sirasi
 
-Yeni local ortam icin onerilen sira:
+Yeni local veya demo ortam icin onerilen sira:
 
 ```bash
 npm install
@@ -150,13 +152,15 @@ npm run db:seed:auth
 npm run dev
 ```
 
-Production veya shared environment icin reset kullanma. Migration deploy ve kontrollu seed tercih edilir:
+Bu seed akisi yalnizca sifirdan kurulan local/demo DB icindir.
+
+Production veya shared environment icin seed komutlarini calistirma. Sadece migration deploy uygula ve gerekiyorsa ortam icin ozel, denetlenmis bir bootstrap proseduru kullan:
 
 ```bash
 npm run db:migrate:deploy
-npm run db:seed
-npm run db:seed:auth
 ```
+
+Production bootstrap gerekiyorsa demo kullanici, bilinen sifre veya mock case data olusturmayan ayri bir operasyon playbook'u hazirlanmalidir.
 
 ## Vercel Deployment
 
@@ -200,6 +204,7 @@ Production checklist:
 - Supabase Auth redirect/origin ayarlari production domain'i iceriyor
 - Supabase Storage bucket ve policy ayarlari upload/download akisina uygun
 - Migration deploy production DB'ye uygulanmis
+- Production uzerinde `db:seed` veya `db:seed:auth` calistirilmamis
 
 ## Health Checks
 
@@ -420,6 +425,21 @@ Cozum:
 
 `DIRECT_URL` direct/session connection string olmalidir. Migration icin transaction pooler kullanma.
 
+### Production ortamda demo seed calismis
+
+Belirti:
+
+- Beklenmeyen demo kullanicilar
+- Bilinen demo sifreli auth kullanicilari
+- Mock case veya lookup verisi
+
+Cozum:
+
+- Etkilenen credential'lari hemen disable veya rotate et.
+- Demo kullanicilari ve mock veriyi temizlemeden production'i acma.
+- Gerekirse DB snapshot/backup'tan geri don.
+- Sonraki bootstrap icin demo seed yerine ortam ozelinde denetlenmis script kullan.
+
 ### 401 unauthenticated
 
 Belirti:
@@ -594,9 +614,11 @@ Kod veya schema degisikligi iceren release icin:
 - `npm run build` basarili
 - Prisma migration dosyalari commitlenmis
 - `npm run db:migrate:deploy` staging ortamda denenmis
+- Production/shared ortamda `db:seed` veya `db:seed:auth` calistirilmeyecegi onaylanmis
+- Production bootstrap gerekiyorsa demo veri/credential olusturmayan ayri prosedur hazirlanmis
 - Yeni env degiskenleri `.env.example` ve Vercel env panelinde mevcut
 - Auth/tenant etkisi olan degisikliklerde Admin ve Agent kullanicilarla smoke test yapilmis
-- Dosya upload degisikligi varsa upload, download ve delete akisları test edilmis
+- Dosya upload degisikligi varsa upload, download ve delete akislari test edilmis
 - AI degisikligi varsa `AIUsageLog` yazimi ve acceptance update kontrol edilmis
 - Cron degisikligi varsa manuel cron endpoint testi yapilmis
 - README ve docs gerekirse guncellenmis
