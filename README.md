@@ -14,6 +14,12 @@ Proje artık yalnızca mock UI aşamasında değildir. Frontend, Express BFF üz
 - Multi-tenant erişim: Kullanıcının erişebildiği şirketler üzerinden filtreleme
 - Mock veri: Geliştirme fallback'i olarak kodda durur, aktif kullanım `USE_MOCK = false`
 
+## Dokümantasyon
+
+- [API Dokümantasyonu](docs/API.md): BFF endpointleri, auth, yetki, request body örnekleri ve durum kodları
+- [Mimari Dokümantasyon](docs/ARCHITECTURE.md): Frontend, BFF, repository, Prisma, Supabase, AI, cron ve tenant mimarisi
+- [Operasyon Dokümantasyonu](docs/OPERATIONS.md): Local kurulum, environment, migration, deploy, cron, monitoring ve troubleshooting
+
 ## Geliştirme
 
 ```bash
@@ -43,6 +49,7 @@ Proje gerçek BFF, Supabase ve Prisma entegrasyonları kullandığı için `.env
 
 Beklenen temel değişkenler:
 
+```bash
 DATABASE_URL=
 DIRECT_URL=
 
@@ -54,7 +61,6 @@ VITE_SUPABASE_ANON_KEY=
 
 CRON_SECRET=
 OPENAI_API_KEY=
-
 ```
 
 `DATABASE_URL` uygulama bağlantısı için, `DIRECT_URL` ise Prisma migration işlemleri için kullanılır.
@@ -161,6 +167,8 @@ POST   /api/cases/cron/snooze-wakeup
 
 Tüm case endpointleri JWT doğrulaması gerektirir. Cron endpoint'i JWT'den önce mount edilir ve `CRON_SECRET` ile korunur.
 
+Detaylı endpoint listesi için [API Dokümantasyonu](docs/API.md) dosyasına bakın.
+
 ## Veri Modeli
 
 Ana veri modeli Prisma üzerinde tanımlıdır.
@@ -239,7 +247,7 @@ Bu scriptler sırasıyla pattern alert ve QA score akışlarını kontrol etmek 
 - [x] Multi-tenant erişim kontrolü
 - [x] Vaka listeleme, oluşturma ve detay akışları
 - [x] Notes, mentions, files, snooze ve bulk update altyapısı
-- [ ] API dokümantasyonunun detaylandırılması
-- [ ] Mimari dokümantasyonun genişletilmesi
-- [ ] Operasyon/deploy dokümantasyonunun tamamlanması
+- [x] API dokümantasyonunun detaylandırılması
+- [x] Mimari dokümantasyonun genişletilmesi
+- [x] Operasyon/deploy dokümantasyonunun tamamlanması
 - [ ] Dashboard ve analitik dokümantasyonu
