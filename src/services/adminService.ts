@@ -45,6 +45,8 @@ export interface DocumentTypeInput {
 export interface TeamInput {
   name: string;
   description?: string;
+  /** Phase 5C — backend body.companyId zorunlu (multi-tenant scope). */
+  companyId: string;
   isActive: boolean;
 }
 

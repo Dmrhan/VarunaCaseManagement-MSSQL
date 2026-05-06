@@ -31,6 +31,11 @@ interface AdminListLayoutProps {
   /** Error state — set edilirse children yerine hata + retry butonu gösterilir */
   error?: string | null;
   onRetry?: () => void;
+  /**
+   * Ek filtre alanları — search bar'ın yanında yer alır.
+   * Phase 5C: CompanySelector gibi sayfa-bazlı filtrelemeler için.
+   */
+  filters?: ReactNode;
   /** Ana içerik — tablo, liste veya empty state */
   children: ReactNode;
 }
@@ -60,6 +65,7 @@ export function AdminListLayout({
   loading = false,
   error = null,
   onRetry,
+  filters,
   children,
 }: AdminListLayoutProps) {
   const [helpOpen, setHelpOpen] = useState(false);
@@ -93,20 +99,23 @@ export function AdminListLayout({
 
         {/* İçerik kartı */}
         <Card>
-          {searchEnabled && (
-            <div className="border-b border-slate-200 p-3">
-              <div className="relative max-w-md">
-                <Search
-                  size={14}
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <TextInput
-                  placeholder={searchPlaceholder}
-                  value={searchValue ?? ''}
-                  onChange={(e) => onSearchChange?.(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
+          {(searchEnabled || filters) && (
+            <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 p-3 dark:border-ndark-border">
+              {searchEnabled && (
+                <div className="relative min-w-[16rem] flex-1 max-w-md">
+                  <Search
+                    size={14}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <TextInput
+                    placeholder={searchPlaceholder}
+                    value={searchValue ?? ''}
+                    onChange={(e) => onSearchChange?.(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+              )}
+              {filters}
             </div>
           )}
           {loading ? (

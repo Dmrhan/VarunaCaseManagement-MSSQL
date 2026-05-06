@@ -68,12 +68,13 @@ export const MOCK_OFFERED_SOLUTIONS: OfferedSolutionDef[] = [
   { id: 'OFFER-CUSTOM-DEV',   name: 'Talep Üzerine Geliştirme',   description: 'Müşteriye özel modül/rapor',                   isActive: true },
 ];
 
+// Mock takımlar — companyId default PARAM (multi-tenant Phase 1+).
 export const MOCK_TEAMS: CaseTeam[] = [
-  { id: 'TEAM-DESTEK',  name: 'Destek Takımı',     description: '1. seviye teknik destek ve genel sorun çözümü',     isActive: true },
-  { id: 'TEAM-FINANS',  name: 'Finans Takımı',     description: 'Fatura, ödeme ve finansal süreç yönetimi',          isActive: true },
-  { id: 'TEAM-CS',      name: 'Customer Success',  description: 'Müşteri başarısı, proaktif takip ve churn önleme',  isActive: true },
-  { id: 'TEAM-MOBIL',   name: 'Mobil Takımı',      description: 'iOS/Android uygulama hataları ve mobil özellikler', isActive: true },
-  { id: 'TEAM-EGITIM',  name: 'Eğitim Takımı',     description: 'Müşteri onboarding, eğitim ve dokümantasyon',       isActive: true },
+  { id: 'TEAM-DESTEK',  name: 'Destek Takımı',     description: '1. seviye teknik destek ve genel sorun çözümü',     companyId: 'COMP-PARAM', isActive: true },
+  { id: 'TEAM-FINANS',  name: 'Finans Takımı',     description: 'Fatura, ödeme ve finansal süreç yönetimi',          companyId: 'COMP-PARAM', isActive: true },
+  { id: 'TEAM-CS',      name: 'Customer Success',  description: 'Müşteri başarısı, proaktif takip ve churn önleme',  companyId: 'COMP-PARAM', isActive: true },
+  { id: 'TEAM-MOBIL',   name: 'Mobil Takımı',      description: 'iOS/Android uygulama hataları ve mobil özellikler', companyId: 'COMP-PARAM', isActive: true },
+  { id: 'TEAM-EGITIM',  name: 'Eğitim Takımı',     description: 'Müşteri onboarding, eğitim ve dokümantasyon',       companyId: 'COMP-PARAM', isActive: true },
 ];
 
 export const MOCK_PERSONS: CasePerson[] = [
