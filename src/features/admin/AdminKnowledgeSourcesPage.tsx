@@ -26,6 +26,7 @@ import {
 } from '@/services/adminService';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { AdminListLayout } from './AdminListLayout';
+import { KNOWLEDGE_SOURCES_HELP } from './helpContents';
 
 /**
  * Faz 1.5 Madde 6 — Bilgi Kaynakları Kayıt Defteri.
@@ -143,6 +144,8 @@ export function AdminKnowledgeSourcesPage() {
         onSearchChange={setSearch}
         onAdd={canCreate ? () => setEditor({ mode: 'create' }) : undefined}
         addLabel="Yeni Kaynak"
+        helpTitle={KNOWLEDGE_SOURCES_HELP.title}
+        helpSections={KNOWLEDGE_SOURCES_HELP.sections}
         loading={loading}
         error={error}
         onRetry={refresh}
