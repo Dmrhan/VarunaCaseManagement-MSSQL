@@ -280,6 +280,42 @@ export const OFFERED_SOLUTIONS_HELP: HelpContent = {
   ],
 };
 
+export const KNOWLEDGE_SOURCES_HELP: HelpContent = {
+  title: 'Bilgi Kaynakları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'AI asistanın (RUNA AI) hangi veri kaynaklarından beslendiğini gösteren envanter ekranı. Buradaki kayıtlar AI\'ın referans aldığı kaynakları şeffaf hale getirir.',
+    },
+    {
+      heading: 'Ne işe yarar?',
+      content:
+        'RUNA AI kategori önerisi, çözüm taslağı ve risk analizi yaparken geçmiş vakalar, SLA kuralları ve kategori tanımları gibi kaynaklara başvurur. Bu ekran hangi kaynakların aktif olduğunu ve içerik sayısını gösterir.',
+    },
+    {
+      heading: 'Kaynak Türleri',
+      content:
+        'Her kaynak türü farklı bir AI yeteneğini besler. Aşağıdaki türler sistemde tanımlıdır.',
+      example: `Geçmiş Vakalar    → Çözülmüş vakalardan öğrenilen örüntüler
+SLA Kuralları     → Öncelik ve süre hesaplamalarında kullanılır
+Kontrol Listeleri → Çözüm adımları önerilerinde kullanılır
+Kategori Tanımları→ Otomatik sınıflandırmada kullanılır
+Manuel Giriş      → Admin tarafından eklenen özel kaynaklar`,
+    },
+    {
+      heading: 'Yeni Kaynak Nasıl Eklenir?',
+      content:
+        '"Yeni Kaynak" butonuna tıklayın, kaynak adı, türü ve içerik sayısını girin. Kaynak eklenmesi AI\'ın otomatik olarak o veriye erişeceği anlamına gelmez — bu sadece bir envanter kaydıdır.',
+    },
+    {
+      heading: 'Kimler Görebilir?',
+      content:
+        'Admin ve SystemAdmin rolündeki kullanıcılar görüntüleyebilir ve düzenleyebilir.',
+    },
+  ],
+};
+
 export const FIELDS_HELP: HelpContent = {
   title: 'Dinamik Alanlar',
   sections: [
