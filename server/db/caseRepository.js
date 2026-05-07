@@ -10,6 +10,16 @@ const SNOOZE_REASON_LABEL = {
   Reminder: 'Hatırlatıcı',
 };
 
+// FAZ 2 §20.2 — aktarım gerekçe kodu → activity log etiketi (TR).
+const TRANSFER_REASON_LABEL = {
+  wrong_team: 'Yanlış Takım',
+  expertise: 'Uzmanlık',
+  workload: 'İş Yükü',
+  escalation: 'Eskalasyon',
+  customer_request: 'Müşteri Talebi',
+  other: 'Diğer',
+};
+
 const TR_DATETIME = new Intl.DateTimeFormat('tr-TR', {
   day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
 });
@@ -771,6 +781,193 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
     return shape(updated);
+  },
+
+  /**
+   * Vaka aktarımı (FAZ 2 §20.2). Takım/kişi devri için tek atomic operasyon:
+   * Case güncelle (assigned*, transferCount++) + CaseTransfer audit + Activity.
+   *
+   * Validasyonlar:
+   *  - Vaka kapalı (Cozuldu/IptalEdildi) → { error: 'closed_case' }
+   *  - Aynı takım → { error: 'same_team' }
+   *  - Hedef takım vakanın şirketinde değil → { error: 'invalid_team' }
+   *  - toPersonId verilmiş + person bu takıma ait değil → { error: 'invalid_person' }
+   *
+   * SLA değiştirilmez (kuralı: aktarım SLA sayacını duraklatmaz/sıfırlamaz).
+   */
+  async transferCase(id, input, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const c = await prisma.case.findUnique({ where: { id } });
+    if (!c) return null;
+
+    // Kapalı vakalar aktarılamaz
+    if (c.status === 'Cozuldu' || c.status === 'IptalEdildi') {
+      return { error: 'closed_case', message: 'Kapatılmış vakalar aktarılamaz.' };
+    }
+
+    if (!input.toTeamId || typeof input.toTeamId !== 'string') {
+      return { error: 'invalid_input', message: 'toTeamId zorunlu.' };
+    }
+    if (c.assignedTeamId === input.toTeamId) {
+      return { error: 'same_team', message: 'Vaka zaten bu takımda.' };
+    }
+    if (!input.reason || typeof input.reason !== 'string' || !input.reason.trim()) {
+      return { error: 'invalid_input', message: 'Aktarım gerekçesi zorunlu.' };
+    }
+    if (!input.transferredBy) {
+      return { error: 'invalid_input', message: 'transferredBy zorunlu.' };
+    }
+
+    // Hedef takım tenant kontrolü
+    const team = await prisma.team.findUnique({ where: { id: input.toTeamId } });
+    if (!team || team.companyId !== companyId) {
+      return { error: 'invalid_team', message: 'Hedef takım vakanın şirketinde değil.' };
+    }
+    if (!team.isActive) {
+      return { error: 'invalid_team', message: 'Hedef takım pasif.' };
+    }
+
+    // Hedef kişi (opsiyonel) takım eşleşmesi
+    let person = null;
+    if (input.toPersonId) {
+      person = await prisma.person.findUnique({ where: { id: input.toPersonId } });
+      if (!person || person.teamId !== input.toTeamId || !person.isActive) {
+        return { error: 'invalid_person', message: 'Atanan kişi seçilen takıma ait değil.' };
+      }
+    }
+
+    const fromTeamId = c.assignedTeamId ?? null;
+    const fromPersonId = c.assignedPersonId ?? null;
+    const fromTeamName = c.assignedTeamName ?? '—';
+    const newTransferCount = (c.transferCount ?? 0) + 1;
+
+    // Activity action satırı: "↔ Vaka aktarıldı: <from> → <to>"
+    // Note alanı: gerekçe etiketi + serbest metin.
+    const reasonLabel = input.reasonCode ? TRANSFER_REASON_LABEL[input.reasonCode] : null;
+    const trimmedReason = input.reason.trim();
+    const noteText = reasonLabel
+      ? `Gerekçe: ${reasonLabel} — ${trimmedReason}`
+      : `Gerekçe: ${trimmedReason}`;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.case.update({
+        where: { id },
+        data: {
+          assignedTeamId: input.toTeamId,
+          assignedTeamName: team.name,
+          assignedPersonId: person?.id ?? null,
+          assignedPersonName: person?.name ?? null,
+          transferCount: { increment: 1 },
+        },
+        include: CASE_INCLUDE,
+      });
+
+      await tx.caseTransfer.create({
+        data: {
+          caseId: id,
+          companyId,
+          fromTeamId,
+          toTeamId: input.toTeamId,
+          fromPersonId,
+          toPersonId: person?.id ?? null,
+          reason: trimmedReason,
+          reasonCode: input.reasonCode ?? null,
+          transferredBy: input.transferredBy,
+          aiSuggestedTeamId: input.aiSuggestedTeamId ?? null,
+          aiSuggestedReason: input.aiSuggestedReason ?? null,
+          aiReasonCode: input.aiReasonCode ?? null,
+          aiConfidence: typeof input.aiConfidence === 'number' ? input.aiConfidence : null,
+        },
+      });
+
+      await tx.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          action: `↔ Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
+          actionType: 'Transfer',
+          fieldName: 'assignedTeamId',
+          fromValue: fromTeamName,
+          toValue: team.name,
+          note: noteText,
+          actor: input.transferredByName ?? input.transferredBy,
+        },
+      });
+
+      return u;
+    });
+
+    return {
+      case: shape(updated),
+      transferCount: newTransferCount,
+      fromTeamId,
+      fromTeamName,
+      toTeamId: input.toTeamId,
+      toTeamName: team.name,
+      companyId,
+    };
+  },
+
+  /**
+   * Bir vakanın tüm aktarım geçmişi — UI için takım/kişi adları enrich edilir.
+   * En yeni en üstte. allowedCompanyIds scope'lu.
+   */
+  async listTransfers(caseId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const rows = await prisma.caseTransfer.findMany({
+      where: { caseId },
+      orderBy: { transferredAt: 'desc' },
+    });
+    if (rows.length === 0) return [];
+
+    const teamIds = new Set();
+    const personIds = new Set();
+    for (const r of rows) {
+      if (r.fromTeamId) teamIds.add(r.fromTeamId);
+      if (r.toTeamId) teamIds.add(r.toTeamId);
+      if (r.aiSuggestedTeamId) teamIds.add(r.aiSuggestedTeamId);
+      if (r.fromPersonId) personIds.add(r.fromPersonId);
+      if (r.toPersonId) personIds.add(r.toPersonId);
+    }
+
+    const [teams, persons] = await Promise.all([
+      teamIds.size > 0
+        ? prisma.team.findMany({ where: { id: { in: [...teamIds] } }, select: { id: true, name: true } })
+        : Promise.resolve([]),
+      personIds.size > 0
+        ? prisma.person.findMany({ where: { id: { in: [...personIds] } }, select: { id: true, name: true } })
+        : Promise.resolve([]),
+    ]);
+    const teamName = new Map(teams.map((t) => [t.id, t.name]));
+    const personName = new Map(persons.map((p) => [p.id, p.name]));
+
+    return rows.map((r) => ({
+      id: r.id,
+      caseId: r.caseId,
+      companyId: r.companyId,
+      fromTeamId: r.fromTeamId,
+      fromTeamName: r.fromTeamId ? teamName.get(r.fromTeamId) ?? null : null,
+      toTeamId: r.toTeamId,
+      toTeamName: teamName.get(r.toTeamId) ?? null,
+      fromPersonId: r.fromPersonId,
+      fromPersonName: r.fromPersonId ? personName.get(r.fromPersonId) ?? null : null,
+      toPersonId: r.toPersonId,
+      toPersonName: r.toPersonId ? personName.get(r.toPersonId) ?? null : null,
+      reason: r.reason,
+      reasonCode: r.reasonCode,
+      reasonLabel: r.reasonCode ? TRANSFER_REASON_LABEL[r.reasonCode] ?? null : null,
+      transferredBy: r.transferredBy,
+      transferredAt: r.transferredAt,
+      aiSuggestedTeamId: r.aiSuggestedTeamId,
+      aiSuggestedTeamName: r.aiSuggestedTeamId ? teamName.get(r.aiSuggestedTeamId) ?? null : null,
+      aiSuggestedReason: r.aiSuggestedReason,
+      aiReasonCode: r.aiReasonCode,
+      aiConfidence: r.aiConfidence,
+    }));
   },
 
   /**

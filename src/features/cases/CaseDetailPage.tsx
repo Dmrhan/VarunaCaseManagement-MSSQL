@@ -7,6 +7,7 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  ArrowRightLeft,
   ChevronRight,
   Clock,
   Clock3,
@@ -46,7 +47,7 @@ import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
-import { TransferCaseModal } from './TransferCaseModal';
+import { TransferModal } from './components/TransferModal';
 import { SnoozeModal } from './components/SnoozeModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
 import { MentionContent } from './components/MentionContent';
@@ -552,6 +553,19 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         />
       )}
 
+      {/* Aktarım uyarısı — FAZ 2 §20.2: 2+ aktarımda kök neden analizi tetiklenir */}
+      {(item.transferCount ?? 0) >= 2 && (
+        <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          <ArrowRightLeft size={16} className="shrink-0 text-amber-700 dark:text-amber-400" />
+          <div className="flex-1">
+            <span className="font-medium">Bu vaka {item.transferCount} kez aktarıldı.</span>{' '}
+            <span className="text-amber-800 dark:text-amber-300">
+              RUNA AI kök neden analizini hazırladı — aktivite akışında "🔍 AI Kök Neden Analizi" satırına bak.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Snooze banner — vakayı geçici olarak ertelendiğinde */}
       {isSnoozeActive && item.snoozeUntil && (
         <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-sm text-amber-900">
@@ -688,12 +702,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
 
       </div>
 
-      {/* Vaka devret modal'ı */}
-      <TransferCaseModal
-        isOpen={transferOpen}
-        caseId={item.id}
-        currentAssignedPersonId={item.assignedPersonId}
-        currentAssignedPersonName={item.assignedPersonName}
+      {/* Vaka aktarımı modal'ı (FAZ 2 §20.2) — AI öneri + 3 step */}
+      <TransferModal
+        open={transferOpen}
+        caseItem={item}
         onClose={() => setTransferOpen(false)}
         onTransferred={(updated) => setItem(updated)}
       />
@@ -2559,24 +2571,24 @@ function ActivityTab({ item }: { item: Case }) {
           );
         }
 
-        // Transfer aksiyonları için amber-tint custom render — diğer log'lardan ayrışsın.
+        // Transfer aksiyonları için blue-tint custom render — diğer log'lardan ayrışsın.
         if (h.actionType === 'Transfer') {
           return (
             <li key={h.id} className="relative">
-              <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-amber-500 ring-4 ring-white" />
-              <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+              <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white dark:ring-ndark-bg" />
+              <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 dark:border-blue-900/40 dark:bg-blue-950/20">
                 <div className="flex flex-wrap items-baseline gap-x-1.5 text-sm">
-                  <span className="font-medium text-amber-900">↪ Devredildi:</span>
-                  <span className="text-slate-700 line-through decoration-slate-300">{h.fromValue ?? '—'}</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-blue-900 dark:text-blue-200">
+                    <ArrowRightLeft size={12} /> Aktarıldı:
+                  </span>
+                  <span className="text-slate-700 line-through decoration-slate-300 dark:text-ndark-muted">{h.fromValue ?? '—'}</span>
                   <span className="text-slate-400">→</span>
-                  <span className="font-semibold text-slate-800">{h.toValue}</span>
+                  <span className="font-semibold text-slate-800 dark:text-ndark-text">{h.toValue}</span>
                 </div>
                 {h.note && (
-                  <p className="mt-1 text-xs italic text-amber-800">
-                    “{h.note}”
-                  </p>
+                  <p className="mt-1 text-xs italic text-blue-800 dark:text-blue-300">{h.note}</p>
                 )}
-                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-ndark-muted">
                   <Calendar size={11} />
                   <span>{formatDateTime(h.at)}</span>
                   <span>·</span>

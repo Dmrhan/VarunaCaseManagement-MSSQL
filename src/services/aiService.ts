@@ -215,6 +215,25 @@ export interface CallSummaryInput {
   customerName?: string;
 }
 
+// ---- 7) Vaka aktarımı önerisi (FAZ 2 §20.2) ----
+
+export type TransferReasonCode =
+  | 'wrong_team'
+  | 'expertise'
+  | 'workload'
+  | 'escalation'
+  | 'customer_request'
+  | 'other';
+
+export interface TransferSuggestion {
+  suggestedTeamId: string;
+  suggestedTeamName: string;
+  reasonCode: TransferReasonCode;
+  reasonText: string;
+  confidence: number;
+  usageLogId: string | null;
+}
+
 export const aiService = {
   async suggestCategory(input: CategorySuggestionInput) {
     return postJson<CategorySuggestion>('/suggest-category', input);
@@ -238,6 +257,15 @@ export const aiService = {
 
   async dashboardChat(input: DashboardChatInput) {
     return postJson<{ reply: string }>('/dashboard-chat', input);
+  },
+
+  /**
+   * Vaka aktarımı önerisi — RUNA AI mevcut takım dışında en uygun takımı seçer
+   * + reasonCode + reasonText + confidence döner. usageLogId ileride
+   * "Uygula/Yoksay" telemetrisi için saklanır (UI tarafında PATCH /usage/:id/accept).
+   */
+  async transferSuggest(caseId: string) {
+    return postJson<TransferSuggestion>('/transfer-suggest', { caseId });
   },
 };
 

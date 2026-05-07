@@ -1,50 +1,18 @@
 import { Router } from 'express';
-import OpenAI from 'openai';
 import { verifyJwt } from '../db/auth.js';
 import { prisma } from '../db/client.js';
+import { aiClient, callOpenAI, logAIUsage, AI_MODEL, AI_MAX_TOKENS, AI_TIMEOUT_MS } from '../lib/aiClient.js';
 
 const router = Router();
 
 router.use(verifyJwt);
 
-/**
- * AI usage telemetry — Faz 1.5 Madde 7.
- * Her başarılı AI çağrısından sonra AIUsageLog satırı yazar (sessiz fail).
- * Acceptance rate, response time, token sayımı için ROI panosu altyapısı.
- *
- * companyId resolve: handler içinden `req.aiLog = { companyId, caseId,
- * tokenCount }` ile set edilir; verilmezse fallback olarak kullanıcının
- * allowedCompanyIds[0]. Multi-company supervisor için %100 doğru değil ama
- * çoğu çağrı tek vaka context'inde — kullanıcı 1.şirketine atfetmek
- * pratik kabul.
- */
-async function logAIUsage({ endpoint, companyId, caseId, userId, responseTimeMs, tokenCount }) {
-  if (!companyId || !endpoint) return; // companyId yoksa log skip
-  try {
-    await prisma.aIUsageLog.create({
-      data: {
-        endpoint,
-        companyId,
-        caseId: caseId ?? null,
-        userId: userId ?? null,
-        responseTimeMs: responseTimeMs ?? null,
-        tokenCount: tokenCount ?? null,
-        accepted: null, // kullanıcı uygula/yoksay tıklayınca PATCH ile set
-      },
-    });
-  } catch (e) {
-    // log yazma hatası ana akışı durdurmasın — sadece warn
-    console.warn('[ai-usage-log]', e?.message ?? e);
-  }
-}
-
-const MODEL = 'gpt-4o-mini';
-const MAX_TOKENS = 1000;
-const TIMEOUT_MS = 30_000;
+const MODEL = AI_MODEL;
+const MAX_TOKENS = AI_MAX_TOKENS;
+const TIMEOUT_MS = AI_TIMEOUT_MS;
 const RATE_LIMIT_PER_MIN = 20;
 
-const apiKey = process.env.OPENAI_API_KEY;
-const client = apiKey ? new OpenAI({ apiKey }) : null;
+const client = aiClient;
 
 console.log('[ai] API Key loaded:', !!process.env.OPENAI_API_KEY);
 
@@ -54,6 +22,7 @@ if (!client) {
       '.env dosyasına OPENAI_API_KEY ekleyin (örnek: .env.example).',
   );
 } else {
+  const apiKey = process.env.OPENAI_API_KEY;
   console.log(
     `[ai] Key format — length=${apiKey.length}, prefix=${apiKey.slice(0, 7)}, suffix=...${apiKey.slice(-4)}`,
   );
@@ -78,65 +47,7 @@ function rateLimit(req, res, next) {
   next();
 }
 
-// ----------------------------------------------------------------
-// OpenAI çağrısı (timeout + JSON parse + standart hata cevabı)
-// ----------------------------------------------------------------
-async function callOpenAI({ system, user, expectJson = false, schema = null, schemaName = 'response' }) {
-  if (!client) {
-    const err = new Error('AI servisi yapılandırılmamış (API key yok).');
-    err.status = 503;
-    throw err;
-  }
-
-  // schema verilmişse strict json_schema modu (decoding-time enum kilidi).
-  // Aksi halde expectJson → json_object (soft) veya düz metin.
-  let responseFormat;
-  if (schema) {
-    responseFormat = {
-      type: 'json_schema',
-      json_schema: { name: schemaName, schema, strict: true },
-    };
-  } else if (expectJson) {
-    responseFormat = { type: 'json_object' };
-  }
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const resp = await client.chat.completions.create(
-      {
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        ...(responseFormat ? { response_format: responseFormat } : {}),
-      },
-      { signal: ctrl.signal },
-    );
-    const text = (resp.choices?.[0]?.message?.content ?? '').trim();
-
-    if (!expectJson && !schema) return { text };
-
-    // JSON modu: response_format=json_object/json_schema ile gelen
-    // ama defansif kod-fence kaldır (json_object modunda model bazen ekliyor)
-    const cleaned = text
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/```\s*$/i, '')
-      .trim();
-    try {
-      return { json: JSON.parse(cleaned), raw: text };
-    } catch {
-      const err = new Error('Modelin JSON çıktısı ayrıştırılamadı.');
-      err.status = 502;
-      err.detail = text.slice(0, 500);
-      throw err;
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// callOpenAI shared module'den (server/lib/aiClient.js) import edilir.
 
 function aiHandler(endpointName, handler) {
   // Backward-compat: aiHandler(handler) eski signature'ında endpointName 'other'
@@ -155,6 +66,8 @@ function aiHandler(endpointName, handler) {
       // Yalnızca 2xx (başarılı) yanıtları logla — timeout/hata logları gürültü olur
       if (res.statusCode < 200 || res.statusCode >= 300) return;
       const ctx = req.aiLog ?? {};
+      // Handler manuel logladıysa (örn. usageLogId döndürmek için) skip
+      if (ctx.skipAutoLog) return;
       const companyId = ctx.companyId ?? req.user?.allowedCompanyIds?.[0];
       void logAIUsage({
         endpoint: endpointName,
@@ -540,6 +453,147 @@ router.post(
 
     const { text } = await callOpenAI({ system, user });
     res.json({ summary: text });
+  }),
+);
+
+// ----------------------------------------------------------------
+// 7) Vaka aktarımı önerisi — FAZ 2 §20.2
+// ----------------------------------------------------------------
+router.post(
+  '/transfer-suggest',
+  rateLimit,
+  aiHandler('transfer-suggest', async (req, res) => {
+    const { caseId } = req.body ?? {};
+    if (!caseId || typeof caseId !== 'string') {
+      return res.status(400).json({ error: 'caseId gerekli.' });
+    }
+
+    // 1. Vakayı bağlam ile çek (notes + callLogs + history son 3)
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      include: {
+        notes:    { orderBy: { createdAt: 'desc' }, take: 3 },
+        callLogs: { orderBy: { callDate: 'desc' }, take: 2 },
+      },
+    });
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(c.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = c.companyId;
+
+    // 2. Aynı şirketteki aktif takımlar — mevcut takım hariç
+    const teams = await prisma.team.findMany({
+      where: {
+        companyId: c.companyId,
+        isActive: true,
+        ...(c.assignedTeamId ? { id: { not: c.assignedTeamId } } : {}),
+      },
+      select: { id: true, name: true, description: true },
+    });
+    if (teams.length === 0) {
+      return res.status(400).json({
+        error: 'no_alternative_teams',
+        message: 'Bu şirkette başka aktif takım yok — aktarım yapılamaz.',
+      });
+    }
+
+    // 3. Strict JSON schema — model sadece geçerli teamId üretebilir
+    const teamIdEnum = teams.map((t) => t.id);
+    const teamNameEnum = teams.map((t) => t.name);
+    const reasonCodeEnum = ['wrong_team', 'expertise', 'workload', 'escalation', 'customer_request', 'other'];
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['suggestedTeamId', 'suggestedTeamName', 'reasonCode', 'reasonText', 'confidence'],
+      properties: {
+        suggestedTeamId:   { type: 'string', enum: teamIdEnum },
+        suggestedTeamName: { type: 'string', enum: teamNameEnum },
+        reasonCode:        { type: 'string', enum: reasonCodeEnum },
+        reasonText:        { type: 'string' },
+        confidence:        { type: 'number' },
+      },
+    };
+
+    const teamList = teams
+      .map((t) => `- ${t.id} | ${t.name}${t.description ? ` — ${t.description}` : ''}`)
+      .join('\n');
+    const lastNotes = c.notes.length > 0
+      ? c.notes.map((n) => `- ${n.content.slice(0, 200)}`).join('\n')
+      : '(yok)';
+    const lastCalls = c.callLogs.length > 0
+      ? c.callLogs.map((cl) => `- ${cl.callOutcome ?? '-'}: ${(cl.description ?? '').slice(0, 150)}`).join('\n')
+      : '(yok)';
+
+    const system = [
+      "Sen Varuna CRM'de vaka aktarımına yardımcı olan bir asistanısın.",
+      'Bir vakayı analiz edip en uygun takıma yönlendirme önerisi verirsin.',
+      'KURAL: suggestedTeamId MUTLAKA verilen takım listesinden olmalı.',
+      'KURAL: suggestedTeamName, seçilen suggestedTeamId\'nin adı ile birebir aynı olmalı.',
+      'KURAL: reasonCode listeden seçilmeli — sadece gerçekten karşılayan kodu seç.',
+      'Türkçe yaz. SADECE JSON döndür.',
+    ].join('\n');
+
+    const userPrompt = [
+      'Vaka:',
+      `- Konu: ${c.title}`,
+      `- Kategori: ${c.category} / ${c.subCategory}`,
+      `- Statü: ${c.status} · Öncelik: ${c.priority}`,
+      `- Mevcut Takım: ${c.assignedTeamName ?? '-'}`,
+      `- Açıklama: ${c.description}`,
+      '',
+      'Son notlar:',
+      lastNotes,
+      '',
+      'Son aramalar:',
+      lastCalls,
+      '',
+      'Şirketin diğer takımları (id | ad — açıklama):',
+      teamList,
+      '',
+      'Gerekçe kodları:',
+      '- wrong_team: yanlış takıma atanmış',
+      '- expertise: konuyu çözmek için farklı uzmanlık gerekiyor',
+      '- workload: mevcut takım yoğun, başkasının daha hızlı bakabilir',
+      '- escalation: eskalasyon — daha üst yetkili veya destek takımı',
+      '- customer_request: müşteri açıkça başka bir takımla ilgilenmek istedi',
+      '- other: yukarıdakilerin hiçbiri uymuyor',
+      '',
+      'reasonText: max 200 karakter, Türkçe, somut gerekçe (genel söz değil).',
+      'confidence: 0.0-1.0 — kararına ne kadar emin olduğun.',
+    ].join('\n');
+
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      system,
+      user: userPrompt,
+      schema,
+      schemaName: 'transfer_suggestion',
+    });
+
+    // 4. Manuel logla → usageLogId'yi response'a ekleyebilelim.
+    //    aiHandler'ın auto-log'unu skip et (req.aiLog.skipAutoLog) — duplikasyon olmasın.
+    req.aiLog.skipAutoLog = true;
+    const log = await logAIUsage({
+      endpoint: 'transfer-suggest',
+      companyId: c.companyId,
+      caseId,
+      userId: req.user.id,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+
+    res.json({
+      suggestedTeamId: json.suggestedTeamId,
+      suggestedTeamName: json.suggestedTeamName,
+      reasonCode: json.reasonCode,
+      reasonText: json.reasonText,
+      confidence: typeof json.confidence === 'number' ? json.confidence : 0,
+      usageLogId: log?.id ?? null,
+    });
   }),
 );
 
