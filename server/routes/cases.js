@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { caseRepository, mentionRepo, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
+import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
 
 const router = Router();
 
@@ -212,6 +213,97 @@ router.post(
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
+  }),
+);
+
+/**
+ * POST /api/cases/:id/transfer — FAZ 2 §20.2 (Vaka Aktarımı).
+ * Body: { toTeamId, toPersonId?, reason, reasonCode?,
+ *         aiSuggestedTeamId?, aiSuggestedReason?, aiReasonCode?, aiConfidence? }
+ *
+ * Atomic: Case güncelle (assigned*, transferCount++) + CaseTransfer audit +
+ * Activity. SLA değiştirilmez. Aynı takım/kapalı vaka 400 döner.
+ *
+ * transferCount >= 2 olduğunda supervisor uyarısı + AI kök neden analizi
+ * fire-and-forget tetiklenir (response geri dönmeden önce başlatılır,
+ * sonuç CaseActivity'ye düşer).
+ */
+router.post(
+  '/:id/transfer',
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    const result = await caseRepository.transferCase(
+      req.params.id,
+      {
+        toTeamId: body.toTeamId,
+        toPersonId: body.toPersonId,
+        reason: body.reason,
+        reasonCode: body.reasonCode,
+        aiSuggestedTeamId: body.aiSuggestedTeamId,
+        aiSuggestedReason: body.aiSuggestedReason,
+        aiReasonCode: body.aiReasonCode,
+        aiConfidence: body.aiConfidence,
+        transferredBy: req.user.id,
+        transferredByName: req.user.fullName,
+      },
+      req.user.allowedCompanyIds,
+    );
+
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error) return res.status(400).json(result);
+
+    // transferCount >= 2 → fire-and-forget supervisor warning + root-cause AI
+    if (result.transferCount >= 2) {
+      void triggerTransferRootCause({
+        caseId: req.params.id,
+        companyId: result.companyId,
+        transferCount: result.transferCount,
+        caseNumber: result.case.caseNumber,
+        userId: req.user.id,
+      });
+    }
+
+    res.json(result.case);
+  }),
+);
+
+/** GET /api/cases/:id/transfers — bir vakanın aktarım geçmişi (en yeni en üstte). */
+router.get(
+  '/:id/transfers',
+  asyncRoute(async (req, res) => {
+    const list = await caseRepository.listTransfers(
+      req.params.id,
+      req.user.allowedCompanyIds,
+    );
+    if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json({ value: list });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/transfer-brief — AI devir notu üretir.
+ * Body: { toTeamId?, toPersonId? }  (opsiyonel — yeni atamayı bağlam olarak verir)
+ * Yanıt: { brief: string }
+ *
+ * Genelde transfer endpoint'i başarıyla döndükten sonra UI bu endpoint'i
+ * çağırır (success state'te devir notunu gösterir). AI key yoksa 503.
+ */
+router.post(
+  '/:id/transfer-brief',
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    const result = await generateTransferBrief({
+      caseId: req.params.id,
+      toTeamId: body.toTeamId,
+      toPersonId: body.toPersonId,
+      userId: req.user.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (result.error === 'not_found') return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+    if (result.error === 'ai_unavailable') return res.status(503).json(result);
+    if (result.error) return res.status(502).json(result);
+    res.json({ brief: result.brief });
   }),
 );
 
