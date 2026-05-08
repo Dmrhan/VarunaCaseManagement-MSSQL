@@ -184,6 +184,81 @@ router.post(
 );
 
 // ----------------------------------------------------------------
+// 1b) Vaka başlığı önerisi — açıklamadan kısa başlık üret
+// ----------------------------------------------------------------
+router.post(
+  '/suggest-title',
+  rateLimit,
+  aiHandler('suggest-title', async (req, res) => {
+    const { description, caseType } = req.body ?? {};
+    if (!description || typeof description !== 'string' || description.trim().length < 10) {
+      return res.status(400).json({ error: 'description gerekli (en az 10 karakter).' });
+    }
+
+    // companyId açıkça gelmediği için kullanıcının ilk şirketini fallback olarak
+    // logla (yeni vaka formundaki çağrılar için pratik kabul).
+    const companyId = req.body?.companyId ?? req.user?.allowedCompanyIds?.[0];
+    req.aiLog.companyId = companyId;
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['title', 'confidence'],
+      properties: {
+        title:      { type: 'string' },
+        confidence: { type: 'number' },
+      },
+    };
+
+    const system = [
+      "Sen Varuna CRM'de vaka başlığı üreten bir asistanısın.",
+      'Açıklamayı okur, kısa ve öz bir başlık önerirsin.',
+      'KURAL: Maksimum 60 karakter — daha uzun başlıkları kısalt.',
+      'KURAL: Türkçe.',
+      'KURAL: Fiil içerme, isim cümlesi olsun (örn. "Sözleşme yenileme reddedildi").',
+      'KURAL: Konuyu net özetle, soyut kalma. Başlık vakanın özüdür.',
+      'SADECE JSON döndür — açıklama veya yorum ekleme.',
+    ].join('\n');
+
+    const user = [
+      `Vaka Tipi: ${caseType ?? 'belirsiz'}`,
+      `Açıklama: ${description.trim()}`,
+      '',
+      'confidence 0.0-1.0 — başlığın açıklamayı ne kadar iyi yansıttığına dair eminliğin.',
+      'Açıklama belirsiz/kısa ise confidence düşür.',
+    ].join('\n');
+
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      system,
+      user,
+      schema,
+      schemaName: 'title_suggestion',
+    });
+
+    // 60 karakter savunma kesimi — model nadiren kuralı aşabilir
+    const title = String(json.title ?? '').slice(0, 60).trim();
+
+    // Manuel log → usageLogId'yi response'a ekleyebilelim (Uygula/Yoksay telemetrisi)
+    req.aiLog.skipAutoLog = true;
+    const log = await logAIUsage({
+      endpoint: 'suggest-title',
+      companyId,
+      caseId: null,
+      userId: req.user?.id,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+
+    res.json({
+      title,
+      confidence: typeof json.confidence === 'number' ? json.confidence : 0,
+      usageLogId: log?.id ?? null,
+    });
+  }),
+);
+
+// ----------------------------------------------------------------
 // 2) Çözüm notu taslağı
 // ----------------------------------------------------------------
 router.post(
