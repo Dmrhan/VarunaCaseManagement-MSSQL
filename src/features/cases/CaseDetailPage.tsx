@@ -55,6 +55,7 @@ import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/Status
 import { useToast } from '@/components/ui/Toast';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
+import { useAuth } from '@/services/AuthContext';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
@@ -2638,6 +2639,53 @@ function ActivityTab({ item }: { item: Case }) {
   );
 }
 
+// İsmin baş harfine göre avatar arka plan rengi (solid).
+// Yumuşak palet — yüksek-doygun marka renkleri (Tailwind 600 tonu).
+// Türkçe karakterler (Ç,Ş,Ğ,Ü,Ö,İ) telaffuz yakınlığıyla Latin grubuna düşer.
+function avatarColor(name: string): string {
+  const ch = (name?.trim()?.[0] ?? 'A').toLocaleUpperCase('tr');
+  const code = ch.charCodeAt(0);
+  if (code >= 65 && code <= 69)  return '#7C3AED'; // A-E violet
+  if (code >= 70 && code <= 74)  return '#2563EB'; // F-J blue
+  if (code >= 75 && code <= 79)  return '#059669'; // K-O emerald
+  if (code >= 80 && code <= 84)  return '#D97706'; // P-T amber
+  if (code >= 85 && code <= 90)  return '#E11D48'; // U-Z rose
+  // Türkçe özel karakterler:
+  if (ch === 'Ç') return '#7C3AED'; // C grubu
+  if (ch === 'Ğ') return '#2563EB'; // G grubu
+  if (ch === 'İ') return '#2563EB'; // I grubu
+  if (ch === 'Ö') return '#059669'; // O grubu
+  if (ch === 'Ş') return '#D97706'; // S grubu
+  if (ch === 'Ü') return '#E11D48'; // U grubu
+  return '#64748B'; // slate-500 fallback (non-Latin)
+}
+
+function avatarInitials(name: string): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toLocaleUpperCase('tr');
+  return (parts[0][0] + parts[parts.length - 1][0]).toLocaleUpperCase('tr');
+}
+
+function NoteAvatar({ name, size = 40 }: { name: string; size?: number }) {
+  const bg = avatarColor(name);
+  const initials = avatarInitials(name);
+  return (
+    <div
+      className="flex shrink-0 items-center justify-center rounded-full font-bold text-white shadow-sm ring-2 ring-white dark:ring-ndark-card"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: bg,
+        fontSize: size <= 28 ? 11 : size <= 36 ? 13 : 14,
+      }}
+      aria-hidden="true"
+    >
+      {initials}
+    </div>
+  );
+}
+
 function NotesTab({
   item,
   noteText,
@@ -2656,84 +2704,129 @@ function NotesTab({
   inputRef: React.RefObject<MentionTextareaHandle>;
 }) {
   const [voiceListening, setVoiceListening] = useState(false);
+  const { user } = useAuth();
+  const currentName = user?.fullName ?? 'Ben';
+
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <Field
-          label="Yeni Not"
-          actions={
-            <VoiceNoteButton
-              onTranscript={(chunk) => onChangeText(noteText ? `${noteText} ${chunk}` : chunk)}
-              onListeningChange={setVoiceListening}
-            />
-          }
-        >
-          <MentionTextarea
-            ref={inputRef}
-            caseId={item.id}
-            value={noteText}
-            onChange={onChangeText}
-            placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın — @ ile kişi etiketleyebilirsiniz…'}
-            rows={3}
-          />
-        </Field>
-        <div className="mt-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-600">Görünürlük:</span>
-            <button
-              onClick={() => onChangeVisibility('Internal')}
-              className={`rounded-full px-2 py-0.5 ring-1 ring-inset ${
-                noteVisibility === 'Internal'
-                  ? 'bg-slate-200 text-slate-800 ring-slate-300'
-                  : 'bg-white text-slate-500 ring-slate-200'
-              }`}
-            >
-              İç Not
-            </button>
-            <button
-              onClick={() => onChangeVisibility('Customer')}
-              className={`rounded-full px-2 py-0.5 ring-1 ring-inset ${
-                noteVisibility === 'Customer'
-                  ? 'bg-blue-100 text-blue-800 ring-blue-300'
-                  : 'bg-white text-slate-500 ring-slate-200'
-              }`}
-            >
-              Müşteriye Görünür
-            </button>
+      {/* Yeni not kartı — dashed border (yazma alanı vurgusu) */}
+      <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white p-4 transition focus-within:border-brand-400 dark:border-ndark-border dark:bg-ndark-card dark:focus-within:border-brand-500">
+        <div className="flex items-start gap-3">
+          <NoteAvatar name={currentName} size={32} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">
+                {currentName} yanıtlıyor…
+              </span>
+              <VoiceNoteButton
+                onTranscript={(chunk) => onChangeText(noteText ? `${noteText} ${chunk}` : chunk)}
+                onListeningChange={setVoiceListening}
+              />
+            </div>
+            <div className="mt-1.5">
+              <MentionTextarea
+                ref={inputRef}
+                caseId={item.id}
+                value={noteText}
+                onChange={onChangeText}
+                placeholder={voiceListening ? 'Dinleniyor…' : 'Not yazın — @ ile kişi etiketleyebilirsiniz…'}
+                rows={3}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs">
+                <button
+                  onClick={() => onChangeVisibility('Internal')}
+                  className={
+                    'rounded-full px-2.5 py-1 font-medium transition ' +
+                    (noteVisibility === 'Internal'
+                      ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/40'
+                      : 'text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card')
+                  }
+                >
+                  İç Not
+                </button>
+                <button
+                  onClick={() => onChangeVisibility('Customer')}
+                  className={
+                    'rounded-full px-2.5 py-1 font-medium transition ' +
+                    (noteVisibility === 'Customer'
+                      ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-900/40'
+                      : 'text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card')
+                  }
+                >
+                  Müşteriye Görünür
+                </button>
+              </div>
+              <Button
+                size="sm"
+                onClick={onSubmit}
+                disabled={!noteText.trim()}
+                leftIcon={<Send size={14} />}
+              >
+                Not Ekle
+              </Button>
+            </div>
           </div>
-          <Button
-            size="sm"
-            onClick={onSubmit}
-            disabled={!noteText.trim()}
-            leftIcon={<Send size={14} />}
-          >
-            Not Ekle
-          </Button>
         </div>
       </div>
+
+      {/* Not akışı — kart kart */}
       {item.notes.length === 0 ? (
-        <p className="py-6 text-center text-sm text-slate-500">Henüz not yok.</p>
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-300 dark:bg-ndark-card dark:text-ndark-muted">
+            <MessageSquare size={28} />
+          </div>
+          <p className="mt-3 text-sm font-medium text-slate-600 dark:text-ndark-text">
+            Henüz not eklenmemiş
+          </p>
+          <p className="mt-1 text-xs text-slate-400 dark:text-ndark-muted">
+            @ ile ekip üyelerini etiketleyebilirsiniz
+          </p>
+        </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="flex flex-col gap-3">
           {item.notes.map((n) => {
             const isInternal = n.visibility === 'Internal';
+            const pill = isInternal
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
             return (
               <li
                 key={n.id}
-                className={`rounded-md px-3 py-2 ring-1 ring-inset ${
-                  isInternal ? 'bg-slate-50 ring-slate-200' : 'bg-blue-50 ring-blue-200'
-                }`}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-ndark-border dark:bg-ndark-card"
               >
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-700">{n.authorName}</span>
-                  <div className="flex items-center gap-2">
-                    <Badge tint={isInternal ? 'slate' : 'blue'}>
+                {/* Header */}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <NoteAvatar name={n.authorName} size={40} />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                      {n.authorName}
+                    </span>
+                    <span
+                      className={
+                        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ' +
+                        pill
+                      }
+                    >
                       {isInternal ? 'İç Not' : 'Müşteriye Görünür'}
-                    </Badge>
-                    <span className="text-slate-500">{formatDateTime(n.createdAt)}</span>
+                    </span>
                   </div>
+                  <span
+                    className="shrink-0 text-xs text-slate-400 dark:text-ndark-muted"
+                    title={formatDateTime(n.createdAt)}
+                  >
+                    {formatRelative(n.createdAt)}
+                  </span>
                 </div>
-                <MentionContent content={n.content} className="text-sm text-slate-800 dark:text-ndark-text" />
+
+                {/* Header / body ayırıcı + body */}
+                <div className="border-t border-slate-100 px-4 pt-3 pb-4 dark:border-ndark-border/60">
+                  <MentionContent
+                    content={n.content}
+                    className="text-sm leading-relaxed text-slate-700 dark:text-slate-300"
+                  />
+                </div>
               </li>
             );
           })}
