@@ -390,10 +390,42 @@ export interface Case {
   qaFeedback?: string | null;
   qaScoredAt?: string | null;
 
+  // FAZ 2 §20.2 — kaç kez aktarıldı. >=2 olunca CaseDetailPage'de uyarı banner'ı
+  // çıkar + supervisor bildirimi + AI kök neden analizi tetiklenir (BFF tarafı).
+  transferCount?: number;
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];
   callLogs: CaseCallLog[];
+}
+
+/**
+ * FAZ 2 §20.2 — bir vakanın aktarım geçmişi satırı.
+ * BFF GET /api/cases/:id/transfers takım/kişi adlarını join'le döner.
+ */
+export interface CaseTransferRecord {
+  id: string;
+  caseId: string;
+  companyId: string;
+  fromTeamId: string | null;
+  fromTeamName: string | null;
+  toTeamId: string;
+  toTeamName: string | null;
+  fromPersonId: string | null;
+  fromPersonName: string | null;
+  toPersonId: string | null;
+  toPersonName: string | null;
+  reason: string;
+  reasonCode: string | null;
+  reasonLabel: string | null;
+  transferredBy: string;
+  transferredAt: string;
+  aiSuggestedTeamId: string | null;
+  aiSuggestedTeamName: string | null;
+  aiSuggestedReason: string | null;
+  aiReasonCode: string | null;
+  aiConfidence: number | null;
 }
 
 // @mention — Faz 1.5 Madde 3

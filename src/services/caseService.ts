@@ -74,6 +74,7 @@ import {
   type CasePriority,
   type CaseRequestType,
   type CaseStatus,
+  type CaseTransferRecord,
   type MentionableUser,
   type UnreadMention,
   type CaseType,
@@ -1221,6 +1222,66 @@ export const caseService = {
       { method: 'POST' },
       'Mention seen güncellenemedi',
     );
+  },
+
+  /**
+   * FAZ 2 §20.2 — vaka aktarımı.
+   * Body: takım/kişi + gerekçe + AI önerisi snapshot (opsiyonel).
+   * Backend transferCount++ + CaseTransfer audit + Activity log üretir.
+   * 2+ transfer olduğunda supervisor uyarısı + AI kök neden analizi tetiklenir
+   * (fire-and-forget; activity feed'de RUNA AI satırı sonradan belirir).
+   */
+  async transferCase(
+    caseId: string,
+    body: {
+      toTeamId: string;
+      toPersonId?: string | null;
+      reason: string;
+      reasonCode?: string;
+      aiSuggestedTeamId?: string;
+      aiSuggestedReason?: string;
+      aiReasonCode?: string;
+      aiConfidence?: number;
+    },
+  ): Promise<Case | undefined> {
+    return apiFetch<Case>(
+      `${API_BASE}/${caseId}/transfer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Vaka aktarımı başarısız',
+    );
+  },
+
+  /**
+   * Aktarım sonrası RUNA AI'dan devir notu üret. Yeni takım için 3 madde
+   * (yapılanlar / kritik nokta / önerilen ilk adım). 503 → AI yapılandırılmamış.
+   */
+  async transferBrief(
+    caseId: string,
+    body: { toTeamId?: string; toPersonId?: string | null },
+  ): Promise<{ brief: string } | undefined> {
+    return apiFetch<{ brief: string }>(
+      `${API_BASE}/${caseId}/transfer-brief`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Devir notu alınamadı',
+    );
+  },
+
+  /** Bir vakanın tüm aktarım geçmişi (en yeni en üstte). */
+  async listTransfers(caseId: string): Promise<CaseTransferRecord[]> {
+    const data = await apiFetch<{ value: CaseTransferRecord[] }>(
+      `${API_BASE}/${caseId}/transfers`,
+      undefined,
+      'Aktarım geçmişi yüklenemedi',
+    );
+    return data?.value ?? [];
   },
 
   /**

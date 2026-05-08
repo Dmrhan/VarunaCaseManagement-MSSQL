@@ -209,11 +209,11 @@ enum PatternAlertStatus {
 // KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
 // AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
 enum KnowledgeSourceType {
-  PastCases    // Geçmiş vakalar (Case tablosu)
-  ProductDocs  // Ürün/kategori dokümanları (CategoryDef + manuel doc)
-  SLARules     // SLA kuralları (SLAPolicy)
-  Checklists   // Kontrol listeleri (ChecklistTemplate)
-  ManualEntry  // Admin'in elle eklediği özel kayıtlar
+  PastCases // Geçmiş vakalar (Case tablosu)
+  ProductDocs // Ürün/kategori dokümanları (CategoryDef + manuel doc)
+  SLARules // SLA kuralları (SLAPolicy)
+  Checklists // Kontrol listeleri (ChecklistTemplate)
+  ManualEntry // Admin'in elle eklediği özel kayıtlar
 }
 
 // ============================================================
@@ -294,7 +294,7 @@ model FieldDefinition {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  company      Company   @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 
   @@unique([companyId, fieldKey])
   @@index([companyId, caseType, isActive])
@@ -310,7 +310,7 @@ model CompanySettings {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  company      Company  @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
 }
 
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
@@ -545,7 +545,7 @@ model Case {
 
   // Custom Fields — şirket FieldDefinition'larına göre dinamik alanlar.
   /// { [fieldKey: string]: any } — değer tipi FieldType'a bağlı
-  customFields   Json?
+  customFields Json?
 
   // Snooze — vaka geçici olarak Inbox'tan kaldırılıp Later sekmesine taşınır.
   // snoozePreviousStatus: erteleme öncesi statü; unsnooze/cron-wakeup'ta buna
@@ -562,6 +562,11 @@ model Case {
   qaSpeedScore   Int?
   qaFeedback     String?
   qaScoredAt     DateTime?
+
+  // Aktarım sayacı (FAZ 2 §20.2 — Vaka Aktarımı). Her başarılı transfer
+  // sonrası +1; >=2 olduğunda supervisor uyarısı + AI kök neden analizi
+  // tetiklenir. CaseTransfer kayıtları tam audit izi tutar.
+  transferCount Int @default(0)
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -584,6 +589,7 @@ model Case {
   aiSuggestions AISuggestion[]
   mentions      CaseMention[]
   reminders     CaseReminder[]
+  transfers     CaseTransfer[]
 
   @@index([accountId])
   @@index([companyId])
@@ -884,4 +890,39 @@ model AISuggestion {
 
   @@index([caseId])
   @@index([companyId])
+}
+
+// CaseTransfer — FAZ 2 §20.2 (Vaka Aktarımı).
+// Bir vaka takım → takım veya kişi → kişi devredildiğinde tam audit izi
+// tutulur. AI önerisi varsa (suggestedTeam + reasonCode + confidence)
+// kabul edildi/edilmedi telemetrisi için snapshot alınır.
+//
+// transferCount Case üzerinde @default(0); her satır ekleme +1 ile birlikte
+// gider. 2+ olduğunda supervisor notification + kök neden analizi tetikler.
+model CaseTransfer {
+  id        String @id @default(cuid())
+  caseId    String
+  companyId String
+
+  fromTeamId   String?
+  toTeamId     String
+  fromPersonId String?
+  toPersonId   String?
+
+  reason        String
+  reasonCode    String?
+  transferredBy String
+  transferredAt DateTime @default(now())
+
+  // AI önerisi snapshot (uygulandı/yok sayıldı analizi için)
+  aiSuggestedTeamId String?
+  aiSuggestedReason String?
+  aiReasonCode      String?
+  aiConfidence      Float?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([companyId, transferredAt])
 }
