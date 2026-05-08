@@ -104,6 +104,20 @@ export interface CategorySuggestion {
   reasoning: string;
 }
 
+// ---- 1b) Başlık önerisi ----
+
+export interface TitleSuggestionInput {
+  description: string;
+  caseType?: CaseType;
+  companyId?: string;
+}
+
+export interface TitleSuggestion {
+  title: string;
+  confidence: number;
+  usageLogId: string | null;
+}
+
 // ---- 2) Çözüm taslağı ----
 
 export interface ResolutionDraftInput {
@@ -237,6 +251,10 @@ export interface TransferSuggestion {
 export const aiService = {
   async suggestCategory(input: CategorySuggestionInput) {
     return postJson<CategorySuggestion>('/suggest-category', input);
+  },
+
+  async suggestTitle(input: TitleSuggestionInput) {
+    return postJson<TitleSuggestion>('/suggest-title', input);
   },
 
   async draftResolution(input: ResolutionDraftInput) {

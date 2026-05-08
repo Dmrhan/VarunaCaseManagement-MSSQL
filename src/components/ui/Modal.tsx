@@ -6,7 +6,7 @@ interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
   children: ReactNode;
   footer?: ReactNode;
   /** Verilirse modal sabit yükseklikte olur, içerik flex column ile sığar (örn. '85vh') */
@@ -22,6 +22,7 @@ const SIZES = {
   xl:    'max-w-3xl',
   '2xl': 'max-w-5xl',
   '3xl': 'max-w-6xl',
+  '4xl': 'max-w-[1280px]',
 };
 
 export function Modal({

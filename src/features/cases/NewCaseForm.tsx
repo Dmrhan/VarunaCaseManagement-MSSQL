@@ -1,16 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bot,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  HeadphonesIcon,
+  History,
+  LineChart,
+  Loader2,
+  ShieldAlert,
+  Sparkles,
+  TrendingDown,
+  X,
+  Zap,
+} from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
-import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { CustomFieldsSection, validateCustomFields } from '@/components/CustomFieldRenderer';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
-import { aiService, aiErrorMessage, type CategorySuggestion } from '@/services/aiService';
+import {
+  aiService,
+  aiErrorMessage,
+  type CategorySuggestion,
+  type TitleSuggestion,
+} from '@/services/aiService';
 import {
   CASE_ORIGINS,
   CASE_PRIORITIES,
@@ -58,7 +77,7 @@ const emptyForm = {
   assignedTeamId: '',
   assignedPersonId: '',
 
-  // Spec 5.2 — ProactiveTracking (caseType=ProactiveTracking ile görünür; KURAL-3: tip değişince silinmez)
+  // Spec 5.2 — ProactiveTracking
   financialStatus:    '' as '' | FinancialStatus,
   productUsage:       '' as '' | ProductUsage,
   usageChangeAlert:   '' as '' | UsageChangeAlert,
@@ -74,21 +93,77 @@ const emptyForm = {
   followUpDate:        '',
 };
 
+const DESCRIPTION_AI_THRESHOLD = 20;
+const AI_DEBOUNCE_MS = 1500;
+
+// SLA tahmin tablosu — gerçek SLAPolicy lookup FAZ 3'te
+const SLA_BY_PRIORITY: Record<CasePriority, [number, number]> = {
+  Low:      [12, 72],
+  Medium:   [8, 48],
+  High:     [4, 24],
+  Critical: [1, 6],
+};
+
+const PRIORITY_CHIP_STYLE: Record<CasePriority, string> = {
+  Low:
+    'border-slate-300 bg-slate-50 text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted',
+  Medium:
+    'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300',
+  High:
+    'border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300',
+  Critical:
+    'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300',
+};
+
+const PRIORITY_CHIP_DOT: Record<CasePriority, string> = {
+  Low: 'bg-slate-400',
+  Medium: 'bg-amber-500',
+  High: 'bg-orange-500',
+  Critical: 'bg-rose-500',
+};
+
+const TYPE_CARD_META: Record<CaseType, { label: string; icon: React.ReactNode; tint: string; tintActive: string }> = {
+  GeneralSupport: {
+    label: 'Genel Destek',
+    icon: <HeadphonesIcon size={18} />,
+    tint: 'border-slate-200 hover:border-slate-300 text-slate-700 dark:border-ndark-border dark:text-ndark-text',
+    tintActive: 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200',
+  },
+  Churn: {
+    label: 'Churn Yönetimi',
+    icon: <TrendingDown size={18} />,
+    tint: 'border-slate-200 hover:border-slate-300 text-slate-700 dark:border-ndark-border dark:text-ndark-text',
+    tintActive: 'border-rose-500 bg-rose-50 text-rose-700 dark:border-rose-700 dark:bg-rose-950/30 dark:text-rose-200',
+  },
+  ProactiveTracking: {
+    label: 'Proaktif Takip',
+    icon: <LineChart size={18} />,
+    tint: 'border-slate-200 hover:border-slate-300 text-slate-700 dark:border-ndark-border dark:text-ndark-text',
+    tintActive: 'border-violet-500 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/30 dark:text-violet-200',
+  },
+};
+
 export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCaseFormProps) {
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [duplicateCase, setDuplicateCase] = useState<Case | undefined>(undefined);
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
-  // RUNA AI — kategori önerisi state'i
+  // RUNA AI — kategori + başlık önerileri
   const [aiSuggestion, setAiSuggestion] = useState<CategorySuggestion | null>(null);
+  const [aiTitle, setAiTitle] = useState<TitleSuggestion | null>(null);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiDismissed, setAiDismissed] = useState(false);
+  const [aiCardCollapsed, setAiCardCollapsed] = useState(false);
   const [aiApplied, setAiApplied] = useState(false);
+  const [titleApplied, setTitleApplied] = useState(false);
   const aiReqIdRef = useRef(0);
   const { toast } = useToast();
+
+  // Müşteri geçmişi (AI panel için)
+  const [customerHistory, setCustomerHistory] = useState<{ openCount: number; lastCase?: Case } | null>(null);
 
   const companies = useMemo(() => lookupService.companies(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
@@ -98,14 +173,25 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   const allFieldDefinitions = useMemo(() => lookupService.fieldDefinitions(), []);
 
-  // Şirkete + caseType'a göre filtrelenmiş aktif custom field'lar
+  // Şirkete göre filtrelenmiş custom field tanımları
   const customFieldDefs = useMemo(
     () => allFieldDefinitions.filter((f) => f.companyId === form.companyId),
     [allFieldDefinitions, form.companyId],
   );
 
-  // customFields state — her render'da reset edilmeden parent state olarak tutulur
-  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
+  // Şirkete göre filtrelenmiş müşteri/takım listeleri (multi-tenant).
+  // Account.companyId null = paylaşımlı müşteri (her şirket görür).
+  const accountsForCompany = useMemo(
+    () =>
+      form.companyId
+        ? accounts.filter((a) => a.companyId == null || a.companyId === form.companyId)
+        : [],
+    [accounts, form.companyId],
+  );
+  const teamsForCompany = useMemo(
+    () => (form.companyId ? teams.filter((t) => t.companyId === form.companyId) : []),
+    [teams, form.companyId],
+  );
 
   const subCategories = useMemo(
     () => categories.find((c) => c.category === form.category)?.subCategories ?? [],
@@ -116,6 +202,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     [form.assignedTeamId],
   );
 
+  // ── State reset effects ──
   useEffect(() => {
     if (!open) {
       setForm(emptyForm);
@@ -123,24 +210,46 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       setErrors({});
       setDuplicateCase(undefined);
       setOverrideDuplicate(false);
+      setAiSuggestion(null);
+      setAiTitle(null);
+      setAiSuggesting(false);
+      setAiError(null);
+      setAiCardCollapsed(false);
+      setAiApplied(false);
+      setTitleApplied(false);
+      setCustomerHistory(null);
     }
   }, [open]);
 
-  // Reset subCategory if category changes invalidates it
+  // Şirket değişince müşteri sıfırlansın (cross-tenant guard)
+  useEffect(() => {
+    if (form.accountId && !accountsForCompany.some((a) => a.id === form.accountId)) {
+      setForm((f) => ({ ...f, accountId: '' }));
+    }
+  }, [accountsForCompany, form.accountId]);
+
+  // Takım şirket dışındaysa sıfırla
+  useEffect(() => {
+    if (form.assignedTeamId && !teamsForCompany.some((t) => t.id === form.assignedTeamId)) {
+      setForm((f) => ({ ...f, assignedTeamId: '', assignedPersonId: '' }));
+    }
+  }, [teamsForCompany, form.assignedTeamId]);
+
+  // Kategori değişirse alt kategori geçersizleşebilir
   useEffect(() => {
     if (form.subCategory && !subCategories.includes(form.subCategory)) {
       setForm((f) => ({ ...f, subCategory: '' }));
     }
   }, [subCategories, form.subCategory]);
 
-  // Reset person if team changes
+  // Takım değişirse kişi sıfırla
   useEffect(() => {
     if (form.assignedPersonId && !personsForTeam.find((p) => p.id === form.assignedPersonId)) {
       setForm((f) => ({ ...f, assignedPersonId: '' }));
     }
   }, [personsForTeam, form.assignedPersonId]);
 
-  // Spec KURAL-4: account + caseType için açık vaka var mı?
+  // Aynı tipte açık vaka var mı?
   useEffect(() => {
     let alive = true;
     setOverrideDuplicate(false);
@@ -156,83 +265,100 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     };
   }, [form.accountId, form.caseType]);
 
-  // RUNA AI — açıklama 1200ms debounce + min 20 karakter → kategori önerisi
-  // Kart 20+ karakterde sürekli görünür; içerik state'e göre değişir
-  // (loading / suggestion / error). Hata anında kart kaybolmaz.
+  // Müşteri geçmişi (AI panel)
+  useEffect(() => {
+    let alive = true;
+    if (!form.accountId) {
+      setCustomerHistory(null);
+      return;
+    }
+    void caseService
+      .findByAccount(form.accountId, { statusNotIn: ['Çözüldü', 'İptalEdildi'] })
+      .then((rows) => {
+        if (!alive) return;
+        const sorted = [...rows].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+        setCustomerHistory({ openCount: rows.length, lastCase: sorted[0] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [form.accountId]);
+
+  // RUNA AI — açıklama 20+ karakter, debounce, kategori + başlık paralel
   useEffect(() => {
     if (!open) return;
-    if (aiDismissed || aiApplied) return;
+    if (aiCardCollapsed) return;
     const desc = form.description.trim();
-    if (desc.length < 20) {
-      // 20 altına inerse temizle (kart zaten görünmüyor)
+    if (desc.length < DESCRIPTION_AI_THRESHOLD) {
       setAiSuggestion(null);
+      setAiTitle(null);
       setAiSuggesting(false);
       setAiError(null);
       return;
     }
     const reqId = ++aiReqIdRef.current;
-    // Loading state'i hemen aç (debounce sırasında bile kart loading gösterir,
-    // böylece kart kaybolup tekrar belirme flash'ı olmaz)
     setAiSuggesting(true);
     const handle = window.setTimeout(async () => {
-      const r = await aiService.suggestCategory({
-        description: desc,
-        caseType: form.caseType,
-        companyName: companies.find((c) => c.id === form.companyId)?.name,
-        availableCategories: categories,
-        availableRequestTypes: CASE_REQUEST_TYPES,
-      });
-      // Stale request — daha yeni istek tetiklendiyse sonucu yoksay
+      const [catR, titleR] = await Promise.all([
+        aiService.suggestCategory({
+          description: desc,
+          caseType: form.caseType,
+          companyName: companies.find((c) => c.id === form.companyId)?.name,
+          availableCategories: categories,
+          availableRequestTypes: CASE_REQUEST_TYPES,
+        }),
+        aiService.suggestTitle({
+          description: desc,
+          caseType: form.caseType,
+          companyId: form.companyId || undefined,
+        }),
+      ]);
+      // Stale request guard
       if (reqId !== aiReqIdRef.current) return;
       setAiSuggesting(false);
-      if (r.ok) {
-        setAiSuggestion(r.data);
+      if (catR.ok) {
+        setAiSuggestion(catR.data);
         setAiError(null);
       } else {
-        // Önceki suggestion'ı koru — sadece üzerine error overlay'i ekle
-        // Böylece "alıamadı" durumunda bile kart sabit kalır
-        setAiError(aiErrorMessage(r.error));
-        if (r.error.kind !== 'unconfigured') {
-          toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
-        }
+        setAiError(aiErrorMessage(catR.error));
       }
-    }, 1200);
+      if (titleR.ok) {
+        setAiTitle(titleR.data);
+      }
+    }, AI_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, form.description, form.caseType, form.companyId, aiDismissed, aiApplied]);
+  }, [open, form.description, form.caseType, form.companyId, aiCardCollapsed]);
 
-  // Modal her açıldığında AI state'ini sıfırla
-  useEffect(() => {
-    if (open) {
-      setAiSuggestion(null);
-      setAiSuggesting(false);
-      setAiError(null);
-      setAiDismissed(false);
-      setAiApplied(false);
-    }
-  }, [open]);
-
-  function handleAiApply() {
+  function applyAllFromAi() {
     if (!aiSuggestion) return;
-    // Defansif: subCategory seçilen kategoriye AİT olmayabilir (model uyumsuz seçtiyse).
-    // Ait değilse alanı boş bırak — kullanıcı manuel seçer, geri kalanı yine doldur.
     const validSubs =
       categories.find((c) => c.category === aiSuggestion.category)?.subCategories ?? [];
     const safeSub = validSubs.includes(aiSuggestion.subCategory) ? aiSuggestion.subCategory : '';
     setForm((f) => ({
       ...f,
+      title: aiTitle?.title ?? f.title,
       category: aiSuggestion.category,
       subCategory: safeSub,
       requestType: aiSuggestion.requestType,
       priority: aiSuggestion.priority,
     }));
     setAiApplied(true);
-    toast({ type: 'success', message: 'AI önerisi uygulandı.', duration: 1800 });
+    if (aiTitle?.title) setTitleApplied(true);
+    setAiCardCollapsed(true);
+    toast({ type: 'success', message: 'RUNA AI önerileri uygulandı.', duration: 2000 });
   }
 
-  function handleAiDismiss() {
-    setAiSuggestion(null);
-    setAiDismissed(true);
+  function applyTitleOnly() {
+    if (!aiTitle) return;
+    setForm((f) => ({ ...f, title: aiTitle.title }));
+    setTitleApplied(true);
+  }
+
+  function dismissAiCard() {
+    setAiCardCollapsed(true);
   }
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -250,7 +376,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     if (!form.requestType) e.requestType = 'Talep türü seçilmeli';
     if (form.origin === 'Diğer' && !form.originDescription.trim())
       e.originDescription = 'Origin "Diğer" seçildiğinde açıklama zorunlu';
-    // Spec 5.3 — Churn koşullu zorunluluklar
     if (form.caseType === 'Churn') {
       if (form.offerOutcome === 'Reddedildi' && !form.offerRejectionReason.trim()) {
         e.offerRejectionReason = 'Reddedildi seçildiğinde gerekçe zorunludur';
@@ -259,7 +384,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         e.followUpDate = 'Beklemede outcome\'da takip tarihi zorunludur';
       }
     }
-    // Custom fields zorunlu kontrolü
     const cfCheck = validateCustomFields(customFieldDefs, form.caseType, customFields);
     if (!cfCheck.ok) {
       e.customFields = `Zorunlu alanlar boş: ${cfCheck.missing.join(', ')}`;
@@ -270,11 +394,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
 
   async function handleSubmit() {
     if (!validate()) return;
-    if (duplicateCase && !overrideDuplicate) return; // Spec KURAL-4: override gerekli
+    if (duplicateCase && !overrideDuplicate) return;
     setSubmitting(true);
-    const account = accounts.find((a) => a.id === form.accountId)!;
+    const account = accountsForCompany.find((a) => a.id === form.accountId)!;
     const company = companies.find((c) => c.id === form.companyId)!;
-    const team = teams.find((t) => t.id === form.assignedTeamId);
+    const team = teamsForCompany.find((t) => t.id === form.assignedTeamId);
     const person = personsForTeam.find((p) => p.id === form.assignedPersonId);
 
     const input: NewCaseInput = {
@@ -296,7 +420,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       assignedTeamName: team?.name,
       assignedPersonId: person?.id,
       assignedPersonName: person?.name,
-      // Type-spesifik alanlar (caseService.create yalnızca tipe uygun olanları persist eder)
       financialStatus:    form.financialStatus    || undefined,
       productUsage:       form.productUsage       || undefined,
       usageChangeAlert:   form.usageChangeAlert   || undefined,
@@ -308,15 +431,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       offerRejectionReason: form.offerRejectionReason.trim() || undefined,
       actionTaken:         form.actionTaken.trim() || undefined,
       followUpDate:        form.followUpDate    || undefined,
-
-      // RUNA AI — kullanıcı "Uygula" derse aiGeneratedFlag=true olur
-      aiGeneratedFlag:      aiApplied || undefined,
+      aiGeneratedFlag:      aiApplied || titleApplied || undefined,
       aiCategoryPrediction: aiApplied && aiSuggestion ? aiSuggestion.category : undefined,
       aiPriorityPrediction: aiApplied && aiSuggestion ? aiSuggestion.priority : undefined,
       aiConfidenceScore:    aiApplied && aiSuggestion ? aiSuggestion.confidence : undefined,
-      aiRejectReason:       aiDismissed ? 'Kullanıcı reddetti' : undefined,
-
-      // Custom Fields — şirket FieldDefinition'larına göre dinamik
+      aiRejectReason:       aiCardCollapsed && !aiApplied ? 'Kullanıcı reddetti' : undefined,
       customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
     };
     try {
@@ -324,564 +443,1032 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       setSubmitting(false);
       onCreated(created);
     } catch {
-      // apiFetch toast'u zaten gösterdi; form'u açık bırak ki kullanıcı yeniden denesin.
       setSubmitting(false);
     }
   }
+
+  // Submit aktif mi? Spec'e göre: Şirket + Müşteri + Açıklama + Başlık + Kategori
+  const canSubmit =
+    !submitting &&
+    form.companyId &&
+    form.accountId &&
+    form.description.trim() &&
+    form.title.trim() &&
+    form.category &&
+    !(duplicateCase && !overrideDuplicate);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      size="2xl"
+      size="4xl"
       title={
         <div className="flex items-center gap-2">
           <span>Yeni Vaka</span>
-          <Badge tint="slate">FAZ 0 — Mock</Badge>
+          {(aiApplied || titleApplied) && (
+            <Badge tint="violet" icon={<Sparkles size={11} />}>RUNA AI</Badge>
+          )}
         </div>
       }
+      bodyClassName="max-h-[calc(92vh-7rem)] overflow-y-auto px-5 py-5"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">
-            {duplicateCase && !overrideDuplicate
-              ? <span className="text-amber-700">Açık vaka mevcut — devam etmek için &quot;Yine de Devam Et&quot; gerekli.</span>
-              : <>Vaka oluşturulduğunda statü <strong>Açık</strong> olarak başlar.</>}
+          <span className="text-xs text-slate-500 dark:text-ndark-muted">
+            {duplicateCase && !overrideDuplicate ? (
+              <span className="text-amber-700 dark:text-amber-400">
+                Açık vaka mevcut — devam etmek için "Yine de Devam Et" gerekli.
+              </span>
+            ) : (
+              <>Vaka oluşturulduğunda statü <strong>Açık</strong> olarak başlar.</>
+            )}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={submitting}>
               Vazgeç
             </Button>
-            <Button onClick={handleSubmit} disabled={submitting || (Boolean(duplicateCase) && !overrideDuplicate)}>
+            <Button onClick={handleSubmit} disabled={!canSubmit} leftIcon={<Check size={14} />}>
               {submitting ? 'Oluşturuluyor…' : 'Vakayı Oluştur'}
             </Button>
           </div>
         </div>
       }
     >
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <div className="space-y-4">
-        {duplicateCase && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-            <div className="flex items-start gap-2">
-              <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div>
-                  Bu müşteri için aynı tipte <strong>açık bir vaka</strong> mevcut.
-                </div>
-                <div className="flex flex-wrap items-center gap-2 rounded bg-white/60 px-2 py-1.5 ring-1 ring-amber-200">
-                  <span className="font-mono text-xs text-slate-600">{duplicateCase.caseNumber}</span>
-                  <span className="truncate text-sm font-medium text-slate-800">{duplicateCase.title}</span>
-                  <StatusPill status={duplicateCase.status} />
-                  {onShowExisting && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onShowExisting(duplicateCase.id);
-                        onClose();
-                      }}
-                      className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-amber-800 underline hover:bg-amber-100"
-                    >
-                      <ExternalLink size={12} /> Mevcut Vakayı Gör
-                    </button>
-                  )}
-                </div>
-                {!overrideDuplicate ? (
-                  <Button size="sm" variant="outline" onClick={() => setOverrideDuplicate(true)}>
-                    Yine de Devam Et
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs text-amber-800">
-                    <Badge tint="amber">Override aktif</Badge>
-                    <button
-                      type="button"
-                      onClick={() => setOverrideDuplicate(false)}
-                      className="underline hover:text-amber-900"
-                    >
-                      vazgeç
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Vaka Başlığı" required error={errors.title}>
-            <TextInput
-              placeholder="Kısa, özetleyici bir başlık"
-              value={form.title}
-              onChange={(e) => update('title', e.target.value)}
-            />
-          </Field>
-          <Field label="Vaka Tipi" required>
-            <Select value={form.caseType} onChange={(e) => update('caseType', e.target.value as CaseType)}>
-              {CASE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {CASE_TYPE_LABELS[t]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Şirket" required error={errors.companyId}>
-            <Select value={form.companyId} onChange={(e) => update('companyId', e.target.value)}>
-              <option value="">Şirket seçin…</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Müşteri" required error={errors.accountId}>
-            <Select value={form.accountId} onChange={(e) => update('accountId', e.target.value)}>
-              <option value="">Müşteri seçin…</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Öncelik" required>
-            <Select value={form.priority} onChange={(e) => update('priority', e.target.value as CasePriority)}>
-              {CASE_PRIORITIES.map((p) => (
-                <option key={p} value={p}>
-                  {CASE_PRIORITY_LABELS[p]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Origin (Kanal)" required>
-            <Select value={form.origin} onChange={(e) => update('origin', e.target.value as CaseOrigin)}>
-              {CASE_ORIGINS.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field
-            label="Origin Açıklama"
-            required={form.origin === 'Diğer'}
-            error={errors.originDescription}
-            hint={form.origin === 'Diğer' ? 'Origin "Diğer" seçildiğinde zorunludur.' : undefined}
-          >
-            <TextInput
-              placeholder={form.origin === 'Diğer' ? 'Kanalı kısaca açıklayın' : 'Opsiyonel'}
-              value={form.originDescription}
-              onChange={(e) => update('originDescription', e.target.value)}
-              disabled={form.origin !== 'Diğer'}
-            />
-          </Field>
-
-          <Field label="Kategori" required error={errors.category}>
-            <Select value={form.category} onChange={(e) => update('category', e.target.value)}>
-              <option value="">Seçin…</option>
-              {categories.map((c) => (
-                <option key={c.category} value={c.category}>
-                  {c.category}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Alt Kategori" required error={errors.subCategory}>
-            <Select
-              value={form.subCategory}
-              onChange={(e) => update('subCategory', e.target.value)}
-              disabled={!form.category}
-            >
-              <option value="">Seçin…</option>
-              {subCategories.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Talep Türü" required error={errors.requestType}>
-            <Select value={form.requestType} onChange={(e) => update('requestType', e.target.value as '' | CaseRequestType)}>
-              <option value="">Seçin…</option>
-              {requestTypes.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Ürün Grubu" hint="SLA hesaplamasında kullanılır (opsiyonel — FAZ 0)">
-            <TextInput
-              placeholder="ör. ERP - Kasa"
-              value={form.productGroup}
-              onChange={(e) => update('productGroup', e.target.value)}
-            />
-          </Field>
-
-          <Field label="Atanan Takım">
-            <Select value={form.assignedTeamId} onChange={(e) => update('assignedTeamId', e.target.value)}>
-              <option value="">Atanmadı</option>
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field
-            label="Atanan Kişi"
-            hint={form.assignedTeamId ? 'Sadece seçili takımın üyeleri listelenir.' : 'Önce takım seçin.'}
-          >
-            <Select
-              value={form.assignedPersonId}
-              onChange={(e) => update('assignedPersonId', e.target.value)}
-              disabled={!form.assignedTeamId}
-            >
-              <option value="">Atanmadı</option>
-              {personsForTeam.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-
-        <Field
-          label="Açıklama"
-          required
-          error={errors.description}
-          actions={
-            <VoiceNoteButton
-              onTranscript={(chunk) =>
-                update('description', form.description ? `${form.description} ${chunk}` : chunk)
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* ═══════════ SOL: FORM ═══════════ */}
+        <div className="min-w-0 space-y-6">
+          {/* Duplicate uyarısı */}
+          {duplicateCase && (
+            <DuplicateBanner
+              caseItem={duplicateCase}
+              overrideActive={overrideDuplicate}
+              onOverride={() => setOverrideDuplicate(true)}
+              onClearOverride={() => setOverrideDuplicate(false)}
+              onShowExisting={
+                onShowExisting
+                  ? () => {
+                      onShowExisting(duplicateCase.id);
+                      onClose();
+                    }
+                  : undefined
               }
             />
-          }
-        >
-          <TextArea
-            placeholder="Sorun veya talebin detayını yazın…"
-            value={form.description}
-            onChange={(e) => update('description', e.target.value)}
-            rows={5}
-          />
-        </Field>
+          )}
 
-        {/* RUNA AI — kategori önerisi
-            Kart açıklama 20+ karakter olunca SABİT görünür (loading/result/error state'inde içerik değişir).
-            Kullanıcı "Yoksay" veya "Uygula" derse tamamen gizlenir. */}
-        {form.description.trim().length >= 20 && !aiDismissed && !aiApplied && (
-          <RunaAiCard
-            title={aiError ? 'Kategori Önerisi' : 'Kategori Önerisi'}
-            body={
-              aiSuggesting
-                ? ''
-                : aiSuggestion
-                  ? `${aiSuggestion.category} / ${aiSuggestion.subCategory} · ${aiSuggestion.requestType} — ${aiSuggestion.reasoning}`
-                  : aiError
-                    ? `${aiError} — yazmaya devam edince yeniden denenecek.`
-                    : 'Açıklama yazıldıkça öneri hazırlanıyor…'
-            }
-            badges={
-              aiSuggestion && !aiSuggesting
-                ? [`%${Math.round(aiSuggestion.confidence * 100)} güven`, aiSuggestion.priority]
-                : []
-            }
-            isLoading={aiSuggesting}
-            primaryAction={
-              aiSuggestion && !aiSuggesting
-                ? { label: 'Uygula', onClick: handleAiApply }
-                : undefined
-            }
-            secondaryAction={{ label: 'Yoksay', onClick: handleAiDismiss }}
-          />
-        )}
-
-        {aiApplied && aiSuggestion && (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            ✦ AI önerisi uygulandı (%{Math.round(aiSuggestion.confidence * 100)} güven). Kategori, alt kategori, talep türü ve öncelik otomatik dolduruldu — istediğiniz gibi düzenleyebilirsiniz.
-          </div>
-        )}
-
-        {/* Custom Fields — şirket FieldDefinition'larına göre dinamik */}
-        <CustomFieldsSection
-          definitions={customFieldDefs}
-          caseType={form.caseType}
-          values={customFields}
-          onChange={(key, val) => setCustomFields((cf) => ({ ...cf, [key]: val }))}
-          disabled={submitting}
-        />
-        {errors.customFields && (
-          <p className="text-xs text-rose-600">{errors.customFields}</p>
-        )}
-
-        {/* Spec 11.2 + KURAL-3 — tip değişince state silinmiyor, sadece görünürlük değişiyor */}
-        {form.caseType === 'ProactiveTracking' && (
-          <SectionFrame title="Proaktif Takip Bilgileri" tint="violet">
+          {/* ── BÖLÜM 1: MÜŞTERİ KİM? ── */}
+          <Section title="Müşteri Kim?" subtitle="Şirket ve müşteriyi seçerek başlayın">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Finansal Risk Seviyesi" hint="Müşteri finansal sağlık skoru">
+              <Field label="Şirket" required error={errors.companyId}>
                 <Select
-                  value={form.financialStatus}
-                  onChange={(e) => update('financialStatus', e.target.value as '' | FinancialStatus)}
+                  value={form.companyId}
+                  onChange={(e) => update('companyId', e.target.value)}
                 >
-                  <option value="">Seçin…</option>
-                  {FINANCIAL_STATUSES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  <option value="">Şirket seçin…</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Ürün Kullanımı" hint="Kullanım yoğunluğu">
+              <Field
+                label="Müşteri"
+                required
+                error={errors.accountId}
+                hint={!form.companyId ? 'Önce şirket seçin' : undefined}
+              >
                 <Select
-                  value={form.productUsage}
-                  onChange={(e) => update('productUsage', e.target.value as '' | ProductUsage)}
+                  value={form.accountId}
+                  onChange={(e) => update('accountId', e.target.value)}
+                  disabled={!form.companyId}
                 >
-                  <option value="">Seçin…</option>
-                  {PRODUCT_USAGES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Kullanım Trendi">
-                <Select
-                  value={form.usageChangeAlert}
-                  onChange={(e) => update('usageChangeAlert', e.target.value as '' | UsageChangeAlert)}
-                >
-                  <option value="">Seçin…</option>
-                  {USAGE_CHANGE_ALERTS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Müdahale Önceliği">
-                <Select
-                  value={form.responseLevel}
-                  onChange={(e) => update('responseLevel', e.target.value as '' | ResponseLevel)}
-                >
-                  <option value="">Seçin…</option>
-                  {RESPONSE_LEVELS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  <option value="">{form.companyId ? 'Müşteri seçin…' : 'Önce şirket seçin'}</option>
+                  {accountsForCompany.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
                   ))}
                 </Select>
               </Field>
             </div>
-          </SectionFrame>
-        )}
+          </Section>
 
-        {form.caseType === 'Churn' && (
-          <SectionFrame title="Churn Yönetimi" tint="rose">
-            <div className="space-y-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={form.cancellationRequest}
-                  onChange={(e) => update('cancellationRequest', e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+          {/* ── BÖLÜM 2: NE OLDU? ── */}
+          <Section title="Ne Oldu?" subtitle="RUNA AI geri kalanını önerecek">
+            <Field
+              label="Açıklama"
+              required
+              error={errors.description}
+              actions={
+                <VoiceNoteButton
+                  onTranscript={(chunk) =>
+                    update('description', form.description ? `${form.description} ${chunk}` : chunk)
+                  }
                 />
-                Müşteri iptal talebinde bulundu
-              </label>
+              }
+            >
+              <TextArea
+                placeholder="Müşteri ne dedi, ne istedi? Kısaca yazın — RUNA AI geri kalanını önerecek."
+                value={form.description}
+                onChange={(e) => update('description', e.target.value)}
+                rows={5}
+              />
+            </Field>
 
-              <Field label="Önerilen Teklifler" hint="Birden fazla seçilebilir">
-                <div className="space-y-1.5 rounded-md border border-slate-200 bg-white px-3 py-2">
-                  {offeredSolutions.map((o) => {
-                    const checked = form.offeredSolutions.includes(o.id);
+            {/* AI öneri kartı (inline) */}
+            {form.description.trim().length >= DESCRIPTION_AI_THRESHOLD && !aiCardCollapsed && (
+              <div className="animate-fade-slide mt-3">
+                <AiSuggestionCard
+                  loading={aiSuggesting}
+                  category={aiSuggestion}
+                  title={aiTitle}
+                  error={aiError}
+                  onApplyAll={applyAllFromAi}
+                  onCollapse={dismissAiCard}
+                />
+              </div>
+            )}
+            {(aiApplied || titleApplied) && aiCardCollapsed && (
+              <div className="mt-3 flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                <Check size={14} />
+                <span>
+                  RUNA AI önerileri uygulandı. Aşağıdaki alanları istediğiniz gibi düzenleyebilirsiniz.
+                </span>
+              </div>
+            )}
+          </Section>
+
+          {/* ── BÖLÜM 4: VAKA BİLGİLERİ ── */}
+          <Section title="Vaka Bilgileri">
+            <div className="space-y-3">
+              {/* Başlık */}
+              <Field label="Vaka Başlığı" required error={errors.title}>
+                <TextInput
+                  placeholder="Kısa, özetleyici bir başlık"
+                  value={form.title}
+                  onChange={(e) => update('title', e.target.value)}
+                />
+              </Field>
+              {aiTitle && !titleApplied && form.title !== aiTitle.title && (
+                <div className="-mt-1 flex flex-wrap items-center gap-2 text-xs text-violet-700 dark:text-violet-300">
+                  <Bot size={12} />
+                  <span className="italic">"{aiTitle.title}"</span>
+                  <button
+                    type="button"
+                    onClick={applyTitleOnly}
+                    className="rounded-md bg-violet-100 px-2 py-0.5 font-medium text-violet-700 hover:bg-violet-200 dark:bg-violet-900/40 dark:text-violet-200 dark:hover:bg-violet-900/60"
+                  >
+                    Uygula
+                  </button>
+                </div>
+              )}
+
+              {/* Vaka tipi — 3 horizontal cards */}
+              <Field label="Vaka Tipi" required>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {CASE_TYPES.map((t) => {
+                    const meta = TYPE_CARD_META[t];
+                    const active = form.caseType === t;
+                    const aiTagged = aiApplied && aiSuggestion && form.caseType === t;
                     return (
-                      <label key={o.id} className="flex cursor-pointer items-start gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...form.offeredSolutions, o.id]
-                              : form.offeredSolutions.filter((id) => id !== o.id);
-                            update('offeredSolutions', next);
-                          }}
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
-                        />
-                        <span className="flex-1">
-                          <span className="font-medium text-slate-800">{o.name}</span>
-                          {o.description && (
-                            <span className="ml-1 text-xs text-slate-500">— {o.description}</span>
-                          )}
-                        </span>
-                      </label>
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => update('caseType', t)}
+                        className={
+                          'flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition ' +
+                          (active ? meta.tintActive : meta.tint)
+                        }
+                      >
+                        {meta.icon}
+                        <span className="flex-1 text-left">{meta.label}</span>
+                        {aiTagged && (
+                          <Bot size={12} className="text-violet-500 dark:text-violet-400" />
+                        )}
+                      </button>
                     );
                   })}
                 </div>
               </Field>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Teklif Geçerlilik Tarihi">
-                  <TextInput
-                    type="date"
-                    value={form.offerExpiryDate}
-                    onChange={(e) => update('offerExpiryDate', e.target.value)}
+                <Field label="Kategori" required error={errors.category}>
+                  <Select value={form.category} onChange={(e) => update('category', e.target.value)}>
+                    <option value="">Seçin…</option>
+                    {categories.map((c) => (
+                      <option key={c.category} value={c.category}>
+                        {c.category}
+                      </option>
+                    ))}
+                  </Select>
+                  {aiApplied && aiSuggestion && form.category === aiSuggestion.category && (
+                    <AiBadge />
+                  )}
+                </Field>
+                <Field label="Alt Kategori" required error={errors.subCategory}>
+                  <Select
+                    value={form.subCategory}
+                    onChange={(e) => update('subCategory', e.target.value)}
+                    disabled={!form.category}
+                  >
+                    <option value="">Seçin…</option>
+                    {subCategories.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                  {aiApplied && aiSuggestion && form.subCategory === aiSuggestion.subCategory && (
+                    <AiBadge />
+                  )}
+                </Field>
+              </div>
+
+              <Field label="Talep Türü" required error={errors.requestType}>
+                <Select
+                  value={form.requestType}
+                  onChange={(e) => update('requestType', e.target.value as '' | CaseRequestType)}
+                >
+                  <option value="">Seçin…</option>
+                  {requestTypes.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </Select>
+                {aiApplied && aiSuggestion && form.requestType === aiSuggestion.requestType && (
+                  <AiBadge />
+                )}
+              </Field>
+            </div>
+          </Section>
+
+          {/* ── BÖLÜM 5: TYPE-SPECIFIC ── */}
+          {form.caseType === 'ProactiveTracking' && (
+            <Section
+              title="Proaktif Takip Bilgileri"
+              accent="violet"
+              icon={<LineChart size={14} />}
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Finansal Risk Seviyesi" hint="Müşteri finansal sağlık skoru">
+                  <Select
+                    value={form.financialStatus}
+                    onChange={(e) => update('financialStatus', e.target.value as '' | FinancialStatus)}
+                  >
+                    <option value="">Seçin…</option>
+                    {FINANCIAL_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Ürün Kullanımı" hint="Kullanım yoğunluğu">
+                  <Select
+                    value={form.productUsage}
+                    onChange={(e) => update('productUsage', e.target.value as '' | ProductUsage)}
+                  >
+                    <option value="">Seçin…</option>
+                    {PRODUCT_USAGES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Kullanım Trendi">
+                  <Select
+                    value={form.usageChangeAlert}
+                    onChange={(e) => update('usageChangeAlert', e.target.value as '' | UsageChangeAlert)}
+                  >
+                    <option value="">Seçin…</option>
+                    {USAGE_CHANGE_ALERTS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Müdahale Önceliği">
+                  <Select
+                    value={form.responseLevel}
+                    onChange={(e) => update('responseLevel', e.target.value as '' | ResponseLevel)}
+                  >
+                    <option value="">Seçin…</option>
+                    {RESPONSE_LEVELS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            </Section>
+          )}
+
+          {form.caseType === 'Churn' && (
+            <Section title="Churn Yönetimi" accent="rose" icon={<TrendingDown size={14} />}>
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-ndark-text">
+                  <input
+                    type="checkbox"
+                    checked={form.cancellationRequest}
+                    onChange={(e) => update('cancellationRequest', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  Müşteri iptal talebinde bulundu
+                </label>
+
+                <Field label="Önerilen Teklifler" hint="Birden fazla seçilebilir">
+                  <div className="grid grid-cols-1 gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card sm:grid-cols-2">
+                    {offeredSolutions.map((o) => {
+                      const checked = form.offeredSolutions.includes(o.id);
+                      return (
+                        <label key={o.id} className="flex cursor-pointer items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...form.offeredSolutions, o.id]
+                                : form.offeredSolutions.filter((id) => id !== o.id);
+                              update('offeredSolutions', next);
+                            }}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                          />
+                          <span className="flex-1">
+                            <span className="font-medium text-slate-800 dark:text-ndark-text">
+                              {o.name}
+                            </span>
+                            {o.description && (
+                              <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">
+                                — {o.description}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </Field>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Teklif Geçerlilik Tarihi">
+                    <TextInput
+                      type="date"
+                      value={form.offerExpiryDate}
+                      onChange={(e) => update('offerExpiryDate', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Teklif Sonucu">
+                    <Select
+                      value={form.offerOutcome}
+                      onChange={(e) => update('offerOutcome', e.target.value as '' | OfferOutcome)}
+                    >
+                      <option value="">Henüz cevap yok</option>
+                      {OFFER_OUTCOMES.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+
+                {form.offerOutcome === 'Reddedildi' && (
+                  <Field label="Red Gerekçesi" required error={errors.offerRejectionReason}>
+                    <TextArea
+                      rows={2}
+                      placeholder="Müşteri neden teklifi reddetti?"
+                      value={form.offerRejectionReason}
+                      onChange={(e) => update('offerRejectionReason', e.target.value)}
+                    />
+                  </Field>
+                )}
+
+                <Field label="Yapılan Aksiyon" hint="Süreçte alınan ana aksiyon notu">
+                  <TextArea
+                    rows={3}
+                    placeholder="ör. İndirim teklifi sunuldu, takip görüşmesi planlandı…"
+                    value={form.actionTaken}
+                    onChange={(e) => update('actionTaken', e.target.value)}
                   />
                 </Field>
-                <Field label="Teklif Sonucu">
+
+                <Field
+                  label="Takip Tarihi"
+                  hint="Teklif sonrası ~7 gün önerilir — outcome 'Beklemede' ise zorunlu"
+                  required={form.offerOutcome === 'Beklemede'}
+                  error={errors.followUpDate}
+                >
+                  <TextInput
+                    type="date"
+                    value={form.followUpDate}
+                    onChange={(e) => update('followUpDate', e.target.value)}
+                  />
+                </Field>
+              </div>
+            </Section>
+          )}
+
+          {/* Custom Fields */}
+          {customFieldDefs.length > 0 && (
+            <Section title="Özel Alanlar">
+              <CustomFieldsSection
+                definitions={customFieldDefs}
+                caseType={form.caseType}
+                values={customFields}
+                onChange={(key, val) => setCustomFields((cf) => ({ ...cf, [key]: val }))}
+                disabled={submitting}
+              />
+              {errors.customFields && (
+                <p className="mt-1 text-xs text-rose-600">{errors.customFields}</p>
+              )}
+            </Section>
+          )}
+
+          {/* ── BÖLÜM 6: KİME VE NASIL? ── */}
+          <Section title="Kime ve Nasıl?">
+            <div className="space-y-3">
+              <Field label="Öncelik" required>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                  {CASE_PRIORITIES.map((p) => {
+                    const active = form.priority === p;
+                    const aiTagged = aiApplied && aiSuggestion?.priority === p;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => update('priority', p)}
+                        className={
+                          'flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition ' +
+                          (active
+                            ? PRIORITY_CHIP_STYLE[p] + ' ring-2 ring-offset-1 ring-current/20'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted')
+                        }
+                      >
+                        <span className={`inline-block h-2 w-2 rounded-full ${PRIORITY_CHIP_DOT[p]}`} />
+                        {CASE_PRIORITY_LABELS[p]}
+                        {aiTagged && active && <Bot size={10} className="opacity-60" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Atanan Takım">
                   <Select
-                    value={form.offerOutcome}
-                    onChange={(e) => update('offerOutcome', e.target.value as '' | OfferOutcome)}
+                    value={form.assignedTeamId}
+                    onChange={(e) => update('assignedTeamId', e.target.value)}
+                    disabled={!form.companyId}
                   >
-                    <option value="">Henüz cevap yok</option>
-                    {OFFER_OUTCOMES.map((o) => (
-                      <option key={o} value={o}>{o}</option>
+                    <option value="">{form.companyId ? 'Atanmadı' : 'Önce şirket seçin'}</option>
+                    {teamsForCompany.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Atanan Kişi"
+                  hint={form.assignedTeamId ? 'Sadece seçili takımın üyeleri' : 'Önce takım seçin'}
+                >
+                  <Select
+                    value={form.assignedPersonId}
+                    onChange={(e) => update('assignedPersonId', e.target.value)}
+                    disabled={!form.assignedTeamId}
+                  >
+                    <option value="">Atanmadı</option>
+                    {personsForTeam.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
                     ))}
                   </Select>
                 </Field>
               </div>
 
-              {form.offerOutcome === 'Reddedildi' && (
-                <Field
-                  label="Red Gerekçesi"
-                  required
-                  error={errors.offerRejectionReason}
-                  actions={
-                    <VoiceNoteButton
-                      onTranscript={(chunk) =>
-                        update(
-                          'offerRejectionReason',
-                          form.offerRejectionReason
-                            ? `${form.offerRejectionReason} ${chunk}`
-                            : chunk,
-                        )
-                      }
-                    />
-                  }
-                >
-                  <TextArea
-                    rows={2}
-                    placeholder="Müşteri neden teklifi reddetti?"
-                    value={form.offerRejectionReason}
-                    onChange={(e) => update('offerRejectionReason', e.target.value)}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Kanal (Origin)" required>
+                  <Select
+                    value={form.origin}
+                    onChange={(e) => update('origin', e.target.value as CaseOrigin)}
+                  >
+                    {CASE_ORIGINS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Ürün Grubu" hint="SLA hesaplamasında kullanılır">
+                  <TextInput
+                    placeholder="ör. ERP - Kasa"
+                    value={form.productGroup}
+                    onChange={(e) => update('productGroup', e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              {form.origin === 'Diğer' && (
+                <Field label="Kanal Açıklaması" required error={errors.originDescription}>
+                  <TextInput
+                    placeholder="Kanalı kısaca açıklayın"
+                    value={form.originDescription}
+                    onChange={(e) => update('originDescription', e.target.value)}
                   />
                 </Field>
               )}
-
-              <Field
-                label="Yapılan Aksiyon"
-                hint="Süreçte alınan ana aksiyon notu"
-                actions={
-                  <VoiceNoteButton
-                    onTranscript={(chunk) =>
-                      update(
-                        'actionTaken',
-                        form.actionTaken ? `${form.actionTaken} ${chunk}` : chunk,
-                      )
-                    }
-                  />
-                }
-              >
-                <TextArea
-                  rows={3}
-                  placeholder="ör. İndirim teklifi sunuldu, takip görüşmesi planlandı…"
-                  value={form.actionTaken}
-                  onChange={(e) => update('actionTaken', e.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="Takip Tarihi"
-                hint="Teklif sonrası ~7 gün — outcome 'Beklemede' ise zorunlu"
-                required={form.offerOutcome === 'Beklemede'}
-                error={errors.followUpDate}
-              >
-                <TextInput
-                  type="date"
-                  value={form.followUpDate}
-                  onChange={(e) => update('followUpDate', e.target.value)}
-                />
-              </Field>
             </div>
-          </SectionFrame>
-        )}
+          </Section>
         </div>
 
-        {/* Spec 11.2 — sağ SLA paneli (salt okunur, otomatik hesaplanmış) */}
-        <aside className="space-y-3 lg:sticky lg:top-2 lg:self-start">
-          <SlaPanel priority={form.priority} caseType={form.caseType} category={form.category} />
+        {/* ═══════════ SAĞ: AI PANEL ═══════════ */}
+        <aside className="lg:sticky lg:top-0 lg:self-start">
+          <AiPanel
+            descriptionLength={form.description.trim().length}
+            aiSuggesting={aiSuggesting}
+            aiSuggestion={aiSuggestion}
+            aiTitle={aiTitle}
+            priority={form.priority}
+            category={form.category}
+            caseType={form.caseType}
+            customerHistory={customerHistory}
+            onShowExisting={onShowExisting}
+            onCloseModal={onClose}
+          />
         </aside>
       </div>
     </Modal>
   );
 }
 
-function SlaPanel({
-  priority,
-  caseType,
-  category,
+// ──────────────────────────────────────────────────────────────
+// Reusable inner pieces
+// ──────────────────────────────────────────────────────────────
+
+function Section({
+  title,
+  subtitle,
+  accent,
+  icon,
+  children,
 }: {
-  priority: CasePriority;
-  caseType: CaseType;
-  category: string;
+  title: string;
+  subtitle?: string;
+  accent?: 'violet' | 'rose';
+  icon?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  // FAZ 0 tahmini — gerçek SLAPolicy lookup FAZ 3'te (Spec 6)
-  const map: Record<CasePriority, [number, number]> = {
-    Low:      [12, 72],
-    Medium:   [8, 48],
-    High:     [4, 24],
-    Critical: [1, 6],
-  };
-  const [responseHours, resolutionHours] = map[priority];
+  const headColor =
+    accent === 'violet'
+      ? 'text-violet-700 dark:text-violet-300'
+      : accent === 'rose'
+        ? 'text-rose-700 dark:text-rose-300'
+        : 'text-slate-700 dark:text-ndark-text';
+  const borderColor =
+    accent === 'violet'
+      ? 'border-l-violet-400 dark:border-l-violet-500'
+      : accent === 'rose'
+        ? 'border-l-rose-400 dark:border-l-rose-500'
+        : 'border-l-transparent';
+  return (
+    <section
+      className={
+        accent
+          ? `border-l-4 pl-4 ${borderColor} animate-fade-slide`
+          : ''
+      }
+    >
+      <header className="mb-3">
+        <h2 className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${headColor}`}>
+          {icon}
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="mt-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">{subtitle}</p>
+        )}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function AiBadge() {
+  return (
+    <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400">
+      <Bot size={10} />
+      AI önerisi
+    </div>
+  );
+}
+
+function DuplicateBanner({
+  caseItem,
+  overrideActive,
+  onOverride,
+  onClearOverride,
+  onShowExisting,
+}: {
+  caseItem: Case;
+  overrideActive: boolean;
+  onOverride: () => void;
+  onClearOverride: () => void;
+  onShowExisting?: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div>Bu müşteri için aynı tipte <strong>açık bir vaka</strong> mevcut.</div>
+          <div className="flex flex-wrap items-center gap-2 rounded bg-white/60 px-2 py-1.5 ring-1 ring-amber-200 dark:bg-ndark-card/60 dark:ring-amber-900/40">
+            <span className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{caseItem.caseNumber}</span>
+            <span className="truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{caseItem.title}</span>
+            <StatusPill status={caseItem.status} />
+            {onShowExisting && (
+              <button
+                type="button"
+                onClick={onShowExisting}
+                className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-amber-800 underline hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+              >
+                <ExternalLink size={12} /> Mevcut Vakayı Gör
+              </button>
+            )}
+          </div>
+          {!overrideActive ? (
+            <Button size="sm" variant="outline" onClick={onOverride}>
+              Yine de Devam Et
+            </Button>
+          ) : (
+            <div className="flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+              <Badge tint="amber">Override aktif</Badge>
+              <button
+                type="button"
+                onClick={onClearOverride}
+                className="underline hover:text-amber-900 dark:hover:text-amber-200"
+              >
+                vazgeç
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiSuggestionCard({
+  loading,
+  category,
+  title,
+  error,
+  onApplyAll,
+  onCollapse,
+}: {
+  loading: boolean;
+  category: CategorySuggestion | null;
+  title: TitleSuggestion | null;
+  error: string | null;
+  onApplyAll: () => void;
+  onCollapse: () => void;
+}) {
+  if (loading && !category) {
+    return (
+      <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
+        <div className="flex items-center gap-2 text-xs font-medium text-violet-800 dark:text-violet-200">
+          <Loader2 size={14} className="animate-spin" />
+          RUNA AI analiz ediyor…
+        </div>
+      </div>
+    );
+  }
+  if (!category) {
+    if (error) {
+      return (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+          ⚠ AI önerisi alınamadı: {error}. Aşağıdan manuel doldurabilirsiniz.
+        </div>
+      );
+    }
+    return null;
+  }
+  const conf = Math.round(category.confidence * 100);
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-violet-900 dark:text-violet-100">
+          <Bot size={16} />
+          RUNA AI Önerileri
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] tabular-nums text-violet-700 dark:text-violet-300">
+            %{conf} güven
+          </span>
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded p-0.5 text-violet-600 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-900/40"
+            aria-label="Kapat"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      <dl className="mt-3 space-y-1.5 text-sm">
+        {title && (
+          <Row label="Başlık" value={`"${title.title}"`} />
+        )}
+        <Row label="Tip" value={CASE_TYPE_LABELS[category.requestType as never] ?? '—'} />
+        <Row
+          label="Kategori"
+          value={`${category.category} / ${category.subCategory} · ${category.requestType}`}
+        />
+        <Row
+          label="Öncelik"
+          value={
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`inline-block h-2 w-2 rounded-full ${PRIORITY_CHIP_DOT[category.priority]}`} />
+              {CASE_PRIORITY_LABELS[category.priority]}
+            </span>
+          }
+        />
+      </dl>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" leftIcon={<Check size={12} />} onClick={onApplyAll}>
+          Tümünü Uygula
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCollapse}>
+          Tek tek düzenle
+        </Button>
+        {loading && (
+          <span className="ml-2 inline-flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
+            <Loader2 size={10} className="animate-spin" />
+            Güncelleniyor…
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="w-20 shrink-0 text-[11px] font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+        {label}
+      </dt>
+      <dd className="min-w-0 flex-1 text-slate-800 dark:text-ndark-text">{value}</dd>
+    </div>
+  );
+}
+
+function AiPanel({
+  descriptionLength,
+  aiSuggesting,
+  aiSuggestion,
+  aiTitle,
+  priority,
+  category,
+  caseType,
+  customerHistory,
+  onShowExisting,
+  onCloseModal,
+}: {
+  descriptionLength: number;
+  aiSuggesting: boolean;
+  aiSuggestion: CategorySuggestion | null;
+  aiTitle: TitleSuggestion | null;
+  priority: CasePriority;
+  category: string;
+  caseType: CaseType;
+  customerHistory: { openCount: number; lastCase?: Case } | null;
+  onShowExisting?: (caseId: string) => void;
+  onCloseModal: () => void;
+}) {
+  const isIdle = descriptionLength < DESCRIPTION_AI_THRESHOLD && !aiSuggestion;
+  const isAnalyzing = aiSuggesting && !aiSuggestion;
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
-        SLA Bilgisi
-      </h3>
-      <dl className="space-y-2 text-sm">
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-slate-500">Yanıt Süresi</dt>
-          <dd className="font-medium text-slate-800">{responseHours} saat</dd>
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-gradient-to-br from-violet-50 to-violet-100/30 px-3 py-2 dark:border-violet-900/40 dark:from-violet-950/40 dark:to-violet-900/20">
+        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-violet-600 text-white shadow-sm">
+          <Sparkles size={14} />
         </div>
         <div>
-          <dt className="text-[11px] uppercase tracking-wide text-slate-500">Çözüm Süresi</dt>
-          <dd className="font-medium text-slate-800">{resolutionHours} saat</dd>
+          <div className="text-sm font-semibold text-violet-900 dark:text-violet-100">RUNA AI</div>
+          <div className="text-[11px] text-violet-700 dark:text-violet-300">Asistan</div>
         </div>
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-slate-500">Öncelik</dt>
-          <dd className="text-slate-700">{priority}</dd>
+      </div>
+
+      {/* State 1: Bekliyor */}
+      {isIdle && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 text-center dark:border-ndark-border dark:bg-ndark-card">
+          <div className="flex justify-center gap-1">
+            {[0, 150, 300].map((d) => (
+              <span
+                key={d}
+                className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-400"
+                style={{ animationDelay: `${d}ms` }}
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-slate-600 dark:text-ndark-muted">
+            Müşteriyi seçin ve ne olduğunu yazın. Ben analiz edeceğim.
+          </p>
         </div>
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-slate-500">Kategori</dt>
-          <dd className="text-slate-700">{category || '—'}</dd>
-        </div>
-      </dl>
-      <p className="mt-3 border-t border-slate-200 pt-2 text-[11px] leading-relaxed text-slate-500">
-        Tahmini değerler. Gerçek SLA, şirket + ürün grubu + kategori + alt kategori + talep türü
-        kombinasyonundan hesaplanır (FAZ 3).
-      </p>
-      {caseType === 'ProactiveTracking' && (
-        <p className="mt-2 text-[11px] text-violet-700">
-          Proaktif takip vakalarında SLA öncelikle takip planı üzerinden değerlendirilir.
-        </p>
       )}
+
+      {/* State 2: Analiz */}
+      {isAnalyzing && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4 dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="flex items-center gap-2 text-sm font-medium text-violet-800 dark:text-violet-200">
+            <Loader2 size={14} className="animate-spin" />
+            Analiz ediliyor…
+          </div>
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-violet-100 dark:bg-violet-900/40">
+            <div className="h-full w-1/3 animate-pulse bg-violet-400" />
+          </div>
+        </div>
+      )}
+
+      {/* SLA tahmini */}
+      <PanelCard
+        icon={<Zap size={12} className="text-amber-600" />}
+        title="SLA Tahmini"
+      >
+        <SlaPreview priority={priority} category={category} caseType={caseType} />
+      </PanelCard>
+
+      {/* Müşteri geçmişi */}
+      <PanelCard
+        icon={<History size={12} className="text-slate-500" />}
+        title="Müşteri Geçmişi"
+      >
+        <CustomerHistory
+          history={customerHistory}
+          onShowExisting={onShowExisting}
+          onCloseModal={onCloseModal}
+        />
+      </PanelCard>
+
+      {/* Churn risk — yalnız Churn type seçilince placeholder */}
       {caseType === 'Churn' && (
-        <p className="mt-2 text-[11px] text-rose-700">
-          Churn vakalarında SLA, retention follow-up tarihiyle birlikte takip edilir.
-        </p>
+        <PanelCard
+          icon={<ShieldAlert size={12} className="text-rose-600" />}
+          title="Churn Risk"
+        >
+          <p className="text-[11px] leading-relaxed text-slate-600 dark:text-ndark-muted">
+            Vaka oluşturulduktan sonra RUNA AI churn risk skoru üretir ve
+            önerilen aksiyon planını paylaşır.
+          </p>
+        </PanelCard>
+      )}
+
+      {/* AI öneri özeti panel sonu */}
+      {aiSuggestion && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3 text-xs dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="font-medium text-violet-900 dark:text-violet-100">
+            <Bot size={12} className="mr-1 inline" />
+            Bu vakayı şöyle anlıyorum:
+          </div>
+          <p className="mt-1 leading-relaxed text-slate-700 dark:text-ndark-muted">
+            {aiSuggestion.reasoning}
+          </p>
+          {aiTitle && (
+            <p className="mt-2 text-[11px] italic text-violet-700 dark:text-violet-300">
+              Başlık önerisi: "{aiTitle.title}"
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-function SectionFrame({
+function PanelCard({
+  icon,
   title,
-  tint,
   children,
 }: {
+  icon: React.ReactNode;
   title: string;
-  tint: 'violet' | 'rose';
   children: React.ReactNode;
 }) {
-  const ring = tint === 'violet' ? 'ring-violet-200 bg-violet-50/40' : 'ring-rose-200 bg-rose-50/40';
-  const head = tint === 'violet' ? 'text-violet-800' : 'text-rose-800';
   return (
-    <section className={`rounded-lg p-3 ring-1 ring-inset ${ring}`}>
-      <h3 className={`mb-2 text-xs font-semibold uppercase tracking-wide ${head}`}>{title}</h3>
-      {children}
-    </section>
+    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
+      <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+        {icon}
+        {title}
+      </h3>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function SlaPreview({
+  priority,
+  category,
+  caseType,
+}: {
+  priority: CasePriority;
+  category: string;
+  caseType: CaseType;
+}) {
+  const [responseHours, resolutionHours] = SLA_BY_PRIORITY[priority];
+  const hasInputs = !!category;
+  return (
+    <dl className="space-y-1.5 text-xs">
+      <div className="flex items-baseline justify-between">
+        <dt className="text-slate-500 dark:text-ndark-muted">Yanıt</dt>
+        <dd className="font-semibold tabular-nums text-slate-800 dark:text-ndark-text">
+          {hasInputs ? `${responseHours} saat` : '—'}
+        </dd>
+      </div>
+      <div className="flex items-baseline justify-between">
+        <dt className="text-slate-500 dark:text-ndark-muted">Çözüm</dt>
+        <dd className="font-semibold tabular-nums text-slate-800 dark:text-ndark-text">
+          {hasInputs ? `${resolutionHours} saat` : '—'}
+        </dd>
+      </div>
+      {!hasInputs && (
+        <p className="mt-1 text-[10px] leading-relaxed text-slate-500 dark:text-ndark-muted">
+          Şirket + kategori seçilince hesaplanır.
+        </p>
+      )}
+      {caseType === 'Churn' && hasInputs && (
+        <p className="mt-1 text-[10px] text-rose-700 dark:text-rose-300">
+          Churn'de SLA, takip tarihiyle birlikte değerlendirilir.
+        </p>
+      )}
+    </dl>
+  );
+}
+
+function CustomerHistory({
+  history,
+  onShowExisting,
+  onCloseModal,
+}: {
+  history: { openCount: number; lastCase?: Case } | null;
+  onShowExisting?: (caseId: string) => void;
+  onCloseModal: () => void;
+}) {
+  if (!history) {
+    return (
+      <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+        Müşteri seçilince geçmiş gösterilir.
+      </p>
+    );
+  }
+  const last = history.lastCase;
+  const daysAgo = last
+    ? Math.floor((Date.now() - new Date(last.createdAt).getTime()) / (24 * 3600 * 1000))
+    : null;
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div className="flex items-baseline justify-between">
+        <span className="text-slate-500 dark:text-ndark-muted">Açık vaka</span>
+        <span
+          className={`font-semibold tabular-nums ${
+            history.openCount > 0
+              ? 'text-amber-700 dark:text-amber-300'
+              : 'text-slate-700 dark:text-ndark-text'
+          }`}
+        >
+          {history.openCount}
+        </span>
+      </div>
+      {last && (
+        <button
+          type="button"
+          onClick={() => {
+            if (onShowExisting) {
+              onShowExisting(last.id);
+              onCloseModal();
+            }
+          }}
+          className="flex w-full items-center justify-between gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-[11px] hover:bg-brand-50 hover:border-brand-300 dark:border-ndark-border dark:bg-ndark-bg dark:hover:bg-brand-950/20"
+          disabled={!onShowExisting}
+        >
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-mono text-slate-500 dark:text-ndark-muted">{last.caseNumber}</span>
+            <span className="ml-1 text-slate-700 dark:text-ndark-text">{last.title}</span>
+          </span>
+          <span className="shrink-0 text-slate-500 dark:text-ndark-muted">
+            {daysAgo === 0 ? 'bugün' : `${daysAgo}g önce`}
+          </span>
+          {onShowExisting && <ChevronRight size={10} className="shrink-0 text-slate-400" />}
+        </button>
+      )}
+      {!last && (
+        <p className="text-[11px] text-slate-500 dark:text-ndark-muted">İlk vakası — geçmişi yok.</p>
+      )}
+    </div>
   );
 }
