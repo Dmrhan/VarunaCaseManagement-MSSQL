@@ -96,6 +96,11 @@ export interface CaseAccount {
   phone: string;
   email?: string;
   contactPerson?: string;
+  /**
+   * Multi-tenant scope. null = sistem geneli (paylaşımlı müşteri — birden çok
+   * şirket aynı müşteriye vaka açabilir). BE prisma.account.companyId nullable.
+   */
+  companyId?: string | null;
 }
 
 export const MOCK_ACCOUNTS: CaseAccount[] = [
