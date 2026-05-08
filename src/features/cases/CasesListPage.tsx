@@ -1032,16 +1032,18 @@ export function CasesListPage({
                 <SortableTh label="Statü"          sortKey="status"      currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Öncelik"        sortKey="priority"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Atama"          sortKey="assignment"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2">TAKIM</th>
+                <SortableTh label="Açılış"         sortKey="createdAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="SLA"            sortKey="sla"         currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Son Güncelleme" sortKey="updatedAt"   currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border/60">
               {loading &&
-                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={9} />)}
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)}
               {!loading && allFiltered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4">
+                  <td colSpan={11} className="px-4">
                     {hasActiveFilters ? (
                       <EmptyState
                         icon={<SearchX size={22} />}
@@ -1135,6 +1137,12 @@ export function CasesListPage({
                     </Td>
                     <Td className="text-slate-700 dark:text-ndark-text">
                       {c.assignedPersonName ?? c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
+                    </Td>
+                    <Td className="text-xs text-slate-600 dark:text-ndark-muted">
+                      {c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
+                    </Td>
+                    <Td className="text-xs text-slate-500 dark:text-ndark-muted">
+                      <span title={formatDateTime(c.createdAt)}>{formatRelative(c.createdAt)}</span>
                     </Td>
                     <Td>
                       <SlaPill
