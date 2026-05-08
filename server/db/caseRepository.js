@@ -841,7 +841,6 @@ export const caseRepository = {
     const fromTeamId = c.assignedTeamId ?? null;
     const fromPersonId = c.assignedPersonId ?? null;
     const fromTeamName = c.assignedTeamName ?? '—';
-    const newTransferCount = (c.transferCount ?? 0) + 1;
 
     // Activity action satırı: "↔ Vaka aktarıldı: <from> → <to>"
     // Note alanı: gerekçe etiketi + serbest metin.
@@ -899,9 +898,12 @@ export const caseRepository = {
       return u;
     });
 
+    // Race-safe: post-increment değerini DB'den oku — pre-computed
+    // (c.transferCount + 1) eş zamanlı transfer'lerde supervisor uyarı
+    // eşiğini atlatabilir.
     return {
       case: shape(updated),
-      transferCount: newTransferCount,
+      transferCount: updated.transferCount,
       fromTeamId,
       fromTeamName,
       toTeamId: input.toTeamId,
