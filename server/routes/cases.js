@@ -3,6 +3,7 @@ import { caseRepository, mentionRepo, CaseAccessError } from '../db/caseReposito
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
+import { generateActionSummary } from '../lib/actionSummaryAi.js';
 
 const router = Router();
 
@@ -326,6 +327,34 @@ router.post(
     if (result.error === 'ai_unavailable') return res.status(503).json(result);
     if (result.error) return res.status(502).json(result);
     res.json({ brief: result.brief });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/action-summary — AI ile vaka aksiyon log özeti.
+ * Mevcut aiSummary (vaka içeriği) ve supervisor-summary (risk) FARKLI bir amaç:
+ * vakanın operasyonel yolculuğunu (atamalar, statü geçişleri, eskalasyon,
+ * snooze, aktarımlar) kronolojik anlatır.
+ *
+ * Body: yok (caseId path param yeterli).
+ * Yanıt: { summary, currentState, recommendedNextAction, eventCount, generatedAt }
+ *
+ * Persist edilmez — UI her "Yenile" tıklayışında yeniden üretir.
+ * AI key yoksa 503. AI başarısızsa 502.
+ */
+router.post(
+  '/:id/action-summary',
+  asyncRoute(async (req, res) => {
+    const result = await generateActionSummary({
+      caseId: req.params.id,
+      userId: req.user.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (result.error === 'not_found') return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+    if (result.error === 'ai_unavailable') return res.status(503).json(result);
+    if (result.error) return res.status(502).json(result);
+    res.json(result);
   }),
 );
 

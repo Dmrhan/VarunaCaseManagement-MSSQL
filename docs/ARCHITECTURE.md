@@ -302,12 +302,29 @@ AI endpointleri `/api/ai/*` altinda yer alir ve JWT gerektirir. Backend OpenAI c
 AI endpoint gruplari:
 
 - Kategori/oncelik onerisi
+- Baslik onerisi
 - Cozum notu taslagi
 - Supervisor summary
 - Churn conversion onerisi
 - Dashboard chat
 - Call summary
+- Vaka aktarimi onerisi
+- Customer Pulse AI ozet
+- Vaka aksiyon log ozeti (Action Timeline Summary)
 - AI usage accept tracking
+
+Bazi AI ozellikleri case-scoped olarak `/api/cases/:id/*` altinda mount edilir
+(`transfer-brief`, `action-summary`) — bunlar caseRepository scope kontrolu
+icin natural bir path verir. Helper kodu `server/lib/*Ai.js` modullerinde
+toplanir (`transferAi.js`, `actionSummaryAi.js`).
+
+Action Timeline Summary (post `/api/cases/:id/action-summary`) ozeli:
+- SADECE CaseActivity log verisi AI'a gider — UI metin scraping yok.
+- Persist edilmez; UI her "Yenile" tikladiginda yeniden uretilir.
+- aiSummary (vaka icerigi) ve supervisor-summary (risk) ile FARKLI amac:
+  vakanin operasyonel yolculugunu kronolojik anlatir.
+- Promptta hallucination disiplini: bir bilgi logda yoksa AI "loglarda
+  gorunmuyor" yazmak zorunda.
 
 AI cagrilarinda temel guvenlik ve operasyon kararlar:
 

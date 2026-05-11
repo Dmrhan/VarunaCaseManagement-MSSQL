@@ -429,6 +429,25 @@ export interface Case {
 }
 
 /**
+ * Case Status Report — AI ile üretilmiş, paydaşlara gönderilebilecek
+ * profesyonel, mail-ready durum raporu. BFF POST /api/cases/:id/action-summary
+ * döndürür (endpoint path geriye uyumlu kaldı; AIUsageLog endpoint adı
+ * 'status-report' olarak güncellendi).
+ *
+ * `report`: backend tarafından şablon + AI bölümleri birleştirilmiş tam
+ * metin. UI doğrudan göstermeli (pre-wrap, monospace).
+ * `subject`: yalnız "Konu:" satırı — mail başlığı.
+ *
+ * Persist edilmez, transient.
+ */
+export interface ActionSummary {
+  report: string;
+  subject: string;
+  eventCount: number;
+  generatedAt: string;
+}
+
+/**
  * Customer Context Intelligence ("Customer Pulse") — Roadmap.
  * BFF GET /api/cases/:id/customer-pulse deterministic metrikler + state
  * etiketi + plain-language summary + evidence + recommendedAction döner.
