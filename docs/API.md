@@ -164,6 +164,32 @@ Statu gecisi body:
 | GET | `/api/cases/by-account` | Musteriye ait vakalari listeler |
 | GET | `/api/cases/snoozed` | Aktif kullanicinin erteledigi vakalar |
 | GET | `/api/cases/:id/customer-pulse` | Musteri durumu (Customer Context Intelligence) |
+| POST | `/api/cases/:id/action-summary` | AI ile paydaslara gonderilebilecek "Durum Raporu" uretir |
+
+`action-summary` response (transient, persist edilmez):
+
+```json
+{
+  "report": "Konu: CASE-... — ... — Durum Raporu\n\nSayin ilgili,\n\n... (mail-ready full text)",
+  "subject": "Konu: CASE-... — ... — Durum Raporu",
+  "eventCount": 12,
+  "generatedAt": "ISO"
+}
+```
+
+- Yetki: `verifyJwt` + `allowedCompanyIds` (cross-tenant ise 403).
+- Body yok; caseId path param yeterli.
+- Profesyonel, mail-ready format. Sablonun statik kisimlari (header, vaka
+  bilgisi, footer/imza) backend tarafindan eklenir; AI sadece dort bolumu
+  uretir: `problemSummary`, `processSummary`, `currentStatus`, `nextStep`.
+- AI'a giden veride raw note 300 char ile kirpilir. AI metadata field
+  guncellemeleri (aiSummary, aiFollowupRecommendation, aiCallBrief vs.)
+  surec ozetinden filtrelenir — operasyonel anlami yok, mail i kirletir.
+- AI key yoksa 503; AI cagri basarisizsa 502.
+- AIUsageLog endpoint = `status-report`.
+- aiSummary (vaka icerigi) ve supervisor-summary (risk) ile FARKLI amac:
+  paydaslara gonderilebilecek durum raporu uretir; kullanici raporu
+  kopyalayip mail ile gonderebilir.
 
 `duplicate-check` query:
 
