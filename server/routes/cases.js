@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { caseRepository, mentionRepo, CaseAccessError } from '../db/caseRepository.js';
+import { caseRepository, mentionRepo, watcherRepo, linkRepo, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
@@ -117,6 +117,18 @@ router.get(
       req.user.allowedCompanyIds,
     );
     res.json({ value: items, '@odata.count': total });
+  }),
+);
+
+/**
+ * GET /api/cases/watching — kullanıcının izlediği aktif vakalar (Watcher Inbox).
+ * companyId scope. /:id rotasından önce mount edilmeli (Express order eşleşmesi).
+ */
+router.get(
+  '/watching',
+  asyncRoute(async (req, res) => {
+    const items = await watcherRepo.listForUser(req.user.id, req.user.allowedCompanyIds);
+    res.json({ value: items, '@odata.count': items.length });
   }),
 );
 
@@ -287,6 +299,160 @@ router.get(
     );
     if (!pulse) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(pulse);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// FAZ 2 Collab — Watcher (izleyici) endpoints
+// ─────────────────────────────────────────────────────────────────
+
+/** GET /api/cases/:id/watchers — vakanın izleyicileri (UI: avatar listesi). */
+router.get(
+  '/:id/watchers',
+  asyncRoute(async (req, res) => {
+    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds);
+    if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json({ value: list });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/watchers — izleyici ekle.
+ * Body: { userId: string }
+ *
+ * Yetki (route-layer):
+ *  - userId === req.user.id (self-watch): tüm roller
+ *  - Başka kullanıcı ekleme: Supervisor/Admin/SystemAdmin VEYA
+ *    (Agent + req.user.personId === case.assignedPersonId)
+ */
+router.post(
+  '/:id/watchers',
+  asyncRoute(async (req, res) => {
+    const targetUserId = req.body?.userId;
+    if (!targetUserId || typeof targetUserId !== 'string') {
+      return res.status(400).json({ error: 'userId gerekli.' });
+    }
+    const isSelf = targetUserId === req.user.id;
+    if (!isSelf) {
+      const role = req.user.role;
+      const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(role);
+      let assignedOwner = false;
+      if (!elevated && req.user.personId) {
+        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+        if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+        assignedOwner = c.assignedPersonId === req.user.personId;
+      }
+      if (!elevated && !assignedOwner) {
+        return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı izleyici yapma yetkin yok.' });
+      }
+    }
+    const result = await watcherRepo.add({
+      caseId: req.params.id,
+      userId: targetUserId,
+      addedBy: req.user.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      actor: req.user.fullName,
+    });
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'already') return res.status(409).json(result);
+    if (result.error) return res.status(400).json(result);
+    res.status(201).json(result);
+  }),
+);
+
+/**
+ * DELETE /api/cases/:id/watchers/:userId — izleyiciyi kaldır.
+ * Yetki: self veya Supervisor/Admin/SystemAdmin.
+ */
+router.delete(
+  '/:id/watchers/:userId',
+  asyncRoute(async (req, res) => {
+    const targetUserId = req.params.userId;
+    const isSelf = targetUserId === req.user.id;
+    const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(req.user.role);
+    if (!isSelf && !elevated) {
+      return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı çıkarma yetkin yok.' });
+    }
+    const result = await watcherRepo.remove({
+      caseId: req.params.id,
+      userId: targetUserId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      actor: req.user.fullName,
+    });
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'not_found') return res.status(404).json(result);
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// FAZ 2 Collab — Linked Cases endpoints
+// ─────────────────────────────────────────────────────────────────
+
+/** GET /api/cases/:id/links — vakanın bağlantıları (3 tip karışık liste). */
+router.get(
+  '/:id/links',
+  asyncRoute(async (req, res) => {
+    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds);
+    if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json({ value: list });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/links — bağlantı ekle.
+ * Body: { linkedCaseId: string, linkType: 'Related'|'Duplicate'|'Parent' }
+ * Validasyonlar repo'da: self_link / invalid_type / target_not_found /
+ * cross_tenant / already / circular (Parent).
+ */
+router.post(
+  '/:id/links',
+  asyncRoute(async (req, res) => {
+    const { linkedCaseId, linkType } = req.body ?? {};
+    const result = await linkRepo.add({
+      caseId: req.params.id,
+      linkedCaseId,
+      linkType,
+      createdBy: req.user.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      actor: req.user.fullName,
+    });
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'target_not_found') return res.status(404).json(result);
+    if (result.error === 'cross_tenant') return res.status(403).json(result);
+    if (result.error === 'already') return res.status(409).json(result);
+    if (result.error) return res.status(400).json(result);
+    res.status(201).json(result);
+  }),
+);
+
+/**
+ * DELETE /api/cases/:id/links/:linkId — bağlantı kaldır.
+ * Yetki: case owner (assignedPersonId === self.personId) veya Supervisor+.
+ * Symmetric Duplicate: reverse link de silinir (repo halleder).
+ */
+router.delete(
+  '/:id/links/:linkId',
+  asyncRoute(async (req, res) => {
+    const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(req.user.role);
+    if (!elevated) {
+      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+      if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+      if (!req.user.personId || c.assignedPersonId !== req.user.personId) {
+        return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
+      }
+    }
+    const result = await linkRepo.remove({
+      caseId: req.params.id,
+      linkId: req.params.linkId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      actor: req.user.fullName,
+    });
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result.error === 'not_found') return res.status(404).json(result);
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
   }),
 );
 

@@ -231,6 +231,22 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    // FAZ 2 Collab — atama veya öncelik değişikliklerinde watcher'lara bildirim.
+    // Status değişimi transitionStatus() üzerinden ayrı olarak fire eder.
+    const watcherTriggers = ['assignedPersonId', 'assignedTeamId', 'assignedPersonName', 'assignedTeamName', 'priority'];
+    const changedKey = historyEntries.find((h) => watcherTriggers.includes(h.fieldName ?? ''));
+    if (changedKey) {
+      const kind = changedKey.fieldName === 'priority' ? 'priority' : 'assignment';
+      const label = changedKey.fieldName === 'priority' ? 'Öncelik' : 'Atama';
+      await notifyWatchers({
+        caseId: id,
+        companyId,
+        message: `${updated.caseNumber}'de ${label.toLowerCase()} değişti: ${changedKey.fromValue ?? '-'} → ${changedKey.toValue ?? '-'}`,
+        kind,
+      });
+    }
+
     return shape(updated);
   },
 
@@ -314,6 +330,18 @@ export const caseRepository = {
         note: cleanedPreview,
         actor: note.authorName,
       },
+    });
+
+    // FAZ 2 Collab — vakaya watcher olarak eklenenlere bildirim
+    const noteCase = await prisma.case.findUnique({
+      where: { id },
+      select: { caseNumber: true },
+    });
+    await notifyWatchers({
+      caseId: id,
+      companyId,
+      message: `${noteCase?.caseNumber ?? id}'de yeni not: ${cleanedPreview.slice(0, 80)}`,
+      kind: 'note',
     });
 
     await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
@@ -814,6 +842,16 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    // FAZ 2 Collab — watcher bildirimleri (statü + opsiyonel eskalasyon)
+    const kind = enteringEscalation ? 'escalation' : 'status';
+    await notifyWatchers({
+      caseId: id,
+      companyId,
+      message: `${updated.caseNumber}: ${prevStatusTr} → ${nextStatus}`,
+      kind,
+    });
+
     return shape(updated);
   },
 
@@ -1415,6 +1453,417 @@ export const mentionRepo = {
       data: { seenAt: new Date() },
     });
     return { updated: result.count };
+  },
+};
+
+/**
+ * notifyWatchers — bir vakaya watcher olarak eklenmiş tüm kullanıcılara
+ * CaseNotification yazar (eventType='watcher_update', channel='InApp').
+ *
+ * Mutation handler'ları (addNote, update, transitionStatus) tarafından
+ * çağrılır. Hata olursa ana akışı durdurmaz — sessiz warn.
+ *
+ * Payload: { message, kind } — kind 'note' | 'status' | 'assignment' |
+ * 'priority' | 'escalation' (UI ayrıştırma için ipucu).
+ */
+async function notifyWatchers({ caseId, companyId, message, kind }) {
+  try {
+    const watchers = await prisma.caseWatcher.findMany({
+      where: { caseId },
+      select: { userId: true },
+    });
+    if (watchers.length === 0) return;
+    await prisma.caseNotification.createMany({
+      data: watchers.map((w) => ({
+        caseId,
+        companyId,
+        eventType: 'watcher_update',
+        channel: 'InApp',
+        recipient: w.userId,
+        payload: { message, kind },
+      })),
+    });
+  } catch (err) {
+    console.warn('[notifyWatchers]', err?.message ?? err);
+  }
+}
+
+/**
+ * Watcher repository — vaka takipçileri (FAZ 2 Collab).
+ * Multi-tenant scope: vakanın companyId'si allowedCompanyIds'de olmalı.
+ * Çapraz tenant watcher imkânsız.
+ */
+export const watcherRepo = {
+  async list(caseId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+    const rows = await prisma.caseWatcher.findMany({
+      where: { caseId },
+      orderBy: { addedAt: 'asc' },
+    });
+    if (rows.length === 0) return [];
+    const userIds = [...new Set(rows.flatMap((r) => [r.userId, r.addedBy]))];
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, fullName: true, email: true },
+    });
+    const um = new Map(users.map((u) => [u.id, u]));
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      userName: um.get(r.userId)?.fullName ?? r.userId,
+      userEmail: um.get(r.userId)?.email ?? null,
+      addedBy: r.addedBy,
+      addedByName: um.get(r.addedBy)?.fullName ?? r.addedBy,
+      addedAt: r.addedAt,
+    }));
+  },
+
+  /**
+   * Add watcher. Auth (caller responsibility — route layer):
+   *  - Add self: any role
+   *  - Add others: Supervisor+ OR (Agent + case.assignedPersonId === self.personId)
+   *
+   * Cross-tenant guard:
+   *  - Hedef vakanın companyId'si allowedCompanyIds'de olmalı
+   *  - Eklenecek kullanıcı aynı şirkette aktif UserCompany'ye sahip olmalı
+   *
+   * Duplicate guard: aynı (caseId, userId) ikinci kez eklenirse 'already' döner.
+   */
+  async add({ caseId, userId, addedBy, allowedCompanyIds, actor = 'Mock User' }) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Eklenecek kullanıcı aynı şirkette aktif olmalı (cross-tenant block)
+    const valid = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        isActive: true,
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, fullName: true },
+    });
+    if (!valid) {
+      return { error: 'invalid_user', message: 'Kullanıcı bu şirkette bulunamadı veya pasif.' };
+    }
+
+    // Duplicate check
+    const existing = await prisma.caseWatcher.findUnique({
+      where: { caseId_userId: { caseId, userId } },
+    });
+    if (existing) {
+      return { error: 'already', message: 'Kullanıcı zaten izleyici.' };
+    }
+
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true },
+    });
+
+    const created = await prisma.caseWatcher.create({
+      data: { caseId, userId, companyId, addedBy },
+    });
+
+    // CaseActivity — "Selin Gümüş izleyici olarak eklendi"
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: `${valid.fullName} izleyici olarak eklendi`,
+        actionType: 'FieldUpdate',
+        fieldName: 'watchers',
+        toValue: valid.fullName,
+        actor,
+      },
+    });
+
+    // CaseNotification — eklenen kullanıcıya "izleyici eklendi" bildirim
+    await prisma.caseNotification.create({
+      data: {
+        caseId,
+        companyId,
+        eventType: 'watcher_added',
+        channel: 'InApp',
+        recipient: userId,
+        payload: {
+          message: `Sizi ${c?.caseNumber ?? caseId} vakasında izleyici olarak eklendi`,
+          addedBy,
+        },
+      },
+    });
+
+    return { id: created.id, userId, addedBy, addedAt: created.addedAt };
+  },
+
+  /**
+   * Remove watcher. Auth (caller responsibility — route layer):
+   *  - Self-removal: always allowed
+   *  - Remove others: Supervisor+
+   */
+  async remove({ caseId, userId, allowedCompanyIds, actor = 'Mock User' }) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const existing = await prisma.caseWatcher.findUnique({
+      where: { caseId_userId: { caseId, userId } },
+    });
+    if (!existing) return { error: 'not_found', message: 'İzleyici bulunamadı.' };
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { fullName: true },
+    });
+
+    await prisma.caseWatcher.delete({ where: { id: existing.id } });
+
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: `${user?.fullName ?? userId} izleyici listesinden çıkarıldı`,
+        actionType: 'FieldUpdate',
+        fieldName: 'watchers',
+        fromValue: user?.fullName ?? userId,
+        actor,
+      },
+    });
+
+    return { ok: true };
+  },
+
+  /** Kullanıcının izlediği aktif vakalar — Watcher Inbox (ileri faz) için. */
+  async listForUser(userId, allowedCompanyIds) {
+    if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) return [];
+    const rows = await prisma.caseWatcher.findMany({
+      where: { userId, companyId: { in: allowedCompanyIds } },
+      orderBy: { addedAt: 'desc' },
+      take: 200,
+      select: {
+        addedAt: true,
+        case: {
+          select: {
+            id: true,
+            caseNumber: true,
+            title: true,
+            status: true,
+            priority: true,
+            companyName: true,
+            accountName: true,
+            assignedPersonName: true,
+            slaViolation: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    return rows
+      .filter((r) => r.case)
+      .map((r) => ({
+        ...shape(r.case),
+        addedAt: r.addedAt,
+      }));
+  },
+};
+
+/**
+ * Link repository — vakalar arası bağlantı (FAZ 2 Collab).
+ * 3 tip: Related (asymmetric), Duplicate (BFF symmetric), Parent (asymmetric).
+ *
+ * Cross-tenant block: kaynak ve hedef vakanın companyId'leri eşit olmalı +
+ * her ikisi de allowedCompanyIds'de.
+ *
+ * Symmetric: Duplicate eklenince reverse link de yazılır; remove'da reverse
+ * de silinir.
+ *
+ * Cycle guard (Parent): A → B Parent + B → A Parent yasak.
+ */
+const LINK_TYPE_TR = {
+  Related: 'İlişkili',
+  Duplicate: 'Mükerrer',
+  Parent: 'Üst Vaka',
+};
+
+export const linkRepo = {
+  async list(caseId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+    const rows = await prisma.caseLink.findMany({
+      where: { caseId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        linkedCase: {
+          select: {
+            id: true,
+            caseNumber: true,
+            title: true,
+            status: true,
+            priority: true,
+            assignedPersonName: true,
+            companyId: true,
+          },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      linkId: r.id,
+      linkType: r.linkType,
+      linkTypeLabel: LINK_TYPE_TR[r.linkType] ?? r.linkType,
+      createdBy: r.createdBy,
+      createdAt: r.createdAt,
+      linkedCase: r.linkedCase
+        ? {
+            id: r.linkedCase.id,
+            caseNumber: r.linkedCase.caseNumber,
+            title: r.linkedCase.title,
+            status: fromDb({ status: r.linkedCase.status }).status,
+            priority: r.linkedCase.priority,
+            assignedPersonName: r.linkedCase.assignedPersonName,
+          }
+        : null,
+    }));
+  },
+
+  async add({ caseId, linkedCaseId, linkType, createdBy, allowedCompanyIds, actor = 'Mock User' }) {
+    if (caseId === linkedCaseId) {
+      return { error: 'self_link', message: 'Vaka kendisine bağlanamaz.' };
+    }
+    if (!['Related', 'Duplicate', 'Parent'].includes(linkType)) {
+      return { error: 'invalid_type', message: 'linkType geçersiz.' };
+    }
+
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const target = await prisma.case.findUnique({
+      where: { id: linkedCaseId },
+      select: { id: true, companyId: true, caseNumber: true },
+    });
+    if (!target) return { error: 'target_not_found', message: 'Hedef vaka bulunamadı.' };
+    if (target.companyId !== companyId) {
+      return { error: 'cross_tenant', message: 'Farklı şirketteki vakaya bağlantı kurulamaz.' };
+    }
+
+    // Duplicate guard (aynı yönde + tipte tekrar)
+    const existing = await prisma.caseLink.findUnique({
+      where: {
+        caseId_linkedCaseId_linkType: { caseId, linkedCaseId, linkType },
+      },
+    });
+    if (existing) {
+      return { error: 'already', message: 'Bağlantı zaten var.' };
+    }
+
+    // Cycle guard for Parent (A → B Parent, B → A Parent yasak)
+    if (linkType === 'Parent') {
+      const reverseParent = await prisma.caseLink.findUnique({
+        where: {
+          caseId_linkedCaseId_linkType: {
+            caseId: linkedCaseId,
+            linkedCaseId: caseId,
+            linkType: 'Parent',
+          },
+        },
+      });
+      if (reverseParent) {
+        return { error: 'circular', message: 'Döngüsel Parent bağlantısı yapılamaz.' };
+      }
+    }
+
+    const created = await prisma.caseLink.create({
+      data: { caseId, linkedCaseId, linkType, companyId, createdBy },
+    });
+
+    // Symmetric: Duplicate her iki yönde de tutulur.
+    if (linkType === 'Duplicate') {
+      const reverseExists = await prisma.caseLink.findUnique({
+        where: {
+          caseId_linkedCaseId_linkType: {
+            caseId: linkedCaseId,
+            linkedCaseId: caseId,
+            linkType: 'Duplicate',
+          },
+        },
+      });
+      if (!reverseExists) {
+        await prisma.caseLink.create({
+          data: {
+            caseId: linkedCaseId,
+            linkedCaseId: caseId,
+            linkType: 'Duplicate',
+            companyId,
+            createdBy,
+          },
+        });
+      }
+    }
+
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: `Bağlantı eklendi: ${LINK_TYPE_TR[linkType]} → ${target.caseNumber}`,
+        actionType: 'FieldUpdate',
+        fieldName: 'links',
+        toValue: `${LINK_TYPE_TR[linkType]} → ${target.caseNumber}`,
+        actor,
+      },
+    });
+
+    return { linkId: created.id, linkType, linkedCaseNumber: target.caseNumber };
+  },
+
+  /**
+   * Remove link. Auth (caller responsibility):
+   *  - Case owner (assignedPersonId === self.personId) or Supervisor+.
+   *
+   * Symmetric Duplicate: hem ileri hem geri yön silinir.
+   */
+  async remove({ caseId, linkId, allowedCompanyIds, actor = 'Mock User' }) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const existing = await prisma.caseLink.findUnique({
+      where: { id: linkId },
+      include: { linkedCase: { select: { caseNumber: true } } },
+    });
+    if (!existing || existing.caseId !== caseId) {
+      return { error: 'not_found', message: 'Bağlantı bulunamadı.' };
+    }
+    if (existing.companyId !== companyId) {
+      return { error: 'cross_tenant', message: 'Bağlantı bu vakaya ait değil.' };
+    }
+
+    await prisma.caseLink.delete({ where: { id: linkId } });
+
+    // Symmetric Duplicate — reverse'i de sil
+    if (existing.linkType === 'Duplicate') {
+      const reverse = await prisma.caseLink.findUnique({
+        where: {
+          caseId_linkedCaseId_linkType: {
+            caseId: existing.linkedCaseId,
+            linkedCaseId: existing.caseId,
+            linkType: 'Duplicate',
+          },
+        },
+      });
+      if (reverse) {
+        await prisma.caseLink.delete({ where: { id: reverse.id } });
+      }
+    }
+
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: `Bağlantı kaldırıldı: ${LINK_TYPE_TR[existing.linkType]} → ${existing.linkedCase?.caseNumber ?? '?'}`,
+        actionType: 'FieldUpdate',
+        fieldName: 'links',
+        fromValue: `${LINK_TYPE_TR[existing.linkType]} → ${existing.linkedCase?.caseNumber ?? '?'}`,
+        actor,
+      },
+    });
+
+    return { ok: true };
   },
 };
 

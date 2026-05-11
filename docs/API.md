@@ -163,8 +163,15 @@ Statu gecisi body:
 | GET | `/api/cases/duplicate-check` | Musteri + vaka tipi icin acik vaka kontrolu |
 | GET | `/api/cases/by-account` | Musteriye ait vakalari listeler |
 | GET | `/api/cases/snoozed` | Aktif kullanicinin erteledigi vakalar |
+| GET | `/api/cases/watching` | Kullanicinin izlemekte oldugu vakalar (Watcher Inbox) |
 | GET | `/api/cases/:id/customer-pulse` | Musteri durumu (Customer Context Intelligence) |
 | POST | `/api/cases/:id/action-summary` | AI ile paydaslara gonderilebilecek "Durum Raporu" uretir |
+| GET | `/api/cases/:id/watchers` | Vakanin izleyicileri (FAZ 2 Collab) |
+| POST | `/api/cases/:id/watchers` | Izleyici ekle. Body: `{ userId }` |
+| DELETE | `/api/cases/:id/watchers/:userId` | Izleyiciyi kaldir |
+| GET | `/api/cases/:id/links` | Vakanin bagli vakalari (3 tip) |
+| POST | `/api/cases/:id/links` | Bagli vaka ekle. Body: `{ linkedCaseId, linkType }` |
+| DELETE | `/api/cases/:id/links/:linkId` | Baglanti kaldir |
 
 `action-summary` response (transient, persist edilmez):
 
@@ -190,6 +197,63 @@ Statu gecisi body:
 - aiSummary (vaka icerigi) ve supervisor-summary (risk) ile FARKLI amac:
   paydaslara gonderilebilecek durum raporu uretir; kullanici raporu
   kopyalayip mail ile gonderebilir.
+
+**Watcher + Linked Cases (FAZ 2 Collab):**
+
+`watchers` response:
+
+```json
+{
+  "value": [
+    {
+      "id": "wat-...",
+      "userId": "user-...",
+      "userName": "Selin Gumus",
+      "userEmail": "selin@param.com.tr",
+      "addedBy": "user-...",
+      "addedByName": "Aslı Tan",
+      "addedAt": "ISO"
+    }
+  ]
+}
+```
+
+- Yetki POST: self-watch tüm roller; başka kullanıcı eklemek Supervisor+ veya
+  Agent + case.assignedPersonId === self.personId.
+- Yetki DELETE: self veya Supervisor+.
+- Cross-tenant block: eklenecek kullanıcı vakanın companyId'sinde aktif olmalı.
+- Yan etkiler: CaseActivity ("X izleyici olarak eklendi/çıkarıldı") +
+  eklenende CaseNotification (eventType='watcher_added').
+- Watcher bildirim akışı (eventType='watcher_update') — vaka not eklenince,
+  atama/öncelik değişince, status geçince tüm watcher'lara yazılır.
+
+`links` response:
+
+```json
+{
+  "value": [
+    {
+      "linkId": "lnk-...",
+      "linkType": "Related | Duplicate | Parent",
+      "linkTypeLabel": "İlişkili | Mükerrer | Üst Vaka",
+      "createdBy": "user-...",
+      "createdAt": "ISO",
+      "linkedCase": {
+        "id": "case-...", "caseNumber": "VK-...", "title": "...",
+        "status": "Açık", "priority": "High",
+        "assignedPersonName": "..."
+      }
+    }
+  ]
+}
+```
+
+- POST body: `{ linkedCaseId, linkType }`.
+- Validasyonlar: self_link (400), invalid_type (400), target_not_found (404),
+  cross_tenant (403), already (409), circular Parent (400).
+- Symmetric Duplicate: A dup B yazılınca B dup A da otomatik yazılır;
+  silinince ikisi de düşer.
+- Yan etki: CaseActivity ("Bağlantı eklendi/kaldırıldı: X → Y").
 
 `duplicate-check` query:
 
@@ -498,6 +562,7 @@ Tum AI endpointleri JWT gerektirir ve IP bazli basit rate limit uygular. `OPENAI
 | POST | `/api/ai/suggest-title` | Aciklamadan kisa Turkce vaka basligi onerir |
 | POST | `/api/ai/transfer-suggest` | Vakaya en uygun takimi onerir (FAZ 2 §20.2) |
 | POST | `/api/ai/customer-pulse-summary` | Deterministic Customer Pulse'i AI ile zenginlestirir (raw not/cagri GONDERMEZ) |
+| POST | `/api/ai/suggest-links` | Vakaya benzer/iliskili olabilecek vakalari onerir (FAZ 2 Collab). Body: `{ caseId }`. Max 3 oneri |
 | PATCH | `/api/ai/usage/:id/accept` | AI onerisi kabul/red bilgisini log kaydina yazar |
 
 `suggest-category` temel body:

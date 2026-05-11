@@ -206,6 +206,16 @@ enum PatternAlertStatus {
   dismissed
 }
 
+// CaseLink türü — FAZ 2 Collab. Vakalar arası bağlantı tipi.
+//   - Related:   genel ilişkili (yumuşak referans, symmetric değil)
+//   - Duplicate: aynı sorun (BFF symmetric davranış — A↔B her iki yön yazılır)
+//   - Parent:    bu vaka, hedef vakanın parçası (A → B = A is child of B)
+enum CaseLinkType {
+  Related
+  Duplicate
+  Parent
+}
+
 // KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
 // AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
 enum KnowledgeSourceType {
@@ -590,6 +600,11 @@ model Case {
   mentions      CaseMention[]
   reminders     CaseReminder[]
   transfers     CaseTransfer[]
+  watchers      CaseWatcher[]
+  // Case A → linkedCaseId: A "outgoing" links (CaseLinkSource).
+  // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
+  outgoingLinks CaseLink[]            @relation("CaseLinkSource")
+  incomingLinks CaseLink[]            @relation("CaseLinkTarget")
 
   @@index([accountId])
   @@index([companyId])
@@ -925,4 +940,56 @@ model CaseTransfer {
   @@index([caseId])
   @@index([companyId])
   @@index([companyId, transferredAt])
+}
+
+// CaseWatcher — FAZ 2 Collab. Vaka takipçileri; vakada değişiklik olunca
+// (status, atama, not vs.) CaseNotification yazılır → bell badge + watcher
+// inbox (ileri faz). Bir kullanıcı bir vakaya bir kez watcher olabilir;
+// addedBy = self-join veya başkası (Supervisor) tarafından eklendiyse User.id.
+// companyId zorunlu — multi-tenant scope (top-level "benim watcher'larım"
+// sorgusu için JOIN gerektirmez).
+model CaseWatcher {
+  id        String   @id @default(cuid())
+  caseId    String
+  userId    String
+  companyId String
+  addedBy   String
+  addedAt   DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, userId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([caseId])
+}
+
+// CaseLink — FAZ 2 Collab. Vakalar arası bağlantı (3 tip):
+//   - Related:   genel ilişkili (yumuşak referans)
+//   - Duplicate: aynı sorun (symmetric — A↔B her iki yön de yazılır)
+//   - Parent:    bu vaka, hedef vakanın parçası (asymmetric — A → B = A is child)
+//
+// Symmetric davranış Duplicate için route layer'ında ele alınır
+// (her iki yönde de satır yazılır). Schema'da @@unique([caseId,
+// linkedCaseId, linkType]) ile dublike koruma; aynı yönde aynı tip iki
+// kez eklenemez.
+//
+// companyId zorunlu — multi-tenant scope. Cross-tenant link route layer'ında
+// reddedilir (kaynak ve hedef vakanın companyId'leri eşit olmalı).
+model CaseLink {
+  id           String       @id @default(cuid())
+  caseId       String
+  linkedCaseId String
+  linkType     CaseLinkType
+  companyId    String
+  createdBy    String
+  createdAt    DateTime     @default(now())
+
+  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: Cascade)
+  linkedCase Case @relation("CaseLinkTarget", fields: [linkedCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, linkedCaseId, linkType])
+  @@index([caseId])
+  @@index([linkedCaseId])
+  @@index([companyId])
 }
