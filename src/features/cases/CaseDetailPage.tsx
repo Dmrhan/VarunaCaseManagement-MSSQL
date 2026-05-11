@@ -12,7 +12,11 @@ import {
   Clock,
   Clock3,
   Copy,
+  Eye,
   HeartPulse,
+  Link as LinkIcon,
+  Loader2,
+  Plus,
   RefreshCw,
   Download,
   FileText,
@@ -86,7 +90,7 @@ import {
   type NoteVisibility,
 } from './types';
 
-type TabKey = 'detail' | 'activity' | 'notes' | 'files' | 'callLogs';
+type TabKey = 'detail' | 'activity' | 'notes' | 'files' | 'callLogs' | 'links';
 
 interface CaseDetailPageProps {
   caseId: string;
@@ -441,6 +445,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               {/* StatusPill artık görsel/display-only — geçişler StatusTransitionPanel ile yapılıyor */}
               <StatusPill status={item.status} />
 
+              {/* FAZ 2 Collab — kullanıcı bu vakada watcher mı? */}
+              <WatcherHeaderBadge caseId={item.id} />
+
               <PriorityBadge priority={item.priority} />
               {item.slaViolation && (
                 <Badge tint="rose" icon={<ShieldAlert size={12} />}>
@@ -660,6 +667,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               count={item.files.length}
               onClick={() => setTab('files')}
             />
+            <TabButton
+              active={tab === 'links'}
+              icon={<LinkIcon size={14} />}
+              label="Bağlantılar"
+              onClick={() => setTab('links')}
+            />
             {(item.caseType === 'ProactiveTracking' || item.caseType === 'Churn') && (
               <TabButton
                 active={tab === 'callLogs'}
@@ -704,6 +717,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
             )}
             {tab === 'files' && (
               <FilesTab item={item} onItemUpdated={(c) => setItem(c)} />
+            )}
+            {tab === 'links' && (
+              <LinksTab item={item} onShowCase={navigateToCase} />
             )}
             {tab === 'callLogs' && (
               <CallLogsTab
@@ -903,6 +919,9 @@ function LeftPanel({
           <Row label="Eskalasyon" value={ESCALATION_LEVEL_LABELS[item.escalationLevel]} />
         </div>
       </PanelSection>
+
+      {/* FAZ 2 Collab — izleyiciler. Self-watch + Supervisor başkasını ekleyebilir. */}
+      <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
 
       <PanelSection title="Hızlı Aksiyonlar" icon={<Sparkles size={12} />}>
         <div className="grid grid-cols-1 gap-1.5">
@@ -1456,6 +1475,780 @@ function MetricChip({
       <span className="font-semibold tabular-nums">{value}</span>
       <span className="text-[10px] opacity-80">{label}</span>
     </span>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Watcher header badge — kullanıcı bu vakanın izleyicisiyse status
+// pill'inin yanında "İzliyorsunuz" göstergesi. Self-fetch + custom
+// event ile WatchersPanel ile senkron.
+// ──────────────────────────────────────────────────────────────
+
+function WatcherHeaderBadge({ caseId }: { caseId: string }) {
+  const { user } = useAuth();
+  const [isWatching, setIsWatching] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setIsWatching(false);
+      return;
+    }
+    let alive = true;
+    async function check() {
+      const watchers = await caseService.listWatchers(caseId);
+      if (alive && user) setIsWatching(watchers.some((w) => w.userId === user.id));
+    }
+    void check();
+
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ caseId?: string }>).detail;
+      if (!detail || detail.caseId === caseId) void check();
+    };
+    window.addEventListener('app:watcher-changed', onChanged);
+    return () => {
+      alive = false;
+      window.removeEventListener('app:watcher-changed', onChanged);
+    };
+  }, [caseId, user]);
+
+  if (!isWatching) return null;
+  return (
+    <Badge tint="violet" icon={<Eye size={11} />}>
+      İzliyorsunuz
+    </Badge>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Watchers panel — FAZ 2 Collab. LeftPanel'in altında, ATAMA section'undan
+// hemen sonra. Self-watch toggle + Supervisor başkalarını ekleyebilir.
+// ──────────────────────────────────────────────────────────────
+
+function WatchersPanel({
+  caseId,
+  assignedPersonId,
+}: {
+  caseId: string;
+  assignedPersonId: string | null;
+}) {
+  const { user } = useAuth();
+  const [watchers, setWatchers] = useState<import('./types').CaseWatcherRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+
+  // Yetki: başkasını ekleyebilen kullanıcı?
+  // Supervisor+ her zaman; Agent yalnız atanmış olduğu vakaya başkasını ekleyebilir.
+  const elevated = !!user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+  const isAssignedOwner = !!user?.personId && assignedPersonId === user.personId;
+  const canAddOthers = elevated || isAssignedOwner;
+
+  async function reload() {
+    setLoading(true);
+    const rows = await caseService.listWatchers(caseId);
+    setWatchers(rows);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseId]);
+
+  const meWatching = !!user && watchers.some((w) => w.userId === user.id);
+
+  function dispatchChanged() {
+    // Header'daki badge'in tazelenmesi için sinyal
+    window.dispatchEvent(new CustomEvent('app:watcher-changed', { detail: { caseId } }));
+  }
+
+  async function toggleSelf() {
+    if (!user || busy) return;
+    setBusy(true);
+    if (meWatching) {
+      const r = await caseService.removeWatcher(caseId, user.id);
+      if (r) {
+        setWatchers((ws) => ws.filter((w) => w.userId !== user.id));
+        dispatchChanged();
+      }
+    } else {
+      const r = await caseService.addWatcher(caseId, user.id);
+      if (r) {
+        await reload();
+        dispatchChanged();
+      }
+    }
+    setBusy(false);
+  }
+
+  async function removeWatcher(userId: string) {
+    if (busy) return;
+    setBusy(true);
+    const r = await caseService.removeWatcher(caseId, userId);
+    if (r) {
+      setWatchers((ws) => ws.filter((w) => w.userId !== userId));
+      dispatchChanged();
+    }
+    setBusy(false);
+  }
+
+  return (
+    <PanelSection title="İzleyiciler" icon={<Eye size={12} />}>
+      {loading ? (
+        <div className="space-y-1.5">
+          <Skeleton height={12} width="60%" />
+          <Skeleton height={12} width="80%" />
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {/* Avatar stack — max 5, +N more rozet */}
+          {watchers.length === 0 ? (
+            <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+              Henüz izleyici yok.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1">
+              {watchers.slice(0, 5).map((w) => {
+                const canRemove = (user?.id === w.userId) || elevated;
+                return (
+                  <button
+                    key={w.userId}
+                    type="button"
+                    onClick={canRemove ? () => removeWatcher(w.userId) : undefined}
+                    disabled={!canRemove || busy}
+                    title={canRemove ? `${w.userName} — Kaldır` : w.userName}
+                    className={
+                      'rounded-full ring-2 ring-white transition dark:ring-ndark-card ' +
+                      (canRemove ? 'hover:scale-105 hover:ring-rose-300' : 'cursor-default')
+                    }
+                  >
+                    <NoteAvatar name={w.userName} size={28} />
+                  </button>
+                );
+              })}
+              {watchers.length > 5 && (
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-medium text-slate-600 ring-2 ring-white dark:bg-ndark-bg dark:text-ndark-muted dark:ring-ndark-card"
+                  title={watchers.slice(5).map((w) => w.userName).join(', ')}
+                >
+                  +{watchers.length - 5}
+                </span>
+              )}
+              {canAddOthers && (
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  disabled={busy}
+                  title="İzleyici Ekle"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-brand-400 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ndark-border dark:text-ndark-muted dark:hover:border-brand-500"
+                >
+                  <Plus size={12} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Self-watch toggle */}
+          <button
+            type="button"
+            onClick={toggleSelf}
+            disabled={busy || !user}
+            className={
+              'inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ' +
+              (meWatching
+                ? 'border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-950/30 dark:text-brand-300'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:bg-ndark-bg')
+            }
+          >
+            {meWatching ? (
+              <>
+                <Eye size={12} /> İzliyorum
+              </>
+            ) : (
+              <>
+                <Eye size={12} /> İzle
+              </>
+            )}
+          </button>
+
+          {addOpen && canAddOthers && (
+            <AddWatcherModal
+              open={addOpen}
+              caseId={caseId}
+              existingUserIds={new Set(watchers.map((w) => w.userId))}
+              onClose={() => setAddOpen(false)}
+              onAdded={async () => {
+                setAddOpen(false);
+                await reload();
+              }}
+            />
+          )}
+        </div>
+      )}
+    </PanelSection>
+  );
+}
+
+function AddWatcherModal({
+  open,
+  caseId,
+  existingUserIds,
+  onClose,
+  onAdded,
+}: {
+  open: boolean;
+  caseId: string;
+  existingUserIds: Set<string>;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [candidates, setCandidates] = useState<import('./types').MentionableUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    void caseService.listMentionableUsers(caseId).then((rows) => {
+      setCandidates(rows.filter((c) => !existingUserIds.has(c.userId)));
+      setLoading(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, caseId]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase('tr');
+    if (!q) return candidates;
+    return candidates.filter(
+      (c) =>
+        c.name.toLocaleLowerCase('tr').includes(q) ||
+        c.email.toLocaleLowerCase('tr').includes(q),
+    );
+  }, [candidates, query]);
+
+  async function pick(userId: string) {
+    setSubmitting(userId);
+    const r = await caseService.addWatcher(caseId, userId);
+    setSubmitting(null);
+    if (r) {
+      window.dispatchEvent(new CustomEvent('app:watcher-changed', { detail: { caseId } }));
+      toast({ type: 'success', message: 'İzleyici eklendi.', duration: 1800 });
+      onAdded();
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="İzleyici Ekle" size="md">
+      <div className="space-y-3">
+        <TextInput
+          autoFocus
+          placeholder="İsim veya e-posta ile ara…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {loading ? (
+          <div className="space-y-1.5">
+            <Skeleton height={14} width="80%" />
+            <Skeleton height={14} width="70%" />
+            <Skeleton height={14} width="75%" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500 dark:text-ndark-muted">
+            {candidates.length === 0
+              ? 'Eklenebilecek kullanıcı yok.'
+              : 'Bu aramaya uyan kullanıcı bulunamadı.'}
+          </p>
+        ) : (
+          <ul className="max-h-[320px] space-y-1 overflow-y-auto">
+            {filtered.map((c) => (
+              <li key={c.userId}>
+                <button
+                  type="button"
+                  onClick={() => pick(c.userId)}
+                  disabled={!!submitting}
+                  className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left transition hover:bg-brand-50 hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ndark-border dark:bg-ndark-card dark:hover:bg-brand-950/20"
+                >
+                  <NoteAvatar name={c.name} size={28} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                      {c.name}
+                    </span>
+                    <span className="block truncate text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {c.teamName ?? '—'} · {c.email}
+                    </span>
+                  </span>
+                  {submitting === c.userId && (
+                    <Loader2 size={14} className="animate-spin text-brand-500" />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Links tab — FAZ 2 Collab. AI öneri kartı (auto-load) + gruplanmış
+// link listesi (Related / Parent / Duplicate). "Vaka Bağla" modalı.
+// ──────────────────────────────────────────────────────────────
+
+type LinkTypeMeta = { label: string; icon: React.ReactNode; pill: string };
+const LINK_TYPE_META: Record<import('./types').CaseLinkType, LinkTypeMeta> = {
+  Related: {
+    label: 'İlişkili Vakalar',
+    icon: <LinkIcon size={14} className="text-blue-600 dark:text-blue-400" />,
+    pill: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  },
+  Parent: {
+    label: 'Üst Vaka',
+    icon: <LinkIcon size={14} className="text-emerald-600 dark:text-emerald-400" />,
+    pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+  },
+  Duplicate: {
+    label: 'Mükerrer',
+    icon: <LinkIcon size={14} className="text-amber-600 dark:text-amber-400" />,
+    pill: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  },
+};
+
+function LinksTab({
+  item,
+  onShowCase,
+}: {
+  item: Case;
+  onShowCase: (caseId: string) => void;
+}) {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [links, setLinks] = useState<import('./types').LinkedCaseEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [suggestions, setSuggestions] = useState<import('./types').LinkSuggestion[]>([]);
+  const [aiLoading, setAiLoading] = useState(true);
+  const [aiErrored, setAiErrored] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+
+  const elevated = !!user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+  const isOwner = !!user?.personId && item.assignedPersonId === user.personId;
+  const canRemove = elevated || isOwner;
+
+  async function reload() {
+    setLoading(true);
+    const rows = await caseService.listLinks(item.id);
+    setLinks(rows);
+    setLoading(false);
+  }
+
+  async function loadAi() {
+    setAiLoading(true);
+    setAiErrored(false);
+    const r = await aiService.suggestLinks(item.id);
+    setAiLoading(false);
+    if (r.ok) setSuggestions(r.data.suggestions);
+    else setAiErrored(true);
+  }
+
+  useEffect(() => {
+    void reload();
+    void loadAi();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  async function addLink(linkedCaseId: string, linkType: import('./types').CaseLinkType) {
+    setBusy(true);
+    const r = await caseService.addLink(item.id, linkedCaseId, linkType);
+    setBusy(false);
+    if (r) {
+      toast({ type: 'success', message: 'Bağlantı eklendi.', duration: 1500 });
+      await reload();
+      // AI önerisini de tazelen (uygulanan vaka tekrar önerilmesin)
+      setSuggestions((prev) => prev.filter((s) => s.caseId !== linkedCaseId));
+    }
+  }
+
+  async function removeLink(linkId: string) {
+    setBusy(true);
+    const r = await caseService.removeLink(item.id, linkId);
+    setBusy(false);
+    if (r) {
+      toast({ type: 'success', message: 'Bağlantı kaldırıldı.', duration: 1500 });
+      setLinks((ls) => ls.filter((l) => l.linkId !== linkId));
+    }
+  }
+
+  // Linkleri tip bazında grupla — render sırası: Related → Parent → Duplicate
+  const groups: import('./types').CaseLinkType[] = ['Related', 'Parent', 'Duplicate'];
+  const grouped = useMemo(() => {
+    const m: Record<string, import('./types').LinkedCaseEntry[]> = {
+      Related: [], Parent: [], Duplicate: [],
+    };
+    for (const l of links) m[l.linkType]?.push(l);
+    return m;
+  }, [links]);
+
+  return (
+    <div className="space-y-4">
+      {/* AI öneri kartı */}
+      <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
+        <header className="flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
+            <Sparkles size={12} />
+            RUNA AI Benzer Vakalar
+          </h3>
+          <button
+            type="button"
+            onClick={loadAi}
+            disabled={aiLoading}
+            className="rounded p-1 text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-900/40"
+            title="Yenile"
+            aria-label="Yenile"
+          >
+            <RefreshCw size={12} />
+          </button>
+        </header>
+
+        {aiLoading ? (
+          <div className="mt-2 flex items-center gap-2 text-xs text-violet-800 dark:text-violet-200">
+            <Loader2 size={12} className="animate-spin" />
+            Analiz ediliyor…
+          </div>
+        ) : aiErrored ? (
+          <p className="mt-2 text-xs text-violet-700 dark:text-violet-300">
+            Öneri üretilemedi. Manuel "Vaka Bağla" ile ekleyebilirsiniz.
+          </p>
+        ) : suggestions.length === 0 ? (
+          <p className="mt-2 text-xs text-violet-700 dark:text-violet-300">
+            Önerilecek benzer vaka bulunamadı.
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {suggestions.map((s) => {
+              const meta = LINK_TYPE_META[s.linkType];
+              const conf = Math.round(s.confidence * 100);
+              return (
+                <li
+                  key={s.caseId}
+                  className="rounded-md border border-violet-100 bg-white px-3 py-2 dark:border-violet-900/40 dark:bg-ndark-card"
+                >
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onShowCase(s.caseId)}
+                      className="font-mono text-xs text-slate-600 underline-offset-2 hover:text-brand-700 hover:underline dark:text-ndark-muted"
+                    >
+                      {s.caseNumber}
+                    </button>
+                    <span className="truncate text-sm text-slate-800 dark:text-ndark-text">
+                      {s.title}
+                    </span>
+                    <span
+                      className={`ml-auto inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${meta.pill}`}
+                    >
+                      {meta.label.replace(' Vakalar', '')}
+                    </span>
+                    <span className="text-[10px] tabular-nums text-violet-700 dark:text-violet-300">
+                      %{conf}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] italic text-slate-600 dark:text-ndark-muted">
+                    "{s.reason}"
+                  </p>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => addLink(s.caseId, s.linkType)}
+                      disabled={busy}
+                    >
+                      Bağla
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setSuggestions((prev) => prev.filter((x) => x.caseId !== s.caseId))
+                      }
+                    >
+                      Yoksay
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* Existing links — gruplandırılmış */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+            Mevcut Bağlantılar
+          </h3>
+          <Button size="sm" leftIcon={<Plus size={12} />} onClick={() => setLinkModalOpen(true)}>
+            Vaka Bağla
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="space-y-2">
+            <Skeleton height={36} width="100%" />
+            <Skeleton height={36} width="100%" />
+          </div>
+        ) : links.length === 0 ? (
+          <p className="py-4 text-center text-sm text-slate-500 dark:text-ndark-muted">
+            Bu vakaya bağlı vaka yok.
+          </p>
+        ) : (
+          groups.map((t) => {
+            const items = grouped[t];
+            if (items.length === 0) return null;
+            const meta = LINK_TYPE_META[t];
+            return (
+              <div key={t}>
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-ndark-text">
+                  {meta.icon}
+                  <span>{meta.label}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
+                    ({items.length})
+                  </span>
+                </div>
+                <ul className="space-y-1.5">
+                  {items.map((l) => (
+                    <li
+                      key={l.linkId}
+                      className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => l.linkedCase && onShowCase(l.linkedCase.id)}
+                        disabled={!l.linkedCase}
+                        className="font-mono text-xs text-slate-600 underline-offset-2 hover:text-brand-700 hover:underline disabled:cursor-not-allowed dark:text-ndark-muted"
+                      >
+                        {l.linkedCase?.caseNumber ?? '?'}
+                      </button>
+                      <span className="min-w-0 flex-1 truncate text-sm text-slate-800 dark:text-ndark-text">
+                        {l.linkedCase?.title ?? '(silinmiş vaka)'}
+                      </span>
+                      {l.linkedCase && (
+                        <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                          {l.linkedCase.status}
+                        </span>
+                      )}
+                      {canRemove && (
+                        <button
+                          type="button"
+                          onClick={() => removeLink(l.linkId)}
+                          disabled={busy}
+                          className="text-[11px] font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50 dark:text-rose-400 dark:hover:text-rose-300"
+                        >
+                          Kaldır
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {linkModalOpen && (
+        <LinkCaseModal
+          open={linkModalOpen}
+          item={item}
+          onClose={() => setLinkModalOpen(false)}
+          onAdded={async () => {
+            setLinkModalOpen(false);
+            await reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const LINK_TYPE_DESCRIPTIONS: Record<import('./types').CaseLinkType, string> = {
+  Related: 'Genel ilişkili — aynı müşteri başka konu, aynı ürün vs.',
+  Duplicate: 'Aynı sorun — iki yön de otomatik bağlanır.',
+  Parent: 'Bu vaka, hedef vakanın bir parçası/alt-kırılımı.',
+};
+
+function LinkCaseModal({
+  open,
+  item,
+  onClose,
+  onAdded,
+}: {
+  open: boolean;
+  item: Case;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const { toast } = useToast();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Case[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<Case | null>(null);
+  const [linkType, setLinkType] = useState<import('./types').CaseLinkType>('Related');
+  const [submitting, setSubmitting] = useState(false);
+  // Aynı müşteri için açılış suggestion'ı
+  const [initialList, setInitialList] = useState<Case[]>([]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      setResults([]);
+      setSelected(null);
+      setLinkType('Related');
+      return;
+    }
+    // Açılışta aynı müşterinin son vakalarını öner
+    void caseService
+      .findByAccount(item.accountId, { excludeId: item.id })
+      .then((rows) => setInitialList(rows.slice(0, 10)));
+  }, [open, item.accountId, item.id]);
+
+  // Search debounce — number/title
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    let alive = true;
+    setSearching(true);
+    const handle = window.setTimeout(async () => {
+      const data = await caseService.list({ search: q }, { page: 1, pageSize: 10 });
+      if (!alive) return;
+      setSearching(false);
+      setResults(data.items.filter((c) => c.id !== item.id));
+    }, 250);
+    return () => {
+      alive = false;
+      window.clearTimeout(handle);
+    };
+  }, [open, query, item.id]);
+
+  async function submit() {
+    if (!selected || submitting) return;
+    setSubmitting(true);
+    const r = await caseService.addLink(item.id, selected.id, linkType);
+    setSubmitting(false);
+    if (r) {
+      toast({ type: 'success', message: 'Bağlantı eklendi.', duration: 1500 });
+      onAdded();
+    }
+  }
+
+  const visible = query.trim().length >= 2 ? results : initialList;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Vaka Bağla"
+      size="md"
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          <Button size="sm" onClick={submit} disabled={!selected || submitting}>
+            {submitting ? 'Ekleniyor…' : 'Bağla'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Vaka Ara" hint="Vaka no, başlık veya müşteri ile ara (min. 2 karakter)">
+          <TextInput
+            autoFocus
+            placeholder="örn. VK-... veya kategori adı"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </Field>
+
+        {searching ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-ndark-muted">
+            <Loader2 size={12} className="animate-spin" />
+            Aranıyor…
+          </div>
+        ) : visible.length === 0 ? (
+          <p className="py-3 text-center text-sm text-slate-500 dark:text-ndark-muted">
+            {query.trim().length >= 2 ? 'Eşleşen vaka yok.' : 'Bu müşteri için başka vaka yok.'}
+          </p>
+        ) : (
+          <ul className="max-h-[240px] space-y-1 overflow-y-auto">
+            {visible.map((c) => {
+              const isSelected = selected?.id === c.id;
+              return (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(c)}
+                    className={
+                      'flex w-full items-baseline gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition ' +
+                      (isSelected
+                        ? 'border-brand-400 bg-brand-50 text-brand-800 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:bg-brand-950/20')
+                    }
+                  >
+                    <span className="font-mono text-xs">{c.caseNumber}</span>
+                    <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {c.status}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {selected && (
+          <Field label="Bağlantı Tipi" required>
+            <div className="space-y-1.5">
+              {(['Related', 'Duplicate', 'Parent'] as import('./types').CaseLinkType[]).map((t) => {
+                const meta = LINK_TYPE_META[t];
+                const active = linkType === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setLinkType(t)}
+                    className={
+                      'flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left transition ' +
+                      (active
+                        ? 'border-brand-400 bg-brand-50 dark:border-brand-700 dark:bg-brand-950/30'
+                        : 'border-slate-200 bg-white hover:border-brand-300 dark:border-ndark-border dark:bg-ndark-card')
+                    }
+                  >
+                    <span className="mt-0.5">{meta.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-slate-800 dark:text-ndark-text">
+                        {meta.label.replace(' Vakalar', '')}
+                      </span>
+                      <span className="block text-[11px] text-slate-500 dark:text-ndark-muted">
+                        {LINK_TYPE_DESCRIPTIONS[t]}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -75,7 +75,10 @@ import {
   type CaseRequestType,
   type CaseStatus,
   type ActionSummary,
+  type CaseLinkType,
   type CaseTransferRecord,
+  type CaseWatcherRecord,
+  type LinkedCaseEntry,
   type CustomerPulse,
   type MentionableUser,
   type UnreadMention,
@@ -1312,6 +1315,97 @@ export const caseService = {
       `${API_BASE}/${caseId}/action-summary`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' } },
       'Eylem özeti üretilemedi',
+    );
+  },
+
+  // ── FAZ 2 Collab — Watcher (izleyici) ────────────────────────
+
+  /** Vakanın izleyici listesi. UI'da LeftPanel "İZLEYİCİLER" bölümünde gösterilir. */
+  async listWatchers(caseId: string): Promise<CaseWatcherRecord[]> {
+    const data = await apiFetch<{ value: CaseWatcherRecord[] }>(
+      `${API_BASE}/${caseId}/watchers`,
+      undefined,
+      'İzleyiciler yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  /**
+   * İzleyici ekle. userId === current user.id ise self-watch (her rol için).
+   * Başka user için Supervisor+ veya assigned owner (BFF enforces).
+   */
+  async addWatcher(
+    caseId: string,
+    userId: string,
+  ): Promise<{ id: string; userId: string; addedAt: string } | undefined> {
+    return apiFetch(
+      `${API_BASE}/${caseId}/watchers`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      },
+      'İzleyici eklenemedi',
+    );
+  },
+
+  /** İzleyici kaldır. Self veya Supervisor+. */
+  async removeWatcher(caseId: string, userId: string): Promise<{ ok: true } | undefined> {
+    return apiFetch(
+      `${API_BASE}/${caseId}/watchers/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+      'İzleyici çıkarılamadı',
+    );
+  },
+
+  /** Kullanıcının izlediği vakalar (Watcher Inbox — ileri faz). */
+  async listWatching(): Promise<Case[]> {
+    const data = await apiFetch<{ value: Case[] }>(
+      `${API_BASE}/watching`,
+      undefined,
+      'İzlenen vakalar yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  // ── FAZ 2 Collab — Linked Cases (bağlantılar) ────────────────
+
+  /** Vakanın bağlantıları (3 tip karışık liste — UI gruplar). */
+  async listLinks(caseId: string): Promise<LinkedCaseEntry[]> {
+    const data = await apiFetch<{ value: LinkedCaseEntry[] }>(
+      `${API_BASE}/${caseId}/links`,
+      undefined,
+      'Bağlantılar yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  /**
+   * Bağlantı ekle. linkType 'Related'|'Duplicate'|'Parent'.
+   * Duplicate symmetric — BFF reverse de yazar.
+   */
+  async addLink(
+    caseId: string,
+    linkedCaseId: string,
+    linkType: CaseLinkType,
+  ): Promise<{ linkId: string; linkType: CaseLinkType; linkedCaseNumber: string } | undefined> {
+    return apiFetch(
+      `${API_BASE}/${caseId}/links`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkedCaseId, linkType }),
+      },
+      'Bağlantı eklenemedi',
+    );
+  },
+
+  /** Bağlantı kaldır. Symmetric Duplicate ters yön de silinir (BFF). */
+  async removeLink(caseId: string, linkId: string): Promise<{ ok: true } | undefined> {
+    return apiFetch(
+      `${API_BASE}/${caseId}/links/${encodeURIComponent(linkId)}`,
+      { method: 'DELETE' },
+      'Bağlantı kaldırılamadı',
     );
   },
 

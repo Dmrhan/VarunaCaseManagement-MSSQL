@@ -779,6 +779,163 @@ router.post(
 );
 
 // ----------------------------------------------------------------
+// 9) Linked cases önerisi — FAZ 2 Collab
+// Vakaya benzer/ilişkili olabilecek vakaları AI ile tespit eder.
+// Body: { caseId }
+// Yanıt: { suggestions: [{ caseId, caseNumber, linkType, reason, confidence }] }
+// Max 3 öneri. Strict JSON schema — caseId enum candidates'tan.
+// ----------------------------------------------------------------
+router.post(
+  '/suggest-links',
+  rateLimit,
+  aiHandler('suggest-links', async (req, res) => {
+    const { caseId } = req.body ?? {};
+    if (!caseId || typeof caseId !== 'string') {
+      return res.status(400).json({ error: 'caseId gerekli.' });
+    }
+
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: {
+        id: true,
+        companyId: true,
+        caseNumber: true,
+        title: true,
+        description: true,
+        category: true,
+        subCategory: true,
+        accountId: true,
+        accountName: true,
+      },
+    });
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(c.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = c.companyId;
+
+    // Aday vakalar: aynı şirket, son 30 gün, aynı kategori VEYA aynı müşteri,
+    // kendisi hariç, max 20. Kapalı vakalar da dahil (duplicate detect için).
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const candidates = await prisma.case.findMany({
+      where: {
+        id: { not: caseId },
+        companyId: c.companyId,
+        createdAt: { gte: thirtyDaysAgo },
+        OR: [
+          { category: c.category },
+          { accountId: c.accountId },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        caseNumber: true,
+        title: true,
+        category: true,
+        subCategory: true,
+        accountName: true,
+        status: true,
+      },
+    });
+
+    if (candidates.length === 0) {
+      return res.json({ suggestions: [] });
+    }
+
+    // Strict JSON schema — caseId mutlaka aday listeden olmalı.
+    const candidateIdEnum = candidates.map((x) => x.id);
+    const linkTypeEnum = ['Related', 'Duplicate', 'Parent'];
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['suggestions'],
+      properties: {
+        suggestions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['caseId', 'linkType', 'reason', 'confidence'],
+            properties: {
+              caseId:     { type: 'string', enum: candidateIdEnum },
+              linkType:   { type: 'string', enum: linkTypeEnum },
+              reason:     { type: 'string' },
+              confidence: { type: 'number' },
+            },
+          },
+        },
+      },
+    };
+
+    const candidateList = candidates
+      .map((x) => `- ${x.id} | ${x.caseNumber} | ${x.title} | ${x.category}/${x.subCategory} | ${x.accountName} | ${x.status}`)
+      .join('\n');
+
+    const system = [
+      "Sen Varuna CRM'de vakalar arası bağlantıları tespit eden bir asistanısın.",
+      'Bir ana vakayı ve aday vaka listesini analiz eder, gerçekten benzer veya ilişkili olanları önerirsin.',
+      '',
+      'KURALLAR:',
+      '- caseId MUTLAKA aday listeden olmalı (enum kilidi).',
+      '- linkType seçenekleri:',
+      "    Related   — genel ilişki (aynı müşteri başka konu, aynı ürün grubu vs.)",
+      "    Duplicate — aynı sorun (yüksek benzerlik, aynı müşteri tercih)",
+      "    Parent    — bu vaka, hedef vakanın parçası/alt-kırılımı",
+      '- Max 3 öneri. Zayıf eşleşmeleri ekleme — gerçekten anlamlı olmayanı yoksay.',
+      '- reason max 100 karakter, Türkçe, somut (örn. "Aynı müşteri, benzer kategori").',
+      '- confidence 0.0-1.0. Düşük güvenli önerileri ya kesin atla ya da 0.5 altında ver.',
+      '- Çıktı SADECE JSON.',
+    ].join('\n');
+
+    const user = [
+      'ANA VAKA:',
+      `- No: ${c.caseNumber}`,
+      `- Başlık: ${c.title}`,
+      `- Kategori: ${c.category} / ${c.subCategory}`,
+      `- Müşteri: ${c.accountName}`,
+      `- Açıklama: ${(c.description ?? '').slice(0, 500)}`,
+      '',
+      'ADAY VAKALAR (son 30 gün, aynı şirket, aynı kategori VEYA aynı müşteri):',
+      candidateList,
+    ].join('\n');
+
+    const { json } = await callOpenAI({
+      system,
+      user,
+      schema,
+      schemaName: 'suggest_links',
+    });
+
+    // Candidate id → caseNumber map'i ile zenginleştir
+    const idMap = new Map(candidates.map((x) => [x.id, x]));
+    const enriched = Array.isArray(json.suggestions)
+      ? json.suggestions
+          .slice(0, 3)
+          .map((s) => {
+            const meta = idMap.get(s.caseId);
+            if (!meta) return null;
+            return {
+              caseId: s.caseId,
+              caseNumber: meta.caseNumber,
+              title: meta.title,
+              linkType: s.linkType,
+              reason: String(s.reason ?? '').slice(0, 100),
+              confidence: typeof s.confidence === 'number' ? s.confidence : 0,
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    res.json({ suggestions: enriched });
+  }),
+);
+
+// ----------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------
 
