@@ -91,6 +91,25 @@ Use this staged workflow. Skip stages only when the work is trivial
 7. **Handover Note** - Handover Agent, if the change is non-trivial or
    touches operations/data (template: HANDOVER_NOTE)
 
+## Workflow Size Guide
+
+Scale the workflow to the size and risk of the change. When in doubt,
+size up rather than down.
+
+**Small changes:**
+- Typos, copy changes, minor UI polish, documentation wording.
+- Required: summary, changed files, validation if relevant.
+
+**Medium changes:**
+- New UI panel, endpoint adjustment, service method, non-critical feature.
+- Required: short feature brief, implementation notes, review checklist, docs impact.
+
+**Large / high-risk changes:**
+- Auth, tenant scope, database schema, cron, AI, file storage,
+  production operations, handover-critical features.
+- Required: full workflow - product brief, technical design,
+  implementation, review, QA, documentation, handover note if needed.
+
 ## Definition of Done
 
 A feature is not done unless:
