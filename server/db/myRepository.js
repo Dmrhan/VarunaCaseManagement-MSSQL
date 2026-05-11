@@ -478,9 +478,10 @@ export async function getDashboard({ user }) {
     newCasesToday,
     myResolvedTodayDetailed,
   ] = await Promise.all([
-    // 1) sla_risk: bana atanan + (slaViolation OR slaResolutionDueAt < 24h)
+    // 1) sla_risk: bana atanan + (slaViolation OR slaResolutionDueAt < 24h).
+    // count() yeterli — UI yalnız sayıyı gösteriyor (caseIds tüketici yok).
     personScope
-      ? prisma.case.findMany({
+      ? prisma.case.count({
           where: {
             ...personScope,
             status: { in: ACTIVE_STATUSES },
@@ -495,10 +496,8 @@ export async function getDashboard({ user }) {
               },
             ],
           },
-          select: { id: true },
-          take: 200,
         })
-      : Promise.resolve([]),
+      : Promise.resolve(0),
     // 2) unread mentions
     prisma.caseMention.count({
       where: {
@@ -614,18 +613,26 @@ export async function getDashboard({ user }) {
           take: 200,
         })
       : Promise.resolve([]),
-    // team avg (kullanıcının şirketleri içindeki tüm scored case'ler — kendi dahil)
-    prisma.case.findMany({
+    // team avg — eskiden findMany take:1000 + JS avg idi. Şimdi DB-side aggregate.
+    // Semantik koruma: avgScores() yalnız 3 skor da non-null olan kayıtları sayardı;
+    // aynı davranış için AND ile non-null guard uyguluyoruz. Aksi halde Prisma _avg
+    // her sütunu bağımsız ortalardı (farklı semantik).
+    prisma.case.aggregate({
       where: {
         ...companyScope,
         qaScoredAt: { gte: day30Ago },
+        AND: [
+          { qaEmpathyScore: { not: null } },
+          { qaClarityScore: { not: null } },
+          { qaSpeedScore: { not: null } },
+        ],
       },
-      select: {
+      _avg: {
         qaEmpathyScore: true,
         qaClarityScore: true,
         qaSpeedScore: true,
       },
-      take: 1000,
+      _count: { _all: true },
     }),
 
     // dailySummary
@@ -647,11 +654,12 @@ export async function getDashboard({ user }) {
 
   // ─── urgentSignals derive ───
   const urgentSignals = [];
-  if (slaRiskCount.length > 0) {
+  if (slaRiskCount > 0) {
+    // caseIds eskiden findMany'den dönüyordu — şimdi count() ile sadece sayı.
+    // UI bu alanı kullanmıyordu (yalnız count gösteriliyor); type'a optional kaldı.
     urgentSignals.push({
       type: 'sla_risk',
-      count: slaRiskCount.length,
-      caseIds: slaRiskCount.map((c) => c.id),
+      count: slaRiskCount,
     });
   }
   if (unreadMentionsCount > 0) {
@@ -783,7 +791,15 @@ export async function getDashboard({ user }) {
   let performance = null;
   if (myQaScoredCases.length >= 3) {
     const myAvg = avgScores(myQaScoredCases);
-    const teamAvg = avgScores(teamQaScoredCases);
+    // teamQaScoredCases artık aggregate result (_avg + _count). Manuel avgScores
+    // yapısına çeviriyoruz — null-safe + 1 desimal yuvarlama (eski JS davranışı).
+    const teamA = teamQaScoredCases?._avg ?? {};
+    const round1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+    const teamAvg = {
+      empathy: round1(teamA.qaEmpathyScore),
+      clarity: round1(teamA.qaClarityScore),
+      speed:   round1(teamA.qaSpeedScore),
+    };
     performance = {
       period: '30d',
       empathy: scoreDimension(myAvg.empathy, teamAvg.empathy),

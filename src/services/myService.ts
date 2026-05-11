@@ -27,7 +27,9 @@ export interface CalendarEvent {
 // ─────────────────────────────────────────────────────────────────
 
 export type UrgentSignal =
-  | { type: 'sla_risk'; count: number; caseIds: string[] }
+  // caseIds: backend count() kullanıyor, normalde dönmez. Optional bıraktık —
+  // tüketici şu an yok; ileride detay drawer eklenirse ayrı endpoint tercih edilir.
+  | { type: 'sla_risk'; count: number; caseIds?: string[] }
   | { type: 'unread_mentions'; count: number }
   | { type: 'awaiting_reply'; count: number; caseIds?: string[] }
   | { type: 'pattern_alert'; count: number; category: string };
@@ -113,9 +115,12 @@ export const myService = {
    * "Benim Sayfam" tek-round-trip dashboard verisi.
    * BFF tarafı 15 paralel sorgu; FE bir sonuç bekler.
    */
-  async getDashboard(): Promise<DashboardData | undefined> {
+  async getDashboard(opts?: { fresh?: boolean }): Promise<DashboardData | undefined> {
+    // fresh=true → BFF 30sn cache'i bypass eder. Mutation sonrası (reminder
+    // create/update/delete, snooze, mention seen) refresh çağrılarında geçilir.
+    const qs = opts?.fresh ? '?fresh=1' : '';
     return apiFetch<DashboardData>(
-      '/api/my/dashboard',
+      `/api/my/dashboard${qs}`,
       undefined,
       'Anasayfa yüklenemedi',
     );
