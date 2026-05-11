@@ -18,6 +18,50 @@ const router = Router();
 router.use(verifyJwt);
 
 /**
+ * In-memory dashboard cache — 30 saniye TTL, user-scope.
+ *
+ * Key shape: `${userId}|${companyIds.sort().join(',')}|${personId}|${role}`
+ *   - userId: farklı kullanıcı = farklı key (cross-user leak yok)
+ *   - companyIds: tenant scope değişirse (kullanıcıya yeni şirket atandı vs.)
+ *     key otomatik değişir → eski cache geçersiz
+ *   - personId: aynı user farklı personId ile servis edilirse (test/migration)
+ *   - role: rol değişimi (Supervisor↔Agent) farklı sorgu seti çalıştırır
+ *
+ * Bypass: `?fresh=1` query parametresi (frontend mutation sonrası kullanır).
+ *
+ * Vercel serverless: her invocation kendi memory'sini taşır — cache yalnız
+ * aynı hot instance'a düşen ardışık isteklerde isabet eder. Cold start veya
+ * load-balance fan-out'ta cache miss olur, yine de korelasyonlu kullanımlarda
+ * (örn. sayfa açılış-kapanış-açılış) ciddi tasarruf sağlar.
+ */
+const DASHBOARD_CACHE_TTL_MS = 30_000;
+const dashboardCache = new Map();
+
+function makeCacheKey(user) {
+  const companies = [...(user.allowedCompanyIds ?? [])].sort().join(',');
+  return `${user.id}|${companies}|${user.personId ?? ''}|${user.role ?? ''}`;
+}
+
+function getCachedDashboard(user) {
+  const key = makeCacheKey(user);
+  const entry = dashboardCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    dashboardCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedDashboard(user, data) {
+  const key = makeCacheKey(user);
+  dashboardCache.set(key, {
+    data,
+    expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS,
+  });
+}
+
+/**
  * GET /api/my/calendar?from=ISO&to=ISO
  * Kullanıcının ±gerekli aralıkta tüm takvim olaylarını döner.
  * Spec'te "?date=YYYY-MM-DD" varyantı da destekleniyor — o gün ±3 gün eklenir.
@@ -34,7 +78,18 @@ router.use(verifyJwt);
  */
 router.get('/dashboard', async (req, res) => {
   try {
+    // ?fresh=1 → cache bypass (frontend mutation sonrası kullanır)
+    const bypass = req.query?.fresh === '1' || req.query?.fresh === 'true';
+    if (!bypass) {
+      const cached = getCachedDashboard(req.user);
+      if (cached) {
+        res.set('X-Dashboard-Cache', 'hit');
+        return res.json(cached);
+      }
+    }
     const data = await getDashboard({ user: req.user });
+    if (data) setCachedDashboard(req.user, data);
+    res.set('X-Dashboard-Cache', bypass ? 'bypass' : 'miss');
     res.json(data);
   } catch (err) {
     console.error('[my:dashboard]', err);

@@ -87,9 +87,10 @@ export function MyHomePage({
         setLoading(false);
       }
     });
-    // 'app:calendar-changed' eventiyle reminder/snooze sonrası refresh
+    // 'app:calendar-changed' eventiyle reminder/snooze sonrası refresh.
+    // fresh=true → BFF 30sn cache'ini bypass et (mutation sonrası stale veri yok).
     const onChanged = () => {
-      void myService.getDashboard().then((d) => {
+      void myService.getDashboard({ fresh: true }).then((d) => {
         if (alive) setData(d ?? null);
       });
     };
