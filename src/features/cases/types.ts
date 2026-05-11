@@ -490,6 +490,55 @@ export interface CustomerPulseSummary {
   source: 'deterministic' | 'ai';
 }
 
+/**
+ * FAZ 2 Collab — Vakaya izleyici (watcher) eklenmiş kullanıcılar.
+ * Watcher'lar vakada her değişiklikte CaseNotification alır (bell badge).
+ */
+export interface CaseWatcherRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string | null;
+  addedBy: string;
+  addedByName: string;
+  addedAt: string;
+}
+
+/**
+ * FAZ 2 Collab — Vakalar arası bağlantı (3 tip).
+ * Duplicate symmetric (BFF iki yönde de yazar), Related ve Parent asymmetric.
+ */
+export type CaseLinkType = 'Related' | 'Duplicate' | 'Parent';
+
+export interface LinkedCaseEntry {
+  linkId: string;
+  linkType: CaseLinkType;
+  linkTypeLabel: string;
+  createdBy: string;
+  createdAt: string;
+  linkedCase: {
+    id: string;
+    caseNumber: string;
+    title: string;
+    status: string;
+    priority: string;
+    assignedPersonName: string | null;
+  } | null;
+}
+
+/**
+ * FAZ 2 Collab — AI link önerisi.
+ * BFF candidate'ları kendi seçer (companyId scope); UI sadece caseId gönderir.
+ */
+export interface LinkSuggestion {
+  caseId: string;
+  caseNumber: string;
+  title: string;
+  linkType: CaseLinkType;
+  reason: string;
+  confidence: number;
+}
+
 export interface CustomerPulse {
   accountId: string;
   accountName: string;

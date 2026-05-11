@@ -258,6 +258,18 @@ export const aiService = {
   },
 
   /**
+   * Linked Cases suggestion (FAZ 2 Collab). BFF candidate'ları kendi seçer
+   * (companyId scope, son 30 gün, aynı kategori/müşteri); UI yalnız caseId
+   * gönderir. Max 3 öneri.
+   */
+  async suggestLinks(caseId: string) {
+    return postJson<{ suggestions: import('@/features/cases/types').LinkSuggestion[] }>(
+      '/suggest-links',
+      { caseId },
+    );
+  },
+
+  /**
    * Customer Pulse AI özet upgrade — deterministic pulse'dan üretilen
    * numerik/kategorik veriyi alır, AI ile daha doğal özet + öneri üretir.
    * RAW note/call içeriği GÖNDERMEZ (KVKK uyumlu). Başarısız olursa
