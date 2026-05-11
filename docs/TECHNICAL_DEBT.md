@@ -21,7 +21,7 @@ maddeler güncellenir veya kaldırılır.
   recommended first-week review order
 - [ ] **docs/PRODUCT_CONTEXT.md** — user roles, main workflows, business rules,
   product decision rationale
-- [ ] **docs/ROADMAP.md** or GitHub Issues — next phases, open items, priorities
+- [x] **docs/ROADMAP.md** or GitHub Issues — next phases, open items, priorities
 
 > **Note:** `docs/DATA_MODEL.md` will be prepared after schema stabilizes.
 

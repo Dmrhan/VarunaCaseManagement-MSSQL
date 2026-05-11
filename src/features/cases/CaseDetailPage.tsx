@@ -77,6 +77,7 @@ import {
   type Case,
   type CaseFile,
   type CaseHistoryActionType,
+  type CaseHistoryEntry,
   type EscalationLevel,
   type NoteVisibility,
 } from './types';
@@ -105,6 +106,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
+  // Çağrı kaydı modal'ı — parent'ta tek instance. handleEndCall otomatik açar.
+  const [callNoteModal, setCallNoteModal] = useState<{ open: boolean; prefillDurationMin?: number }>({
+    open: false,
+  });
 
   // Inline edit / drafts
   const [drafts, setDrafts] = useState<Partial<Case>>({});
@@ -325,12 +330,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
 
   function handleEndCall(durationSec: number) {
     setCallActive(false);
-    toast({
-      type: 'success',
-      title: 'Çağrı sonlandırıldı',
-      message: `Süre: ${Math.floor(durationSec / 60)}dk ${durationSec % 60}sn — kayıt eklemek için Çağrı Logları sekmesini kullan.`,
-      duration: 5000,
-    });
+    // Süreyi dakikaya yuvarla (her zaman >=1) — kullanıcı dilerse modal'da düzenler.
+    const durationMin = Math.max(1, Math.round(durationSec / 60));
+    setCallNoteModal({ open: true, prefillDurationMin: durationMin });
   }
 
   if (loading && !item) {
@@ -689,7 +691,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               <FilesTab item={item} onItemUpdated={(c) => setItem(c)} />
             )}
             {tab === 'callLogs' && (
-              <CallLogsTab item={item} onItemUpdated={(c) => setItem(c)} />
+              <CallLogsTab
+                item={item}
+                onAddCallLog={() => setCallNoteModal({ open: true })}
+              />
             )}
           </div>
         </main>
@@ -719,6 +724,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         caseTitle={item.title}
         onClose={() => setSnoozeOpen(false)}
         onSnoozed={(updated) => setItem(updated)}
+      />
+
+      {/* Çağrı kaydı modal'ı — parent'a yükseltildi:
+          (1) handleEndCall otomatik açar (süre pre-fill);
+          (2) Çağrı Logları sekmesindeki "Çağrı Notu Gir" butonu da aynı modal'ı açar. */}
+      <NewCallLogModal
+        open={callNoteModal.open}
+        item={item}
+        prefillDurationMin={callNoteModal.prefillDurationMin}
+        onClose={() => setCallNoteModal({ open: false })}
+        onCreated={(c) => {
+          setItem(c);
+          setCallNoteModal({ open: false });
+        }}
       />
     </div>
   );
@@ -2417,7 +2436,18 @@ interface FilterDef {
   dot: string;
   /** Tailwind class'ları — chip pasif (renkli ama tonlu) */
   inactive: string;
+  /** Custom matcher — types yetersizse (örn. Atama hem Transfer hem assignment FieldUpdate). */
+  match?: (h: CaseHistoryEntry) => boolean;
 }
+
+// Atama filtresi için sayılan FieldUpdate alanları — bu alanlardaki değişimler
+// "Atama"ya düşer, "Alan"a düşmez (BUG 2).
+const ASSIGNMENT_FIELDS = new Set([
+  'assignedPersonId',
+  'assignedTeamId',
+  'assignedPersonName',
+  'assignedTeamName',
+]);
 
 const ACTIVITY_FILTERS: FilterDef[] = [
   { key: 'all',       label: 'Hepsi',   types: [],
@@ -2431,7 +2461,10 @@ const ACTIVITY_FILTERS: FilterDef[] = [
   { key: 'assign',    label: 'Atama',   types: ['Transfer'],
     active:   'bg-amber-600 text-white shadow-sm',
     inactive: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
-    dot:      'bg-amber-500' },
+    dot:      'bg-amber-500',
+    match: (h) =>
+      h.actionType === 'Transfer' ||
+      (h.actionType === 'FieldUpdate' && ASSIGNMENT_FIELDS.has(h.fieldName ?? '')) },
   { key: 'files',     label: 'Dosya',   types: ['FileUploaded', 'FileRemoved'],
     active:   'bg-blue-600 text-white shadow-sm',
     inactive: 'bg-blue-50 text-blue-700 hover:bg-blue-100',
@@ -2447,19 +2480,25 @@ const ACTIVITY_FILTERS: FilterDef[] = [
   { key: 'fields',    label: 'Alan',    types: ['FieldUpdate'],
     active:   'bg-slate-600 text-white shadow-sm',
     inactive: 'bg-slate-100 text-slate-600 hover:bg-slate-200',
-    dot:      'bg-slate-400' },
+    dot:      'bg-slate-400',
+    // Atamayla çift sayım olmasın — assignment field'lar "Atama"ya gider.
+    match: (h) =>
+      h.actionType === 'FieldUpdate' && !ASSIGNMENT_FIELDS.has(h.fieldName ?? '') },
   { key: 'checklist', label: 'Kontrol', types: ['ChecklistToggle'],
     active:   'bg-teal-600 text-white shadow-sm',
     inactive: 'bg-teal-50 text-teal-700 hover:bg-teal-100',
     dot:      'bg-teal-500' },
 ];
 
-/** Bir actionType'a göre dot rengi — timeline noktasını chip rengiyle eşleştir */
-function dotColorFor(actionType?: CaseHistoryActionType): string {
-  if (!actionType) return 'bg-slate-400';
-  const def = ACTIVITY_FILTERS.find(
-    (f) => f.key !== 'all' && f.types.includes(actionType),
-  );
+function matchesFilter(h: CaseHistoryEntry, f: FilterDef): boolean {
+  if (f.match) return f.match(h);
+  return !!h.actionType && f.types.includes(h.actionType);
+}
+
+/** Bir history entry için dot rengi — chip rengiyle eşleşmesi için custom matcher dahil. */
+function dotColorFor(h: CaseHistoryEntry): string {
+  if (!h.actionType) return 'bg-slate-400';
+  const def = ACTIVITY_FILTERS.find((f) => f.key !== 'all' && matchesFilter(h, f));
   return def?.dot ?? 'bg-slate-400';
 }
 
@@ -2475,7 +2514,7 @@ function ActivityTab({ item }: { item: Case }) {
     for (const h of item.history) {
       for (const f of ACTIVITY_FILTERS) {
         if (f.key === 'all') continue;
-        if (h.actionType && f.types.includes(h.actionType)) map[f.key]++;
+        if (matchesFilter(h, f)) map[f.key]++;
       }
     }
     return map;
@@ -2485,7 +2524,7 @@ function ActivityTab({ item }: { item: Case }) {
     if (filter === 'all') return item.history;
     const def = ACTIVITY_FILTERS.find((f) => f.key === filter);
     if (!def) return item.history;
-    return item.history.filter((h) => h.actionType && def.types.includes(h.actionType));
+    return item.history.filter((h) => matchesFilter(h, def));
   }, [item.history, filter]);
 
   return (
@@ -2606,7 +2645,7 @@ function ActivityTab({ item }: { item: Case }) {
         return (
           <li key={h.id} className="relative">
             <span
-              className={`absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full ring-4 ring-white ${dotColorFor(h.actionType)}`}
+              className={`absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full ring-4 ring-white ${dotColorFor(h)}`}
             />
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
               <span className="font-medium text-slate-800">{h.action}</span>
@@ -3120,20 +3159,19 @@ function FilesTab({
 
 function CallLogsTab({
   item,
-  onItemUpdated,
+  onAddCallLog,
 }: {
   item: Case;
-  onItemUpdated: (c: Case) => void;
+  onAddCallLog: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
           Çağrı kayıtları — toplam <strong>{item.callLogs.length}</strong>.
         </p>
-        <Button size="sm" variant="outline" leftIcon={<Mic size={12} />} onClick={() => setOpen(true)}>
-          Çağrı Kaydı Ekle
+        <Button size="sm" variant="outline" leftIcon={<Mic size={12} />} onClick={onAddCallLog}>
+          Çağrı Notu Gir
         </Button>
       </div>
       {item.callLogs.length === 0 ? (
@@ -3164,13 +3202,6 @@ function CallLogsTab({
           ))}
         </ul>
       )}
-
-      <NewCallLogModal
-        open={open}
-        item={item}
-        onClose={() => setOpen(false)}
-        onCreated={onItemUpdated}
-      />
     </div>
   );
 }
@@ -3178,11 +3209,14 @@ function CallLogsTab({
 function NewCallLogModal({
   open,
   item,
+  prefillDurationMin,
   onClose,
   onCreated,
 }: {
   open: boolean;
   item: Case;
+  /** Çağrı sonlandığında handleEndCall'dan gelen dakika sayısı — varsa initial state'i bununla doldur. */
+  prefillDurationMin?: number;
   onClose: () => void;
   onCreated: (c: Case) => void;
 }) {
@@ -3197,12 +3231,12 @@ function NewCallLogModal({
   useEffect(() => {
     if (open) {
       setCallerName('');
-      setDurationMin(5);
+      setDurationMin(prefillDurationMin ?? 5);
       setDisposition('Cevapladı');
       setOutcome('Memnun');
       setDescription('');
     }
-  }, [open]);
+  }, [open, prefillDurationMin]);
 
   async function handleSave() {
     if (!callerName.trim()) {
