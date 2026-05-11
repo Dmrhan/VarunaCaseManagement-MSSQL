@@ -11,7 +11,9 @@ import {
   ChevronRight,
   Clock,
   Clock3,
+  Copy,
   HeartPulse,
+  RefreshCw,
   Download,
   FileText,
   History as HistoryIcon,
@@ -112,6 +114,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const [callNoteModal, setCallNoteModal] = useState<{ open: boolean; prefillDurationMin?: number }>({
     open: false,
   });
+  // Durum Raporu modal — header toolbar trigger; içerik self-fetch ile gelir.
+  const [statusReportOpen, setStatusReportOpen] = useState(false);
 
   // Inline edit / drafts
   const [drafts, setDrafts] = useState<Partial<Case>>({});
@@ -484,6 +488,15 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
             >
               Çağrı Başlat
             </Button>
+            <button
+              type="button"
+              onClick={() => setStatusReportOpen(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-400 bg-white px-3 text-xs font-medium text-violet-700 transition hover:bg-violet-50 dark:border-violet-700 dark:bg-ndark-card dark:text-violet-300 dark:hover:bg-violet-950/40"
+              title="Paydaşlara gönderilebilecek profesyonel özet"
+            >
+              <Sparkles size={12} />
+              Durum Raporu
+            </button>
             <Button
               variant="outline"
               size="sm"
@@ -740,6 +753,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
           setItem(c);
           setCallNoteModal({ open: false });
         }}
+      />
+
+      {/* Durum Raporu modal — header toolbar'dan tetiklenir.
+          Self-fetch; AI çağrısı modal açılınca yapılır. Persist edilmez. */}
+      <StatusReportModal
+        open={statusReportOpen}
+        caseId={item.id}
+        onClose={() => setStatusReportOpen(false)}
       />
     </div>
   );
@@ -1435,6 +1456,148 @@ function MetricChip({
       <span className="font-semibold tabular-nums">{value}</span>
       <span className="text-[10px] opacity-80">{label}</span>
     </span>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Status Report Modal — paydaşlara gönderilebilecek mail-ready
+// vaka durum raporu. Header toolbar'dan tetiklenir.
+// Modal açıldığında AI çağrısı tetiklenir; kullanıcı kopyala-kapat
+// akışıyla raporu kullanır. Persist edilmez.
+// ──────────────────────────────────────────────────────────────
+
+function StatusReportModal({
+  open,
+  caseId,
+  onClose,
+}: {
+  open: boolean;
+  caseId: string;
+  onClose: () => void;
+}) {
+  const [report, setReport] = useState<import('./types').ActionSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errored, setErrored] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Modal açılınca AI çağrısı yap. Kapanınca state'i sıfırla.
+  useEffect(() => {
+    if (!open) {
+      setReport(null);
+      setLoading(false);
+      setErrored(false);
+      setCopied(false);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setErrored(false);
+    setReport(null);
+    void caseService.getActionSummary(caseId).then((r) => {
+      if (!alive) return;
+      setLoading(false);
+      if (r) setReport(r);
+      else setErrored(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open, caseId]);
+
+  async function regenerate() {
+    if (loading) return;
+    setLoading(true);
+    setErrored(false);
+    const r = await caseService.getActionSummary(caseId);
+    setLoading(false);
+    if (r) setReport(r);
+    else setErrored(true);
+  }
+
+  async function copyToClipboard() {
+    if (!report) return;
+    try {
+      await navigator.clipboard.writeText(report.report);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard izni yoksa sessiz kal — spec sadece pozitif feedback ister
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="lg"
+      title={
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} className="text-violet-600 dark:text-violet-400" />
+          <span>Durum Raporu</span>
+        </div>
+      }
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          {copied && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900/40">
+              <Check size={12} />
+              Kopyalandı
+            </span>
+          )}
+          {report && !loading && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<RefreshCw size={12} />}
+              onClick={regenerate}
+              title="Yenile"
+            >
+              Yenile
+            </Button>
+          )}
+          <Button
+            size="sm"
+            leftIcon={<Copy size={12} />}
+            onClick={copyToClipboard}
+            disabled={!report || loading}
+          >
+            Kopyala
+          </Button>
+          <Button size="sm" variant="outline" onClick={onClose}>
+            Kapat
+          </Button>
+        </div>
+      }
+    >
+      {loading && (
+        <div className="flex items-center gap-2 rounded-md bg-violet-50 px-3 py-3 text-sm text-violet-900 ring-1 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-200 dark:ring-violet-900/40">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+          Rapor hazırlanıyor…
+        </div>
+      )}
+
+      {errored && !loading && (
+        <div className="space-y-2">
+          <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 ring-1 ring-rose-200 dark:bg-rose-950/30 dark:text-rose-300 dark:ring-rose-900/40">
+            Oluşturulamadı. Tekrar deneyin.
+          </p>
+          <Button size="sm" variant="outline" onClick={regenerate}>
+            Tekrar Dene
+          </Button>
+        </div>
+      )}
+
+      {report && !loading && (
+        <div className="space-y-2">
+          <pre className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-xs leading-relaxed text-slate-800 dark:border-ndark-border dark:bg-ndark-bg dark:text-slate-200">
+            {report.report}
+          </pre>
+          <div className="text-[11px] text-slate-500 dark:text-ndark-muted">
+            Son üretim: {formatRelative(report.generatedAt)} · {report.eventCount} olay
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

@@ -74,6 +74,7 @@ import {
   type CasePriority,
   type CaseRequestType,
   type CaseStatus,
+  type ActionSummary,
   type CaseTransferRecord,
   type CustomerPulse,
   type MentionableUser,
@@ -1295,6 +1296,22 @@ export const caseService = {
       `${API_BASE}/${caseId}/customer-pulse`,
       undefined,
       'Müşteri durumu yüklenemedi',
+    );
+  },
+
+  /**
+   * Action Timeline Summary — vakanın operasyonel aksiyon geçmişi (CaseActivity)
+   * AI ile kronolojik özetlenir. aiSummary (vaka içeriği) ve supervisor-summary
+   * (risk) ile FARKLI amaç: vakanın yolculuğunu anlatır.
+   *
+   * Persist edilmez — UI her "Yenile" tıklayışında yeniden üretir.
+   * AI yoksa 503 → UI fallback mesajı gösterir.
+   */
+  async getActionSummary(caseId: string): Promise<ActionSummary | undefined> {
+    return apiFetch<ActionSummary>(
+      `${API_BASE}/${caseId}/action-summary`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'Eylem özeti üretilemedi',
     );
   },
 
