@@ -429,6 +429,60 @@ export interface Case {
 }
 
 /**
+ * Customer Context Intelligence ("Customer Pulse") — Roadmap.
+ * BFF GET /api/cases/:id/customer-pulse deterministic metrikler + state
+ * etiketi + plain-language summary + evidence + recommendedAction döner.
+ * AI yoksa da çalışır (source='deterministic'). AI upgrade'de source='ai'.
+ */
+export type CustomerPulseState = 'Stable' | 'Watch' | 'Risky' | 'Critical';
+
+export interface CustomerPulseMetrics {
+  openCases: number;
+  recent30d: number;
+  recent60d: number;
+  recent90d: number;
+  slaViolations: number;
+  criticalCases: number;
+  escalatedCases: number;
+}
+
+export interface CustomerPulseRepeatedIssue {
+  category: string;
+  subCategory?: string;
+  count: number;
+}
+
+export interface CustomerPulseRecentCase {
+  id: string;
+  caseNumber: string;
+  title: string;
+  status: string;
+  priority: string;
+  category: string;
+  subCategory: string;
+  createdAt: string;
+  slaViolation: boolean;
+}
+
+export interface CustomerPulseSummary {
+  text: string;
+  evidence: string[];
+  recommendedAction: string;
+  source: 'deterministic' | 'ai';
+}
+
+export interface CustomerPulse {
+  accountId: string;
+  accountName: string;
+  caseId: string;
+  state: CustomerPulseState;
+  metrics: CustomerPulseMetrics;
+  repeatedIssues: CustomerPulseRepeatedIssue[];
+  recentCases: CustomerPulseRecentCase[];
+  summary: CustomerPulseSummary;
+}
+
+/**
  * FAZ 2 §20.2 — bir vakanın aktarım geçmişi satırı.
  * BFF GET /api/cases/:id/transfers takım/kişi adlarını join'le döner.
  */

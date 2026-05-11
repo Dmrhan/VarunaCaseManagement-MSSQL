@@ -673,6 +673,112 @@ router.post(
 );
 
 // ----------------------------------------------------------------
+// 8) Customer Pulse — AI-zenginleştirilmiş özet
+// Roadmap §"Customer Context Intelligence" Phase 5.
+//
+// Deterministic Customer Pulse (caseRepository.getCustomerPulse) çoktan
+// state + metrics + summary üretiyor. Bu endpoint o veriyi alır ve daha
+// doğal Türkçe 2-3 cümlelik özet + öneri üretir.
+//
+// GÜVENLİK NOTU: SADECE numeric/kategorik veri AI'a gönderilir. Raw note
+// veya call log içeriği gitmez — KVKK uyumlu yaklaşım.
+// ----------------------------------------------------------------
+router.post(
+  '/customer-pulse-summary',
+  rateLimit,
+  aiHandler('customer-pulse-summary', async (req, res) => {
+    const { caseId, accountName, state, metrics, repeatedIssues, evidence } = req.body ?? {};
+    if (!caseId || typeof caseId !== 'string') {
+      return res.status(400).json({ error: 'caseId gerekli.' });
+    }
+    if (!state || typeof state !== 'string') {
+      return res.status(400).json({ error: 'state gerekli (Stable/Watch/Risky/Critical).' });
+    }
+    if (!metrics || typeof metrics !== 'object') {
+      return res.status(400).json({ error: 'metrics gerekli.' });
+    }
+
+    // Vakanın companyId'sini telemetri için al — scope kontrolüne gerek yok
+    // çünkü body sadece numerik/kategorik veri (yan kanal sızıntı riski yok).
+    const c = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { companyId: true },
+    });
+    req.aiLog.caseId = caseId;
+    req.aiLog.companyId = c?.companyId ?? req.user?.allowedCompanyIds?.[0];
+
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['summary', 'recommendedAction', 'evidence'],
+      properties: {
+        summary:           { type: 'string' },
+        recommendedAction: { type: 'string' },
+        evidence:          { type: 'array', items: { type: 'string' } },
+      },
+    };
+
+    const repeatedList = Array.isArray(repeatedIssues) && repeatedIssues.length > 0
+      ? repeatedIssues
+          .slice(0, 3)
+          .map((r) => `- ${r.category}${r.subCategory ? ` / ${r.subCategory}` : ''}: ${r.count}×`)
+          .join('\n')
+      : '(yok)';
+    const evidenceList = Array.isArray(evidence) && evidence.length > 0
+      ? evidence.map((e) => `- ${e}`).join('\n')
+      : '(yok)';
+
+    const system = [
+      "Sen Varuna CRM'de müşteri durum analizi yapan bir asistanısın.",
+      'Bir agent\'a, vakayı açtığı müşterinin geniş durumunu özetlersin.',
+      'Türkçe yaz. Soyut kalma — sayılara dayan.',
+      'KURAL: SADECE JSON döndür.',
+    ].join('\n');
+
+    const user = [
+      `Müşteri: ${accountName ?? '-'}`,
+      `Durum etiketi: ${state}`,
+      '',
+      'Metrikler:',
+      `- Açık vaka: ${metrics.openCases ?? 0}`,
+      `- Son 30 gün: ${metrics.recent30d ?? 0}`,
+      `- Son 90 gün: ${metrics.recent90d ?? 0}`,
+      `- SLA ihlali: ${metrics.slaViolations ?? 0}`,
+      `- Kritik vaka: ${metrics.criticalCases ?? 0}`,
+      `- Eskalasyon: ${metrics.escalatedCases ?? 0}`,
+      '',
+      'Tekrar eden konular:',
+      repeatedList,
+      '',
+      'Deterministic evidence:',
+      evidenceList,
+      '',
+      'Görev:',
+      '- summary: 2-3 cümle, müşterinin durumunu sayılarla destekleyerek özetle.',
+      '- recommendedAction: 1-2 cümle, agent ne yapmalı — somut adım.',
+      '- evidence: 3-5 madde, sayısal kanıtlar (TR, kısa).',
+      '',
+      'Veri yetersizse "stabil" olarak özetle, evidence\'a "Risk sinyali yok" yaz.',
+    ].join('\n');
+
+    const { json } = await callOpenAI({
+      system,
+      user,
+      schema,
+      schemaName: 'customer_pulse_summary',
+    });
+
+    res.json({
+      summary: String(json.summary ?? '').slice(0, 600),
+      recommendedAction: String(json.recommendedAction ?? '').slice(0, 400),
+      evidence: Array.isArray(json.evidence)
+        ? json.evidence.slice(0, 6).map((e) => String(e).slice(0, 200))
+        : [],
+    });
+  }),
+);
+
+// ----------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------
 
