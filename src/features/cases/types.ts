@@ -255,10 +255,38 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   followUpDate:         'Takip Tarihi',
 
   // AI
-  aiSummary:            'AI Özeti',
-  aiCategoryPrediction: 'AI Kategori Önerisi',
-  aiPriorityPrediction: 'AI Öncelik Önerisi',
-  aiGeneratedFlag:      'AI Önerisi',
+  aiSummary:                  'AI Özeti',
+  aiCategoryPrediction:       'AI Kategori Önerisi',
+  aiPriorityPrediction:       'AI Öncelik Önerisi',
+  aiGeneratedFlag:            'AI Önerisi',
+  aiFollowupRecommendation:   'AI Takip Önerisi',
+  aiCallBrief:                'AI Çağrı Özeti',
+  aiDuplicateScore:           'AI Dublikasyon Skoru',
+  aiConfidenceScore:          'AI Güven Skoru',
+  aiRejectReason:             'AI Red Gerekçesi',
+  aiRetentionOfferSuggestion: 'AI Elde Tutma Önerisi',
+  aiRootCause:                'AI Kök Neden',
+
+  // Snooze
+  snoozeUntil:          'Erteleme Tarihi',
+  snoozeReason:         'Erteleme Nedeni',
+  snoozePreviousStatus: 'Erteleme Öncesi Statü',
+
+  // QA (Faz 1.5 Smart QA Lite)
+  qaEmpathyScore: 'QA Empati Skoru',
+  qaClarityScore: 'QA Netlik Skoru',
+  qaSpeedScore:   'QA Hız Skoru',
+  qaFeedback:     'QA Geri Bildirim',
+  qaScoredAt:     'QA Skor Tarihi',
+
+  // Diğer
+  transferCount:        'Aktarım Sayısı',
+  checklistItems:       'Kontrol Listesi',
+  customFields:         'Özel Alanlar',
+  slaThirdPartyWaitMin: '3. Parti Bekleme Süresi',
+  resolvedAt:           'Çözüm Tarihi',
+  updatedAt:            'Güncelleme Tarihi',
+  createdAt:            'Oluşturma Tarihi',
 };
 
 // Inline edit ile düzenlenebilen Case alanları

@@ -300,6 +300,22 @@ export const caseRepository = {
       });
     }
 
+    // Aktivite akışında "Not eklendi" satırı — content preview ile.
+    // @mention tag'leri kullanıcıyı kafa karıştırmasın diye düz isimle değiştirilir.
+    const cleanedPreview = (note.content ?? '')
+      .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
+      .slice(0, 200);
+    await prisma.caseActivity.create({
+      data: {
+        caseId: id,
+        companyId,
+        action: note.visibility === 'Customer' ? 'Müşteri notu eklendi' : 'İç not eklendi',
+        actionType: 'NoteAdded',
+        note: cleanedPreview,
+        actor: note.authorName,
+      },
+    });
+
     await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
     return created;
   },
@@ -364,6 +380,24 @@ export const caseRepository = {
         lastInteractionDate: new Date(),
       },
     });
+
+    // Aktivite akışında "Çağrı kaydı eklendi" satırı — kısa özet.
+    const outcomeLabel = input.callOutcome ?? '-';
+    const descPreview = (input.description ?? '').slice(0, 200);
+    const noteText = descPreview
+      ? `${m.durationMin ?? 0} dk · ${outcomeLabel} — ${descPreview}`
+      : `${m.durationMin ?? 0} dk · ${outcomeLabel}`;
+    await prisma.caseActivity.create({
+      data: {
+        caseId: id,
+        companyId,
+        action: 'Çağrı kaydı eklendi',
+        actionType: 'CallLogAdded',
+        note: noteText,
+        actor: input.callerName ?? 'Mock User',
+      },
+    });
+
     const caseUpdated = await prisma.case.update({
       where: { id },
       data: { updatedAt: new Date() },
