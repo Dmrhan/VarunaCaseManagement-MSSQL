@@ -19,8 +19,22 @@ ekleniyor demektir.
 ## Customer Context Intelligence
 
 **Priority:** High
-**Status:** Proposed
+**Status:** Partially Shipped (Case Detail) — New Case Flow deferred
 **Source:** General Manager feedback (Mayıs 2026 sunumu)
+
+**Shipped phases:**
+- Phase 1 — Backend deterministic endpoint: `GET /api/cases/:id/customer-pulse`
+- Phase 2 — Frontend service: `caseService.getCustomerPulse(caseId)`
+- Phase 3 — UI panel: "Müşteri Durumu" inside `LeftPanel` of `CaseDetailPage` (self-fetching, non-blocking)
+- Phase 5 — AI summary upgrade: `POST /api/ai/customer-pulse-summary` (numeric/categorical only, no raw notes; silent fallback to deterministic on failure)
+
+**Deferred:**
+- Phase 4 — New case flow integration. New case form's AI panel already has a
+  "Müşteri Geçmişi" card (open count + last case). A full Customer Pulse panel
+  there would need a 2nd account-based endpoint (`GET /api/accounts/:id/customer-pulse?companyId=...`)
+  and duplicate UI; deferred to avoid an awkward partial integration. To enable
+  later: add account-based variant of `getCustomerPulse` + reuse the same
+  panel component with pre-fetched data prop.
 
 ### Goal
 

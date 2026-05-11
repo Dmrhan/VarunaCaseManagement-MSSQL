@@ -267,6 +267,28 @@ router.post(
   }),
 );
 
+/**
+ * GET /api/cases/:id/customer-pulse — Customer Context Intelligence.
+ * Vakanın müşterisinin geniş durumunu deterministic metriklerle özetler:
+ * açık vaka sayısı, son 30/60/90 gün vakaları, SLA ihlal/kritik/eskalasyon
+ * sayıları, tekrar eden kategoriler, state etiketi (Stable/Watch/Risky/Critical),
+ * deterministic summary + evidence + recommendedAction.
+ *
+ * AI gerekmez — endpoint OPENAI_API_KEY olmadan da tam çalışır.
+ * companyId scope allowedCompanyIds ile korunur.
+ */
+router.get(
+  '/:id/customer-pulse',
+  asyncRoute(async (req, res) => {
+    const pulse = await caseRepository.getCustomerPulse(
+      req.params.id,
+      req.user.allowedCompanyIds,
+    );
+    if (!pulse) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(pulse);
+  }),
+);
+
 /** GET /api/cases/:id/transfers — bir vakanın aktarım geçmişi (en yeni en üstte). */
 router.get(
   '/:id/transfers',

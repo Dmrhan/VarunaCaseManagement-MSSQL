@@ -163,6 +163,7 @@ Statu gecisi body:
 | GET | `/api/cases/duplicate-check` | Musteri + vaka tipi icin acik vaka kontrolu |
 | GET | `/api/cases/by-account` | Musteriye ait vakalari listeler |
 | GET | `/api/cases/snoozed` | Aktif kullanicinin erteledigi vakalar |
+| GET | `/api/cases/:id/customer-pulse` | Musteri durumu (Customer Context Intelligence) |
 
 `duplicate-check` query:
 
@@ -175,6 +176,49 @@ accountId=<id>&caseType=<caseType>
 ```txt
 accountId=<id>&excludeId=<caseId>&statusIn=Acik,Incelemede&statusNotIn=Cozuldu,IptalEdildi
 ```
+
+`customer-pulse` response (deterministic, AI gerekmez):
+
+```json
+{
+  "accountId": "ACC-...",
+  "accountName": "...",
+  "caseId": "case-...",
+  "state": "Stable | Watch | Risky | Critical",
+  "metrics": {
+    "openCases": 0,
+    "recent30d": 0,
+    "recent60d": 0,
+    "recent90d": 0,
+    "slaViolations": 0,
+    "criticalCases": 0,
+    "escalatedCases": 0
+  },
+  "repeatedIssues": [
+    { "category": "...", "subCategory": "...", "count": 2 }
+  ],
+  "recentCases": [
+    {
+      "id": "case-...", "caseNumber": "VK-...", "title": "...",
+      "status": "Acik", "priority": "High",
+      "category": "...", "subCategory": "...",
+      "createdAt": "ISO", "slaViolation": false
+    }
+  ],
+  "summary": {
+    "text": "Plain-language ozet (TR).",
+    "evidence": ["3 acik vaka", "1 SLA ihlali"],
+    "recommendedAction": "Onerilen aksiyon (TR).",
+    "source": "deterministic"
+  }
+}
+```
+
+- Yetki: `verifyJwt` + `allowedCompanyIds` (vaka companyId scope dışıysa 403).
+- Performans: tek prisma sorgu, son 200 vakaya kadar bound.
+- AI gerektirmez. AI varsa frontend ayrı bir endpoint ile özetı zenginleştirir
+  (`POST /api/ai/customer-pulse-summary`); başarısız olursa deterministic
+  metin korunur.
 
 ### Toplu Guncelleme
 
@@ -425,6 +469,9 @@ Tum AI endpointleri JWT gerektirir ve IP bazli basit rate limit uygular. `OPENAI
 | POST | `/api/ai/churn-conversion` | Churn riski ve aksiyon onerisi uretir |
 | POST | `/api/ai/dashboard-chat` | Dashboard analist asistani cevabi uretir |
 | POST | `/api/ai/call-summary` | Cagri notunu kisa ozetler |
+| POST | `/api/ai/suggest-title` | Aciklamadan kisa Turkce vaka basligi onerir |
+| POST | `/api/ai/transfer-suggest` | Vakaya en uygun takimi onerir (FAZ 2 §20.2) |
+| POST | `/api/ai/customer-pulse-summary` | Deterministic Customer Pulse'i AI ile zenginlestirir (raw not/cagri GONDERMEZ) |
 | PATCH | `/api/ai/usage/:id/accept` | AI onerisi kabul/red bilgisini log kaydina yazar |
 
 `suggest-category` temel body:

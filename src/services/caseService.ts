@@ -75,6 +75,7 @@ import {
   type CaseRequestType,
   type CaseStatus,
   type CaseTransferRecord,
+  type CustomerPulse,
   type MentionableUser,
   type UnreadMention,
   type CaseType,
@@ -1282,6 +1283,19 @@ export const caseService = {
       'Aktarım geçmişi yüklenemedi',
     );
     return data?.value ?? [];
+  },
+
+  /**
+   * Customer Pulse — vakanın müşterisinin geniş durumu (state + metrics +
+   * recommended action). Deterministic; AI yoksa da çalışır. UI'da
+   * panel olarak gösterilir; başarısız olursa case detail bozulmaz.
+   */
+  async getCustomerPulse(caseId: string): Promise<CustomerPulse | undefined> {
+    return apiFetch<CustomerPulse>(
+      `${API_BASE}/${caseId}/customer-pulse`,
+      undefined,
+      'Müşteri durumu yüklenemedi',
+    );
   },
 
   /**
