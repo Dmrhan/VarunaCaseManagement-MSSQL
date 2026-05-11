@@ -257,6 +257,26 @@ export const aiService = {
     return postJson<TitleSuggestion>('/suggest-title', input);
   },
 
+  /**
+   * Customer Pulse AI özet upgrade — deterministic pulse'dan üretilen
+   * numerik/kategorik veriyi alır, AI ile daha doğal özet + öneri üretir.
+   * RAW note/call içeriği GÖNDERMEZ (KVKK uyumlu). Başarısız olursa
+   * frontend deterministic summary'i korur.
+   */
+  async customerPulseSummary(input: {
+    caseId: string;
+    accountName: string;
+    state: string;
+    metrics: Record<string, number>;
+    repeatedIssues: { category: string; subCategory?: string; count: number }[];
+    evidence: string[];
+  }) {
+    return postJson<{ summary: string; recommendedAction: string; evidence: string[] }>(
+      '/customer-pulse-summary',
+      input,
+    );
+  },
+
   async draftResolution(input: ResolutionDraftInput) {
     return postJson<{ draft: string }>('/draft-resolution', input);
   },
