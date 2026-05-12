@@ -120,11 +120,18 @@ Demo seed:
 ```bash
 npm run db:seed
 npm run db:seed:auth
+npm run db:seed:scenarios
 ```
 
-`db:seed` ve `db:seed:auth`; fresh local, demo veya sandbox veritabanlari icin kullanilabilir. Ekiplerin uygulama akisini test amaciyla gorecegi paylasimli demo ortamlarinda da uygundur, ancak bu ortamlar gercek musteri verisi tasimamali ve production ile ayni Supabase projesini/DB'yi kullanmamalidir.
+- `db:seed` — mock veri (sirketler/musteriler/orneklem vakalar)
+- `db:seed:auth` — demo personalar (Agent/Supervisor/CSM/Backoffice/Admin/SystemAdmin, sifre demo1234)
+- `db:seed:scenarios` — Univera/Finrota/PARAM senaryo verisi (Watcher, Linked, Reply/Reaction, AI Status Report, Customer Pulse, Multi-tenant). Idempotent — tekrar calistirmak guvenli.
 
-Production veya gercek veri tasiyan shared environment uzerinde calistirma; demo veri, mock vaka kayitlari ve bilinen demo credential'lar olusturabilir.
+`db:seed` / `db:seed:auth` / `db:seed:scenarios` — fresh local, demo veya sandbox veritabanlari icin kullanilabilir. Ekiplerin uygulama akisini test amaciyla gorecegi paylasilmi demo ortamlarinda da uygundur, ancak bu ortamlar gercek musteri verisi tasimamali ve production ile ayni Supabase projesini/DB'yi kullanmamalidir.
+
+Production veya gercek veri tasiyan shared environment uzerinde **asla** calistirmayin; demo veri, mock vaka kayitlari ve bilinen demo credential'lar olusturabilir. Senaryo seed'i `DEMO-` prefix'li ID kullanir — yalnislikla prod'da calisirsa bile arama/filtre ile temizlenebilir, ancak yine de **once .env'inin prod olmadigini dogrulayin**.
+
+Detayli senaryo rehberi: [docs/TEST_SCENARIOS.md](TEST_SCENARIOS.md).
 
 Prisma Studio:
 
@@ -245,7 +252,7 @@ onlemektir (bkz. "Migration neden build'e gomulmedi" bolumu).
    Eski deployment hala servis ediyorsa migration tablosu/sutunu eksik
    olabilir (rollback gerekebilir).
 
-5. **Production uzerinde `db:seed` veya `db:seed:auth` calistirma** — bu
+5. **Production uzerinde `db:seed`, `db:seed:auth` veya `db:seed:scenarios` calistirma** — bu
    komutlar yalniz local/demo ortamlari icindir (bkz. AI_WORKFLOW Seed
    Safety bolumu).
 
