@@ -681,13 +681,36 @@ model CaseNote {
   replyCount   Int            @default(0)
   createdAt    DateTime       @default(now())
 
-  case    Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  parent  CaseNote?  @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: SetNull)
-  replies CaseNote[] @relation("NoteReplies")
+  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  parent    CaseNote?          @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: SetNull)
+  replies   CaseNote[]         @relation("NoteReplies")
+  reactions CaseNoteReaction[]
 
   @@index([caseId])
   @@index([companyId])
   @@index([parentNoteId])
+}
+
+// CaseNoteReaction — bir nota (top-level veya reply) emoji reaksiyonu.
+// Sabit whitelist (UI seviyesinde + BFF seviyesinde dogrulanir):
+// "thumbs_up" | "eyes" | "check" | "important" | "thanks"
+// Unique (noteId, userId, emoji) — bir kullanici ayni emoji'yi iki kez veremez;
+// ikinci tiklamada toggle remove yapilir.
+// onDelete Cascade — note silinirse reaksiyonlar da gider.
+model CaseNoteReaction {
+  id        String   @id @default(cuid())
+  noteId    String
+  userId    String
+  companyId String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  note CaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, userId, emoji])
+  @@index([noteId])
+  @@index([userId])
+  @@index([companyId])
 }
 
 model CaseAttachment {

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { caseRepository, mentionRepo, watcherRepo, linkRepo, CaseAccessError } from '../db/caseRepository.js';
+import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
@@ -577,6 +577,32 @@ router.post(
     if (!reply) return res.status(404).json({ error: 'Vaka veya not bulunamadı' });
     if (reply.error) return res.status(400).json(reply);
     res.status(201).json(reply);
+  }),
+);
+
+/**
+ * POST /api/cases/:id/notes/:noteId/reactions — bir nota emoji reaksiyonu toggle eder.
+ * body: { emoji: 'thumbs_up' | 'eyes' | 'check' | 'important' | 'thanks' }
+ * Davranis: ayni kullanici ayni emoji ikinci kez tiklarsa kaldirilir.
+ * Activity feed'e yazilmaz (noise azaltmak icin).
+ */
+router.post(
+  '/:id/notes/:noteId/reactions',
+  asyncRoute(async (req, res) => {
+    const emoji = req.body?.emoji;
+    if (typeof emoji !== 'string' || !emoji) {
+      return res.status(400).json({ error: 'emoji zorunlu' });
+    }
+    const result = await reactionRepo.toggle({
+      caseId: req.params.id,
+      noteId: req.params.noteId,
+      userId: req.user.id,
+      emoji,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!result) return res.status(404).json({ error: 'Vaka veya not bulunamadı' });
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
   }),
 );
 

@@ -144,6 +144,37 @@ export interface SlaPolicy {
   isActive: boolean;
 }
 
+/**
+ * Sabit emoji whitelist — UI + BFF dogrulamasi ayni listeyi paylasir.
+ * UI sembolu ve aciklamayi REACTION_EMOJI_META'dan alir.
+ */
+export type NoteReactionEmoji = 'thumbs_up' | 'eyes' | 'check' | 'important' | 'thanks';
+
+export const NOTE_REACTION_EMOJIS: NoteReactionEmoji[] = [
+  'thumbs_up',
+  'eyes',
+  'check',
+  'important',
+  'thanks',
+];
+
+export const NOTE_REACTION_META: Record<
+  NoteReactionEmoji,
+  { symbol: string; label: string }
+> = {
+  thumbs_up: { symbol: '👍', label: 'Onayladım' },
+  eyes: { symbol: '👀', label: 'İnceliyorum' },
+  check: { symbol: '✅', label: 'Bitti' },
+  important: { symbol: '❗', label: 'Önemli' },
+  thanks: { symbol: '🙏', label: 'Teşekkürler' },
+};
+
+export interface CaseNoteReactionRow {
+  id: string;
+  userId: string;
+  emoji: NoteReactionEmoji;
+}
+
 export interface CaseNote {
   id: string;
   caseId: string;
@@ -154,6 +185,8 @@ export interface CaseNote {
   parentNoteId?: string | null;
   /** Top-level notlar icin reply sayisi (denormalize). Reply'larda 0. */
   replyCount?: number;
+  /** Raw reaksiyon satirlari — frontend aggregate eder (emoji + count + mine). */
+  reactions?: CaseNoteReactionRow[];
   createdAt: string;
 }
 

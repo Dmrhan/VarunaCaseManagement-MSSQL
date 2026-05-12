@@ -40,12 +40,25 @@ const TR_DATETIME = new Intl.DateTimeFormat('tr-TR', {
 // History desc: yeni en üstte (uzun yaşayan vakada scroll etmeden son durumu gör)
 // Notlar: top-level (parentNoteId IS NULL) çekilir; replies inline değil,
 // kullanıcı thread'i açtığında ayrı endpoint ile lazy load edilir.
+// Reactions: her note ile birlikte raw satırlar gelir (userId + emoji);
+// frontend aggregate eder ve "mine" flag'ini hesaplar.
+const NOTE_REACTION_SELECT = { id: true, userId: true, emoji: true };
+
 const CASE_INCLUDE = {
-  notes:        { where: { parentNoteId: null }, orderBy: { createdAt: 'desc' } },
+  notes: {
+    where: { parentNoteId: null },
+    orderBy: { createdAt: 'desc' },
+    include: { reactions: { select: NOTE_REACTION_SELECT } },
+  },
   attachments:  { orderBy: { uploadedAt: 'desc' } },
   history:      { orderBy: { at: 'desc' } },
   callLogs:     { orderBy: { callDate: 'desc' } },
 };
+
+// İzin verilen reaksiyon emojileri — UI + BFF whitelist.
+// Anahtarlar UI'da ikon olarak gösterilir; identifier ile saklanır ki ileride
+// gerekirse aynı anahtar için farklı sembol render edilebilir.
+export const NOTE_REACTION_EMOJIS = ['thumbs_up', 'eyes', 'check', 'important', 'thanks'];
 
 // DB'den gelen Case'i frontend Case tipine çevir:
 //  - attachments → files
@@ -368,6 +381,7 @@ export const caseRepository = {
     const replies = await prisma.caseNote.findMany({
       where: { parentNoteId: noteId },
       orderBy: { createdAt: 'asc' },
+      include: { reactions: { select: NOTE_REACTION_SELECT } },
     });
     return replies;
   },
@@ -2006,6 +2020,55 @@ export const linkRepo = {
     });
 
     return { ok: true };
+  },
+};
+
+/**
+ * Note reaction repository — bir nota (top-level veya reply) emoji reaksiyonu.
+ *
+ * Toggle davranisi:
+ *  - Aynı (noteId, userId, emoji) yoksa: ekle
+ *  - Varsa: kaldir (unique constraint nedeniyle "ayni kullanici ayni emoji 2 kez"
+ *    yapamaz)
+ *
+ * Auth/tenant:
+ *  - Note'un caseId'si allowedCompanyIds icinde olmali (assertCaseInScope)
+ *  - Cross-tenant note id'sine reaction imkansiz
+ *
+ * Emoji whitelist:
+ *  - NOTE_REACTION_EMOJIS'in disindaki emoji'ler 400 ile reddedilir
+ *  - "noisy field" değişimi degil, audit/activity yazilmaz (spec: activity-feed
+ *    noise yok)
+ */
+export const reactionRepo = {
+  async toggle({ caseId, noteId, userId, emoji, allowedCompanyIds }) {
+    if (!NOTE_REACTION_EMOJIS.includes(emoji)) {
+      return { error: 'invalid_emoji', message: 'Bu emoji desteklenmiyor.' };
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Note aynı vakaya ait olmalı (cross-note reaction'ı engelle).
+    const note = await prisma.caseNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, caseId: true },
+    });
+    if (!note || note.caseId !== caseId) return null;
+
+    const existing = await prisma.caseNoteReaction.findUnique({
+      where: { noteId_userId_emoji: { noteId, userId, emoji } },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await prisma.caseNoteReaction.delete({ where: { id: existing.id } });
+      return { ok: true, action: 'removed', emoji };
+    }
+
+    await prisma.caseNoteReaction.create({
+      data: { noteId, userId, companyId, emoji },
+    });
+    return { ok: true, action: 'added', emoji };
   },
 };
 
