@@ -403,7 +403,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header — sticky */}
-      <header className="border-b border-slate-200 bg-white">
+      <header className="border-b border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-start gap-4 px-6 py-3">
           {/* Mobile: hamburger for left panel */}
           <button
@@ -447,13 +447,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
-            <h1 className="mt-0.5 truncate text-lg font-semibold text-slate-900">{item.title}</h1>
+            <h1 className="mt-0.5 truncate text-lg font-semibold text-slate-900 dark:text-ndark-text">{item.title}</h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               {onShowCustomer && (
                 <button
                   type="button"
                   onClick={() => onShowCustomer(item.accountId)}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
                 >
                   <Building2 size={11} />
                   {item.accountName}
@@ -548,8 +548,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 <button
                   type="button"
                   onClick={toggle}
-                  className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:bg-ndark-bg"
                   title="Daha fazla aksiyon"
+                  aria-label="Daha fazla aksiyon"
                 >
                   <MoreHorizontal size={14} />
                 </button>
@@ -657,7 +658,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4">
+          <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
             <TabButton
               active={tab === 'detail'}
               icon={<FileText size={14} />}
@@ -880,7 +881,7 @@ function LeftPanel({
     <div className="space-y-4">
       <PanelSection title="Müşteri" icon={<Building2 size={12} />}>
         <div className="space-y-1">
-          <div className="text-sm font-semibold text-slate-900">{item.accountName}</div>
+          <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">{item.accountName}</div>
           <div className="font-mono text-[11px] text-slate-500">{item.accountId}</div>
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             <Badge tint="slate">{item.companyName}</Badge>
@@ -993,13 +994,14 @@ function LeftPanel({
       {drawerOpen && (
         <div className="fixed inset-0 z-30 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/30" onClick={onCloseDrawer} />
-          <aside className="absolute left-0 top-0 h-full w-[320px] overflow-y-auto bg-white p-4 shadow-xl">
+          <aside className="absolute left-0 top-0 h-full w-[320px] overflow-y-auto bg-white p-4 shadow-xl dark:bg-ndark-bg">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Müşteri Özeti</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">Müşteri Özeti</span>
               <button
                 type="button"
                 onClick={onCloseDrawer}
-                className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                aria-label="Müşteri özeti panelini kapat"
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card"
               >
                 ✕
               </button>
@@ -1670,6 +1672,7 @@ function WatchersPanel({
                   onClick={() => setAddOpen(true)}
                   disabled={busy}
                   title="İzleyici Ekle"
+                  aria-label="İzleyici Ekle"
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-brand-400 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ndark-border dark:text-ndark-muted dark:hover:border-brand-500"
                 >
                   <Plus size={12} />
@@ -1935,8 +1938,8 @@ function LinksTab({
             onClick={loadAi}
             disabled={aiLoading}
             className="rounded p-1 text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-900/40"
-            title="Yenile"
-            aria-label="Yenile"
+            title="Benzer vakaları yeniden analiz et"
+            aria-label="Benzer vakaları yeniden analiz et"
           >
             <RefreshCw size={12} />
           </button>
@@ -2442,14 +2445,14 @@ function PanelSection({
 }) {
   if (hidden) return null;
   const ring =
-    tint === 'violet' ? 'ring-violet-200' :
-    tint === 'rose'   ? 'ring-rose-200' :
-    tint === 'amber'  ? 'ring-amber-200' :
-                         'ring-slate-200';
+    tint === 'violet' ? 'ring-violet-200 dark:ring-violet-900/40' :
+    tint === 'rose'   ? 'ring-rose-200 dark:ring-rose-900/40' :
+    tint === 'amber'  ? 'ring-amber-200 dark:ring-amber-900/40' :
+                         'ring-slate-200 dark:ring-ndark-border';
   return (
-    <section className={`rounded-lg bg-white p-3 ring-1 ring-inset ${ring}`}>
+    <section className={`rounded-lg bg-white p-3 ring-1 ring-inset dark:bg-ndark-card ${ring}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
           {icon}
           {title}
         </h3>
@@ -2463,8 +2466,8 @@ function PanelSection({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="truncate text-right text-slate-800">{value}</span>
+      <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</span>
+      <span className="truncate text-right text-slate-800 dark:text-ndark-text">{value}</span>
     </div>
   );
 }
@@ -2478,11 +2481,14 @@ function AiTile({
   value: string;
   tint?: 'slate' | 'indigo';
 }) {
-  const cls = tint === 'indigo' ? 'bg-indigo-50 ring-indigo-200' : 'bg-white ring-slate-200';
+  const cls =
+    tint === 'indigo'
+      ? 'bg-indigo-50 ring-indigo-200 dark:bg-indigo-950/30 dark:ring-indigo-900/40'
+      : 'bg-white ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border';
   return (
     <div className={`rounded-md px-2.5 py-2 ring-1 ring-inset ${cls}`}>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-0.5 text-sm font-semibold text-slate-800">{value}</div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</div>
+      <div className="mt-0.5 text-sm font-semibold text-slate-800 dark:text-ndark-text">{value}</div>
     </div>
   );
 }
@@ -2961,12 +2967,12 @@ function DetailTab({
                   <button
                     type="button"
                     onClick={() => onSelectPrevious(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40"
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
                   >
-                    <span className="font-mono text-[11px] text-slate-500">{p.caseNumber}</span>
-                    <span className="flex-1 truncate text-sm font-medium text-slate-800">{p.title}</span>
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">{p.caseNumber}</span>
+                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{p.title}</span>
                     <StatusPill status={p.status} />
-                    <span className="text-[11px] text-slate-500">{formatRelative(refDate)}</span>
+                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{formatRelative(refDate)}</span>
                   </button>
                 </li>
               );
@@ -3190,8 +3196,8 @@ function OfferedSolutionsPickerModal({
                   <label
                     className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition ${
                       checked
-                        ? 'border-rose-300 bg-rose-50/60'
-                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                        ? 'border-rose-300 bg-rose-50/60 dark:border-rose-900/40 dark:bg-rose-950/30'
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-ndark-border dark:hover:bg-ndark-bg'
                     }`}
                   >
                     <input
@@ -3276,10 +3282,10 @@ function ChecklistSection({
             key={it.id}
             className={`flex items-start gap-2.5 rounded-md border px-3 py-2 transition ${
               it.checked
-                ? 'border-emerald-200 bg-emerald-50/60'
+                ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20'
                 : it.required
-                  ? 'border-rose-200 bg-rose-50/40'
-                  : 'border-slate-200 bg-white'
+                  ? 'border-rose-200 bg-rose-50/40 dark:border-rose-900/40 dark:bg-rose-950/20'
+                  : 'border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card'
             }`}
           >
             <button
@@ -3290,7 +3296,7 @@ function ChecklistSection({
               className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                 it.checked
                   ? 'border-emerald-500 bg-emerald-500 text-white'
-                  : 'border-slate-300 bg-white hover:border-slate-400'
+                  : 'border-slate-300 bg-white hover:border-slate-400 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-ndark-muted'
               }`}
               title={it.checked ? 'İşareti kaldır' : 'Tamamlandı olarak işaretle'}
             >
@@ -3383,11 +3389,11 @@ function KpiInlineTile({
                        'bg-slate-50 ring-slate-200';
   return (
     <div className={`rounded-lg p-3 ring-1 ring-inset ${cls}`}>
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-600">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
         {icon}
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold text-slate-900">{value}</div>
+      <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-ndark-text">{value}</div>
     </div>
   );
 }
@@ -3615,7 +3621,7 @@ function InlineEdit({
         }}
         onKeyDown={handleKey}
         placeholder={placeholder}
-        className="flex-1 rounded-md border border-blue-500 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-blue-500/40 focus:outline-none"
+        className="flex-1 rounded-md border border-blue-500 bg-white px-3 py-1.5 text-sm text-slate-800 ring-2 ring-blue-500/40 focus:outline-none dark:bg-ndark-card dark:text-ndark-text"
       />
       {editControls}
     </div>
@@ -4100,24 +4106,29 @@ function NoteReactions({
 
     const cur = grouped.get(emoji);
     const willRemove = cur?.mine ?? false;
+    const tempId = `temp-${Date.now()}`;
 
-    // Optimistic
-    const optimistic = willRemove
-      ? rows.filter((r) => !(r.emoji === emoji && r.userId === user.id))
-      : [
-          ...rows,
-          {
-            id: `temp-${Date.now()}`,
-            userId: user.id,
-            emoji,
-          },
-        ];
-    setRows(optimistic);
+    // Optimistic — functional update; revert sirasinda da functional update
+    // ile sadece bu kullanicinin bu emoji'sini geri al/koy. Araya baska
+    // (websocket/poll) update girse bile bozulmaz. (Smoke Audit P1.6)
+    setRows((prev) =>
+      willRemove
+        ? prev.filter((r) => !(r.emoji === emoji && r.userId === user.id))
+        : [...prev, { id: tempId, userId: user.id, emoji }],
+    );
 
     const res = await caseService.toggleReaction(caseId, noteId, emoji);
     if (!res) {
-      // Geri al
-      setRows(rows);
+      // Targeted revert — sadece optimistic mutasyonu geri al.
+      setRows((prev) =>
+        willRemove
+          ? // remove'u geri al: emoji + user kombinasyonu hala yoksa ekle
+            prev.some((r) => r.emoji === emoji && r.userId === user.id)
+            ? prev
+            : [...prev, { id: tempId, userId: user.id, emoji }]
+          : // add'i geri al: temp id'yi (yoksa ilk eslesen) sil
+            prev.filter((r) => r.id !== tempId),
+      );
       toast({ type: 'error', message: 'Reaksiyon kaydedilemedi.' });
     }
   }

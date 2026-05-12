@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { AtSign, Users } from 'lucide-react';
+import { AtSign, ShieldAlert, Users } from 'lucide-react';
 import { TextArea } from '@/components/ui/Field';
 import { caseService } from '@/services/caseService';
 import type { MentionableUser } from '../types';
@@ -212,10 +212,16 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
               <span>{loading ? 'Yükleniyor…' : query ? `"${query}" eşleşmeleri` : 'Etiketle'}</span>
             </div>
             {loadError && (
-              <div className="px-3 py-2 text-xs text-rose-600">{loadError}</div>
+              <div
+                role="alert"
+                className="flex items-start gap-1.5 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/30 dark:text-rose-300"
+              >
+                <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+                <span>{loadError}</span>
+              </div>
             )}
             {!loading && !loadError && filtered.length === 0 && (
-              <div className="px-3 py-3 text-center text-xs text-slate-500">
+              <div className="px-3 py-3 text-center text-xs text-slate-500 dark:text-ndark-muted">
                 Eşleşen kişi yok
               </div>
             )}
