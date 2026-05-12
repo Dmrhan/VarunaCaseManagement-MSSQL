@@ -313,6 +313,9 @@ export const caseRepository = {
         caseId: id,
         companyId,
         authorName: note.authorName,
+        // mentionedBy = req.user.id (route'tan); reaction bildirimleri için
+        // CaseNote.authorId olarak tutulur. mentionedBy yoksa null.
+        authorId: mentionedBy ?? null,
         content: note.content,
         visibility: note.visibility,
       },
@@ -450,6 +453,7 @@ export const caseRepository = {
           caseId,
           companyId,
           authorName: reply.authorName,
+          authorId: mentionedBy ?? null,
           content,
           visibility: reply.visibility,
           parentNoteId: noteId,
@@ -2040,6 +2044,16 @@ export const linkRepo = {
  *  - "noisy field" değişimi degil, audit/activity yazilmaz (spec: activity-feed
  *    noise yok)
  */
+// emoji identifier → görsel sembol (CaseNotification mesaji icin).
+// Frontend tarafindaki NOTE_REACTION_META ile ayni esleme.
+const NOTE_REACTION_SYMBOL = {
+  thumbs_up: '👍',
+  eyes: '👀',
+  check: '✅',
+  important: '❗',
+  thanks: '🙏',
+};
+
 export const reactionRepo = {
   async toggle({ caseId, noteId, userId, emoji, allowedCompanyIds }) {
     if (!NOTE_REACTION_EMOJIS.includes(emoji)) {
@@ -2048,10 +2062,11 @@ export const reactionRepo = {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
-    // Note aynı vakaya ait olmalı (cross-note reaction'ı engelle).
+    // Note aynı vakaya ait olmalı + sahip bilgisini birlikte çek
+    // (bildirim için authorId + authorName lazım).
     const note = await prisma.caseNote.findUnique({
       where: { id: noteId },
-      select: { id: true, caseId: true },
+      select: { id: true, caseId: true, authorId: true, authorName: true },
     });
     if (!note || note.caseId !== caseId) return null;
 
@@ -2061,6 +2076,7 @@ export const reactionRepo = {
     });
 
     if (existing) {
+      // Toggle off — bildirim üretilmez (spec: removal'da notify yok).
       await prisma.caseNoteReaction.delete({ where: { id: existing.id } });
       return { ok: true, action: 'removed', emoji };
     }
@@ -2068,6 +2084,37 @@ export const reactionRepo = {
     await prisma.caseNoteReaction.create({
       data: { noteId, userId, companyId, emoji },
     });
+
+    // Bildirim — yalnızca: not sahibi biliniyor + sahip kendine tepki vermiyor.
+    // Hata sessiz logla (ana akışı durdurma).
+    if (note.authorId && note.authorId !== userId) {
+      try {
+        const reactor = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { fullName: true, email: true },
+        });
+        const reactorName = reactor?.fullName ?? reactor?.email ?? 'Bir kullanıcı';
+        const symbol = NOTE_REACTION_SYMBOL[emoji] ?? emoji;
+        await prisma.caseNotification.create({
+          data: {
+            caseId,
+            companyId,
+            eventType: 'note_reaction',
+            channel: 'InApp',
+            recipient: note.authorId,
+            payload: {
+              message: `${reactorName} notunuza ${symbol} tepkisi verdi`,
+              kind: 'reaction',
+              emoji,
+              noteId,
+            },
+          },
+        });
+      } catch (err) {
+        console.warn('[reactionRepo.notify]', err?.message ?? err);
+      }
+    }
+
     return { ok: true, action: 'added', emoji };
   },
 };
