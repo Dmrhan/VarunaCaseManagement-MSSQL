@@ -152,14 +152,16 @@ güncellemelerini yalnız header bell drawer'dan görür. Dedicated "Inbox"
 sayfası planlandı ama uygulanmadı.
 
 ### CasesList link count indicator
-**Status:** Not implemented
-Vakalar listesinde "bu vaka 2 başka vakaya bağlı" gibi küçük chip yok.
-Kullanıcı detaya girip Bağlantılar sekmesinden görür.
+**Status:** Shipped (Phase 5b)
+Vakalar listesinde başlık yanında violet chip `🔗 N` görünür (sadece N>0).
+`outgoingLinks._count` üzerinden hesaplanır; tam liste için Bağlantılar
+sekmesi.
 
 ### CaseNotification retention / cleanup
-**Status:** Not implemented
-Append-only tablo; eski satırlar silinmiyor. Cron retention policy
-(örn. 30 gün+ okunmuşları sil) planlandı.
+**Status:** Shipped (Phase 5a)
+`POST /api/cron/notification-cleanup` — `readAt NOT NULL` ve 30g+ eski
+satırları siler; okunmamış bildirimler korunur. Cron tetiklenmesi
+(GitHub Actions / Vercel Cron) ops ekibi tarafından yapılandırılır.
 
 ### Eski notlara reaksiyon bildirimi
 **Status:** Partial — PR #68 sonrası yeni notlar etkilenir

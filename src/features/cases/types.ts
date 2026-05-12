@@ -459,6 +459,10 @@ export interface Case {
   // çıkar + supervisor bildirimi + AI kök neden analizi tetiklenir (BFF tarafı).
   transferCount?: number;
 
+  // FAZ 2 Collab — vakanın açtığı bağlantı sayısı (outgoing). CasesList'te
+  // chip; detayda LinksTab tam listeyi gösterir. 0 ise chip render edilmez.
+  linkCount?: number;
+
   notes: CaseNote[];
   files: CaseFile[];
   history: CaseHistoryEntry[];

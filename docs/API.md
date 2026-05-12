@@ -697,6 +697,7 @@ x-uptime-secret: <CRON_SECRET>
 | POST | `/api/cron/pattern-detect` | Son donem vaka yogunlugundan pattern alert uretir |
 | POST | `/api/cron/qa-score-batch` | Kapanmis vakalar icin QA score batch calistirir |
 | POST | `/api/cron/qa-score` | Tek vaka icin QA score calistirir |
+| POST | `/api/cron/notification-cleanup` | 30 gun+ okunmus CaseNotification satirlarini siler (okunmamislar korunur). Onerilen periyot: gunluk |
 
 `qa-score` body:
 
