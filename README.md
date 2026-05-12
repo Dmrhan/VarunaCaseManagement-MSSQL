@@ -73,11 +73,14 @@ OPENAI_API_KEY=
 npm run db:generate
 npm run db:migrate
 npm run db:migrate:deploy
-npm run db:seed
-npm run db:seed:auth
+npm run db:seed             # mock veri (local/demo)
+npm run db:seed:auth        # demo personalar (local/demo)
+npm run db:seed:scenarios   # demo senaryo verisi (Univera/Finrota/PARAM) — local/demo
 npm run db:studio
 npm run db:reset
 ```
+
+> ⚠️ **`db:seed`, `db:seed:auth` ve `db:seed:scenarios` yalnız local/demo/sandbox kullanım içindir. Production'da çalıştırmayın.** Senaryo verisi rehberi: [docs/TEST_SCENARIOS.md](docs/TEST_SCENARIOS.md).
 
 ## Proje Yapısı
 
