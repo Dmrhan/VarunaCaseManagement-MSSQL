@@ -5,10 +5,16 @@ import { withDbRetry } from './retry.js';
  * Vakalardaki distinct productGroup değerleri — admin productGroup tanımı
  * yapmıyor, vaka açılışında serbest yazılıyor; bu yüzden DB'den distinct
  * çekiyoruz. Dropdown autocomplete için.
+ *
+ * MULTI-TENANT: allowedCompanyIds verilirse yalnız o şirketlerin vakalarındaki
+ * distinct değerler döner. Verilmezse (SystemAdmin dahili çağrı) tüm şirketler.
+ * Aksi takdirde cross-tenant productGroup sızıntısı olur (Smoke Audit P0.2).
  */
-async function listProductGroups() {
+async function listProductGroups(allowedCompanyIds) {
+  const where = { productGroup: { not: null } };
+  if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
   const rows = await prisma.case.findMany({
-    where: { productGroup: { not: null } },
+    where,
     select: { productGroup: true },
     distinct: ['productGroup'],
     orderBy: { productGroup: 'asc' },
@@ -124,7 +130,7 @@ async function bootstrapInner(allowedCompanyIds) {
         .map((s) => ({ id: s.id, name: s.name, isActive: s.isActive })),
     }));
 
-    const productGroups = await listProductGroups();
+    const productGroups = await listProductGroups(allowedCompanyIds);
 
     return {
       companies,
