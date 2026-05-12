@@ -196,8 +196,8 @@ Aşağıdakiler şu an **uygulanmamış** veya **kısmi**; bu senaryolarda test 
 
 - **E-posta bildirimi**: Hiçbir notification e-posta göndermez. `channel='InApp'` only. (Faz 2 §6 kapsamında planlandı.)
 - **Watcher Inbox UI**: BFF endpoint `/watching` ve `/me/notifications/unread` mevcut; ayrı bir inbox sayfası yok. Watcher kullanıcılar bell drawer'dan takip eder.
-- **CasesList link count indicator**: Liste satırında "bu vaka X başka vakaya bağlı" küçük chip yok. Bağlantılar sayfasından görülür.
-- **CaseNotification cleanup**: Tablo append-only; eski satırlar henüz cron ile silinmiyor (retention policy TBD).
+- ~~**CasesList link count indicator**~~: **Eklendi** (Phase 5b). Başlık yanında violet `🔗 N` chip görünür.
+- ~~**CaseNotification cleanup**~~: **Eklendi** (Phase 5a). `POST /api/cron/notification-cleanup` 30g+ okunmuş satırları siler; ops cron tetiklemesini yapılandırır.
 - **Eski notlara reaksiyon bildirimi**: PR #68 öncesi yazılmış notlar `authorId` taşımıyor; reaksiyon eklenirse bildirim üretilmez (sessiz fallback). Yeni notlar test edin.
 - **OpenAI rate-limit (429)**: Gerçek trafikte test edilemez; kod yolu statik review ile kabul edildi.
 - **Mobile responsive**: Telefon emülasyonuyla genel akış test edilebilir ama "mobile-first" tasarım hedefi değil.
