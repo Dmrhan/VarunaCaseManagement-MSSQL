@@ -195,7 +195,7 @@ Demo şifreleri `prisma/seedAuth.ts` ile set edilir (varsayılan: `demo1234`).
 Aşağıdakiler şu an **uygulanmamış** veya **kısmi**; bu senaryolarda test etmeyin:
 
 - **E-posta bildirimi**: Hiçbir notification e-posta göndermez. `channel='InApp'` only. (Faz 2 §6 kapsamında planlandı.)
-- **Watcher Inbox UI**: BFF endpoint `/watching` ve `/me/notifications/unread` mevcut; ayrı bir inbox sayfası yok. Watcher kullanıcılar bell drawer'dan takip eder.
+- ~~**Watcher Inbox UI**~~: **Eklendi** (Phase 5c). Sidebar > Çalışma Alanım > İzleyici Inbox; izlenen vakalar + son bildirimler tek sayfada, statü/zaman filtreleri ile.
 - ~~**CasesList link count indicator**~~: **Eklendi** (Phase 5b). Başlık yanında violet `🔗 N` chip görünür.
 - ~~**CaseNotification cleanup**~~: **Eklendi** (Phase 5a). `POST /api/cron/notification-cleanup` 30g+ okunmuş satırları siler; ops cron tetiklemesini yapılandırır.
 - **Eski notlara reaksiyon bildirimi**: PR #68 öncesi yazılmış notlar `authorId` taşımıyor; reaksiyon eklenirse bildirim üretilmez (sessiz fallback). Yeni notlar test edin.
