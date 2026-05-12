@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, CaseAccessError } from '../db/caseRepository.js';
+import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError } from '../db/caseRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
@@ -654,6 +654,41 @@ router.get(
       req.user.allowedCompanyIds,
     );
     res.json({ value: data.items, '@odata.count': data.total });
+  }),
+);
+
+/**
+ * GET /api/cases/me/notifications/unread — generic CaseNotification listesi
+ * (watcher_update, watcher_added, note_reaction, vs.). Mention'lar AYRI
+ * kanal: /me/mentions/unread. Bu liste bell drawer'da mention'larla
+ * birleşik gösterilir. (Smoke Audit P0.1)
+ */
+router.get(
+  '/me/notifications/unread',
+  asyncRoute(async (req, res) => {
+    const data = await notificationRepo.listUnreadForUser(
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    res.json({ value: data.items, '@odata.count': data.total });
+  }),
+);
+
+/**
+ * POST /api/cases/me/notifications/seen — drawer açıldığında veya kullanıcı
+ * "Tümünü okundu işaretle" yaparken çağrılır. Body opsiyonel `ids` array'i
+ * (belirli notification'ları seen yap; yoksa hepsi).
+ */
+router.post(
+  '/me/notifications/seen',
+  asyncRoute(async (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : undefined;
+    const result = await notificationRepo.markAllAsSeen(
+      req.user.id,
+      req.user.allowedCompanyIds,
+      ids,
+    );
+    res.json(result);
   }),
 );
 

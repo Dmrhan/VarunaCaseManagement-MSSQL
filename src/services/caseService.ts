@@ -1318,6 +1318,35 @@ export const caseService = {
   },
 
   /**
+   * Bell badge için generic CaseNotification listesi (watcher_update,
+   * watcher_added, note_reaction). Mention'lar ayrı kanaldan gelir.
+   */
+  async listUnreadNotifications(): Promise<{ items: import('@/features/cases/types').UnreadNotification[]; total: number }> {
+    const data = await apiFetch<{ value: import('@/features/cases/types').UnreadNotification[]; '@odata.count': number }>(
+      `${API_BASE}/me/notifications/unread`,
+      undefined,
+      'Bildirimler yüklenemedi',
+    );
+    return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
+  },
+
+  /**
+   * Drawer açıldığında veya kullanıcı "tümünü okundu işaretle" yaparken.
+   * `ids` verilmezse tüm okunmamışlar seen yapılır.
+   */
+  async markNotificationsSeen(ids?: string[]): Promise<{ updated: number } | undefined> {
+    return apiFetch(
+      `${API_BASE}/me/notifications/seen`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids ?? [] }),
+      },
+      'Bildirimler işaretlenemedi',
+    );
+  },
+
+  /**
    * FAZ 2 §20.2 — vaka aktarımı.
    * Body: takım/kişi + gerekçe + AI önerisi snapshot (opsiyonel).
    * Backend transferCount++ + CaseTransfer audit + Activity log üretir.
