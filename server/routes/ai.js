@@ -49,6 +49,58 @@ function rateLimit(req, res, next) {
 
 // callOpenAI shared module'den (server/lib/aiClient.js) import edilir.
 
+// ----------------------------------------------------------------
+// Input validation — cost protection. (Smoke Audit P2.3)
+// Her endpoint kabul edilen field'lar icin max length + max array items
+// kontrolu yapar; ihlalde 400 doner ve OpenAI'ye gitmez.
+// ----------------------------------------------------------------
+const AI_LIMITS = {
+  shortText:    500,    // title, accountName, category
+  mediumText:   2_000,  // history item, message, note content
+  longText:     5_000,  // description, transcript, large content
+  arrayItems:   50,     // repeatedIssues, evidence, history
+  historyItems: 20,     // dashboard chat history
+};
+
+/**
+ * Verilen body alanlarinin boyutunu dogrula. Sorun varsa hata mesaji (string)
+ * doner; aksi halde null. Route handler bu cikti varsa 400 ile reddeder.
+ *
+ * @param {object} body
+ * @param {Array<[key: string, kind: 'shortText'|'mediumText'|'longText'|'array'|'history']>} rules
+ */
+function validateAiInputs(body, rules) {
+  if (!body || typeof body !== 'object') return null;
+  for (const [key, kind] of rules) {
+    const v = body[key];
+    if (v == null) continue; // optional; presence check ayri yapilir
+    if (kind === 'shortText' || kind === 'mediumText' || kind === 'longText') {
+      if (typeof v !== 'string') continue; // shape check ayri
+      const max = AI_LIMITS[kind];
+      if (v.length > max) {
+        return `${key} cok uzun (max ${max} karakter, gelen ${v.length}).`;
+      }
+    } else if (kind === 'array') {
+      if (!Array.isArray(v)) continue;
+      if (v.length > AI_LIMITS.arrayItems) {
+        return `${key} cok fazla oge icin (max ${AI_LIMITS.arrayItems}).`;
+      }
+    } else if (kind === 'history') {
+      if (!Array.isArray(v)) continue;
+      if (v.length > AI_LIMITS.historyItems) {
+        return `${key} gecmis ogesi limit (max ${AI_LIMITS.historyItems}).`;
+      }
+      for (const item of v) {
+        const text = typeof item === 'string' ? item : item?.content;
+        if (typeof text === 'string' && text.length > AI_LIMITS.mediumText) {
+          return `${key} icinde tek bir mesaj cok uzun (max ${AI_LIMITS.mediumText}).`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function aiHandler(endpointName, handler) {
   // Backward-compat: aiHandler(handler) eski signature'ında endpointName 'other'
   if (typeof endpointName === 'function') {
@@ -81,11 +133,44 @@ function aiHandler(endpointName, handler) {
     try {
       await handler(req, res);
     } catch (err) {
-      const status = err?.status ?? 500;
       const isTimeout = err?.name === 'AbortError';
-      console.error('[ai] hata:', err?.message ?? err);
-      res.status(isTimeout ? 504 : status).json({
-        error: isTimeout ? 'timeout' : 'ai_error',
+      const upstream = err?.status; // OpenAI SDK throw'larında veya aiClient'ta set edilir
+      // Frontend aiService.postJson mapping: 429→rate_limited, 503→unconfigured,
+      // 504→timeout, diger non-2xx→server.
+      // OpenAI hatalarini buraya gore esle (Smoke Audit P1.5):
+      let status;
+      let errorCode;
+      if (isTimeout) {
+        status = 504;
+        errorCode = 'timeout';
+      } else if (upstream === 401 || upstream === 403) {
+        // API key gecersiz/revoke → kullanici "AI yapilandirilmamis" gorsun
+        status = 503;
+        errorCode = 'ai_unavailable';
+      } else if (upstream === 429) {
+        status = 429;
+        errorCode = 'rate_limited';
+      } else if (upstream === 503) {
+        // aiClient.callOpenAI "API key yok" durumunda 503 firlatir — koru.
+        status = 503;
+        errorCode = 'ai_unavailable';
+      } else if (upstream === 502) {
+        // aiClient parse hatasi
+        status = 502;
+        errorCode = 'ai_parse_error';
+      } else if (typeof upstream === 'number' && upstream >= 400 && upstream < 600) {
+        // Diger OpenAI/upstream hatalari — frontend bunlari 'server' olarak isler
+        status = 502;
+        errorCode = 'ai_error';
+      } else {
+        // Bilinmeyen — bizim bug'imiz olabilir; 500 yerine 502 don ki "AI tarafi"
+        // gibi gorunsun ve frontend "AI onerisi alinamadi" toast'i gostersin.
+        status = 502;
+        errorCode = 'ai_error';
+      }
+      console.error(`[ai] hata (upstream=${upstream ?? '-'}, mapped=${status}):`, err?.message ?? err);
+      res.status(status).json({
+        error: errorCode,
         message: err?.message ?? 'AI servis hatası',
       });
     }
@@ -104,6 +189,13 @@ router.post(
     req.aiLog.companyId = companyId;
     if (!description || typeof description !== 'string') {
       return res.status(400).json({ error: 'description gerekli.' });
+    }
+    {
+      const e = validateAiInputs(req.body, [
+        ['description', 'longText'],
+        ['companyName', 'shortText'],
+      ]);
+      if (e) return res.status(400).json({ error: 'input_too_large', message: e });
     }
     if (!Array.isArray(availableCategories) || availableCategories.length === 0) {
       return res.status(400).json({ error: 'availableCategories gerekli (kategori enum kilidi için).' });
@@ -193,6 +285,10 @@ router.post(
     const { description, caseType } = req.body ?? {};
     if (!description || typeof description !== 'string' || description.trim().length < 10) {
       return res.status(400).json({ error: 'description gerekli (en az 10 karakter).' });
+    }
+    {
+      const e = validateAiInputs(req.body, [['description', 'longText']]);
+      if (e) return res.status(400).json({ error: 'input_too_large', message: e });
     }
 
     // companyId açıkça gelmediği için kullanıcının ilk şirketini fallback olarak
@@ -406,6 +502,13 @@ router.post(
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'message gerekli.' });
     }
+    {
+      const e = validateAiInputs(req.body, [
+        ['message', 'mediumText'],
+        ['history', 'history'],
+      ]);
+      if (e) return res.status(400).json({ error: 'input_too_large', message: e });
+    }
 
     const ctx = context ?? {};
     const teamLoadStr = Array.isArray(ctx.teamLoads)
@@ -552,7 +655,7 @@ router.post(
       },
     });
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı.' });
-    if (!req.user.allowedCompanyIds.includes(c.companyId)) {
+    if (!(req.user?.allowedCompanyIds ?? []).includes(c.companyId)) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
@@ -697,6 +800,15 @@ router.post(
     if (!metrics || typeof metrics !== 'object') {
       return res.status(400).json({ error: 'metrics gerekli.' });
     }
+    {
+      const e = validateAiInputs(req.body, [
+        ['accountName',    'shortText'],
+        ['state',          'shortText'],
+        ['repeatedIssues', 'array'],
+        ['evidence',       'array'],
+      ]);
+      if (e) return res.status(400).json({ error: 'input_too_large', message: e });
+    }
 
     // Vakanın companyId'sini telemetri için al — scope kontrolüne gerek yok
     // çünkü body sadece numerik/kategorik veri (yan kanal sızıntı riski yok).
@@ -809,7 +921,7 @@ router.post(
       },
     });
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı.' });
-    if (!req.user.allowedCompanyIds.includes(c.companyId)) {
+    if (!(req.user?.allowedCompanyIds ?? []).includes(c.companyId)) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
