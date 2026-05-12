@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   Bot,
   Check,
-  ChevronRight,
   ExternalLink,
   HeadphonesIcon,
   History,
@@ -23,6 +22,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { CustomFieldsSection, validateCustomFields } from '@/components/CustomFieldRenderer';
 import { useToast } from '@/components/ui/Toast';
+import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
 import {
   aiService,
@@ -162,9 +162,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const aiReqIdRef = useRef(0);
   const { toast } = useToast();
 
-  // Müşteri geçmişi (AI panel için)
-  const [customerHistory, setCustomerHistory] = useState<{ openCount: number; lastCase?: Case } | null>(null);
-
   const companies = useMemo(() => lookupService.companies(), []);
   const accounts = useMemo(() => lookupService.accounts(), []);
   const categories = useMemo(() => lookupService.categories(), []);
@@ -217,7 +214,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       setAiCardCollapsed(false);
       setAiApplied(false);
       setTitleApplied(false);
-      setCustomerHistory(null);
     }
   }, [open]);
 
@@ -265,26 +261,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     };
   }, [form.accountId, form.caseType]);
 
-  // Müşteri geçmişi (AI panel)
-  useEffect(() => {
-    let alive = true;
-    if (!form.accountId) {
-      setCustomerHistory(null);
-      return;
-    }
-    void caseService
-      .findByAccount(form.accountId, { statusNotIn: ['Çözüldü', 'İptalEdildi'] })
-      .then((rows) => {
-        if (!alive) return;
-        const sorted = [...rows].sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-        setCustomerHistory({ openCount: rows.length, lastCase: sorted[0] });
-      });
-    return () => {
-      alive = false;
-    };
-  }, [form.accountId]);
+  // Müşteri geçmişi artık CustomerPulsePanel içinde self-fetch ediliyor —
+  // burada manuel state tutmaya gerek yok. (Roadmap A1 / Phase 5+)
 
   // RUNA AI — açıklama 20+ karakter, debounce, kategori + başlık paralel
   useEffect(() => {
@@ -995,9 +973,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
             priority={form.priority}
             category={form.category}
             caseType={form.caseType}
-            customerHistory={customerHistory}
-            onShowExisting={onShowExisting}
-            onCloseModal={onClose}
+            accountId={form.accountId || null}
+            companyId={form.companyId || null}
           />
         </aside>
       </div>
@@ -1235,9 +1212,8 @@ function AiPanel({
   priority,
   category,
   caseType,
-  customerHistory,
-  onShowExisting,
-  onCloseModal,
+  accountId,
+  companyId,
 }: {
   descriptionLength: number;
   aiSuggesting: boolean;
@@ -1246,9 +1222,8 @@ function AiPanel({
   priority: CasePriority;
   category: string;
   caseType: CaseType;
-  customerHistory: { openCount: number; lastCase?: Case } | null;
-  onShowExisting?: (caseId: string) => void;
-  onCloseModal: () => void;
+  accountId: string | null;
+  companyId: string | null;
 }) {
   const isIdle = descriptionLength < DESCRIPTION_AI_THRESHOLD && !aiSuggestion;
   const isAnalyzing = aiSuggesting && !aiSuggestion;
@@ -1305,17 +1280,20 @@ function AiPanel({
         <SlaPreview priority={priority} category={category} caseType={caseType} />
       </PanelCard>
 
-      {/* Müşteri geçmişi */}
-      <PanelCard
-        icon={<History size={12} className="text-slate-500" />}
-        title="Müşteri Geçmişi"
-      >
-        <CustomerHistory
-          history={customerHistory}
-          onShowExisting={onShowExisting}
-          onCloseModal={onCloseModal}
-        />
-      </PanelCard>
+      {/* Müşteri Durumu — Customer Pulse (account-based, deterministic only).
+          Müşteri + şirket seçilince zenginleşir; öncesinde küçük placeholder. */}
+      {accountId && companyId ? (
+        <CustomerPulsePanel source={{ kind: 'account', accountId, companyId }} />
+      ) : (
+        <PanelCard
+          icon={<History size={12} className="text-slate-500" />}
+          title="Müşteri Durumu"
+        >
+          <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+            Müşteri seçilince durum gösterilir.
+          </p>
+        </PanelCard>
+      )}
 
       {/* Churn risk — yalnız Churn type seçilince placeholder */}
       {caseType === 'Churn' && (
@@ -1407,68 +1385,5 @@ function SlaPreview({
         </p>
       )}
     </dl>
-  );
-}
-
-function CustomerHistory({
-  history,
-  onShowExisting,
-  onCloseModal,
-}: {
-  history: { openCount: number; lastCase?: Case } | null;
-  onShowExisting?: (caseId: string) => void;
-  onCloseModal: () => void;
-}) {
-  if (!history) {
-    return (
-      <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
-        Müşteri seçilince geçmiş gösterilir.
-      </p>
-    );
-  }
-  const last = history.lastCase;
-  const daysAgo = last
-    ? Math.floor((Date.now() - new Date(last.createdAt).getTime()) / (24 * 3600 * 1000))
-    : null;
-  return (
-    <div className="space-y-1.5 text-xs">
-      <div className="flex items-baseline justify-between">
-        <span className="text-slate-500 dark:text-ndark-muted">Açık vaka</span>
-        <span
-          className={`font-semibold tabular-nums ${
-            history.openCount > 0
-              ? 'text-amber-700 dark:text-amber-300'
-              : 'text-slate-700 dark:text-ndark-text'
-          }`}
-        >
-          {history.openCount}
-        </span>
-      </div>
-      {last && (
-        <button
-          type="button"
-          onClick={() => {
-            if (onShowExisting) {
-              onShowExisting(last.id);
-              onCloseModal();
-            }
-          }}
-          className="flex w-full items-center justify-between gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-[11px] hover:bg-brand-50 hover:border-brand-300 dark:border-ndark-border dark:bg-ndark-bg dark:hover:bg-brand-950/20"
-          disabled={!onShowExisting}
-        >
-          <span className="min-w-0 flex-1 truncate">
-            <span className="font-mono text-slate-500 dark:text-ndark-muted">{last.caseNumber}</span>
-            <span className="ml-1 text-slate-700 dark:text-ndark-text">{last.title}</span>
-          </span>
-          <span className="shrink-0 text-slate-500 dark:text-ndark-muted">
-            {daysAgo === 0 ? 'bugün' : `${daysAgo}g önce`}
-          </span>
-          {onShowExisting && <ChevronRight size={10} className="shrink-0 text-slate-400" />}
-        </button>
-      )}
-      {!last && (
-        <p className="text-[11px] text-slate-500 dark:text-ndark-muted">İlk vakası — geçmişi yok.</p>
-      )}
-    </div>
   );
 }
