@@ -889,6 +889,31 @@ export const caseService = {
   },
 
   /**
+   * Bir nota emoji reaksiyonu toggle eder.
+   * Backend ayni (note, user, emoji) varsa kaldirir, yoksa ekler.
+   * Mock'ta currentUserId bilinmedigi icin reaction'lar atlanir.
+   */
+  async toggleReaction(
+    caseId: string,
+    noteId: string,
+    emoji: string,
+  ): Promise<{ action: 'added' | 'removed' } | undefined> {
+    if (USE_MOCK) {
+      await delay(40);
+      return { action: 'added' };
+    }
+    return apiFetch<{ action: 'added' | 'removed' }>(
+      `${API_BASE}/${caseId}/notes/${noteId}/reactions`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emoji }),
+      },
+      'Reaksiyon kaydedilemedi',
+    );
+  },
+
+  /**
    * Vakaya dosya ekler. 3 adımlı orchestration:
    *  1. BFF'den signed upload URL al
    *  2. Doğrudan Supabase Storage'a PUT (Vercel 4.5MB body limitini bypass)

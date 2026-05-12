@@ -336,9 +336,10 @@ Not: Kapatma statuleri toplu guncellemede engellenir. Cross-tenant case ID denen
 
 | Method | Path | Aciklama |
 | --- | --- | --- |
-| POST | `/api/cases/:id/notes` | Vakaya not ekler. Case detayindaki notes alani sadece top-level (parentNoteId=NULL) notlari dondurur; her not `replyCount` icerir |
-| GET | `/api/cases/:id/notes/:noteId/replies` | Bir notun thread reply'larini lazy fetch eder (createdAt ASC) |
+| POST | `/api/cases/:id/notes` | Vakaya not ekler. Case detayindaki notes alani sadece top-level (parentNoteId=NULL) notlari dondurur; her not `replyCount` ve `reactions` icerir |
+| GET | `/api/cases/:id/notes/:noteId/replies` | Bir notun thread reply'larini lazy fetch eder (createdAt ASC). Her reply `reactions` icerir |
 | POST | `/api/cases/:id/notes/:noteId/reply` | Bir nota yanit ekle. Body: `{ content, isInternal? }`. Max 1 derinlik (yanita yanit yok), @mention destegi |
+| POST | `/api/cases/:id/notes/:noteId/reactions` | Bir nota (top-level veya reply) emoji reaksiyonu toggle eder. Body: `{ emoji }`. Whitelist: `thumbs_up \| eyes \| check \| important \| thanks`. Response: `{ ok: true, action: 'added' \| 'removed', emoji }` |
 | GET | `/api/cases/:id/mentionable-users` | Mention dropdown adaylarini dondurur |
 | POST | `/api/cases/:id/mentions/seen` | Vaka icindeki aktif kullanici mentionlarini goruldu yapar |
 | GET | `/api/cases/me/mentions/unread` | Aktif kullanicinin okunmamis mentionlarini listeler |
@@ -352,6 +353,16 @@ Not body:
   "authorName": "Demo User"
 }
 ```
+
+Not response her zaman `reactions: [{ id, userId, emoji }]` (bos olabilir) ve top-level notlarda `replyCount` icerir. Frontend reaksiyonlari emoji'ye gore aggregate eder ve `userId === currentUser.id` ile "mine" flag'ini hesaplar.
+
+Reaction toggle body:
+
+```json
+{ "emoji": "thumbs_up" }
+```
+
+Whitelist disindaki emoji'ler 400 ile reddedilir. Ayni (note, user, emoji) ikinci kez gonderilirse satir silinir (toggle off).
 
 ### Aktivite, Call Log ve Checklist
 

@@ -32,6 +32,7 @@ import {
   Save,
   Send,
   ShieldAlert,
+  SmilePlus,
   Sparkles,
   Star,
   Target,
@@ -90,6 +91,9 @@ import {
   type CaseNote,
   type EscalationLevel,
   type NoteVisibility,
+  NOTE_REACTION_EMOJIS,
+  NOTE_REACTION_META,
+  type NoteReactionEmoji,
 } from './types';
 
 type TabKey = 'detail' | 'activity' | 'notes' | 'files' | 'callLogs' | 'links';
@@ -4024,6 +4028,162 @@ function NotesTab({
 }
 
 /**
+ * NoteReactions — bir notenun (top-level veya reply) reaksiyon chip'leri + picker.
+ * Optimistic update: tiklamada local state hemen toggle olur, API arka planda;
+ * backend hata verirse local state geri alinir.
+ */
+function NoteReactions({
+  caseId,
+  noteId,
+  initial,
+  size = 'md',
+}: {
+  caseId: string;
+  noteId: string;
+  initial: import('./types').CaseNoteReactionRow[];
+  size?: 'sm' | 'md';
+}) {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [rows, setRows] = useState(initial);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
+  // initial degisirse (case re-fetch sonrasi) state'i resync et
+  useEffect(() => {
+    setRows(initial);
+  }, [initial]);
+
+  // Outside click → picker kapanir
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onClick(e: MouseEvent) {
+      if (!pickerRef.current?.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [pickerOpen]);
+
+  // Aggregate: emoji → { count, mine }
+  const grouped = useMemo(() => {
+    const map = new Map<NoteReactionEmoji, { count: number; mine: boolean }>();
+    for (const r of rows) {
+      const cur = map.get(r.emoji) ?? { count: 0, mine: false };
+      cur.count += 1;
+      if (user && r.userId === user.id) cur.mine = true;
+      map.set(r.emoji, cur);
+    }
+    return map;
+  }, [rows, user]);
+
+  // Picker'da kullanici henuz vermedigi emoji'leri secebilsin diye:
+  // tum whitelist'i goster, mevcut/yok ayrimi chip'lerde gozukur.
+  const visibleEmojis: NoteReactionEmoji[] = NOTE_REACTION_EMOJIS.filter((e) => grouped.has(e));
+
+  async function toggle(emoji: NoteReactionEmoji) {
+    if (!user) return;
+    setPickerOpen(false);
+
+    const cur = grouped.get(emoji);
+    const willRemove = cur?.mine ?? false;
+
+    // Optimistic
+    const optimistic = willRemove
+      ? rows.filter((r) => !(r.emoji === emoji && r.userId === user.id))
+      : [
+          ...rows,
+          {
+            id: `temp-${Date.now()}`,
+            userId: user.id,
+            emoji,
+          },
+        ];
+    setRows(optimistic);
+
+    const res = await caseService.toggleReaction(caseId, noteId, emoji);
+    if (!res) {
+      // Geri al
+      setRows(rows);
+      toast({ type: 'error', message: 'Reaksiyon kaydedilemedi.' });
+    }
+  }
+
+  const chipBase =
+    size === 'sm'
+      ? 'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] transition'
+      : 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition';
+  const triggerBase =
+    size === 'sm'
+      ? 'inline-flex items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-400 transition hover:border-brand-400 hover:text-brand-500 dark:border-ndark-border dark:text-ndark-muted dark:hover:border-brand-500 dark:hover:text-brand-400'
+      : 'inline-flex items-center justify-center rounded-full border border-dashed border-slate-300 text-slate-400 transition hover:border-brand-400 hover:text-brand-500 dark:border-ndark-border dark:text-ndark-muted dark:hover:border-brand-500 dark:hover:text-brand-400';
+  const triggerSize = size === 'sm' ? 'h-5 w-5' : 'h-6 w-6';
+
+  return (
+    <div className="relative mt-2 flex flex-wrap items-center gap-1">
+      {visibleEmojis.map((e) => {
+        const meta = NOTE_REACTION_META[e];
+        const info = grouped.get(e)!;
+        const mine = info.mine;
+        const cls = mine
+          ? 'border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-300'
+          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg/40 dark:text-ndark-muted dark:hover:bg-ndark-card';
+        return (
+          <button
+            key={e}
+            type="button"
+            onClick={() => toggle(e)}
+            className={chipBase + ' ' + cls}
+            title={meta.label}
+          >
+            <span aria-hidden>{meta.symbol}</span>
+            <span className="tabular-nums">{info.count}</span>
+          </button>
+        );
+      })}
+
+      <div ref={pickerRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setPickerOpen((v) => !v)}
+          className={triggerBase + ' ' + triggerSize}
+          title="Reaksiyon ekle"
+          aria-label="Reaksiyon ekle"
+        >
+          <SmilePlus size={size === 'sm' ? 11 : 13} />
+        </button>
+        {pickerOpen && (
+          <div className="absolute bottom-full left-0 z-20 mb-1 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1 shadow-md dark:border-ndark-border dark:bg-ndark-card">
+            {NOTE_REACTION_EMOJIS.map((e) => {
+              const meta = NOTE_REACTION_META[e];
+              const mine = grouped.get(e)?.mine ?? false;
+              return (
+                <button
+                  key={e}
+                  type="button"
+                  onClick={() => toggle(e)}
+                  className={
+                    'rounded-full px-1.5 py-0.5 text-base transition ' +
+                    (mine
+                      ? 'bg-brand-100 dark:bg-brand-500/20'
+                      : 'hover:bg-slate-100 dark:hover:bg-ndark-bg')
+                  }
+                  title={meta.label}
+                  aria-label={meta.label}
+                >
+                  {meta.symbol}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * NoteCard — parent note + thread (yanıtlar) + reply composer.
  * Yanıtlar lazy fetch edilir (kullanıcı "X yanıt" linkine bastığında).
  */
@@ -4122,6 +4282,13 @@ function NoteCard({
           className="text-sm leading-relaxed text-slate-700 dark:text-slate-300"
         />
 
+        {/* Reaksiyon chip'leri + picker */}
+        <NoteReactions
+          caseId={caseId}
+          noteId={note.id}
+          initial={note.reactions ?? []}
+        />
+
         {/* Aksiyon satiri — Yanitla + thread aç/kapa */}
         <div className="mt-3 flex items-center gap-3 text-xs">
           <button
@@ -4156,7 +4323,7 @@ function NoteCard({
           ) : (
             <ul className="flex flex-col gap-2">
               {(replies ?? []).map((r) => (
-                <ReplyItem key={r.id} reply={r} parentAuthor={note.authorName} />
+                <ReplyItem key={r.id} caseId={caseId} reply={r} parentAuthor={note.authorName} />
               ))}
             </ul>
           )}
@@ -4178,7 +4345,7 @@ function NoteCard({
   );
 }
 
-function ReplyItem({ reply, parentAuthor }: { reply: CaseNote; parentAuthor: string }) {
+function ReplyItem({ caseId, reply, parentAuthor }: { caseId: string; reply: CaseNote; parentAuthor: string }) {
   const isInternal = reply.visibility === 'Internal';
   const pill = isInternal
     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
@@ -4217,6 +4384,12 @@ function ReplyItem({ reply, parentAuthor }: { reply: CaseNote; parentAuthor: str
         <MentionContent
           content={reply.content}
           className="text-[13px] leading-relaxed text-slate-700 dark:text-slate-300"
+        />
+        <NoteReactions
+          caseId={caseId}
+          noteId={reply.id}
+          initial={reply.reactions ?? []}
+          size="sm"
         />
       </div>
     </li>
