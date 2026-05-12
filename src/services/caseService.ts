@@ -1420,6 +1420,23 @@ export const caseService = {
   },
 
   /**
+   * Account-based Customer Pulse — yeni vaka açılışı için (caseId yok).
+   * Response.caseId null gelir; deterministic only (AI upgrade istemcide skip).
+   * Cross-tenant: companyId allowedCompanyIds'de olmalı.
+   */
+  async getCustomerPulseByAccount(
+    accountId: string,
+    companyId: string,
+  ): Promise<CustomerPulse | undefined> {
+    const qs = new URLSearchParams({ companyId }).toString();
+    return apiFetch<CustomerPulse>(
+      `${API_BASE}/accounts/${accountId}/customer-pulse?${qs}`,
+      undefined,
+      'Müşteri durumu yüklenemedi',
+    );
+  },
+
+  /**
    * Action Timeline Summary — vakanın operasyonel aksiyon geçmişi (CaseActivity)
    * AI ile kronolojik özetlenir. aiSummary (vaka içeriği) ve supervisor-summary
    * (risk) ile FARKLI amaç: vakanın yolculuğunu anlatır.

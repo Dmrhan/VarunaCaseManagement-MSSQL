@@ -1416,174 +1416,226 @@ export const caseRepository = {
     if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
       throw new CaseAccessError();
     }
-
-    // Son 90 gün — recent metrics için yeterli. Daha eskisi performansı boğar.
-    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 3600 * 1000);
-
-    const rows = await prisma.case.findMany({
-      where: {
-        accountId: found.accountId,
-        companyId: found.companyId,
-        // Tüm vakalar — açık + kapalı — repeat issue ve geçmiş sayımı için.
-        // 90 günden eski olanları sayım dışı bırakmak için createdAt filtre ile
-        // birlikte değil; metrikleri içeride zaman damgasına göre türetiyoruz.
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200, // Çok eski müşterilerde de bound — son 200 vakaya bakarız.
-      select: {
-        id: true,
-        caseNumber: true,
-        title: true,
-        status: true,
-        priority: true,
-        category: true,
-        subCategory: true,
-        createdAt: true,
-        resolvedAt: true,
-        slaViolation: true,
-        escalationLevel: true,
-      },
-    });
-
-    const OPEN_STATUSES = new Set(['Acik', 'Incelemede', 'ThirdPartyWaiting', 'Eskalasyon', 'YenidenAcildi']);
-    const now = Date.now();
-    const ms30 = 30 * 24 * 3600 * 1000;
-    const ms60 = 60 * 24 * 3600 * 1000;
-    const ms90 = 90 * 24 * 3600 * 1000;
-
-    let openCases = 0;
-    let recent30d = 0;
-    let recent60d = 0;
-    let recent90d = 0;
-    let slaViolations = 0;
-    let criticalCases = 0;
-    let escalatedCases = 0;
-    const categoryCount = new Map();
-
-    for (const r of rows) {
-      const ageMs = now - new Date(r.createdAt).getTime();
-      if (OPEN_STATUSES.has(r.status)) openCases++;
-      if (ageMs <= ms30) recent30d++;
-      if (ageMs <= ms60) recent60d++;
-      if (ageMs <= ms90) recent90d++;
-      if (r.slaViolation) slaViolations++;
-      if (r.priority === 'Critical') criticalCases++;
-      if (r.escalationLevel && r.escalationLevel !== 'Yok') escalatedCases++;
-      else if (r.status === 'Eskalasyon') escalatedCases++;
-
-      // Repeated issues: yalnız son 90 gün — eski örüntüler bilgisel değil.
-      if (ageMs <= ms90) {
-        const key = r.subCategory ? `${r.category}::${r.subCategory}` : r.category;
-        categoryCount.set(key, (categoryCount.get(key) ?? 0) + 1);
-      }
-    }
-
-    const repeatedIssues = [...categoryCount.entries()]
-      .filter(([, count]) => count >= 2)
-      .map(([key, count]) => {
-        const [category, subCategory] = key.split('::');
-        return { category: fromDb({ category }).category ?? category, subCategory, count };
-      })
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-    void ninetyDaysAgo; // eslint-fence: kullanılmayan değişken uyarısını sustur
-
-    // Son 5 vaka — UI'da hızlı geçmiş için (current case dahil değil)
-    const recentCases = rows
-      .filter((r) => r.id !== caseId)
-      .slice(0, 5)
-      .map((r) => ({
-        id: r.id,
-        caseNumber: r.caseNumber,
-        title: r.title,
-        status: fromDb({ status: r.status }).status,
-        priority: r.priority,
-        category: fromDb({ category: r.category }).category ?? r.category,
-        subCategory: fromDb({ subCategory: r.subCategory }).subCategory ?? r.subCategory,
-        createdAt: r.createdAt,
-        slaViolation: r.slaViolation,
-      }));
-
-    // State logic — roadmap spec'iyle birebir
-    let state = 'Stable';
-    if (
-      openCases >= 3 ||
-      criticalCases > 0 ||
-      slaViolations >= 2 ||
-      (escalatedCases > 0 && openCases > 0)
-    ) {
-      state = 'Critical';
-    } else if (
-      openCases >= 2 ||
-      recent30d >= 3 ||
-      slaViolations > 0 ||
-      repeatedIssues.length >= 3
-    ) {
-      state = 'Risky';
-    } else if (recent90d >= 2 || repeatedIssues.length >= 2) {
-      state = 'Watch';
-    }
-
-    // Deterministic summary + evidence + recommendation
-    const evidence = [];
-    if (openCases > 0) evidence.push(`${openCases} açık vaka`);
-    if (slaViolations > 0) evidence.push(`${slaViolations} SLA ihlali`);
-    if (criticalCases > 0) evidence.push(`${criticalCases} kritik vaka`);
-    if (escalatedCases > 0) evidence.push(`${escalatedCases} eskalasyona giden vaka`);
-    if (recent30d >= 2) evidence.push(`Son 30 günde ${recent30d} vaka`);
-    if (recent90d >= 3 && recent30d < 2) evidence.push(`Son 90 günde ${recent90d} vaka`);
-    for (const r of repeatedIssues.slice(0, 2)) {
-      const label = r.subCategory ? `${r.category} / ${r.subCategory}` : r.category;
-      evidence.push(`Tekrar eden: ${label} (${r.count}×)`);
-    }
-
-    let summaryText;
-    let recommendedAction;
-    switch (state) {
-      case 'Critical':
-        summaryText = 'Bu müşteri yüksek riskli — yakın takip gerekli. Son dönemde açık veya çözülmemiş kritik/eskalasyon vakaları mevcut.';
-        recommendedAction = 'Supervisor görünürlüğünü aç, proaktif iletişim kur, mevcut açık vakaları öncelikli işlet.';
-        break;
-      case 'Risky':
-        summaryText = 'Müşteri dikkat gerektiriyor. Açık veya tekrar eden vakalar var, müşteri memnuniyeti riskli olabilir.';
-        recommendedAction = 'Açık vakaları gözden geçir, tekrar eden konuları araştır, müşteriyle proaktif iletişim planla.';
-        break;
-      case 'Watch':
-        summaryText = 'Müşterinin son dönemde birkaç vakası var. Şu an kritik değil ama örüntü gelişebilir.';
-        recommendedAction = 'Geçmiş vakaları kontrol et, benzer şikayetler tekrarlanıyorsa kök neden ara.';
-        break;
-      default:
-        summaryText = 'Müşteri stabil görünüyor. Son dönemde tekrar eden vaka veya SLA risk sinyali yok.';
-        recommendedAction = 'Standart akışla devam et — özel önlem gerekmez.';
-        break;
-    }
-    if (evidence.length === 0) evidence.push('Risk sinyali yok');
-
-    return {
+    return computeCustomerPulse({
       accountId: found.accountId,
       accountName: found.accountName,
-      caseId: found.id,
-      state,
-      metrics: {
-        openCases,
-        recent30d,
-        recent60d,
-        recent90d,
-        slaViolations,
-        criticalCases,
-        escalatedCases,
-      },
-      repeatedIssues,
-      recentCases,
-      summary: {
-        text: summaryText,
-        evidence,
-        recommendedAction,
-        source: 'deterministic',
-      },
-    };
+      companyId: found.companyId,
+      excludeCaseId: caseId,
+      caseIdForResponse: found.id,
+    });
+  },
+
+  /**
+   * Account-based Customer Pulse — yeni vaka açma formundan kullanılır.
+   * Vaka henüz oluşmadığı için caseId yok; sadece accountId + companyId yeter.
+   *
+   * Cross-tenant: companyId allowedCompanyIds'de olmalı + account'in companyId'si
+   * (varsa — Account.companyId null olabilir, shared kayıt) sorgulanan companyId
+   * ile uyumlu olmalı.
+   */
+  async getCustomerPulseByAccount(accountId, companyId, allowedCompanyIds) {
+    if (!accountId || !companyId) return null;
+    if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+      throw new CaseAccessError();
+    }
+    // Account doğrula — yoksa 404 (cross-tenant null guard değildir; Account
+    // companyId null shared olabiliyor).
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: { id: true, name: true, companyId: true },
+    });
+    if (!account) return null;
+    // Account.companyId null = shared (tüm şirketler kullanır). Doluysa
+    // sorgulanan companyId ile uyumlu olmalı.
+    if (account.companyId && account.companyId !== companyId) {
+      throw new CaseAccessError();
+    }
+    return computeCustomerPulse({
+      accountId,
+      accountName: account.name,
+      companyId,
+      excludeCaseId: null,
+      caseIdForResponse: null,
+    });
   },
 };
+
+/**
+ * Customer Pulse computation — shared between case-based (CaseDetailPage) ve
+ * account-based (NewCaseForm) endpoint'ler. accountId + companyId aynı,
+ * sadece excludeCaseId (mevcut vakayı recentCases'ten dışla) ve
+ * caseIdForResponse (response payload'undaki caseId alanı) farklılaşır.
+ */
+async function computeCustomerPulse({
+  accountId,
+  accountName,
+  companyId,
+  excludeCaseId,
+  caseIdForResponse,
+}) {
+  const rows = await prisma.case.findMany({
+    where: {
+      accountId,
+      companyId,
+      // Tüm vakalar — açık + kapalı — repeat issue ve geçmiş sayımı için.
+      // 90 günden eski olanları sayım dışı bırakmak için createdAt filtre ile
+      // birlikte değil; metrikleri içeride zaman damgasına göre türetiyoruz.
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 200, // Çok eski müşterilerde de bound — son 200 vakaya bakarız.
+    select: {
+      id: true,
+      caseNumber: true,
+      title: true,
+      status: true,
+      priority: true,
+      category: true,
+      subCategory: true,
+      createdAt: true,
+      resolvedAt: true,
+      slaViolation: true,
+      escalationLevel: true,
+    },
+  });
+
+  const OPEN_STATUSES = new Set(['Acik', 'Incelemede', 'ThirdPartyWaiting', 'Eskalasyon', 'YenidenAcildi']);
+  const now = Date.now();
+  const ms30 = 30 * 24 * 3600 * 1000;
+  const ms60 = 60 * 24 * 3600 * 1000;
+  const ms90 = 90 * 24 * 3600 * 1000;
+
+  let openCases = 0;
+  let recent30d = 0;
+  let recent60d = 0;
+  let recent90d = 0;
+  let slaViolations = 0;
+  let criticalCases = 0;
+  let escalatedCases = 0;
+  const categoryCount = new Map();
+
+  for (const r of rows) {
+    const ageMs = now - new Date(r.createdAt).getTime();
+    if (OPEN_STATUSES.has(r.status)) openCases++;
+    if (ageMs <= ms30) recent30d++;
+    if (ageMs <= ms60) recent60d++;
+    if (ageMs <= ms90) recent90d++;
+    if (r.slaViolation) slaViolations++;
+    if (r.priority === 'Critical') criticalCases++;
+    if (r.escalationLevel && r.escalationLevel !== 'Yok') escalatedCases++;
+    else if (r.status === 'Eskalasyon') escalatedCases++;
+
+    // Repeated issues: yalnız son 90 gün — eski örüntüler bilgisel değil.
+    if (ageMs <= ms90) {
+      const key = r.subCategory ? `${r.category}::${r.subCategory}` : r.category;
+      categoryCount.set(key, (categoryCount.get(key) ?? 0) + 1);
+    }
+  }
+
+  const repeatedIssues = [...categoryCount.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([key, count]) => {
+      const [category, subCategory] = key.split('::');
+      return { category: fromDb({ category }).category ?? category, subCategory, count };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  // Son 5 vaka — UI'da hızlı geçmiş için (current case dahil değil — case-based
+  // çağrıda mevcut vaka filtrelenir; account-based'de excludeCaseId null = filter yok)
+  const recentCases = rows
+    .filter((r) => !excludeCaseId || r.id !== excludeCaseId)
+    .slice(0, 5)
+    .map((r) => ({
+      id: r.id,
+      caseNumber: r.caseNumber,
+      title: r.title,
+      status: fromDb({ status: r.status }).status,
+      priority: r.priority,
+      category: fromDb({ category: r.category }).category ?? r.category,
+      subCategory: fromDb({ subCategory: r.subCategory }).subCategory ?? r.subCategory,
+      createdAt: r.createdAt,
+      slaViolation: r.slaViolation,
+    }));
+
+  // State logic — roadmap spec'iyle birebir
+  let state = 'Stable';
+  if (
+    openCases >= 3 ||
+    criticalCases > 0 ||
+    slaViolations >= 2 ||
+    (escalatedCases > 0 && openCases > 0)
+  ) {
+    state = 'Critical';
+  } else if (
+    openCases >= 2 ||
+    recent30d >= 3 ||
+    slaViolations > 0 ||
+    repeatedIssues.length >= 3
+  ) {
+    state = 'Risky';
+  } else if (recent90d >= 2 || repeatedIssues.length >= 2) {
+    state = 'Watch';
+  }
+
+  // Deterministic summary + evidence + recommendation
+  const evidence = [];
+  if (openCases > 0) evidence.push(`${openCases} açık vaka`);
+  if (slaViolations > 0) evidence.push(`${slaViolations} SLA ihlali`);
+  if (criticalCases > 0) evidence.push(`${criticalCases} kritik vaka`);
+  if (escalatedCases > 0) evidence.push(`${escalatedCases} eskalasyona giden vaka`);
+  if (recent30d >= 2) evidence.push(`Son 30 günde ${recent30d} vaka`);
+  if (recent90d >= 3 && recent30d < 2) evidence.push(`Son 90 günde ${recent90d} vaka`);
+  for (const r of repeatedIssues.slice(0, 2)) {
+    const label = r.subCategory ? `${r.category} / ${r.subCategory}` : r.category;
+    evidence.push(`Tekrar eden: ${label} (${r.count}×)`);
+  }
+
+  let summaryText;
+  let recommendedAction;
+  switch (state) {
+    case 'Critical':
+      summaryText = 'Bu müşteri yüksek riskli — yakın takip gerekli. Son dönemde açık veya çözülmemiş kritik/eskalasyon vakaları mevcut.';
+      recommendedAction = 'Supervisor görünürlüğünü aç, proaktif iletişim kur, mevcut açık vakaları öncelikli işlet.';
+      break;
+    case 'Risky':
+      summaryText = 'Müşteri dikkat gerektiriyor. Açık veya tekrar eden vakalar var, müşteri memnuniyeti riskli olabilir.';
+      recommendedAction = 'Açık vakaları gözden geçir, tekrar eden konuları araştır, müşteriyle proaktif iletişim planla.';
+      break;
+    case 'Watch':
+      summaryText = 'Müşterinin son dönemde birkaç vakası var. Şu an kritik değil ama örüntü gelişebilir.';
+      recommendedAction = 'Geçmiş vakaları kontrol et, benzer şikayetler tekrarlanıyorsa kök neden ara.';
+      break;
+    default:
+      summaryText = 'Müşteri stabil görünüyor. Son dönemde tekrar eden vaka veya SLA risk sinyali yok.';
+      recommendedAction = 'Standart akışla devam et — özel önlem gerekmez.';
+      break;
+  }
+  if (evidence.length === 0) evidence.push('Risk sinyali yok');
+
+  return {
+    accountId,
+    accountName,
+    caseId: caseIdForResponse,
+    state,
+    metrics: {
+      openCases,
+      recent30d,
+      recent60d,
+      recent90d,
+      slaViolations,
+      criticalCases,
+      escalatedCases,
+    },
+    repeatedIssues,
+    recentCases,
+    summary: {
+      text: summaryText,
+      evidence,
+      recommendedAction,
+      source: 'deterministic',
+    },
+  };
+}
 
 /**
  * Mention repository — user-centric mention sorguları (bell badge için).

@@ -164,7 +164,8 @@ Statu gecisi body:
 | GET | `/api/cases/by-account` | Musteriye ait vakalari listeler |
 | GET | `/api/cases/snoozed` | Aktif kullanicinin erteledigi vakalar |
 | GET | `/api/cases/watching` | Kullanicinin izlemekte oldugu vakalar (Watcher Inbox) |
-| GET | `/api/cases/:id/customer-pulse` | Musteri durumu (Customer Context Intelligence) |
+| GET | `/api/cases/:id/customer-pulse` | Musteri durumu (Customer Context Intelligence) — case-based |
+| GET | `/api/cases/accounts/:accountId/customer-pulse?companyId=...` | Musteri durumu — account-based, yeni vaka akisi icin (caseId yok, deterministic only) |
 | POST | `/api/cases/:id/action-summary` | AI ile paydaslara gonderilebilecek "Durum Raporu" uretir |
 | GET | `/api/cases/:id/watchers` | Vakanin izleyicileri (FAZ 2 Collab) |
 | POST | `/api/cases/:id/watchers` | Izleyici ekle. Body: `{ userId }` |
