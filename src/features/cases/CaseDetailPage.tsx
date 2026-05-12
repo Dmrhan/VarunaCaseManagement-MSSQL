@@ -1316,11 +1316,14 @@ function CustomerPulsePanel({ caseId }: { caseId: string }) {
   const [pulse, setPulse] = useState<import('./types').CustomerPulse | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
+  // AI upgrade fail oldugunda kullaniciyi haberdar et (Smoke Audit P2.5).
+  const [aiFailed, setAiFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setErrored(false);
+    setAiFailed(false);
     setPulse(null);
     void caseService
       .getCustomerPulse(caseId)
@@ -1355,8 +1358,10 @@ function CustomerPulsePanel({ caseId }: { caseId: string }) {
               source: 'ai',
             },
           });
+        } else {
+          // AI fail — deterministic kalir; kullaniciya "standart ozet" bilgisi ver.
+          setAiFailed(true);
         }
-        // AI başarısızsa deterministic kalır — sessiz fallback.
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -1467,6 +1472,12 @@ function CustomerPulsePanel({ caseId }: { caseId: string }) {
           <div className="flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400">
             <Sparkles size={10} />
             RUNA AI özet
+          </div>
+        )}
+        {pulse.summary.source !== 'ai' && aiFailed && (
+          <div className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+            <ShieldAlert size={10} />
+            Standart özet (AI önerisi alınamadı)
           </div>
         )}
       </div>
@@ -1937,8 +1948,9 @@ function LinksTab({
             Analiz ediliyor…
           </div>
         ) : aiErrored ? (
-          <p className="mt-2 text-xs text-violet-700 dark:text-violet-300">
-            Öneri üretilemedi. Manuel "Vaka Bağla" ile ekleyebilirsiniz.
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <ShieldAlert size={12} />
+            AI önerisi alınamadı. Manuel "Vaka Bağla" ile ekleyebilirsiniz.
           </p>
         ) : suggestions.length === 0 ? (
           <p className="mt-2 text-xs text-violet-700 dark:text-violet-300">
