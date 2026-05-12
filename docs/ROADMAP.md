@@ -19,22 +19,15 @@ ekleniyor demektir.
 ## Customer Context Intelligence
 
 **Priority:** High
-**Status:** Partially Shipped (Case Detail) — New Case Flow deferred
+**Status:** Shipped (Case Detail + New Case Flow)
 **Source:** General Manager feedback (Mayıs 2026 sunumu)
 
 **Shipped phases:**
 - Phase 1 — Backend deterministic endpoint: `GET /api/cases/:id/customer-pulse`
 - Phase 2 — Frontend service: `caseService.getCustomerPulse(caseId)`
 - Phase 3 — UI panel: "Müşteri Durumu" inside `LeftPanel` of `CaseDetailPage` (self-fetching, non-blocking)
-- Phase 5 — AI summary upgrade: `POST /api/ai/customer-pulse-summary` (numeric/categorical only, no raw notes; silent fallback to deterministic on failure)
-
-**Deferred:**
-- Phase 4 — New case flow integration. New case form's AI panel already has a
-  "Müşteri Geçmişi" card (open count + last case). A full Customer Pulse panel
-  there would need a 2nd account-based endpoint (`GET /api/accounts/:id/customer-pulse?companyId=...`)
-  and duplicate UI; deferred to avoid an awkward partial integration. To enable
-  later: add account-based variant of `getCustomerPulse` + reuse the same
-  panel component with pre-fetched data prop.
+- Phase 4 — New case flow integration: `GET /api/cases/accounts/:accountId/customer-pulse?companyId=...` + shared `CustomerPulsePanel` component (account/case discriminated union); replaces the old "Müşteri Geçmişi" mini-card.
+- Phase 5 — AI summary upgrade: `POST /api/ai/customer-pulse-summary` (case-based only; account variant deterministic-only since AI route is caseId-bound).
 
 ### Goal
 
@@ -58,7 +51,7 @@ the customer's broader state:
 ### Proposed UX
 
 Add a compact **"Customer Pulse"** panel to the case detail screen and
-optionally to the new case flow after account selection.
+to the new case flow after company + account selection.
 
 Example panel content:
 
@@ -102,8 +95,8 @@ Example AI summary:
 
 - Reuse existing account-based case lookup where possible
   (`caseService.findByAccount`, `caseRepository.findByAccount`).
-- Add a backend endpoint only if needed — e.g. `GET /api/accounts/:id/customer-pulse`
-  or `GET /api/cases/:id/customer-pulse`.
+- Case detail uses `GET /api/cases/:id/customer-pulse`.
+- New case flow uses `GET /api/cases/accounts/:accountId/customer-pulse?companyId=...`.
 - Tenant scope must be respected through `allowedCompanyIds`.
 - The feature should not block the case workflow if AI fails.
 - If AI is unavailable, show **deterministic metrics only** (counts,
@@ -116,20 +109,23 @@ Example AI summary:
 
 ### Acceptance criteria
 
-- [ ] Agent can see customer open case count from the case detail screen
-- [ ] Agent can see recent historical case context for the selected account
-- [ ] System identifies repeated issue categories when present
-- [ ] System shows SLA/churn/escalation risk signals when present
-- [ ] AI summary includes **evidence**, not only a vague score
-- [ ] AI failure does not break the case detail screen
-- [ ] Customer Pulse respects multi-tenant access control
-- [ ] Feature is documented in roadmap/product spec before implementation
+- [x] Agent can see customer open case count from the case detail screen
+- [x] Agent can see recent historical case context for the selected account
+- [x] Agent can see customer context in the new case flow after company + account selection
+- [x] System identifies repeated issue categories when present
+- [x] System shows SLA/churn/escalation risk signals when present
+- [x] AI summary includes **evidence**, not only a vague score
+- [x] AI failure does not break the case detail screen
+- [x] Customer Pulse respects multi-tenant access control
+- [x] Feature is documented in roadmap/product spec before implementation
 
 ### Notes
 
-Implementation has **not** started. This item must be reviewed and moved
-to **Planned** before any work begins. When shipped, the spec moves into
-PRODUCT_SPEC.md and the entry here is removed.
+Case Detail and New Case Flow implementations are shipped. The case detail
+panel can upgrade deterministic metrics with AI; the new case flow currently
+uses deterministic account-level pulse data so case creation remains fast and
+non-blocking. Next documentation step: move the shipped behavior into
+PRODUCT_SPEC.md, then keep only future enhancements in this roadmap.
 
 ---
 

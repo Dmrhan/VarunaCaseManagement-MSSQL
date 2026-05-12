@@ -302,6 +302,32 @@ router.get(
   }),
 );
 
+/**
+ * GET /api/cases/accounts/:accountId/customer-pulse?companyId=...
+ * Yeni vaka açma akışı için — vaka henüz oluşmadığı için account-based.
+ * Cross-tenant: companyId allowedCompanyIds'de olmalı; Account.companyId
+ * (varsa) sorgulanan companyId ile uyumlu olmalı (null = shared, ok).
+ *
+ * Response payload `caseId: null` (vaka yok). AI upgrade istemcide yapılmaz
+ * (caseId bağımlı log); deterministic ile döner.
+ */
+router.get(
+  '/accounts/:accountId/customer-pulse',
+  asyncRoute(async (req, res) => {
+    const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : null;
+    if (!companyId) {
+      return res.status(400).json({ error: 'companyId zorunlu (query param).' });
+    }
+    const pulse = await caseRepository.getCustomerPulseByAccount(
+      req.params.accountId,
+      companyId,
+      req.user.allowedCompanyIds,
+    );
+    if (!pulse) return res.status(404).json({ error: 'Müşteri bulunamadı' });
+    res.json(pulse);
+  }),
+);
+
 // ─────────────────────────────────────────────────────────────────
 // FAZ 2 Collab — Watcher (izleyici) endpoints
 // ─────────────────────────────────────────────────────────────────
