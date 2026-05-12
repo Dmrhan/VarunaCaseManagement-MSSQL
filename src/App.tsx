@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BrainCircuit,
   Calendar,
+  Eye,
   Home,
   Inbox,
   Keyboard,
@@ -22,6 +23,7 @@ import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
 import { MyCalendarPage } from './features/my/MyCalendarPage';
 import { MyHomePage } from './features/my/MyHomePage';
+import { WatcherInboxPage } from './features/my/WatcherInboxPage';
 import { analyticsService } from './services/analyticsService';
 import { myService } from './services/myService';
 import { CustomerCardModal } from './features/customers/CustomerCardModal';
@@ -44,7 +46,7 @@ import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSource
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'case-detail' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'case-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -396,6 +398,24 @@ export default function App() {
                     </>
                   )}
                 </button>
+
+                {/* İzleyici Inbox — FAZ 2 Collab + Smoke Audit Phase 5c.
+                    Tüm rollere açık (sadece kullanıcının kendi izlediği vakalar). */}
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('watching')}
+                  className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                  } ${
+                    view === 'watching'
+                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                  }`}
+                  title="İzleyici Inbox"
+                >
+                  <Eye size={16} />
+                  {sidebarExpanded && <span className="flex-1 text-left">İzleyici Inbox</span>}
+                </button>
               </>
             )}
 
@@ -527,6 +547,7 @@ export default function App() {
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
+          {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}

@@ -145,11 +145,10 @@ Hiçbir notification e-posta tetiklemez. Faz 2 §6 kapsamında WebSocket /
 30sn poll modeline geçildiğinde e-posta opsiyonel kanal olarak eklenebilir.
 
 ### Watcher Inbox UI
-**Status:** API mevcut, sayfa yok
-`GET /api/cases/watching` (kullanıcının izlediği vakalar) ve
-`GET /api/cases/me/notifications/unread` mevcut. Kullanıcı şu an watcher
-güncellemelerini yalnız header bell drawer'dan görür. Dedicated "Inbox"
-sayfası planlandı ama uygulanmadı.
+**Status:** Shipped (Phase 5c)
+Yeni sayfa: sidebar > Çalışma Alanım > **İzleyici Inbox**. İzlenen
+vakalar (kart grid) + son okunmamış generic CaseNotification'lar (top 10)
++ statü/zaman filtreleri. Bell drawer hızlı erişim için kalır.
 
 ### CasesList link count indicator
 **Status:** Shipped (Phase 5b)
