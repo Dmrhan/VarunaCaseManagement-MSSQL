@@ -193,7 +193,7 @@ Vite static build -> dist/ -> Vercel CDN
 /api/* request -> rewrite -> api/index.js -> Express app -> server/routes/*
 ```
 
-Production checklist:
+### Environment Variables Checklist
 
 - `DATABASE_URL` Vercel env'de tanimli
 - `DIRECT_URL` Vercel env'de tanimli
@@ -205,8 +205,65 @@ Production checklist:
 - `OPENAI_API_KEY` AI ozellikleri gerekiyorsa tanimli
 - Supabase Auth redirect/origin ayarlari production domain'i iceriyor
 - Supabase Storage bucket ve policy ayarlari upload/download akisina uygun
-- Migration deploy production DB'ye uygulanmis
-- Production uzerinde `db:seed` veya `db:seed:auth` calistirilmamis
+
+### Production Deploy Checklist
+
+Schema degisikligi (yeni migration) iceren PR'lar icin uygulama siralamasi
+asagidaki gibidir. `npm run build` icinde **otomatik migrate calistirilmaz**:
+bunun nedeni preview/local build'lerin yanlislikla production DB'ye DDL
+yazmasini engellemek + build failure'larinda schema-deployment drift'ini
+onlemektir (bkz. "Migration neden build'e gomulmedi" bolumu).
+
+1. **Deploy / app build** — Vercel `npm run build` (`tsc -b && vite build`).
+   Build yesilse Vercel yeni deployment'i hazirlar.
+2. **Production DB'ye migration uygula** — yeni migration varsa local'den
+   (veya CI release adimindan) production `DATABASE_URL`/`DIRECT_URL`
+   ile:
+
+   ```bash
+   npm run db:migrate:deploy
+   ```
+
+   `prisma migrate deploy` idempotent + non-destructive — sadece pending
+   migration'lari uygular. Yoksa sessiz cikar.
+
+3. **Health verify** — yeni deployment + schema canli:
+
+   ```bash
+   curl https://<prod-domain>/api/health/deep
+   ```
+
+   `{"status":"ok","db":"reachable"}` dondugunden emin ol.
+
+4. **Smoke test** — yeni feature endpoint'lerine kisa bir istek at:
+
+   ```bash
+   curl -H "Authorization: Bearer <token>" \
+        https://<prod-domain>/api/cases/<id>/watchers
+   ```
+
+   Eski deployment hala servis ediyorsa migration tablosu/sutunu eksik
+   olabilir (rollback gerekebilir).
+
+5. **Production uzerinde `db:seed` veya `db:seed:auth` calistirma** — bu
+   komutlar yalniz local/demo ortamlari icindir (bkz. AI_WORKFLOW Seed
+   Safety bolumu).
+
+### Migration neden build'e gomulmedi
+
+`prisma migrate deploy` `npm run build` icine konursa:
+
+- **Preview build'leri** ayni `DATABASE_URL`'i kullanir ve production DB'ye
+  DDL yazabilir. Preview, deploy edilmeden silinen "throwaway" bir
+  ortamdir; ona ait olmayan bir migration prod schema'sini mutate eder.
+- **Build failure** durumunda schema mutate edilmis ama uygulama henuz
+  promote edilmemis kalir. Backward-incompatible migration'larda eski
+  deployment yeni schema ile bozulur.
+- **Local `npm run build`** yanlislikla prod migration calistirabilir.
+
+Bu nedenle migration `db:migrate:deploy` ayri script olarak tutulur ve
+release surecinin **build'i takip eden** bilincli bir adimi olarak
+calistirilir.
 
 ## Health Checks
 
