@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { runPatternDetect } from '../cron/patternDetect.js';
 import { runQaScoreBatch, runScoreCase } from '../cron/qaScoreBatch.js';
+import { runNotificationCleanup } from '../cron/notificationCleanup.js';
 
 /**
  * /api/cron/* — uzaktan tetiklenen periyodik işler.
@@ -54,6 +55,22 @@ router.post('/qa-score-batch', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[cron:qa-score-batch]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * Notification retention cleanup — readAt NOT NULL + 30g+ satirlari siler.
+ * Okunmamis bildirimleri korur. Onerilen periyot: gunluk.
+ */
+router.post('/notification-cleanup', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const result = await runNotificationCleanup();
+    if (!result.ok) return res.status(500).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:notification-cleanup]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

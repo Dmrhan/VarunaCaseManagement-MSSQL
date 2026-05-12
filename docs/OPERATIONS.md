@@ -351,6 +351,24 @@ Body:
 
 Manuel test ve debug icin kullanilir.
 
+### Notification Cleanup
+
+```txt
+POST /api/cron/notification-cleanup
+```
+
+`readAt NOT NULL` ve **30 gunden eski** `CaseNotification` satirlarini siler.
+Okunmamis bildirimler (`readAt = null`) korunur. Idempotent.
+
+Response:
+
+```json
+{ "ok": true, "deleted": 42, "cutoff": "2026-04-12T00:00:00.000Z" }
+```
+
+Onerilen periyot: **gunluk** (orn. 02:30 UTC, qa-score-batch'ten sonra).
+GitHub Actions / Vercel Cron / UptimeRobot ile tetiklenebilir.
+
 ## Cron Testleri
 
 Local scriptler:

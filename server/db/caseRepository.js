@@ -53,6 +53,10 @@ const CASE_INCLUDE = {
   attachments:  { orderBy: { uploadedAt: 'desc' } },
   history:      { orderBy: { at: 'desc' } },
   callLogs:     { orderBy: { callDate: 'desc' } },
+  // Liste/Detay her ikisi icin de "kac baglanti var" sinyali. outgoingLinks
+  // sayisi: Related/Parent A->B yonu + Duplicate symmetric'in A->B satiri.
+  // Detay sayfasi tam listeyi LinksTab'de gosterir; bu yalniz chip icin.
+  _count: { select: { outgoingLinks: true } },
 };
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
@@ -66,12 +70,14 @@ export const NOTE_REACTION_EMOJIS = ['thumbs_up', 'eyes', 'check', 'important', 
 //  - callLog'lardaki enum'ları da TR'ye çevir
 function shape(c) {
   if (!c) return null;
-  const { attachments, callLogs, ...rest } = c;
+  const { attachments, callLogs, _count, ...rest } = c;
   const baseShape = fromDb(rest);
   return {
     ...baseShape,
     files: attachments ?? [],
     callLogs: (callLogs ?? []).map((cl) => fromDb(cl)),
+    // _count.outgoingLinks → linkCount (frontend için tek flat number).
+    linkCount: _count?.outgoingLinks ?? 0,
   };
 }
 

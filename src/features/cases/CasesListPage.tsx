@@ -14,6 +14,7 @@ import {
   Filter,
   Flag,
   Inbox,
+  Link as LinkIcon,
   Plus,
   RotateCw,
   Search,
@@ -1104,8 +1105,19 @@ export function CasesListPage({
                     </Td>
                     <Td className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{c.caseNumber}</Td>
                     <Td className="max-w-[360px]">
-                      <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
-                        {c.title}
+                      <div className="flex items-center gap-1.5">
+                        <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
+                          {c.title}
+                        </div>
+                        {(c.linkCount ?? 0) > 0 && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900/40"
+                            title={`${c.linkCount} bağlantılı vaka`}
+                          >
+                            <LinkIcon size={9} />
+                            {c.linkCount}
+                          </span>
+                        )}
                       </div>
                       <button
                         type="button"
