@@ -551,8 +551,8 @@ export function CasesListPage({
       )}
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Vakalar</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-ndark-text">Vakalar</h1>
+          <p className="mt-0.5 text-sm text-slate-500 dark:text-ndark-muted">
             Müşteri talep, şikayet ve olaylarını tek listeden yönetin.
           </p>
         </div>
