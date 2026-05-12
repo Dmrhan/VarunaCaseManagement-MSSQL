@@ -826,6 +826,69 @@ export const caseService = {
   },
 
   /**
+   * Bir notun thread reply'larini getirir. Thread acildiginda lazy fetch.
+   * createdAt ASC siralidir.
+   */
+  async listReplies(caseId: string, noteId: string): Promise<CaseNote[]> {
+    if (USE_MOCK) {
+      await delay(50);
+      const c = store.find((c) => c.id === caseId);
+      if (!c) return [];
+      return clone(c.notes.filter((n) => n.parentNoteId === noteId));
+    }
+    const res = await apiFetch<{ value: CaseNote[] }>(
+      `${API_BASE}/${caseId}/notes/${noteId}/replies`,
+      { method: 'GET' },
+      'Yanitlar yuklenemedi',
+    );
+    return res?.value ?? [];
+  },
+
+  /**
+   * Bir nota yanit ekle (max 1 derinlik). Backend `replyCount`'i increment eder,
+   * watcher bildirimi + CaseActivity yazar.
+   */
+  async addReply(
+    caseId: string,
+    noteId: string,
+    reply: { content: string; visibility: NoteVisibility; authorName: string },
+  ): Promise<CaseNote | undefined> {
+    if (USE_MOCK) {
+      await delay(80);
+      const idx = store.findIndex((c) => c.id === caseId);
+      if (idx < 0) return undefined;
+      const newReply: CaseNote = {
+        id: uid('NOTE'),
+        caseId,
+        authorName: reply.authorName,
+        content: reply.content,
+        visibility: reply.visibility,
+        parentNoteId: noteId,
+        replyCount: 0,
+        createdAt: nowIso(),
+      };
+      const updatedNotes = store[idx].notes.map((n) =>
+        n.id === noteId ? { ...n, replyCount: (n.replyCount ?? 0) + 1 } : n,
+      );
+      store[idx] = {
+        ...store[idx],
+        notes: [...updatedNotes, newReply],
+        updatedAt: nowIso(),
+      };
+      return clone(newReply);
+    }
+    return apiFetch<CaseNote>(
+      `${API_BASE}/${caseId}/notes/${noteId}/reply`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reply),
+      },
+      'Yanit eklenemedi',
+    );
+  },
+
+  /**
    * Vakaya dosya ekler. 3 adımlı orchestration:
    *  1. BFF'den signed upload URL al
    *  2. Doğrudan Supabase Storage'a PUT (Vercel 4.5MB body limitini bypass)

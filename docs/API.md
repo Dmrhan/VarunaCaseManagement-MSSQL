@@ -336,7 +336,9 @@ Not: Kapatma statuleri toplu guncellemede engellenir. Cross-tenant case ID denen
 
 | Method | Path | Aciklama |
 | --- | --- | --- |
-| POST | `/api/cases/:id/notes` | Vakaya not ekler |
+| POST | `/api/cases/:id/notes` | Vakaya not ekler. Case detayindaki notes alani sadece top-level (parentNoteId=NULL) notlari dondurur; her not `replyCount` icerir |
+| GET | `/api/cases/:id/notes/:noteId/replies` | Bir notun thread reply'larini lazy fetch eder (createdAt ASC) |
+| POST | `/api/cases/:id/notes/:noteId/reply` | Bir nota yanit ekle. Body: `{ content, isInternal? }`. Max 1 derinlik (yanita yanit yok), @mention destegi |
 | GET | `/api/cases/:id/mentionable-users` | Mention dropdown adaylarini dondurur |
 | POST | `/api/cases/:id/mentions/seen` | Vaka icindeki aktif kullanici mentionlarini goruldu yapar |
 | GET | `/api/cases/me/mentions/unread` | Aktif kullanicinin okunmamis mentionlarini listeler |

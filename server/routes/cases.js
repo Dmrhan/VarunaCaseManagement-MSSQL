@@ -544,6 +544,43 @@ router.post(
 );
 
 /**
+ * GET /api/cases/:id/notes/:noteId/replies — bir notun thread reply'larını
+ * lazy fetch eder (kullanıcı thread'i açtığında çağrılır). createdAt ASC.
+ */
+router.get(
+  '/:id/notes/:noteId/replies',
+  asyncRoute(async (req, res) => {
+    const replies = await caseRepository.listReplies(
+      req.params.id,
+      req.params.noteId,
+      req.user.allowedCompanyIds,
+    );
+    if (replies === null) return res.status(404).json({ error: 'Not bulunamadı' });
+    res.json({ value: replies });
+  }),
+);
+
+/**
+ * POST /api/cases/:id/notes/:noteId/reply — bir nota yanıt ekle (max 1 derinlik).
+ * @[Name](userId) tag'leri parse edilir; CaseMention + watcher bildirimi tetiklenir.
+ */
+router.post(
+  '/:id/notes/:noteId/reply',
+  asyncRoute(async (req, res) => {
+    const reply = await caseRepository.addReply(
+      req.params.id,
+      req.params.noteId,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+      req.user.id,
+    );
+    if (!reply) return res.status(404).json({ error: 'Vaka veya not bulunamadı' });
+    if (reply.error) return res.status(400).json(reply);
+    res.status(201).json(reply);
+  }),
+);
+
+/**
  * GET /api/cases/:id/mentionable-users — @mention dropdown için aday liste.
  * Vakanın şirketine bağlı + Person'a bağlı aktif User'lar (cross-tenant izole).
  */
