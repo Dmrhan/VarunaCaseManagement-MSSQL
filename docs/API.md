@@ -343,6 +343,8 @@ Not: Kapatma statuleri toplu guncellemede engellenir. Cross-tenant case ID denen
 | GET | `/api/cases/:id/mentionable-users` | Mention dropdown adaylarini dondurur |
 | POST | `/api/cases/:id/mentions/seen` | Vaka icindeki aktif kullanici mentionlarini goruldu yapar |
 | GET | `/api/cases/me/mentions/unread` | Aktif kullanicinin okunmamis mentionlarini listeler |
+| GET | `/api/cases/me/notifications/unread` | Aktif kullanicinin okunmamis generic CaseNotification listesi (watcher_update, watcher_added, note_reaction, transfer). Bell drawer mention'larla birlestirip gosterir |
+| POST | `/api/cases/me/notifications/seen` | Drawer acildiginda gorunen notification'lari seen yapar. Body: `{ ids?: string[] }`. Bos array = tum okunmamislar |
 
 Not body:
 

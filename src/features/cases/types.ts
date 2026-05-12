@@ -637,6 +637,28 @@ export interface UnreadMention {
   };
 }
 
+/**
+ * Generic CaseNotification — watcher_update, watcher_added, note_reaction,
+ * vs. Bell drawer'da mention'larla birleşik gösterilir.
+ * payload.message UI'da görünen metindir; payload.kind UI ayrım ipucu.
+ */
+export interface UnreadNotification {
+  id: string;
+  caseId: string;
+  eventType: string;
+  payload: {
+    message?: string;
+    kind?: string;
+    [key: string]: unknown;
+  } | null;
+  sentAt: string;
+  case: {
+    caseNumber: string;
+    title: string;
+    accountName: string;
+  };
+}
+
 // Snooze sebepleri — backend enum identifier ile eşleşir (CaseDetail UI etiketler).
 export type SnoozeReason = 'CustomerWillCall' | 'WaitingThirdParty' | 'Reminder';
 

@@ -1130,6 +1130,15 @@ export const caseRepository = {
       return u;
     });
 
+    // Watcher bildirimi — transfer status/assignment/priority gibi izlenebilir
+    // bir değişiklik. (Smoke Audit P1.2)
+    await notifyWatchers({
+      caseId: id,
+      companyId,
+      message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
+      kind: 'transfer',
+    });
+
     // Race-safe: post-increment değerini DB'den oku — pre-computed
     // (c.transferCount + 1) eş zamanlı transfer'lerde supervisor uyarı
     // eşiğini atlatabilir.
@@ -1617,6 +1626,64 @@ export const mentionRepo = {
 };
 
 /**
+ * Notification repository — generic CaseNotification okuyucu.
+ * (Smoke Audit P0.1 — yazılıyordu, okunmuyordu.)
+ *
+ * Bell badge bu repo'dan beslenir; mention (CaseMention) ayrı kanal kalır
+ * (kendine has audit/read tracking var).
+ *
+ * eventType kapsamı: 'watcher_update', 'watcher_added', 'note_reaction', vs.
+ * Tüm yazıcılar payload'u { message, kind, ... } şeklinde verir.
+ */
+export const notificationRepo = {
+  async listUnreadForUser(userId, allowedCompanyIds) {
+    if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) {
+      return { items: [], total: 0 };
+    }
+    const items = await prisma.caseNotification.findMany({
+      where: {
+        recipient: userId,
+        readAt: null,
+        channel: 'InApp',
+        companyId: { in: allowedCompanyIds },
+      },
+      orderBy: { sentAt: 'desc' },
+      take: 50, // bell drawer için pratik üst sınır
+      select: {
+        id: true,
+        caseId: true,
+        eventType: true,
+        payload: true,
+        sentAt: true,
+        case: { select: { caseNumber: true, title: true, accountName: true } },
+      },
+    });
+    return { items, total: items.length };
+  },
+
+  /**
+   * Kullanıcının tüm in-app notification'larını seen yap.
+   * Body opsiyonel `ids` array'i ile sadece o id'leri seen yapılabilir
+   * (mention seen flow ile uyumlu).
+   */
+  async markAllAsSeen(userId, allowedCompanyIds, ids) {
+    if (!userId) return { updated: 0 };
+    const where = {
+      recipient: userId,
+      channel: 'InApp',
+      readAt: null,
+    };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    if (Array.isArray(ids) && ids.length > 0) where.id = { in: ids };
+    const result = await prisma.caseNotification.updateMany({
+      where,
+      data: { readAt: new Date() },
+    });
+    return { updated: result.count };
+  },
+};
+
+/**
  * notifyWatchers — bir vakaya watcher olarak eklenmiş tüm kullanıcılara
  * CaseNotification yazar (eventType='watcher_update', channel='InApp').
  *
@@ -1737,7 +1804,9 @@ export const watcherRepo = {
       },
     });
 
-    // CaseNotification — eklenen kullanıcıya "izleyici eklendi" bildirim
+    // CaseNotification — eklenen kullanıcıya "izleyici eklendi" bildirim.
+    // Payload shape diğer notification yazıcılarıyla aynı: { message, kind }.
+    // (Smoke Audit P2.2 — UI tek shape okuyabilsin.)
     await prisma.caseNotification.create({
       data: {
         caseId,
@@ -1747,6 +1816,7 @@ export const watcherRepo = {
         recipient: userId,
         payload: {
           message: `Sizi ${c?.caseNumber ?? caseId} vakasında izleyici olarak eklendi`,
+          kind: 'watcher_added',
           addedBy,
         },
       },
@@ -1929,33 +1999,39 @@ export const linkRepo = {
       }
     }
 
-    const created = await prisma.caseLink.create({
-      data: { caseId, linkedCaseId, linkType, companyId, createdBy },
-    });
-
-    // Symmetric: Duplicate her iki yönde de tutulur.
-    if (linkType === 'Duplicate') {
-      const reverseExists = await prisma.caseLink.findUnique({
-        where: {
-          caseId_linkedCaseId_linkType: {
-            caseId: linkedCaseId,
-            linkedCaseId: caseId,
-            linkType: 'Duplicate',
-          },
-        },
+    // Forward + reverse (Duplicate için) tek transaction içinde — reverse
+    // create fail ederse forward da rollback olur (orphan link kalmaz).
+    // Smoke Audit P2.1.
+    const created = await prisma.$transaction(async (tx) => {
+      const fwd = await tx.caseLink.create({
+        data: { caseId, linkedCaseId, linkType, companyId, createdBy },
       });
-      if (!reverseExists) {
-        await prisma.caseLink.create({
-          data: {
-            caseId: linkedCaseId,
-            linkedCaseId: caseId,
-            linkType: 'Duplicate',
-            companyId,
-            createdBy,
+
+      if (linkType === 'Duplicate') {
+        const reverseExists = await tx.caseLink.findUnique({
+          where: {
+            caseId_linkedCaseId_linkType: {
+              caseId: linkedCaseId,
+              linkedCaseId: caseId,
+              linkType: 'Duplicate',
+            },
           },
         });
+        if (!reverseExists) {
+          await tx.caseLink.create({
+            data: {
+              caseId: linkedCaseId,
+              linkedCaseId: caseId,
+              linkType: 'Duplicate',
+              companyId,
+              createdBy,
+            },
+          });
+        }
       }
-    }
+
+      return fwd;
+    });
 
     await prisma.caseActivity.create({
       data: {
