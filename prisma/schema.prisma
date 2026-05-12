@@ -140,6 +140,7 @@ enum CaseHistoryActionType {
   FieldUpdate
   ChecklistToggle
   NoteAdded
+  NoteReplyAdded
   CallLogAdded
   FileUploaded
   FileRemoved
@@ -670,18 +671,23 @@ model CaseActivity {
 }
 
 model CaseNote {
-  id         String         @id @default(cuid())
-  caseId     String
-  companyId  String
-  authorName String
-  content    String
-  visibility NoteVisibility @default(Internal)
-  createdAt  DateTime       @default(now())
+  id           String         @id @default(cuid())
+  caseId       String
+  companyId    String
+  authorName   String
+  content      String
+  visibility   NoteVisibility @default(Internal)
+  parentNoteId String?
+  replyCount   Int            @default(0)
+  createdAt    DateTime       @default(now())
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case    Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  parent  CaseNote?  @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: SetNull)
+  replies CaseNote[] @relation("NoteReplies")
 
   @@index([caseId])
   @@index([companyId])
+  @@index([parentNoteId])
 }
 
 model CaseAttachment {

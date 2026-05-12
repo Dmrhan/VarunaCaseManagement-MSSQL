@@ -38,8 +38,10 @@ const TR_DATETIME = new Intl.DateTimeFormat('tr-TR', {
 
 // Frontend Case shape'i tek bir SELECT'te hazırla — ilişkili tabloları include et
 // History desc: yeni en üstte (uzun yaşayan vakada scroll etmeden son durumu gör)
+// Notlar: top-level (parentNoteId IS NULL) çekilir; replies inline değil,
+// kullanıcı thread'i açtığında ayrı endpoint ile lazy load edilir.
 const CASE_INCLUDE = {
-  notes:        { orderBy: { createdAt: 'desc' } },
+  notes:        { where: { parentNoteId: null }, orderBy: { createdAt: 'desc' } },
   attachments:  { orderBy: { uploadedAt: 'desc' } },
   history:      { orderBy: { at: 'desc' } },
   callLogs:     { orderBy: { callDate: 'desc' } },
@@ -345,6 +347,146 @@ export const caseRepository = {
     });
 
     await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
+    return created;
+  },
+
+  /**
+   * Bir notun reply'larını döner (thread görünümü için lazy load).
+   * Auth: vaka scope + parent note aynı vakaya ait olmalı.
+   * Sıralama: createdAt ASC — kronolojik thread.
+   */
+  async listReplies(caseId, noteId, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const parent = await prisma.caseNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, caseId: true },
+    });
+    if (!parent || parent.caseId !== caseId) return null;
+
+    const replies = await prisma.caseNote.findMany({
+      where: { parentNoteId: noteId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return replies;
+  },
+
+  /**
+   * Bir nota reply ekle (max 1 derinlik — reply'a reply yok).
+   *
+   * Kurallar:
+   *  - Parent note aynı vakada olmalı.
+   *  - Parent'in parentNoteId NULL olmalı (zaten reply olana reply yok).
+   *  - @mention parse + cross-tenant kontrol (addNote ile aynı kalıp).
+   *  - parent.replyCount transactional artırılır.
+   *  - CaseActivity: NoteReplyAdded.
+   *  - Watcher bildirimleri tetiklenir.
+   */
+  async addReply(caseId, noteId, reply, allowedCompanyIds, mentionedBy) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const parent = await prisma.caseNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, caseId: true, parentNoteId: true, authorName: true },
+    });
+    if (!parent || parent.caseId !== caseId) return null;
+    if (parent.parentNoteId !== null) {
+      return { error: 'max_depth', message: 'Bir yanıta yanıt verilemez (max 1 derinlik).' };
+    }
+
+    const content = (reply.content ?? '').trim();
+    if (!content) {
+      return { error: 'empty', message: 'Yanıt boş olamaz.' };
+    }
+
+    // @[Name](userId) tag parse (addNote ile aynı kural)
+    const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+    const matches = [...content.matchAll(mentionRegex)];
+    const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
+
+    if (mentionedUserIds.length > 10) {
+      return { error: 'too_many_mentions', message: 'Bir yanıtta en fazla 10 kişi etiketlenebilir.' };
+    }
+
+    if (mentionedUserIds.length > 0) {
+      const valid = await prisma.user.findMany({
+        where: {
+          id: { in: mentionedUserIds },
+          isActive: true,
+          companies: { some: { companyId, isActive: true } },
+        },
+        select: { id: true },
+      });
+      const validIds = new Set(valid.map((v) => v.id));
+      const invalid = mentionedUserIds.filter((uid) => !validIds.has(uid));
+      if (invalid.length > 0) {
+        return {
+          error: 'invalid_mentions',
+          message: `Etiketlenen ${invalid.length} kullanıcı bu şirkette bulunamadı veya pasif.`,
+        };
+      }
+    }
+
+    // Transactional: reply create + parent.replyCount artır.
+    const created = await prisma.$transaction(async (tx) => {
+      const r = await tx.caseNote.create({
+        data: {
+          caseId,
+          companyId,
+          authorName: reply.authorName,
+          content,
+          visibility: reply.visibility,
+          parentNoteId: noteId,
+        },
+      });
+      await tx.caseNote.update({
+        where: { id: noteId },
+        data: { replyCount: { increment: 1 } },
+      });
+      return r;
+    });
+
+    // Mention satırları
+    if (mentionedUserIds.length > 0 && mentionedBy) {
+      await prisma.caseMention.createMany({
+        data: mentionedUserIds.map((uid) => ({
+          caseId,
+          noteId: created.id,
+          companyId,
+          mentionedUserId: uid,
+          mentionedBy,
+        })),
+      });
+    }
+
+    const cleanedPreview = content
+      .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
+      .slice(0, 200);
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: 'Nota yanıt eklendi',
+        actionType: 'NoteReplyAdded',
+        note: cleanedPreview,
+        actor: reply.authorName,
+      },
+    });
+
+    const noteCase = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true },
+    });
+    await notifyWatchers({
+      caseId,
+      companyId,
+      message: `${noteCase?.caseNumber ?? caseId} — ${parent.authorName}'in notuna yanıt: ${cleanedPreview.slice(0, 80)}`,
+      kind: 'note',
+    });
+
+    await prisma.case.update({ where: { id: caseId }, data: { updatedAt: new Date() } });
     return created;
   },
 
