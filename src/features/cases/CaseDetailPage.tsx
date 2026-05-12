@@ -14,6 +14,7 @@ import {
   Copy,
   Eye,
   HeartPulse,
+  CornerDownRight,
   Link as LinkIcon,
   Loader2,
   Plus,
@@ -86,6 +87,7 @@ import {
   type CaseFile,
   type CaseHistoryActionType,
   type CaseHistoryEntry,
+  type CaseNote,
   type EscalationLevel,
   type NoteVisibility,
 } from './types';
@@ -220,6 +222,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         duration: 2500,
       });
     }
+  }
+
+  // Reply eklendiginde parent note'un replyCount alanini increment et —
+  // case detail re-fetch etmeden badge guncellenir.
+  function handleReplyAdded(parentNoteId: string) {
+    if (!item) return;
+    setItem({
+      ...item,
+      notes: item.notes.map((n) =>
+        n.id === parentNoteId ? { ...n, replyCount: (n.replyCount ?? 0) + 1 } : n,
+      ),
+    });
   }
 
   function handleQuickActionAddNote() {
@@ -712,6 +726,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
                 onChangeText={setNoteText}
                 onChangeVisibility={setNoteVisibility}
                 onSubmit={handleAddNote}
+                onReplyAdded={handleReplyAdded}
                 inputRef={noteRef}
               />
             )}
@@ -3898,6 +3913,7 @@ function NotesTab({
   onChangeText,
   onChangeVisibility,
   onSubmit,
+  onReplyAdded,
   inputRef,
 }: {
   item: Case;
@@ -3906,6 +3922,7 @@ function NotesTab({
   onChangeText: (s: string) => void;
   onChangeVisibility: (v: NoteVisibility) => void;
   onSubmit: () => void;
+  onReplyAdded: (parentNoteId: string) => void;
   inputRef: React.RefObject<MentionTextareaHandle>;
 }) {
   const [voiceListening, setVoiceListening] = useState(false);
@@ -3991,52 +4008,306 @@ function NotesTab({
         </div>
       ) : (
         <ul className="flex flex-col gap-3">
-          {item.notes.map((n) => {
-            const isInternal = n.visibility === 'Internal';
-            const pill = isInternal
-              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
-            return (
-              <li
-                key={n.id}
-                className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-ndark-border dark:bg-ndark-card"
-              >
-                {/* Header */}
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <NoteAvatar name={n.authorName} size={40} />
-                  <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
-                      {n.authorName}
-                    </span>
-                    <span
-                      className={
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ' +
-                        pill
-                      }
-                    >
-                      {isInternal ? 'İç Not' : 'Müşteriye Görünür'}
-                    </span>
-                  </div>
-                  <span
-                    className="shrink-0 text-xs text-slate-400 dark:text-ndark-muted"
-                    title={formatDateTime(n.createdAt)}
-                  >
-                    {formatRelative(n.createdAt)}
-                  </span>
-                </div>
-
-                {/* Header / body ayırıcı + body */}
-                <div className="border-t border-slate-100 px-4 pt-3 pb-4 dark:border-ndark-border/60">
-                  <MentionContent
-                    content={n.content}
-                    className="text-sm leading-relaxed text-slate-700 dark:text-slate-300"
-                  />
-                </div>
-              </li>
-            );
-          })}
+          {item.notes.map((n) => (
+            <NoteCard
+              key={n.id}
+              caseId={item.id}
+              note={n}
+              currentName={currentName}
+              onReplyAdded={onReplyAdded}
+            />
+          ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * NoteCard — parent note + thread (yanıtlar) + reply composer.
+ * Yanıtlar lazy fetch edilir (kullanıcı "X yanıt" linkine bastığında).
+ */
+function NoteCard({
+  caseId,
+  note,
+  currentName,
+  onReplyAdded,
+}: {
+  caseId: string;
+  note: CaseNote;
+  currentName: string;
+  onReplyAdded: (parentNoteId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [replies, setReplies] = useState<CaseNote[] | null>(null);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const { toast } = useToast();
+
+  const isInternal = note.visibility === 'Internal';
+  const pill = isInternal
+    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+  const replyCount = note.replyCount ?? 0;
+
+  async function loadReplies() {
+    setLoadingReplies(true);
+    try {
+      const r = await caseService.listReplies(caseId, note.id);
+      setReplies(r);
+    } catch {
+      toast({ type: 'error', message: 'Yanıtlar yüklenemedi.' });
+    } finally {
+      setLoadingReplies(false);
+    }
+  }
+
+  function toggleThread() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && replies === null) {
+      void loadReplies();
+    }
+  }
+
+  async function handleSubmitReply(content: string, visibility: NoteVisibility) {
+    const created = await caseService.addReply(caseId, note.id, {
+      content,
+      visibility,
+      authorName: currentName,
+    });
+    if (!created) return false;
+    // Thread'i guncelle — yeni reply en sona eklenir (createdAt ASC)
+    setReplies((prev) => (prev ? [...prev, created] : [created]));
+    setExpanded(true);
+    setComposerOpen(false);
+    onReplyAdded(note.id);
+    toast({
+      type: 'success',
+      message: visibility === 'Internal' ? 'İç yanıt eklendi.' : 'Müşteriye görünür yanıt eklendi.',
+      duration: 2500,
+    });
+    return true;
+  }
+
+  return (
+    <li className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-ndark-border dark:bg-ndark-card">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <NoteAvatar name={note.authorName} size={40} />
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+            {note.authorName}
+          </span>
+          <span
+            className={
+              'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ' + pill
+            }
+          >
+            {isInternal ? 'İç Not' : 'Müşteriye Görünür'}
+          </span>
+        </div>
+        <span
+          className="shrink-0 text-xs text-slate-400 dark:text-ndark-muted"
+          title={formatDateTime(note.createdAt)}
+        >
+          {formatRelative(note.createdAt)}
+        </span>
+      </div>
+
+      {/* Body */}
+      <div className="border-t border-slate-100 px-4 pt-3 pb-3 dark:border-ndark-border/60">
+        <MentionContent
+          content={note.content}
+          className="text-sm leading-relaxed text-slate-700 dark:text-slate-300"
+        />
+
+        {/* Aksiyon satiri — Yanitla + thread aç/kapa */}
+        <div className="mt-3 flex items-center gap-3 text-xs">
+          <button
+            type="button"
+            onClick={() => setComposerOpen((v) => !v)}
+            className="inline-flex items-center gap-1 font-medium text-slate-500 transition hover:text-brand-600 dark:text-ndark-muted dark:hover:text-brand-400"
+          >
+            <CornerDownRight size={13} />
+            Yanıtla
+          </button>
+          {replyCount > 0 && (
+            <button
+              type="button"
+              onClick={toggleThread}
+              className="inline-flex items-center gap-1 font-medium text-brand-600 transition hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+            >
+              <MessageSquare size={13} />
+              {replyCount} yanıt {expanded ? '▴' : '▾'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Thread — açıldığında reply'lar */}
+      {expanded && (
+        <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-ndark-border/60 dark:bg-ndark-bg/40">
+          {loadingReplies && replies === null ? (
+            <div className="space-y-2">
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <Skeleton className="h-12 w-full rounded-lg" />
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {(replies ?? []).map((r) => (
+                <ReplyItem key={r.id} reply={r} parentAuthor={note.authorName} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Reply composer — inline */}
+      {composerOpen && (
+        <ReplyComposer
+          caseId={caseId}
+          parentAuthor={note.authorName}
+          parentVisibility={note.visibility}
+          currentName={currentName}
+          onCancel={() => setComposerOpen(false)}
+          onSubmit={handleSubmitReply}
+        />
+      )}
+    </li>
+  );
+}
+
+function ReplyItem({ reply, parentAuthor }: { reply: CaseNote; parentAuthor: string }) {
+  const isInternal = reply.visibility === 'Internal';
+  const pill = isInternal
+    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+  return (
+    <li className="rounded-lg border-l-2 border-brand-400 bg-white px-3 py-2 shadow-sm dark:border-brand-500 dark:bg-ndark-card">
+      <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-400 dark:text-ndark-muted">
+        <CornerDownRight size={11} />
+        <span className="font-medium text-slate-500 dark:text-ndark-muted">
+          {parentAuthor}
+        </span>
+        <span>'a yanıt</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <NoteAvatar name={reply.authorName} size={28} />
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-xs font-semibold text-slate-900 dark:text-ndark-text">
+            {reply.authorName}
+          </span>
+          <span
+            className={
+              'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ' + pill
+            }
+          >
+            {isInternal ? 'İç' : 'Müşteri'}
+          </span>
+        </div>
+        <span
+          className="shrink-0 text-[11px] text-slate-400 dark:text-ndark-muted"
+          title={formatDateTime(reply.createdAt)}
+        >
+          {formatRelative(reply.createdAt)}
+        </span>
+      </div>
+      <div className="mt-1.5 pl-9">
+        <MentionContent
+          content={reply.content}
+          className="text-[13px] leading-relaxed text-slate-700 dark:text-slate-300"
+        />
+      </div>
+    </li>
+  );
+}
+
+function ReplyComposer({
+  caseId,
+  parentAuthor,
+  parentVisibility,
+  currentName,
+  onCancel,
+  onSubmit,
+}: {
+  caseId: string;
+  parentAuthor: string;
+  parentVisibility: NoteVisibility;
+  currentName: string;
+  onCancel: () => void;
+  onSubmit: (content: string, visibility: NoteVisibility) => Promise<boolean>;
+}) {
+  const [text, setText] = useState('');
+  // Reply parent visibility'i miras alir; kullanici degistirebilir.
+  const [visibility, setVisibility] = useState<NoteVisibility>(parentVisibility);
+  const [busy, setBusy] = useState(false);
+  const composerRef = useRef<MentionTextareaHandle>(null);
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, []);
+  return (
+    <div className="border-t border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-ndark-border/60 dark:bg-ndark-bg/40">
+      <div className="flex items-start gap-2">
+        <NoteAvatar name={currentName} size={28} />
+        <div className="min-w-0 flex-1">
+          <MentionTextarea
+            ref={composerRef}
+            caseId={caseId}
+            value={text}
+            onChange={setText}
+            placeholder={`${parentAuthor}'a yanıt yazın — @ ile kişi etiketleyebilirsiniz…`}
+            rows={2}
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <div className="flex items-center gap-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setVisibility('Internal')}
+                className={
+                  'rounded-full px-2 py-0.5 font-medium transition ' +
+                  (visibility === 'Internal'
+                    ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-900/40'
+                    : 'text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card')
+                }
+              >
+                İç Not
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibility('Customer')}
+                className={
+                  'rounded-full px-2 py-0.5 font-medium transition ' +
+                  (visibility === 'Customer'
+                    ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-900/40'
+                    : 'text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card')
+                }
+              >
+                Müşteriye Görünür
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
+                İptal
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  if (!text.trim() || busy) return;
+                  setBusy(true);
+                  const ok = await onSubmit(text.trim(), visibility);
+                  if (ok) setText('');
+                  setBusy(false);
+                }}
+                disabled={!text.trim() || busy}
+                leftIcon={<Send size={13} />}
+              >
+                {busy ? 'Gönderiliyor…' : 'Yanıtla'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

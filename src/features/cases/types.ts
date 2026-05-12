@@ -150,6 +150,10 @@ export interface CaseNote {
   authorName: string;
   content: string;
   visibility: NoteVisibility;
+  /** Parent note id — null/undefined ise top-level. Reply ise parent.id. */
+  parentNoteId?: string | null;
+  /** Top-level notlar icin reply sayisi (denormalize). Reply'larda 0. */
+  replyCount?: number;
   createdAt: string;
 }
 
