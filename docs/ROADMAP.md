@@ -130,3 +130,50 @@ Example AI summary:
 Implementation has **not** started. This item must be reviewed and moved
 to **Planned** before any work begins. When shipped, the spec moves into
 PRODUCT_SPEC.md and the entry here is removed.
+
+---
+
+## Known Limitations (Faz 2 sonrası)
+
+Şu an üretimde olan ama eksikleri olan veya kısmi özellikler. Test eden
+ekibe `docs/TEST_SCENARIOS.md` ile birlikte verilir.
+
+### E-posta bildirimi
+**Status:** Not implemented
+Tüm `CaseNotification` satırları `channel='InApp'` olarak yazılır.
+Hiçbir notification e-posta tetiklemez. Faz 2 §6 kapsamında WebSocket /
+30sn poll modeline geçildiğinde e-posta opsiyonel kanal olarak eklenebilir.
+
+### Watcher Inbox UI
+**Status:** API mevcut, sayfa yok
+`GET /api/cases/watching` (kullanıcının izlediği vakalar) ve
+`GET /api/cases/me/notifications/unread` mevcut. Kullanıcı şu an watcher
+güncellemelerini yalnız header bell drawer'dan görür. Dedicated "Inbox"
+sayfası planlandı ama uygulanmadı.
+
+### CasesList link count indicator
+**Status:** Not implemented
+Vakalar listesinde "bu vaka 2 başka vakaya bağlı" gibi küçük chip yok.
+Kullanıcı detaya girip Bağlantılar sekmesinden görür.
+
+### CaseNotification retention / cleanup
+**Status:** Not implemented
+Append-only tablo; eski satırlar silinmiyor. Cron retention policy
+(örn. 30 gün+ okunmuşları sil) planlandı.
+
+### Eski notlara reaksiyon bildirimi
+**Status:** Partial — PR #68 sonrası yeni notlar etkilenir
+`CaseNote.authorId` PR #68 ile eklendi (nullable). Daha önce yazılmış
+notlar `authorId=NULL` taşır; reaksiyon eklenirse not sahibine bildirim
+üretilmez (sessiz `if` gate). Backfill cron'u Faz 5 backlog'unda.
+
+### OpenAI 401/429 simülasyonu
+**Status:** Static review only
+Prod'da gerçek API key rotate veya rate-limit testi yapılamaz. Phase 2
+audit fix'leri (PR #72) kod yolunda doğrulandı; canlıda davranış
+gözlemlenmedi.
+
+### Mobile responsive
+**Status:** General flow works, not mobile-first
+Telefon görüntü oranlarıyla temel akış kullanılabilir ama "mobile-first"
+tasarım hedefi değil. Modal/popover overflow durumları olabilir.
