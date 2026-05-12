@@ -27,6 +27,97 @@ Demo şifreleri `prisma/seedAuth.ts` ile set edilir (varsayılan: `demo1234`).
 
 ---
 
+## Senaryo Verisi (Scenario Seed)
+
+Aşağıdaki senaryoları kolayca test etmek için **idempotent** bir seed
+script eklendi:
+
+```bash
+npm run db:seed:scenarios
+```
+
+> ⚠️ **Yalnızca local/demo/sandbox** DB'de çalıştırın. Production'da **asla**
+> kullanmayın — gerçek müşteri verisi etkilenir.
+
+**Üretilen demo veriler** (stable ID + caseNumber — tekrar çalıştırıldığında
+çoğaltma yapmaz):
+
+### Şirketler ve domain'ler
+
+| Şirket | Domain | Tipik müşteriler |
+| --- | --- | --- |
+| **Univera** | Enterprise FMCG yazılım (Enroute, Quest, Stokbar) | FMCG distribütörleri, saha satış, soğuk zincir |
+| **Finrota** | SMB finans & üretkenlik (Netahsilat, Netekstre, Posrapor, E-DBS, NAP360, TOS) | Mali müşavirler, KOBİ finans/muhasebe, bayi tahsilat |
+| **PARAM** | Fintech / ödeme (Fiziki POS, Sanal POS, BKM) | Marketler, online mağazalar, restoran zincirleri |
+
+### Demo müşteriler
+
+**Univera** (DEMO-ACC-UNI-*): Akar Gıda Dağıtım A.Ş., Doğa Lojistik Saha Satış, Mavi Soğuk Zincir Ltd., Anadolu Distribütörler Birliği
+
+**Finrota** (DEMO-ACC-FIN-*): Kemal Mali Müşavirlik, Atlas Pazarlama Tic. Ltd., Yıldız Eczanesi, Doğu Otomotiv Bayi
+
+**PARAM** (DEMO-ACC-PAR-*): Sancaktepe Market Zinciri, GnG Online Mağaza, İstanbul Restoranlar Bayi Grubu, Anadolu Bankamatik Hizmetleri
+
+**Multi-tenant izolasyon testi** (DEMO-ACC-MT-*): "Multi-Tenant Test Müşterisi" — aynı isimle her 3 şirkette de mevcut; cross-tenant sızıntı testi için.
+
+### Demo vakalar — caseNumber'lar stable
+
+#### Univera
+
+| caseNumber | Başlık | Durum | Senaryo |
+| --- | --- | --- | --- |
+| `DEMO-UNI-001` | Enroute rota sahaya yansımıyor | Açık | **Watcher flow** — Supervisor Agent'ı izleyici yapar |
+| `DEMO-UNI-002` | Stokbar depo/mobil uyuşmazlığı | Eskalasyon + SLA ihlali | **Customer Pulse** (Kritik sinyal) |
+| `DEMO-UNI-003` | Quest ziyaret planı yüklenmiyor | Açık | **Note Reply + Reaction** (1 parent + 2 reply + 2 reaction) |
+| `DEMO-UNI-PARENT-001` | Ülke geneli FMCG rota kesintisi | İncelemede / Kritik | **Linked Parent** (2 child) |
+| `DEMO-UNI-CHILD-001` | Marmara bölgesi rota — child | Açık | Parent: DEMO-UNI-PARENT-001 |
+| `DEMO-UNI-CHILD-002` | Ege bölgesi rota gecikmesi — child | Açık | Parent: DEMO-UNI-PARENT-001 |
+
+#### Finrota
+
+| caseNumber | Başlık | Durum | Senaryo |
+| --- | --- | --- | --- |
+| `DEMO-FIN-001` | Netahsilat: bayi tahsilatı yansımıyor | Açık | **Reaction** + parent note + reply |
+| `DEMO-FIN-002` | Netekstre: banka hareketi eksik | Açık + SLA ihlali | **Customer Pulse** (Kemal Mali Müşavirlik geçmişi) |
+| `DEMO-FIN-003` | Posrapor: gün sonu mutabakat farkı | Çözüldü | Customer Pulse — resolved |
+| `DEMO-FIN-004` | E-DBS banka cevabı gecikti | 3rdPartyBekleniyor | Customer Pulse — 3rd party wait |
+| `DEMO-FIN-005` | NAP360 nakit akışı veri eksik | Kritik + Direktör eskalasyon | Customer Pulse — kritik vaka |
+
+#### PARAM
+
+| caseNumber | Başlık | Durum | Senaryo |
+| --- | --- | --- | --- |
+| `DEMO-PAR-001` | POS "Bilinmeyen Hata" | Açık | **Watcher** (Supervisor + CSM izliyor) |
+| `DEMO-PAR-002` | BKM gün sonu eksik işlem | Eskalasyon + Direktör | **AI Status Report** (zengin activity timeline: oluşturma → atama → öncelik → statü → not → 3rd party → eskalasyon → transfer) |
+| `DEMO-PAR-DUP-A` | Sanal POS settlement gecikmesi | Açık | **Linked Duplicate** (symmetric) |
+| `DEMO-PAR-DUP-B` | Sanal POS settlement — 2. başvuru | Açık | Linked Duplicate'ın diğer ucu |
+
+#### Multi-Tenant Izolasyon Testi
+
+| caseNumber | Şirket | accountId | Beklenti |
+| --- | --- | --- | --- |
+| `DEMO-MT-UNI` | UNIVERA | DEMO-ACC-MT-UNI | A şirketi kullanıcısı sadece kendi şirketinin vakasını görür |
+| `DEMO-MT-FIN` | FINROTA | DEMO-ACC-MT-FIN | Cross-tenant erişim 404 / 403 dönmeli |
+| `DEMO-MT-PAR` | PARAM | DEMO-ACC-MT-PAR | Aynı isim üç şirkette — UI'da karışmamalı |
+
+### Hızlı test akışları
+
+**Watcher + Notification**: Supervisor login → `DEMO-PAR-001` vaka detayı → CSM ve Supervisor watcher listesinde görünür → Agent login (varsa) → not eklendiğinde **bell badge** artar.
+
+**Linked Cases**: Supervisor login → `DEMO-UNI-PARENT-001` Bağlantılar sekmesinde 2 child görünür. `DEMO-PAR-DUP-A` Duplicate açar → `DEMO-PAR-DUP-B`'de de aynı bağlantı görünür (symmetric).
+
+**Note Reply + Reaction**: Agent login → `DEMO-UNI-003` Notlar sekmesinde 1 parent + 2 reply + 2 reaction; "X yanıt" linki açılır.
+
+**AI Status Report**: Supervisor login → `DEMO-PAR-002` Detay > "Durum Raporu Oluştur" → AI mail-ready rapor üretir (zengin timeline'dan).
+
+**Customer Pulse — Case Detail**: Agent login → `DEMO-FIN-002` Detay → sağda "Müşteri Durumu" Kemal Mali Müşavirlik için **Riskli/Kritik** badge + birkaç metric chip.
+
+**Customer Pulse — New Case Flow**: Agent login → "Yeni Vaka" → Şirket: FINROTA, Müşteri: Kemal Mali Müşavirlik → Aİ panelinde Customer Pulse otomatik gelir (deterministic).
+
+**Multi-Tenant Izolasyon**: PARAM-only Agent → `/cases/DEMO-MT-UNI` URL'i ile gitmeye çalış → 403/404. Bootstrap'ta product group dropdown başka şirket değeri göstermez.
+
+---
+
 ## 1. Vaka Yaşam Döngüsü (Smoke)
 
 **Persona:** Agent (`agent@varuna.dev`)

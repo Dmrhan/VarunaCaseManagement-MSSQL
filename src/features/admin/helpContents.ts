@@ -252,6 +252,28 @@ Admin       — Şirket içi yapılandırma (takım, kategori,
       warning:
         'Bir kullanıcıyı SystemAdmin yapmak için sistem rolünü değiştirmek gerekir; bu bilinçli olarak UI\'dan kapalı (yalnızca seedAuth.ts ya da DB\'den).',
     },
+    {
+      heading: 'Demo Personalar & Test Senaryoları',
+      content:
+        'Yalnız local/demo/sandbox kullanım için. `npm run db:seed:auth` 6 demo persona oluşturur (varsayılan şifre demo1234). `npm run db:seed:scenarios` Univera (FMCG), Finrota (SMB finans) ve PARAM (fintech) için zengin senaryo verisi ekler — watcher, linked cases, note reply/reaction, AI Status Report, Customer Pulse ve multi-tenant izolasyon testleri.',
+      example: `agent@varuna.dev       — PARAM Agent (frontline)
+supervisor@varuna.dev  — PARAM + UNIVERA Supervisor
+csm@varuna.dev         — PARAM CSM (müşteri temaslı)
+backoffice@varuna.dev  — PARAM Backoffice (çözüm)
+admin@varuna.dev       — Tüm şirketler Admin
+sysadmin@varuna.dev    — Platform SystemAdmin
+
+Senaryo vakaları (örnek):
+  DEMO-UNI-001  Enroute rota — Watcher
+  DEMO-UNI-003  Quest — Note reply + Reaction
+  DEMO-PAR-002  BKM — AI Status Report
+  DEMO-FIN-002  Netekstre — Customer Pulse
+  DEMO-MT-*     Multi-tenant izolasyon
+
+Detaylı rehber: docs/TEST_SCENARIOS.md`,
+      warning:
+        'Scenario seed yalnız demo/sandbox DB içindir. Production\'da ASLA çalıştırılmaz — gerçek müşteri verisi etkilenir. `npm run db:seed:scenarios` çalıştırmadan önce DATABASE_URL\'in prod olmadığını doğrulayın.',
+    },
   ],
 };
 
