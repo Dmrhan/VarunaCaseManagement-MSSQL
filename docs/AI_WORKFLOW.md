@@ -162,7 +162,9 @@ Agents should update:
 - `docs/OPERATIONS.md` when env vars, deploy, migration, cron,
   monitoring, storage, or AI operations change
 - `docs/ROADMAP.md` when roadmap status changes (Proposed -> Planned
-  -> In Progress -> Shipped)
+  -> In Progress -> Shipped) or when known limitations change
+- `docs/TEST_SCENARIOS.md` when a new feature ships that PMs/QA should
+  manually test (add a scenario with persona + steps + expected)
 - `docs/HANDOVER.md` when handover-relevant decisions change
 - `README.md` when local setup, commands, or doc links change
 

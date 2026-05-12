@@ -19,6 +19,8 @@ Proje artık yalnızca mock UI aşamasında değildir. Frontend, Express BFF üz
 - [API Dokümantasyonu](docs/API.md): BFF endpointleri, auth, yetki, request body örnekleri ve durum kodları
 - [Mimari Dokümantasyon](docs/ARCHITECTURE.md): Frontend, BFF, repository, Prisma, Supabase, AI, cron ve tenant mimarisi
 - [Operasyon Dokümantasyonu](docs/OPERATIONS.md): Local kurulum, environment, migration, deploy, cron, monitoring ve troubleshooting
+- [Test Senaryoları](docs/TEST_SCENARIOS.md): PM ve QA için manuel test senaryoları, persona'lar, bilinen kısıtlamalar
+- [Yol Haritası](docs/ROADMAP.md): Önerilen, planlanan ve aktif özellikler; bilinen kısıtlamalar
 
 ## Geliştirme
 
