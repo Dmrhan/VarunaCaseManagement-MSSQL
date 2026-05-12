@@ -675,6 +675,9 @@ model CaseNote {
   caseId       String
   companyId    String
   authorName   String
+  // authorId — User.id; reaksiyon/yanıt bildirimleri için gerekir.
+  // Nullable: eski notlarda boş, yeni eklenenlerde dolu.
+  authorId     String?
   content      String
   visibility   NoteVisibility @default(Internal)
   parentNoteId String?
