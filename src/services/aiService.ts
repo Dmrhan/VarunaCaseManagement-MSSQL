@@ -333,6 +333,10 @@ export const aiService = {
   async operationsReportDraft(input: OperationsBaseRequest) {
     return postJson<OperationsReportResponse>('/operations-report-draft', input);
   },
+
+  async operationsDrilldownAssist(input: DrilldownAssistRequest) {
+    return postJson<DrilldownAssistResponse>('/operations-drilldown-assist', input);
+  },
 };
 
 // ---- 8) Operations Intelligence — AI Analyst (Phase 4a) ----
@@ -444,6 +448,43 @@ export interface OperationsReportResponse {
     actions: string;
   };
   scope: OperationsAiScope;
+  generatedAt: string;
+  usageLogId: string | null;
+}
+
+// ---- 9) Operations Drill-down AI Assistant (Phase 4b) ----
+
+export type DrilldownAssistMode = 'summarize' | 'prioritize' | 'rootCause' | 'nextAction' | 'custom';
+
+export interface DrilldownAssistRequest extends OperationsBaseRequest {
+  bucket: OperationsInsightBucket;
+  mode: DrilldownAssistMode;
+  customPrompt?: string;
+}
+
+export interface DrilldownAssistEvidence {
+  label: string;
+  value: string;
+  caseNumbers: string[];
+  drilldown: OperationsInsightBucket | null;
+}
+
+export interface DrilldownAssistAnswer {
+  title: string;
+  summary: string;
+  bullets: string[];
+  risks: string[];
+  recommendedActions: string[];
+  evidence: DrilldownAssistEvidence[];
+}
+
+export interface DrilldownAssistResponse {
+  answer: DrilldownAssistAnswer;
+  scope: OperationsAiScope;
+  bucket: OperationsInsightBucket;
+  mode: DrilldownAssistMode;
+  rowCount: number;
+  total: number;
   generatedAt: string;
   usageLogId: string | null;
 }
