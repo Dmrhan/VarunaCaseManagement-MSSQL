@@ -61,6 +61,132 @@ export interface PatternAlert {
   dismissedAt: string | null;
 }
 
+// Operations Overview — POST /api/analytics/cases/overview (Phase 1 backend, Phase 2 UI)
+// Tek kaynak: docs/OPERATIONS_DASHBOARD_DESIGN.md §2.1 + §2.6
+export type OverviewGranularity = 'day' | 'hour';
+
+export interface OverviewRequest {
+  from: string;                // ISO UTC
+  to: string;                  // ISO UTC
+  companies?: string[];
+  teams?: string[];
+  productGroups?: string[];
+  caseTypes?: string[];
+  statuses?: string[];
+  granularity?: OverviewGranularity;
+}
+
+export interface OverviewDelta {
+  value: number | null;
+  direction: 'up' | 'down' | 'flat' | null;
+  sourceMissing: boolean;
+}
+
+export interface OverviewKpi {
+  key: string;
+  value: number | null;
+  delta: OverviewDelta;
+}
+
+export interface OverviewKpis {
+  totalCases: OverviewKpi;
+  openCases: OverviewKpi;
+  slaRiskCount: OverviewKpi;
+  createdInPeriod: OverviewKpi;
+  resolvedInPeriod: OverviewKpi;
+  slaViolationRatePct: OverviewKpi;
+  avgResolutionWallClockHours: OverviewKpi;
+  reopenRatePct: OverviewKpi;
+  escalationRatePct: OverviewKpi;
+  transferRatePct: OverviewKpi;
+  retentionSuccessPct: OverviewKpi;
+}
+
+export interface OverviewMinSampleViolation {
+  metric: string;
+  sampleSize: number;
+  minimum: number;
+  reason: string;
+}
+
+export interface OverviewTimeSeriesPoint {
+  bucket: string;        // YYYY-MM-DD
+  created: number;
+  resolved: number;
+  slaBreached: number;
+}
+
+export interface OverviewCountPair { key: string; count: number }
+export interface OverviewCompanyRow { id: string; name: string; count: number }
+export interface OverviewTeamRow {
+  id: string;
+  name: string;
+  count: number;
+  avgTtrHours: number | null;
+}
+export interface OverviewCategoryRow {
+  category: string;
+  subCategory: string | null;
+  total: number;
+  open: number;
+  avgTtrHours: number | null;
+  slaBreachCount: number;
+}
+export interface OverviewAtRiskAccount {
+  accountId: string;
+  accountName: string;
+  companyId: string;
+  openCount: number;
+  slaBreachCount: number;
+  escalatedCount: number;
+}
+
+export type OverviewScopeKind = 'self' | 'team' | 'company' | 'cross-company';
+
+export interface OverviewScope {
+  kind: OverviewScopeKind;
+  companyIds: string[];
+  teamIds: string[] | null;
+  personIds: string[] | null;
+  canExport: boolean;
+  canCrossCompanyAgg: boolean;
+  narrowedFromBody: boolean;
+  narrative: string;
+  effectiveScopeReason: string;
+}
+
+export interface OperationsOverviewResponse {
+  asOf: string;
+  asOfLocal: string;
+  formulaVersion: string;
+  timezone: string;
+  appliedFilters: {
+    from: string;
+    to: string;
+    companies: string[];
+    teams: string[] | null;
+    productGroups: string[] | null;
+    caseTypes: string[] | null;
+    statuses: string[] | null;
+    granularity: OverviewGranularity;
+  };
+  approximations: unknown[];
+  minSampleViolations: OverviewMinSampleViolation[];
+  notAvailable: string[];
+  kpis: OverviewKpis;
+  timeSeries: OverviewTimeSeriesPoint[];
+  byStatus: OverviewCountPair[];
+  byPriority: OverviewCountPair[];
+  byCaseType: OverviewCountPair[];
+  byCompany: OverviewCompanyRow[] | null;
+  byTeam: OverviewTeamRow[];
+  byCategory: OverviewCategoryRow[];
+  topAtRiskAccounts: OverviewAtRiskAccount[];
+  scope: OverviewScope;
+  metricAuditId: string | null;
+  durationMs: number;
+}
+
 export const analyticsService = {
   async getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport | undefined> {
     return apiFetch<AIUsageReport>(
@@ -92,6 +218,20 @@ export const analyticsService = {
       `/api/analytics/patterns/${id}/dismiss`,
       { method: 'PATCH' },
       'Alarm kapatılamadı',
+    );
+  },
+
+  async getOperationsOverview(
+    body: OverviewRequest,
+  ): Promise<OperationsOverviewResponse | undefined> {
+    return apiFetch<OperationsOverviewResponse>(
+      '/api/analytics/cases/overview',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Operasyon panosu yüklenemedi',
     );
   },
 };
