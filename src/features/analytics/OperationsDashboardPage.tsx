@@ -187,6 +187,11 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   });
   const [statuses, setStatuses] = useState<string[]>([]);
   const [caseTypes, setCaseTypes] = useState<string[]>([]);
+  const [companies, setCompanies] = useState<string[]>([]);
+  // Mevcut kapsam icindeki sirket listesi — overview response'larindan birlestirilerek
+  // toplanir; user PARAM'a daraltinca byCompany kuculur ama allCompanies kuculmesin
+  // diye ayri tutuyoruz. SystemAdmin disindaki rollerde byCompany null → bos kalir.
+  const [allCompanies, setAllCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [refetchTick, setRefetchTick] = useState(0);
 
   // Data state
@@ -225,13 +230,15 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   // Stable serialized deps for useEffect
   const statusesKey = statuses.slice().sort().join(',');
   const caseTypesKey = caseTypes.slice().sort().join(',');
+  const companiesKey = companies.slice().sort().join(',');
   const overviewBody = useMemo<OverviewRequest>(() => ({
     from: rangeStartIso(dateFrom),
     to: rangeEndIso(dateTo),
+    companies: companies.length > 0 ? companies : undefined,
     statuses: statuses.length > 0 ? statuses : undefined,
     caseTypes: caseTypes.length > 0 ? caseTypes : undefined,
     granularity: 'day',
-  }), [dateFrom, dateTo, statusesKey, caseTypesKey]);
+  }), [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey]);
 
   useEffect(() => {
     let alive = true;
@@ -260,7 +267,22 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     return () => {
       alive = false;
     };
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, refetchTick, overviewBody]);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, refetchTick, overviewBody]);
+
+  // Cross-company role: byCompany dolu donerse allCompanies'e merge et.
+  // Filtre daralinca byCompany kuculur ama listeyi kuculmemesi icin sakliyoruz.
+  useEffect(() => {
+    if (!data?.byCompany || data.byCompany.length === 0) return;
+    setAllCompanies((cur) => {
+      const map = new Map(cur.map((c) => [c.id, c.name]));
+      let changed = false;
+      for (const c of data.byCompany!) {
+        if (!map.has(c.id)) { map.set(c.id, c.name || c.id); changed = true; }
+      }
+      if (!changed) return cur;
+      return Array.from(map, ([id, name]) => ({ id, name }));
+    });
+  }, [data?.byCompany]);
 
   useEffect(() => {
     if (!drilldown) return;
@@ -293,6 +315,9 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   }
   function toggleCaseType(t: string) {
     setCaseTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
+  }
+  function toggleCompany(id: string) {
+    setCompanies((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
   function applyQuickRange(days: number) {
     const to = new Date();
@@ -330,7 +355,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     setInsightsError(null);
     setReport(null);
     setReportError(null);
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey]);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey]);
 
   function runBrief() {
     setBriefLoading(true);
@@ -390,11 +415,15 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
       <FilterBar
         statuses={statuses}
         caseTypes={caseTypes}
+        companies={companies}
+        availableCompanies={allCompanies}
         onToggleStatus={toggleStatus}
         onToggleCaseType={toggleCaseType}
+        onToggleCompany={toggleCompany}
         onClear={() => {
           setStatuses([]);
           setCaseTypes([]);
+          setCompanies([]);
         }}
       />
 
@@ -686,45 +715,68 @@ function DashboardHeader({
 function FilterBar({
   statuses,
   caseTypes,
+  companies,
+  availableCompanies,
   onToggleStatus,
   onToggleCaseType,
+  onToggleCompany,
   onClear,
 }: {
   statuses: string[];
   caseTypes: string[];
+  companies: string[];
+  availableCompanies: Array<{ id: string; name: string }>;
   onToggleStatus: (s: string) => void;
   onToggleCaseType: (t: string) => void;
+  onToggleCompany: (id: string) => void;
   onClear: () => void;
 }) {
-  const anyActive = statuses.length > 0 || caseTypes.length > 0;
+  const anyActive = statuses.length > 0 || caseTypes.length > 0 || companies.length > 0;
+  // Tek sirket icin chip gostermek anlamsiz (zaten daraltma yapilamaz).
+  const showCompanies = availableCompanies.length > 1;
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-ndark-border dark:bg-ndark-bg/30">
-      <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
-      {STATUS_ORDER.map((s) => (
-        <FilterChip
-          key={s}
-          active={statuses.includes(s)}
-          label={STATUS_LABEL[s] ?? s}
-          onClick={() => onToggleStatus(s)}
-        />
-      ))}
-      <span className="ml-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">Tip:</span>
-      {Object.keys(CASE_TYPE_LABEL).map((t) => (
-        <FilterChip
-          key={t}
-          active={caseTypes.includes(t)}
-          label={CASE_TYPE_LABEL[t]}
-          onClick={() => onToggleCaseType(t)}
-        />
-      ))}
-      {anyActive && (
-        <button
-          type="button"
-          onClick={onClear}
-          className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:underline dark:text-ndark-muted"
-        >
-          Filtreleri temizle
-        </button>
+    <div className="space-y-1.5 rounded-md border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-ndark-border dark:bg-ndark-bg/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
+        {STATUS_ORDER.map((s) => (
+          <FilterChip
+            key={s}
+            active={statuses.includes(s)}
+            label={STATUS_LABEL[s] ?? s}
+            onClick={() => onToggleStatus(s)}
+          />
+        ))}
+        <span className="ml-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">Tip:</span>
+        {Object.keys(CASE_TYPE_LABEL).map((t) => (
+          <FilterChip
+            key={t}
+            active={caseTypes.includes(t)}
+            label={CASE_TYPE_LABEL[t]}
+            onClick={() => onToggleCaseType(t)}
+          />
+        ))}
+        {anyActive && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="ml-auto text-xs font-medium text-slate-500 underline-offset-2 hover:underline dark:text-ndark-muted"
+          >
+            Filtreleri temizle
+          </button>
+        )}
+      </div>
+      {showCompanies && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Şirket:</span>
+          {availableCompanies.map((c) => (
+            <FilterChip
+              key={c.id}
+              active={companies.includes(c.id)}
+              label={c.name}
+              onClick={() => onToggleCompany(c.id)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
