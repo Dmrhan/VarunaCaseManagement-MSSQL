@@ -18,7 +18,17 @@ import {
 
 const router = Router();
 
-router.use(verifyJwt, requireRole('Supervisor', 'Admin', 'SystemAdmin'));
+router.use(verifyJwt);
+
+const requireSupervisorAnalytics = requireRole('Supervisor', 'Admin', 'SystemAdmin');
+const requireOverviewAnalytics = requireRole(
+  'Agent',
+  'Backoffice',
+  'CSM',
+  'Supervisor',
+  'Admin',
+  'SystemAdmin',
+);
 
 // Manuel aksiyon ortalama süresi (s) — kategori önerme/manuel arama vb. için
 // kabaca tahmin. ROI raporu "tasarruf edilen dakika" hesabında kullanılır.
@@ -32,7 +42,7 @@ const SECONDS_PER_MANUAL_ACTION = 28;
  * Multi-tenant: req.user.allowedCompanyIds scope filter (SystemAdmin için
  * verifyJwt zaten tüm aktif şirketlerle dolduruyor).
  */
-router.get('/ai-usage', async (req, res) => {
+router.get('/ai-usage', requireSupervisorAnalytics, async (req, res) => {
   try {
     const period = req.query.period === '30d' ? 30 : 7;
     const since = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
@@ -124,7 +134,7 @@ router.get('/ai-usage', async (req, res) => {
  * Faz 1.5 Madde 4 — agent başına ortalama empati/clarity/speed + companyAvg
  * + top/bottom agent. allowedCompanyIds scope.
  */
-router.get('/qa-scores', async (req, res) => {
+router.get('/qa-scores', requireSupervisorAnalytics, async (req, res) => {
   try {
     const period = req.query.period === '30d' ? 30 : 7;
     const since = new Date(Date.now() - period * 24 * 60 * 60 * 1000);
@@ -217,7 +227,7 @@ function round1(v) {
  * GET /api/analytics/patterns?status=active|all
  * Default: status=active. allowedCompanyIds scope. Faz 1.5 Madde 5.
  */
-router.get('/patterns', async (req, res) => {
+router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
   try {
     const status = req.query.status === 'all' ? undefined : 'active';
     const where = { companyId: { in: req.user.allowedCompanyIds } };
@@ -238,7 +248,7 @@ router.get('/patterns', async (req, res) => {
  * PATCH /api/analytics/patterns/:id/dismiss — yönetici alarmı kapatır.
  * Yetki: companyId scope (Supervisor/Admin/SystemAdmin guard zaten router'da).
  */
-router.patch('/patterns/:id/dismiss', async (req, res) => {
+router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, res) => {
   try {
     const target = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
     if (!target) return res.status(404).json({ error: 'Alarm bulunamadı.' });
@@ -294,7 +304,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  *  - minSampleViolations, notAvailable, approximations
  *  - metricAuditId
  */
-router.post('/cases/overview', async (req, res) => {
+router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   const t0 = Date.now();
   try {
     const body = req.body ?? {};
