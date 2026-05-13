@@ -40,6 +40,20 @@
   html.dark .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: #30363D;
   }
+
+  /* Indeterminate progress bar — uzun süre yüklenen
+     refetch'lerde dashboard üstüne ince bir kaydırma şeridi koymak için. */
+  @keyframes progress-slide {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+  }
+  .animate-progress-slide {
+    position: absolute;
+    top: 0;
+    width: 40%;
+    height: 100%;
+    animation: progress-slide 1.2s ease-in-out infinite;
+  }
 }
 
 /* ----------------------------------------------------------------
