@@ -76,6 +76,19 @@ export interface OverviewRequest {
   granularity?: OverviewGranularity;
 }
 
+export type DrilldownBucket =
+  | { kind: 'totalCases' | 'createdInPeriod' | 'resolvedInPeriod' | 'openCases' | 'slaRiskCount' | 'slaBreached' | 'slaViolationRatePct' | 'reopened' | 'reopenRatePct' | 'escalationRatePct' | 'transferRatePct' | 'retentionSuccessPct'; label?: string }
+  | { kind: 'status' | 'priority' | 'caseType' | 'team' | 'company' | 'atRiskAccount'; key: string; label?: string }
+  | { kind: 'category'; category: string; subCategory?: string | null; label?: string };
+
+export interface DrilldownRequest extends OverviewRequest {
+  bucket: DrilldownBucket;
+  page?: number;
+  pageSize?: number;
+  sortBy?: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
+  sortDir?: 'asc' | 'desc';
+}
+
 export interface OverviewDelta {
   value: number | null;
   direction: 'up' | 'down' | 'flat' | null;
@@ -187,6 +200,37 @@ export interface OperationsOverviewResponse {
   durationMs: number;
 }
 
+export interface DrilldownCaseRow {
+  id: string;
+  caseNumber: string;
+  title: string;
+  status: string;
+  priority: string;
+  companyName: string;
+  accountName: string;
+  category: string;
+  subCategory: string | null;
+  assignedTeamName: string | null;
+  assignedPersonName: string | null;
+  createdAt: string;
+  slaResolutionDueAt: string | null;
+  slaViolation: boolean;
+  ageHours: number;
+}
+
+export interface DrilldownResponse {
+  items: DrilldownCaseRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
+  sortDir: 'asc' | 'desc';
+  appliedBucket: DrilldownBucket & { label: string };
+  scope: OverviewScope;
+  metricAuditId: string | null;
+  durationMs: number;
+}
+
 export const analyticsService = {
   async getAIUsage(period: AIUsagePeriod): Promise<AIUsageReport | undefined> {
     return apiFetch<AIUsageReport>(
@@ -232,6 +276,20 @@ export const analyticsService = {
         body: JSON.stringify(body),
       },
       'Operasyon panosu yüklenemedi',
+    );
+  },
+
+  async getOperationsDrilldown(
+    body: DrilldownRequest,
+  ): Promise<DrilldownResponse | undefined> {
+    return apiFetch<DrilldownResponse>(
+      '/api/analytics/cases/drilldown',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Drill-down listesi yüklenemedi',
     );
   },
 };

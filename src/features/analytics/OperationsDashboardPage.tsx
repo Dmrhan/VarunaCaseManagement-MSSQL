@@ -5,7 +5,10 @@ import {
   ArrowUpRight,
   Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
+  ExternalLink,
   Inbox,
   Layers,
   Minus,
@@ -21,10 +24,13 @@ import { Badge, type BadgeTint } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton, MetricTileSkeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { BarList, type BarListItem } from '@/components/charts/BarList';
+import type { BarListItem } from '@/components/charts/BarList';
 import { TrendLine } from '@/components/charts/TrendLine';
 import {
   analyticsService,
+  type DrilldownBucket,
+  type DrilldownCaseRow,
+  type DrilldownResponse,
   type OperationsOverviewResponse,
   type OverviewKpi,
   type OverviewRequest,
@@ -151,7 +157,7 @@ function formatDateLabel(iso: string): string {
 
 // ----- Component --------------------------------------------------
 
-export function OperationsDashboardPage() {
+export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (caseId: string) => void }) {
   // Filter state
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
@@ -172,10 +178,27 @@ export function OperationsDashboardPage() {
   const [data, setData] = useState<OperationsOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drilldown, setDrilldown] = useState<{
+    bucket: DrilldownBucket;
+    title: string;
+    page: number;
+    sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
+    sortDir: 'asc' | 'desc';
+  } | null>(null);
+  const [drilldownData, setDrilldownData] = useState<DrilldownResponse | null>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [drilldownError, setDrilldownError] = useState<string | null>(null);
 
   // Stable serialized deps for useEffect
   const statusesKey = statuses.slice().sort().join(',');
   const caseTypesKey = caseTypes.slice().sort().join(',');
+  const overviewBody = useMemo<OverviewRequest>(() => ({
+    from: rangeStartIso(dateFrom),
+    to: rangeEndIso(dateTo),
+    statuses: statuses.length > 0 ? statuses : undefined,
+    caseTypes: caseTypes.length > 0 ? caseTypes : undefined,
+    granularity: 'day',
+  }), [dateFrom, dateTo, statusesKey, caseTypesKey]);
 
   useEffect(() => {
     let alive = true;
@@ -191,15 +214,7 @@ export function OperationsDashboardPage() {
       return;
     }
 
-    const body: OverviewRequest = {
-      from: rangeStartIso(dateFrom),
-      to: rangeEndIso(dateTo),
-      statuses: statuses.length > 0 ? statuses : undefined,
-      caseTypes: caseTypes.length > 0 ? caseTypes : undefined,
-      granularity: 'day',
-    };
-
-    void analyticsService.getOperationsOverview(body).then((r) => {
+    void analyticsService.getOperationsOverview(overviewBody).then((r) => {
       if (!alive) return;
       if (r) {
         setData(r);
@@ -212,7 +227,33 @@ export function OperationsDashboardPage() {
     return () => {
       alive = false;
     };
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, refetchTick]);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, refetchTick, overviewBody]);
+
+  useEffect(() => {
+    if (!drilldown) return;
+    let alive = true;
+    setDrilldownLoading(true);
+    setDrilldownError(null);
+    void analyticsService.getOperationsDrilldown({
+      ...overviewBody,
+      bucket: drilldown.bucket,
+      page: drilldown.page,
+      pageSize: 50,
+      sortBy: drilldown.sortBy,
+      sortDir: drilldown.sortDir,
+    }).then((r) => {
+      if (!alive) return;
+      if (r) {
+        setDrilldownData(r);
+      } else {
+        setDrilldownError('Vaka listesi yüklenemedi.');
+      }
+      setDrilldownLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [drilldown, overviewBody]);
 
   function toggleStatus(s: string) {
     setStatuses((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
@@ -230,6 +271,20 @@ export function OperationsDashboardPage() {
   }
   function refresh() {
     setRefetchTick((n) => n + 1);
+  }
+  function openDrilldown(bucket: DrilldownBucket, title: string) {
+    setDrilldown({ bucket, title, page: 1, sortBy: 'createdAt', sortDir: 'desc' });
+    setDrilldownData(null);
+  }
+  function setDrilldownPage(page: number) {
+    setDrilldown((cur) => (cur ? { ...cur, page } : cur));
+  }
+  function setDrilldownSort(sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours') {
+    setDrilldown((cur) => {
+      if (!cur) return cur;
+      const sortDir = cur.sortBy === sortBy && cur.sortDir === 'desc' ? 'asc' : 'desc';
+      return { ...cur, sortBy, sortDir, page: 1 };
+    });
   }
 
   // -------------------------------------------------------------- render
@@ -288,7 +343,12 @@ export function OperationsDashboardPage() {
         />
       )}
 
-      <KpiGrid kpis={data?.kpis} loading={loading} minSampleMetrics={mapMinSample(data)} />
+      <KpiGrid
+        kpis={data?.kpis}
+        loading={loading}
+        minSampleMetrics={mapMinSample(data)}
+        onOpenDrilldown={openDrilldown}
+      />
 
       <TimeSeriesCard
         loading={loading}
@@ -302,6 +362,7 @@ export function OperationsDashboardPage() {
           loading={loading}
           items={mapStatusItems(data?.byStatus ?? [])}
           emptyHint="Bu dönemde vaka oluşturulmamış."
+          onOpenDrilldown={openDrilldown}
         />
         <BreakdownCard
           title="Önceliğe Göre"
@@ -309,6 +370,7 @@ export function OperationsDashboardPage() {
           loading={loading}
           items={mapPriorityItems(data?.byPriority ?? [])}
           emptyHint="Veri yok."
+          onOpenDrilldown={openDrilldown}
         />
       </div>
 
@@ -319,6 +381,7 @@ export function OperationsDashboardPage() {
           loading={loading}
           items={mapCaseTypeItems(data?.byCaseType ?? [])}
           emptyHint="Veri yok."
+          onOpenDrilldown={openDrilldown}
         />
         {data?.byCompany && data.byCompany.length > 0 && (
           <BreakdownCard
@@ -327,15 +390,16 @@ export function OperationsDashboardPage() {
             loading={loading}
             items={mapCompanyItems(data.byCompany)}
             emptyHint="Veri yok."
+            onOpenDrilldown={openDrilldown}
           />
         )}
       </div>
 
-      <TeamBreakdownCard loading={loading} rows={data?.byTeam ?? []} />
+      <TeamBreakdownCard loading={loading} rows={data?.byTeam ?? []} onOpenDrilldown={openDrilldown} />
 
-      <CategoryBreakdownCard loading={loading} rows={data?.byCategory ?? []} />
+      <CategoryBreakdownCard loading={loading} rows={data?.byCategory ?? []} onOpenDrilldown={openDrilldown} />
 
-      <AtRiskAccountsCard loading={loading} rows={data?.topAtRiskAccounts ?? []} />
+      <AtRiskAccountsCard loading={loading} rows={data?.topAtRiskAccounts ?? []} onOpenDrilldown={openDrilldown} />
 
       {!loading && data && (data.kpis.totalCases.value ?? 0) === 0 && (
         <Card>
@@ -356,6 +420,22 @@ export function OperationsDashboardPage() {
           {data.metricAuditId && <> · Audit: <code className="font-mono">{data.metricAuditId}</code></>}
         </div>
       )}
+
+      <DrilldownDrawer
+        open={drilldown != null}
+        title={drilldown?.title ?? 'Vaka listesi'}
+        request={drilldown}
+        data={drilldownData}
+        loading={drilldownLoading}
+        error={drilldownError}
+        onClose={() => {
+          setDrilldown(null);
+          setDrilldownData(null);
+        }}
+        onPageChange={setDrilldownPage}
+        onSort={setDrilldownSort}
+        onSelectCase={onSelectCase}
+      />
     </div>
   );
 }
@@ -573,10 +653,12 @@ function KpiGrid({
   kpis,
   loading,
   minSampleMetrics,
+  onOpenDrilldown,
 }: {
   kpis: OperationsOverviewResponse['kpis'] | undefined;
   loading: boolean;
   minSampleMetrics: Set<string>;
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
   if (loading && !kpis) {
     return (
@@ -596,6 +678,7 @@ function KpiGrid({
           spec={spec}
           kpi={kpis[spec.key]}
           minSample={minSampleMetrics.has(spec.key)}
+          onOpenDrilldown={onOpenDrilldown}
         />
       ))}
     </div>
@@ -606,10 +689,12 @@ function KpiCard({
   spec,
   kpi,
   minSample,
+  onOpenDrilldown,
 }: {
   spec: KpiTileSpec;
   kpi: OverviewKpi;
   minSample: boolean;
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
   const valueText = useMemo(() => {
     if (kpi.value == null) return '—';
@@ -621,8 +706,19 @@ function KpiCard({
   const showDelta = !spec.hideDelta && kpi.delta.value != null && !kpi.delta.sourceMissing;
   const positiveIsGood = spec.positiveIsGood ?? true;
 
+  const clickable = (kpi.value ?? 0) > 0;
   return (
-    <div className="rounded-xl bg-white p-4 ring-1 ring-inset ring-slate-200 shadow-sm dark:bg-ndark-card dark:ring-ndark-border">
+    <button
+      type="button"
+      disabled={!clickable}
+      onClick={() => onOpenDrilldown({ kind: spec.key, label: spec.label } as DrilldownBucket, spec.label)}
+      className={`rounded-xl bg-white p-4 text-left ring-1 ring-inset ring-slate-200 shadow-sm transition dark:bg-ndark-card dark:ring-ndark-border ${
+        clickable
+          ? 'hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500'
+          : 'cursor-default opacity-95'
+      }`}
+      title={clickable ? 'Vakaları gör' : undefined}
+    >
       <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
         {spec.icon}
         <span>{spec.label}</span>
@@ -644,7 +740,7 @@ function KpiCard({
         )}
         <span className="text-slate-400 dark:text-ndark-muted">önceki döneme göre</span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -731,19 +827,27 @@ function TimeSeriesCard({
 
 // ===== Breakdown cards ============================================
 
+interface DrilldownBarItem extends BarListItem {
+  bucket?: DrilldownBucket;
+}
+
 function BreakdownCard({
   title,
   icon,
   loading,
   items,
   emptyHint,
+  onOpenDrilldown,
 }: {
   title: string;
   icon: React.ReactNode;
   loading: boolean;
-  items: BarListItem[];
+  items: DrilldownBarItem[];
   emptyHint: string;
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  const sum = items.reduce((a, b) => a + b.value, 0);
   return (
     <Card>
       <CardHeader>
@@ -762,16 +866,49 @@ function BreakdownCard({
         ) : items.length === 0 ? (
           <EmptyState size="sm" title={emptyHint} />
         ) : (
-          <BarList items={items} showPct />
+          <ul className="space-y-2">
+            {items.map((it) => {
+              const widthPct = (it.value / max) * 100;
+              const sharePct = sum > 0 ? (it.value / sum) * 100 : 0;
+              const content = (
+                <>
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-700 dark:text-ndark-text">{it.label}</span>
+                    <span className="font-medium text-slate-800 dark:text-ndark-text">
+                      {it.value}
+                      <span className="ml-1 text-slate-400">({sharePct.toFixed(0)}%)</span>
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-ndark-bg">
+                    <div className={`h-full rounded-full transition-all ${it.color}`} style={{ width: `${widthPct}%` }} />
+                  </div>
+                </>
+              );
+              return (
+                <li key={it.key}>
+                  {it.bucket ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenDrilldown(it.bucket as DrilldownBucket, String(it.label))}
+                      className="w-full rounded-md p-1 text-left transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:hover:bg-ndark-bg/50"
+                      title="Vakaları gör"
+                    >
+                      {content}
+                    </button>
+                  ) : content}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </CardBody>
     </Card>
   );
 }
 
-function mapStatusItems(rows: { key: string; count: number }[]): BarListItem[] {
+function mapStatusItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
   // Bilinen statüleri sabit sırada göster, bilinmeyenleri sonuna ekle
-  const known = STATUS_ORDER
+  const known: DrilldownBarItem[] = STATUS_ORDER
     .map((s) => rows.find((r) => r.key === s))
     .filter((r): r is { key: string; count: number } => r != null && r.count > 0)
     .map((r) => ({
@@ -779,19 +916,21 @@ function mapStatusItems(rows: { key: string; count: number }[]): BarListItem[] {
       label: STATUS_LABEL[r.key] ?? r.key,
       value: r.count,
       color: STATUS_COLOR[r.key] ?? 'bg-slate-500',
+      bucket: { kind: 'status', key: r.key, label: STATUS_LABEL[r.key] ?? r.key },
     }));
-  const unknown = rows
+  const unknown: DrilldownBarItem[] = rows
     .filter((r) => !STATUS_ORDER.includes(r.key))
     .map((r) => ({
       key: r.key,
       label: r.key,
       value: r.count,
       color: 'bg-slate-400',
+      bucket: { kind: 'status', key: r.key, label: r.key },
     }));
   return [...known, ...unknown];
 }
 
-function mapPriorityItems(rows: { key: string; count: number }[]): BarListItem[] {
+function mapPriorityItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
   const order = ['Critical', 'High', 'Medium', 'Low'];
   return order
     .map((p) => rows.find((r) => r.key === p))
@@ -801,25 +940,28 @@ function mapPriorityItems(rows: { key: string; count: number }[]): BarListItem[]
       label: PRIORITY_LABEL[r.key] ?? r.key,
       value: r.count,
       color: PRIORITY_COLOR[r.key] ?? 'bg-slate-500',
+      bucket: { kind: 'priority', key: r.key, label: PRIORITY_LABEL[r.key] ?? r.key },
     }));
 }
 
-function mapCaseTypeItems(rows: { key: string; count: number }[]): BarListItem[] {
+function mapCaseTypeItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
   return rows.map((r) => ({
     key: r.key,
     label: CASE_TYPE_LABEL[r.key] ?? r.key,
     value: r.count,
     color: CASE_TYPE_COLOR[r.key] ?? 'bg-slate-500',
+    bucket: { kind: 'caseType', key: r.key, label: CASE_TYPE_LABEL[r.key] ?? r.key },
   }));
 }
 
-function mapCompanyItems(rows: { id: string; name: string; count: number }[]): BarListItem[] {
+function mapCompanyItems(rows: { id: string; name: string; count: number }[]): DrilldownBarItem[] {
   const palette = ['bg-brand-500', 'bg-amber-500', 'bg-emerald-500', 'bg-violet-500', 'bg-rose-500'];
   return rows.map((r, i) => ({
     key: r.id,
     label: r.name || r.id,
     value: r.count,
     color: palette[i % palette.length],
+    bucket: { kind: 'company', key: r.id, label: r.name || r.id },
   }));
 }
 
@@ -828,9 +970,11 @@ function mapCompanyItems(rows: { id: string; name: string; count: number }[]): B
 function TeamBreakdownCard({
   loading,
   rows,
+  onOpenDrilldown,
 }: {
   loading: boolean;
   rows: OperationsOverviewResponse['byTeam'];
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
   return (
     <Card>
@@ -865,7 +1009,15 @@ function TeamBreakdownCard({
                 const max = Math.max(1, ...rows.map((x) => x.count));
                 return (
                   <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-ndark-bg/40">
-                    <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">{r.name}</td>
+                    <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">
+                      <button
+                        type="button"
+                        onClick={() => onOpenDrilldown({ kind: 'team', key: r.id, label: r.name }, r.name)}
+                        className="rounded text-left hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        {r.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-2.5 text-right text-slate-700 dark:text-ndark-text">{r.count}</td>
                     <td className="px-4 py-2.5 text-right text-slate-600 dark:text-ndark-muted">
                       {formatHours(r.avgTtrHours)}
@@ -894,9 +1046,11 @@ function TeamBreakdownCard({
 function CategoryBreakdownCard({
   loading,
   rows,
+  onOpenDrilldown,
 }: {
   loading: boolean;
   rows: OperationsOverviewResponse['byCategory'];
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
   return (
     <Card>
@@ -931,7 +1085,20 @@ function CategoryBreakdownCard({
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
               {rows.map((r, i) => (
                 <tr key={`${r.category}-${r.subCategory ?? '-'}-${i}`} className="hover:bg-slate-50 dark:hover:bg-ndark-bg/40">
-                  <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">{r.category}</td>
+                  <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">
+                    <button
+                      type="button"
+                      onClick={() => onOpenDrilldown({
+                        kind: 'category',
+                        category: r.category,
+                        subCategory: r.subCategory,
+                        label: r.subCategory ? `${r.category} / ${r.subCategory}` : r.category,
+                      }, r.subCategory ? `${r.category} / ${r.subCategory}` : r.category)}
+                      className="rounded text-left hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    >
+                      {r.category}
+                    </button>
+                  </td>
                   <td className="px-4 py-2.5 text-slate-600 dark:text-ndark-muted">{r.subCategory ?? '—'}</td>
                   <td className="px-4 py-2.5 text-right text-slate-700 dark:text-ndark-text">{r.total}</td>
                   <td className="px-4 py-2.5 text-right text-slate-700 dark:text-ndark-text">{r.open}</td>
@@ -960,9 +1127,11 @@ function CategoryBreakdownCard({
 function AtRiskAccountsCard({
   loading,
   rows,
+  onOpenDrilldown,
 }: {
   loading: boolean;
   rows: OperationsOverviewResponse['topAtRiskAccounts'];
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
   return (
     <Card>
@@ -997,7 +1166,15 @@ function AtRiskAccountsCard({
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
               {rows.map((r) => (
                 <tr key={r.accountId} className="hover:bg-slate-50 dark:hover:bg-ndark-bg/40">
-                  <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">{r.accountName}</td>
+                  <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-ndark-text">
+                    <button
+                      type="button"
+                      onClick={() => onOpenDrilldown({ kind: 'atRiskAccount', key: r.accountId, label: r.accountName }, r.accountName)}
+                      className="rounded text-left hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    >
+                      {r.accountName}
+                    </button>
+                  </td>
                   <td className="px-4 py-2.5 text-right text-slate-700 dark:text-ndark-text">{r.openCount}</td>
                   <td className="px-4 py-2.5 text-right">
                     {r.slaBreachCount > 0 ? (
@@ -1021,4 +1198,221 @@ function AtRiskAccountsCard({
       </CardBody>
     </Card>
   );
+}
+
+// ===== Drill-down drawer ==========================================
+
+function DrilldownDrawer({
+  open,
+  title,
+  request,
+  data,
+  loading,
+  error,
+  onClose,
+  onPageChange,
+  onSort,
+  onSelectCase,
+}: {
+  open: boolean;
+  title: string;
+  request: {
+    page: number;
+    sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
+    sortDir: 'asc' | 'desc';
+  } | null;
+  data: DrilldownResponse | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onPageChange: (page: number) => void;
+  onSort: (sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours') => void;
+  onSelectCase?: (caseId: string) => void;
+}) {
+  if (!open) return null;
+  const page = data?.page ?? request?.page ?? 1;
+  const pageSize = data?.pageSize ?? 50;
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        type="button"
+        aria-label="Drill-down drawer kapat"
+        className="absolute inset-0 bg-slate-900/35"
+        onClick={onClose}
+      />
+      <aside className="absolute right-0 top-0 flex h-full w-full max-w-5xl flex-col bg-white shadow-2xl dark:bg-ndark-card">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-ndark-border">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-ndark-text">{data?.appliedBucket.label ?? title}</h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
+              {data ? `${formatInt(total)} vaka · Sayfa ${page}/${pageCount}` : 'Vaka listesi yükleniyor'}
+              {data?.metricAuditId && <> · Audit <code className="font-mono">{data.metricAuditId}</code></>}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-ndark-muted dark:hover:bg-ndark-bg"
+            aria-label="Kapat"
+          >
+            ×
+          </button>
+        </header>
+
+        {data?.scope.narrowedFromBody && (
+          <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-200">
+            Kapsam server tarafında yetkili veriyle daraltıldı.
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto">
+          {error ? (
+            <div className="p-5 text-sm text-rose-700 dark:text-rose-300">{error}</div>
+          ) : loading && !data ? (
+            <div className="space-y-2 p-5">
+              {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} height={18} />)}
+            </div>
+          ) : !data || data.items.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                icon={<Inbox size={20} />}
+                title="Bu kırılımda vaka yok"
+                description="Filtreleri değiştirip tekrar deneyebilirsin."
+              />
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-ndark-border">
+              <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-ndark-bg">
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                  <SortableDrawerTh label="Vaka" sortKey="createdAt" request={request} onSort={onSort} />
+                  <th className="px-4 py-2.5">Müşteri</th>
+                  <th className="px-4 py-2.5">Statü</th>
+                  <SortableDrawerTh label="Öncelik" sortKey="priority" request={request} onSort={onSort} align="right" />
+                  <th className="px-4 py-2.5">Sahip</th>
+                  <SortableDrawerTh label="SLA" sortKey="slaResolutionDueAt" request={request} onSort={onSort} align="right" />
+                  <SortableDrawerTh label="Yaş" sortKey="ageHours" request={request} onSort={onSort} align="right" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
+                {data.items.map((row) => (
+                  <DrilldownRow key={row.id} row={row} onSelectCase={onSelectCase} onClose={onClose} />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3 text-xs dark:border-ndark-border">
+          <div className="text-slate-500 dark:text-ndark-muted">
+            {data ? `${formatInt(Math.min(total, (page - 1) * pageSize + 1))}-${formatInt(Math.min(total, page * pageSize))} / ${formatInt(total)}` : '—'}
+            {data && <span> · {data.durationMs} ms</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => onPageChange(page - 1)}>
+              <ChevronLeft size={13} />
+              Önceki
+            </Button>
+            <Button size="sm" variant="outline" disabled={page >= pageCount || loading} onClick={() => onPageChange(page + 1)}>
+              Sonraki
+              <ChevronRight size={13} />
+            </Button>
+          </div>
+        </footer>
+      </aside>
+    </div>
+  );
+}
+
+function SortableDrawerTh({
+  label,
+  sortKey,
+  request,
+  onSort,
+  align = 'left',
+}: {
+  label: string;
+  sortKey: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
+  request: { sortBy: string; sortDir: 'asc' | 'desc' } | null;
+  onSort: (sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours') => void;
+  align?: 'left' | 'right';
+}) {
+  const active = request?.sortBy === sortKey;
+  return (
+    <th className={`px-4 py-2.5 ${align === 'right' ? 'text-right' : ''}`}>
+      <button type="button" onClick={() => onSort(sortKey)} className="rounded hover:underline focus:outline-none focus:ring-2 focus:ring-brand-500">
+        {label}
+        {active && <span className="ml-1">{request?.sortDir === 'asc' ? '↑' : '↓'}</span>}
+      </button>
+    </th>
+  );
+}
+
+function DrilldownRow({
+  row,
+  onSelectCase,
+  onClose,
+}: {
+  row: DrilldownCaseRow;
+  onSelectCase?: (caseId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <tr className="hover:bg-slate-50 dark:hover:bg-ndark-bg/40">
+      <td className="max-w-xs px-4 py-3">
+        <button
+          type="button"
+          onClick={() => {
+            onSelectCase?.(row.id);
+            onClose();
+          }}
+          className="group block text-left focus:outline-none"
+        >
+          <span className="flex items-center gap-1.5 font-mono text-xs text-brand-700 group-hover:underline dark:text-brand-300">
+            {row.caseNumber}
+            <ExternalLink size={11} />
+          </span>
+          <span className="mt-0.5 block truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{row.title}</span>
+          <span className="mt-0.5 block text-[11px] text-slate-400">{formatDateTime(row.createdAt)}</span>
+        </button>
+      </td>
+      <td className="px-4 py-3 text-slate-700 dark:text-ndark-text">
+        <div className="max-w-[180px] truncate">{row.accountName}</div>
+        <div className="text-[11px] text-slate-400">{row.companyName}</div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge tint={statusTint(row.status)}>{STATUS_LABEL[row.status] ?? row.status}</Badge>
+      </td>
+      <td className="px-4 py-3 text-right">
+        <Badge tint={row.priority === 'Critical' ? 'rose' : row.priority === 'High' ? 'amber' : 'slate'}>
+          {PRIORITY_LABEL[row.priority] ?? row.priority}
+        </Badge>
+      </td>
+      <td className="px-4 py-3 text-slate-600 dark:text-ndark-muted">
+        <div>{row.assignedPersonName ?? 'Atanmamış'}</div>
+        <div className="text-[11px] text-slate-400">{row.assignedTeamName ?? 'Takım yok'}</div>
+      </td>
+      <td className="px-4 py-3 text-right text-slate-600 dark:text-ndark-muted">
+        {row.slaViolation ? <Badge tint="rose">İhlal</Badge> : row.slaResolutionDueAt ? formatDateTime(row.slaResolutionDueAt) : '—'}
+      </td>
+      <td className="px-4 py-3 text-right text-slate-600 dark:text-ndark-muted">{formatHours(row.ageHours)}</td>
+    </tr>
+  );
+}
+
+function statusTint(status: string): BadgeTint {
+  if (status === 'Çözüldü' || status === 'Cozuldu') return 'emerald';
+  if (status === 'Eskalasyon') return 'rose';
+  if (status === 'İncelemede' || status === 'Incelemede') return 'amber';
+  return 'slate';
+}
+
+function formatDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
 }

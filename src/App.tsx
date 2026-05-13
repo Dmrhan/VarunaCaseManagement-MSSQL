@@ -535,7 +535,7 @@ export default function App() {
               onShowPatterns={() => setView('analytics-patterns')}
             />
           )}
-          {view === 'dashboard' && <OperationsDashboardPage />}
+          {view === 'dashboard' && <OperationsDashboardPage onSelectCase={openCase} />}
           {view === 'analytics-ai-usage' && <AIUsagePage />}
           {view === 'analytics-patterns' && (
             <PatternsPage

@@ -228,6 +228,11 @@ export function filterFingerprint(filters) {
     caseTypes: filters.caseTypes ? [...filters.caseTypes].sort() : null,
     statuses: filters.statuses ? [...filters.statuses].sort() : null,
     granularity: filters.granularity ?? 'day',
+    bucket: filters.bucket ?? null,
+    page: filters.page ?? null,
+    pageSize: filters.pageSize ?? null,
+    sortBy: filters.sortBy ?? null,
+    sortDir: filters.sortDir ?? null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
 }
