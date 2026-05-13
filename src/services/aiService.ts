@@ -317,7 +317,136 @@ export const aiService = {
   async transferSuggest(caseId: string) {
     return postJson<TransferSuggestion>('/transfer-suggest', { caseId });
   },
+
+  async operationsBrief(input: OperationsBaseRequest) {
+    return postJson<OperationsBriefResponse>('/operations-brief', input);
+  },
+
+  async operationsInsights(input: OperationsBaseRequest) {
+    return postJson<OperationsInsightsResponse>('/operations-insights', input);
+  },
+
+  async operationsExplainMetric(input: OperationsExplainRequest) {
+    return postJson<OperationsExplainResponse>('/operations-explain-metric', input);
+  },
+
+  async operationsReportDraft(input: OperationsBaseRequest) {
+    return postJson<OperationsReportResponse>('/operations-report-draft', input);
+  },
 };
+
+// ---- 8) Operations Intelligence — AI Analyst (Phase 4a) ----
+
+export interface OperationsBaseRequest {
+  from: string;
+  to: string;
+  productGroups?: string[];
+  caseTypes?: string[];
+  statuses?: string[];
+  granularity?: 'day' | 'hour';
+}
+
+export interface OperationsAiScope {
+  kind: 'self' | 'team' | 'company' | 'cross-company';
+  companyIds: string[];
+  teamIds: string[] | null;
+  personIds: string[] | null;
+  canExport: boolean;
+  canCrossCompanyAgg: boolean;
+  narrowedFromBody: boolean;
+  narrative: string;
+  effectiveScopeReason: string;
+}
+
+export interface OperationsBrief {
+  title: string;
+  summary: string;
+  bullets: string[];
+  risks: string[];
+  recommendedActions: string[];
+}
+
+export interface OperationsBriefResponse {
+  brief: OperationsBrief;
+  scope: OperationsAiScope;
+  formulaVersion: string;
+  generatedAt: string;
+  usageLogId: string | null;
+  sourceMetricAuditId: string | null;
+}
+
+export type OperationsInsightType =
+  | 'sla-anomaly'
+  | 'backlog-buildup'
+  | 'repeated-issue'
+  | 'customer-risk-cluster'
+  | 'workload-imbalance';
+export type OperationsInsightSeverity = 'info' | 'warning' | 'critical';
+
+export interface OperationsInsightBucket {
+  kind: string;
+  key?: string;
+  category?: string;
+  subCategory?: string;
+  label?: string;
+}
+
+export interface OperationsInsightEvidence {
+  label: string;
+  value: string;
+  bucket: OperationsInsightBucket | null;
+}
+
+export interface OperationsInsight {
+  id: string;
+  type: OperationsInsightType;
+  severity: OperationsInsightSeverity;
+  title: string;
+  narrative: string;
+  evidence: OperationsInsightEvidence[];
+  suggestedAction: string;
+  drilldown: OperationsInsightBucket | null;
+}
+
+export interface OperationsInsightsResponse {
+  insights: OperationsInsight[];
+  scope: OperationsAiScope;
+  generatedAt: string;
+  usageLogId: string | null;
+}
+
+export interface OperationsExplainRequest extends OperationsBaseRequest {
+  metricKey: string;
+}
+
+export interface OperationsExplainSuggestedDrilldown {
+  label: string;
+  bucket: OperationsInsightBucket;
+}
+
+export interface OperationsExplainResponse {
+  metricKey: string;
+  explanation: string;
+  formula: string;
+  whatChanged: string;
+  watchouts: string[];
+  suggestedDrilldowns: OperationsExplainSuggestedDrilldown[];
+  scope: OperationsAiScope;
+  generatedAt: string;
+  usageLogId: string | null;
+}
+
+export interface OperationsReportResponse {
+  markdown: string;
+  sections: {
+    summary: string;
+    risks: string;
+    actions: string;
+  };
+  scope: OperationsAiScope;
+  generatedAt: string;
+  usageLogId: string | null;
+}
 
 /**
  * Toast kullanımı için yardımcı: hata tipine göre kullanıcı dostu mesaj.

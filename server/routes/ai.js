@@ -2,6 +2,21 @@ import { Router } from 'express';
 import { verifyJwt } from '../db/auth.js';
 import { prisma } from '../db/client.js';
 import { aiClient, callOpenAI, logAIUsage, AI_MODEL, AI_MAX_TOKENS, AI_TIMEOUT_MS } from '../lib/aiClient.js';
+import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { deriveAnalyticsScope, describeScope } from '../analytics/scopeDerivation.js';
+import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
+import {
+  buildOperationsSnapshot,
+  buildBriefPrompt,
+  buildInsightsPrompt,
+  buildExplainPrompt,
+  buildReportPrompt,
+  sanitizeBrief,
+  sanitizeInsights,
+  sanitizeExplain,
+  sanitizeReport,
+  isAllowedMetricKey,
+} from '../ai/operationsAnalyst.js';
 
 const router = Router();
 
@@ -1123,5 +1138,210 @@ router.patch('/usage/:id/accept', async (req, res) => {
     res.status(500).json({ error: 'internal', message: e?.message });
   }
 });
+
+// ----------------------------------------------------------------
+// Operations Intelligence — AI Analyst (Phase 4a)
+// ----------------------------------------------------------------
+
+const OPS_MAX_PERIOD_DAYS = 90;
+const ONE_DAY_MS_OPS = 24 * 60 * 60 * 1000;
+
+function validateOpsBody(body) {
+  if (!body?.from || !body?.to) return { error: '`from` ve `to` zorunlu.' };
+  const from = new Date(body.from);
+  const to = new Date(body.to);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    return { error: 'Tarihler ISO formatinda olmali.' };
+  }
+  if (from >= to) return { error: '`from` `to` dan kucuk olmali.' };
+  if (to.getTime() - from.getTime() > OPS_MAX_PERIOD_DAYS * ONE_DAY_MS_OPS) {
+    return { error: `Donem ${OPS_MAX_PERIOD_DAYS} gunu asamaz.` };
+  }
+  return { from, to };
+}
+
+function sanitizeOpsStringArray(value) {
+  if (!Array.isArray(value)) return null;
+  const clean = value.filter((v) => typeof v === 'string' && v.length > 0).slice(0, 100);
+  return clean.length > 0 ? clean : null;
+}
+
+/**
+ * Filter set'inden scoped overview payload + AI snapshot uret.
+ * Hem brief hem insights hem report endpoint'leri ayni yoldan gecer; tek kaynak.
+ */
+async function buildScopedSnapshot(req) {
+  const body = req.body ?? {};
+  const validation = validateOpsBody(body);
+  if (validation.error) return { status: 400, error: validation.error };
+  const { from, to } = validation;
+  const scope = deriveAnalyticsScope(req.user, body);
+  const filters = {
+    from: from.toISOString(),
+    to: to.toISOString(),
+    productGroups: sanitizeOpsStringArray(body.productGroups),
+    caseTypes: sanitizeOpsStringArray(body.caseTypes),
+    statuses: sanitizeOpsStringArray(body.statuses),
+    granularity: body.granularity === 'hour' ? 'hour' : 'day',
+  };
+  const payload = await computeOperationsOverview({ scope, filters });
+  // operationsAggregator scope objesini payload icine yazmaz — burada ekleyelim ki narrative cikabilsin
+  const enrichedPayload = { ...payload, scope: { narrative: describeScope(scope) } };
+  const snapshot = buildOperationsSnapshot(scope, enrichedPayload, filters);
+  return { scope, payload: enrichedPayload, snapshot, filters };
+}
+
+function scopeMetadata(scope) {
+  return {
+    kind: scope.scopeKind,
+    companyIds: scope.companyIds,
+    teamIds: scope.teamIds,
+    personIds: scope.personIds,
+    canExport: scope.canExport,
+    canCrossCompanyAgg: scope.canCrossCompanyAgg,
+    narrowedFromBody: scope.narrowedFromBody,
+    narrative: describeScope(scope),
+    effectiveScopeReason: scope.effectiveScopeReason,
+  };
+}
+
+// 1) Operations Brief
+router.post(
+  '/operations-brief',
+  rateLimit,
+  aiHandler('operations-brief', async (req, res) => {
+    const ctx = await buildScopedSnapshot(req);
+    if (ctx.error) return res.status(ctx.status).json({ error: 'invalid_input', message: ctx.error });
+    const { scope, snapshot } = ctx;
+    req.aiLog.companyId = scope.companyIds?.[0];
+    req.aiLog.skipAutoLog = true;
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      ...buildBriefPrompt(scope, snapshot),
+      expectJson: true,
+    });
+    const brief = sanitizeBrief(json);
+    const log = await logAIUsage({
+      endpoint: 'operations-brief',
+      companyId: scope.companyIds?.[0] ?? null,
+      caseId: null,
+      userId: req.user?.id ?? null,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+    res.json({
+      brief,
+      scope: scopeMetadata(scope),
+      formulaVersion: FORMULA_VERSION,
+      generatedAt: new Date().toISOString(),
+      usageLogId: log?.id ?? null,
+      sourceMetricAuditId: null,
+    });
+  }),
+);
+
+// 2) Operations Insights
+router.post(
+  '/operations-insights',
+  rateLimit,
+  aiHandler('operations-insights', async (req, res) => {
+    const ctx = await buildScopedSnapshot(req);
+    if (ctx.error) return res.status(ctx.status).json({ error: 'invalid_input', message: ctx.error });
+    const { scope, snapshot } = ctx;
+    req.aiLog.companyId = scope.companyIds?.[0];
+    req.aiLog.skipAutoLog = true;
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      ...buildInsightsPrompt(scope, snapshot),
+      expectJson: true,
+    });
+    const insights = sanitizeInsights(json);
+    const log = await logAIUsage({
+      endpoint: 'operations-insights',
+      companyId: scope.companyIds?.[0] ?? null,
+      caseId: null,
+      userId: req.user?.id ?? null,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+    res.json({
+      insights,
+      scope: scopeMetadata(scope),
+      generatedAt: new Date().toISOString(),
+      usageLogId: log?.id ?? null,
+    });
+  }),
+);
+
+// 3) Operations Explain Metric
+router.post(
+  '/operations-explain-metric',
+  rateLimit,
+  aiHandler('operations-explain-metric', async (req, res) => {
+    const { metricKey } = req.body ?? {};
+    if (!isAllowedMetricKey(metricKey)) {
+      return res.status(400).json({ error: 'invalid_metric', message: 'Bilinmeyen metricKey.' });
+    }
+    const ctx = await buildScopedSnapshot(req);
+    if (ctx.error) return res.status(ctx.status).json({ error: 'invalid_input', message: ctx.error });
+    const { scope, snapshot } = ctx;
+    req.aiLog.companyId = scope.companyIds?.[0];
+    req.aiLog.skipAutoLog = true;
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      ...buildExplainPrompt(scope, snapshot, metricKey),
+      expectJson: true,
+    });
+    const explain = sanitizeExplain(json, metricKey);
+    const log = await logAIUsage({
+      endpoint: 'operations-explain-metric',
+      companyId: scope.companyIds?.[0] ?? null,
+      caseId: null,
+      userId: req.user?.id ?? null,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+    res.json({
+      metricKey,
+      ...explain,
+      scope: scopeMetadata(scope),
+      generatedAt: new Date().toISOString(),
+      usageLogId: log?.id ?? null,
+    });
+  }),
+);
+
+// 4) Operations Report Draft
+router.post(
+  '/operations-report-draft',
+  rateLimit,
+  aiHandler('operations-report-draft', async (req, res) => {
+    const ctx = await buildScopedSnapshot(req);
+    if (ctx.error) return res.status(ctx.status).json({ error: 'invalid_input', message: ctx.error });
+    const { scope, snapshot } = ctx;
+    req.aiLog.companyId = scope.companyIds?.[0];
+    req.aiLog.skipAutoLog = true;
+    const t0 = Date.now();
+    const { json, tokenCount } = await callOpenAI({
+      ...buildReportPrompt(scope, snapshot),
+      expectJson: true,
+    });
+    const report = sanitizeReport(json);
+    const log = await logAIUsage({
+      endpoint: 'operations-report-draft',
+      companyId: scope.companyIds?.[0] ?? null,
+      caseId: null,
+      userId: req.user?.id ?? null,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+    res.json({
+      ...report,
+      scope: scopeMetadata(scope),
+      generatedAt: new Date().toISOString(),
+      usageLogId: log?.id ?? null,
+    });
+  }),
+);
 
 export default router;
