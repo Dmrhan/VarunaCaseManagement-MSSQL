@@ -17,11 +17,14 @@ import {
   type ReportFilterSummary,
   type ReportSectionToggles,
 } from './reportMarkdownBuilder';
+import type { LensConfig } from './operationsLensConfig';
 
 interface ReportStudioModalProps {
   open: boolean;
   overview: OperationsOverviewResponse | null;
   body: OperationsBaseRequest;
+  /** Aktif lens — rapor basligi ve default section secimleri buradan gelir. */
+  lens: LensConfig;
   statusLabels: Record<string, string>;
   priorityLabels: Record<string, string>;
   caseTypeLabels: Record<string, string>;
@@ -30,31 +33,29 @@ interface ReportStudioModalProps {
   onClose: () => void;
 }
 
-const DEFAULT_SECTIONS: ReportSectionToggles = {
-  kpis: true,
-  timeSeries: true,
-  breakdowns: true,
-  riskAccounts: true,
-  aiNarrative: true,
-  appendix: true,
-};
-
 export function ReportStudioModal({
   open,
   overview,
   body,
+  lens,
   statusLabels,
   priorityLabels,
   caseTypeLabels,
   seedReport,
   onClose,
 }: ReportStudioModalProps) {
-  const [title, setTitle] = useState('Operasyon Raporu');
-  const [sections, setSections] = useState<ReportSectionToggles>(DEFAULT_SECTIONS);
+  const [title, setTitle] = useState(lens.reportTitle);
+  const [sections, setSections] = useState<ReportSectionToggles>(lens.reportDefaults);
   const [ai, setAi] = useState<OperationsReportResponse | null>(seedReport);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<AiError | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Lens degisirse rapor basligi + default section'lar yenilensin.
+  useEffect(() => {
+    setTitle(lens.reportTitle);
+    setSections(lens.reportDefaults);
+  }, [lens.key]);
 
   // Modal acildiginda seed'i tazele; filtre degistiginde modal'i kapatip
   // tekrar acmak temiz state verir, ama acikken filtre degisirse de seed yenilenir.
@@ -79,7 +80,7 @@ export function ReportStudioModal({
     if (!overview) return;
     setAiLoading(true);
     setAiError(null);
-    void aiService.operationsReportDraft(body).then((r) => {
+    void aiService.operationsReportDraft({ ...body, lens: lens.key }).then((r) => {
       if (r.ok) setAi(r.data);
       else setAiError(r.error);
       setAiLoading(false);

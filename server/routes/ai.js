@@ -19,6 +19,7 @@ import {
   sanitizeDrilldownAssist,
   isAllowedMetricKey,
   isAllowedAssistMode,
+  normalizeLens,
 } from '../ai/operationsAnalyst.js';
 import {
   validateDrilldownBucket,
@@ -1226,8 +1227,9 @@ router.post(
     req.aiLog.companyId = scope.companyIds?.[0];
     req.aiLog.skipAutoLog = true;
     const t0 = Date.now();
+    const lens = normalizeLens(req.body?.lens);
     const { json, tokenCount } = await callOpenAI({
-      ...buildBriefPrompt(scope, snapshot),
+      ...buildBriefPrompt(scope, snapshot, lens),
       expectJson: true,
     });
     const brief = sanitizeBrief(json);
@@ -1261,8 +1263,9 @@ router.post(
     req.aiLog.companyId = scope.companyIds?.[0];
     req.aiLog.skipAutoLog = true;
     const t0 = Date.now();
+    const lens = normalizeLens(req.body?.lens);
     const { json, tokenCount } = await callOpenAI({
-      ...buildInsightsPrompt(scope, snapshot),
+      ...buildInsightsPrompt(scope, snapshot, lens),
       expectJson: true,
     });
     const insights = sanitizeInsights(json);
@@ -1298,8 +1301,9 @@ router.post(
     req.aiLog.companyId = scope.companyIds?.[0];
     req.aiLog.skipAutoLog = true;
     const t0 = Date.now();
+    const lens = normalizeLens(req.body?.lens);
     const { json, tokenCount } = await callOpenAI({
-      ...buildExplainPrompt(scope, snapshot, metricKey),
+      ...buildExplainPrompt(scope, snapshot, metricKey, lens),
       expectJson: true,
     });
     const explain = sanitizeExplain(json, metricKey);
@@ -1367,8 +1371,9 @@ router.post(
     const topRows = rows.map(mapDrilldownCase);
     const allowedCaseNumbers = topRows.map((r) => r.caseNumber);
 
+    const lens = normalizeLens(req.body?.lens);
     const { json, tokenCount } = await callOpenAI({
-      ...buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, customPrompt, topRows, total }),
+      ...buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, customPrompt, topRows, total, lens }),
       expectJson: true,
     });
     const answer = sanitizeDrilldownAssist(json, allowedCaseNumbers);
@@ -1405,8 +1410,9 @@ router.post(
     req.aiLog.companyId = scope.companyIds?.[0];
     req.aiLog.skipAutoLog = true;
     const t0 = Date.now();
+    const lens = normalizeLens(req.body?.lens);
     const { json, tokenCount } = await callOpenAI({
-      ...buildReportPrompt(scope, snapshot),
+      ...buildReportPrompt(scope, snapshot, lens),
       expectJson: true,
     });
     const report = sanitizeReport(json);
