@@ -11,12 +11,22 @@ import {
   buildInsightsPrompt,
   buildExplainPrompt,
   buildReportPrompt,
+  buildDrilldownAssistPrompt,
   sanitizeBrief,
   sanitizeInsights,
   sanitizeExplain,
   sanitizeReport,
+  sanitizeDrilldownAssist,
   isAllowedMetricKey,
+  isAllowedAssistMode,
 } from '../ai/operationsAnalyst.js';
+import {
+  validateDrilldownBucket,
+  buildDrilldownWhere,
+  buildDrilldownOrderBy,
+  mapDrilldownCase,
+  bucketLabel,
+} from '../analytics/drilldownQuery.js';
 
 const router = Router();
 
@@ -1305,6 +1315,79 @@ router.post(
       metricKey,
       ...explain,
       scope: scopeMetadata(scope),
+      generatedAt: new Date().toISOString(),
+      usageLogId: log?.id ?? null,
+    });
+  }),
+);
+
+// 5) Operations Drill-down AI Assistant (Phase 4b)
+router.post(
+  '/operations-drilldown-assist',
+  rateLimit,
+  aiHandler('operations-drilldown-assist', async (req, res) => {
+    const body = req.body ?? {};
+    const bucketCheck = validateDrilldownBucket(body.bucket);
+    if (bucketCheck.error) {
+      return res.status(400).json({ error: 'invalid_bucket', message: bucketCheck.error });
+    }
+    const mode = isAllowedAssistMode(body.mode) ? body.mode : 'summarize';
+    if (!isAllowedAssistMode(body.mode)) {
+      return res.status(400).json({ error: 'invalid_mode', message: '`mode` gecersiz.' });
+    }
+    const customPrompt = typeof body.customPrompt === 'string' ? body.customPrompt.slice(0, 500) : null;
+
+    const ctx = await buildScopedSnapshot(req);
+    if (ctx.error) return res.status(ctx.status).json({ error: 'invalid_input', message: ctx.error });
+    const { scope, snapshot } = ctx;
+    req.aiLog.companyId = scope.companyIds?.[0];
+    req.aiLog.skipAutoLog = true;
+    const t0 = Date.now();
+
+    const bucket = bucketCheck.value;
+    const from = new Date(snapshot.period.from);
+    const to = new Date(snapshot.period.to);
+    const where = buildDrilldownWhere({ scope, filters: ctx.filters, from, to, bucket });
+    const orderBy = buildDrilldownOrderBy('createdAt', 'desc');
+
+    const [total, rows] = await Promise.all([
+      prisma.case.count({ where }),
+      prisma.case.findMany({
+        where,
+        orderBy,
+        take: 50,
+        select: {
+          id: true, caseNumber: true, title: true, status: true, priority: true,
+          companyName: true, accountName: true, category: true, subCategory: true,
+          assignedTeamName: true, assignedPersonName: true,
+          createdAt: true, slaResolutionDueAt: true, slaViolation: true,
+        },
+      }),
+    ]);
+    const topRows = rows.map(mapDrilldownCase);
+    const allowedCaseNumbers = topRows.map((r) => r.caseNumber);
+
+    const { json, tokenCount } = await callOpenAI({
+      ...buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, customPrompt, topRows, total }),
+      expectJson: true,
+    });
+    const answer = sanitizeDrilldownAssist(json, allowedCaseNumbers);
+    const log = await logAIUsage({
+      endpoint: 'operations-drilldown-assist',
+      companyId: scope.companyIds?.[0] ?? null,
+      caseId: null,
+      userId: req.user?.id ?? null,
+      responseTimeMs: Date.now() - t0,
+      tokenCount,
+    });
+
+    res.json({
+      answer,
+      scope: scopeMetadata(scope),
+      bucket: { ...bucket, label: bucketLabel(bucket) },
+      mode,
+      rowCount: topRows.length,
+      total,
       generatedAt: new Date().toISOString(),
       usageLogId: log?.id ?? null,
     });
