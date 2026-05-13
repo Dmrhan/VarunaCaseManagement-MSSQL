@@ -49,6 +49,7 @@ import { RunaInsightCard } from './RunaInsightCard';
 import { ExplainMetricModal } from './ExplainMetricModal';
 import { AiReportDraftModal } from './AiReportDraftModal';
 import { ReportStudioModal } from './ReportStudioModal';
+import { DrilldownAssistantCard } from './DrilldownAssistantCard';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -544,6 +545,8 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         open={drilldown != null}
         title={drilldown?.title ?? 'Vaka listesi'}
         request={drilldown}
+        bucket={drilldown?.bucket ?? null}
+        body={overviewBody}
         data={drilldownData}
         loading={drilldownLoading}
         error={drilldownError}
@@ -554,6 +557,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         onPageChange={setDrilldownPage}
         onSort={setDrilldownSort}
         onSelectCase={onSelectCase}
+        onOpenDrilldown={openDrilldown}
       />
 
       <ExplainMetricModal
@@ -1377,6 +1381,8 @@ function DrilldownDrawer({
   open,
   title,
   request,
+  bucket,
+  body,
   data,
   loading,
   error,
@@ -1384,6 +1390,7 @@ function DrilldownDrawer({
   onPageChange,
   onSort,
   onSelectCase,
+  onOpenDrilldown,
 }: {
   open: boolean;
   title: string;
@@ -1392,6 +1399,8 @@ function DrilldownDrawer({
     sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours';
     sortDir: 'asc' | 'desc';
   } | null;
+  bucket: DrilldownBucket | null;
+  body: OverviewRequest;
   data: DrilldownResponse | null;
   loading: boolean;
   error: string | null;
@@ -1399,7 +1408,25 @@ function DrilldownDrawer({
   onPageChange: (page: number) => void;
   onSort: (sortBy: 'createdAt' | 'priority' | 'slaResolutionDueAt' | 'ageHours') => void;
   onSelectCase?: (caseId: string) => void;
+  onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
 }) {
+  // Stale-guard: bucket / page / sort / body degisirse assistant cevabini sifirla.
+  const staleKey = useMemo(() => JSON.stringify({
+    bucket,
+    page: request?.page,
+    sortBy: request?.sortBy,
+    sortDir: request?.sortDir,
+    body,
+  }), [bucket, request?.page, request?.sortBy, request?.sortDir, body]);
+
+  const [highlighted, setHighlighted] = useState<Set<string>>(() => new Set());
+
+  // staleKey degistiginde highlight kapanir. Assistant card kendi state'ini
+  // bu key'i prop olarak alip resetler.
+  useEffect(() => {
+    setHighlighted(new Set());
+  }, [staleKey]);
+
   if (!open) return null;
   const page = data?.page ?? request?.page ?? 1;
   const pageSize = data?.pageSize ?? 50;
@@ -1438,6 +1465,25 @@ function DrilldownDrawer({
           </div>
         )}
 
+        {bucket && (
+          <div key={staleKey} className="border-b border-slate-200 px-5 py-2 dark:border-ndark-border">
+            <DrilldownAssistantCard
+              bucket={bucket}
+              body={body}
+              onAnswerChange={(ans) => {
+                const set = new Set<string>();
+                if (ans) {
+                  for (const ev of ans.evidence) {
+                    for (const n of ev.caseNumbers) set.add(n);
+                  }
+                }
+                setHighlighted(set);
+              }}
+              onOpenDrilldown={onOpenDrilldown}
+            />
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto">
           {error ? (
             <div className="p-5 text-sm text-rose-700 dark:text-rose-300">{error}</div>
@@ -1468,7 +1514,13 @@ function DrilldownDrawer({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
                 {data.items.map((row) => (
-                  <DrilldownRow key={row.id} row={row} onSelectCase={onSelectCase} onClose={onClose} />
+                  <DrilldownRow
+                    key={row.id}
+                    row={row}
+                    highlighted={highlighted.has(row.caseNumber)}
+                    onSelectCase={onSelectCase}
+                    onClose={onClose}
+                  />
                 ))}
               </tbody>
             </table>
@@ -1522,15 +1574,17 @@ function SortableDrawerTh({
 
 function DrilldownRow({
   row,
+  highlighted,
   onSelectCase,
   onClose,
 }: {
   row: DrilldownCaseRow;
+  highlighted?: boolean;
   onSelectCase?: (caseId: string) => void;
   onClose: () => void;
 }) {
   return (
-    <tr className="hover:bg-slate-50 dark:hover:bg-ndark-bg/40">
+    <tr className={`hover:bg-slate-50 dark:hover:bg-ndark-bg/40 ${highlighted ? 'bg-violet-50/60 ring-1 ring-inset ring-violet-200 dark:bg-violet-900/20 dark:ring-violet-700/40' : ''}`}>
       <td className="max-w-xs px-4 py-3">
         <button
           type="button"
