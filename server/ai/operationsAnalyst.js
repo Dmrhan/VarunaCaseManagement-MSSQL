@@ -59,6 +59,36 @@ export function isAllowedAssistMode(m) {
   return typeof m === 'string' && ALLOWED_ASSIST_MODES.has(m);
 }
 
+const ALLOWED_LENSES = Object.freeze(new Set(['operations', 'customer', 'executive', 'personal']));
+
+/**
+ * Opsiyonel lens parametresi: AI prompt tonunu ayarlar. Veri/yetkilendirme
+ * davranisini DEGISTIRMEZ. Bilinmeyen lens icin null doner.
+ */
+export function normalizeLens(lens) {
+  if (typeof lens !== 'string') return null;
+  return ALLOWED_LENSES.has(lens) ? lens : null;
+}
+
+const LENS_TONE = Object.freeze({
+  operations: 'Tonlama: Taktik, SLA odakli, kuyrukla ilgili. Acik vakalar ve aktif riskler oncelikli.',
+  customer:
+    'Tonlama: Musteri risk kumelerine, tekrar eden kategori sorunlarina ve hesap bazli aksiyonlara odaklan. ' +
+    'Bireysel agent performansi yargilama; iletisim ve hesap koruma aksiyonlari oner.',
+  executive:
+    'Tonlama: Karar-destekli, ozet, sayisal. 3-5 kritik hareket noktasi belirle; ' +
+    'gunluk operasyonel detay (statu adetleri, takim bazli yuk) verme.',
+  personal:
+    'Tonlama: Sadece kullanicinin yapabilecegi sirada yapilacaklar uzerinden konus. ' +
+    'Takim/organizasyon dusey aksiyonu (rebalance, kapasite planlama, kadro) ASLA onerme.',
+});
+
+function lensInstruction(lens) {
+  const key = normalizeLens(lens);
+  if (!key) return '';
+  return `\nLENS BAGLAMI:\n${LENS_TONE[key]}\n`;
+}
+
 /**
  * Drilldown row'lari AI'a verirken sadece beyaz listedeki alanlara izin ver.
  * Raw notes/descriptions/attachments/callLogs/internal comments asla gitmez.
@@ -202,9 +232,10 @@ function snapshotBlock(snapshot) {
 // 1) Brief
 // ──────────────────────────────────────────────────────────────────
 
-export function buildBriefPrompt(scope, snapshot) {
+export function buildBriefPrompt(scope, snapshot, lens) {
   const system = [
     rolePersona(scope),
+    lensInstruction(lens),
     '',
     COMMON_RULES,
     '',
@@ -246,9 +277,10 @@ export function sanitizeBrief(raw) {
 // 2) Insights
 // ──────────────────────────────────────────────────────────────────
 
-export function buildInsightsPrompt(scope, snapshot) {
+export function buildInsightsPrompt(scope, snapshot, lens) {
   const system = [
     rolePersona(scope),
+    lensInstruction(lens),
     '',
     COMMON_RULES,
     '',
@@ -344,11 +376,12 @@ export function isAllowedMetricKey(k) {
   return typeof k === 'string' && ALLOWED_METRIC_KEYS.has(k);
 }
 
-export function buildExplainPrompt(scope, snapshot, metricKey) {
+export function buildExplainPrompt(scope, snapshot, metricKey, lens) {
   const kpiSlice = snapshot.kpis?.[metricKey] ?? null;
   const formula = METRIC_FORMULAS[metricKey] ?? '(formul kayitli degil)';
   const system = [
     rolePersona(scope),
+    lensInstruction(lens),
     '',
     COMMON_RULES,
     '',
@@ -408,9 +441,10 @@ export function sanitizeExplain(raw, metricKey) {
 // 4) Report draft
 // ──────────────────────────────────────────────────────────────────
 
-export function buildReportPrompt(scope, snapshot) {
+export function buildReportPrompt(scope, snapshot, lens) {
   const system = [
     rolePersona(scope),
+    lensInstruction(lens),
     '',
     COMMON_RULES,
     '',
@@ -461,8 +495,9 @@ const ASSIST_MODE_INSTRUCTIONS = {
   custom:      'GOREV: Kullanici sorusunu yalnizca verilen snapshot baglaminda yanitla. Snapshot disinda iddia uretme; "Elindeki veriyle sinirli" cumlesini koru.',
 };
 
-export function buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, customPrompt, topRows, total }) {
+export function buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, customPrompt, topRows, total, lens }) {
   const persona = rolePersona(scope);
+  const lensText = lensInstruction(lens);
   const modeInstr = ASSIST_MODE_INSTRUCTIONS[mode] ?? ASSIST_MODE_INSTRUCTIONS.summarize;
 
   const safeRows = stripDrilldownRowsForAi(topRows);
@@ -494,6 +529,7 @@ export function buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, cust
 
   const system = [
     persona,
+    lensText,
     '',
     COMMON_RULES,
     '',

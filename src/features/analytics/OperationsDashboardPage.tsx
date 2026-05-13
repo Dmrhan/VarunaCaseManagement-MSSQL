@@ -50,6 +50,16 @@ import { ExplainMetricModal } from './ExplainMetricModal';
 import { AiReportDraftModal } from './AiReportDraftModal';
 import { ReportStudioModal } from './ReportStudioModal';
 import { DrilldownAssistantCard } from './DrilldownAssistantCard';
+import { LensSelector } from './LensSelector';
+import {
+  LENS_BY_KEY,
+  availableLensesForRole,
+  defaultLensForRole,
+  type DashboardSectionKey,
+  type LensConfig,
+  type LensKey,
+} from './operationsLensConfig';
+import { useAuth } from '@/services/AuthContext';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -173,6 +183,23 @@ function formatDateLabel(iso: string): string {
 // ----- Component --------------------------------------------------
 
 export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (caseId: string) => void }) {
+  const { user } = useAuth();
+
+  // Lens (persona) — role bazli default. Lens YALNIZCA sunum katmaninda etkili.
+  const availableLenses = useMemo(() => availableLensesForRole(user?.role), [user?.role]);
+  const [lensKey, setLensKey] = useState<LensKey>(() => defaultLensForRole(user?.role));
+  // Role degisirse default'a don (login transition).
+  useEffect(() => {
+    setLensKey(defaultLensForRole(user?.role));
+  }, [user?.role]);
+  // Lens role icin available degilse default'a dus.
+  useEffect(() => {
+    if (!availableLenses.some((l) => l.key === lensKey)) {
+      setLensKey(defaultLensForRole(user?.role));
+    }
+  }, [availableLenses, lensKey, user?.role]);
+  const lens: LensConfig = LENS_BY_KEY[lensKey];
+
   // Filter state
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
@@ -355,13 +382,13 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     setInsightsError(null);
     setReport(null);
     setReportError(null);
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey]);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey]);
 
   function runBrief() {
     setBriefLoading(true);
     setBriefError(null);
     setBriefDismissed(false);
-    void aiService.operationsBrief(overviewBody).then((r) => {
+    void aiService.operationsBrief({ ...overviewBody, lens: lensKey }).then((r) => {
       if (r.ok) setBrief(r.data);
       else setBriefError(r.error);
       setBriefLoading(false);
@@ -370,7 +397,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   function runInsights() {
     setInsightsLoading(true);
     setInsightsError(null);
-    void aiService.operationsInsights(overviewBody).then((r) => {
+    void aiService.operationsInsights({ ...overviewBody, lens: lensKey }).then((r) => {
       if (r.ok) setInsights(r.data.insights);
       else setInsightsError(r.error);
       setInsightsLoading(false);
@@ -380,7 +407,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     setReportOpen(true);
     setReportLoading(true);
     setReportError(null);
-    void aiService.operationsReportDraft(overviewBody).then((r) => {
+    void aiService.operationsReportDraft({ ...overviewBody, lens: lensKey }).then((r) => {
       if (r.ok) setReport(r.data);
       else setReportError(r.error);
       setReportLoading(false);
@@ -422,6 +449,9 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         refetching={refetching}
         scope={data?.scope}
         asOfLocal={data?.asOfLocal}
+        lens={lens}
+        availableLenses={availableLenses}
+        onLensChange={setLensKey}
       />
 
       <FilterBar
@@ -503,66 +533,14 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         />
       )}
 
-      <div className={refetching ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
-        <KpiGrid
-          kpis={data?.kpis}
-          loading={loading}
-          minSampleMetrics={mapMinSample(data)}
-          onOpenDrilldown={openDrilldown}
-          onExplain={openExplain}
-        />
-      </div>
-
-      <TimeSeriesCard
-        loading={loading}
-        series={data?.timeSeries ?? []}
-      />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BreakdownCard
-          title="Statü Dağılımı"
-          icon={<Layers size={16} />}
-          loading={loading}
-          items={mapStatusItems(data?.byStatus ?? [])}
-          emptyHint="Bu dönemde vaka oluşturulmamış."
-          onOpenDrilldown={openDrilldown}
-        />
-        <BreakdownCard
-          title="Önceliğe Göre"
-          icon={<AlertTriangle size={16} />}
-          loading={loading}
-          items={mapPriorityItems(data?.byPriority ?? [])}
-          emptyHint="Veri yok."
-          onOpenDrilldown={openDrilldown}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <BreakdownCard
-          title="Vaka Tipi"
-          icon={<Target size={16} />}
-          loading={loading}
-          items={mapCaseTypeItems(data?.byCaseType ?? [])}
-          emptyHint="Veri yok."
-          onOpenDrilldown={openDrilldown}
-        />
-        {data?.byCompany && data.byCompany.length > 0 && (
-          <BreakdownCard
-            title="Şirkete Göre"
-            icon={<Building2 size={16} />}
-            loading={loading}
-            items={mapCompanyItems(data.byCompany)}
-            emptyHint="Veri yok."
-            onOpenDrilldown={openDrilldown}
-          />
-        )}
-      </div>
-
-      <TeamBreakdownCard loading={loading} rows={data?.byTeam ?? []} onOpenDrilldown={openDrilldown} />
-
-      <CategoryBreakdownCard loading={loading} rows={data?.byCategory ?? []} onOpenDrilldown={openDrilldown} />
-
-      <AtRiskAccountsCard loading={loading} rows={data?.topAtRiskAccounts ?? []} onOpenDrilldown={openDrilldown} />
+      {renderLensSections({
+        lens,
+        data,
+        loading,
+        refetching,
+        openDrilldown,
+        openExplain,
+      })}
 
       {!loading && data && (data.kpis.totalCases.value ?? 0) === 0 && (
         <Card>
@@ -590,6 +568,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         request={drilldown}
         bucket={drilldown?.bucket ?? null}
         body={overviewBody}
+        lens={lensKey}
         data={drilldownData}
         loading={drilldownLoading}
         error={drilldownError}
@@ -624,6 +603,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         open={studioOpen}
         overview={data}
         body={overviewBody}
+        lens={lens}
         statusLabels={STATUS_LABEL}
         priorityLabels={PRIORITY_LABEL}
         caseTypeLabels={CASE_TYPE_LABEL}
@@ -639,6 +619,135 @@ function aiErrorShort(err: AiError): string {
   return err.kind;
 }
 
+// ===== Lens-aware section renderer ================================
+//
+// Lens config'ten gelen sectionOrder + hiddenSections'a gore section'lari
+// dinamik render eder. Her section yatay full-width; statusPriorityGroup
+// kompozit (byStatus + byPriority 2-col).
+
+function renderLensSections({
+  lens,
+  data,
+  loading,
+  refetching,
+  openDrilldown,
+  openExplain,
+}: {
+  lens: LensConfig;
+  data: OperationsOverviewResponse | null;
+  loading: boolean;
+  refetching: boolean;
+  openDrilldown: (bucket: DrilldownBucket, title: string) => void;
+  openExplain: (metricKey: string, metricLabel: string) => void;
+}) {
+  const visibleOrder = lens.sectionOrder.filter((k) => !lens.hiddenSections.includes(k));
+  return (
+    <>
+      {visibleOrder.map((key) => (
+        <SectionRenderer
+          key={key}
+          sectionKey={key}
+          lens={lens}
+          data={data}
+          loading={loading}
+          refetching={refetching}
+          openDrilldown={openDrilldown}
+          openExplain={openExplain}
+        />
+      ))}
+    </>
+  );
+}
+
+function SectionRenderer({
+  sectionKey,
+  lens,
+  data,
+  loading,
+  refetching,
+  openDrilldown,
+  openExplain,
+}: {
+  sectionKey: DashboardSectionKey;
+  lens: LensConfig;
+  data: OperationsOverviewResponse | null;
+  loading: boolean;
+  refetching: boolean;
+  openDrilldown: (bucket: DrilldownBucket, title: string) => void;
+  openExplain: (metricKey: string, metricLabel: string) => void;
+}) {
+  switch (sectionKey) {
+    case 'kpiGrid':
+      return (
+        <div className={refetching ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
+          <KpiGrid
+            kpis={data?.kpis}
+            loading={loading}
+            minSampleMetrics={mapMinSample(data)}
+            kpiOrder={lens.kpiOrder}
+            onOpenDrilldown={openDrilldown}
+            onExplain={openExplain}
+          />
+        </div>
+      );
+    case 'timeSeries':
+      return <TimeSeriesCard loading={loading} series={data?.timeSeries ?? []} />;
+    case 'statusPriorityGroup':
+      return (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <BreakdownCard
+            title="Statü Dağılımı"
+            icon={<Layers size={16} />}
+            loading={loading}
+            items={mapStatusItems(data?.byStatus ?? [])}
+            emptyHint="Bu dönemde vaka oluşturulmamış."
+            onOpenDrilldown={openDrilldown}
+          />
+          <BreakdownCard
+            title="Önceliğe Göre"
+            icon={<AlertTriangle size={16} />}
+            loading={loading}
+            items={mapPriorityItems(data?.byPriority ?? [])}
+            emptyHint="Veri yok."
+            onOpenDrilldown={openDrilldown}
+          />
+        </div>
+      );
+    case 'byCaseType':
+      return (
+        <BreakdownCard
+          title="Vaka Tipi"
+          icon={<Target size={16} />}
+          loading={loading}
+          items={mapCaseTypeItems(data?.byCaseType ?? [])}
+          emptyHint="Veri yok."
+          onOpenDrilldown={openDrilldown}
+        />
+      );
+    case 'byCompany':
+      // byCompany sadece backend null degilse render — scope guard server-side.
+      if (!data?.byCompany || data.byCompany.length === 0) return null;
+      return (
+        <BreakdownCard
+          title="Şirkete Göre"
+          icon={<Building2 size={16} />}
+          loading={loading}
+          items={mapCompanyItems(data.byCompany)}
+          emptyHint="Veri yok."
+          onOpenDrilldown={openDrilldown}
+        />
+      );
+    case 'byTeam':
+      return <TeamBreakdownCard loading={loading} rows={data?.byTeam ?? []} onOpenDrilldown={openDrilldown} />;
+    case 'byCategory':
+      return <CategoryBreakdownCard loading={loading} rows={data?.byCategory ?? []} onOpenDrilldown={openDrilldown} />;
+    case 'atRiskAccounts':
+      return <AtRiskAccountsCard loading={loading} rows={data?.topAtRiskAccounts ?? []} onOpenDrilldown={openDrilldown} />;
+    default:
+      return null;
+  }
+}
+
 // ===== Header & filters ===========================================
 
 function DashboardHeader({
@@ -652,6 +761,9 @@ function DashboardHeader({
   refetching,
   scope,
   asOfLocal,
+  lens,
+  availableLenses,
+  onLensChange,
 }: {
   dateFrom: string;
   dateTo: string;
@@ -663,6 +775,9 @@ function DashboardHeader({
   refetching: boolean;
   scope: OperationsOverviewResponse['scope'] | undefined;
   asOfLocal: string | undefined;
+  lens: LensConfig;
+  availableLenses: LensConfig[];
+  onLensChange: (k: LensKey) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -682,18 +797,26 @@ function DashboardHeader({
             )}
           </h1>
           <p className="mt-0.5 text-sm text-slate-500 dark:text-ndark-muted">
-            Vaka operasyonlarının özet performansı — son veri{asOfLocal ? `: ${asOfLocal}` : ''}.
+            <span>{lens.description}</span>
+            {asOfLocal && <span> · son veri: {asOfLocal}</span>}
           </p>
         </div>
-        {scope && (
-          <Badge tint={SCOPE_KIND_TINT[scope.kind] ?? 'slate'}>
-            <span className="font-semibold uppercase tracking-wide">
-              {SCOPE_KIND_LABEL[scope.kind] ?? scope.kind}
-            </span>
-            <span className="opacity-70">·</span>
-            <span className="opacity-90">{scope.narrative}</span>
-          </Badge>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <LensSelector
+            current={lens.key}
+            options={availableLenses}
+            onChange={onLensChange}
+          />
+          {scope && (
+            <Badge tint={SCOPE_KIND_TINT[scope.kind] ?? 'slate'}>
+              <span className="font-semibold uppercase tracking-wide">
+                {SCOPE_KIND_LABEL[scope.kind] ?? scope.kind}
+              </span>
+              <span className="opacity-70">·</span>
+              <span className="opacity-90">{scope.narrative}</span>
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -889,15 +1012,29 @@ function KpiGrid({
   kpis,
   loading,
   minSampleMetrics,
+  kpiOrder,
   onOpenDrilldown,
   onExplain,
 }: {
   kpis: OperationsOverviewResponse['kpis'] | undefined;
   loading: boolean;
   minSampleMetrics: Set<string>;
+  kpiOrder?: ReadonlyArray<string>;
   onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
   onExplain: (metricKey: string, metricLabel: string) => void;
 }) {
+  // Lens'ten gelen kpiOrder default sirayi override eder. Bilinmeyen keyler
+  // dizinin sonuna duser. Lens hicbir reorder vermezse default KPI_TILES sirasi.
+  const orderedTiles = useMemo(() => {
+    if (!kpiOrder || kpiOrder.length === 0) return KPI_TILES;
+    const indexOf = new Map<string, number>();
+    kpiOrder.forEach((k, i) => indexOf.set(k, i));
+    return KPI_TILES.slice().sort((a, b) => {
+      const ai = indexOf.has(a.key) ? indexOf.get(a.key)! : 999;
+      const bi = indexOf.has(b.key) ? indexOf.get(b.key)! : 999;
+      return ai - bi;
+    });
+  }, [kpiOrder]);
   if (loading && !kpis) {
     return (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
@@ -910,7 +1047,7 @@ function KpiGrid({
   if (!kpis) return null;
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-      {KPI_TILES.map((spec) => (
+      {orderedTiles.map((spec) => (
         <KpiCard
           key={spec.key}
           spec={spec}
@@ -1463,6 +1600,7 @@ function DrilldownDrawer({
   request,
   bucket,
   body,
+  lens,
   data,
   loading,
   error,
@@ -1481,6 +1619,7 @@ function DrilldownDrawer({
   } | null;
   bucket: DrilldownBucket | null;
   body: OverviewRequest;
+  lens: LensKey;
   data: DrilldownResponse | null;
   loading: boolean;
   error: string | null;
@@ -1550,6 +1689,7 @@ function DrilldownDrawer({
             <DrilldownAssistantCard
               bucket={bucket}
               body={body}
+              lens={lens}
               onAnswerChange={(ans) => {
                 const set = new Set<string>();
                 if (ans) {
