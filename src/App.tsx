@@ -17,7 +17,7 @@ import {
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
-import { CaseAnalyticsPage } from './features/analytics/CaseAnalyticsPage';
+import { OperationsDashboardPage } from './features/analytics/OperationsDashboardPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
@@ -535,7 +535,7 @@ export default function App() {
               onShowPatterns={() => setView('analytics-patterns')}
             />
           )}
-          {view === 'dashboard' && <CaseAnalyticsPage />}
+          {view === 'dashboard' && <OperationsDashboardPage />}
           {view === 'analytics-ai-usage' && <AIUsagePage />}
           {view === 'analytics-patterns' && (
             <PatternsPage
