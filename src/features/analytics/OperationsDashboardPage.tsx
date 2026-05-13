@@ -10,6 +10,7 @@ import {
   Clock,
   ExternalLink,
   Inbox,
+  Info,
   Layers,
   Minus,
   RefreshCw,
@@ -35,6 +36,18 @@ import {
   type OverviewKpi,
   type OverviewRequest,
 } from '@/services/analyticsService';
+import {
+  aiService,
+  type AiError,
+  type OperationsBriefResponse,
+  type OperationsInsight,
+  type OperationsReportResponse,
+} from '@/services/aiService';
+import { RunaCommandStrip, type AiCommandKey } from './RunaCommandStrip';
+import { AiBriefCard } from './AiBriefCard';
+import { RunaInsightCard } from './RunaInsightCard';
+import { ExplainMetricModal } from './ExplainMetricModal';
+import { AiReportDraftModal } from './AiReportDraftModal';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -189,6 +202,23 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<string | null>(null);
 
+  // ---- AI state (Phase 4a) ----
+  const [brief, setBrief] = useState<OperationsBriefResponse | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<AiError | null>(null);
+  const [briefDismissed, setBriefDismissed] = useState(false);
+
+  const [insights, setInsights] = useState<OperationsInsight[] | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<AiError | null>(null);
+
+  const [report, setReport] = useState<OperationsReportResponse | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<AiError | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+
+  const [explainTarget, setExplainTarget] = useState<{ key: string; label: string } | null>(null);
+
   // Stable serialized deps for useEffect
   const statusesKey = statuses.slice().sort().join(',');
   const caseTypesKey = caseTypes.slice().sort().join(',');
@@ -287,6 +317,56 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     });
   }
 
+  // ---- AI command handlers (Phase 4a) ----
+  // Filtre değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  useEffect(() => {
+    setBrief(null);
+    setBriefError(null);
+    setBriefDismissed(false);
+    setInsights(null);
+    setInsightsError(null);
+    setReport(null);
+    setReportError(null);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey]);
+
+  function runBrief() {
+    setBriefLoading(true);
+    setBriefError(null);
+    setBriefDismissed(false);
+    void aiService.operationsBrief(overviewBody).then((r) => {
+      if (r.ok) setBrief(r.data);
+      else setBriefError(r.error);
+      setBriefLoading(false);
+    });
+  }
+  function runInsights() {
+    setInsightsLoading(true);
+    setInsightsError(null);
+    void aiService.operationsInsights(overviewBody).then((r) => {
+      if (r.ok) setInsights(r.data.insights);
+      else setInsightsError(r.error);
+      setInsightsLoading(false);
+    });
+  }
+  function runReport() {
+    setReportOpen(true);
+    setReportLoading(true);
+    setReportError(null);
+    void aiService.operationsReportDraft(overviewBody).then((r) => {
+      if (r.ok) setReport(r.data);
+      else setReportError(r.error);
+      setReportLoading(false);
+    });
+  }
+  function handleCommand(cmd: AiCommandKey) {
+    if (cmd === 'brief') runBrief();
+    else if (cmd === 'insights') runInsights();
+    else if (cmd === 'report') runReport();
+  }
+  function openExplain(metricKey: string, metricLabel: string) {
+    setExplainTarget({ key: metricKey, label: metricLabel });
+  }
+
   // -------------------------------------------------------------- render
 
   return (
@@ -313,6 +393,40 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
           setCaseTypes([]);
         }}
       />
+
+      <RunaCommandStrip
+        briefLoading={briefLoading}
+        insightsLoading={insightsLoading}
+        reportLoading={reportLoading}
+        briefError={briefError ? aiErrorShort(briefError) : null}
+        insightsError={insightsError ? aiErrorShort(insightsError) : null}
+        reportError={reportError ? aiErrorShort(reportError) : null}
+        hasBrief={!!brief && !briefDismissed}
+        hasInsights={!!insights && insights.length > 0}
+        onRun={handleCommand}
+      />
+
+      {(brief || briefLoading || briefError) && !briefDismissed && (
+        <AiBriefCard
+          data={brief}
+          loading={briefLoading}
+          error={briefError}
+          onRetry={runBrief}
+          onDismiss={() => {
+            setBrief(null);
+            setBriefError(null);
+            setBriefDismissed(true);
+          }}
+        />
+      )}
+
+      {insights && insights.length > 0 && (
+        <div className="space-y-3">
+          {insights.map((ins) => (
+            <RunaInsightCard key={ins.id} insight={ins} onOpenDrilldown={openDrilldown} />
+          ))}
+        </div>
+      )}
 
       {error && (
         <Card>
@@ -348,6 +462,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         loading={loading}
         minSampleMetrics={mapMinSample(data)}
         onOpenDrilldown={openDrilldown}
+        onExplain={openExplain}
       />
 
       <TimeSeriesCard
@@ -436,8 +551,30 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         onSort={setDrilldownSort}
         onSelectCase={onSelectCase}
       />
+
+      <ExplainMetricModal
+        open={explainTarget != null}
+        metricKey={explainTarget?.key ?? null}
+        metricLabel={explainTarget?.label ?? ''}
+        body={overviewBody}
+        onClose={() => setExplainTarget(null)}
+        onOpenDrilldown={openDrilldown}
+      />
+
+      <AiReportDraftModal
+        open={reportOpen}
+        data={report}
+        loading={reportLoading}
+        error={reportError}
+        onClose={() => setReportOpen(false)}
+      />
     </div>
   );
+}
+
+function aiErrorShort(err: AiError): string {
+  // Kompakt rozet metni; full mesaj komponent-içi aiErrorMessage() ile gosterilir.
+  return err.kind;
 }
 
 // ===== Header & filters ===========================================
@@ -654,11 +791,13 @@ function KpiGrid({
   loading,
   minSampleMetrics,
   onOpenDrilldown,
+  onExplain,
 }: {
   kpis: OperationsOverviewResponse['kpis'] | undefined;
   loading: boolean;
   minSampleMetrics: Set<string>;
   onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
+  onExplain: (metricKey: string, metricLabel: string) => void;
 }) {
   if (loading && !kpis) {
     return (
@@ -679,6 +818,7 @@ function KpiGrid({
           kpi={kpis[spec.key]}
           minSample={minSampleMetrics.has(spec.key)}
           onOpenDrilldown={onOpenDrilldown}
+          onExplain={onExplain}
         />
       ))}
     </div>
@@ -690,11 +830,13 @@ function KpiCard({
   kpi,
   minSample,
   onOpenDrilldown,
+  onExplain,
 }: {
   spec: KpiTileSpec;
   kpi: OverviewKpi;
   minSample: boolean;
   onOpenDrilldown: (bucket: DrilldownBucket, title: string) => void;
+  onExplain: (metricKey: string, metricLabel: string) => void;
 }) {
   const valueText = useMemo(() => {
     if (kpi.value == null) return '—';
@@ -708,17 +850,18 @@ function KpiCard({
 
   const clickable = (kpi.value ?? 0) > 0;
   return (
-    <button
-      type="button"
-      disabled={!clickable}
-      onClick={() => onOpenDrilldown({ kind: spec.key, label: spec.label } as DrilldownBucket, spec.label)}
-      className={`rounded-xl bg-white p-4 text-left ring-1 ring-inset ring-slate-200 shadow-sm transition dark:bg-ndark-card dark:ring-ndark-border ${
-        clickable
-          ? 'hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500'
-          : 'cursor-default opacity-95'
-      }`}
-      title={clickable ? 'Vakaları gör' : undefined}
-    >
+    <div className="relative">
+      <button
+        type="button"
+        disabled={!clickable}
+        onClick={() => onOpenDrilldown({ kind: spec.key, label: spec.label } as DrilldownBucket, spec.label)}
+        className={`block w-full rounded-xl bg-white p-4 pr-8 text-left ring-1 ring-inset ring-slate-200 shadow-sm transition dark:bg-ndark-card dark:ring-ndark-border ${
+          clickable
+            ? 'hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500'
+            : 'cursor-default opacity-95'
+        }`}
+        title={clickable ? 'Vakaları gör' : undefined}
+      >
       <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
         {spec.icon}
         <span>{spec.label}</span>
@@ -740,7 +883,20 @@ function KpiCard({
         )}
         <span className="text-slate-400 dark:text-ndark-muted">önceki döneme göre</span>
       </div>
-    </button>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onExplain(spec.key, spec.label);
+        }}
+        className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-violet-600 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:hover:bg-ndark-bg dark:hover:text-violet-300"
+        aria-label="Metriği AI ile açıkla"
+        title="Metriği AI ile açıkla"
+      >
+        <Info size={12} />
+      </button>
+    </div>
   );
 }
 
