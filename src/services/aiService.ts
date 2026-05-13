@@ -341,13 +341,18 @@ export const aiService = {
 
 // ---- 8) Operations Intelligence — AI Analyst (Phase 4a) ----
 
+export type LensKey = 'operations' | 'customer' | 'executive' | 'personal';
+
 export interface OperationsBaseRequest {
   from: string;
   to: string;
   productGroups?: string[];
   caseTypes?: string[];
   statuses?: string[];
+  companies?: string[];
   granularity?: 'day' | 'hour';
+  /** Phase 6a: AI prompt tonu (operations|customer|executive|personal). Veri/yetkilendirme degistirmez. */
+  lens?: LensKey;
 }
 
 export interface OperationsAiScope {

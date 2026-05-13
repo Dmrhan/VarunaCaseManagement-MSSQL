@@ -10,6 +10,7 @@ import {
   type DrilldownAssistAnswer,
   type DrilldownAssistMode,
   type DrilldownAssistResponse,
+  type LensKey,
   type OperationsBaseRequest,
   type OperationsInsightBucket,
 } from '@/services/aiService';
@@ -20,6 +21,8 @@ interface DrilldownAssistantCardProps {
   bucket: DrilldownBucket | null;
   /** Dashboard'un guncel filtre body'si. */
   body: OperationsBaseRequest;
+  /** Aktif lens — AI prompt tonunu etkiler. */
+  lens?: LensKey;
   /** Drawer'da goz onunde olan vaka numaralari — AI cevabindaki caseNumbers ile match icin parent kullanir. */
   onAnswerChange: (answer: DrilldownAssistAnswer | null) => void;
   /** Phase 3 drilldown navigation — evidence chip'leri buradan acilir. */
@@ -33,7 +36,7 @@ const MODE_BUTTONS: Array<{ key: DrilldownAssistMode; label: string; icon: React
   { key: 'nextAction', label: 'Aksiyon öner',   icon: <Target size={12} /> },
 ];
 
-export function DrilldownAssistantCard({ bucket, body, onAnswerChange, onOpenDrilldown }: DrilldownAssistantCardProps) {
+export function DrilldownAssistantCard({ bucket, body, lens, onAnswerChange, onOpenDrilldown }: DrilldownAssistantCardProps) {
   const [answer, setAnswer] = useState<DrilldownAssistResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<AiError | null>(null);
@@ -51,6 +54,7 @@ export function DrilldownAssistantCard({ bucket, body, onAnswerChange, onOpenDri
         ...body,
         bucket: bucketToInsightBucket(bucket),
         mode,
+        ...(lens ? { lens } : {}),
         ...(customPrompt ? { customPrompt } : {}),
       })
       .then((r) => {
