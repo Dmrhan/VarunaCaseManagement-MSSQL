@@ -264,3 +264,55 @@ html.dark .bg-slate-100\/40,
 html.dark .bg-slate-100\/60 {
   background-color: rgba(28, 33, 40, 0.6);
 }
+
+/* ----------------------------------------------------------------
+   Print mode — Report Studio (Phase 5a) §2.10
+   Yazdirma esnasinda yalnizca `.printable-report` agaci goz onunde
+   kalir; app chrome (sidebar, header, modal backdrop, butonlar) gizlenir.
+   `report-no-print` sinifi olan herhangi bir eleman da yazdirmaya
+   dahil edilmez. Tum renkler beyaz/koyu metin olarak normalize edilir.
+   ---------------------------------------------------------------- */
+@media print {
+  html, body, #root {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    height: auto !important;
+  }
+  body * { visibility: hidden !important; }
+  .printable-report, .printable-report * { visibility: visible !important; }
+  .printable-report {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    padding: 1.5rem !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+  }
+  .report-no-print { display: none !important; }
+  /* Renkli badge/tile arka planlarini sade beyaz/cizgili goster */
+  .printable-report .bg-white,
+  .printable-report .bg-slate-50,
+  .printable-report .bg-slate-100,
+  .printable-report [class*="bg-"] {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  .printable-report .ring-1,
+  .printable-report .border {
+    box-shadow: inset 0 0 0 1px #cbd5e1 !important;
+    border-color: #cbd5e1 !important;
+  }
+  /* Tablo sayfa kirilmasini koru */
+  .printable-report table {
+    page-break-inside: auto;
+  }
+  .printable-report tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  .printable-report h1, .printable-report h2, .printable-report h3 {
+    page-break-after: avoid;
+  }
+}
