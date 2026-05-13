@@ -1,8 +1,8 @@
-import { FileText, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
+import { FileText, FileBarChart, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 
-export type AiCommandKey = 'brief' | 'insights' | 'report';
+export type AiCommandKey = 'brief' | 'insights' | 'report' | 'studio';
 
 interface RunaCommandStripProps {
   briefLoading: boolean;
@@ -13,6 +13,7 @@ interface RunaCommandStripProps {
   reportError: string | null;
   hasBrief: boolean;
   hasInsights: boolean;
+  studioDisabled?: boolean;
   onRun: (cmd: AiCommandKey) => void;
 }
 
@@ -36,6 +37,7 @@ export function RunaCommandStrip({
   reportError,
   hasBrief,
   hasInsights,
+  studioDisabled,
   onRun,
 }: RunaCommandStripProps) {
   return (
@@ -71,6 +73,15 @@ export function RunaCommandStrip({
         onClick={() => onRun('report')}
       />
 
+      <CommandButton
+        label="Rapor Studio"
+        icon={<FileBarChart size={12} />}
+        loading={false}
+        error={null}
+        disabled={studioDisabled}
+        onClick={() => onRun('studio')}
+      />
+
       <div className="ml-auto text-[11px] text-slate-400 dark:text-ndark-muted">
         Tüm sayılar deterministic; AI yalnızca özetler.
       </div>
@@ -84,6 +95,7 @@ function CommandButton({
   loading,
   active,
   error,
+  disabled,
   onClick,
 }: {
   label: string;
@@ -91,11 +103,12 @@ function CommandButton({
   loading: boolean;
   active?: boolean;
   error: string | null;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <div className="inline-flex items-center gap-1.5">
-      <Button size="sm" variant={active ? 'primary' : 'outline'} disabled={loading} onClick={onClick}>
+      <Button size="sm" variant={active ? 'primary' : 'outline'} disabled={loading || disabled} onClick={onClick}>
         {loading ? <RefreshCw size={12} className="animate-spin" /> : icon}
         {label}
       </Button>
