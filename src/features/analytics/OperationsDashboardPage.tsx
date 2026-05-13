@@ -48,6 +48,7 @@ import { AiBriefCard } from './AiBriefCard';
 import { RunaInsightCard } from './RunaInsightCard';
 import { ExplainMetricModal } from './ExplainMetricModal';
 import { AiReportDraftModal } from './AiReportDraftModal';
+import { ReportStudioModal } from './ReportStudioModal';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -218,6 +219,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   const [reportOpen, setReportOpen] = useState(false);
 
   const [explainTarget, setExplainTarget] = useState<{ key: string; label: string } | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
 
   // Stable serialized deps for useEffect
   const statusesKey = statuses.slice().sort().join(',');
@@ -362,6 +364,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     if (cmd === 'brief') runBrief();
     else if (cmd === 'insights') runInsights();
     else if (cmd === 'report') runReport();
+    else if (cmd === 'studio') setStudioOpen(true);
   }
   function openExplain(metricKey: string, metricLabel: string) {
     setExplainTarget({ key: metricKey, label: metricLabel });
@@ -403,6 +406,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         reportError={reportError ? aiErrorShort(reportError) : null}
         hasBrief={!!brief && !briefDismissed}
         hasInsights={!!insights && insights.length > 0}
+        studioDisabled={!data}
         onRun={handleCommand}
       />
 
@@ -567,6 +571,17 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         loading={reportLoading}
         error={reportError}
         onClose={() => setReportOpen(false)}
+      />
+
+      <ReportStudioModal
+        open={studioOpen}
+        overview={data}
+        body={overviewBody}
+        statusLabels={STATUS_LABEL}
+        priorityLabels={PRIORITY_LABEL}
+        caseTypeLabels={CASE_TYPE_LABEL}
+        seedReport={report}
+        onClose={() => setStudioOpen(false)}
       />
     </div>
   );
