@@ -702,13 +702,16 @@ WHERE companyId = ANY($1)
 ##### `reopenRatePct`
 | Alan | Tanım |
 | --- | --- |
-| **Business definition** | Bir kez çözülmüş ve sonra **yeniden açılmış** vakaların oranı |
-| **Formula** | `100 * COUNT(DISTINCT caseId WHERE status history contains transition 'Cozuldu' → 'YenidenAcildi' AND createdAt ∈ [from, to)) / NULLIF(COUNT(WHERE createdAt ∈ [from, to)), 0)` |
-| **Required source** | CaseActivity (`actionType='StatusChange'`, `fromValue='Cozuldu'`, `toValue='YenidenAcildi'`) — mevcut |
-| **Denominator** | Period içinde açılan tüm vakalar (yeniden açılanları içeren bir baseline mantıklı; alternatifi resolved-only — bu doc'ta **created-based** kullanılır) |
-| **Caveats** | Çoklu reopen aynı caseId tek sayılır (DISTINCT). Statü iptal-çözüm-iptal döngüsü reopen sayılmaz. |
+| **Business definition** | Bir kez çözülmüş ve sonra **yeniden açılmış** vakaların oranı — çözüm kalitesi sinyali |
+| **Formula** | `100 * COUNT(*) FILTER (WHERE status='YenidenAcildi' AND resolvedAt ∈ [from, to)) / NULLIF(COUNT(*) FILTER (WHERE resolvedAt ∈ [from, to)), 0)` |
+| **Numerator** | Period içinde resolvedAt set olan VE status='YenidenAcildi' olan vakalar |
+| **Denominator** | Period içinde **çözülmüş** (resolvedAt set olan) tüm vakalar (**resolved-based** — Phase 1 kararı §5) |
+| **Required source** | `Case.status` + `Case.resolvedAt`. CaseActivity history opsiyonel ileri analiz için. |
+| **Included** | resolvedAt period içinde; status sonradan YenidenAcildi'ye dönmüş vakalar payına dahil |
+| **Excluded** | Hiç çözülmemiş vakalar (denominator dışı); period dışı çözülenler |
+| **Caveats** | Resolved-based payda **çözüm kalitesi** semantiğiyle uyumlu: "kaç vakayı çözdük, kaçı geri açıldı?" Created-based alternatifi (period içinde açılanlar) gecikmeli reopen sinyalini geç yakalar — Phase 1'de tercih edilmedi. |
 | **Rounding** | 1 ondalık |
-| **Min sample** | 20 |
+| **Min sample** | default (5) — yetersiz örnekte null + minSampleViolations'a eklenir |
 
 ##### `escalationRatePct`
 | Alan | Tanım |
@@ -3179,7 +3182,7 @@ Dashboard **AI Fabric** ürün vaadini taşır:
 8. **Drilldown 403 vs silent narrow**: Agent başka takım için drill-down isterse 403 mı dönsün (açık reject) yoksa silent 0-result + scope metadata mı (UX dostu)? Default önerilen: **silent narrow + scope metadata**. Onay?
 9. **`firstResponseTimeMin` field eklensin mi?**: Şu an `Case.firstAgentResponseAt` yok. Eklenirse: (a) schema migration + cron backfill veya (b) "Eklenince aktif olur" şeklinde gizli/disabled metric. Hangisi? (§2.6.2)
 10. **`avgTtrHours` formülü — pause süresi çıkar mı?**: Doc'ta "net çalışma süresi" (pause çıkarılır) seçildi. Wall-clock alternatifi de eklenmeli mi (ayrı metric `avgTtrWallClockHours`)? PM'in beklentisi hangisi? (§2.6.2, R16)
-11. **`reopenRatePct` denominator**: created-based mi (period içinde açılan vakalar) yoksa resolved-based mi (period içinde çözülenler)? Doc'ta **created-based** seçildi. Onay?
+11. ~~**`reopenRatePct` denominator**~~: **Karar verildi (Phase 1).** Resolved-based payda — period içinde çözülen vakalardan kaçı sonradan reopen oldu. Quality signal semantiği ile uyumlu. (§2.6.2 reopenRatePct + Phase 1 blocker kararı §5)
 12. **`MetricQueryAudit` retention**: Audit row'ları sınırsız tutulsun mu, yoksa 90 gün cleanup cron'u eklensin mi? PM/HR şikâyetlerinde 1 yıl önceki rapor talep edilebilir.
 13. **Min sample thresholds**: §2.6.2'de tahmini değerler (5, 10, 20). Domain expert/HR onayı gerekli — özellikle QA score (n=5 az olabilir).
 14. **`BacklogSnapshot` cron**: Phase 5 opsiyonel diye işaretlendi. Eğer "yaklaşık ~" prefix kabul edilmiyorsa Phase 1'e çekilebilir (daha büyük scope). PM kararı.
