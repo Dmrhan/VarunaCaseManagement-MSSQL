@@ -49,6 +49,24 @@ const TOP_AT_RISK_LIMIT = 10;
 
 const SLA_RISK_HOURS = 4; // SLA dolmadan once "risk" sayilir (yaklasan ihlal)
 
+const STATUS_TO_DB = Object.freeze({
+  Acik: 'Açık',
+  Incelemede: 'İncelemede',
+  ThirdPartyWaiting: '3rdPartyBekleniyor',
+  Eskalasyon: 'Eskalasyon',
+  Cozuldu: 'Çözüldü',
+  YenidenAcildi: 'YenidenAcildi',
+  IptalEdildi: 'İptalEdildi',
+});
+
+const STATUS_FROM_DB = Object.freeze(
+  Object.fromEntries(Object.entries(STATUS_TO_DB).map(([app, db]) => [db, app])),
+);
+
+const OPEN_STATUS_DB_VALUES = Object.freeze(OPEN_STATUSES.map((status) => STATUS_TO_DB[status] ?? status));
+const RETENTION_SUCCESS_DB_VALUE = 'Başarılı';
+const RETENTION_PENDING_DB_VALUE = 'DevamEdiyor';
+
 /**
  * Ana giris noktasi. Scope + applied filters alir, deterministic overview
  * payload'u dondurur. AI'a verilecek snapshot icin de bu sonuc kullanilir.
@@ -295,6 +313,12 @@ function buildWhereSql(scope, filters) {
     clauses.push(`"caseType"::text = ANY($${params.length}::text[])`);
   }
 
+  // statuses (filter) — raw SQL'de PostgreSQL enum label'lari kullanilir.
+  if (filters.statuses && filters.statuses.length > 0) {
+    params.push(filters.statuses.map((status) => STATUS_TO_DB[status] ?? status));
+    clauses.push(`"status"::text = ANY($${params.length}::text[])`);
+  }
+
   return { sql: clauses.join(' AND '), params };
 }
 
@@ -311,12 +335,13 @@ async function queryOpenSnapshot(scope, filters, baseWhere) {
 
   const slaRiskDeadline = new Date(Date.now() + SLA_RISK_HOURS * 3600 * 1000);
   const p1 = withParam(baseWhere, slaRiskDeadline);
+  const p2 = withParam(p1, OPEN_STATUS_DB_VALUES);
 
   const sql = `
     SELECT
-      COUNT(*) FILTER (WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi'])) AS open_count,
+      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p2.idx}::text[])) AS open_count,
       COUNT(*) FILTER (
-        WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi'])
+        WHERE "status"::text = ANY ($${p2.idx}::text[])
         AND "slaResolutionDueAt" IS NOT NULL
         AND "slaResolutionDueAt" > NOW()
         AND "slaResolutionDueAt" <= $${p1.idx}::timestamp
@@ -326,7 +351,7 @@ async function queryOpenSnapshot(scope, filters, baseWhere) {
     FROM "Case"
     WHERE ${baseWhere.sql}
   `;
-  const rows = await prisma.$queryRawUnsafe(sql, ...p1.params);
+  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
   const r = rows[0] || {};
   return {
     openCount: Number(r.open_count ?? 0),
@@ -383,12 +408,12 @@ async function queryPeriodMetrics(scope, filters, from, to, baseWhere) {
         WHERE "caseType"::text = 'Churn'
         AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
         AND "retentionStatus"::text IS NOT NULL
-        AND "retentionStatus"::text <> 'DevamEdiyor'
+        AND "retentionStatus"::text <> '${RETENTION_PENDING_DB_VALUE}'
       ) AS retention_decided_count,
       COUNT(*) FILTER (
         WHERE "caseType"::text = 'Churn'
         AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-        AND "retentionStatus"::text = 'Basarili'
+        AND "retentionStatus"::text = '${RETENTION_SUCCESS_DB_VALUE}'
       ) AS retention_success_count
     FROM "Case"
     WHERE ${baseWhere.sql}
@@ -480,7 +505,7 @@ async function queryByStatus(scope, filters, from, to, baseWhere) {
     ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
-  return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+  return rows.map((r) => ({ key: STATUS_FROM_DB[r.key] ?? r.key, count: Number(r.cnt) }));
 }
 
 async function queryByPriority(scope, filters, from, to, baseWhere) {
@@ -563,12 +588,13 @@ async function queryByCategory(scope, filters, from, to, baseWhere) {
   if (scope.companyIds.length === 0) return [];
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
+  const p3 = withParam(p2, OPEN_STATUS_DB_VALUES);
   const sql = `
     SELECT
       "category"    AS category,
       "subCategory" AS sub_category,
       COUNT(*)      AS total,
-      COUNT(*) FILTER (WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi'])) AS open_count,
+      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p3.idx}::text[])) AS open_count,
       COALESCE(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) / 3600.0)
         FILTER (WHERE "resolvedAt" IS NOT NULL AND "resolvedAt" > "createdAt"), NULL) AS avg_ttr_hours,
       COUNT(*) FILTER (
@@ -582,7 +608,7 @@ async function queryByCategory(scope, filters, from, to, baseWhere) {
     ORDER BY total DESC
     LIMIT ${TOP_CATEGORY_LIMIT};
   `;
-  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  const rows = await prisma.$queryRawUnsafe(sql, ...p3.params);
   return rows.map((r) => ({
     category: r.category,
     subCategory: r.sub_category,
@@ -601,27 +627,28 @@ async function queryByCategory(scope, filters, from, to, baseWhere) {
  */
 async function queryTopAtRiskAccounts(scope, filters, baseWhere) {
   if (scope.companyIds.length === 0) return [];
+  const p1 = withParam(baseWhere, OPEN_STATUS_DB_VALUES);
 
   const sql = `
     SELECT
       "accountId"   AS account_id,
       "accountName" AS account_name,
       "companyId"   AS company_id,
-      COUNT(*) FILTER (WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi'])) AS open_count,
+      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[])) AS open_count,
       COUNT(*) FILTER (WHERE "slaViolation" = true) AS sla_breach_count,
       COUNT(*) FILTER (WHERE "escalationLevel"::text <> 'Yok') AS escalated_count
     FROM "Case"
     WHERE ${baseWhere.sql}
     GROUP BY "accountId", "accountName", "companyId"
     HAVING
-      COUNT(*) FILTER (WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi'])) > 0
+      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[])) > 0
       OR COUNT(*) FILTER (WHERE "slaViolation" = true) > 0
     ORDER BY
       (COUNT(*) FILTER (WHERE "slaViolation" = true)) DESC,
-      (COUNT(*) FILTER (WHERE "status"::text = ANY (ARRAY['Acik','Incelemede','ThirdPartyWaiting','Eskalasyon','YenidenAcildi']))) DESC
+      (COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[]))) DESC
     LIMIT ${TOP_AT_RISK_LIMIT};
   `;
-  const rows = await prisma.$queryRawUnsafe(sql, ...baseWhere.params);
+  const rows = await prisma.$queryRawUnsafe(sql, ...p1.params);
   return rows.map((r) => ({
     accountId: r.account_id,
     accountName: r.account_name,
