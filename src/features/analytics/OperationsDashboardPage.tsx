@@ -398,8 +398,19 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
 
   // -------------------------------------------------------------- render
 
+  // "Refetching" = filtre/tarih/şirket degisiminde arka planda yenileme.
+  // Initial yukleme zaten skeleton ile kaplanir; refetch sirasinda kullanici
+  // hicbir geri bildirim gormuyordu — top progress bar + "Yukleniyor..." rozeti
+  // bu durumda goz onunde olsun.
+  const refetching = loading && data !== null;
+
   return (
-    <div className="space-y-5">
+    <div className="relative space-y-5" aria-busy={loading || undefined}>
+      {refetching && (
+        <div className="sticky top-0 z-30 -mx-6 -mt-6 mb-1 h-1 overflow-hidden bg-brand-100/70 dark:bg-brand-900/30">
+          <div className="animate-progress-slide bg-brand-500/90 dark:bg-brand-400/90" />
+        </div>
+      )}
       <DashboardHeader
         dateFrom={dateFrom}
         dateTo={dateTo}
@@ -408,6 +419,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         onQuickRange={applyQuickRange}
         onRefresh={refresh}
         loading={loading}
+        refetching={refetching}
         scope={data?.scope}
         asOfLocal={data?.asOfLocal}
       />
@@ -491,13 +503,15 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         />
       )}
 
-      <KpiGrid
-        kpis={data?.kpis}
-        loading={loading}
-        minSampleMetrics={mapMinSample(data)}
-        onOpenDrilldown={openDrilldown}
-        onExplain={openExplain}
-      />
+      <div className={refetching ? 'opacity-70 transition-opacity' : 'transition-opacity'}>
+        <KpiGrid
+          kpis={data?.kpis}
+          loading={loading}
+          minSampleMetrics={mapMinSample(data)}
+          onOpenDrilldown={openDrilldown}
+          onExplain={openExplain}
+        />
+      </div>
 
       <TimeSeriesCard
         loading={loading}
@@ -635,6 +649,7 @@ function DashboardHeader({
   onQuickRange,
   onRefresh,
   loading,
+  refetching,
   scope,
   asOfLocal,
 }: {
@@ -645,6 +660,7 @@ function DashboardHeader({
   onQuickRange: (days: number) => void;
   onRefresh: () => void;
   loading: boolean;
+  refetching: boolean;
   scope: OperationsOverviewResponse['scope'] | undefined;
   asOfLocal: string | undefined;
 }) {
@@ -652,7 +668,19 @@ function DashboardHeader({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-ndark-text">Operasyon Panosu</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900 dark:text-ndark-text">
+            Operasyon Panosu
+            {refetching && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/30 dark:text-brand-300 dark:ring-brand-800/40"
+                role="status"
+                aria-live="polite"
+              >
+                <RefreshCw size={11} className="animate-spin" />
+                Yükleniyor…
+              </span>
+            )}
+          </h1>
           <p className="mt-0.5 text-sm text-slate-500 dark:text-ndark-muted">
             Vaka operasyonlarının özet performansı — son veri{asOfLocal ? `: ${asOfLocal}` : ''}.
           </p>
