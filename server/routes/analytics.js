@@ -2,8 +2,9 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { fromDb } from '../db/enumMap.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
-import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
+import { FORMULA_VERSION, OPEN_STATUSES } from '../analytics/metricFormulas.js';
 import {
   deriveAnalyticsScope,
   describeScope,
@@ -280,6 +281,7 @@ router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, re
 
 const MAX_PERIOD_DAYS = 90;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_DRILLDOWN_PAGE_SIZE = 200;
 
 /**
  * POST /api/analytics/cases/overview
@@ -393,6 +395,146 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/analytics/cases/drilldown
+ *
+ * Aynı overview filter set'i + bucket alır ve scope-bound vaka listesi döner.
+ * Phase 3: dashboard drawer/table için deterministic evidence listesi.
+ */
+router.post('/cases/drilldown', requireOverviewAnalytics, async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const body = req.body ?? {};
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const bucket = validateDrilldownBucket(body.bucket);
+    if (bucket.error) {
+      return res.status(400).json({ error: 'invalid_bucket', message: bucket.error });
+    }
+
+    const { from, to } = validation;
+    const scope = deriveAnalyticsScope(req.user, body);
+    const filters = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      productGroups: sanitizeStringArray(body.productGroups),
+      caseTypes:     sanitizeStringArray(body.caseTypes),
+      statuses:      sanitizeStringArray(body.statuses),
+      granularity:   body.granularity === 'hour' ? 'hour' : 'day',
+    };
+    const page = sanitizePositiveInt(body.page, 1);
+    const pageSize = Math.min(sanitizePositiveInt(body.pageSize, 50), MAX_DRILLDOWN_PAGE_SIZE);
+    const sortBy = sanitizeSortBy(body.sortBy);
+    const sortDir = body.sortDir === 'asc' ? 'asc' : 'desc';
+
+    const where = buildDrilldownWhere({
+      scope,
+      filters,
+      from,
+      to,
+      bucket: bucket.value,
+    });
+    const orderBy = buildDrilldownOrderBy(sortBy, sortDir);
+
+    const [total, rows] = await Promise.all([
+      prisma.case.count({ where }),
+      prisma.case.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          caseNumber: true,
+          title: true,
+          status: true,
+          priority: true,
+          companyName: true,
+          accountName: true,
+          category: true,
+          subCategory: true,
+          assignedTeamName: true,
+          assignedPersonName: true,
+          createdAt: true,
+          slaResolutionDueAt: true,
+          slaViolation: true,
+        },
+      }),
+    ]);
+
+    const fpScope = scopeFingerprint(scope);
+    const fpFilter = filterFingerprint({
+      from: filters.from,
+      to: filters.to,
+      companies: scope.companyIds,
+      teams: scope.teamIds,
+      productGroups: filters.productGroups,
+      caseTypes: filters.caseTypes,
+      statuses: filters.statuses,
+      bucket: bucket.value,
+      page,
+      pageSize,
+      sortBy,
+      sortDir,
+    });
+    const durationMs = Date.now() - t0;
+    let metricAuditId = null;
+    try {
+      const audit = await prisma.metricQueryAudit.create({
+        data: {
+          userId: req.user.id,
+          userRole: req.user.role,
+          endpoint: 'cases-drilldown',
+          scopeFingerprint: fpScope,
+          scopeKind: scope.scopeKind,
+          filterFingerprint: fpFilter,
+          formulaVersion: FORMULA_VERSION,
+          durationMs,
+          responseHash: crypto.createHash('sha256').update(`${total}:${bucket.value.kind}`).digest('hex').slice(0, 16),
+        },
+        select: { id: true },
+      });
+      metricAuditId = audit.id;
+    } catch (err) {
+      console.warn('[analytics:drilldown] audit write failed:', err?.message ?? err);
+    }
+
+    res.json({
+      items: rows.map(mapDrilldownCase),
+      total,
+      page,
+      pageSize,
+      sortBy,
+      sortDir,
+      appliedBucket: {
+        ...bucket.value,
+        label: bucketLabel(bucket.value),
+      },
+      scope: {
+        kind: scope.scopeKind,
+        companyIds: scope.companyIds,
+        teamIds: scope.teamIds,
+        personIds: scope.personIds,
+        canExport: scope.canExport,
+        canCrossCompanyAgg: scope.canCrossCompanyAgg,
+        narrowedFromBody: scope.narrowedFromBody,
+        narrative: describeScope(scope),
+        effectiveScopeReason: scope.effectiveScopeReason,
+      },
+      metricAuditId,
+      durationMs,
+    });
+  } catch (err) {
+    console.error('[analytics:cases-drilldown]', err);
+    res.status(500).json({
+      error: 'internal',
+      message: err?.message ?? 'Drill-down listesi hesaplanamadi',
+    });
+  }
+});
+
 // ---------- helpers (overview) ----------
 
 function validateOverviewBody(body) {
@@ -418,6 +560,218 @@ function sanitizeStringArray(value) {
   if (!Array.isArray(value)) return null;
   const clean = value.filter((v) => typeof v === 'string' && v.length > 0).slice(0, 100);
   return clean.length > 0 ? clean : null;
+}
+
+function sanitizePositiveInt(value, fallback) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return fallback;
+  return n;
+}
+
+function sanitizeSortBy(value) {
+  return ['createdAt', 'priority', 'slaResolutionDueAt', 'ageHours'].includes(value)
+    ? value
+    : 'createdAt';
+}
+
+const DRILLDOWN_BUCKET_KINDS = new Set([
+  'totalCases',
+  'createdInPeriod',
+  'resolvedInPeriod',
+  'openCases',
+  'slaRiskCount',
+  'slaBreached',
+  'slaViolationRatePct',
+  'reopened',
+  'reopenRatePct',
+  'escalationRatePct',
+  'transferRatePct',
+  'retentionSuccessPct',
+  'status',
+  'priority',
+  'caseType',
+  'team',
+  'company',
+  'category',
+  'atRiskAccount',
+]);
+const DRILLDOWN_KEY_REQUIRED = new Set(['status', 'priority', 'caseType', 'team', 'company', 'atRiskAccount']);
+
+function validateDrilldownBucket(bucket) {
+  if (!bucket || typeof bucket !== 'object') return { error: '`bucket` zorunlu.' };
+  if (typeof bucket.kind !== 'string' || !DRILLDOWN_BUCKET_KINDS.has(bucket.kind)) {
+    return { error: '`bucket.kind` gecersiz.' };
+  }
+  if (DRILLDOWN_KEY_REQUIRED.has(bucket.kind) && (typeof bucket.key !== 'string' || bucket.key.length === 0)) {
+    return { error: `\`bucket.key\` zorunlu (${bucket.kind}).` };
+  }
+  if (bucket.kind === 'category' && typeof bucket.category !== 'string' && typeof bucket.key !== 'string') {
+    return { error: '`bucket.category` zorunlu.' };
+  }
+  return {
+    value: {
+      kind: bucket.kind,
+      key: typeof bucket.key === 'string' ? bucket.key : undefined,
+      category: typeof bucket.category === 'string' ? bucket.category : undefined,
+      subCategory: typeof bucket.subCategory === 'string' ? bucket.subCategory : undefined,
+      label: typeof bucket.label === 'string' ? bucket.label : undefined,
+    },
+  };
+}
+
+function buildDrilldownWhere({ scope, filters, from, to, bucket }) {
+  const and = [{ companyId: { in: scope.companyIds } }];
+  if (scope.teamIds && scope.teamIds.length > 0) and.push({ assignedTeamId: { in: scope.teamIds } });
+  if (scope.personIds && scope.personIds.length > 0) and.push({ assignedPersonId: { in: scope.personIds } });
+  if (filters.productGroups && filters.productGroups.length > 0) {
+    and.push({ productGroup: { in: filters.productGroups } });
+  }
+  if (filters.caseTypes && filters.caseTypes.length > 0) {
+    and.push({ caseType: { in: filters.caseTypes } });
+  }
+  if (filters.statuses && filters.statuses.length > 0) {
+    and.push({ status: { in: filters.statuses } });
+  }
+
+  const periodCreated = { createdAt: { gte: from, lt: to } };
+  const periodResolved = { resolvedAt: { gte: from, lt: to } };
+
+  switch (bucket.kind) {
+    case 'totalCases':
+    case 'createdInPeriod':
+      and.push(periodCreated);
+      break;
+    case 'resolvedInPeriod':
+      and.push(periodResolved);
+      break;
+    case 'openCases':
+      and.push({ status: { in: OPEN_STATUSES } });
+      break;
+    case 'slaRiskCount': {
+      const riskDeadline = new Date(Date.now() + 4 * 3600 * 1000);
+      and.push({
+        status: { in: OPEN_STATUSES },
+        slaResolutionDueAt: { gt: new Date(), lte: riskDeadline },
+        slaViolation: false,
+        slaPausedAt: null,
+      });
+      break;
+    }
+    case 'slaBreached':
+    case 'slaViolationRatePct':
+      and.push(periodResolved, { slaViolation: true });
+      break;
+    case 'reopened':
+    case 'reopenRatePct':
+      and.push(periodResolved, { status: 'YenidenAcildi' });
+      break;
+    case 'escalationRatePct':
+      and.push(periodCreated, { escalationLevel: { not: 'Yok' } });
+      break;
+    case 'transferRatePct':
+      and.push(periodCreated, { transferCount: { gt: 0 } });
+      break;
+    case 'retentionSuccessPct':
+      and.push(periodCreated, { caseType: 'Churn', retentionStatus: 'Basarili' });
+      break;
+    case 'status':
+      and.push(periodCreated, { status: String(bucket.key ?? '') });
+      break;
+    case 'priority':
+      and.push(periodCreated, { priority: String(bucket.key ?? '') });
+      break;
+    case 'caseType':
+      and.push(periodCreated, { caseType: String(bucket.key ?? '') });
+      break;
+    case 'team':
+      and.push(periodCreated, { assignedTeamId: String(bucket.key ?? '') });
+      break;
+    case 'company':
+      and.push(periodCreated, { companyId: String(bucket.key ?? '') });
+      break;
+    case 'category':
+      and.push(periodCreated, { category: String(bucket.category ?? bucket.key ?? '') });
+      if (bucket.subCategory) and.push({ subCategory: String(bucket.subCategory) });
+      break;
+    case 'atRiskAccount':
+      and.push({
+        accountId: String(bucket.key ?? ''),
+        OR: [
+          { status: { in: OPEN_STATUSES } },
+          { slaViolation: true },
+        ],
+      });
+      break;
+    case 'patternAlert':
+      and.push({ id: { in: [] } });
+      break;
+    default:
+      and.push(periodCreated);
+      break;
+  }
+
+  return { AND: and };
+}
+
+function buildDrilldownOrderBy(sortBy, sortDir) {
+  if (sortBy === 'priority') {
+    return [{ priority: sortDir }, { createdAt: 'desc' }];
+  }
+  if (sortBy === 'slaResolutionDueAt') {
+    return [{ slaResolutionDueAt: sortDir }, { createdAt: 'desc' }];
+  }
+  // ageHours is derived from createdAt; older age first means createdAt asc.
+  if (sortBy === 'ageHours') {
+    return [{ createdAt: sortDir === 'asc' ? 'desc' : 'asc' }];
+  }
+  return [{ createdAt: sortDir }];
+}
+
+function mapDrilldownCase(row) {
+  const mapped = fromDb({ status: row.status });
+  return {
+    id: row.id,
+    caseNumber: row.caseNumber,
+    title: row.title,
+    status: mapped.status,
+    priority: row.priority,
+    companyName: row.companyName,
+    accountName: row.accountName,
+    category: row.category,
+    subCategory: row.subCategory,
+    assignedTeamName: row.assignedTeamName,
+    assignedPersonName: row.assignedPersonName,
+    createdAt: row.createdAt.toISOString(),
+    slaResolutionDueAt: row.slaResolutionDueAt ? row.slaResolutionDueAt.toISOString() : null,
+    slaViolation: row.slaViolation,
+    ageHours: Math.round(((Date.now() - row.createdAt.getTime()) / 3600000) * 10) / 10,
+  };
+}
+
+function bucketLabel(bucket) {
+  if (bucket.label) return bucket.label;
+  if (bucket.kind === 'status') return `Statü: ${bucket.key}`;
+  if (bucket.kind === 'priority') return `Öncelik: ${bucket.key}`;
+  if (bucket.kind === 'caseType') return `Vaka tipi: ${bucket.key}`;
+  if (bucket.kind === 'team') return 'Takım vakaları';
+  if (bucket.kind === 'company') return 'Şirket vakaları';
+  if (bucket.kind === 'category') return bucket.subCategory ? `${bucket.category} / ${bucket.subCategory}` : String(bucket.category ?? bucket.key);
+  if (bucket.kind === 'atRiskAccount') return 'Riskli müşteri vakaları';
+  const labels = {
+    totalCases: 'Dönemdeki vakalar',
+    createdInPeriod: 'Dönemde açılan vakalar',
+    resolvedInPeriod: 'Dönemde çözülen vakalar',
+    openCases: 'Açık vakalar',
+    slaRiskCount: 'SLA riski olan vakalar',
+    slaBreached: 'SLA ihlalli vakalar',
+    slaViolationRatePct: 'SLA ihlalli çözümler',
+    reopened: 'Yeniden açılan vakalar',
+    reopenRatePct: 'Yeniden açılan çözümler',
+    escalationRatePct: 'Eskalasyonlu vakalar',
+    transferRatePct: 'Aktarılan vakalar',
+    retentionSuccessPct: 'Başarılı retention vakaları',
+  };
+  return labels[bucket.kind] ?? 'Vaka listesi';
 }
 
 function hashResponse(payload) {
