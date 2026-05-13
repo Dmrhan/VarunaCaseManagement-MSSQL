@@ -1,6 +1,15 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
+import {
+  deriveAnalyticsScope,
+  describeScope,
+  scopeFingerprint,
+  filterFingerprint,
+} from '../analytics/scopeDerivation.js';
 
 /**
  * /api/analytics/* — supervisor + admin + sysadmin ROI panoları.
@@ -253,5 +262,158 @@ router.patch('/patterns/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'internal', message: e?.message });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────
+// Operations Intelligence Dashboard — Phase 1
+// docs/OPERATIONS_DASHBOARD_DESIGN.md §2.1, §2.6
+// ─────────────────────────────────────────────────────────────────
+
+const MAX_PERIOD_DAYS = 90;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * POST /api/analytics/cases/overview
+ *
+ * Body:
+ *  {
+ *    from:   ISO UTC,   // zorunlu
+ *    to:     ISO UTC,   // zorunlu
+ *    companies?: string[],   // opsiyonel — scope icinde daraltma
+ *    teams?:     string[],   // opsiyonel
+ *    productGroups?: string[],
+ *    caseTypes?: string[],
+ *    statuses?:  string[],
+ *    granularity?: 'day'
+ *  }
+ *
+ * Response (§2.1 + §2.6.6):
+ *  - asOf, asOfLocal, formulaVersion, timezone
+ *  - scope (silent-narrow ve metadata icerir)
+ *  - appliedFilters echo
+ *  - kpis, breakdown'lar, timeSeries
+ *  - minSampleViolations, notAvailable, approximations
+ *  - metricAuditId
+ */
+router.post('/cases/overview', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const body = req.body ?? {};
+
+    // 1) Validation — from/to zorunlu + 90 gun cap
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+
+    // 2) Scope derivation (§2.2A) — server-side, body filter genisletemez
+    const scope = deriveAnalyticsScope(req.user, body);
+
+    const filters = {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      productGroups: sanitizeStringArray(body.productGroups),
+      caseTypes:     sanitizeStringArray(body.caseTypes),
+      statuses:      sanitizeStringArray(body.statuses),
+      granularity:   body.granularity === 'hour' ? 'hour' : 'day',
+    };
+
+    // 3) Aggregator cagrisi (deterministic)
+    const payload = await computeOperationsOverview({ scope, filters });
+
+    // 4) Audit
+    const fpScope = scopeFingerprint(scope);
+    const fpFilter = filterFingerprint({
+      from: filters.from,
+      to: filters.to,
+      companies: scope.companyIds,
+      teams: scope.teamIds,
+      productGroups: filters.productGroups,
+      caseTypes: filters.caseTypes,
+      statuses: filters.statuses,
+      granularity: filters.granularity,
+    });
+    const durationMs = Date.now() - t0;
+    const responseHash = hashResponse(payload);
+
+    let metricAuditId = null;
+    try {
+      const audit = await prisma.metricQueryAudit.create({
+        data: {
+          userId: req.user.id,
+          userRole: req.user.role,
+          endpoint: 'cases-overview',
+          scopeFingerprint: fpScope,
+          scopeKind: scope.scopeKind,
+          filterFingerprint: fpFilter,
+          formulaVersion: FORMULA_VERSION,
+          durationMs,
+          responseHash,
+        },
+        select: { id: true },
+      });
+      metricAuditId = audit.id;
+    } catch (err) {
+      // Audit yazimi ana akisi durdurmaz
+      console.warn('[analytics:overview] audit write failed:', err?.message ?? err);
+    }
+
+    // 5) Response — scope metadata + audit id
+    res.json({
+      ...payload,
+      scope: {
+        kind: scope.scopeKind,
+        companyIds: scope.companyIds,
+        teamIds: scope.teamIds,
+        personIds: scope.personIds,
+        canExport: scope.canExport,
+        canCrossCompanyAgg: scope.canCrossCompanyAgg,
+        narrowedFromBody: scope.narrowedFromBody,
+        narrative: describeScope(scope),
+        effectiveScopeReason: scope.effectiveScopeReason,
+      },
+      metricAuditId,
+    });
+  } catch (err) {
+    console.error('[analytics:cases-overview]', err);
+    res.status(500).json({
+      error: 'internal',
+      message: err?.message ?? 'Operasyon ozeti hesaplanamadi',
+    });
+  }
+});
+
+// ---------- helpers (overview) ----------
+
+function validateOverviewBody(body) {
+  if (!body.from || !body.to) {
+    return { error: '`from` ve `to` ISO tarihi zorunlu.' };
+  }
+  const from = new Date(body.from);
+  const to = new Date(body.to);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    return { error: '`from`/`to` gecerli ISO tarih degil.' };
+  }
+  if (from.getTime() >= to.getTime()) {
+    return { error: '`from` `to`dan kucuk olmali.' };
+  }
+  const diffDays = (to.getTime() - from.getTime()) / ONE_DAY_MS;
+  if (diffDays > MAX_PERIOD_DAYS) {
+    return { error: `Periyot max ${MAX_PERIOD_DAYS} gun olabilir.` };
+  }
+  return { from, to };
+}
+
+function sanitizeStringArray(value) {
+  if (!Array.isArray(value)) return null;
+  const clean = value.filter((v) => typeof v === 'string' && v.length > 0).slice(0, 100);
+  return clean.length > 0 ? clean : null;
+}
+
+function hashResponse(payload) {
+  // Sadece KPI degerlerinin hash'i — replay/diff icin yeterli
+  const subset = JSON.stringify(payload.kpis ?? {});
+  return crypto.createHash('sha256').update(subset).digest('hex').slice(0, 16);
+}
 
 export default router;
