@@ -1107,7 +1107,7 @@ router.patch('/usage/:id/accept', async (req, res) => {
   try {
     const target = await prisma.aIUsageLog.findUnique({ where: { id: req.params.id } });
     if (!target) return res.status(404).json({ error: 'Log bulunamadı.' });
-    if (!req.user.allowedCompanyIds.includes(target.companyId)) {
+    if (!(req.user?.allowedCompanyIds ?? []).includes(target.companyId)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     if (target.userId && target.userId !== req.user.id) {

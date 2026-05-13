@@ -624,6 +624,7 @@ Tum analytics endpointleri JWT ve `Supervisor`, `Admin` veya `SystemAdmin` rolu 
 | GET | `/api/analytics/qa-scores?period=7d` | QA skor metrikleri |
 | GET | `/api/analytics/patterns?status=active` | Pattern alert listesi |
 | PATCH | `/api/analytics/patterns/:id/dismiss` | Pattern alert kaydini kapatir |
+| POST | `/api/analytics/cases/overview` | Operations Intelligence Dashboard — deterministic KPI + breakdown + time series. Body: `{ from, to, companies?, teams?, productGroups?, caseTypes?, statuses?, granularity? }`. Server-side scope derivation (rol bazli, body genisletemez). Response audit'li (`metricAuditId` + `formulaVersion`). Auth: Supervisor+ |
 
 Desteklenen period degerleri: `7d`, `30d`.
 

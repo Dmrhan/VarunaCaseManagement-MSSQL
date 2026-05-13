@@ -617,6 +617,14 @@ model Case {
   @@index([slaResolutionDueAt])
   @@index([slaResponseDueAt])
   @@index([snoozeUntil])
+  // Analytics dashboard composite indexler (Operations Intelligence Phase 1):
+  // companyId + tarih aralığı + statü/team/category hot path'leri için.
+  // Mevcut tek-sütun index'lere ek; downtime'sız additive.
+  @@index([companyId, createdAt])
+  @@index([companyId, status])
+  @@index([companyId, assignedTeamId])
+  @@index([companyId, category, subCategory])
+  @@index([companyId, resolvedAt])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
@@ -714,6 +722,29 @@ model CaseNoteReaction {
   @@index([noteId])
   @@index([userId])
   @@index([companyId])
+}
+
+// MetricQueryAudit — Operations Intelligence Dashboard Phase 1.
+// Her analytics overview/drilldown/export çağrısı bir audit satırı bırakır.
+// HR/audit talepleri için 1 yıl+ retention (cleanup cron Phase 5+).
+// docs/OPERATIONS_DASHBOARD_DESIGN.md §2.6.6'da detay.
+model MetricQueryAudit {
+  id                String   @id @default(cuid())
+  userId            String
+  userRole          String // snapshot — rol o anki haliyle saklanır
+  endpoint          String // 'overview' | 'drilldown' | 'export' | 'ai-insights' vs.
+  scopeFingerprint  String // hash(scope.companyIds + teamIds + personIds)
+  scopeKind         String // 'self' | 'team' | 'company' | 'cross-company'
+  filterFingerprint String // hash(appliedFilters)
+  formulaVersion    String // metric definition versiyonu (v1 sabit)
+  generatedAt       DateTime @default(now())
+  durationMs        Int
+  recordsScanned    Int? // approximate; Phase 1 için opsiyonel
+  responseHash      String? // opsiyonel — sonraki replay/diff için
+
+  @@index([userId, generatedAt])
+  @@index([endpoint, generatedAt])
+  @@index([scopeFingerprint])
 }
 
 model CaseAttachment {
