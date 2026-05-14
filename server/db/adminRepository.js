@@ -905,17 +905,69 @@ async function autoPopulateIfEmpty(companyId) {
   return 4;
 }
 
+/**
+ * refreshSystemCounts: Bir sirketin 4 sistem kaynaginin (PastCases /
+ * ProductDocs / SLARules / Checklists) contentCount alanlarini gercek
+ * tablolardan tekrar sayar ve sapan kayitlari guncelller.
+ *
+ * - ManualEntry tipinde olanlara DOKUNULMAZ (admin tarafindan yonetiliyor)
+ * - Sadece SAPMA varsa write yapilir; aksi halde gereksiz I/O yok
+ * - `lastUpdated` yalnizca degisiklik halinde guncellenir
+ *
+ * Phase 1 hotfix (knowledge-sources-contentcount-refresh): list cagrisinda
+ * cagrilarak admin'in gordugu sayilarin "AI buna baktigi tablonun gercek
+ * boyutuyla" uyumlu kalmasini saglar.
+ */
+async function refreshSystemCounts(companyId) {
+  const [caseCount, slaCount, checklistCount, categoryCount] = await Promise.all([
+    prisma.case.count({ where: { companyId } }),
+    prisma.sLAPolicy.count({ where: { companyId } }),
+    prisma.checklistTemplate.count({ where: { companyId } }),
+    prisma.categoryDef.count({
+      where: { OR: [{ companyId }, { companyId: null }] },
+    }),
+  ]);
+  const target = {
+    PastCases: caseCount,
+    ProductDocs: categoryCount,
+    SLARules: slaCount,
+    Checklists: checklistCount,
+  };
+  // Sistem 4 tipinden o sirkette olanlari cek, drift'leri tek tek guncelle
+  const existing = await prisma.knowledgeSource.findMany({
+    where: {
+      companyId,
+      sourceType: { in: ['PastCases', 'ProductDocs', 'SLARules', 'Checklists'] },
+    },
+    select: { id: true, sourceType: true, contentCount: true },
+  });
+  const now = new Date();
+  await Promise.all(
+    existing
+      .filter((row) => target[row.sourceType] !== row.contentCount)
+      .map((row) =>
+        prisma.knowledgeSource.update({
+          where: { id: row.id },
+          data: { contentCount: target[row.sourceType], lastUpdated: now },
+        }),
+      ),
+  );
+}
+
 export const knowledgeSourceRepo = {
   /**
    * Kullanıcının erişebildiği şirketler için kaynak listesi.
    * Eğer tek şirket görünüyor ve hiç kaynak yoksa otomatik 4 default yaratılır.
    * Multi-company kullanıcı için her şirketi ayrı ayrı populate ederiz.
+   * Her çağrıda sistem kaynaklarinin contentCount'lari canli tablo
+   * sayilariyla senkronize edilir (Faz 1 hotfix — bayatlamayı önler).
    */
   async list(allowedCompanyIds) {
     if (!allowedCompanyIds || allowedCompanyIds.length === 0) return [];
-    // Her şirket için boşsa auto-populate
+    // Her şirket için: önce boşsa auto-populate, sonra sistem 4 kaynagini tazele.
     for (const cid of allowedCompanyIds) {
       await autoPopulateIfEmpty(cid);
+      await refreshSystemCounts(cid);
     }
     return prisma.knowledgeSource.findMany({
       where: { companyId: { in: allowedCompanyIds } },
