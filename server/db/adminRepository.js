@@ -990,6 +990,18 @@ export const userRepo = {
       redirectTo: redirectTo || undefined,
     });
     if (error) {
+      // TEMP DEBUG (debug/resend-invite-supabase-error): exact Supabase
+      // error object'ini Vercel function loglarinda gormek icin. Vercel →
+      // Deployments → Functions → Logs ekraninda '[resend-invite] Supabase error:'
+      // grep edilebilir. Sorun teshis edildiginde bu satir kaldirilacak.
+      console.log('[resend-invite] Supabase error:', JSON.stringify(error, null, 2));
+      console.log('[resend-invite] context:', JSON.stringify({
+        targetEmail: target.email,
+        redirectTo: redirectTo ?? null,
+        errorStatus: error?.status ?? null,
+        errorName: error?.name ?? null,
+        errorMessageLen: error?.message?.length ?? 0,
+      }));
       // Rate limit / SMTP / config hatasi vs. — safe message
       const status = error.status === 429 ? 429 : 502;
       const msg =
