@@ -715,17 +715,51 @@ export const userRepo = {
   },
 
   /**
-   * Admin'den davet akisi (Phase 5C):
-   *  1) Supabase Auth `inviteUserByEmail` — kullaniciya magic-link davet maili
-   *  2) Donen supabase user id ile DB User satiri yarat
-   *  3) UserCompany ataması yap
+   * Supabase Auth'da e-posta ile kullanici ara. SDK v2'de listUsers'da
+   * filter yok; paginated taranir. Performans icin per-page=200 +
+   * en fazla 5 sayfa (1000 kullanici) — Faz 5 olcek ihtiyaci dogarsa
+   * Supabase'in ileride email filter eklemesi beklenir.
    *
-   * Eger DB yazma asamasi basarisiz olursa Supabase user'i geri al
-   * (`auth.admin.deleteUser`) — orphan birakmamak icin best-effort cleanup.
-   * fullName placeholder olarak email saklanir; kullanici ilk login'inde
-   * Supabase'den gelen `user_metadata.full_name` ile auto-update edilebilir
-   * (verifyJwt auto-provision kodunda var; biz davet edileni overwrite etmeyiz —
-   * UI placeholder badge bunu "Davet bekliyor" gosterir).
+   * @returns Supabase user objesi veya null
+   */
+  async _findSupabaseUserByEmail(supabaseAdmin, email) {
+    const PER_PAGE = 200;
+    const MAX_PAGES = 5;
+    const normalized = email.toLowerCase();
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
+      if (error) {
+        console.warn(`[invite] listUsers page=${page} hata:`, error.message);
+        return null;
+      }
+      const users = data?.users ?? [];
+      const match = users.find((u) => (u.email || '').toLowerCase() === normalized);
+      if (match) return match;
+      if (users.length < PER_PAGE) return null; // son sayfa
+    }
+    return null; // 1000+ kullanici icinde bulunamadi
+  },
+
+  /**
+   * Admin'den davet akisi (Phase 5C):
+   *  1) Validate input + DB e-posta cakismasi kontrolu (varsa 409)
+   *  2) Supabase Auth `inviteUserByEmail` — kullaniciya magic-link davet
+   *     - Basarili → donen supabase user.id kullanilir
+   *     - 422 "already in Auth" → orphan kurtarma: listUsers ile user.id'yi bul
+   *     - Diger hatalar → 502
+   *  3) DB User satiri (Supabase user.id ile aynı id — verifyJwt auto-provision
+   *     sirasinda mevcut Supabase Auth + DB User esleme akisiyla birebir uyumlu)
+   *  4) UserCompany ataması
+   *
+   * Auto-provision compatibility (server/db/auth.js:60-102):
+   *  - verifyJwt User.findUnique({ id: supabase_user.id }) ile arar
+   *  - Davet sirasinda yarattigimiz User satiri da ayni id'yi kullanir
+   *  - Davet edilen kullanici ilk login'inde verifyJwt User'i bulur, auto-provision tetiklenmez
+   *  - fullName placeholder=email; kullanici ilk login sonrasi profil duzenleyebilir
+   *
+   * Compensation:
+   *  - DB yazma asamasi basarisiz olursa Supabase user'i geri al (deleteUser)
+   *  - Orphan kurtarma yolunda Supabase user'i biz yaratmadik → silmeyiz
    *
    * @param {object} input
    * @param {string} input.email
@@ -754,38 +788,54 @@ export const userRepo = {
       throw new AdminError('Şirket rolü Agent / Supervisor / Admin olmalı.', 400);
     }
 
-    // E-posta zaten kayitli mi?
+    // E-posta DB'de zaten varsa → 409 (idempotent davet desteklemiyoruz).
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new AdminError('Bu e-posta zaten kayıtlı.', 409);
     }
 
-    // 1) Supabase Auth davet
     const { supabaseAdmin, redirectTo } = deps ?? {};
     if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
+
+    // 1) Supabase Auth davet
+    let supabaseUserId = null;
+    let createdByUs = false; // compensation rollback flag
     const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
       redirectTo ? { redirectTo } : undefined,
     );
-    if (inviteErr || !invited?.user?.id) {
-      // Supabase 422 = e-posta zaten Auth'ta (DB'de yok ama Auth'ta orphan)
-      const status = inviteErr?.status === 422 ? 409 : 502;
-      const msg = inviteErr?.status === 422
-        ? 'Bu e-posta Supabase Auth\'ta zaten kayıtlı (orphan). Önce orphan kaydı temizle.'
-        : `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`;
-      throw new AdminError(msg, status);
-    }
-    const supabaseUserId = invited.user.id;
 
-    // 2) DB User + 3) UserCompany — TEK transaction. Basarisiz olursa Supabase
-    // user'i geri al (compensation; idempotent — Supabase'da silinme idempotent).
+    if (!inviteErr && invited?.user?.id) {
+      supabaseUserId = invited.user.id;
+      createdByUs = true;
+    } else if (inviteErr?.status === 422) {
+      // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul + DB record yarat.
+      // (Davet maili tekrar gonderilmez — kullaniciya manuel iletilmesi gerekir;
+      //  veya admin Supabase paneli/UI'dan resend tetikleyebilir.)
+      const orphan = await this._findSupabaseUserByEmail(supabaseAdmin, email);
+      if (!orphan) {
+        throw new AdminError(
+          'Supabase Auth\'ta orphan kayit var ama listUsers ile bulunamadi (1000+ kullanici?). Manuel mudahale gerekli.',
+          409,
+        );
+      }
+      supabaseUserId = orphan.id;
+      // createdByUs = false → compensation'da silmeyiz
+    } else {
+      throw new AdminError(
+        `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`,
+        502,
+      );
+    }
+
+    // 2) DB User + 3) UserCompany — TEK transaction.
     try {
       const created = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({
           data: {
-            id: supabaseUserId,
+            id: supabaseUserId, // !!! Supabase Auth user.id == DB User.id
             email,
-            fullName: email, // placeholder; first-login sonrasi UI "Davet bekliyor" badge gizler
+            fullName: email, // placeholder; UI "Davet bekliyor" badge bunu gorur
             role,
             isActive: true,
           },
@@ -797,35 +847,59 @@ export const userRepo = {
       });
       return {
         success: true,
-        message: `Davet maili gönderildi: ${email}`,
+        message: createdByUs
+          ? `Davet maili gönderildi: ${email}`
+          : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email} (manuel resend gerekebilir)`,
         userId: created.id,
         email: created.email,
+        orphanRecovered: !createdByUs,
       };
     } catch (dbErr) {
-      // Compensation: Supabase user'i geri al
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(supabaseUserId);
-        console.warn(`[invite] DB hata sonrasi Supabase user temizlendi: ${email}`);
-      } catch (cleanupErr) {
-        console.error(`[invite] CRITICAL: Supabase user ${supabaseUserId} temizlenemedi:`, cleanupErr?.message);
+      // Compensation: Sadece biz yarattıysak Supabase user'i geri al.
+      // Orphan kurtarma yolunda Supabase user'i biz yaratmadik → dokunmayiz.
+      if (createdByUs) {
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(supabaseUserId);
+          console.warn(`[invite] DB hata sonrasi Supabase user temizlendi: ${email}`);
+        } catch (cleanupErr) {
+          console.error(
+            `[invite] CRITICAL: Supabase user ${supabaseUserId} temizlenemedi:`,
+            cleanupErr?.message,
+          );
+        }
       }
       throw new AdminError(`Kullanıcı DB'ye yazılamadı: ${dbErr?.message ?? 'unknown'}`, 500);
     }
   },
 
   /**
-   * Pasiflestir: User.isActive=false. Aktif Supabase oturumlarini global
-   * sign-out ile sonlandirir. Supabase Auth user'i SILINMEZ — tekrar
-   * aktiflestirilebilsin. UserCompany kayitlarinda dokunma yapmaz (yetki cascaded
-   * fakat veri korunur).
+   * Pasiflestir: User.isActive=false. Bu DB flag verifyJwt middleware'inde
+   * (server/db/auth.js:104-109) **enforced barrier**: pasif user'in
+   * Authorization header'iyla yapılan tum API cagrilari 403 'inactive' doner.
+   *
+   * Supabase Auth user SILINMEZ — tekrar aktive edilebilsin + audit izi korunsun.
+   * UserCompany kayitlarinda dokunma yapmaz (kasitli — yetki cascaded fakat veri korunur).
+   *
+   * Supabase session invalidation:
+   *  SDK v2.105.1'in `auth.admin.signOut(jwt, scope)` metodu user.id KABUL ETMEZ;
+   *  yalnizca aktif bir JWT (access token) string'i kabul eder. Bizim elimizde
+   *  user.id var, JWT yok. Bu nedenle:
+   *   - Aktif session invalidation YAPILMIYOR
+   *   - Pasif user'in cached JWT'si Supabase'ce halen gecerli sayilir
+   *   - **ANCAK** her API cagrisinda verifyJwt → DB User.isActive=false kontrolu
+   *     → 403. Yani client'in elindeki JWT pratikte ise yaramaz hale gelir.
+   *   - Frontend `app:unauthenticated` event'i ile oturumu yerel olarak kapatir.
+   *
+   * Bu PR'da `ban_duration` ile updateUserById gibi workaround YAPILMADI —
+   * spec aciktan "do not invent a workaround" dedi. DB barrier yeterli.
    *
    * Guards:
    *  - Kendini pasiflestiremezsin
    *  - SystemAdmin kullanicilari Admin pasiflestiremez (sadece SystemAdmin)
    *  - Hedef en az bir companyId'sinde requesting user Admin/SystemAdmin olmali
-   *    (route layer assertCompanyAdmin ile dogrular — buraya gelmeden once)
+   *    (route layer dogrular — buraya gelmeden once)
    */
-  async deactivate(userId, deps, requestingUser) {
+  async deactivate(userId, _deps, requestingUser) {
     if (!userId) throw new AdminError('userId gerekli.', 400);
     if (userId === requestingUser?.id) {
       throw new AdminError('Kendi hesabını pasifleştiremezsin.', 400);
@@ -842,21 +916,15 @@ export const userRepo = {
       return { success: true, message: 'Zaten pasif.', userId, email: target.email };
     }
 
-    // 1) DB: isActive = false
+    // DB: isActive = false — verifyJwt bunu enforced barrier olarak kullanir
     await prisma.user.update({ where: { id: userId }, data: { isActive: false } });
 
-    // 2) Supabase: aktif oturumlari sonlandir (best-effort; DB ana otorite)
-    const { supabaseAdmin } = deps ?? {};
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin.auth.admin.signOut(userId, 'global');
-      } catch (err) {
-        // Supabase tarafindan sign-out basarisiz olsa bile DB isActive=false
-        // verifyJwt ilk istekte 403 'inactive' dondurur — kapsam guvende.
-        console.warn(`[deactivate] Supabase signOut basarisiz (DB guvende):`, err?.message);
-      }
-    }
-    return { success: true, message: 'Kullanıcı pasifleştirildi.', userId, email: target.email };
+    return {
+      success: true,
+      message: 'Kullanıcı pasifleştirildi. DB barrier aktif; client cached JWT verifyJwt\'de 403 \'inactive\' alacak.',
+      userId,
+      email: target.email,
+    };
   },
 };
 

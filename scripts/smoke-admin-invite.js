@@ -14,21 +14,31 @@ import { userRepo } from '../server/db/adminRepository.js';
 const TEST_EMAIL = `invite-smoke-${Date.now()}@varuna.dev`;
 const TEST_SUPABASE_ID = `smoke-${Date.now()}`;
 
-function mockSupabase({ shouldFailInvite = false, shouldFailDelete = false } = {}) {
+function mockSupabase({
+  shouldFailInvite = false,
+  alreadyExists = false,
+  orphanInListUsers = null, // { id, email } eger listUsers'da bulunmali ise
+} = {}) {
   return {
     auth: {
       admin: {
         async inviteUserByEmail(email, opts) {
+          if (alreadyExists) {
+            return { data: { user: null }, error: { status: 422, message: 'User already registered' } };
+          }
           if (shouldFailInvite) {
             return { data: null, error: { status: 500, message: 'mock invite fail' } };
           }
           return { data: { user: { id: TEST_SUPABASE_ID, email } }, error: null };
         },
-        async deleteUser(id) {
-          if (shouldFailDelete) throw new Error('mock delete fail');
-          return { data: null, error: null };
+        async listUsers({ page, perPage } = {}) {
+          // Sadece ilk sayfayi simule et; orphan varsa donder.
+          if (orphanInListUsers && page === 1) {
+            return { data: { users: [orphanInListUsers] }, error: null };
+          }
+          return { data: { users: [] }, error: null };
         },
-        async signOut(userId, scope) {
+        async deleteUser(id) {
           return { data: null, error: null };
         },
       },
@@ -148,6 +158,49 @@ async function main() {
       await userRepo.invite(
         { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
         { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+        null,
+      );
+      throw new Error('beklenen 409 atmadi');
+    } catch (e) {
+      if (e.status !== 409) throw e;
+    }
+  });
+
+  // --- Orphan recovery (Supabase var, DB yok) ---
+  console.log('\n--- Orphan kurtarma (Supabase Auth\'ta var, DB\'de yok) ---');
+  const ORPHAN_EMAIL = `orphan-${Date.now()}@varuna.dev`;
+  const ORPHAN_ID = `orphan-id-${Date.now()}`;
+  await expect('orphan tespit edilip DB\'ye baglandi', async () => {
+    const r = await userRepo.invite(
+      { email: ORPHAN_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
+      {
+        supabaseAdmin: mockSupabase({
+          alreadyExists: true,
+          orphanInListUsers: { id: ORPHAN_ID, email: ORPHAN_EMAIL },
+        }),
+        redirectTo: 'http://x',
+      },
+      null,
+    );
+    if (!r.success) throw new Error('orphan kurtarma success=false');
+    if (!r.orphanRecovered) throw new Error('orphanRecovered flag eksik');
+    if (r.userId !== ORPHAN_ID) throw new Error('Supabase user.id kullanilmadi');
+    const dbUser = await prisma.user.findUnique({ where: { id: ORPHAN_ID } });
+    if (!dbUser) throw new Error('Orphan DB\'ye baglanmadi');
+  });
+  // Cleanup orphan test
+  await prisma.userCompany.deleteMany({ where: { userId: ORPHAN_ID } });
+  await prisma.user.delete({ where: { id: ORPHAN_ID } }).catch(() => {});
+
+  // --- Orphan not found in listUsers (1000+ scenario) ---
+  await expect('orphan Auth\'ta ama listUsers bulamadi (409)', async () => {
+    try {
+      await userRepo.invite(
+        { email: `notfound-${Date.now()}@varuna.dev`, role: 'Agent', companyId, companyRole: 'Agent' },
+        {
+          supabaseAdmin: mockSupabase({ alreadyExists: true, orphanInListUsers: null }),
+          redirectTo: 'http://x',
+        },
         null,
       );
       throw new Error('beklenen 409 atmadi');
