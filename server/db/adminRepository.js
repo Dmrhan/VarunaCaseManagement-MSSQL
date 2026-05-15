@@ -741,31 +741,37 @@ export const userRepo = {
   },
 
   /**
-   * Admin'den davet akisi (Phase 5C-v2, createUser + resetPasswordForEmail):
+   * Admin'den davet akisi (Phase 5C-v3, inviteUserByEmail).
    *
-   *  Onceki versiyonda `inviteUserByEmail` kullanilirdi. Sorun: Supabase
-   *  redirect URL whitelist'inde olmayan adres icin redirectTo'yu STRIP ediyor
-   *  → mail linksiz gidiyor. inviteUserByEmail ile resend (resetPasswordForEmail)
-   *  farkli template/path kullaniyordu — debug'i zorlastiriyordu.
+   * V2 createUser+resetPasswordForEmail kombinasyonu KAPALI:
+   *  - createUser({ email_confirm: true }) → magic-link bypass, sifresiz oturum (bug 1)
+   *  - createUser({ email_confirm: false }) → resetPasswordForEmail unconfirmed
+   *    user'a sessizce mail GONDERMIYOR (Supabase security feature) → davet
+   *    mailleri hic gelmiyor
    *
-   *  Yeni akis (v2):
-   *   1) Validate input + DB e-posta cakismasi kontrolu (varsa 409)
-   *   2) `auth.admin.createUser({ email, email_confirm: true })` — kullanici
-   *      yaratilir, MAIL GONDERILMEZ. email_confirm:true admin'in e-postayi
-   *      onayladigini belirtir; kullanici sifre belirledikten sonra "confirm
-   *      email" adimi atlanir.
-   *   3) `auth.resetPasswordForEmail(email, { redirectTo })` — mail link ile
-   *      gider. Resend ile AYNI template ve redirect path → debug kolay.
-   *   4) DB User satiri (Supabase user.id ile aynı id)
-   *   5) UserCompany ataması
+   * V3 (geri donus): `auth.admin.inviteUserByEmail(email, { redirectTo })`
+   *  Supabase'in resmi invite akisi:
+   *   - Kullaniciyi yaratir (email_confirmed_at: null)
+   *   - Invite template ile mail gonderir
+   *   - Kullanici link'e tikladiginda email otomatik confirmed olur
+   *   - Sifre belirleme akisi tetiklenir (magic-link bypass YOK)
+   *   - Sifre belirledikten sonra oturum baslar
    *
-   *  Orphan kurtarma (createUser 422 → email zaten Auth'ta):
-   *   - listUsers ile user.id'yi bul, DB record yarat, mail gonder
-   *   - createdByUs = false → compensation'da Supabase user'i silmeyiz
+   * Onkosul: Supabase Dashboard → URL Configuration → Redirect URLs:
+   *  - https://varuna-case-management.vercel.app/**
+   *  - http://localhost:5273/**
+   *  (Whitelist'te olmayan adres icin Supabase redirectTo'yu STRIP eder ve
+   *   mail linksiz gider — bilinen tuzak.)
    *
-   *  Mail gonderim hatasi: createUser basarili ama resetPasswordForEmail
-   *  fail → DB user yaratilir, response'da `emailSent: false` doner. Admin
-   *  daha sonra "Yeniden gonder" ile mail tetikleyebilir.
+   * Akis:
+   *  1) Validate + DB e-posta cakismasi (varsa 409)
+   *  2) inviteUserByEmail(email, { redirectTo })
+   *     - Basarili → supabase user.id kullanilir
+   *     - 422 "already in Auth" → orphan kurtarma: listUsers ile user.id'yi bul,
+   *       sadece DB record yarat (mail tekrar gonderilmez; admin "Yeniden gonder"
+   *       ile manuel tetikler)
+   *     - Diger hata → 502
+   *  3) DB User + UserCompany — TEK transaction (compensation aynen)
    *
    * Auto-provision compatibility (server/db/auth.js:60-102):
    *  - verifyJwt User.findUnique({ id: supabase_user.id }) ile arar
@@ -813,22 +819,22 @@ export const userRepo = {
     const { supabaseAdmin, redirectTo } = deps ?? {};
     if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
 
-    // 1) Supabase Auth user yaratimi (createUser; mail GONDERMEZ)
+    // 1) Supabase Auth invite — kullaniciyi yaratir + invite mail gonderir.
+    //    Mail linki tiklandiginda Supabase email'i onaylar + sifre belirleme akisi.
     let supabaseUserId = null;
     let createdByUs = false; // compensation rollback flag
-    // email_confirm: false — kullanici resetPasswordForEmail link'ine
-    // tikladiginda sifre belirleme akisindan gecmeli. email_confirm:true ile
-    // Supabase kullaniciyi otomatik onaylayip sifresiz oturum aciyordu (bug).
-    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    let emailSent = true;
+    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
-      email_confirm: false,
-    });
+      redirectTo ? { redirectTo } : undefined,
+    );
 
-    if (!createErr && created?.user?.id) {
-      supabaseUserId = created.user.id;
+    if (!inviteErr && invited?.user?.id) {
+      supabaseUserId = invited.user.id;
       createdByUs = true;
-    } else if (createErr?.status === 422) {
-      // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul + DB record yarat.
+    } else if (inviteErr?.status === 422) {
+      // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul, DB record
+      // yarat. Mail TEKRAR GONDERILMEZ; admin "Yeniden gonder" ile tetikler.
       const orphan = await this._findSupabaseUserByEmail(supabaseAdmin, email);
       if (!orphan) {
         throw new AdminError(
@@ -837,31 +843,13 @@ export const userRepo = {
         );
       }
       supabaseUserId = orphan.id;
+      emailSent = false; // orphan'da mail otomatik gitmez
       // createdByUs = false → compensation'da silmeyiz
     } else {
       throw new AdminError(
-        `Supabase kullanici yaratim hatasi: ${createErr?.message ?? 'bilinmeyen'}`,
+        `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`,
         502,
       );
-    }
-
-    // 2) Davet mailini gonder (resetPasswordForEmail; resend ile AYNI yol)
-    // Bu hata DB yazimini durdurmaz — kullanici yaratildi, admin manuel
-    // "Yeniden gonder" ile mail tetikleyebilir.
-    let emailSent = true;
-    let emailError = null;
-    {
-      const { error: emailErr } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-        redirectTo: redirectTo || undefined,
-      });
-      if (emailErr) {
-        emailSent = false;
-        emailError = emailErr;
-        console.warn(
-          `[invite] resetPasswordForEmail basarisiz (DB user yine yaratilacak; manuel resend gerekebilir):`,
-          emailErr?.message ?? emailErr,
-        );
-      }
     }
 
     // 3) DB User + 4) UserCompany — TEK transaction.
@@ -881,15 +869,12 @@ export const userRepo = {
         });
         return user;
       });
-      const baseMessage = createdByUs
+      const message = emailSent
         ? `Davet maili gönderildi: ${email}`
-        : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email}`;
-      const suffix = emailSent
-        ? ''
-        : ` (UYARI: davet maili gönderilemedi — admin panelinden "Yeniden gönder" ile tekrar dene. Hata: ${emailError?.message ?? 'bilinmeyen'})`;
+        : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email}. Admin panelinden "Yeniden gönder" ile davet maili tekrar tetiklenebilir.`;
       return {
         success: true,
-        message: baseMessage + suffix,
+        message,
         userId: created.id,
         email: created.email,
         orphanRecovered: !createdByUs,
