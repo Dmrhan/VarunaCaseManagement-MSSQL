@@ -534,6 +534,9 @@ Bu endpointler yalnizca `SystemAdmin` tarafindan kullanilabilir.
 | DELETE | `/api/admin/companies/:id` | Sirket pasifler, `SystemAdmin` only |
 | GET | `/api/admin/users` | Kullanici listesi |
 | PUT | `/api/admin/users/:id/companies` | Kullanicinin sirket atamalarini degistirir |
+| POST | `/api/admin/users/invite` | Yeni kullaniciyi e-posta ile davet eder (Supabase Auth + DB placeholder) |
+| DELETE | `/api/admin/users/:id/deactivate` | Kullaniciyi pasiflestirir (isActive=false; DB barrier verifyJwt'de enforce edilir) |
+| PATCH | `/api/admin/users/:id/reactivate` | Pasif kullaniciyi yeniden aktiflestirir (isActive=true; idempotent) |
 
 User company assignment body:
 

@@ -518,6 +518,7 @@ export const adminService = {
   },
 
   // Phase 5B — Users + per-company assignment yönetimi.
+  // Phase 5C: invite / deactivate / reactivate eklendi.
   users: {
     async list(): Promise<AdminUser[]> {
       const data = await apiFetch<{ value: AdminUser[] }>(
@@ -543,6 +544,63 @@ export const adminService = {
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true, item };
+    },
+    /**
+     * Phase 5C — Admin'den e-posta ile kullanıcı davet.
+     * Supabase Auth `inviteUserByEmail` → DB placeholder User + UserCompany.
+     */
+    async invite(input: {
+      email: string;
+      role: AdminUser['role'];
+      companyId: string;
+      companyRole: CompanyRole;
+    }): Promise<AdminResult<{ userId: string; email: string; message: string; orphanRecovered: boolean }>> {
+      const item = await apiFetch<{
+        success: boolean;
+        userId: string;
+        email: string;
+        message: string;
+        orphanRecovered: boolean;
+      }>(
+        `${ADMIN_BASE}/users/invite`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Davet gönderilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return {
+        ok: true,
+        item: {
+          userId: item.userId,
+          email: item.email,
+          message: item.message,
+          orphanRecovered: item.orphanRecovered,
+        },
+      };
+    },
+    /**
+     * Phase 5C — Kullanıcıyı pasifleştir. DB `isActive=false`, verifyJwt'de barrier.
+     */
+    async deactivate(userId: string): Promise<AdminResult<{ message: string }>> {
+      const item = await apiFetch<{ success: boolean; message: string }>(
+        `${ADMIN_BASE}/users/${userId}/deactivate`,
+        { method: 'DELETE' },
+        'Pasifleştirme başarısız',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item: { message: item.message } };
+    },
+    /**
+     * Phase 5C — Pasif kullanıcıyı yeniden aktiflestir. UserCompany atamaları
+     * korunur — sadece `isActive=true` döner. Idempotent.
+     */
+    async reactivate(userId: string): Promise<AdminResult<{ message: string }>> {
+      const item = await apiFetch<{ success: boolean; message: string }>(
+        `${ADMIN_BASE}/users/${userId}/reactivate`,
+        { method: 'PATCH' },
+        'Yeniden aktifleştirme başarısız',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item: { message: item.message } };
     },
   },
 
