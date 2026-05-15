@@ -601,6 +601,10 @@ export const fieldDefinitionRepo = {
 // salt-okunur gösterir; verifyJwt zaten tüm aktif şirketleri runtime'da ekliyor.
 // ─────────────────────────────────────────────────────────────────
 const VALID_COMPANY_ROLES = new Set(['Agent', 'Supervisor', 'Admin', 'SystemAdmin']);
+// User.role (UserRole enum) icin invite akisinda kabul edilen sistem rolleri.
+// SystemAdmin invite UI'dan kabul edilmez — seedAuth-equivalent islem.
+const INVITABLE_SYSTEM_ROLES = new Set(['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin']);
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const userRepo = {
   async list(allowedCompanyIds) {
@@ -708,6 +712,258 @@ export const userRepo = {
     });
 
     return { id: userId, fullName: target.fullName, assignments };
+  },
+
+  /**
+   * Supabase Auth'da e-posta ile kullanici ara. SDK v2'de listUsers'da
+   * filter yok; paginated taranir. Performans icin per-page=200 +
+   * en fazla 5 sayfa (1000 kullanici) — Faz 5 olcek ihtiyaci dogarsa
+   * Supabase'in ileride email filter eklemesi beklenir.
+   *
+   * @returns Supabase user objesi veya null
+   */
+  async _findSupabaseUserByEmail(supabaseAdmin, email) {
+    const PER_PAGE = 200;
+    const MAX_PAGES = 5;
+    const normalized = email.toLowerCase();
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
+      if (error) {
+        console.warn(`[invite] listUsers page=${page} hata:`, error.message);
+        return null;
+      }
+      const users = data?.users ?? [];
+      const match = users.find((u) => (u.email || '').toLowerCase() === normalized);
+      if (match) return match;
+      if (users.length < PER_PAGE) return null; // son sayfa
+    }
+    return null; // 1000+ kullanici icinde bulunamadi
+  },
+
+  /**
+   * Admin'den davet akisi (Phase 5C):
+   *  1) Validate input + DB e-posta cakismasi kontrolu (varsa 409)
+   *  2) Supabase Auth `inviteUserByEmail` — kullaniciya magic-link davet
+   *     - Basarili → donen supabase user.id kullanilir
+   *     - 422 "already in Auth" → orphan kurtarma: listUsers ile user.id'yi bul
+   *     - Diger hatalar → 502
+   *  3) DB User satiri (Supabase user.id ile aynı id — verifyJwt auto-provision
+   *     sirasinda mevcut Supabase Auth + DB User esleme akisiyla birebir uyumlu)
+   *  4) UserCompany ataması
+   *
+   * Auto-provision compatibility (server/db/auth.js:60-102):
+   *  - verifyJwt User.findUnique({ id: supabase_user.id }) ile arar
+   *  - Davet sirasinda yarattigimiz User satiri da ayni id'yi kullanir
+   *  - Davet edilen kullanici ilk login'inde verifyJwt User'i bulur, auto-provision tetiklenmez
+   *  - fullName placeholder=email; kullanici ilk login sonrasi profil duzenleyebilir
+   *
+   * Compensation:
+   *  - DB yazma asamasi basarisiz olursa Supabase user'i geri al (deleteUser)
+   *  - Orphan kurtarma yolunda Supabase user'i biz yaratmadik → silmeyiz
+   *
+   * @param {object} input
+   * @param {string} input.email
+   * @param {string} input.role             — sistem rolu (User.role)
+   * @param {string} input.companyId
+   * @param {string} input.companyRole      — UserCompany.role
+   * @param {object} deps                   — DI: { supabaseAdmin, redirectTo }
+   * @param {string[]} allowedCompanyIds    — caller'in yetki sinirlari (null=SystemAdmin)
+   */
+  async invite(input, deps, allowedCompanyIds) {
+    const email = String(input.email ?? '').trim().toLowerCase();
+    if (!email || !EMAIL_RX.test(email)) {
+      throw new AdminError('Geçerli bir e-posta adresi gerekli.', 400);
+    }
+    const role = String(input.role ?? '');
+    if (!INVITABLE_SYSTEM_ROLES.has(role)) {
+      throw new AdminError(`Geçersiz sistem rolü: ${role}`, 400);
+    }
+    const companyId = String(input.companyId ?? '');
+    if (!companyId) throw new AdminError('companyId zorunlu.', 400);
+    if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+      throw new AdminError('Bu şirkete davet etme yetkin yok.', 403);
+    }
+    const companyRole = String(input.companyRole ?? '');
+    if (!VALID_COMPANY_ROLES.has(companyRole) || companyRole === 'SystemAdmin') {
+      throw new AdminError('Şirket rolü Agent / Supervisor / Admin olmalı.', 400);
+    }
+
+    // E-posta DB'de zaten varsa → 409 (idempotent davet desteklemiyoruz).
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new AdminError('Bu e-posta zaten kayıtlı.', 409);
+    }
+
+    const { supabaseAdmin, redirectTo } = deps ?? {};
+    if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
+
+    // 1) Supabase Auth davet
+    let supabaseUserId = null;
+    let createdByUs = false; // compensation rollback flag
+    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+      email,
+      redirectTo ? { redirectTo } : undefined,
+    );
+
+    if (!inviteErr && invited?.user?.id) {
+      supabaseUserId = invited.user.id;
+      createdByUs = true;
+    } else if (inviteErr?.status === 422) {
+      // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul + DB record yarat.
+      // (Davet maili tekrar gonderilmez — kullaniciya manuel iletilmesi gerekir;
+      //  veya admin Supabase paneli/UI'dan resend tetikleyebilir.)
+      const orphan = await this._findSupabaseUserByEmail(supabaseAdmin, email);
+      if (!orphan) {
+        throw new AdminError(
+          'Supabase Auth\'ta orphan kayit var ama listUsers ile bulunamadi (1000+ kullanici?). Manuel mudahale gerekli.',
+          409,
+        );
+      }
+      supabaseUserId = orphan.id;
+      // createdByUs = false → compensation'da silmeyiz
+    } else {
+      throw new AdminError(
+        `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`,
+        502,
+      );
+    }
+
+    // 2) DB User + 3) UserCompany — TEK transaction.
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            id: supabaseUserId, // !!! Supabase Auth user.id == DB User.id
+            email,
+            fullName: email, // placeholder; UI "Davet bekliyor" badge bunu gorur
+            role,
+            isActive: true,
+          },
+        });
+        await tx.userCompany.create({
+          data: { userId: user.id, companyId, role: companyRole, isActive: true },
+        });
+        return user;
+      });
+      return {
+        success: true,
+        message: createdByUs
+          ? `Davet maili gönderildi: ${email}`
+          : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email} (manuel resend gerekebilir)`,
+        userId: created.id,
+        email: created.email,
+        orphanRecovered: !createdByUs,
+      };
+    } catch (dbErr) {
+      // Compensation: Sadece biz yarattıysak Supabase user'i geri al.
+      // Orphan kurtarma yolunda Supabase user'i biz yaratmadik → dokunmayiz.
+      if (createdByUs) {
+        try {
+          await supabaseAdmin.auth.admin.deleteUser(supabaseUserId);
+          console.warn(`[invite] DB hata sonrasi Supabase user temizlendi: ${email}`);
+        } catch (cleanupErr) {
+          console.error(
+            `[invite] CRITICAL: Supabase user ${supabaseUserId} temizlenemedi:`,
+            cleanupErr?.message,
+          );
+        }
+      }
+      throw new AdminError(`Kullanıcı DB'ye yazılamadı: ${dbErr?.message ?? 'unknown'}`, 500);
+    }
+  },
+
+  /**
+   * Pasiflestir: User.isActive=false. Bu DB flag verifyJwt middleware'inde
+   * (server/db/auth.js:104-109) **enforced barrier**: pasif user'in
+   * Authorization header'iyla yapılan tum API cagrilari 403 'inactive' doner.
+   *
+   * Supabase Auth user SILINMEZ — tekrar aktive edilebilsin + audit izi korunsun.
+   * UserCompany kayitlarinda dokunma yapmaz (kasitli — yetki cascaded fakat veri korunur).
+   *
+   * Supabase session invalidation:
+   *  SDK v2.105.1'in `auth.admin.signOut(jwt, scope)` metodu user.id KABUL ETMEZ;
+   *  yalnizca aktif bir JWT (access token) string'i kabul eder. Bizim elimizde
+   *  user.id var, JWT yok. Bu nedenle:
+   *   - Aktif session invalidation YAPILMIYOR
+   *   - Pasif user'in cached JWT'si Supabase'ce halen gecerli sayilir
+   *   - **ANCAK** her API cagrisinda verifyJwt → DB User.isActive=false kontrolu
+   *     → 403. Yani client'in elindeki JWT pratikte ise yaramaz hale gelir.
+   *   - Frontend `app:unauthenticated` event'i ile oturumu yerel olarak kapatir.
+   *
+   * Bu PR'da `ban_duration` ile updateUserById gibi workaround YAPILMADI —
+   * spec aciktan "do not invent a workaround" dedi. DB barrier yeterli.
+   *
+   * Guards:
+   *  - Kendini pasiflestiremezsin
+   *  - SystemAdmin kullanicilari Admin pasiflestiremez (sadece SystemAdmin)
+   *  - Hedef en az bir companyId'sinde requesting user Admin/SystemAdmin olmali
+   *    (route layer dogrular — buraya gelmeden once)
+   */
+  async deactivate(userId, _deps, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    if (userId === requestingUser?.id) {
+      throw new AdminError('Kendi hesabını pasifleştiremezsin.', 400);
+    }
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin kullanıcıyı yalnızca SystemAdmin pasifleştirebilir.', 403);
+    }
+    if (!target.isActive) {
+      return { success: true, message: 'Zaten pasif.', userId, email: target.email };
+    }
+
+    // DB: isActive = false — verifyJwt bunu enforced barrier olarak kullanir
+    await prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+
+    return {
+      success: true,
+      message: 'Kullanıcı pasifleştirildi. DB barrier aktif; client cached JWT verifyJwt\'de 403 \'inactive\' alacak.',
+      userId,
+      email: target.email,
+    };
+  },
+
+  /**
+   * Reactivate — pasif kullaniciyi tekrar aktiflestir. `isActive=true` atar.
+   * UserCompany assignment'lari deaktive sirasinda DOKUNULMADIGI icin burada
+   * da dokunmayiz — onceki yetkiler korunur. Supabase Auth user zaten silinmedi
+   * → kullanici cached JWT veya yeniden login ile dogrudan erisir.
+   *
+   * Guards:
+   *  - Hedef DB'de yoksa 404
+   *  - Zaten aktifse idempotent 200 doner
+   *  - SystemAdmin kullanicilari Admin reactivate edemez (sadece SystemAdmin)
+   *  - Hedef en az bir companyId'sinde requesting user Admin/SystemAdmin olmali
+   *    (route layer dogrular — buraya gelmeden once)
+   *
+   * Reactivate sonrasi:
+   *  - Frontend `app:unauthenticated` event'i tetiklenmesi gerekmez — kullanici
+   *    yeni bir session acmak zorunda degil; eski JWT verifyJwt'de 200 doner.
+   */
+  async reactivate(userId, _deps, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin kullanıcıyı yalnızca SystemAdmin yeniden aktifleştirebilir.', 403);
+    }
+    if (target.isActive) {
+      return { success: true, message: 'Zaten aktif.', userId, email: target.email };
+    }
+    await prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+    return {
+      success: true,
+      message: 'Kullanıcı yeniden aktifleştirildi.',
+      userId,
+      email: target.email,
+    };
   },
 };
 

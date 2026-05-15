@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Mail, Pencil, Shield, ShieldCheck, Users } from 'lucide-react';
+import { Mail, Pencil, PowerOff, RefreshCw, Shield, ShieldCheck, Users } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -15,18 +15,19 @@ import {
   type CompanyRole,
 } from '@/services/adminService';
 import { AdminListLayout } from './AdminListLayout';
+import { InviteUserModal } from './InviteUserModal';
 import { USERS_HELP } from './helpContents';
 
 /**
- * Phase 5B — Kullanıcı yönetimi (yalnız atama).
+ * Phase 5B + 5C — Kullanıcı yönetimi.
  *
  * SystemAdmin: tüm kullanıcıları görür, herhangi birinin atamalarını değiştirir.
  * Admin: yalnızca atandığı şirketlerde assignment'ı olan kullanıcıları görür;
  * yalnızca kendi şirketlerine atama yapabilir.
  *
- * NOT: Yeni kullanıcı oluşturma akışı (Supabase Auth admin createUser) bu
- * faz dışında. Yeni Supabase Auth user'ı ilk login'inde verifyJwt
- * auto-provision ile DB'ye yazılır; ardından admin bu ekrandan şirket atar.
+ * Phase 5C: Admin'den davet, pasifleştir, yeniden aktiflestir akışları eklendi.
+ * "Davet bekliyor" rozet `fullName === email` heuristic'i ile tespit edilir
+ * (kullanıcı ilk login sonrası fullName'i Supabase'den günceller).
  */
 
 const ASSIGNABLE_ROLES: CompanyRole[] = ['Agent', 'Supervisor', 'Admin'];
@@ -53,6 +54,9 @@ export function AdminUsersPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<AdminUser | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<{ user: AdminUser; action: 'deactivate' | 'reactivate' } | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -102,6 +106,8 @@ export function AdminUsersPage() {
         searchPlaceholder="Ad, e-posta veya rol..."
         searchValue={search}
         onSearchChange={setSearch}
+        onAdd={() => setInviteOpen(true)}
+        addLabel="Yeni Kullanıcı Davet Et"
         loading={loading}
         error={error}
         onRetry={refresh}
@@ -136,6 +142,10 @@ export function AdminUsersPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
                 {filtered.map((u) => {
                   const isReadOnly = u.role === 'SystemAdmin';
+                  // "Davet bekliyor" heuristic: fullName === email → kullanıcı ilk login
+                  // sonrası Supabase metadata'sıyla fullName'i güncelleyene kadar placeholder kalır.
+                  const inviteePending = u.fullName === u.email;
+                  const isSelf = u.id === currentUser?.id;
                   return (
                     <tr key={u.id} className="text-sm hover:bg-slate-50 dark:hover:bg-ndark-bg/50">
                       <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800 dark:text-ndark-text">
@@ -145,7 +155,16 @@ export function AdminUsersPage() {
                           ) : (
                             <Shield size={14} className="text-slate-400" />
                           )}
-                          {u.fullName}
+                          {inviteePending ? (
+                            <span className="italic text-slate-500 dark:text-ndark-muted">
+                              (henüz giriş yapmadı)
+                            </span>
+                          ) : (
+                            u.fullName
+                          )}
+                          {inviteePending && (
+                            <Badge tint="amber" className="font-normal">Davet bekliyor</Badge>
+                          )}
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700 dark:text-ndark-text">
@@ -195,20 +214,51 @@ export function AdminUsersPage() {
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          leftIcon={<Pencil size={12} />}
-                          onClick={() => setEditor(u)}
-                          disabled={isReadOnly}
-                          title={
-                            isReadOnly
-                              ? 'SystemAdmin sistem rolü — atama otomatik, değiştirilemez.'
-                              : 'Şirket atamalarını düzenle'
-                          }
-                        >
-                          Düzenle
-                        </Button>
+                        <div className="inline-flex items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            leftIcon={<Pencil size={12} />}
+                            onClick={() => setEditor(u)}
+                            disabled={isReadOnly}
+                            title={
+                              isReadOnly
+                                ? 'SystemAdmin sistem rolü — atama otomatik, değiştirilemez.'
+                                : 'Şirket atamalarını düzenle'
+                            }
+                          >
+                            Düzenle
+                          </Button>
+                          {u.isActive ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={<PowerOff size={12} />}
+                              onClick={() => setConfirmTarget({ user: u, action: 'deactivate' })}
+                              disabled={isReadOnly || isSelf}
+                              title={
+                                isSelf
+                                  ? 'Kendi hesabını pasifleştiremezsin.'
+                                  : isReadOnly
+                                    ? 'SystemAdmin pasifleştirilemez.'
+                                    : 'Kullanıcıyı pasifleştir'
+                              }
+                            >
+                              Pasifleştir
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={<RefreshCw size={12} />}
+                              onClick={() => setConfirmTarget({ user: u, action: 'reactivate' })}
+                              disabled={isReadOnly}
+                              title="Kullanıcıyı yeniden aktiflestir"
+                            >
+                              Yeniden aktif et
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -230,6 +280,85 @@ export function AdminUsersPage() {
             toast({ type: 'success', message: 'Şirket atamaları güncellendi.' });
           }}
         />
+      )}
+
+      <InviteUserModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        onInvited={refresh}
+      />
+
+      {confirmTarget && (
+        <Modal
+          open
+          onClose={() => (actionBusy ? null : setConfirmTarget(null))}
+          size="sm"
+          title={
+            confirmTarget.action === 'deactivate'
+              ? 'Kullanıcıyı pasifleştir'
+              : 'Kullanıcıyı yeniden aktif et'
+          }
+          footer={(
+            <div className="flex items-center justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={() => setConfirmTarget(null)} disabled={actionBusy}>
+                Vazgeç
+              </Button>
+              <Button
+                size="sm"
+                variant={confirmTarget.action === 'deactivate' ? 'danger' : 'primary'}
+                onClick={async () => {
+                  setActionBusy(true);
+                  const result = confirmTarget.action === 'deactivate'
+                    ? await adminService.users.deactivate(confirmTarget.user.id)
+                    : await adminService.users.reactivate(confirmTarget.user.id);
+                  setActionBusy(false);
+                  if (result.ok) {
+                    toast({
+                      type: 'success',
+                      message:
+                        confirmTarget.action === 'deactivate'
+                          ? `${confirmTarget.user.email} pasifleştirildi.`
+                          : `${confirmTarget.user.email} yeniden aktifleştirildi.`,
+                    });
+                    setConfirmTarget(null);
+                    await refresh();
+                  } else {
+                    toast({ type: 'error', message: result.error });
+                  }
+                }}
+                disabled={actionBusy}
+              >
+                {actionBusy
+                  ? 'İşleniyor…'
+                  : confirmTarget.action === 'deactivate'
+                    ? 'Pasifleştir'
+                    : 'Yeniden aktif et'}
+              </Button>
+            </div>
+          )}
+        >
+          <div className="space-y-2 text-sm text-slate-700 dark:text-ndark-text">
+            <p>
+              <strong>{confirmTarget.user.fullName === confirmTarget.user.email ? confirmTarget.user.email : `${confirmTarget.user.fullName} (${confirmTarget.user.email})`}</strong>
+              {' '}
+              {confirmTarget.action === 'deactivate'
+                ? 'kullanıcısını pasifleştirmek istediğine emin misin?'
+                : 'kullanıcısını yeniden aktiflestirmek istediğine emin misin?'}
+            </p>
+            {confirmTarget.action === 'deactivate' ? (
+              <p className="text-xs text-slate-500 dark:text-ndark-muted">
+                Kullanıcı sonraki API çağrısında 403 alır ve uygulamadan çıkmış olur. Şirket
+                atamaları silinmez — yeniden aktive ederek geri açabilirsin. Supabase Auth hesabı
+                silinmez (audit izi korunur).
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 dark:text-ndark-muted">
+                Önceki şirket atamaları korunur. Kullanıcı mevcut şifresiyle veya cached
+                JWT'siyle uygulamaya tekrar girebilir.
+              </p>
+            )}
+          </div>
+        </Modal>
       )}
     </>
   );

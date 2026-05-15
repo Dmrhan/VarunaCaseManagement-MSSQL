@@ -15,7 +15,7 @@ import {
   thirdPartyRepo,
   userRepo,
 } from '../db/adminRepository.js';
-import { verifyJwt, requireRole } from '../db/auth.js';
+import { verifyJwt, requireRole, getSupabaseAdminClient } from '../db/auth.js';
 
 const router = Router();
 
@@ -353,6 +353,104 @@ router.put('/users/:id/companies', asyncRoute(async (req, res) => {
   }
   const allowedScope = req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds;
   const result = await userRepo.replaceCompanies(req.params.id, assignments, allowedScope);
+  res.json(result);
+}));
+
+/**
+ * POST /api/admin/users/invite — Phase 5C: Admin'den davet akisi.
+ * Body: { email, role, companyId, companyRole }
+ *  - role           — Sistem rolu (User.role): Agent | Backoffice | Supervisor | CSM | Admin
+ *  - companyRole    — UserCompany.role: Agent | Supervisor | Admin
+ *  - companyId      — Davet edilen sirket; Admin yalnizca kendi sirketlerine, SystemAdmin tum sirketlere
+ *
+ * Akis: Supabase Auth `inviteUserByEmail` ile e-posta gonderilir; Donen
+ * supabase user id ile placeholder DB User + UserCompany yaratilir. DB hata
+ * verirse Supabase user geri alinir (best-effort compensation).
+ */
+router.post('/users/invite', asyncRoute(async (req, res) => {
+  const { email, role, companyId, companyRole } = req.body ?? {};
+  assertCompanyAdmin(req, companyId);
+  const allowedScope = req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds;
+  const supabaseAdmin = getSupabaseAdminClient();
+  // Redirect URL: kullanici davet e-postasindaki linke tikladiginda nereye
+  // gidecek. Varsayilan: SUPABASE_INVITE_REDIRECT_URL env, fallback APP_URL,
+  // son fallback localhost.
+  const redirectTo =
+    process.env.SUPABASE_INVITE_REDIRECT_URL ||
+    process.env.APP_URL ||
+    'http://localhost:5173';
+  const result = await userRepo.invite(
+    { email, role, companyId, companyRole },
+    { supabaseAdmin, redirectTo },
+    allowedScope,
+  );
+  res.status(201).json(result);
+}));
+
+/**
+ * PATCH /api/admin/users/:id/reactivate — Phase 5C: pasif kullaniciyi yeniden aktiflestir.
+ * Guards:
+ *  - Hedef DB'de bulunmali
+ *  - SystemAdmin'i sadece SystemAdmin reactivate edebilir
+ *  - Hedef en az bir companyId'sinde caller Admin/SystemAdmin olmali
+ *
+ * Idempotent: zaten aktifse 200 doner. UserCompany kayitlarinda dokunma yok
+ * — onceki atamalar korunuyor.
+ */
+router.patch('/users/:id/reactivate', asyncRoute(async (req, res) => {
+  const target = await userRepo.list(
+    req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,
+  );
+  const matched = target.find((u) => u.id === req.params.id);
+  if (!matched) {
+    throw new AdminError('Kullanıcı kapsamında değil veya bulunamadı.', 404);
+  }
+  if (req.user.role !== 'SystemAdmin') {
+    const hasCompanyAdminRight = matched.assignments.some((a) =>
+      req.user.companyRoles?.some(
+        (cr) => cr.companyId === a.companyId && (cr.role === 'Admin' || cr.role === 'SystemAdmin'),
+      ),
+    );
+    if (!hasCompanyAdminRight) {
+      throw new AdminError('Bu kullanıcıyı yeniden aktifleştirme yetkin yok.', 403);
+    }
+  }
+  const result = await userRepo.reactivate(req.params.id, {}, req.user);
+  res.json(result);
+}));
+
+/**
+ * DELETE /api/admin/users/:id/deactivate — Phase 5C: Kullaniciyi pasiflestir.
+ * Guards:
+ *  - Kendini pasiflestiremezsin
+ *  - SystemAdmin kullaniciyi yalnizca SystemAdmin pasiflestirebilir
+ *  - Hedef en az bir companyId'sinde caller Admin/SystemAdmin olmali
+ *
+ * DB User.isActive=false (idempotent) + Supabase global signOut (best-effort).
+ * Supabase Auth user'i SILINMEZ — yeniden aktive edilebilsin.
+ */
+router.delete('/users/:id/deactivate', asyncRoute(async (req, res) => {
+  // Yetki kontrolu: hedef user'in en az bir companyId'sinde caller Admin olmali
+  const target = await userRepo.list(
+    req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,
+  );
+  const matched = target.find((u) => u.id === req.params.id);
+  if (!matched) {
+    throw new AdminError('Kullanıcı kapsamında değil veya bulunamadı.', 404);
+  }
+  // En az bir assignment companyId'sinde Admin/SystemAdmin olmali
+  if (req.user.role !== 'SystemAdmin') {
+    const hasCompanyAdminRight = matched.assignments.some((a) =>
+      req.user.companyRoles?.some(
+        (cr) => cr.companyId === a.companyId && (cr.role === 'Admin' || cr.role === 'SystemAdmin'),
+      ),
+    );
+    if (!hasCompanyAdminRight) {
+      throw new AdminError('Bu kullanıcıyı pasifleştirme yetkin yok.', 403);
+    }
+  }
+  const supabaseAdmin = getSupabaseAdminClient();
+  const result = await userRepo.deactivate(req.params.id, { supabaseAdmin }, req.user);
   res.json(result);
 }));
 
