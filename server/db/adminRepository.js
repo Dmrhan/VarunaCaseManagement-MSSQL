@@ -601,6 +601,10 @@ export const fieldDefinitionRepo = {
 // salt-okunur gösterir; verifyJwt zaten tüm aktif şirketleri runtime'da ekliyor.
 // ─────────────────────────────────────────────────────────────────
 const VALID_COMPANY_ROLES = new Set(['Agent', 'Supervisor', 'Admin', 'SystemAdmin']);
+// User.role (UserRole enum) icin invite akisinda kabul edilen sistem rolleri.
+// SystemAdmin invite UI'dan kabul edilmez — seedAuth-equivalent islem.
+const INVITABLE_SYSTEM_ROLES = new Set(['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin']);
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const userRepo = {
   async list(allowedCompanyIds) {
@@ -708,6 +712,151 @@ export const userRepo = {
     });
 
     return { id: userId, fullName: target.fullName, assignments };
+  },
+
+  /**
+   * Admin'den davet akisi (Phase 5C):
+   *  1) Supabase Auth `inviteUserByEmail` — kullaniciya magic-link davet maili
+   *  2) Donen supabase user id ile DB User satiri yarat
+   *  3) UserCompany ataması yap
+   *
+   * Eger DB yazma asamasi basarisiz olursa Supabase user'i geri al
+   * (`auth.admin.deleteUser`) — orphan birakmamak icin best-effort cleanup.
+   * fullName placeholder olarak email saklanir; kullanici ilk login'inde
+   * Supabase'den gelen `user_metadata.full_name` ile auto-update edilebilir
+   * (verifyJwt auto-provision kodunda var; biz davet edileni overwrite etmeyiz —
+   * UI placeholder badge bunu "Davet bekliyor" gosterir).
+   *
+   * @param {object} input
+   * @param {string} input.email
+   * @param {string} input.role             — sistem rolu (User.role)
+   * @param {string} input.companyId
+   * @param {string} input.companyRole      — UserCompany.role
+   * @param {object} deps                   — DI: { supabaseAdmin, redirectTo }
+   * @param {string[]} allowedCompanyIds    — caller'in yetki sinirlari (null=SystemAdmin)
+   */
+  async invite(input, deps, allowedCompanyIds) {
+    const email = String(input.email ?? '').trim().toLowerCase();
+    if (!email || !EMAIL_RX.test(email)) {
+      throw new AdminError('Geçerli bir e-posta adresi gerekli.', 400);
+    }
+    const role = String(input.role ?? '');
+    if (!INVITABLE_SYSTEM_ROLES.has(role)) {
+      throw new AdminError(`Geçersiz sistem rolü: ${role}`, 400);
+    }
+    const companyId = String(input.companyId ?? '');
+    if (!companyId) throw new AdminError('companyId zorunlu.', 400);
+    if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+      throw new AdminError('Bu şirkete davet etme yetkin yok.', 403);
+    }
+    const companyRole = String(input.companyRole ?? '');
+    if (!VALID_COMPANY_ROLES.has(companyRole) || companyRole === 'SystemAdmin') {
+      throw new AdminError('Şirket rolü Agent / Supervisor / Admin olmalı.', 400);
+    }
+
+    // E-posta zaten kayitli mi?
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new AdminError('Bu e-posta zaten kayıtlı.', 409);
+    }
+
+    // 1) Supabase Auth davet
+    const { supabaseAdmin, redirectTo } = deps ?? {};
+    if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
+    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+      email,
+      redirectTo ? { redirectTo } : undefined,
+    );
+    if (inviteErr || !invited?.user?.id) {
+      // Supabase 422 = e-posta zaten Auth'ta (DB'de yok ama Auth'ta orphan)
+      const status = inviteErr?.status === 422 ? 409 : 502;
+      const msg = inviteErr?.status === 422
+        ? 'Bu e-posta Supabase Auth\'ta zaten kayıtlı (orphan). Önce orphan kaydı temizle.'
+        : `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`;
+      throw new AdminError(msg, status);
+    }
+    const supabaseUserId = invited.user.id;
+
+    // 2) DB User + 3) UserCompany — TEK transaction. Basarisiz olursa Supabase
+    // user'i geri al (compensation; idempotent — Supabase'da silinme idempotent).
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            id: supabaseUserId,
+            email,
+            fullName: email, // placeholder; first-login sonrasi UI "Davet bekliyor" badge gizler
+            role,
+            isActive: true,
+          },
+        });
+        await tx.userCompany.create({
+          data: { userId: user.id, companyId, role: companyRole, isActive: true },
+        });
+        return user;
+      });
+      return {
+        success: true,
+        message: `Davet maili gönderildi: ${email}`,
+        userId: created.id,
+        email: created.email,
+      };
+    } catch (dbErr) {
+      // Compensation: Supabase user'i geri al
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(supabaseUserId);
+        console.warn(`[invite] DB hata sonrasi Supabase user temizlendi: ${email}`);
+      } catch (cleanupErr) {
+        console.error(`[invite] CRITICAL: Supabase user ${supabaseUserId} temizlenemedi:`, cleanupErr?.message);
+      }
+      throw new AdminError(`Kullanıcı DB'ye yazılamadı: ${dbErr?.message ?? 'unknown'}`, 500);
+    }
+  },
+
+  /**
+   * Pasiflestir: User.isActive=false. Aktif Supabase oturumlarini global
+   * sign-out ile sonlandirir. Supabase Auth user'i SILINMEZ — tekrar
+   * aktiflestirilebilsin. UserCompany kayitlarinda dokunma yapmaz (yetki cascaded
+   * fakat veri korunur).
+   *
+   * Guards:
+   *  - Kendini pasiflestiremezsin
+   *  - SystemAdmin kullanicilari Admin pasiflestiremez (sadece SystemAdmin)
+   *  - Hedef en az bir companyId'sinde requesting user Admin/SystemAdmin olmali
+   *    (route layer assertCompanyAdmin ile dogrular — buraya gelmeden once)
+   */
+  async deactivate(userId, deps, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    if (userId === requestingUser?.id) {
+      throw new AdminError('Kendi hesabını pasifleştiremezsin.', 400);
+    }
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin kullanıcıyı yalnızca SystemAdmin pasifleştirebilir.', 403);
+    }
+    if (!target.isActive) {
+      return { success: true, message: 'Zaten pasif.', userId, email: target.email };
+    }
+
+    // 1) DB: isActive = false
+    await prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+
+    // 2) Supabase: aktif oturumlari sonlandir (best-effort; DB ana otorite)
+    const { supabaseAdmin } = deps ?? {};
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.auth.admin.signOut(userId, 'global');
+      } catch (err) {
+        // Supabase tarafindan sign-out basarisiz olsa bile DB isActive=false
+        // verifyJwt ilk istekte 403 'inactive' dondurur — kapsam guvende.
+        console.warn(`[deactivate] Supabase signOut basarisiz (DB guvende):`, err?.message);
+      }
+    }
+    return { success: true, message: 'Kullanıcı pasifleştirildi.', userId, email: target.email };
   },
 };
 

@@ -29,6 +29,15 @@ function getClient() {
 }
 
 /**
+ * Service-role Supabase admin istemcisi — auth/storage disinda kullanmak
+ * isteyenler icin export. Phase 5C+: admin invite / deactivate yollarinda
+ * `auth.admin.inviteUserByEmail`, `auth.admin.signOut`, vb.
+ */
+export function getSupabaseAdminClient() {
+  return getClient();
+}
+
+/**
  * Express middleware — Bearer token okur, Supabase'e doğrulatır,
  * DB'den User satırını çekip req.user'a koyar.
  *
