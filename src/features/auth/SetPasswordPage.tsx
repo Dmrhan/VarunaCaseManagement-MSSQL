@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, LogOut } from 'lucide-react';
 import { supabase } from '@/services/supabase';
 import { useAuth } from '@/services/AuthContext';
+import { evaluatePassword } from '@/lib/passwordPolicy';
+import { PasswordChecklist } from '@/components/auth/PasswordChecklist';
 
 /**
  * Davet kabulü / şifre belirleme sayfası.
@@ -26,11 +28,17 @@ export function SetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  const evaluation = useMemo(
+    () => evaluatePassword(password, { email: user?.email ?? null, fullName: user?.fullName ?? null }),
+    [password, user?.email, user?.fullName],
+  );
+  const canSubmit = evaluation.ok && password === confirmPassword && password.length > 0;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (password.length < 8) {
-      setError('Şifre en az 8 karakter olmalı.');
+    if (!evaluation.ok) {
+      setError('Şifre gereksinimleri karşılanmıyor.');
       return;
     }
     if (password !== confirmPassword) {
@@ -109,7 +117,7 @@ export function SetPasswordPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="En az 8 karakter"
+                  placeholder="Güçlü bir şifre belirleyin"
                   autoFocus
                   disabled={submitting}
                   className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
@@ -126,6 +134,9 @@ export function SetPasswordPage() {
               </div>
             </div>
 
+            {/* Canli policy checklist */}
+            <PasswordChecklist evaluation={evaluation} dim={password.length === 0} />
+
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-ndark-text">
                 Şifreyi tekrar gir
@@ -138,11 +149,16 @@ export function SetPasswordPage() {
                 disabled={submitting}
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
               />
+              {confirmPassword.length > 0 && password !== confirmPassword && (
+                <p className="mt-1 text-[11px] text-rose-700 dark:text-rose-300">
+                  Şifreler eşleşmiyor.
+                </p>
+              )}
             </div>
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !canSubmit}
               className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? (
