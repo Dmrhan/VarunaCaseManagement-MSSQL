@@ -816,9 +816,12 @@ export const userRepo = {
     // 1) Supabase Auth user yaratimi (createUser; mail GONDERMEZ)
     let supabaseUserId = null;
     let createdByUs = false; // compensation rollback flag
+    // email_confirm: false — kullanici resetPasswordForEmail link'ine
+    // tikladiginda sifre belirleme akisindan gecmeli. email_confirm:true ile
+    // Supabase kullaniciyi otomatik onaylayip sifresiz oturum aciyordu (bug).
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email,
-      email_confirm: true, // admin e-postayi onayladi sayilir → kullanici confirm tiklamadan sifre belirleme akisina gider
+      email_confirm: false,
     });
 
     if (!createErr && created?.user?.id) {

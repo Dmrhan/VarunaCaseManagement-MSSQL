@@ -110,6 +110,37 @@ export async function verifyJwt(req, res, next) {
       }
     }
 
+    // Davet-bekleyen placeholder upgrade: invite akisinda DB User satiri
+    // `fullName = email` placeholder ile yaratilir. Kullanici Supabase'de
+    // sifre belirledikten sonra ilk login'inde buraya gelir; gercek bir
+    // ismimiz varsa (user_metadata.full_name vs.) DB fullName'i guncelleriz.
+    // Aksi halde de fullName'i e-posta yerine email-local-part ile degistirip
+    // "Davet bekliyor" rozetinin (fullName === email heuristic) kalkmasini
+    // sagliyoruz — kullanici profil ekraninda istedigi zaman gunceller.
+    if (user && user.fullName === user.email) {
+      const meta = data.user.user_metadata ?? {};
+      const fromMeta =
+        (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
+        (typeof meta.fullName === 'string' && meta.fullName.trim()) ||
+        (typeof meta.name === 'string' && meta.name.trim()) ||
+        '';
+      const fallbackLocal = (data.user.email ?? '').split('@')[0];
+      const newFullName = fromMeta || fallbackLocal || user.fullName;
+      // Yalnizca yeni bir deger varsa ve mevcut placeholder'dan farkliysa yaz
+      if (newFullName && newFullName !== user.fullName) {
+        try {
+          user = await prisma.user.update({
+            where: { id: user.id },
+            data: { fullName: newFullName },
+          });
+          console.log(`[auth] Davet placeholder upgrade: ${user.email} → fullName="${newFullName}"`);
+        } catch (err) {
+          // Update basarisiz olsa bile login akisini durdurmayiz — placeholder kalir
+          console.warn('[auth] davet placeholder upgrade basarisiz:', err?.message ?? err);
+        }
+      }
+    }
+
     if (!user.isActive) {
       return res.status(403).json({
         error: 'inactive',
