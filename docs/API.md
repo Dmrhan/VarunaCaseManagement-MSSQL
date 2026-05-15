@@ -63,6 +63,37 @@ Roller:
 | Method | Path | Auth | Aciklama |
 | --- | --- | --- | --- |
 | GET | `/api/auth/me` | JWT | Aktif kullanici, rol ve person bilgisini dondurur |
+| POST | `/api/auth/forgot-password` | anonim | Sifre sifirlama mail tetikleyici. Generic response; account enumeration koruma. IP basina 5/dk rate limit. |
+
+### POST /api/auth/forgot-password
+
+**Anonim** — login gerektirmez. Sifre sifirlama linki tetiklemek icin kullanilir.
+
+**Request:**
+```json
+{ "email": "user@example.com" }
+```
+
+**Response (her durumda):**
+```json
+{
+  "success": true,
+  "message": "Eğer bu e-posta sistemde kayıtlıysa, şifre yenileme bağlantısı gönderildi."
+}
+```
+
+**Davranis:**
+- E-posta formati gecersiz olsa bile generic success doner (account enumeration korumasi)
+- Kullanici varsa Supabase `resetPasswordForEmail` ile mail gonderilir; redirectTo = `SUPABASE_INVITE_REDIRECT_URL` (prod URL)
+- Supabase mail gonderim hatasi server-side loglanir (email + status); kullaniciya yansıtılmaz
+
+**Rate limit:** IP başına 5 istek/dakika → 429 `{ success: false, message: "Çok fazla istek..." }`
+
+**Security:**
+- Kullanici varligi sizdirilmaz
+- Raw Supabase hatasi gizlenir
+- Service role key sadece sunucu tarafinda kullanilir
+- Sifre/token loglanmaz
 
 Ornek yanit:
 
