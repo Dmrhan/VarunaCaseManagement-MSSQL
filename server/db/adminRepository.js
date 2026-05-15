@@ -926,6 +926,45 @@ export const userRepo = {
       email: target.email,
     };
   },
+
+  /**
+   * Reactivate — pasif kullaniciyi tekrar aktiflestir. `isActive=true` atar.
+   * UserCompany assignment'lari deaktive sirasinda DOKUNULMADIGI icin burada
+   * da dokunmayiz — onceki yetkiler korunur. Supabase Auth user zaten silinmedi
+   * → kullanici cached JWT veya yeniden login ile dogrudan erisir.
+   *
+   * Guards:
+   *  - Hedef DB'de yoksa 404
+   *  - Zaten aktifse idempotent 200 doner
+   *  - SystemAdmin kullanicilari Admin reactivate edemez (sadece SystemAdmin)
+   *  - Hedef en az bir companyId'sinde requesting user Admin/SystemAdmin olmali
+   *    (route layer dogrular — buraya gelmeden once)
+   *
+   * Reactivate sonrasi:
+   *  - Frontend `app:unauthenticated` event'i tetiklenmesi gerekmez — kullanici
+   *    yeni bir session acmak zorunda degil; eski JWT verifyJwt'de 200 doner.
+   */
+  async reactivate(userId, _deps, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin kullanıcıyı yalnızca SystemAdmin yeniden aktifleştirebilir.', 403);
+    }
+    if (target.isActive) {
+      return { success: true, message: 'Zaten aktif.', userId, email: target.email };
+    }
+    await prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+    return {
+      success: true,
+      message: 'Kullanıcı yeniden aktifleştirildi.',
+      userId,
+      email: target.email,
+    };
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────

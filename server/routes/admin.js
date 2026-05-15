@@ -388,6 +388,38 @@ router.post('/users/invite', asyncRoute(async (req, res) => {
 }));
 
 /**
+ * PATCH /api/admin/users/:id/reactivate — Phase 5C: pasif kullaniciyi yeniden aktiflestir.
+ * Guards:
+ *  - Hedef DB'de bulunmali
+ *  - SystemAdmin'i sadece SystemAdmin reactivate edebilir
+ *  - Hedef en az bir companyId'sinde caller Admin/SystemAdmin olmali
+ *
+ * Idempotent: zaten aktifse 200 doner. UserCompany kayitlarinda dokunma yok
+ * — onceki atamalar korunuyor.
+ */
+router.patch('/users/:id/reactivate', asyncRoute(async (req, res) => {
+  const target = await userRepo.list(
+    req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,
+  );
+  const matched = target.find((u) => u.id === req.params.id);
+  if (!matched) {
+    throw new AdminError('Kullanıcı kapsamında değil veya bulunamadı.', 404);
+  }
+  if (req.user.role !== 'SystemAdmin') {
+    const hasCompanyAdminRight = matched.assignments.some((a) =>
+      req.user.companyRoles?.some(
+        (cr) => cr.companyId === a.companyId && (cr.role === 'Admin' || cr.role === 'SystemAdmin'),
+      ),
+    );
+    if (!hasCompanyAdminRight) {
+      throw new AdminError('Bu kullanıcıyı yeniden aktifleştirme yetkin yok.', 403);
+    }
+  }
+  const result = await userRepo.reactivate(req.params.id, {}, req.user);
+  res.json(result);
+}));
+
+/**
  * DELETE /api/admin/users/:id/deactivate — Phase 5C: Kullaniciyi pasiflestir.
  * Guards:
  *  - Kendini pasiflestiremezsin

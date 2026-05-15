@@ -240,6 +240,35 @@ async function main() {
     if (!r.success) throw new Error('idempotent call basarisiz');
   });
 
+  // --- Reactivate ---
+  console.log('\n--- Reactivate ---');
+  await expect('reactivate happy path', async () => {
+    const r = await userRepo.reactivate(
+      createdUserId,
+      {},
+      { id: 'other-user', role: 'SystemAdmin' },
+    );
+    if (!r.success) throw new Error('success=false');
+    const dbUser = await prisma.user.findUnique({ where: { id: createdUserId } });
+    if (dbUser?.isActive !== true) throw new Error('isActive true olmadi');
+  });
+  await expect('reactivate idempotent (zaten aktif)', async () => {
+    const r = await userRepo.reactivate(
+      createdUserId,
+      {},
+      { id: 'other-user', role: 'SystemAdmin' },
+    );
+    if (!r.success) throw new Error('idempotent call basarisiz');
+  });
+  await expect('reactivate user not found (404)', async () => {
+    try {
+      await userRepo.reactivate('non-existent-id', {}, { id: 'x', role: 'SystemAdmin' });
+      throw new Error('beklenen 404 atmadi');
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+  });
+
   // Cleanup
   console.log('\n--- Cleanup ---');
   await cleanup();
