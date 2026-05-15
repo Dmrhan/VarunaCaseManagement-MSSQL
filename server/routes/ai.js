@@ -48,10 +48,15 @@ if (!client) {
       '.env dosyasına OPENAI_API_KEY ekleyin (örnek: .env.example).',
   );
 } else {
-  const apiKey = process.env.OPENAI_API_KEY;
-  console.log(
-    `[ai] Key format — length=${apiKey.length}, prefix=${apiKey.slice(0, 7)}, suffix=...${apiKey.slice(-4)}`,
-  );
+  // Key prefix/suffix sadece development teshiis icin — production loglarinda
+  // 11 karakterlik sizinti riski (Vercel/Sentry log dump). Model + rate limit
+  // bilgisi her ortamda guvenli; key format yalniz NODE_ENV !== 'production'.
+  if (process.env.NODE_ENV !== 'production') {
+    const apiKey = process.env.OPENAI_API_KEY;
+    console.log(
+      `[ai] Key format — length=${apiKey.length}, prefix=${apiKey.slice(0, 7)}, suffix=...${apiKey.slice(-4)}`,
+    );
+  }
   console.log(`[ai] Model: ${MODEL}, max_tokens: ${MAX_TOKENS}, rate limit: ${RATE_LIMIT_PER_MIN}/dk`);
 }
 
