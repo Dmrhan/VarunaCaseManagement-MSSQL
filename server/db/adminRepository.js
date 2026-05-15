@@ -944,6 +944,68 @@ export const userRepo = {
    *  - Frontend `app:unauthenticated` event'i tetiklenmesi gerekmez — kullanici
    *    yeni bir session acmak zorunda degil; eski JWT verifyJwt'de 200 doner.
    */
+  /**
+   * Davet maili yeniden gonder (Phase 5C-resend).
+   *
+   * Akis (inviteUserByEmail KULLANMAYIZ — Supabase Auth user zaten var):
+   *  - Supabase `auth.resetPasswordForEmail(email, { redirectTo })` cagrisi
+   *  - Kullaniciya magic-link gibi calisan "sifre belirleme" maili gider
+   *  - redirectTo zorunlu `SUPABASE_INVITE_REDIRECT_URL` (prod URL); env yoksa
+   *    APP_URL fallback. Eski daveti localhost olarak gonderilmis kullanicilar
+   *    icin yeni mail dogru prod link ile gider.
+   *
+   * Eligibility:
+   *  - User mevcut olmali (yoksa 404)
+   *  - User.isActive === true olmali (pasif user'a davet anlamsiz; 400)
+   *  - fullName === email "pending invite" heuristic; aksi halde 400
+   *    "Bu kullanıcı davet beklemiyor."
+   *
+   * Supabase Auth user'i SILMEZ, yeni user yaratmaz. resetPasswordForEmail
+   * sadece email tetikler. Email bulunmazsa Supabase typically yine 200 doner
+   * (security: email enumeration koruma) — bu durumda da success gostermek
+   * gerekir cunku elimizdeki DB User'a kesinlikle invite gondermistik.
+   */
+  async resendInvite(userId, deps, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, fullName: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin kullanıcıya yeniden davet sadece SystemAdmin tarafından gönderilebilir.', 403);
+    }
+    if (!target.isActive) {
+      throw new AdminError('Pasif kullanıcıya davet gönderilemez. Önce yeniden aktiflestirin.', 400);
+    }
+    // "Pending invite" heuristic — Phase 5C urun karari (kullanici onayli)
+    if (target.fullName !== target.email) {
+      throw new AdminError('Bu kullanıcı davet beklemiyor (zaten profilini doldurmuş).', 400);
+    }
+
+    const { supabaseAdmin, redirectTo } = deps ?? {};
+    if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
+
+    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(target.email, {
+      redirectTo: redirectTo || undefined,
+    });
+    if (error) {
+      // Rate limit / SMTP / config hatasi vs. — safe message
+      const status = error.status === 429 ? 429 : 502;
+      const msg =
+        error.status === 429
+          ? 'Supabase email rate limit. Birkaç dakika sonra tekrar dene.'
+          : `Davet maili gönderilemedi: ${error.message ?? 'bilinmeyen Supabase hatası'}`;
+      throw new AdminError(msg, status);
+    }
+    return {
+      success: true,
+      message: `Davet maili yeniden gönderildi: ${target.email}`,
+      userId: target.id,
+      email: target.email,
+    };
+  },
+
   async reactivate(userId, _deps, requestingUser) {
     if (!userId) throw new AdminError('userId gerekli.', 400);
     const target = await prisma.user.findUnique({
