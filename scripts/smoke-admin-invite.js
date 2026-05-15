@@ -18,6 +18,7 @@ function mockSupabase({
   shouldFailInvite = false,
   alreadyExists = false,
   orphanInListUsers = null, // { id, email } eger listUsers'da bulunmali ise
+  resetPasswordError = null, // { status, message } veya null
 } = {}) {
   return {
     auth: {
@@ -32,7 +33,6 @@ function mockSupabase({
           return { data: { user: { id: TEST_SUPABASE_ID, email } }, error: null };
         },
         async listUsers({ page, perPage } = {}) {
-          // Sadece ilk sayfayi simule et; orphan varsa donder.
           if (orphanInListUsers && page === 1) {
             return { data: { users: [orphanInListUsers] }, error: null };
           }
@@ -41,6 +41,10 @@ function mockSupabase({
         async deleteUser(id) {
           return { data: null, error: null };
         },
+      },
+      async resetPasswordForEmail(email, opts) {
+        if (resetPasswordError) return { data: null, error: resetPasswordError };
+        return { data: {}, error: null };
       },
     },
   };
@@ -266,6 +270,81 @@ async function main() {
       throw new Error('beklenen 404 atmadi');
     } catch (e) {
       if (e.status !== 404) throw e;
+    }
+  });
+
+  // --- Resend invite ---
+  console.log('\n--- Resend invite ---');
+  // Tekrar deaktive et ki "inactive" testini calistirabilelim
+  await prisma.user.update({ where: { id: createdUserId }, data: { isActive: false } });
+  await expect('resend inaktif user (400)', async () => {
+    try {
+      await userRepo.resendInvite(
+        createdUserId,
+        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+        { id: 'other', role: 'SystemAdmin' },
+      );
+      throw new Error('beklenen 400 atmadi');
+    } catch (e) {
+      if (e.status !== 400) throw e;
+    }
+  });
+  // Aktife geri al
+  await prisma.user.update({ where: { id: createdUserId }, data: { isActive: true } });
+
+  await expect('resend happy path (pending invite)', async () => {
+    const r = await userRepo.resendInvite(
+      createdUserId,
+      { supabaseAdmin: mockSupabase(), redirectTo: 'https://varuna-case-management.vercel.app' },
+      { id: 'other', role: 'SystemAdmin' },
+    );
+    if (!r.success) throw new Error('success=false');
+    if (!r.message.includes(TEST_EMAIL)) throw new Error('message email icermiyor');
+  });
+
+  // fullName != email yap → "davet beklemiyor" testi
+  await prisma.user.update({ where: { id: createdUserId }, data: { fullName: 'Ali Veli' } });
+  await expect('resend davet beklemeyen user (400)', async () => {
+    try {
+      await userRepo.resendInvite(
+        createdUserId,
+        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+        { id: 'other', role: 'SystemAdmin' },
+      );
+      throw new Error('beklenen 400 atmadi');
+    } catch (e) {
+      if (e.status !== 400) throw e;
+    }
+  });
+  // Geri al pending'e
+  await prisma.user.update({ where: { id: createdUserId }, data: { fullName: TEST_EMAIL } });
+
+  await expect('resend user not found (404)', async () => {
+    try {
+      await userRepo.resendInvite(
+        'non-existent-id',
+        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+        { id: 'x', role: 'SystemAdmin' },
+      );
+      throw new Error('beklenen 404 atmadi');
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+  });
+
+  await expect('resend Supabase 429 rate-limit (429)', async () => {
+    try {
+      await userRepo.resendInvite(
+        createdUserId,
+        {
+          supabaseAdmin: mockSupabase({ resetPasswordError: { status: 429, message: 'rate limited' } }),
+          redirectTo: 'http://x',
+        },
+        { id: 'other', role: 'SystemAdmin' },
+      );
+      throw new Error('beklenen 429 atmadi');
+    } catch (e) {
+      if (e.status !== 429) throw e;
     }
   });
 

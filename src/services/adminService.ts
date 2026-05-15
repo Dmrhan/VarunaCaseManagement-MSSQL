@@ -590,6 +590,20 @@ export const adminService = {
       return { ok: true, item: { message: item.message } };
     },
     /**
+     * Phase 5C-resend — Davet bekleyen (fullName === email) aktif kullanıcıya
+     * yeni magic-link mail göndermek için. Supabase `resetPasswordForEmail`
+     * çağrısı yapılır; redirectTo backend env'inden gelir (prod URL).
+     */
+    async resendInvite(userId: string): Promise<AdminResult<{ message: string; email: string }>> {
+      const item = await apiFetch<{ success: boolean; message: string; email: string }>(
+        `${ADMIN_BASE}/users/${userId}/resend-invite`,
+        { method: 'POST' },
+        'Davet yeniden gönderilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item: { message: item.message, email: item.email } };
+    },
+    /**
      * Phase 5C — Pasif kullanıcıyı yeniden aktiflestir. UserCompany atamaları
      * korunur — sadece `isActive=true` döner. Idempotent.
      */

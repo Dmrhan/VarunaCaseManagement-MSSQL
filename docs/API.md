@@ -535,6 +535,7 @@ Bu endpointler yalnizca `SystemAdmin` tarafindan kullanilabilir.
 | GET | `/api/admin/users` | Kullanici listesi |
 | PUT | `/api/admin/users/:id/companies` | Kullanicinin sirket atamalarini degistirir |
 | POST | `/api/admin/users/invite` | Yeni kullaniciyi e-posta ile davet eder (Supabase Auth + DB placeholder) |
+| POST | `/api/admin/users/:id/resend-invite` | Davet bekleyen kullaniciya yeniden mail gonderir (resetPasswordForEmail; prod redirect URL) |
 | DELETE | `/api/admin/users/:id/deactivate` | Kullaniciyi pasiflestirir (isActive=false; DB barrier verifyJwt'de enforce edilir) |
 | PATCH | `/api/admin/users/:id/reactivate` | Pasif kullaniciyi yeniden aktiflestirir (isActive=true; idempotent) |
 

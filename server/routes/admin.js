@@ -388,6 +388,70 @@ router.post('/users/invite', asyncRoute(async (req, res) => {
 }));
 
 /**
+ * In-memory per-target rate limit: ayni kullaniciya 60 saniye icinde 1 resend.
+ * Admin'in yanlislikla 2-3 kez tikladigi durumda Supabase email rate-limit'ine
+ * vurmadan once UI'da rejekte ederiz. Multi-instance deploy'da bu garanti
+ * "best-effort"; gercek koruma Supabase tarafinda zaten var.
+ */
+const _resendBuckets = new Map(); // userId -> lastTs
+const RESEND_COOLDOWN_MS = 60_000;
+function checkResendCooldown(userId) {
+  const now = Date.now();
+  const last = _resendBuckets.get(userId);
+  if (last && now - last < RESEND_COOLDOWN_MS) {
+    const wait = Math.ceil((RESEND_COOLDOWN_MS - (now - last)) / 1000);
+    throw new AdminError(`Çok sık yeniden gönderme. ${wait} saniye bekle.`, 429);
+  }
+  _resendBuckets.set(userId, now);
+}
+
+/**
+ * POST /api/admin/users/:id/resend-invite — Phase 5C-resend: davet mailini
+ * yeniden gonder. Supabase Auth user yeniden yaratilmaz; resetPasswordForEmail
+ * kullanilarak prod redirect URL'iyle taze magic-link gonderilir.
+ *
+ * Eligibility (repo katmaninda): User var + isActive=true + fullName===email.
+ * Aksi halde 400/404 mesajlari.
+ *
+ * Yetki:
+ *  - Auth: Admin + SystemAdmin (router-level requireRole)
+ *  - Admin sadece kendi allowedCompanyIds icindeki kullaniciya
+ *  - SystemAdmin tum kullanicilara
+ *  - Per-user 60s cooldown spam korumasi
+ */
+router.post('/users/:id/resend-invite', asyncRoute(async (req, res) => {
+  checkResendCooldown(req.params.id);
+  const target = await userRepo.list(
+    req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,
+  );
+  const matched = target.find((u) => u.id === req.params.id);
+  if (!matched) {
+    throw new AdminError('Kullanıcı kapsamında değil veya bulunamadı.', 404);
+  }
+  if (req.user.role !== 'SystemAdmin') {
+    const hasCompanyAdminRight = matched.assignments.some((a) =>
+      req.user.companyRoles?.some(
+        (cr) => cr.companyId === a.companyId && (cr.role === 'Admin' || cr.role === 'SystemAdmin'),
+      ),
+    );
+    if (!hasCompanyAdminRight) {
+      throw new AdminError('Bu kullanıcıya davet gönderme yetkin yok.', 403);
+    }
+  }
+  const supabaseAdmin = getSupabaseAdminClient();
+  const redirectTo =
+    process.env.SUPABASE_INVITE_REDIRECT_URL ||
+    process.env.APP_URL ||
+    'http://localhost:5173';
+  const result = await userRepo.resendInvite(
+    req.params.id,
+    { supabaseAdmin, redirectTo },
+    req.user,
+  );
+  res.json(result);
+}));
+
+/**
  * PATCH /api/admin/users/:id/reactivate — Phase 5C: pasif kullaniciyi yeniden aktiflestir.
  * Guards:
  *  - Hedef DB'de bulunmali
