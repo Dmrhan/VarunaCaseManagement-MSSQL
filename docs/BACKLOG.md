@@ -15,17 +15,12 @@ Faz 2 Collab eksik bölümleri + Collab Hardening + ileri sprint adayları.
 
 ---
 
-## 🔴 1) OpenAI API key prefix/suffix loglama — production'da kapat
+## ~~🔴 1) OpenAI API key prefix/suffix loglama — production'da kapat~~ ✅ SHIPPED
 
-**Ne yapacağız?**
-`server/routes/ai.js:53` startup'ta `[ai] Key format — length=51, prefix=sk-xxxx, suffix=...abcd` formatında konsola yazıyor. Bu satırı **production ortamda yazmayacak şekilde** gate'le (`if (process.env.NODE_ENV !== 'production')`).
+**Durum:** Tamamlandı (2026-05-15, PR sonrası prod'a indi).
 
-**Neden önemli?**
-11 karakterlik substring (prefix 7 + suffix 4) sızıntı potansiyeli taşıyor. Vercel log'larında, Sentry'de veya stdout dump'larında görünür. Geliştirme için faydalı, prod için risk.
-
-**Mevcut durum:** Açık. Tek satır değişikliği.
-**Çaba:** 15 dakika
-**Bağımlılık:** Yok
+**Ne yapıldı?**
+`server/routes/ai.js:51-58` startup logging `if (process.env.NODE_ENV !== 'production')` gate'iyle sarmalandı. Production log'larında key prefix/suffix artık yazılmaz; dev'de debugging için kalır. Model + rate limit info her ortamda güvenli kaldı.
 
 ---
 
