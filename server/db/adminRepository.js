@@ -741,15 +741,31 @@ export const userRepo = {
   },
 
   /**
-   * Admin'den davet akisi (Phase 5C):
-   *  1) Validate input + DB e-posta cakismasi kontrolu (varsa 409)
-   *  2) Supabase Auth `inviteUserByEmail` — kullaniciya magic-link davet
-   *     - Basarili → donen supabase user.id kullanilir
-   *     - 422 "already in Auth" → orphan kurtarma: listUsers ile user.id'yi bul
-   *     - Diger hatalar → 502
-   *  3) DB User satiri (Supabase user.id ile aynı id — verifyJwt auto-provision
-   *     sirasinda mevcut Supabase Auth + DB User esleme akisiyla birebir uyumlu)
-   *  4) UserCompany ataması
+   * Admin'den davet akisi (Phase 5C-v2, createUser + resetPasswordForEmail):
+   *
+   *  Onceki versiyonda `inviteUserByEmail` kullanilirdi. Sorun: Supabase
+   *  redirect URL whitelist'inde olmayan adres icin redirectTo'yu STRIP ediyor
+   *  → mail linksiz gidiyor. inviteUserByEmail ile resend (resetPasswordForEmail)
+   *  farkli template/path kullaniyordu — debug'i zorlastiriyordu.
+   *
+   *  Yeni akis (v2):
+   *   1) Validate input + DB e-posta cakismasi kontrolu (varsa 409)
+   *   2) `auth.admin.createUser({ email, email_confirm: true })` — kullanici
+   *      yaratilir, MAIL GONDERILMEZ. email_confirm:true admin'in e-postayi
+   *      onayladigini belirtir; kullanici sifre belirledikten sonra "confirm
+   *      email" adimi atlanir.
+   *   3) `auth.resetPasswordForEmail(email, { redirectTo })` — mail link ile
+   *      gider. Resend ile AYNI template ve redirect path → debug kolay.
+   *   4) DB User satiri (Supabase user.id ile aynı id)
+   *   5) UserCompany ataması
+   *
+   *  Orphan kurtarma (createUser 422 → email zaten Auth'ta):
+   *   - listUsers ile user.id'yi bul, DB record yarat, mail gonder
+   *   - createdByUs = false → compensation'da Supabase user'i silmeyiz
+   *
+   *  Mail gonderim hatasi: createUser basarili ama resetPasswordForEmail
+   *  fail → DB user yaratilir, response'da `emailSent: false` doner. Admin
+   *  daha sonra "Yeniden gonder" ile mail tetikleyebilir.
    *
    * Auto-provision compatibility (server/db/auth.js:60-102):
    *  - verifyJwt User.findUnique({ id: supabase_user.id }) ile arar
@@ -797,21 +813,19 @@ export const userRepo = {
     const { supabaseAdmin, redirectTo } = deps ?? {};
     if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
 
-    // 1) Supabase Auth davet
+    // 1) Supabase Auth user yaratimi (createUser; mail GONDERMEZ)
     let supabaseUserId = null;
     let createdByUs = false; // compensation rollback flag
-    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email,
-      redirectTo ? { redirectTo } : undefined,
-    );
+      email_confirm: true, // admin e-postayi onayladi sayilir → kullanici confirm tiklamadan sifre belirleme akisina gider
+    });
 
-    if (!inviteErr && invited?.user?.id) {
-      supabaseUserId = invited.user.id;
+    if (!createErr && created?.user?.id) {
+      supabaseUserId = created.user.id;
       createdByUs = true;
-    } else if (inviteErr?.status === 422) {
+    } else if (createErr?.status === 422) {
       // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul + DB record yarat.
-      // (Davet maili tekrar gonderilmez — kullaniciya manuel iletilmesi gerekir;
-      //  veya admin Supabase paneli/UI'dan resend tetikleyebilir.)
       const orphan = await this._findSupabaseUserByEmail(supabaseAdmin, email);
       if (!orphan) {
         throw new AdminError(
@@ -823,12 +837,31 @@ export const userRepo = {
       // createdByUs = false → compensation'da silmeyiz
     } else {
       throw new AdminError(
-        `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`,
+        `Supabase kullanici yaratim hatasi: ${createErr?.message ?? 'bilinmeyen'}`,
         502,
       );
     }
 
-    // 2) DB User + 3) UserCompany — TEK transaction.
+    // 2) Davet mailini gonder (resetPasswordForEmail; resend ile AYNI yol)
+    // Bu hata DB yazimini durdurmaz — kullanici yaratildi, admin manuel
+    // "Yeniden gonder" ile mail tetikleyebilir.
+    let emailSent = true;
+    let emailError = null;
+    {
+      const { error: emailErr } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectTo || undefined,
+      });
+      if (emailErr) {
+        emailSent = false;
+        emailError = emailErr;
+        console.warn(
+          `[invite] resetPasswordForEmail basarisiz (DB user yine yaratilacak; manuel resend gerekebilir):`,
+          emailErr?.message ?? emailErr,
+        );
+      }
+    }
+
+    // 3) DB User + 4) UserCompany — TEK transaction.
     try {
       const created = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({
@@ -845,14 +878,19 @@ export const userRepo = {
         });
         return user;
       });
+      const baseMessage = createdByUs
+        ? `Davet maili gönderildi: ${email}`
+        : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email}`;
+      const suffix = emailSent
+        ? ''
+        : ` (UYARI: davet maili gönderilemedi — admin panelinden "Yeniden gönder" ile tekrar dene. Hata: ${emailError?.message ?? 'bilinmeyen'})`;
       return {
         success: true,
-        message: createdByUs
-          ? `Davet maili gönderildi: ${email}`
-          : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email} (manuel resend gerekebilir)`,
+        message: baseMessage + suffix,
         userId: created.id,
         email: created.email,
         orphanRecovered: !createdByUs,
+        emailSent,
       };
     } catch (dbErr) {
       // Compensation: Sadece biz yarattıysak Supabase user'i geri al.
@@ -990,18 +1028,6 @@ export const userRepo = {
       redirectTo: redirectTo || undefined,
     });
     if (error) {
-      // TEMP DEBUG (debug/resend-invite-supabase-error): exact Supabase
-      // error object'ini Vercel function loglarinda gormek icin. Vercel →
-      // Deployments → Functions → Logs ekraninda '[resend-invite] Supabase error:'
-      // grep edilebilir. Sorun teshis edildiginde bu satir kaldirilacak.
-      console.log('[resend-invite] Supabase error:', JSON.stringify(error, null, 2));
-      console.log('[resend-invite] context:', JSON.stringify({
-        targetEmail: target.email,
-        redirectTo: redirectTo ?? null,
-        errorStatus: error?.status ?? null,
-        errorName: error?.name ?? null,
-        errorMessageLen: error?.message?.length ?? 0,
-      }));
       // Rate limit / SMTP / config hatasi vs. — safe message
       const status = error.status === 429 ? 429 : 502;
       const msg =

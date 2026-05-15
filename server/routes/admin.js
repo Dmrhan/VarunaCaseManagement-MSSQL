@@ -378,7 +378,7 @@ router.post('/users/invite', asyncRoute(async (req, res) => {
   const redirectTo =
     process.env.SUPABASE_INVITE_REDIRECT_URL ||
     process.env.APP_URL ||
-    'http://localhost:5173';
+    'http://localhost:5273';
   const result = await userRepo.invite(
     { email, role, companyId, companyRole },
     { supabaseAdmin, redirectTo },
@@ -442,7 +442,7 @@ router.post('/users/:id/resend-invite', asyncRoute(async (req, res) => {
   const redirectTo =
     process.env.SUPABASE_INVITE_REDIRECT_URL ||
     process.env.APP_URL ||
-    'http://localhost:5173';
+    'http://localhost:5273';
   const result = await userRepo.resendInvite(
     req.params.id,
     { supabaseAdmin, redirectTo },

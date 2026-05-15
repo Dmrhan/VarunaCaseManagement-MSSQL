@@ -15,22 +15,22 @@ const TEST_EMAIL = `invite-smoke-${Date.now()}@varuna.dev`;
 const TEST_SUPABASE_ID = `smoke-${Date.now()}`;
 
 function mockSupabase({
-  shouldFailInvite = false,
+  shouldFailCreate = false,
   alreadyExists = false,
   orphanInListUsers = null, // { id, email } eger listUsers'da bulunmali ise
-  resetPasswordError = null, // { status, message } veya null
+  resetPasswordError = null, // { status, message } veya null — invite mail VEYA resend mail icin
 } = {}) {
   return {
     auth: {
       admin: {
-        async inviteUserByEmail(email, opts) {
+        async createUser(attrs) {
           if (alreadyExists) {
-            return { data: { user: null }, error: { status: 422, message: 'User already registered' } };
+            return { data: { user: null }, error: { status: 422, message: 'A user with this email address has already been registered' } };
           }
-          if (shouldFailInvite) {
-            return { data: null, error: { status: 500, message: 'mock invite fail' } };
+          if (shouldFailCreate) {
+            return { data: { user: null }, error: { status: 500, message: 'mock createUser fail' } };
           }
-          return { data: { user: { id: TEST_SUPABASE_ID, email } }, error: null };
+          return { data: { user: { id: TEST_SUPABASE_ID, email: attrs?.email } }, error: null };
         },
         async listUsers({ page, perPage } = {}) {
           if (orphanInListUsers && page === 1) {
