@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Mail, Pencil, PowerOff, RefreshCw, Shield, ShieldCheck, Users } from 'lucide-react';
+import { Mail, Pencil, PowerOff, RefreshCw, Send, Shield, ShieldCheck, Users } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -57,6 +57,23 @@ export function AdminUsersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{ user: AdminUser; action: 'deactivate' | 'reactivate' } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  /** Resend yalnız tek bir satırın spinning'i için — global modal yok */
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  async function handleResend(user: AdminUser) {
+    setResendingId(user.id);
+    const result = await adminService.users.resendInvite(user.id);
+    setResendingId(null);
+    if (result.ok) {
+      toast({
+        type: 'success',
+        title: 'Davet maili yeniden gönderildi',
+        message: `${result.item.email} adresine yeni link gönderildi.`,
+      });
+    } else {
+      toast({ type: 'error', message: result.error });
+    }
+  }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -215,6 +232,27 @@ export function AdminUsersPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-1.5">
+                          {/* "Yeniden gönder" — yalnız davet bekleyen aktif kullanıcılar için.
+                              Eski davet mailindeki link localhost olabilir (yanlış env ile gönderildiyse);
+                              yeni mail SUPABASE_INVITE_REDIRECT_URL ile gider. */}
+                          {inviteePending && u.isActive && !isReadOnly && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={
+                                resendingId === u.id ? (
+                                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+                                ) : (
+                                  <Send size={12} />
+                                )
+                              }
+                              onClick={() => handleResend(u)}
+                              disabled={resendingId !== null}
+                              title="Davet mailini yeniden gönder (prod link)"
+                            >
+                              {resendingId === u.id ? 'Gönderiliyor…' : 'Yeniden gönder'}
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
