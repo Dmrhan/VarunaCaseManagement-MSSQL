@@ -880,6 +880,26 @@ export function CasesListPage({
                     </div>
                   </FilterPanelSection>
 
+                  {/* Phase D — Müşteri Eşleştirme Bekleyen: Supervisor+ rolleri. */}
+                  {user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role) && (
+                    <FilterPanelSection label="Müşteri">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-ndark-text">
+                        <input
+                          type="checkbox"
+                          checked={filters.customerMatchPending === true}
+                          onChange={(e) =>
+                            setFilters((f) => ({
+                              ...f,
+                              customerMatchPending: e.target.checked ? true : undefined,
+                            }))
+                          }
+                          className="h-4 w-4 cursor-pointer accent-brand-600"
+                        />
+                        <span>Yalnız müşteri eşleştirilmemiş vakalar</span>
+                      </label>
+                    </FilterPanelSection>
+                  )}
+
                   <FilterPanelSection label="Öncelik">
                     <div className="grid grid-cols-2 gap-1.5">
                       {CASE_PRIORITIES.map((p) => (
@@ -1126,6 +1146,15 @@ export function CasesListPage({
                       >
                         {c.accountName}
                       </button>
+                      {/* Phase D — Müşteri eşleştirilmemiş vakalar için amber rozet (tüm roller görür). */}
+                      {c.customerMatchPending && (
+                        <span
+                          className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:ring-amber-900/40"
+                          title="Bu vakaya henüz müşteri eşleştirilmedi"
+                        >
+                          ⚠ Müşteri yok
+                        </span>
+                      )}
                       {snoozeMeta?.snoozeUntil && (
                         <div
                           className={`mt-0.5 text-xs ${

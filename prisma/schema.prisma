@@ -319,6 +319,10 @@ model CompanySettings {
   primaryColor String? // hex (#7C3AED gibi)
   appName      String?
   supportEmail String?
+  /// Phase D: true ise vaka açarken müşteri seçimi zorunlu; false (default)
+  /// ise Agent "Müşterisiz devam et" ile vaka açabilir ve Case.customerMatchPending
+  /// = true set edilir (Supervisor/Admin için eşleştirme kuyruğu).
+  requireCustomerOnCaseCreate Boolean @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -614,6 +618,12 @@ model Case {
   slaPausedAt          DateTime?
   slaPausedDurationMin Int       @default(0)
   slaThirdPartyWaitMin Int       @default(0)
+
+  // Phase D — Müşteri Eşleştirme: accountId NULL ile açılan vakalar bu flag
+  // ile işaretlenir. Supervisor/Admin "Müşteri Eşleştirilmemiş" kuyruğunda
+  // görür ve PATCH /api/cases/:id/link-account ile bağlar. accountId set
+  // edilen vakalarda her zaman false.
+  customerMatchPending Boolean @default(false)
 
   // AI alanları
   aiSummary                  String?

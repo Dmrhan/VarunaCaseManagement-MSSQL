@@ -187,6 +187,8 @@ export interface Company {
   primaryColor: string | null;
   appName: string | null;
   supportEmail: string | null;
+  // Phase D — müşterisiz vaka açma zorunluluğu (per-company toggle)
+  requireCustomerOnCaseCreate?: boolean;
   userCount: number;
   createdAt?: string;
   updatedAt?: string;
@@ -199,6 +201,7 @@ export interface CompanyInput {
   primaryColor?: string;
   appName?: string;
   supportEmail?: string;
+  requireCustomerOnCaseCreate?: boolean;
 }
 
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };

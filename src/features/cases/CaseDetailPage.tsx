@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   BellOff,
   Brain,
@@ -66,6 +67,7 @@ import { useToast } from '@/components/ui/Toast';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
 import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
@@ -108,6 +110,9 @@ interface CaseDetailPageProps {
 }
 
 export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+  const { user } = useAuth();
+  // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
+  const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
   const [item, setItem] = useState<Case | null>(null);
   const [loading, setLoading] = useState(false);
   const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
@@ -121,6 +126,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
+  // Phase D — Müşteri eşleştirme modal'ı (Supervisor+).
+  const [linkAccountOpen, setLinkAccountOpen] = useState(false);
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [unsnoozing, setUnsnoozing] = useState(false);
@@ -658,6 +666,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           accountContact={customerContext?.primaryContact?.fullName ?? account?.contactPerson}
           customerContext={customerContext}
           onOpenAccount={onOpenAccount}
+          canLinkAccount={canLinkAccount}
+          onLinkAccount={canLinkAccount ? () => setLinkAccountOpen(true) : undefined}
           onStartCall={handleStartCall}
           onTransfer={() => setTransferOpen(true)}
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
@@ -770,6 +780,33 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
 
       </div>
 
+      {/* Phase D — Müşteri Eşleştir modal'ı. Picker companyId case'in şirketiyle
+          scoped; manuel onay (auto-link yok). Phase D Step 2'de öneri section'ı
+          eklenecek; mevcut picker arama davranışı korunur. */}
+      {canLinkAccount && (
+        <AccountSearchPicker
+          open={linkAccountOpen}
+          companyId={item.companyId}
+          selectedAccountId={item.accountId || null}
+          allowNullSelection={false}
+          onClose={() => setLinkAccountOpen(false)}
+          onSelect={async (account) => {
+            if (!account || linkSubmitting) return;
+            setLinkSubmitting(true);
+            const updated = await caseService.linkAccount(item.id, account.id);
+            setLinkSubmitting(false);
+            if (updated) {
+              setItem(updated);
+              setLinkAccountOpen(false);
+              // Customer context'i yeniden çek — banner kaybolur, panel zenginleşir.
+              void accountService.getCaseCustomerContext(item.id).then((out) => {
+                setCustomerContext(out?.context ?? null);
+              });
+            }
+          }}
+        />
+      )}
+
       {/* Vaka aktarımı modal'ı (FAZ 2 §20.2) — AI öneri + 3 step */}
       <TransferModal
         open={transferOpen}
@@ -870,6 +907,8 @@ function LeftPanel({
   accountContact,
   customerContext,
   onOpenAccount,
+  canLinkAccount,
+  onLinkAccount,
   onStartCall,
   onTransfer,
   onNoteAdded,
@@ -884,6 +923,8 @@ function LeftPanel({
   accountContact?: string;
   customerContext: CaseCustomerContext | null;
   onOpenAccount?: (accountId: string) => void;
+  canLinkAccount?: boolean;
+  onLinkAccount?: () => void;
   onStartCall: () => void;
   onTransfer: () => void;
   onNoteAdded: (note: import('./types').CaseNote) => void;
@@ -981,12 +1022,29 @@ function LeftPanel({
               )}
             </>
           ) : (
-            <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
-              <div className="font-medium">Müşterisiz vaka</div>
-              <div className="mt-0.5 text-[11px] opacity-80">
-                Bu vaka açıldığında müşteri eşleşmesi yapılmadı. Supervisor / Admin
-                Müşteri Eşleştirme akışında bağlayabilir.
+            <div className="space-y-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300" />
+                <div className="min-w-0">
+                  <div className="font-medium">Bu vakaya henüz müşteri eşleştirilmedi.</div>
+                  {!canLinkAccount && (
+                    <div className="mt-0.5 text-[11px] opacity-80">
+                      Eşleştirme için Supervisor veya Admin yetkisi gerekir.
+                    </div>
+                  )}
+                </div>
               </div>
+              {canLinkAccount && onLinkAccount && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<Building2 size={12} />}
+                  onClick={onLinkAccount}
+                  className="w-full justify-center border-amber-300 bg-white text-amber-900 hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-900/30 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                >
+                  Müşteri Eşleştir
+                </Button>
+              )}
             </div>
           )}
         </div>

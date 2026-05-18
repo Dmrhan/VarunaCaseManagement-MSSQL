@@ -1086,6 +1086,8 @@ export const companyRepo = {
       primaryColor: c.settings?.primaryColor ?? null,
       appName: c.settings?.appName ?? null,
       supportEmail: c.settings?.supportEmail ?? null,
+      // Phase D — Müşterisiz vaka açma kısıtı; default false (geri uyumlu).
+      requireCustomerOnCaseCreate: c.settings?.requireCustomerOnCaseCreate ?? false,
       userCount: c._count.userCompanies,
     }));
   },
@@ -1112,6 +1114,8 @@ export const companyRepo = {
           primaryColor: input.primaryColor?.trim() || null,
           appName: input.appName?.trim() || null,
           supportEmail: input.supportEmail?.trim() || null,
+          // Phase D — Müşteri zorunluluğu (default false)
+          requireCustomerOnCaseCreate: !!input.requireCustomerOnCaseCreate,
         },
       });
       return company;
@@ -1145,7 +1149,8 @@ export const companyRepo = {
         patch.logoUrl !== undefined ||
         patch.primaryColor !== undefined ||
         patch.appName !== undefined ||
-        patch.supportEmail !== undefined;
+        patch.supportEmail !== undefined ||
+        patch.requireCustomerOnCaseCreate !== undefined;
       if (hasBranding) {
         await tx.companySettings.upsert({
           where: { companyId: id },
@@ -1154,6 +1159,9 @@ export const companyRepo = {
             ...(patch.primaryColor !== undefined && { primaryColor: patch.primaryColor?.trim() || null }),
             ...(patch.appName !== undefined && { appName: patch.appName?.trim() || null }),
             ...(patch.supportEmail !== undefined && { supportEmail: patch.supportEmail?.trim() || null }),
+            ...(patch.requireCustomerOnCaseCreate !== undefined && {
+              requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
+            }),
           },
           create: {
             companyId: id,
@@ -1161,6 +1169,7 @@ export const companyRepo = {
             primaryColor: patch.primaryColor?.trim() || null,
             appName: patch.appName?.trim() || null,
             supportEmail: patch.supportEmail?.trim() || null,
+            requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
           },
         });
       }
@@ -1378,6 +1387,10 @@ export const companySettingsRepo = {
         ...(patch.primaryColor !== undefined && { primaryColor: patch.primaryColor }),
         ...(patch.appName !== undefined && { appName: patch.appName }),
         ...(patch.supportEmail !== undefined && { supportEmail: patch.supportEmail }),
+        // Phase D — Müşteri zorunluluğu toggle
+        ...(patch.requireCustomerOnCaseCreate !== undefined && {
+          requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
+        }),
       },
       create: {
         companyId,
@@ -1385,6 +1398,7 @@ export const companySettingsRepo = {
         primaryColor: patch.primaryColor ?? null,
         appName: patch.appName ?? null,
         supportEmail: patch.supportEmail ?? null,
+        requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
       },
     });
   },

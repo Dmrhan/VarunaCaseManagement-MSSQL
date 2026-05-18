@@ -171,6 +171,14 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   // Phase C2: müşteri seçimi artık AccountSearchPicker (real API). Bootstrap
   // cache'inden account listesi okunmuyor.
   const categories = useMemo(() => lookupService.categories(), []);
+  // Phase D — seçili şirketin CompanySettings.requireCustomerOnCaseCreate flag'i.
+  // Bootstrap'tan flatten geliyor; false ise "Müşterisiz devam et" görünür,
+  // true ise müşteri zorunlu (picker'da null seçim gizli + validation).
+  const selectedCompany = useMemo(
+    () => companies.find((c) => c.id === form.companyId),
+    [companies, form.companyId],
+  );
+  const requireCustomer = !!selectedCompany?.requireCustomerOnCaseCreate;
   const teams = useMemo(() => lookupService.teams(), []);
   const requestTypes = useMemo(() => lookupService.requestTypes(), []);
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
@@ -350,6 +358,10 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     if (!form.companyId) e.companyId = 'Şirket seçilmeli';
     // Phase C2: accountId opsiyonel — müşteri bulunamazsa "Müşterisiz devam et"
     // ile boş bırakılabilir. accountName de buna paralel olarak boş kalır.
+    // Phase D: seçili şirkette requireCustomerOnCaseCreate=true ise müşteri zorunlu.
+    if (requireCustomer && !form.accountId) {
+      e.accountId = 'Bu şirkette müşteri seçimi zorunlu.';
+    }
     if (!form.category) e.category = 'Kategori seçilmeli';
     if (!form.subCategory) e.subCategory = 'Alt kategori seçilmeli';
     if (!form.requestType) e.requestType = 'Talep türü seçilmeli';
@@ -512,7 +524,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
               </Field>
               <Field
                 label="Müşteri"
-                hint={!form.companyId ? 'Önce şirket seçin' : 'Müşteriyi bulamazsan müşterisiz devam edebilirsin.'}
+                required={requireCustomer}
+                error={errors.accountId}
+                hint={
+                  !form.companyId
+                    ? 'Önce şirket seçin'
+                    : requireCustomer
+                      ? 'Bu şirkette müşteri seçimi zorunlu.'
+                      : 'Müşteriyi bulamazsan müşterisiz devam edebilirsin.'
+                }
               >
                 {form.accountId ? (
                   <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-ndark-border dark:bg-ndark-card">
@@ -1021,7 +1041,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         open={accountPickerOpen}
         companyId={form.companyId || null}
         selectedAccountId={form.accountId || null}
-        allowNullSelection
+        // Phase D: şirket politikası "Müşterisiz devam et"i kapatabilir.
+        allowNullSelection={!requireCustomer}
         onClose={() => setAccountPickerOpen(false)}
         onSelect={(account) => {
           setAccountPickerOpen(false);

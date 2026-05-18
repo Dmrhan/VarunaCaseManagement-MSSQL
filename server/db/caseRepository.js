@@ -94,6 +94,18 @@ export class CaseAccessError extends Error {
 }
 
 /**
+ * CaseValidationError — 400 validation. Phase D: requireCustomerOnCaseCreate
+ * ihlali bunu fırlatır; route layer bunu HTTP 400'e çevirir.
+ */
+export class CaseValidationError extends Error {
+  constructor(message, { status = 400, code = 'validation_error' } = {}) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
  * Mutation guard + companyId resolver.
  *
  * Davranış:
@@ -159,6 +171,26 @@ export const caseRepository = {
     const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
     // TR string enum'larını ASCII identifier'a çevir
     const m = toDb(input);
+
+    // Phase D — Müşterisiz vaka akışı:
+    //   - CompanySettings.requireCustomerOnCaseCreate=true ise accountId zorunlu
+    //   - accountId null → customerMatchPending=true (Supervisor eşleştirme kuyruğu)
+    //   - accountId dolu → customerMatchPending=false
+    const settings = m.companyId
+      ? await prisma.companySettings.findUnique({
+          where: { companyId: m.companyId },
+          select: { requireCustomerOnCaseCreate: true },
+        })
+      : null;
+    const requireCustomer = !!settings?.requireCustomerOnCaseCreate;
+    if (requireCustomer && !m.accountId) {
+      throw new CaseValidationError(
+        'Bu şirkette vaka açmak için müşteri seçimi zorunludur.',
+        { status: 400, code: 'customer_required' },
+      );
+    }
+    const customerMatchPending = !m.accountId;
+
     const created = await prisma.case.create({
       data: {
         caseNumber,
@@ -173,6 +205,7 @@ export const caseRepository = {
         companyName: m.companyName,
         accountId: m.accountId,
         accountName: m.accountName,
+        customerMatchPending,
         category: m.category,
         subCategory: m.subCategory,
         requestType: m.requestType,
@@ -244,10 +277,21 @@ export const caseRepository = {
       });
     }
 
+    // Phase D — customerMatchPending lifecycle:
+    //   patch içinde accountId alanı geliyorsa pending flag'i otomatik toggle et.
+    //   accountId set ediliyor → pending=false; accountId clear ediliyor → pending=true.
+    //   (Update path'inde companyId değiştirilmediği için requireCustomer kontrolüne
+    //    gerek yok; create + link-account endpoint'lerinde zaten enforce ediliyor.)
+    const lifecyclePatch = {};
+    if ('accountId' in patch) {
+      lifecyclePatch.customerMatchPending = patch.accountId == null;
+    }
+
     const updated = await prisma.case.update({
       where: { id },
       data: {
         ...dbPatch,
+        ...lifecyclePatch,
         history: historyEntries.length > 0 ? { create: historyEntries } : undefined,
       },
       include: CASE_INCLUDE,
@@ -268,6 +312,89 @@ export const caseRepository = {
       });
     }
 
+    return shape(updated);
+  },
+
+  /**
+   * Phase D — PATCH /api/cases/:id/link-account
+   *
+   * Müşterisiz açılmış (customerMatchPending=true) bir vakaya Supervisor/Admin
+   * eşleştirmesi. Geri uyumluluk için müşterili vakalarda da çağrılabilir.
+   *
+   * Kurallar:
+   *  - Vaka kullanıcının scope'unda olmalı (assertCaseInScope).
+   *  - Account kullanıcının allowedCompanyIds'inde görünür olmalı.
+   *  - Account vakanın companyId'sine bağlanmış olmalı:
+   *      AccountCompany.companyId === case.companyId
+   *      OR legacy Account.companyId === case.companyId
+   *      OR legacy shared Account.companyId IS NULL
+   *  - Update: Case.accountId + Case.accountName + customerMatchPending=false
+   *  - Audit: CaseActivity "Müşteri eşleştirildi: {accountName}"
+   */
+  async linkAccount(caseId, accountId, actor, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: {
+        id: true,
+        name: true,
+        companyId: true,
+        companies: { select: { companyId: true } },
+      },
+    });
+    if (!account) {
+      throw new CaseValidationError('Müşteri bulunamadı.', { status: 404, code: 'account_not_found' });
+    }
+
+    const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
+    // Account kullanıcının scope'unda görünür mü?
+    const visibleToUser =
+      account.companies.some((c) => allowed.includes(c.companyId)) ||
+      (account.companyId && allowed.includes(account.companyId)) ||
+      account.companyId === null;
+    if (!visibleToUser) {
+      throw new CaseAccessError('Bu müşteriye erişim yetkin yok.');
+    }
+
+    // Account vakanın companyId'sine bağlı mı?
+    const linkable =
+      account.companies.some((c) => c.companyId === companyId) ||
+      account.companyId === companyId ||
+      account.companyId === null;
+    if (!linkable) {
+      throw new CaseValidationError(
+        'Bu müşteri vakanın şirketine bağlı değil.',
+        { status: 400, code: 'company_mismatch' },
+      );
+    }
+
+    const before = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { accountName: true },
+    });
+
+    const updated = await prisma.case.update({
+      where: { id: caseId },
+      data: {
+        accountId: account.id,
+        accountName: account.name,
+        customerMatchPending: false,
+        history: {
+          create: {
+            companyId,
+            action: `Müşteri eşleştirildi: ${account.name}`,
+            actionType: 'FieldUpdate',
+            fieldName: 'accountId',
+            fromValue: before?.accountName ?? null,
+            toValue: account.name,
+            actor,
+          },
+        },
+      },
+      include: CASE_INCLUDE,
+    });
     return shape(updated);
   },
 
@@ -2305,5 +2432,8 @@ function buildWhere(f, allowedCompanyIds) {
     to.setHours(23, 59, 59, 999);
     where.createdAt = { ...(where.createdAt ?? {}), lte: to };
   }
+  // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
+  if (f.customerMatchPending === true) where.customerMatchPending = true;
+  if (f.customerMatchPending === false) where.customerMatchPending = false;
   return where;
 }
