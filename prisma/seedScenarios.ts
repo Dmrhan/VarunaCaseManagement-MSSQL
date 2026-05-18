@@ -84,21 +84,235 @@ async function loadUserIds() {
 }
 
 /**
- * P0 cleanup — eski seedScenarios USR-* (Person.id) yazmış olabilir
- * CaseWatcher/CaseNote/CaseNoteReaction'a. Yeni doğru User.id (UUID) ile
- * paralel kayıt yazmadan önce yanlışları sil. Idempotent: gerçek UUID'lere
- * dokunmaz, yalnız 'USR-' prefix'li userId/authorId kayıtları silinir.
+ * Person.id → User.id mapping — User.personId (USR-X) ↔ User.id (Supabase UUID).
+ * Yalnız personId set edilmiş ve aktif user'ları döner.
  */
-async function cleanupLegacyPersonIdReferences() {
-  const w = await prisma.caseWatcher.deleteMany({ where: { userId: { startsWith: 'USR-' } } });
-  const r = await prisma.caseNoteReaction.deleteMany({ where: { userId: { startsWith: 'USR-' } } });
-  // CaseNote.authorId nullable; legacy yazımı temizlemek yerine null'a düşür ki not içeriği kaybolmasın.
-  const n = await prisma.caseNote.updateMany({
-    where: { authorId: { startsWith: 'USR-' } },
-    data: { authorId: null },
+async function buildPersonToUserMap(): Promise<Map<string, string>> {
+  const users = await prisma.user.findMany({
+    where: { personId: { not: null }, isActive: true },
+    select: { id: true, personId: true },
   });
-  if (w.count || r.count || n.count) {
-    console.log(`→ Legacy USR-* cleanup: watcher=${w.count}, reaction=${r.count}, note.authorId nulled=${n.count}`);
+  const map = new Map<string, string>();
+  for (const u of users) {
+    if (u.personId) map.set(u.personId, u.id);
+  }
+  return map;
+}
+
+/**
+ * Bad-row sayım: USR-* prefix'li User.id alanları + null author for demo notes.
+ * Hem önce hem sonra çağrılır; cleanup raporlama için.
+ */
+async function countIdMixupBadRows() {
+  const usrPrefix = { startsWith: 'USR-' };
+  const [watcherUserId, watcherAddedBy, noteAuthorId, reactionUserId, mentionUserId, linkCreatedBy] =
+    await Promise.all([
+      prisma.caseWatcher.count({ where: { userId: usrPrefix } }),
+      prisma.caseWatcher.count({ where: { addedBy: usrPrefix } }),
+      prisma.caseNote.count({ where: { authorId: usrPrefix } }),
+      prisma.caseNoteReaction.count({ where: { userId: usrPrefix } }),
+      prisma.caseMention.count({ where: { mentionedUserId: usrPrefix } }),
+      prisma.caseLink.count({ where: { createdBy: usrPrefix } }),
+    ]);
+  // Demo scenario notes where authorId is null — beklenmiyor (her demo not author UUID olmalı)
+  const noteAuthorNullForDemo = await prisma.caseNote.count({
+    where: { authorId: null, case: { caseNumber: { startsWith: 'DEMO-' } } },
+  });
+  return {
+    watcherUserId,
+    watcherAddedBy,
+    noteAuthorId,
+    reactionUserId,
+    mentionUserId,
+    linkCreatedBy,
+    noteAuthorNullForDemo,
+  };
+}
+
+function logBadRows(label: string, counts: Awaited<ReturnType<typeof countIdMixupBadRows>>) {
+  console.log(`→ Bad-row counts (${label}):`);
+  console.log(`    CaseWatcher.userId USR-*:                  ${counts.watcherUserId}`);
+  console.log(`    CaseWatcher.addedBy USR-*:                 ${counts.watcherAddedBy}`);
+  console.log(`    CaseNote.authorId USR-*:                   ${counts.noteAuthorId}`);
+  console.log(`    CaseNoteReaction.userId USR-*:             ${counts.reactionUserId}`);
+  console.log(`    CaseMention.mentionedUserId USR-*:         ${counts.mentionUserId}`);
+  console.log(`    CaseLink.createdBy USR-*:                  ${counts.linkCreatedBy}`);
+  console.log(`    CaseNote.authorId NULL for DEMO-* cases:   ${counts.noteAuthorNullForDemo}`);
+}
+
+/**
+ * Mapping-aware repair — USR-* (Person.id) yazılmış User.id alanlarını
+ * Person.id → User.id mapping ile UPDATE eder. Mapping bulunamayan satırlar
+ * için tablo bazında güvenli karar:
+ *  - CaseWatcher: delete (yeni doğru kayıt seed'de tekrar yazılır)
+ *  - CaseNoteReaction: delete (yeni doğru kayıt seed'de tekrar yazılır)
+ *  - CaseNote.authorId: null'a düşür (içerik korunur, author bilinmiyorsa boş)
+ *  - CaseLink.createdBy: delete (yeni doğru kayıt ensureLink'te tekrar yazılır)
+ *
+ * Idempotent: ikinci çağrıda zaten USR-* satırı kalmadığı için sayımlar 0 olur.
+ *
+ * NOTE: Gerçek (non-demo) kullanıcı verisi USR-* prefix'i içermez (Supabase UUID
+ * formatı). Bu yüzden cleanup yalnız legacy seed kalıntılarını hedefler.
+ */
+async function repairLegacyPersonIdReferences(personToUser: Map<string, string>) {
+  let watcherUpdated = 0;
+  let watcherAddedByUpdated = 0;
+  let watcherDeleted = 0;
+  let reactionUpdated = 0;
+  let reactionDeleted = 0;
+  let noteAuthorUpdated = 0;
+  let noteAuthorNulled = 0;
+  let linkCreatedByUpdated = 0;
+  let linkDeleted = 0;
+
+  // 1) CaseWatcher.userId
+  const watchers = await prisma.caseWatcher.findMany({
+    where: { userId: { startsWith: 'USR-' } },
+    select: { id: true, userId: true },
+  });
+  for (const w of watchers) {
+    const newId = personToUser.get(w.userId);
+    if (newId) {
+      // Çakışma kontrolü: (caseId, userId) unique — eğer hedef UUID zaten varsa duplicate'ı sil
+      const dup = await prisma.caseWatcher.findFirst({
+        where: { id: w.id },
+        select: { caseId: true },
+      });
+      const conflict = dup
+        ? await prisma.caseWatcher.findUnique({
+            where: { caseId_userId: { caseId: dup.caseId, userId: newId } },
+            select: { id: true },
+          })
+        : null;
+      if (conflict) {
+        await prisma.caseWatcher.delete({ where: { id: w.id } });
+        watcherDeleted++;
+      } else {
+        await prisma.caseWatcher.update({ where: { id: w.id }, data: { userId: newId } });
+        watcherUpdated++;
+      }
+    } else {
+      await prisma.caseWatcher.delete({ where: { id: w.id } });
+      watcherDeleted++;
+    }
+  }
+
+  // 2) CaseWatcher.addedBy (mapping varsa update, yoksa silmek yerine null değil — schema String NOT NULL,
+  //    bu yüzden mapping yoksa kaydı silmek tek seçenek)
+  const watcherByMissing = await prisma.caseWatcher.findMany({
+    where: { addedBy: { startsWith: 'USR-' } },
+    select: { id: true, addedBy: true },
+  });
+  for (const w of watcherByMissing) {
+    const newId = personToUser.get(w.addedBy);
+    if (newId) {
+      await prisma.caseWatcher.update({ where: { id: w.id }, data: { addedBy: newId } });
+      watcherAddedByUpdated++;
+    } else {
+      await prisma.caseWatcher.delete({ where: { id: w.id } });
+      watcherDeleted++;
+    }
+  }
+
+  // 3) CaseNoteReaction.userId (unique noteId+userId+emoji — conflict halinde delete)
+  const reactions = await prisma.caseNoteReaction.findMany({
+    where: { userId: { startsWith: 'USR-' } },
+    select: { id: true, noteId: true, userId: true, emoji: true },
+  });
+  for (const r of reactions) {
+    const newId = personToUser.get(r.userId);
+    if (newId) {
+      const conflict = await prisma.caseNoteReaction.findUnique({
+        where: { noteId_userId_emoji: { noteId: r.noteId, userId: newId, emoji: r.emoji } },
+        select: { id: true },
+      });
+      if (conflict) {
+        await prisma.caseNoteReaction.delete({ where: { id: r.id } });
+        reactionDeleted++;
+      } else {
+        await prisma.caseNoteReaction.update({ where: { id: r.id }, data: { userId: newId } });
+        reactionUpdated++;
+      }
+    } else {
+      await prisma.caseNoteReaction.delete({ where: { id: r.id } });
+      reactionDeleted++;
+    }
+  }
+
+  // 4) CaseNote.authorId — mapping varsa update; yoksa null (içerik korunur)
+  const notes = await prisma.caseNote.findMany({
+    where: { authorId: { startsWith: 'USR-' } },
+    select: { id: true, authorId: true },
+  });
+  for (const n of notes) {
+    const newId = n.authorId ? personToUser.get(n.authorId) : null;
+    if (newId) {
+      await prisma.caseNote.update({ where: { id: n.id }, data: { authorId: newId } });
+      noteAuthorUpdated++;
+    } else {
+      await prisma.caseNote.update({ where: { id: n.id }, data: { authorId: null } });
+      noteAuthorNulled++;
+    }
+  }
+
+  // 5) CaseLink.createdBy — mapping varsa update; yoksa sil
+  const links = await prisma.caseLink.findMany({
+    where: { createdBy: { startsWith: 'USR-' } },
+    select: { id: true, createdBy: true },
+  });
+  for (const l of links) {
+    const newId = personToUser.get(l.createdBy);
+    if (newId) {
+      await prisma.caseLink.update({ where: { id: l.id }, data: { createdBy: newId } });
+      linkCreatedByUpdated++;
+    } else {
+      await prisma.caseLink.delete({ where: { id: l.id } });
+      linkDeleted++;
+    }
+  }
+
+  // 6) Demo not içeriğindeki @[Name](USR-XXX) → @[Name](UUID) backfill
+  //    Yalnız DEMO-* prefix'li vakalardaki notlarda; mapping deterministic.
+  const usrMentionRegex = /\(USR-(\d+)\)/g;
+  const demoNotes = await prisma.caseNote.findMany({
+    where: {
+      content: { contains: '(USR-' },
+      case: { caseNumber: { startsWith: 'DEMO-' } },
+    },
+    select: { id: true, content: true },
+  });
+  let mentionContentRepaired = 0;
+  for (const note of demoNotes) {
+    const replaced = note.content.replace(usrMentionRegex, (_match, num) => {
+      const personId = `USR-${num}`;
+      const userId = personToUser.get(personId);
+      return userId ? `(${userId})` : `(USR-${num})`;
+    });
+    if (replaced !== note.content) {
+      await prisma.caseNote.update({ where: { id: note.id }, data: { content: replaced } });
+      mentionContentRepaired++;
+    }
+  }
+
+  const total =
+    watcherUpdated +
+    watcherAddedByUpdated +
+    watcherDeleted +
+    reactionUpdated +
+    reactionDeleted +
+    noteAuthorUpdated +
+    noteAuthorNulled +
+    linkCreatedByUpdated +
+    linkDeleted +
+    mentionContentRepaired;
+  if (total > 0) {
+    console.log('→ Legacy USR-* repair (mapping-aware):');
+    console.log(`    CaseWatcher.userId           updated=${watcherUpdated}, deleted=${watcherDeleted}`);
+    console.log(`    CaseWatcher.addedBy          updated=${watcherAddedByUpdated}`);
+    console.log(`    CaseNoteReaction.userId      updated=${reactionUpdated}, deleted=${reactionDeleted}`);
+    console.log(`    CaseNote.authorId            updated=${noteAuthorUpdated}, nulled=${noteAuthorNulled}`);
+    console.log(`    CaseLink.createdBy           updated=${linkCreatedByUpdated}, deleted=${linkDeleted}`);
+    console.log(`    Note content mention USR→UUID  ${mentionContentRepaired}`);
   }
 }
 
@@ -515,12 +729,26 @@ async function ensureNote(opts: {
     parentNoteId = parent.id;
   }
 
-  // Dedup — aynı parent altında aynı content varsa skip
+  // Dedup — aynı parent altında aynı content varsa skip.
+  // Update path: var olan notun authorId'si null veya USR-* prefix'liyse ve
+  // ensureNote çağrısı UUID veriyorsa, mevcut nota authorId UPDATE yap
+  // (içerik korunur, bell badge/reaction bağı doğru kullanıcıya bağlanır).
   const dup = await prisma.caseNote.findFirst({
     where: { caseId, content: opts.content, parentNoteId },
-    select: { id: true },
+    select: { id: true, authorId: true },
   });
-  if (dup) return dup.id;
+  if (dup) {
+    const isStaleAuthor =
+      dup.authorId === null || (dup.authorId && dup.authorId.startsWith('USR-'));
+    const isNewAuthorUuid = opts.authorId && !opts.authorId.startsWith('USR-');
+    if (isStaleAuthor && isNewAuthorUuid && dup.authorId !== opts.authorId) {
+      await prisma.caseNote.update({
+        where: { id: dup.id },
+        data: { authorId: opts.authorId },
+      });
+    }
+    return dup.id;
+  }
 
   const note = await prisma.caseNote.create({
     data: {
@@ -715,7 +943,8 @@ async function seedReplyReactionFlow() {
       caseNumber: 'DEMO-UNI-003',
       authorId: USER.SUPERVISOR,
       authorName: 'Demo Supervisor',
-      content: '@[Demo Agent](USR-001) müşteriye dakikada bir geri dönüş veriyor musun? Yarın sabaha kadar manuel sync alternatifi düşünelim.',
+      // Mention id'si runtime-populated User.id (UUID) — Person.id değil.
+      content: `@[Demo Agent](${USER.AGENT}) müşteriye dakikada bir geri dönüş veriyor musun? Yarın sabaha kadar manuel sync alternatifi düşünelim.`,
       parentNoteContent: 'Quest planı tarafında sync trigger logu görmüyorum, bir bakar mısınız?',
     });
     void reply1;
@@ -846,9 +1075,15 @@ async function main() {
   // Demo user UUID'lerini yükle — CaseWatcher/CaseNote/CaseNoteReaction
   // User.id (Supabase UUID) bekler. seedAuth eksikse fail-fast.
   await loadUserIds();
-  // Önceki seed run'larında yanlışlıkla yazılmış USR-* (Person.id) referansları
-  // temizle — idempotent, gerçek UUID kayıtlarına dokunmaz.
-  await cleanupLegacyPersonIdReferences();
+  // Mapping-aware repair — USR-* (Person.id) yazılmış User.id alanlarını
+  // mümkün olduğunda User.id (UUID)'ye UPDATE eder; mapping bulunamayanlar
+  // tablo bazında güvenli karar (delete veya null). Idempotent.
+  const personToUser = await buildPersonToUserMap();
+  const before = await countIdMixupBadRows();
+  logBadRows('BEFORE repair', before);
+  await repairLegacyPersonIdReferences(personToUser);
+  const afterRepair = await countIdMixupBadRows();
+  logBadRows('AFTER repair', afterRepair);
 
   await upsertAccounts();
   await upsertCases();
