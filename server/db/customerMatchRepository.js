@@ -74,16 +74,38 @@ function extractSignalsFromCase(c) {
   }
   const text = textParts.join(' \n ');
 
-  const phones = Array.from(text.matchAll(PHONE_RX)).map((m) => normalizePhone(m[0])).filter((p) => p.length >= 7);
-  const emails = Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
+  // Text-extracted signals (low-confidence; free-text regex tabanlı)
+  const textPhones = Array.from(text.matchAll(PHONE_RX))
+    .map((m) => normalizePhone(m[0]))
+    .filter((p) => p.length >= 7);
+  const textEmails = Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
   const fiveDigit = Array.from(text.matchAll(FIVE_DIGIT_RX)).map((m) => m[0]);
-  const nameTokens = new Set(normalizeTokens(`${c.title} ${c.description} ${c.accountName ?? ''}`));
+
+  // Phase D Step 2 — Requester intake fields (high-confidence; Agent explicit).
+  // Backend payload'ında trimlenmiş; burada normalize edip set'lere katarız.
+  const requesterPhone = c.customerContactPhone ? normalizePhone(c.customerContactPhone) : null;
+  const requesterEmail = c.customerContactEmail ? normalizeEmail(c.customerContactEmail) : null;
+  const requesterCompany = c.customerCompanyName ?? '';
+  const requesterContactName = c.customerContactName ?? '';
+
+  const phones = [...new Set([...(requesterPhone ? [requesterPhone] : []), ...textPhones])];
+  const emails = [...new Set([...(requesterEmail ? [requesterEmail] : []), ...textEmails])];
+
+  // Name tokens: title + description + (sentinel filtreli) accountName + requester firma adı
+  const nameTokens = new Set(
+    normalizeTokens(`${c.title} ${c.description} ${c.accountName ?? ''} ${requesterCompany}`),
+  );
+  const contactNameTokens = new Set(normalizeTokens(requesterContactName));
 
   return {
-    phones: [...new Set(phones)],
-    emails: [...new Set(emails)],
+    phones,
+    emails,
     externalCodes: [...new Set(fiveDigit)],
     nameTokens,
+    contactNameTokens,
+    requesterPhone,
+    requesterEmail,
+    requesterCompany,
     rawText: text,
   };
 }
@@ -154,7 +176,9 @@ function scoreCandidate(account, signals) {
   const reasons = [];
   let score = 0;
 
-  // Phone — Account.phone + Contact.phone
+  // Phone — Account.phone + Contact.phone. Phase D Step 2: requester phone
+  // (Agent'ın explicit girdiği) yüksek-öncelik kabul edilir. Tek bir reason
+  // ekleriz; double-count yok.
   const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
     .filter(Boolean)
     .map(normalizePhone);
@@ -179,9 +203,7 @@ function scoreCandidate(account, signals) {
   }
 
   // External customer code — yalnız case.companyId'deki AccountCompany'lerde
-  const acCodes = account.companies
-    .map((c) => c.externalCustomerCode)
-    .filter(Boolean);
+  const acCodes = account.companies.map((c) => c.externalCustomerCode).filter(Boolean);
   for (const code of signals.externalCodes) {
     if (acCodes.includes(code)) {
       score += 60;
@@ -190,13 +212,32 @@ function scoreCandidate(account, signals) {
     }
   }
 
-  // Name similarity
+  // Name similarity (case text + requester firma adı — extractSignals'da union)
   const accountNameTokens = new Set(normalizeTokens(account.name));
   const overlap = tokenOverlap(signals.nameTokens, accountNameTokens);
   if (overlap > 0) {
     const bonus = Math.min(overlap * 20, 40);
     score += bonus;
-    reasons.push({ type: 'name', label: 'İsim benzerliği', valueMasked: null });
+    // Phase D Step 2: requester firma adı varsa label "Firma adı benzer",
+    // yoksa eski "İsim benzerliği" davranışı.
+    const label = signals.requesterCompany ? 'Firma adı benzer' : 'İsim benzerliği';
+    reasons.push({ type: 'name', label, valueMasked: null });
+  }
+
+  // Phase D Step 2 — requester contact-name vs AccountContact.fullName
+  if (signals.contactNameTokens.size > 0 && account.contacts.length > 0) {
+    let contactHit = false;
+    for (const c of account.contacts) {
+      const ct = new Set(normalizeTokens(c.fullName ?? ''));
+      if (tokenOverlap(signals.contactNameTokens, ct) > 0) {
+        contactHit = true;
+        break;
+      }
+    }
+    if (contactHit) {
+      score += 25;
+      reasons.push({ type: 'contactName', label: 'İletişim kişisi eşleşti', valueMasked: null });
+    }
   }
 
   // Product / package signal
@@ -276,6 +317,12 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
       accountId: true,
       accountName: true,
       customerMatchPending: true,
+      // Phase D Step 2 — Agent intake'inde alınan başvuran bilgileri,
+      // extractSignalsFromCase'in yüksek-öncelik sinyalleri.
+      customerContactName: true,
+      customerContactPhone: true,
+      customerContactEmail: true,
+      customerCompanyName: true,
       callLogs: {
         select: { description: true, callerName: true },
         take: 20,

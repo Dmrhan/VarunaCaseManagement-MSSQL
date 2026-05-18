@@ -106,6 +106,43 @@ export class CaseValidationError extends Error {
 }
 
 /**
+ * Phase D Step 2 — Müşterisiz vaka başvuran bilgilerini sanitize et.
+ *  - Trim
+ *  - Max length cap
+ *  - Email format kontrolü (basit regex)
+ *  - Boş string null'a çevrilir
+ *  - Tüm alanlar opsiyonel; hiçbiri verilmese hata yok
+ */
+const EMAIL_VALIDATION_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function trimOrNull(value, max) {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (trimmed.length > max) {
+    throw new CaseValidationError(`Alan ${max} karakteri geçemez.`, {
+      status: 400,
+      code: 'requester_field_too_long',
+    });
+  }
+  return trimmed;
+}
+function sanitizeRequesterContext(raw) {
+  const out = {
+    customerContactName: trimOrNull(raw.customerContactName, 120),
+    customerContactPhone: trimOrNull(raw.customerContactPhone, 40),
+    customerContactEmail: trimOrNull(raw.customerContactEmail, 160),
+    customerCompanyName: trimOrNull(raw.customerCompanyName, 180),
+  };
+  if (out.customerContactEmail && !EMAIL_VALIDATION_RX.test(out.customerContactEmail)) {
+    throw new CaseValidationError('Geçersiz e-posta.', {
+      status: 400,
+      code: 'requester_email_invalid',
+    });
+  }
+  return out;
+}
+
+/**
  * Mutation guard + companyId resolver.
  *
  * Davranış:
@@ -191,6 +228,15 @@ export const caseRepository = {
     }
     const customerMatchPending = !m.accountId;
 
+    // Phase D Step 2 — Opsiyonel başvuran bilgileri.
+    // Hassas alanlar (phone, email) sadece DB'ye yazılır; log/analytics yok.
+    const requester = sanitizeRequesterContext({
+      customerContactName: m.customerContactName,
+      customerContactPhone: m.customerContactPhone,
+      customerContactEmail: m.customerContactEmail,
+      customerCompanyName: m.customerCompanyName,
+    });
+
     const created = await prisma.case.create({
       data: {
         caseNumber,
@@ -201,6 +247,11 @@ export const caseRepository = {
         priority: m.priority,
         origin: m.origin,
         originDescription: m.originDescription,
+        // Phase D Step 2 — başvuran bilgileri (opsiyonel)
+        customerContactName: requester.customerContactName,
+        customerContactPhone: requester.customerContactPhone,
+        customerContactEmail: requester.customerContactEmail,
+        customerCompanyName: requester.customerCompanyName,
         companyId: m.companyId,
         companyName: m.companyName,
         accountId: m.accountId,

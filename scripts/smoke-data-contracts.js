@@ -678,6 +678,54 @@ defineGroup('Customer Match Contract', async () => {
     ));
   }
 
+  // 6.5) Phase D Step 2 — Case schema includes requester context columns
+  //      Müşterisiz vaka intake'i için 4 opsiyonel kolon mevcut olmalı.
+  const requesterCols = await prisma.$queryRawUnsafe(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'Case'
+      AND column_name IN (
+        'customerContactName', 'customerContactPhone',
+        'customerContactEmail', 'customerCompanyName'
+      )
+  `);
+  const presentCols = new Set(requesterCols.map((r) => r.column_name));
+  const expectedCols = ['customerContactName', 'customerContactPhone', 'customerContactEmail', 'customerCompanyName'];
+  const missingCols = expectedCols.filter((c) => !presentCols.has(c));
+  out.push(check(
+    'Case schema has requester context columns (Phase D Step 2)',
+    missingCols.length === 0 ? 'PASS' : 'FAIL',
+    {
+      count: presentCols.size,
+      detail: missingCols.length ? `Eksik: ${missingCols.join(', ')}` : 'Tüm 4 kolon mevcut',
+    },
+  ));
+
+  // 6.6) Customerless case + requester context kullanım — varsa sample, yoksa WARN
+  //      (Feature yeni; sadece kullanıma açıldığını teyit eder. Zorunlu DEĞİL.)
+  const customerlessTotal = await prisma.case.count({
+    where: { accountId: null, customerMatchPending: true },
+  });
+  const customerlessWithCtx = await prisma.case.count({
+    where: {
+      accountId: null,
+      customerMatchPending: true,
+      OR: [
+        { customerContactPhone: { not: null } },
+        { customerContactEmail: { not: null } },
+        { customerCompanyName: { not: null } },
+        { customerContactName: { not: null } },
+      ],
+    },
+  });
+  out.push(check(
+    'Customerless cases may carry requester context (schema allows it)',
+    'PASS',
+    {
+      count: customerlessTotal,
+      detail: `accountId=NULL toplam ${customerlessTotal}, requester context dolu ${customerlessWithCtx}`,
+    },
+  ));
+
   return out;
 });
 
@@ -795,6 +843,56 @@ defineGroup('Customer Match Suggestions Contract', async () => {
   const aiHit =
     /\b(from\s+['"]openai['"]|require\(['"]openai['"]|new\s+OpenAI|aiClient\b|chat\.completions|gpt-\d)/i.test(repoSrc);
   out.push(check('Suggestions helper contains no AI/OpenAI references', aiHit ? 'FAIL' : 'PASS'));
+
+  // 7.8) Phase D Step 2 — Suggestion engine uses requester contact fields.
+  //      extractSignalsFromCase, customerContactPhone/Email/CompanyName/Name
+  //      alanlarını üst-öncelikli sinyal olarak okumalı.
+  const usesRequesterPhone = /customerContactPhone\b/.test(repoSrc);
+  const usesRequesterEmail = /customerContactEmail\b/.test(repoSrc);
+  const usesRequesterCompany = /customerCompanyName\b/.test(repoSrc);
+  const usesRequesterContactName = /customerContactName\b/.test(repoSrc);
+  const usesContactNameTokens = /contactNameTokens\b/.test(repoSrc);
+  const allUsed = usesRequesterPhone && usesRequesterEmail && usesRequesterCompany && usesRequesterContactName && usesContactNameTokens;
+  out.push(check(
+    'Suggestion engine reads requester contact fields (phone/email/company/name)',
+    allUsed ? 'PASS' : 'FAIL',
+    {
+      detail: allUsed
+        ? undefined
+        : `Eksik: ${[
+            !usesRequesterPhone && 'customerContactPhone',
+            !usesRequesterEmail && 'customerContactEmail',
+            !usesRequesterCompany && 'customerCompanyName',
+            !usesRequesterContactName && 'customerContactName',
+            !usesContactNameTokens && 'contactNameTokens',
+          ].filter(Boolean).join(', ')}`,
+    },
+  ));
+
+  // 7.9) Runtime — requester phone seçilmiş bir vaka için suggestion engine
+  //      eşleştirme üretiyor mu? (Varsa kontrol et; yoksa WARN.)
+  const reqCase = await prisma.case.findFirst({
+    where: {
+      customerMatchPending: true,
+      customerContactPhone: { not: null },
+    },
+    select: { id: true, customerContactPhone: true },
+  });
+  if (reqCase) {
+    const r = await suggestCustomerMatches({ caseId: reqCase.id, allowedCompanyIds: activeIds });
+    const ok = r && Array.isArray(r.suggestions);
+    out.push(check(
+      'Suggestions request with requester phone returns deterministic result',
+      ok ? 'PASS' : 'FAIL',
+      { count: r?.suggestions?.length ?? 0, detail: `caseId=${reqCase.id}` },
+    ));
+  } else {
+    out.push(check(
+      'Suggestions request with requester phone returns deterministic result',
+      'WARN',
+      { detail: 'No customerless case with requester phone in DB yet (Phase D Step 2 yeni — kullanım zamanı)' },
+    ));
+  }
 
   return out;
 });

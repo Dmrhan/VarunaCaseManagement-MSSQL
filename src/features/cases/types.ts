@@ -418,6 +418,12 @@ export interface Case {
   // görür ve PATCH /api/cases/:id/link-account ile bağlar.
   customerMatchPending: boolean;
 
+  // Phase D Step 2 — opsiyonel başvuran bilgileri (müşterisiz vaka intake'i).
+  customerContactName?: string | null;
+  customerContactPhone?: string | null;
+  customerContactEmail?: string | null;
+  customerCompanyName?: string | null;
+
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;

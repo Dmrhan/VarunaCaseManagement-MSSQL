@@ -1074,6 +1074,44 @@ function LeftPanel({
                   </Button>
                 )}
               </div>
+              {/* Phase D Step 2 — Başvuran bilgileri (müşterisiz intake context). */}
+              {(item.customerCompanyName ||
+                item.customerContactName ||
+                item.customerContactPhone ||
+                item.customerContactEmail) && (
+                <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-700 dark:border-ndark-border dark:text-ndark-text">
+                  <div className="mb-1 font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                    Başvuran Bilgileri
+                  </div>
+                  <dl className="space-y-0.5">
+                    {item.customerCompanyName && (
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-slate-500 dark:text-ndark-muted">Firma</dt>
+                        <dd className="truncate">{item.customerCompanyName}</dd>
+                      </div>
+                    )}
+                    {item.customerContactName && (
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-slate-500 dark:text-ndark-muted">Ad Soyad</dt>
+                        <dd className="truncate">{item.customerContactName}</dd>
+                      </div>
+                    )}
+                    {item.customerContactPhone && (
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-slate-500 dark:text-ndark-muted">Telefon</dt>
+                        <dd className="truncate">{item.customerContactPhone}</dd>
+                      </div>
+                    )}
+                    {item.customerContactEmail && (
+                      <div className="flex items-center justify-between gap-2">
+                        <dt className="text-slate-500 dark:text-ndark-muted">E-posta</dt>
+                        <dd className="truncate">{item.customerContactEmail}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
               {/* Phase D Step 2 — Önerilen müşteriler. Yalnız Supervisor+. */}
               {canLinkAccount && onConfirmLinkSuggestion && (
                 <CustomerMatchSuggestionsPanel

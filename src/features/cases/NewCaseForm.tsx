@@ -74,6 +74,11 @@ const emptyForm = {
   companyId: '',
   accountId: '',
   accountName: '',
+  // Phase D Step 2 — opsiyonel başvuran bilgileri (müşterisiz vakada eşleştirme sinyali)
+  customerContactName: '',
+  customerContactPhone: '',
+  customerContactEmail: '',
+  customerCompanyName: '',
   category: '',
   subCategory: '',
   requestType: '' as '' | CaseRequestType,
@@ -404,6 +409,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       accountId: form.accountId || undefined,
       // accountId yoksa accountName "Müşterisiz vaka" sentinel'i sadece UI'da; backend'e gönderme.
       accountName: form.accountId ? form.accountName : undefined,
+      // Phase D Step 2 — opsiyonel başvuran bilgileri.
+      customerContactName: form.customerContactName.trim() || undefined,
+      customerContactPhone: form.customerContactPhone.trim() || undefined,
+      customerContactEmail: form.customerContactEmail.trim() || undefined,
+      customerCompanyName: form.customerCompanyName.trim() || undefined,
       category: form.category,
       subCategory: form.subCategory,
       requestType: form.requestType as CaseRequestType,
@@ -439,11 +449,14 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     }
   }
 
-  // Submit aktif mi? Spec'e göre: Şirket + Müşteri + Açıklama + Başlık + Kategori
+  // Submit aktif mi?
+  // Phase D Step 2 fix: müşteri zorunluluğu CompanySettings.requireCustomerOnCaseCreate'a
+  // bağlı. requireCustomer=false ise "Müşterisiz devam et" akışı submit'i bloklamamalı —
+  // önceki davranış (form.accountId her zaman zorunlu) bug'dı.
   const canSubmit =
     !submitting &&
     form.companyId &&
-    form.accountId &&
+    (!requireCustomer || !!form.accountId) &&
     form.description.trim() &&
     form.title.trim() &&
     form.category &&
@@ -586,6 +599,55 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                 )}
               </Field>
             </div>
+
+            {/* Phase D Step 2 — Müşterisiz vaka akışında başvuran bilgileri.
+                Sadece müşterisiz seçilmişse default görünür; müşteri seçilmişse
+                gizli (Field zorunlu değildir). */}
+            {!form.accountId && (
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-3 dark:border-ndark-border dark:bg-ndark-surface/40">
+                <div className="mb-1 text-xs font-semibold text-slate-700 dark:text-ndark-text">
+                  Ulaşan kişi bilgileri
+                </div>
+                <p className="mb-3 text-[11px] text-slate-500 dark:text-ndark-muted">
+                  Müşteri kaydı bulunamadığında eşleştirme için yardımcı olur. Zorunlu değildir.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Ad Soyad">
+                    <TextInput
+                      value={form.customerContactName}
+                      onChange={(e) => update('customerContactName', e.target.value)}
+                      maxLength={120}
+                      placeholder="Örn. Ali Yılmaz"
+                    />
+                  </Field>
+                  <Field label="Telefon">
+                    <TextInput
+                      value={form.customerContactPhone}
+                      onChange={(e) => update('customerContactPhone', e.target.value)}
+                      maxLength={40}
+                      placeholder="+90 5XX XXX XX XX"
+                    />
+                  </Field>
+                  <Field label="E-posta">
+                    <TextInput
+                      type="email"
+                      value={form.customerContactEmail}
+                      onChange={(e) => update('customerContactEmail', e.target.value)}
+                      maxLength={160}
+                      placeholder="ad.soyad@firma.com"
+                    />
+                  </Field>
+                  <Field label="Firma Ünvanı">
+                    <TextInput
+                      value={form.customerCompanyName}
+                      onChange={(e) => update('customerCompanyName', e.target.value)}
+                      maxLength={180}
+                      placeholder="Örn. Akar Gıda A.Ş."
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
           </Section>
 
           {/* ── BÖLÜM 2: NE OLDU? ── */}

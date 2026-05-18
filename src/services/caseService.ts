@@ -243,6 +243,11 @@ export interface NewCaseInput {
   // Phase C2: müşterisiz vaka — picker boş geçilirse her ikisi undefined.
   accountId?: string;
   accountName?: string;
+  // Phase D Step 2 — opsiyonel başvuran bilgileri.
+  customerContactName?: string;
+  customerContactPhone?: string;
+  customerContactEmail?: string;
+  customerCompanyName?: string;
   category: string;
   subCategory: string;
   requestType: CaseRequestType;
