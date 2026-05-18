@@ -257,6 +257,10 @@ function CompanyEditor({
   const [appName, setAppName] = useState(existing?.appName ?? '');
   const [logoUrl, setLogoUrl] = useState(existing?.logoUrl ?? '');
   const [supportEmail, setSupportEmail] = useState(existing?.supportEmail ?? '');
+  // Phase D — Vaka açarken müşteri seçimi zorunlu mu (default false)
+  const [requireCustomerOnCaseCreate, setRequireCustomerOnCaseCreate] = useState(
+    existing?.requireCustomerOnCaseCreate ?? false,
+  );
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -281,6 +285,7 @@ function CompanyEditor({
       appName: appName.trim() || undefined,
       logoUrl: logoUrl.trim() || undefined,
       supportEmail: supportEmail.trim() || undefined,
+      requireCustomerOnCaseCreate,
     };
 
     setSubmitting(true);
@@ -368,6 +373,27 @@ function CompanyEditor({
             placeholder="destek@firma.com.tr"
           />
         </Field>
+
+        {/* Phase D — Vaka Yönetimi Ayarları */}
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-ndark-border dark:bg-ndark-surface">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+            Vaka Yönetimi Ayarları
+          </div>
+          <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700 dark:text-ndark-text">
+            <input
+              type="checkbox"
+              checked={requireCustomerOnCaseCreate}
+              onChange={(e) => setRequireCustomerOnCaseCreate(e.target.checked)}
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-brand-600"
+            />
+            <span>
+              <span className="font-medium">Vaka açarken müşteri zorunlu</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-ndark-muted">
+                Açık olduğunda kullanıcılar müşteri seçmeden vaka kaydedemez.
+              </span>
+            </span>
+          </label>
+        </div>
       </form>
     </Modal>
   );

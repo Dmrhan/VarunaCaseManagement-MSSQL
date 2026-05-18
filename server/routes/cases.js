@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError } from '../db/caseRepository.js';
+import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
-import { verifyJwt } from '../db/auth.js';
+import { verifyJwt, requireRole } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
 import { generateActionSummary } from '../lib/actionSummaryAi.js';
@@ -56,6 +56,9 @@ function asyncRoute(handler) {
       if (err instanceof CaseAccessError) {
         return res.status(403).json({ error: 'forbidden', message: err.message });
       }
+      if (err instanceof CaseValidationError) {
+        return res.status(err.status ?? 400).json({ error: err.code ?? 'validation_error', message: err.message });
+      }
       console.error('[cases]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
     }
@@ -64,12 +67,24 @@ function asyncRoute(handler) {
 
 /**
  * GET /api/cases — list + filter + pagination
- * Query params: search, statuses (CSV), caseType, priorities (CSV), teamId, personId, dateFrom, dateTo, page, pageSize
+ * Query params: search, statuses (CSV), caseType, priorities (CSV), teamId,
+ *               personId, dateFrom, dateTo, page, pageSize,
+ *               customerMatchPending (true|false — Supervisor+ only)
  */
+const CUSTOMER_MATCH_QUEUE_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+
 router.get(
   '/',
   asyncRoute(async (req, res) => {
     const f = req.query;
+    // Phase D: müşteri eşleştirme bekleyen vaka filter'ı sadece Supervisor+
+    // tarafından kullanılabilir. Agent/Backoffice query param gönderse bile
+    // ignore edilir — sızıntı yok ama sessiz davranış.
+    let customerMatchPending;
+    if (f.customerMatchPending !== undefined && CUSTOMER_MATCH_QUEUE_ROLES.includes(req.user.role)) {
+      if (f.customerMatchPending === 'true') customerMatchPending = true;
+      else if (f.customerMatchPending === 'false') customerMatchPending = false;
+    }
     const filters = {
       search: f.search,
       statuses: f.statuses ? f.statuses.split(',') : undefined,
@@ -79,6 +94,7 @@ router.get(
       personId: f.personId,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
+      customerMatchPending,
     };
     const pagination = f.page
       ? { page: Number(f.page), pageSize: Number(f.pageSize ?? 25) }
@@ -201,6 +217,37 @@ router.patch(
     const updated = await caseRepository.update(
       req.params.id,
       req.body ?? {},
+      req.user.fullName,
+      req.user.allowedCompanyIds,
+    );
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PATCH /api/cases/:id/link-account — Phase D
+ *
+ * Müşterisiz açılmış vakaya Supervisor/Admin müşteri eşleştirir.
+ * Body: { accountId: string }
+ * Auth: Supervisor, CSM, Admin, SystemAdmin (Agent + Backoffice 403)
+ *
+ * Repository scope guard:
+ *  - Vaka kullanıcının allowedCompanyIds'inde
+ *  - Account vakanın companyId'sine bağlı (AccountCompany OR legacy OR shared NULL)
+ *  - Aksi halde 400 (company_mismatch)
+ */
+router.patch(
+  '/:id/link-account',
+  requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const { accountId } = req.body ?? {};
+    if (!accountId || typeof accountId !== 'string') {
+      return res.status(400).json({ error: 'validation_error', message: 'accountId zorunlu.' });
+    }
+    const updated = await caseRepository.linkAccount(
+      req.params.id,
+      accountId,
       req.user.fullName,
       req.user.allowedCompanyIds,
     );

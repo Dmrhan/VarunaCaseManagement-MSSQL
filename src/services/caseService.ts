@@ -303,6 +303,9 @@ export const caseService = {
     if (filters?.personId) params.set('personId', filters.personId);
     if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
     if (filters?.dateTo)   params.set('dateTo', filters.dateTo);
+    if (filters?.customerMatchPending !== undefined) {
+      params.set('customerMatchPending', String(filters.customerMatchPending));
+    }
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -403,6 +406,8 @@ export const caseService = {
         title: input.title,
         description: input.description,
         caseType: input.caseType,
+        // Phase D — mock store: accountId yoksa müşteri eşleştirme bekleyen.
+        customerMatchPending: !input.accountId,
         status: 'Açık',
         priority: input.priority,
         origin: input.origin,
@@ -633,6 +638,23 @@ export const caseService = {
         body: JSON.stringify(patch),
       },
       'Vaka güncellenemedi',
+    );
+  },
+
+  /**
+   * Phase D — Müşteri eşleştirme. Supervisor/Admin/CSM/SystemAdmin vakayı bir
+   * Account'a bağlar. Backend doğrular: Account vakanın companyId'sine bağlı,
+   * kullanıcının scope'unda.
+   */
+  async linkAccount(caseId: string, accountId: string): Promise<Case | undefined> {
+    return apiFetch<Case>(
+      `${API_BASE}/${caseId}/link-account`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId }),
+      },
+      'Müşteri eşleştirme',
     );
   },
 

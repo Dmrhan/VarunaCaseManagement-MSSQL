@@ -557,6 +557,131 @@ defineGroup('Customer Picker Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group 6 — Customer Match Contract (Phase D Step 1)
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Customer Match Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // 6.1) accountId NULL → customerMatchPending = true (her zaman tutarlı olmalı)
+  const nullAccountWrong = await prisma.case.count({
+    where: { accountId: null, customerMatchPending: false },
+  });
+  const nullAccountTotal = await prisma.case.count({ where: { accountId: null } });
+  out.push(check(
+    'accountId NULL → customerMatchPending = true',
+    nullAccountWrong === 0 ? 'PASS' : 'FAIL',
+    {
+      count: nullAccountWrong,
+      detail: `accountId NULL toplam: ${nullAccountTotal}`,
+    },
+  ));
+
+  // 6.2) accountId NON-NULL → customerMatchPending = false
+  const setAccountWrong = await prisma.case.count({
+    where: { accountId: { not: null }, customerMatchPending: true },
+  });
+  out.push(check(
+    'accountId NOT NULL → customerMatchPending = false',
+    setAccountWrong === 0 ? 'PASS' : 'FAIL',
+    {
+      count: setAccountWrong,
+      examples: setAccountWrong
+        ? take(
+            await prisma.case.findMany({
+              where: { accountId: { not: null }, customerMatchPending: true },
+              select: { id: true, caseNumber: true, accountId: true },
+              take: MAX_EXAMPLES,
+            }),
+          )
+        : [],
+    },
+  ));
+
+  // 6.3) link-account cross-company guard — simulate: vakanın companyId'sine
+  //      bağlı OLMAYAN account'a link denenirse repository CaseValidationError
+  //      (company_mismatch) atmalı. Smoke harness'ı runtime'da denemiyor;
+  //      onun yerine VERİDE inconsistency varsa raporla:
+  //      Case.accountId NOT NULL ama Account o şirkete bağlı değil → FAIL.
+  const linkedCases = await prisma.case.findMany({
+    where: { accountId: { not: null } },
+    select: {
+      id: true,
+      caseNumber: true,
+      companyId: true,
+      accountId: true,
+      account: {
+        select: {
+          companyId: true,
+          companies: { select: { companyId: true } },
+        },
+      },
+    },
+    take: 1000,
+  });
+  const crossCompanyLinks = linkedCases.filter((c) => {
+    if (!c.account) return false; // FK orphan'ı Group 2 yakalar
+    const acIds = c.account.companies.map((x) => x.companyId);
+    const compatible =
+      acIds.includes(c.companyId) ||
+      c.account.companyId === c.companyId ||
+      c.account.companyId === null;
+    return !compatible;
+  });
+  out.push(check(
+    'Case.accountId linked to Account compatible with case.companyId',
+    crossCompanyLinks.length === 0 ? 'PASS' : 'FAIL',
+    {
+      count: crossCompanyLinks.length,
+      examples: take(crossCompanyLinks).map((c) => ({
+        caseNumber: c.caseNumber,
+        companyId: c.companyId,
+        accountId: c.accountId,
+      })),
+      detail: crossCompanyLinks.length
+        ? 'Bu vakalar başka şirketteki Account\'a bağlı — link-account guard regresyonu'
+        : undefined,
+    },
+  ));
+
+  // 6.4) companies with requireCustomerOnCaseCreate = true cannot have
+  //      customerless cases (accountId NULL).
+  const strictSettings = await prisma.companySettings.findMany({
+    where: { requireCustomerOnCaseCreate: true },
+    select: { companyId: true },
+  });
+  if (strictSettings.length === 0) {
+    out.push(check('requireCustomer companies have no customerless cases', 'PASS', {
+      detail: 'Hiçbir şirket strict mode aktif değil (default)',
+    }));
+  } else {
+    const strictIds = strictSettings.map((s) => s.companyId);
+    const violations = await prisma.case.findMany({
+      where: { companyId: { in: strictIds }, accountId: null },
+      select: { id: true, caseNumber: true, companyId: true },
+      take: MAX_EXAMPLES,
+    });
+    const violationCount = await prisma.case.count({
+      where: { companyId: { in: strictIds }, accountId: null },
+    });
+    out.push(check(
+      'requireCustomer companies have no customerless cases',
+      violationCount === 0 ? 'PASS' : 'FAIL',
+      {
+        count: violationCount,
+        examples: violations,
+        detail: violationCount
+          ? `Strict companies (${strictIds.join(', ')}) yine de accountId NULL vaka içeriyor`
+          : `Strict companies: ${strictIds.join(', ')}`,
+      },
+    ));
+  }
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 

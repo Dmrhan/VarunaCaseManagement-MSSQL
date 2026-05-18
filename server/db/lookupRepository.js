@@ -74,9 +74,12 @@ async function bootstrapInner(allowedCompanyIds) {
       await Promise.all([
         // Company listesi — kullanıcının erişebildiği şirketler (yeni şirket
         // yaratma UI'sı için tam liste SystemAdmin admin endpoint'inden gelir).
+        // Phase D: CompanySettings.requireCustomerOnCaseCreate ile NewCaseForm
+        // müşteri zorunluluğunu enforce eder; alan tüm rollere okutulur.
         prisma.company.findMany({
           where: allowedCompanyIds ? { isActive: true, id: { in: allowedCompanyIds } } : { isActive: true },
           orderBy: { name: 'asc' },
+          include: { settings: { select: { requireCustomerOnCaseCreate: true } } },
         }),
         // Account scope — accountRepository.buildScopeWhere ile simetrik:
         //   (legacy Account.companyId in allowedCompanyIds)
@@ -146,8 +149,18 @@ async function bootstrapInner(allowedCompanyIds) {
 
     const productGroups = await listProductGroups(allowedCompanyIds);
 
+    // Frontend için flatten — settings sub-object yerine top-level field.
+    const companiesShaped = companies.map((c) => ({
+      id: c.id,
+      name: c.name,
+      isActive: c.isActive,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      requireCustomerOnCaseCreate: c.settings?.requireCustomerOnCaseCreate ?? false,
+    }));
+
     return {
-      companies,
+      companies: companiesShaped,
       accounts,
       teams,
       persons,

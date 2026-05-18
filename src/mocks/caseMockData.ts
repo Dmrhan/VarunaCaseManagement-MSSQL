@@ -926,6 +926,7 @@ function buildCase(typeIdx: number, slot: number): Case {
     title,
     description,
     caseType,
+    customerMatchPending: false,
     status,
     priority,
     origin,

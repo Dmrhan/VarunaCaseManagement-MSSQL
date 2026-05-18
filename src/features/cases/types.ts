@@ -53,6 +53,8 @@ export interface CaseCallLog {
 export interface CaseCompany {
   id: string;
   name: string;
+  /** Phase D: true ise vaka açarken müşteri seçimi zorunlu. Default false. */
+  requireCustomerOnCaseCreate?: boolean;
 }
 
 export interface CaseThirdParty {
@@ -411,6 +413,11 @@ export interface Case {
   slaPausedDurationMin: number;
   slaThirdPartyWaitMin: number;
 
+  // Phase D — Müşteri eşleştirme bekleyen flag.
+  // true ise vaka accountId NULL açıldı, Supervisor/Admin eşleştirme kuyruğunda
+  // görür ve PATCH /api/cases/:id/link-account ile bağlar.
+  customerMatchPending: boolean;
+
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
@@ -693,6 +700,8 @@ export interface CaseFilters {
   personId?: string;
   dateFrom?: string;                // ISO date (YYYY-MM-DD)
   dateTo?: string;                  // ISO date
+  // Phase D — yalnız Supervisor+ rolleri görür; backend ignore eder Agent için.
+  customerMatchPending?: boolean;
 }
 
 export interface CaseListPagination {
