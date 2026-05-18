@@ -43,15 +43,64 @@ const COMPANY = {
   PARAM: { id: 'COMP-PARAM', name: 'PARAM' },
 };
 
-// seedAuth'taki demo persona id'leri — User.id ile aynı.
-const USER = {
-  AGENT: 'USR-001',
-  SUPERVISOR: 'USR-002',
-  CSM: 'USR-003',
-  ADMIN: 'USR-004',
-  SYSADMIN: 'USR-005',
-  BACKOFFICE: 'USR-006',
+// CaseWatcher.userId, CaseNote.authorId, CaseNoteReaction.userId vb. alanlar
+// User.id (Supabase UUID) bekler — Person.id DEĞİL. Bu yüzden USER mapping
+// runtime'da DB'den yüklenir (main() içinde loadUserIds çağrılır).
+//
+// seedAuth çalıştırılmadan seed:scenarios çalıştırılırsa hata fırlatır.
+const USER: Record<'AGENT' | 'SUPERVISOR' | 'CSM' | 'ADMIN' | 'SYSADMIN' | 'BACKOFFICE', string> = {
+  AGENT: '',
+  SUPERVISOR: '',
+  CSM: '',
+  ADMIN: '',
+  SYSADMIN: '',
+  BACKOFFICE: '',
 };
+
+const USER_EMAILS: Record<keyof typeof USER, string> = {
+  AGENT: 'agent@varuna.dev',
+  SUPERVISOR: 'supervisor@varuna.dev',
+  CSM: 'csm@varuna.dev',
+  ADMIN: 'admin@varuna.dev',
+  SYSADMIN: 'sysadmin@varuna.dev',
+  BACKOFFICE: 'backoffice@varuna.dev',
+};
+
+async function loadUserIds() {
+  const users = await prisma.user.findMany({
+    where: { email: { in: Object.values(USER_EMAILS) } },
+    select: { id: true, email: true },
+  });
+  for (const role of Object.keys(USER_EMAILS) as Array<keyof typeof USER>) {
+    const u = users.find((x) => x.email === USER_EMAILS[role]);
+    if (!u) {
+      throw new Error(
+        `seed:scenarios — demo user yok: ${USER_EMAILS[role]}. ` +
+          `Önce 'npm run db:seed:auth' çalıştır.`,
+      );
+    }
+    USER[role] = u.id;
+  }
+}
+
+/**
+ * P0 cleanup — eski seedScenarios USR-* (Person.id) yazmış olabilir
+ * CaseWatcher/CaseNote/CaseNoteReaction'a. Yeni doğru User.id (UUID) ile
+ * paralel kayıt yazmadan önce yanlışları sil. Idempotent: gerçek UUID'lere
+ * dokunmaz, yalnız 'USR-' prefix'li userId/authorId kayıtları silinir.
+ */
+async function cleanupLegacyPersonIdReferences() {
+  const w = await prisma.caseWatcher.deleteMany({ where: { userId: { startsWith: 'USR-' } } });
+  const r = await prisma.caseNoteReaction.deleteMany({ where: { userId: { startsWith: 'USR-' } } });
+  // CaseNote.authorId nullable; legacy yazımı temizlemek yerine null'a düşür ki not içeriği kaybolmasın.
+  const n = await prisma.caseNote.updateMany({
+    where: { authorId: { startsWith: 'USR-' } },
+    data: { authorId: null },
+  });
+  if (w.count || r.count || n.count) {
+    console.log(`→ Legacy USR-* cleanup: watcher=${w.count}, reaction=${r.count}, note.authorId nulled=${n.count}`);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Müşteri (Account) tanımları — şirket bazlı + multi-tenant izolasyon
@@ -793,6 +842,13 @@ async function main() {
       process.exit(1);
     }
   }
+
+  // Demo user UUID'lerini yükle — CaseWatcher/CaseNote/CaseNoteReaction
+  // User.id (Supabase UUID) bekler. seedAuth eksikse fail-fast.
+  await loadUserIds();
+  // Önceki seed run'larında yanlışlıkla yazılmış USR-* (Person.id) referansları
+  // temizle — idempotent, gerçek UUID kayıtlarına dokunmaz.
+  await cleanupLegacyPersonIdReferences();
 
   await upsertAccounts();
   await upsertCases();
