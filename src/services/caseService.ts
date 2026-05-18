@@ -1586,7 +1586,11 @@ export const caseService = {
     const params = new URLSearchParams();
     params.set('accountId', accountId);
     if (options?.excludeId) params.set('excludeId', options.excludeId);
-    if (options?.statusIn)  params.set('statusIn', options.statusIn.join(','));
+    if (options?.statusIn) params.set('statusIn', options.statusIn.join(','));
+    // P0 hotfix: statusNotIn frontend'de gönderilmiyordu; backend destekliyor
+    // (server/routes/cases.js:158-161). CustomerSearchModal "Çözüldü/İptalEdildi"
+    // hariç gönderiyor — filter şimdi backend'de uygulanır.
+    if (options?.statusNotIn) params.set('statusNotIn', options.statusNotIn.join(','));
     const data = await apiFetch<{ value: Case[] }>(
       `${API_BASE}/by-account?${params.toString()}`,
       undefined,

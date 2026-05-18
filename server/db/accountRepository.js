@@ -167,7 +167,15 @@ export async function listAccounts({
   }
 
   if (companyId) {
-    whereAnd.push({ companies: { some: { companyId } } });
+    // P0 hotfix: backfill öncesinde legacy Account.companyId set olan müşteriler
+    // AccountCompany'siz olabilir. Filter'a legacy companyId fallback'ı ekle ki
+    // arama/listeleme bu boşlukta körleşmesin.
+    whereAnd.push({
+      OR: [
+        { companies: { some: { companyId } } },
+        { companyId },
+      ],
+    });
   }
 
   if (status) {
