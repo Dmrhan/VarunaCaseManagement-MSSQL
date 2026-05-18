@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
+  Building2,
   Calendar,
   Eye,
   Home,
@@ -45,8 +46,11 @@ import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
+import { AccountsListPage } from './features/accounts/AccountsListPage';
+import { AccountDetailPage } from './features/accounts/AccountDetailPage';
+import { canReadAccounts } from './services/accountService';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'case-detail' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'case-detail' | 'accounts' | 'account-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -68,6 +72,7 @@ export default function App() {
   const [view, setView] = useState<View>('cases');
   const [initialRedirectDone, setInitialRedirectDone] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
@@ -205,6 +210,17 @@ export default function App() {
   function handleNavSelect(key: View) {
     setView(key);
     setSelectedCaseId(null);
+    setSelectedAccountId(null);
+  }
+
+  function openAccount(id: string) {
+    setSelectedAccountId(id);
+    setView('account-detail');
+  }
+
+  function backToAccounts() {
+    setView('accounts');
+    setSelectedAccountId(null);
   }
 
   const isDetail = view === 'case-detail';
@@ -354,6 +370,28 @@ export default function App() {
                 </button>
               );
             })}
+
+            {/*
+              Müşteriler — Account 360 Phase B. Agent ve Backoffice rolleri görmez.
+              Detail view (`account-detail`) seçili olduğunda da bu sidebar item aktif kalır.
+            */}
+            {canReadAccounts(user?.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('accounts')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'accounts' || view === 'account-detail'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Müşteriler"
+              >
+                <Building2 size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Müşteriler</span>}
+              </button>
+            )}
 
             {/* ÇALIŞMA ALANIM — kişisel ekranlar (Takvimim). Tüm rollere açık. */}
             {user && (
@@ -553,7 +591,26 @@ export default function App() {
               caseId={selectedCaseId}
               onBack={backToList}
               onShowCustomer={(id) => setCustomerCardId(id)}
+              onOpenAccount={canReadAccounts(user?.role) ? openAccount : undefined}
             />
+          )}
+          {view === 'accounts' && (
+            canReadAccounts(user?.role) ? (
+              <AccountsListPage onSelectAccount={openAccount} />
+            ) : (
+              <ForbiddenView />
+            )
+          )}
+          {view === 'account-detail' && selectedAccountId && (
+            canReadAccounts(user?.role) ? (
+              <AccountDetailPage
+                accountId={selectedAccountId}
+                onBack={backToAccounts}
+                onSelectCase={openCase}
+              />
+            ) : (
+              <ForbiddenView />
+            )
           )}
         </main>
       </div>
@@ -585,6 +642,25 @@ export default function App() {
           setPendingQuickPrefill(accountId);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Müşteriler modülüne yetkisiz roller (Agent/Backoffice) doğrudan view
+ * key'iyle ulaşırsa burada güvenli bir 403 ekranı görür. Sidebar zaten
+ * gizliyor; bu sadece sigorta.
+ */
+function ForbiddenView() {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm dark:border-ndark-border dark:bg-ndark-card">
+      <AlertTriangle size={28} className="text-amber-500" />
+      <h2 className="text-base font-semibold text-slate-900 dark:text-ndark-text">
+        Erişim engellendi
+      </h2>
+      <p className="text-sm text-slate-500 dark:text-ndark-muted">
+        Bu sayfa Supervisor, CSM, Admin ve SystemAdmin rolleri içindir.
+      </p>
     </div>
   );
 }

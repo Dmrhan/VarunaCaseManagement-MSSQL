@@ -206,7 +206,8 @@ function applyFilters(items: Case[], f?: CaseFilters): Case[] {
         (c) =>
           c.title.toLowerCase().includes(q) ||
           c.caseNumber.toLowerCase().includes(q) ||
-          c.accountName.toLowerCase().includes(q),
+          // Phase C2: accountName artık nullable (müşterisiz vakalar)
+          (c.accountName ?? '').toLowerCase().includes(q),
       );
     }
   }
@@ -239,8 +240,9 @@ export interface NewCaseInput {
   originDescription?: string;
   companyId: string;
   companyName: string;
-  accountId: string;
-  accountName: string;
+  // Phase C2: müşterisiz vaka — picker boş geçilirse her ikisi undefined.
+  accountId?: string;
+  accountName?: string;
   category: string;
   subCategory: string;
   requestType: CaseRequestType;
@@ -407,8 +409,9 @@ export const caseService = {
         originDescription: input.originDescription,
         companyId: input.companyId,
         companyName: input.companyName,
-        accountId: input.accountId,
-        accountName: input.accountName,
+        // Mock path: Case tipi string istiyor; picker boş geçildiyse default değerler.
+        accountId: input.accountId ?? '',
+        accountName: input.accountName ?? 'Müşteri Belirtilmedi',
         category: input.category,
         subCategory: input.subCategory,
         requestType: input.requestType,

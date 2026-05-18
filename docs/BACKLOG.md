@@ -605,6 +605,61 @@ Yöneticinin telefondan kontrol etmesi temel senaryo.
 
 ---
 
+## 🟡 Müşteri Eşleştirme Edge Case'leri
+
+**Tetik:** Account 360 Phase B başlarken karara bağlanmalı.
+**Öncelik:** 🟡 Yüksek
+
+**Neden önemli?**
+Phase A schema + BFF teslim edildi (Account, AccountCompany, AccountContact). Phase B UI'a geçmeden önce gerçek hayatta çıkacak iki büyük edge case'i (müşterisiz vaka + mükerrer kayıt) ürün kararıyla netleştirmek gerek. Aksi halde Agent ekranında "müşteri bulamadım" / "iki müşteri çıktı, hangisi?" durumları çözümsüz kalır.
+
+### 1) Müşterisiz vaka akışı
+
+Agent bazen vakayı açarken müşteriyi sistemde bulamaz (henüz girilmemiş, holding adıyla geldi, Univera kodu bilinmiyor). Bu durumda:
+
+- Case create'te `accountId = null` **geçerli kalmalı** (mevcut schema zaten destekliyor — `Case.accountId` opsiyonel).
+- Agent müşteri bulamazsa vakayı **müşterisiz açabilmeli**, akış kesilmesin.
+- Vaka otomatik olarak **"Müşteri eşleştirme bekliyor"** durumuyla işaretlenmeli (yeni flag veya `customerMatchPending` benzeri Case alanı).
+- Case listesinde **"Müşteri eşleştirme bekliyor" filtresi** eklenmeli — Agent ve Supervisor görsün.
+- Supervisor / Admin için **unlinked cases queue** tasarlanmalı — günlük temizlik kuyruğu.
+
+### 2) Mükerrer kayıt önleme (Agent disambiguation)
+
+Aynı müşteri için iki kayıt açılması, müşteri verisinin en hızlı kirlendiği nokta. Agent arama yaptığında karar verebilsin diye:
+
+- Arama sonuçlarında her satırda **disambiguation alanları** gösterilmeli:
+  - Bağlı şirket chip'leri (PARAM / UNIVERA / FINROTA)
+  - `externalCustomerCode` (Univera 5 hane)
+  - Maskeli VKN
+  - Telefon, e-posta
+  - `isActive`, `openCaseCount`, `lastCaseAt`
+- Agent **merge işlemi yapmamalı** — yetkisi yok.
+- Agent **"Mükerrer olabilir" flag'i** bırakabilmeli (yeni alan: `AccountFlag` veya `Account.suspectedDuplicateOf`).
+- Flag **Supervisor / Admin review kuyruğuna** düşmeli — Phase D'de inceleme + merge UI'ı gelir.
+
+### 3) İleride (ayrı/kontrollü faz)
+
+- **Customer matching queue ekranı** — Supervisor/Admin için müşteri eşleştirme bekleyen vakaları temizleme arayüzü.
+- **Duplicate detection** — sistem otomatik öneri üretsin:
+  - Aynı VKN
+  - Aynı telefon / e-posta
+  - Benzer ad (Levenshtein / tokenized match)
+- **Account merge** — yüksek riskli operasyon, ayrı faz:
+  - Master account seçimi
+  - Taşınacak vaka / şirket ilişkisi / kontak ön izlemesi (dry-run)
+  - Audit log zorunlu
+  - Source account pasife alma **veya** `Account.mergedIntoAccountId` ile soft-delete (vakalar geçmişte hâlâ izlenebilsin)
+
+**Faz notları:**
+- **Phase B/C** (UI + ürün/kod/paket): disambiguation alanları + unlinked cases queue tasarlanabilir — düşük riskli, görünür değer üretir.
+- **Account merge** Phase B/C kapsamı dışında; veri kaybı / audit riski yüksek, kendi başına bir faz olarak ele alınmalı (Phase F gibi).
+
+**Mevcut durum:** Phase A schema + BFF hazır; edge case ürün kararı bekliyor.
+**Çaba:** Phase B/C içinde disambiguation 1 gün, unlinked queue 1-2 gün; merge fazı ayrı 3-5 gün.
+**Bağımlılık:** Account 360 Phase B (UI).
+
+---
+
 ## 🟢 33-46) Düşük öncelik / ileri sprint
 
 Bu kalemler ürün kararı, ileri sprint ya da yeterli talep gelmedikçe ertelenir:
