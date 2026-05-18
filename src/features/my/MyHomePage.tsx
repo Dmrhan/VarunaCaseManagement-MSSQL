@@ -214,11 +214,21 @@ export function MyHomePage({
           {data.myTopCases.length === 0 && (
             <Card className="shadow-md">
               <div className="px-6 py-8">
-                <EmptyState
-                  icon={<CheckCircle2 size={22} />}
-                  title="Şu an öncelikli vakan yok"
-                  description="Aktif vakaların geldikçe en acil olanlar burada listelenecek."
-                />
+                {data.stats.assignedToMe === 0 ? (
+                  // Net mesaj: kullanıcının scope'unda vaka olabilir ama hiçbiri
+                  // bu Agent'a atanmamış. "Her şey kontrol altında" yanıltıcı olur.
+                  <EmptyState
+                    icon={<User size={22} />}
+                    title="Sana atanmış aktif vaka yok"
+                    description="Vakalar listesinden açabilir veya bir takım liderinden atama bekleyebilirsin."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={<CheckCircle2 size={22} />}
+                    title="Şu an öncelikli vakan yok"
+                    description="Aktif vakaların geldikçe en acil olanlar burada listelenecek."
+                  />
+                )}
               </div>
             </Card>
           )}
