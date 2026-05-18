@@ -16,6 +16,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:auth": "tsx prisma/seedAuth.ts",
     "db:seed:scenarios": "tsx prisma/seedScenarios.ts --confirm-demo-seed",
+    "db:seed:full-demo": "node --env-file=.env scripts/seed-full-demo-scenarios.js",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "test:pattern": "node --env-file=.env scripts/test-pattern-alert.js",
