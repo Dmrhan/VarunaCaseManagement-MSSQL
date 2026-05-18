@@ -127,6 +127,12 @@ const COMPANY_THEMES = {
       'Komisyon hesaplaması yanlış görünüyor', 'Sanal POS entegrasyon hatası', 'Kart/cashback sorunu',
       'Settlement raporu eksik', 'POS bağlantı kopuyor', 'ParamKart yükleme başarısız',
       'Komisyon iadesi yapılmadı', 'Fiziki POS yazıcı hatası', 'Cep POS kullanıcı yetki sorunu',
+      '3D Secure başarısız işlem akışı', 'Taksitli ödeme reddedildi', 'Kolay Tahsilat linki açılmıyor',
+      'Pazaryeri komisyon raporu indirilemiyor', 'Cashback kuralı uygulanmadı', 'Settlement dosya formatı hatalı',
+      'IBAN doğrulama sürekli fail', 'ParamKart cüzdan bakiye sapması', 'POS terminali yazılım güncellemesi başarısız',
+      'Mobil uygulama ödeme ekranı donuyor', 'ParamPOS API rate limit hatası', 'İade onayı 24 saattir bekliyor',
+      'Multi-vendor split yanlış oran', 'Card-on-file kayıt başarısız', 'Webhook bildirimleri ulaşmıyor',
+      'Refund-on-original-card çalışmıyor', 'Test ortamı POS simülasyonu fail', 'Komisyon faturası yanlış tarih',
     ],
     descriptions: [
       'Müşteri dün akşam yapılan POS işlemlerini raporda göremediğini iletti. İşlem ID mevcut ama settlement kuyruğunda kayıp.',
@@ -135,6 +141,18 @@ const COMPANY_THEMES = {
       'Aylık komisyon kesintisi sözleşmede belirtilen orandan farklı. Müşteri sözleşme oranını doğrulamamızı istedi.',
       'Sanal POS entegrasyonunda 3D Secure adımında müşteri ekranı boş kalıyor. Birden fazla rapor geldi.',
       'ParamKart hesabına yapılan cashback yansımıyor. Müşteri 2 hafta önceki kampanyadan bahsediyor.',
+      'Bayi 2 günlük settlement raporunu indirmek istediğinde "format error" hatası alıyor; PDF üretimi kırıldı.',
+      'Taksitli ödeme talep edilen kart için "taksit desteği yok" cevabı dönüyor; oysa müşteri kartının taksit desteği var.',
+      'Kolay Tahsilat linki müşteriye gönderildi ama açıldığında "ödeme sonlandırıldı" mesajı görüyor.',
+      'Cashback kampanya kuralı 5000 TL üstü işlemler için 50 TL idi; uygulamada 0 TL yansıdı.',
+      'IBAN doğrulama servisi banka cevabını parse edemiyor; 200 müşterinin ekleme işlemi pending.',
+      'Webhook 24 saattir hedef sunucuya ulaşmıyor; muhtemel TLS sertifika rotasyonu kaynaklı.',
+      'Refund-on-original-card işlemi VISA tarafından "transaction expired" reddiyle dönüyor; net 7 gün geçmiş.',
+      'Bayi paneli bir kez girişte 2FA istiyor, ardından dashboard 401 hatası ile geri atıyor.',
+      'Multi-vendor split aranan %70/%30 yerine %100/%0 gönderdi; finans ekibi acil talep ediyor.',
+      'Test sandbox üzerinde POS simülatörü "ECR not responding" hatası veriyor; entegrasyon ekibi bloklu.',
+      'Card-on-file kaydı kayıt sırasında 3DS challenge sonrası timeout veriyor; müşteri tamamlayamıyor.',
+      'Pazaryeri satıcı 3 gün önceki komisyon faturasını sistemde tarih olarak 1 ay önceki tarih görüyor.',
     ],
     categories: [
       ['Yazılım', 'POS Entegrasyon'],
@@ -169,6 +187,13 @@ const COMPANY_THEMES = {
       'Servis iş emri atanmadı', 'Panorama raporu rakam tutmuyor', 'Uni-Dox yedekleme hatası',
       'Saha veri kaydı kayboldu', 'Mobil cihaz GPS sapması', 'Dağıtım planı oluşturulamıyor',
       'e-Arşiv fatura PDF\'i bozuk',
+      'Panorama PDF export kırık', 'Rota optimizasyonu hatalı şehir sırası', 'Mobil ekip GPS koordinatı boş',
+      'Depo barkod okuyucu eşleşmiyor', 'e-Fatura ETTN üretilmedi', 'e-Arşiv fatura mail gönderilmedi',
+      'e-İrsaliye iptal işlemi kabul edilmiyor', 'Saha çalışanı fotoğraf yükleme başarısız',
+      'Uni-Dox arama indeksi güncel değil', 'Stok sayım eksik kayıt', 'Servis iş emri imza alanı boş',
+      'Mobil app rotada offline mode hatası', 'e-Fatura GİB sender alias eksik', 'Depo lokasyon kodu çakışması',
+      'Mobil uygulama oturum açma zorluğu', 'Panorama dashboard yavaş yükleniyor', 'Rota planı silinince irsaliye kaldı',
+      'e-İrsaliye RP kodu doğrulanmıyor',
     ],
     descriptions: [
       'Bayi dağıtım rotaları Panorama\'da güncellendi ama mobil ekibin tabletine yansımıyor. 12 saattir senkronize değil.',
@@ -177,6 +202,18 @@ const COMPANY_THEMES = {
       'GIB tarafına e-Fatura gönderiminde "geçersiz UUID" hatası alıyoruz. Son 4 saatte 17 fatura beklemede.',
       'Servis ekibi mobil cihazlarına iş emri atanmadı, müşteriye geç gidildi. Dispatcher görünüyor diyor ama gelmiyor.',
       'Panorama "Aylık Satış" raporunda toplam, bayi bazlı kalemlerin toplamından 8% sapıyor.',
+      'Rota optimizasyonu Edirne→İstanbul→Bursa yerine İstanbul→Edirne→Bursa öneriyor; yakıt 60% fazla.',
+      'Mobil cihazda GPS koordinatı boş geldiği için saha çalışanı ziyaret kayıt edemedi; 12 ziyaret kaybedildi.',
+      'Depo barkod okuyucu yeni nesil Honeywell modelle eşleşmiyor; manual entry %60 yavaşlatıyor.',
+      'e-Fatura ETTN GİB tarafından üretilmemiş geri dönüyor; tüm gönderimler bekleme.',
+      'Stok sayım uygulaması kapanmadan önce kayıt eden son 7 lokasyon kayıp; tutarsızlık çıktı.',
+      'Servis iş emrinde müşteri imza alanı boş kayıtlandı; offline modda devam etti ama imza sync olmadı.',
+      'Uni-Dox arama indeksi 3 gündür güncellenmiyor; yeni yüklenen dokümanlar bulunamıyor.',
+      'e-İrsaliye iptal işlemi "RP kodu doğrulanmadı" hatasıyla reddediliyor; muhasebe kapatamıyor.',
+      'Mobil uygulama login sonrası "session expired" döngüsüne giriyor; 20+ saha çalışanı etkilendi.',
+      'Panorama dashboard sayfası 12 saniye yüklenmeden cevap vermiyor; rapor ekibi şikayetçi.',
+      'Saha çalışanı offline modda alınan siparişler online döndüğünde duplicate olarak kaydoluyor.',
+      'e-Arşiv fatura HTML PDF dönüşümünde Türkçe karakterler bozuk çıkıyor; arşivlik PDF iade.',
     ],
     categories: [
       ['Yazılım', 'Mobil App'],
@@ -210,6 +247,12 @@ const COMPANY_THEMES = {
       'Toplu ödeme dosyası reddedildi', 'Açık bankacılık bağlantısı süresi doldu', 'E-DBS limit aşımı',
       'Netekstre çıktı PDF\'i kırık', 'Posrapor günlük rapor gelmedi', 'TÖS dosya format hatası',
       'Nakit akışı tahminleri sapıyor', 'Banka API timeout', 'Tahsilat kuyruğunda takılan dosya',
+      'Posrapor günlük özet hesap dışı', 'E-DBS limit artışı talebi reddedildi', 'Netahsilat dealer kanalı boş',
+      'Banka ekstresi 2 satır eksik', 'TÖS dosya 1 IBAN reddedildi', 'Açık bankacılık scope eksik',
+      'Netekstre Excel export kırık', 'POS terminal mutabakat 1 günlük gecikme', 'Bayi paneli giriş 401 hatası',
+      'E-DBS borç dekontu indirilemiyor', 'TÖS otomatik ödeme planı bozuldu', 'Netahsilat IBAN format değişikliği',
+      'Bayi hareketleri raporu boş', 'Posrapor hesap özeti yanlış toplam', 'Açık bankacılık webhook gecikmesi',
+      'POS mutabakatı duplicate hareket', 'E-DBS bireysel limit aşımı uyarısı', 'Toplu ödeme dosyası encoding hatası',
     ],
     descriptions: [
       'Bayi 5 gün önce yaptığı tahsilatları Netahsilat panelinde göremiyor. Banka onay yapmış, sistemde "pending" kaldı.',
@@ -218,6 +261,18 @@ const COMPANY_THEMES = {
       'TÖS toplu ödeme dosyası "geçersiz IBAN" hatasıyla reddedildi. 47 maaş ödemesi etkilendi.',
       'Açık bankacılık consent süresi 90 günü tamamladı, yenilemeden hareketler durmuş.',
       'E-DBS sistemi günlük limit aşıldı uyarısı veriyor ama müşteri limitin 30%\'sinde olduğunu söylüyor.',
+      'Posrapor günlük rapor saat 09:00 yerine 14:30\'da geldi; finans ekibi raporlama döngüsünü kaçırdı.',
+      'E-DBS limit artırma talebi sistemde "incomplete document" reddiyle dönüyor; eksik bilgi yok.',
+      'Netahsilat dealer kanalında bugünkü 87 işlem görünmüyor; bayi paneli boş gösteriyor.',
+      'Garanti BBVA ekstresinde 2 satır eksik; banka tarafı tamam doğruladı, import katmanında kayıp.',
+      'TÖS dosyasındaki son IBAN 26-haneli; sistem "geçersiz uzunluk" reddediyor; gerçekte yeni IBAN formatı.',
+      'Açık bankacılık consent\'inde "AISP_PAYMENTS" scope eksik; transaction list dönmüyor.',
+      'Netekstre Excel export 65 saniye sonra timeout veriyor; 200K+ hareket olan müşterilerde tetikleniyor.',
+      'POS terminal hareketleri dün gece geç işlendi; mutabakat 24 saat gerisinde.',
+      'Bayi paneli login sonrası 401 alıyor; consent token süresi bittiği anda silinmemiş.',
+      'E-DBS dekont indirme butonu "file not found" dönüyor; oysa dosya storage\'da mevcut.',
+      'TÖS otomatik ödeme planı 1\'inde tetiklenmedi; cron loglarında "no execution" satırı yok bile.',
+      'Posrapor günlük özet rakamı 24.430 TL eksik; ay başında benzer fark vardı, tekrar oluyor.',
     ],
     categories: [
       ['Finans', 'Tahsilat'],
@@ -391,6 +446,19 @@ async function main() {
 
       const slaViolation = isOpen && r() < 0.18 ? true : (resolvedAt && resolvedAt > slaResolutionDueAt ? true : false);
 
+      // Snooze (defer): ~12% of open cases get snoozeUntil in next 1-7 days.
+      // ThirdPartyWaiting status doğal olarak snooze hak ediyor — agent
+      // 3. parti cevabını bekliyor, vakayı tarihe defer ediyor.
+      let snoozeUntil = null;
+      let snoozeReason = null;
+      let snoozePreviousStatus = null;
+      if (isOpen && (status === 'ThirdPartyWaiting' ? r() < 0.6 : r() < 0.12)) {
+        const baseSnoozeMs = Date.now() + (1 + Math.floor(r() * 7)) * 24 * 60 * 60 * 1000;
+        snoozeUntil = new Date(baseSnoozeMs);
+        snoozeReason = pick(['CustomerWillCall', 'WaitingThirdParty', 'Reminder'], r);
+        snoozePreviousStatus = status;
+      }
+
       const data = {
         caseNumber,
         title: `${title}`,
@@ -416,6 +484,9 @@ async function main() {
         slaResolutionDueAt,
         slaViolation,
         resolvedAt,
+        snoozeUntil,
+        snoozeReason,
+        snoozePreviousStatus,
         createdAt,
         updatedAt: resolvedAt ?? createdAt,
       };
@@ -798,10 +869,156 @@ async function main() {
           },
         });
         transferCount++;
+        // Transfer notification → new team's people
+        const notifId = `NOTIF-${c.caseNumber}-XFER-${i + 1}`;
+        await prisma.caseNotification.upsert({
+          where: { id: notifId },
+          update: {},
+          create: {
+            id: notifId,
+            caseId: c.id,
+            companyId,
+            eventType: 'transfer',
+            channel: 'InApp',
+            recipient: userByEmail['supervisor@varuna.dev'].id,
+            payload: { fromTeam: fromTeam.name, toTeam: toTeam.name, caseNumber: c.caseNumber },
+            sentAt: new Date(c.createdAt.getTime() + 2 * 60 * 60 * 1000),
+          },
+        });
       } catch {}
     }
   }
-  console.log(`   ${transferCount} transfers`);
+  console.log(`   ${transferCount} transfers (+ transfer notifications)`);
+
+  // ── 10b) CaseLink seed: Related / Duplicate / Parent ──
+  console.log('10b) Seeding case links (Related/Duplicate/Parent)...');
+  let linkCount = 0;
+  for (const companyId of COMPANIES) {
+    const cases = allCaseIds[companyId];
+    // 2 Related pairs, 1 Duplicate pair (symmetric — 2 rows), 1 Parent (parent-child)
+    const linkPairs = [
+      { from: 5, to: 12, type: 'Related' },
+      { from: 18, to: 22, type: 'Related' },
+      { from: 30, to: 31, type: 'Duplicate' }, // symmetric — yazılır 2 yön
+      { from: 40, to: 41, type: 'Parent' },    // 40 child, 41 parent
+    ];
+    for (let idx = 0; idx < linkPairs.length; idx++) {
+      const lp = linkPairs[idx];
+      const src = cases[lp.from];
+      const dst = cases[lp.to];
+      if (!src || !dst) continue;
+      const linkId = `LINK-${src.caseNumber}-${dst.caseNumber}-${lp.type}`;
+      try {
+        await prisma.caseLink.upsert({
+          where: { id: linkId },
+          update: {},
+          create: {
+            id: linkId,
+            caseId: src.id,
+            linkedCaseId: dst.id,
+            linkType: lp.type,
+            companyId,
+            createdBy: userByEmail['supervisor@varuna.dev'].id,
+            createdAt: new Date(src.createdAt.getTime() + 60 * 60 * 1000),
+          },
+        });
+        linkCount++;
+        // Duplicate is symmetric — write reverse direction
+        if (lp.type === 'Duplicate') {
+          const revId = `LINK-${dst.caseNumber}-${src.caseNumber}-${lp.type}`;
+          await prisma.caseLink.upsert({
+            where: { id: revId },
+            update: {},
+            create: {
+              id: revId,
+              caseId: dst.id,
+              linkedCaseId: src.id,
+              linkType: 'Duplicate',
+              companyId,
+              createdBy: userByEmail['supervisor@varuna.dev'].id,
+              createdAt: new Date(src.createdAt.getTime() + 60 * 60 * 1000),
+            },
+          });
+          linkCount++;
+        }
+      } catch {}
+    }
+  }
+  console.log(`   ${linkCount} case links`);
+
+  // ── 10c) Watcher_update notifications + note reactions ──
+  console.log('10c) Seeding watcher_update notifications + note reactions...');
+  let watcherNotifCount = 0;
+  let reactionCount = 0;
+  let reactionNotifCount = 0;
+  // For every watcher, generate 1 watcher_update notif for a status-change event
+  // on the watched case. Picking the most recent activity as the trigger.
+  const allWatchers = await prisma.caseWatcher.findMany({
+    select: { id: true, caseId: true, userId: true, companyId: true, addedAt: true },
+  });
+  for (const w of allWatchers) {
+    const notifId = `NOTIF-W-${w.id}`;
+    try {
+      await prisma.caseNotification.upsert({
+        where: { id: notifId },
+        update: {},
+        create: {
+          id: notifId,
+          caseId: w.caseId,
+          companyId: w.companyId,
+          eventType: 'watcher_update',
+          channel: 'InApp',
+          recipient: w.userId,
+          payload: { reason: 'status_change', addedAt: w.addedAt },
+          sentAt: new Date(w.addedAt.getTime() + 12 * 60 * 60 * 1000),
+        },
+      });
+      watcherNotifCount++;
+    } catch {}
+  }
+  // Note reactions: add 2-3 reactions per company to existing notes
+  const reactionEmojis = ['thumbs_up', 'eyes', 'check', 'important', 'thanks'];
+  for (const companyId of COMPANIES) {
+    const r = rng(hash('react' + companyId));
+    const notes = await prisma.caseNote.findMany({
+      where: { companyId, authorId: { not: null } },
+      select: { id: true, caseId: true, authorId: true },
+      take: 30,
+    });
+    for (let i = 0; i < Math.min(8, notes.length); i++) {
+      const note = notes[i];
+      if (!note.authorId) continue;
+      const reactorEmail = pick(['agent@varuna.dev', 'supervisor@varuna.dev', 'csm@varuna.dev'], r);
+      const reactor = userByEmail[reactorEmail];
+      if (reactor.id === note.authorId) continue; // don't react to your own
+      const emoji = pick(reactionEmojis, r);
+      try {
+        await prisma.caseNoteReaction.upsert({
+          where: { noteId_userId_emoji: { noteId: note.id, userId: reactor.id, emoji } },
+          update: {},
+          create: { noteId: note.id, userId: reactor.id, companyId, emoji },
+        });
+        reactionCount++;
+        // Notify the note author of the reaction
+        const notifId = `NOTIF-REACT-${note.id}-${reactor.id}`;
+        await prisma.caseNotification.upsert({
+          where: { id: notifId },
+          update: {},
+          create: {
+            id: notifId,
+            caseId: note.caseId,
+            companyId,
+            eventType: 'note_reaction',
+            channel: 'InApp',
+            recipient: note.authorId,
+            payload: { noteId: note.id, reactorId: reactor.id, emoji },
+          },
+        });
+        reactionNotifCount++;
+      } catch {}
+    }
+  }
+  console.log(`   ${watcherNotifCount} watcher_update + ${reactionCount} reactions + ${reactionNotifCount} reaction notifications`);
 
   // ── 11) Synthetic pattern burst (5 cases createdAt=now, same company+category) ──
   console.log('11) Seeding synthetic burst for PatternAlert...');
