@@ -230,6 +230,60 @@ filter, embedded usage, and legacy/null-data checks are covered.
 If an agent is unsure whether an environment is real-data, it must
 refuse to seed and ask.
 
+## System Data Contract Smoke (`smoke:data-contracts`)
+
+`npm run smoke:data-contracts` is the standard regression gate for any
+change that touches cross-module data contracts. The script is
+read-only and groups contract checks by domain:
+
+- Identity Contract — `User.id` vs `Person.id` mixups + FK existence
+- Account / Case Integrity — AccountCompany/Product/Contact FK and
+  shared/legacy `Account.companyId` handling
+- Tenant Scope Contract — `allowedCompanyIds` enforcement across
+  list/search/count/filter paths, plus persona-based visibility
+- Demo Seed Drift — required demo companies/persons/users + role
+  assignments
+- Customer Picker Contract — role split (`LIST_ROLES` vs
+  `DETAIL_READ_ROLES`) and scoped case-count behavior
+
+### When this gate is mandatory
+
+Run `npm run smoke:data-contracts` and include the PASS/WARN/FAIL
+summary in the PR report whenever the change touches any of:
+
+- a new table or schema field
+- a new endpoint or role gate
+- a tenant-scoped query, aggregate, count, or filter
+- seed data, demo personas, or scenario flows
+- integrations (Jira, telephony, mail, etc.) or AI payloads
+- watcher / mention / note / reaction / reminder / transfer logic
+- Account / Case / User / Person / Notification surfaces
+
+### Extending the gate (mandatory for new contracts)
+
+For any future PR that introduces a new contract (table, endpoint,
+role permission, tenant scope rule, aggregate, integration, AI payload),
+the developer must either:
+
+1. **Add a new contract check** to `scripts/smoke-data-contracts.js` via
+   `defineGroup('X Contract', async () => [...checks])`, or
+2. **Explicitly state in the PR report** why no new contract check is
+   needed (e.g. the change is purely cosmetic/UI copy, or an existing
+   group already covers it).
+
+The harness is intentionally designed as an extensible check registry,
+not a one-off checklist. New product areas (Document Request,
+Notification Rules, Jira Sync, Telephony/AloTech, Data Import,
+Account Merge, Knowledge Base / AI Suggestion) should add their own
+group rather than embedding ad-hoc checks elsewhere.
+
+### Output expectations
+
+- Exit code `0` only if every group is PASS or WARN; any FAIL exits `1`.
+- The script never writes, mutates, deletes, or seeds.
+- Sensitive payloads (note content, segment, VKN) are never printed.
+- Examples are limited to 5 rows per check.
+
 ## Documentation Update Rules
 
 Agents should update:
