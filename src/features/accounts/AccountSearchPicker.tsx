@@ -35,7 +35,7 @@ const PAGE_SIZE = 20;
  *
  * - GET /api/accounts ile gerçek zamanlı arama (bootstrap cache değil).
  * - Debounce 300ms, min 2 karakter.
- * - Disambiguation: company chip + Univera kodu + maskeli VKN + telefon + email
+ * - Disambiguation: company chip + dış müşteri kodu + maskeli VKN + telefon + email
  *   + isActive + openCaseCount + totalCaseCount.
  * - "Müşterisiz devam et" — Agent vaka açabilsin diye explicit null seçim.
  */

@@ -178,7 +178,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     void caseService.markMentionsSeen(activeId).then(() => {
       window.dispatchEvent(new CustomEvent('app:mentions-changed'));
     });
-    // Phase C2: customer-context — Univera kodu, paket, aktif ürünler, primary kontak.
+    // Phase C2: customer-context — dış kod, paket, aktif ürünler, primary kontak.
     void accountService.getCaseCustomerContext(activeId).then((out) => {
       if (alive) setCustomerContext(out?.context ?? null);
     });
@@ -924,8 +924,11 @@ function LeftPanel({
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge tint="slate">{item.companyName}</Badge>
                 {ctxCompany?.externalCustomerCode && (
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
-                    Univera {ctxCompany.externalCustomerCode}
+                  <span
+                    title="Müşteri Dış Kodu"
+                    className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
+                  >
+                    Kod {ctxCompany.externalCustomerCode}
                   </span>
                 )}
                 {ctxCompany?.packageName && <Badge tint="indigo">{ctxCompany.packageName}</Badge>}

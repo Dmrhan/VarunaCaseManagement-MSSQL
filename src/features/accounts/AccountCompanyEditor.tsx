@@ -105,7 +105,7 @@ export function AccountCompanyEditor({
     const errs: Record<string, string> = {};
     if (mode === 'add' && !companyId) errs.companyId = 'Şirket seç.';
     if (externalCustomerCode && !FIVE_DIGIT_RX.test(externalCustomerCode.trim())) {
-      errs.externalCustomerCode = 'Tam 5 hane (rakam) olmalı.';
+      errs.externalCustomerCode = 'Müşteri dış kodu 5 hane olmalı.';
     }
     if (contractStartAt && contractEndAt && contractStartAt > contractEndAt) {
       errs.contractEndAt = 'Bitiş tarihi başlangıçtan önce olamaz.';
@@ -257,8 +257,8 @@ export function AccountCompanyEditor({
           </Field>
 
           <Field
-            label="Univera Müşteri Kodu"
-            hint="5 hane (opsiyonel)"
+            label="Müşteri Dış Kodu"
+            hint="Opsiyonel dış sistem kodu (ERP/CRM/3. parti)"
             error={errors.externalCustomerCode}
           >
             <TextInput

@@ -615,7 +615,7 @@ Phase A schema + BFF teslim edildi (Account, AccountCompany, AccountContact). Ph
 
 ### 1) Müşterisiz vaka akışı
 
-Agent bazen vakayı açarken müşteriyi sistemde bulamaz (henüz girilmemiş, holding adıyla geldi, Univera kodu bilinmiyor). Bu durumda:
+Agent bazen vakayı açarken müşteriyi sistemde bulamaz (henüz girilmemiş, holding adıyla geldi, dış sistem kodu bilinmiyor). Bu durumda:
 
 - Case create'te `accountId = null` **geçerli kalmalı** (mevcut schema zaten destekliyor — `Case.accountId` opsiyonel).
 - Agent müşteri bulamazsa vakayı **müşterisiz açabilmeli**, akış kesilmesin.
@@ -628,8 +628,8 @@ Agent bazen vakayı açarken müşteriyi sistemde bulamaz (henüz girilmemiş, h
 Aynı müşteri için iki kayıt açılması, müşteri verisinin en hızlı kirlendiği nokta. Agent arama yaptığında karar verebilsin diye:
 
 - Arama sonuçlarında her satırda **disambiguation alanları** gösterilmeli:
-  - Bağlı şirket chip'leri (PARAM / UNIVERA / FINROTA)
-  - `externalCustomerCode` (Univera 5 hane)
+  - Bağlı şirket chip'leri (tenant tarafında tanımlı şirketler)
+  - `externalCustomerCode` (Müşteri Dış Kodu — ERP/CRM/3. parti referansı)
   - Maskeli VKN
   - Telefon, e-posta
   - `isActive`, `openCaseCount`, `lastCaseAt`
@@ -657,6 +657,28 @@ Aynı müşteri için iki kayıt açılması, müşteri verisinin en hızlı kir
 **Mevcut durum:** Phase A schema + BFF hazır; edge case ürün kararı bekliyor.
 **Çaba:** Phase B/C içinde disambiguation 1 gün, unlinked queue 1-2 gün; merge fazı ayrı 3-5 gün.
 **Bağımlılık:** Account 360 Phase B (UI).
+
+---
+
+## 🟡 externalCustomerCode validation tenant-configurable
+
+`externalCustomerCode` (Müşteri Dış Kodu) şu an **tüm tenant'lar için sabit
+5-hane rakam** regex'iyle doğrulanıyor (`^\d{5}$`). Üretim kullanımında bazı
+müşteriler farklı ERP/CRM/3. parti kod formatları kullanır:
+
+- Bazı tenant'lar 5 hane rakam (mevcut format) ister
+- Bazıları alfanümerik ERP kodu kullanır (örn. `ACC-00123`)
+- Bazıları sözleşme numarası, vergi dairesi kodu vb. saklamak ister
+
+İleride: `CompanySettings.externalCustomerCodePattern` benzeri bir alan
+(regex veya format adı) eklenip backend doğrulaması tenant'a göre çalışmalı.
+UI hint metni de tenant'a göre dinamik olmalı.
+
+**Mevcut durum:** Phase C2'de generic UI copy yapıldı ("Müşteri Dış Kodu"),
+ama validation hala 5-hane sabit. Şu an blocker değil; yeni tenant onboard
+sırasında planlanmalı.
+**Çaba:** 1 gün (schema + validation + UI helper).
+**Bağımlılık:** Yeni tenant ihtiyacı.
 
 ---
 
