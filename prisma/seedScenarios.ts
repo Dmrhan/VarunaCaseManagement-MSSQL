@@ -372,6 +372,15 @@ async function upsertAccounts() {
       update: { name: a.name, companyId: a.companyId, email: a.email, phone: a.phone, isActive: true },
       create: { id: a.id, name: a.name, companyId: a.companyId, email: a.email, phone: a.phone, isActive: true },
     });
+    // P0 hotfix: legacy Account.companyId set ediliyor; AccountCompany ilişkisi
+    // de aynı işlemde ensure et — aksi halde Account 360 detay/picker'da gap çıkar.
+    if (a.companyId) {
+      await prisma.accountCompany.upsert({
+        where: { accountId_companyId: { accountId: a.id, companyId: a.companyId } },
+        update: {}, // var olan ilişkiye dokunma (status/code/notes elle güncellenmiş olabilir)
+        create: { accountId: a.id, companyId: a.companyId, status: 'active' },
+      });
+    }
   }
 }
 
