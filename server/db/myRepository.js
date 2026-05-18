@@ -12,6 +12,12 @@ const MAX_RANGE_DAYS = 90; // performans guard'ı: çok geniş aralıklı istekl
 
 const ALL_EVENT_TYPES = ['reminder', 'snooze', 'sla_response', 'sla_resolution', 'followup'];
 
+// Closed/cancelled statuses — calendar SLA/snooze/followup eventleri
+// non-actionable olduğu için bu vakaların case-bağlı olaylarını gizleriz.
+// Reminder hariç (kullanıcının explicit oluşturduğu hatırlatıcı kapalı vakada
+// bile görünür kalır — bilinçli niyeti korumak için).
+const CLOSED_CASE_STATUSES = ['Cozuldu', 'IptalEdildi'];
+
 /**
  * Tarih aralığı içindeki kişisel takvim olaylarını derle.
  *
@@ -81,12 +87,14 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
       : Promise.resolve([]),
 
     // 2) Snooze — assignedPersonId = me.personId. personId yoksa skip.
+    //    Kapalı/iptal vakalarda snooze hedefi yok; gizle.
     want('snooze') && personId
       ? prisma.case.findMany({
           where: {
             ...companyScope,
             assignedPersonId: personId,
             snoozeUntil: { not: null, ...dateRange },
+            status: { notIn: CLOSED_CASE_STATUSES },
           },
           select: {
             id: true,
@@ -101,7 +109,8 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
         })
       : Promise.resolve([]),
 
-    // 3) SLA yanıt tarihi — me'nin atanan vakaları, henüz ihlal yok
+    // 3) SLA yanıt tarihi — me'nin atanan vakaları, henüz ihlal yok.
+    //    Kapalı/iptal vakaların SLA'sı non-actionable; gizle.
     want('sla_response') && personId
       ? prisma.case.findMany({
           where: {
@@ -109,6 +118,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             assignedPersonId: personId,
             slaResponseDueAt: { not: null, ...dateRange },
             slaViolation: false,
+            status: { notIn: CLOSED_CASE_STATUSES },
           },
           select: {
             id: true,
@@ -123,7 +133,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
         })
       : Promise.resolve([]),
 
-    // 4) SLA çözüm tarihi — aynı kural
+    // 4) SLA çözüm tarihi — aynı kural; kapalı/iptal gizli.
     want('sla_resolution') && personId
       ? prisma.case.findMany({
           where: {
@@ -131,6 +141,7 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
             assignedPersonId: personId,
             slaResolutionDueAt: { not: null, ...dateRange },
             slaViolation: false,
+            status: { notIn: CLOSED_CASE_STATUSES },
           },
           select: {
             id: true,
@@ -146,13 +157,14 @@ export async function listCalendarEvents({ userId, personId, allowedCompanyIds, 
       : Promise.resolve([]),
 
     // 5) Followup — vakanın atanan kişisi me. CaseCallLog.callerId şu an mock-user
-    // olduğu için case'in assigned person'ı üzerinden filtreliyoruz.
+    //    olduğu için case'in assigned person'ı üzerinden filtreliyoruz.
+    //    Kapalı/iptal vakalar için takip araması anlamsız; gizle.
     want('followup') && personId
       ? prisma.caseCallLog.findMany({
           where: {
             ...companyScope,
             nextFollowupDate: { not: null, ...dateRange },
-            case: { assignedPersonId: personId },
+            case: { assignedPersonId: personId, status: { notIn: CLOSED_CASE_STATUSES } },
           },
           include: {
             case: { select: { id: true, caseNumber: true, accountName: true, priority: true } },
