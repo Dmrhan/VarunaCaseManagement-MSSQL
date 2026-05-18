@@ -179,7 +179,17 @@ export async function listAccounts({
   }
 
   if (status) {
-    whereAnd.push({ companies: { some: { status } } });
+    // P2 hotfix: status filter sadece görünür AccountCompany kayıtlarına
+    // uygulanır — başka tenant'taki hidden status'lar match'lememeli.
+    // companyId query verildiyse onu da kombinle; verilmediyse allowedCompanyIds
+    // içinden herhangi biri. allowedCompanyIds boşsa zaten kullanıcı hiçbir şey
+    // göremez (whereAnd[0] = buildScopeWhere ile filter edildi).
+    const statusCompanyScope = companyId
+      ? { companyId }
+      : allowed.length
+        ? { companyId: { in: allowed } }
+        : {};
+    whereAnd.push({ companies: { some: { status, ...statusCompanyScope } } });
   }
 
   const where = { AND: whereAnd };
@@ -220,10 +230,19 @@ export async function listAccounts({
   const accountIds = rows.map((r) => r.id);
 
   // Open / total case sayısını batch al — N+1 önle.
-  const allCases = accountIds.length
+  // P2 hotfix: shared/multi-company account'larda case count'u allowedCompanyIds
+  // ile sınırla; aksi halde kullanıcı görmediği şirketin vaka sayısını sayar.
+  // SystemAdmin allowed = tüm aktif şirketler (verifyJwt). allowed boşsa hiçbir
+  // şey sayma (kullanıcı zaten hiçbir şey göremiyor).
+  const caseScope = accountIds.length
+    ? allowed.length
+      ? { accountId: { in: accountIds }, companyId: { in: allowed } }
+      : { accountId: { in: [] } }
+    : null;
+  const allCases = caseScope
     ? await prisma.case.groupBy({
         by: ['accountId', 'status'],
-        where: { accountId: { in: accountIds } },
+        where: caseScope,
         _count: { _all: true },
       })
     : [];
