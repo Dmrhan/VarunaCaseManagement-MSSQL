@@ -625,6 +625,14 @@ model Case {
   // edilen vakalarda her zaman false.
   customerMatchPending Boolean @default(false)
 
+  // Phase D Step 2 — müşterisiz vaka açılırken Agent'ın aldığı başvuran
+  // bilgileri (opsiyonel). Eşleştirme öneri motoru bu alanları yüksek-öncelik
+  // sinyal olarak kullanır. Analytics/AI payload'lara DAHIL EDİLMEZ.
+  customerContactName  String?
+  customerContactPhone String?
+  customerContactEmail String?
+  customerCompanyName  String?
+
   // AI alanları
   aiSummary                  String?
   aiCategoryPrediction       String?

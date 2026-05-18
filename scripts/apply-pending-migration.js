@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MIGRATION_SQL = path.resolve(
   __dirname,
-  '../prisma/migrations/20260518180000_add_customer_match_pending/migration.sql',
+  '../prisma/migrations/20260518210000_add_customerless_case_contact_context/migration.sql',
 );
 
 const POSTGRES_DUPLICATE_COLUMN = '42701';
@@ -99,31 +99,24 @@ async function main() {
   // ── Validation ──
   console.log('\n── Validation ──');
 
-  const caseColumnOk = await columnExists('Case', 'customerMatchPending');
-  console.log(`  ${caseColumnOk ? '✓' : '✗'} Case.customerMatchPending exists`);
-
-  const settingsColumnOk = await columnExists('CompanySettings', 'requireCustomerOnCaseCreate');
-  console.log(`  ${settingsColumnOk ? '✓' : '✗'} CompanySettings.requireCustomerOnCaseCreate exists`);
-
-  const nullAccount = await prisma.$queryRaw`SELECT COUNT(*)::int AS n FROM "Case" WHERE "accountId" IS NULL`;
-  const nullAccountMatched = await prisma.$queryRaw`
-    SELECT COUNT(*)::int AS n FROM "Case"
-    WHERE "accountId" IS NULL AND "customerMatchPending" = true
-  `;
-  const totalNull = nullAccount?.[0]?.n ?? 0;
-  const matchedNull = nullAccountMatched?.[0]?.n ?? 0;
-  const backfillOk = totalNull === matchedNull;
-  console.log(
-    `  ${backfillOk ? '✓' : '✗'} accountId IS NULL backfill match: ${matchedNull}/${totalNull}`,
-  );
+  const expectedColumns = [
+    ['Case', 'customerContactName'],
+    ['Case', 'customerContactPhone'],
+    ['Case', 'customerContactEmail'],
+    ['Case', 'customerCompanyName'],
+  ];
+  let allOk = true;
+  for (const [table, col] of expectedColumns) {
+    const ok = await columnExists(table, col);
+    if (!ok) allOk = false;
+    console.log(`  ${ok ? '✓' : '✗'} ${table}.${col} exists`);
+  }
 
   // Bonus diagnostics — total counts (sensitive payload yok)
   const totalCases = await prisma.case.count();
-  const totalSettings = await prisma.companySettings.count();
-  console.log(`  ℹ total cases: ${totalCases}, total CompanySettings rows: ${totalSettings}`);
+  console.log(`  ℹ total cases: ${totalCases}`);
 
-  const allOk = caseColumnOk && settingsColumnOk && backfillOk;
-  console.log(`\n${allOk ? '✅' : '❌'} Phase 1 DB apply ${allOk ? 'PASS' : 'FAIL'}`);
+  console.log(`\n${allOk ? '✅' : '❌'} Phase D Step 2 completion DB apply ${allOk ? 'PASS' : 'FAIL'}`);
 
   await prisma.$disconnect();
   process.exit(allOk ? 0 : 1);

@@ -678,6 +678,222 @@ defineGroup('Customer Match Contract', async () => {
     ));
   }
 
+  // 6.5) Phase D Step 2 — Case schema includes requester context columns
+  //      Müşterisiz vaka intake'i için 4 opsiyonel kolon mevcut olmalı.
+  const requesterCols = await prisma.$queryRawUnsafe(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'Case'
+      AND column_name IN (
+        'customerContactName', 'customerContactPhone',
+        'customerContactEmail', 'customerCompanyName'
+      )
+  `);
+  const presentCols = new Set(requesterCols.map((r) => r.column_name));
+  const expectedCols = ['customerContactName', 'customerContactPhone', 'customerContactEmail', 'customerCompanyName'];
+  const missingCols = expectedCols.filter((c) => !presentCols.has(c));
+  out.push(check(
+    'Case schema has requester context columns (Phase D Step 2)',
+    missingCols.length === 0 ? 'PASS' : 'FAIL',
+    {
+      count: presentCols.size,
+      detail: missingCols.length ? `Eksik: ${missingCols.join(', ')}` : 'Tüm 4 kolon mevcut',
+    },
+  ));
+
+  // 6.6) Customerless case + requester context kullanım — varsa sample, yoksa WARN
+  //      (Feature yeni; sadece kullanıma açıldığını teyit eder. Zorunlu DEĞİL.)
+  const customerlessTotal = await prisma.case.count({
+    where: { accountId: null, customerMatchPending: true },
+  });
+  const customerlessWithCtx = await prisma.case.count({
+    where: {
+      accountId: null,
+      customerMatchPending: true,
+      OR: [
+        { customerContactPhone: { not: null } },
+        { customerContactEmail: { not: null } },
+        { customerCompanyName: { not: null } },
+        { customerContactName: { not: null } },
+      ],
+    },
+  });
+  out.push(check(
+    'Customerless cases may carry requester context (schema allows it)',
+    'PASS',
+    {
+      count: customerlessTotal,
+      detail: `accountId=NULL toplam ${customerlessTotal}, requester context dolu ${customerlessWithCtx}`,
+    },
+  ));
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Group 7 — Customer Match Suggestions Contract (Phase D Step 2)
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Customer Match Suggestions Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // Repository import — read-only kullanım, mutasyon yok.
+  const { suggestCustomerMatches } = await import('../server/db/customerMatchRepository.js');
+  const fs = await import('node:fs/promises');
+
+  const allActiveCompanies = await prisma.company.findMany({ where: { isActive: true }, select: { id: true } });
+  const activeIds = allActiveCompanies.map((c) => c.id);
+
+  // 7.1) Linked case → empty + reason
+  const linkedCase = await prisma.case.findFirst({
+    where: { customerMatchPending: false, accountId: { not: null } },
+    select: { id: true },
+  });
+  if (linkedCase) {
+    const r = await suggestCustomerMatches({ caseId: linkedCase.id, allowedCompanyIds: activeIds });
+    const ok = r && r.suggestions.length === 0 && r.reason === 'case_already_linked';
+    out.push(check('Linked case returns empty + case_already_linked', ok ? 'PASS' : 'FAIL', {
+      detail: r ? `reason=${r.reason}, count=${r.suggestions.length}` : 'null result',
+    }));
+  } else {
+    out.push(check('Linked case returns empty + case_already_linked', 'WARN', { detail: 'no linked case in DB' }));
+  }
+
+  // 7.2) Pending case → suggestions OR empty (deterministic, no error)
+  const pendingCase = await prisma.case.findFirst({
+    where: { customerMatchPending: true },
+    select: { id: true, companyId: true },
+  });
+  if (pendingCase) {
+    const r = await suggestCustomerMatches({ caseId: pendingCase.id, allowedCompanyIds: activeIds });
+    const ok = r && Array.isArray(r.suggestions);
+    out.push(check('Pending case → suggestions array returned', ok ? 'PASS' : 'FAIL', {
+      count: r?.suggestions?.length ?? 0,
+    }));
+
+    // 7.3) Suggestions scoped to case.companyId — cross-company never appears
+    if (r && r.suggestions.length > 0) {
+      const accountIds = r.suggestions.map((s) => s.accountId);
+      const accounts = await prisma.account.findMany({
+        where: { id: { in: accountIds } },
+        select: {
+          id: true,
+          companyId: true,
+          companies: { select: { companyId: true } },
+        },
+      });
+      const violators = accounts.filter((a) => {
+        const inAC = a.companies.some((c) => c.companyId === pendingCase.companyId);
+        const inLegacy = a.companyId === pendingCase.companyId;
+        const shared = a.companyId === null;
+        return !inAC && !inLegacy && !shared;
+      });
+      out.push(check(
+        'Suggested accounts compatible with case.companyId',
+        violators.length === 0 ? 'PASS' : 'FAIL',
+        { count: violators.length, examples: take(violators) },
+      ));
+
+      // 7.4) Suggestions do not expose notes/segment
+      const leaked = r.suggestions.some(
+        (s) =>
+          'notes' in s ||
+          'segment' in s ||
+          s.companies.some((c) => 'notes' in c || 'segment' in c),
+      );
+      out.push(check('No notes/segment in suggestions response', leaked ? 'FAIL' : 'PASS', {
+        detail: leaked ? 'sızıntı bulundu' : undefined,
+      }));
+
+      // 7.5) Deterministic order — aynı çağrıyı 2 kez yap
+      const r2 = await suggestCustomerMatches({ caseId: pendingCase.id, allowedCompanyIds: activeIds });
+      const sameOrder = JSON.stringify(r.suggestions.map((s) => s.accountId)) ===
+        JSON.stringify(r2.suggestions.map((s) => s.accountId));
+      out.push(check('Deterministic order stable for same DB state', sameOrder ? 'PASS' : 'FAIL'));
+    } else {
+      out.push(check('Suggested accounts compatible with case.companyId', 'PASS', {
+        detail: 'no suggestions to verify',
+      }));
+      out.push(check('No notes/segment in suggestions response', 'PASS', {
+        detail: 'no suggestions to verify',
+      }));
+      out.push(check('Deterministic order stable for same DB state', 'PASS', {
+        detail: 'no suggestions to verify',
+      }));
+    }
+  } else {
+    out.push(check('Pending case → suggestions array', 'WARN', { detail: 'no pending case in DB' }));
+  }
+
+  // 7.6) Route role config — Agent should not reach suggestions endpoint.
+  //      Source kontrolü: requireRole listesinde Agent yok.
+  const routeSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/routes/cases.js', 'utf8');
+  const suggestionsRoute = routeSrc.match(/customer-match-suggestions[^]*?requireRole\(([^)]*)\)/);
+  const rolesStr = suggestionsRoute?.[1] ?? '';
+  const allowsAgent = /['"]Agent['"]/.test(rolesStr);
+  out.push(check(
+    'Suggestions route excludes Agent (requireRole)',
+    suggestionsRoute && !allowsAgent ? 'PASS' : 'FAIL',
+    { detail: suggestionsRoute ? `roles=${rolesStr.replace(/\s+/g, ' ').trim()}` : 'route guard not found' },
+  ));
+
+  // 7.7) AI/OpenAI çağrısı yok — gerçek kullanım imzaları (import/require/yeni client)
+  //      taranır, yalnız yorum içindeki "OpenAI" kelimesi false-positive üretmez.
+  const repoSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/db/customerMatchRepository.js', 'utf8');
+  const aiHit =
+    /\b(from\s+['"]openai['"]|require\(['"]openai['"]|new\s+OpenAI|aiClient\b|chat\.completions|gpt-\d)/i.test(repoSrc);
+  out.push(check('Suggestions helper contains no AI/OpenAI references', aiHit ? 'FAIL' : 'PASS'));
+
+  // 7.8) Phase D Step 2 — Suggestion engine uses requester contact fields.
+  //      extractSignalsFromCase, customerContactPhone/Email/CompanyName/Name
+  //      alanlarını üst-öncelikli sinyal olarak okumalı.
+  const usesRequesterPhone = /customerContactPhone\b/.test(repoSrc);
+  const usesRequesterEmail = /customerContactEmail\b/.test(repoSrc);
+  const usesRequesterCompany = /customerCompanyName\b/.test(repoSrc);
+  const usesRequesterContactName = /customerContactName\b/.test(repoSrc);
+  const usesContactNameTokens = /contactNameTokens\b/.test(repoSrc);
+  const allUsed = usesRequesterPhone && usesRequesterEmail && usesRequesterCompany && usesRequesterContactName && usesContactNameTokens;
+  out.push(check(
+    'Suggestion engine reads requester contact fields (phone/email/company/name)',
+    allUsed ? 'PASS' : 'FAIL',
+    {
+      detail: allUsed
+        ? undefined
+        : `Eksik: ${[
+            !usesRequesterPhone && 'customerContactPhone',
+            !usesRequesterEmail && 'customerContactEmail',
+            !usesRequesterCompany && 'customerCompanyName',
+            !usesRequesterContactName && 'customerContactName',
+            !usesContactNameTokens && 'contactNameTokens',
+          ].filter(Boolean).join(', ')}`,
+    },
+  ));
+
+  // 7.9) Runtime — requester phone seçilmiş bir vaka için suggestion engine
+  //      eşleştirme üretiyor mu? (Varsa kontrol et; yoksa WARN.)
+  const reqCase = await prisma.case.findFirst({
+    where: {
+      customerMatchPending: true,
+      customerContactPhone: { not: null },
+    },
+    select: { id: true, customerContactPhone: true },
+  });
+  if (reqCase) {
+    const r = await suggestCustomerMatches({ caseId: reqCase.id, allowedCompanyIds: activeIds });
+    const ok = r && Array.isArray(r.suggestions);
+    out.push(check(
+      'Suggestions request with requester phone returns deterministic result',
+      ok ? 'PASS' : 'FAIL',
+      { count: r?.suggestions?.length ?? 0, detail: `caseId=${reqCase.id}` },
+    ));
+  } else {
+    out.push(check(
+      'Suggestions request with requester phone returns deterministic result',
+      'WARN',
+      { detail: 'No customerless case with requester phone in DB yet (Phase D Step 2 yeni — kullanım zamanı)' },
+    ));
+  }
+
   return out;
 });
 

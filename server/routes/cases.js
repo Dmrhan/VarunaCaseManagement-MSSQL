@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
+import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
@@ -222,6 +223,36 @@ router.patch(
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
+  }),
+);
+
+/**
+ * GET /api/cases/:id/customer-match-suggestions — Phase D Step 2
+ *
+ * customerMatchPending=true vakalar için deterministic eşleştirme önerileri.
+ * AI YOK, auto-link YOK; Supervisor/Admin manuel onay verir (PATCH /link-account).
+ *
+ * Auth: Supervisor, CSM, Admin, SystemAdmin (Agent + Backoffice 403)
+ * Scope:
+ *   - Case kullanıcının allowedCompanyIds'inde (route layer guard)
+ *   - Önerilen Account'lar case.companyId ile uyumlu (helper guard)
+ *
+ * Linked case (accountId set veya pending=false) → { suggestions: [], reason: 'case_already_linked' }
+ */
+router.get(
+  '/:id/customer-match-suggestions',
+  requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    // Scope verify via existing get (404/403 mantığı reuse).
+    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    const out = await customerMatchRepository.suggestCustomerMatches({
+      caseId: req.params.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      limit: req.query.limit ? Math.min(20, Math.max(1, Number(req.query.limit))) : 5,
+    });
+    if (!out) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(out);
   }),
 );
 
