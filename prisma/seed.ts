@@ -369,9 +369,14 @@ async function main() {
         updatedAt: new Date(c.updatedAt),
         resolvedAt: toDate(c.resolvedAt),
         // İlişkili tablolar
+        // Phase 1 add_company_id_to_child_tables migration sonrası tüm Case
+        // child kayıtları companyId zorunlu — nested create'lerde Case.companyId
+        // ile denormalize ediyoruz (schema: CaseNote/CaseAttachment/CaseActivity/
+        // CaseCallLog hepsi `companyId String`).
         notes: {
           create: c.notes.map((n) => ({
             id: n.id,
+            companyId: c.companyId,
             authorName: n.authorName,
             content: n.content,
             visibility: n.visibility,
@@ -381,6 +386,7 @@ async function main() {
         attachments: {
           create: c.files.map((f) => ({
             id: f.id,
+            companyId: c.companyId,
             fileName: f.fileName,
             fileSize: f.fileSize,
             mimeType: f.mimeType,
@@ -392,6 +398,7 @@ async function main() {
         history: {
           create: c.history.map((h) => ({
             id: h.id,
+            companyId: c.companyId,
             action: h.action,
             actionType: h.actionType,
             fieldName: h.fieldName,
@@ -405,6 +412,7 @@ async function main() {
         callLogs: {
           create: c.callLogs.map((cl) => ({
             id: cl.id,
+            companyId: c.companyId,
             callDate: new Date(cl.callDate),
             durationMin: cl.durationMin,
             callDisposition: map(M_CALL_DISP, cl.callDisposition),
