@@ -286,7 +286,7 @@ function CompaniesSection({
   return (
     <SectionCard
       title="Şirket İlişkileri"
-      subtitle="Bu müşterinin bağlı olduğu şirketler ve Univera kayıtları"
+      subtitle="Bu müşterinin bağlı olduğu şirketler ve dış sistem kayıtları"
       action={
         isWriter ? (
           <Button variant="outline" size="sm" leftIcon={<Plus size={12} />} onClick={onAdd}>
@@ -321,8 +321,11 @@ function CompaniesSection({
                   </span>
                   <Badge tint={statusTint(c.status)}>{statusLabel(c.status)}</Badge>
                   {c.externalCustomerCode && (
-                    <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
-                      Univera {c.externalCustomerCode}
+                    <span
+                      title="Müşteri Dış Kodu"
+                      className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
+                    >
+                      Kod {c.externalCustomerCode}
                     </span>
                   )}
                 </div>

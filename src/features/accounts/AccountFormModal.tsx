@@ -105,7 +105,7 @@ export function AccountFormModal({
       rows.forEach((r, i) => {
         if (!r.companyId) errs[`row.${i}.companyId`] = 'Şirket seç.';
         if (r.externalCustomerCode && !FIVE_DIGIT_RX.test(r.externalCustomerCode.trim())) {
-          errs[`row.${i}.externalCustomerCode`] = 'Tam 5 hane (rakam) olmalı.';
+          errs[`row.${i}.externalCustomerCode`] = 'Müşteri dış kodu 5 hane olmalı.';
         }
       });
       // Aynı şirket iki kez seçilmiş mi
@@ -285,8 +285,8 @@ export function AccountFormModal({
                       </Select>
                     </Field>
                     <Field
-                      label="Univera Müşteri Kodu"
-                      hint="5 hane (opsiyonel)"
+                      label="Müşteri Dış Kodu"
+                      hint="Opsiyonel dış sistem kodu (ERP/CRM/3. parti)"
                       error={errors[`row.${i}.externalCustomerCode`]}
                     >
                       <TextInput
@@ -332,9 +332,9 @@ export function AccountFormModal({
         )}
 
         {mode === 'edit' && (
-          <p className="rounded-md bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
-            Şirket ilişkilerini (Univera kodu, paket, sözleşme) bu ekrandan henüz
-            düzenleyemezsin. Bir sonraki fazda gelecek.
+          <p className="rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-700 dark:bg-ndark-surface dark:text-ndark-muted">
+            Şirket ilişkileri, kontaklar ve ürünler müşteri detay sayfasındaki
+            ilgili bölümlerden düzenlenir.
           </p>
         )}
       </form>

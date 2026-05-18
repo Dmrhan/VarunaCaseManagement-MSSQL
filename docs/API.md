@@ -513,7 +513,7 @@ Notlar:
 
 - Agent ve Backoffice rolleri herhangi bir Account endpoint'ine erisemez (403).
 - VKN response'ta MASKELI doner (`123***890` formati). Plain VKN log'a yazilmaz.
-- Universa/`externalCustomerCode` tam 5 hane (regex `^\d{5}$`); per-company benzersiz.
+- `externalCustomerCode` (Müşteri Dış Kodu, ERP/CRM/3. parti sistem referansı) opsiyonel; verilirse tam 5 hane rakam (regex `^\d{5}$`); per-company benzersiz.
 - `vkn` global benzersiz; çakisma 409 (`{ error: "duplicate_vkn" }`).
 - `externalCustomerCode` çakismasi 409 (`{ error: "duplicate_external_code" }`).
 
