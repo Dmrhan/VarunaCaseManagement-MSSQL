@@ -111,6 +111,8 @@ type DemoCase = {
   accountName: string;
   assignedTeamId?: string;
   assignedTeamName?: string;
+  assignedPersonId?: string;
+  assignedPersonName?: string;
   escalationLevel?: EscalationLevel;
   slaViolation?: boolean;
   /** scenario notları için tag (raporlama amaçlı). */
@@ -287,6 +289,8 @@ const CASES: DemoCase[] = [
   }),
 
   // ───── PARAM Fintech ─────
+  // PARAM vakalarının bir kısmı Demo Agent'a (USR-001 = Burak Demir, TEAM-DESTEK)
+  // atanır. Aksi halde Agent MyHome boş kalır.
   paramCase({
     caseNumber: 'DEMO-PAR-001',
     title: 'POS: "Bilinmeyen Hata" işlemi reddediyor',
@@ -294,6 +298,8 @@ const CASES: DemoCase[] = [
     accountId: 'DEMO-ACC-PAR-001',
     accountName: 'Sancaktepe Market Zinciri',
     productGroup: 'Fiziki POS',
+    assignedPersonId: 'USR-001',
+    assignedPersonName: 'Burak Demir',
     scenarioTag: 'watcher',
   }),
   paramCase({
@@ -305,6 +311,8 @@ const CASES: DemoCase[] = [
     productGroup: 'BKM Servisi',
     status: 'Eskalasyon',
     escalationLevel: 'Direktor',
+    assignedPersonId: 'USR-001',
+    assignedPersonName: 'Burak Demir',
     scenarioTag: 'ai-status-report',
   }),
   // Duplicate (Linked Cases scenario)
@@ -315,6 +323,8 @@ const CASES: DemoCase[] = [
     accountId: 'DEMO-ACC-PAR-002',
     accountName: 'GnG Online Mağaza',
     productGroup: 'Sanal POS',
+    assignedPersonId: 'USR-001',
+    assignedPersonName: 'Burak Demir',
     scenarioTag: 'linked-duplicate-a',
   }),
   paramCase({
@@ -388,54 +398,39 @@ async function upsertCases() {
   console.log(`→ ${CASES.length} demo vaka upsert ediliyor...`);
   for (const c of CASES) {
     const existing = await prisma.case.findUnique({ where: { caseNumber: c.caseNumber }, select: { id: true } });
+    // Phase D hotfix: assignedPersonId/Name eski seed'de eksikti; Demo Agent KPI
+     //'larının dolması için scenario CASES'lerinde belirtilen kişiyi DB'ye yansıt.
+    const baseData = {
+      title: c.title,
+      description: c.description,
+      caseType: c.caseType,
+      status: c.status,
+      priority: c.priority,
+      origin: c.origin,
+      category: c.category,
+      subCategory: c.subCategory,
+      requestType: c.requestType,
+      productGroup: c.productGroup,
+      companyId: c.companyId,
+      companyName: c.companyName,
+      accountId: c.accountId,
+      accountName: c.accountName,
+      assignedTeamId: c.assignedTeamId,
+      assignedTeamName: c.assignedTeamName,
+      assignedPersonId: c.assignedPersonId ?? null,
+      assignedPersonName: c.assignedPersonName ?? null,
+      escalationLevel: c.escalationLevel ?? 'Yok',
+      slaViolation: c.slaViolation ?? false,
+    };
     if (existing) {
       const updated = await prisma.case.update({
         where: { caseNumber: c.caseNumber },
-        data: {
-          title: c.title,
-          description: c.description,
-          caseType: c.caseType,
-          status: c.status,
-          priority: c.priority,
-          origin: c.origin,
-          category: c.category,
-          subCategory: c.subCategory,
-          requestType: c.requestType,
-          productGroup: c.productGroup,
-          companyId: c.companyId,
-          companyName: c.companyName,
-          accountId: c.accountId,
-          accountName: c.accountName,
-          assignedTeamId: c.assignedTeamId,
-          assignedTeamName: c.assignedTeamName,
-          escalationLevel: c.escalationLevel ?? 'Yok',
-          slaViolation: c.slaViolation ?? false,
-        },
+        data: baseData,
       });
       caseIdByNumber.set(c.caseNumber, updated.id);
     } else {
       const created = await prisma.case.create({
-        data: {
-          caseNumber: c.caseNumber,
-          title: c.title,
-          description: c.description,
-          caseType: c.caseType,
-          status: c.status,
-          priority: c.priority,
-          origin: c.origin,
-          category: c.category,
-          subCategory: c.subCategory,
-          requestType: c.requestType,
-          productGroup: c.productGroup,
-          companyId: c.companyId,
-          companyName: c.companyName,
-          accountId: c.accountId,
-          accountName: c.accountName,
-          assignedTeamId: c.assignedTeamId,
-          assignedTeamName: c.assignedTeamName,
-          escalationLevel: c.escalationLevel ?? 'Yok',
-          slaViolation: c.slaViolation ?? false,
-        },
+        data: { caseNumber: c.caseNumber, ...baseData },
       });
       caseIdByNumber.set(c.caseNumber, created.id);
     }
