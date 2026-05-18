@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Building2, Search, Sparkles, X, Zap } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -6,13 +6,15 @@ import { Field, TextInput } from '@/components/ui/Field';
 import { Badge } from '@/components/ui/Badge';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { useToast } from '@/components/ui/Toast';
-import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
+import { caseService, type NewCaseInput } from '@/services/caseService';
+import { accountService } from '@/services/accountService';
 import {
   CASE_TYPES,
   CASE_TYPE_LABELS,
   type Case,
   type CaseType,
 } from './types';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 
 interface QuickCaseModalProps {
   open: boolean;
@@ -29,7 +31,9 @@ const CASE_TYPE_HINTS: Record<CaseType, string> = {
   Churn:             'Müşteri iptal talebi yönetimi',
 };
 
-// Quick mode için sabit defaultlar — detaylar drawer'da düzenlenebilir
+// Quick mode için sabit defaultlar — detaylar drawer'da düzenlenebilir.
+// NOT (Phase C2): companyId/companyName hala mock — Phase D'de UI'da gerçek
+// şirket seçimi gelecek. Burada müşteri picker dışında değişiklik yok.
 const QUICK_DEFAULTS = {
   description: '— Hızlı vaka açılışı, detaylar daha sonra eklenecek —',
   priority: 'Medium' as const,
@@ -43,42 +47,29 @@ const QUICK_DEFAULTS = {
 };
 
 export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: QuickCaseModalProps) {
-  const accounts = useMemo(() => lookupService.accounts(), []);
-
-  const [accountId, setAccountId] = useState('');
+  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(null);
   const [caseType, setCaseType] = useState<CaseType>('GeneralSupport');
   const [title, setTitle] = useState('');
-  const [accountQuery, setAccountQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    if (open) {
-      setAccountId(prefillAccountId ?? '');
+    if (!open) {
+      setSelectedAccount(null);
       setCaseType('GeneralSupport');
       setTitle('');
-      setAccountQuery('');
-      const t = window.setTimeout(() => {
-        if (prefillAccountId) titleRef.current?.focus();
-      }, 80);
+      return;
+    }
+    if (prefillAccountId) {
+      void accountService.get(prefillAccountId).then((acc) => {
+        if (acc) setSelectedAccount({ id: acc.id, name: acc.name });
+      });
+      const t = window.setTimeout(() => titleRef.current?.focus(), 80);
       return () => window.clearTimeout(t);
     }
   }, [open, prefillAccountId]);
-
-  const selectedAccount = accounts.find((a) => a.id === accountId);
-
-  const filteredAccounts = useMemo(() => {
-    const q = accountQuery.trim().toLowerCase();
-    if (!q) return accounts;
-    const qNoSpace = q.replace(/\s/g, '');
-    return accounts.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
-        (a.phone ?? '').replace(/\s/g, '').includes(qNoSpace),
-    );
-  }, [accounts, accountQuery]);
 
   const canSubmit = Boolean(selectedAccount) && title.trim().length > 0 && !submitting;
 
@@ -140,7 +131,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
       }
       footer={
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-ndark-muted">
             <Sparkles size={12} />
             Detaylar sonra Vaka Detayında düzenlenebilir.
           </span>
@@ -159,63 +150,40 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
         {/* Müşteri */}
         <Field label="Müşteri" required>
           {selectedAccount ? (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-brand-300 bg-brand-50/40 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-brand-300 bg-brand-50/40 px-3 py-2 dark:border-brand-700 dark:bg-brand-900/20">
               <div className="flex min-w-0 items-center gap-2">
-                <Building2 size={14} className="text-brand-600" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-800">
-                    {selectedAccount.name}
-                  </div>
-                  <div className="truncate text-[11px] text-slate-500">{selectedAccount.phone}</div>
-                </div>
+                <Building2 size={14} className="text-brand-600 dark:text-brand-300" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                  {selectedAccount.name}
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setAccountId('');
-                  setAccountQuery('');
-                }}
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-800"
-                aria-label="Müşteriyi değiştir"
-              >
-                <X size={12} /> Değiştir
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+                >
+                  Değiştir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAccount(null)}
+                  aria-label="Müşteriyi temizle"
+                  className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                >
+                  <X size={12} />
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="space-y-2">
-              <div className="relative">
-                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <TextInput
-                  placeholder="İsim veya telefon ile ara…"
-                  value={accountQuery}
-                  onChange={(e) => setAccountQuery(e.target.value)}
-                  className="pl-8"
-                  autoFocus
-                />
-              </div>
-              <ul className="max-h-[160px] overflow-y-auto rounded-md border border-slate-200 bg-white scrollbar-thin">
-                {filteredAccounts.length === 0 ? (
-                  <li className="px-3 py-2 text-xs text-slate-500">Sonuç yok.</li>
-                ) : (
-                  filteredAccounts.map((a) => (
-                    <li key={a.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAccountId(a.id);
-                          setAccountQuery('');
-                        }}
-                        className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-slate-50"
-                      >
-                        <Building2 size={13} className="text-slate-400" />
-                        <span className="flex-1 truncate font-medium text-slate-800">{a.name}</span>
-                        <span className="font-mono text-[11px] text-slate-500">{a.phone}</span>
-                      </button>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:bg-ndark-surface"
+            >
+              <Search size={14} />
+              <span className="flex-1">Müşteri ara…</span>
+            </button>
           )}
         </Field>
 
@@ -232,7 +200,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
                   className={`rounded-md px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
                     active
                       ? 'bg-brand-600 text-white ring-brand-600'
-                      : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50'
+                      : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50 dark:bg-ndark-card dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-surface'
                   }`}
                 >
                   {CASE_TYPE_LABELS[t]}
@@ -240,7 +208,9 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
               );
             })}
           </div>
-          <p className="mt-1.5 text-[11px] text-slate-500">{CASE_TYPE_HINTS[caseType]}</p>
+          <p className="mt-1.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+            {CASE_TYPE_HINTS[caseType]}
+          </p>
         </Field>
 
         {/* Vaka Konusu */}
@@ -262,7 +232,7 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
               }
             }}
           />
-          <div className="flex justify-end text-[11px] text-slate-400">
+          <div className="flex justify-end text-[11px] text-slate-400 dark:text-ndark-dim">
             <span className={title.length > TITLE_MAX * 0.9 ? 'text-amber-600' : ''}>
               {title.length}/{TITLE_MAX}
             </span>
@@ -270,10 +240,20 @@ export function QuickCaseModal({ open, onClose, onCreated, prefillAccountId }: Q
         </Field>
 
         {/* Otomatik atananlar — tek satır muted */}
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
           ℹ Öncelik, şirket ve kategori vaka açıldıktan sonra ayarlanabilir.
         </p>
       </div>
+
+      <AccountSearchPicker
+        open={pickerOpen}
+        selectedAccountId={selectedAccount?.id ?? null}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(account) => {
+          setPickerOpen(false);
+          if (account) setSelectedAccount({ id: account.id, name: account.name });
+        }}
+      />
     </Modal>
   );
 }

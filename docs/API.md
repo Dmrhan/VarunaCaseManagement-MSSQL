@@ -494,6 +494,160 @@ Base path:
 | --- | --- | --- | --- |
 | GET | `/api/lookups/bootstrap` | JWT | Uygulama acilisinda gereken lookup verilerini tek istekte dondurur |
 
+## Accounts (Phase A)
+
+Base path:
+
+```txt
+/api/accounts
+```
+
+| Method | Path | Auth | Aciklama |
+| --- | --- | --- | --- |
+| GET | `/api/accounts` | JWT — `Supervisor` / `CSM` / `Admin` / `SystemAdmin` | Musteri listesi (scope: AccountCompany + legacy `Account.companyId` veya `NULL`). |
+| GET | `/api/accounts/:id` | JWT — read roller | Tek musteri detayi: izinli sirket iliskileri + kontaklar + son vakalar. |
+| POST | `/api/accounts` | JWT — `Admin` / `SystemAdmin` | Yeni musteri + en az bir sirket iliskisi (atomik). |
+| PATCH | `/api/accounts/:id` | JWT — `Admin` / `SystemAdmin` | Sadece Account fieldlari (`name`, `phone`, `email`, `isActive`, `vkn`). |
+
+Notlar:
+
+- Agent ve Backoffice rolleri herhangi bir Account endpoint'ine erisemez (403).
+- VKN response'ta MASKELI doner (`123***890` formati). Plain VKN log'a yazilmaz.
+- Universa/`externalCustomerCode` tam 5 hane (regex `^\d{5}$`); per-company benzersiz.
+- `vkn` global benzersiz; çakisma 409 (`{ error: "duplicate_vkn" }`).
+- `externalCustomerCode` çakismasi 409 (`{ error: "duplicate_external_code" }`).
+
+### GET /api/accounts
+
+Query parametreleri:
+
+- `search` — min 2 char. Match: `name` (contains), `vkn` (startsWith), contact `phone`/`email` (contains)
+- `companyId` — izinli sirket icindeki bir companyId; izinsizse bos liste doner
+- `status` — AccountCompany.status filter (`active` | `churn` | `prospect` | `inactive`)
+- `page` (default 1), `limit` (default 25, max 100)
+
+Response:
+
+```json
+{
+  "accounts": [
+    {
+      "id": "cuid",
+      "name": "Acme A.Ş.",
+      "vknMasked": "123***890",
+      "phone": "+90...",
+      "email": "info@acme.com",
+      "isActive": true,
+      "companies": [
+        { "companyId": "...", "companyName": "PARAM", "status": "active", "externalCustomerCode": "30001" }
+      ],
+      "openCaseCount": 2,
+      "totalCaseCount": 7
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "limit": 25
+}
+```
+
+### GET /api/accounts/:id
+
+Response (kisaltilmis):
+
+```json
+{
+  "id": "cuid",
+  "name": "Acme A.Ş.",
+  "vknMasked": "123***890",
+  "phone": "+90...",
+  "email": "info@acme.com",
+  "isActive": true,
+  "createdAt": "2026-04-01T...",
+  "companies": [
+    {
+      "companyId": "...",
+      "companyName": "PARAM",
+      "status": "active",
+      "externalCustomerCode": "30001",
+      "packageName": "Standart",
+      "contractStartAt": "2026-01-01T...",
+      "contractEndAt": null,
+      "segment": "KOBI",
+      "notes": null
+    }
+  ],
+  "contacts": [
+    {
+      "id": "...",
+      "fullName": "Ayse Yilmaz",
+      "title": "Karar Verici",
+      "phone": "+90...",
+      "email": "ayse@acme.com",
+      "isPrimary": true,
+      "isActive": true,
+      "preferredChannel": "email"
+    }
+  ],
+  "caseStats": { "total": 7, "open": 2, "resolved": 4, "slaBreachCount": 1 },
+  "recentCases": [
+    {
+      "id": "...",
+      "caseNumber": "CS-2026-000123",
+      "title": "Iade talebi",
+      "status": "Acik",
+      "priority": "High",
+      "createdAt": "..."
+    }
+  ]
+}
+```
+
+### POST /api/accounts
+
+Request body:
+
+```json
+{
+  "name": "Acme A.Ş.",
+  "vkn": "1234567890",
+  "phone": "+90...",
+  "email": "info@acme.com",
+  "companies": [
+    {
+      "companyId": "...",
+      "externalCustomerCode": "30001",
+      "packageName": "Standart",
+      "contractStartAt": "2026-01-01"
+    }
+  ]
+}
+```
+
+Dogrulamalar:
+
+- `name` zorunlu.
+- `companies` dizi, min 1 eleman.
+- `companies[].companyId` izinli (SystemAdmin disinda `allowedCompanyIds` icinde olmali).
+- `externalCustomerCode` opsiyonel; verilirse `^\d{5}$`.
+- `vkn` opsiyonel; varsa global benzersiz; cakisma 409.
+
+Response: yeni musteri (GET /api/accounts/:id ile ayni shape), HTTP 201.
+
+`Account.companyId` (legacy) ilk company ile doldurulur — mevcut Case scope sorgulari geri uyumlu kalir.
+
+### PATCH /api/accounts/:id
+
+Request body:
+
+```json
+{ "name": "...", "phone": "...", "email": "...", "isActive": true, "vkn": "..." }
+```
+
+Sirket iliskileri burada guncellenmez — sonraki Phase'lerde ayri endpoint'lerle gelir.
+
+Cakisma: `vkn` baska bir Account'ta varsa 409 (`{ error: "duplicate_vkn" }`).
+
 ## Admin
 
 Base path:

@@ -78,10 +78,24 @@ async function bootstrapInner(allowedCompanyIds) {
           where: allowedCompanyIds ? { isActive: true, id: { in: allowedCompanyIds } } : { isActive: true },
           orderBy: { name: 'asc' },
         }),
-        // Account: companyId null = shared (eski yorum: "aynı müşteri birden
-        // fazla şirketin vakası olabilir") — null'ları her zaman dahil.
+        // Account scope — accountRepository.buildScopeWhere ile simetrik:
+        //   (legacy Account.companyId in allowedCompanyIds)
+        //   OR (legacy Account.companyId NULL = shared)
+        //   OR (AccountCompany kaydı izinli şirkete bağlı — Phase A sonrası
+        //       legacy companyId boş ama AccountCompany üzerinden bağlı müşteriler)
+        // Eski hali sadece ilk iki dalı kapsıyordu; Phase A migration sonrası
+        // legacy companyId set edilmemiş Account'lar bootstrap'tan kayıyordu.
         prisma.account.findMany({
-          where: { isActive: true, ...companyScopeNullable },
+          where: allowedCompanyIds
+            ? {
+                isActive: true,
+                OR: [
+                  { companyId: { in: allowedCompanyIds } },
+                  { companyId: null },
+                  { companies: { some: { companyId: { in: allowedCompanyIds } } } },
+                ],
+              }
+            : { isActive: true },
           orderBy: { name: 'asc' },
         }),
         // Team: companyId zorunlu (Phase 1).

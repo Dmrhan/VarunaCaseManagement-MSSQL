@@ -65,6 +65,7 @@ import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/Status
 import { useToast } from '@/components/ui/Toast';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
+import { accountService, type CaseCustomerContext } from '@/services/accountService';
 import { useAuth } from '@/services/AuthContext';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import {
@@ -102,11 +103,14 @@ interface CaseDetailPageProps {
   caseId: string;
   onBack: () => void;
   onShowCustomer?: (accountId: string) => void;
+  /** "Müşteri Detayı'na git" linki — sadece canReadAccounts olan rollerde aktiftir. */
+  onOpenAccount?: (accountId: string) => void;
 }
 
-export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPageProps) {
+export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const [item, setItem] = useState<Case | null>(null);
   const [loading, setLoading] = useState(false);
+  const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
   const [activeId, setActiveId] = useState(caseId);
 
   // Breadcrumb stack — geçmiş vaka navigasyonu için (max 3 level)
@@ -140,6 +144,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
   const noteRef = useRef<MentionTextareaHandle>(null);
 
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
+  // Phase C2: account bilgisi artık /api/cases/:id/customer-context'tan; bootstrap kullanılmıyor.
   const accounts = useMemo(() => lookupService.accounts(), []);
   const categories = useMemo(() => lookupService.categories(), []);
   const teams = useMemo(() => lookupService.teams(), []);
@@ -172,6 +177,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
     // seen yap. Header bell badge'i bu çağrıdan sonra refresh ile sayıyı düşürür.
     void caseService.markMentionsSeen(activeId).then(() => {
       window.dispatchEvent(new CustomEvent('app:mentions-changed'));
+    });
+    // Phase C2: customer-context — Univera kodu, paket, aktif ürünler, primary kontak.
+    void accountService.getCaseCustomerContext(activeId).then((out) => {
+      if (alive) setCustomerContext(out?.context ?? null);
     });
     return () => {
       alive = false;
@@ -644,9 +653,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer }: CaseDetailPag
         {/* Left panel */}
         <LeftPanel
           item={item}
-          accountPhone={account?.phone}
-          accountEmail={account?.email}
-          accountContact={account?.contactPerson}
+          accountPhone={customerContext?.primaryContact?.phone ?? account?.phone}
+          accountEmail={customerContext?.primaryContact?.email ?? account?.email}
+          accountContact={customerContext?.primaryContact?.fullName ?? account?.contactPerson}
+          customerContext={customerContext}
+          onOpenAccount={onOpenAccount}
           onStartCall={handleStartCall}
           onTransfer={() => setTransferOpen(true)}
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
@@ -857,6 +868,8 @@ function LeftPanel({
   accountPhone,
   accountEmail,
   accountContact,
+  customerContext,
+  onOpenAccount,
   onStartCall,
   onTransfer,
   onNoteAdded,
@@ -869,6 +882,8 @@ function LeftPanel({
   accountPhone?: string;
   accountEmail?: string;
   accountContact?: string;
+  customerContext: CaseCustomerContext | null;
+  onOpenAccount?: (accountId: string) => void;
   onStartCall: () => void;
   onTransfer: () => void;
   onNoteAdded: (note: import('./types').CaseNote) => void;
@@ -877,27 +892,99 @@ function LeftPanel({
   drawerOpen: boolean;
   onCloseDrawer: () => void;
 }) {
+  const ctxCompany = customerContext?.company ?? null;
   const content = (
     <div className="space-y-4">
       <PanelSection title="Müşteri" icon={<Building2 size={12} />}>
-        <div className="space-y-1">
-          <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">{item.accountName}</div>
-          <div className="font-mono text-[11px] text-slate-500">{item.accountId}</div>
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <Badge tint="slate">{item.companyName}</Badge>
-            <Badge tint={item.priority === 'Critical' ? 'rose' : 'blue'}>{item.priority}</Badge>
-          </div>
-          {accountPhone && (
-            <div className="flex items-center gap-1.5 pt-1 text-xs text-slate-600">
-              <Phone size={11} />
-              {accountPhone}
+        <div className="space-y-1.5">
+          {item.accountId ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                    {customerContext?.accountName ?? item.accountName}
+                  </div>
+                  {customerContext?.vknMasked && (
+                    <div className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+                      VKN {customerContext.vknMasked}
+                    </div>
+                  )}
+                </div>
+                {onOpenAccount && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenAccount(item.accountId as string)}
+                    title="Müşteri Detayı'na git"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+                  >
+                    Detay →
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tint="slate">{item.companyName}</Badge>
+                {ctxCompany?.externalCustomerCode && (
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+                    Univera {ctxCompany.externalCustomerCode}
+                  </span>
+                )}
+                {ctxCompany?.packageName && <Badge tint="indigo">{ctxCompany.packageName}</Badge>}
+                <Badge tint={item.priority === 'Critical' ? 'rose' : 'blue'}>
+                  {item.priority}
+                </Badge>
+              </div>
+              {ctxCompany?.activeProducts && ctxCompany.activeProducts.length > 0 && (
+                <div className="pt-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">
+                    Aktif Ürünler
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {ctxCompany.activeProducts.slice(0, 6).map((p) => (
+                      <Badge key={p.id} tint="teal">
+                        <span className="max-w-[140px] truncate">{p.productName}</span>
+                        {p.productCode && (
+                          <span className="ml-1 font-mono opacity-80">{p.productCode}</span>
+                        )}
+                      </Badge>
+                    ))}
+                    {ctxCompany.activeProducts.length > 6 && (
+                      <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
+                        +{ctxCompany.activeProducts.length - 6}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {accountPhone && (
+                <div className="flex items-center gap-1.5 pt-1 text-xs text-slate-600 dark:text-ndark-muted">
+                  <Phone size={11} />
+                  {accountPhone}
+                </div>
+              )}
+              {accountEmail && (
+                <div className="truncate text-[11px] text-slate-500 dark:text-ndark-muted">
+                  {accountEmail}
+                </div>
+              )}
+              {accountContact && (
+                <div className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                  Yetkili: {accountContact}
+                  {customerContext?.primaryContact?.title && (
+                    <span className="ml-1 text-slate-400 dark:text-ndark-dim">
+                      ({customerContext.primaryContact.title})
+                    </span>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
+              <div className="font-medium">Müşterisiz vaka</div>
+              <div className="mt-0.5 text-[11px] opacity-80">
+                Bu vaka açıldığında müşteri eşleşmesi yapılmadı. Supervisor / Admin
+                Müşteri Eşleştirme akışında bağlayabilir.
+              </div>
             </div>
-          )}
-          {accountEmail && (
-            <div className="truncate text-[11px] text-slate-500">{accountEmail}</div>
-          )}
-          {accountContact && (
-            <div className="text-[11px] text-slate-500">Yetkili: {accountContact}</div>
           )}
         </div>
       </PanelSection>

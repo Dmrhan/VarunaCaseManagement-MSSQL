@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError } from '../db/caseRepository.js';
+import { accountRepository } from '../db/accountRepository.js';
 import { verifyJwt } from '../db/auth.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
@@ -299,6 +300,30 @@ router.get(
     );
     if (!pulse) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(pulse);
+  }),
+);
+
+/**
+ * GET /api/cases/:id/customer-context — Case Detail müşteri panel'i.
+ *
+ * Hafif payload: müşteri adı, maskeli VKN, vakanın bağlı olduğu şirketin
+ * AccountCompany kaydı (externalCustomerCode, packageName, kontrat, aktif
+ * ürünler) ve birincil kontak. Account modülünün dahili `notes` ve `segment`
+ * alanları DAHİL EDİLMEZ (Agent için güvenli).
+ *
+ * accountId null vakalarda 200 + { context: null } döner.
+ */
+router.get(
+  '/:id/customer-context',
+  asyncRoute(async (req, res) => {
+    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    const context = await accountRepository.getCaseCustomerContext({
+      accountId: caseRow.accountId,
+      companyId: caseRow.companyId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json({ context });
   }),
 );
 

@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
-import { Building2, ExternalLink, Inbox, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Building2, ExternalLink, Inbox, Mail, Phone, Sparkles } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { caseService, lookupService } from '@/services/caseService';
-import { useEffect, useState } from 'react';
+import { caseService } from '@/services/caseService';
+import { accountService, type AccountDetail } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
 import { CASE_TYPE_LABELS } from '@/features/cases/types';
 
@@ -15,31 +15,44 @@ interface CustomerCardModalProps {
   onShowCase?: (caseId: string) => void;
 }
 
+/**
+ * Müşteri kartı önizleme — Phase C2 sonrası:
+ *  - Müşteri bilgisi: accountService.get (Phase A API)
+ *  - Vaka listesi: /api/cases/by-account (tüm vaka tablosunu çekmez)
+ *
+ * Önceden caseService.list() tüm vakaları çekip client'te filtreliyordu —
+ * büyük tenant'larda yük problemi vardı; düzeltildi.
+ */
 export function CustomerCardModal({ open, accountId, onClose, onShowCase }: CustomerCardModalProps) {
-  const accounts = useMemo(() => lookupService.accounts(), []);
-  const account = accounts.find((a) => a.id === accountId);
+  const [account, setAccount] = useState<AccountDetail | null>(null);
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    if (open && accountId) {
-      setLoading(true);
-      void caseService.list().then(({ items }) => {
-        if (alive) {
-          setCases(items.filter((c) => c.accountId === accountId));
-          setLoading(false);
-        }
-      });
-    } else {
+    if (!open || !accountId) {
+      setAccount(null);
       setCases([]);
+      return;
     }
+    setLoading(true);
+    void Promise.all([
+      accountService.get(accountId),
+      caseService.findByAccount(accountId),
+    ]).then(([acc, list]) => {
+      if (!alive) return;
+      setAccount(acc ?? null);
+      setCases(list ?? []);
+      setLoading(false);
+    });
     return () => {
       alive = false;
     };
   }, [open, accountId]);
 
-  const openCount = cases.filter((c) => c.status !== 'Çözüldü' && c.status !== 'İptalEdildi').length;
+  const openCount = cases.filter(
+    (c) => c.status !== 'Çözüldü' && c.status !== 'İptalEdildi',
+  ).length;
   const slaBreach = cases.filter((c) => c.slaViolation).length;
   const byType = cases.reduce<Record<string, number>>((acc, c) => {
     acc[c.caseType] = (acc[c.caseType] ?? 0) + 1;
@@ -55,14 +68,13 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
         <div className="flex items-center gap-2">
           <Building2 size={16} className="text-brand-600" />
           <span>Müşteri Kartı</span>
-          <Badge tint="amber">FAZ 0 — Önizleme</Badge>
         </div>
       }
       footer={
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-ndark-muted">
             <Sparkles size={12} />
-            Tam Müşteri Kartı modülü FAZ 1+ ile gelecek.
+            Detay için Müşteriler sayfasını aç.
           </span>
           <Button variant="outline" onClick={onClose}>
             Kapat
@@ -70,24 +82,69 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
         </div>
       }
     >
-      {!account ? (
-        <p className="text-sm text-slate-600">Müşteri bulunamadı.</p>
+      {!account && !loading ? (
+        <p className="text-sm text-slate-600 dark:text-ndark-muted">Müşteri bulunamadı.</p>
       ) : (
         <div className="space-y-4">
           <div>
-            <div className="text-lg font-semibold text-slate-900">{account.name}</div>
-            <div className="font-mono text-xs text-slate-500">{account.id}</div>
+            <div className="text-lg font-semibold text-slate-900 dark:text-ndark-text">
+              {account?.name ?? '…'}
+            </div>
+            {account?.vknMasked && (
+              <div className="font-mono text-xs text-slate-500 dark:text-ndark-muted">
+                VKN {account.vknMasked}
+              </div>
+            )}
           </div>
+
+          {account?.companies && account.companies.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {account.companies.map((c) => (
+                <Badge
+                  key={c.accountCompanyId ?? c.companyId}
+                  tint="blue"
+                  icon={<Building2 size={10} />}
+                >
+                  <span className="max-w-[140px] truncate">
+                    {c.companyName ?? c.companyId}
+                  </span>
+                  {c.externalCustomerCode && (
+                    <span className="ml-1 font-mono opacity-80">{c.externalCustomerCode}</span>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          {(account?.phone || account?.email) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-ndark-muted">
+              {account?.phone && (
+                <span className="inline-flex items-center gap-1">
+                  <Phone size={11} /> {account.phone}
+                </span>
+              )}
+              {account?.email && (
+                <span className="inline-flex items-center gap-1 truncate">
+                  <Mail size={11} /> <span className="truncate">{account.email}</span>
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-2">
             <SummaryTile label="Toplam Vaka" value={cases.length} loading={loading} />
-            <SummaryTile label="Açık"        value={openCount}    loading={loading} tone="info" />
-            <SummaryTile label="SLA İhlal"   value={slaBreach}    loading={loading} tone={slaBreach > 0 ? 'danger' : 'neutral'} />
+            <SummaryTile label="Açık" value={openCount} loading={loading} tone="info" />
+            <SummaryTile
+              label="SLA İhlal"
+              value={slaBreach}
+              loading={loading}
+              tone={slaBreach > 0 ? 'danger' : 'neutral'}
+            />
           </div>
 
           {Object.keys(byType).length > 0 && (
             <div>
-              <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
                 Tip Dağılımı
               </h4>
               <div className="flex flex-wrap gap-1.5">
@@ -102,20 +159,27 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
 
           {cases.length > 0 && (
             <div>
-              <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
                 <Inbox size={12} />
                 Son Vakalar
               </h4>
-              <ul className="divide-y divide-slate-100 rounded-md ring-1 ring-slate-200">
+              <ul className="divide-y divide-slate-100 rounded-md ring-1 ring-slate-200 dark:divide-ndark-border/60 dark:ring-ndark-border">
                 {cases.slice(0, 5).map((c) => (
-                  <li key={c.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <span className="font-mono text-[11px] text-slate-500">{c.caseNumber}</span>
-                    <span className="flex-1 truncate text-slate-800">{c.title}</span>
+                  <li
+                    key={c.id}
+                    className="flex items-center gap-2 px-3 py-2 text-sm dark:bg-ndark-card"
+                  >
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {c.caseNumber}
+                    </span>
+                    <span className="flex-1 truncate text-slate-800 dark:text-ndark-text">
+                      {c.title}
+                    </span>
                     {onShowCase && (
                       <button
                         type="button"
                         onClick={() => onShowCase(c.id)}
-                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
                       >
                         <ExternalLink size={11} /> Aç
                       </button>
@@ -124,7 +188,9 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
                 ))}
               </ul>
               {cases.length > 5 && (
-                <p className="mt-1 text-[11px] text-slate-400">+{cases.length - 5} daha…</p>
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-ndark-dim">
+                  +{cases.length - 5} daha…
+                </p>
               )}
             </div>
           )}
@@ -146,14 +212,16 @@ function SummaryTile({
   tone?: 'neutral' | 'info' | 'danger';
 }) {
   const cls =
-    tone === 'info'   ? 'bg-blue-50 ring-blue-200 text-blue-800' :
-    tone === 'danger' ? 'bg-rose-50 ring-rose-200 text-rose-800' :
-                         'bg-slate-50 ring-slate-200 text-slate-700';
+    tone === 'info'
+      ? 'bg-blue-50 ring-blue-200 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 dark:ring-blue-900/40'
+      : tone === 'danger'
+        ? 'bg-rose-50 ring-rose-200 text-rose-800 dark:bg-rose-900/30 dark:text-rose-200 dark:ring-rose-900/40'
+        : 'bg-slate-50 ring-slate-200 text-slate-700 dark:bg-ndark-surface dark:text-ndark-text dark:ring-ndark-border';
   return (
     <div className={`rounded-md p-2.5 ring-1 ring-inset ${cls}`}>
       <div className="text-[10px] font-medium uppercase tracking-wide opacity-80">{label}</div>
       {loading ? (
-        <div className="mt-1 h-6 w-8 animate-pulse rounded bg-slate-200" />
+        <div className="mt-1 h-6 w-8 animate-pulse rounded bg-slate-200 dark:bg-ndark-border" />
       ) : (
         <div className="mt-0.5 text-xl font-semibold">{value}</div>
       )}

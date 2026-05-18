@@ -276,15 +276,16 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts         Account[]
-  teams            Team[]
-  cases            Case[]
-  slaPolicies      SLAPolicy[]
-  categories       CategoryDef[]
-  checklists       ChecklistTemplate[]
-  fieldDefinitions FieldDefinition[]
-  settings         CompanySettings?
-  userCompanies    UserCompany[]
+  accounts          Account[]
+  accountCompanies  AccountCompany[]
+  teams             Team[]
+  cases             Case[]
+  slaPolicies       SLAPolicy[]
+  categories        CategoryDef[]
+  checklists        ChecklistTemplate[]
+  fieldDefinitions  FieldDefinition[]
+  settings          CompanySettings?
+  userCompanies     UserCompany[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -325,11 +326,14 @@ model CompanySettings {
 }
 
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
-// companyId opsiyonel: aynı müşteri birden fazla şirketin (PARAM/UNIVERA/FINROTA)
-// vakası olabilir; gerçek CRM entegrasyonunda canonical bağlama gelecek.
+// Phase A: Account global kimlik. Şirkete özel alanlar (Univera kodu, paket,
+// kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
+// ve mevcut Case scope sorguları için geri uyumlu kalır.
 model Account {
   id        String   @id @default(cuid())
   name      String
+  /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
+  vkn       String?  @unique
   companyId String?
   email     String?
   phone     String?
@@ -337,11 +341,82 @@ model Account {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company Company? @relation(fields: [companyId], references: [id])
-  cases   Case[]
+  company   Company? @relation(fields: [companyId], references: [id])
+  cases     Case[]
+  companies AccountCompany[]
+  contacts  AccountContact[]
 
   @@index([companyId])
   @@index([name])
+}
+
+// AccountCompany — Account ile Company arasında per-tenant ilişki.
+// Aynı müşteri (Account) birden çok şirkete (PARAM/UNIVERA/FINROTA) bağlı
+// olabilir; şirkete özel kod, paket, kontrat ve segment burada tutulur.
+model AccountCompany {
+  id                   String    @id @default(cuid())
+  accountId            String
+  companyId            String
+  /// Univera 5 haneli müşteri kodu — şirket içinde unique.
+  externalCustomerCode String?
+  packageName          String?
+  contractStartAt      DateTime?
+  contractEndAt        DateTime?
+  segment              String?
+  status               String    @default("active") // active | churn | prospect | inactive
+  notes                String?   @db.Text
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products AccountProduct[]
+
+  @@unique([accountId, companyId])
+  @@unique([companyId, externalCustomerCode])
+  @@index([companyId])
+  @@index([accountId])
+  @@index([externalCustomerCode])
+}
+
+// AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.
+// Vaka açma akışında müşteri context'ini zenginleştirir; vaka için zorunlu değil.
+model AccountProduct {
+  id               String    @id @default(cuid())
+  accountCompanyId String
+  productName      String
+  productCode      String?
+  isActive         Boolean   @default(true)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+
+  @@unique([accountCompanyId, productCode])
+  @@index([accountCompanyId])
+}
+
+// AccountContact — Account altında kişi kayıtları (karar verici, teknik lider vb.).
+// Global tutulur; ileride per-company role linkleri eklenebilir.
+model AccountContact {
+  id               String   @id @default(cuid())
+  accountId        String
+  fullName         String
+  title            String?
+  email            String?
+  phone            String?
+  isPrimary        Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.
+  preferredChannel String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
 }
 
 model Team {
@@ -486,8 +561,10 @@ model Case {
   // Şirket / Müşteri (denormalized — ad alanları arşiv için)
   companyId   String
   companyName String
-  accountId   String
-  accountName String
+  // Phase C2: accountId nullable — Agent müşteriyi tanıyamadığında vaka
+  // "müşterisiz" açılabilir; Supervisor/Admin sonra eşleştirir.
+  accountId   String?
+  accountName String?
 
   // Sınıflandırma (denormalized — kategori adları)
   category     String
@@ -585,7 +662,7 @@ model Case {
 
   // Relations
   company        Company     @relation(fields: [companyId], references: [id])
-  account        Account     @relation(fields: [accountId], references: [id])
+  account        Account?    @relation(fields: [accountId], references: [id])
   assignedTeam   Team?       @relation(fields: [assignedTeamId], references: [id])
   assignedPerson Person?     @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
   thirdParty     ThirdParty? @relation(fields: [thirdPartyId], references: [id])

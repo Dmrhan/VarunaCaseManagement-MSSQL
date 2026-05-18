@@ -8,9 +8,11 @@ import {
   History,
   LineChart,
   Loader2,
+  Search,
   ShieldAlert,
   Sparkles,
   TrendingDown,
+  UserX,
   X,
   Zap,
 } from 'lucide-react';
@@ -24,6 +26,7 @@ import { CustomFieldsSection, validateCustomFields } from '@/components/CustomFi
 import { useToast } from '@/components/ui/Toast';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
   aiService,
   aiErrorMessage,
@@ -70,6 +73,7 @@ const emptyForm = {
   originDescription: '',
   companyId: '',
   accountId: '',
+  accountName: '',
   category: '',
   subCategory: '',
   requestType: '' as '' | CaseRequestType,
@@ -147,6 +151,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [duplicateCase, setDuplicateCase] = useState<Case | undefined>(undefined);
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
@@ -163,7 +168,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const { toast } = useToast();
 
   const companies = useMemo(() => lookupService.companies(), []);
-  const accounts = useMemo(() => lookupService.accounts(), []);
+  // Phase C2: müşteri seçimi artık AccountSearchPicker (real API). Bootstrap
+  // cache'inden account listesi okunmuyor.
   const categories = useMemo(() => lookupService.categories(), []);
   const teams = useMemo(() => lookupService.teams(), []);
   const requestTypes = useMemo(() => lookupService.requestTypes(), []);
@@ -176,15 +182,6 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     [allFieldDefinitions, form.companyId],
   );
 
-  // Şirkete göre filtrelenmiş müşteri/takım listeleri (multi-tenant).
-  // Account.companyId null = paylaşımlı müşteri (her şirket görür).
-  const accountsForCompany = useMemo(
-    () =>
-      form.companyId
-        ? accounts.filter((a) => a.companyId == null || a.companyId === form.companyId)
-        : [],
-    [accounts, form.companyId],
-  );
   const teamsForCompany = useMemo(
     () => (form.companyId ? teams.filter((t) => t.companyId === form.companyId) : []),
     [teams, form.companyId],
@@ -217,12 +214,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     }
   }, [open]);
 
-  // Şirket değişince müşteri sıfırlansın (cross-tenant guard)
+  // Şirket değişince müşteri seçimini sıfırla. Picker yeni şirketin müşterilerini
+  // canlı API'den çeker; cross-tenant veri kalmasın.
   useEffect(() => {
-    if (form.accountId && !accountsForCompany.some((a) => a.id === form.accountId)) {
-      setForm((f) => ({ ...f, accountId: '' }));
-    }
-  }, [accountsForCompany, form.accountId]);
+    setForm((f) => {
+      if (!f.accountId && !f.accountName) return f;
+      return { ...f, accountId: '', accountName: '' };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.companyId]);
 
   // Takım şirket dışındaysa sıfırla
   useEffect(() => {
@@ -348,7 +348,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     if (!form.title.trim()) e.title = 'Başlık zorunlu';
     if (!form.description.trim()) e.description = 'Açıklama zorunlu';
     if (!form.companyId) e.companyId = 'Şirket seçilmeli';
-    if (!form.accountId) e.accountId = 'Müşteri seçilmeli';
+    // Phase C2: accountId opsiyonel — müşteri bulunamazsa "Müşterisiz devam et"
+    // ile boş bırakılabilir. accountName de buna paralel olarak boş kalır.
     if (!form.category) e.category = 'Kategori seçilmeli';
     if (!form.subCategory) e.subCategory = 'Alt kategori seçilmeli';
     if (!form.requestType) e.requestType = 'Talep türü seçilmeli';
@@ -374,7 +375,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     if (!validate()) return;
     if (duplicateCase && !overrideDuplicate) return;
     setSubmitting(true);
-    const account = accountsForCompany.find((a) => a.id === form.accountId)!;
+    // Phase C2: accountId picker'dan gelir; null kabul edilir (müşterisiz vaka).
     const company = companies.find((c) => c.id === form.companyId)!;
     const team = teamsForCompany.find((t) => t.id === form.assignedTeamId);
     const person = personsForTeam.find((p) => p.id === form.assignedPersonId);
@@ -388,8 +389,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       originDescription: form.origin === 'Diğer' ? form.originDescription.trim() : undefined,
       companyId: company.id,
       companyName: company.name,
-      accountId: account.id,
-      accountName: account.name,
+      accountId: form.accountId || undefined,
+      // accountId yoksa accountName "Müşterisiz vaka" sentinel'i sadece UI'da; backend'e gönderme.
+      accountName: form.accountId ? form.accountName : undefined,
       category: form.category,
       subCategory: form.subCategory,
       requestType: form.requestType as CaseRequestType,
@@ -510,22 +512,58 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
               </Field>
               <Field
                 label="Müşteri"
-                required
-                error={errors.accountId}
-                hint={!form.companyId ? 'Önce şirket seçin' : undefined}
+                hint={!form.companyId ? 'Önce şirket seçin' : 'Müşteriyi bulamazsan müşterisiz devam edebilirsin.'}
               >
-                <Select
-                  value={form.accountId}
-                  onChange={(e) => update('accountId', e.target.value)}
-                  disabled={!form.companyId}
-                >
-                  <option value="">{form.companyId ? 'Müşteri seçin…' : 'Önce şirket seçin'}</option>
-                  {accountsForCompany.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </Select>
+                {form.accountId ? (
+                  <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-ndark-border dark:bg-ndark-card">
+                    <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-ndark-text">
+                      {form.accountName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAccountPickerOpen(true)}
+                      disabled={!form.companyId}
+                      className="rounded px-2 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+                    >
+                      Değiştir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, accountId: '', accountName: '' }))}
+                      aria-label="Müşteri seçimini kaldır"
+                      className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : form.accountName ? (
+                  <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-900/40 dark:bg-amber-900/20">
+                    <UserX size={14} className="text-amber-700 dark:text-amber-300" />
+                    <span className="min-w-0 flex-1 truncate text-amber-900 dark:text-amber-200">
+                      {form.accountName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAccountPickerOpen(true)}
+                      disabled={!form.companyId}
+                      className="rounded px-2 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-200 dark:hover:bg-amber-900/30"
+                    >
+                      Müşteri Seç
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAccountPickerOpen(true)}
+                    disabled={!form.companyId}
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:bg-ndark-surface"
+                  >
+                    <Search size={14} />
+                    <span className="flex-1">
+                      {form.companyId ? 'Müşteri ara…' : 'Önce şirket seçin'}
+                    </span>
+                  </button>
+                )}
               </Field>
             </div>
           </Section>
@@ -978,6 +1016,23 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
           />
         </aside>
       </div>
+
+      <AccountSearchPicker
+        open={accountPickerOpen}
+        companyId={form.companyId || null}
+        selectedAccountId={form.accountId || null}
+        allowNullSelection
+        onClose={() => setAccountPickerOpen(false)}
+        onSelect={(account) => {
+          setAccountPickerOpen(false);
+          if (account) {
+            setForm((f) => ({ ...f, accountId: account.id, accountName: account.name }));
+          } else {
+            // "Müşterisiz devam et" — accountId boş, accountName "Müşteri Yok" işaret.
+            setForm((f) => ({ ...f, accountId: '', accountName: 'Müşterisiz vaka' }));
+          }
+        }}
+      />
     </Modal>
   );
 }
