@@ -65,6 +65,32 @@ const matchedFromCustomerless = await prisma.caseActivity.count({
 });
 record('11. ≥1 matched customerless case (activity log)', matchedFromCustomerless >= 1, `count=${matchedFromCustomerless}`);
 
+// PR v2 additions — links, snoozes, notification eventType diversity
+const snoozedActive = await prisma.case.count({
+  where: { snoozeUntil: { gt: new Date() } },
+});
+record('13. ≥1 snoozed-until-future case (Calendar snooze chip data)', snoozedActive >= 1, `count=${snoozedActive}`);
+
+const linkRelated = await prisma.caseLink.count({ where: { linkType: 'Related' } });
+const linkDup = await prisma.caseLink.count({ where: { linkType: 'Duplicate' } });
+const linkParent = await prisma.caseLink.count({ where: { linkType: 'Parent' } });
+record('14a. ≥1 Related case link', linkRelated >= 1, `count=${linkRelated}`);
+record('14b. ≥1 Duplicate case link (symmetric pair)', linkDup >= 2, `count=${linkDup}`);
+record('14c. ≥1 Parent case link', linkParent >= 1, `count=${linkParent}`);
+
+const eventTypes = await prisma.caseNotification.groupBy({
+  by: ['eventType'],
+  _count: { _all: true },
+});
+const types = new Set(eventTypes.map((g) => g.eventType));
+record('15a. notification eventType mention exists', types.has('mention'), JSON.stringify([...types]));
+record('15b. notification eventType watcher_update exists', types.has('watcher_update'));
+record('15c. notification eventType transfer exists', types.has('transfer'));
+record('15d. notification eventType note_reaction exists', types.has('note_reaction'));
+
+const reactionCount = await prisma.caseNoteReaction.count();
+record('16. ≥1 note reaction', reactionCount >= 1, `count=${reactionCount}`);
+
 // Suggestion engine sanity — at least one pending case with requester phone
 // should produce a phone-match suggestion.
 const { suggestCustomerMatches } = await import('../server/db/customerMatchRepository.js');
