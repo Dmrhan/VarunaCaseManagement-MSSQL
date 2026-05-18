@@ -7,19 +7,26 @@ import {
 } from '../db/accountRepository.js';
 
 /**
- * Phase A — /api/accounts route.
+ * /api/accounts route.
  *
- * Read roles: Supervisor, CSM, Admin, SystemAdmin (Agent + Backoffice 403)
- * Write roles: Admin, SystemAdmin
+ * Role matrix (P1 hotfix sonrası):
+ *  - LIST_ROLES: tüm authenticated case-opening roller GET /api/accounts list/search
+ *    çağırabilir. Agent vaka açma akışında AccountSearchPicker kullanır;
+ *    Müşteriler modülüne giremez (sidebar + route guard frontend).
+ *  - DETAIL_READ_ROLES: GET /api/accounts/:id ve sub-resource GET'leri
+ *    yalnız Supervisor/CSM/Admin/SystemAdmin'e açık (Agent'a Account detayı
+ *    sızmaz — notes/segment yok).
+ *  - WRITE_ROLES: Tüm mutasyonlar Admin/SystemAdmin only.
  *
  * Scope: req.user.allowedCompanyIds üzerinden AccountCompany veya legacy
- * Account.companyId. Detay almak için accountRepository.assertAccountInScope().
+ * Account.companyId. Detay erişimi için accountRepository.assertAccountInScope().
  */
 
 const router = Router();
 router.use(verifyJwt);
 
-const READ_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+const LIST_ROLES = ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+const DETAIL_READ_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
 const WRITE_ROLES = ['Admin', 'SystemAdmin'];
 
 function asyncRoute(handler) {
@@ -42,10 +49,19 @@ function asyncRoute(handler) {
   };
 }
 
-/** GET /api/accounts — list */
+/**
+ * GET /api/accounts — list/search
+ *
+ * P1 hotfix: Tüm case-opening rolleri (Agent dahil) AccountSearchPicker'ı
+ * vaka açma akışında kullanabilmeli. Müşteriler modülünün sidebar/route
+ * guard'ı Agent'a kapalı kalır (canReadAccounts === false).
+ *
+ * Response shape: internal notes/segment hiçbir zaman dahil edilmez (zaten
+ * accountRepository.shapeAccountRow yalnız company chip + meta döndürür).
+ */
 router.get(
   '/',
-  requireRole(...READ_ROLES),
+  requireRole(...LIST_ROLES),
   asyncRoute(async (req, res) => {
     const { search, companyId, status, page, limit } = req.query;
     const result = await accountRepository.listAccounts({
@@ -60,10 +76,14 @@ router.get(
   }),
 );
 
-/** GET /api/accounts/:id — detay */
+/**
+ * GET /api/accounts/:id — full detail (notes/segment dahil)
+ *
+ * Agent + Backoffice 403. Detayı sadece müşteri yöneticileri görür.
+ */
 router.get(
   '/:id',
-  requireRole(...READ_ROLES),
+  requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
     const account = await accountRepository.getAccount(req.params.id, {
       allowedCompanyIds: req.user.allowedCompanyIds,
@@ -215,7 +235,7 @@ router.delete(
 /** GET /api/accounts/:id/products — read scope (companyId optional filter) */
 router.get(
   '/:id/products',
-  requireRole(...READ_ROLES),
+  requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
     const out = await accountRepository.listProducts({
       accountId: req.params.id,
