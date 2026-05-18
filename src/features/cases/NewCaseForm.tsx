@@ -184,6 +184,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     [companies, form.companyId],
   );
   const requireCustomer = !!selectedCompany?.requireCustomerOnCaseCreate;
+  // Phase D Step 2 — "Ulaşan kişi bilgileri" yalnız şirket customerless izniyor
+  // VE kullanıcı picker'da "Müşterisiz devam et" seçtiyse açılır. Sentinel:
+  // picker accountId='' + accountName='Müşterisiz vaka' set ediyor (line ~1115).
+  const customerlessMode =
+    !requireCustomer && !form.accountId && form.accountName === 'Müşterisiz vaka';
   const teams = useMemo(() => lookupService.teams(), []);
   const requestTypes = useMemo(() => lookupService.requestTypes(), []);
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
@@ -227,12 +232,29 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     }
   }, [open]);
 
-  // Şirket değişince müşteri seçimini sıfırla. Picker yeni şirketin müşterilerini
-  // canlı API'den çeker; cross-tenant veri kalmasın.
+  // Şirket değişince müşteri seçimini + başvuran bilgilerini sıfırla. Picker
+  // yeni şirketin müşterilerini canlı API'den çeker; cross-tenant veri kalmasın.
+  // Phase D Step 2: yeni şirket strict olsa bile customerlessMode otomatik
+  // kapanır (accountName='' olur), requester fields temizlenir.
   useEffect(() => {
     setForm((f) => {
-      if (!f.accountId && !f.accountName) return f;
-      return { ...f, accountId: '', accountName: '' };
+      const noState =
+        !f.accountId &&
+        !f.accountName &&
+        !f.customerContactName &&
+        !f.customerContactPhone &&
+        !f.customerContactEmail &&
+        !f.customerCompanyName;
+      if (noState) return f;
+      return {
+        ...f,
+        accountId: '',
+        accountName: '',
+        customerContactName: '',
+        customerContactPhone: '',
+        customerContactEmail: '',
+        customerCompanyName: '',
+      };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.companyId]);
@@ -409,11 +431,13 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       accountId: form.accountId || undefined,
       // accountId yoksa accountName "Müşterisiz vaka" sentinel'i sadece UI'da; backend'e gönderme.
       accountName: form.accountId ? form.accountName : undefined,
-      // Phase D Step 2 — opsiyonel başvuran bilgileri.
-      customerContactName: form.customerContactName.trim() || undefined,
-      customerContactPhone: form.customerContactPhone.trim() || undefined,
-      customerContactEmail: form.customerContactEmail.trim() || undefined,
-      customerCompanyName: form.customerCompanyName.trim() || undefined,
+      // Phase D Step 2 — opsiyonel başvuran bilgileri. Yalnız customerlessMode
+      // aktifken gönderilir; müşteri seçilmişse veya henüz mod seçilmemişse
+      // backend'e geçmez (UI gate + defense-in-depth).
+      customerContactName: customerlessMode ? form.customerContactName.trim() || undefined : undefined,
+      customerContactPhone: customerlessMode ? form.customerContactPhone.trim() || undefined : undefined,
+      customerContactEmail: customerlessMode ? form.customerContactEmail.trim() || undefined : undefined,
+      customerCompanyName: customerlessMode ? form.customerCompanyName.trim() || undefined : undefined,
       category: form.category,
       subCategory: form.subCategory,
       requestType: form.requestType as CaseRequestType,
@@ -562,7 +586,17 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                     </button>
                     <button
                       type="button"
-                      onClick={() => setForm((f) => ({ ...f, accountId: '', accountName: '' }))}
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          accountId: '',
+                          accountName: '',
+                          customerContactName: '',
+                          customerContactPhone: '',
+                          customerContactEmail: '',
+                          customerCompanyName: '',
+                        }))
+                      }
                       aria-label="Müşteri seçimini kaldır"
                       className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
                     >
@@ -600,10 +634,11 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
               </Field>
             </div>
 
-            {/* Phase D Step 2 — Müşterisiz vaka akışında başvuran bilgileri.
-                Sadece müşterisiz seçilmişse default görünür; müşteri seçilmişse
-                gizli (Field zorunlu değildir). */}
-            {!form.accountId && (
+            {/* Phase D Step 2 — Başvuran bilgileri YALNIZ customerlessMode
+                aktifken görünür: şirket customerless izniyor + kullanıcı picker'da
+                "Müşterisiz devam et"i tıkladı. Picker hiç açılmadıysa veya müşteri
+                seçildiyse gizli. */}
+            {customerlessMode && (
               <div className="mt-4 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-3 dark:border-ndark-border dark:bg-ndark-surface/40">
                 <div className="mb-1 text-xs font-semibold text-slate-700 dark:text-ndark-text">
                   Ulaşan kişi bilgileri
@@ -1109,7 +1144,17 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         onSelect={(account) => {
           setAccountPickerOpen(false);
           if (account) {
-            setForm((f) => ({ ...f, accountId: account.id, accountName: account.name }));
+            // Customer seçildi — başvuran bilgileri artık alakasız, sıfırla
+            // (kullanıcı önce customerless modda doldurmuş olabilir).
+            setForm((f) => ({
+              ...f,
+              accountId: account.id,
+              accountName: account.name,
+              customerContactName: '',
+              customerContactPhone: '',
+              customerContactEmail: '',
+              customerCompanyName: '',
+            }));
           } else {
             // "Müşterisiz devam et" — accountId boş, accountName "Müşteri Yok" işaret.
             setForm((f) => ({ ...f, accountId: '', accountName: 'Müşterisiz vaka' }));
