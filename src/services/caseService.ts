@@ -278,6 +278,34 @@ export interface NewCaseInput {
   customFields?: Record<string, unknown>;
 }
 
+// Phase D Step 2 — Customer Match Suggestions (deterministic, no AI).
+export type CustomerMatchReasonType = 'phone' | 'email' | 'externalCode' | 'name' | 'product';
+export interface CustomerMatchReason {
+  type: CustomerMatchReasonType;
+  label: string;
+  valueMasked: string | null;
+}
+export interface CustomerMatchSuggestion {
+  accountId: string;
+  accountName: string;
+  score: number;
+  confidence: 'high' | 'medium' | 'low';
+  reasons: CustomerMatchReason[];
+  companies: Array<{
+    companyId: string;
+    companyName: string | null;
+    companyColor: string | null;
+    externalCustomerCode: string | null;
+  }>;
+  openCaseCount: number;
+  totalCaseCount: number;
+}
+export interface CustomerMatchSuggestionsResponse {
+  suggestions: CustomerMatchSuggestion[];
+  generatedAt: string;
+  reason?: 'case_already_linked';
+}
+
 export const caseService = {
   async list(
     filters?: CaseFilters,
@@ -638,6 +666,21 @@ export const caseService = {
         body: JSON.stringify(patch),
       },
       'Vaka güncellenemedi',
+    );
+  },
+
+  /**
+   * Phase D Step 2 — Deterministic müşteri eşleştirme önerileri.
+   * AI YOK; auto-link YOK. Supervisor+ manuel onay verir.
+   */
+  async getCustomerMatchSuggestions(
+    caseId: string,
+    limit = 5,
+  ): Promise<CustomerMatchSuggestionsResponse | undefined> {
+    return apiFetch<CustomerMatchSuggestionsResponse>(
+      `${API_BASE}/${caseId}/customer-match-suggestions?limit=${limit}`,
+      undefined,
+      'Müşteri önerileri',
     );
   },
 
