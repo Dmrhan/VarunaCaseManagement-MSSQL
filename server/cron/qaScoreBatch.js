@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { prisma } from '../db/client.js';
+import { logAIUsage } from '../lib/aiClient.js';
 
 /**
  * Smart QA Lite — Faz 1.5 Madde 4.
@@ -117,6 +118,7 @@ export async function runScoreCase(caseId) {
     resolutionPart,
   ].join('\n');
 
+  const startedAt = Date.now();
   const completion = await client.chat.completions.create({
     model: MODEL,
     response_format: {
@@ -130,6 +132,8 @@ export async function runScoreCase(caseId) {
     max_tokens: MAX_TOKENS,
     temperature: 0.3,
   });
+  const responseTimeMs = Date.now() - startedAt;
+  const tokenCount = completion.usage?.total_tokens ?? null;
 
   const raw = completion.choices?.[0]?.message?.content;
   if (!raw) return { error: 'AI yanıtı boş' };
@@ -172,6 +176,18 @@ export async function runScoreCase(caseId) {
       },
     }),
   ]);
+
+  // AI Kullanım panosunda görünsün — diğer endpoint'lerle aynı telemetry pattern.
+  // Fire-and-forget; log hatası ana akışı durdurmaz (logAIUsage kendi try/catch'i var).
+  void logAIUsage({
+    endpoint: 'qa-score-batch',
+    companyId: c.companyId,
+    caseId,
+    userId: null, // cron — kullanıcı yok
+    responseTimeMs,
+    tokenCount,
+  });
+
   return { scored: true, ...parsed };
 }
 
