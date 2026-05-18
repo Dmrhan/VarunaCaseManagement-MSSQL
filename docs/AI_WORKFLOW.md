@@ -139,6 +139,84 @@ pass when reviewing someone else's work.
 - Are demo seed commands avoided on production or real-data shared
   environments?
 
+## Multi-tenant Endpoint & UI Review Checklist
+
+Before marking any multi-tenant or role-sensitive feature as done,
+verify each item below. This is a stricter superset of the general
+Review Checklist; it is mandatory for any feature that touches
+`allowedCompanyIds`, role gates, account/company/case scope, search
+endpoints reused by multiple flows, or shared aggregate metrics.
+
+### 1. Role Matrix
+
+- Which roles can open the full page?
+- Which roles can use embedded widgets/pickers from another flow?
+- Which roles can read detail?
+- Which roles can mutate?
+- Are page access and embedded access intentionally different?
+
+### 2. Scope Matrix
+
+- Are returned rows scoped by `allowedCompanyIds`?
+- Are detail endpoints scoped?
+- Are create/update/delete mutations scoped server-side?
+- Is `SystemAdmin` behavior explicit?
+- Do `Admin` / `Supervisor` / `Agent` scopes differ as expected?
+
+### 3. Aggregate / Count Safety
+
+- Are counts, badges, totals, summaries, dashboards, and KPI tiles
+  scoped the same way as rows?
+- Can a user infer hidden tenant activity from a count, badge, filter
+  result, or empty/non-empty state?
+
+### 4. Filter Safety
+
+- Do filters apply only to visible tenant relations?
+- For multi-company relations, does status/category/company filtering
+  combine with `allowedCompanyIds`?
+- Does filtering by one company accidentally match another hidden
+  company relation?
+
+### 5. Search / Picker Safety
+
+- Is the endpoint used by full pages, pickers, modals, quick flows, or
+  case creation?
+- Do embedded consumers need narrower payload or broader role access
+  than the full page?
+- Are search results scoped and free of internal notes?
+
+### 6. Legacy / Null Data
+
+- What happens before/after backfill?
+- Are nullable fields handled safely?
+- Do legacy records with old relations still appear where needed?
+- Is there an idempotent repair/backfill path?
+
+### 7. Data Leakage Review
+
+- Are internal notes, segment, sensitive identifiers, raw PII, or
+  hidden company relations excluded from lower-role responses?
+- Are AI prompts and report exports using the same visibility rules?
+
+### 8. Regression Smoke
+
+For every relevant role, test:
+
+- allowed page access
+- denied page access
+- embedded picker/widget access
+- scoped list results
+- scoped counts
+- scoped filters
+- one legacy/null-data scenario
+
+### Note
+
+Avoid relying only on "nominal" or "happy path" validation.
+Multi-tenant features are not complete until role, scope, aggregate,
+filter, embedded usage, and legacy/null-data checks are covered.
+
 ## Seed / Environment Safety
 
 - `db:seed` and `db:seed:auth` are allowed for fresh local, demo, or
