@@ -18,6 +18,8 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+// WR-A2 — Phone E.164 normalize için validation util'i import et.
+import { normalizePhoneE164 } from '../server/utils/accountValidation.js';
 
 const prisma = new PrismaClient();
 
@@ -338,6 +340,12 @@ async function main() {
           ? null
           : String(100000 + (Math.abs(hash(def.code + 'reg')) % 900000));
 
+      // WR-A2 — Phone E.164 normalize for seed. Deterministic phone üretilir,
+      // sonra normalize edilir. TCKN bilinçli olarak omit edilir (Decision Sprint #1:
+      // gerçek TCKN üretme; smoke kendi TCKN'sini oluşturur).
+      const seedPhone = `+90 5${30 + Math.abs(hash(def.code) % 9)}${String(Math.abs(hash(def.code + 'p') % 10000000)).padStart(7, '0')}`;
+      const seedPhoneE164 = normalizePhoneE164(seedPhone);
+
       const acc = await prisma.account.upsert({
         where: { id: `ACC-${def.code}` },
         update: {
@@ -347,18 +355,21 @@ async function main() {
           customerType,
           legalName: accLegalName,
           registrationNo: accRegistrationNo,
+          phoneE164: seedPhoneE164, // backfill normalize
         },
         create: {
           id: `ACC-${def.code}`,
           name: def.name,
           vkn: accVkn,
-          phone: `+90 ${500 + Math.abs(hash(def.code) % 99)} ${String(Math.abs(hash(def.code + 'p') % 10000000)).padStart(7, '0')}`,
+          phone: seedPhone,
+          phoneE164: seedPhoneE164,
           email: `${def.code.toLowerCase()}@${theme.name.toLowerCase()}-demo.com`,
           companyId: null,
           isActive: true,
           customerType,
           legalName: accLegalName,
           registrationNo: accRegistrationNo,
+          // WR-A2 — TCKN seed omitted by design; Bireysel accounts tcknHash/last4 null.
         },
       });
       const ac = await prisma.accountCompany.upsert({
@@ -386,16 +397,20 @@ async function main() {
       for (let i = 0; i < Math.min(3, titles.length); i++) {
         const slug = `${def.code}-C${i + 1}`;
         const contactId = `CONT-${slug}`;
+        // WR-A2 — Contact phone E.164 normalize.
+        const contactPhone = `+90 53${2 + i} ${String(Math.abs(hash(slug) % 10000000)).padStart(7, '0')}`;
+        const contactPhoneE164 = normalizePhoneE164(contactPhone);
         await prisma.accountContact.upsert({
           where: { id: contactId },
-          update: { isActive: true, isPrimary: i === 0 },
+          update: { isActive: true, isPrimary: i === 0, phoneE164: contactPhoneE164 },
           create: {
             id: contactId,
             accountId: acc.id,
             fullName: turkishName(slug, i),
             title: titles[i],
             email: `${slug.toLowerCase()}@${def.code.toLowerCase()}-demo.com`,
-            phone: `+90 ${532 + i} ${String(Math.abs(hash(slug) % 10000000)).padStart(7, '0')}`,
+            phone: contactPhone,
+            phoneE164: contactPhoneE164,
             isPrimary: i === 0,
             isActive: true,
             preferredChannel: i === 0 ? 'phone' : 'email',

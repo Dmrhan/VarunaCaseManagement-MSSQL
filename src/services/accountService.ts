@@ -112,12 +112,16 @@ export interface AccountListItem {
   name: string;
   vknMasked: string | null;
   phone: string | null;
+  /** WR-A2 — E.164 normalize edilmiş telefon (search/dedup için iç UI). */
+  phoneE164: string | null;
   email: string | null;
   isActive: boolean;
   /** WR-A1 / PM-01 — Müşteri tipi (default Corporate). */
   customerType: CustomerType;
   legalName: string | null;
   registrationNo: string | null;
+  /** WR-A2 — TCKN maskeli display ("*******1234"); plain TCKN ASLA API'da yok. */
+  tcknMasked: string | null;
   companies: AccountCompanyChip[];
   openCaseCount: number;
   totalCaseCount: number;
@@ -171,9 +175,13 @@ export interface AccountDetail {
   name: string;
   vknMasked: string | null;
   phone: string | null;
+  /** WR-A2 — E.164 normalize edilmiş telefon. */
+  phoneE164: string | null;
   email: string | null;
   isActive: boolean;
   createdAt: string;
+  /** WR-A2 — TCKN maskeli display ("*******1234"); plain TCKN ASLA API'da yok. */
+  tcknMasked: string | null;
   /** WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) kurumsal alanlar. */
   customerType: CustomerType;
   legalName: string | null;
@@ -208,6 +216,8 @@ export interface AccountCreateInput {
   customerType?: CustomerType;
   legalName?: string | null;
   registrationNo?: string | null;
+  /** WR-A2 — Plain TCKN. **Yalnız submit transient**; cache/storage'da tutulmaz, response'ta dönmez. */
+  tckn?: string | null;
   companies: AccountCompanyCreateInput[];
 }
 
@@ -221,6 +231,34 @@ export interface AccountUpdateInput {
   customerType?: CustomerType;
   legalName?: string | null;
   registrationNo?: string | null;
+  /** WR-A2 — Plain TCKN (submit transient only). null/'' → TCKN clear. */
+  tckn?: string | null;
+}
+
+// WR-A2 — Validation endpoint shapes.
+export interface ValidationResult {
+  valid: boolean;
+  reason: string | null;
+}
+
+export async function validateVknRemote(value: string): Promise<ValidationResult | undefined> {
+  const result = await apiFetch<ValidationResult>(
+    `/api/lookups/validate-vkn?value=${encodeURIComponent(value)}`,
+    undefined,
+    'VKN doğrulama',
+  );
+  return result;
+}
+
+export async function validateTcknRemote(value: string): Promise<ValidationResult | undefined> {
+  // SECURITY: plain TCKN query string'de gider; HTTPS şarttır. Response asla
+  // hash veya normalized değer içermez — sadece valid/invalid + reason.
+  const result = await apiFetch<ValidationResult>(
+    `/api/lookups/validate-tckn?value=${encodeURIComponent(value)}`,
+    undefined,
+    'TCKN doğrulama',
+  );
+  return result;
 }
 
 /* Phase C1 — AccountCompany + AccountContact mutations */
