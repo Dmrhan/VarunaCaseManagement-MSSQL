@@ -36,6 +36,7 @@ import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
 import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
 import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
+import { AdminProductCatalogPage } from './features/admin/AdminProductCatalogPage';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
@@ -240,6 +241,7 @@ export default function App() {
         {view === 'admin-checklist' && <AdminChecklistPage />}
         {view === 'admin-teams' && <AdminTeamsPage />}
         {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
+        {view === 'admin-product-catalog' && <AdminProductCatalogPage />}
         {view === 'admin-fields' && <AdminFieldsPage />}
         {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}

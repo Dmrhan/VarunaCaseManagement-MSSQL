@@ -314,6 +314,9 @@ model Company {
   fieldDefinitions FieldDefinition[]
   settings         CompanySettings?
   userCompanies    UserCompany[]
+  /// WR-A6 / PM-05 — tenant-scoped product catalog.
+  productGroups    ProductGroup[]
+  products         Product[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -552,6 +555,52 @@ model Address {
   @@index([companyId])
   @@index([accountId, type])
   @@index([accountId, isDefault])
+}
+
+/// WR-A6 / PM-05 — Tenant-scoped product catalog (foundation only).
+/// ProductGroup gruplandırma (örn. UNIVERA "Saha", PARAM "POS"); altında
+/// Product (Enroute, ParamPOS vb.).  `code` immutable after create —
+/// A7 Package paket-ürün referansları stabil olsun diye.
+/// Bu PR'da `supportLevel` field'ı yok (A5 SupportLevel enum shipped olunca
+/// ek migration ile gelir).  Mevcut `Case.productGroup` string kolonu ve
+/// `AccountProduct` tablosu dokunulmaz — geri uyumluluk.
+model ProductGroup {
+  id          String   @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, isActive])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  companyId      String
+  productGroupId String
+  code           String
+  name           String
+  description    String?
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productGroup ProductGroup @relation(fields: [productGroupId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, productGroupId, isActive])
 }
 
 model Team {

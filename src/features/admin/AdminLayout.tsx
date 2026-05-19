@@ -7,6 +7,7 @@ import {
   FileText,
   FolderTree,
   Network,
+  Package,
   Settings2,
   Shield,
   Sliders,
@@ -32,6 +33,7 @@ export type AdminView =
   | 'admin-checklist'
   | 'admin-teams'
   | 'admin-offered-solutions'
+  | 'admin-product-catalog'
   | 'admin-fields'
   | 'admin-knowledge'
   | 'admin-companies'
@@ -45,6 +47,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-checklist',
   'admin-teams',
   'admin-offered-solutions',
+  'admin-product-catalog',
   'admin-fields',
   'admin-knowledge',
   'admin-companies',
@@ -70,6 +73,7 @@ const NAV: NavGroup[] = [
       { key: 'admin-thirdparty',        label: '3. Parti Tanımları',       icon: <Network size={14} /> },
       { key: 'admin-documents',         label: 'Belge Türleri',            icon: <FileText size={14} /> },
       { key: 'admin-offered-solutions', label: 'Teklif Tanımları',         icon: <Tag size={14} /> },
+      { key: 'admin-product-catalog',   label: 'Ürün Kataloğu',            icon: <Package size={14} /> },
       { key: 'admin-teams',             label: 'Takımlar & Üyeler',        icon: <Users2 size={14} /> },
     ],
   },

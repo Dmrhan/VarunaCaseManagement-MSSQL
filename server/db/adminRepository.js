@@ -1430,4 +1430,200 @@ export const companySettingsRepo = {
   },
 };
 
+/* ─────────────────────────────────────────────────────────────────
+ * WR-A6 / PM-05 — ProductGroup + Product catalog (foundation only).
+ * Tenant-scoped. `code` immutable after create. Soft delete only.
+ * Mevcut Case.productGroup string'ini ve AccountProduct tablosunu
+ * etkilemez (A7b'de catalog'a switch).
+ * ───────────────────────────────────────────────────────────────── */
+
+const CODE_RX = /^[A-Z0-9][A-Z0-9_-]*$/;
+
+function normalizeCode(raw) {
+  const s = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+  if (!s) throw new AdminError('Kod zorunlu.');
+  if (s.length > 64) throw new AdminError('Kod 64 karakteri geçemez.');
+  if (!CODE_RX.test(s)) {
+    throw new AdminError('Kod ASCII büyük harf/rakam/_/- olmalı (örn. PARAM_POS).');
+  }
+  return s;
+}
+
+function normalizeName(raw, max = 160) {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) throw new AdminError('Ad zorunlu.');
+  if (s.length > max) throw new AdminError(`Ad ${max} karakteri geçemez.`);
+  return s;
+}
+
+function assertCompanyScope(companyId, allowedCompanyIds) {
+  if (!companyId) throw new AdminError('companyId gerekli.');
+  if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
+    throw new AdminError('Bu şirket için yetkin yok.', 403);
+  }
+}
+
+export const productGroupRepo = {
+  async list({ companyId, allowedCompanyIds, includeInactive = false }) {
+    const where = {};
+    if (companyId) {
+      assertCompanyScope(companyId, allowedCompanyIds);
+      where.companyId = companyId;
+    } else if (allowedCompanyIds) {
+      where.companyId = { in: allowedCompanyIds };
+    }
+    if (!includeInactive) where.isActive = true;
+    return prisma.productGroup.findMany({
+      where,
+      orderBy: [{ companyId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      take: 500,
+    });
+  },
+
+  async create(input, allowedCompanyIds) {
+    assertCompanyScope(input.companyId, allowedCompanyIds);
+    const code = normalizeCode(input.code);
+    const name = normalizeName(input.name);
+    try {
+      return await prisma.productGroup.create({
+        data: {
+          companyId: input.companyId,
+          code,
+          name,
+          description: input.description?.trim() || null,
+          sortOrder: Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0,
+          isActive: input.isActive === undefined ? true : !!input.isActive,
+        },
+      });
+    } catch (err) {
+      if (err?.code === 'P2002') {
+        throw new AdminError('Bu şirkette aynı kodda bir ürün grubu var.', 409);
+      }
+      throw err;
+    }
+  },
+
+  async update(id, patch, allowedCompanyIds) {
+    const target = await prisma.productGroup.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, code: true },
+    });
+    if (!target) throw new AdminError('Ürün grubu bulunamadı.', 404);
+    assertCompanyScope(target.companyId, allowedCompanyIds);
+
+    // `code` immutable — silently ignore (D-A6.2).
+    const data = {};
+    if (patch.name !== undefined) data.name = normalizeName(patch.name);
+    if (patch.description !== undefined) data.description = patch.description?.trim() || null;
+    if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
+    if (patch.isActive !== undefined) data.isActive = !!patch.isActive;
+    if (Object.keys(data).length === 0) return target;
+
+    return prisma.productGroup.update({ where: { id }, data });
+  },
+};
+
+export const productRepo = {
+  async list({ companyId, productGroupId, allowedCompanyIds, includeInactive = false }) {
+    const where = {};
+    if (companyId) {
+      assertCompanyScope(companyId, allowedCompanyIds);
+      where.companyId = companyId;
+    } else if (allowedCompanyIds) {
+      where.companyId = { in: allowedCompanyIds };
+    }
+    if (productGroupId) where.productGroupId = productGroupId;
+    if (!includeInactive) where.isActive = true;
+    return prisma.product.findMany({
+      where,
+      orderBy: [{ companyId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      include: {
+        productGroup: { select: { id: true, code: true, name: true } },
+      },
+      take: 500,
+    });
+  },
+
+  async create(input, allowedCompanyIds) {
+    assertCompanyScope(input.companyId, allowedCompanyIds);
+    if (!input.productGroupId) throw new AdminError('productGroupId gerekli.');
+    const group = await prisma.productGroup.findUnique({
+      where: { id: input.productGroupId },
+      select: { id: true, companyId: true, isActive: true },
+    });
+    if (!group) throw new AdminError('Ürün grubu bulunamadı.', 404);
+    if (group.companyId !== input.companyId) {
+      throw new AdminError(
+        'Ürün grubu farklı şirkete ait — cross-tenant referans reddedildi.',
+        400,
+      );
+    }
+    const code = normalizeCode(input.code);
+    const name = normalizeName(input.name);
+    try {
+      return await prisma.product.create({
+        data: {
+          companyId: input.companyId,
+          productGroupId: input.productGroupId,
+          code,
+          name,
+          description: input.description?.trim() || null,
+          sortOrder: Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0,
+          isActive: input.isActive === undefined ? true : !!input.isActive,
+        },
+        include: {
+          productGroup: { select: { id: true, code: true, name: true } },
+        },
+      });
+    } catch (err) {
+      if (err?.code === 'P2002') {
+        throw new AdminError('Bu şirkette aynı kodda bir ürün var.', 409);
+      }
+      throw err;
+    }
+  },
+
+  async update(id, patch, allowedCompanyIds) {
+    const target = await prisma.product.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, productGroupId: true, code: true },
+    });
+    if (!target) throw new AdminError('Ürün bulunamadı.', 404);
+    assertCompanyScope(target.companyId, allowedCompanyIds);
+
+    // `code` immutable — silently ignore (D-A6.2).
+    const data = {};
+    if (patch.name !== undefined) data.name = normalizeName(patch.name);
+    if (patch.description !== undefined) data.description = patch.description?.trim() || null;
+    if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
+    if (patch.isActive !== undefined) data.isActive = !!patch.isActive;
+
+    // productGroupId değiştirilebilir — aynı şirkete bağlı bir grup olmalı.
+    if (patch.productGroupId !== undefined && patch.productGroupId !== target.productGroupId) {
+      const grp = await prisma.productGroup.findUnique({
+        where: { id: patch.productGroupId },
+        select: { id: true, companyId: true },
+      });
+      if (!grp) throw new AdminError('Hedef ürün grubu bulunamadı.', 404);
+      if (grp.companyId !== target.companyId) {
+        throw new AdminError(
+          'Ürün grubu farklı şirkete ait — taşınamaz.',
+          400,
+        );
+      }
+      data.productGroupId = patch.productGroupId;
+    }
+
+    if (Object.keys(data).length === 0) return target;
+
+    return prisma.product.update({
+      where: { id },
+      data,
+      include: {
+        productGroup: { select: { id: true, code: true, name: true } },
+      },
+    });
+  },
+};
+
 export { AdminError };

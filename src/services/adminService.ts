@@ -210,6 +210,53 @@ export interface CompanyInput {
   projectsRequired?: boolean;
 }
 
+// WR-A6 / PM-05 — ProductGroup + Product catalog (foundation only).
+export interface ProductGroup {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ProductGroupInput {
+  companyId: string;
+  code?: string;
+  name?: string;
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface Product {
+  id: string;
+  companyId: string;
+  productGroupId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  /** BFF select chip — group code/name UI'da kullanılır. */
+  productGroup?: { id: string; code: string; name: string };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ProductInput {
+  companyId: string;
+  productGroupId?: string;
+  code?: string;
+  name?: string;
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
 
 // ─────────────────────────────────────────────────────────────────
@@ -671,6 +718,82 @@ export const adminService = {
       if (!result) return { ok: false, error: 'Sunucu hatası' };
       await refreshBootstrap();
       return { ok: true };
+    },
+  },
+
+  // WR-A6 / PM-05 — ProductGroup + Product catalog (foundation only).
+  // Tenant-scoped. Admin/SystemAdmin only. `code` immutable after create.
+  productGroups: {
+    async list(companyId?: string, opts: { includeInactive?: boolean } = {}): Promise<ProductGroup[]> {
+      const q = new URLSearchParams();
+      if (companyId) q.set('companyId', companyId);
+      if (opts.includeInactive) q.set('includeInactive', '1');
+      const data = await apiFetch<{ value: ProductGroup[] }>(
+        `${ADMIN_BASE}/product-groups${q.toString() ? `?${q}` : ''}`,
+        undefined,
+        'Ürün grupları yüklenemedi',
+      );
+      return data?.value ?? [];
+    },
+    async create(input: ProductGroupInput): Promise<AdminResult<ProductGroup>> {
+      const item = await apiFetch<ProductGroup>(
+        `${ADMIN_BASE}/product-groups`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Ürün grubu oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<ProductGroupInput>): Promise<AdminResult<ProductGroup>> {
+      const item = await apiFetch<ProductGroup>(
+        `${ADMIN_BASE}/product-groups/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Ürün grubu güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<ProductGroup>> {
+      return this.update(id, { isActive });
+    },
+  },
+
+  products: {
+    async list(
+      companyId?: string,
+      opts: { productGroupId?: string; includeInactive?: boolean } = {},
+    ): Promise<Product[]> {
+      const q = new URLSearchParams();
+      if (companyId) q.set('companyId', companyId);
+      if (opts.productGroupId) q.set('productGroupId', opts.productGroupId);
+      if (opts.includeInactive) q.set('includeInactive', '1');
+      const data = await apiFetch<{ value: Product[] }>(
+        `${ADMIN_BASE}/products${q.toString() ? `?${q}` : ''}`,
+        undefined,
+        'Ürünler yüklenemedi',
+      );
+      return data?.value ?? [];
+    },
+    async create(input: ProductInput): Promise<AdminResult<Product>> {
+      const item = await apiFetch<Product>(
+        `${ADMIN_BASE}/products`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Ürün oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<ProductInput>): Promise<AdminResult<Product>> {
+      const item = await apiFetch<Product>(
+        `${ADMIN_BASE}/products/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Ürün güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<Product>> {
+      return this.update(id, { isActive });
     },
   },
 

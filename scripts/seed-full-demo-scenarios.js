@@ -639,6 +639,103 @@ async function main() {
   }
   console.log(`   Addresses: ${addressTotal} (TR + non-TR variety across major accounts)`);
 
+  // ── 3.7) Product Catalog — WR-A6 / PM-05 ──
+  // Tenant-scoped ProductGroup + Product foundation (admin-managed).
+  // Mevcut Case.productGroup serbest string ve AccountProduct dokunulmaz.
+  // WhitePackage / RedPackage paket adları Product DEĞİL → A7 Package'a saklı.
+  console.log('3.7) Seeding product catalog (WR-A6 / PM-05)...');
+  const CATALOG = {
+    'COMP-PARAM': {
+      groups: [
+        { code: 'POS',         name: 'POS Çözümleri',           description: 'Fiziki ve sanal POS ürünleri' },
+        { code: 'PAZARYERI',   name: 'Pazaryeri & Ödeme',        description: 'Marketplace ve ödeme entegrasyonları' },
+        { code: 'TAHSILAT',    name: 'Tahsilat & Mutabakat',     description: 'Tahsilat akışları ve uzlaştırma' },
+      ],
+      products: [
+        { groupCode: 'POS',       code: 'PARAMPOS',   name: 'ParamPOS' },
+        { groupCode: 'POS',       code: 'SANALPOS',   name: 'Sanal POS' },
+        { groupCode: 'POS',       code: 'FIZIKIPOS',  name: 'Fiziki POS' },
+        { groupCode: 'POS',       code: 'CEPPOS',     name: 'Cep POS' },
+        { groupCode: 'PAZARYERI', code: 'PAZARYERI',  name: 'Pazaryeri Entegrasyonu' },
+        { groupCode: 'TAHSILAT',  code: 'KOLAYTAHS',  name: 'Kolay Tahsilat' },
+        { groupCode: 'TAHSILAT',  code: 'PARAMKART',  name: 'ParamKart' },
+        { groupCode: 'TAHSILAT',  code: 'MUTABAKAT',  name: 'Mutabakat & Settlement' },
+      ],
+    },
+    'COMP-UNIVERA': {
+      groups: [
+        { code: 'SAHA',        name: 'Saha Operasyonları',       description: 'Saha satış, rota, ziyaret yönetimi' },
+        { code: 'DEPO',        name: 'Depo & Stok',              description: 'Depo, stok ve sevkiyat ürünleri' },
+        { code: 'DOKUMAN',     name: 'Doküman Yönetimi',         description: 'e-Dönüşüm ve doküman yönetimi' },
+        { code: 'PLATFORM',    name: 'Platform',                  description: 'Genel platform ürünleri' },
+      ],
+      products: [
+        { groupCode: 'SAHA',     code: 'ENROUTE',    name: 'Enroute' },
+        { groupCode: 'SAHA',     code: 'QUEST',      name: 'Quest' },
+        { groupCode: 'DEPO',     code: 'STOKBAR',    name: 'Stokbar' },
+        { groupCode: 'DEPO',     code: 'WMS',        name: 'WMS / Depo' },
+        { groupCode: 'DOKUMAN',  code: 'UNIDOX',     name: 'Uni-Dox' },
+        { groupCode: 'DOKUMAN',  code: 'EFATURA',    name: 'e-Fatura' },
+        { groupCode: 'DOKUMAN',  code: 'EARSIV',     name: 'e-Arşiv' },
+        { groupCode: 'DOKUMAN',  code: 'EIRSALIYE',  name: 'e-İrsaliye' },
+        { groupCode: 'PLATFORM', code: 'VARUNA',     name: 'Varuna' },
+      ],
+      // Not: WhitePackage / RedPackage paket adları Product DEĞİL — A7'de Package olarak gelir.
+    },
+    'COMP-FINROTA': {
+      groups: [
+        { code: 'TAHSILAT',     name: 'Tahsilat & Ödeme',        description: 'Tahsilat ve toplu ödeme akışları' },
+        { code: 'RAPORLAMA',    name: 'Raporlama',                description: 'Banka ekstresi ve POS raporu' },
+        { code: 'ACIK_BANKA',   name: 'Açık Bankacılık',          description: 'Open banking & bank movement tracking' },
+      ],
+      products: [
+        { groupCode: 'TAHSILAT',   code: 'NETAHSILAT', name: 'Netahsilat' },
+        { groupCode: 'TAHSILAT',   code: 'TOS',        name: 'TÖS / Toplu Ödeme' },
+        { groupCode: 'RAPORLAMA',  code: 'NETEKSTRE',  name: 'Netekstre' },
+        { groupCode: 'RAPORLAMA',  code: 'POSRAPOR',   name: 'Posrapor' },
+        { groupCode: 'RAPORLAMA',  code: 'EDBS',       name: 'E-DBS' },
+        { groupCode: 'ACIK_BANKA', code: 'OPENBANK',   name: 'Açık Bankacılık' },
+        { groupCode: 'ACIK_BANKA', code: 'BANKMVT',    name: 'Bank Movement Tracking' },
+      ],
+    },
+  };
+  let groupTotal = 0;
+  let productTotal = 0;
+  for (const companyId of COMPANIES) {
+    const def = CATALOG[companyId];
+    if (!def) continue;
+    const groupByCode = {};
+    for (const g of def.groups) {
+      const id = `PG-${companyId}-${g.code}`;
+      const row = await prisma.productGroup.upsert({
+        where: { id },
+        update: { name: g.name, description: g.description ?? null, isActive: true },
+        create: {
+          id, companyId, code: g.code, name: g.name,
+          description: g.description ?? null, isActive: true,
+          sortOrder: 0,
+        },
+      });
+      groupByCode[g.code] = row;
+      groupTotal++;
+    }
+    for (const p of def.products) {
+      const id = `PROD-${companyId}-${p.code}`;
+      const grp = groupByCode[p.groupCode];
+      if (!grp) continue;
+      await prisma.product.upsert({
+        where: { id },
+        update: { name: p.name, productGroupId: grp.id, isActive: true },
+        create: {
+          id, companyId, productGroupId: grp.id, code: p.code, name: p.name,
+          isActive: true, sortOrder: 0,
+        },
+      });
+      productTotal++;
+    }
+  }
+  console.log(`   Catalog: ${groupTotal} product groups + ${productTotal} products across PARAM/UNIVERA/FINROTA`);
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};

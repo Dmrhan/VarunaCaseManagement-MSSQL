@@ -10,6 +10,8 @@ import {
   knowledgeSourceRepo,
   offeredSolutionRepo,
   personRepo,
+  productGroupRepo,
+  productRepo,
   slaPolicyRepo,
   teamRepo,
   thirdPartyRepo,
@@ -540,6 +542,65 @@ router.post('/knowledge-sources', asyncRoute(async (req, res) => {
 router.patch('/knowledge-sources/:id', asyncRoute(async (req, res) => {
   // assertCompanyAdmin: target.companyId üzerinden — repo yapıyor
   const item = await knowledgeSourceRepo.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+  );
+  res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// WR-A6 / PM-05 — ProductGroup + Product catalog (foundation only)
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/product-groups', asyncRoute(async (req, res) => {
+  const filterCompanyId = req.query.companyId;
+  if (filterCompanyId) assertCompanyAdmin(req, filterCompanyId);
+  const items = await productGroupRepo.list({
+    companyId: filterCompanyId,
+    allowedCompanyIds: req.user.allowedCompanyIds,
+    includeInactive: req.query.includeInactive === '1',
+  });
+  res.json({ value: items });
+}));
+
+router.post('/product-groups', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const item = await productGroupRepo.create(body, req.user.allowedCompanyIds);
+  res.status(201).json(item);
+}));
+
+router.patch('/product-groups/:id', asyncRoute(async (req, res) => {
+  const item = await productGroupRepo.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+  );
+  res.json(item);
+}));
+
+router.get('/products', asyncRoute(async (req, res) => {
+  const filterCompanyId = req.query.companyId;
+  if (filterCompanyId) assertCompanyAdmin(req, filterCompanyId);
+  const items = await productRepo.list({
+    companyId: filterCompanyId,
+    productGroupId: req.query.productGroupId,
+    allowedCompanyIds: req.user.allowedCompanyIds,
+    includeInactive: req.query.includeInactive === '1',
+  });
+  res.json({ value: items });
+}));
+
+router.post('/products', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const item = await productRepo.create(body, req.user.allowedCompanyIds);
+  res.status(201).json(item);
+}));
+
+router.patch('/products/:id', asyncRoute(async (req, res) => {
+  const item = await productRepo.update(
     req.params.id,
     req.body ?? {},
     req.user.allowedCompanyIds,
