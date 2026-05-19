@@ -23,7 +23,13 @@ import {
   type TeamInput,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
-import type { CasePerson, CaseTeam } from '@/features/cases/types';
+import {
+  SUPPORT_LEVEL_LABELS,
+  SUPPORT_LEVELS,
+  type CasePerson,
+  type CaseTeam,
+  type SupportLevel,
+} from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { TEAMS_HELP } from './helpContents';
 
@@ -321,6 +327,7 @@ function TeamEditModal({
     description: '',
     companyId: defaultCompanyId,
     isActive: true,
+    defaultSupportLevel: 'L1',
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -340,6 +347,7 @@ function TeamEditModal({
             description: item.description ?? '',
             companyId: item.companyId,
             isActive: item.isActive,
+            defaultSupportLevel: item.defaultSupportLevel ?? 'L1',
           });
         }
       })();
@@ -352,6 +360,7 @@ function TeamEditModal({
         description: '',
         companyId: defaultCompanyId,
         isActive: true,
+        defaultSupportLevel: 'L1',
       });
     }
   }, [open, mode, editingId, defaultCompanyId]);
@@ -364,6 +373,7 @@ function TeamEditModal({
       description: form.description?.trim() || undefined,
       companyId: form.companyId,
       isActive: form.isActive,
+      defaultSupportLevel: form.defaultSupportLevel ?? 'L1',
     };
 
     const r =
@@ -449,6 +459,24 @@ function TeamEditModal({
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             rows={2}
           />
+        </Field>
+
+        <Field
+          label="Varsayılan Destek Seviyesi"
+          hint="Vaka açılışında bu takıma atandığında (kişi seçilmemişse) kullanılır."
+        >
+          <Select
+            value={form.defaultSupportLevel ?? 'L1'}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, defaultSupportLevel: e.target.value as SupportLevel }))
+            }
+          >
+            {SUPPORT_LEVELS.map((s) => (
+              <option key={s} value={s}>
+                {SUPPORT_LEVEL_LABELS[s]}
+              </option>
+            ))}
+          </Select>
         </Field>
 
         <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -812,6 +840,8 @@ function PersonEditModal({
     teamId: '',
     email: '',
     isActive: true,
+    supportLevel: 'L1',
+    isTeamLead: false,
   });
   const [teams, setTeams] = useState<CaseTeam[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -835,10 +865,19 @@ function PersonEditModal({
             teamId: p.teamId,
             email: p.email ?? '',
             isActive: p.isActive,
+            supportLevel: p.supportLevel ?? 'L1',
+            isTeamLead: !!p.isTeamLead,
           });
         }
       } else {
-        setForm({ name: '', teamId: editor.teamId, email: '', isActive: true });
+        setForm({
+          name: '',
+          teamId: editor.teamId,
+          email: '',
+          isActive: true,
+          supportLevel: 'L1',
+          isTeamLead: false,
+        });
       }
     })();
     return () => {
@@ -855,6 +894,8 @@ function PersonEditModal({
       teamId: form.teamId,
       email: form.email?.trim() || undefined,
       isActive: form.isActive,
+      supportLevel: form.supportLevel ?? 'L1',
+      isTeamLead: !!form.isTeamLead,
     };
 
     const r =
@@ -931,6 +972,34 @@ function PersonEditModal({
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
           />
         </Field>
+
+        <Field
+          label="Destek Seviyesi"
+          hint="Vaka açılışında bu kişi atandığında varsayılan değer (L1/L2/L3/Expert)."
+        >
+          <Select
+            value={form.supportLevel ?? 'L1'}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, supportLevel: e.target.value as SupportLevel }))
+            }
+          >
+            {SUPPORT_LEVELS.map((s) => (
+              <option key={s} value={s}>
+                {SUPPORT_LEVEL_LABELS[s]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={!!form.isTeamLead}
+            onChange={(e) => setForm((f) => ({ ...f, isTeamLead: e.target.checked }))}
+            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          Takım Lideri — escalation ve atama önerilerinde öne çıkar
+        </label>
 
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input

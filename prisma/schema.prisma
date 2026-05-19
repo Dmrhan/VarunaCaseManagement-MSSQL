@@ -96,6 +96,15 @@ enum AddressType {
   Branch
 }
 
+/// Destek seviyesi — WR-A5 / PM-03 (Phase 1 foundation; SLA/routing entegrasyonu Phase 2).
+/// L1/L2 mevcut kullanım; L3/Expert future-proof.
+enum SupportLevel {
+  L1
+  L2
+  L3
+  Expert
+}
+
 enum NoteVisibility {
   Internal
   Customer
@@ -611,6 +620,9 @@ model Team {
   // listQueries: WHERE companyId IN req.user.allowedCompanyIds.
   companyId   String
   isActive    Boolean  @default(true)
+  /// WR-A5 / PM-03 — Takımın varsayılan destek seviyesi. Case create cascade'inde
+  /// (assignedPersonId yokken) kullanılır. Mevcut takımlar default L1.
+  defaultSupportLevel SupportLevel @default(L1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -627,6 +639,12 @@ model Person {
   email     String?
   teamId    String?
   isActive  Boolean  @default(true)
+  /// WR-B1 / PM-03 — Takım lideri bayrağı. Phase 2'de escalation hedef seçiminde
+  /// hint sinyali; bu PR'da yalnız Admin toggle + smoke invariant.
+  isTeamLead Boolean @default(false)
+  /// WR-A5 / PM-03 — Kişinin destek seviyesi. Case create cascade kaynağı.
+  /// Default L1; rol-bazlı seed dağılımı (Agent L1, team lead L2, Admin Expert).
+  supportLevel SupportLevel @default(L1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -772,6 +790,13 @@ model Case {
   // Eskalasyon
   escalationLevel EscalationLevel @default(Yok)
 
+  // WR-A5 / PM-03 — Vakanın destek seviyesi (L1/L2/L3/Expert). Create cascade:
+  //   assignedPersonId → Person.supportLevel
+  //   else assignedTeamId → Team.defaultSupportLevel
+  //   else default L1
+  // Phase 1 foundation: SLA/escalation tier-aware rewrite Phase 2'de.
+  supportLevel SupportLevel @default(L1)
+
   // 3rd party
   thirdPartyId   String?
   thirdPartyName String?
@@ -909,6 +934,8 @@ model Case {
   @@index([companyId, assignedTeamId])
   @@index([companyId, category, subCategory])
   @@index([companyId, resolvedAt])
+  // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
+  @@index([companyId, supportLevel])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı

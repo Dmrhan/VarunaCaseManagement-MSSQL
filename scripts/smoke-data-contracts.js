@@ -1364,6 +1364,93 @@ defineGroup('Product Catalog Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group N+4 — Support Level / Team Lead Contract (WR-A5 + WR-B1 / PM-03)
+//   Phase 1 foundation: SupportLevel enum + Person/Team/Case non-null fields
+//   + team lead invariants + seed coverage.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Support Level / Team Lead Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // SL.1) Person.supportLevel NOT NULL.
+  const personCol = await prisma.$queryRawUnsafe(
+    `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'Person' AND column_name = 'supportLevel'`,
+  );
+  out.push(check(
+    'Person.supportLevel NOT NULL',
+    personCol?.[0]?.is_nullable === 'NO' ? 'PASS' : 'FAIL',
+    { detail: personCol?.[0] ? `is_nullable=${personCol[0].is_nullable}` : 'missing' },
+  ));
+
+  // SL.2) Team.defaultSupportLevel NOT NULL.
+  const teamCol = await prisma.$queryRawUnsafe(
+    `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'Team' AND column_name = 'defaultSupportLevel'`,
+  );
+  out.push(check(
+    'Team.defaultSupportLevel NOT NULL',
+    teamCol?.[0]?.is_nullable === 'NO' ? 'PASS' : 'FAIL',
+    { detail: teamCol?.[0] ? `is_nullable=${teamCol[0].is_nullable}` : 'missing' },
+  ));
+
+  // SL.3) Case.supportLevel NOT NULL.
+  const caseCol = await prisma.$queryRawUnsafe(
+    `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'Case' AND column_name = 'supportLevel'`,
+  );
+  out.push(check(
+    'Case.supportLevel NOT NULL',
+    caseCol?.[0]?.is_nullable === 'NO' ? 'PASS' : 'FAIL',
+    { detail: caseCol?.[0] ? `is_nullable=${caseCol[0].is_nullable}` : 'missing' },
+  ));
+
+  // SL.4) No Case with NULL supportLevel (sanity even with NOT NULL).
+  //   Note: column is NOT NULL → prisma filter for null is rejected; raw SQL.
+  const nullCases = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int AS n FROM "Case" WHERE "supportLevel" IS NULL`,
+  );
+  const nullN = nullCases?.[0]?.n ?? 0;
+  out.push(check(
+    'No Case row with NULL supportLevel',
+    nullN === 0 ? 'PASS' : 'FAIL',
+    { count: nullN },
+  ));
+
+  // SL.5) At least one Person.isTeamLead=true per active company that has teams.
+  const activeCompanies = await prisma.company.findMany({ where: { isActive: true }, select: { id: true, name: true } });
+  for (const c of activeCompanies) {
+    const teamCount = await prisma.team.count({ where: { companyId: c.id, isActive: true } });
+    if (teamCount === 0) continue;
+    const leadCount = await prisma.person.count({
+      where: { isTeamLead: true, team: { companyId: c.id } },
+    });
+    out.push(check(
+      `${c.name}: at least 1 team lead`,
+      leadCount >= 1 ? 'PASS' : 'FAIL',
+      { detail: `teams=${teamCount} leads=${leadCount}` },
+    ));
+  }
+
+  // SL.6) No Person.isTeamLead=true with teamId NULL (orphan lead invariant).
+  const orphanLead = await prisma.person.count({ where: { isTeamLead: true, teamId: null } });
+  out.push(check(
+    'No team lead with NULL teamId (orphan)',
+    orphanLead === 0 ? 'PASS' : 'FAIL',
+    { count: orphanLead },
+  ));
+
+  // SL.7) UNIVERA cases mix L1 + L2 (seed coverage).
+  const univeraL1 = await prisma.case.count({ where: { companyId: 'COMP-UNIVERA', supportLevel: 'L1' } });
+  const univeraL2 = await prisma.case.count({ where: { companyId: 'COMP-UNIVERA', supportLevel: 'L2' } });
+  out.push(check(
+    'UNIVERA case L1 + L2 coverage',
+    univeraL1 > 0 && univeraL2 > 0 ? 'PASS' : 'FAIL',
+    { detail: `L1=${univeraL1} L2=${univeraL2}` },
+  ));
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 

@@ -48,6 +48,8 @@ export interface TeamInput {
   /** Phase 5C — backend body.companyId zorunlu (multi-tenant scope). */
   companyId: string;
   isActive: boolean;
+  /** WR-A5 — Takım default destek seviyesi (L1/L2/L3/Expert). Default L1. */
+  defaultSupportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
 }
 
 export interface PersonInput {
@@ -55,6 +57,10 @@ export interface PersonInput {
   teamId: string;
   email?: string;
   isActive: boolean;
+  /** WR-A5 — Kişinin destek seviyesi (L1/L2/L3/Expert). Default L1. */
+  supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
+  /** WR-B1 — Takım lideri bayrağı. Default false. */
+  isTeamLead?: boolean;
 }
 
 export interface CategoryInput {
