@@ -1,6 +1,30 @@
 import { apiFetch } from '@/services/caseService';
 
 /**
+ * WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı).
+ *
+ * API wire format: ASCII identifier (Individual/Corporate/Government/NonProfit).
+ * UI'da TR label'a `CUSTOMER_TYPE_LABELS` üzerinden çevrilir.
+ *
+ * TCKN bu modelde YOK — A2'de privacy design sonrası.
+ */
+export type CustomerType = 'Individual' | 'Corporate' | 'Government' | 'NonProfit';
+
+export const CUSTOMER_TYPES: CustomerType[] = [
+  'Corporate',
+  'Individual',
+  'Government',
+  'NonProfit',
+];
+
+export const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
+  Corporate: 'Kurumsal',
+  Individual: 'Bireysel',
+  Government: 'Kamu',
+  NonProfit: 'Vakıf / STK',
+};
+
+/**
  * Account 360 — Phase B service layer.
  *
  * Phase A BFF endpoint'leri:
@@ -39,6 +63,10 @@ export interface AccountListItem {
   phone: string | null;
   email: string | null;
   isActive: boolean;
+  /** WR-A1 / PM-01 — Müşteri tipi (default Corporate). */
+  customerType: CustomerType;
+  legalName: string | null;
+  registrationNo: string | null;
   companies: AccountCompanyChip[];
   openCaseCount: number;
   totalCaseCount: number;
@@ -95,6 +123,10 @@ export interface AccountDetail {
   email: string | null;
   isActive: boolean;
   createdAt: string;
+  /** WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) kurumsal alanlar. */
+  customerType: CustomerType;
+  legalName: string | null;
+  registrationNo: string | null;
   companies: AccountCompanyDetail[];
   contacts: AccountContact[];
   caseStats: AccountCaseStats;
@@ -121,6 +153,10 @@ export interface AccountCreateInput {
   vkn?: string | null;
   phone?: string | null;
   email?: string | null;
+  /** WR-A1 — default Corporate. */
+  customerType?: CustomerType;
+  legalName?: string | null;
+  registrationNo?: string | null;
   companies: AccountCompanyCreateInput[];
 }
 
@@ -130,6 +166,10 @@ export interface AccountUpdateInput {
   phone?: string | null;
   email?: string | null;
   isActive?: boolean;
+  /** WR-A1. */
+  customerType?: CustomerType;
+  legalName?: string | null;
+  registrationNo?: string | null;
 }
 
 /* Phase C1 — AccountCompany + AccountContact mutations */

@@ -317,17 +317,48 @@ async function main() {
     const theme = COMPANY_THEMES[companyId];
     allAccountIds[companyId] = [];
     for (const def of theme.accounts) {
+      // WR-A1 — Müşteri tipi deterministic dağılım (~80% Corporate / 15% Individual / 3% Gov / 2% NonProfit).
+      // hash(def.code) bin alır; aynı code her run'da aynı tip üretir.
+      const typeBucket = Math.abs(hash(def.code + 'type')) % 100;
+      const customerType =
+        typeBucket < 80
+          ? 'Corporate'
+          : typeBucket < 95
+            ? 'Individual'
+            : typeBucket < 98
+              ? 'Government'
+              : 'NonProfit';
+      // Bireysel için VKN tutmuyoruz (gerçekçi); diğerlerinde mevcut def.vkn korunur.
+      // TCKN bu fazda EKLENMEZ — A2 privacy design sonrası.
+      const accVkn = customerType === 'Individual' ? null : def.vkn;
+      const accLegalName =
+        customerType === 'Individual' ? null : `${def.name} ${customerType === 'Government' ? 'Genel Müdürlüğü' : customerType === 'NonProfit' ? 'Vakfı' : 'A.Ş.'}`;
+      const accRegistrationNo =
+        customerType === 'Individual'
+          ? null
+          : String(100000 + (Math.abs(hash(def.code + 'reg')) % 900000));
+
       const acc = await prisma.account.upsert({
         where: { id: `ACC-${def.code}` },
-        update: { name: def.name, vkn: def.vkn, isActive: true },
+        update: {
+          name: def.name,
+          vkn: accVkn,
+          isActive: true,
+          customerType,
+          legalName: accLegalName,
+          registrationNo: accRegistrationNo,
+        },
         create: {
           id: `ACC-${def.code}`,
           name: def.name,
-          vkn: def.vkn,
+          vkn: accVkn,
           phone: `+90 ${500 + Math.abs(hash(def.code) % 99)} ${String(Math.abs(hash(def.code + 'p') % 10000000)).padStart(7, '0')}`,
           email: `${def.code.toLowerCase()}@${theme.name.toLowerCase()}-demo.com`,
           companyId: null,
           isActive: true,
+          customerType,
+          legalName: accLegalName,
+          registrationNo: accRegistrationNo,
         },
       });
       const ac = await prisma.accountCompany.upsert({

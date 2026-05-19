@@ -29,6 +29,17 @@ export const M_REQUEST = {
 export const M_ESCALATION = {
   'Yok': 'Yok', 'TakımLideri': 'TakimLideri', 'Direktör': 'Direktor', 'ÜstYönetim': 'UstYonetim',
 };
+// WR-A1 / PM-01 — Müşteri tipi. Account API'da ASCII identifier (Individual/Corporate/Government/NonProfit)
+// kullanılır; UI tarafta TR label'a map'lenir (src/services/accountService.ts CUSTOMER_TYPE_LABELS).
+// Bu sözlük future symmetric use için tutulur (Case pipeline'ı gibi toDb/fromDb yoluna girmez).
+export const M_CUSTOMER_TYPE = {
+  'Bireysel': 'Individual',
+  'Kurumsal': 'Corporate',
+  'Kamu': 'Government',
+  'Vakıf-STK': 'NonProfit',
+};
+/** Geçerli Account customerType identifier'ları — validation için tek doğru kaynak. */
+export const CUSTOMER_TYPE_VALUES = ['Individual', 'Corporate', 'Government', 'NonProfit'];
 export const M_FINANCIAL = {
   'Düşük': 'Dusuk', 'Orta': 'Orta', 'Yüksek': 'Yuksek', 'Kritik': 'Kritik',
 };

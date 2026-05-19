@@ -246,6 +246,29 @@ defineGroup('Account / Case Integrity', async () => {
     examples: take(orphanContacts),
   }));
 
+  // 2.7) WR-A1 — Account.customerType has no nulls. Migration default 'Kurumsal' (Corporate)
+  //      tüm satırlarda olmalı. Schema NOT NULL — Prisma zaten geçirmez; runtime raw query ile doğrula.
+  const rawNulls = await prisma.$queryRawUnsafe(
+    'SELECT COUNT(*)::int as n FROM "Account" WHERE "customerType" IS NULL',
+  );
+  const nullCount = rawNulls?.[0]?.n ?? 0;
+  out.push(check('Account.customerType has no nulls (WR-A1)', nullCount === 0 ? 'PASS' : 'FAIL', {
+    count: nullCount,
+  }));
+
+  // 2.8) WR-A1 regression guard — Account tablosunda tckn / tcknHash KOLONU yok.
+  //      TCKN A2'de privacy design sonrası eklenir; bu PR'da hiçbir varyantı var olmamalı.
+  const cols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'Account' AND column_name IN ('tckn', 'tcknHash', 'tckn_hash', 'national_id')`,
+  );
+  const forbiddenCols = (cols ?? []).map((r) => r.column_name);
+  out.push(check(
+    'Account table excludes tckn / tcknHash columns (WR-A1 / Modeling Guardrail #1)',
+    forbiddenCols.length === 0 ? 'PASS' : 'FAIL',
+    { count: forbiddenCols.length, examples: forbiddenCols },
+  ));
+
   return out;
 });
 

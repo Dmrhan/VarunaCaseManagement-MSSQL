@@ -70,6 +70,15 @@ enum EscalationLevel {
   UstYonetim  @map("ÜstYönetim")
 }
 
+/// Müşteri tipi — WR-A1 / PM-01. Bireysel/Kurumsal/Kamu/Vakıf-STK.
+/// TCKN bu enuma rağmen Account'a EKLENMEZ (A2'de privacy design sonrası).
+enum CustomerType {
+  Individual @map("Bireysel")
+  Corporate  @map("Kurumsal")
+  Government @map("Kamu")
+  NonProfit  @map("Vakıf-STK")
+}
+
 enum NoteVisibility {
   Internal
   Customer
@@ -276,16 +285,16 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts          Account[]
-  accountCompanies  AccountCompany[]
-  teams             Team[]
-  cases             Case[]
-  slaPolicies       SLAPolicy[]
-  categories        CategoryDef[]
-  checklists        ChecklistTemplate[]
-  fieldDefinitions  FieldDefinition[]
-  settings          CompanySettings?
-  userCompanies     UserCompany[]
+  accounts         Account[]
+  accountCompanies AccountCompany[]
+  teams            Team[]
+  cases            Case[]
+  slaPolicies      SLAPolicy[]
+  categories       CategoryDef[]
+  checklists       ChecklistTemplate[]
+  fieldDefinitions FieldDefinition[]
+  settings         CompanySettings?
+  userCompanies    UserCompany[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -314,17 +323,17 @@ model FieldDefinition {
 
 // Şirket başına UI/marka yapılandırması — multi-tenant beyaz etiket için.
 model CompanySettings {
-  companyId    String   @id
-  logoUrl      String?
-  primaryColor String? // hex (#7C3AED gibi)
-  appName      String?
-  supportEmail String?
+  companyId                   String   @id
+  logoUrl                     String?
+  primaryColor                String? // hex (#7C3AED gibi)
+  appName                     String?
+  supportEmail                String?
   /// Phase D: true ise vaka açarken müşteri seçimi zorunlu; false (default)
   /// ise Agent "Müşterisiz devam et" ile vaka açabilir ve Case.customerMatchPending
   /// = true set edilir (Supervisor/Admin için eşleştirme kuyruğu).
-  requireCustomerOnCaseCreate Boolean @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  requireCustomerOnCaseCreate Boolean  @default(false)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id])
 }
@@ -334,24 +343,32 @@ model CompanySettings {
 // kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
 // ve mevcut Case scope sorguları için geri uyumlu kalır.
 model Account {
-  id        String   @id @default(cuid())
-  name      String
+  id             String       @id @default(cuid())
+  name           String
   /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
-  vkn       String?  @unique
-  companyId String?
-  email     String?
-  phone     String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  vkn            String?      @unique
+  companyId      String?
+  email          String?
+  phone          String?
+  isActive       Boolean      @default(true)
+  /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
+  /// TCKN bu modelde YOKTUR — A2'de privacy design (encrypt/hash/mask) onayından sonra eklenir.
+  customerType   CustomerType @default(Corporate)
+  /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
+  legalName      String?
+  /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
+  registrationNo String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  company   Company? @relation(fields: [companyId], references: [id])
+  company   Company?         @relation(fields: [companyId], references: [id])
   cases     Case[]
   companies AccountCompany[]
   contacts  AccountContact[]
 
   @@index([companyId])
   @@index([name])
+  @@index([customerType])
 }
 
 // AccountCompany — Account ile Company arasında per-tenant ilişki.
