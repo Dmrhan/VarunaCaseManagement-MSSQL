@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { X, AlertCircle, ExternalLink, Loader2, MessageCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  X, AlertCircle, ExternalLink, Loader2, MessageCircle,
+  Paperclip, Mail, Phone, Trash2, Download, Upload, User as UserIcon,
+} from 'lucide-react';
 import { cn } from '@/components/ui/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -8,6 +11,9 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import { caseService, lookupService } from '@/services/caseService';
+import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import { MentionTextarea } from '@/features/cases/components/MentionTextarea';
+import { MentionContent } from '@/features/cases/components/MentionContent';
 import type { Case, CaseFilters, CasePriority, CaseStatus, NoteVisibility } from '@/features/cases/types';
 
 /**
@@ -373,6 +379,8 @@ function EmptyRightPanel() {
 // Right panel — quick edit
 // ─────────────────────────────────────────────────────────────────
 
+type RightTab = 'edit' | 'notes';
+
 function QuickEditPanel({
   caseItem,
   loading,
@@ -389,18 +397,31 @@ function QuickEditPanel({
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // Drafts
+  // Tab
+  const [tab, setTab] = useState<RightTab>('edit');
+
+  // Drafts (edit tab)
   const [statusDraft, setStatusDraft] = useState<CaseStatus | ''>('');
   const [priorityDraft, setPriorityDraft] = useState<CasePriority | ''>('');
   const [assigneeDraft, setAssigneeDraft] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
-  // Note
+  // Note (notes tab)
   const [noteContent, setNoteContent] = useState('');
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>('Internal');
   const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [showAllNotes, setShowAllNotes] = useState(false);
 
-  // Reset drafts when case changes
+  // Customer context (sticky header)
+  const [customerCtx, setCustomerCtx] = useState<CaseCustomerContext | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
+
+  // File upload (edit tab)
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Reset state when case changes
   useEffect(() => {
     if (caseItem) {
       setStatusDraft(caseItem.status);
@@ -408,7 +429,25 @@ function QuickEditPanel({
       setAssigneeDraft(caseItem.assignedPersonId ?? '');
       setNoteContent('');
       setNoteVisibility('Internal');
+      setShowAllNotes(false);
+      setTab('edit');
     }
+  }, [caseItem?.id]);
+
+  // Fetch customer context once per case
+  useEffect(() => {
+    if (!caseItem?.id) {
+      setCustomerCtx(null);
+      return;
+    }
+    let alive = true;
+    setCustomerLoading(true);
+    void accountService.getCaseCustomerContext(caseItem.id).then((res) => {
+      if (!alive) return;
+      setCustomerCtx(res?.context ?? null);
+      setCustomerLoading(false);
+    });
+    return () => { alive = false; };
   }, [caseItem?.id]);
 
   const personsForCompany = useMemo(() => {
@@ -480,10 +519,50 @@ function QuickEditPanel({
     }
   }
 
-  const lastNotes = (caseItem.notes ?? [])
+  async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !caseItem) return;
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const r = await caseService.addFile(caseItem.id, file, (p) => setUploadProgress(p));
+      if (r && 'file' in r) {
+        toast({ type: 'success', message: 'Dosya yüklendi.' });
+        await onSaved();
+      } else if (r && 'error' in r) {
+        toast({ type: 'error', message: r.error });
+      }
+    } catch {
+      toast({ type: 'error', message: 'Dosya yüklenemedi.' });
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      // reset input so same file can be re-picked
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  async function handleFileDownload(fileId: string) {
+    if (!caseItem) return;
+    await caseService.downloadFile(caseItem.id, fileId);
+  }
+
+  async function handleFileRemove(fileId: string) {
+    if (!caseItem) return;
+    if (!confirm('Bu dosyayı silmek istediğinize emin misiniz?')) return;
+    const r = await caseService.removeFile(caseItem.id, fileId);
+    if (r) {
+      toast({ type: 'success', message: 'Dosya silindi.' });
+      await onSaved();
+    }
+  }
+
+  // Sorted notes (newest first)
+  const allNotes = (caseItem.notes ?? [])
     .slice()
-    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
-    .slice(0, 2);
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  const visibleNotes = showAllNotes ? allNotes : allNotes.slice(0, 3);
+  const files = caseItem.files ?? [];
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -509,9 +588,6 @@ function QuickEditPanel({
             <div className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
               {caseItem.title}
             </div>
-            <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-ndark-muted">
-              {caseItem.accountName ?? 'Müşterisiz'}
-            </div>
           </div>
           <button
             type="button"
@@ -524,194 +600,473 @@ function QuickEditPanel({
         </div>
       </div>
 
-      {/* Body — scroll */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3 space-y-4">
-        {/* SLA info */}
-        {caseItem.slaResolutionDueAt && (
-          <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs dark:border-ndark-border dark:bg-ndark-surface/40">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-500 dark:text-ndark-muted">SLA Çözüm</span>
-              {caseItem.slaViolation ? (
-                <span className="font-semibold text-rose-700 dark:text-rose-300">İhlal</span>
-              ) : (
-                <span className="font-medium text-slate-700 dark:text-ndark-text">
-                  {formatRemaining(caseItem.slaResolutionDueAt)}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+      {/* Sticky customer strip — always visible */}
+      <CustomerStrip
+        ctx={customerCtx}
+        loading={customerLoading}
+        fallbackName={caseItem.accountName}
+        requesterFallback={
+          (caseItem as Case & {
+            customerContactName?: string | null;
+            customerContactPhone?: string | null;
+            customerContactEmail?: string | null;
+            customerCompanyName?: string | null;
+          })
+        }
+      />
 
-        {/* Quick edit fields */}
-        <div className="space-y-3">
-          {/* Status */}
-          <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Durum
-            </label>
-            <select
-              value={statusDraft}
-              onChange={(e) => setStatusDraft(e.target.value as CaseStatus)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-            >
-              {SIMPLE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-              {/* Complex statuses gösterilir (option olarak) ama seçilince user'a hint:
-                  tam ekranda aç. Native select karmaşık validation desteklemediği için
-                  draft kabul edilmiyor — kullanıcıyı tam ekrana yönlendir. */}
-              {COMPLEX_STATUSES.includes(caseItem.status) && (
-                <option value={caseItem.status} disabled>
-                  {caseItem.status} (tam ekran)
-                </option>
-              )}
-            </select>
-            {COMPLEX_STATUSES.includes(caseItem.status) && (
-              <p className="mt-1 text-[11px] text-slate-500 dark:text-ndark-muted">
-                Bu vaka karmaşık durumda; statü değiştirmek için tam ekranı kullanın.
-              </p>
-            )}
-          </div>
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 bg-slate-50/60 dark:border-ndark-border dark:bg-ndark-surface/30">
+        <TabButton active={tab === 'edit'} onClick={() => setTab('edit')}>
+          Düzenle
+          {isDirty && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />}
+        </TabButton>
+        <TabButton active={tab === 'notes'} onClick={() => setTab('notes')}>
+          Notlar
+          {allNotes.length > 0 && (
+            <span className="ml-1.5 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-ndark-surface dark:text-ndark-muted">
+              {allNotes.length}
+            </span>
+          )}
+        </TabButton>
+      </div>
 
-          {/* Priority */}
-          <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Öncelik
-            </label>
-            <select
-              value={priorityDraft}
-              onChange={(e) => setPriorityDraft(e.target.value as CasePriority)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-            >
-              {PRIORITIES.map((p) => (
-                <option key={p} value={p}>
-                  {PRIORITY_LABEL[p]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Assignee */}
-          <div>
-            <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Atanan Kişi
-            </label>
-            <select
-              value={assigneeDraft}
-              onChange={(e) => setAssigneeDraft(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-            >
-              <option value="">— Atanmamış —</option>
-              {personsForCompany.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Add note */}
-        <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-ndark-border">
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
-              <MessageCircle size={11} className="mr-1 inline" />
-              Not Ekle
-            </label>
-            <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-ndark-border">
-              <button
-                type="button"
-                onClick={() => setNoteVisibility('Internal')}
-                className={cn(
-                  'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
-                  noteVisibility === 'Internal'
-                    ? 'bg-slate-700 text-white dark:bg-ndark-surface'
-                    : 'text-slate-600 dark:text-ndark-muted',
-                )}
-              >
-                İç Not
-              </button>
-              <button
-                type="button"
-                onClick={() => setNoteVisibility('Customer')}
-                className={cn(
-                  'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
-                  noteVisibility === 'Customer'
-                    ? 'bg-brand-600 text-white'
-                    : 'text-slate-600 dark:text-ndark-muted',
-                )}
-              >
-                Müşteriye Görünür
-              </button>
-            </div>
-          </div>
-          <textarea
-            value={noteContent}
-            onChange={(e) => setNoteContent(e.target.value)}
-            rows={3}
-            placeholder="Kısa not…"
-            className="w-full resize-none rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-          />
-          <div className="mt-2 flex justify-end">
-            <Button
-              size="sm"
-              onClick={handleAddNote}
-              disabled={!noteContent.trim() || noteSubmitting}
-              leftIcon={noteSubmitting ? <Loader2 size={12} className="animate-spin" /> : undefined}
-            >
-              Not Ekle
-            </Button>
-          </div>
-        </div>
-
-        {/* Last 2 notes */}
-        {lastNotes.length > 0 && (
-          <div className="space-y-2">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-              Son Notlar
-            </div>
-            {lastNotes.map((n) => (
-              <div
-                key={n.id}
-                className="rounded-md border border-slate-200 bg-slate-50/40 px-3 py-2 text-xs dark:border-ndark-border dark:bg-ndark-surface/40"
-              >
-                <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted">
-                  <span className="font-medium">{n.authorName}</span>
-                  <span>·</span>
-                  <span>{formatShortDate(n.createdAt)}</span>
-                  {n.visibility === 'Customer' && (
-                    <span className="ml-1 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
-                      Müşteri
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3">
+        {tab === 'edit' && (
+          <div className="space-y-4">
+            {/* SLA info */}
+            {caseItem.slaResolutionDueAt && (
+              <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs dark:border-ndark-border dark:bg-ndark-surface/40">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 dark:text-ndark-muted">SLA Çözüm</span>
+                  {caseItem.slaViolation ? (
+                    <span className="font-semibold text-rose-700 dark:text-rose-300">İhlal</span>
+                  ) : (
+                    <span className="font-medium text-slate-700 dark:text-ndark-text">
+                      {formatRemaining(caseItem.slaResolutionDueAt)}
                     </span>
                   )}
                 </div>
-                <p className="mt-1 line-clamp-3 text-slate-700 dark:text-ndark-text">{n.content}</p>
               </div>
-            ))}
+            )}
+
+            {/* Status */}
+            <div>
+              <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                Durum
+              </label>
+              <select
+                value={statusDraft}
+                onChange={(e) => setStatusDraft(e.target.value as CaseStatus)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+              >
+                {SIMPLE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+                {COMPLEX_STATUSES.includes(caseItem.status) && (
+                  <option value={caseItem.status} disabled>
+                    {caseItem.status} (tam ekran)
+                  </option>
+                )}
+              </select>
+              {COMPLEX_STATUSES.includes(caseItem.status) && (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+                  Bu vaka karmaşık durumda; statü değiştirmek için tam ekranı kullanın.
+                </p>
+              )}
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                Öncelik
+              </label>
+              <select
+                value={priorityDraft}
+                onChange={(e) => setPriorityDraft(e.target.value as CasePriority)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+              >
+                {PRIORITIES.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_LABEL[p]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Assignee */}
+            <div>
+              <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                Atanan Kişi
+              </label>
+              <select
+                value={assigneeDraft}
+                onChange={(e) => setAssigneeDraft(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+              >
+                <option value="">— Atanmamış —</option>
+                {personsForCompany.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Files */}
+            <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-ndark-border">
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+                  <Paperclip size={11} className="mr-1 inline" />
+                  Dosyalar ({files.length})
+                </label>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 size={11} className="animate-spin" /> %{uploadProgress}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={11} /> Dosya Ekle
+                    </>
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFilePick}
+                  className="hidden"
+                />
+              </div>
+              {files.length === 0 ? (
+                <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                  Henüz dosya yok.
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {files.map((f) => (
+                    <li
+                      key={f.id}
+                      className="flex items-center justify-between gap-2 rounded-md border border-slate-100 bg-slate-50/40 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-surface/40"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-slate-800 dark:text-ndark-text">
+                          {f.fileName}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-ndark-muted">
+                          {formatBytes(f.fileSize ?? 0)} · {formatShortDate(f.uploadedAt)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleFileDownload(f.id)}
+                        className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-ndark-surface"
+                        aria-label="İndir"
+                      >
+                        <Download size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFileRemove(f.id)}
+                        className="rounded p-1 text-slate-500 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-900/30"
+                        aria-label="Sil"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'notes' && (
+          <div className="space-y-4">
+            {/* Note compose with mention support */}
+            <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-ndark-border">
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+                  <MessageCircle size={11} className="mr-1 inline" />
+                  Not Ekle
+                </label>
+                <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-ndark-border">
+                  <button
+                    type="button"
+                    onClick={() => setNoteVisibility('Internal')}
+                    className={cn(
+                      'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+                      noteVisibility === 'Internal'
+                        ? 'bg-slate-700 text-white dark:bg-ndark-surface'
+                        : 'text-slate-600 dark:text-ndark-muted',
+                    )}
+                  >
+                    İç Not
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNoteVisibility('Customer')}
+                    className={cn(
+                      'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+                      noteVisibility === 'Customer'
+                        ? 'bg-brand-600 text-white'
+                        : 'text-slate-600 dark:text-ndark-muted',
+                    )}
+                  >
+                    Müşteriye Görünür
+                  </button>
+                </div>
+              </div>
+              <MentionTextarea
+                caseId={caseItem.id}
+                value={noteContent}
+                onChange={setNoteContent}
+                rows={3}
+                placeholder="Kısa not… @ ile takım arkadaşı etiketle"
+              />
+              <div className="mt-2 flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={handleAddNote}
+                  disabled={!noteContent.trim() || noteSubmitting}
+                  leftIcon={noteSubmitting ? <Loader2 size={12} className="animate-spin" /> : undefined}
+                >
+                  Not Ekle
+                </Button>
+              </div>
+            </div>
+
+            {/* History */}
+            {visibleNotes.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-ndark-muted">Henüz not yok.</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                    Geçmiş Notlar ({allNotes.length})
+                  </div>
+                  {allNotes.length > 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllNotes((v) => !v)}
+                      className="text-[11px] font-medium text-brand-700 hover:underline dark:text-brand-300"
+                    >
+                      {showAllNotes ? 'Daha Az' : `Tümünü Göster (${allNotes.length})`}
+                    </button>
+                  )}
+                </div>
+                {visibleNotes.map((n) => (
+                  <div
+                    key={n.id}
+                    className="rounded-md border border-slate-200 bg-slate-50/40 px-3 py-2 text-xs dark:border-ndark-border dark:bg-ndark-surface/40"
+                  >
+                    <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+                      <span className="font-medium">{n.authorName}</span>
+                      <span>·</span>
+                      <span>{formatShortDate(n.createdAt)}</span>
+                      {n.visibility === 'Customer' && (
+                        <span className="ml-1 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                          Müşteri
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-slate-700 dark:text-ndark-text">
+                      <MentionContent content={n.content} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-2.5 dark:border-ndark-border dark:bg-ndark-surface/40">
-        <div className="flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={onBack}>
-            Kapat
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!isDirty || saving}
-            leftIcon={saving ? <Loader2 size={12} className="animate-spin" /> : undefined}
-          >
-            Kaydet
-          </Button>
+      {/* Footer — only on edit tab */}
+      {tab === 'edit' && (
+        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-2.5 dark:border-ndark-border dark:bg-ndark-surface/40">
+          <div className="flex items-center justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={onBack}>
+              Kapat
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={!isDirty || saving}
+              leftIcon={saving ? <Loader2 size={12} className="animate-spin" /> : undefined}
+            >
+              Kaydet
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Customer strip — sticky between header and tabs
+// ─────────────────────────────────────────────────────────────────
+
+function CustomerStrip({
+  ctx,
+  loading,
+  fallbackName,
+  requesterFallback,
+}: {
+  ctx: CaseCustomerContext | null;
+  loading: boolean;
+  fallbackName: string | null | undefined;
+  requesterFallback: {
+    customerContactName?: string | null;
+    customerContactPhone?: string | null;
+    customerContactEmail?: string | null;
+    customerCompanyName?: string | null;
+  };
+}) {
+  if (loading) {
+    return (
+      <div className="border-b border-slate-200 bg-amber-50/40 px-4 py-2 dark:border-ndark-border dark:bg-amber-950/10">
+        <Skeleton height={14} width="70%" />
+      </div>
+    );
+  }
+
+  // Customer-context varsa onu kullan
+  if (ctx) {
+    const c = ctx.primaryContact;
+    return (
+      <div className="border-b border-slate-200 bg-amber-50/40 px-4 py-2 dark:border-ndark-border dark:bg-amber-950/10">
+        <div className="flex items-center gap-2 text-xs">
+          <UserIcon size={12} className="shrink-0 text-amber-700 dark:text-amber-300" />
+          <span className="min-w-0 truncate font-semibold text-slate-900 dark:text-ndark-text">
+            {ctx.accountName}
+          </span>
+          {ctx.company?.packageName && (
+            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-ndark-surface dark:text-ndark-muted">
+              {ctx.company.packageName}
+            </span>
+          )}
+        </div>
+        {c && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600 dark:text-ndark-muted">
+            <span className="font-medium text-slate-700 dark:text-ndark-text">
+              {c.fullName}
+              {c.title && <span className="font-normal text-slate-500"> · {c.title}</span>}
+            </span>
+            {c.phone && (
+              <a
+                href={`tel:${c.phone}`}
+                className="inline-flex items-center gap-0.5 text-brand-700 hover:underline dark:text-brand-300"
+              >
+                <Phone size={10} /> {c.phone}
+              </a>
+            )}
+            {c.email && (
+              <a
+                href={`mailto:${c.email}`}
+                className="inline-flex items-center gap-0.5 text-brand-700 hover:underline dark:text-brand-300"
+              >
+                <Mail size={10} /> {c.email}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Customerless case — Phase D requester context fallback
+  const hasRequester =
+    requesterFallback.customerContactName ||
+    requesterFallback.customerContactPhone ||
+    requesterFallback.customerContactEmail ||
+    requesterFallback.customerCompanyName;
+  if (hasRequester) {
+    return (
+      <div className="border-b border-slate-200 bg-amber-50/40 px-4 py-2 dark:border-ndark-border dark:bg-amber-950/10">
+        <div className="flex items-center gap-2 text-xs">
+          <UserIcon size={12} className="shrink-0 text-amber-700 dark:text-amber-300" />
+          <span className="truncate font-semibold text-slate-900 dark:text-ndark-text">
+            {requesterFallback.customerCompanyName || 'Müşterisiz Başvuran'}
+          </span>
+          <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+            Eşleşmemiş
+          </span>
+        </div>
+        {requesterFallback.customerContactName && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600 dark:text-ndark-muted">
+            <span className="font-medium text-slate-700 dark:text-ndark-text">
+              {requesterFallback.customerContactName}
+            </span>
+            {requesterFallback.customerContactPhone && (
+              <a
+                href={`tel:${requesterFallback.customerContactPhone}`}
+                className="inline-flex items-center gap-0.5 text-brand-700 hover:underline dark:text-brand-300"
+              >
+                <Phone size={10} /> {requesterFallback.customerContactPhone}
+              </a>
+            )}
+            {requesterFallback.customerContactEmail && (
+              <a
+                href={`mailto:${requesterFallback.customerContactEmail}`}
+                className="inline-flex items-center gap-0.5 text-brand-700 hover:underline dark:text-brand-300"
+              >
+                <Mail size={10} /> {requesterFallback.customerContactEmail}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // No customer info at all
+  return (
+    <div className="border-b border-slate-200 bg-slate-50/40 px-4 py-2 text-xs text-slate-500 dark:border-ndark-border dark:bg-ndark-surface/30 dark:text-ndark-muted">
+      <UserIcon size={12} className="mr-1 inline" />
+      {fallbackName ?? 'Müşterisiz'}
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex flex-1 items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
+        active
+          ? 'border-brand-500 text-brand-700 dark:text-brand-300'
+          : 'border-transparent text-slate-600 hover:text-slate-800 dark:text-ndark-muted',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatRemaining(iso: string): string {
