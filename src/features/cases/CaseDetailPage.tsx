@@ -387,6 +387,16 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setCallNoteModal({ open: true, prefillDurationMin: durationMin });
   }
 
+  // WR-C1 — "Üstlen" / Claim handler. Race conflict 409 → apiFetch toast eder, undefined döner.
+  const [claiming, setClaiming] = useState(false);
+  async function handleClaim() {
+    if (!item || claiming) return;
+    setClaiming(true);
+    const updated = await caseService.claimCase(item.id);
+    setClaiming(false);
+    if (updated) setItem(updated);
+  }
+
   if (loading && !item) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -695,6 +705,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
           }
           onStartCall={handleStartCall}
           onTransfer={() => setTransferOpen(true)}
+          onClaim={handleClaim}
+          claiming={claiming}
+          canClaim={!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi'}
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
           onTabFocusNote={handleQuickActionAddNote}
           callActive={callActive}
@@ -937,6 +950,9 @@ function LeftPanel({
   onConfirmLinkSuggestion,
   onStartCall,
   onTransfer,
+  onClaim,
+  claiming,
+  canClaim,
   onNoteAdded,
   onTabFocusNote,
   callActive,
@@ -954,6 +970,12 @@ function LeftPanel({
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
   onStartCall: () => void;
   onTransfer: () => void;
+  /** WR-C1 — Üstlen click handler (parent state'i günceller). */
+  onClaim: () => void;
+  /** WR-C1 — Claim akışı çalışırken disabled + spinner için. */
+  claiming: boolean;
+  /** WR-C1 — Vaka açık + atanmamış + user.personId varsa true. */
+  canClaim: boolean;
   onNoteAdded: (note: import('./types').CaseNote) => void;
   onTabFocusNote: () => void;
   callActive: boolean;
@@ -1159,6 +1181,18 @@ function LeftPanel({
           <Row label="Vaka Sahibi" value={item.assignedPersonName ?? 'Atanmadı'} />
           <Row label="Takım" value={item.assignedTeamName ?? '—'} />
           <Row label="Eskalasyon" value={ESCALATION_LEVEL_LABELS[item.escalationLevel]} />
+          {/* WR-C1 — Atanmamış + açık vakalar için "Üstlen" butonu. */}
+          {canClaim && (
+            <button
+              type="button"
+              onClick={onClaim}
+              disabled={claiming}
+              className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+              title="Bu vakayı üstlen"
+            >
+              {claiming ? 'Üstleniliyor…' : 'Üstlen'}
+            </button>
+          )}
         </div>
       </PanelSection>
 

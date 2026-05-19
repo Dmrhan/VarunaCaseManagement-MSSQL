@@ -279,6 +279,35 @@ router.patch(
 );
 
 /**
+ * WR-C1 / PM-07 — POST /api/cases/:id/claim ("Üstlen")
+ *
+ * Atanmamış açık bir vakayı çağıran kullanıcıya atomik olarak atar.
+ * Auth: Agent, Backoffice, CSM, Supervisor, Admin, SystemAdmin
+ *   (Sadece kullanıcının allowedCompanyIds scope'undaki vakalar.)
+ *
+ * Atomicity & race handling repository tarafında (`updateMany` WHERE filter).
+ * Hata kodları:
+ *   400 — kapalı vaka (Cozuldu/IptalEdildi) veya user'da Person kaydı yok
+ *   403 — cross-tenant case erişimi (CaseAccessError)
+ *   404 — case yok
+ *   409 — vaka zaten atanmış (race lost ya da ön check)
+ */
+router.post(
+  '/:id/claim',
+  requireRole('Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const updated = await caseRepository.claim({
+      caseId: req.params.id,
+      user: req.user,
+    });
+    if (!updated) {
+      return res.status(404).json({ error: 'not_found', message: 'Vaka bulunamadı.' });
+    }
+    res.json(updated);
+  }),
+);
+
+/**
  * GET /api/cases/:id/customer-match-suggestions — Phase D Step 2
  *
  * customerMatchPending=true vakalar için deterministic eşleştirme önerileri.

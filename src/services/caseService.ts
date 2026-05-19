@@ -762,6 +762,21 @@ export const caseService = {
   },
 
   /**
+   * WR-C1 / PM-07 — "Üstlen" / Claim.
+   * Atomik backend update; race conflict 409 → apiFetch toast eder, undefined döner.
+   * Cache invalidate edilir (assignedPersonId/Name/TeamId değişti).
+   */
+  async claimCase(caseId: string): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `${API_BASE}/${caseId}/claim`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'Vaka üstlenilemedi',
+    );
+    if (result) invalidateCaseDetail(caseId);
+    return result;
+  },
+
+  /**
    * Yeni çağrı logu ekler. UI tarafında oluşturulan log'u case.callLogs'a önder.
    * AI özetlemesi caller tarafında yapılır (aiService.callSummary → ardından
    * caseService.update ile aiCallBrief set edilir).
