@@ -312,8 +312,132 @@ console.log('\n── 10) Multi-tenant scope ──');
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 11-15) Codex review fix — team lead requires effective teamId
+// ─────────────────────────────────────────────────────────────────
+
+console.log('\n── 11-15) Team lead invariant: requires effective teamId ──');
+
+const sysadminToken = await getToken('sysadmin@varuna.dev');
+const createdPersonIds = [];
+const teamForFix = await prisma.team.findFirst({ where: { isActive: true } });
+
+if (!sysadminToken) {
+  record('11-15. team lead invariant suite', false, 'sysadmin token unavailable');
+} else if (!teamForFix) {
+  record('11-15. team lead invariant suite', false, 'no active team in DB');
+} else {
+  // 11) POST /api/admin/persons with isTeamLead=true + no teamId → 400
+  {
+    const r = await api(sysadminToken, '/api/admin/persons', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `${STAMP} 11 no-team-lead`,
+        isActive: true,
+        isTeamLead: true,
+        // NO teamId
+      }),
+    });
+    const ok = r.status === 400 && r.data?.error === 'team_lead_requires_team';
+    record('11. Create isTeamLead=true + no teamId → 400 team_lead_requires_team', ok, `status=${r.status} error=${r.data?.error}`);
+    if (r.data?.id) createdPersonIds.push(r.data.id);
+  }
+
+  // Baseline: create a person WITH team, no lead — anchor for tests 12-15.
+  let baselinePerson = null;
+  {
+    const r = await api(sysadminToken, '/api/admin/persons', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `${STAMP} 12-15 baseline`,
+        isActive: true,
+        teamId: teamForFix.id,
+        isTeamLead: false,
+        supportLevel: 'L1',
+      }),
+    });
+    if (r.status === 201 && r.data?.id) {
+      baselinePerson = r.data;
+      createdPersonIds.push(r.data.id);
+    } else {
+      record('11-15. baseline create', false, `status=${r.status} error=${r.data?.error}`);
+    }
+  }
+
+  // 12) PATCH teamId=null + isTeamLead=true → 400
+  if (baselinePerson) {
+    const r = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ teamId: null, isTeamLead: true }),
+    });
+    const ok = r.status === 400 && r.data?.error === 'team_lead_requires_team';
+    record('12. PATCH teamId=null + isTeamLead=true → 400 team_lead_requires_team', ok, `status=${r.status} error=${r.data?.error}`);
+  }
+
+  // 13) Promote baseline to lead (valid), then PATCH only teamId=null → 400.
+  let leadPerson = null;
+  if (baselinePerson) {
+    const promote = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isTeamLead: true }),
+    });
+    if (promote.status === 200) {
+      leadPerson = promote.data;
+      const r = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ teamId: null }),
+      });
+      const ok = r.status === 400 && r.data?.error === 'team_lead_requires_team';
+      record('13. Existing lead PATCH teamId=null only → 400 (effective lead remains true)', ok, `status=${r.status} error=${r.data?.error}`);
+    } else {
+      record('13. Promote to lead', false, `status=${promote.status} error=${promote.data?.error}`);
+    }
+  }
+
+  // 14) PATCH valid teamId + isTeamLead=true → 200.
+  if (baselinePerson) {
+    const r = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ teamId: teamForFix.id, isTeamLead: true }),
+    });
+    const ok = r.status === 200 && r.data?.isTeamLead === true && r.data?.teamId === teamForFix.id;
+    record('14. PATCH valid teamId + isTeamLead=true → 200', ok, `status=${r.status} teamId=${r.data?.teamId} isTeamLead=${r.data?.isTeamLead}`);
+  }
+
+  // 15) Demote then clear teamId → 200 (both ops valid in sequence).
+  if (baselinePerson && leadPerson) {
+    const demote = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isTeamLead: false }),
+    });
+    if (demote.status !== 200) {
+      record('15. Demote step', false, `status=${demote.status} error=${demote.data?.error}`);
+    } else {
+      const r = await api(sysadminToken, `/api/admin/persons/${baselinePerson.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ teamId: null }),
+      });
+      const ok = r.status === 200 && r.data?.teamId === null && r.data?.isTeamLead === false;
+      record('15. After demote, PATCH teamId=null → 200 (no lead)', ok, `status=${r.status} teamId=${r.data?.teamId} isTeamLead=${r.data?.isTeamLead}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Summary + cleanup
 // ─────────────────────────────────────────────────────────────────
+
+// Cleanup any persons created by this run (cases not assigned to them since
+// we never reference them; safe to hard delete).
+async function cleanupPersons() {
+  try {
+    if (createdPersonIds.length) {
+      await prisma.person.deleteMany({ where: { id: { in: createdPersonIds } } });
+    }
+  } catch (e) {
+    console.warn('[cleanup persons]', e?.message);
+  }
+}
+await cleanupPersons();
 
 await cleanup();
 await prisma.$disconnect();

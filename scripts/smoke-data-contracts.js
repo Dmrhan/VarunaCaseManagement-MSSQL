@@ -1431,6 +1431,8 @@ defineGroup('Support Level / Team Lead Contract', async () => {
   }
 
   // SL.6) No Person.isTeamLead=true with teamId NULL (orphan lead invariant).
+  //   Enforced at write-time by adminRepository.personRepo (team_lead_requires_team).
+  //   Data-contract check covers any rows that pre-date the guard or escape it.
   const orphanLead = await prisma.person.count({ where: { isTeamLead: true, teamId: null } });
   out.push(check(
     'No team lead with NULL teamId (orphan)',
