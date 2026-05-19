@@ -351,6 +351,141 @@ if (sahaGroup) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 16-20) Product Catalog RBAC audit — per-company admin gate on
+// /product-groups/:id and /products/:id (mirrors WR-A7 fix).
+// ─────────────────────────────────────────────────────────────────
+
+console.log('\n── 16-20) ID-route company-admin gate ──');
+
+const sysadminToken = await getToken('sysadmin@varuna.dev');
+
+// Demote admin@varuna.dev's UserCompany role for COMP-PARAM to Supervisor
+// (still in allowedCompanyIds, but NOT company-admin). Restore at end.
+const adminUser = await prisma.user.findUnique({
+  where: { email: 'admin@varuna.dev' },
+  select: { id: true },
+});
+const originalParamLink = adminUser
+  ? await prisma.userCompany.findFirst({
+      where: { userId: adminUser.id, companyId: 'COMP-PARAM' },
+      select: { role: true, isActive: true },
+    })
+  : null;
+
+// Setup: create a PARAM group + product via sysadmin (so cleanup is clean).
+let paramGroup = null;
+let paramProductForGate = null;
+if (sysadminToken) {
+  const gr = await api(sysadminToken, '/api/admin/product-groups', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_B,
+      code: `${STAMP}_GATE_GRP`,
+      name: `${STAMP} Param Gate Group`,
+    }),
+  });
+  if (gr.status === 201 && gr.data?.id) { paramGroup = gr.data; createdGroupIds.push(gr.data.id); }
+
+  if (paramGroup) {
+    const pr = await api(sysadminToken, '/api/admin/products', {
+      method: 'POST',
+      body: JSON.stringify({
+        companyId: COMP_B,
+        productGroupId: paramGroup.id,
+        code: `${STAMP}_GATE_PRD`,
+        name: `${STAMP} Param Gate Product`,
+      }),
+    });
+    if (pr.status === 201 && pr.data?.id) { paramProductForGate = pr.data; createdProductIds.push(pr.data.id); }
+  }
+}
+
+if (!sysadminToken) {
+  record('16-20. company-admin gate suite', false, 'sysadmin token unavailable');
+} else if (!paramGroup || !paramProductForGate) {
+  record('16-20. company-admin gate suite', false, 'failed to create PARAM test entities');
+} else if (!adminUser || !originalParamLink) {
+  record('16-20. company-admin gate suite', false, 'admin user or PARAM UserCompany link missing');
+} else {
+  // Demote admin to Supervisor in COMP-PARAM only.
+  await prisma.userCompany.update({
+    where: { userId_companyId: { userId: adminUser.id, companyId: 'COMP-PARAM' } },
+    data: { role: 'Supervisor' },
+  });
+
+  try {
+    // 16) Demoted admin PATCH /product-groups/:id → 403
+    {
+      const r = await api(adminToken, `/api/admin/product-groups/${paramGroup.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'blocked' }),
+      });
+      record('16. Demoted admin PATCH /product-groups/:id → 403', r.status === 403, `status=${r.status}`);
+    }
+
+    // 17) Demoted admin PATCH /products/:id → 403
+    {
+      const r = await api(adminToken, `/api/admin/products/${paramProductForGate.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'blocked' }),
+      });
+      record('17. Demoted admin PATCH /products/:id → 403', r.status === 403, `status=${r.status}`);
+    }
+
+    // 18) SystemAdmin PATCH both → 200 (system path intact)
+    {
+      const rg = await api(sysadminToken, `/api/admin/product-groups/${paramGroup.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'sysadmin path' }),
+      });
+      const rp = await api(sysadminToken, `/api/admin/products/${paramProductForGate.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'sysadmin path' }),
+      });
+      record(
+        '18. SystemAdmin PATCH group + product → all 200',
+        rg.status === 200 && rp.status === 200,
+        `group=${rg.status} product=${rp.status}`,
+      );
+    }
+  } finally {
+    // Restore admin role.
+    await prisma.userCompany.update({
+      where: { userId_companyId: { userId: adminUser.id, companyId: 'COMP-PARAM' } },
+      data: { role: originalParamLink.role },
+    });
+  }
+
+  // 19) Restored Admin PATCH both → 200 (proves restore + happy path)
+  {
+    const rg = await api(adminToken, `/api/admin/product-groups/${paramGroup.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ description: 'restored admin' }),
+    });
+    const rp = await api(adminToken, `/api/admin/products/${paramProductForGate.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ description: 'restored admin' }),
+    });
+    record(
+      '19. Restored Admin PATCH group + product → all 200',
+      rg.status === 200 && rp.status === 200,
+      `group=${rg.status} product=${rp.status}`,
+    );
+  }
+
+  // 20) Out-of-scope companyId → still 403 (regression — already covered for
+  //     POST in step 10, but PATCH path didn't have a similar test; this
+  //     verifies non-existent ID path returns 404 (the gate's not-found arm).
+  {
+    const r = await api(adminToken, '/api/admin/products/DOES_NOT_EXIST_xyz', {
+      method: 'PATCH',
+      body: JSON.stringify({ description: 'should 404' }),
+    });
+    record('20. PATCH unknown product id → 404 (not-found gate arm)', r.status === 404, `status=${r.status}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Summary + cleanup
 // ─────────────────────────────────────────────────────────────────
 
