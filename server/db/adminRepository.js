@@ -143,12 +143,14 @@ export const teamRepo = {
       },
     });
     if (exists) throw new AdminError('Bu şirkette aynı isimde takım zaten mevcut.');
+    const defaultSupportLevel = normalizeSupportLevel(input.defaultSupportLevel);
     return prisma.team.create({
       data: {
         name: input.name.trim(),
         description: input.description?.trim() || null,
         companyId: input.companyId,
         isActive: input.isActive ?? true,
+        ...(defaultSupportLevel !== undefined && { defaultSupportLevel }),
       },
     });
   },
@@ -172,12 +174,14 @@ export const teamRepo = {
       });
       if (dup) throw new AdminError('Bu şirkette aynı isimde başka takım var.');
     }
+    const defaultSupportLevel = normalizeSupportLevel(patch.defaultSupportLevel);
     return prisma.team.update({
       where: { id },
       data: {
         ...(patch.name !== undefined && { name: patch.name.trim() }),
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        ...(defaultSupportLevel !== undefined && { defaultSupportLevel }),
       },
     });
   },
@@ -216,6 +220,17 @@ export const teamRepo = {
 // ─────────────────────────────────────────────────────────────────
 // Persons
 // ─────────────────────────────────────────────────────────────────
+const VALID_SUPPORT_LEVELS = new Set(['L1', 'L2', 'L3', 'Expert']);
+function normalizeSupportLevel(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return undefined;
+  const s = String(raw).trim();
+  if (!VALID_SUPPORT_LEVELS.has(s)) {
+    throw new AdminError('Geçersiz destek seviyesi (L1/L2/L3/Expert).');
+  }
+  return s;
+}
+
 export const personRepo = {
   async list() {
     return prisma.person.findMany({ orderBy: { name: 'asc' } });
@@ -227,12 +242,16 @@ export const personRepo = {
       });
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
+    const supportLevel = normalizeSupportLevel(input.supportLevel);
     return prisma.person.create({
       data: {
         name: input.name.trim(),
         email: input.email?.trim() || null,
         teamId: input.teamId,
         isActive: input.isActive ?? true,
+        // WR-A5 / B1
+        ...(supportLevel !== undefined && { supportLevel }),
+        ...(input.isTeamLead !== undefined && { isTeamLead: !!input.isTeamLead }),
       },
     });
   },
@@ -243,6 +262,7 @@ export const personRepo = {
       });
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
+    const supportLevel = normalizeSupportLevel(patch.supportLevel);
     return prisma.person.update({
       where: { id },
       data: {
@@ -250,6 +270,9 @@ export const personRepo = {
         ...(patch.email !== undefined && { email: patch.email?.trim() || null }),
         ...(patch.teamId !== undefined && { teamId: patch.teamId }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        // WR-A5 / B1
+        ...(supportLevel !== undefined && { supportLevel }),
+        ...(patch.isTeamLead !== undefined && { isTeamLead: !!patch.isTeamLead }),
       },
     });
   },

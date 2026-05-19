@@ -736,6 +736,47 @@ async function main() {
   }
   console.log(`   Catalog: ${groupTotal} product groups + ${productTotal} products across PARAM/UNIVERA/FINROTA`);
 
+  // ── 3.8) Team Lead + supportLevel dağılımı — WR-A5 + WR-B1 / PM-03 ──
+  // Mevcut base seed Person/Team kayıtlarını dokunmaz; burada ek alanları
+  // (isTeamLead, supportLevel, Team.defaultSupportLevel) backfill ederiz.
+  // Rol-bazlı dağılım:
+  //   - Email-bazlı kişi rol etiketi (admin@varuna.dev → Expert vs.)
+  //   - Diğer kişiler: takım başına 1 lead (L2); kalanlar L1
+  //   - Takımlar: defaultSupportLevel L1 (mevcut davranış; lead'li olanlar L2 olabilir, opsiyonel)
+  console.log('3.8) Seeding team lead + supportLevel distribution (WR-A5/B1)...');
+  let leadTotal = 0;
+  let updatedPersons = 0;
+  // 1) Tüm takım liderlerini önce sıfırla — idempotent rerun için.
+  await prisma.person.updateMany({ data: { isTeamLead: false } });
+  // 2) Rol-bazlı supportLevel: User → Person mapping ile.
+  const ROLE_SUPPORT_LEVEL = {
+    Agent:        'L1',
+    Backoffice:   'L1',
+    Supervisor:   'L2',
+    CSM:          'L2',
+    Admin:        'Expert',
+    SystemAdmin:  'Expert',
+  };
+  for (const u of users) {
+    if (!u.personId) continue;
+    const lvl = ROLE_SUPPORT_LEVEL[u.role] ?? 'L1';
+    await prisma.person.update({ where: { id: u.personId }, data: { supportLevel: lvl } });
+    updatedPersons++;
+  }
+  // 3) Major takımlara birer lead ata. Aktif takım başına: takımda en az 1 üye
+  //    varsa ilkini lead olarak işaretle + L2'ye yükselt (Agent ise).
+  for (const t of teams) {
+    const members = persons.filter((p) => p.teamId === t.id);
+    if (members.length === 0) continue;
+    const lead = members[0];
+    await prisma.person.update({
+      where: { id: lead.id },
+      data: { isTeamLead: true, supportLevel: 'L2' },
+    });
+    leadTotal++;
+  }
+  console.log(`   Persons: ${updatedPersons} rol-bazlı supportLevel set + ${leadTotal} takım lideri`);
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};
@@ -812,6 +853,18 @@ async function main() {
         snoozePreviousStatus = status;
       }
 
+      // WR-A5 / PM-03 — supportLevel dağılımı:
+      //   UNIVERA: 50% L1 / 40% L2 / 10% L3 (proje-bazlı destek karışımı)
+      //   PARAM / FINROTA: 80% L1 / 18% L2 / 2% L3
+      let caseSupportLevel;
+      if (companyId === 'COMP-UNIVERA') {
+        const sx = r();
+        caseSupportLevel = sx < 0.5 ? 'L1' : sx < 0.9 ? 'L2' : 'L3';
+      } else {
+        const sx = r();
+        caseSupportLevel = sx < 0.8 ? 'L1' : sx < 0.98 ? 'L2' : 'L3';
+      }
+
       const data = {
         caseNumber,
         title: `${title}`,
@@ -836,6 +889,8 @@ async function main() {
         assignedTeamName: team.name,
         assignedPersonId: person.id,
         assignedPersonName: person.name,
+        // WR-A5 / PM-03 — destek seviyesi (case-level explicit set).
+        supportLevel: caseSupportLevel,
         slaResponseDueAt,
         slaResolutionDueAt,
         slaViolation,

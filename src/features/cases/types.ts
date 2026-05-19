@@ -75,6 +75,18 @@ export interface CaseDocumentType {
   isActive: boolean;
 }
 
+/** WR-A5 / PM-03 — destek seviyesi. L1/L2 mevcut kullanım; L3/Expert future. */
+export type SupportLevel = 'L1' | 'L2' | 'L3' | 'Expert';
+
+export const SUPPORT_LEVELS: SupportLevel[] = ['L1', 'L2', 'L3', 'Expert'];
+
+export const SUPPORT_LEVEL_LABELS: Record<SupportLevel, string> = {
+  L1: 'L1',
+  L2: 'L2',
+  L3: 'L3',
+  Expert: 'Uzman',
+};
+
 export interface CaseTeam {
   id: string;
   name: string;
@@ -82,6 +94,8 @@ export interface CaseTeam {
   /** Phase 5C — multi-tenant scope. BE prisma.team.companyId String (NOT NULL). */
   companyId: string;
   isActive: boolean;
+  /** WR-A5 — Takımın varsayılan destek seviyesi. Default L1. */
+  defaultSupportLevel?: SupportLevel;
 }
 
 export interface CasePerson {
@@ -90,6 +104,10 @@ export interface CasePerson {
   teamId: string;
   email?: string;
   isActive: boolean;
+  /** WR-B1 — Takım lideri bayrağı. */
+  isTeamLead?: boolean;
+  /** WR-A5 — Kişinin destek seviyesi. */
+  supportLevel?: SupportLevel;
 }
 
 export interface CaseSubCategoryDef {
@@ -388,6 +406,9 @@ export interface Case {
   assignedPersonName?: string;
 
   escalationLevel: EscalationLevel;
+
+  /** WR-A5 / PM-03 — destek seviyesi. Default L1. */
+  supportLevel?: SupportLevel;
 
   // Spec 5.1 — third_party_id FK (3rdPartyBekleniyor statüsünde zorunlu)
   thirdPartyId?: string;

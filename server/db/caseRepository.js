@@ -453,6 +453,28 @@ export const caseRepository = {
     const finalAccountProjectId = m.accountId ? (m.accountProjectId ?? null) : null;
     const finalAccountProjectName = m.accountId ? accountProjectName : null;
 
+    // WR-A5 / PM-03 — supportLevel cascade.
+    //   1. patch'te explicit set edildiyse onu kullan (D-A5.2)
+    //   2. assignedPersonId varsa Person.supportLevel
+    //   3. else assignedTeamId varsa Team.defaultSupportLevel
+    //   4. else 'L1' (schema default; explicit set ediyoruz determinism için)
+    let resolvedSupportLevel = m.supportLevel;
+    if (!resolvedSupportLevel && m.assignedPersonId) {
+      const p = await prisma.person.findUnique({
+        where: { id: m.assignedPersonId },
+        select: { supportLevel: true },
+      });
+      if (p?.supportLevel) resolvedSupportLevel = p.supportLevel;
+    }
+    if (!resolvedSupportLevel && m.assignedTeamId) {
+      const t = await prisma.team.findUnique({
+        where: { id: m.assignedTeamId },
+        select: { defaultSupportLevel: true },
+      });
+      if (t?.defaultSupportLevel) resolvedSupportLevel = t.defaultSupportLevel;
+    }
+    if (!resolvedSupportLevel) resolvedSupportLevel = 'L1';
+
     // Phase D Step 2 — Opsiyonel başvuran bilgileri.
     // Hassas alanlar (phone, email) sadece DB'ye yazılır; log/analytics yok.
     const requester = sanitizeRequesterContext({
@@ -493,6 +515,8 @@ export const caseRepository = {
         assignedTeamName: m.assignedTeamName,
         assignedPersonId: m.assignedPersonId,
         assignedPersonName: m.assignedPersonName,
+        // WR-A5 / PM-03 — Cascade person → team → L1.
+        supportLevel: resolvedSupportLevel,
         // ProactiveTracking
         financialStatus: m.financialStatus,
         productUsage: m.productUsage,
@@ -529,7 +553,19 @@ export const caseRepository = {
     return shape(created);
   },
 
-  async update(id, patch, actor = 'Mock User', allowedCompanyIds) {
+  async update(id, patch, actor = 'Mock User', allowedCompanyIds, actorRole) {
+    // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
+    // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
+    if ('supportLevel' in patch && actorRole) {
+      const SUPPORT_LEVEL_ROLES = new Set(['Supervisor', 'CSM', 'Admin', 'SystemAdmin']);
+      if (!SUPPORT_LEVEL_ROLES.has(actorRole)) {
+        throw new CaseValidationError(
+          'Destek seviyesini değiştirme yetkin yok.',
+          { status: 403, code: 'support_level_forbidden' },
+        );
+      }
+    }
+
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     // Otomatik alan değişim log'u: değişen her alan için CaseActivity entry'si

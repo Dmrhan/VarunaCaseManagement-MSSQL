@@ -274,6 +274,7 @@ router.patch(
       req.body ?? {},
       req.user.fullName,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
