@@ -67,6 +67,7 @@ import {
   type CallOutcome,
   type CaseCallLog,
   type CaseFilters,
+  type CaseStatsResponse,
   type CaseHistoryActionType,
   type CaseListPagination,
   type CaseNote,
@@ -339,6 +340,11 @@ export const caseService = {
     if (filters?.customerMatchPending !== undefined) {
       params.set('customerMatchPending', String(filters.customerMatchPending));
     }
+    // KPI tile click intents — server-side resolve edilir.
+    if (filters?.assignedToMe) params.set('assignedToMe', 'true');
+    if (filters?.teamScope) params.set('teamScope', 'true');
+    if (filters?.slaViolation) params.set('slaViolation', 'true');
+    if (filters?.resolvedToday) params.set('resolvedToday', 'true');
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -349,6 +355,24 @@ export const caseService = {
       'Vakalar yüklenemedi',
     );
     return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
+  },
+
+  /**
+   * Role-aware KPI stats for the cases list page header.
+   * Mode chosen server-side from req.user.role. Use the discriminated union
+   * `mode` field to render the right tile set.
+   */
+  async getStats(): Promise<CaseStatsResponse | null> {
+    if (USE_MOCK) {
+      // Mock mode: compute personal stats from local store for Agent-style demo.
+      return null;
+    }
+    const data = await apiFetch<CaseStatsResponse>(
+      `${API_BASE}/stats`,
+      undefined,
+      'KPI verileri yüklenemedi',
+    );
+    return data ?? null;
   },
 
   async get(id: string): Promise<Case | undefined> {

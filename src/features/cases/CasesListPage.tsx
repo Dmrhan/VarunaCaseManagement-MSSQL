@@ -49,6 +49,7 @@ import {
   CASE_TYPE_LABELS,
   type Case,
   type CaseFilters,
+  type CaseStatsResponse,
   type CasePriority,
   type CaseStatus,
 } from './types';
@@ -219,13 +220,13 @@ export function CasesListPage({
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   // KPI tıklamasıyla aktive olan client-side filtre (sortedFiltered'de uygulanır).
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(null);
-  // Agent rolü kişisel KPI değerleri — yalnızca frontline kullanıcılarda hesaplanır.
-  const [personalStats, setPersonalStats] = useState<{
-    assigned: number;
-    slaRisk: number;
-    resolvedToday: number;
-    snoozed: number;
-  } | null>(null);
+  // Role-aware KPI stats — backend tek truth source (/api/cases/stats).
+  // Önceki "personalStats + client-computed Supervisor stats" yapısı bırakıldı:
+  // her rol için sayım artık server tarafında, scope korunarak hesaplanıyor.
+  const [caseStats, setCaseStats] = useState<CaseStatsResponse | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  // Hangi KPI tile aktif/seçili olarak işaretlensin (görsel hint).
+  const [selectedKpi, setSelectedKpi] = useState<string | null>(null);
   // AI briefing strip — pattern (Supervisor+) veya SLA mesajı veya "her şey yolunda".
   const [activePatterns, setActivePatterns] = useState<PatternAlert[]>([]);
   const [briefingDismissed, setBriefingDismissed] = useState<boolean>(() => {
@@ -312,45 +313,30 @@ export function CasesListPage({
     return { total, open, slaBreach, critical };
   }, [allFiltered]);
 
-  // Frontline kullanıcılar için kişisel KPI fetch — sekmeden bağımsız global sayaçlar.
-  // Yenile butonu ve bulk action sonrası tetiklenir; tab/filtre değiştiğinde değil
-  // (counts global, kullanıcının view'ından bağımsız).
-  async function refreshPersonalStats() {
-    if (!isFrontline || !user?.personId) {
-      setPersonalStats(null);
+  // Role-aware KPI fetch — backend mod seçer (personal/team/operations).
+  // Yenile butonu ve bulk action sonrası tetiklenir; tab/filtre değiştiğinde
+  // değil (counts global, view'dan bağımsız).
+  async function refreshStats() {
+    if (!user) {
+      setCaseStats(null);
       return;
     }
-    const personId = user.personId;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    setStatsLoading(true);
     try {
-      const [openRes, closedTodayRes, snoozedRes] = await Promise.all([
-        caseService.list({ ...initialFilters, personId, statuses: OPEN_STATUSES }),
-        caseService.list({ ...initialFilters, personId, statuses: ['Çözüldü'], dateFrom: startOfDay.toISOString() }),
-        apiFetch<{ value: Case[]; '@odata.count': number }>(
-          '/api/cases/snoozed',
-          undefined,
-          'Ertelenmiş vakalar yüklenemedi',
-        ),
-      ]);
-      const slaRisk = openRes.items.filter((c) => c.slaViolation).length;
-      setPersonalStats({
-        assigned: openRes.items.length,
-        slaRisk,
-        resolvedToday: closedTodayRes.items.length,
-        snoozed: snoozedRes?.value?.length ?? 0,
-      });
+      const data = await caseService.getStats();
+      setCaseStats(data);
     } catch {
-      // apiFetch toast gösterdi — sayaçları sıfır bırak.
-      setPersonalStats({ assigned: 0, slaRisk: 0, resolvedToday: 0, snoozed: 0 });
+      setCaseStats(null);
+    } finally {
+      setStatsLoading(false);
     }
   }
 
-  // Kullanıcı yüklendiğinde / değiştiğinde personal stats'i bir kez çek.
+  // Kullanıcı yüklendiğinde / role değiştiğinde stats'i bir kez çek.
   useEffect(() => {
-    void refreshPersonalStats();
+    void refreshStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFrontline, user?.personId]);
+  }, [user?.id, user?.role]);
 
   // Briefing — örüntü alarmları yalnızca Supervisor+ için. Endpoint frontline'a 403 dönüyor.
   useEffect(() => {
@@ -377,7 +363,15 @@ export function CasesListPage({
   }
 
   // Briefing içeriği — pattern > SLA > ok sıralaması.
-  const briefingSlaCount = isFrontline ? personalStats?.slaRisk ?? 0 : stats.slaBreach;
+  // SLA briefing — server stats varsa onu kullan; yoksa client-computed
+  // stats.slaBreach (mevcut sayfa view'ı kapsamında).
+  const briefingSlaCount = (() => {
+    if (!caseStats) return stats.slaBreach;
+    if (caseStats.mode === 'personal') return caseStats.slaRiskMine;
+    if (caseStats.mode === 'team') return caseStats.teamSlaRisk;
+    if (caseStats.mode === 'operations') return caseStats.slaViolation;
+    return stats.slaBreach;
+  })();
   const briefingState: 'pattern' | 'sla' | 'ok' | null = briefingDismissed
     ? null
     : activePatterns.length > 0
@@ -521,7 +515,7 @@ export function CasesListPage({
     }
     clearSelection();
     void load();
-    void refreshPersonalStats();
+    void refreshStats();
   }
 
   function handleAccountClick(e: React.MouseEvent, account: { id: string; name: string }) {
@@ -563,7 +557,7 @@ export function CasesListPage({
             leftIcon={<RotateCw size={14} />}
             onClick={() => {
               void load();
-              void refreshPersonalStats();
+              void refreshStats();
             }}
           >
             Yenile
@@ -596,100 +590,147 @@ export function CasesListPage({
       </div>
 
       {/*
-        KPI'lar — Frontline (Agent/Backoffice/CSM) için kişisel; Supervisor+ için global.
-        Tıklama → ilgili filtre/sekme uygulanır. quickFilter state'i client-side
-        SLA-risk veya bugün-çözüldü daraltması yapar.
+        Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
+        Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
+        operations (Admin/SystemAdmin). Tile click → list filter intent +
+        seçili tile görsel hint. Card sayısı ile click sonrası liste sayısı
+        eşleşir (pagination hariç).
       */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {isFrontline && user?.personId ? (
-          <>
+        {(() => {
+          // Color band per card category (spec: blue/red/green/amber)
+          const TILE_BORDER = {
+            blue: 'border-t-2 border-t-blue-500 dark:border-t-blue-600',
+            red: 'border-t-2 border-t-rose-500 dark:border-t-rose-600',
+            green: 'border-t-2 border-t-emerald-500 dark:border-t-emerald-600',
+            amber: 'border-t-2 border-t-amber-500 dark:border-t-amber-600',
+          } as const;
+          type Color = keyof typeof TILE_BORDER;
+
+          const tile = (
+            id: string,
+            label: string,
+            value: number,
+            color: Color,
+            icon: React.ReactNode,
+            onClick: () => void,
+          ) => (
             <KpiTile
-              label="Bana Atanan"
-              value={personalStats?.assigned ?? 0}
-              icon={<User size={16} />}
-              tone="brand"
+              key={id}
+              label={label}
+              value={value}
+              icon={icon}
+              tone={value === 0 ? 'slate' : (color === 'red' ? 'rose' : color === 'green' ? 'emerald' : color === 'amber' ? 'amber' : 'brand')}
+              selected={selectedKpi === id}
+              extraClassName={TILE_BORDER[color]}
               onClick={() => {
-                setFilters({ ...initialFilters, personId: user.personId! });
+                setSelectedKpi(id);
+                onClick();
+              }}
+            />
+          );
+
+          if (statsLoading && !caseStats) {
+            return [0, 1, 2, 3].map((i) => (
+              <div
+                key={`skel-${i}`}
+                className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
+              />
+            ));
+          }
+
+          // PERSONAL (Agent/Backoffice/CSM)
+          if (caseStats?.mode === 'personal' && user?.personId) {
+            const s = caseStats;
+            const me = user.personId;
+            return [
+              tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
+                setFilters({ ...initialFilters, personId: me });
                 setInboxTab('open');
                 setQuickFilter(null);
-              }}
-            />
-            <KpiTile
-              label="SLA Riskimde"
-              value={personalStats?.slaRisk ?? 0}
-              icon={<AlertCircle size={16} />}
-              tone={(personalStats?.slaRisk ?? 0) > 0 ? 'rose' : 'slate'}
-              onClick={() => {
-                setFilters({ ...initialFilters, personId: user.personId! });
+              }),
+              tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
+                setFilters({ ...initialFilters, personId: me, slaViolation: true });
                 setInboxTab('open');
-                setQuickFilter('slaRisk');
-              }}
-            />
-            <KpiTile
-              label="Bugün Çözdüğüm"
-              value={personalStats?.resolvedToday ?? 0}
-              icon={<CheckCircle2 size={16} />}
-              tone="emerald"
-              onClick={() => {
-                setFilters({ ...initialFilters, personId: user.personId! });
+                setQuickFilter(null);
+              }),
+              tile('personal.resolvedToday', 'Bugün Çözdüm', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+                setFilters({ ...initialFilters, personId: me, resolvedToday: true });
                 setInboxTab('closed');
-                setQuickFilter('resolvedToday');
-              }}
-            />
-            <KpiTile
-              label="Ertelenenlerim"
-              value={personalStats?.snoozed ?? 0}
-              icon={<Clock size={16} />}
-              tone={(personalStats?.snoozed ?? 0) > 0 ? 'amber' : 'slate'}
-              onClick={() => {
+                setQuickFilter(null);
+              }),
+              tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
                 setFilters(initialFilters);
                 setInboxTab('later');
                 setQuickFilter(null);
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <KpiTile
-              label="Toplam Vaka"
-              value={stats.total}
-              icon={<Inbox size={16} />}
-              tone="slate"
-            />
-            <KpiTile
-              label="Açık Vaka"
-              value={stats.open}
-              hint={stats.total > 0 ? `%${Math.round((stats.open / stats.total) * 100)}` : undefined}
-              icon={<Inbox size={16} />}
-              tone="slate"
-              onClick={() => {
+              }),
+            ];
+          }
+
+          // TEAM (Supervisor)
+          if (caseStats?.mode === 'team') {
+            const s = caseStats;
+            return [
+              tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
+                setFilters({ ...initialFilters, teamScope: true });
                 setInboxTab('open');
                 setQuickFilter(null);
-              }}
-            />
-            <KpiTile
-              label="SLA İhlali"
-              value={stats.slaBreach}
-              icon={<ShieldAlert size={16} />}
-              tone={stats.slaBreach > 0 ? 'rose' : 'slate'}
-              onClick={() => {
+              }),
+              tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
+                setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
                 setInboxTab('open');
-                setQuickFilter('slaRisk');
-              }}
-            />
-            <KpiTile
-              label="Critical"
-              value={stats.critical}
-              icon={<Flag size={16} />}
-              tone={stats.critical > 0 ? 'rose' : 'slate'}
-              onClick={() => {
+                setQuickFilter(null);
+              }),
+              tile('team.escalation', 'Eskalasyon', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
+                setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+                setInboxTab('open');
+                setQuickFilter(null);
+              }),
+              tile('team.resolvedToday', 'Bugün Çözülen', s.teamResolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+                setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
+                setInboxTab('closed');
+                setQuickFilter(null);
+              }),
+            ];
+          }
+
+          // OPERATIONS (Admin/SystemAdmin)
+          if (caseStats?.mode === 'operations') {
+            const s = caseStats;
+            return [
+              tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
+                setFilters(initialFilters);
+                setInboxTab('open');
+                setQuickFilter(null);
+              }),
+              tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
+                setFilters({ ...initialFilters, slaViolation: true });
+                setInboxTab('open');
+                setQuickFilter(null);
+              }),
+              tile('ops.critical', 'Critical', s.critical, 'red', <Flag size={16} />, () => {
                 setFilters({ ...initialFilters, priorities: ['Critical'] });
                 setInboxTab('open');
                 setQuickFilter(null);
-              }}
-            />
-          </>
-        )}
+              }),
+              tile('ops.resolvedToday', 'Bugün Çözülen', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+                setFilters({ ...initialFilters, resolvedToday: true });
+                setInboxTab('closed');
+                setQuickFilter(null);
+              }),
+            ];
+          }
+
+          // Stats fetch failed / empty scope — placeholder cards with "—".
+          return [0, 1, 2, 3].map((i) => (
+            <div
+              key={`empty-${i}`}
+              className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
+            >
+              —
+            </div>
+          ));
+        })()}
       </div>
 
       {/*
@@ -1607,6 +1648,8 @@ function KpiTile({
   icon,
   tone = 'slate',
   onClick,
+  selected = false,
+  extraClassName,
 }: {
   label: string;
   value: number;
@@ -1614,14 +1657,20 @@ function KpiTile({
   icon: React.ReactNode;
   tone?: KpiTone;
   onClick?: () => void;
+  selected?: boolean;
+  extraClassName?: string;
 }) {
   const t = KPI_TONE[tone];
   const baseClass = cn(
     'flex items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-slate-200 shadow-card',
     'dark:bg-ndark-card dark:ring-ndark-border',
+    extraClassName,
   );
   const interactiveClass = onClick
-    ? 'cursor-pointer transition-colors hover:ring-brand-300 hover:bg-slate-50 dark:hover:ring-brand-700 dark:hover:bg-ndark-bg'
+    ? cn(
+        'cursor-pointer transition-colors hover:ring-brand-300 hover:bg-slate-50 dark:hover:ring-brand-700 dark:hover:bg-ndark-bg',
+        selected && 'ring-2 ring-brand-500 dark:ring-brand-600',
+      )
     : '';
   const inner = (
     <>
@@ -1633,7 +1682,14 @@ function KpiTile({
           {label}
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className={cn('text-xl font-semibold tabular-nums', t.valueColor)}>{value}</span>
+          <span
+            className={cn(
+              'text-xl font-semibold tabular-nums',
+              value === 0 ? 'text-slate-400 dark:text-ndark-muted' : t.valueColor,
+            )}
+          >
+            {value}
+          </span>
           {hint && <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{hint}</span>}
         </div>
       </div>
