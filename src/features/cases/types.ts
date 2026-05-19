@@ -708,7 +708,20 @@ export interface CaseFilters {
   dateTo?: string;                  // ISO date
   // Phase D — yalnız Supervisor+ rolleri görür; backend ignore eder Agent için.
   customerMatchPending?: boolean;
+  // KPI tile click intents — server-side resolve edilir.
+  assignedToMe?: boolean;     // personId → req.user.personId
+  teamScope?: boolean;        // teamId → Supervisor'ın Person.teamId'si (server resolve)
+  slaViolation?: boolean;     // Case.slaViolation = true
+  resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
 }
+
+// Role-aware KPI stats — GET /api/cases/stats response.
+export type CaseStatsResponse =
+  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number }
+  | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null }
+  | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number }
+  | { mode: 'empty' }
+  | { mode: 'unknown' };
 
 export interface CaseListPagination {
   page: number;       // 1-based

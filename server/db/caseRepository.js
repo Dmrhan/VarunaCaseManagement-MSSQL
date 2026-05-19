@@ -171,7 +171,143 @@ async function assertCaseInScope(caseId, allowedCompanyIds) {
   return found.companyId;
 }
 
+/**
+ * Role-aware KPI stats. Used by /api/cases/stats — Vakalar listesi üstündeki
+ * kartlar. Aynı scope kuralları list endpoint'iyle birebir tutarlı:
+ *   - companyId ∈ allowedCompanyIds
+ *   - "open" = Acik/Incelemede/ThirdPartyWaiting/Eskalasyon/YenidenAcildi
+ *   - resolvedToday = today UTC (server tz uses Istanbul daysOffset already in scope)
+ *
+ * Modes:
+ *   personal   → Agent / Backoffice / CSM
+ *   team       → Supervisor (Person.teamId üzerinden tek-takım)
+ *   operations → Admin / SystemAdmin
+ *
+ * LIMITATION: Schema Supervisor için çoklu-takım üyeliği modellemiyor.
+ * Person.teamId tek bir takım. Supervisor birden fazla takımı yönetiyorsa
+ * şu an sadece kendi Person.teamId'sindeki vakaları görüyor. Person'ı yoksa
+ * fallback: assignedTeamId NOT NULL içindeki tüm cases (scope dahilinde).
+ */
+const STATS_OPEN_STATUSES = ['Acik', 'Incelemede', 'ThirdPartyWaiting', 'Eskalasyon', 'YenidenAcildi'];
+
+function buildTodayRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { gte: start, lte: end };
+}
+
+// List endpoint default: snoozeUntil > now olan vakalar hidden (Later sekmesi
+// ayrı). Stats da aynı kuralı kullanır ki "Bana Atanan" sayısı tıklama sonrası
+// liste sayısıyla aynı olsun. Sadece snoozedMine bunu override eder (sadece
+// snoozed olanları sayar).
+function notSnoozedClause() {
+  return { OR: [{ snoozeUntil: null }, { snoozeUntil: { lte: new Date() } }] };
+}
+
 export const caseRepository = {
+  /**
+   * Compute role-aware stats for the cases list KPI cards.
+   * Mode is selected from `user.role`. companyId scope enforced via
+   * allowedCompanyIds. No cross-tenant leakage. snoozedMine ignores the
+   * default "hide snoozed" rule (which is a list-presentation default,
+   * not a counting default).
+   */
+  async getStats({ user }) {
+    const allowedCompanyIds = user?.allowedCompanyIds ?? [];
+    if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
+      return { mode: 'empty' };
+    }
+    const scope = { companyId: { in: allowedCompanyIds } };
+    const todayRange = buildTodayRange();
+    const role = user.role;
+
+    if (['Agent', 'Backoffice', 'CSM'].includes(role)) {
+      if (!user.personId) {
+        return { mode: 'personal', assignedToMe: 0, slaRiskMine: 0, resolvedToday: 0, snoozedMine: 0 };
+      }
+      const personId = user.personId;
+      const notSnoozed = notSnoozedClause();
+      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine] = await Promise.all([
+        // assignedToMe: open + not snoozed (matches list default)
+        prisma.case.count({
+          where: { ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] },
+        }),
+        // slaRiskMine: open + not snoozed + slaViolation
+        prisma.case.count({
+          where: { ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+        }),
+        // resolvedToday: snooze irrelevant — case zaten Cozuldu
+        prisma.case.count({
+          where: { ...scope, assignedPersonId: personId, resolvedAt: todayRange },
+        }),
+        // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
+        prisma.case.count({
+          where: { ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } },
+        }),
+      ]);
+      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine };
+    }
+
+    if (role === 'Supervisor') {
+      // Supervisor "team" = Person.teamId (single-team limitation, see header).
+      let teamFilter = { assignedTeamId: { not: null } };
+      let supervisorTeamId = null;
+      if (user.personId) {
+        const person = await prisma.person.findUnique({
+          where: { id: user.personId },
+          select: { teamId: true },
+        });
+        if (person?.teamId) {
+          supervisorTeamId = person.teamId;
+          teamFilter = { assignedTeamId: person.teamId };
+        }
+      }
+      const notSnoozed = notSnoozedClause();
+      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday] = await Promise.all([
+        prisma.case.count({
+          where: { ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] },
+        }),
+        prisma.case.count({
+          where: { ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+        }),
+        prisma.case.count({
+          where: { ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] },
+        }),
+        prisma.case.count({
+          where: { ...scope, ...teamFilter, resolvedAt: todayRange },
+        }),
+      ]);
+      return {
+        mode: 'team',
+        teamOpenCount,
+        teamSlaRisk,
+        teamEscalation,
+        teamResolvedToday,
+        // Echo back resolved teamId for client filter (so click can apply same scope).
+        supervisorTeamId,
+      };
+    }
+
+    if (role === 'Admin' || role === 'SystemAdmin') {
+      const notSnoozed = notSnoozedClause();
+      const [totalOpen, slaViolation, critical, resolvedToday] = await Promise.all([
+        prisma.case.count({ where: { ...scope, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] } }),
+        prisma.case.count({
+          where: { ...scope, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+        }),
+        prisma.case.count({
+          where: { ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] },
+        }),
+        prisma.case.count({ where: { ...scope, resolvedAt: todayRange } }),
+      ]);
+      return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday };
+    }
+
+    return { mode: 'unknown' };
+  },
+
   async list({ filters, pagination, allowedCompanyIds } = {}) {
     const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
     const total = await prisma.case.count({ where });
@@ -2486,5 +2622,12 @@ function buildWhere(f, allowedCompanyIds) {
   // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
   if (f.customerMatchPending === true) where.customerMatchPending = true;
   if (f.customerMatchPending === false) where.customerMatchPending = false;
+  // KPI tile click intents — sayım ve liste tek truth source kullansın diye:
+  if (f.slaViolation === true) where.slaViolation = true;
+  if (f.resolvedToday === true) {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+    where.resolvedAt = { gte: start, lte: end };
+  }
   return where;
 }

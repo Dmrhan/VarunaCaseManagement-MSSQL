@@ -86,16 +86,35 @@ router.get(
       if (f.customerMatchPending === 'true') customerMatchPending = true;
       else if (f.customerMatchPending === 'false') customerMatchPending = false;
     }
+
+    // KPI tile click intents — server-side resolution (assignedToMe → personId,
+    // teamScope → Supervisor'ın Person.teamId'si). Query params boş veya kötü
+    // niyetli olursa silent ignore: tek-sürçük yapan input filter yok.
+    let personId = f.personId;
+    if (f.assignedToMe === 'true' && req.user.personId) {
+      personId = req.user.personId;
+    }
+    let teamId = f.teamId;
+    if (f.teamScope === 'true' && req.user.role === 'Supervisor' && req.user.personId) {
+      const sup = await (await import('../db/client.js')).prisma.person.findUnique({
+        where: { id: req.user.personId },
+        select: { teamId: true },
+      });
+      if (sup?.teamId) teamId = sup.teamId;
+    }
+
     const filters = {
       search: f.search,
       statuses: f.statuses ? f.statuses.split(',') : undefined,
       caseType: f.caseType,
       priorities: f.priorities ? f.priorities.split(',') : undefined,
-      teamId: f.teamId,
-      personId: f.personId,
+      teamId,
+      personId,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
       customerMatchPending,
+      slaViolation: f.slaViolation === 'true' ? true : undefined,
+      resolvedToday: f.resolvedToday === 'true' ? true : undefined,
     };
     const pagination = f.page
       ? { page: Number(f.page), pageSize: Number(f.pageSize ?? 25) }
@@ -106,6 +125,30 @@ router.get(
       allowedCompanyIds: req.user.allowedCompanyIds,
     });
     res.json({ value: items, '@odata.count': total });
+  }),
+);
+
+/**
+ * GET /api/cases/stats — Role-aware KPI counts for the cases list tile bar.
+ *
+ * Response shape switches by role:
+ *   Agent/Backoffice/CSM → { mode:'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine }
+ *   Supervisor           → { mode:'team', teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, supervisorTeamId }
+ *   Admin/SystemAdmin    → { mode:'operations', totalOpen, slaViolation, critical, resolvedToday }
+ *
+ * companyId scope enforced via req.user.allowedCompanyIds. Closed statuses
+ * (Cozuldu, IptalEdildi) intentionally not counted in open/action metrics.
+ *
+ * LIMITATION: Supervisor schema'da çoklu-takım üyeliğini modellemediği için
+ * "ekibim" = Person.teamId (tek takım). Person yoksa fallback: assignedTeamId
+ * NOT NULL (allowed companies içinde) — supervisor takım bilgisi olmadan
+ * görünür operasyonu kapsar.
+ */
+router.get(
+  '/stats',
+  asyncRoute(async (req, res) => {
+    const stats = await caseRepository.getStats({ user: req.user });
+    res.json(stats);
   }),
 );
 
