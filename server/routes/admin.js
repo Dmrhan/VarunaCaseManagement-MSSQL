@@ -12,6 +12,7 @@ import {
   personRepo,
   productGroupRepo,
   productRepo,
+  packageRepo,
   slaPolicyRepo,
   teamRepo,
   thirdPartyRepo,
@@ -610,6 +611,52 @@ router.patch('/products/:id', asyncRoute(async (req, res) => {
     req.user.allowedCompanyIds,
   );
   res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// WR-A7 / PM-05 — Package + PackageItem catalog (foundation only)
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/packages', asyncRoute(async (req, res) => {
+  const filterCompanyId = req.query.companyId;
+  if (filterCompanyId) assertCompanyAdmin(req, filterCompanyId);
+  const items = await packageRepo.list({
+    companyId: filterCompanyId,
+    allowedCompanyIds: req.user.allowedCompanyIds,
+    includeInactive: req.query.includeInactive === '1',
+  });
+  res.json({ value: items });
+}));
+
+router.post('/packages', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const item = await packageRepo.create(body, req.user.allowedCompanyIds);
+  res.status(201).json(item);
+}));
+
+router.patch('/packages/:id', asyncRoute(async (req, res) => {
+  const item = await packageRepo.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+  );
+  res.json(item);
+}));
+
+router.get('/packages/:id/items', asyncRoute(async (req, res) => {
+  const items = await packageRepo.listItems(req.params.id, req.user.allowedCompanyIds);
+  res.json({ value: items });
+}));
+
+router.put('/packages/:id/items', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  const items = await packageRepo.replaceItems(
+    req.params.id,
+    body.productIds,
+    req.user.allowedCompanyIds,
+  );
+  res.json({ value: items });
 }));
 
 export default router;

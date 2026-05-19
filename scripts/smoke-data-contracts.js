@@ -1409,6 +1409,107 @@ defineGroup('Product Catalog Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Group N+5 — Package Catalog Contract (WR-A7 / PM-05)
+//   Package + PackageItem schema + cross-table same-company invariant +
+//   seed coverage. Foundation only; no Case.packageId / AccountCompany.packageId.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Package Catalog Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // PK.1) Package has companyId column + FK.
+  const pkgCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'Package'`,
+  );
+  const pkgColSet = new Set((pkgCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'Package.companyId column exists',
+    pkgColSet.has('companyId') ? 'PASS' : 'FAIL',
+    { detail: pkgColSet.has('companyId') ? '' : 'missing companyId' },
+  ));
+
+  // PK.2) PackageItem composite PK (packageId, productId).
+  const pi = await prisma.$queryRawUnsafe(`
+    SELECT a.attname FROM pg_index i
+      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = '"PackageItem"'::regclass AND i.indisprimary
+     ORDER BY a.attnum
+  `);
+  const pkCols = (pi ?? []).map((r) => r.attname);
+  const ok2 = pkCols.length === 2 && pkCols.includes('packageId') && pkCols.includes('productId');
+  out.push(check(
+    'PackageItem composite PK = (packageId, productId)',
+    ok2 ? 'PASS' : 'FAIL',
+    { detail: `PK cols=${pkCols.join(',')}` },
+  ));
+
+  // PK.3) Cross-table same-company invariant: every PackageItem's product.companyId == package.companyId.
+  const drift = await prisma.$queryRawUnsafe(`
+    SELECT pi."packageId", pi."productId", pkg."companyId" AS pkg_company, prd."companyId" AS prd_company
+      FROM "PackageItem" pi
+      JOIN "Package" pkg ON pkg.id = pi."packageId"
+      JOIN "Product" prd ON prd.id = pi."productId"
+     WHERE pkg."companyId" <> prd."companyId"
+     LIMIT 5
+  `);
+  out.push(check(
+    'PackageItem cross-company invariant: package.companyId == product.companyId',
+    (drift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: drift?.length ?? 0, examples: drift ?? [] },
+  ));
+
+  // PK.4) No duplicate active package code per company.
+  const dup = await prisma.$queryRawUnsafe(`
+    SELECT "companyId", code, COUNT(*)::int AS n
+      FROM "Package"
+     WHERE "isActive" = true
+     GROUP BY "companyId", code
+    HAVING COUNT(*) > 1
+     LIMIT 5
+  `);
+  out.push(check(
+    'No duplicate active Package code per company',
+    (dup?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: dup?.length ?? 0, examples: dup ?? [] },
+  ));
+
+  // PK.5) Seed coverage: each company ≥2 active Package rows.
+  for (const cid of ['COMP-PARAM', 'COMP-UNIVERA', 'COMP-FINROTA']) {
+    const n = await prisma.package.count({ where: { companyId: cid, isActive: true } });
+    out.push(check(
+      `${cid}: ≥2 active Package rows`,
+      n >= 2 ? 'PASS' : 'FAIL',
+      { detail: `count=${n}` },
+    ));
+  }
+
+  // PK.6) UNIVERA WhitePackage + RedPackage exist as Package rows (Decision Sprint #6 hybrid: seed reserves these names for Package, not Product).
+  const wp = await prisma.package.count({ where: { companyId: 'COMP-UNIVERA', code: 'WHITE_PKG' } });
+  const rp = await prisma.package.count({ where: { companyId: 'COMP-UNIVERA', code: 'RED_PKG' } });
+  out.push(check(
+    'UNIVERA WhitePackage + RedPackage exist as Package rows',
+    wp >= 1 && rp >= 1 ? 'PASS' : 'FAIL',
+    { detail: `WhitePackage=${wp} RedPackage=${rp}` },
+  ));
+
+  // PK.7) … and they MUST NOT appear in Product table.
+  const wpInProd = await prisma.product.count({
+    where: { companyId: 'COMP-UNIVERA', OR: [{ code: 'WHITE_PKG' }, { name: { contains: 'WhitePackage' } }] },
+  });
+  const rpInProd = await prisma.product.count({
+    where: { companyId: 'COMP-UNIVERA', OR: [{ code: 'RED_PKG' }, { name: { contains: 'RedPackage' } }] },
+  });
+  out.push(check(
+    'UNIVERA WhitePackage + RedPackage absent from Product table',
+    wpInProd === 0 && rpInProd === 0 ? 'PASS' : 'FAIL',
+    { detail: `Product hits: White=${wpInProd} Red=${rpInProd}` },
+  ));
+
+  return out;
+});
+
 // Group N+4 — Support Level / Team Lead Contract (WR-A5 + WR-B1 / PM-03)
 //   Phase 1 foundation: SupportLevel enum + Person/Team/Case non-null fields
 //   + team lead invariants + seed coverage.

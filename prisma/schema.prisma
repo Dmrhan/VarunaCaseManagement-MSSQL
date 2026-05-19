@@ -326,6 +326,8 @@ model Company {
   /// WR-A6 / PM-05 — tenant-scoped product catalog.
   productGroups    ProductGroup[]
   products         Product[]
+  /// WR-A7 / PM-05 — tenant-scoped package (contract bundle) catalog.
+  packages         Package[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -611,11 +613,57 @@ model Product {
 
   company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   productGroup ProductGroup @relation(fields: [productGroupId], references: [id])
+  /// WR-A7 — Reverse relation for PackageItem assignment.
+  packageItems PackageItem[]
 
   @@unique([companyId, code])
   @@index([companyId])
   @@index([companyId, productGroupId, isActive])
   @@index([companyId, supportLevel])
+}
+
+/// WR-A7 / PM-05 — Tenant-scoped package (contract bundle / subscription plan).
+/// Distinct from Product: Product = supported app/module/service; Package =
+/// contractual bundle. Examples: UNIVERA WhitePackage/RedPackage,
+/// PARAM "POS Başlangıç", FINROTA "Tahsilat Plus".
+///
+/// IMPORTANT cross-table invariant: every PackageItem.product.companyId
+/// MUST equal Package.companyId. Prisma cannot enforce this at DB level;
+/// enforced in repository + smoke + data-contract.
+model Package {
+  id          String       @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  supportLevel SupportLevel @default(L1)
+  sortOrder   Int          @default(0)
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items   PackageItem[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@index([companyId, supportLevel])
+}
+
+/// WR-A7 — Package ↔ Product join. Composite PK prevents duplicate rows.
+/// Product RESTRICT: paketteki ürün hard-delete edilemez (önce paketten
+/// çıkar). Package CASCADE: paket silinince üyelikler kalkar.
+model PackageItem {
+  packageId String
+  productId String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@id([packageId, productId])
+  @@index([productId])
 }
 
 model Team {
