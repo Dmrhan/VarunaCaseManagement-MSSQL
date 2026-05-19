@@ -16,6 +16,7 @@ import {
   type ProductGroupInput,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
+import { SUPPORT_LEVEL_LABELS, SUPPORT_LEVELS, type SupportLevel } from '@/features/cases/types';
 
 /**
  * WR-A6 / PM-05 — Admin ürün kataloğu master-detail UI.
@@ -212,6 +213,13 @@ export function AdminProductCatalogPage() {
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
                         {p.code}
                       </span>
+                      {p.supportLevel && (
+                        <span title="Varsayılan destek seviyesi">
+                          <Badge tint={p.supportLevel === 'L1' ? 'slate' : p.supportLevel === 'L2' ? 'amber' : 'rose'}>
+                            {SUPPORT_LEVEL_LABELS[p.supportLevel as SupportLevel] ?? p.supportLevel}
+                          </Badge>
+                        </span>
+                      )}
                       {!p.isActive && <Badge tint="slate">Pasif</Badge>}
                     </div>
                     {p.description && (
@@ -444,6 +452,7 @@ function ProductEditor({
   const [description, setDescription] = useState('');
   const [sortOrder, setSortOrder] = useState<number>(0);
   const [isActive, setIsActive] = useState(true);
+  const [supportLevel, setSupportLevel] = useState<SupportLevel>('L1');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -457,6 +466,7 @@ function ProductEditor({
       setDescription(product.description ?? '');
       setSortOrder(product.sortOrder);
       setIsActive(product.isActive);
+      setSupportLevel((product.supportLevel as SupportLevel | undefined) ?? 'L1');
     } else {
       setProductGroupId(defaultGroupId);
       setCode('');
@@ -464,6 +474,7 @@ function ProductEditor({
       setDescription('');
       setSortOrder(0);
       setIsActive(true);
+      setSupportLevel('L1');
     }
   }, [open, mode, product, defaultGroupId]);
 
@@ -483,6 +494,7 @@ function ProductEditor({
         description: description.trim() || null,
         sortOrder,
         isActive,
+        supportLevel,
       };
       const r = await adminService.products.create(input);
       setSubmitting(false);
@@ -494,6 +506,7 @@ function ProductEditor({
         description: description.trim() || null,
         sortOrder,
         isActive,
+        supportLevel,
       };
       const r = await adminService.products.update(product.id, patch);
       setSubmitting(false);
@@ -551,6 +564,18 @@ function ProductEditor({
         </div>
         <Field label="Açıklama">
           <TextArea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+        </Field>
+        <Field
+          label="Varsayılan Destek Seviyesi"
+          hint="Bu ürüne bağlı vaka açılışında default tier (L1/L2/L3/Uzman). A7b sonrası case form'una bağlanacak."
+        >
+          <Select value={supportLevel} onChange={(e) => setSupportLevel(e.target.value as SupportLevel)}>
+            {SUPPORT_LEVELS.map((s) => (
+              <option key={s} value={s}>
+                {SUPPORT_LEVEL_LABELS[s]}
+              </option>
+            ))}
+          </Select>
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Sıralama">

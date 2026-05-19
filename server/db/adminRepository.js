@@ -226,7 +226,10 @@ function normalizeSupportLevel(raw) {
   if (raw === null || raw === '') return undefined;
   const s = String(raw).trim();
   if (!VALID_SUPPORT_LEVELS.has(s)) {
-    throw new AdminError('Geçersiz destek seviyesi (L1/L2/L3/Expert).');
+    // WR-A6 follow-up — explicit error code so client/smoke can dispatch.
+    const err = new AdminError('Geçersiz destek seviyesi (L1/L2/L3/Expert).', 400);
+    err.code = 'support_level_invalid';
+    throw err;
   }
   return s;
 }
@@ -1634,6 +1637,8 @@ export const productRepo = {
     }
     const code = normalizeCode(input.code);
     const name = normalizeName(input.name);
+    // WR-A6 follow-up — Product.supportLevel additive field.
+    const supportLevel = normalizeSupportLevel(input.supportLevel);
     try {
       return await prisma.product.create({
         data: {
@@ -1644,6 +1649,8 @@ export const productRepo = {
           description: input.description?.trim() || null,
           sortOrder: Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0,
           isActive: input.isActive === undefined ? true : !!input.isActive,
+          // WR-A6 follow-up — DB default L1 if omitted; only override when set.
+          ...(supportLevel !== undefined && { supportLevel }),
         },
         include: {
           productGroup: { select: { id: true, code: true, name: true } },
@@ -1671,6 +1678,9 @@ export const productRepo = {
     if (patch.description !== undefined) data.description = patch.description?.trim() || null;
     if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
     if (patch.isActive !== undefined) data.isActive = !!patch.isActive;
+    // WR-A6 follow-up — supportLevel mutable.
+    const supportLevel = normalizeSupportLevel(patch.supportLevel);
+    if (supportLevel !== undefined) data.supportLevel = supportLevel;
 
     // productGroupId değiştirilebilir — aynı şirkete bağlı bir grup olmalı.
     if (patch.productGroupId !== undefined && patch.productGroupId !== target.productGroupId) {

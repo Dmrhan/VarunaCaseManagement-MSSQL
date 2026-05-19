@@ -276,6 +276,81 @@ for (const cid of ['COMP-PARAM', 'COMP-UNIVERA', 'COMP-FINROTA']) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 12-15) WR-A6 follow-up: Product.supportLevel
+// ─────────────────────────────────────────────────────────────────
+
+console.log('\n── 12-15) Product.supportLevel ──');
+
+// Use the existing UNIVERA group from seed (PG-COMP-UNIVERA-SAHA).
+const sahaGroup = await prisma.productGroup.findFirst({
+  where: { companyId: COMP_A, code: 'SAHA' },
+});
+
+// 12) Create product with supportLevel=L2 → 201 + DB matches
+let level2Product = null;
+if (sahaGroup) {
+  const r = await api(adminToken, '/api/admin/products', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_A,
+      productGroupId: sahaGroup.id,
+      code: `${STAMP}_SL_L2`,
+      name: `${STAMP} L2 product`,
+      supportLevel: 'L2',
+    }),
+  });
+  const ok = r.status === 201 && r.data?.supportLevel === 'L2';
+  record('12. Create supportLevel=L2 → 201 + DB matches', ok, `status=${r.status} supportLevel=${r.data?.supportLevel}`);
+  if (r.data?.id) { level2Product = r.data; createdProductIds.push(r.data.id); }
+}
+
+// 13) Update product supportLevel=L3 → 200 + DB matches
+if (level2Product) {
+  const r = await api(adminToken, `/api/admin/products/${level2Product.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ supportLevel: 'L3' }),
+  });
+  const row = await prisma.product.findUnique({ where: { id: level2Product.id }, select: { supportLevel: true } });
+  const ok = r.status === 200 && row?.supportLevel === 'L3';
+  record('13. Update supportLevel=L3 → 200 + DB updated', ok, `status=${r.status} supportLevel=${row?.supportLevel}`);
+}
+
+// 14) Invalid supportLevel → 400 support_level_invalid
+if (sahaGroup) {
+  const r = await api(adminToken, '/api/admin/products', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_A,
+      productGroupId: sahaGroup.id,
+      code: `${STAMP}_SL_BAD`,
+      name: 'invalid level',
+      supportLevel: 'Z9',
+    }),
+  });
+  const ok = r.status === 400 && r.data?.error === 'support_level_invalid';
+  record('14. Invalid supportLevel="Z9" → 400 support_level_invalid', ok, `status=${r.status} error=${r.data?.error}`);
+  if (r.data?.id) createdProductIds.push(r.data.id);
+}
+
+// 15) Seed coverage: each company has products with non-L1 supportLevel
+{
+  const univeraNonL1 = await prisma.product.count({
+    where: { companyId: 'COMP-UNIVERA', isActive: true, supportLevel: { in: ['L2', 'L3', 'Expert'] } },
+  });
+  const paramNonL1 = await prisma.product.count({
+    where: { companyId: 'COMP-PARAM', isActive: true, supportLevel: { in: ['L2', 'L3', 'Expert'] } },
+  });
+  const finrotaNonL1 = await prisma.product.count({
+    where: { companyId: 'COMP-FINROTA', isActive: true, supportLevel: { in: ['L2', 'L3', 'Expert'] } },
+  });
+  record(
+    '15. Seed coverage: UNIVERA + PARAM + FINROTA each has ≥1 non-L1 product',
+    univeraNonL1 >= 1 && paramNonL1 >= 1 && finrotaNonL1 >= 1,
+    `UNIVERA=${univeraNonL1} PARAM=${paramNonL1} FINROTA=${finrotaNonL1}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Summary + cleanup
 // ─────────────────────────────────────────────────────────────────
 

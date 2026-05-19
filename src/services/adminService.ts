@@ -247,6 +247,8 @@ export interface Product {
   description: string | null;
   sortOrder: number;
   isActive: boolean;
+  /** WR-A6 follow-up — Varsayılan destek seviyesi (L1/L2/L3/Expert). Default L1. */
+  supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
   /** BFF select chip — group code/name UI'da kullanılır. */
   productGroup?: { id: string; code: string; name: string };
   createdAt?: string;
@@ -261,6 +263,8 @@ export interface ProductInput {
   description?: string | null;
   sortOrder?: number;
   isActive?: boolean;
+  /** WR-A6 follow-up — Varsayılan destek seviyesi (L1/L2/L3/Expert). */
+  supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
 }
 
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };

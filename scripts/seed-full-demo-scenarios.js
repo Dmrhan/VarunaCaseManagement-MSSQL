@@ -651,15 +651,16 @@ async function main() {
         { code: 'PAZARYERI',   name: 'Pazaryeri & Ödeme',        description: 'Marketplace ve ödeme entegrasyonları' },
         { code: 'TAHSILAT',    name: 'Tahsilat & Mutabakat',     description: 'Tahsilat akışları ve uzlaştırma' },
       ],
+      // WR-A6 follow-up — supportLevel dağılım: PARAM L1 ağırlıklı, mutabakat L2.
       products: [
-        { groupCode: 'POS',       code: 'PARAMPOS',   name: 'ParamPOS' },
-        { groupCode: 'POS',       code: 'SANALPOS',   name: 'Sanal POS' },
-        { groupCode: 'POS',       code: 'FIZIKIPOS',  name: 'Fiziki POS' },
-        { groupCode: 'POS',       code: 'CEPPOS',     name: 'Cep POS' },
-        { groupCode: 'PAZARYERI', code: 'PAZARYERI',  name: 'Pazaryeri Entegrasyonu' },
-        { groupCode: 'TAHSILAT',  code: 'KOLAYTAHS',  name: 'Kolay Tahsilat' },
-        { groupCode: 'TAHSILAT',  code: 'PARAMKART',  name: 'ParamKart' },
-        { groupCode: 'TAHSILAT',  code: 'MUTABAKAT',  name: 'Mutabakat & Settlement' },
+        { groupCode: 'POS',       code: 'PARAMPOS',   name: 'ParamPOS',                   supportLevel: 'L1' },
+        { groupCode: 'POS',       code: 'SANALPOS',   name: 'Sanal POS',                   supportLevel: 'L1' },
+        { groupCode: 'POS',       code: 'FIZIKIPOS',  name: 'Fiziki POS',                  supportLevel: 'L1' },
+        { groupCode: 'POS',       code: 'CEPPOS',     name: 'Cep POS',                     supportLevel: 'L1' },
+        { groupCode: 'PAZARYERI', code: 'PAZARYERI',  name: 'Pazaryeri Entegrasyonu',      supportLevel: 'L2' },
+        { groupCode: 'TAHSILAT',  code: 'KOLAYTAHS',  name: 'Kolay Tahsilat',              supportLevel: 'L1' },
+        { groupCode: 'TAHSILAT',  code: 'PARAMKART',  name: 'ParamKart',                   supportLevel: 'L1' },
+        { groupCode: 'TAHSILAT',  code: 'MUTABAKAT',  name: 'Mutabakat & Settlement',      supportLevel: 'L2' },
       ],
     },
     'COMP-UNIVERA': {
@@ -669,16 +670,18 @@ async function main() {
         { code: 'DOKUMAN',     name: 'Doküman Yönetimi',         description: 'e-Dönüşüm ve doküman yönetimi' },
         { code: 'PLATFORM',    name: 'Platform',                  description: 'Genel platform ürünleri' },
       ],
+      // WR-A6 follow-up — supportLevel dağılım: UNIVERA L1/L2/L3 karışım.
+      // WMS/e-Dönüşüm L3; saha/mobile L1; doküman çekirdeği L2.
       products: [
-        { groupCode: 'SAHA',     code: 'ENROUTE',    name: 'Enroute' },
-        { groupCode: 'SAHA',     code: 'QUEST',      name: 'Quest' },
-        { groupCode: 'DEPO',     code: 'STOKBAR',    name: 'Stokbar' },
-        { groupCode: 'DEPO',     code: 'WMS',        name: 'WMS / Depo' },
-        { groupCode: 'DOKUMAN',  code: 'UNIDOX',     name: 'Uni-Dox' },
-        { groupCode: 'DOKUMAN',  code: 'EFATURA',    name: 'e-Fatura' },
-        { groupCode: 'DOKUMAN',  code: 'EARSIV',     name: 'e-Arşiv' },
-        { groupCode: 'DOKUMAN',  code: 'EIRSALIYE',  name: 'e-İrsaliye' },
-        { groupCode: 'PLATFORM', code: 'VARUNA',     name: 'Varuna' },
+        { groupCode: 'SAHA',     code: 'ENROUTE',    name: 'Enroute',     supportLevel: 'L1' },
+        { groupCode: 'SAHA',     code: 'QUEST',      name: 'Quest',       supportLevel: 'L1' },
+        { groupCode: 'DEPO',     code: 'STOKBAR',    name: 'Stokbar',     supportLevel: 'L2' },
+        { groupCode: 'DEPO',     code: 'WMS',        name: 'WMS / Depo',  supportLevel: 'L3' },
+        { groupCode: 'DOKUMAN',  code: 'UNIDOX',     name: 'Uni-Dox',     supportLevel: 'L2' },
+        { groupCode: 'DOKUMAN',  code: 'EFATURA',    name: 'e-Fatura',    supportLevel: 'L3' },
+        { groupCode: 'DOKUMAN',  code: 'EARSIV',     name: 'e-Arşiv',     supportLevel: 'L2' },
+        { groupCode: 'DOKUMAN',  code: 'EIRSALIYE',  name: 'e-İrsaliye',  supportLevel: 'L2' },
+        { groupCode: 'PLATFORM', code: 'VARUNA',     name: 'Varuna',      supportLevel: 'L2' },
       ],
       // Not: WhitePackage / RedPackage paket adları Product DEĞİL — A7'de Package olarak gelir.
     },
@@ -688,14 +691,16 @@ async function main() {
         { code: 'RAPORLAMA',    name: 'Raporlama',                description: 'Banka ekstresi ve POS raporu' },
         { code: 'ACIK_BANKA',   name: 'Açık Bankacılık',          description: 'Open banking & bank movement tracking' },
       ],
+      // WR-A6 follow-up — supportLevel dağılım: FINROTA L1/L2 karışım.
+      // Açık Bankacılık + E-DBS L2; raporlama çoğunlukla L1.
       products: [
-        { groupCode: 'TAHSILAT',   code: 'NETAHSILAT', name: 'Netahsilat' },
-        { groupCode: 'TAHSILAT',   code: 'TOS',        name: 'TÖS / Toplu Ödeme' },
-        { groupCode: 'RAPORLAMA',  code: 'NETEKSTRE',  name: 'Netekstre' },
-        { groupCode: 'RAPORLAMA',  code: 'POSRAPOR',   name: 'Posrapor' },
-        { groupCode: 'RAPORLAMA',  code: 'EDBS',       name: 'E-DBS' },
-        { groupCode: 'ACIK_BANKA', code: 'OPENBANK',   name: 'Açık Bankacılık' },
-        { groupCode: 'ACIK_BANKA', code: 'BANKMVT',    name: 'Bank Movement Tracking' },
+        { groupCode: 'TAHSILAT',   code: 'NETAHSILAT', name: 'Netahsilat',                   supportLevel: 'L1' },
+        { groupCode: 'TAHSILAT',   code: 'TOS',        name: 'TÖS / Toplu Ödeme',            supportLevel: 'L2' },
+        { groupCode: 'RAPORLAMA',  code: 'NETEKSTRE',  name: 'Netekstre',                    supportLevel: 'L1' },
+        { groupCode: 'RAPORLAMA',  code: 'POSRAPOR',   name: 'Posrapor',                     supportLevel: 'L1' },
+        { groupCode: 'RAPORLAMA',  code: 'EDBS',       name: 'E-DBS',                        supportLevel: 'L2' },
+        { groupCode: 'ACIK_BANKA', code: 'OPENBANK',   name: 'Açık Bankacılık',              supportLevel: 'L2' },
+        { groupCode: 'ACIK_BANKA', code: 'BANKMVT',    name: 'Bank Movement Tracking',       supportLevel: 'L2' },
       ],
     },
   };
@@ -725,10 +730,17 @@ async function main() {
       if (!grp) continue;
       await prisma.product.upsert({
         where: { id },
-        update: { name: p.name, productGroupId: grp.id, isActive: true },
+        update: {
+          name: p.name,
+          productGroupId: grp.id,
+          isActive: true,
+          // WR-A6 follow-up — Product.supportLevel default L1 if omitted.
+          ...(p.supportLevel && { supportLevel: p.supportLevel }),
+        },
         create: {
           id, companyId, productGroupId: grp.id, code: p.code, name: p.name,
           isActive: true, sortOrder: 0,
+          ...(p.supportLevel && { supportLevel: p.supportLevel }),
         },
       });
       productTotal++;
