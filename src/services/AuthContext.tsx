@@ -75,17 +75,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadFromSession() {
     const { data, error } = await supabase.auth.getSession();
     if (error) {
+      // WR-H2 — Hata durumunda da PII cache'te kalmamalı.
+      clearClientCache();
       setState({ status: 'error', user: null, error: error.message });
       return;
     }
     const session = data.session;
     if (!session) {
+      // WR-H2 — Session yoksa (sign-out sonrası, expired) cache temizlenir.
+      clearClientCache();
       setState({ status: 'unauthenticated', user: null, error: null });
       return;
     }
     const me = await fetchMe(session.access_token);
     if ('error' in me) {
       // Auth user var ama DB'de User yok ya da pasif → logout
+      // WR-H2 (review fix) — bu sign-out yolu da cache temizler.
+      clearClientCache();
       await supabase.auth.signOut();
       setState({ status: 'unauthenticated', user: null, error: me.error });
       return;
@@ -94,17 +100,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
     // WR-H2 — Logout client cache'i temizle; sonraki kullanıcı önceki PII'ye dokunmasın.
     clearClientCache();
+    await supabase.auth.signOut();
     setState({ status: 'unauthenticated', user: null, error: null });
   }
 
   useEffect(() => {
     void loadFromSession();
 
-    // Login/logout event'lerinde state'i tazele
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, _session) => {
+    // Login/logout event'lerinde state'i tazele.
+    // WR-H2 (review fix) — SIGNED_OUT / USER_DELETED gibi event'lerde cache
+    // temizliği loadFromSession() içinde "session yoksa clearClientCache()"
+    // dalı tarafından idempotent şekilde garantilenir.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      // SIGNED_OUT veya session null gelirse cache'i hemen temizle —
+      // loadFromSession bekleyemez; sonraki render'da fetch tetiklenirse
+      // cache hit eski oturumdan PII verebilir.
+      if (event === 'SIGNED_OUT' || !session) {
+        clearClientCache();
+      }
       void loadFromSession();
     });
 

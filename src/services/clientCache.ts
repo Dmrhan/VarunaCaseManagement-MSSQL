@@ -71,19 +71,35 @@ export function invalidateCachePath(key: string): boolean {
 }
 
 /**
- * Prefix match toplu drop. Örnek: invalidateCachePrefix('/api/cases/abc123')
- * hem `/api/cases/abc123`'ü hem de `/api/cases/abc123/customer-context`'i siler.
+ * Predicate-match toplu drop. Esnek invalidation; örneğin "tüm
+ * customer-context entry'lerini sil" (account mutation'larında, accountId →
+ * caseIds map'i client'ta tutulmadığı için broad invalidation gerekli):
+ *
+ *   invalidateCacheMatching((k) =>
+ *     k.startsWith('/api/cases/') && k.endsWith('/customer-context'),
+ *   );
+ *
  * Silinen entry sayısını döner.
  */
-export function invalidateCachePrefix(prefix: string): number {
+export function invalidateCacheMatching(predicate: (key: string) => boolean): number {
   let count = 0;
   for (const key of Array.from(memCache.keys())) {
-    if (key.startsWith(prefix)) {
+    if (predicate(key)) {
       memCache.delete(key);
       count++;
     }
   }
   return count;
+}
+
+/**
+ * Prefix match toplu drop. Örnek: invalidateCachePrefix('/api/cases/abc123')
+ * hem `/api/cases/abc123`'ü hem de `/api/cases/abc123/customer-context`'i siler.
+ * Silinen entry sayısını döner. Aslında invalidateCacheMatching üzerine
+ * thin wrapper; kod sitesinde okunaklılık için ayrı tutulur.
+ */
+export function invalidateCachePrefix(prefix: string): number {
+  return invalidateCacheMatching((key) => key.startsWith(prefix));
 }
 
 /** Tüm cache'i temizle. AuthContext logout'ta çağırır. */

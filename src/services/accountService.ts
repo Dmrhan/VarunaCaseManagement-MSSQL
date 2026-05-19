@@ -2,6 +2,7 @@ import { apiFetch } from '@/services/caseService';
 // WR-H2 — Client TTL cache helpers (sibling module, no circular dep via fetcher injection).
 import {
   cachedGet,
+  invalidateCacheMatching,
   invalidateCachePrefix,
   DEFAULT_CLIENT_CACHE_TTL_MS,
 } from '@/services/clientCache';
@@ -22,6 +23,32 @@ function caseCustomerContextCacheKey(caseId: string): string {
  */
 function invalidateAccountDetail(accountId: string): void {
   invalidateCachePrefix(accountDetailCacheKey(accountId));
+}
+
+/**
+ * WR-H2 (PR review fix) — Account / AccountCompany / AccountContact /
+ * AccountProduct mutation'ları getCaseCustomerContext payload'ını da
+ * etkiler (primaryContact, activeProducts, packageName, contractDates).
+ *
+ * Client tarafta accountId → caseIds map'i tutmadığımız için **broad
+ * invalidation** yapıyoruz: tüm `/api/cases/.../customer-context` cache
+ * entry'lerini silinen sayar.
+ *
+ * Tradeoff: account mutation'dan sonra açılan ilk drawer/detail, ilgili
+ * olmayan vakaları da yeniden fetch ettirir. Account mutation'ları admin-
+ * only ve seyrek olduğundan kabul edilebilir (worst case: 30 sn boyunca
+ * extra fetch'ler; correctness > efficiency for stale data).
+ */
+function invalidateAllCaseCustomerContexts(): number {
+  return invalidateCacheMatching(
+    (key) => key.startsWith('/api/cases/') && key.endsWith('/customer-context'),
+  );
+}
+
+/** Yardımcı: account mutation sonrası iki invalidation'ı birden çalıştırır. */
+function invalidateAccountAndCustomerContext(accountId: string): void {
+  invalidateAccountDetail(accountId);
+  invalidateAllCaseCustomerContexts();
 }
 
 /**
@@ -321,7 +348,7 @@ export const accountService = {
       },
       'Müşteri güncelleme',
     );
-    if (result) invalidateAccountDetail(id); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(id); // WR-H2 (review fix)
     return result;
   },
 
@@ -340,7 +367,7 @@ export const accountService = {
       },
       'Şirket ilişkisi ekleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -358,7 +385,7 @@ export const accountService = {
       },
       'Şirket ilişkisi güncelleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -371,7 +398,7 @@ export const accountService = {
       { method: 'DELETE' },
       'Şirket ilişkisi silme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -390,7 +417,7 @@ export const accountService = {
       },
       'Kontak ekleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -408,7 +435,7 @@ export const accountService = {
       },
       'Kontak güncelleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -421,7 +448,7 @@ export const accountService = {
       { method: 'DELETE' },
       'Kontak silme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -452,7 +479,7 @@ export const accountService = {
       },
       'Ürün ekleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -470,7 +497,7 @@ export const accountService = {
       },
       'Ürün güncelleme',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
@@ -483,7 +510,7 @@ export const accountService = {
       { method: 'DELETE' },
       'Ürün kaldırma',
     );
-    if (result) invalidateAccountDetail(accountId); // WR-H2
+    if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
     return result;
   },
 
