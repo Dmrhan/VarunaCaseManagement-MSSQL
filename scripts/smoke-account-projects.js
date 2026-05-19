@@ -222,21 +222,29 @@ if (agentToken) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 6) Cross-tenant: PARAM AccountCompany'ye admin (UNIVERA scope) dokunamaz
+// 6) Scope guard: accountCompanyId başka hesaba aitse 404
 // ─────────────────────────────────────────────────────────────────
 
-console.log('\n── 6) Cross-tenant denial ──');
+console.log('\n── 6) Wrong accountCompanyId for account → 404 ──');
+// Demo admin tüm tenant'lara sahip; gerçek cross-tenant testi için
+// proper guard'ı "yanlış accountCompany ile path mismatch → 404" senaryosuyla
+// test ediyoruz. paramAC.id PARAM hesabına ait; acA.accountId UNIVERA;
+// addProject loadEditable* zinciri accountCompany'yi accountId scope'unda
+// aramalı — eşleşmezse 404 dönmeli.
 if (paramAC) {
-  // admin@varuna.dev'in scope'u UNIVERA olduğundan PARAM accountCompany'ye
-  // proje eklemeye çalıştığında 403/404 dönmeli.
-  const r = await api(adminToken, `/api/accounts/${paramAC.accountId}/companies/${paramAC.id}/projects`, {
+  const r = await api(adminToken, `/api/accounts/${acA.accountId}/companies/${paramAC.id}/projects`, {
     method: 'POST',
-    body: JSON.stringify({ code: `${STAMP}-XSCOPE`, name: 'cross-tenant test', status: 'Active' }),
+    body: JSON.stringify({ code: `${STAMP}-XSCOPE`, name: 'wrong-ac test', status: 'Active' }),
   });
-  const blocked = r.status === 403 || r.status === 404;
-  record('6. Cross-tenant → 403/404', blocked, `status=${r.status}`);
+  // Yanlış accountCompany için 404 beklenir; alternatif olarak 403 da kabul.
+  const blocked = r.status === 404 || r.status === 403;
+  record('6. Wrong accountCompanyId for account → 404/403', blocked, `status=${r.status} code=${r.data?.error}`);
+  if (r.status === 201 && r.data?.id) {
+    // Beklenmedik şekilde başarılı olduysa cleanup için kaydet.
+    createdProjectIds.push(r.data.id);
+  }
 } else {
-  record('6. Cross-tenant → 403/404', false, 'PARAM accountCompany yok');
+  record('6. Wrong accountCompanyId for account → 404/403', false, 'PARAM accountCompany yok');
 }
 
 // ─────────────────────────────────────────────────────────────────
