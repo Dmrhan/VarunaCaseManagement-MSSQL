@@ -317,6 +317,142 @@ console.log('\n── 13) Seed coverage + WhitePackage/RedPackage typing ──'
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 14-18) WR-A7 review fix — per-company admin gate on ID routes
+// ─────────────────────────────────────────────────────────────────
+
+console.log('\n── 14-18) ID-route company-admin gate ──');
+
+const sysadminToken = await getToken('sysadmin@varuna.dev');
+
+// Demote admin@varuna.dev's UserCompany role for COMP-PARAM to Supervisor
+// (still in allowedCompanyIds, but NOT company-admin). Restore at the end.
+const adminUser = await prisma.user.findUnique({ where: { email: 'admin@varuna.dev' }, select: { id: true } });
+const originalParamLink = adminUser
+  ? await prisma.userCompany.findFirst({
+      where: { userId: adminUser.id, companyId: 'COMP-PARAM' },
+      select: { role: true, isActive: true },
+    })
+  : null;
+
+// Create a fresh PARAM package owned by sysadmin (deterministic ID for cleanup).
+let paramPkg = null;
+if (sysadminToken) {
+  const r = await api(sysadminToken, '/api/admin/packages', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_B,
+      code: `${STAMP}_PARAM_GATE`,
+      name: `${STAMP} Param gate test`,
+      supportLevel: 'L1',
+    }),
+  });
+  if (r.status === 201 && r.data?.id) { paramPkg = r.data; createdPackageIds.push(r.data.id); }
+}
+
+if (!sysadminToken) {
+  record('14-18. company-admin gate suite', false, 'sysadmin token unavailable');
+} else if (!paramPkg) {
+  record('14-18. company-admin gate suite', false, 'failed to create PARAM test package');
+} else if (!adminUser || !originalParamLink) {
+  record('14-18. company-admin gate suite', false, 'admin user or PARAM UserCompany link missing');
+} else {
+  // Sanity: existing Admin for company can do all 3 operations.
+  {
+    const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ description: 'pre-demote sanity' }),
+    });
+    record('Admin (proper role) PATCH → 200 (pre-demote sanity)', r.status === 200, `status=${r.status}`);
+  }
+  {
+    const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`);
+    record('Admin (proper role) GET items → 200 (pre-demote sanity)', r.status === 200, `status=${r.status}`);
+  }
+  {
+    const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`, {
+      method: 'PUT',
+      body: JSON.stringify({ productIds: [] }),
+    });
+    record('Admin (proper role) PUT items → 200 (pre-demote sanity)', r.status === 200, `status=${r.status}`);
+  }
+
+  // Demote admin to Supervisor in COMP-PARAM only.
+  await prisma.userCompany.update({
+    where: { userId_companyId: { userId: adminUser.id, companyId: 'COMP-PARAM' } },
+    data: { role: 'Supervisor' },
+  });
+
+  try {
+    // 14) Demoted admin PATCH /packages/:id → 403
+    {
+      const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'should be blocked' }),
+      });
+      record('14. Demoted admin (Supervisor role) PATCH → 403', r.status === 403, `status=${r.status}`);
+    }
+
+    // 15) Demoted admin GET /packages/:id/items → 403
+    {
+      const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`);
+      record('15. Demoted admin GET /items → 403', r.status === 403, `status=${r.status}`);
+    }
+
+    // 16) Demoted admin PUT /packages/:id/items → 403
+    {
+      const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`, {
+        method: 'PUT',
+        body: JSON.stringify({ productIds: [] }),
+      });
+      record('16. Demoted admin PUT /items → 403', r.status === 403, `status=${r.status}`);
+    }
+
+    // 17) SystemAdmin still works (effective company role 'SystemAdmin' for all)
+    {
+      const r = await api(sysadminToken, `/api/admin/packages/${paramPkg.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'sysadmin path' }),
+      });
+      const r2 = await api(sysadminToken, `/api/admin/packages/${paramPkg.id}/items`);
+      const r3 = await api(sysadminToken, `/api/admin/packages/${paramPkg.id}/items`, {
+        method: 'PUT',
+        body: JSON.stringify({ productIds: [] }),
+      });
+      record(
+        '17. SystemAdmin PATCH + GET items + PUT items → all 200',
+        r.status === 200 && r2.status === 200 && r3.status === 200,
+        `PATCH=${r.status} GET=${r2.status} PUT=${r3.status}`,
+      );
+    }
+  } finally {
+    // Restore admin role.
+    await prisma.userCompany.update({
+      where: { userId_companyId: { userId: adminUser.id, companyId: 'COMP-PARAM' } },
+      data: { role: originalParamLink.role },
+    });
+  }
+
+  // 18) Re-promoted admin → all 3 succeed again (also covers contract case
+  //     "Existing Admin for company can still PATCH / GET items / PUT items").
+  {
+    const r = await api(adminToken, `/api/admin/packages/${paramPkg.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ description: 'restored admin' }),
+    });
+    const r2 = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`);
+    const r3 = await api(adminToken, `/api/admin/packages/${paramPkg.id}/items`, {
+      method: 'PUT',
+      body: JSON.stringify({ productIds: [] }),
+    });
+    record(
+      '18. Restored Admin PATCH + GET items + PUT items → all 200',
+      r.status === 200 && r2.status === 200 && r3.status === 200,
+      `PATCH=${r.status} GET=${r2.status} PUT=${r3.status}`,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Summary + cleanup
 // ─────────────────────────────────────────────────────────────────
 

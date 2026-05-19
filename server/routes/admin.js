@@ -635,7 +635,18 @@ router.post('/packages', asyncRoute(async (req, res) => {
   res.status(201).json(item);
 }));
 
+// WR-A7 review fix — ID-based package routes must enforce per-company admin
+// permission for the target package's companyId, not just allowedCompanyIds
+// scope. assertCompanyAdmin checks req.user.companyRoles for Admin/SystemAdmin
+// in the target company.
+async function assertPackageCompanyAdmin(req, packageId) {
+  const companyId = await packageRepo.getCompanyId(packageId);
+  if (!companyId) throw new AdminError('Paket bulunamadı.', 404);
+  assertCompanyAdmin(req, companyId);
+}
+
 router.patch('/packages/:id', asyncRoute(async (req, res) => {
+  await assertPackageCompanyAdmin(req, req.params.id);
   const item = await packageRepo.update(
     req.params.id,
     req.body ?? {},
@@ -645,11 +656,13 @@ router.patch('/packages/:id', asyncRoute(async (req, res) => {
 }));
 
 router.get('/packages/:id/items', asyncRoute(async (req, res) => {
+  await assertPackageCompanyAdmin(req, req.params.id);
   const items = await packageRepo.listItems(req.params.id, req.user.allowedCompanyIds);
   res.json({ value: items });
 }));
 
 router.put('/packages/:id/items', asyncRoute(async (req, res) => {
+  await assertPackageCompanyAdmin(req, req.params.id);
   const body = req.body ?? {};
   const items = await packageRepo.replaceItems(
     req.params.id,
