@@ -1,4 +1,28 @@
 import { apiFetch } from '@/services/caseService';
+// WR-H2 — Client TTL cache helpers (sibling module, no circular dep via fetcher injection).
+import {
+  cachedGet,
+  invalidateCachePrefix,
+  DEFAULT_CLIENT_CACHE_TTL_MS,
+} from '@/services/clientCache';
+
+/** WR-H2 — Account detail GET için cache key. */
+function accountDetailCacheKey(id: string): string {
+  return `/api/accounts/${id}`;
+}
+
+/** WR-H2 — Case-scoped customer-context için cache key. */
+function caseCustomerContextCacheKey(caseId: string): string {
+  return `/api/cases/${caseId}/customer-context`;
+}
+
+/**
+ * WR-H2 — Account mutation'larından sonra çağrılır. Account detail +
+ * sub-resource path'leri (companies/contacts/products) toplu drop.
+ */
+function invalidateAccountDetail(accountId: string): void {
+  invalidateCachePrefix(accountDetailCacheKey(accountId));
+}
 
 /**
  * WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı).
@@ -268,7 +292,11 @@ export const accountService = {
   },
 
   async get(id: string): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(`/api/accounts/${id}`, undefined, 'Müşteri detayı');
+    // WR-H2 — TTL cache (30s) ile detay sayfa reopen sırasında network'ten kaçın.
+    const key = accountDetailCacheKey(id);
+    return cachedGet<AccountDetail>(key, DEFAULT_CLIENT_CACHE_TTL_MS, () =>
+      apiFetch<AccountDetail>(key, undefined, 'Müşteri detayı'),
+    );
   },
 
   async create(body: AccountCreateInput): Promise<AccountDetail | undefined> {
@@ -284,7 +312,7 @@ export const accountService = {
   },
 
   async update(id: string, body: AccountUpdateInput): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${id}`,
       {
         method: 'PATCH',
@@ -293,6 +321,8 @@ export const accountService = {
       },
       'Müşteri güncelleme',
     );
+    if (result) invalidateAccountDetail(id); // WR-H2
+    return result;
   },
 
   /* Phase C1 — AccountCompany mutations */
@@ -301,7 +331,7 @@ export const accountService = {
     accountId: string,
     body: AccountCompanyMutationInput,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/companies`,
       {
         method: 'POST',
@@ -310,6 +340,8 @@ export const accountService = {
       },
       'Şirket ilişkisi ekleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async updateCompanyRelation(
@@ -317,7 +349,7 @@ export const accountService = {
     accountCompanyId: string,
     body: AccountCompanyMutationInput,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/companies/${accountCompanyId}`,
       {
         method: 'PATCH',
@@ -326,17 +358,21 @@ export const accountService = {
       },
       'Şirket ilişkisi güncelleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async removeCompanyRelation(
     accountId: string,
     accountCompanyId: string,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/companies/${accountCompanyId}`,
       { method: 'DELETE' },
       'Şirket ilişkisi silme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   /* Phase C1 — AccountContact mutations */
@@ -345,7 +381,7 @@ export const accountService = {
     accountId: string,
     body: AccountContactMutationInput,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/contacts`,
       {
         method: 'POST',
@@ -354,6 +390,8 @@ export const accountService = {
       },
       'Kontak ekleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async updateContact(
@@ -361,7 +399,7 @@ export const accountService = {
     contactId: string,
     body: AccountContactMutationInput,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/contacts/${contactId}`,
       {
         method: 'PATCH',
@@ -370,17 +408,21 @@ export const accountService = {
       },
       'Kontak güncelleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async removeContact(
     accountId: string,
     contactId: string,
   ): Promise<AccountDetail | undefined> {
-    return apiFetch<AccountDetail>(
+    const result = await apiFetch<AccountDetail>(
       `/api/accounts/${accountId}/contacts/${contactId}`,
       { method: 'DELETE' },
       'Kontak silme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   /* Phase C2 — AccountProduct mutations */
@@ -401,7 +443,7 @@ export const accountService = {
     accountId: string,
     body: AccountProductMutationInput,
   ): Promise<{ id: string; account: AccountDetail } | undefined> {
-    return apiFetch<{ id: string; account: AccountDetail }>(
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
       `/api/accounts/${accountId}/products`,
       {
         method: 'POST',
@@ -410,6 +452,8 @@ export const accountService = {
       },
       'Ürün ekleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async updateProduct(
@@ -417,7 +461,7 @@ export const accountService = {
     productId: string,
     body: AccountProductMutationInput,
   ): Promise<{ id: string; account: AccountDetail } | undefined> {
-    return apiFetch<{ id: string; account: AccountDetail }>(
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
       `/api/accounts/${accountId}/products/${productId}`,
       {
         method: 'PATCH',
@@ -426,25 +470,34 @@ export const accountService = {
       },
       'Ürün güncelleme',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
   async removeProduct(
     accountId: string,
     productId: string,
   ): Promise<{ id: string; account: AccountDetail } | undefined> {
-    return apiFetch<{ id: string; account: AccountDetail }>(
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
       `/api/accounts/${accountId}/products/${productId}`,
       { method: 'DELETE' },
       'Ürün kaldırma',
     );
+    if (result) invalidateAccountDetail(accountId); // WR-H2
+    return result;
   },
 
-  /** Case detail customer-context — vakaya bağlı müşteri özetini hafif payload olarak çeker. */
+  /**
+   * Case detail customer-context — vakaya bağlı müşteri özetini hafif payload olarak çeker.
+   * WR-H2 — TTL cache (30s); drawer reopen sırasında network'ten kaçınır.
+   * caseService.invalidateCaseDetail() bu key'i de prefix match ile drop'lar.
+   */
   async getCaseCustomerContext(caseId: string): Promise<{ context: CaseCustomerContext | null } | undefined> {
-    return apiFetch<{ context: CaseCustomerContext | null }>(
-      `/api/cases/${caseId}/customer-context`,
-      undefined,
-      'Müşteri özeti',
+    const key = caseCustomerContextCacheKey(caseId);
+    return cachedGet<{ context: CaseCustomerContext | null }>(
+      key,
+      DEFAULT_CLIENT_CACHE_TTL_MS,
+      () => apiFetch<{ context: CaseCustomerContext | null }>(key, undefined, 'Müşteri özeti'),
     );
   },
 };
