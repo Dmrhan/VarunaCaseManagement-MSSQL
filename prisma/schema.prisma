@@ -87,6 +87,15 @@ enum ProjectStatus {
   Cancelled
 }
 
+/// Adres tipi — WR-A3 / PM-02 (country-agnostic; type-bağlı default uniqueness app-layer).
+enum AddressType {
+  Billing
+  Shipping
+  Visit
+  Headquarters
+  Branch
+}
+
 enum NoteVisibility {
   Internal
   Customer
@@ -295,6 +304,8 @@ model Company {
 
   accounts         Account[]
   accountCompanies AccountCompany[]
+  /// WR-A3 — Account adresleri tenant scope için Company'ye bağlı.
+  addresses        Address[]
   teams            Team[]
   cases            Case[]
   slaPolicies      SLAPolicy[]
@@ -391,6 +402,8 @@ model Account {
   cases     Case[]
   companies AccountCompany[]
   contacts  AccountContact[]
+  /// WR-A3 / PM-02 — country-agnostic address book. Account silindiğinde cascade.
+  addresses Address[]
 
   @@index([companyId])
   @@index([name])
@@ -502,6 +515,43 @@ model AccountContact {
 
   @@index([accountId])
   @@index([phoneE164])
+}
+
+/// WR-A3 / PM-02 — Account address book. Country-agnostic; TR default.
+/// Parent: Account (cascade). Tenant scope: companyId denormalized — must match
+/// an AccountCompany.companyId for this account (write-time validation in BFF).
+/// `isDefault` uniqueness per (accountId, companyId, type) enforced at app layer
+/// inside Prisma transactions (no DB unique to avoid soft-delete race windows).
+model Address {
+  id         String      @id @default(cuid())
+  accountId  String
+  /// Denormalized tenant scope. Must equal an AccountCompany.companyId where
+  /// AccountCompany.accountId = this.accountId (BFF-enforced).
+  companyId  String
+  type       AddressType
+  /// Optional human label (e.g. "İstanbul merkez ofis", "Adana şube").
+  label      String?
+  line1      String
+  line2      String?
+  district   String?
+  /// Nullable: country-agnostic — some countries / address formats omit a city.
+  city       String?
+  state      String?
+  postalCode String?
+  /// ISO 3166-1 alpha-2 (uppercase). App-layer format validation `^[A-Z]{2}$`.
+  country    String      @default("TR")
+  isDefault  Boolean     @default(false)
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([accountId])
+  @@index([companyId])
+  @@index([accountId, type])
+  @@index([accountId, isDefault])
 }
 
 model Team {

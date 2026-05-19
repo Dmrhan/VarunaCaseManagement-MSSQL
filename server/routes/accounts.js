@@ -365,4 +365,71 @@ router.delete(
   }),
 );
 
+/* ---------- WR-A3 / PM-02 — Address CRUD ---------- */
+
+/**
+ * GET /api/accounts/:id/addresses
+ * Read roles only. Adresler getAccount response'unda zaten geliyor; ayrı endpoint
+ * advanced clients / future import path için.
+ */
+router.get(
+  '/:id/addresses',
+  requireRole(...DETAIL_READ_ROLES),
+  asyncRoute(async (req, res) => {
+    const detail = await accountRepository.getAccount(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!detail) return res.status(404).json({ error: 'not_found', message: 'Müşteri bulunamadı.' });
+    res.json({ value: detail.addresses ?? [] });
+  }),
+);
+
+/**
+ * POST /api/accounts/:id/addresses
+ * Admin/SystemAdmin only.
+ */
+router.post(
+  '/:id/addresses',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const created = await accountRepository.addAddress({
+      accountId: req.params.id,
+      data: req.body,
+      user: req.user,
+    });
+    res.status(201).json(created);
+  }),
+);
+
+/** PATCH /api/accounts/:id/addresses/:addressId */
+router.patch(
+  '/:id/addresses/:addressId',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const updated = await accountRepository.updateAddress({
+      accountId: req.params.id,
+      addressId: req.params.addressId,
+      data: req.body,
+      user: req.user,
+    });
+    if (!updated) return res.status(404).json({ error: 'not_found', message: 'Adres bulunamadı.' });
+    res.json(updated);
+  }),
+);
+
+/** DELETE /api/accounts/:id/addresses/:addressId — soft delete. */
+router.delete(
+  '/:id/addresses/:addressId',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const result = await accountRepository.removeAddress({
+      accountId: req.params.id,
+      addressId: req.params.addressId,
+      user: req.user,
+    });
+    if (!result) return res.status(404).json({ error: 'not_found', message: 'Adres bulunamadı.' });
+    res.json(result);
+  }),
+);
+
 export default router;

@@ -514,6 +514,131 @@ async function main() {
   const univeraProjectCount = Object.values(projectsByAccountCompany).reduce((n, list) => n + list.length, 0);
   console.log(`   UNIVERA: ${univeraProjectCount} active projects across ${Object.keys(projectsByAccountCompany).length} accounts`);
 
+  // ── 3.6) Account Address — WR-A3 / PM-02 ──
+  // Country-agnostic adres listesi. Major hesaplar için 1-2 adres seed edilir.
+  // TR ağırlıklı; non-TR variety (DE, NL, US) en az 2 örnek.
+  // Hesap-Şirket ilişkisi başına ekleme yapılır (Address.companyId).
+  console.log('3.6) Seeding addresses (WR-A3 / PM-02)...');
+  const ADDRESS_TEMPLATES_TR = [
+    {
+      type: 'Headquarters',
+      label: 'Merkez Ofis',
+      line1: 'Maslak Mah. Büyükdere Cad. No: 245',
+      line2: 'Kat 12',
+      district: 'Sarıyer',
+      city: 'İstanbul',
+      state: null,
+      postalCode: '34485',
+      country: 'TR',
+      isDefault: true,
+    },
+    {
+      type: 'Billing',
+      label: 'Faturalama Adresi',
+      line1: 'Cumhuriyet Cad. No: 88',
+      line2: null,
+      district: 'Çankaya',
+      city: 'Ankara',
+      state: null,
+      postalCode: '06420',
+      country: 'TR',
+      isDefault: true,
+    },
+    {
+      type: 'Branch',
+      label: 'Adana Şube',
+      line1: 'Ziyapaşa Bulvarı No: 14',
+      line2: 'Kat 3',
+      district: 'Seyhan',
+      city: 'Adana',
+      state: null,
+      postalCode: '01100',
+      country: 'TR',
+      isDefault: false,
+    },
+    {
+      type: 'Visit',
+      label: 'Saha Servis Adresi',
+      line1: 'Ostim OSB 100. Yıl Bulvarı No: 88',
+      line2: null,
+      district: 'Yenimahalle',
+      city: 'Ankara',
+      state: null,
+      postalCode: '06370',
+      country: 'TR',
+      isDefault: false,
+    },
+  ];
+  const ADDRESS_TEMPLATES_NON_TR = [
+    {
+      type: 'Headquarters',
+      label: 'EU HQ',
+      line1: 'Friedrichstraße 68',
+      line2: null,
+      district: 'Mitte',
+      city: 'Berlin',
+      state: null,
+      postalCode: '10117',
+      country: 'DE',
+      isDefault: false,
+    },
+    {
+      type: 'Branch',
+      label: 'NL Logistics Hub',
+      line1: 'Stationsplein 30',
+      line2: null,
+      district: null,
+      city: 'Rotterdam',
+      state: null,
+      postalCode: '3013 AK',
+      country: 'NL',
+      isDefault: false,
+    },
+    {
+      type: 'Billing',
+      label: 'US Billing Office',
+      line1: '500 Terry A Francois Blvd',
+      line2: 'Suite 410',
+      district: null,
+      city: 'San Francisco',
+      state: 'CA',
+      postalCode: '94158',
+      country: 'US',
+      isDefault: false,
+    },
+  ];
+  let addressTotal = 0;
+  for (const companyId of COMPANIES) {
+    // İlk 4 hesabın her birine TR adres ekle (deterministic dağılım: HQ, Billing,
+    // Branch, Visit). 4. hesaba ek olarak bir non-TR örnek bind et.
+    const accs = allAccountIds[companyId].slice(0, 4);
+    for (let i = 0; i < accs.length; i++) {
+      const { acc } = accs[i];
+      const tpl = ADDRESS_TEMPLATES_TR[i % ADDRESS_TEMPLATES_TR.length];
+      const addrId = `ADDR-${acc.id}-${tpl.type}`;
+      await prisma.address.upsert({
+        where: { id: addrId },
+        update: { ...tpl, isActive: true },
+        create: { id: addrId, accountId: acc.id, companyId, ...tpl, isActive: true },
+      });
+      addressTotal++;
+    }
+    // İlk 1 hesaba ayrıca non-TR adres ekle (per-tenant: DE/NL/US round-robin).
+    if (accs.length > 0) {
+      const tplIdx = COMPANIES.indexOf(companyId) % ADDRESS_TEMPLATES_NON_TR.length;
+      const tpl = ADDRESS_TEMPLATES_NON_TR[tplIdx];
+      const { acc } = accs[0];
+      const addrId = `ADDR-${acc.id}-${tpl.type}-${tpl.country}`;
+      await prisma.address.upsert({
+        where: { id: addrId },
+        update: { ...tpl, isActive: true },
+        create: { id: addrId, accountId: acc.id, companyId, ...tpl, isActive: true },
+      });
+      addressTotal++;
+    }
+  }
+  console.log(`   Addresses: ${addressTotal} (TR + non-TR variety across major accounts)`);
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};

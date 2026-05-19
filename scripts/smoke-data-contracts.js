@@ -1190,6 +1190,93 @@ defineGroup('Account Project Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group N+2 — Account Address Contract (WR-A3 / PM-02)
+//   Address country-agnostic + tenant-scope + ISO-2 invariants.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Account Address Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // A.1) Address table has required scope columns.
+  const addrCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'Address'`,
+  );
+  const addrColSet = new Set((addrCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'Address.accountId column exists',
+    addrColSet.has('accountId') ? 'PASS' : 'FAIL',
+    { detail: addrColSet.has('accountId') ? '' : 'missing accountId' },
+  ));
+  out.push(check(
+    'Address.companyId column exists (denormalized tenant scope)',
+    addrColSet.has('companyId') ? 'PASS' : 'FAIL',
+    { detail: addrColSet.has('companyId') ? '' : 'missing companyId' },
+  ));
+
+  // A.2) No Address row without a valid account (FK guarantee + dangling check).
+  const orphanAcc = await prisma.$queryRawUnsafe(`
+    SELECT a.id, a."accountId"
+      FROM "Address" a
+      LEFT JOIN "Account" acc ON acc.id = a."accountId"
+     WHERE acc.id IS NULL
+     LIMIT 5
+  `);
+  out.push(check(
+    'Address.accountId references a real Account',
+    (orphanAcc?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: orphanAcc?.length ?? 0, examples: orphanAcc ?? [] },
+  ));
+
+  // A.3) Address.companyId must match an AccountCompany.companyId for that
+  //      account — no cross-tenant orphan addresses.
+  const tenantDrift = await prisma.$queryRawUnsafe(`
+    SELECT a.id, a."accountId", a."companyId"
+      FROM "Address" a
+     WHERE NOT EXISTS (
+       SELECT 1 FROM "AccountCompany" ac
+        WHERE ac."accountId" = a."accountId" AND ac."companyId" = a."companyId"
+     )
+     LIMIT 5
+  `);
+  out.push(check(
+    'Address.companyId valid for Account scope (AccountCompany exists)',
+    (tenantDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: tenantDrift?.length ?? 0, examples: tenantDrift ?? [] },
+  ));
+
+  // A.4) ISO-2 country: every row has length=2.
+  const badCountry = await prisma.$queryRawUnsafe(`
+    SELECT id, country FROM "Address"
+     WHERE country IS NULL OR LENGTH(country) <> 2
+     LIMIT 5
+  `);
+  out.push(check(
+    'Address.country length = 2 (ISO 3166-1 alpha-2)',
+    (badCountry?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: badCountry?.length ?? 0, examples: badCountry ?? [] },
+  ));
+
+  // A.5) Default address uniqueness — at most one active default per
+  //      (accountId, companyId, type). DB unique YOK; transaction-level invariant.
+  const dupDefault = await prisma.$queryRawUnsafe(`
+    SELECT "accountId", "companyId", "type", COUNT(*)::int AS n
+      FROM "Address"
+     WHERE "isActive" = true AND "isDefault" = true
+     GROUP BY "accountId", "companyId", "type"
+    HAVING COUNT(*) > 1
+     LIMIT 5
+  `);
+  out.push(check(
+    'At most 1 active default Address per (accountId, companyId, type)',
+    (dupDefault?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: dupDefault?.length ?? 0, examples: dupDefault ?? [] },
+  ));
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 

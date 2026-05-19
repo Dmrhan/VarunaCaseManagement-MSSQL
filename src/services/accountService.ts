@@ -141,6 +141,53 @@ export interface AccountProjectMutationInput {
   isActive?: boolean;
 }
 
+/** WR-A3 / PM-02 — Adres tipi (ASCII identifier; UI'da TR'ye çevrilir). */
+export type AddressType = 'Billing' | 'Shipping' | 'Visit' | 'Headquarters' | 'Branch';
+
+export const ADDRESS_TYPES: AddressType[] = ['Billing', 'Shipping', 'Visit', 'Headquarters', 'Branch'];
+
+export const ADDRESS_TYPE_LABELS: Record<AddressType, string> = {
+  Billing: 'Faturalama',
+  Shipping: 'Sevkiyat',
+  Visit: 'Saha/Ziyaret',
+  Headquarters: 'Merkez',
+  Branch: 'Şube',
+};
+
+/** WR-A3 — Account adres kaydı. Country-agnostic; TR default. */
+export interface AccountAddressSummary {
+  id: string;
+  companyId: string;
+  type: AddressType;
+  label: string | null;
+  line1: string;
+  line2: string | null;
+  district: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  /** ISO 3166-1 alpha-2 uppercase. */
+  country: string;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface AccountAddressMutationInput {
+  companyId?: string;
+  type?: AddressType;
+  label?: string | null;
+  line1?: string;
+  line2?: string | null;
+  district?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  /** ISO-2 uppercase; default "TR" backend tarafında uygulanır. */
+  country?: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+}
+
 export interface AccountListItem {
   id: string;
   name: string;
@@ -224,6 +271,8 @@ export interface AccountDetail {
   registrationNo: string | null;
   companies: AccountCompanyDetail[];
   contacts: AccountContact[];
+  /** WR-A3 / PM-02 — country-agnostic address list. Tenant-scope filtered. */
+  addresses: AccountAddressSummary[];
   caseStats: AccountCaseStats;
   recentCases: AccountRecentCase[];
 }
@@ -634,6 +683,56 @@ export const accountService = {
       `/api/accounts/${accountId}/projects/${projectId}`,
       { method: 'DELETE' },
       'Proje kaldırma',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
+    return result;
+  },
+
+  /* WR-A3 / PM-02 — Address CRUD */
+
+  async addAddress(
+    accountId: string,
+    body: AccountAddressMutationInput,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/addresses`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Adres ekleme',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
+    return result;
+  },
+
+  async updateAddress(
+    accountId: string,
+    addressId: string,
+    body: AccountAddressMutationInput,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/addresses/${addressId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Adres güncelleme',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
+    return result;
+  },
+
+  async removeAddress(
+    accountId: string,
+    addressId: string,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/addresses/${addressId}`,
+      { method: 'DELETE' },
+      'Adres kaldırma',
     );
     if (result) invalidateAccountAndCustomerContext(accountId);
     return result;

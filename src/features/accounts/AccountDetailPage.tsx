@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Inbox,
   Mail,
+  MapPin,
   Package,
   Pencil,
   Phone,
@@ -18,10 +19,12 @@ import {
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
+  ADDRESS_TYPE_LABELS,
   canReadAccounts,
   canWriteAccounts,
   CUSTOMER_TYPE_LABELS,
   PROJECT_STATUS_LABELS,
+  type AccountAddressSummary,
   type AccountContact,
   type AccountCompanyDetail,
   type AccountDetail,
@@ -37,6 +40,7 @@ import { AccountCompanyEditor } from './AccountCompanyEditor';
 import { AccountContactEditor } from './AccountContactEditor';
 import { AccountProductEditor } from './AccountProductEditor';
 import { AccountProjectEditor } from './AccountProjectEditor';
+import { AccountAddressEditor } from './AccountAddressEditor';
 
 interface AccountDetailPageProps {
   accountId: string;
@@ -74,6 +78,11 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
   const [projectEditor, setProjectEditor] = useState<
     | { mode: 'add' }
     | { mode: 'edit'; project: AccountProjectSummary; accountCompanyId: string }
+    | null
+  >(null);
+  const [addressEditor, setAddressEditor] = useState<
+    | { mode: 'add' }
+    | { mode: 'edit'; address: AccountAddressSummary }
     | null
   >(null);
 
@@ -156,6 +165,13 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
                 onEdit={(project, accountCompanyId) =>
                   setProjectEditor({ mode: 'edit', project, accountCompanyId })
                 }
+              />
+              <AddressesSection
+                addresses={account.addresses}
+                companies={account.companies}
+                isWriter={isWriter}
+                onAdd={() => setAddressEditor({ mode: 'add' })}
+                onEdit={(address) => setAddressEditor({ mode: 'edit', address })}
               />
               <ContactsSection
                 contacts={account.contacts}
@@ -246,6 +262,21 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
             onClose={() => setProjectEditor(null)}
             onSaved={(updated) => {
               setProjectEditor(null);
+              if (updated) setAccount(updated);
+            }}
+          />
+
+          <AccountAddressEditor
+            open={addressEditor !== null}
+            mode={addressEditor?.mode ?? 'add'}
+            accountId={account.id}
+            visibleCompanies={account.companies}
+            address={
+              addressEditor && addressEditor.mode === 'edit' ? addressEditor.address : null
+            }
+            onClose={() => setAddressEditor(null)}
+            onSaved={(updated) => {
+              setAddressEditor(null);
               if (updated) setAccount(updated);
             }}
           />
@@ -628,6 +659,119 @@ function projectStatusTint(status: string): BadgeTint {
       return 'blue';
     case 'Cancelled':
       return 'rose';
+    default:
+      return 'slate';
+  }
+}
+
+function AddressesSection({
+  addresses,
+  companies,
+  isWriter,
+  onAdd,
+  onEdit,
+}: {
+  addresses: AccountDetail['addresses'];
+  companies: AccountDetail['companies'];
+  isWriter: boolean;
+  onAdd: () => void;
+  onEdit: (address: AccountAddressSummary) => void;
+}) {
+  // WR-A3 — Account-level adres listesi; companyId chip ile şirket bağı görünür.
+  const companyName = (companyId: string) =>
+    companies.find((c) => c.companyId === companyId)?.companyName ?? companyId;
+  const total = addresses.length;
+  const canAdd = isWriter && companies.length > 0;
+
+  return (
+    <SectionCard
+      title="Adresler"
+      subtitle="Faturalama, merkez, şube, saha ziyaret, sevkiyat — country-agnostic"
+      action={
+        canAdd ? (
+          <Button variant="outline" size="sm" leftIcon={<Plus size={12} />} onClick={onAdd}>
+            Adres Ekle
+          </Button>
+        ) : null
+      }
+    >
+      {total === 0 ? (
+        <EmptyState
+          size="sm"
+          icon={<MapPin size={16} />}
+          title="Adres yok"
+          description={
+            isWriter
+              ? companies.length === 0
+                ? 'Önce müşteriyi bir şirkete bağla, sonra adres ekleyebilirsin.'
+                : 'Müşterinin adres bilgilerini eklemek için yukarıdaki düğmeyi kullan.'
+              : 'Bu müşteri için henüz adres tanımlanmamış.'
+          }
+        />
+      ) : (
+        <ul className="space-y-2">
+          {addresses.map((a) => (
+            <li
+              key={a.id}
+              className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-ndark-border"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <MapPin size={13} className="text-slate-500 dark:text-ndark-muted" />
+                  <Badge tint={addressTypeTint(a.type)}>
+                    {ADDRESS_TYPE_LABELS[a.type] ?? a.type}
+                  </Badge>
+                  {a.label && (
+                    <span className="font-medium text-slate-900 dark:text-ndark-text">
+                      {a.label}
+                    </span>
+                  )}
+                  {a.isDefault && <Badge tint="amber">Varsayılan</Badge>}
+                  {!a.isActive && <Badge tint="slate">Pasif</Badge>}
+                  <Badge tint="blue">{companyName(a.companyId)}</Badge>
+                  <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+                    {a.country}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-slate-700 dark:text-ndark-text">
+                  {a.line1}
+                  {a.line2 ? `, ${a.line2}` : ''}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                  {[a.district, a.city, a.state, a.postalCode].filter(Boolean).join(' · ') || '—'}
+                </div>
+              </div>
+              {isWriter && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(a)}
+                  title="Düzenle"
+                  aria-label={`${ADDRESS_TYPE_LABELS[a.type] ?? a.type} adresini düzenle`}
+                  className="shrink-0 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+function addressTypeTint(type: string): BadgeTint {
+  switch (type) {
+    case 'Billing':
+      return 'emerald';
+    case 'Shipping':
+      return 'sky';
+    case 'Visit':
+      return 'violet';
+    case 'Headquarters':
+      return 'indigo';
+    case 'Branch':
+      return 'teal';
     default:
       return 'slate';
   }
