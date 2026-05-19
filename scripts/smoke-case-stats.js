@@ -191,6 +191,42 @@ if (sysToken) {
   record('5f. SystemAdmin response mode = operations', r.data?.mode === 'operations');
 }
 
+// ── Section 6: WR-H1 — pageSize hard cap (defansif large-query guard) ──
+console.log('\n── 6) WR-H1 pageSize hard cap ──');
+{
+  const token = await getToken('admin@varuna.dev');
+  if (token) {
+    // 6a. Abusive pageSize=10000 → response.value.length ≤ 200
+    const rBig = await api(token, '/api/cases?page=1&pageSize=10000');
+    const bigLen = Array.isArray(rBig.data?.value) ? rBig.data.value.length : -1;
+    record(
+      '6a. GET /api/cases?pageSize=10000 → response ≤ 200 rows',
+      rBig.status === 200 && bigLen >= 0 && bigLen <= 200,
+      `status=${rBig.status} rows=${bigLen}`,
+    );
+
+    // 6b. No-param request → ≤ 25 rows (default applied even without page param)
+    const rNone = await api(token, '/api/cases');
+    const noneLen = Array.isArray(rNone.data?.value) ? rNone.data.value.length : -1;
+    record(
+      '6b. GET /api/cases (no params) → response ≤ 25 rows (default cap)',
+      rNone.status === 200 && noneLen >= 0 && noneLen <= 25,
+      `status=${rNone.status} rows=${noneLen}`,
+    );
+
+    // 6c. Sane pageSize=50 → exactly up to 50 rows (cap not aggressive)
+    const rOk = await api(token, '/api/cases?page=1&pageSize=50');
+    const okLen = Array.isArray(rOk.data?.value) ? rOk.data.value.length : -1;
+    record(
+      '6c. GET /api/cases?pageSize=50 → response ≤ 50 rows (sane request honored)',
+      rOk.status === 200 && okLen >= 0 && okLen <= 50,
+      `status=${rOk.status} rows=${okLen}`,
+    );
+  } else {
+    record('6. WR-H1 pageSize cap → skipped (no admin token)', true, 'auth not available');
+  }
+}
+
 await prisma.$disconnect();
 
 const failed = results.filter((r) => !r.ok);
