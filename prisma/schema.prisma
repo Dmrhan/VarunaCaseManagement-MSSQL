@@ -599,6 +599,11 @@ model Product {
   code           String
   name           String
   description    String?
+  /// WR-A6 follow-up — Varsayılan destek seviyesi. A5 SupportLevel enum
+  /// shipped olduktan sonra additive eklendi. Mevcut tüm ürünler default L1.
+  /// Phase 2 Case create cascade'inde Product → Person → Team → L1 zincirinin
+  /// ilk hint sinyali (A7b sonrası).
+  supportLevel   SupportLevel @default(L1)
   sortOrder      Int      @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
@@ -610,6 +615,7 @@ model Product {
   @@unique([companyId, code])
   @@index([companyId])
   @@index([companyId, productGroupId, isActive])
+  @@index([companyId, supportLevel])
 }
 
 model Team {

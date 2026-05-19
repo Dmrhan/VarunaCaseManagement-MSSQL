@@ -1360,6 +1360,51 @@ defineGroup('Product Catalog Contract', async () => {
     ));
   }
 
+  // WR-A6 follow-up — Product.supportLevel invariants (A5 enum dependency satisfied).
+  // C.7) Product.supportLevel NOT NULL.
+  const slCol = await prisma.$queryRawUnsafe(
+    `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'Product' AND column_name = 'supportLevel'`,
+  );
+  out.push(check(
+    'Product.supportLevel NOT NULL',
+    slCol?.[0]?.is_nullable === 'NO' ? 'PASS' : 'FAIL',
+    { detail: slCol?.[0] ? `is_nullable=${slCol[0].is_nullable}` : 'missing' },
+  ));
+
+  // C.8) Product.supportLevel value ∈ SupportLevel enum. Postgres enforces via
+  //      enum type; raw query verifies no nulls and no rogue text leak.
+  const slDrift = await prisma.$queryRawUnsafe(`
+    SELECT COUNT(*)::int AS n FROM "Product"
+     WHERE "supportLevel" IS NULL OR "supportLevel"::text NOT IN ('L1','L2','L3','Expert')
+  `);
+  out.push(check(
+    'Product.supportLevel value ∈ {L1, L2, L3, Expert}',
+    (slDrift?.[0]?.n ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: slDrift?.[0]?.n ?? 0 },
+  ));
+
+  // C.9) UNIVERA: ≥1 product with supportLevel ∈ {L2, L3, Expert}.
+  const univeraTier = await prisma.product.count({
+    where: { companyId: 'COMP-UNIVERA', isActive: true, supportLevel: { in: ['L2', 'L3', 'Expert'] } },
+  });
+  out.push(check(
+    'UNIVERA: ≥1 active product with supportLevel ∈ {L2, L3, Expert}',
+    univeraTier >= 1 ? 'PASS' : 'FAIL',
+    { detail: `count=${univeraTier}` },
+  ));
+
+  // C.10) PARAM + FINROTA: each ≥1 product with supportLevel != L1 (mix coverage).
+  for (const cid of ['COMP-PARAM', 'COMP-FINROTA']) {
+    const tier = await prisma.product.count({
+      where: { companyId: cid, isActive: true, supportLevel: { in: ['L2', 'L3', 'Expert'] } },
+    });
+    out.push(check(
+      `${cid}: ≥1 active product with supportLevel != L1`,
+      tier >= 1 ? 'PASS' : 'FAIL',
+      { detail: `count=${tier}` },
+    ));
+  }
+
   return out;
 });
 
