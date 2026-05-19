@@ -31,6 +31,20 @@ import {
   type UrgentSignal,
 } from '@/services/myService';
 import { QuickReminderModal } from './QuickReminderModal';
+import { CaseListDrawer } from '@/features/cases/components/CaseListDrawer';
+import { caseService, apiFetch } from '@/services/caseService';
+import type { Case, CaseFilters } from '@/features/cases/types';
+
+const OPEN_STATUSES_TR = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'] as const;
+
+type DrawerKpi = 'assigned' | 'resolvedToday' | 'snoozed' | 'followup';
+
+interface DrawerConfig {
+  title: string;
+  filter?: CaseFilters;
+  customFetch?: () => Promise<Case[]>;
+  emptyMessage?: string;
+}
 
 interface MyHomePageProps {
   onSelectCase: (caseId: string) => void;
@@ -77,6 +91,59 @@ export function MyHomePage({
     presetCaseLabel?: string;
     presetRemindAt?: Date | null;
   }>({ open: false });
+
+  // KPI drawer state — tıklanan kart için açılır liste + quick edit
+  const [drawer, setDrawer] = useState<{ open: boolean; kpi: DrawerKpi | null }>({
+    open: false,
+    kpi: null,
+  });
+
+  // KPI türüne göre drawer konfigürasyonu (filter veya customFetch).
+  function buildDrawerConfig(kpi: DrawerKpi): DrawerConfig {
+    if (kpi === 'assigned') {
+      return {
+        title: 'Bana Atanan',
+        filter: { assignedToMe: true, statuses: [...OPEN_STATUSES_TR] as CaseFilters['statuses'] },
+        emptyMessage: 'Üzerinizde açık vaka yok.',
+      };
+    }
+    if (kpi === 'resolvedToday') {
+      return {
+        title: 'Bugün Çözdüm',
+        filter: { assignedToMe: true, resolvedToday: true },
+        emptyMessage: 'Bugün henüz vaka çözmediniz.',
+      };
+    }
+    if (kpi === 'snoozed') {
+      return {
+        title: 'Ertelenenler',
+        customFetch: async () => {
+          const r = await apiFetch<{ value: Case[]; '@odata.count': number }>(
+            '/api/cases/snoozed',
+            undefined,
+            'Ertelenmiş vakalar yüklenemedi',
+          );
+          return r?.value ?? [];
+        },
+        emptyMessage: 'Ertelenmiş vakanız yok.',
+      };
+    }
+    // 'followup' — bugün arayacaklarım: dashboard.todayCalendar'dan followup type'lı caseIds
+    const ids = (data?.todayCalendar ?? [])
+      .filter((e) => e.type === 'followup' && e.caseId)
+      .map((e) => e.caseId as string);
+    return {
+      title: 'Bugün Arayacaklarım',
+      customFetch: async () => {
+        if (ids.length === 0) return [];
+        // Tek tek fetch et — caseService.list ID filtresi henüz desteklemiyor.
+        // Maliyet: bugün arayacaklarım ≤ ~10 vaka normalde.
+        const cases = await Promise.all(ids.map((id) => caseService.get(id)));
+        return cases.filter((c): c is Case => !!c);
+      },
+      emptyMessage: 'Bugün için takip aramanız yok.',
+    };
+  }
 
   useEffect(() => {
     let alive = true;
@@ -187,11 +254,10 @@ export function MyHomePage({
         onShowPatterns={onShowPatterns}
       />
 
-      {/* STATS */}
+      {/* STATS — KPI tile click → drawer (split list + quick edit) */}
       <StatsRow
         stats={data.stats}
-        onShowCases={onShowCases}
-        onShowCalendar={onShowCalendar}
+        onOpenKpiDrawer={(kpi) => setDrawer({ open: true, kpi })}
       />
 
       {/* TWO COLUMN */}
@@ -262,6 +328,26 @@ export function MyHomePage({
         }}
         onOpenCase={onSelectCase}
       />
+
+      {/* KPI drawer — split list + quick edit. Card click → açılır,
+          "Tam ekranda aç" CaseDetailPage'e gönderir, X ile MyHome geri. */}
+      {drawer.open && drawer.kpi && (() => {
+        const cfg = buildDrawerConfig(drawer.kpi);
+        return (
+          <CaseListDrawer
+            open={drawer.open}
+            title={cfg.title}
+            filter={cfg.filter}
+            customFetch={cfg.customFetch}
+            emptyMessage={cfg.emptyMessage}
+            onClose={() => setDrawer({ open: false, kpi: null })}
+            onOpenFullCase={(caseId) => {
+              setDrawer({ open: false, kpi: null });
+              onSelectCase(caseId);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -411,12 +497,10 @@ const STAT_TONE: Record<
 
 function StatsRow({
   stats,
-  onShowCases,
-  onShowCalendar,
+  onOpenKpiDrawer,
 }: {
   stats: DashboardData['stats'];
-  onShowCases: () => void;
-  onShowCalendar: () => void;
+  onOpenKpiDrawer: (kpi: DrawerKpi) => void;
 }) {
   const items: Array<{
     label: string;
@@ -425,10 +509,10 @@ function StatsRow({
     tone: StatTone;
     onClick: () => void;
   }> = [
-    { label: 'Bana Atanan', value: stats.assignedToMe, icon: <User size={20} />, tone: 'violet', onClick: onShowCases },
-    { label: 'Bugün Çözdüm', value: stats.resolvedToday, icon: <CheckCircle2 size={20} />, tone: 'emerald', onClick: onShowCases },
-    { label: 'Ertelenenler', value: stats.snoozed, icon: <Clock size={20} />, tone: 'amber', onClick: onShowCases },
-    { label: 'Bugün Arayacaklarım', value: stats.followupToday, icon: <Phone size={20} />, tone: 'blue', onClick: onShowCalendar },
+    { label: 'Bana Atanan', value: stats.assignedToMe, icon: <User size={20} />, tone: 'violet', onClick: () => onOpenKpiDrawer('assigned') },
+    { label: 'Bugün Çözdüm', value: stats.resolvedToday, icon: <CheckCircle2 size={20} />, tone: 'emerald', onClick: () => onOpenKpiDrawer('resolvedToday') },
+    { label: 'Ertelenenler', value: stats.snoozed, icon: <Clock size={20} />, tone: 'amber', onClick: () => onOpenKpiDrawer('snoozed') },
+    { label: 'Bugün Arayacaklarım', value: stats.followupToday, icon: <Phone size={20} />, tone: 'blue', onClick: () => onOpenKpiDrawer('followup') },
   ];
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
