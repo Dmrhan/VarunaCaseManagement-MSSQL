@@ -346,18 +346,28 @@ model Account {
   id             String       @id @default(cuid())
   name           String
   /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
+  /// WR-A2: format + checksum validation app-layer'da (server/utils/accountValidation.js).
   vkn            String?      @unique
   companyId      String?
   email          String?
+  /// Display amaçlı orijinal telefon (kullanıcı girdiği format). WR-A2'de phoneE164 ayrı tutulur.
   phone          String?
+  /// WR-A2 — E.164 normalize (örn. "+905325551234"). Search/index için.
+  /// **DB unique constraint YOK** — paylaşılan call center numarası iki Account'ta görünebilir.
+  phoneE164      String?
   isActive       Boolean      @default(true)
   /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
-  /// TCKN bu modelde YOKTUR — A2'de privacy design (encrypt/hash/mask) onayından sonra eklenir.
   customerType   CustomerType @default(Corporate)
   /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
   legalName      String?
   /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
   registrationNo String?
+  /// WR-A2 / Decision Sprint #1 — TCKN HMAC-SHA256(plain, TCKN_HASH_PEPPER), 64-char hex.
+  /// **Plain TCKN ASLA saklanmaz.** Global unique → duplicate Bireysel müşteri önleme.
+  /// Pepper env yoksa write path 400 fail; read path (search) sessizce skip.
+  tcknHash       String?      @unique
+  /// WR-A2 — Display için son 4 hane (örn "1234"). UI'da "*******1234" maskeli gösterilir.
+  tcknLast4      String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -369,6 +379,7 @@ model Account {
   @@index([companyId])
   @@index([name])
   @@index([customerType])
+  @@index([phoneE164])
 }
 
 // AccountCompany — Account ile Company arasında per-tenant ilişki.
@@ -428,6 +439,8 @@ model AccountContact {
   title            String?
   email            String?
   phone            String?
+  /// WR-A2 — E.164 normalize. Account.phoneE164 ile aynı kural; DB unique yok.
+  phoneE164        String?
   isPrimary        Boolean  @default(false)
   isActive         Boolean  @default(true)
   /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.
@@ -438,6 +451,7 @@ model AccountContact {
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
+  @@index([phoneE164])
 }
 
 model Team {

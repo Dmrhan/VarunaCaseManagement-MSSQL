@@ -256,15 +256,16 @@ defineGroup('Account / Case Integrity', async () => {
     count: nullCount,
   }));
 
-  // 2.8) WR-A1 regression guard — Account tablosunda tckn / tcknHash KOLONU yok.
-  //      TCKN A2'de privacy design sonrası eklenir; bu PR'da hiçbir varyantı var olmamalı.
+  // 2.8) WR-A1 / WR-A2 regression guard — Account tablosunda PLAIN TCKN kolonu yok.
+  //      A2'de tcknHash + tcknLast4 eklendi (privacy-safe); ama plain tckn / national_id ASLA olmamalı.
+  //      Detaylı privacy kontratı: 'Account Privacy Contract' grubunda.
   const cols = await prisma.$queryRawUnsafe(
     `SELECT column_name FROM information_schema.columns
-     WHERE table_name = 'Account' AND column_name IN ('tckn', 'tcknHash', 'tckn_hash', 'national_id')`,
+     WHERE table_name = 'Account' AND column_name IN ('tckn', 'tckn_raw', 'rawTckn', 'national_id', 'nationalId')`,
   );
   const forbiddenCols = (cols ?? []).map((r) => r.column_name);
   out.push(check(
-    'Account table excludes tckn / tcknHash columns (WR-A1 / Modeling Guardrail #1)',
+    'Account table excludes raw TCKN columns (WR-A1+A2 / Modeling Guardrail #1)',
     forbiddenCols.length === 0 ? 'PASS' : 'FAIL',
     { count: forbiddenCols.length, examples: forbiddenCols },
   ));
@@ -916,6 +917,83 @@ defineGroup('Customer Match Suggestions Contract', async () => {
       { detail: 'No customerless case with requester phone in DB yet (Phase D Step 2 yeni — kullanım zamanı)' },
     ));
   }
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Group N — Account Privacy Contract (WR-A2)
+//   Account schema'da raw TCKN kolonu YOK; sadece tcknHash + tcknLast4 + tcknMasked.
+//   Detaylı smoke: scripts/smoke-account-validation-privacy.js (A2).
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Account Privacy Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  const cols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'Account'`,
+  );
+  const colSet = new Set((cols ?? []).map((r) => r.column_name));
+
+  // F.A1) Raw TCKN columns must be ABSENT.
+  const FORBIDDEN_TCKN_COLS = ['tckn', 'tcknRaw', 'rawTckn', 'nationalId', 'national_id'];
+  const leakedTckn = FORBIDDEN_TCKN_COLS.filter((c) => colSet.has(c));
+  out.push(check(
+    'Account table has no raw TCKN columns (WR-A2 privacy)',
+    leakedTckn.length === 0 ? 'PASS' : 'FAIL',
+    { count: leakedTckn.length, examples: leakedTckn },
+  ));
+
+  // F.A2) tcknHash + tcknLast4 columns must EXIST.
+  const hasHash = colSet.has('tcknHash');
+  const hasLast4 = colSet.has('tcknLast4');
+  out.push(check(
+    'Account table has tcknHash + tcknLast4 columns',
+    hasHash && hasLast4 ? 'PASS' : 'FAIL',
+    { detail: `tcknHash=${hasHash} tcknLast4=${hasLast4}` },
+  ));
+
+  // F.A3) tcknHash unique constraint exists.
+  const indexes = await prisma.$queryRawUnsafe(
+    `SELECT indexname FROM pg_indexes WHERE tablename = 'Account'`,
+  );
+  const hasTcknHashUnique = (indexes ?? []).some((r) =>
+    r.indexname.toLowerCase().includes('tcknhash'),
+  );
+  out.push(check(
+    'Account.tcknHash unique index exists',
+    hasTcknHashUnique ? 'PASS' : 'FAIL',
+    { detail: 'Account_tcknHash_key (Prisma @unique) present' },
+  ));
+
+  // F.A4) phoneE164 column exists; NOT in unique index.
+  const hasPhoneE164 = colSet.has('phoneE164');
+  out.push(check(
+    'Account.phoneE164 column exists',
+    hasPhoneE164 ? 'PASS' : 'FAIL',
+  ));
+
+  const phoneE164Unique = (indexes ?? []).some((r) => {
+    const name = r.indexname.toLowerCase();
+    return name.includes('phonee164') && name.endsWith('_key');
+  });
+  out.push(check(
+    'Account.phoneE164 is NOT unique (paylaşılan call center allowed)',
+    !phoneE164Unique ? 'PASS' : 'FAIL',
+    { detail: phoneE164Unique ? 'unexpected unique index found' : 'index ok, not unique' },
+  ));
+
+  // F.A5) Existing tcknHash values look like HMAC-SHA256 hex (64 chars).
+  const wrongHashes = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int as n FROM "Account" WHERE "tcknHash" IS NOT NULL AND "tcknHash" !~ '^[0-9a-f]{64}$'`,
+  );
+  const wrongN = wrongHashes?.[0]?.n ?? 0;
+  out.push(check(
+    'AIUsageLog-like tcknHash values are 64-char hex (HMAC-SHA256)',
+    wrongN === 0 ? 'PASS' : 'FAIL',
+    { count: wrongN },
+  ));
 
   return out;
 });

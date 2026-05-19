@@ -1,5 +1,13 @@
 import { prisma } from './client.js';
 import { CUSTOMER_TYPE_VALUES } from './enumMap.js';
+// WR-A2 — Validation + privacy helpers.
+import {
+  validateVkn,
+  validateTckn,
+  hashTckn,
+  maskTcknLast4,
+  normalizePhoneE164,
+} from '../utils/accountValidation.js';
 
 /**
  * Phase A — Account 360 repository.
@@ -119,12 +127,17 @@ function shapeAccountRow(account, { caseAggregates }) {
     name: account.name,
     vknMasked: maskVkn(account.vkn),
     phone: account.phone ?? null,
+    // WR-A2 — phoneE164 search/dedup için iç UI'a geri döner; internal use only.
+    phoneE164: account.phoneE164 ?? null,
     email: account.email ?? null,
     isActive: account.isActive,
     // WR-A1 / PM-01 — Müşteri tipi + opsiyonel ticari unvan/sicil no.
     customerType: account.customerType,
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
+    // WR-A2 — TCKN: sadece maskeli display ("*******1234"). Plain TCKN ve tcknHash
+    // ASLA response'ta yer almaz.
+    tcknMasked: maskTcknLast4(account.tcknLast4),
     companies: account.companies
       .filter((c) => c.__inScope)
       .map((c) => ({
@@ -226,12 +239,15 @@ export async function listAccounts({
         name: true,
         vkn: true,
         phone: true,
+        phoneE164: true, // WR-A2
         email: true,
         isActive: true,
         // WR-A1
         customerType: true,
         legalName: true,
         registrationNo: true,
+        // WR-A2 — tcknHash select edilmez (privacy); sadece tcknLast4 (mask için).
+        tcknLast4: true,
         companies: {
           select: {
             id: true,
@@ -316,6 +332,7 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       name: true,
       vkn: true,
       phone: true,
+      phoneE164: true, // WR-A2
       email: true,
       isActive: true,
       companyId: true,
@@ -324,6 +341,8 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       customerType: true,
       legalName: true,
       registrationNo: true,
+      // WR-A2 — tcknHash select edilmez; sadece tcknLast4 (mask için).
+      tcknLast4: true,
       companies: {
         select: {
           id: true,
@@ -426,11 +445,14 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     name: account.name,
     vknMasked: maskVkn(account.vkn),
     phone: account.phone ?? null,
+    phoneE164: account.phoneE164 ?? null, // WR-A2
     email: account.email ?? null,
     isActive: account.isActive,
     createdAt: account.createdAt,
     // WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) ticari unvan/sicil no.
     customerType: account.customerType,
+    // WR-A2 — TCKN maskeli display only; tcknHash response'a girmez.
+    tcknMasked: maskTcknLast4(account.tcknLast4),
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
     companies: visibleCompanies.map((c) => ({
@@ -513,8 +535,17 @@ export async function createAccount({ data, user }) {
     }
   }
 
-  const vkn = typeof data?.vkn === 'string' ? data.vkn.trim() || null : null;
+  // WR-A2 — VKN format/checksum validation + duplicate check.
+  let vkn = typeof data?.vkn === 'string' ? data.vkn.trim() || null : null;
   if (vkn) {
+    const vknCheck = validateVkn(vkn);
+    if (!vknCheck.ok) {
+      throw new AccountValidationError(vknCheck.reason ?? 'VKN geçersiz.', {
+        status: 400,
+        code: 'invalid_vkn',
+      });
+    }
+    vkn = vknCheck.normalized;
     const existing = await prisma.account.findUnique({ where: { vkn }, select: { id: true } });
     if (existing) {
       throw new AccountValidationError('Bu VKN ile kayıtlı müşteri var.', {
@@ -563,17 +594,49 @@ export async function createAccount({ data, user }) {
       ? data.registrationNo.trim()
       : null;
 
+  // WR-A2 — Phone E.164 normalize (display + e164 ayrı saklanır).
+  const phoneRaw = typeof data?.phone === 'string' && data.phone.trim() ? data.phone.trim() : null;
+  const phoneE164 = phoneRaw ? normalizePhoneE164(phoneRaw) : null;
+
+  // WR-A2 — TCKN: yalnızca Individual customerType için kabul edilir.
+  // Plain TCKN ASLA DB'ye yazılmaz; HMAC hash + last4 hesaplanır, plain bellekte
+  // bırakılıp atılır (variable scope sonrası GC).
+  let tcknHash = null;
+  let tcknLast4 = null;
+  if (data?.tckn != null && data.tckn !== '') {
+    if (customerType !== 'Individual') {
+      throw new AccountValidationError(
+        'TCKN yalnızca Bireysel müşteri tipi için verilebilir.',
+        { status: 400, code: 'tckn_not_allowed_for_type' },
+      );
+    }
+    try {
+      const { hash, last4 } = hashTckn(data.tckn);
+      tcknHash = hash;
+      tcknLast4 = last4;
+    } catch (err) {
+      // pepper missing veya TCKN invalid → 400 ile yansıt
+      throw new AccountValidationError(err.message ?? 'TCKN işlenemedi.', {
+        status: err.status ?? 400,
+        code: err.code ?? 'tckn_error',
+      });
+    }
+  }
+
   // Atomik: Account + AccountCompany kayıtları aynı transaction.
   try {
     const created = await prisma.account.create({
       data: {
         name,
         vkn,
-        phone: data?.phone ?? null,
+        phone: phoneRaw,
+        phoneE164,
         email: data?.email ?? null,
         customerType,
         legalName,
         registrationNo,
+        tcknHash,
+        tcknLast4,
         // Legacy: ilk company'i companyId'ye yaz — mevcut Case scope sorguları çalışsın.
         companyId: companies[0].companyId,
         companies: {
@@ -598,6 +661,12 @@ export async function createAccount({ data, user }) {
         throw new AccountValidationError('Bu VKN ile kayıtlı müşteri var.', {
           status: 409,
           code: 'duplicate_vkn',
+        });
+      }
+      if (targets.includes('tcknHash')) {
+        throw new AccountValidationError('Bu TCKN ile kayıtlı müşteri var.', {
+          status: 409,
+          code: 'duplicate_tckn',
         });
       }
       if (targets.includes('externalCustomerCode') || targets.includes('companyId')) {
@@ -625,13 +694,27 @@ export async function updateAccount({ accountId, data, user }) {
     if (!trimmed) throw new AccountValidationError('Müşteri adı boş olamaz.');
     patch.name = trimmed;
   }
-  if (data?.phone !== undefined) patch.phone = data.phone || null;
+  // WR-A2 — Phone update: display + phoneE164 birlikte güncelle (atomic pair).
+  if (data?.phone !== undefined) {
+    const newPhone = data.phone || null;
+    patch.phone = newPhone;
+    patch.phoneE164 = newPhone ? normalizePhoneE164(newPhone) : null;
+  }
   if (data?.email !== undefined) patch.email = data.email || null;
   if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
 
   if (data?.vkn !== undefined) {
-    const newVkn = typeof data.vkn === 'string' ? data.vkn.trim() || null : null;
+    let newVkn = typeof data.vkn === 'string' ? data.vkn.trim() || null : null;
     if (newVkn) {
+      // WR-A2 — VKN format/checksum validation.
+      const vknCheck = validateVkn(newVkn);
+      if (!vknCheck.ok) {
+        throw new AccountValidationError(vknCheck.reason ?? 'VKN geçersiz.', {
+          status: 400,
+          code: 'invalid_vkn',
+        });
+      }
+      newVkn = vknCheck.normalized;
       const conflict = await prisma.account.findFirst({
         where: { vkn: newVkn, NOT: { id: accountId } },
         select: { id: true },
@@ -646,7 +729,7 @@ export async function updateAccount({ accountId, data, user }) {
     patch.vkn = newVkn;
   }
 
-  // WR-A1: customerType / legalName / registrationNo PATCH. TCKN YOK.
+  // WR-A1: customerType / legalName / registrationNo PATCH. TCKN ayrı (aşağıda).
   if (data?.customerType !== undefined) {
     const ct = normalizeCustomerType(data.customerType);
     if (ct) patch.customerType = ct;
@@ -662,6 +745,36 @@ export async function updateAccount({ accountId, data, user }) {
         : null;
   }
 
+  // WR-A2 — TCKN update: yalnızca Individual customerType. Plain TCKN saklanmaz.
+  // null/'' → clear; valid TCKN → re-hash; invalid → 400.
+  if (data?.tckn !== undefined) {
+    // customerType final değerini bilmemiz lazım (patch'te değişiyor olabilir).
+    const targetCustomerType =
+      patch.customerType ??
+      (await prisma.account.findUnique({ where: { id: accountId }, select: { customerType: true } }))?.customerType;
+    if (data.tckn === null || data.tckn === '') {
+      patch.tcknHash = null;
+      patch.tcknLast4 = null;
+    } else {
+      if (targetCustomerType !== 'Individual') {
+        throw new AccountValidationError(
+          'TCKN yalnızca Bireysel müşteri tipi için verilebilir.',
+          { status: 400, code: 'tckn_not_allowed_for_type' },
+        );
+      }
+      try {
+        const { hash, last4 } = hashTckn(data.tckn);
+        patch.tcknHash = hash;
+        patch.tcknLast4 = last4;
+      } catch (err) {
+        throw new AccountValidationError(err.message ?? 'TCKN işlenemedi.', {
+          status: err.status ?? 400,
+          code: err.code ?? 'tckn_error',
+        });
+      }
+    }
+  }
+
   if (Object.keys(patch).length === 0) {
     return getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds });
   }
@@ -670,6 +783,13 @@ export async function updateAccount({ accountId, data, user }) {
     await prisma.account.update({ where: { id: accountId }, data: patch });
   } catch (err) {
     if (err?.code === 'P2002') {
+      const targets = Array.isArray(err.meta?.target) ? err.meta.target : [err.meta?.target];
+      if (targets.includes('tcknHash')) {
+        throw new AccountValidationError('Bu TCKN ile kayıtlı müşteri var.', {
+          status: 409,
+          code: 'duplicate_tckn',
+        });
+      }
       throw new AccountValidationError('Bu VKN ile kayıtlı müşteri var.', {
         status: 409,
         code: 'duplicate_vkn',

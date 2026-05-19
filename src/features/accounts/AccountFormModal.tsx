@@ -63,6 +63,11 @@ export function AccountFormModal({
   const [customerType, setCustomerType] = useState<CustomerType>('Corporate');
   const [legalName, setLegalName] = useState('');
   const [registrationNo, setRegistrationNo] = useState('');
+  // WR-A2 — TCKN: yalnız submit transient. Sadece state'te tutulur; submit
+  // sonrası temizlenir. localStorage / sessionStorage / cache'e YAZILMAZ.
+  const [tckn, setTckn] = useState('');
+  const [vknValidationMsg, setVknValidationMsg] = useState<string | null>(null);
+  const [tcknValidationMsg, setTcknValidationMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<CompanyRow[]>([emptyCompanyRow()]);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -71,6 +76,9 @@ export function AccountFormModal({
   useEffect(() => {
     if (!open) return;
     setErrors({});
+    setVknValidationMsg(null);
+    setTcknValidationMsg(null);
+    setTckn(''); // WR-A2 — TCKN state'i her modal açılışında temizlenir
     if (mode === 'edit' && account) {
       setName(account.name);
       // vknMasked plaintext değil — edit'te boş başla, kullanıcı değiştirmek istemezse göndermez.
@@ -96,6 +104,38 @@ export function AccountFormModal({
   }, [open, mode, account, companies]);
 
   const isIndividual = customerType === 'Individual';
+
+  // WR-A2 — VKN inline validate (debounce 350ms).
+  useEffect(() => {
+    if (!vkn || vkn.trim().length < 10) {
+      setVknValidationMsg(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const r = await import('@/services/accountService').then((m) =>
+        m.validateVknRemote(vkn.trim()),
+      );
+      if (r && !r.valid) setVknValidationMsg(r.reason);
+      else setVknValidationMsg(null);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [vkn]);
+
+  // WR-A2 — TCKN inline validate (debounce 350ms). Sadece Individual'da.
+  useEffect(() => {
+    if (!isIndividual || !tckn || tckn.trim().length < 11) {
+      setTcknValidationMsg(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const r = await import('@/services/accountService').then((m) =>
+        m.validateTcknRemote(tckn.trim()),
+      );
+      if (r && !r.valid) setTcknValidationMsg(r.reason);
+      else setTcknValidationMsg(null);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [tckn, isIndividual]);
 
   function updateRow(index: number, patch: Partial<CompanyRow>) {
     setRows((current) => current.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -153,6 +193,8 @@ export function AccountFormModal({
         customerType,
         legalName: isIndividual ? null : legalName.trim() || null,
         registrationNo: isIndividual ? null : registrationNo.trim() || null,
+        // WR-A2 — Plain TCKN sadece submit transient; backend hash + last4'e çevirir.
+        tckn: isIndividual && tckn.trim() ? tckn.trim() : undefined,
         companies: rows.map<AccountCompanyCreateInput>((r) => ({
           companyId: r.companyId,
           externalCustomerCode: r.externalCustomerCode.trim() || null,
@@ -184,11 +226,16 @@ export function AccountFormModal({
               ? null
               : registrationNo.trim() || null
             : undefined,
+        // WR-A2 — TCKN edit: yalnızca Individual + dolu input gönderilir.
+        // Boş gönderme = "değişme" (clear için ayrıca null gönderme).
+        tckn: isIndividual && tckn.trim() ? tckn.trim() : undefined,
       };
       saved = await accountService.update(account.id, body);
       if (saved) notify({ type: 'success', title: 'Müşteri güncellendi', message: saved.name });
     }
 
+    // WR-A2 — Submit sonrası plain TCKN state'ten temizlenir (transient guarantee).
+    setTckn('');
     setSubmitting(false);
     if (saved) onSaved(saved);
   }
@@ -267,11 +314,12 @@ export function AccountFormModal({
             label="VKN"
             hint={
               isIndividual
-                ? 'TCKN doğrulaması sonraki fazda eklenecek.'
+                ? 'TCKN aşağıda — bu alan kurumsal müşteri için.'
                 : mode === 'edit'
                   ? 'Boş bırak → değişmez.'
-                  : 'Vergi numarası (opsiyonel)'
+                  : 'Vergi numarası — 10 hane, otomatik doğrulanır'
             }
+            error={vknValidationMsg ?? undefined}
           >
             <TextInput
               value={isIndividual ? '' : vkn}
@@ -280,6 +328,7 @@ export function AccountFormModal({
               inputMode="numeric"
               autoComplete="off"
               disabled={isIndividual}
+              maxLength={10}
             />
           </Field>
           <Field label="Telefon">
@@ -312,6 +361,29 @@ export function AccountFormModal({
               />
             </Field>
           </div>
+        )}
+
+        {/* WR-A2 — TCKN: yalnızca Individual. Plain TCKN sadece submit transient;
+            backend HMAC + last4 olarak saklar; localStorage/cache'e yazılmaz. */}
+        {isIndividual && (
+          <Field
+            label="TCKN"
+            hint={
+              mode === 'edit' && account?.tcknMasked
+                ? `Mevcut: ${account.tcknMasked} — değiştirmek için yeni TCKN yaz; boş bırak → değişmez`
+                : 'TCKN güvenli şekilde hashlenir, ham değer saklanmaz.'
+            }
+            error={tcknValidationMsg ?? undefined}
+          >
+            <TextInput
+              value={tckn}
+              onChange={(e) => setTckn(e.target.value)}
+              placeholder="11 haneli TCKN"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={11}
+            />
+          </Field>
         )}
 
         <Field label="E-posta">

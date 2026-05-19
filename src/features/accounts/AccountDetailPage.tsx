@@ -246,6 +246,16 @@ function DetailHeader({
               VKN {account.vknMasked}
             </span>
           )}
+          {/* WR-A2 — TCKN maskeli display (yalnız Individual + tcknMasked dolu ise).
+              Plain TCKN UI'a hiç gelmez; sadece "*******1234" maskeli string backend'den döner. */}
+          {account.customerType === 'Individual' && account.tcknMasked && (
+            <span
+              className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
+              title="TCKN güvenli şekilde hashlenmiş; gösterim için son 4 hane"
+            >
+              TCKN {account.tcknMasked}
+            </span>
+          )}
         </div>
         <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
           Eklendi: {formatDate(account.createdAt)}
