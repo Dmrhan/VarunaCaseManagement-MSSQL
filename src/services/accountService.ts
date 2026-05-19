@@ -107,6 +107,40 @@ export interface AccountProductSummary {
   endedAt: string | null;
 }
 
+/** WR-A4 / PM-04 — Proje statüsü (ASCII identifier; UI'da TR'ye çevrilir). */
+export type ProjectStatus = 'Active' | 'Passive' | 'Completed' | 'Cancelled';
+
+export const PROJECT_STATUSES: ProjectStatus[] = ['Active', 'Passive', 'Completed', 'Cancelled'];
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  Active: 'Aktif',
+  Passive: 'Pasif',
+  Completed: 'Tamamlandı',
+  Cancelled: 'İptal Edildi',
+};
+
+/** WR-A4 — AccountCompany altındaki proje. */
+export interface AccountProjectSummary {
+  id: string;
+  code: string;
+  name: string;
+  status: ProjectStatus;
+  isActive: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  description: string | null;
+}
+
+export interface AccountProjectMutationInput {
+  code?: string;
+  name?: string;
+  status?: ProjectStatus;
+  startDate?: string | null;
+  endDate?: string | null;
+  description?: string | null;
+  isActive?: boolean;
+}
+
 export interface AccountListItem {
   id: string;
   name: string;
@@ -141,6 +175,8 @@ export interface AccountCompanyDetail extends AccountCompanyChip {
   segment: string | null;
   notes: string | null;
   products: AccountProductSummary[];
+  /** WR-A4 — AccountCompany altındaki projeler. */
+  projects: AccountProjectSummary[];
 }
 
 export interface AccountContact {
@@ -549,6 +585,57 @@ export const accountService = {
       'Ürün kaldırma',
     );
     if (result) invalidateAccountAndCustomerContext(accountId); // WR-H2 (review fix)
+    return result;
+  },
+
+  /* WR-A4 — AccountProject mutations */
+
+  async addProject(
+    accountId: string,
+    accountCompanyId: string,
+    body: AccountProjectMutationInput,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/companies/${accountCompanyId}/projects`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Proje ekleme',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
+    return result;
+  },
+
+  async updateProject(
+    accountId: string,
+    projectId: string,
+    body: AccountProjectMutationInput,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/projects/${projectId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Proje güncelleme',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
+    return result;
+  },
+
+  async removeProject(
+    accountId: string,
+    projectId: string,
+  ): Promise<{ id: string; account: AccountDetail } | undefined> {
+    const result = await apiFetch<{ id: string; account: AccountDetail }>(
+      `/api/accounts/${accountId}/projects/${projectId}`,
+      { method: 'DELETE' },
+      'Proje kaldırma',
+    );
+    if (result) invalidateAccountAndCustomerContext(accountId);
     return result;
   },
 

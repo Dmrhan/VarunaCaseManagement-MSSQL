@@ -1076,6 +1076,100 @@ defineGroup('AI Telemetry Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group N+1 — Account Project Contract (WR-A4 / PM-04)
+//   Project is AccountCompany-scoped (NEVER Account-level).
+//   Case.accountProjectId is nullable + Project's accountCompany matches case.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Account Project Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // P.1) AccountProject table column contract — accountCompanyId required, no accountId column.
+  const projCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'AccountProject'`,
+  );
+  const projColSet = new Set((projCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'AccountProject.accountCompanyId column exists',
+    projColSet.has('accountCompanyId') ? 'PASS' : 'FAIL',
+    { detail: projColSet.has('accountCompanyId') ? '' : 'missing accountCompanyId — model is wrong scope' },
+  ));
+  out.push(check(
+    'AccountProject has no direct accountId column (Account-level forbidden)',
+    !projColSet.has('accountId') ? 'PASS' : 'FAIL',
+    { detail: projColSet.has('accountId') ? 'AccountProject.accountId present — modeling guardrail violation' : '' },
+  ));
+
+  // P.2) Case has nullable accountProjectId + denormalized accountProjectName.
+  const caseCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'Case' AND column_name IN ('accountProjectId', 'accountProjectName')`,
+  );
+  const projIdCol = (caseCols ?? []).find((r) => r.column_name === 'accountProjectId');
+  const projNameCol = (caseCols ?? []).find((r) => r.column_name === 'accountProjectName');
+  out.push(check(
+    'Case.accountProjectId nullable',
+    projIdCol?.is_nullable === 'YES' ? 'PASS' : 'FAIL',
+    { detail: projIdCol ? `is_nullable=${projIdCol.is_nullable}` : 'column missing' },
+  ));
+  out.push(check(
+    'Case.accountProjectName denormalized column present',
+    !!projNameCol ? 'PASS' : 'FAIL',
+    { detail: projNameCol ? '' : 'missing accountProjectName' },
+  ));
+
+  // P.3) Every Case with accountProjectId must reference a real project whose
+  //      accountCompany matches case.companyId AND accountId.
+  const drift = await prisma.$queryRawUnsafe(`
+    SELECT c.id, c."caseNumber", c."companyId" AS case_company, c."accountId" AS case_account,
+           ac."companyId" AS proj_company, ac."accountId" AS proj_account, p.id AS project_id
+      FROM "Case" c
+      LEFT JOIN "AccountProject" p ON p.id = c."accountProjectId"
+      LEFT JOIN "AccountCompany" ac ON ac.id = p."accountCompanyId"
+     WHERE c."accountProjectId" IS NOT NULL
+       AND (p.id IS NULL
+            OR ac."companyId" <> c."companyId"
+            OR (c."accountId" IS NOT NULL AND ac."accountId" <> c."accountId"))
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.accountProjectId references project in matching tenant + account',
+    (drift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: drift?.length ?? 0, examples: drift ?? [] },
+  ));
+
+  // P.4) CompanySettings has projectsEnabled + projectsRequired columns (default false).
+  const settingsCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'CompanySettings' AND column_name IN ('projectsEnabled', 'projectsRequired')`,
+  );
+  const enabled = (settingsCols ?? []).find((r) => r.column_name === 'projectsEnabled');
+  const required = (settingsCols ?? []).find((r) => r.column_name === 'projectsRequired');
+  out.push(check(
+    'CompanySettings.projectsEnabled present, default false',
+    !!enabled && /false/i.test(String(enabled.column_default ?? '')) ? 'PASS' : 'FAIL',
+    { detail: enabled ? `default=${enabled.column_default}` : 'missing' },
+  ));
+  out.push(check(
+    'CompanySettings.projectsRequired present, default false',
+    !!required && /false/i.test(String(required.column_default ?? '')) ? 'PASS' : 'FAIL',
+    { detail: required ? `default=${required.column_default}` : 'missing' },
+  ));
+
+  // P.5) Unique constraint: (accountCompanyId, code) — duplicate codes per tenant prevented.
+  const uniq = await prisma.$queryRawUnsafe(`
+    SELECT indexname FROM pg_indexes
+     WHERE tablename = 'AccountProject' AND indexdef ILIKE '%accountCompanyId%' AND indexdef ILIKE '%code%' AND indexdef ILIKE '%UNIQUE%'
+  `);
+  out.push(check(
+    'AccountProject(accountCompanyId, code) unique constraint exists',
+    (uniq?.length ?? 0) > 0 ? 'PASS' : 'FAIL',
+    { detail: (uniq ?? []).map((u) => u.indexname).join(', ') },
+  ));
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 

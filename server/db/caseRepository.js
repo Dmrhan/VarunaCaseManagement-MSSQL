@@ -352,7 +352,11 @@ export const caseRepository = {
     const settings = m.companyId
       ? await prisma.companySettings.findUnique({
           where: { companyId: m.companyId },
-          select: { requireCustomerOnCaseCreate: true },
+          select: {
+            requireCustomerOnCaseCreate: true,
+            // WR-A4 — projectsRequired flag (default false)
+            projectsRequired: true,
+          },
         })
       : null;
     const requireCustomer = !!settings?.requireCustomerOnCaseCreate;
@@ -363,6 +367,51 @@ export const caseRepository = {
       );
     }
     const customerMatchPending = !m.accountId;
+
+    // WR-A4 — AccountProject validation.
+    //   1. projectsRequired=true tenant'ta accountId varken accountProjectId zorunlu
+    //   2. accountProjectId verildiyse:
+    //      - Project mevcut + isActive=true olmalı
+    //      - Project.accountCompany.accountId === case.accountId
+    //      - Project.accountCompany.companyId === case.companyId
+    //      → İhlalde 400 ('invalid_project' veya 'project_account_mismatch')
+    let accountProjectName = null;
+    if (m.accountProjectId) {
+      const project = await prisma.accountProject.findUnique({
+        where: { id: m.accountProjectId },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          accountCompany: { select: { accountId: true, companyId: true } },
+        },
+      });
+      if (!project || !project.isActive) {
+        throw new CaseValidationError('Geçersiz veya pasif proje.', {
+          status: 400,
+          code: 'invalid_project',
+        });
+      }
+      if (project.accountCompany.companyId !== m.companyId) {
+        throw new CaseValidationError(
+          'Bu proje vaka şirketine ait değil.',
+          { status: 400, code: 'project_company_mismatch' },
+        );
+      }
+      if (m.accountId && project.accountCompany.accountId !== m.accountId) {
+        throw new CaseValidationError(
+          'Bu proje seçili müşteriye ait değil.',
+          { status: 400, code: 'project_account_mismatch' },
+        );
+      }
+      accountProjectName = project.name;
+    } else if (m.accountId && settings?.projectsRequired) {
+      // projectsRequired=true + accountId var + projectId yok → 400
+      throw new CaseValidationError(
+        'Bu şirkette vaka açmak için proje seçimi zorunludur.',
+        { status: 400, code: 'project_required' },
+      );
+    }
 
     // Phase D Step 2 — Opsiyonel başvuran bilgileri.
     // Hassas alanlar (phone, email) sadece DB'ye yazılır; log/analytics yok.
@@ -393,6 +442,9 @@ export const caseRepository = {
         accountId: m.accountId,
         accountName: m.accountName,
         customerMatchPending,
+        // WR-A4 — Project link (validated above).
+        accountProjectId: m.accountProjectId ?? null,
+        accountProjectName,
         category: m.category,
         subCategory: m.subCategory,
         requestType: m.requestType,
@@ -472,6 +524,46 @@ export const caseRepository = {
     const lifecyclePatch = {};
     if ('accountId' in patch) {
       lifecyclePatch.customerMatchPending = patch.accountId == null;
+    }
+
+    // WR-A4 — AccountProject patch validation + name denormalize.
+    if ('accountProjectId' in patch) {
+      const newProjectId = patch.accountProjectId;
+      if (newProjectId == null || newProjectId === '') {
+        lifecyclePatch.accountProjectId = null;
+        lifecyclePatch.accountProjectName = null;
+      } else {
+        const project = await prisma.accountProject.findUnique({
+          where: { id: newProjectId },
+          select: {
+            id: true,
+            name: true,
+            isActive: true,
+            accountCompany: { select: { accountId: true, companyId: true } },
+          },
+        });
+        if (!project || !project.isActive) {
+          throw new CaseValidationError('Geçersiz veya pasif proje.', {
+            status: 400,
+            code: 'invalid_project',
+          });
+        }
+        if (project.accountCompany.companyId !== companyId) {
+          throw new CaseValidationError(
+            'Bu proje vaka şirketine ait değil.',
+            { status: 400, code: 'project_company_mismatch' },
+          );
+        }
+        const targetAccountId = 'accountId' in patch ? patch.accountId : before.accountId;
+        if (targetAccountId && project.accountCompany.accountId !== targetAccountId) {
+          throw new CaseValidationError(
+            'Bu proje seçili müşteriye ait değil.',
+            { status: 400, code: 'project_account_mismatch' },
+          );
+        }
+        lifecyclePatch.accountProjectId = project.id;
+        lifecyclePatch.accountProjectName = project.name;
+      }
     }
 
     const updated = await prisma.case.update({
@@ -2749,5 +2841,7 @@ function buildWhere(f, allowedCompanyIds) {
     const end = new Date(); end.setHours(23, 59, 59, 999);
     where.resolvedAt = { gte: start, lte: end };
   }
+  // WR-A4 — Project-bazlı vaka filtresi.
+  if (f.accountProjectId) where.accountProjectId = f.accountProjectId;
   return where;
 }

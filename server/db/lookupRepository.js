@@ -79,7 +79,15 @@ async function bootstrapInner(allowedCompanyIds) {
         prisma.company.findMany({
           where: allowedCompanyIds ? { isActive: true, id: { in: allowedCompanyIds } } : { isActive: true },
           orderBy: { name: 'asc' },
-          include: { settings: { select: { requireCustomerOnCaseCreate: true } } },
+          include: {
+            settings: {
+              select: {
+                requireCustomerOnCaseCreate: true,
+                projectsEnabled: true,
+                projectsRequired: true,
+              },
+            },
+          },
         }),
         // Account scope — accountRepository.buildScopeWhere ile simetrik:
         //   (legacy Account.companyId in allowedCompanyIds)
@@ -157,6 +165,9 @@ async function bootstrapInner(allowedCompanyIds) {
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
       requireCustomerOnCaseCreate: c.settings?.requireCustomerOnCaseCreate ?? false,
+      // WR-A4 / PM-04 — AccountProject opt-in (default false; mevcut davranışı korur)
+      projectsEnabled: c.settings?.projectsEnabled ?? false,
+      projectsRequired: c.settings?.projectsRequired ?? false,
     }));
 
     return {

@@ -27,6 +27,7 @@ import { useToast } from '@/components/ui/Toast';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { caseService, lookupService, type NewCaseInput } from '@/services/caseService';
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { accountService, type AccountProjectSummary } from '@/services/accountService';
 import {
   aiService,
   aiErrorMessage,
@@ -74,6 +75,9 @@ const emptyForm = {
   companyId: '',
   accountId: '',
   accountName: '',
+  // WR-A4 / PM-04 — opsiyonel proje bağı (UNIVERA gibi multi-project müşterilerde)
+  accountProjectId: '',
+  accountProjectName: '',
   // Phase D Step 2 — opsiyonel başvuran bilgileri (müşterisiz vakada eşleştirme sinyali)
   customerContactName: '',
   customerContactPhone: '',
@@ -161,6 +165,10 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
+  // WR-A4 / PM-04 — Seçilen müşterinin (account+company scope) aktif proje listesi.
+  const [projects, setProjects] = useState<AccountProjectSummary[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+
   // RUNA AI — kategori + başlık önerileri
   const [aiSuggestion, setAiSuggestion] = useState<CategorySuggestion | null>(null);
   const [aiTitle, setAiTitle] = useState<TitleSuggestion | null>(null);
@@ -184,6 +192,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     [companies, form.companyId],
   );
   const requireCustomer = !!selectedCompany?.requireCustomerOnCaseCreate;
+  // WR-A4 / PM-04 — Şirket bazlı proje opt-in/zorunluluk flag'leri.
+  const projectsEnabled = !!selectedCompany?.projectsEnabled;
+  const projectsRequired = !!selectedCompany?.projectsRequired;
   // Phase D Step 2 — "Ulaşan kişi bilgileri" yalnız şirket customerless izniyor
   // VE kullanıcı picker'da "Müşterisiz devam et" seçtiyse açılır. Sentinel:
   // picker accountId='' + accountName='Müşterisiz vaka' set ediyor (line ~1115).
@@ -236,6 +247,7 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   // yeni şirketin müşterilerini canlı API'den çeker; cross-tenant veri kalmasın.
   // Phase D Step 2: yeni şirket strict olsa bile customerlessMode otomatik
   // kapanır (accountName='' olur), requester fields temizlenir.
+  // WR-A4: proje seçimi de sıfırlanır (companyId değiştiyse eski proje irrelevant).
   useEffect(() => {
     setForm((f) => {
       const noState =
@@ -244,20 +256,58 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         !f.customerContactName &&
         !f.customerContactPhone &&
         !f.customerContactEmail &&
-        !f.customerCompanyName;
+        !f.customerCompanyName &&
+        !f.accountProjectId;
       if (noState) return f;
       return {
         ...f,
         accountId: '',
         accountName: '',
+        accountProjectId: '',
+        accountProjectName: '',
         customerContactName: '',
         customerContactPhone: '',
         customerContactEmail: '',
         customerCompanyName: '',
       };
     });
+    setProjects([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.companyId]);
+
+  // WR-A4 — Müşteri seçilince ve seçili şirkette projectsEnabled=true ise
+  // accountCompany altındaki aktif projeleri yükle. Cross-tenant guard zaten
+  // BFF tarafında (assertAccountInScope); UI sadece relevant scope'u gösterir.
+  useEffect(() => {
+    let alive = true;
+    if (!projectsEnabled || !form.accountId || !form.companyId) {
+      setProjects([]);
+      return;
+    }
+    setProjectsLoading(true);
+    void accountService.get(form.accountId).then((detail) => {
+      if (!alive) return;
+      setProjectsLoading(false);
+      if (!detail) {
+        setProjects([]);
+        return;
+      }
+      const company = detail.companies.find((c) => c.companyId === form.companyId);
+      const list = (company?.projects ?? []).filter(
+        (p) => p.isActive && p.status === 'Active',
+      );
+      setProjects(list);
+      // Seçili proje listede yoksa sıfırla.
+      setForm((f) =>
+        f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
+          ? { ...f, accountProjectId: '', accountProjectName: '' }
+          : f,
+      );
+    });
+    return () => {
+      alive = false;
+    };
+  }, [projectsEnabled, form.accountId, form.companyId]);
 
   // Takım şirket dışındaysa sıfırla
   useEffect(() => {
@@ -389,6 +439,10 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     if (requireCustomer && !form.accountId) {
       e.accountId = 'Bu şirkette müşteri seçimi zorunlu.';
     }
+    // WR-A4 / PM-04 — projectsRequired=true ve müşteri seçildiyse proje zorunlu.
+    if (projectsEnabled && projectsRequired && form.accountId && !form.accountProjectId) {
+      e.accountProjectId = 'Bu şirkette müşteri seçildiyse proje seçimi zorunlu.';
+    }
     if (!form.category) e.category = 'Kategori seçilmeli';
     if (!form.subCategory) e.subCategory = 'Alt kategori seçilmeli';
     if (!form.requestType) e.requestType = 'Talep türü seçilmeli';
@@ -431,6 +485,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       accountId: form.accountId || undefined,
       // accountId yoksa accountName "Müşterisiz vaka" sentinel'i sadece UI'da; backend'e gönderme.
       accountName: form.accountId ? form.accountName : undefined,
+      // WR-A4 / PM-04 — opsiyonel proje bağı. accountId yoksa proje de gitmez.
+      accountProjectId: form.accountId && form.accountProjectId ? form.accountProjectId : undefined,
+      accountProjectName: form.accountId && form.accountProjectId ? form.accountProjectName : undefined,
       // Phase D Step 2 — opsiyonel başvuran bilgileri. Yalnız customerlessMode
       // aktifken gönderilir; müşteri seçilmişse veya henüz mod seçilmemişse
       // backend'e geçmez (UI gate + defense-in-depth).
@@ -481,6 +538,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     !submitting &&
     form.companyId &&
     (!requireCustomer || !!form.accountId) &&
+    // WR-A4 — projectsRequired ve müşteri seçildiyse proje zorunlu.
+    (!projectsEnabled || !projectsRequired || !form.accountId || !!form.accountProjectId) &&
     form.description.trim() &&
     form.title.trim() &&
     form.category &&
@@ -591,6 +650,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                           ...f,
                           accountId: '',
                           accountName: '',
+                          accountProjectId: '',
+                          accountProjectName: '',
                           customerContactName: '',
                           customerContactPhone: '',
                           customerContactEmail: '',
@@ -633,6 +694,51 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                 )}
               </Field>
             </div>
+
+            {/* WR-A4 / PM-04 — Proje seçici: şirkette projectsEnabled=true VE müşteri seçildi.
+                projectsRequired=true ise zorunlu; aksi halde opsiyonel. Liste hem
+                "Active" hem isActive=true filtreli — Passive/Completed/Cancelled gizli. */}
+            {projectsEnabled && form.accountId && (
+              <div className="mt-3">
+                <Field
+                  label="Proje"
+                  required={projectsRequired}
+                  error={errors.accountProjectId}
+                  hint={
+                    projectsLoading
+                      ? 'Projeler yükleniyor…'
+                      : projects.length === 0
+                        ? 'Bu müşteri için tanımlı aktif proje yok.'
+                        : projectsRequired
+                          ? 'Bu şirkette müşteri seçilince proje zorunlu.'
+                          : 'Opsiyonel — vaka belirli bir projeye bağlanacaksa seç.'
+                  }
+                >
+                  <Select
+                    value={form.accountProjectId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      const p = projects.find((x) => x.id === id);
+                      setForm((f) => ({
+                        ...f,
+                        accountProjectId: id,
+                        accountProjectName: p ? p.name : '',
+                      }));
+                    }}
+                    disabled={projectsLoading || projects.length === 0}
+                  >
+                    <option value="">
+                      {projectsRequired ? 'Proje seç…' : 'Proje seçilmedi'}
+                    </option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.code} — {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            )}
 
             {/* Phase D Step 2 — Başvuran bilgileri YALNIZ customerlessMode
                 aktifken görünür: şirket customerless izniyor + kullanıcı picker'da

@@ -115,6 +115,8 @@ router.get(
       customerMatchPending,
       slaViolation: f.slaViolation === 'true' ? true : undefined,
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
+      // WR-A4 — Proje filtresi.
+      accountProjectId: typeof f.accountProjectId === 'string' && f.accountProjectId ? f.accountProjectId : undefined,
     };
     // WR-H1 — Defansif large-query guard (AGENTIC_PLANNING_PROTOCOL §③ #6).
     // pageSize her zaman [1, 200] içine clamp edilir; pagination object'i her zaman

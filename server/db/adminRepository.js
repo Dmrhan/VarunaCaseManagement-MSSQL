@@ -1088,6 +1088,9 @@ export const companyRepo = {
       supportEmail: c.settings?.supportEmail ?? null,
       // Phase D — Müşterisiz vaka açma kısıtı; default false (geri uyumlu).
       requireCustomerOnCaseCreate: c.settings?.requireCustomerOnCaseCreate ?? false,
+      // WR-A4 / PM-04 — AccountProject opt-in flag'leri.
+      projectsEnabled: c.settings?.projectsEnabled ?? false,
+      projectsRequired: c.settings?.projectsRequired ?? false,
       userCount: c._count.userCompanies,
     }));
   },
@@ -1116,6 +1119,9 @@ export const companyRepo = {
           supportEmail: input.supportEmail?.trim() || null,
           // Phase D — Müşteri zorunluluğu (default false)
           requireCustomerOnCaseCreate: !!input.requireCustomerOnCaseCreate,
+          // WR-A4 / PM-04 — AccountProject opt-in (default false)
+          projectsEnabled: !!input.projectsEnabled,
+          projectsRequired: !!input.projectsRequired,
         },
       });
       return company;
@@ -1150,7 +1156,9 @@ export const companyRepo = {
         patch.primaryColor !== undefined ||
         patch.appName !== undefined ||
         patch.supportEmail !== undefined ||
-        patch.requireCustomerOnCaseCreate !== undefined;
+        patch.requireCustomerOnCaseCreate !== undefined ||
+        patch.projectsEnabled !== undefined ||
+        patch.projectsRequired !== undefined;
       if (hasBranding) {
         await tx.companySettings.upsert({
           where: { companyId: id },
@@ -1162,6 +1170,13 @@ export const companyRepo = {
             ...(patch.requireCustomerOnCaseCreate !== undefined && {
               requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
             }),
+            // WR-A4 / PM-04 — AccountProject toggles
+            ...(patch.projectsEnabled !== undefined && {
+              projectsEnabled: !!patch.projectsEnabled,
+            }),
+            ...(patch.projectsRequired !== undefined && {
+              projectsRequired: !!patch.projectsRequired,
+            }),
           },
           create: {
             companyId: id,
@@ -1170,6 +1185,8 @@ export const companyRepo = {
             appName: patch.appName?.trim() || null,
             supportEmail: patch.supportEmail?.trim() || null,
             requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
+            projectsEnabled: !!patch.projectsEnabled,
+            projectsRequired: !!patch.projectsRequired,
           },
         });
       }
@@ -1391,6 +1408,13 @@ export const companySettingsRepo = {
         ...(patch.requireCustomerOnCaseCreate !== undefined && {
           requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
         }),
+        // WR-A4 — Project module flags.
+        ...(patch.projectsEnabled !== undefined && {
+          projectsEnabled: !!patch.projectsEnabled,
+        }),
+        ...(patch.projectsRequired !== undefined && {
+          projectsRequired: !!patch.projectsRequired,
+        }),
       },
       create: {
         companyId,
@@ -1399,6 +1423,8 @@ export const companySettingsRepo = {
         appName: patch.appName ?? null,
         supportEmail: patch.supportEmail ?? null,
         requireCustomerOnCaseCreate: !!patch.requireCustomerOnCaseCreate,
+        projectsEnabled: !!patch.projectsEnabled,
+        projectsRequired: !!patch.projectsRequired,
       },
     });
   },

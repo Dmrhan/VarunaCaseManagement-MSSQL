@@ -55,6 +55,10 @@ export interface CaseCompany {
   name: string;
   /** Phase D: true ise vaka açarken müşteri seçimi zorunlu. Default false. */
   requireCustomerOnCaseCreate?: boolean;
+  /** WR-A4 / PM-04: AccountProject UI'da gösterilsin mi? Default false. */
+  projectsEnabled?: boolean;
+  /** WR-A4 / PM-04: accountId varken vaka açarken proje zorunlu mu? Default false. */
+  projectsRequired?: boolean;
 }
 
 export interface CaseThirdParty {
@@ -367,6 +371,10 @@ export interface Case {
 
   accountId: string;
   accountName: string;
+
+  /** WR-A4 / PM-04 — AccountCompany altındaki proje (opsiyonel). */
+  accountProjectId?: string;
+  accountProjectName?: string;
 
   category: string;
   subCategory: string;
@@ -713,6 +721,8 @@ export interface CaseFilters {
   teamScope?: boolean;        // teamId → Supervisor'ın Person.teamId'si (server resolve)
   slaViolation?: boolean;     // Case.slaViolation = true
   resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
+  // WR-A4 — proje bazlı filter
+  accountProjectId?: string;
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.
