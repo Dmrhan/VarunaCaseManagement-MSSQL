@@ -1,0 +1,91 @@
+# Varuna Product Planning Matrix
+
+> **Amaç:** Ürün/iş tarafında müşteri ve PM görüşmelerinde kullanılacak yetenek matrisi.
+> Bu doküman **operasyonel teknik takip** değil; konuşmaya, önceliklendirmeye, müşteri yol haritası sunumuna hizmet eder.
+>
+> **Kaynak gerçek:** [WORK_REGISTER.md](./WORK_REGISTER.md) (ID, status, dependency için tek doğru kaynak).
+> Burada item statüleri değiştirilmez; matrix değişiklikleri WORK_REGISTER'a yansıtılmaz. Status değişiklikleri sadece WORK_REGISTER'da yapılır, bu matrix referansla okur.
+>
+> **Bağlı dokümanlar:** [WORK_REGISTER.md](./WORK_REGISTER.md), [AGENTIC_PLANNING_PROTOCOL.md](./AGENTIC_PLANNING_PROTOCOL.md), [BACKLOG.md](./BACKLOG.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [ROADMAP.md](./ROADMAP.md).
+> **Son güncelleme:** 2026-05-19.
+> **Sahip:** Ürün direktörü (connect@univera.com.tr).
+>
+> **Not:** Bu matrix'teki capability'ler **iş planlama birimleridir**. Bir capability altındaki herhangi bir item'ın implementasyonu, ancak [AGENTIC_PLANNING_PROTOCOL.md](./AGENTIC_PLANNING_PROTOCOL.md)'deki Agentic Planning Card aşamasında Product / Architecture / Code / QA uyumu doğrulandıktan sonra başlar. Matrix tek başına "implement et" yetkisi vermez.
+>
+> **Öncelik kodları:**
+> - 🔴 **P0 — Acil/Foundation:** Diğer yetenekleri kilitler; UNIVERA/PARAM/FINROTA core operasyonu için zorunlu.
+> - 🟡 **P1 — Orta:** Bu çeyrek/sonraki çeyrek kapsamına alınması beklenen.
+> - 🟢 **P2 — Düşük/Polish:** Önemli ama erteleme kaldırır; quick-win veya hazırlık.
+
+---
+
+## Capability Matrix
+
+| ID | Konu | Sorun / İhtiyaç | Çözüm Önerisi | Mevcut Business'a Uyum | Üzerine Ne Koyabiliriz? | Öncelik | İlgili WR ID |
+|---|---|---|---|---|---|---|---|
+| **PM-01** | Master Data & Müşteri Kimliği | Tek tip Account modeli; B2B/B2C ayırımı yok. VKN/TCKN/telefon doğrulama ve mükerrer kayıt önleme yok. TCKN için KVKK uyumlu saklama tasarımı yok | Account'a `customerType` ayırımı (Bireysel/Kurumsal/Kamu/Vakıf) + tipe göre conditional alanlar; VKN/TCKN/telefon format + checksum + uniqueness; TCKN için privacy design (encrypt/hash/mask seçimi) | Üç tenant da (UNIVERA, PARAM, FINROTA) hem B2B hem B2C taşıyor; KVKK denetim baskısı altında. Foundation — sonraki tüm müşteri görünümlerinin önkoşulu | Müşteri 360 zenginleştirme, churn/risk skoru, segment-bazlı SLA, müşteri yaşam döngüsü dashboard'u | 🔴 P0 | A1, A2 |
+| **PM-02** | Adres ve İletişim Kalitesi | Adres modeli yok; sadece tek telefon/e-posta. Faturalama, sevkiyat, saha servis ve şube adreslerini tutamıyoruz | Country-agnostic `Address` modeli (tip enum: Billing/Shipping/Visit/HQ/Branch, isDefault flag). TR'ye özel kurallar (il/ilçe, posta kodu) opsiyonel enhancement | Saha servis ve mobil iş emri süreçlerinde (UNIVERA Rota/Saha) doğrudan eksiklik. Faturalama akışına bir sonraki temas noktası | Geocoding + harita üzerinde rota, bölge bazlı SLA, saha ekibi optimal route, e-fatura entegrasyonu için adres standardizasyonu | 🟡 P1 | A3 |
+| **PM-03** | Takım Liderliği ve Destek Seviyeleri | Takım lideri kavramı, çoklu takım üyeliği ve L1/L2/L3 destek seviyeleri yok. Supervisor kapsamı tek takıma sıkışmış; eskalasyon ile destek tier'ı karışıyor | `Person.isTeamLead` veya `Team.leadPersonId` (karar gerekli) + `SupportLevel` enum (Person/Team/Case'de). Supervisor scope sorgusu yeni modele göre revize | Operasyon ölçeklendiği anda zorunlu: L1 frontline / L2 ileri destek ayrımı bugün yok, eskalasyon kararları subjektif | Auto-routing (skill + tier match), capacity planning, tier-aware SLA dashboard, performance review (lead başına ekip metrikleri) | 🟡 P1 | A5, B1, B2, B3 |
+| **PM-04** | AccountProject — UNIVERA için Proje Modeli | UNIVERA müşterileri (Anadolu FMCG, Marmara Soğuk Zincir vb.) proje bazlı destek istiyor; bugün vakalar Account'a takılı, hangi projeye ait belirsiz | `AccountProject` tablosu **AccountCompany'ye bağlı** (Account → AccountCompany → AccountProject → Case). `Case.accountProjectId` FK; Account detail altında Projeler sekmesi; case form'da proje combobox. `Company.projectsEnabled` flag ile tenant başına opt-in | UNIVERA core ihtiyacı, kritik blocker. PARAM ve FINROTA için opsiyonel. Doğru hiyerarşi netleşti; karar bekleyen "zorunlu mu opt-in mi?" | Proje sağlık skoru, proje bütçe vs harcanan zaman, proje portföy dashboard, milestone takibi, project-level SLA roll-up | 🔴 P0 | A4 |
+| **PM-05** | Ürün Grubu / Ürün / Paket Kataloğu | `productGroup` Case/SLA/Checklist'te free-string; ürün metadata yok; paket sözleşmesel olarak `packageName` string olarak duruyor. Katalog drift'i SLA eşleştirmesini bozuyor | `ProductGroup` + `Product` (FK ile ProductGroup'a; defaultSupportLevel, ürün kodu) + `Package` + `PackageItem`. Admin'de katalog CRUD. Case'de `productId?` FK; eski string field bir süre denormalize kalır | Üç tenant'ın hepsinde ürün portföyü farklı (PARAM ödeme, UNIVERA dağıtım, FINROTA finans); ürün-tier ilişkisi ortak. SLA matching güvenirliği için zorunlu | Ürün-bazlı bilgi tabanı (KB), ürün lifecycle/versiyon takibi, paket bazlı upsell önerileri, paket gelir raporu, ürün-bazlı NPS | 🟡 P1 | A6, A7, D1 |
+| **PM-06** | Veri İçeri Aktarım (CSV / XLS / API) | Toplu hesap/case/ürün import yok; tüm girdiler manuel form. UNIVERA çeyreklik 150 hesap göçü kâbus. Idempotency anahtarı, create/update/skip kuralları yok | Yeni `ImportJob` + `ImportRow` staging tabloları, 4-adımlı ImportWizard (yükle → sütun eşle → preview/validation → commit). Entity başına şablon (Account, Contact, Case, Address). Async progress + hata satır CSV indirme | UNIVERA müşteri göçü, FINROTA sync; PARAM içeride var. Ürün/sözleşme yenilemelerinde tekrarlanan ihtiyaç | API ile sürekli sync (CDC), partner self-service portalı, scheduled import, source-of-truth reconciliation rapor | 🔴 P0 | A8 |
+| **PM-07** | Vaka Sahiplenme / "Üstlen" | Atanmamış vakayı Agent kendi üstlenemiyor; Supervisor müdahalesi gerekiyor; frontline'da bottleneck | `POST /api/cases/:id/claim` atomik update (`WHERE assignedPersonId IS NULL`); başarısızsa 409 conflict, başarıda CaseActivity log. UI'da "Üstlen" butonu (sadece atanmamış vakalarda, Agent rolünde) | Üç tenant'ın da operasyonel quick-win'i. Küçük yüzey, hızlı değer | Otomatik claim önerisi (rol/skill match), claim leaderboard, akıllı load balancing, "müsait" durum sinyali | 🟡 P1 | C1 |
+| **PM-08** | Müşteri Arama ve Vaka Oluşturma | CustomerSearchModal sınırlı (name/vkn prefix); klavye nav yetersiz. Account detail'den vaka oluşturma sınırlı (tam form değil) | Arama: name + vkn + externalCode + phone + email; recent customers + klavye nav + "yeni müşteri" inline. Account'tan vaka: tam form modal, pre-fill korunur | Frontline'ın günlük en sık aksiyonu — saniye kazanımı operasyonel verimlilik. Demo'da en görünür UX | AI-destekli müşteri önerisi (gelen aramaya göre), 360 önizleme hover'da, son bakılanlar paneli, smart pre-fill (geçmiş vakalardan kategori önerisi) | 🟡 P1 | C2, C3 |
+| **PM-09** | Müşterisiz Eşleştirme / Mükerrer Müşteri / Hesap Birleştirme | Phase D Step 1+2 shipped: pending flag + banner + suggestions + tekil link akışı var. Eksikler: Supervisor için ayrı eşleştirme kuyruğu, toplu işlem, mükerrer hesap review, account merge | Eşleştirme: Supervisor dedicated queue + bulk match/dismiss. Duplicate: arka plan tarama (VKN/TCKN/phone benzerliği) + review queue. Merge: source/target preview + atomic transaction + audit | UNIVERA'da mükerrer hesap riski yüksek (proje-bazlı, çoklu kayıt). Terminoloji disiplini: "eşleştirme" = case-link; "birleştirme" = Account merge | Fuzzy duplicate detection (ad/adres similarity), data quality skoru dashboard, otomatik merge öneri sistemi, müşteri master data steward rolü | 🟡 P1 | C4, C5, C6 |
+| **PM-10** | Doküman / Bilgi Talep Akışı | "Müşteriden ek bilgi/dosya iste" akışı yok; not içinde yazılıyor, takibi insan hafızasına bağlı | Yeni `CaseInfoRequest` entity + yeni durum `BilgiBekleniyor`. Müşteriye e-posta/link → public mini form (TTL token) → upload + cevap → vaka otomatik unblock + SLA pause yönetimi | Üç tenant'ta da "müşteriden eksik bilgi" → vaka uzaması ana SLA sebebi. Operasyonel kazanç yüksek | Müşteri portalı self-service, mobil link, OCR ile otomatik metadata, e-imza, otomatik hatırlatma kademeleri | 🟡 P1 | C8 |
+| **PM-11** | Bildirim Kuralları ve Çözüm Onayı | Bildirimler kod içinde ad-hoc; admin'den kural yönetimi yok. Çözüm onayı (resolution approval) akışı yok — Agent direkt kapatabiliyor | `NotificationRule` (event/audience/channel/template) + admin UI + tenant override. `ResolutionApprovalPolicy` (kategori/tier başına onaylayıcı) + Case `pendingApprovalBy` field | Operasyonel hata maliyeti: yanlış kapatma → tekrar açılan vaka. Onay sürecini paket olarak satabilir hale geliyoruz | Kullanıcı bildirim tercih yönetimi, e-posta digest, Slack/Teams entegrasyonu, multi-step approval (escalation paths), approval analytics | 🟢 P2 | D3, D4 |
+| **PM-12** | Jira Entegrasyonu ve Raporlama | Jira gönderimi tek yönlü ve manuel; durum/yorum geri yansımıyor; reopen edilen vakanın Jira issue politikası yok. Jira export permission yok (tüm Agent'lara açık) | **Önce küçük adım (D5):** `canExportToJira` permission flag + admin UI — RBAC hardening kapsamında bağımsız ve erken uygulanabilir, tam sync'ten önce gönderme kontrolünü tenant'a verir. **Sonra (E1/E2/E3):** (a) 10dk cron veya webhook ile durum/yorum sync (b) Reopen olunca **yeni** Jira issue + link history (c) `/api/reports/jira-distribution` admin raporu | Eng/Frontline iletişimini kapatır; UNIVERA ve FINROTA'da Jira eng workflow standart. Permission kontrolü hemen uygulanabilir | Çift yönlü tam sync, mühendislik backlog görünürlüğü, customer-eng SLA, sprint kapasitesi planlamada müşteri talebi entegrasyonu | 🟡 P1 | E1, E2, E3, D5 |
+| **PM-13** | AloTech / Telefoni | AloTech çağrı durumları vakaya yansımıyor; gelen çağrıda otomatik vaka açma yok; Agent caller ID lookup'tan beste mahrum | (a) AloTech webhook → CaseActivity event (busy/missed/answered) + `callStatus` (b) Caller ID → Account match → "mevcut case mi yeni mi?" modal otomatik | Çağrı yoğun tenant'larda (özellikle PARAM ödeme destek) frontline saniyelerini kurtarır | Çağrı kayıt entegrasyonu, AI tonlama/duygu analizi, çağrı kalite skoru, "Müsait olan ekibe yönlendir" AI router | 🟢 P2 | E4, E5 |
+| **PM-14** | Active Directory / Emakin Kullanıcı Senkronu | Enterprise SSO + auto-provision yok; Supabase Auth tek kaynak. Yeni çalışan onboarding manuel | SCIM veya custom sync (Azure AD / Okta / Emakin → Person + role auto-assign). JIT provisioning + role conflict detection | UNIVERA enterprise müşteri ön koşulu — sözleşme baskısı geldiğinde devreye girer. PARAM/FINROTA için orta vade | SCIM full lifecycle (onboarding+offboarding), role conflict detection, JIT provisioning, audit log entegrasyonu | 🟢 P2 | B4 |
+| **PM-15** | Kaydedilmiş Filtreler ve Liste Standardı | Kullanıcı filtre seti kaydedemiyor; her açılışta URL'i yeniden kurmak gerekiyor. Cases/Accounts/Admin listeleri farklı convention; sort yok | `SavedView` (userId/entity/filters JSON/isDefault/isShared). Tüm list endpoint'lerinde `sort` param + sortable column header. Convention dokümanı | Power user (Supervisor + Admin) günlük verimliliği. Eğitim materyali ve müşteri demosu kısalır | Takım paylaşımlı view'lar, scheduled email reports, dashboard widget'a dönüştürme, view template marketplace | 🟢 P2 | F4, F5 |
+| **PM-16** | AI Kullanımı / Cron Sağlığı / QA / Pattern Alerts | AI çağrı telemetrisi kısmen log'lanıyor (cron qa-score-batch fix shipped); tüm path envanteri eksik. Cron sağlık dashboard yok. QA score yorumlama rehberi yok. Pattern alert detay/aksiyon zayıf | (a) AI çağrı envanteri + her path'te `logAIUsage` zorunlu (b) `CronRun` tablosu + admin dashboard (c) `docs/QA_PLAYBOOK.md` (d) Pattern alert detay sayfası + aksiyon önerisi | Operasyonel görünürlük katmanı — yatırım yapılan AI'ın ROI'sını müşteriye gösterir. İçeride incident triage hızını artırır | AI ROI dashboard, model A/B karşılaştırma, prompt versiyonlama, otomatik QA bot, anomali alarmı (kullanım/maliyet ani sıçrama) | 🟡 P1 | F1, F2, F3, F6 |
+| **PM-17** | Demo Seed / Smoke / Kalite Altyapısı | Demo seed shipped (`3fd7c3b`, `14830f4`) ama her yeni feature seed güncelliği zorunlu. Smoke harness 7 grup/66 check shipped (`bc340cc`) — multi-tenant + frontend state coverage eksik | (a) PR template'e seed update reminder (b) Multi-tenant smoke (BACKLOG #6) (c) Frontend için Playwright entry-level test infra | İç kalite/dev hızı katmanı; müşteri tarafına doğrudan dokunmaz ama "Varuna'da production-grade testing var" mesajını destekler | Production shadow ortamı, blue-green deploy smoke, otomatik regresyon suite, sentetik kullanıcı (canary user) | 🟢 P2 | G1, G2 |
+| **PM-18** | UI Polish / Bundle / Marka | Mobile + dark mode polish yapılmadı; bundle 1.2MB tek chunk (gzip 326KB); favicon default Vite | (a) Tailwind dark variant + responsive audit (b) `React.lazy` + Suspense + manualChunks (admin/analytics ayrı chunk) (c) Varuna logo SVG favicon + meta | Marka/algı + ilk yükleme performansı; demo izleniminde direkt etki. G5 saatlik, G4 yarım gün quick-win | Tema/markalama editörü (white-label tenant), kişiselleştirilebilir dashboard, dark mode tenant-default, PWA install banner | 🟢 P2 | G3, G4, G5 |
+| **PM-19** | Kategori Katmanı & Operasyonel Sınıflandırma | Kategori/subkategori tanımında Backoffice, Genel, Mobile, Dinamik Rapor, Sabit Rapor gibi kullanıcı tanımlı **katman** bilgisi yok. Vakalar bu eksen üzerinden ne raporlanabiliyor ne route edilebiliyor | `CategoryLayerDef` (id, companyId, name, code, isActive) + `CategoryDef.layerId` nullable FK + admin'de Layer CRUD. Case/Report filter'larında layer chip. Mevcut N-level CategoryDef hierarchy ile karıştırılmamalı — bu yatay sınıflandırma | Özellikle UNIVERA'da mobil, rapor, backoffice operasyonel ayrımları routing ve raporlama için kritik. PARAM/FINROTA'da da raporlama eksenini netleştirir | Katman bazlı SLA matrisi, ekip auto-routing (mobil ekibe → mobil layer), katman bazlı raporlama dashboardları, Jira hedef takım yönlendirme, AI kategori önerisinde layer sinyali | 🟡 P1 | D2 |
+| **PM-20** | Vaka Süre Takibi / Operasyonel Zaman Ölçümü | Bazı vakalarda AloTech dışı (manuel) başlangıç/bitiş tarihi ve harcanan süre takibi gerekiyor. Next4biz benzeri süre ölçümü müşteri tarafından isteniyor; bugün tek kaynak status timestamps, gerçek work time görünür değil | İki seçenek: (a) Hafif yaklaşım — Case'e `workStartedAt` / `workEndedAt` field çifti (b) Zengin yaklaşım — `CaseTimeEntry` tablosu (caseId, personId, startedAt, endedAt, durationMin, note) ile aynı vakaya çoklu entry. Case Detail'de süre girişi UI; raporlamada vaka/ekip/proje bazlı kırılım | Destek operasyonunda harcanan süre, bekleme süresi ve net çözüm süresi görünür olur; SLA pause analizini destekler. Müşteri yakın vadede operasyonel test için bekliyor (P1) | Faturalandırılabilir süre kalemi, kapasite planlama, ekip verimlilik dashboard, proje bazlı efor raporu (PM-04 ile), SLA pause sebep analizi, "ortalama dokunma süresi" KPI | 🟡 P1 | C7 |
+
+---
+
+## Öncelik Dağılımı (Özet)
+
+| Öncelik | Capability sayısı | Capability'ler |
+|---|---|---|
+| 🔴 P0 | 3 | PM-01, PM-04, PM-06 |
+| 🟡 P1 | 11 | PM-02, PM-03, PM-05, PM-07, PM-08, PM-09, PM-10, PM-12, PM-16, PM-19, PM-20 |
+| 🟢 P2 | 6 | PM-11, PM-13, PM-14, PM-15, PM-17, PM-18 |
+
+**Toplam:** 20 capability (P0=3 + P1=11 + P2=6).
+
+**WR kapsama kontrolü:** 41/41 WORK_REGISTER item bu matrix'te en az bir capability altında temsil ediliyor (none omitted).
+
+---
+
+## P0 İlk 3 — Müşteri Konuşması Konsantrasyonu
+
+Müşteri/yönetim toplantısında zaman kısıtlıysa konuşma bu üç yetenek üzerine yoğunlaşmalı:
+
+1. **PM-01 Master Data & Müşteri Kimliği** — KVKK uyumu + B2B/B2C ayırımı + mükerrer kayıt önleme. Sonraki tüm yetenekleri kilitler.
+2. **PM-04 AccountProject (UNIVERA)** — UNIVERA'nın proje-bazlı operasyonu için somut blocker; AccountCompany scope'unda doğru model netleşti.
+3. **PM-06 Veri İçeri Aktarım** — UNIVERA çeyreklik göçü ve genel "ilk yüklemeden sonra ne olacak?" sorusunun cevabı; PM-01 ve PM-02'nin değerini ölçeklendirir.
+
+---
+
+## Üzerine Ne Koyabiliriz? — Tema Özetleri
+
+Capability'lerin uzun vadeli birleşik vizyonu (müşteri toplantısında "5 yıl sonra Varuna nereye gider?" sorusunun cevabı):
+
+- **Müşteri Master Data Olgunluğu** — PM-01 + PM-02 + PM-09 birlikte: Müşteri Veri Yönetim Sistemi (MDM) seviyesinde tek müşteri kaynağı, KVKK denetlenebilir, fuzzy dedup, data steward rolü.
+- **Servis Operasyonu Olgunluğu** — PM-03 + PM-05 + PM-07 + PM-08 + PM-10 + PM-19 + PM-20: skill-based auto-routing + tier-aware SLA + katman bazlı raporlama + süre/efor takibi + müşteri self-service portal.
+- **UNIVERA Proje İşletim Sistemi** — PM-04 + PM-05 + PM-06 + PM-19 + PM-20: proje-bazlı destek + ürün-bazlı KB + katman bazlı operasyon + proje bazlı efor raporu + import-driven sözleşme yönetimi.
+- **Entegrasyon Halkası** — PM-12 + PM-13 + PM-14: Jira (eng), AloTech (telefon), AD/Emakin (kimlik) → Varuna'nın "kurumsal müşteri için tek panel" konumu.
+- **AI/Analitik Olgunluğu** — PM-16 + PM-11: AI kullanım ROI dashboard + bildirim/onay engine ile "akıllı süreç otomasyonu" katmanı.
+- **Power User Ekosistemi** — PM-15 + PM-17 + PM-18: view marketplace + white-label tema + production-grade test → SaaS olgunluk imzası.
+
+---
+
+## Update Convention
+
+- Bu doküman **WORK_REGISTER.md'yi okur, yazmaz**. Status/dependency değişiklikleri sadece WORK_REGISTER'da yapılır.
+- Yeni capability eklenmesi gerekirse: PM-19, PM-20 olarak devam et ve "İlgili WR ID" sütununda WORK_REGISTER'da var olan ID'lere bağla; yoksa önce WORK_REGISTER'a iş eklenir.
+- Müşteri toplantısı öncesi sadece bu doküman dağıtılabilir; WORK_REGISTER iç görünüm olarak kalır.
+- "Üzerine Ne Koyabiliriz?" alanı vizyon — implementasyon plan değil. Müşteri talebine göre güncellenir.

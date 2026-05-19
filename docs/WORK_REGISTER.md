@@ -1,0 +1,246 @@
+# Varuna Product Work Register
+
+> **Amaç:** Tüm açık ürün/teknik işlerin tek source-of-truth listesi. Konuşmadan konuşmaya kaybolmasın diye sürdürülen canlı kayıt.
+>
+> **Son güncelleme:** 2026-05-19
+> **Sahip:** Ürün direktörü (connect@univera.com.tr)
+> **Format:** Markdown, kod değişikliği yok.
+>
+> **Bağlı dokümanlar:** [BACKLOG.md](./BACKLOG.md) (teknik borç + Faz 2/3 listesi), [PRODUCT_PLANNING_MATRIX.md](./PRODUCT_PLANNING_MATRIX.md) (PM/müşteri planlama görünümü), [AGENTIC_PLANNING_PROTOCOL.md](./AGENTIC_PLANNING_PROTOCOL.md) (planlama döngüsü + Planning Card şablonu), [planning_cards/MASTER_DATA_DECISION_SPRINT.md](./planning_cards/MASTER_DATA_DECISION_SPRINT.md) (Master Data Decision Sprint — 8 karar onaylı 2026-05-19), [ARCHITECTURE.md](./ARCHITECTURE.md), [API.md](./API.md), [AI_WORKFLOW.md](./AI_WORKFLOW.md), [ROADMAP.md](./ROADMAP.md).
+>
+> **TODO:** Master Data Discovery (2026-05-19) raporu şu an `/tmp/varuna_master_data_discovery.md` altında — kalıcı referans gerekirse `docs/MASTER_DATA_DISCOVERY.md` olarak repo'ya taşı.
+
+> **Planning protocol:** Bu register'daki her `Ready` item, implementasyona başlamadan önce [AGENTIC_PLANNING_PROTOCOL.md](./AGENTIC_PLANNING_PROTOCOL.md)'deki **beş uyum kontrolünden** (Product / Architecture / **Performance & Architecture Gate** / Code / QA) geçmelidir. Planlama döngüsü tamamlanmadan PR açılmaz. `Needs Decision` item'lar Card'a girer ama implementation prompt aşamasına geçmez.
+>
+> **Clean & Strong Architecture Gate (TEMİZ ve GÜÇLÜ MİMARİ):** Her implementation Planning Card'ı **Performance & Architecture Gate**'ten geçmek **zorundadır**. Sistem bütçesi: 800-1000 eş zamanlı kullanıcı, 30-40 günlük yeni vaka/kullanıcı kohortu; donma/timeout/bloklayan sorgu yok. Verdict **Pass** veya **Needs mitigation** olmadan ⑥ Implementation Prompt yazılmaz; **Blocked** verdict'i Architecture Fit'e geri döner.
+>
+> **PR referans zorunluluğu:** Implementation PR body'sinde Work Register ID (örn. `WR-A1`) ve Product Planning Matrix ID (örn. `PM-01`) açıkça belirtilir; mümkünse Planning Card link'i eklenir.
+>
+> **Git Flow zorunluluğu:** Her implementation [AI_WORKFLOW.md → Git Flow Rules](./AI_WORKFLOW.md#git-flow-rules)'a uyar. Feature branch'ler `dev`'den ayrılır ve PR `dev`'i hedef alır; release PR'ı `dev → main` ayrı açılır. Yeni feature başlatmadan önce `origin/main..origin/dev` ve `origin/dev..origin/main` boş olmalı. Merge edilen branch'ler local + remote silinir. Final report'ta topology metadata bloğu zorunludur.
+>
+> **Durum kuralları:**
+> - `Shipped` — `main` branch'inde merge edildi, kanıt: git log commit hash'i.
+> - `Ready` — Karar tamam, kapsam belirgin, implementation prompt yazılabilir.
+> - `Needs Decision` — Ürün/iş kararı eksik. Önce karar, sonra prompt.
+> - `Backlog` — Bilinen iş ama henüz scope/decision/prompt çalışılmadı.
+>
+> **Sütunlar:** ID · Area · Work item · Problem · Proposed solution · Business fit · Dependencies · Risk · Status · Next action · Prompt?
+
+---
+
+## A. Master Data / Account
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A1 | Account | `customerType` discriminator (Individual/Corporate/Government/NonProfit) | Tek tip `Account` modeli; B2B/B2C ayırımı yok. Tip bazlı conditional alan/UI imkânsız | Prisma enum + Account'a `customerType`, `legalName`, `registrationNo` alanları; form'da radio + conditional UI. **TCKN A1 kapsamında DEĞİL** — TCKN saklama/validation/privacy A2'ye taşındı | UNIVERA + FINROTA hem B2B hem B2C; PARAM ağırlıklı B2B. Foundation: A2/A3/A8 bu karara dayanır | Yok (önce gelmeli) | Mevcut hesapların migration sırasında default Corporate atanması; manuel cleanup gerekebilir | **Ready** | A1 prompt'unu uygula (Faz 0 Adım 1) — TCKN hariç scope | yes |
+| A2 | Account | VKN / TCKN / phone validation + uniqueness + **TCKN storage/privacy design** | VKN @unique var ama format check yok; TCKN field'ı hiç yok; phone unique değil, format normalize edilmiyor. TCKN hassas PII — saklama stratejisi netleşmeden field eklenmez | TCKN **HMAC-SHA256 + last4** (env `TCKN_HASH_PEPPER`; pepper missing → 400 safe-fail); VKN global `@unique` + format/checksum (Türk Luhn variant) app-layer; Phone **E.164 normalize** + ayrı `phoneE164` kolon (DB unique YOK); validate endpoint'leri (`/api/lookups/validate-vkn`, `/validate-tckn`) inline UX feedback için; AccountFormModal Individual'da TCKN input + submit-transient (cache/storage YAZILMAZ); response shape `tcknMasked` only — plain `tckn`/`tcknHash` ASLA dönmez | KVKK ve sözleşmesel zorunluluk; mükerrer kayıt önleme | A1 ✓ | Pepper rotation Phase 2 (yıllık batch rehash); production öncesi env set | **Shipped** | Done (PR #159 merged 2026-05-19; commit `a22ddf1`). smoke-account-validation-privacy 28/28 PASS; data-contracts Account Privacy Contract 6/6 PASS; A1 regression 33/33 PASS; Performance Gate verdict Pass. ⚠️ Production deploy öncesi `TCKN_HASH_PEPPER` Vercel secret olarak set edilmeli | yes |
+| A3 | Account | Multiple addresses (Billing/Shipping/Visit/HQ/Branch) | Address modeli yok; Account'ta sadece phone/email | **Country-agnostic** `Address` tablosu: `country` ISO-2 zorunlu (default `TR` opsiyonel), `line1`, `line2`, `district`, `city`, `region`, `postalCode` esnek string. Type enum (Billing/Shipping/Visit/Headquarters/Branch), `isDefault` flag, `accountId` FK | Saha servis senaryoları (UNIVERA Rota/Saha Veri ürünleri), faturalama farklı adresler, ileride uluslararası müşteri opsiyonu | A1 | Country-agnostic temel zorunlu; ileride TR-specific kuralları opsiyonel enhancement olarak ekle (örn. il/ilçe lookup, posta kodu format) — temel tasarımı bağlamamalı | **Ready** | A3 prompt'u hazırla (country-agnostic schema, TR validation enhancement olarak ayrı PR) | no |
+| A4 | Account | `AccountProject` — company-relationship scoped project model | Schema'da Project yok; UNIVERA'nın proje bazlı vaka takip ihtiyacı karşılanmıyor | **Hiyerarşi (kilit):** `Account → AccountCompany → AccountProject → Case`. `AccountProject.accountCompanyId` FK. `Case.accountProjectId?` nullable. **Phase 1 (Decision Sprint #4):** `Company.projectsEnabled` (default false) + `Company.projectsRequired` (default false) flags — opt-in; default tüm tenantlar kapalı. **Phase 2:** UNIVERA için `projectsRequired=true` ayrı admin flag flip operasyonu | UNIVERA core (Anadolu FMCG, Marmara Soğuk Zincir vb.) | A1 ✓, A7 (paket-proje ilişkisi opsiyonel — sonraki phase) | UNIVERA `projectsRequired=true` flag flip zamanı belirsiz; Phase 1 sadece opt-in altyapı kurar | **Shipped (Phase 1)** — PR #160 merged 2026-05-19; commits `82dc72c` (impl) + `f7c5054` (smoke fix); 17/17 HTTP smoke + Account Project Contract 8/8 PASS | Phase 2: UNIVERA için `projectsRequired=true` flag flip ayrı admin operasyonu (zamanı belirsiz); ileride `AccountProject.defaultSupportLevel` A5 sonrası inheritance | no |
+| A5 | Case+Team | L1/L2 support level | Sadece `EscalationLevel` enum var (vaka durumu); tier (L1/L2/L3/Expert) yok | **Phase 1 (Decision Sprint #5):** `SupportLevel` enum (L1/L2; L3/Expert future-proof olarak enum'a eklenir, kullanımı sonraki phase'lerde) + `Case.supportLevel` + `Team.defaultSupportLevel` + `Person.supportLevel` (default L1). Case create default: assigned team'in `defaultSupportLevel`. **Phase 2-3:** `Product.defaultSupportLevel` (A6 sonrası) + `AccountProject.defaultSupportLevel` (A4 sonrası) inheritance | Destek operasyonu KPI'ı (L1 vs L2 SLA), routing | B1 (team lead) ✓ (Phase 1 paralel) | L3/Expert enum'da var ama UI gösterilmiyor; kullanım netleşince enable | **Ready** (Phase 1) | B1 ile paralel veya sonra; Decision Sprint #5 onaylı | no |
+| A6 | Catalog | Product Group + Product Catalog | `Case.productGroup` free string; ProductGroup tablosu yok; AccountProduct rich metadata yok | Yeni `ProductGroup`, `Product` (FK to ProductGroup, defaultSupportLevel); Case'de `productId?` FK; admin CRUD | SLA/Checklist matching string drift'ini durdurur; ürün-tier ilişkisi netleşir | A5 (Product.defaultSupportLevel için faydalı) | Mevcut Case.productGroup string'leri ile yeni Product.code 1:1 reconcile gerekir | **Ready** | A6 prompt'unu hazırla; admin önce, Case migration sonra | no |
+| A7 | Catalog | Package definitions | Account paketi sadece `AccountCompany.packageName` free string | **Phase 1 Hybrid (Decision Sprint #6):** legacy `packageName` korunur (deprecated comment); yeni `Package` + `PackageItem` tabloları + `AccountCompany.packageId?` FK eklenir. Admin Package CRUD UI'da reconcile **manuel item-by-item** ilk olarak (batch reconcile Phase 2). PackageItem ↔ Product ilişkisi A6 Product entity sonrası aktive olur | UNIVERA bundle paketleri, sözleşme raporlaması | **A6 (Product) sonrası** | Reconcile süreci kullanıcı emeği gerektirir; batch tool Phase 2 | **Ready** (A6 sonrası) | A6 shipped olduktan sonra A7 Card aç; Decision Sprint #6 onaylı | no |
+| A8 | Import | CSV / XLS / API import mapping | Bulk import altyapısı yok; sadece manuel form | **Phase 1 (Decision Sprint #8):** `ImportJob` + `ImportRow` staging tabloları + 4-adımlı ImportWizard UI; **Account-only**, **VKN primary match key** (Corporate), **create + update** semantik, **preview validation zorunlu**, audit retention **90 gün**. Phase 2: Contact + Address; Phase 3: Project + Product (A4, A6 sonrası) | UNIVERA çeyreklik 150 hesap göçü, FINROTA müşteri sync | A1 ✓, A2 (validation pipeline), A3 (address Phase 2 için) | A2 shipped olmadan Account import VKN/TCKN/phone validation'ı kullanamaz | **Ready** (Phase 1) | A2 sonrası A8a Account import Card aç; Decision Sprint #8 onaylı | no |
+
+---
+
+## B. Team / Organization
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | Team | Team lead model | Team'de lead alanı yok; Person'da `isTeamLead` yok | **Phase 1 (Decision Sprint #7):** `Person.isTeamLead Boolean @default(false)` flag. Aynı takımda çoklu lead mümkün (co-lead/shift). Mevcut `Person.teamId` tek FK korunur (1 person → 0 veya 1 team). Admin Team detail'inde members listesinde "Lead" toggle | Supervisor scope netleşir, escalation hedefi belirgin | Yok (A5 ile paralel ideal) | Multi-team senaryosu Phase 2'ye ertelendi (B2 → Backlog) | **Ready** (Phase 1) | A5 Phase 1 ile aynı PR'da paketlenebilir; Decision Sprint #7 onaylı | no |
+| B2 | Team | TeamMembership decision (multi-team membership) | `Person.teamId` 1:1 FK; bir kişi tek takımda | **Phase 2 (Decision Sprint #7 — ertelendi):** Multi-team senaryosu gerçek talep gelene kadar ertelendi. B1 `Person.isTeamLead` ile şimdilik yeterli. Gerçek ihtiyaç (AD/Emakin sync veya CSM cross-team) doğunca `PersonTeam` join + role yeniden açılır | CSM/cross-functional ileride; bugün B1 yeterli | B1 ✓, B4 (AD/Emakin) | Schema migration phase 2'de gelir; supervisor scope sorgusu kompleksleşir | **Backlog** | B4 (AD/Emakin) veya gerçek multi-team senaryosu ortaya çıkınca yeniden değerlendir; Decision Sprint #7 onaylı | no |
+| B3 | Team | Supervisor team scope correctness | Bugün Supervisor → `Person.teamId` → tek takım scope; multi-team olursa kırılır | Stats endpoint'i ve `teamScope` filter B1/B2 kararına göre güncellenir | Supervisor KPI doğruluğu | B1, B2 | B1/B2 yapılana kadar kıpırdama; stats endpoint regresyon riski | **Backlog** | B1/B2 sonrası revize | no |
+| B4 | Integration | Active Directory / Emakin sync | Kullanıcı kaynağı tek (Supabase Auth); enterprise SSO + auto-provision yok | SCIM ya da custom sync job; AD → Person + role auto-assign | UNIVERA enterprise müşteri ihtiyacı | B1 (lead atama), Auth model | Identity provider seçimi (Azure AD/Okta/Emakin) belirsiz | **Needs Decision** | Provider + sync sıklığı + role mapping onayı | no |
+
+---
+
+## C. Case Operations
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| C1 | Case | Unassigned case "Üstlen" (claim) | Atanmamış vakaya Agent kendi başına `assignedPersonId` atayamıyor; Supervisor müdahalesi gerekiyor | `POST /api/cases/:id/claim`: **atomik `updateMany`** — `WHERE id, assignedPersonId IS NULL, status NOT IN (Cozuldu, IptalEdildi)`. `count = 0` → 409. Başarıda `CaseActivity` (FieldUpdate, "Vaka üstlenildi: X") + watcher notification. UI: CasesListPage row + CaseDetailPage Atama panel'inde "Üstlen" butonu (atanmamış + açık + user.personId varsa); list renderer claim eligibility'yi team-name fallback'inden önce kontrol eder | Self-service; supervisor bottleneck azalır | Yok | Race kontrolü atomik UPDATE WHERE NULL ile çözüldü; conflict response'unda UI fresh state için load() | **Shipped** | Done. PR #156 (commit `3bbf094`, original C1) + PR #157 (commit `6f8afd6`, review fixup: list renderer ordering — claim before team fallback). smoke-case-claim 21/21 PASS; Performance Gate verdict Pass | yes |
+| C2 | Case | Customer search refactor | Mevcut CustomerSearchModal sınırlı (sadece name/vkn prefix); modal ergonomisi zayıf | Yeni search: name + vkn + externalCode + phone + email; klavye navigasyon, recent customers, "yeni müşteri" inline | Frontline hız | Yok | Şu anki kullanıcılar alıştı; UX değişikliği eğitim gerektirir | **Ready** | C2 prompt'u hazırla | no |
+| C3 | Case | "Bu müşteri için vaka oluştur" full New Case form | Account detail'den vaka oluştur butonu sınırlı; tam form değil | Account'tan trigger'lanan New Case modal/page'de account pre-fill korunur, tüm alanlar açık | UX akıcılığı, veri kalitesi | C2 (search) | Pre-fill mantığı edge case'ler (multi-company account) | **Ready** | C3 prompt'u hazırla (C2 sonrası) | no |
+| C4 | Case | Supervisor customerless matching queue + bulk operations | **Mevcut durum:** Phase D Step 1+2 shipped (`d9fc5bf`, `4a55359`) — customerless vaka `customerMatchPending` flag'i, ana listede filter + uyarı banner'ı, deterministic match suggestions, tekil link akışı **var**. **Eksik:** Supervisor için ayrı/dedicated matching queue UI ve toplu işlem (bulk match/dismiss) **yok** | Yeni "Eşleştirme Bekliyor" sayfası (Supervisor+): yaş + öncelik + suggestion confidence sıralı liste; çoklu seç → toplu link/dismiss; bekleme yaşı KPI'ı | Customerless akış olgunluğu, supervisor verimliliği | A1, A2 (validation) | False-match riski (Phase D deterministic, low confidence normal — memory: `project_varuna_phase_d_step2`); toplu işlemde geri alma penceresi | **Backlog** | Toplu işlem ihtiyacı + queue UI scope netleşince ele al | no |
+| C5 | Case | Duplicate customer review | Müşteri eşleştirme akışında olası duplicate Account'ları flag'leyecek mekanizma yok | Background scan (vkn/tckn/phone benzerliği) + Supervisor review queue + merge önerisi | Veri hijyeni | A1, A2, C6 | False positive yüksek olabilir; eşik ayarı | **Needs Decision** | Eşleme stratejisi (deterministic vs fuzzy) onayı | no |
+| C6 | Case | Account merge | İki Account'u (duplicate veya hatalı kayıt) birleştirme aracı yok. "Müşteri eşleştirme" (case-link) ile karıştırılmamalı — memory: `feedback_terminology_customer_match_vs_merge` | Admin tool: source/target seç + preview (kaç case, contact, address) + atomic merge transaction + audit log | Veri hijyeni (UNIVERA'da mükerrer hesap riski yüksek) | A1, C5 | Geri alınamayan operasyon; audit + soft-delete shadow gerekir | **Needs Decision** | Audit requirements + reversibility onayı | no |
+| C7 | Case | Start/end time tracking | Vaka üzerinde harcanan süre (work time) field'ı yok; sadece status timestamps var | `CaseTimeEntry` tablosu (caseId, personId, startedAt, endedAt, durationMin, note) + Case detail'de timer | Faturalama, SLA compliance analizi, kapasite planlama | Yok | Pause/resume edge case'leri, mobile sync zorluğu | **Backlog** | Faturalama/raporlama ihtiyacı netleşince scope | no |
+| C8 | Case | Document / information request flow | "Müşteriden ek bilgi/dosya iste" özel akışı yok; not içinde yazılıyor | Yeni `CaseInfoRequest` entity: yeni status `BilgiBekleniyor`, e-posta linki, müşteri public form (sınırlı), idempotent reminder | "ThirdPartyWaiting" benzeri ama müşteri-yönlü; SLA pause | Notification rules (D3), public form auth | Public form güvenlik (rate limit, token TTL); KVKK | **Needs Decision** | Public form auth modeli + KVKK onayı | no |
+
+---
+
+## D. Admin Definitions
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1 | Admin | Category product group ilişkisi | Mevcut `CategoryDef` ve `productGroup` ayrı; ilişki örtük | CategoryDef'e `productGroupId?` FK; admin'de mapping UI | SLA/Checklist eşleştirme netleşir | A6 | Mevcut kategorilerin productGroup'a remap'i veri işi | **Backlog** | A6 sonrası ele al | no |
+| D2 | Admin | Category layer classification field | Kategori sınıflandırması yok: "Backoffice / Genel / Mobile / Dinamik Rapor / Sabit Rapor" gibi tenant-tanımlı bir layer kavramı schema'da yok. **Bu N-level tree değil**, kategori grubunun yatay etiketi | Yeni `CategoryLayerDef` (id, companyId, name, code, isActive) + `CategoryDef.layerId` (nullable FK). Admin'de Layer CRUD. Case form/filter'da layer chip. N-level deep hierarchy ihtiyacı varsa ayrı backlog item olarak işle | Raporlama ve route'lama netleşir (mobil iş emirleri vs raporlama vakaları farklı işlenir) | Yok | Mevcut kategorilerin layer'a backfill'i veri işi; layer enum mı tablo mu kararı (config'lik istenirse tablo) | **Backlog** | Layer field schema kararı (enum vs def-table) ve örnek layer listesi onayı | no |
+| D3 | Admin | Notification rules engine | Bildirimler ad-hoc kod içinde; admin'den kural yönetimi yok | `NotificationRule` tablosu (event, audience, channel, template) + admin UI | Tenant başına özelleştirme; e-posta/SMS şablonlar | Email infra (Resend — BACKLOG #22) | Trigger event taxonomy büyük yüzey; kural çakışması | **Needs Decision** | Event taxonomy + tenant override seviyesi onayı | no |
+| D4 | Admin | Solution approval rules | Çözüm önerisi (resolution) onay akışı yok; agent direkt kapatabiliyor | `ResolutionApprovalPolicy` (kategori/tier başına) + Case `pendingApprovalBy` field | Kalite kontrolü, SLA compliance | A5 (supportLevel), B1 (lead) | Akış uzar, agent ergonomisi düşer; flag bazlı pilot | **Needs Decision** | Hangi vakalar approval ister? Karar | no |
+| D5 | Admin | Jira export permission | Jira export'u kim yapabilir kuralı yok; tüm Agent'lara açık | Role + permission flag (`canExportToJira`) + admin UI | İç süreç kontrolü | Permission matrix (BACKLOG #3) | RBAC genelinde merkezi karar bekliyor (BACKLOG #3) | **Backlog** | BACKLOG #3 (role permission hardening) ile birlikte ele al | no |
+
+---
+
+## E. Integrations
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E1 | Jira | Category distribution report | Jira'ya gönderilen vakaların kategori dağılım raporu yok | `/api/reports/jira-distribution` + Admin → Raporlar altında tablo | Mühendislik kapasitesi planlama | E2 (Jira sync genel altyapısı) | Jira API rate limit, data freshness | **Backlog** | E2 sonrası ele al | no |
+| E2 | Jira | Status/comment 10-minute sync | Tek yönlü ad-hoc; otomatik 10dk poll yok | Cron job (10dk) + JiraIssue tablosu (issueKey, lastSyncedAt) + Case'e yansıt | Eng team feedback loop kapanır | Notification (D3), Cron infra | API auth, rate limit; webhook yerine cron seçimi netleşmeli | **Needs Decision** | Cron vs webhook + auth modeli onayı | no |
+| E3 | Jira | "Resolved then reopened" davranışı | Case Jira'da resolved sonra reopen edilince ne olacak belirsiz | Reopen tetiklenince **yeni** Jira issue oluştur + Case'e link history | Eng tarafında temiz issue lifecycle | E2 | Eski Jira link'ini kaybetme; aktivite logu zorunlu | **Needs Decision** | Yeni issue mu, eski reopen mu? Politika onayı | no |
+| E4 | Telephony | AloTech status mapping | AloTech çağrı durumları (busy/missed/answered) Case'e taşınmıyor | AloTech webhook → Case'de yeni `callStatus` field veya CaseActivity event | Inbound call kontekstini Case'e zenginleştirir | E5 | AloTech credentials, multi-tenant config | **Needs Decision** | Sözleşme + credential modeli onayı | no |
+| E5 | Telephony | Incoming call → auto-open case | Telefon çaldığında Case açma akışı manuel | Caller ID → Account lookup → "Mevcut case mi yeni mi?" modal otomatik açılır | Frontline hız (call kuyruğunda saniyeler) | E4, C2 (search) | False match (paylaşılan telefon), gizlilik | **Needs Decision** | Caller ID → Account match stratejisi onayı | no |
+
+---
+
+## F. Reporting / Analytics / AI
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| F1 | AI | AI Usage Dashboard metric logic verification + instrumentation gaps | Sadece bir nokta düzeltildi: cron qa-score-batch artık `logAIUsage` çağırıyor (`8b1c2f6` / PR #142 main'de). **Dashboard'ın bütün metric logic'i ve tüm AI çağrı path'lerinin telemetri kapsamı doğrulanmadı**; başka eksik nokta olabilir. Geçmiş veri eksiklikleri (cron öncesi) backfill edilemez | (a) Tüm AI call site'larını envanterle (grep `openai`, `anthropic`, model adları); her birinde `logAIUsage` var mı doğrula (b) Dashboard agregasyon mantığı (cost, token, model breakdown) review (c) docs/AI_WORKFLOW.md'ye "yeni AI çağrısı eklerken logAIUsage zorunlu" pattern dokümante et | Maliyet/kullanım görünürlüğü; ML maliyet kontrolü | Yok | Bazı path'ler hâlâ log'suz olabilir; envanter tamamlanmadan "shipped" demek yanıltıcı | **Backlog** | AI call site envanteri + dashboard logic review (önceki cron fix #142 main'de, ek doğrulama gerekli) | no |
+| F2 | Ops | Cron / job health monitoring | Cron başarı/başarısızlık dashboard yok; sessiz fail olabiliyor | `CronRun` tablosu (jobName, startedAt, endedAt, status, error?) + admin dashboard | Operasyonel görünürlük | Yok | Job tanımlarının tek noktada listesi yok; envanter gerekir | **Ready** | F2 prompt'u hazırla (küçük PR) | no |
+| F3 | QA | QA Playbook | QA score yorumlama rehberi yok; QAScoresPage var ama "ne yapacağız?" belirsiz | docs/ altına QA_PLAYBOOK.md: skor kategorileri, threshold'lar, aksiyon adımları | QA döngüsünün kapanması | Yok | Eğitim ihtiyacı; kullanıcı adoption | **Ready** | F3 prompt'u hazırla (sadece doc) | no |
+| F4 | UX | Saved filters / views | Kullanıcının filtre seti kaydedemiyor; her seferinde URL ile yeniden kurmak gerekiyor | `SavedView` tablosu (userId, entity, filters JSON, isDefault) + sidebar/list bar UI | Power user verimliliği | F5 | View JSON schema versioning gerekli; bozulma riski | **Ready** | F4 prompt'u hazırla | no |
+| F5 | UX | List filtering standard | Cases vs Accounts vs Admin list'leri farklı filter convention (CSV vs single, sort param yok) | Convention dokümanı + sort param + cursor pagination (opsiyonel) | Tutarlılık, geliştirme hızı | Yok | Mevcut endpoint'leri kırmadan ek (additive) yaklaşım gerekli | **Ready** | F5 önce convention doc, sonra implementation | no |
+| F6 | AI | Pattern alert copy / details | PatternAlert var ama UI'da kullanıcıya açıklayıcı detay/aksiyon zayıf | Pattern türü başına detay sayfası: trend grafiği, etkilenen vakalar, önerilen aksiyon | Supervisor karar desteği | Pattern engine olgunluğu | Aksiyon önerileri AI mı static mi? | **Needs Decision** | Aksiyon önerisi kaynağı onayı | no |
+| F7 | AI / Quality | AI telemetry verification smoke (focused audit) | F1'in büyük envanter işinden önce **hemen yapılabilir küçük adım**: shipped olan AI çağrılarının (cron `qa-score-batch`, drawer "AI çözüm önerisi", Phase D match suggestions vb.) her birinin `logAIUsage` çağırdığını assert eden smoke harness. Yeni AI feature eklendiğinde regresyon yakalanır | `scripts/smoke-ai-telemetry.js` (38 assertion): A. AIUsageLog schema/contract B. 19 endpoint identifier coverage (4 critical-set must-have; 15 info; unknown-detect) C. Privacy guard (12 forbidden PII/raw-prompt fields absent) D. Dashboard aggregate sanity (count/avg/groupBy/acceptanceRate). `smoke-data-contracts.js`'e yeni "AI Telemetry Contract" group (5 cheap checks) | Maliyet görünürlüğü + ML telemetry güvenliği. Gate başlık #7 Observability mitigation | F1 (umbrella envanter); F2 ile CronRun entegrasyonunda paralel | Envanter sonucu: 19/19 AI path telemetri yazıyor — eksik logAIUsage yok | **Shipped** | Done (PR #158 merged 2026-05-19; commit `0b18516`). smoke-ai-telemetry 38/38 PASS; smoke:data-contracts 72/73 (AI Telemetry Contract 5/5 PASS); OpenAI cost $0; Performance Gate verdict Pass | yes |
+
+---
+
+## G. Quality / Demo / Seed
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| G1 | Demo | Full demo seed maintenance | `seed-full-demo-scenarios.js` ve gap-fix shipped (`3fd7c3b`, `14830f4`); yeni feature'lar geldikçe seed güncel kalmalı | Her yeni schema field PR'ında seed update zorunlu adım; CHECKLIST.md'ye ekle | Demo/dev hızı | Yok | Seed güncellenmezse demo'da null alanlar görünür | **Shipped (ongoing)** | PR template'ine seed update reminder ekle | no |
+| G2 | Smoke | Smoke coverage expansion | `smoke-data-contracts.js` 7 grup / 66 check shipped (`bc340cc`); multi-tenant + frontend state bug'ları kapsam dışı | Multi-tenant smoke (BACKLOG #6); frontend React state için Playwright/Cypress entry-level | Regresyon güveni | Yok | Test infra (Vitest, BACKLOG #7) ile birlikte yürünmeli | **Backlog** | BACKLOG #6 + #7 ile birlikte planla | no |
+| G3 | UX | Dark mode / responsive polish | BACKLOG #32 — mobile + dark mode polish henüz turlanmadı | Audit page'leri + Tailwind dark variant ekle + breakpoint testi | Mobile kullanım, branding | Yok | Yüzey çok geniş; iterative tur | **Backlog** | Faz 2 sonu polish slot | no |
+| G4 | Build | Bundle splitting | BACKLOG #10 — Vite tek 1.2MB chunk üretiyor (gzip 326KB); React.lazy yok | `React.lazy` + Suspense; admin/analytics page'leri ayrı chunk; `vite.config.ts manualChunks` (vendor-recharts, vendor-icons) | İlk yükleme süresi (Frontline kullanıcı admin chunk'ı gereksiz indirir) | Yok | Suspense boundary eksikliği → runtime crash; Slow 3G test gerekli | **Ready** | G4 prompt'u hazır (önceki Plan moddaki polished-wondering-waffle planının 1. Refactor'u) | yes |
+| G5 | Brand | Favicon + brand polish | Default Vite favicon hala duruyor; tab'da tanınmıyor | `index.html` head: `public/varuna-logo.png` favicon + apple-touch-icon + Türkçe `meta description` + light/dark `theme-color` (brand-500 / ndark-bg) | Branding | Yok | Trivial | **Shipped** | Done. PR #154 (commit `278da6c`, original G5) + PR #155 (commit `ed05424`, post-merge review fixup: `sizes="any"` → `sizes="1024x1024"` for PNG semantics). vite build clean | yes |
+
+---
+
+## H. Architecture & Performance Mitigations
+
+> **Kaynak:** AGENTIC_PLANNING_PROTOCOL v2.0 retro review (2026-05-19). Üç madde shipped feature'larda Performance & Architecture Gate verdict'i *Needs mitigation* yorumuyla işaretlenseydi takip edilecek noktalardı. Hiçbiri P0 değil; küçük, izole güvenlik kazanımları.
+
+| ID | Area | Work item | Problem | Proposed solution | Business fit | Dependencies | Risk | Status | Next action | Prompt? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| H1 | Quality / Performance | Case list server-side hard max `pageSize` cap | UI default 25 ama `?limit=` query param user-controlled; teorik olarak büyük sayı verilebilir, server bunu hard cap'lemiyor. Account list'te `Math.min(100, …)` var, case list'te yok | `server/routes/cases.js` GET `/` ve GET `/stats` filter validation'a `Math.min(200, Number(limit) || 25)` cap'i ekle (Account list pattern'ini takip et). Smoke'ta `limit=10000` → response satır sayısı ≤ 200 assertion | Tüm tenantlar — defansif güvenlik. Performans degradation'ı önler (Gate başlık #6 Large Query Guards) | Yok | Trivial; kullanıcı UI'da daha fazla görmek isterse pagination/sort UX backlog'a iner (F4/F5) | **Shipped** | Done (commit `563e52d`, PR #151 merged 2026-05-19). Smoke 29/29 PASS | yes |
+| H2 | Frontend Performance | MyHome / CaseListDrawer reopen cache strategy | Drawer her açılışta `/api/cases/:id` + `/customer-context` + notes + files fetch'lerini yeniden tetikliyor. Aynı vaka 30 sn içinde reopen edilirse trafiği boşa harcıyor | `src/services/clientCache.ts` — module-level Map + TTL 30s; `caseService.get`, `accountService.get`, `getCaseCustomerContext` cache'li; tüm mutation'larda prefix/predicate invalidation; logout'ta tüm sign-out path'lerinde `clearClientCache()` | Frontline (Agent) drawer'ı sık açıp kapayan kullanıcı — perceived latency düşer (Gate başlık #2 Caching Strategy) | Yok (orthogonal) | Cache invalidation timing: case patch sonrası prefix drop; account mutation sonrası broad customer-context wipe (review fix) | **Shipped** | Done. PR #152 (commit `5780790`, original H2) + PR #153 (commit `fb6ae7c` = cherry-pick of `c54829f`, review fix recovery — `c54829f` original H2 PR merge'ine yetişemedi, ayrı `fix/drawer-cache-review-fixup` PR'ı ile geri getirildi). smoke-client-cache 18/18 PASS | yes |
+| H3 | Frontend Performance | Drawer prefetch / N+1 risk review | Drawer selected case'de `getCase` + `getCaseCustomerContext` + notes + files paralel 4 fetch tetikliyor. Bugün paralel olduğu için "donma" yok ama serverless cold start'ta bu 4 ayrı endpoint ek connection burn-in maliyeti olabiliyor | (a) Liste tarafında **hover prefetch** (mouseenter → fetch start, useDebouncedCallback ile 150ms) (b) Veya backend tarafta `GET /api/cases/:id?include=context,notes,files` bileşik endpoint. Önce ölçüm: prod-shadow'da gerçek 99p latency, sonra karar | Frontline ağır kullanıcı; UNIVERA gibi gün boyu drawer açan profil için (Gate başlık #3 + #1) | H2 (cache eklenirse prefetch'in cost-benefit'i değişir) | Hover prefetch yanlış vakayı çekmesin (focus tracking gerekli); bileşik endpoint backward-compat sıkıntısı yapabilir | **Backlog** | Ölçüm verisi netleşince re-scope: önce H2'yi gör, sonra bu işle ilgilen | no |
+
+---
+
+## Recommended Implementation Order
+
+Bağımlılık zinciri başka türlü baskı yapmadıkça aşağıdaki sıra uygulanır:
+
+| # | Adım | İlgili ID | Ön koşul | Tahmin |
+|---|---|---|---|---|
+| 1 | **Master Data Discovery follow-up decisions** — bu register'daki tüm `Needs Decision` item'ları için tek toplantı/karar sprint'i | A2, A4, A5, A7, A8, B1, B2, B4, C5, C6, C8, D3, D4, E2, E3, E4, E5, F6 | Yok | 1-2 gün karar |
+| 2 | **Account customerType discriminator safe scope** | A1 | #1'de A2/A4 kararları | 1-1.5 gün |
+| 3 | **VKN/TCKN/phone validation + privacy design** | A2 | #1 (TCKN storage kararı), #2 | 1.5 gün |
+| 4 | **Address model + multi-address UI** | A3 | #2 | 2 gün |
+| 5 | **Team lead + SupportLevel (Person/Team/Case)** | B1, A5 | #1 (B1 modeli, A5 scope) | 1.5-2 gün |
+| 6 | **ProductGroup / Product / Package catalog** | A6, A7, D1 | #1 (A7 kararı) | 3-4 gün (iki PR) |
+| 7 | **AccountProject + Case project assignment** | A4 | #1, #2, #6 | 3-4 gün (iki PR) |
+| 8 | **Data import mapping (CSV/XLS + entity şablonları)** | A8 | #1, #2, #3, #4 | 4-5 gün (üç PR) |
+| 9 | **Customer search refactor** | C2 | Yok | 1.5 gün |
+| 10 | **"Üstlen" (claim) + unassigned akışı** | C1 | Yok | 1 gün |
+| 11 | **Document / information request flow** | C8 | #1 (KVKK kararı), D3 | 3 gün |
+| 12 | **Notification rules + solution approval** | D3, D4 | #1, #5 | 3-4 gün (iki PR) |
+| 13 | **Jira sync + reopen policy + distribution report** | E2, E3, E1 | #1, #12 (notification) | 3 gün |
+| 14 | **AloTech status + incoming call auto-open** | E4, E5 | #1, #9 | 2-3 gün |
+| 15 | **Active Directory / Emakin sync** | B4 | #1 (provider kararı), #5 | 3-4 gün |
+
+**Yan slotlar (yukarıdaki zincirden bağımsız, herhangi bir aşamada paralel):**
+- G4 Bundle splitting (Ready, ~0.5-1 gün)
+- G5 Favicon (Ready, < 1 saat)
+- F2 Cron health monitoring (Ready, 1 gün)
+- **H1** Case list pageSize cap (Ready, < 1 saat — defansif quick-win)
+- **H2** Drawer reopen cache (Ready, ~2-3 saat — FE perceived latency)
+- **F7** AI telemetry verification smoke (Ready, ~2 saat — Gate Observability mitigation)
+- F3 QA Playbook (Ready, dokümantasyon, 0.5 gün)
+- F4 Saved views + F5 List filter standard (Ready, birlikte 2 gün)
+
+---
+
+## Do Not Forget / Product Decisions Needed
+
+Aşağıdaki kararlar verilmeden ilgili item başlamaz. Toplantı/karar sprint'inin ana ajandası:
+
+| # | Karar | İlgili ID | Seçenekler / sorular |
+|---|---|---|---|
+| 1 | **TCKN storage strategy** | A2 | (a) Clear text + DB encryption (b) HMAC hash + lookup (c) Masked + last-4 query (d) Saklama yapmama, sadece validation | KVKK + operasyonel arama ihtiyacı dengesi |
+| 2 | **TeamMembership vs Team.leadPersonId** | B1, B2 | (a) Sadece `Person.isTeamLead` flag (b) `Team.leadPersonId` FK (atomik, tek lead) (c) `PersonTeam` join + `role` (multi-team + multi-lead) | Senaryo: bir kişi iki takımda olabilir mi? |
+| 3 | **Project: sadece UNIVERA mı yoksa şirket-configurable mı?** | A4 | (a) `Company.projectsEnabled` flag (b) `projectsRequired` katı zorunluluk (c) Tüm tenantlar için opt-in | UI complexity ve UNIVERA dışı tenantların friction'ı |
+| 4 | **L1/L2 sadece Case'de mi, Project + Case mi?** | A5 | (a) Sadece `Case.supportLevel` (b) `Project.defaultSupportLevel` + Case override (c) Üçlü: Account paketinden de inherit | Tier inheritance logic'i ne kadar derin? |
+| 5 | **Package: free text mi catalog mı?** | A7 | (a) Mevcut `packageName` string kalsın + normalize cron (b) `Package` catalog + `packageId` FK + migration (c) İki yöntem hybrid, freemium tenantlar string | Sözleşme rapor ihtiyacı |
+| 6 | **Phone uniqueness scope** | A2 | (a) Account içinde unique (b) Company içinde unique (c) Global unique (d) Hiç unique değil, sadece format normalize | Mükerrer müşteri önleme vs çoklu telefon gerçekliği |
+| 7 | **Import create/update/skip rules** | A8 | (a) Sadece create (yeni kayıt) (b) Create + update (idempotent matching key) (c) Create + update + delete (full sync mode) | Idempotency key her entity için ne? (Account: vkn? externalCode? email?) |
+| 8 | **Account merge audit requirements** | C6 | (a) Soft delete + 90 gün rollback (b) Hard delete + full audit JSON (c) Atomic + irreversible (compliance gerekli mi?) | Geri alma penceresi vs storage maliyeti |
+| 9 | **(Bonus) Notification event taxonomy + override scope** | D3 | Event listesi nereden (kod-tarafı kapalı vs admin-tarafı açık), tenant override hangi seviyede | D3'ün ön koşulu |
+| 10 | **(Bonus) Jira sync mekanizması** | E2 | (a) 10dk cron poll (b) Webhook + cron fallback (c) Sadece webhook | Eng ekibinin Jira instance erişimi |
+| 11 | **(Bonus) Jira reopen davranışı** | E3 | (a) Yeni issue + link (b) Eski issue reopen + comment (c) Karar Agent'a bırak (modal) | Eng issue hijyeni |
+| 12 | **(Bonus) AloTech sözleşme + credential modeli** | E4 | Tenant başına API key, single key all-tenants, OAuth | Multi-tenant sınırı |
+| 13 | **(Bonus) Caller ID → Account match stratejisi** | E5 | Strict (tam eşleşme), Fuzzy (telefon + segment), Disambiguation modal her zaman | False match riski |
+| 14 | **(Bonus) Pattern aksiyon önerisi kaynağı** | F6 | Static (kategori → öneri eşleştirme), AI generated, Hybrid | AI maliyeti / latency |
+| 15 | **(Bonus) Public form auth + KVKK** | C8 | Token URL (TTL), magic link, OTP, hiçbiri (sadece e-posta reply) | Spam/abuse riski |
+
+---
+
+## Item Count + Top 10 Next Actions
+
+**Toplam item:** 45 (A:8 + B:4 + C:8 + D:5 + E:5 + F:7 + G:5 + H:3 — Order/Decisions hariç)
+
+**Durum dağılımı (toplam 45):**
+- Shipped: **9** — G1 (ongoing seed maintenance), A1 (commit `e6df055`, PR #150), H1 (commit `563e52d`, PR #151), H2 (commit `5780790`, PR #152 + `fb6ae7c` recovery PR #153), G5 (commit `278da6c`, PR #154 + `ed05424` fixup PR #155), C1 (commit `3bbf094`, PR #156 + `6f8afd6` fixup PR #157), F7 (commit `0b18516`, PR #158), A2 (commit `a22ddf1`, PR #159), A4 (Phase 1) (commit `82dc72c` + `f7c5054` fixup, PR #160)
+- Ready: **13** — A3, A5 (Phase 1), A6, A7 (A6 sonrası), A8 (Phase 1), B1 (Phase 1), C2, C3, F2, F3, F4, F5, G4
+- Needs Decision: **11** — B4, C5, C6, C8, D3, D4, E2, E3, E4, E5, F6
+- Backlog: **12** — B2 (Phase 2 ertelendi), B3, C4, C7, D1, D2, D5, E1, F1, G2, G3, H3
+
+**Top 10 next actions** (öncelik sırası):
+
+1. **Decision sprint** — Do Not Forget tablosundaki 8 ana kararı netleştir (1-2 gün, tek oturum tercih) → ID #1-8 Karar Tablosu
+2. **A1 prompt → PR** — Account customerType discriminator (Ready, scope net, foundation) — 1.5 gün
+3. **A2 prompt → PR** — VKN/TCKN/phone validation (decision #1 sonrası) — 1.5 gün
+4. **G4 prompt → PR** — Bundle splitting (Ready, izole, hızlı kazanç) — 0.5-1 gün
+5. **G5 prompt → PR** — Favicon + brand polish (Ready, trivial) — < 1 saat
+6. **A3 prompt → PR** — Address modeli + UI (A1 sonrası) — 2 gün
+7. **A6+D1 prompt → PR** — ProductGroup/Product catalog + admin (Ready) — 3 gün
+8. **C1 prompt → PR** — "Üstlen" akışı (küçük, izole) — 1 gün
+9. **F2 prompt → PR** — Cron job health monitoring (izole, ops değeri) — 1 gün
+10. **F4+F5 prompt → PR** — SavedView + list filter standard (UX kazancı) — 2 gün
+
+---
+
+## Modeling Guardrails
+
+Bu register'a yeni iş eklerken / mevcut iş'i implementasyona alırken aşağıdaki modeller **bağlayıcıdır**. Yanlış modelle başlamak migration borcu üretir.
+
+1. **TCKN hassas PII** — düz (plain) `tckn String` field eklenmez. A1 (customerType) bu field'ı **içermez**. TCKN için A2 kapsamında privacy design + DPO onayı + encryption-at-rest / hash modeli kararı net olmadan schema'ya kolon eklenmemeli. KVKK kapsamında erişim audit log'u zorunlu.
+
+2. **Project, AccountCompany-scoped** — `Project` veya `AccountProject` global Account'a değil, **AccountCompany'ye** bağlanır. Doğru hiyerarşi: `Account → AccountCompany → AccountProject → Case`. Aynı Account farklı şirketlerle (multi-tenant) farklı projeler yürütebilir; UNIVERA senaryosunda bu çoklu. `Case.accountProjectId` FK; `Case.projectId` kısayolu kullanma.
+
+3. **Category Layer, sınıflandırma alanı (tree depth değil)** — "Backoffice / Genel / Mobile / Dinamik Rapor / Sabit Rapor" gibi tenant-tanımlı **yatay etiket**. `CategoryDef.layerId` (nullable FK to `CategoryLayerDef`). CategoryDef self-relation parent/child hierarchy ayrı bir konu — onunla karıştırma.
+
+4. **"Eşleştirme" ≠ "Birleştirme"** — Terminoloji ayrımı zorunlu (memory: `feedback_terminology_customer_match_vs_merge`):
+   - **Müşteri eşleştirme** = customerless case'in mevcut Account'a bağlanması (case-link akışı). Mevcut: Phase D Step 1+2.
+   - **Müşteri birleştirme** = iki ayrı Account'ın atomic merge'i (Account Merge, C6). Geri alınamaz operasyon, ayrı audit gerekir.
+   Bu iki akışı aynı UI'da/komut'ta karıştırma; rapor/log'larda farklı isimle yaz.
+
+5. **Address country-agnostic** — `Address` modeli `country` ISO-2 zorunlu (default TR opsiyonel), alanlar generic string. TR-specific kurallar (il/ilçe lookup, posta kodu format, mahalle hierarşisi) **opsiyonel enhancement** olarak ayrı PR; temel modeli bağlamamalı.
+
+6. **Multi-tenant scope** — Yeni her endpoint `req.user.allowedCompanyIds` filter uygular; cross-company leak smoke'u zorunlu (BACKLOG #6). Yeni FK eklerken `companyId` denormalize edilebilirse edilir (Case/CaseNote pattern'i).
+
+7. **Enum mapping (TR ↔ ASCII)** — Yeni Prisma enum eklenince `server/db/enumMap.js` (fromDb + toDb) + `src/types.ts` mirror **aynı PR'da** güncellenir; aksi halde TR label silently fail.
+
+---
+
+## Update Convention
+
+- Her yeni feature/iş kaydı bu register'a eklenir; ID'ler artarak yeni harf bloğunda devam eder (`H1`, `H2`...).
+- Status değişikliklerinde commit/PR hash'i `Next action` sütununa eklenir.
+- Decision'lar netleşince `Needs Decision` → `Ready` taşınır ve karar kısaca register'da not edilir.
+- Shipped item'lar 30 gün sonra arşive (`docs/WORK_REGISTER_ARCHIVE.md` — gerekirse açılır) taşınabilir; register açık iş listesi olarak kalır.
+- Bu doküman BACKLOG.md'yi **değiştirmez**, tamamlayıcıdır: BACKLOG = teknik borç + Faz 2/3 detayları, WORK_REGISTER = aktif ürün/iş kalemleri.
