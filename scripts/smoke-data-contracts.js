@@ -1277,6 +1277,93 @@ defineGroup('Account Address Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group N+3 — Product Catalog Contract (WR-A6 / PM-05)
+//   Tenant-scope + FK integrity + unique-code invariants + seed coverage.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Product Catalog Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // C.1) ProductGroup has companyId column + FK.
+  const pgCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'ProductGroup'`,
+  );
+  const pgColSet = new Set((pgCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'ProductGroup.companyId column exists',
+    pgColSet.has('companyId') ? 'PASS' : 'FAIL',
+    { detail: pgColSet.has('companyId') ? '' : 'missing companyId' },
+  ));
+
+  // C.2) Product has companyId + productGroupId columns.
+  const prCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'Product'`,
+  );
+  const prColSet = new Set((prCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'Product.companyId + Product.productGroupId columns exist',
+    prColSet.has('companyId') && prColSet.has('productGroupId') ? 'PASS' : 'FAIL',
+    { detail: `companyId=${prColSet.has('companyId')} productGroupId=${prColSet.has('productGroupId')}` },
+  ));
+
+  // C.3) Every Product.companyId must equal its ProductGroup.companyId.
+  const drift = await prisma.$queryRawUnsafe(`
+    SELECT p.id, p."companyId" AS product_company, pg."companyId" AS group_company
+      FROM "Product" p
+      JOIN "ProductGroup" pg ON pg.id = p."productGroupId"
+     WHERE p."companyId" <> pg."companyId"
+     LIMIT 5
+  `);
+  out.push(check(
+    'Product.companyId == ProductGroup.companyId',
+    (drift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: drift?.length ?? 0, examples: drift ?? [] },
+  ));
+
+  // C.4) No duplicate active codes per company (groups + products separately).
+  const dupGroups = await prisma.$queryRawUnsafe(`
+    SELECT "companyId", code, COUNT(*)::int AS n
+      FROM "ProductGroup"
+     WHERE "isActive" = true
+     GROUP BY "companyId", code
+    HAVING COUNT(*) > 1
+     LIMIT 5
+  `);
+  out.push(check(
+    'No duplicate active ProductGroup code per company',
+    (dupGroups?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: dupGroups?.length ?? 0, examples: dupGroups ?? [] },
+  ));
+  const dupProducts = await prisma.$queryRawUnsafe(`
+    SELECT "companyId", code, COUNT(*)::int AS n
+      FROM "Product"
+     WHERE "isActive" = true
+     GROUP BY "companyId", code
+    HAVING COUNT(*) > 1
+     LIMIT 5
+  `);
+  out.push(check(
+    'No duplicate active Product code per company',
+    (dupProducts?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: dupProducts?.length ?? 0, examples: dupProducts ?? [] },
+  ));
+
+  // C.5 + C.6) Seed coverage: each of PARAM/UNIVERA/FINROTA has ≥2 active groups and ≥5 active products.
+  for (const cid of ['COMP-PARAM', 'COMP-UNIVERA', 'COMP-FINROTA']) {
+    const groups = await prisma.productGroup.count({ where: { companyId: cid, isActive: true } });
+    const products = await prisma.product.count({ where: { companyId: cid, isActive: true } });
+    out.push(check(
+      `${cid}: ≥2 active ProductGroups, ≥5 active Products`,
+      groups >= 2 && products >= 5 ? 'PASS' : 'FAIL',
+      { detail: `groups=${groups} products=${products}` },
+    ));
+  }
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 
