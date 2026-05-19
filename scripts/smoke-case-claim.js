@@ -287,6 +287,76 @@ if (agentToken && agent.personId) {
   }
 }
 
+// ── Section 11: WR-C1 review fix — team-assigned + person-unassigned must be claimable ──
+// Backend kuralı: claim eligibility sadece assignedPersonId IS NULL'a bakar. UI'da
+// "assignedTeamName"in claim button'ı maskelememesi gerekiyor (CasesListPage renderer
+// review fix). Backend tarafında bu senaryoyu doğrularız: takım atanmış ama kişi
+// atanmamış bir vakayı agent claim edebilmelidir.
+console.log('\n── 11) Team-assigned + person-unassigned can still be claimed ──');
+const teamOnlyTarget = await prisma.case.findFirst({
+  where: {
+    companyId: { in: agentScope },
+    assignedPersonId: null,
+    assignedTeamId: { not: null },
+    status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+  },
+  select: { id: true, assignedTeamName: true, assignedPersonId: true },
+});
+if (teamOnlyTarget && agentToken) {
+  record(
+    '11a. Fixture has team-only assignment (team set, person null)',
+    !!teamOnlyTarget.assignedTeamName && teamOnlyTarget.assignedPersonId === null,
+    `team=${teamOnlyTarget.assignedTeamName}`,
+  );
+  const r = await api(agentToken, `/api/cases/${teamOnlyTarget.id}/claim`, { method: 'POST' });
+  record(
+    '11b. Team-assigned + person-unassigned case claim → 200',
+    r.status === 200,
+    `status=${r.status}`,
+  );
+  record(
+    '11c. Claimed case now has BOTH assignedPersonId AND assignedTeamId set',
+    r.data?.assignedPersonId === agent.personId && !!r.data?.assignedTeamId,
+    `person=${r.data?.assignedPersonId} team=${r.data?.assignedTeamId}`,
+  );
+} else {
+  // Synthetic fallback: seed'de team-only fixture'ı oluşturmak yerine başka claim
+  // edilebilir vakayı manuel team set'le → ardından claim → restore.
+  const candidate = await prisma.case.findFirst({
+    where: {
+      companyId: { in: agentScope },
+      assignedPersonId: null,
+      assignedTeamId: null,
+      status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+    },
+    select: { id: true },
+  });
+  const someTeam = await prisma.team.findFirst({
+    where: { companyId: { in: agentScope }, isActive: true },
+    select: { id: true, name: true },
+  });
+  if (candidate && someTeam && agentToken) {
+    // Synthetic team assignment (without person)
+    await prisma.case.update({
+      where: { id: candidate.id },
+      data: { assignedTeamId: someTeam.id, assignedTeamName: someTeam.name },
+    });
+    const r = await api(agentToken, `/api/cases/${candidate.id}/claim`, { method: 'POST' });
+    record(
+      '11b. Team-assigned + person-unassigned (synthetic) case claim → 200',
+      r.status === 200,
+      `status=${r.status}`,
+    );
+    record(
+      '11c. Claimed case now has BOTH assignedPersonId AND assignedTeamId set',
+      r.data?.assignedPersonId === agent.personId && !!r.data?.assignedTeamId,
+      `person=${r.data?.assignedPersonId} team=${r.data?.assignedTeamId}`,
+    );
+  } else {
+    record('11. Team-only claim — skipped (no fixture)', true);
+  }
+}
+
 // ── Done ──
 await prisma.$disconnect();
 

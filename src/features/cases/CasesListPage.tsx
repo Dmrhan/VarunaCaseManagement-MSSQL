@@ -1270,20 +1270,29 @@ export function CasesListPage({
                       <PriorityBadge priority={c.priority} />
                     </Td>
                     <Td className="text-slate-700 dark:text-ndark-text">
-                      {c.assignedPersonName ?? c.assignedTeamName ?? (
-                        canClaimCase(c) ? (
-                          <button
-                            type="button"
-                            onClick={(e) => handleClaim(e, c.id)}
-                            disabled={claimingId === c.id}
-                            className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
-                            title="Bu vakayı üstlen"
-                          >
-                            {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
-                          </button>
-                        ) : (
-                          <span className="text-slate-400 dark:text-ndark-muted">—</span>
-                        )
+                      {/* WR-C1 review fix — Claim eligibility person-only (assignedPersonId IS NULL).
+                          Team-assigned ama person-assigned olmayan vakalarda da "Üstlen" gösterilmeli;
+                          backend bunu kabul ediyor. Render sırası:
+                            1) atanmış kişi varsa adını göster
+                            2) yoksa claim eligible mı → "Üstlen" butonu
+                            3) yoksa atanmış takım varsa takım adını fallback olarak göster
+                            4) yoksa dash. */}
+                      {c.assignedPersonName ? (
+                        c.assignedPersonName
+                      ) : canClaimCase(c) ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleClaim(e, c.id)}
+                          disabled={claimingId === c.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+                          title="Bu vakayı üstlen"
+                        >
+                          {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
+                        </button>
+                      ) : c.assignedTeamName ? (
+                        c.assignedTeamName
+                      ) : (
+                        <span className="text-slate-400 dark:text-ndark-muted">—</span>
                       )}
                     </Td>
                     <Td className="text-xs text-slate-600 dark:text-ndark-muted">
