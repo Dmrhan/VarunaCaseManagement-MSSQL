@@ -126,6 +126,60 @@ function trimOrNull(value, max) {
   }
   return trimmed;
 }
+/**
+ * WR-A4 — AccountProject lookup + integrity validator. Used by both create
+ * and update paths.
+ *
+ *  - projectId must exist + isActive=true → else 400 'invalid_project'
+ *  - accountId is REQUIRED when projectId is supplied (Account→AccountCompany
+ *    →AccountProject→Case hierarchy invariant) → else 400
+ *    'project_requires_account'
+ *  - project's AccountCompany.companyId must equal companyId → else 400
+ *    'project_company_mismatch'
+ *  - project's AccountCompany.accountId must equal accountId → else 400
+ *    'project_account_mismatch'
+ *
+ * Returns { id, name } for denormalize.
+ */
+async function loadAndValidateProject({ projectId, accountId, companyId }) {
+  if (!accountId) {
+    // Project without account would orphan Case.accountProjectId from the
+    // Account → AccountCompany → AccountProject hierarchy.
+    throw new CaseValidationError(
+      'Müşteri seçilmeden proje seçilemez.',
+      { status: 400, code: 'project_requires_account' },
+    );
+  }
+  const project = await prisma.accountProject.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      isActive: true,
+      accountCompany: { select: { accountId: true, companyId: true } },
+    },
+  });
+  if (!project || !project.isActive) {
+    throw new CaseValidationError('Geçersiz veya pasif proje.', {
+      status: 400,
+      code: 'invalid_project',
+    });
+  }
+  if (project.accountCompany.companyId !== companyId) {
+    throw new CaseValidationError(
+      'Bu proje vaka şirketine ait değil.',
+      { status: 400, code: 'project_company_mismatch' },
+    );
+  }
+  if (project.accountCompany.accountId !== accountId) {
+    throw new CaseValidationError(
+      'Bu proje seçili müşteriye ait değil.',
+      { status: 400, code: 'project_account_mismatch' },
+    );
+  }
+  return { id: project.id, name: project.name };
+}
+
 function sanitizeRequesterContext(raw) {
   const out = {
     customerContactName: trimOrNull(raw.customerContactName, 120),
@@ -368,42 +422,23 @@ export const caseRepository = {
     }
     const customerMatchPending = !m.accountId;
 
-    // WR-A4 — AccountProject validation.
-    //   1. projectsRequired=true tenant'ta accountId varken accountProjectId zorunlu
-    //   2. accountProjectId verildiyse:
-    //      - Project mevcut + isActive=true olmalı
-    //      - Project.accountCompany.accountId === case.accountId
-    //      - Project.accountCompany.companyId === case.companyId
-    //      → İhlalde 400 ('invalid_project' veya 'project_account_mismatch')
+    // WR-A4 — AccountProject integrity guard.
+    //   Invariant: Account → AccountCompany → AccountProject → Case. A project
+    //   reference is meaningful only when the case has an account; otherwise
+    //   accountProjectId would dangle (no account to anchor the relationship).
+    //
+    //   1. accountProjectId provided + accountId missing → 400 project_requires_account
+    //   2. accountProjectId provided + accountId provided → full validate via helper
+    //   3. accountProjectId missing + accountId provided + projectsRequired=true → 400 project_required
+    //   4. accountId missing → accountProjectId/Name MUST be null (customerless flow)
     let accountProjectName = null;
     if (m.accountProjectId) {
-      const project = await prisma.accountProject.findUnique({
-        where: { id: m.accountProjectId },
-        select: {
-          id: true,
-          name: true,
-          isActive: true,
-          accountCompany: { select: { accountId: true, companyId: true } },
-        },
+      // accountId checked first inside helper (project_requires_account).
+      const project = await loadAndValidateProject({
+        projectId: m.accountProjectId,
+        accountId: m.accountId,
+        companyId: m.companyId,
       });
-      if (!project || !project.isActive) {
-        throw new CaseValidationError('Geçersiz veya pasif proje.', {
-          status: 400,
-          code: 'invalid_project',
-        });
-      }
-      if (project.accountCompany.companyId !== m.companyId) {
-        throw new CaseValidationError(
-          'Bu proje vaka şirketine ait değil.',
-          { status: 400, code: 'project_company_mismatch' },
-        );
-      }
-      if (m.accountId && project.accountCompany.accountId !== m.accountId) {
-        throw new CaseValidationError(
-          'Bu proje seçili müşteriye ait değil.',
-          { status: 400, code: 'project_account_mismatch' },
-        );
-      }
       accountProjectName = project.name;
     } else if (m.accountId && settings?.projectsRequired) {
       // projectsRequired=true + accountId var + projectId yok → 400
@@ -412,6 +447,11 @@ export const caseRepository = {
         { status: 400, code: 'project_required' },
       );
     }
+    // Customerless (accountId missing) → force project to null regardless of
+    // what frontend may have sent; defense-in-depth alongside the helper
+    // throw above.
+    const finalAccountProjectId = m.accountId ? (m.accountProjectId ?? null) : null;
+    const finalAccountProjectName = m.accountId ? accountProjectName : null;
 
     // Phase D Step 2 — Opsiyonel başvuran bilgileri.
     // Hassas alanlar (phone, email) sadece DB'ye yazılır; log/analytics yok.
@@ -443,8 +483,8 @@ export const caseRepository = {
         accountName: m.accountName,
         customerMatchPending,
         // WR-A4 — Project link (validated above).
-        accountProjectId: m.accountProjectId ?? null,
-        accountProjectName,
+        accountProjectId: finalAccountProjectId,
+        accountProjectName: finalAccountProjectName,
         category: m.category,
         subCategory: m.subCategory,
         requestType: m.requestType,
@@ -526,45 +566,51 @@ export const caseRepository = {
       lifecyclePatch.customerMatchPending = patch.accountId == null;
     }
 
-    // WR-A4 — AccountProject patch validation + name denormalize.
-    if ('accountProjectId' in patch) {
-      const newProjectId = patch.accountProjectId;
-      if (newProjectId == null || newProjectId === '') {
+    // WR-A4 — AccountProject ↔ accountId integrity matrix for PATCH.
+    //
+    // Invariant: a Case may carry an accountProjectId only when its accountId
+    // is set AND the project's AccountCompany belongs to that account in the
+    // same companyId. Bug fix: prior code only validated when the patch
+    // explicitly touched accountProjectId, allowing an accountId change to
+    // orphan the existing project link.
+    //
+    // Effective values: companyId never changes via PATCH (multi-tenant
+    // guarantee); effectiveAccountId is the value after the patch lands.
+    const accountIdInPatch = 'accountId' in patch;
+    const projectIdInPatch = 'accountProjectId' in patch;
+    const effectiveAccountId = accountIdInPatch ? patch.accountId : before.accountId;
+    const effectiveCompanyId = companyId;
+
+    if (projectIdInPatch) {
+      // Frontend explicitly set/cleared the project.
+      const requestedProjectId = patch.accountProjectId;
+      if (requestedProjectId == null || requestedProjectId === '') {
         lifecyclePatch.accountProjectId = null;
         lifecyclePatch.accountProjectName = null;
       } else {
-        const project = await prisma.accountProject.findUnique({
-          where: { id: newProjectId },
-          select: {
-            id: true,
-            name: true,
-            isActive: true,
-            accountCompany: { select: { accountId: true, companyId: true } },
-          },
+        const project = await loadAndValidateProject({
+          projectId: requestedProjectId,
+          accountId: effectiveAccountId,
+          companyId: effectiveCompanyId,
         });
-        if (!project || !project.isActive) {
-          throw new CaseValidationError('Geçersiz veya pasif proje.', {
-            status: 400,
-            code: 'invalid_project',
-          });
-        }
-        if (project.accountCompany.companyId !== companyId) {
-          throw new CaseValidationError(
-            'Bu proje vaka şirketine ait değil.',
-            { status: 400, code: 'project_company_mismatch' },
-          );
-        }
-        const targetAccountId = 'accountId' in patch ? patch.accountId : before.accountId;
-        if (targetAccountId && project.accountCompany.accountId !== targetAccountId) {
-          throw new CaseValidationError(
-            'Bu proje seçili müşteriye ait değil.',
-            { status: 400, code: 'project_account_mismatch' },
-          );
-        }
         lifecyclePatch.accountProjectId = project.id;
         lifecyclePatch.accountProjectName = project.name;
       }
+    } else if (accountIdInPatch) {
+      // Account changed but project not explicitly set.
+      // If account cleared or changed to a different one → clear orphaned
+      // project link. Same account (re-sent with same value) → keep project.
+      const accountCleared = patch.accountId == null;
+      const accountChanged = !accountCleared && patch.accountId !== before.accountId;
+      if (accountCleared || accountChanged) {
+        if (before.accountProjectId != null) {
+          lifecyclePatch.accountProjectId = null;
+          lifecyclePatch.accountProjectName = null;
+        }
+      }
     }
+    // Neither accountId nor accountProjectId in patch → existing project link
+    // is preserved by the absence of any lifecyclePatch entry.
 
     const updated = await prisma.case.update({
       where: { id },
