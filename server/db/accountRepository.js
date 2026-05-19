@@ -1,4 +1,5 @@
 import { prisma } from './client.js';
+import { CUSTOMER_TYPE_VALUES } from './enumMap.js';
 
 /**
  * Phase A — Account 360 repository.
@@ -30,6 +31,21 @@ export class AccountValidationError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * WR-A1 — Müşteri tipi validation. Geçersiz identifier 400 fırlatır.
+ * Boş/undefined kabul edilir (caller default'a düşer).
+ *
+ * TCKN bu fazın DIŞINDA — A2'de privacy design sonrası. Bu fonksiyona
+ * tckn benzeri bir alan eklenmez.
+ */
+function normalizeCustomerType(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string' || !CUSTOMER_TYPE_VALUES.includes(value)) {
+    throw new AccountValidationError('Geçersiz müşteri tipi.', { code: 'invalid_customer_type' });
+  }
+  return value;
 }
 
 export function maskVkn(vkn) {
@@ -105,6 +121,10 @@ function shapeAccountRow(account, { caseAggregates }) {
     phone: account.phone ?? null,
     email: account.email ?? null,
     isActive: account.isActive,
+    // WR-A1 / PM-01 — Müşteri tipi + opsiyonel ticari unvan/sicil no.
+    customerType: account.customerType,
+    legalName: account.legalName ?? null,
+    registrationNo: account.registrationNo ?? null,
     companies: account.companies
       .filter((c) => c.__inScope)
       .map((c) => ({
@@ -208,6 +228,10 @@ export async function listAccounts({
         phone: true,
         email: true,
         isActive: true,
+        // WR-A1
+        customerType: true,
+        legalName: true,
+        registrationNo: true,
         companies: {
           select: {
             id: true,
@@ -296,6 +320,10 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       isActive: true,
       companyId: true,
       createdAt: true,
+      // WR-A1
+      customerType: true,
+      legalName: true,
+      registrationNo: true,
       companies: {
         select: {
           id: true,
@@ -401,6 +429,10 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     email: account.email ?? null,
     isActive: account.isActive,
     createdAt: account.createdAt,
+    // WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) ticari unvan/sicil no.
+    customerType: account.customerType,
+    legalName: account.legalName ?? null,
+    registrationNo: account.registrationNo ?? null,
     companies: visibleCompanies.map((c) => ({
       // Phase C1: PATCH/DELETE endpoint'leri için stable AccountCompany.id.
       accountCompanyId: c.id,
@@ -522,6 +554,15 @@ export async function createAccount({ data, user }) {
     }
   }
 
+  // WR-A1: customerType (default Corporate), legalName, registrationNo. TCKN burada YOK.
+  const customerType = normalizeCustomerType(data?.customerType) ?? 'Corporate';
+  const legalName =
+    typeof data?.legalName === 'string' && data.legalName.trim() ? data.legalName.trim() : null;
+  const registrationNo =
+    typeof data?.registrationNo === 'string' && data.registrationNo.trim()
+      ? data.registrationNo.trim()
+      : null;
+
   // Atomik: Account + AccountCompany kayıtları aynı transaction.
   try {
     const created = await prisma.account.create({
@@ -530,6 +571,9 @@ export async function createAccount({ data, user }) {
         vkn,
         phone: data?.phone ?? null,
         email: data?.email ?? null,
+        customerType,
+        legalName,
+        registrationNo,
         // Legacy: ilk company'i companyId'ye yaz — mevcut Case scope sorguları çalışsın.
         companyId: companies[0].companyId,
         companies: {
@@ -600,6 +644,22 @@ export async function updateAccount({ accountId, data, user }) {
       }
     }
     patch.vkn = newVkn;
+  }
+
+  // WR-A1: customerType / legalName / registrationNo PATCH. TCKN YOK.
+  if (data?.customerType !== undefined) {
+    const ct = normalizeCustomerType(data.customerType);
+    if (ct) patch.customerType = ct;
+  }
+  if (data?.legalName !== undefined) {
+    patch.legalName =
+      typeof data.legalName === 'string' && data.legalName.trim() ? data.legalName.trim() : null;
+  }
+  if (data?.registrationNo !== undefined) {
+    patch.registrationNo =
+      typeof data.registrationNo === 'string' && data.registrationNo.trim()
+        ? data.registrationNo.trim()
+        : null;
   }
 
   if (Object.keys(patch).length === 0) {

@@ -6,8 +6,11 @@ import { Field, Select, TextInput } from '@/components/ui/Field';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
+  CUSTOMER_TYPES,
+  CUSTOMER_TYPE_LABELS,
   type AccountCompanyCreateInput,
   type AccountDetail,
+  type CustomerType,
 } from '@/services/accountService';
 import { lookupService } from '@/services/caseService';
 import { notify } from '@/components/ui/Toast';
@@ -56,6 +59,10 @@ export function AccountFormModal({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [isActive, setIsActive] = useState(true);
+  // WR-A1 — Müşteri tipi + (opsiyonel) kurumsal alanlar.
+  const [customerType, setCustomerType] = useState<CustomerType>('Corporate');
+  const [legalName, setLegalName] = useState('');
+  const [registrationNo, setRegistrationNo] = useState('');
   const [rows, setRows] = useState<CompanyRow[]>([emptyCompanyRow()]);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -71,16 +78,24 @@ export function AccountFormModal({
       setPhone(account.phone ?? '');
       setEmail(account.email ?? '');
       setIsActive(account.isActive);
+      setCustomerType(account.customerType ?? 'Corporate');
+      setLegalName(account.legalName ?? '');
+      setRegistrationNo(account.registrationNo ?? '');
     } else {
       setName('');
       setVkn('');
       setPhone('');
       setEmail('');
       setIsActive(true);
+      setCustomerType('Corporate');
+      setLegalName('');
+      setRegistrationNo('');
       const defaultCompanyId = companies.length === 1 ? companies[0].id : '';
       setRows([{ ...emptyCompanyRow(), companyId: defaultCompanyId }]);
     }
   }, [open, mode, account, companies]);
+
+  const isIndividual = customerType === 'Individual';
 
   function updateRow(index: number, patch: Partial<CompanyRow>) {
     setRows((current) => current.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -131,9 +146,13 @@ export function AccountFormModal({
     if (mode === 'create') {
       const body = {
         name: name.trim(),
-        vkn: vkn.trim() || null,
+        // WR-A1: Bireysel'de VKN gönderilmez; helper text TCKN A2'ye işaret ediyor.
+        vkn: isIndividual ? null : vkn.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
+        customerType,
+        legalName: isIndividual ? null : legalName.trim() || null,
+        registrationNo: isIndividual ? null : registrationNo.trim() || null,
         companies: rows.map<AccountCompanyCreateInput>((r) => ({
           companyId: r.companyId,
           externalCustomerCode: r.externalCustomerCode.trim() || null,
@@ -150,7 +169,21 @@ export function AccountFormModal({
         email: email.trim() !== (account.email ?? '') ? email.trim() || null : undefined,
         isActive: isActive !== account.isActive ? isActive : undefined,
         // VKN sadece kullanıcı dolu bıraktıysa gönderilir; boşsa mevcut kalır.
-        vkn: vkn.trim() ? vkn.trim() : undefined,
+        // WR-A1: Bireysel seçiliyse VKN gönderilmez (alan disabled).
+        vkn: isIndividual ? undefined : vkn.trim() ? vkn.trim() : undefined,
+        customerType: customerType !== account.customerType ? customerType : undefined,
+        legalName:
+          legalName.trim() !== (account.legalName ?? '')
+            ? isIndividual
+              ? null
+              : legalName.trim() || null
+            : undefined,
+        registrationNo:
+          registrationNo.trim() !== (account.registrationNo ?? '')
+            ? isIndividual
+              ? null
+              : registrationNo.trim() || null
+            : undefined,
       };
       saved = await accountService.update(account.id, body);
       if (saved) notify({ type: 'success', title: 'Müşteri güncellendi', message: saved.name });
@@ -199,17 +232,54 @@ export function AccountFormModal({
           />
         </Field>
 
+        {/* WR-A1 — Müşteri tipi segmented control. Bireysel'de VKN disabled olur. */}
+        <Field label="Müşteri Tipi" required>
+          <div
+            role="radiogroup"
+            aria-label="Müşteri tipi"
+            className="inline-flex flex-wrap rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs dark:border-ndark-border dark:bg-ndark-surface"
+          >
+            {CUSTOMER_TYPES.map((opt) => {
+              const active = customerType === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setCustomerType(opt)}
+                  className={
+                    'rounded px-3 py-1.5 transition-colors ' +
+                    (active
+                      ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-ndark-bg dark:text-ndark-text'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-ndark-muted dark:hover:text-ndark-text')
+                  }
+                >
+                  {CUSTOMER_TYPE_LABELS[opt]}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
             label="VKN"
-            hint={mode === 'edit' ? 'Boş bırak → değişmez.' : 'Vergi numarası (opsiyonel)'}
+            hint={
+              isIndividual
+                ? 'TCKN doğrulaması sonraki fazda eklenecek.'
+                : mode === 'edit'
+                  ? 'Boş bırak → değişmez.'
+                  : 'Vergi numarası (opsiyonel)'
+            }
           >
             <TextInput
-              value={vkn}
+              value={isIndividual ? '' : vkn}
               onChange={(e) => setVkn(e.target.value)}
-              placeholder="1234567890"
+              placeholder={isIndividual ? '—' : '1234567890'}
               inputMode="numeric"
               autoComplete="off"
+              disabled={isIndividual}
             />
           </Field>
           <Field label="Telefon">
@@ -221,6 +291,28 @@ export function AccountFormModal({
             />
           </Field>
         </div>
+
+        {/* WR-A1 — Kurumsal/Kamu/Vakıf-STK için opsiyonel ticari unvan + sicil no. */}
+        {!isIndividual && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Ticari Unvan" hint="Resmi tam unvan (opsiyonel)">
+              <TextInput
+                value={legalName}
+                onChange={(e) => setLegalName(e.target.value)}
+                placeholder="Örn. Acme Anonim Şirketi"
+                autoComplete="off"
+              />
+            </Field>
+            <Field label="Sicil No" hint="Ticaret sicil no veya muadili (opsiyonel)">
+              <TextInput
+                value={registrationNo}
+                onChange={(e) => setRegistrationNo(e.target.value)}
+                placeholder="Örn. 123456"
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+        )}
 
         <Field label="E-posta">
           <TextInput
