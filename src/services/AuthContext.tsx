@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from './supabase';
+// WR-H2 — Logout sırasında client cache temizlenir (cross-user PII leak önlenir).
+import { clearClientCache } from './clientCache';
 
 /**
  * AuthContext — Supabase session + DB kullanıcı bilgisi (rol dahil).
@@ -93,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+    // WR-H2 — Logout client cache'i temizle; sonraki kullanıcı önceki PII'ye dokunmasın.
+    clearClientCache();
     setState({ status: 'unauthenticated', user: null, error: null });
   }
 

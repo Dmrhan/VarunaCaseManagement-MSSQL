@@ -97,6 +97,27 @@ export const USE_MOCK = false;
 
 const API_BASE = '/api/cases';
 
+// WR-H2 — Client cache helpers (import after API_BASE def to keep this block grouped).
+// clientCache is a sibling module with no circular dep (it takes a fetcher callback).
+import {
+  cachedGet,
+  invalidateCachePrefix,
+  DEFAULT_CLIENT_CACHE_TTL_MS,
+} from '@/services/clientCache';
+
+/** WR-H2 — case detail + customer-context cache key'i için tek noktadan helper. */
+function caseDetailCacheKey(id: string): string {
+  return `${API_BASE}/${id}`;
+}
+
+/**
+ * WR-H2 — Vaka mutation'larından sonra çağrılır. Hem case detail hem
+ * customer-context (aynı id prefix'li tüm GET key'ler) drop'lanır.
+ */
+function invalidateCaseDetail(id: string): void {
+  invalidateCachePrefix(caseDetailCacheKey(id));
+}
+
 /**
  * SLA fallback saatleri — Sprint F SlaPolicy 5-tuple match'i bulunamadığında
  * priority bazlı varsayılan değerler kullanılır.
@@ -381,7 +402,11 @@ export const caseService = {
       const found = store.find((c) => c.id === id);
       return found ? clone(found) : undefined;
     }
-    return apiFetch<Case>(`${API_BASE}/${id}`, undefined, 'Vaka yüklenemedi');
+    // WR-H2 — TTL cache (30s) ile drawer/detail reopen sırasında network'ten kaçın.
+    const key = caseDetailCacheKey(id);
+    return cachedGet<Case>(key, DEFAULT_CLIENT_CACHE_TTL_MS, () =>
+      apiFetch<Case>(key, undefined, 'Vaka yüklenemedi'),
+    );
   },
 
   async create(input: NewCaseInput): Promise<Case> {
@@ -633,7 +658,7 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${id}/transition`,
       {
         method: 'POST',
@@ -642,6 +667,8 @@ export const caseService = {
       },
       'Statü geçişi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2
+    return result;
   },
 
   // Spec section 15 — CaseActivity her değişiklik: field_name, old_value, new_value
@@ -687,7 +714,7 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${id}`,
       {
         method: 'PATCH',
@@ -696,6 +723,8 @@ export const caseService = {
       },
       'Vaka güncellenemedi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2
+    return result;
   },
 
   /**
@@ -719,7 +748,7 @@ export const caseService = {
    * kullanıcının scope'unda.
    */
   async linkAccount(caseId: string, accountId: string): Promise<Case | undefined> {
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${caseId}/link-account`,
       {
         method: 'PATCH',
@@ -728,6 +757,8 @@ export const caseService = {
       },
       'Müşteri eşleştirme',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -772,7 +803,7 @@ export const caseService = {
       store[idx] = updated;
       return { caseUpdated: clone(updated), callLog: clone(newLog) };
     }
-    return apiFetch<{ caseUpdated: Case; callLog: CaseCallLog }>(
+    const result = await apiFetch<{ caseUpdated: Case; callLog: CaseCallLog }>(
       `${API_BASE}/${id}/call-logs`,
       {
         method: 'POST',
@@ -781,6 +812,8 @@ export const caseService = {
       },
       'Çağrı kaydı eklenemedi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2
+    return result;
   },
 
   /**
@@ -825,7 +858,7 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${caseId}/activity`,
       {
         method: 'POST',
@@ -834,6 +867,8 @@ export const caseService = {
       },
       'Aktivite kaydı eklenemedi',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -880,7 +915,7 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${caseId}/checklist/${itemId}`,
       {
         method: 'PATCH',
@@ -889,6 +924,8 @@ export const caseService = {
       },
       'Kontrol listesi güncellenemedi',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   async addNote(id: string, note: { content: string; visibility: NoteVisibility; authorName: string }): Promise<CaseNote | undefined> {
@@ -911,7 +948,7 @@ export const caseService = {
       };
       return clone(newNote);
     }
-    return apiFetch<CaseNote>(
+    const result = await apiFetch<CaseNote>(
       `${API_BASE}/${id}/notes`,
       {
         method: 'POST',
@@ -920,6 +957,8 @@ export const caseService = {
       },
       'Not eklenemedi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2 — note Case response'unda embed
+    return result;
   },
 
   /**
@@ -974,7 +1013,7 @@ export const caseService = {
       };
       return clone(newReply);
     }
-    return apiFetch<CaseNote>(
+    const result = await apiFetch<CaseNote>(
       `${API_BASE}/${caseId}/notes/${noteId}/reply`,
       {
         method: 'POST',
@@ -983,6 +1022,8 @@ export const caseService = {
       },
       'Yanit eklenemedi',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -999,7 +1040,7 @@ export const caseService = {
       await delay(40);
       return { action: 'added' };
     }
-    return apiFetch<{ action: 'added' | 'removed' }>(
+    const result = await apiFetch<{ action: 'added' | 'removed' }>(
       `${API_BASE}/${caseId}/notes/${noteId}/reactions`,
       {
         method: 'POST',
@@ -1008,6 +1049,8 @@ export const caseService = {
       },
       'Reaksiyon kaydedilemedi',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -1136,7 +1179,7 @@ export const caseService = {
     }
 
     // Adım 3 — finalize: DB satırı + history
-    return apiFetch<{ caseUpdated: Case; file: CaseFile }>(
+    const result = await apiFetch<{ caseUpdated: Case; file: CaseFile }>(
       `${API_BASE}/${id}/files/finalize`,
       {
         method: 'POST',
@@ -1151,6 +1194,8 @@ export const caseService = {
       },
       'Dosya kaydedilemedi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2
+    return result;
   },
 
   /** Dosya indirme için kısa ömürlü signed URL al + tarayıcıda aç. */
@@ -1215,11 +1260,13 @@ export const caseService = {
       store[idx] = updated;
       return clone(updated);
     }
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${id}/files/${fileId}`,
       { method: 'DELETE' },
       'Dosya silinemedi',
     );
+    if (result) invalidateCaseDetail(id); // WR-H2
+    return result;
   },
 
   async findOpenCaseFor(accountId: string, caseType: CaseType): Promise<Case | undefined> {
@@ -1463,7 +1510,7 @@ export const caseService = {
       aiConfidence?: number;
     },
   ): Promise<Case | undefined> {
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `${API_BASE}/${caseId}/transfer`,
       {
         method: 'POST',
@@ -1472,6 +1519,8 @@ export const caseService = {
       },
       'Vaka aktarımı başarısız',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -1569,7 +1618,7 @@ export const caseService = {
     caseId: string,
     userId: string,
   ): Promise<{ id: string; userId: string; addedAt: string } | undefined> {
-    return apiFetch(
+    const result = await apiFetch<{ id: string; userId: string; addedAt: string }>(
       `${API_BASE}/${caseId}/watchers`,
       {
         method: 'POST',
@@ -1578,15 +1627,19 @@ export const caseService = {
       },
       'İzleyici eklenemedi',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /** İzleyici kaldır. Self veya Supervisor+. */
   async removeWatcher(caseId: string, userId: string): Promise<{ ok: true } | undefined> {
-    return apiFetch(
+    const result = await apiFetch<{ ok: true }>(
       `${API_BASE}/${caseId}/watchers/${encodeURIComponent(userId)}`,
       { method: 'DELETE' },
       'İzleyici çıkarılamadı',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /** Kullanıcının izlediği vakalar (Watcher Inbox — ileri faz). */
@@ -1620,7 +1673,7 @@ export const caseService = {
     linkedCaseId: string,
     linkType: CaseLinkType,
   ): Promise<{ linkId: string; linkType: CaseLinkType; linkedCaseNumber: string } | undefined> {
-    return apiFetch(
+    const result = await apiFetch<{ linkId: string; linkType: CaseLinkType; linkedCaseNumber: string }>(
       `${API_BASE}/${caseId}/links`,
       {
         method: 'POST',
@@ -1629,15 +1682,22 @@ export const caseService = {
       },
       'Bağlantı eklenemedi',
     );
+    if (result) {
+      invalidateCaseDetail(caseId);
+      invalidateCaseDetail(linkedCaseId); // WR-H2 — symmetric link side
+    }
+    return result;
   },
 
   /** Bağlantı kaldır. Symmetric Duplicate ters yön de silinir (BFF). */
   async removeLink(caseId: string, linkId: string): Promise<{ ok: true } | undefined> {
-    return apiFetch(
+    const result = await apiFetch<{ ok: true }>(
       `${API_BASE}/${caseId}/links/${encodeURIComponent(linkId)}`,
       { method: 'DELETE' },
       'Bağlantı kaldırılamadı',
     );
+    if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
   },
 
   /**
@@ -1654,7 +1714,7 @@ export const caseService = {
       status?: CaseStatus;
     },
   ): Promise<{ updated: number; failed: number; errors: { caseId: string; error: string }[] } | undefined> {
-    return apiFetch(
+    const result = await apiFetch<{ updated: number; failed: number; errors: { caseId: string; error: string }[] }>(
       `${API_BASE}/bulk-update`,
       {
         method: 'POST',
@@ -1663,6 +1723,8 @@ export const caseService = {
       },
       'Toplu güncelleme başarısız',
     );
+    if (result) caseIds.forEach((id) => invalidateCaseDetail(id)); // WR-H2
+    return result;
   },
 
   async findByAccount(
