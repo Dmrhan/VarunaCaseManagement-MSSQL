@@ -91,6 +91,148 @@ Use this staged workflow. Skip stages only when the work is trivial
 7. **Handover Note** - Handover Agent, if the change is non-trivial or
    touches operations/data (template: HANDOVER_NOTE)
 
+## Git Flow Rules
+
+These rules apply to **every** implementation regardless of size. They
+keep `dev` and `main` aligned regardless of which path a merge actually
+takes through GitHub's UI.
+
+### Observed reality (2026-05-19)
+
+PRs #160, #161, #162, #163 were each opened against `dev` but landed on
+`main` when merged through GitHub's UI (likely because the repository
+default base is `main` and the operator did not switch it at merge
+time). The protocol previously assumed the strict `feature → dev → main`
+flow; that assumption produced wasted release-PR steps and stale `dev`.
+The rules below replace the strict rule with a dual-path discipline:
+**check where the PR actually landed** and apply the matching cleanup.
+
+### Default flow
+
+1. **Start from updated `dev`.** Before branching, run:
+   ```bash
+   git fetch origin
+   git checkout dev
+   git merge --ff-only origin/dev
+   ```
+   If the fast-forward fails because `dev` has local commits, stop and
+   report — never overwrite.
+
+2. **Create the feature branch from `dev`:**
+   ```bash
+   git checkout -b feature/<short-kebab-name>
+   ```
+   Prefixes: `feat/<name>` for new features, `fix/<name>` for bug fixes,
+   `docs/<name>` for documentation-only work, `chore/<name>` for tooling.
+
+3. **Open the PR with intended base `dev`.** State the intended base in
+   the chat/PR body explicitly. PR body must include:
+   - Work Register ID (e.g. `WR-A1`) when applicable
+   - Planning Card link if one was authored
+   - Validation summary
+   GitHub's UI may show a different default base. **The operator must
+   verify the base at merge time** — never trust the form default.
+
+4. **After merge, identify which path actually happened** by re-fetching
+   and reading the topology:
+   ```bash
+   git fetch origin
+   git log --oneline origin/main..origin/dev   # commits in dev not yet in main
+   git log --oneline origin/dev..origin/main   # commits in main not yet in dev
+   ```
+   Exactly one of the two paths below applies; report which one in the
+   final task summary.
+
+   **Path A — PR landed on `dev` (standard flow):**
+   - `origin/main..origin/dev` is non-empty (your feature commits).
+   - `origin/dev..origin/main` should be empty (assuming `dev` was even
+     with `main` before merge).
+   - Open a release PR `dev → main` to promote.
+   - After release PR merges, re-fetch and confirm parity.
+
+   **Path B — PR landed directly on `main` (observed default in this repo):**
+   - `origin/dev..origin/main` is non-empty (your feature commits sit
+     in `main`, not `dev`).
+   - `origin/main..origin/dev` should be empty.
+   - **Do not open a redundant release PR.** Fast-forward `dev` to
+     `main` instead:
+     ```bash
+     git checkout dev
+     git merge --ff-only origin/main
+     git push origin dev
+     ```
+   - Sync local `main` too: `git branch -f main origin/main`.
+
+5. **After either path, delete the feature branch (local + remote)**
+   unless there is a documented reason to keep it:
+   ```bash
+   git branch -D feature/<short-name>
+   git push origin --delete feature/<short-name>
+   ```
+
+6. **Before starting any new feature, confirm sync:**
+   ```bash
+   git log --oneline origin/main..origin/dev | head -3   # must be empty
+   git log --oneline origin/dev..origin/main | head -3   # must be empty
+   ```
+   If either side is non-empty, resolve before branching.
+
+### Final-report metadata (required)
+
+Every post-merge task summary must include this metadata block — no
+exceptions:
+
+- **Intended PR base:** `dev` (or `main` only for release / approved hotfix)
+- **Observed merge path:** `Path A` (landed on dev) or `Path B` (landed on main)
+- **Action taken:** `release PR dev → main` (Path A) or `fast-forward dev to main` (Path B)
+- **Feature branch deleted after merge:** Yes / No / Pending
+- **Topology check:** `origin/main..origin/dev` and `origin/dev..origin/main`
+  — both must be empty before the task closes
+- **origin/main HEAD / origin/dev HEAD** — the commit hashes
+
+Missing this block is a self-review failure; add it before declaring
+"done".
+
+### Anti-Patterns
+
+These are prohibited; surfacing any of them in a Card or PR review
+sends the work back:
+
+1. **Opening a release PR `dev → main` when `main` is already ahead of
+   `dev`.** That state means a feature PR landed on `main` (Path B);
+   fast-forward `dev` instead. A release PR with no commits to release
+   is noise.
+2. **Leaving merged feature branches around.** Delete local + remote
+   immediately after merge unless there is an explicit reason to keep
+   them; the reason must be written down.
+3. **Starting a new feature while `dev` is behind `main`.** Always
+   sync first (`merge --ff-only origin/main` on `dev`, then push).
+4. **Silently creating extra branches.** Every branch creation must be
+   announced and tied to a Work Register item / Planning Card.
+5. **Trusting GitHub's default base at merge time.** The repository
+   default is `main`; if your intended base is `dev`, verify before
+   clicking merge. If it landed on `main` anyway, switch to Path B —
+   do not retry by re-opening or reverting.
+
+### Branch Hygiene Audit
+
+Periodically (and at the start of any "let's tidy up" session) run a
+**branch hygiene audit**:
+
+- List all local branches: `git branch`
+- List all remote branches: `git branch -r`
+- Cross-check each remote branch against `gh pr list --state merged --limit 50`
+  (or the GitHub web equivalent) to determine which feature branches
+  belong to already-merged PRs.
+- For each merged-but-not-deleted branch, propose deletion (local +
+  remote) and confirm before deleting.
+- For each unmerged-but-stale branch (no commits in 30+ days, no open
+  PR), flag for review with the original author.
+
+This protocol task **does not delete branches automatically.** It only
+documents the cleanup discipline. Actual deletions require an explicit
+"approve cleanup" or similar instruction.
+
 ## Workflow Size Guide
 
 Scale the workflow to the size and risk of the change. When in doubt,
