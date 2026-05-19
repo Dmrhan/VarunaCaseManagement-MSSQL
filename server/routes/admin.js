@@ -33,7 +33,11 @@ function asyncRoute(handler) {
       await handler(req, res);
     } catch (err) {
       if (err instanceof AdminError) {
-        return res.status(err.status).json({ error: 'admin', message: err.message });
+        // WR-B1 review fix — surface optional `code` for client-friendly
+        // identification (e.g. team_lead_requires_team). Default 'admin'.
+        return res
+          .status(err.status)
+          .json({ error: err.code ?? 'admin', message: err.message });
       }
       console.error('[admin]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });

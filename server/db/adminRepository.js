@@ -231,6 +231,27 @@ function normalizeSupportLevel(raw) {
   return s;
 }
 
+/**
+ * WR-B1 review fix — Team lead invariant: a Person can be isTeamLead=true
+ * only when an effective teamId is set. Throws AdminError(400) with code
+ * `team_lead_requires_team` on violation.
+ *
+ * Inputs are "effective" values (already merged from patch + existing row by
+ * caller for the update path). Empty string treated as null/missing.
+ */
+function assertTeamLeadInvariant({ effectiveIsTeamLead, effectiveTeamId }) {
+  if (!effectiveIsTeamLead) return;
+  const hasTeam = typeof effectiveTeamId === 'string' && effectiveTeamId.trim().length > 0;
+  if (!hasTeam) {
+    const err = new AdminError(
+      'Takım lideri olabilmek için bir takıma bağlı olmalı.',
+      400,
+    );
+    err.code = 'team_lead_requires_team';
+    throw err;
+  }
+}
+
 export const personRepo = {
   async list() {
     return prisma.person.findMany({ orderBy: { name: 'asc' } });
@@ -243,6 +264,13 @@ export const personRepo = {
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
     const supportLevel = normalizeSupportLevel(input.supportLevel);
+
+    // WR-B1 review fix — isTeamLead=true must come with an effective teamId.
+    assertTeamLeadInvariant({
+      effectiveIsTeamLead: !!input.isTeamLead,
+      effectiveTeamId: input.teamId,
+    });
+
     return prisma.person.create({
       data: {
         name: input.name.trim(),
@@ -263,6 +291,29 @@ export const personRepo = {
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
     const supportLevel = normalizeSupportLevel(patch.supportLevel);
+
+    // WR-B1 review fix — compute effective (teamId, isTeamLead) AFTER patch.
+    //   patch.teamId === undefined → keep existing (need a single fetch)
+    //   patch.teamId === null/''    → cleared
+    //   patch.isTeamLead === undefined → keep existing
+    const teamIdInPatch = 'teamId' in patch;
+    const isTeamLeadInPatch = 'isTeamLead' in patch;
+    let effectiveTeamId;
+    let effectiveIsTeamLead;
+    if (teamIdInPatch && isTeamLeadInPatch) {
+      effectiveTeamId = patch.teamId;
+      effectiveIsTeamLead = !!patch.isTeamLead;
+    } else {
+      const existing = await prisma.person.findUnique({
+        where: { id },
+        select: { teamId: true, isTeamLead: true },
+      });
+      if (!existing) throw new AdminError('Kişi bulunamadı.', 404);
+      effectiveTeamId = teamIdInPatch ? patch.teamId : existing.teamId;
+      effectiveIsTeamLead = isTeamLeadInPatch ? !!patch.isTeamLead : existing.isTeamLead;
+    }
+    assertTeamLeadInvariant({ effectiveIsTeamLead, effectiveTeamId });
+
     return prisma.person.update({
       where: { id },
       data: {
