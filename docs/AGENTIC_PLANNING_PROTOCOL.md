@@ -436,7 +436,7 @@ Bu protokol aşağıdaki davranışları yasaklar. Card review'ünde herhangi bi
 
 **Git Flow hygiene (detaylı kurallar: [AI_WORKFLOW.md → Git Flow Rules](./AI_WORKFLOW.md#git-flow-rules)):**
 
-17. **Feature PR'ı doğrudan `main`'e açmak.** Her zaman `dev` → sonra ayrı `dev → main` release PR.
+17. **`dev` `main`'in gerisindeyken release PR (`dev → main`) açmak.** Bu durumda feature PR Path B (doğrudan `main`'e merge) ile inmiş demektir; release PR boş olur. Onun yerine `dev`'i `main`'den fast-forward et + push et. PR base = `dev` intent korunur; GitHub UI'nın default'una güvenme, merge anında base'i doğrula. (Detaylı dual-path discipline: [AI_WORKFLOW.md → Git Flow Rules](./AI_WORKFLOW.md#git-flow-rules))
 18. **Merge edilmiş feature branch'i silmeden bırakmak.** Local + remote, açık bir saklama gerekçesi yoksa hemen silinir.
 19. **`dev` `main`'in gerisindeyken yeni feature başlatmak.** Önce `dev`'i `main`'den fast-forward et + push et.
 20. **Sessizce ekstra branch açmak.** Her branch oluşturma WR item'a ve/veya Planning Card'a bağlanır; raporda explicit görünür.
