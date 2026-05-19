@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, AlertCircle, ExternalLink, Loader2, MessageCircle,
   Paperclip, Mail, Phone, Trash2, Download, Upload, User as UserIcon,
+  Sparkles, RefreshCw, ClipboardCopy,
 } from 'lucide-react';
 import { cn } from '@/components/ui/cn';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +13,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import { caseService, lookupService } from '@/services/caseService';
 import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import { aiService } from '@/services/aiService';
 import { MentionTextarea } from '@/features/cases/components/MentionTextarea';
 import { MentionContent } from '@/features/cases/components/MentionContent';
 import type { Case, CaseFilters, CasePriority, CaseStatus, NoteVisibility } from '@/features/cases/types';
@@ -54,6 +56,9 @@ export interface CaseListDrawerProps {
 // Status transitions that require additional payload — gizlenir, "Tam ekranda aç" yönlendirilir
 const SIMPLE_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', 'YenidenAcildi'];
 const COMPLEX_STATUSES: CaseStatus[] = ['Çözüldü', '3rdPartyBekleniyor', 'Eskalasyon', 'İptalEdildi'];
+
+// Kapalı/iptal vakalarda AI çözüm önerisi anlamsız (zaten çözülmüş veya iptal)
+const COMPLEX_CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
 const PRIORITIES: CasePriority[] = ['Low', 'Medium', 'High', 'Critical'];
 
@@ -421,6 +426,10 @@ function QuickEditPanel({
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // AI çözüm önerisi (Notlar tab) — manual trigger, cost-aware
+  const [aiDraft, setAiDraft] = useState<string | null>(null);
+  const [aiDrafting, setAiDrafting] = useState(false);
+
   // Reset state when case changes
   useEffect(() => {
     if (caseItem) {
@@ -431,6 +440,7 @@ function QuickEditPanel({
       setNoteVisibility('Internal');
       setShowAllNotes(false);
       setTab('edit');
+      setAiDraft(null);
     }
   }, [caseItem?.id]);
 
@@ -496,6 +506,35 @@ function QuickEditPanel({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDraftResolution() {
+    if (!caseItem) return;
+    setAiDrafting(true);
+    try {
+      const r = await aiService.draftResolution({
+        caseSubject: caseItem.title,
+        description: caseItem.description,
+        caseType: caseItem.caseType,
+        category: caseItem.category,
+        history: caseItem.history,
+        notes: caseItem.notes,
+      });
+      if (r.ok) {
+        setAiDraft(r.data.draft);
+      } else {
+        toast({ type: 'error', message: 'AI önerisi alınamadı.' });
+      }
+    } finally {
+      setAiDrafting(false);
+    }
+  }
+
+  function applyDraftToNote() {
+    if (!aiDraft) return;
+    // Mevcut note içeriğini koru — kullanıcı düzenleyip ekleyebilsin.
+    setNoteContent((prev) => (prev ? `${prev}\n\n${aiDraft}` : aiDraft));
+    setAiDraft(null);
   }
 
   async function handleAddNote() {
@@ -791,6 +830,68 @@ function QuickEditPanel({
 
         {tab === 'notes' && (
           <div className="space-y-4">
+            {/* AI çözüm önerisi — manual trigger, açık vakalarda */}
+            {!COMPLEX_CLOSED_STATUSES.includes(caseItem.status) && (
+              <div className="rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/20">
+                {aiDraft === null ? (
+                  <button
+                    type="button"
+                    onClick={handleDraftResolution}
+                    disabled={aiDrafting}
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-violet-300 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-violet-800 dark:bg-ndark-card dark:text-violet-300"
+                  >
+                    {aiDrafting ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        Öneri hazırlanıyor…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} />
+                        AI çözüm önerisi al
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div>
+                    <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                      <Sparkles size={11} />
+                      AI Önerisi
+                    </div>
+                    <p className="whitespace-pre-wrap rounded-md border border-violet-100 bg-white p-2 text-xs leading-relaxed text-slate-700 dark:border-violet-900/40 dark:bg-ndark-card dark:text-ndark-text">
+                      {aiDraft}
+                    </p>
+                    <div className="mt-2 flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setAiDraft(null)}
+                        className="rounded-md px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-surface"
+                      >
+                        Kapat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDraftResolution}
+                        disabled={aiDrafting}
+                        className="inline-flex items-center gap-1 rounded-md border border-violet-200 px-2 py-1 text-[11px] font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-60 dark:border-violet-800 dark:text-violet-300"
+                      >
+                        {aiDrafting ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                        Yeniden Üret
+                      </button>
+                      <button
+                        type="button"
+                        onClick={applyDraftToNote}
+                        className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700"
+                      >
+                        <ClipboardCopy size={11} />
+                        Nota Kopyala
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Note compose with mention support */}
             <div className="rounded-md border border-slate-200 px-3 py-3 dark:border-ndark-border">
               <div className="mb-2 flex items-center justify-between">
