@@ -400,12 +400,34 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
           preferredChannel: true,
         },
       },
+      // WR-A3 / PM-02 — country-agnostic address book. Sadece izinli companyId
+      // scope'undaki adresler dışarı sızar (filter aşağıda).
+      addresses: {
+        orderBy: [{ isActive: 'desc' }, { isDefault: 'desc' }, { type: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          companyId: true,
+          type: true,
+          label: true,
+          line1: true,
+          line2: true,
+          district: true,
+          city: true,
+          state: true,
+          postalCode: true,
+          country: true,
+          isDefault: true,
+          isActive: true,
+        },
+      },
     },
   });
   if (!account) return null;
 
   // Sadece izinli AccountCompany'ler dışarı sızar.
   const visibleCompanies = account.companies.filter((c) => allowed.includes(c.companyId));
+  // WR-A3 — Aynı multi-tenant kuralı address'lere uygulanır.
+  const visibleAddresses = (account.addresses ?? []).filter((a) => allowed.includes(a.companyId));
 
   // Case istatistikleri — yalnızca izinli şirketlerin vakaları + legacy null/scope.
   const caseScopeOr = [];
@@ -504,6 +526,22 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       })),
     })),
     contacts: account.contacts,
+    // WR-A3 / PM-02 — country-agnostic address list (scope-filtered).
+    addresses: visibleAddresses.map((a) => ({
+      id: a.id,
+      companyId: a.companyId,
+      type: a.type,
+      label: a.label ?? null,
+      line1: a.line1,
+      line2: a.line2 ?? null,
+      district: a.district ?? null,
+      city: a.city ?? null,
+      state: a.state ?? null,
+      postalCode: a.postalCode ?? null,
+      country: a.country,
+      isDefault: a.isDefault,
+      isActive: a.isActive,
+    })),
     caseStats: { total, open, resolved, slaBreachCount },
     recentCases: recentCases.map((c) => ({
       id: c.id,
@@ -1479,6 +1517,224 @@ export async function removeProject({ accountId, projectId, user }) {
   return { id: projectId };
 }
 
+/* ---------- Address CRUD (WR-A3 / PM-02) ---------- */
+
+const ADDRESS_TYPES = new Set(['Billing', 'Shipping', 'Visit', 'Headquarters', 'Branch']);
+const ISO2_RX = /^[A-Z]{2}$/;
+
+/**
+ * Address yazma yetkisi:
+ *  - Account, kullanıcının erişebildiği scope'ta olmalı (assertAccountInScope)
+ *  - Adres var ise bu account'a ait olmalı + companyId allowedCompanyIds içinde
+ * Dönen `row`: { id, accountId, companyId, type, isDefault, isActive }
+ */
+async function loadEditableAddress({ accountId, addressId, user }) {
+  await assertAccountInScope(accountId, user.allowedCompanyIds);
+  const row = await prisma.address.findUnique({
+    where: { id: addressId },
+    select: {
+      id: true,
+      accountId: true,
+      companyId: true,
+      type: true,
+      isDefault: true,
+      isActive: true,
+    },
+  });
+  if (!row || row.accountId !== accountId) return null;
+  const allowed = ensureArray(user.allowedCompanyIds);
+  if (allowed.length && !allowed.includes(row.companyId)) return null;
+  return row;
+}
+
+/**
+ * Address input sanitization + validation. Yaratma ve güncelleme yollarında
+ * aynı kurallar.
+ */
+function sanitizeAddressInput(data, { isCreate }) {
+  const out = {};
+  if (isCreate) {
+    const type = typeof data?.type === 'string' ? data.type.trim() : '';
+    if (!type) throw new AccountValidationError('Adres tipi zorunlu.', { code: 'address_type_required' });
+    if (!ADDRESS_TYPES.has(type)) {
+      throw new AccountValidationError('Geçersiz adres tipi.', { code: 'address_type_invalid' });
+    }
+    out.type = type;
+
+    const companyId = typeof data?.companyId === 'string' ? data.companyId.trim() : '';
+    if (!companyId) throw new AccountValidationError('Şirket zorunlu.', { code: 'address_company_required' });
+    out.companyId = companyId;
+  } else if (data?.type !== undefined) {
+    const type = typeof data.type === 'string' ? data.type.trim() : '';
+    if (!ADDRESS_TYPES.has(type)) {
+      throw new AccountValidationError('Geçersiz adres tipi.', { code: 'address_type_invalid' });
+    }
+    out.type = type;
+  }
+
+  if (isCreate || data?.line1 !== undefined) {
+    const line1 = typeof data?.line1 === 'string' ? data.line1.trim() : '';
+    if (!line1) throw new AccountValidationError('Adres satırı (line1) zorunlu.', { code: 'address_line1_required' });
+    out.line1 = line1;
+  }
+  if (data?.line2 !== undefined) out.line2 = (data.line2 ?? '').toString().trim() || null;
+  if (data?.label !== undefined) out.label = (data.label ?? '').toString().trim() || null;
+  if (data?.district !== undefined) out.district = (data.district ?? '').toString().trim() || null;
+  if (data?.city !== undefined) out.city = (data.city ?? '').toString().trim() || null;
+  if (data?.state !== undefined) out.state = (data.state ?? '').toString().trim() || null;
+  if (data?.postalCode !== undefined) out.postalCode = (data.postalCode ?? '').toString().trim() || null;
+
+  if (isCreate || data?.country !== undefined) {
+    const raw = data?.country == null || data.country === '' ? 'TR' : String(data.country).trim().toUpperCase();
+    if (!ISO2_RX.test(raw)) {
+      throw new AccountValidationError(
+        'Ülke kodu ISO-2 formatında olmalı (örn. TR, DE, US).',
+        { code: 'address_country_invalid' },
+      );
+    }
+    out.country = raw;
+  }
+
+  if (data?.isDefault !== undefined) out.isDefault = !!data.isDefault;
+  if (data?.isActive !== undefined) out.isActive = !!data.isActive;
+  return out;
+}
+
+/**
+ * POST /api/accounts/:id/addresses
+ *
+ * Body: { companyId, type, line1, line2?, label?, district?, city?, state?,
+ *   postalCode?, country?, isDefault?, isActive? }
+ *
+ * Doğrulamalar:
+ *  - companyId account'un mevcut AccountCompany kaydıyla eşleşmeli (cross-tenant
+ *    sızıntı önleme + tenant scope guard).
+ *  - companyId kullanıcının allowedCompanyIds'inde olmalı.
+ *  - isDefault=true → aynı (accountId, companyId, type) için diğer aktif
+ *    default'lar app-layer transaction içinde temizlenir.
+ */
+export async function addAddress({ accountId, data, user }) {
+  await assertAccountInScope(accountId, user.allowedCompanyIds);
+  const patch = sanitizeAddressInput(data, { isCreate: true });
+
+  // companyId account'un AccountCompany kaydı içinde olmalı + user scope'unda.
+  const allowed = ensureArray(user.allowedCompanyIds);
+  if (allowed.length && !allowed.includes(patch.companyId)) {
+    throw new AccountValidationError(
+      'Bu şirket erişiminiz dışında.',
+      { code: 'address_company_forbidden' },
+    );
+  }
+  const accountCompany = await prisma.accountCompany.findFirst({
+    where: { accountId, companyId: patch.companyId },
+    select: { id: true },
+  });
+  if (!accountCompany) {
+    throw new AccountValidationError(
+      'Bu müşteri bu şirkete bağlı değil — önce şirket ilişkisini ekleyin.',
+      { code: 'address_company_mismatch' },
+    );
+  }
+
+  const wantDefault = !!patch.isDefault;
+  const wantActive = patch.isActive === undefined ? true : patch.isActive;
+
+  const created = await prisma.$transaction(async (tx) => {
+    if (wantDefault && wantActive) {
+      await tx.address.updateMany({
+        where: {
+          accountId,
+          companyId: patch.companyId,
+          type: patch.type,
+          isActive: true,
+          isDefault: true,
+        },
+        data: { isDefault: false },
+      });
+    }
+    return tx.address.create({
+      data: {
+        accountId,
+        companyId: patch.companyId,
+        type: patch.type,
+        label: patch.label ?? null,
+        line1: patch.line1,
+        line2: patch.line2 ?? null,
+        district: patch.district ?? null,
+        city: patch.city ?? null,
+        state: patch.state ?? null,
+        postalCode: patch.postalCode ?? null,
+        country: patch.country ?? 'TR',
+        isDefault: wantDefault,
+        isActive: wantActive,
+      },
+    });
+  });
+
+  return { id: created.id, account: await getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds }) };
+}
+
+/**
+ * PATCH /api/accounts/:id/addresses/:addressId
+ *
+ * Güncellenebilir: type, label, line1, line2, district, city, state,
+ * postalCode, country, isDefault, isActive. companyId değiştirilemez
+ * (taşıma desteklenmiyor — yeni adres yarat + eskiyi pasifleştir).
+ */
+export async function updateAddress({ accountId, addressId, data, user }) {
+  const row = await loadEditableAddress({ accountId, addressId, user });
+  if (!row) return null;
+
+  const patch = sanitizeAddressInput(data, { isCreate: false });
+  // companyId immutable
+  if (data?.companyId !== undefined && data.companyId !== row.companyId) {
+    throw new AccountValidationError(
+      'Adresin şirketi değiştirilemez. Yeni şirket için yeni adres ekleyin.',
+      { code: 'address_company_immutable' },
+    );
+  }
+
+  const nextType = patch.type ?? row.type;
+  const nextIsDefault = patch.isDefault === undefined ? row.isDefault : patch.isDefault;
+  const nextIsActive = patch.isActive === undefined ? row.isActive : patch.isActive;
+  const becomesDefault = nextIsDefault && nextIsActive && (!row.isDefault || nextType !== row.type);
+
+  await prisma.$transaction(async (tx) => {
+    if (becomesDefault) {
+      await tx.address.updateMany({
+        where: {
+          accountId,
+          companyId: row.companyId,
+          type: nextType,
+          isActive: true,
+          isDefault: true,
+          NOT: { id: addressId },
+        },
+        data: { isDefault: false },
+      });
+    }
+    if (Object.keys(patch).length === 0) return;
+    await tx.address.update({ where: { id: addressId }, data: patch });
+  });
+
+  return { id: addressId, account: await getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds }) };
+}
+
+/**
+ * DELETE /api/accounts/:id/addresses/:addressId — soft delete.
+ * isActive=false + isDefault=false. Account silindiğinde Cascade DELETE
+ * (DB-level); manuel hard-delete UI'de açık değil.
+ */
+export async function removeAddress({ accountId, addressId, user }) {
+  const row = await loadEditableAddress({ accountId, addressId, user });
+  if (!row) return null;
+  await prisma.address.update({
+    where: { id: addressId },
+    data: { isActive: false, isDefault: false },
+  });
+  return { id: addressId, account: await getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds }) };
+}
+
 /**
  * Hafif müşteri context'i — Case detail panel'i için.
  *
@@ -1590,5 +1846,9 @@ export const accountRepository = {
   addProject,
   updateProject,
   removeProject,
+  // WR-A3 / PM-02 — Address CRUD
+  addAddress,
+  updateAddress,
+  removeAddress,
   getCaseCustomerContext,
 };
