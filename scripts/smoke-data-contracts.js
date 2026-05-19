@@ -921,6 +921,83 @@ defineGroup('Customer Match Suggestions Contract', async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// Group N — AI Telemetry Contract (WR-F7)
+//   AIUsageLog telemetri kontratının statik/deterministic invariant'ları.
+//   Detaylı smoke: scripts/smoke-ai-telemetry.js (F7).
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('AI Telemetry Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // AIUsageLog kolonlarını information_schema'dan oku — schema-level kontrat.
+  const cols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'AIUsageLog'`,
+  );
+  const colSet = new Set((cols ?? []).map((r) => r.column_name));
+
+  // F.1) Required field set tam.
+  const REQUIRED = ['id', 'endpoint', 'companyId', 'createdAt'];
+  const missing = REQUIRED.filter((c) => !colSet.has(c));
+  out.push(check(
+    'AIUsageLog required columns present',
+    missing.length === 0 ? 'PASS' : 'FAIL',
+    { count: missing.length, examples: missing },
+  ));
+
+  // F.2) Forbidden PII / raw-prompt kolonları YOK (privacy guard).
+  const FORBIDDEN = [
+    'customerContactName', 'customerContactPhone', 'customerContactEmail', 'customerCompanyName',
+    'prompt', 'system', 'user', 'text', 'content', 'rawPrompt', 'response', 'message',
+  ];
+  const leaked = FORBIDDEN.filter((c) => colSet.has(c));
+  out.push(check(
+    'AIUsageLog has no PII / raw-prompt columns',
+    leaked.length === 0 ? 'PASS' : 'FAIL',
+    { count: leaked.length, examples: leaked },
+  ));
+
+  // F.3) endpoint not null/empty for existing rows.
+  const blankEndpoint = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int as n FROM "AIUsageLog" WHERE "endpoint" IS NULL OR "endpoint" = ''`,
+  );
+  const blankN = blankEndpoint?.[0]?.n ?? 0;
+  out.push(check(
+    'AIUsageLog.endpoint not null/empty for existing rows',
+    blankN === 0 ? 'PASS' : 'FAIL',
+    { count: blankN },
+  ));
+
+  // F.4) responseTimeMs >= 0 when present (no negative noise).
+  const negTime = await prisma.aIUsageLog.count({
+    where: { responseTimeMs: { lt: 0 } },
+  });
+  out.push(check(
+    'AIUsageLog.responseTimeMs >= 0 when present',
+    negTime === 0 ? 'PASS' : 'FAIL',
+    { count: negTime },
+  ));
+
+  // F.5) cron path (qa-score-batch) userId nullable accepted — sanity.
+  const cronWithoutUser = await prisma.aIUsageLog.count({
+    where: { endpoint: 'qa-score-batch', userId: null },
+  });
+  const cronTotal = await prisma.aIUsageLog.count({ where: { endpoint: 'qa-score-batch' } });
+  out.push(check(
+    'AIUsageLog cron paths accept nullable userId (qa-score-batch)',
+    cronTotal === 0 || cronWithoutUser > 0 ? 'PASS' : 'WARN',
+    {
+      count: cronWithoutUser,
+      detail: cronTotal === 0
+        ? 'no qa-score-batch rows yet — schema allows null'
+        : `${cronWithoutUser}/${cronTotal} cron rows have null userId`,
+    },
+  ));
+
+  return out;
+});
+
+// ─────────────────────────────────────────────────────────────────
 // Runner
 // ─────────────────────────────────────────────────────────────────
 
