@@ -191,6 +191,13 @@ const initialFilters: CaseFilters = {
   personId: '',
   dateFrom: '',
   dateTo: '',
+  // Phase D + KPI intent flag'leri — reset durumunda false/undefined kalmalı
+  // ki "Tümünü Temizle" sonrası yan etkili filtre aktif görünmesin.
+  customerMatchPending: undefined,
+  assignedToMe: false,
+  teamScope: false,
+  slaViolation: false,
+  resolvedToday: false,
 };
 
 export function CasesListPage({
@@ -303,6 +310,14 @@ export function CasesListPage({
     filters.personId,
     filters.dateFrom,
     filters.dateTo,
+    // KPI tile intents + Phase D — bu flag'ler yalnızca client click ile değişir
+    // ama load() URL params'a ekliyor. Deps'te olmayınca tile click sonrası
+    // fetch tetiklenmiyordu; eklendi (#145 follow-up fix).
+    filters.customerMatchPending,
+    filters.assignedToMe,
+    filters.teamScope,
+    filters.slaViolation,
+    filters.resolvedToday,
   ]);
 
   const stats = useMemo(() => {
@@ -438,7 +453,12 @@ export function CasesListPage({
     Boolean(filters.teamId) ||
     Boolean(filters.personId) ||
     Boolean(filters.dateFrom) ||
-    Boolean(filters.dateTo);
+    Boolean(filters.dateTo) ||
+    Boolean(filters.customerMatchPending) ||
+    Boolean(filters.assignedToMe) ||
+    Boolean(filters.teamScope) ||
+    Boolean(filters.slaViolation) ||
+    Boolean(filters.resolvedToday);
 
   // "Filtrele" butonu rozetinde gösterilen aktif filtre boyut sayısı.
   // Search hariç — search bar arayüzde zaten görünür, panel rozetiyle çift saymak gereksiz.
@@ -449,7 +469,12 @@ export function CasesListPage({
     (filters.teamId ? 1 : 0) +
     (filters.personId ? 1 : 0) +
     (filters.dateFrom ? 1 : 0) +
-    (filters.dateTo ? 1 : 0);
+    (filters.dateTo ? 1 : 0) +
+    (filters.customerMatchPending ? 1 : 0) +
+    (filters.assignedToMe ? 1 : 0) +
+    (filters.teamScope ? 1 : 0) +
+    (filters.slaViolation ? 1 : 0) +
+    (filters.resolvedToday ? 1 : 0);
 
   function toggleStatus(s: CaseStatus) {
     setFilters((f) => {
@@ -457,6 +482,7 @@ export function CasesListPage({
       const next = cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s];
       return { ...f, statuses: next };
     });
+    setSelectedKpi(null); // manuel status değişimi → KPI ring sıfırla
   }
 
   function togglePriority(p: CasePriority) {
@@ -465,10 +491,14 @@ export function CasesListPage({
       const next = cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p];
       return { ...f, priorities: next };
     });
+    setSelectedKpi(null); // manuel priority değişimi → KPI ring sıfırla
   }
 
   function clearFilters() {
     setFilters(initialFilters);
+    // Filtre paneli temizliği KPI selection'ı da sıfırlasın — kullanıcı manuel
+    // temizledikten sonra eski kart ring'i kalmasın (görsel tutarlılık).
+    setSelectedKpi(null);
   }
 
   // Bulk select helpers
