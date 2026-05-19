@@ -267,6 +267,40 @@ export interface ProductInput {
   supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
 }
 
+// WR-A7 / PM-05 — Package + PackageItem (foundation only; no Case form picker).
+export interface Package {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  supportLevel: 'L1' | 'L2' | 'L3' | 'Expert';
+  sortOrder: number;
+  isActive: boolean;
+  /** Eklenmiş ürün sayısı (list endpoint'inde groupBy ile gelir). */
+  productCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PackageInput {
+  companyId: string;
+  code?: string;
+  name?: string;
+  description?: string | null;
+  supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface PackageItem {
+  packageId: string;
+  productId: string;
+  sortOrder: number;
+  createdAt?: string;
+  product?: { id: string; code: string; name: string; isActive: boolean; supportLevel?: string };
+}
+
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
 
 // ─────────────────────────────────────────────────────────────────
@@ -804,6 +838,60 @@ export const adminService = {
     },
     async setActive(id: string, isActive: boolean): Promise<AdminResult<Product>> {
       return this.update(id, { isActive });
+    },
+  },
+
+  // WR-A7 / PM-05 — Package + PackageItem catalog (foundation only).
+  // Tenant-scoped. Admin/SystemAdmin only. `code` immutable after create.
+  packages: {
+    async list(companyId?: string, opts: { includeInactive?: boolean } = {}): Promise<Package[]> {
+      const q = new URLSearchParams();
+      if (companyId) q.set('companyId', companyId);
+      if (opts.includeInactive) q.set('includeInactive', '1');
+      const data = await apiFetch<{ value: Package[] }>(
+        `${ADMIN_BASE}/packages${q.toString() ? `?${q}` : ''}`,
+        undefined,
+        'Paketler yüklenemedi',
+      );
+      return data?.value ?? [];
+    },
+    async create(input: PackageInput): Promise<AdminResult<Package>> {
+      const item = await apiFetch<Package>(
+        `${ADMIN_BASE}/packages`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Paket oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<PackageInput>): Promise<AdminResult<Package>> {
+      const item = await apiFetch<Package>(
+        `${ADMIN_BASE}/packages/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Paket güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<Package>> {
+      return this.update(id, { isActive });
+    },
+    async listItems(id: string): Promise<PackageItem[]> {
+      const data = await apiFetch<{ value: PackageItem[] }>(
+        `${ADMIN_BASE}/packages/${id}/items`,
+        undefined,
+        'Paket ürünleri yüklenemedi',
+      );
+      return data?.value ?? [];
+    },
+    async replaceItems(id: string, productIds: string[]): Promise<AdminResult<PackageItem[]>> {
+      const data = await apiFetch<{ value: PackageItem[] }>(
+        `${ADMIN_BASE}/packages/${id}/items`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productIds }) },
+        'Paket ürünleri güncellenemedi',
+      );
+      if (!data) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item: data.value ?? [] };
     },
   },
 

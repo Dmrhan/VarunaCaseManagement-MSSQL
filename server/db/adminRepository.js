@@ -1710,4 +1710,162 @@ export const productRepo = {
   },
 };
 
+/* ─────────────────────────────────────────────────────────────────
+ * WR-A7 / PM-05 — Package + PackageItem catalog (foundation).
+ * Tenant-scoped Package; PackageItem composite (packageId, productId).
+ * Cross-table invariant: Package.companyId === Product.companyId for every
+ * PackageItem — enforced here (Prisma cannot enforce cross-table CHECK).
+ * `code` immutable after create (A6 D-A6.2 pattern).
+ * ───────────────────────────────────────────────────────────────── */
+
+const PACKAGE_ITEM_MAX = 200; // PUT items body cap (Performance Gate item #4)
+
+export const packageRepo = {
+  async list({ companyId, allowedCompanyIds, includeInactive = false }) {
+    const where = {};
+    if (companyId) {
+      assertCompanyScope(companyId, allowedCompanyIds);
+      where.companyId = companyId;
+    } else if (allowedCompanyIds) {
+      where.companyId = { in: allowedCompanyIds };
+    }
+    if (!includeInactive) where.isActive = true;
+    const packages = await prisma.package.findMany({
+      where,
+      orderBy: [{ companyId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      take: 500,
+    });
+    if (packages.length === 0) return [];
+    // Tek groupBy ile productCount; N+1 önlenir.
+    const counts = await prisma.packageItem.groupBy({
+      by: ['packageId'],
+      where: { packageId: { in: packages.map((p) => p.id) } },
+      _count: { productId: true },
+    });
+    const countMap = new Map(counts.map((c) => [c.packageId, c._count.productId]));
+    return packages.map((p) => ({ ...p, productCount: countMap.get(p.id) ?? 0 }));
+  },
+
+  async create(input, allowedCompanyIds) {
+    assertCompanyScope(input.companyId, allowedCompanyIds);
+    const code = normalizeCode(input.code);
+    const name = normalizeName(input.name);
+    const supportLevel = normalizeSupportLevel(input.supportLevel);
+    try {
+      return await prisma.package.create({
+        data: {
+          companyId: input.companyId,
+          code,
+          name,
+          description: input.description?.trim() || null,
+          sortOrder: Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0,
+          isActive: input.isActive === undefined ? true : !!input.isActive,
+          ...(supportLevel !== undefined && { supportLevel }),
+        },
+      });
+    } catch (err) {
+      if (err?.code === 'P2002') {
+        throw new AdminError('Bu şirkette aynı kodda bir paket var.', 409);
+      }
+      throw err;
+    }
+  },
+
+  async update(id, patch, allowedCompanyIds) {
+    const target = await prisma.package.findUnique({
+      where: { id },
+      select: { id: true, companyId: true },
+    });
+    if (!target) throw new AdminError('Paket bulunamadı.', 404);
+    assertCompanyScope(target.companyId, allowedCompanyIds);
+
+    // `code` immutable — silently ignore (D-A6.2 pattern).
+    const data = {};
+    if (patch.name !== undefined) data.name = normalizeName(patch.name);
+    if (patch.description !== undefined) data.description = patch.description?.trim() || null;
+    if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
+    if (patch.isActive !== undefined) data.isActive = !!patch.isActive;
+    const supportLevel = normalizeSupportLevel(patch.supportLevel);
+    if (supportLevel !== undefined) data.supportLevel = supportLevel;
+
+    if (Object.keys(data).length === 0) return target;
+    return prisma.package.update({ where: { id }, data });
+  },
+
+  async listItems(packageId, allowedCompanyIds) {
+    const pkg = await prisma.package.findUnique({
+      where: { id: packageId },
+      select: { id: true, companyId: true },
+    });
+    if (!pkg) throw new AdminError('Paket bulunamadı.', 404);
+    assertCompanyScope(pkg.companyId, allowedCompanyIds);
+    return prisma.packageItem.findMany({
+      where: { packageId },
+      orderBy: { sortOrder: 'asc' },
+      include: {
+        product: { select: { id: true, code: true, name: true, isActive: true, supportLevel: true } },
+      },
+    });
+  },
+
+  /**
+   * Bulk-replace package items. Body: { productIds: string[] }.
+   * - Dedupes productIds.
+   * - Validates every product belongs to the same company as the package.
+   * - Unknown product → 400 `package_product_invalid`.
+   * - Cross-company product → 400 `package_product_company_mismatch`.
+   * - Atomic via $transaction (deleteMany + createMany).
+   * - Cap PACKAGE_ITEM_MAX (200).
+   */
+  async replaceItems(packageId, productIds, allowedCompanyIds) {
+    const pkg = await prisma.package.findUnique({
+      where: { id: packageId },
+      select: { id: true, companyId: true },
+    });
+    if (!pkg) throw new AdminError('Paket bulunamadı.', 404);
+    assertCompanyScope(pkg.companyId, allowedCompanyIds);
+
+    if (!Array.isArray(productIds)) {
+      throw new AdminError('productIds dizisi gerekli.', 400);
+    }
+    // Dedupe + filter falsy.
+    const cleaned = Array.from(new Set(productIds.filter((id) => typeof id === 'string' && id.length > 0)));
+    if (cleaned.length > PACKAGE_ITEM_MAX) {
+      throw new AdminError(`Bir pakette en fazla ${PACKAGE_ITEM_MAX} ürün olabilir.`, 400);
+    }
+
+    if (cleaned.length > 0) {
+      const products = await prisma.product.findMany({
+        where: { id: { in: cleaned } },
+        select: { id: true, companyId: true },
+      });
+      if (products.length !== cleaned.length) {
+        const err = new AdminError('Bir veya daha fazla ürün bulunamadı.', 400);
+        err.code = 'package_product_invalid';
+        throw err;
+      }
+      const mismatch = products.find((p) => p.companyId !== pkg.companyId);
+      if (mismatch) {
+        const err = new AdminError(
+          'Ürün paketin şirketine ait değil — cross-tenant referans reddedildi.',
+          400,
+        );
+        err.code = 'package_product_company_mismatch';
+        throw err;
+      }
+    }
+
+    await prisma.$transaction([
+      prisma.packageItem.deleteMany({ where: { packageId } }),
+      ...(cleaned.length > 0
+        ? [prisma.packageItem.createMany({
+            data: cleaned.map((productId, idx) => ({ packageId, productId, sortOrder: idx })),
+          })]
+        : []),
+    ]);
+
+    return packageRepo.listItems(packageId, allowedCompanyIds);
+  },
+};
+
 export { AdminError };

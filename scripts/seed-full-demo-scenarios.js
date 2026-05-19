@@ -789,6 +789,76 @@ async function main() {
   }
   console.log(`   Persons: ${updatedPersons} rol-bazlı supportLevel set + ${leadTotal} takım lideri`);
 
+  // ── 3.9) Package Catalog — WR-A7 / PM-05 ──
+  // Tenant-scoped paket modeli. WhitePackage/RedPackage Product DEĞİL, Package.
+  // PackageItem üzerinden ürünler atanır (cross-company invariant: paket.companyId
+  // === product.companyId).
+  console.log('3.9) Seeding package catalog (WR-A7 / PM-05)...');
+  const PACKAGES = {
+    'COMP-PARAM': [
+      { code: 'POS_BASIC',   name: 'POS Başlangıç',        supportLevel: 'L1', productCodes: ['PARAMPOS', 'SANALPOS'] },
+      { code: 'POS_PRO',     name: 'POS Pro',              supportLevel: 'L2', productCodes: ['PARAMPOS', 'SANALPOS', 'FIZIKIPOS', 'CEPPOS', 'MUTABAKAT'] },
+      { code: 'PAZARYERI',   name: 'Pazaryeri',            supportLevel: 'L2', productCodes: ['PAZARYERI', 'KOLAYTAHS', 'MUTABAKAT'] },
+      { code: 'KURUMSAL',    name: 'Kurumsal Tahsilat',    supportLevel: 'L2', productCodes: ['KOLAYTAHS', 'PARAMKART', 'MUTABAKAT'] },
+    ],
+    'COMP-UNIVERA': [
+      { code: 'WHITE_PKG',    name: 'WhitePackage',         supportLevel: 'L1', productCodes: ['ENROUTE', 'QUEST', 'UNIDOX'] },
+      { code: 'RED_PKG',      name: 'RedPackage',           supportLevel: 'L2', productCodes: ['ENROUTE', 'QUEST', 'STOKBAR', 'UNIDOX', 'EFATURA', 'EARSIV'] },
+      { code: 'BLACK_PKG',    name: 'BlackPackage',         supportLevel: 'L3', productCodes: ['ENROUTE', 'QUEST', 'STOKBAR', 'WMS', 'UNIDOX', 'EFATURA', 'EARSIV', 'EIRSALIYE', 'VARUNA'] },
+      { code: 'ENTERPRISE',   name: 'EnterprisePackage',    supportLevel: 'L3', productCodes: ['ENROUTE', 'QUEST', 'STOKBAR', 'WMS', 'UNIDOX', 'EFATURA', 'EARSIV', 'EIRSALIYE', 'VARUNA'] },
+    ],
+    'COMP-FINROTA': [
+      { code: 'TAHS_BASIC',   name: 'Tahsilat Basic',       supportLevel: 'L1', productCodes: ['NETAHSILAT', 'NETEKSTRE'] },
+      { code: 'TAHS_PLUS',    name: 'Tahsilat Plus',        supportLevel: 'L2', productCodes: ['NETAHSILAT', 'NETEKSTRE', 'POSRAPOR', 'TOS', 'EDBS'] },
+      { code: 'OPENBANK_PRO', name: 'Open Banking Pro',     supportLevel: 'L2', productCodes: ['OPENBANK', 'BANKMVT', 'NETEKSTRE'] },
+      { code: 'ENT_FINANCE',  name: 'Enterprise Finance',   supportLevel: 'L2', productCodes: ['NETAHSILAT', 'NETEKSTRE', 'POSRAPOR', 'TOS', 'EDBS', 'OPENBANK', 'BANKMVT'] },
+    ],
+  };
+  let packageTotal = 0;
+  let packageItemTotal = 0;
+  for (const [cid, pkgs] of Object.entries(PACKAGES)) {
+    for (const def of pkgs) {
+      const pkgId = `PKG-${cid}-${def.code}`;
+      await prisma.package.upsert({
+        where: { id: pkgId },
+        update: {
+          name: def.name,
+          supportLevel: def.supportLevel,
+          isActive: true,
+        },
+        create: {
+          id: pkgId,
+          companyId: cid,
+          code: def.code,
+          name: def.name,
+          supportLevel: def.supportLevel,
+          isActive: true,
+          sortOrder: 0,
+        },
+      });
+      packageTotal++;
+
+      // Resolve product IDs by (companyId, code) — products zaten step 3.7'de seed edildi.
+      const products = await prisma.product.findMany({
+        where: { companyId: cid, code: { in: def.productCodes } },
+        select: { id: true },
+      });
+      // Bulk-replace: önce var olan üyelikleri sil, sonra yeniden ekle (idempotent).
+      await prisma.$transaction([
+        prisma.packageItem.deleteMany({ where: { packageId: pkgId } }),
+        ...(products.length > 0
+          ? [
+              prisma.packageItem.createMany({
+                data: products.map((p, idx) => ({ packageId: pkgId, productId: p.id, sortOrder: idx })),
+              }),
+            ]
+          : []),
+      ]);
+      packageItemTotal += products.length;
+    }
+  }
+  console.log(`   Packages: ${packageTotal} package + ${packageItemTotal} PackageItem across PARAM/UNIVERA/FINROTA`);
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};

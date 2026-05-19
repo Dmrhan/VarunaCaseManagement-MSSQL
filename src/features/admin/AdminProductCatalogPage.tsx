@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderTree, Loader2, Package, Pencil, Plus } from 'lucide-react';
+import { Boxes, FolderTree, Loader2, Package, Pencil, Plus } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -10,6 +10,8 @@ import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import {
   adminService,
+  type Package as PackageDef,
+  type PackageInput,
   type Product,
   type ProductGroup,
   type ProductInput,
@@ -50,6 +52,15 @@ export function AdminProductCatalogPage() {
     | null
   >(null);
 
+  // WR-A7 — Package catalog state.
+  const [packages, setPackages] = useState<PackageDef[]>([]);
+  const [packageEditor, setPackageEditor] = useState<
+    | { mode: 'add' }
+    | { mode: 'edit'; pkg: PackageDef }
+    | null
+  >(null);
+  const [packageItemsEditor, setPackageItemsEditor] = useState<PackageDef | null>(null);
+
   const loadGroups = useCallback(async () => {
     if (!companyId) {
       setGroups([]);
@@ -76,8 +87,18 @@ export function AdminProductCatalogPage() {
     setProducts(list);
   }, [companyId, showInactive]);
 
+  const loadPackages = useCallback(async () => {
+    if (!companyId) {
+      setPackages([]);
+      return;
+    }
+    const list = await adminService.packages.list(companyId, { includeInactive: showInactive });
+    setPackages(list);
+  }, [companyId, showInactive]);
+
   useEffect(() => { void loadGroups(); }, [loadGroups]);
   useEffect(() => { void loadProducts(selectedGroupId); }, [loadProducts, selectedGroupId]);
+  useEffect(() => { void loadPackages(); }, [loadPackages]);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
@@ -243,6 +264,112 @@ export function AdminProductCatalogPage() {
           )}
         </Card>
       </div>
+
+      {/* WR-A7 / PM-05 — Package Catalog (foundation only; no Case form picker). */}
+      <Card className="p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+            <Boxes size={12} />
+            Paketler
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-normal text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+              Sözleşme/abonelik bundle'ı — Ürün ≠ Paket
+            </span>
+          </div>
+          {writeAllowed && companyId && (
+            <Button size="sm" variant="outline" leftIcon={<Plus size={12} />} onClick={() => setPackageEditor({ mode: 'add' })}>
+              Paket
+            </Button>
+          )}
+        </div>
+        {packages.length === 0 ? (
+          <EmptyState
+            size="sm"
+            icon={<Boxes size={16} />}
+            title="Paket yok"
+            description={writeAllowed ? 'İlk paketi eklemek için yukarıdaki düğmeyi kullan.' : '—'}
+          />
+        ) : (
+          <ul className="space-y-1.5">
+            {packages.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-start justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-slate-900 dark:text-ndark-text">{p.name}</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+                      {p.code}
+                    </span>
+                    <span title="Varsayılan destek seviyesi">
+                      <Badge tint={p.supportLevel === 'L1' ? 'slate' : p.supportLevel === 'L2' ? 'amber' : 'rose'}>
+                        {SUPPORT_LEVEL_LABELS[p.supportLevel as SupportLevel] ?? p.supportLevel}
+                      </Badge>
+                    </span>
+                    {!p.isActive && <Badge tint="slate">Pasif</Badge>}
+                    <span
+                      className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
+                      title="Pakete bağlı ürün sayısı"
+                    >
+                      {p.productCount ?? 0} ürün
+                    </span>
+                  </div>
+                  {p.description && (
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">{p.description}</p>
+                  )}
+                </div>
+                {writeAllowed && (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setPackageItemsEditor(p)}
+                      title="Ürünleri yönet"
+                      aria-label={`${p.name} paketinin ürünlerini düzenle`}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                    >
+                      <Package size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPackageEditor({ mode: 'edit', pkg: p })}
+                      title="Düzenle"
+                      aria-label={`${p.name} paketini düzenle`}
+                      className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <PackageEditor
+        open={packageEditor !== null}
+        mode={packageEditor?.mode ?? 'add'}
+        companyId={companyId}
+        pkg={packageEditor && packageEditor.mode === 'edit' ? packageEditor.pkg : null}
+        onClose={() => setPackageEditor(null)}
+        onSaved={async (action) => {
+          setPackageEditor(null);
+          await loadPackages();
+          toast({ type: 'success', message: action === 'created' ? 'Paket eklendi.' : 'Paket güncellendi.' });
+        }}
+      />
+
+      <PackageItemsEditor
+        open={packageItemsEditor !== null}
+        pkg={packageItemsEditor}
+        companyId={companyId}
+        onClose={() => setPackageItemsEditor(null)}
+        onSaved={async () => {
+          setPackageItemsEditor(null);
+          await loadPackages();
+          toast({ type: 'success', message: 'Paket ürünleri güncellendi.' });
+        }}
+      />
 
       <ProductGroupEditor
         open={groupEditor !== null}
@@ -594,6 +721,281 @@ function ProductEditor({
           </Field>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Package Editor (WR-A7)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function PackageEditor({
+  open,
+  mode,
+  companyId,
+  pkg,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  mode: 'add' | 'edit';
+  companyId: string;
+  pkg?: PackageDef | null;
+  onClose: () => void;
+  onSaved: (action: 'created' | 'updated') => void;
+}) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [supportLevel, setSupportLevel] = useState<SupportLevel>('L1');
+  const [sortOrder, setSortOrder] = useState<number>(0);
+  const [isActive, setIsActive] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    if (mode === 'edit' && pkg) {
+      setCode(pkg.code);
+      setName(pkg.name);
+      setDescription(pkg.description ?? '');
+      setSupportLevel(pkg.supportLevel as SupportLevel);
+      setSortOrder(pkg.sortOrder);
+      setIsActive(pkg.isActive);
+    } else {
+      setCode('');
+      setName('');
+      setDescription('');
+      setSupportLevel('L1');
+      setSortOrder(0);
+      setIsActive(true);
+    }
+  }, [open, mode, pkg]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (mode === 'add' && !code.trim()) { setError('Kod zorunlu.'); return; }
+    if (!name.trim()) { setError('Ad zorunlu.'); return; }
+    setSubmitting(true);
+    if (mode === 'add') {
+      const input: PackageInput = {
+        companyId,
+        code: code.trim().toUpperCase(),
+        name: name.trim(),
+        description: description.trim() || null,
+        supportLevel,
+        sortOrder,
+        isActive,
+      };
+      const r = await adminService.packages.create(input);
+      setSubmitting(false);
+      if (r.ok) onSaved('created');
+    } else if (pkg) {
+      const patch: Partial<PackageInput> = {
+        name: name.trim(),
+        description: description.trim() || null,
+        supportLevel,
+        sortOrder,
+        isActive,
+      };
+      const r = await adminService.packages.update(pkg.id, patch);
+      setSubmitting(false);
+      if (r.ok) onSaved('updated');
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      title={mode === 'add' ? 'Yeni Paket' : 'Paketi Düzenle'}
+      footer={
+        <div className="flex items-center justify-end gap-2 px-5 py-3">
+          <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>Vazgeç</Button>
+          <Button type="submit" form="admin-package-form" disabled={submitting}>
+            {submitting ? 'Kaydediliyor…' : mode === 'add' ? 'Paket Ekle' : 'Değişiklikleri Kaydet'}
+          </Button>
+        </div>
+      }
+    >
+      <form id="admin-package-form" onSubmit={handleSubmit} className="space-y-4 p-5">
+        {error && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300">
+            {error}
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field
+            label="Kod"
+            required={mode === 'add'}
+            hint={mode === 'edit' ? 'Kod oluşturma sonrası değiştirilemez.' : 'ASCII; örn. WHITE_PKG, POS_BASIC'}
+          >
+            <TextInput
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              maxLength={64}
+              autoFocus={mode === 'add'}
+              disabled={mode === 'edit'}
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Ad" required>
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Örn. WhitePackage" />
+          </Field>
+        </div>
+        <Field label="Açıklama">
+          <TextArea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Destek Seviyesi">
+            <Select value={supportLevel} onChange={(e) => setSupportLevel(e.target.value as SupportLevel)}>
+              {SUPPORT_LEVELS.map((s) => (
+                <option key={s} value={s}>{SUPPORT_LEVEL_LABELS[s]}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Sıralama">
+            <TextInput type="number" value={String(sortOrder)} onChange={(e) => setSortOrder(Number(e.target.value) || 0)} />
+          </Field>
+          <Field label="Durum">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-ndark-text">
+              <input
+                type="checkbox"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-surface"
+              />
+              <span>Aktif</span>
+            </label>
+          </Field>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Package Items Editor — assign products to package via multi-select.
+ * Bulk-replace via PUT /api/admin/packages/:id/items.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function PackageItemsEditor({
+  open,
+  pkg,
+  companyId,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  pkg: PackageDef | null;
+  companyId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [companyProducts, setCompanyProducts] = useState<Product[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!open || !pkg) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      const [products, items] = await Promise.all([
+        adminService.products.list(companyId, { includeInactive: false }),
+        adminService.packages.listItems(pkg.id),
+      ]);
+      if (cancelled) return;
+      setCompanyProducts(products);
+      setSelectedIds(new Set(items.map((i) => i.productId)));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [open, pkg, companyId]);
+
+  function toggle(productId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!pkg) return;
+    setSubmitting(true);
+    const r = await adminService.packages.replaceItems(pkg.id, Array.from(selectedIds));
+    setSubmitting(false);
+    if (r.ok) onSaved();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      title={pkg ? `${pkg.name} — Ürünler` : 'Paket Ürünleri'}
+      footer={
+        <div className="flex items-center justify-between gap-2 px-5 py-3">
+          <span className="text-xs text-slate-500 dark:text-ndark-muted">
+            {selectedIds.size} ürün seçili
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" type="button" onClick={onClose} disabled={submitting}>Vazgeç</Button>
+            <Button type="button" onClick={handleSave} disabled={submitting || loading}>
+              {submitting ? 'Kaydediliyor…' : 'Ürünleri Güncelle'}
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="p-5">
+        {loading ? (
+          <div className="flex h-32 items-center justify-center text-slate-400 dark:text-ndark-muted">
+            <Loader2 size={20} className="animate-spin" />
+          </div>
+        ) : companyProducts.length === 0 ? (
+          <EmptyState
+            size="sm"
+            icon={<Package size={16} />}
+            title="Ürün yok"
+            description="Bu şirkette aktif ürün tanımı yok. Önce ürün ekle."
+          />
+        ) : (
+          <ul className="max-h-[60vh] space-y-1 overflow-y-auto">
+            {companyProducts.map((p) => (
+              <li key={p.id}>
+                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-surface">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(p.id)}
+                    onChange={() => toggle(p.id)}
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-surface"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-slate-900 dark:text-ndark-text">{p.name}</span>
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+                        {p.code}
+                      </span>
+                      {p.supportLevel && (
+                        <Badge tint={p.supportLevel === 'L1' ? 'slate' : p.supportLevel === 'L2' ? 'amber' : 'rose'}>
+                          {SUPPORT_LEVEL_LABELS[p.supportLevel as SupportLevel] ?? p.supportLevel}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Modal>
   );
 }
