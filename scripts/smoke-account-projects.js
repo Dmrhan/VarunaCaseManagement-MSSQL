@@ -8,7 +8,11 @@
  * seed-full-demo-scenarios.js çalışmış olmalı (UNIVERA accountCompany'leri
  * referans alınıyor).
  *
- * 14 senaryo (Planning Card §⑤'den):
+ * Senaryolar:
+ *  1-14: WR-A4 baseline (CRUD, RBAC, scope, case linkage, seed verification).
+ * 15-22: Codex review fix regression — Case.accountId ↔ accountProjectId
+ *        integrity guard (project_requires_account on create + update;
+ *        auto-clear orphaned project when account changes/clears in PATCH).
  *  1. Project create (admin) → 201 + account detail includes new project.
  *  2. Duplicate project code aynı AccountCompany için → 409.
  *  3. Project update (name/status) → ok.
@@ -23,6 +27,14 @@
  * 12. projectsRequired=true + accountId verili + projectId yok → 400.
  * 13. Soft-deleted project linked cases hala referansı korur (Case.accountProjectId stays).
  * 14. Seed verification: en az 1 UNIVERA hesabı + 1 case proje bağlı.
+ * 15. Create customerless + accountProjectId → 400 project_requires_account.
+ * 16. Create accountId + accountProjectId → 201 baseline (anchor for 17-22).
+ * 17. PATCH accountId-only (different account) → project auto-cleared.
+ * 18. PATCH accountId=B + projectA → 400 project_account_mismatch.
+ * 19. PATCH accountId=B + projectB → success.
+ * 20. PATCH unrelated field → existing project preserved.
+ * 21. PATCH accountId=null → project auto-cleared.
+ * 22. PATCH accountId=null + accountProjectId → 400 project_requires_account.
  */
 
 import { prisma } from '../server/db/client.js';
@@ -450,6 +462,190 @@ console.log('\n── 14) Seed verification ──');
   });
   record('14. UNIVERA active projects > 0', seededProjects > 0, `count=${seededProjects}`);
   record('14b. UNIVERA cases with project link > 0', linkedCases > 0, `count=${linkedCases}`);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 15-22) Codex review fix — Case.accountId ↔ Case.accountProjectId
+// integrity regression suite.
+// ─────────────────────────────────────────────────────────────────
+
+console.log('\n── 15-22) Account ↔ Project integrity regression ──');
+
+// Setup: ensure acB has its own active project that we control. acA also
+// gets a fresh dedicated project (projA2) so we don't depend on the state
+// of projA / projTemp from earlier tests.
+let projB = null;
+{
+  const r = await api(adminToken, `/api/accounts/${acB.accountId}/companies/${acB.id}/projects`, {
+    method: 'POST',
+    body: JSON.stringify({ code: `${STAMP}-PB`, name: `${STAMP} Project B`, status: 'Active' }),
+  });
+  if (r.status === 201 && r.data?.id) { projB = r.data; createdProjectIds.push(r.data.id); }
+}
+let projA2 = null;
+{
+  const r = await api(adminToken, `/api/accounts/${acA.accountId}/companies/${acA.id}/projects`, {
+    method: 'POST',
+    body: JSON.stringify({ code: `${STAMP}-PA2`, name: `${STAMP} Project A2`, status: 'Active' }),
+  });
+  if (r.status === 201 && r.data?.id) { projA2 = r.data; createdProjectIds.push(r.data.id); }
+}
+
+// 15) Create customerless case with accountProjectId only → 400 project_requires_account
+{
+  const r = await api(adminToken, '/api/cases', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: `${STAMP} 15-customerless+project`,
+      description: 'reject customerless+project',
+      caseType: 'GeneralSupport',
+      priority: 'Medium',
+      origin: 'Telefon',
+      companyId: 'COMP-UNIVERA',
+      companyName: 'UNIVERA',
+      // accountId omitted intentionally
+      accountProjectId: projA2?.id,
+      accountProjectName: projA2?.name,
+      category: 'Yazılım',
+      subCategory: 'Mobil App',
+      requestType: 'Şikayet',
+    }),
+  });
+  const ok = r.status === 400 && r.data?.error === 'project_requires_account';
+  record('15. Create customerless + project → 400 project_requires_account', ok, `status=${r.status} code=${r.data?.error}`);
+  if (r.data?.id) createdCaseIds.push(r.data.id);
+}
+
+// 16) Create case with accountId + valid accountProjectId → 201 (anchor for 17-22)
+let baseCase = null;
+if (projA2) {
+  const r = await api(adminToken, '/api/cases', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: `${STAMP} 16-baseline`,
+      description: 'integrity baseline',
+      caseType: 'GeneralSupport',
+      priority: 'Medium',
+      origin: 'Telefon',
+      companyId: 'COMP-UNIVERA',
+      companyName: 'UNIVERA',
+      accountId: acA.accountId,
+      accountName: acA.account.name,
+      accountProjectId: projA2.id,
+      accountProjectName: projA2.name,
+      category: 'Yazılım',
+      subCategory: 'Mobil App',
+      requestType: 'Şikayet',
+    }),
+  });
+  const ok = r.status === 201 && r.data?.accountProjectId === projA2.id;
+  record('16. Create with accountId + valid projectId → 201', ok, `status=${r.status}`);
+  if (r.data?.id) { baseCase = r.data; createdCaseIds.push(r.data.id); }
+}
+
+// Helper: re-anchor baseCase to (accountA + projectA2) between PATCH tests.
+async function reanchorBaseCase() {
+  if (!baseCase || !projA2) return;
+  await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ accountId: acA.accountId, accountName: acA.account.name, accountProjectId: projA2.id }),
+  });
+}
+
+// 17) PATCH only accountId → account B; expect project auto-cleared
+if (baseCase && projA2) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ accountId: acB.accountId, accountName: acB.account.name }),
+  });
+  const row = await prisma.case.findUnique({ where: { id: baseCase.id }, select: { accountId: true, accountProjectId: true, accountProjectName: true } });
+  const ok =
+    r.status === 200 &&
+    row?.accountId === acB.accountId &&
+    row?.accountProjectId === null &&
+    row?.accountProjectName === null;
+  record('17. PATCH accountId only → project auto-cleared', ok, `status=${r.status} accountId=${row?.accountId} projectId=${row?.accountProjectId}`);
+}
+
+// 18) PATCH accountId=B + accountProjectId=projectA2 → 400 project_account_mismatch
+if (baseCase && projA2) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      accountId: acB.accountId,
+      accountName: acB.account.name,
+      accountProjectId: projA2.id,
+    }),
+  });
+  const ok = r.status === 400 && r.data?.error === 'project_account_mismatch';
+  record('18. PATCH accountId=B + projectA → 400 project_account_mismatch', ok, `status=${r.status} code=${r.data?.error}`);
+}
+
+// 19) PATCH accountId=B + accountProjectId=projectB → 200 success
+if (baseCase && projB) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      accountId: acB.accountId,
+      accountName: acB.account.name,
+      accountProjectId: projB.id,
+    }),
+  });
+  const row = await prisma.case.findUnique({ where: { id: baseCase.id }, select: { accountId: true, accountProjectId: true } });
+  const ok =
+    r.status === 200 &&
+    row?.accountId === acB.accountId &&
+    row?.accountProjectId === projB.id;
+  record('19. PATCH accountId=B + projectB → success', ok, `status=${r.status} accountId=${row?.accountId} projectId=${row?.accountProjectId}`);
+}
+
+// 20) PATCH unrelated field only → existing project preserved
+if (baseCase && projA2) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ priority: 'High' }),
+  });
+  const row = await prisma.case.findUnique({ where: { id: baseCase.id }, select: { accountProjectId: true, accountProjectName: true } });
+  const ok =
+    r.status === 200 &&
+    row?.accountProjectId === projA2.id &&
+    row?.accountProjectName != null;
+  record('20. PATCH unrelated field → project preserved', ok, `projectId=${row?.accountProjectId}`);
+}
+
+// 21) PATCH accountId=null → project auto-cleared
+if (baseCase && projA2) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ accountId: null, accountName: null }),
+  });
+  const row = await prisma.case.findUnique({ where: { id: baseCase.id }, select: { accountId: true, accountProjectId: true, accountProjectName: true } });
+  const ok =
+    r.status === 200 &&
+    row?.accountId === null &&
+    row?.accountProjectId === null &&
+    row?.accountProjectName === null;
+  record('21. PATCH accountId=null → project auto-cleared', ok, `status=${r.status} accountId=${row?.accountId} projectId=${row?.accountProjectId}`);
+}
+
+// 22) PATCH accountId=null + accountProjectId=projectA → 400 project_requires_account
+if (baseCase && projA2) {
+  await reanchorBaseCase();
+  const r = await api(adminToken, `/api/cases/${baseCase.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      accountId: null,
+      accountName: null,
+      accountProjectId: projA2.id,
+    }),
+  });
+  const ok = r.status === 400 && r.data?.error === 'project_requires_account';
+  record('22. PATCH accountId=null + projectId → 400 project_requires_account', ok, `status=${r.status} code=${r.data?.error}`);
 }
 
 // ─────────────────────────────────────────────────────────────────

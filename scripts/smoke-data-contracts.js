@@ -1118,8 +1118,27 @@ defineGroup('Account Project Contract', async () => {
     { detail: projNameCol ? '' : 'missing accountProjectName' },
   ));
 
-  // P.3) Every Case with accountProjectId must reference a real project whose
-  //      accountCompany matches case.companyId AND accountId.
+  // P.3a) Hierarchy invariant: a project link requires an account.
+  //   Account → AccountCompany → AccountProject → Case. A Case with
+  //   accountProjectId set but accountId NULL is an orphaned project link
+  //   (no account anchor). Codex review fix landed in PR after WR-A4 to
+  //   reject this state at create + update.
+  const orphan = await prisma.$queryRawUnsafe(`
+    SELECT c.id, c."caseNumber", c."accountProjectId"
+      FROM "Case" c
+     WHERE c."accountProjectId" IS NOT NULL AND c."accountId" IS NULL
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.accountProjectId NOT NULL ⇒ Case.accountId NOT NULL (hierarchy invariant)',
+    (orphan?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: orphan?.length ?? 0, examples: orphan ?? [] },
+  ));
+
+  // P.3b) Every Case with accountProjectId references a real, active-or-
+  //      historical project whose accountCompany matches BOTH case.companyId
+  //      AND case.accountId. No "accountId NULL" escape hatch — that case is
+  //      covered by P.3a and would be invalid before reaching this check.
   const drift = await prisma.$queryRawUnsafe(`
     SELECT c.id, c."caseNumber", c."companyId" AS case_company, c."accountId" AS case_account,
            ac."companyId" AS proj_company, ac."accountId" AS proj_account, p.id AS project_id
@@ -1127,9 +1146,10 @@ defineGroup('Account Project Contract', async () => {
       LEFT JOIN "AccountProject" p ON p.id = c."accountProjectId"
       LEFT JOIN "AccountCompany" ac ON ac.id = p."accountCompanyId"
      WHERE c."accountProjectId" IS NOT NULL
+       AND c."accountId" IS NOT NULL
        AND (p.id IS NULL
             OR ac."companyId" <> c."companyId"
-            OR (c."accountId" IS NOT NULL AND ac."accountId" <> c."accountId"))
+            OR ac."accountId" <> c."accountId")
      LIMIT 5
   `);
   out.push(check(
