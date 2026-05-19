@@ -577,6 +577,12 @@ router.post('/product-groups', asyncRoute(async (req, res) => {
 }));
 
 router.patch('/product-groups/:id', asyncRoute(async (req, res) => {
+  // Product Catalog RBAC audit — load target group companyId and enforce
+  // per-company admin gate (mirrors WR-A7 review fix for packages).
+  const targetCompanyId = await productGroupRepo.getCompanyId(req.params.id);
+  if (!targetCompanyId) throw new AdminError('Ürün grubu bulunamadı.', 404);
+  assertCompanyAdmin(req, targetCompanyId);
+
   const item = await productGroupRepo.update(
     req.params.id,
     req.body ?? {},
@@ -605,6 +611,12 @@ router.post('/products', asyncRoute(async (req, res) => {
 }));
 
 router.patch('/products/:id', asyncRoute(async (req, res) => {
+  // Product Catalog RBAC audit — same per-company admin gate as
+  // /product-groups/:id and /packages/:id (WR-A7 pattern).
+  const targetCompanyId = await productRepo.getCompanyId(req.params.id);
+  if (!targetCompanyId) throw new AdminError('Ürün bulunamadı.', 404);
+  assertCompanyAdmin(req, targetCompanyId);
+
   const item = await productRepo.update(
     req.params.id,
     req.body ?? {},

@@ -1541,6 +1541,20 @@ function assertCompanyScope(companyId, allowedCompanyIds) {
 }
 
 export const productGroupRepo = {
+  /**
+   * Product Catalog RBAC audit — lookup helper for per-company admin gate.
+   * Returns companyId or null (not found). Route layer calls assertCompanyAdmin
+   * BEFORE delegating to update path. Same pattern as packageRepo.getCompanyId.
+   */
+  async getCompanyId(id) {
+    if (!id) return null;
+    const row = await prisma.productGroup.findUnique({
+      where: { id },
+      select: { companyId: true },
+    });
+    return row?.companyId ?? null;
+  },
+
   async list({ companyId, allowedCompanyIds, includeInactive = false }) {
     const where = {};
     if (companyId) {
@@ -1601,6 +1615,19 @@ export const productGroupRepo = {
 };
 
 export const productRepo = {
+  /**
+   * Product Catalog RBAC audit — same getCompanyId pattern as productGroupRepo.
+   * Used by route gate before PATCH.
+   */
+  async getCompanyId(id) {
+    if (!id) return null;
+    const row = await prisma.product.findUnique({
+      where: { id },
+      select: { companyId: true },
+    });
+    return row?.companyId ?? null;
+  },
+
   async list({ companyId, productGroupId, allowedCompanyIds, includeInactive = false }) {
     const where = {};
     if (companyId) {
