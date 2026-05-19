@@ -305,4 +305,64 @@ router.delete(
   }),
 );
 
+/* ---------- WR-A4 — AccountProject CRUD ---------- */
+
+/**
+ * POST /api/accounts/:id/companies/:accountCompanyId/projects
+ * Admin/SystemAdmin only. Tenant scope via AccountCompany.companyId.
+ */
+router.post(
+  '/:id/companies/:accountCompanyId/projects',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const created = await accountRepository.addProject({
+      accountId: req.params.id,
+      accountCompanyId: req.params.accountCompanyId,
+      data: req.body,
+      user: req.user,
+    });
+    const detail = await accountRepository.getAccount(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.status(201).json({ ...created, account: detail });
+  }),
+);
+
+/** PATCH /api/accounts/:id/projects/:projectId */
+router.patch(
+  '/:id/projects/:projectId',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const updated = await accountRepository.updateProject({
+      accountId: req.params.id,
+      projectId: req.params.projectId,
+      data: req.body,
+      user: req.user,
+    });
+    if (!updated) return res.status(404).json({ error: 'not_found', message: 'Proje bulunamadı.' });
+    const detail = await accountRepository.getAccount(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json({ ...updated, account: detail });
+  }),
+);
+
+/** DELETE /api/accounts/:id/projects/:projectId — soft delete (isActive=false, status=Cancelled). */
+router.delete(
+  '/:id/projects/:projectId',
+  requireRole(...WRITE_ROLES),
+  asyncRoute(async (req, res) => {
+    const result = await accountRepository.removeProject({
+      accountId: req.params.id,
+      projectId: req.params.projectId,
+      user: req.user,
+    });
+    if (!result) return res.status(404).json({ error: 'not_found', message: 'Proje bulunamadı.' });
+    const detail = await accountRepository.getAccount(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json({ ...result, account: detail });
+  }),
+);
+
 export default router;

@@ -371,6 +371,20 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
             },
             orderBy: [{ isActive: 'desc' }, { productName: 'asc' }],
           },
+          // WR-A4 — AccountCompany altındaki projeler.
+          projects: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              status: true,
+              isActive: true,
+              startDate: true,
+              endDate: true,
+              description: true,
+            },
+            orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+          },
         },
       },
       contacts: {
@@ -476,6 +490,17 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
         isActive: p.isActive,
         startedAt: p.startedAt,
         endedAt: p.endedAt,
+      })),
+      // WR-A4 — AccountCompany altındaki projeler.
+      projects: (c.projects ?? []).map((p) => ({
+        id: p.id,
+        code: p.code,
+        name: p.name,
+        status: p.status,
+        isActive: p.isActive,
+        startDate: p.startDate,
+        endDate: p.endDate,
+        description: p.description ?? null,
       })),
     })),
     contacts: account.contacts,
@@ -1294,6 +1319,166 @@ export async function removeProduct({ accountId, productId, user }) {
   return { id: productId };
 }
 
+/* ---------- WR-A4 — AccountProject CRUD ---------- */
+
+const VALID_PROJECT_STATUSES = new Set(['Active', 'Passive', 'Completed', 'Cancelled']);
+
+/**
+ * Bir AccountProject'a yazma yetkisi: bağlı AccountCompany'nin companyId'si
+ * kullanıcının yazma kapsamında olmalı (SystemAdmin tüm şirketler).
+ */
+async function loadEditableProject({ accountId, projectId, user }) {
+  await assertAccountInScope(accountId, user.allowedCompanyIds);
+  const project = await prisma.accountProject.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      accountCompanyId: true,
+      accountCompany: { select: { accountId: true, companyId: true } },
+    },
+  });
+  if (!project || project.accountCompany.accountId !== accountId) return null;
+  const isSystemAdmin = user.role === 'SystemAdmin';
+  const allowed = ensureArray(user.allowedCompanyIds);
+  if (!isSystemAdmin && !allowed.includes(project.accountCompany.companyId)) {
+    throw new AccountAccessError('Bu projeyi düzenleme yetkin yok.');
+  }
+  return project;
+}
+
+/**
+ * POST /api/accounts/:id/companies/:accountCompanyId/projects
+ *
+ * Body: { code, name, status?, startDate?, endDate?, description? }
+ * Validation:
+ *  - AccountCompany bu account'a ait olmalı + kullanıcı scope'unda
+ *  - code zorunlu (tenant-içi unique per AccountCompany)
+ *  - name zorunlu
+ *  - status (varsa) VALID_PROJECT_STATUSES içinde
+ *  - duplicate (accountCompanyId, code) → 409
+ */
+export async function addProject({ accountId, accountCompanyId, data, user }) {
+  await assertAccountInScope(accountId, user.allowedCompanyIds);
+
+  const ac = await prisma.accountCompany.findUnique({
+    where: { id: accountCompanyId },
+    select: { id: true, accountId: true, companyId: true },
+  });
+  if (!ac || ac.accountId !== accountId) {
+    throw new AccountValidationError('Şirket ilişkisi bulunamadı.', {
+      status: 404,
+      code: 'not_found',
+    });
+  }
+  const isSystemAdmin = user.role === 'SystemAdmin';
+  const allowed = ensureArray(user.allowedCompanyIds);
+  if (!isSystemAdmin && !allowed.includes(ac.companyId)) {
+    throw new AccountAccessError('Bu şirkete proje ekleme yetkin yok.');
+  }
+
+  const code = typeof data?.code === 'string' ? data.code.trim() : '';
+  if (!code) throw new AccountValidationError('Proje kodu zorunlu.');
+  const name = typeof data?.name === 'string' ? data.name.trim() : '';
+  if (!name) throw new AccountValidationError('Proje adı zorunlu.');
+
+  const status = data?.status ?? 'Active';
+  if (!VALID_PROJECT_STATUSES.has(status)) {
+    throw new AccountValidationError('Geçersiz proje statüsü.');
+  }
+
+  try {
+    const created = await prisma.accountProject.create({
+      data: {
+        accountCompanyId,
+        code,
+        name,
+        status,
+        startDate: data?.startDate ? new Date(data.startDate) : null,
+        endDate: data?.endDate ? new Date(data.endDate) : null,
+        description: data?.description ?? null,
+        isActive: data?.isActive === undefined ? true : !!data.isActive,
+      },
+      select: { id: true },
+    });
+    return created;
+  } catch (err) {
+    if (err?.code === 'P2002') {
+      throw new AccountValidationError(
+        'Bu şirkette aynı proje kodu zaten kullanılıyor.',
+        { status: 409, code: 'duplicate_project_code' },
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * PATCH /api/accounts/:id/projects/:projectId
+ *
+ * Düzenlenebilir: code, name, status, startDate, endDate, description, isActive.
+ * accountCompanyId değiştirilemez (proje farklı AccountCompany'ye taşınamaz).
+ */
+export async function updateProject({ accountId, projectId, data, user }) {
+  const project = await loadEditableProject({ accountId, projectId, user });
+  if (!project) return null;
+
+  const patch = {};
+  if (data?.code !== undefined) {
+    const code = String(data.code).trim();
+    if (!code) throw new AccountValidationError('Proje kodu boş olamaz.');
+    patch.code = code;
+  }
+  if (data?.name !== undefined) {
+    const name = String(data.name).trim();
+    if (!name) throw new AccountValidationError('Proje adı boş olamaz.');
+    patch.name = name;
+  }
+  if (data?.status !== undefined) {
+    if (!VALID_PROJECT_STATUSES.has(data.status)) {
+      throw new AccountValidationError('Geçersiz proje statüsü.');
+    }
+    patch.status = data.status;
+  }
+  if (data?.startDate !== undefined) {
+    patch.startDate = data.startDate ? new Date(data.startDate) : null;
+  }
+  if (data?.endDate !== undefined) {
+    patch.endDate = data.endDate ? new Date(data.endDate) : null;
+  }
+  if (data?.description !== undefined) patch.description = data.description || null;
+  if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
+
+  if (Object.keys(patch).length === 0) return { id: projectId };
+
+  try {
+    await prisma.accountProject.update({ where: { id: projectId }, data: patch });
+  } catch (err) {
+    if (err?.code === 'P2002') {
+      throw new AccountValidationError(
+        'Bu şirkette aynı proje kodu zaten kullanılıyor.',
+        { status: 409, code: 'duplicate_project_code' },
+      );
+    }
+    throw err;
+  }
+  return { id: projectId };
+}
+
+/**
+ * DELETE /api/accounts/:id/projects/:projectId — soft delete.
+ * isActive=false + status=Cancelled. Linked case'ler korunur (Case.accountProjectId
+ * Set NULL ile sıfırlanmaz; geçmişte hangi projede açıldı kaydı kalır).
+ */
+export async function removeProject({ accountId, projectId, user }) {
+  const project = await loadEditableProject({ accountId, projectId, user });
+  if (!project) return null;
+  await prisma.accountProject.update({
+    where: { id: projectId },
+    data: { isActive: false, status: 'Cancelled' },
+  });
+  return { id: projectId };
+}
+
 /**
  * Hafif müşteri context'i — Case detail panel'i için.
  *
@@ -1401,5 +1586,9 @@ export const accountRepository = {
   addProduct,
   updateProduct,
   removeProduct,
+  // WR-A4 — AccountProject CRUD
+  addProject,
+  updateProject,
+  removeProject,
   getCaseCustomerContext,
 };

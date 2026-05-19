@@ -265,6 +265,9 @@ export interface NewCaseInput {
   // Phase C2: müşterisiz vaka — picker boş geçilirse her ikisi undefined.
   accountId?: string;
   accountName?: string;
+  // WR-A4 / PM-04 — Şirket-ilişkisi altındaki opsiyonel proje bağı (UNIVERA).
+  accountProjectId?: string;
+  accountProjectName?: string;
   // Phase D Step 2 — opsiyonel başvuran bilgileri.
   customerContactName?: string;
   customerContactPhone?: string;

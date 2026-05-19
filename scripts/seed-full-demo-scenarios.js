@@ -312,6 +312,21 @@ async function main() {
 
   console.log(`Companies: ${companies.length} | Users: ${users.length} | Persons: ${persons.length} | Teams: ${teams.length}\n`);
 
+  // ── 0) CompanySettings: WR-A4 — UNIVERA projeleri demo'da aktif. ──
+  // projectsEnabled=true sayesinde UI'da "Proje" alanı görünür.
+  // projectsRequired=false bırakılır: yeni vakalar projesiz de açılabilir
+  // (geri uyumluluk testi). PARAM ve FINROTA için flag'ler açıkça false set
+  // edilir — başka seedler set ettiyse demo'da reset olur.
+  console.log('0) Seeding CompanySettings (project flags)...');
+  for (const companyId of COMPANIES) {
+    const projectsEnabled = companyId === 'COMP-UNIVERA';
+    await prisma.companySettings.upsert({
+      where: { companyId },
+      update: { projectsEnabled, projectsRequired: false },
+      create: { companyId, projectsEnabled, projectsRequired: false },
+    });
+  }
+
   // ── 1) Accounts + AccountCompany ──
   console.log('1) Seeding accounts + company relations...');
   const allAccountIds = {};
@@ -444,6 +459,61 @@ async function main() {
     }
   }
 
+  // ── 3.5) AccountProject — WR-A4 / PM-04 ──
+  // UNIVERA demo'da multi-project müşterilerinde proje listesi.
+  // Account başına 2-3 proje (Rota / e-Fatura / Saha Veri tema kombinasyonu).
+  // İlk 6 UNIVERA hesabı proje alır; geri kalanlar projesiz (backward-compat test).
+  console.log('3.5) Seeding UNIVERA AccountProjects (WR-A4)...');
+  const UNIVERA_PROJECT_TEMPLATES = [
+    { code: 'ROTA-2026', name: 'Rota Optimizasyonu — Faz 1', status: 'Active', description: 'Saha ekibi rota planlama modülü pilot uygulaması.' },
+    { code: 'EFAT-2026', name: 'e-Fatura Geçişi — Tüm Bayiler', status: 'Active', description: 'GİB uyumlu e-Fatura altyapı geçişi.' },
+    { code: 'SAHA-2026', name: 'Saha Veri Toplama Pilot', status: 'Active', description: 'Mobil ekip için saha veri girişi pilot çalışması.' },
+    { code: 'PNRM-2026', name: 'Panorama Raporlama Yenileme', status: 'Active', description: 'Yönetici raporları için Panorama dashboard yenilemesi.' },
+    { code: 'STOK-2025', name: 'Depo/Stok Tamamlama', status: 'Completed', description: 'Geçmiş dönem stok altyapı projesi — referans olarak korunuyor.' },
+  ];
+  const projectsByAccountCompany = {};
+  for (const { ac, def } of allAccountIds['COMP-UNIVERA'].slice(0, 6)) {
+    const r = rng(hash(def.code + 'proj'));
+    const count = 2 + Math.floor(r() * 2); // 2 or 3
+    const picked = [];
+    const usedCodes = new Set();
+    for (let i = 0; i < count; i++) {
+      let tpl = pick(UNIVERA_PROJECT_TEMPLATES, r);
+      // Avoid duplicate code per AccountCompany — @@unique constraint.
+      let attempts = 0;
+      while (usedCodes.has(tpl.code) && attempts < 8) {
+        tpl = pick(UNIVERA_PROJECT_TEMPLATES, r);
+        attempts++;
+      }
+      if (usedCodes.has(tpl.code)) continue;
+      usedCodes.add(tpl.code);
+      const projectId = `PROJ-${def.code}-${tpl.code}`;
+      const created = await prisma.accountProject.upsert({
+        where: { id: projectId },
+        update: {
+          name: tpl.name,
+          status: tpl.status,
+          isActive: tpl.status !== 'Cancelled' && tpl.status !== 'Completed',
+          description: tpl.description,
+        },
+        create: {
+          id: projectId,
+          accountCompanyId: ac.id,
+          code: tpl.code,
+          name: tpl.name,
+          status: tpl.status,
+          isActive: tpl.status === 'Active',
+          startDate: new Date('2026-01-15T00:00:00Z'),
+          description: tpl.description,
+        },
+      });
+      picked.push(created);
+    }
+    projectsByAccountCompany[ac.id] = picked.filter((p) => p.isActive && p.status === 'Active');
+  }
+  const univeraProjectCount = Object.values(projectsByAccountCompany).reduce((n, list) => n + list.length, 0);
+  console.log(`   UNIVERA: ${univeraProjectCount} active projects across ${Object.keys(projectsByAccountCompany).length} accounts`);
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};
@@ -466,7 +536,22 @@ async function main() {
       const titleIdx = i % accountList.length;
       const acc = accountList[titleIdx].acc;
       const accDef = accountList[titleIdx].def;
+      const ac = accountList[titleIdx].ac;
       const createdAt = randDateInRange(r);
+
+      // WR-A4 / PM-04 — UNIVERA cases ~40% chance to link to a project (if any).
+      // Diğer şirketler ve UNIVERA'nın projesiz hesapları: accountProjectId null
+      // kalır (backward-compat sinyali).
+      let linkedProjectId = null;
+      let linkedProjectName = null;
+      if (companyId === 'COMP-UNIVERA') {
+        const projList = projectsByAccountCompany[ac.id] ?? [];
+        if (projList.length > 0 && r() < 0.4) {
+          const p = pick(projList, r);
+          linkedProjectId = p.id;
+          linkedProjectName = p.name;
+        }
+      }
       // Some demo companies (UNIVERA/FINROTA) may not have own teams in base
       // seed. Fall back to any active team so the case is still assigned.
       const teamPool = companyTeams.length > 0 ? companyTeams : teams;
@@ -517,6 +602,9 @@ async function main() {
         companyName: companies.find((c) => c.id === companyId).name,
         accountId: acc.id,
         accountName: acc.name,
+        // WR-A4 / PM-04 — opsiyonel proje bağı (UNIVERA için bazı vakalar).
+        accountProjectId: linkedProjectId,
+        accountProjectName: linkedProjectName,
         customerMatchPending: false,
         category: cat,
         subCategory: sub,

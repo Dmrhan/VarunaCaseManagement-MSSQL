@@ -261,6 +261,13 @@ function CompanyEditor({
   const [requireCustomerOnCaseCreate, setRequireCustomerOnCaseCreate] = useState(
     existing?.requireCustomerOnCaseCreate ?? false,
   );
+  // WR-A4 / PM-04 — AccountProject opt-in (default false; mevcut davranışı korur)
+  const [projectsEnabled, setProjectsEnabled] = useState(
+    existing?.projectsEnabled ?? false,
+  );
+  const [projectsRequired, setProjectsRequired] = useState(
+    existing?.projectsRequired ?? false,
+  );
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -286,6 +293,11 @@ function CompanyEditor({
       logoUrl: logoUrl.trim() || undefined,
       supportEmail: supportEmail.trim() || undefined,
       requireCustomerOnCaseCreate,
+      // WR-A4 / PM-04 — proje opt-in/zorunluluk
+      projectsEnabled,
+      // projectsRequired anlamlı olabilmesi için projectsEnabled true olmalı; aksi
+      // halde gönderme (UI gating ile defense-in-depth).
+      projectsRequired: projectsEnabled ? projectsRequired : false,
     };
 
     setSubmitting(true);
@@ -390,6 +402,47 @@ function CompanyEditor({
               <span className="font-medium">Vaka açarken müşteri zorunlu</span>
               <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-ndark-muted">
                 Açık olduğunda kullanıcılar müşteri seçmeden vaka kaydedemez.
+              </span>
+            </span>
+          </label>
+
+          {/* WR-A4 / PM-04 — AccountProject opt-in toggles. */}
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate-700 dark:text-ndark-text">
+            <input
+              type="checkbox"
+              checked={projectsEnabled}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setProjectsEnabled(next);
+                if (!next) setProjectsRequired(false);
+              }}
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-brand-600"
+            />
+            <span>
+              <span className="font-medium">Proje kullanımı aktif</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-ndark-muted">
+                Müşteri kartında ve vaka formunda "Proje" seçimi görünür hale gelir.
+              </span>
+            </span>
+          </label>
+          <label
+            className={`mt-2 flex items-start gap-2 text-sm ${
+              projectsEnabled
+                ? 'cursor-pointer text-slate-700 dark:text-ndark-text'
+                : 'cursor-not-allowed text-slate-400 dark:text-ndark-dim'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={projectsRequired}
+              onChange={(e) => setProjectsRequired(e.target.checked)}
+              disabled={!projectsEnabled}
+              className="mt-0.5 h-4 w-4 accent-brand-600 disabled:cursor-not-allowed"
+            />
+            <span>
+              <span className="font-medium">Vaka açarken proje zorunlu</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-ndark-muted">
+                Müşteri seçildikten sonra proje seçimi de zorunlu olur. "Proje kullanımı aktif" gerekir.
               </span>
             </span>
           </label>

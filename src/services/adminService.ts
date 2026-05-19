@@ -189,6 +189,9 @@ export interface Company {
   supportEmail: string | null;
   // Phase D — müşterisiz vaka açma zorunluluğu (per-company toggle)
   requireCustomerOnCaseCreate?: boolean;
+  // WR-A4 / PM-04 — AccountProject opt-in toggles (default false)
+  projectsEnabled?: boolean;
+  projectsRequired?: boolean;
   userCount: number;
   createdAt?: string;
   updatedAt?: string;
@@ -202,6 +205,9 @@ export interface CompanyInput {
   appName?: string;
   supportEmail?: string;
   requireCustomerOnCaseCreate?: boolean;
+  // WR-A4 / PM-04
+  projectsEnabled?: boolean;
+  projectsRequired?: boolean;
 }
 
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };

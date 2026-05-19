@@ -79,6 +79,14 @@ enum CustomerType {
   NonProfit  @map("Vakıf-STK")
 }
 
+/// Proje statüsü — WR-A4 / PM-04 (AccountProject lifecycle).
+enum ProjectStatus {
+  Active
+  Passive
+  Completed
+  Cancelled
+}
+
 enum NoteVisibility {
   Internal
   Customer
@@ -332,6 +340,14 @@ model CompanySettings {
   /// ise Agent "Müşterisiz devam et" ile vaka açabilir ve Case.customerMatchPending
   /// = true set edilir (Supervisor/Admin için eşleştirme kuyruğu).
   requireCustomerOnCaseCreate Boolean  @default(false)
+  /// WR-A4 / PM-04 — true ise UI'da AccountProject menüsü + Case create
+  /// project combobox açılır. Default false → mevcut davranış değişmez.
+  projectsEnabled             Boolean  @default(false)
+  /// WR-A4 / PM-04 — true ise (projectsEnabled=true gerektirir) Case create
+  /// sırasında accountId varsa accountProjectId zorunlu. Default false →
+  /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
+  /// operasyonu ile flip edilir.
+  projectsRequired            Boolean  @default(false)
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 
@@ -403,12 +419,46 @@ model AccountCompany {
   account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   products AccountProduct[]
+  /// WR-A4 — AccountCompany-scoped projeler.
+  projects AccountProject[]
 
   @@unique([accountId, companyId])
   @@unique([companyId, externalCustomerCode])
   @@index([companyId])
   @@index([accountId])
   @@index([externalCustomerCode])
+}
+
+/// AccountProject — WR-A4 / PM-04. UNIVERA gibi proje bazlı müşterilerin
+/// projelerini AccountCompany altında tutar. Case.accountProjectId üzerinden
+/// vakalara bağlanır.
+///
+/// Tasarım kuralı (Decision Sprint §④, Modeling Guardrail #2):
+///   Account → AccountCompany → AccountProject → Case
+///   Project ASLA doğrudan Account'a bağlanmaz.
+///
+/// CompanySettings.projectsEnabled flag'i (default false) tenant başına opt-in;
+/// projectsRequired (default false) Case create'te projectId'yi zorunlu yapar.
+model AccountProject {
+  id               String        @id @default(cuid())
+  accountCompanyId String
+  /// Tenant-içi unique kod (AccountCompany scope'unda). Örn "ROTA-2026".
+  code             String
+  name             String
+  status           ProjectStatus @default(Active)
+  startDate        DateTime?
+  endDate          DateTime?
+  description      String?       @db.Text
+  isActive         Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+  cases          Case[]
+
+  @@unique([accountCompanyId, code])
+  @@index([accountCompanyId])
+  @@index([accountCompanyId, isActive])
 }
 
 // AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.
@@ -601,6 +651,13 @@ model Case {
   accountId   String?
   accountName String?
 
+  // WR-A4 / PM-04 — Proje bazlı vaka takip (UNIVERA core).
+  // AccountCompany üzerinden bağlı; Account-level değil. Mevcut tüm vakalarda
+  // null kalır. CompanySettings.projectsRequired=true tenant'larda Case create
+  // sırasında accountId varsa accountProjectId zorunlu olur (app-layer check).
+  accountProjectId   String?
+  accountProjectName String?
+
   // Sınıflandırma (denormalized — kategori adları)
   category     String
   subCategory  String
@@ -710,11 +767,12 @@ model Case {
   resolvedAt DateTime?
 
   // Relations
-  company        Company     @relation(fields: [companyId], references: [id])
-  account        Account?    @relation(fields: [accountId], references: [id])
-  assignedTeam   Team?       @relation(fields: [assignedTeamId], references: [id])
-  assignedPerson Person?     @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
-  thirdParty     ThirdParty? @relation(fields: [thirdPartyId], references: [id])
+  company        Company         @relation(fields: [companyId], references: [id])
+  account        Account?        @relation(fields: [accountId], references: [id])
+  accountProject AccountProject? @relation(fields: [accountProjectId], references: [id])
+  assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id])
+  assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
+  thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id])
 
   notes         CaseNote[]
   attachments   CaseAttachment[]
@@ -734,6 +792,7 @@ model Case {
   incomingLinks CaseLink[]            @relation("CaseLinkTarget")
 
   @@index([accountId])
+  @@index([accountProjectId])
   @@index([companyId])
   @@index([assignedPersonId])
   @@index([assignedTeamId])

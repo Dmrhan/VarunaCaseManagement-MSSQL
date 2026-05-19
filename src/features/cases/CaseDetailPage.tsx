@@ -1022,6 +1022,12 @@ function LeftPanel({
                   </span>
                 )}
                 {ctxCompany?.packageName && <Badge tint="indigo">{ctxCompany.packageName}</Badge>}
+                {/* WR-A4 / PM-04 — Bağlı proje badge'i. */}
+                {item.accountProjectName && (
+                  <span title="Bağlı proje">
+                    <Badge tint="violet">Proje: {item.accountProjectName}</Badge>
+                  </span>
+                )}
                 <Badge tint={item.priority === 'Critical' ? 'rose' : 'blue'}>
                   {item.priority}
                 </Badge>

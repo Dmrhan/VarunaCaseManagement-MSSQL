@@ -5,6 +5,7 @@ import {
   Building2,
   Calendar,
   Clock,
+  FolderKanban,
   Inbox,
   Mail,
   Package,
@@ -20,10 +21,12 @@ import {
   canReadAccounts,
   canWriteAccounts,
   CUSTOMER_TYPE_LABELS,
+  PROJECT_STATUS_LABELS,
   type AccountContact,
   type AccountCompanyDetail,
   type AccountDetail,
   type AccountProductSummary,
+  type AccountProjectSummary,
 } from '@/services/accountService';
 import { Badge, type BadgeTint } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -33,6 +36,7 @@ import { AccountFormModal } from './AccountFormModal';
 import { AccountCompanyEditor } from './AccountCompanyEditor';
 import { AccountContactEditor } from './AccountContactEditor';
 import { AccountProductEditor } from './AccountProductEditor';
+import { AccountProjectEditor } from './AccountProjectEditor';
 
 interface AccountDetailPageProps {
   accountId: string;
@@ -65,6 +69,11 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
   const [productEditor, setProductEditor] = useState<
     | { mode: 'add' }
     | { mode: 'edit'; product: AccountProductSummary; accountCompanyId: string }
+    | null
+  >(null);
+  const [projectEditor, setProjectEditor] = useState<
+    | { mode: 'add' }
+    | { mode: 'edit'; project: AccountProjectSummary; accountCompanyId: string }
     | null
   >(null);
 
@@ -140,6 +149,14 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
                   setProductEditor({ mode: 'edit', product, accountCompanyId })
                 }
               />
+              <ProjectsSection
+                companies={account.companies}
+                isWriter={isWriter}
+                onAdd={() => setProjectEditor({ mode: 'add' })}
+                onEdit={(project, accountCompanyId) =>
+                  setProjectEditor({ mode: 'edit', project, accountCompanyId })
+                }
+              />
               <ContactsSection
                 contacts={account.contacts}
                 isWriter={isWriter}
@@ -209,6 +226,26 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
             onClose={() => setProductEditor(null)}
             onSaved={(updated) => {
               setProductEditor(null);
+              if (updated) setAccount(updated);
+            }}
+          />
+
+          <AccountProjectEditor
+            open={projectEditor !== null}
+            mode={projectEditor?.mode ?? 'add'}
+            accountId={account.id}
+            visibleCompanies={account.companies}
+            project={
+              projectEditor && projectEditor.mode === 'edit' ? projectEditor.project : null
+            }
+            accountCompanyId={
+              projectEditor && projectEditor.mode === 'edit'
+                ? projectEditor.accountCompanyId
+                : null
+            }
+            onClose={() => setProjectEditor(null)}
+            onSaved={(updated) => {
+              setProjectEditor(null);
               if (updated) setAccount(updated);
             }}
           />
@@ -481,6 +518,119 @@ function ProductsSection({
       )}
     </SectionCard>
   );
+}
+
+function ProjectsSection({
+  companies,
+  isWriter,
+  onAdd,
+  onEdit,
+}: {
+  companies: AccountDetail['companies'];
+  isWriter: boolean;
+  onAdd: () => void;
+  onEdit: (project: AccountProjectSummary, accountCompanyId: string) => void;
+}) {
+  // WR-A4 — Şirket-ilişkisi başına projeleri tek listede düzleştir.
+  const flat = companies.flatMap((c) =>
+    c.projects.map((p) => ({
+      ...p,
+      companyName: c.companyName ?? c.companyId,
+      accountCompanyId: c.accountCompanyId,
+    })),
+  );
+  const total = flat.length;
+  const canAdd = isWriter && companies.length > 0;
+
+  return (
+    <SectionCard
+      title="Projeler"
+      subtitle="Şirket-ilişkisi başına proje listesi — vaka açma anında opsiyonel olarak seçilebilir"
+      action={
+        canAdd ? (
+          <Button variant="outline" size="sm" leftIcon={<Plus size={12} />} onClick={onAdd}>
+            Proje Ekle
+          </Button>
+        ) : null
+      }
+    >
+      {total === 0 ? (
+        <EmptyState
+          size="sm"
+          icon={<FolderKanban size={16} />}
+          title="Proje yok"
+          description={
+            isWriter
+              ? companies.length === 0
+                ? 'Önce müşteriyi bir şirkete bağla, sonra proje ekleyebilirsin.'
+                : 'Müşterinin proje listesini eklemek için yukarıdaki düğmeyi kullan.'
+              : 'Bu müşteri için henüz proje tanımlanmamış.'
+          }
+        />
+      ) : (
+        <ul className="space-y-2">
+          {flat.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-ndark-border"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FolderKanban size={13} className="text-slate-500 dark:text-ndark-muted" />
+                  <span className="font-medium text-slate-900 dark:text-ndark-text">
+                    {p.name}
+                  </span>
+                  <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+                    {p.code}
+                  </span>
+                  <Badge tint={projectStatusTint(p.status)}>
+                    {PROJECT_STATUS_LABELS[p.status] ?? p.status}
+                  </Badge>
+                  {!p.isActive && <Badge tint="slate">Pasif</Badge>}
+                  <Badge tint="blue">{p.companyName}</Badge>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                  {p.startDate && <span>Başlangıç: {formatDate(p.startDate)}</span>}
+                  {p.endDate && <span>Bitiş: {formatDate(p.endDate)}</span>}
+                </div>
+                {p.description && (
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600 dark:text-ndark-muted">
+                    {p.description}
+                  </p>
+                )}
+              </div>
+              {isWriter && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(p, p.accountCompanyId)}
+                  title="Düzenle"
+                  aria-label={`${p.name} projesini düzenle`}
+                  className="shrink-0 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-surface dark:hover:text-ndark-text"
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+function projectStatusTint(status: string): BadgeTint {
+  switch (status) {
+    case 'Active':
+      return 'emerald';
+    case 'Passive':
+      return 'slate';
+    case 'Completed':
+      return 'blue';
+    case 'Cancelled':
+      return 'rose';
+    default:
+      return 'slate';
+  }
 }
 
 function ContactsSection({

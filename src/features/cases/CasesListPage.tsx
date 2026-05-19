@@ -1239,6 +1239,15 @@ export function CasesListPage({
                       >
                         {c.accountName}
                       </button>
+                      {/* WR-A4 / PM-04 — Proje bağı varsa ince violet chip. */}
+                      {c.accountProjectName && (
+                        <span
+                          className="mt-1 inline-flex w-fit max-w-full items-center gap-1 truncate rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-inset ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900/40"
+                          title={`Proje: ${c.accountProjectName}`}
+                        >
+                          📁 <span className="truncate">{c.accountProjectName}</span>
+                        </span>
+                      )}
                       {/* Phase D — Müşteri eşleştirilmemiş vakalar için amber rozet (tüm roller görür). */}
                       {c.customerMatchPending && (
                         <span
