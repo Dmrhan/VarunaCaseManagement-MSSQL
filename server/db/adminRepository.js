@@ -1721,6 +1721,20 @@ export const productRepo = {
 const PACKAGE_ITEM_MAX = 200; // PUT items body cap (Performance Gate item #4)
 
 export const packageRepo = {
+  /**
+   * WR-A7 review fix — lookup helper for per-company admin gate.
+   * Returns companyId or null (not found). Route layer uses this to call
+   * assertCompanyAdmin BEFORE delegating to the repo's CRUD path.
+   */
+  async getCompanyId(id) {
+    if (!id) return null;
+    const row = await prisma.package.findUnique({
+      where: { id },
+      select: { companyId: true },
+    });
+    return row?.companyId ?? null;
+  },
+
   async list({ companyId, allowedCompanyIds, includeInactive = false }) {
     const where = {};
     if (companyId) {
