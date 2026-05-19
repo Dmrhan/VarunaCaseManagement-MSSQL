@@ -503,6 +503,126 @@ export const caseRepository = {
   },
 
   /**
+   * WR-C1 / PM-07 — POST /api/cases/:id/claim ("Üstlen")
+   *
+   * Atanmamış açık bir vakayı çağıran kullanıcıya atomik olarak atar. Race
+   * koşulları `updateMany` WHERE filter'ı ile kapatılır: iki kullanıcı eş
+   * zamanlı claim'lerse Postgres ilkini başarıyla kaydeder, ikincide
+   * `count: 0` döner → 409.
+   *
+   * Kurallar:
+   *  - Case kullanıcının scope'unda olmalı (assertCaseInScope → 403 / 404).
+   *  - Case status terminal olamaz: Cozuldu, IptalEdildi → 400.
+   *  - Case.assignedPersonId NULL olmalı; aksi halde 409.
+   *  - User.personId NULL ise (SystemAdmin gibi) 400 — atanabilir Person yok.
+   *  - Atomik update: `updateMany` WHERE assignedPersonId IS NULL AND
+   *    status NOT IN terminal. Affected row count = 0 → 409.
+   *  - On success: assignedPersonId/Name, assignedTeamId (varsa) güncellenir;
+   *    CaseActivity (actionType=FieldUpdate, "Vaka üstlenildi: {fullName}") oluşur;
+   *    watcher'lara assignment notification yollanır (mevcut pattern).
+   */
+  async claim({ caseId, user }) {
+    const allowed = Array.isArray(user?.allowedCompanyIds) ? user.allowedCompanyIds : [];
+    const companyId = await assertCaseInScope(caseId, allowed);
+    if (!companyId) return null; // route 404'e çevirir
+
+    if (!user?.personId) {
+      throw new CaseValidationError(
+        'Bu hesap claim yapamaz (atanabilir Person kaydı yok).',
+        { status: 400, code: 'no_person_record' },
+      );
+    }
+
+    // Ön check — closed mu, zaten atanmış mı? Atomik update zaten kapsar
+    // ama explicit 400 vs 409 ayrımı için ön bakış.
+    const current = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { status: true, assignedPersonId: true, companyId: true },
+    });
+    if (!current) return null;
+    if (current.status === 'Cozuldu' || current.status === 'IptalEdildi') {
+      throw new CaseValidationError('Kapalı vaka üstlenilemez.', {
+        status: 400,
+        code: 'case_closed',
+      });
+    }
+    if (current.assignedPersonId) {
+      throw new CaseValidationError(
+        'Bu vaka başka bir kullanıcı tarafından üstlenilmiş olabilir.',
+        { status: 409, code: 'already_assigned' },
+      );
+    }
+
+    const person = await prisma.person.findUnique({
+      where: { id: user.personId },
+      select: { name: true, teamId: true, team: { select: { name: true } } },
+    });
+    if (!person) {
+      throw new CaseValidationError('Person kaydı bulunamadı.', {
+        status: 400,
+        code: 'person_not_found',
+      });
+    }
+
+    const assignedPersonName = person.name ?? user.fullName ?? user.personId;
+    const assignedTeamId = person.teamId ?? null;
+    const assignedTeamName = person.team?.name ?? null;
+
+    // Atomic — race-safe.
+    const result = await prisma.case.updateMany({
+      where: {
+        id: caseId,
+        assignedPersonId: null,
+        status: { notIn: ['Cozuldu', 'IptalEdildi'] },
+      },
+      data: {
+        assignedPersonId: user.personId,
+        assignedPersonName,
+        ...(assignedTeamId
+          ? { assignedTeamId, assignedTeamName }
+          : {}),
+        updatedAt: new Date(),
+      },
+    });
+
+    if (result.count === 0) {
+      // Başka kullanıcı arada üstlendi veya status değişti.
+      throw new CaseValidationError(
+        'Bu vaka başka bir kullanıcı tarafından üstlenilmiş olabilir.',
+        { status: 409, code: 'claim_race_lost' },
+      );
+    }
+
+    // Audit log — başarılı claim sonrası.
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: `Vaka üstlenildi: ${assignedPersonName}`,
+        actionType: 'FieldUpdate',
+        fieldName: 'assignedPersonId',
+        fromValue: null,
+        toValue: user.personId,
+        actor: user.fullName ?? assignedPersonName,
+      },
+    });
+
+    // Watcher bildirimi — mevcut update path ile aynı pattern.
+    await notifyWatchers({
+      caseId,
+      companyId,
+      message: `Vaka üstlenildi: ${assignedPersonName}`,
+      kind: 'assignment',
+    });
+
+    const updated = await prisma.case.findUnique({
+      where: { id: caseId },
+      include: CASE_INCLUDE,
+    });
+    return shape(updated);
+  },
+
+  /**
    * Phase D — PATCH /api/cases/:id/link-account
    *
    * Müşterisiz açılmış (customerMatchPending=true) bir vakaya Supervisor/Admin

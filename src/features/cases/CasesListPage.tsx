@@ -554,6 +554,28 @@ export function CasesListPage({
     onShowCustomer?.(account.id);
   }
 
+  // WR-C1 — Üstlen / Claim. Row-level loading state; race conflict (409) apiFetch
+  // tarafından toast'lanır + list refresh fresh durumu gösterir.
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+  async function handleClaim(e: React.MouseEvent, caseId: string) {
+    e.stopPropagation();
+    if (claimingId) return;
+    setClaimingId(caseId);
+    const updated = await caseService.claimCase(caseId);
+    setClaimingId(null);
+    if (updated) {
+      toast({ type: 'success', message: `Vaka üstlenildi: ${updated.assignedPersonName ?? 'sen'}` });
+      void load();
+      void refreshStats();
+    } else {
+      // apiFetch zaten toast gösterdi (409 → "üstlenilmiş olabilir"); listeyi refresh et ki güncel durum görünsün.
+      void load();
+    }
+  }
+  /** WR-C1 — Claim koşulu: kapalı değil, atanmamış, kullanıcının personId'si var. */
+  const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
+    !!user?.personId && !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
+
   return (
     <div className="space-y-4">
       {patternCasesFilter && (
@@ -1248,7 +1270,21 @@ export function CasesListPage({
                       <PriorityBadge priority={c.priority} />
                     </Td>
                     <Td className="text-slate-700 dark:text-ndark-text">
-                      {c.assignedPersonName ?? c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
+                      {c.assignedPersonName ?? c.assignedTeamName ?? (
+                        canClaimCase(c) ? (
+                          <button
+                            type="button"
+                            onClick={(e) => handleClaim(e, c.id)}
+                            disabled={claimingId === c.id}
+                            className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+                            title="Bu vakayı üstlen"
+                          >
+                            {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
+                          </button>
+                        ) : (
+                          <span className="text-slate-400 dark:text-ndark-muted">—</span>
+                        )
+                      )}
                     </Td>
                     <Td className="text-xs text-slate-600 dark:text-ndark-muted">
                       {c.assignedTeamName ?? <span className="text-slate-400 dark:text-ndark-muted">—</span>}
