@@ -116,9 +116,18 @@ router.get(
       slaViolation: f.slaViolation === 'true' ? true : undefined,
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
     };
-    const pagination = f.page
-      ? { page: Number(f.page), pageSize: Number(f.pageSize ?? 25) }
-      : undefined;
+    // WR-H1 — Defansif large-query guard (AGENTIC_PLANNING_PROTOCOL §③ #6).
+    // pageSize her zaman [1, 200] içine clamp edilir; pagination object'i her zaman
+    // üretilir (undefined yok) ki route hiçbir senaryoda unbounded findMany tetiklemesin.
+    // accountRepository.listAccounts ile aynı clamp pattern'i (cap 100 → 200; cases entity bigger).
+    const HARD_MAX_PAGE_SIZE = 200;
+    const requestedPageSize = Number(f.pageSize ?? 25);
+    const safePageSize = Math.min(
+      HARD_MAX_PAGE_SIZE,
+      Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 25),
+    );
+    const safePage = Math.max(1, Number(f.page) || 1);
+    const pagination = { page: safePage, pageSize: safePageSize };
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
