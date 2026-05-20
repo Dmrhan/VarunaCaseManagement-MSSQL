@@ -25,14 +25,13 @@ router.use(verifyJwt);
 
 const STRICTNESS_VALUES = new Set(['lenient', 'normal', 'strict']);
 const SOURCE_TYPE_ALLOWLIST = new Set([
-  // Allowlist generic; EnRoute KB ileride farklı set isterse genişletilir.
-  'kb',
-  'past_cases',
-  'docs',
-  'manual',
-  'sla',
-  'checklists',
-  'panorama',
+  // WR-KB4 — Yalnız EnRoute KB API tarafından desteklenen tipler:
+  //   pdf                — Belge / dokümantasyon
+  //   panorama_screen    — Panorama ekranı referansı
+  //   ticket_resolution  — Geçmiş ticket çözümleri
+  'pdf',
+  'panorama_screen',
+  'ticket_resolution',
 ]);
 
 function jsonError(res, status, code, message) {
