@@ -369,17 +369,37 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     };
   }, [open, form.companyId, form.accountId]);
 
-  // WR-A7b — companyId / accountId değişirse seçili productId/packageId catalog'da yoksa sıfırla.
-  useEffect(() => {
-    if (form.productId && !catalogProducts.some((p) => p.id === form.productId)) {
-      setForm((f) => ({ ...f, productId: '' }));
-    }
-  }, [catalogProducts, form.productId]);
+  // WR-A7b — Catalog reconciliation: seçili productId/packageId catalog'da yoksa sıfırla.
+  //
+  // packageId değişimi (kullanıcı paket değiştirdiğinde de tetiklenir):
+  //   - packageId boş → productId company-wide aktif catalog'da olduğu sürece kalır.
+  //   - packageId set → productId PackageItem[packageId] içinde olmak zorunda;
+  //     değilse otomatik sıfırla. (Backend DI.3 package_product_mismatch'i de
+  //     yakalardı; UI proaktif çalışıp 400 turunu engeller.)
+  //
+  // Otomatik bir ürün SEÇMEZ — Sadece uyumsuzu temizler.
   useEffect(() => {
     if (form.packageId && !catalogPackages.some((p) => p.id === form.packageId)) {
+      // Paket catalog'da yok → packageId sıfırla.
       setForm((f) => ({ ...f, packageId: '' }));
     }
   }, [catalogPackages, form.packageId]);
+
+  useEffect(() => {
+    if (!form.productId) return;
+    // 1) Catalog'da yoksa sıfırla.
+    if (!catalogProducts.some((p) => p.id === form.productId)) {
+      setForm((f) => ({ ...f, productId: '' }));
+      return;
+    }
+    // 2) Paket seçiliyse PackageItem üyeliği şart.
+    if (form.packageId) {
+      const memberIds = catalogPackageItems[form.packageId] ?? [];
+      if (!memberIds.includes(form.productId)) {
+        setForm((f) => ({ ...f, productId: '' }));
+      }
+    }
+  }, [catalogProducts, catalogPackageItems, form.packageId, form.productId]);
 
   // Kategori değişirse alt kategori geçersizleşebilir
   useEffect(() => {
