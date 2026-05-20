@@ -336,6 +336,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
     }
   }, [teamsForCompany, form.assignedTeamId]);
 
+  // WR-A7b — accountId değişimi: packageId müşteri-şirket ilişkisine bağlı (DI.5).
+  // Müşteri değişti/temizlendiyse eski packageId yanlıştır → invalidate. Catalog
+  // refetch effect (aşağıda) yeni suggestedPackage'i preselect eder.
+  useEffect(() => {
+    if (!open) return;
+    setForm((f) => (f.packageId ? { ...f, packageId: '' } : f));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, form.accountId]);
+
   // WR-A7b — companyId / accountId değiştikçe catalog lookup.
   // accountId set ise suggestedPackage preselect; null ise sadece package listesi (DI.4 enforce).
   useEffect(() => {
@@ -356,7 +365,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
         setCatalogProducts(data.products);
         setCatalogPackageItems(data.packageItems);
         setCatalogSuggestedPackage(data.suggestedPackage);
-        // suggestedPackage'i preselect (form.packageId boşsa).
+        // suggestedPackage'i preselect (form.packageId boşsa — accountId change effect
+        // yukarıda packageId'yi sıfırladıysa burada yeni paketle eşleşir).
         setForm((f) =>
           !f.packageId && data.suggestedPackage ? { ...f, packageId: data.suggestedPackage } : f,
         );
