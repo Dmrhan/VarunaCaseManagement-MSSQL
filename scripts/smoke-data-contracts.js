@@ -1608,6 +1608,24 @@ defineGroup('Case Product/Package Integrity Contract', async () => {
     { count: customerlessPkg?.length ?? 0, examples: customerlessPkg ?? [] },
   ));
 
+  // CP.6.5) DI.3 — If Case has both productId and packageId, productId MUST be
+  //                in PackageItem.productId for that packageId.
+  const pkgProdDrift = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."productId", c."packageId"
+      FROM "Case" c
+     WHERE c."productId" IS NOT NULL AND c."packageId" IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM "PackageItem" pi
+          WHERE pi."packageId" = c."packageId" AND pi."productId" = c."productId"
+       )
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.productId ∈ PackageItem when both set (DI.3)',
+    (pkgProdDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: pkgProdDrift?.length ?? 0, examples: pkgProdDrift ?? [] },
+  ));
+
   // CP.7) DI.5 — Case.packageId MUST equal AccountCompany.packageId (account, company tuple).
   //   Drift query: case has both accountId and packageId, but the AC link's packageId differs (or null).
   const caseAcPkgDrift = await prisma.$queryRawUnsafe(`

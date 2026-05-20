@@ -74,7 +74,10 @@ async function cleanup() {
     if (touchedAccountCompanyOriginal) {
       await prisma.accountCompany.update({
         where: { id: touchedAccountCompanyOriginal.id },
-        data: { packageId: touchedAccountCompanyOriginal.packageId },
+        data: {
+          packageId: touchedAccountCompanyOriginal.packageId,
+          packageName: touchedAccountCompanyOriginal.packageName,
+        },
       });
     }
   } catch (e) {
@@ -111,6 +114,11 @@ async function pickEntities() {
     where: { companyId: COMP_UNI, code: 'ENROUTE', isActive: true },
     select: { id: true, name: true, supportLevel: true },
   });
+  // STOKBAR — RED_PKG'de var, WHITE_PKG'de yok → DI.3 mismatch testi için.
+  const uniProductNotInWhite = await prisma.product.findFirst({
+    where: { companyId: COMP_UNI, code: 'STOKBAR', isActive: true },
+    select: { id: true, name: true },
+  });
   // PARAM: cross-tenant test için
   const parPackage = await prisma.package.findUnique({
     where: { companyId_code: { companyId: COMP_PAR, code: 'POS_BASIC' } },
@@ -125,19 +133,23 @@ async function pickEntities() {
     where: { companyId: COMP_UNI, status: 'active' },
     select: { id: true, accountId: true, packageId: true, packageName: true },
   });
-  return { uniPackage, uniRedPackage, uniProduct, parPackage, parProduct, uniAc };
+  return { uniPackage, uniRedPackage, uniProduct, uniProductNotInWhite, parPackage, parProduct, uniAc };
 }
 
 const ents = await pickEntities();
-if (!ents.uniPackage || !ents.uniRedPackage || !ents.uniProduct || !ents.parPackage || !ents.parProduct || !ents.uniAc) {
-  console.log('SKIP — seed verisi eksik (uniPackage/uniRedPackage/uniProduct/parPackage/parProduct/uniAc).');
+if (!ents.uniPackage || !ents.uniRedPackage || !ents.uniProduct || !ents.uniProductNotInWhite || !ents.parPackage || !ents.parProduct || !ents.uniAc) {
+  console.log('SKIP — seed verisi eksik.');
   console.log('  uniPackage:', ents.uniPackage?.id, 'uniRedPackage:', ents.uniRedPackage?.id);
-  console.log('  uniProduct:', ents.uniProduct?.id, 'parPackage:', ents.parPackage?.id);
-  console.log('  parProduct:', ents.parProduct?.id, 'uniAc:', ents.uniAc?.id);
+  console.log('  uniProduct:', ents.uniProduct?.id, 'uniProductNotInWhite:', ents.uniProductNotInWhite?.id);
+  console.log('  parPackage:', ents.parPackage?.id, 'parProduct:', ents.parProduct?.id, 'uniAc:', ents.uniAc?.id);
   await prisma.$disconnect();
   process.exit(0);
 }
-touchedAccountCompanyOriginal = { id: ents.uniAc.id, packageId: ents.uniAc.packageId };
+touchedAccountCompanyOriginal = {
+  id: ents.uniAc.id,
+  packageId: ents.uniAc.packageId,
+  packageName: ents.uniAc.packageName,
+};
 
 // ─────────────────────────────────────────────────────────────────
 // 1) Admin links AccountCompany.packageId (same-company) → 200
@@ -267,6 +279,43 @@ console.log('\n── 5) Case packageId mismatch AC → 400 ──');
   record(
     '5. Case packageId mismatch → 400 package_account_company_mismatch',
     r.status === 400 && r.data?.error === 'package_account_company_mismatch',
+    `status=${r.status} code=${r.data?.error}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 5b) DI.3 — Case create productId + packageId, productId PackageItem'da yok
+// AC.packageId = WHITE_PKG, productId = STOKBAR (RED_PKG'de var, WHITE'da yok).
+// ─────────────────────────────────────────────────────────────────
+console.log('\n── 5b) DI.3 package_product_mismatch → 400 ──');
+{
+  // AC'yi WHITE_PKG'a bağla (test 1 sonrası belki RED'di, garantiye al).
+  await prisma.accountCompany.update({
+    where: { id: ents.uniAc.id },
+    data: { packageId: ents.uniPackage.id },
+  });
+  const r = await api(supervisorToken, '/api/cases', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: `${STAMP} pkg+prod mismatch`,
+      description: 'productId WHITE_PKG PackageItem listesinde yok',
+      caseType: 'GeneralSupport',
+      priority: 'Medium',
+      origin: 'Telefon',
+      companyId: COMP_UNI,
+      companyName: 'UNIVERA',
+      accountId: ents.uniAc.accountId,
+      accountName: 'demo',
+      category: 'Genel',
+      subCategory: 'Diğer',
+      requestType: 'Talep',
+      packageId: ents.uniPackage.id,        // WHITE_PKG
+      productId: ents.uniProductNotInWhite.id, // STOKBAR — WHITE'da yok
+    }),
+  });
+  record(
+    '5b. DI.3 productId ∉ PackageItem → 400 package_product_mismatch',
+    r.status === 400 && r.data?.error === 'package_product_mismatch',
     `status=${r.status} code=${r.data?.error}`,
   );
 }
@@ -423,6 +472,41 @@ if (caseProd && backofficeToken) {
     r.status === 403 && r.data?.error === 'product_forbidden',
     `status=${r.status} code=${r.data?.error}`,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 12b) DI.3 PATCH — Case'in productId'si bir pakete uyumsuz kalırsa reject.
+// caseProd UNIVERA ENROUTE'a sahip. PATCH packageId=WHITE_PKG → ENROUTE WHITE'da var,
+// OK olur. Bunun yerine STOKBAR'a (WHITE'da yok) PATCH'leyip sonra WHITE pakete
+// bağlamayı dene. CSM/Admin/Supervisor productId allowed. Burada Supervisor kullanır.
+// ─────────────────────────────────────────────────────────────────
+console.log('\n── 12b) DI.3 PATCH package_product_mismatch ──');
+if (caseProd) {
+  // Önce productId'yi STOKBAR'a çevir (paket null olduğu için DI.3 tetiklenmez).
+  // caseProd test #11'de productId clear edildi; tekrar productId set edelim.
+  await prisma.case.update({
+    where: { id: caseProd.id },
+    data: { productId: ents.uniProductNotInWhite.id, productName: ents.uniProductNotInWhite.name, packageId: null, packageName: null },
+  });
+  // AC.packageId zaten WHITE_PKG (test 9 sonrası RED'di; test 13 hazırlık öncesi düzeltilecek).
+  await prisma.accountCompany.update({
+    where: { id: ents.uniAc.id },
+    data: { packageId: ents.uniPackage.id },
+  });
+  const r = await api(supervisorToken, `/api/cases/${caseProd.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ packageId: ents.uniPackage.id }),
+  });
+  record(
+    '12b. DI.3 PATCH packageId with incompatible productId → 400 package_product_mismatch',
+    r.status === 400 && r.data?.error === 'package_product_mismatch',
+    `status=${r.status} code=${r.data?.error}`,
+  );
+  // Cleanup state for downstream tests.
+  await prisma.case.update({
+    where: { id: caseProd.id },
+    data: { productId: null, productName: null, packageId: null, packageName: null },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────

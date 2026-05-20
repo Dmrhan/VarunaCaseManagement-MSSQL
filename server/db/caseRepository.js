@@ -259,6 +259,30 @@ async function loadAndValidateCasePackage({ packageId, accountId, companyId }) {
   return { id: pkg.id, name: pkg.name };
 }
 
+/**
+ * WR-A7b / DI.3 — Eğer Case'de hem productId hem packageId set ise productId
+ * o paketin PackageItem listesinde olmalı. Aksi halde 400 'package_product_mismatch'.
+ *
+ * Bu invariant planning card §⑥ tablosunda enumarate edildi (CP.6 contract).
+ * UI'da product picker zaten paket seçilince filtre uyguluyor; backend
+ * defense-in-depth.
+ *
+ * Helper yalnız her iki id de set olduğunda çağrılmalı; null tarafı caller atlar.
+ */
+async function assertPackageProductCompatible({ packageId, productId }) {
+  if (!packageId || !productId) return;
+  const link = await prisma.packageItem.findUnique({
+    where: { packageId_productId: { packageId, productId } },
+    select: { packageId: true },
+  });
+  if (!link) {
+    throw new CaseValidationError(
+      'Seçilen ürün bu paketin içeriğinde değil.',
+      { status: 400, code: 'package_product_mismatch' },
+    );
+  }
+}
+
 function sanitizeRequesterContext(raw) {
   const out = {
     customerContactName: trimOrNull(raw.customerContactName, 120),
@@ -552,6 +576,11 @@ export const caseRepository = {
     const finalProductName = productInfo ? productInfo.name : null;
     const finalPackageId = packageInfo ? packageInfo.id : null;
     const finalPackageName = packageInfo ? packageInfo.name : null;
+    // WR-A7b / DI.3 — Hem product hem package set ise PackageItem üyeliği zorunlu.
+    await assertPackageProductCompatible({
+      packageId: finalPackageId,
+      productId: finalProductId,
+    });
 
     // WR-A5 / PM-03 + WR-A7b D-A7BI.7 — supportLevel cascade.
     //   1. patch'te explicit set edildiyse onu kullan (D-A5.2)
@@ -831,6 +860,25 @@ export const caseRepository = {
           lifecyclePatch.packageName = null;
         }
       }
+    }
+
+    // WR-A7b / DI.3 — Effective (productId, packageId) çiftinde her ikisi de set ise
+    // PackageItem üyeliği zorunlu. lifecyclePatch'i öncelikli al; sonra patch; sonra before.
+    const effectiveProductId = Object.prototype.hasOwnProperty.call(lifecyclePatch, 'productId')
+      ? lifecyclePatch.productId
+      : productIdInPatch
+        ? patch.productId
+        : before.productId;
+    const effectivePackageId = Object.prototype.hasOwnProperty.call(lifecyclePatch, 'packageId')
+      ? lifecyclePatch.packageId
+      : packageIdInPatch
+        ? patch.packageId
+        : before.packageId;
+    if (effectiveProductId && effectivePackageId) {
+      await assertPackageProductCompatible({
+        packageId: effectivePackageId,
+        productId: effectiveProductId,
+      });
     }
 
     const updated = await prisma.case.update({
