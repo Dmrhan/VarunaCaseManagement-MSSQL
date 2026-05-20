@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  BookOpen,
   BrainCircuit,
   Building2,
   Calendar,
@@ -46,13 +47,14 @@ import { AdminLayout, type AdminView, isAdminView } from './features/admin/Admin
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
+import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'case-detail' | 'accounts' | 'account-detail' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | AdminView;
 
 interface NavItem {
   key: View;
@@ -458,6 +460,23 @@ export default function App() {
                   <Eye size={16} />
                   {sidebarExpanded && <span className="flex-1 text-left">İzleyici Inbox</span>}
                 </button>
+
+                {/* WR-KB2 — Bilgi Bankası bağımsız test ekranı. Tüm rollere açık. */}
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('kb-viewer')}
+                  className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                  } ${
+                    view === 'kb-viewer'
+                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                  }`}
+                  title="Bilgi Bankası"
+                >
+                  <BookOpen size={16} />
+                  {sidebarExpanded && <span className="flex-1 text-left">Bilgi Bankası</span>}
+                </button>
               </>
             )}
 
@@ -590,6 +609,7 @@ export default function App() {
           {view === 'analytics-qa-scores' && <QAScoresPage />}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
+          {view === 'kb-viewer' && <KnowledgeBasePage />}
           {view === 'case-detail' && selectedCaseId && (
             <CaseDetailPage
               caseId={selectedCaseId}
