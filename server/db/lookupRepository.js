@@ -57,6 +57,83 @@ export const lookupRepository = {
   },
 
   productGroups: listProductGroups,
+
+  /**
+   * WR-A7b / PM-05 — Vaka açılış catalog lookup.
+   *
+   * NewCaseForm + CaseDetail inline edit kullanır. Çağrı:
+   *   GET /api/lookups/catalog?companyId=&accountId=
+   *
+   * Dönüş:
+   *   - packages: companyId'deki aktif Package'lar [{ id, code, name, supportLevel }]
+   *   - products: companyId'deki aktif Product'lar [{ id, code, name, supportLevel, productGroupId }]
+   *   - packageItems: { [packageId]: productId[] } — UI paket filtresi için
+   *   - suggestedPackage: accountId verildiyse AccountCompany(accountId, companyId).packageId
+   *     veya null. NewCaseForm preselect için.
+   *
+   * Multi-tenant: allowedCompanyIds içermiyorsa companyId → 403.
+   *
+   * companyId zorunlu. accountId opsiyonel — verildiyse AccountCompany scope kontrol edilir.
+   */
+  async getCaseCatalog({ companyId, accountId = null, allowedCompanyIds }) {
+    if (!companyId) {
+      const err = new Error('companyId zorunlu.');
+      err.status = 400;
+      err.code = 'company_required';
+      throw err;
+    }
+    const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
+    if (allowed.length && !allowed.includes(companyId)) {
+      const err = new Error('Bu şirkete erişim yetkin yok.');
+      err.status = 403;
+      err.code = 'forbidden';
+      throw err;
+    }
+
+    const [packages, products, packageItems, accountCompany] = await Promise.all([
+      prisma.package.findMany({
+        where: { companyId, isActive: true },
+        select: { id: true, code: true, name: true, supportLevel: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.product.findMany({
+        where: { companyId, isActive: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          supportLevel: true,
+          productGroupId: true,
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.packageItem.findMany({
+        where: { package: { companyId, isActive: true } },
+        select: { packageId: true, productId: true },
+      }),
+      accountId
+        ? prisma.accountCompany.findUnique({
+            where: { accountId_companyId: { accountId, companyId } },
+            select: { packageId: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const packageItemsMap = {};
+    for (const row of packageItems) {
+      if (!packageItemsMap[row.packageId]) packageItemsMap[row.packageId] = [];
+      packageItemsMap[row.packageId].push(row.productId);
+    }
+
+    return {
+      companyId,
+      accountId: accountId ?? null,
+      packages,
+      products,
+      packageItems: packageItemsMap,
+      suggestedPackage: accountCompany?.packageId ?? null,
+    };
+  },
 };
 
 async function bootstrapInner(allowedCompanyIds) {

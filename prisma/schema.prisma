@@ -434,7 +434,12 @@ model AccountCompany {
   companyId            String
   /// Univera 5 haneli müşteri kodu — şirket içinde unique.
   externalCustomerCode String?
+  /// WR-A7b — Legacy free-text paket adı. packageId set olsa bile snapshot olarak korunur;
+  /// packageId clear edilse de packageName silinmez (D-A7BI.1).
   packageName          String?
+  /// WR-A7b — Tenant-scoped Package referansı. Package.companyId === AccountCompany.companyId
+  /// invariantı app-layer'da enforce edilir (DI.1).
+  packageId            String?
   contractStartAt      DateTime?
   contractEndAt        DateTime?
   segment              String?
@@ -445,6 +450,7 @@ model AccountCompany {
 
   account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  package  Package?         @relation(fields: [packageId], references: [id], onDelete: Restrict)
   products AccountProduct[]
   /// WR-A4 — AccountCompany-scoped projeler.
   projects AccountProject[]
@@ -454,6 +460,7 @@ model AccountCompany {
   @@index([companyId])
   @@index([accountId])
   @@index([externalCustomerCode])
+  @@index([packageId])
 }
 
 /// AccountProject — WR-A4 / PM-04. UNIVERA gibi proje bazlı müşterilerin
@@ -615,6 +622,8 @@ model Product {
   productGroup ProductGroup @relation(fields: [productGroupId], references: [id])
   /// WR-A7 — Reverse relation for PackageItem assignment.
   packageItems PackageItem[]
+  /// WR-A7b — Reverse relation: bu ürünü referanslayan vakalar.
+  cases        Case[]        @relation("CaseProduct")
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -642,8 +651,12 @@ model Package {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  items   PackageItem[]
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items            PackageItem[]
+  /// WR-A7b — Reverse relation: bu paketi referanslayan AccountCompany'ler.
+  accountCompanies AccountCompany[]
+  /// WR-A7b — Reverse relation: bu paketi referanslayan vakalar.
+  cases            Case[]            @relation("CasePackage")
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -833,7 +846,17 @@ model Case {
   category     String
   subCategory  String
   requestType  CaseRequestType
+  /// Legacy free-text productGroup. WR-A7b sonrası yeni vakalarda productId/productName tercih edilir;
+  /// mevcut vakalar korunur, otomatik backfill yok.
   productGroup String?
+
+  // WR-A7b / PM-05 — Catalog entegrasyonu. productId/packageId opsiyonel referans;
+  // productName/packageName snapshot (arşiv için, catalog silinse de korunur).
+  // Cross-table invariants DI.1-DI.6 app-layer'da enforce edilir.
+  productId   String?
+  productName String?
+  packageId   String?
+  packageName String?
 
   // Atama (FK + denormalized name)
   assignedTeamId     String?
@@ -951,6 +974,10 @@ model Case {
   assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id])
   assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
   thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id])
+  /// WR-A7b — Catalog Product referansı (opsiyonel).
+  product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: Restrict)
+  /// WR-A7b — Catalog Package referansı (opsiyonel).
+  package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: Restrict)
 
   notes         CaseNote[]
   attachments   CaseAttachment[]
@@ -990,6 +1017,9 @@ model Case {
   @@index([companyId, resolvedAt])
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
+  // WR-A7b — Catalog filter / report path'leri için.
+  @@index([companyId, productId])
+  @@index([companyId, packageId])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı

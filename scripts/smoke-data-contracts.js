@@ -1510,6 +1510,153 @@ defineGroup('Package Catalog Contract', async () => {
   return out;
 });
 
+// Group N+3.5 — Case Product/Package Integrity Contract (WR-A7b / PM-05)
+//   AccountCompany.packageId + Case.product/package cross-table invariants.
+//   DB-level drift queries; runtime DI.1-DI.6 enforcement BFF + smoke A7b.
+// ─────────────────────────────────────────────────────────────────
+
+defineGroup('Case Product/Package Integrity Contract', async () => {
+  /** @type {Result[]} */
+  const out = [];
+
+  // CP.1) AccountCompany.packageId column exists.
+  const acCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'AccountCompany'`,
+  );
+  const acColSet = new Set((acCols ?? []).map((r) => r.column_name));
+  out.push(check(
+    'AccountCompany.packageId column exists',
+    acColSet.has('packageId') ? 'PASS' : 'FAIL',
+    { detail: acColSet.has('packageId') ? '' : 'missing packageId' },
+  ));
+
+  // CP.2) Case product/package columns exist.
+  const caseCols = await prisma.$queryRawUnsafe(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'Case'`,
+  );
+  const caseColSet = new Set((caseCols ?? []).map((r) => r.column_name));
+  const hasAllFour =
+    caseColSet.has('productId') &&
+    caseColSet.has('productName') &&
+    caseColSet.has('packageId') &&
+    caseColSet.has('packageName');
+  out.push(check(
+    'Case.productId/productName/packageId/packageName columns exist',
+    hasAllFour ? 'PASS' : 'FAIL',
+    {
+      detail: hasAllFour
+        ? ''
+        : `missing: ${['productId', 'productName', 'packageId', 'packageName']
+            .filter((c) => !caseColSet.has(c))
+            .join(',')}`,
+    },
+  ));
+
+  // CP.3) AccountCompany.packageId FK same-company drift.
+  //   Every non-null AccountCompany.packageId MUST point to Package in the same companyId.
+  const acDrift = await prisma.$queryRawUnsafe(`
+    SELECT ac.id AS ac_id, ac."companyId" AS ac_company, pkg."companyId" AS pkg_company
+      FROM "AccountCompany" ac
+      JOIN "Package" pkg ON pkg.id = ac."packageId"
+     WHERE ac."packageId" IS NOT NULL AND ac."companyId" <> pkg."companyId"
+     LIMIT 5
+  `);
+  out.push(check(
+    'AccountCompany.packageId same-company invariant (DI.1)',
+    (acDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: acDrift?.length ?? 0, examples: acDrift ?? [] },
+  ));
+
+  // CP.4) Case.productId FK same-company drift (DI.2).
+  const caseProdDrift = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."companyId" AS case_company, p."companyId" AS prod_company
+      FROM "Case" c
+      JOIN "Product" p ON p.id = c."productId"
+     WHERE c."productId" IS NOT NULL AND c."companyId" <> p."companyId"
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.productId same-company invariant (DI.2)',
+    (caseProdDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: caseProdDrift?.length ?? 0, examples: caseProdDrift ?? [] },
+  ));
+
+  // CP.5) Case.packageId FK same-company drift (DI.3).
+  const casePkgDrift = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."companyId" AS case_company, pkg."companyId" AS pkg_company
+      FROM "Case" c
+      JOIN "Package" pkg ON pkg.id = c."packageId"
+     WHERE c."packageId" IS NOT NULL AND c."companyId" <> pkg."companyId"
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.packageId same-company invariant (DI.3)',
+    (casePkgDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: casePkgDrift?.length ?? 0, examples: casePkgDrift ?? [] },
+  ));
+
+  // CP.6) DI.4 — Case.packageId NOT NULL ⇒ Case.accountId NOT NULL.
+  const customerlessPkg = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."packageId"
+      FROM "Case" c
+     WHERE c."packageId" IS NOT NULL AND c."accountId" IS NULL
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.packageId requires accountId (DI.4)',
+    (customerlessPkg?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: customerlessPkg?.length ?? 0, examples: customerlessPkg ?? [] },
+  ));
+
+  // CP.6.5) DI.3 — If Case has both productId and packageId, productId MUST be
+  //                in PackageItem.productId for that packageId.
+  const pkgProdDrift = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."productId", c."packageId"
+      FROM "Case" c
+     WHERE c."productId" IS NOT NULL AND c."packageId" IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM "PackageItem" pi
+          WHERE pi."packageId" = c."packageId" AND pi."productId" = c."productId"
+       )
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.productId ∈ PackageItem when both set (DI.3)',
+    (pkgProdDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: pkgProdDrift?.length ?? 0, examples: pkgProdDrift ?? [] },
+  ));
+
+  // CP.7) DI.5 — Case.packageId MUST equal AccountCompany.packageId (account, company tuple).
+  //   Drift query: case has both accountId and packageId, but the AC link's packageId differs (or null).
+  const caseAcPkgDrift = await prisma.$queryRawUnsafe(`
+    SELECT c.id AS case_id, c."packageId" AS case_pkg, ac."packageId" AS ac_pkg
+      FROM "Case" c
+      JOIN "AccountCompany" ac
+        ON ac."accountId" = c."accountId" AND ac."companyId" = c."companyId"
+     WHERE c."packageId" IS NOT NULL
+       AND (ac."packageId" IS NULL OR ac."packageId" <> c."packageId")
+     LIMIT 5
+  `);
+  out.push(check(
+    'Case.packageId == AccountCompany.packageId (DI.5)',
+    (caseAcPkgDrift?.length ?? 0) === 0 ? 'PASS' : 'FAIL',
+    { count: caseAcPkgDrift?.length ?? 0, examples: caseAcPkgDrift ?? [] },
+  ));
+
+  // CP.8) Seed coverage — at least 1 case with productId AND 1 case with packageId per active company.
+  for (const cid of ['COMP-PARAM', 'COMP-UNIVERA', 'COMP-FINROTA']) {
+    const withProd = await prisma.case.count({ where: { companyId: cid, productId: { not: null } } });
+    const withPkg = await prisma.case.count({ where: { companyId: cid, packageId: { not: null } } });
+    out.push(check(
+      `${cid}: ≥1 Case with productId AND ≥1 with packageId`,
+      withProd >= 1 && withPkg >= 1 ? 'PASS' : 'WARN',
+      { detail: `withProd=${withProd} withPkg=${withPkg}` },
+    ));
+  }
+
+  return out;
+});
+
 // Group N+4 — Support Level / Team Lead Contract (WR-A5 + WR-B1 / PM-03)
 //   Phase 1 foundation: SupportLevel enum + Person/Team/Case non-null fields
 //   + team lead invariants + seed coverage.

@@ -180,6 +180,109 @@ async function loadAndValidateProject({ projectId, accountId, companyId }) {
   return { id: project.id, name: project.name };
 }
 
+/**
+ * WR-A7b / DI.2 — Case.productId validation.
+ *
+ *  - Product mevcut + isActive=true → else 400 'invalid_product'
+ *  - Product.companyId === Case.companyId → else 400 'product_company_mismatch'
+ *
+ * Returns { id, name, supportLevel } for denormalize + supportLevel cascade.
+ */
+async function loadAndValidateCaseProduct({ productId, companyId }) {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, name: true, companyId: true, isActive: true, supportLevel: true },
+  });
+  if (!product || !product.isActive) {
+    throw new CaseValidationError('Geçersiz veya pasif ürün.', {
+      status: 400,
+      code: 'invalid_product',
+    });
+  }
+  if (product.companyId !== companyId) {
+    throw new CaseValidationError(
+      'Bu ürün vaka şirketine ait değil.',
+      { status: 400, code: 'product_company_mismatch' },
+    );
+  }
+  return { id: product.id, name: product.name, supportLevel: product.supportLevel };
+}
+
+/**
+ * WR-A7b — Case.packageId validation (DI.3 / DI.4 / DI.5).
+ *
+ *  - DI.3: Package.companyId === Case.companyId → else 400 'invalid_package' or
+ *    'package_company_mismatch'
+ *  - DI.4: accountId NULL + packageId set → 400 'package_requires_account'
+ *  - DI.5: accountId set + packageId set → AccountCompany(account,company).packageId
+ *    === packageId; aksi halde 400 'package_account_company_mismatch'
+ *    (AccountCompany'de packageId NULL ise zaten mismatch'tir; önce
+ *    AccountCompany'e bağla, sonra vakaya at).
+ *
+ * Returns { id, name } for denormalize.
+ */
+async function loadAndValidateCasePackage({ packageId, accountId, companyId }) {
+  if (!accountId) {
+    // D-A7BI.4 — customerless flow için package bağlanamaz.
+    throw new CaseValidationError(
+      'Müşteri seçilmeden paket atanamaz.',
+      { status: 400, code: 'package_requires_account' },
+    );
+  }
+  const pkg = await prisma.package.findUnique({
+    where: { id: packageId },
+    select: { id: true, name: true, companyId: true, isActive: true },
+  });
+  if (!pkg || !pkg.isActive) {
+    throw new CaseValidationError('Geçersiz veya pasif paket.', {
+      status: 400,
+      code: 'invalid_package',
+    });
+  }
+  if (pkg.companyId !== companyId) {
+    throw new CaseValidationError(
+      'Bu paket vaka şirketine ait değil.',
+      { status: 400, code: 'package_company_mismatch' },
+    );
+  }
+  // D-A7BI.3 — Case.packageId === AccountCompany.packageId zorunlu.
+  const ac = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId, companyId } },
+    select: { packageId: true },
+  });
+  if (!ac || ac.packageId !== pkg.id) {
+    throw new CaseValidationError(
+      'Bu paket müşterinin şirket ilişkisine bağlı değil. Önce müşteri-şirket ilişkisinde paketi tanımla.',
+      { status: 400, code: 'package_account_company_mismatch' },
+    );
+  }
+  return { id: pkg.id, name: pkg.name };
+}
+
+/**
+ * WR-A7b / DI.3 — Eğer Case'de hem productId hem packageId set ise productId
+ * o paketin PackageItem listesinde olmalı. Aksi halde 400 'package_product_mismatch'.
+ *
+ * Bu invariant planning card §⑥ tablosunda enumarate edildi (CP.6 contract).
+ * UI'da product picker zaten paket seçilince filtre uyguluyor; backend
+ * defense-in-depth.
+ *
+ * Helper yalnız her iki id de set olduğunda çağrılmalı; null tarafı caller atlar.
+ */
+async function assertPackageProductCompatible({ packageId, productId }) {
+  if (!packageId || !productId) return;
+  const link = await prisma.packageItem.findUnique({
+    where: { packageId_productId: { packageId, productId } },
+    select: { packageId: true },
+  });
+  if (!link) {
+    throw new CaseValidationError(
+      'Seçilen ürün bu paketin içeriğinde değil.',
+      { status: 400, code: 'package_product_mismatch' },
+    );
+  }
+}
+
 function sanitizeRequesterContext(raw) {
   const out = {
     customerContactName: trimOrNull(raw.customerContactName, 120),
@@ -453,12 +556,42 @@ export const caseRepository = {
     const finalAccountProjectId = m.accountId ? (m.accountProjectId ?? null) : null;
     const finalAccountProjectName = m.accountId ? accountProjectName : null;
 
-    // WR-A5 / PM-03 — supportLevel cascade.
+    // WR-A7b — Product / Package validation + denorm.
+    let productInfo = null;
+    if (m.productId) {
+      productInfo = await loadAndValidateCaseProduct({
+        productId: m.productId,
+        companyId: m.companyId,
+      });
+    }
+    let packageInfo = null;
+    if (m.packageId) {
+      packageInfo = await loadAndValidateCasePackage({
+        packageId: m.packageId,
+        accountId: m.accountId,
+        companyId: m.companyId,
+      });
+    }
+    const finalProductId = productInfo ? productInfo.id : null;
+    const finalProductName = productInfo ? productInfo.name : null;
+    const finalPackageId = packageInfo ? packageInfo.id : null;
+    const finalPackageName = packageInfo ? packageInfo.name : null;
+    // WR-A7b / DI.3 — Hem product hem package set ise PackageItem üyeliği zorunlu.
+    await assertPackageProductCompatible({
+      packageId: finalPackageId,
+      productId: finalProductId,
+    });
+
+    // WR-A5 / PM-03 + WR-A7b D-A7BI.7 — supportLevel cascade.
     //   1. patch'te explicit set edildiyse onu kullan (D-A5.2)
-    //   2. assignedPersonId varsa Person.supportLevel
-    //   3. else assignedTeamId varsa Team.defaultSupportLevel
-    //   4. else 'L1' (schema default; explicit set ediyoruz determinism için)
+    //   2. WR-A7b: productId varsa Product.supportLevel (catalog hint en güvenilir)
+    //   3. assignedPersonId varsa Person.supportLevel
+    //   4. else assignedTeamId varsa Team.defaultSupportLevel
+    //   5. else 'L1'
     let resolvedSupportLevel = m.supportLevel;
+    if (!resolvedSupportLevel && productInfo?.supportLevel) {
+      resolvedSupportLevel = productInfo.supportLevel;
+    }
     if (!resolvedSupportLevel && m.assignedPersonId) {
       const p = await prisma.person.findUnique({
         where: { id: m.assignedPersonId },
@@ -511,6 +644,11 @@ export const caseRepository = {
         subCategory: m.subCategory,
         requestType: m.requestType,
         productGroup: m.productGroup,
+        // WR-A7b — Catalog product/package link + snapshot.
+        productId: finalProductId,
+        productName: finalProductName,
+        packageId: finalPackageId,
+        packageName: finalPackageName,
         assignedTeamId: m.assignedTeamId,
         assignedTeamName: m.assignedTeamName,
         assignedPersonId: m.assignedPersonId,
@@ -562,6 +700,28 @@ export const caseRepository = {
         throw new CaseValidationError(
           'Destek seviyesini değiştirme yetkin yok.',
           { status: 403, code: 'support_level_forbidden' },
+        );
+      }
+    }
+
+    // WR-A7b / D-A7BI.5 — Role gates for productId / packageId patch.
+    //   - productId: Supervisor / CSM / Admin / SystemAdmin (Agent değiştiremez)
+    //   - packageId: Supervisor / Admin / SystemAdmin (CSM dahil değil; contract bağlama yetkisi)
+    if ('productId' in patch && actorRole) {
+      const PRODUCT_ROLES = new Set(['Supervisor', 'CSM', 'Admin', 'SystemAdmin']);
+      if (!PRODUCT_ROLES.has(actorRole)) {
+        throw new CaseValidationError(
+          'Ürün alanını değiştirme yetkin yok.',
+          { status: 403, code: 'product_forbidden' },
+        );
+      }
+    }
+    if ('packageId' in patch && actorRole) {
+      const PACKAGE_ROLES = new Set(['Supervisor', 'Admin', 'SystemAdmin']);
+      if (!PACKAGE_ROLES.has(actorRole)) {
+        throw new CaseValidationError(
+          'Paket alanını değiştirme yetkin yok.',
+          { status: 403, code: 'package_forbidden' },
         );
       }
     }
@@ -647,6 +807,79 @@ export const caseRepository = {
     }
     // Neither accountId nor accountProjectId in patch → existing project link
     // is preserved by the absence of any lifecyclePatch entry.
+
+    // WR-A7b / DI.6 — Product / Package lifecycle on PATCH.
+    //
+    //  - productId explicit set → validate Product (company match), refresh productName snapshot.
+    //  - productId explicit clear → productName null.
+    //  - packageId explicit set → validate Package + AccountCompany match (DI.3/4/5);
+    //    refresh packageName snapshot.
+    //  - packageId explicit clear → packageName null.
+    //  - accountId cleared/changed AND packageId not in patch → auto-clear packageId/Name
+    //    (D-A7BI.2: packageId binds to accountId; productId remains untouched).
+    const productIdInPatch = 'productId' in patch;
+    const packageIdInPatch = 'packageId' in patch;
+
+    if (productIdInPatch) {
+      const requestedProductId = patch.productId;
+      if (requestedProductId == null || requestedProductId === '') {
+        lifecyclePatch.productId = null;
+        lifecyclePatch.productName = null;
+      } else {
+        const product = await loadAndValidateCaseProduct({
+          productId: requestedProductId,
+          companyId: effectiveCompanyId,
+        });
+        lifecyclePatch.productId = product.id;
+        lifecyclePatch.productName = product.name;
+      }
+    }
+
+    if (packageIdInPatch) {
+      const requestedPackageId = patch.packageId;
+      if (requestedPackageId == null || requestedPackageId === '') {
+        lifecyclePatch.packageId = null;
+        lifecyclePatch.packageName = null;
+      } else {
+        const pkg = await loadAndValidateCasePackage({
+          packageId: requestedPackageId,
+          accountId: effectiveAccountId,
+          companyId: effectiveCompanyId,
+        });
+        lifecyclePatch.packageId = pkg.id;
+        lifecyclePatch.packageName = pkg.name;
+      }
+    } else if (accountIdInPatch) {
+      // D-A7BI.2 — accountId cleared or changed → packageId/packageName clear.
+      //                                           productId remains (catalog ref).
+      const accountCleared = patch.accountId == null;
+      const accountChanged = !accountCleared && patch.accountId !== before.accountId;
+      if (accountCleared || accountChanged) {
+        if (before.packageId != null) {
+          lifecyclePatch.packageId = null;
+          lifecyclePatch.packageName = null;
+        }
+      }
+    }
+
+    // WR-A7b / DI.3 — Effective (productId, packageId) çiftinde her ikisi de set ise
+    // PackageItem üyeliği zorunlu. lifecyclePatch'i öncelikli al; sonra patch; sonra before.
+    const effectiveProductId = Object.prototype.hasOwnProperty.call(lifecyclePatch, 'productId')
+      ? lifecyclePatch.productId
+      : productIdInPatch
+        ? patch.productId
+        : before.productId;
+    const effectivePackageId = Object.prototype.hasOwnProperty.call(lifecyclePatch, 'packageId')
+      ? lifecyclePatch.packageId
+      : packageIdInPatch
+        ? patch.packageId
+        : before.packageId;
+    if (effectiveProductId && effectivePackageId) {
+      await assertPackageProductCompatible({
+        packageId: effectivePackageId,
+        productId: effectiveProductId,
+      });
+    }
 
     const updated = await prisma.case.update({
       where: { id },
