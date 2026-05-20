@@ -100,6 +100,11 @@ export interface CategorizeInput {
 export interface AnalyzeInput {
   companyId: string;
   freeText: string;
+  /** Opsiyonel — vaka kimliği (EnRoute "bildirimNo"). */
+  bildirimNo?: string;
+  /** Opsiyonel — proje / müşteri etiketi. */
+  project?: string;
+  /** Legacy — eski caller'lar için context objesi. */
   context?: unknown;
 }
 
