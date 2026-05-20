@@ -206,13 +206,15 @@ router.post('/ask', asyncRoute(async (req, res) => {
     }
   }
   const { setting } = await loadAndGate(req);
+  // EnRoute KB API camelCase bekler — eski snake_case (top_k/source_types)
+  // formatı 400 'Geçersiz girdi' alıyordu.
   const payload = {
     query,
-    top_k: body.topK ?? setting.defaultTopK,
+    topK: body.topK ?? setting.defaultTopK,
     strictness: strictness ?? setting.defaultStrictness,
     rerank: body.rerank ?? setting.defaultRerank,
     verify: body.verify ?? setting.defaultVerify,
-    ...(body.sourceTypes !== undefined ? { source_types: body.sourceTypes } : {}),
+    ...(body.sourceTypes !== undefined ? { sourceTypes: body.sourceTypes } : {}),
   };
   const r = await externalKbClient.ask(setting, payload);
   return res.json(r);
@@ -245,10 +247,11 @@ router.post('/search', asyncRoute(async (req, res) => {
     }
   }
   const { setting } = await loadAndGate(req);
+  // EnRoute KB API camelCase bekler.
   const payload = {
     query,
-    top_k: body.topK ?? setting.defaultTopK,
-    ...(body.sourceTypes !== undefined ? { source_types: body.sourceTypes } : {}),
+    topK: body.topK ?? setting.defaultTopK,
+    ...(body.sourceTypes !== undefined ? { sourceTypes: body.sourceTypes } : {}),
   };
   const r = await externalKbClient.search(setting, payload);
   return res.json(r);
@@ -271,18 +274,45 @@ router.post('/categorize', asyncRoute(async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────
 // POST /api/external-kb/analyze
-// body: { companyId, freeText, context? }
+// body: { companyId, freeText, bildirimNo?, project?, context? }
+//
+// EnRoute KB tarafından "bildirimNo veya freeText gerekli" şartı vardır;
+// en az birinin gönderilmesi yeterli. Frontend her ikisini de top-level
+// veya `context.bildirim_no` / `context.project` formatında verebilir;
+// burada her iki şekli de kabul edip API'ye camelCase top-level olarak iletiyoruz.
 // ─────────────────────────────────────────────────────────────────
 router.post('/analyze', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   const freeText = typeof body.freeText === 'string' ? body.freeText.trim() : '';
-  if (!freeText || freeText.length < 3 || freeText.length > 8000) {
+  // Context (legacy) ve top-level alanlardan bildirimNo/project topla.
+  const ctx = body.context && typeof body.context === 'object' ? body.context : {};
+  const bildirimNo =
+    (typeof body.bildirimNo === 'string' && body.bildirimNo.trim()) ||
+    (typeof ctx.bildirimNo === 'string' && ctx.bildirimNo.trim()) ||
+    (typeof ctx.bildirim_no === 'string' && ctx.bildirim_no.trim()) ||
+    '';
+  const project =
+    (typeof body.project === 'string' && body.project.trim()) ||
+    (typeof ctx.project === 'string' && ctx.project.trim()) ||
+    '';
+
+  if (!freeText && !bildirimNo) {
+    return jsonError(
+      res,
+      400,
+      'invalid_free_text',
+      'freeText (3-8000 karakter) veya bildirimNo gerekli.',
+    );
+  }
+  if (freeText && (freeText.length < 3 || freeText.length > 8000)) {
     return jsonError(res, 400, 'invalid_free_text', 'freeText 3-8000 karakter arası olmalı.');
   }
+
   const { setting } = await loadAndGate(req);
   const payload = {
-    free_text: freeText,
-    ...(body.context !== undefined ? { context: body.context } : {}),
+    ...(freeText ? { freeText } : {}),
+    ...(bildirimNo ? { bildirimNo } : {}),
+    ...(project ? { project } : {}),
   };
   const r = await externalKbClient.analyze(setting, payload);
   return res.json(r);

@@ -158,13 +158,8 @@ export function KnowledgeBasePage() {
       r = await externalKbService.analyze({
         companyId,
         freeText: problemText.trim(),
-        context:
-          projectName.trim() || bildirimNo.trim()
-            ? {
-                project: projectName.trim() || undefined,
-                bildirim_no: bildirimNo.trim() || undefined,
-              }
-            : undefined,
+        bildirimNo: bildirimNo.trim() || undefined,
+        project: projectName.trim() || undefined,
       });
     } else if (mode === 'ask') {
       r = await externalKbService.ask({
