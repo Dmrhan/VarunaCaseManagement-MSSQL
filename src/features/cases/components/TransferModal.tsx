@@ -269,6 +269,15 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
             />
           ) : null}
 
+          {/* Empty-state banner — vakanın şirketinde aktarılabilecek başka aktif takım yok.
+              AI durumundan bağımsız; data eksikse net mesaj göster. */}
+          {availableTeams.length === 0 && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+              ⚠ Bu vakanın şirketinde ({caseItem.companyName}) aktarılabilecek başka aktif takım bulunmuyor.
+              Yönetim → Takımlar altından yeni takım oluştur veya pasif bir takımı aktif et.
+            </div>
+          )}
+
           {/* Form */}
           <Field label="Aktarılacak Takım" required>
             <Select
@@ -276,20 +285,18 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
               onChange={(e) => setToTeamId(e.target.value)}
               disabled={availableTeams.length === 0}
             >
-              <option value="">Takım seçin…</option>
-              {availableTeams.length === 0 ? (
-                <option disabled>(Aktarılabilecek başka takım yok)</option>
-              ) : (
-                availableTeams.map((t) => {
-                  const isAi = aiSuggestion?.suggestedTeamId === t.id;
-                  return (
-                    <option key={t.id} value={t.id}>
-                      {isAi ? '🤖 ' : ''}
-                      {t.name}
-                    </option>
-                  );
-                })
-              )}
+              <option value="">
+                {availableTeams.length === 0 ? '— Aktif takım yok —' : 'Takım seçin…'}
+              </option>
+              {availableTeams.map((t) => {
+                const isAi = aiSuggestion?.suggestedTeamId === t.id;
+                return (
+                  <option key={t.id} value={t.id}>
+                    {isAi ? '🤖 ' : ''}
+                    {t.name}
+                  </option>
+                );
+              })}
             </Select>
             {aiTeam && toTeamId !== aiTeam.id && (
               <div className="mt-1 text-[11px] text-violet-700 dark:text-violet-300">
