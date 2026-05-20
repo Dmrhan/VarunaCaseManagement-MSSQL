@@ -328,6 +328,9 @@ model Company {
   products         Product[]
   /// WR-A7 / PM-05 — tenant-scoped package (contract bundle) catalog.
   packages         Package[]
+  /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımları (yalnız config; API
+  /// çağrısı sonraki fazda). Her şirket için tek satır.
+  externalKbSetting ExternalKbSetting?
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -377,6 +380,47 @@ model CompanySettings {
   updatedAt                   DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id])
+}
+
+/// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımı (tenant-scoped).
+///
+/// SADECE configuration. Hiçbir alan API çağrısı tetiklemez; API entegrasyonu
+/// sonraki fazda eklenir. Raw API key / secret BURADA TUTULMAZ — yalnız
+/// `apiKeySecretName` referans adı (ör. `EXTERNAL_KB_API_KEY`) saklanır;
+/// gerçek değer environment secret olarak deploy ortamında yer alır.
+///
+/// authType:
+///   - "none"        — kimlik doğrulama yok
+///   - "apiKey"      — API key header (X-Api-Key veya benzeri)
+///   - "bearerToken" — Authorization: Bearer
+///
+/// Per-company admin gate ile yönetilir (assertCompanyAdmin). SystemAdmin
+/// tüm şirketleri görür/düzenler.
+model ExternalKbSetting {
+  id                 String   @id @default(cuid())
+  companyId          String   @unique
+  enabled            Boolean  @default(false)
+  providerName       String?
+  baseUrl            String?
+  askEndpointPath    String   @default("/ask")
+  searchEndpointPath String   @default("/search")
+  /// "none" | "apiKey" | "bearerToken" — string union (Prisma enum gerekli değil; UI tarafı validate eder).
+  authType           String   @default("none")
+  /// Sadece referans adı (env var key). Raw secret asla saklanmaz.
+  apiKeySecretName   String?
+  timeoutMs          Int      @default(15000)
+  defaultTopK        Int      @default(5)
+  showCitations      Boolean  @default(true)
+  allowAgentUse      Boolean  @default(true)
+  allowSupervisorUse Boolean  @default(true)
+  allowCsmUse        Boolean  @default(true)
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, enabled])
 }
 
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)

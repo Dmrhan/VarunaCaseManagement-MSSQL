@@ -927,6 +927,33 @@ export const adminService = {
       return this.update(id, { isActive });
     },
   },
+
+  // WR-KB1 — External KB Integration Settings (admin-only config; no API call).
+  externalKbSettings: {
+    async get(companyId: string): Promise<ExternalKbSetting | undefined> {
+      return apiFetch<ExternalKbSetting>(
+        `${ADMIN_BASE}/external-kb-settings?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'Bilgi Bankası ayarları yüklenemedi',
+      );
+    },
+    async save(
+      companyId: string,
+      patch: ExternalKbSettingInput,
+    ): Promise<AdminResult<ExternalKbSetting>> {
+      const item = await apiFetch<ExternalKbSetting>(
+        `${ADMIN_BASE}/external-kb-settings/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'Bilgi Bankası ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -953,4 +980,48 @@ export interface KnowledgeSourceInput {
   description?: string;
   isActive?: boolean;
   companyId?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-KB1 — External KB Integration Settings
+// ─────────────────────────────────────────────────────────────────
+export type ExternalKbAuthType = 'none' | 'apiKey' | 'bearerToken';
+
+export interface ExternalKbSetting {
+  id: string | null;
+  companyId: string;
+  enabled: boolean;
+  providerName: string | null;
+  baseUrl: string | null;
+  askEndpointPath: string;
+  searchEndpointPath: string;
+  authType: ExternalKbAuthType;
+  /** Sadece environment secret referans adı; raw secret değildir. */
+  apiKeySecretName: string | null;
+  timeoutMs: number;
+  defaultTopK: number;
+  showCitations: boolean;
+  allowAgentUse: boolean;
+  allowSupervisorUse: boolean;
+  allowCsmUse: boolean;
+  notes: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExternalKbSettingInput {
+  enabled?: boolean;
+  providerName?: string | null;
+  baseUrl?: string | null;
+  askEndpointPath?: string;
+  searchEndpointPath?: string;
+  authType?: ExternalKbAuthType;
+  apiKeySecretName?: string | null;
+  timeoutMs?: number;
+  defaultTopK?: number;
+  showCitations?: boolean;
+  allowAgentUse?: boolean;
+  allowSupervisorUse?: boolean;
+  allowCsmUse?: boolean;
+  notes?: string | null;
 }
