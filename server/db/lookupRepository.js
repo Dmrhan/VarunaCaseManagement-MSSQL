@@ -71,7 +71,12 @@ export const lookupRepository = {
    *   - suggestedPackage: accountId verildiyse AccountCompany(accountId, companyId).packageId
    *     veya null. NewCaseForm preselect için.
    *
-   * Multi-tenant: allowedCompanyIds içermiyorsa companyId → 403.
+   * Multi-tenant scope: companyId açıkça allowedCompanyIds içinde olmalı.
+   *
+   * SECURITY: Boş allowedCompanyIds "unrestricted" anlamına GELMEZ — sıfır
+   * erişim demektir. verifyJwt SystemAdmin için tüm aktif şirketleri,
+   * diğer roller için UserCompany.isActive=true linklerini populate eder.
+   * Boş array → 403; zero-scope user başka tenant'ın kataloğunu çekemez.
    *
    * companyId zorunlu. accountId opsiyonel — verildiyse AccountCompany scope kontrol edilir.
    */
@@ -83,7 +88,10 @@ export const lookupRepository = {
       throw err;
     }
     const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
-    if (allowed.length && !allowed.includes(companyId)) {
+    // WR-A7b review fix — Empty allowedCompanyIds is NOT a bypass; explicit
+    // membership required. Cross-tenant catalog exposure on zero-scope users
+    // previously possible because of `allowed.length && ...` short-circuit.
+    if (!allowed.includes(companyId)) {
       const err = new Error('Bu şirkete erişim yetkin yok.');
       err.status = 403;
       err.code = 'forbidden';

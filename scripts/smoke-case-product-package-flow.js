@@ -26,6 +26,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
+import { lookupRepository } from '../server/db/lookupRepository.js';
 
 const BFF = process.env.BFF_URL || 'http://localhost:3101';
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -620,6 +621,70 @@ console.log('\n── 15) GET /api/lookups/catalog ──');
     '15. GET /lookups/catalog → packages+products+suggestedPackage',
     ok,
     `status=${r.status} pkgs=${r.data?.packages?.length} prods=${r.data?.products?.length} suggested=${r.data?.suggestedPackage}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 16) Review fix — Empty allowedCompanyIds MUST be rejected
+// (Previously: `allowed.length && ...` short-circuit let zero-scope users
+//  through; cross-tenant catalog exposure.)
+// ─────────────────────────────────────────────────────────────────
+console.log('\n── 16) Empty allowedCompanyIds → 403 ──');
+{
+  let err = null;
+  try {
+    await lookupRepository.getCaseCatalog({
+      companyId: COMP_UNI,
+      accountId: null,
+      allowedCompanyIds: [], // zero-scope user
+    });
+  } catch (e) {
+    err = e;
+  }
+  record(
+    '16. getCaseCatalog(allowedCompanyIds=[]) → throws forbidden',
+    err?.status === 403 && err?.code === 'forbidden',
+    `status=${err?.status} code=${err?.code}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 17) Cross-tenant — companyId not in allowedCompanyIds → 403
+// ─────────────────────────────────────────────────────────────────
+console.log('\n── 17) Cross-tenant catalog request → 403 ──');
+{
+  let err = null;
+  try {
+    await lookupRepository.getCaseCatalog({
+      companyId: COMP_UNI,
+      accountId: null,
+      allowedCompanyIds: [COMP_PAR], // user has PARAM but requests UNIVERA
+    });
+  } catch (e) {
+    err = e;
+  }
+  record(
+    '17. getCaseCatalog cross-tenant → throws forbidden',
+    err?.status === 403 && err?.code === 'forbidden',
+    `status=${err?.status} code=${err?.code}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 18) HTTP-level reverse: legitimate single-tenant user can still access
+//     own catalog (no regression).
+// ─────────────────────────────────────────────────────────────────
+console.log('\n── 18) Single-tenant user → own catalog 200 ──');
+{
+  const result = await lookupRepository.getCaseCatalog({
+    companyId: COMP_UNI,
+    accountId: null,
+    allowedCompanyIds: [COMP_UNI],
+  });
+  record(
+    '18. Single-tenant catalog OK',
+    Array.isArray(result?.packages) && Array.isArray(result?.products),
+    `pkgs=${result?.packages?.length} prods=${result?.products?.length}`,
   );
 }
 
