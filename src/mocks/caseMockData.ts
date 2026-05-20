@@ -68,13 +68,27 @@ export const MOCK_OFFERED_SOLUTIONS: OfferedSolutionDef[] = [
   { id: 'OFFER-CUSTOM-DEV',   name: 'Talep Üzerine Geliştirme',   description: 'Müşteriye özel modül/rapor',                   isActive: true },
 ];
 
-// Mock takımlar — companyId default PARAM (multi-tenant Phase 1+).
+// Mock takımlar — multi-tenant: her şirketin kendi takımları olmalı.
+// PARAM 5 takım baseline; UNIVERA + FINROTA için de en az 3'er takım eklenir
+// (önceki seed'de yalnız PARAM'da takım vardı → UNIVERA/FINROTA case'leri
+// PARAM takımına assign ediliyordu = cross-tenant inconsistency; TransferModal
+// "Aktarılacak Takım" boş kalıyordu çünkü hedef şirkette başka takım yok).
 export const MOCK_TEAMS: CaseTeam[] = [
-  { id: 'TEAM-DESTEK',  name: 'Destek Takımı',     description: '1. seviye teknik destek ve genel sorun çözümü',     companyId: 'COMP-PARAM', isActive: true },
-  { id: 'TEAM-FINANS',  name: 'Finans Takımı',     description: 'Fatura, ödeme ve finansal süreç yönetimi',          companyId: 'COMP-PARAM', isActive: true },
-  { id: 'TEAM-CS',      name: 'Customer Success',  description: 'Müşteri başarısı, proaktif takip ve churn önleme',  companyId: 'COMP-PARAM', isActive: true },
-  { id: 'TEAM-MOBIL',   name: 'Mobil Takımı',      description: 'iOS/Android uygulama hataları ve mobil özellikler', companyId: 'COMP-PARAM', isActive: true },
-  { id: 'TEAM-EGITIM',  name: 'Eğitim Takımı',     description: 'Müşteri onboarding, eğitim ve dokümantasyon',       companyId: 'COMP-PARAM', isActive: true },
+  // PARAM (UN/Lonca demo şirketi)
+  { id: 'TEAM-DESTEK',     name: 'Destek Takımı',     description: '1. seviye teknik destek ve genel sorun çözümü',     companyId: 'COMP-PARAM',    isActive: true },
+  { id: 'TEAM-FINANS',     name: 'Finans Takımı',     description: 'Fatura, ödeme ve finansal süreç yönetimi',          companyId: 'COMP-PARAM',    isActive: true },
+  { id: 'TEAM-CS',         name: 'Customer Success',  description: 'Müşteri başarısı, proaktif takip ve churn önleme',  companyId: 'COMP-PARAM',    isActive: true },
+  { id: 'TEAM-MOBIL',      name: 'Mobil Takımı',      description: 'iOS/Android uygulama hataları ve mobil özellikler', companyId: 'COMP-PARAM',    isActive: true },
+  { id: 'TEAM-EGITIM',     name: 'Eğitim Takımı',     description: 'Müşteri onboarding, eğitim ve dokümantasyon',       companyId: 'COMP-PARAM',    isActive: true },
+  // UNIVERA (rota, e-fatura, saha veri, WMS)
+  { id: 'TEAM-UNI-L1',     name: 'UNIVERA L1 Destek', description: 'Saha ekibi 1. seviye destek (UNIVERA ürün ailesi)',  companyId: 'COMP-UNIVERA',  isActive: true },
+  { id: 'TEAM-UNI-WMS',    name: 'UNIVERA WMS',       description: 'Depo Yönetim Sistemi uzman ekibi',                  companyId: 'COMP-UNIVERA',  isActive: true },
+  { id: 'TEAM-UNI-ROTA',   name: 'UNIVERA Rota',      description: 'Enroute & saha rota optimizasyonu',                 companyId: 'COMP-UNIVERA',  isActive: true },
+  { id: 'TEAM-UNI-EFAT',   name: 'UNIVERA e-Belge',   description: 'e-Fatura/e-Arşiv/e-İrsaliye GİB entegrasyon',       companyId: 'COMP-UNIVERA',  isActive: true },
+  // FINROTA (tahsilat, open banking)
+  { id: 'TEAM-FIN-L1',     name: 'FINROTA Destek',    description: 'Tahsilat ürünleri 1. seviye destek',                companyId: 'COMP-FINROTA',  isActive: true },
+  { id: 'TEAM-FIN-OBANK',  name: 'FINROTA Open Bank', description: 'Open Banking entegrasyon ve mutabakat uzman ekibi', companyId: 'COMP-FINROTA',  isActive: true },
+  { id: 'TEAM-FIN-CS',     name: 'FINROTA Hesap',     description: 'Kurumsal hesap yönetimi ve onboarding',             companyId: 'COMP-FINROTA',  isActive: true },
 ];
 
 export const MOCK_PERSONS: CasePerson[] = [
@@ -88,6 +102,16 @@ export const MOCK_PERSONS: CasePerson[] = [
   { id: 'USR-011', name: 'Cem Ergin',       teamId: 'TEAM-MOBIL',  email: 'cem.ergin@param.com.tr',       isActive: true },
   { id: 'USR-012', name: 'Aslı Tan',        teamId: 'TEAM-MOBIL',  email: 'asli.tan@param.com.tr',        isActive: true },
   { id: 'USR-021', name: 'Pelin Yalçın',    teamId: 'TEAM-EGITIM', email: 'pelin.yalcin@param.com.tr',    isActive: true },
+  // UNIVERA
+  { id: 'USR-U01', name: 'Mehmet Yıldız',   teamId: 'TEAM-UNI-L1',     email: 'mehmet.yildiz@univera.com.tr',  isActive: true },
+  { id: 'USR-U02', name: 'Zeynep Korkmaz',  teamId: 'TEAM-UNI-L1',     email: 'zeynep.korkmaz@univera.com.tr', isActive: true },
+  { id: 'USR-U03', name: 'Tolga Yurtseven', teamId: 'TEAM-UNI-WMS',    email: 'tolga.y@univera.com.tr',        isActive: true },
+  { id: 'USR-U04', name: 'Ece Demirci',     teamId: 'TEAM-UNI-ROTA',   email: 'ece.demirci@univera.com.tr',    isActive: true },
+  { id: 'USR-U05', name: 'Hakan Ateş',      teamId: 'TEAM-UNI-EFAT',   email: 'hakan.ates@univera.com.tr',     isActive: true },
+  // FINROTA
+  { id: 'USR-F01', name: 'Onur Aydoğdu',    teamId: 'TEAM-FIN-L1',     email: 'onur.aydogdu@finrota.com.tr',   isActive: true },
+  { id: 'USR-F02', name: 'Burcu Sezgin',    teamId: 'TEAM-FIN-OBANK',  email: 'burcu.sezgin@finrota.com.tr',   isActive: true },
+  { id: 'USR-F03', name: 'Tuğçe Aksoy',     teamId: 'TEAM-FIN-CS',     email: 'tugce.aksoy@finrota.com.tr',    isActive: true },
 ];
 
 export interface CaseAccount {
