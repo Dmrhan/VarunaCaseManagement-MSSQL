@@ -9,6 +9,7 @@ import authRouter from './routes/auth.js';
 import cronRouter from './routes/cron.js';
 import myRouter from './routes/my.js';
 import accountsRouter from './routes/accounts.js';
+import externalKbRouter from './routes/externalKb.js';
 import { prisma } from './db/client.js';
 
 /**
@@ -62,6 +63,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api/cron', cronRouter);
 app.use('/api/my', myRouter);
 app.use('/api/accounts', accountsRouter);
+app.use('/api/external-kb', externalKbRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

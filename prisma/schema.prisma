@@ -397,26 +397,37 @@ model CompanySettings {
 /// Per-company admin gate ile yönetilir (assertCompanyAdmin). SystemAdmin
 /// tüm şirketleri görür/düzenler.
 model ExternalKbSetting {
-  id                 String   @id @default(cuid())
-  companyId          String   @unique
-  enabled            Boolean  @default(false)
-  providerName       String?
-  baseUrl            String?
-  askEndpointPath    String   @default("/ask")
-  searchEndpointPath String   @default("/search")
+  id                     String   @id @default(cuid())
+  companyId              String   @unique
+  enabled                Boolean  @default(false)
+  providerName           String?
+  baseUrl                String?
+  /// WR-KB3 — Yeni endpoint path'leri. ask/search 1. fazda /ask /search default'uyla
+  /// shipped olmuştu; gerçek EnRoute KB endpoint'leri /api/v1/... şeklinde. Mevcut
+  /// satırlar default'la geliyor; tenant override edebilir.
+  askEndpointPath        String   @default("/api/v1/kb/ask")
+  searchEndpointPath     String   @default("/api/v1/kb/search")
+  healthEndpointPath     String   @default("/api/v1/health")
+  statsEndpointPath      String   @default("/api/v1/stats")
+  categorizeEndpointPath String   @default("/api/v1/categorize")
+  analyzeEndpointPath    String   @default("/api/v1/analyze")
   /// "none" | "apiKey" | "bearerToken" — string union (Prisma enum gerekli değil; UI tarafı validate eder).
-  authType           String   @default("none")
+  authType               String   @default("none")
   /// Sadece referans adı (env var key). Raw secret asla saklanmaz.
-  apiKeySecretName   String?
-  timeoutMs          Int      @default(15000)
-  defaultTopK        Int      @default(5)
-  showCitations      Boolean  @default(true)
-  allowAgentUse      Boolean  @default(true)
-  allowSupervisorUse Boolean  @default(true)
-  allowCsmUse        Boolean  @default(true)
-  notes              String?  @db.Text
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  apiKeySecretName       String?
+  timeoutMs              Int      @default(30000)
+  defaultTopK            Int      @default(8)
+  /// "lenient" | "normal" | "strict" — kb/ask + kb/search için varsayılan.
+  defaultStrictness      String   @default("lenient")
+  defaultRerank          Boolean  @default(true)
+  defaultVerify          Boolean  @default(true)
+  showCitations          Boolean  @default(true)
+  allowAgentUse          Boolean  @default(true)
+  allowSupervisorUse     Boolean  @default(true)
+  allowCsmUse            Boolean  @default(true)
+  notes                  String?  @db.Text
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

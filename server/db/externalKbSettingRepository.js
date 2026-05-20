@@ -16,8 +16,9 @@ import { AdminError } from './adminRepository.js';
  */
 
 const AUTH_TYPES = new Set(['none', 'apiKey', 'bearerToken']);
+const STRICTNESS_VALUES = new Set(['lenient', 'normal', 'strict']);
 const TIMEOUT_MIN = 1000;
-const TIMEOUT_MAX = 60000;
+const TIMEOUT_MAX = 120000; // 2dk — external API uzun analiz çağrılarına yer ver
 const TOPK_MIN = 1;
 const TOPK_MAX = 20;
 
@@ -29,10 +30,17 @@ const SELECTABLE = {
   baseUrl: true,
   askEndpointPath: true,
   searchEndpointPath: true,
+  healthEndpointPath: true,
+  statsEndpointPath: true,
+  categorizeEndpointPath: true,
+  analyzeEndpointPath: true,
   authType: true,
   apiKeySecretName: true,
   timeoutMs: true,
   defaultTopK: true,
+  defaultStrictness: true,
+  defaultRerank: true,
+  defaultVerify: true,
   showCitations: true,
   allowAgentUse: true,
   allowSupervisorUse: true,
@@ -50,12 +58,19 @@ function defaultShape(companyId) {
     enabled: false,
     providerName: null,
     baseUrl: null,
-    askEndpointPath: '/ask',
-    searchEndpointPath: '/search',
+    askEndpointPath: '/api/v1/kb/ask',
+    searchEndpointPath: '/api/v1/kb/search',
+    healthEndpointPath: '/api/v1/health',
+    statsEndpointPath: '/api/v1/stats',
+    categorizeEndpointPath: '/api/v1/categorize',
+    analyzeEndpointPath: '/api/v1/analyze',
     authType: 'none',
     apiKeySecretName: null,
-    timeoutMs: 15000,
-    defaultTopK: 5,
+    timeoutMs: 30000,
+    defaultTopK: 8,
+    defaultStrictness: 'lenient',
+    defaultRerank: true,
+    defaultVerify: true,
     showCitations: true,
     allowAgentUse: true,
     allowSupervisorUse: true,
@@ -109,6 +124,18 @@ function validatePatch(patch) {
         400,
       );
       err.code = 'invalid_top_k';
+      throw err;
+    }
+  }
+
+  // defaultStrictness validation
+  if (patch.defaultStrictness !== undefined) {
+    if (!STRICTNESS_VALUES.has(patch.defaultStrictness)) {
+      const err = new AdminError(
+        'Geçersiz defaultStrictness. Beklenen: lenient | normal | strict.',
+        400,
+      );
+      err.code = 'invalid_strictness';
       throw err;
     }
   }
@@ -169,11 +196,18 @@ export const externalKbSettingRepo = {
     if (patch.enabled !== undefined) data.enabled = !!patch.enabled;
     if (patch.providerName !== undefined) data.providerName = normalizeOptionalText(patch.providerName);
     if (patch.baseUrl !== undefined) data.baseUrl = normalizeOptionalText(patch.baseUrl);
-    if (patch.askEndpointPath !== undefined) data.askEndpointPath = String(patch.askEndpointPath || '/ask');
-    if (patch.searchEndpointPath !== undefined) data.searchEndpointPath = String(patch.searchEndpointPath || '/search');
+    if (patch.askEndpointPath !== undefined) data.askEndpointPath = String(patch.askEndpointPath || '/api/v1/kb/ask');
+    if (patch.searchEndpointPath !== undefined) data.searchEndpointPath = String(patch.searchEndpointPath || '/api/v1/kb/search');
+    if (patch.healthEndpointPath !== undefined) data.healthEndpointPath = String(patch.healthEndpointPath || '/api/v1/health');
+    if (patch.statsEndpointPath !== undefined) data.statsEndpointPath = String(patch.statsEndpointPath || '/api/v1/stats');
+    if (patch.categorizeEndpointPath !== undefined) data.categorizeEndpointPath = String(patch.categorizeEndpointPath || '/api/v1/categorize');
+    if (patch.analyzeEndpointPath !== undefined) data.analyzeEndpointPath = String(patch.analyzeEndpointPath || '/api/v1/analyze');
     if (patch.authType !== undefined) data.authType = effectiveAuthType;
     if (patch.timeoutMs !== undefined) data.timeoutMs = Number(patch.timeoutMs);
     if (patch.defaultTopK !== undefined) data.defaultTopK = Number(patch.defaultTopK);
+    if (patch.defaultStrictness !== undefined) data.defaultStrictness = String(patch.defaultStrictness);
+    if (patch.defaultRerank !== undefined) data.defaultRerank = !!patch.defaultRerank;
+    if (patch.defaultVerify !== undefined) data.defaultVerify = !!patch.defaultVerify;
     if (patch.showCitations !== undefined) data.showCitations = !!patch.showCitations;
     if (patch.allowAgentUse !== undefined) data.allowAgentUse = !!patch.allowAgentUse;
     if (patch.allowSupervisorUse !== undefined) data.allowSupervisorUse = !!patch.allowSupervisorUse;

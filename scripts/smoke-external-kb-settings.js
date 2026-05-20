@@ -83,11 +83,11 @@ const cleanupCompanyIds = [];
     r.data?.companyId === COMP_PAR &&
     r.data?.enabled === false &&
     r.data?.authType === 'none' &&
-    r.data?.timeoutMs === 15000 &&
-    r.data?.defaultTopK === 5 &&
+    r.data?.timeoutMs === 30000 &&
+    r.data?.defaultTopK === 8 &&
     r.data?.showCitations === true;
   record(
-    '1. Admin GET defaults → enabled=false, authType=none, timeout=15000, topK=5',
+    '1. Admin GET defaults → enabled=false, authType=none, timeout=30000, topK=8',
     ok,
     `status=${r.status} enabled=${r.data?.enabled} authType=${r.data?.authType}`,
   );
