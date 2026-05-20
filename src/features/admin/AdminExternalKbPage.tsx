@@ -28,7 +28,7 @@ import { lookupService } from '@/services/caseService';
  */
 
 const TIMEOUT_MIN = 1000;
-const TIMEOUT_MAX = 60000;
+const TIMEOUT_MAX = 120000;
 const TOPK_MIN = 1;
 const TOPK_MAX = 20;
 
@@ -38,16 +38,25 @@ const AUTH_TYPE_OPTIONS: { value: ExternalKbAuthType; label: string }[] = [
   { value: 'bearerToken', label: 'Bearer Token' },
 ];
 
+type StrictnessValue = 'lenient' | 'normal' | 'strict';
+
 interface DraftState {
   enabled: boolean;
   providerName: string;
   baseUrl: string;
   askEndpointPath: string;
   searchEndpointPath: string;
+  healthEndpointPath: string;
+  statsEndpointPath: string;
+  categorizeEndpointPath: string;
+  analyzeEndpointPath: string;
   authType: ExternalKbAuthType;
   apiKeySecretName: string;
   timeoutMs: number;
   defaultTopK: number;
+  defaultStrictness: StrictnessValue;
+  defaultRerank: boolean;
+  defaultVerify: boolean;
   showCitations: boolean;
   allowAgentUse: boolean;
   allowSupervisorUse: boolean;
@@ -60,12 +69,19 @@ function toDraft(s: ExternalKbSetting): DraftState {
     enabled: s.enabled,
     providerName: s.providerName ?? '',
     baseUrl: s.baseUrl ?? '',
-    askEndpointPath: s.askEndpointPath || '/ask',
-    searchEndpointPath: s.searchEndpointPath || '/search',
+    askEndpointPath: s.askEndpointPath || '/api/v1/kb/ask',
+    searchEndpointPath: s.searchEndpointPath || '/api/v1/kb/search',
+    healthEndpointPath: s.healthEndpointPath || '/api/v1/health',
+    statsEndpointPath: s.statsEndpointPath || '/api/v1/stats',
+    categorizeEndpointPath: s.categorizeEndpointPath || '/api/v1/categorize',
+    analyzeEndpointPath: s.analyzeEndpointPath || '/api/v1/analyze',
     authType: s.authType,
     apiKeySecretName: s.apiKeySecretName ?? '',
     timeoutMs: s.timeoutMs,
     defaultTopK: s.defaultTopK,
+    defaultStrictness: s.defaultStrictness ?? 'lenient',
+    defaultRerank: s.defaultRerank ?? true,
+    defaultVerify: s.defaultVerify ?? true,
     showCitations: s.showCitations,
     allowAgentUse: s.allowAgentUse,
     allowSupervisorUse: s.allowSupervisorUse,
@@ -79,12 +95,19 @@ function toPatch(d: DraftState): ExternalKbSettingInput {
     enabled: d.enabled,
     providerName: d.providerName.trim() || null,
     baseUrl: d.baseUrl.trim() || null,
-    askEndpointPath: d.askEndpointPath.trim() || '/ask',
-    searchEndpointPath: d.searchEndpointPath.trim() || '/search',
+    askEndpointPath: d.askEndpointPath.trim() || '/api/v1/kb/ask',
+    searchEndpointPath: d.searchEndpointPath.trim() || '/api/v1/kb/search',
+    healthEndpointPath: d.healthEndpointPath.trim() || '/api/v1/health',
+    statsEndpointPath: d.statsEndpointPath.trim() || '/api/v1/stats',
+    categorizeEndpointPath: d.categorizeEndpointPath.trim() || '/api/v1/categorize',
+    analyzeEndpointPath: d.analyzeEndpointPath.trim() || '/api/v1/analyze',
     authType: d.authType,
     apiKeySecretName: d.authType === 'none' ? null : d.apiKeySecretName.trim() || null,
     timeoutMs: d.timeoutMs,
     defaultTopK: d.defaultTopK,
+    defaultStrictness: d.defaultStrictness,
+    defaultRerank: d.defaultRerank,
+    defaultVerify: d.defaultVerify,
     showCitations: d.showCitations,
     allowAgentUse: d.allowAgentUse,
     allowSupervisorUse: d.allowSupervisorUse,
@@ -289,14 +312,42 @@ export function AdminExternalKbPage() {
                   <TextInput
                     value={draft.askEndpointPath}
                     onChange={(e) => update('askEndpointPath', e.target.value)}
-                    placeholder="/ask"
+                    placeholder="/api/v1/kb/ask"
                   />
                 </Field>
                 <Field label="Search Endpoint Path" hint="Arama endpoint relative path">
                   <TextInput
                     value={draft.searchEndpointPath}
                     onChange={(e) => update('searchEndpointPath', e.target.value)}
-                    placeholder="/search"
+                    placeholder="/api/v1/kb/search"
+                  />
+                </Field>
+                <Field label="Health Endpoint Path" hint="Sağlık kontrolü relative path">
+                  <TextInput
+                    value={draft.healthEndpointPath}
+                    onChange={(e) => update('healthEndpointPath', e.target.value)}
+                    placeholder="/api/v1/health"
+                  />
+                </Field>
+                <Field label="Stats Endpoint Path" hint="İstatistik relative path">
+                  <TextInput
+                    value={draft.statsEndpointPath}
+                    onChange={(e) => update('statsEndpointPath', e.target.value)}
+                    placeholder="/api/v1/stats"
+                  />
+                </Field>
+                <Field label="Categorize Endpoint Path" hint="Kategorize endpoint">
+                  <TextInput
+                    value={draft.categorizeEndpointPath}
+                    onChange={(e) => update('categorizeEndpointPath', e.target.value)}
+                    placeholder="/api/v1/categorize"
+                  />
+                </Field>
+                <Field label="Analyze Endpoint Path" hint="Analiz endpoint">
+                  <TextInput
+                    value={draft.analyzeEndpointPath}
+                    onChange={(e) => update('analyzeEndpointPath', e.target.value)}
+                    placeholder="/api/v1/analyze"
                   />
                 </Field>
               </div>
@@ -354,6 +405,36 @@ export function AdminExternalKbPage() {
                     min={TOPK_MIN}
                     max={TOPK_MAX}
                   />
+                </Field>
+                <Field label="Varsayılan Strictness" hint="ask/search için varsayılan">
+                  <Select
+                    value={draft.defaultStrictness}
+                    onChange={(e) => update('defaultStrictness', e.target.value as StrictnessValue)}
+                  >
+                    <option value="lenient">Esnek (lenient)</option>
+                    <option value="normal">Normal</option>
+                    <option value="strict">Katı (strict)</option>
+                  </Select>
+                </Field>
+                <Field label="Rerank (varsayılan)">
+                  <label className="flex items-center gap-2 px-1 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.defaultRerank}
+                      onChange={(e) => update('defaultRerank', e.target.checked)}
+                    />
+                    <span>{draft.defaultRerank ? 'Açık' : 'Kapalı'}</span>
+                  </label>
+                </Field>
+                <Field label="Verify (varsayılan)">
+                  <label className="flex items-center gap-2 px-1 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.defaultVerify}
+                      onChange={(e) => update('defaultVerify', e.target.checked)}
+                    />
+                    <span>{draft.defaultVerify ? 'Açık' : 'Kapalı'}</span>
+                  </label>
                 </Field>
               </div>
 

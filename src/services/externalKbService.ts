@@ -1,73 +1,168 @@
 /**
- * WR-KB2 — External Knowledge Base frontend adapter (MOCK ONLY).
+ * WR-KB3 — External Knowledge Base / AI service frontend adapter.
  *
- * Bu modül ileride external KB / Vector DB API'sini çağıracak. Şu an SADECE
- * mock yanıt döndürür; gerçek network çağrısı YOKTUR. API kontratı netleşince
- * bu modül gerçek fetch ile değiştirilecek; UI tarafı imzayı korur.
+ * Bu modül BFF proxy üzerinden dış servise çağrı yapar. Hiçbir yanıt
+ * yorumlanmaz; UI'a HAM data iletilir. Frontend `Case` mutation, Runa AI
+ * tetiklemesi veya AIUsageLog yazımı YAPMAZ.
  *
- * Tasarım kuralları (config & privacy):
- *  - Bu modül `AIUsageLog` yazmaz, `caseService.update`'i çağırmaz, hiçbir
- *    case mutation tetiklemez.
- *  - Mock yanıt local state'tir; backend round-trip yok.
- *  - WR-KB1 admin ekranı (ExternalKbSetting) bağlantı configuration'ını
- *    saklar; bu adapter ileride o ayarları okuyacak.
- *
- * TODO: Replace mock with POST /api/kb/external-ask when external API
- * contract is ready. Real implementation will:
- *  - Read `ExternalKbSetting.enabled` per company; reject if false.
- *  - Forward `query`, `companyId`, `caseNumber?` to external API via BFF proxy.
- *  - Honor `defaultTopK`, `showCitations`, `allow*Use` role gates.
- *  - Use `apiKeySecretName` lookup at BFF (raw secret never leaves env).
- *  - Surface `confidence` and `citations` from external response.
+ * Backend wrapper kontratı:
+ *   {
+ *     ok: true,
+ *     endpoint: 'ask' | 'search' | 'categorize' | 'analyze' | 'health' | 'stats',
+ *     rawSource: 'enroute-kb',
+ *     data: <external response exactly as returned>,
+ *     meta: { proxiedAt, latencyMs }
+ *   }
+ * veya
+ *   {
+ *     ok: false,
+ *     endpoint,
+ *     rawSource: 'enroute-kb',
+ *     error: { code, message, status }
+ *   }
  */
 
-export interface ExternalKbCitation {
-  title?: string;
-  excerpt?: string;
-  url?: string;
+import { apiFetch } from './caseService';
+
+export type ExternalKbEndpoint =
+  | 'health'
+  | 'stats'
+  | 'ask'
+  | 'search'
+  | 'categorize'
+  | 'analyze';
+
+export type ExternalKbStrictness = 'lenient' | 'normal' | 'strict';
+
+export interface ExternalKbWrappedSuccess<T = unknown> {
+  ok: true;
+  endpoint: ExternalKbEndpoint;
+  rawSource: 'enroute-kb';
+  data: T;
+  meta: { proxiedAt: string; latencyMs: number };
 }
 
-export interface ExternalKbAnswer {
-  title?: string;
-  answer: string;
-  confidence?: number | null;
-  citations?: ExternalKbCitation[];
+export interface ExternalKbWrappedError {
+  ok: false;
+  endpoint: ExternalKbEndpoint | null;
+  rawSource: 'enroute-kb';
+  error: { code: string; message: string; status: number | null };
+  meta?: { proxiedAt: string; latencyMs: number };
+  data?: unknown;
 }
 
-export interface ExternalKbAskInput {
+export type ExternalKbWrappedResponse<T = unknown> =
+  | ExternalKbWrappedSuccess<T>
+  | ExternalKbWrappedError;
+
+export interface ExternalKbSettingsStatus {
+  companyId: string;
+  configured: boolean;
+  enabled?: boolean;
+  providerName?: string | null;
+  baseUrl?: string | null;
+  authType?: 'none' | 'apiKey' | 'bearerToken';
+  apiKeySecretName?: string | null;
+  /** Server-side resolved: true if authType=none, or env var with that name is set. */
+  secretConfigured?: boolean;
+  defaultTopK?: number;
+  defaultStrictness?: ExternalKbStrictness;
+  defaultRerank?: boolean;
+  defaultVerify?: boolean;
+  showCitations?: boolean;
+  allowAgentUse?: boolean;
+  allowSupervisorUse?: boolean;
+  allowCsmUse?: boolean;
+}
+
+export interface AskInput {
+  companyId: string;
   query: string;
-  companyId?: string | null;
-  caseNumber?: string | null;
+  topK?: number;
+  strictness?: ExternalKbStrictness;
+  rerank?: boolean;
+  verify?: boolean;
+  sourceTypes?: string[];
 }
 
-export interface ExternalKbAskResponse {
-  answers: ExternalKbAnswer[];
+export interface SearchInput {
+  companyId: string;
+  query: string;
+  topK?: number;
+  sourceTypes?: string[];
 }
 
-/**
- * Mock yanıt üretici. Gerçek API hazır olmadığı için her sorgu için tek bir
- * placeholder answer döndürür. Latency taklit etmek için minik bir
- * setTimeout (UI loading state'ini doğrulamak için faydalı) — fakat hiçbir
- * gerçek I/O yapılmaz.
- */
-export async function askExternalKbMock(
-  input: ExternalKbAskInput,
-): Promise<ExternalKbAskResponse> {
-  // Hafif gecikme — UI loading davranışını test edebilmek için. Hiçbir network
-  // veya backend round-trip yok.
-  await new Promise((r) => setTimeout(r, 300));
-
-  void input; // Query/context şu an mock yanıtı etkilemiyor; gerçek API hazır olunca kullanılacak.
-
-  return {
-    answers: [
-      {
-        title: 'Örnek KB Yanıtı',
-        answer:
-          "Dış bilgi bankası API'si bağlandığında cevaplar bu alanda gösterilecek.",
-        confidence: null,
-        citations: [],
-      },
-    ],
-  };
+export interface CategorizeInput {
+  companyId: string;
+  description: string;
 }
+
+export interface AnalyzeInput {
+  companyId: string;
+  freeText: string;
+  context?: unknown;
+}
+
+const BASE = '/api/external-kb';
+
+async function postJson<T>(path: string, body: unknown, errorMsg: string): Promise<ExternalKbWrappedResponse<T>> {
+  const data = await apiFetch<ExternalKbWrappedResponse<T>>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, errorMsg);
+  return (
+    data ?? {
+      ok: false,
+      endpoint: null,
+      rawSource: 'enroute-kb',
+      error: { code: 'client_network_error', message: errorMsg, status: null },
+    }
+  );
+}
+
+async function getJson<T>(path: string, errorMsg: string): Promise<ExternalKbWrappedResponse<T>> {
+  const data = await apiFetch<ExternalKbWrappedResponse<T>>(path, undefined, errorMsg);
+  return (
+    data ?? {
+      ok: false,
+      endpoint: null,
+      rawSource: 'enroute-kb',
+      error: { code: 'client_network_error', message: errorMsg, status: null },
+    }
+  );
+}
+
+export const externalKbService = {
+  async settingsStatus(companyId: string): Promise<ExternalKbSettingsStatus | undefined> {
+    return apiFetch<ExternalKbSettingsStatus>(
+      `${BASE}/settings-status?companyId=${encodeURIComponent(companyId)}`,
+      undefined,
+      'Bilgi Bankası ayarları okunamadı',
+    );
+  },
+  async health(companyId: string): Promise<ExternalKbWrappedResponse> {
+    return getJson(
+      `${BASE}/health?companyId=${encodeURIComponent(companyId)}`,
+      'Bilgi Bankası health çağrısı başarısız',
+    );
+  },
+  async stats(companyId: string): Promise<ExternalKbWrappedResponse> {
+    return getJson(
+      `${BASE}/stats?companyId=${encodeURIComponent(companyId)}`,
+      'Bilgi Bankası stats çağrısı başarısız',
+    );
+  },
+  async ask(input: AskInput): Promise<ExternalKbWrappedResponse> {
+    return postJson(`${BASE}/ask`, input, 'Soru gönderilemedi');
+  },
+  async search(input: SearchInput): Promise<ExternalKbWrappedResponse> {
+    return postJson(`${BASE}/search`, input, 'Arama gönderilemedi');
+  },
+  async categorize(input: CategorizeInput): Promise<ExternalKbWrappedResponse> {
+    return postJson(`${BASE}/categorize`, input, 'Kategorize çağrısı başarısız');
+  },
+  async analyze(input: AnalyzeInput): Promise<ExternalKbWrappedResponse> {
+    return postJson(`${BASE}/analyze`, input, 'Analiz çağrısı başarısız');
+  },
+};

@@ -987,6 +987,8 @@ export interface KnowledgeSourceInput {
 // ─────────────────────────────────────────────────────────────────
 export type ExternalKbAuthType = 'none' | 'apiKey' | 'bearerToken';
 
+export type ExternalKbStrictness = 'lenient' | 'normal' | 'strict';
+
 export interface ExternalKbSetting {
   id: string | null;
   companyId: string;
@@ -995,11 +997,18 @@ export interface ExternalKbSetting {
   baseUrl: string | null;
   askEndpointPath: string;
   searchEndpointPath: string;
+  healthEndpointPath: string;
+  statsEndpointPath: string;
+  categorizeEndpointPath: string;
+  analyzeEndpointPath: string;
   authType: ExternalKbAuthType;
   /** Sadece environment secret referans adı; raw secret değildir. */
   apiKeySecretName: string | null;
   timeoutMs: number;
   defaultTopK: number;
+  defaultStrictness: ExternalKbStrictness;
+  defaultRerank: boolean;
+  defaultVerify: boolean;
   showCitations: boolean;
   allowAgentUse: boolean;
   allowSupervisorUse: boolean;
@@ -1015,10 +1024,17 @@ export interface ExternalKbSettingInput {
   baseUrl?: string | null;
   askEndpointPath?: string;
   searchEndpointPath?: string;
+  healthEndpointPath?: string;
+  statsEndpointPath?: string;
+  categorizeEndpointPath?: string;
+  analyzeEndpointPath?: string;
   authType?: ExternalKbAuthType;
   apiKeySecretName?: string | null;
   timeoutMs?: number;
   defaultTopK?: number;
+  defaultStrictness?: ExternalKbStrictness;
+  defaultRerank?: boolean;
+  defaultVerify?: boolean;
   showCitations?: boolean;
   allowAgentUse?: boolean;
   allowSupervisorUse?: boolean;
