@@ -36,6 +36,7 @@ export type AdminView =
   | 'admin-product-catalog'
   | 'admin-fields'
   | 'admin-knowledge'
+  | 'admin-external-kb'
   | 'admin-companies'
   | 'admin-users';
 
@@ -50,6 +51,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-product-catalog',
   'admin-fields',
   'admin-knowledge',
+  'admin-external-kb',
   'admin-companies',
   'admin-users',
 ];
@@ -80,8 +82,9 @@ const NAV: NavGroup[] = [
   {
     label: 'Yapılandırma',
     items: [
-      { key: 'admin-fields',    label: 'Dinamik Alanlar', icon: <Sliders size={14} /> },
-      { key: 'admin-knowledge', label: 'Bilgi Kaynakları', icon: <BookOpen size={14} /> },
+      { key: 'admin-fields',      label: 'Dinamik Alanlar',           icon: <Sliders size={14} /> },
+      { key: 'admin-knowledge',   label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
+      { key: 'admin-external-kb', label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
     ],
   },
   {

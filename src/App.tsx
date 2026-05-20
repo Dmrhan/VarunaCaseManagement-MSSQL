@@ -45,6 +45,7 @@ import { useAuth } from './services/AuthContext';
 import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
+import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
@@ -244,6 +245,7 @@ export default function App() {
         {view === 'admin-product-catalog' && <AdminProductCatalogPage />}
         {view === 'admin-fields' && <AdminFieldsPage />}
         {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
+        {view === 'admin-external-kb' && <AdminExternalKbPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
       </AdminLayout>

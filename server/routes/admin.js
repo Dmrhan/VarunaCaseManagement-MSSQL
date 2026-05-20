@@ -18,6 +18,7 @@ import {
   thirdPartyRepo,
   userRepo,
 } from '../db/adminRepository.js';
+import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { verifyJwt, requireRole, getSupabaseAdminClient } from '../db/auth.js';
 
 const router = Router();
@@ -682,6 +683,36 @@ router.put('/packages/:id/items', asyncRoute(async (req, res) => {
     req.user.allowedCompanyIds,
   );
   res.json({ value: items });
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// WR-KB1 — External KB Integration Settings (per-company admin gate).
+//
+// SADECE configuration ekranı. Hiçbir uç dış API çağrısı yapmaz; raw
+// API key saklamaz; AIUsageLog yazmaz. Per-company admin gate ile yönetilir.
+// SystemAdmin (verifyJwt tüm aktif şirketler) tüm şirketleri görebilir.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/external-kb-settings', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const item = await externalKbSettingRepo.getByCompany(companyId);
+  res.json(item);
+}));
+
+router.patch('/external-kb-settings/:companyId', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  // Body içinde companyId override olsa bile parametre kullanılır.
+  const patch = { ...(req.body ?? {}) };
+  delete patch.companyId;
+  delete patch.id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  const item = await externalKbSettingRepo.upsert(companyId, patch);
+  res.json(item);
 }));
 
 export default router;
