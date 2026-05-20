@@ -859,6 +859,67 @@ async function main() {
   }
   console.log(`   Packages: ${packageTotal} package + ${packageItemTotal} PackageItem across PARAM/UNIVERA/FINROTA`);
 
+  // ── 3.10) AccountCompany.packageId map — WR-A7b / PM-05 ──
+  // Legacy def.package serbest metni (Standard/Premium/Enterprise) catalog Package
+  // code'larına eşle, AccountCompany.packageId'yi set et. packageName SILINMEZ;
+  // snapshot olarak hem legacy text hem catalog ref yan yana durur (D-A7BI.1).
+  console.log('3.10) Linking AccountCompany.packageId to catalog packages (WR-A7b)...');
+  const PACKAGE_MAP_BY_COMPANY = {
+    'COMP-PARAM':   { Premium: 'POS_PRO',     Standard: 'POS_BASIC',    Enterprise: 'POS_PRO' },
+    'COMP-UNIVERA': { Premium: 'RED_PKG',     Standard: 'WHITE_PKG',    Enterprise: 'ENTERPRISE' },
+    'COMP-FINROTA': { Premium: 'TAHS_PLUS',   Standard: 'TAHS_BASIC',   Enterprise: 'ENT_FINANCE' },
+  };
+  let acPackageLinks = 0;
+  for (const cid of COMPANIES) {
+    const map = PACKAGE_MAP_BY_COMPANY[cid] ?? {};
+    for (const { ac, def } of allAccountIds[cid]) {
+      const code = map[def.package];
+      if (!code) continue;
+      const pkg = await prisma.package.findUnique({
+        where: { companyId_code: { companyId: cid, code } },
+        select: { id: true },
+      });
+      if (!pkg) continue;
+      await prisma.accountCompany.update({
+        where: { id: ac.id },
+        data: { packageId: pkg.id },
+      });
+      // In-memory state'i de güncelle ki case loop'unda erişilebilsin.
+      ac.packageId = pkg.id;
+      acPackageLinks++;
+    }
+  }
+  console.log(`   AccountCompany package links: ${acPackageLinks}`);
+
+  // WR-A7b — Pre-build catalog cache for case loop. Her şirket için:
+  //   packageById[pid] = { id, name, productIds: [productId...] }
+  //   productById[prodId] = { id, name }
+  const catalogByCompany = {};
+  for (const cid of COMPANIES) {
+    const [pkgs, items, prods] = await Promise.all([
+      prisma.package.findMany({
+        where: { companyId: cid, isActive: true },
+        select: { id: true, name: true },
+      }),
+      prisma.packageItem.findMany({
+        where: { package: { companyId: cid } },
+        select: { packageId: true, productId: true },
+      }),
+      prisma.product.findMany({
+        where: { companyId: cid, isActive: true },
+        select: { id: true, name: true },
+      }),
+    ]);
+    const productById = {};
+    for (const p of prods) productById[p.id] = p;
+    const packageById = {};
+    for (const pk of pkgs) packageById[pk.id] = { ...pk, productIds: [] };
+    for (const it of items) {
+      if (packageById[it.packageId]) packageById[it.packageId].productIds.push(it.productId);
+    }
+    catalogByCompany[cid] = { packageById, productById };
+  }
+
   // ── 4) Cases — 55 per company ──
   console.log('4) Seeding 165 cases (55 per company)...');
   const allCaseIds = {};
@@ -947,6 +1008,39 @@ async function main() {
         caseSupportLevel = sx < 0.8 ? 'L1' : sx < 0.98 ? 'L2' : 'L3';
       }
 
+      // WR-A7b — Vakaya catalog ürün/paket ataması (~35% örneklem).
+      //   AccountCompany.packageId set ise: Case.packageId = ac.packageId (D-A7BI.3 strict).
+      //   PackageItem'lardan rastgele bir ürün seçilir; productId/productName denorm yazılır.
+      //   AC paketsizse productId yine ~20% ile rastgele aktif ürüne bağlanabilir
+      //   (paket olmadan ürün referansı geçerli; DI.2 sadece companyId match ister).
+      let casePackageId = null;
+      let casePackageName = null;
+      let caseProductId = null;
+      let caseProductName = null;
+      const catalog = catalogByCompany[companyId];
+      if (catalog && ac.packageId && catalog.packageById[ac.packageId] && r() < 0.35) {
+        const pkg = catalog.packageById[ac.packageId];
+        casePackageId = pkg.id;
+        casePackageName = pkg.name;
+        if (pkg.productIds.length > 0) {
+          const prodId = pick(pkg.productIds, r);
+          const prod = catalog.productById[prodId];
+          if (prod) {
+            caseProductId = prod.id;
+            caseProductName = prod.name;
+          }
+        }
+      } else if (catalog && !caseProductId && r() < 0.2) {
+        // Paket bağı yoksa salt ürün referansı da olabilir.
+        const productIds = Object.keys(catalog.productById);
+        if (productIds.length > 0) {
+          const prodId = pick(productIds, r);
+          const prod = catalog.productById[prodId];
+          caseProductId = prod.id;
+          caseProductName = prod.name;
+        }
+      }
+
       const data = {
         caseNumber,
         title: `${title}`,
@@ -967,6 +1061,11 @@ async function main() {
         subCategory: sub,
         requestType,
         productGroup: theme.productNames[i % theme.productNames.length],
+        // WR-A7b — Catalog product/package (sample subset).
+        productId: caseProductId,
+        productName: caseProductName,
+        packageId: casePackageId,
+        packageName: casePackageName,
         assignedTeamId: team.id,
         assignedTeamName: team.name,
         assignedPersonId: person.id,

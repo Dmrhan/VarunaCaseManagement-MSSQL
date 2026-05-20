@@ -48,4 +48,33 @@ router.get('/validate-tckn', (req, res) => {
   res.json({ valid: result.ok, reason: result.ok ? null : result.reason });
 });
 
+/**
+ * WR-A7b / PM-05 — GET /api/lookups/catalog?companyId=&accountId=
+ *
+ * NewCaseForm + AccountCompanyEditor + CaseDetail inline edit kullanır.
+ * Returns: { companyId, accountId, packages, products, packageItems, suggestedPackage }
+ *
+ * Auth: verifyJwt; allowedCompanyIds scope check repository içinde.
+ */
+router.get('/catalog', async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  const accountIdRaw = typeof req.query.accountId === 'string' ? req.query.accountId : '';
+  const accountId = accountIdRaw ? accountIdRaw : null;
+  try {
+    const data = await lookupRepository.getCaseCatalog({
+      companyId,
+      accountId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json(data);
+  } catch (err) {
+    if (err?.status) {
+      res.status(err.status).json({ error: err.code ?? 'lookup_error', message: err.message });
+      return;
+    }
+    console.error('[lookups/catalog]', err);
+    res.status(500).json({ error: 'internal', message: err?.message });
+  }
+});
+
 export default router;

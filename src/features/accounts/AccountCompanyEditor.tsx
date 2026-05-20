@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Building2, Trash2 } from 'lucide-react';
+import { Building2, Package as PackageIcon, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
@@ -12,6 +12,13 @@ import {
   type AccountDetail,
 } from '@/services/accountService';
 import { lookupService } from '@/services/caseService';
+
+interface CatalogPackage {
+  id: string;
+  code: string;
+  name: string;
+  supportLevel: 'L1' | 'L2' | 'L3' | 'Expert';
+}
 
 interface AccountCompanyEditorProps {
   open: boolean;
@@ -62,6 +69,7 @@ export function AccountCompanyEditor({
   const [companyId, setCompanyId] = useState('');
   const [externalCustomerCode, setExternalCustomerCode] = useState('');
   const [packageName, setPackageName] = useState('');
+  const [packageId, setPackageId] = useState<string>('');
   const [contractStartAt, setContractStartAt] = useState('');
   const [contractEndAt, setContractEndAt] = useState('');
   const [segment, setSegment] = useState('');
@@ -71,6 +79,10 @@ export function AccountCompanyEditor({
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // WR-A7b — Catalog package picker.
+  const [catalogPackages, setCatalogPackages] = useState<CatalogPackage[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setErrors({});
@@ -78,6 +90,7 @@ export function AccountCompanyEditor({
       setCompanyId(relation.companyId);
       setExternalCustomerCode(relation.externalCustomerCode ?? '');
       setPackageName(relation.packageName ?? '');
+      setPackageId(relation.packageId ?? '');
       setContractStartAt(toDateInput(relation.contractStartAt));
       setContractEndAt(toDateInput(relation.contractEndAt));
       setSegment(relation.segment ?? '');
@@ -87,6 +100,7 @@ export function AccountCompanyEditor({
       setCompanyId('');
       setExternalCustomerCode('');
       setPackageName('');
+      setPackageId('');
       setContractStartAt('');
       setContractEndAt('');
       setSegment('');
@@ -94,6 +108,42 @@ export function AccountCompanyEditor({
       setNotes('');
     }
   }, [open, mode, relation]);
+
+  // WR-A7b — companyId değiştikçe catalog package'larını yükle.
+  useEffect(() => {
+    if (!open || !companyId) {
+      setCatalogPackages([]);
+      return;
+    }
+    let cancelled = false;
+    setCatalogLoading(true);
+    (async () => {
+      try {
+        const data = await lookupService.caseCatalog({ companyId });
+        if (!cancelled) setCatalogPackages(data.packages);
+      } catch {
+        if (!cancelled) setCatalogPackages([]);
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, companyId]);
+
+  // WR-A7b — Reconcile suggestion: legacy packageName text bir Package row name'iyle eşleşirse
+  // "Paketi catalog'dan eşle: X" chip'i göster. packageId zaten set ise gösterilmez.
+  const reconcileSuggestion = useMemo<CatalogPackage | null>(() => {
+    if (packageId) return null;
+    const text = packageName.trim().toLowerCase();
+    if (!text) return null;
+    return (
+      catalogPackages.find(
+        (p) => p.name.toLowerCase() === text || p.code.toLowerCase() === text,
+      ) ?? null
+    );
+  }, [catalogPackages, packageId, packageName]);
 
   // Add modunda: zaten bağlı companyId'leri dışla. Edit'te aynı kalır.
   const availableCompanies = useMemo(() => {
@@ -125,6 +175,7 @@ export function AccountCompanyEditor({
         companyId,
         externalCustomerCode: externalCustomerCode.trim() || null,
         packageName: packageName.trim() || null,
+        packageId: packageId || null,
         contractStartAt: contractStartAt || null,
         contractEndAt: contractEndAt || null,
         segment: segment.trim() || null,
@@ -137,6 +188,7 @@ export function AccountCompanyEditor({
       const body: AccountCompanyMutationInput = {
         externalCustomerCode: externalCustomerCode.trim() || null,
         packageName: packageName.trim() || null,
+        packageId: packageId || null,
         contractStartAt: contractStartAt || null,
         contractEndAt: contractEndAt || null,
         segment: segment.trim() || null,
@@ -269,12 +321,44 @@ export function AccountCompanyEditor({
               maxLength={5}
             />
           </Field>
-          <Field label="Paket">
+          <Field label="Paket (Catalog)" hint={catalogLoading ? 'Catalog yükleniyor…' : 'Catalog paketinden seç (DI.1)'}>
+            <Select
+              value={packageId}
+              onChange={(e) => {
+                const next = e.target.value;
+                setPackageId(next);
+                // Catalog'dan paket seçildiyse packageName'i de aynı isimle eşitle (snapshot tutarlılığı).
+                const found = catalogPackages.find((p) => p.id === next);
+                if (found && !packageName.trim()) setPackageName(found.name);
+              }}
+              disabled={!companyId || catalogLoading}
+            >
+              <option value="">— Catalog paketi yok —</option>
+              {catalogPackages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.code})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Paket Adı (Legacy / Serbest Metin)" hint="Catalog dışı paket adı veya geçici etiket">
             <TextInput
               value={packageName}
               onChange={(e) => setPackageName(e.target.value)}
               placeholder="Örn. Standart"
             />
+            {reconcileSuggestion ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPackageId(reconcileSuggestion.id);
+                  setPackageName(reconcileSuggestion.name);
+                }}
+                className="mt-1 inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200"
+              >
+                <PackageIcon size={12} /> Catalog'dan eşle: {reconcileSuggestion.name}
+              </button>
+            ) : null}
           </Field>
 
           <Field label="Sözleşme Başlangıç">

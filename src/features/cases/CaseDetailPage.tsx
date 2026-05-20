@@ -170,6 +170,20 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
   const { toast } = useToast();
 
+  // WR-A7b — Catalog state (Package + Product). Vakanın companyId/accountId'sine bağlı.
+  const [catalogPackages, setCatalogPackages] = useState<
+    Array<{ id: string; code: string; name: string; supportLevel: SupportLevel }>
+  >([]);
+  const [catalogProducts, setCatalogProducts] = useState<
+    Array<{
+      id: string;
+      code: string;
+      name: string;
+      supportLevel: SupportLevel;
+      productGroupId: string;
+    }>
+  >([]);
+
   // Parent caseId değişirse içerideki state ve breadcrumb sıfırlanır
   useEffect(() => {
     setActiveId(caseId);
@@ -204,6 +218,26 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
       alive = false;
     };
   }, [activeId]);
+
+  // WR-A7b — Vakanın companyId/accountId'sine bağlı catalog lookup.
+  useEffect(() => {
+    let alive = true;
+    if (!item?.companyId) {
+      setCatalogPackages([]);
+      setCatalogProducts([]);
+      return;
+    }
+    void lookupService
+      .caseCatalog({ companyId: item.companyId, accountId: item.accountId || null })
+      .then((data) => {
+        if (!alive) return;
+        setCatalogPackages(data.packages);
+        setCatalogProducts(data.products);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [item?.companyId, item?.accountId]);
 
   // Önceki vakalar (Çözüldü / İptalEdildi)
   useEffect(() => {
@@ -774,6 +808,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 teams={teams}
                 persons={persons}
                 thirdParties={thirdParties}
+                catalogPackages={catalogPackages}
+                catalogProducts={catalogProducts}
                 previousCases={previousCases}
                 onSelectPrevious={navigateToCase}
                 drafts={drafts}
@@ -1029,6 +1065,17 @@ function LeftPanel({
                 {item.accountProjectName && (
                   <span title="Bağlı proje">
                     <Badge tint="violet">Proje: {item.accountProjectName}</Badge>
+                  </span>
+                )}
+                {/* WR-A7b / PM-05 — Catalog ürün ve paket badge'leri. */}
+                {item.packageName && (
+                  <span title="Vakaya bağlı catalog paketi">
+                    <Badge tint="indigo">Paket: {item.packageName}</Badge>
+                  </span>
+                )}
+                {item.productName && (
+                  <span title="Vakaya bağlı ürün">
+                    <Badge tint="blue">Ürün: {item.productName}</Badge>
                   </span>
                 )}
                 {/* WR-A5 / PM-03 — Destek seviyesi badge'i. */}
@@ -2742,6 +2789,8 @@ function DetailTab({
   teams,
   persons,
   thirdParties,
+  catalogPackages,
+  catalogProducts,
   previousCases,
   onSelectPrevious,
   drafts,
@@ -2757,6 +2806,14 @@ function DetailTab({
   teams: { id: string; name: string }[];
   persons: { id: string; name: string; teamId: string }[];
   thirdParties: { id: string; name: string }[];
+  catalogPackages: Array<{ id: string; code: string; name: string; supportLevel: SupportLevel }>;
+  catalogProducts: Array<{
+    id: string;
+    code: string;
+    name: string;
+    supportLevel: SupportLevel;
+    productGroupId: string;
+  }>;
   previousCases: Case[];
   onSelectPrevious: (id: string) => void;
   drafts: Partial<Case>;
@@ -2862,6 +2919,75 @@ function DetailTab({
                 onCommit={(val) => onCommitDraft('productGroup', val)}
                 onCancel={onCancelEdit}
                 options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
+              />
+            )},
+            // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
+            // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
+            { label: 'Paket', node: (
+              <InlineEdit
+                fieldKey="packageId"
+                type="select"
+                value={(v('packageId') as string | null | undefined) ?? ''}
+                editing={editingField === 'packageId'}
+                isDraft={drafts.packageId !== undefined}
+                onStart={() => onStartEdit('packageId')}
+                onCommit={(val) => onCommitDraft('packageId', val || null)}
+                onCancel={onCancelEdit}
+                options={[
+                  { value: '', label: '— Paket Yok —' },
+                  ...catalogPackages.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+                ]}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {(() => {
+                      const pid =
+                        (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
+                      if (!pid) return item.packageName ?? '—';
+                      const found = catalogPackages.find((p) => p.id === pid);
+                      return found ? `${found.name} (${found.code})` : item.packageName ?? pid;
+                    })()}
+                  </span>
+                )}
+              />
+            )},
+            // WR-A7b — Catalog Ürün inline edit. BFF DI.2 enforce; role gate
+            // (Supervisor/CSM/Admin/SystemAdmin) BFF tarafında.
+            { label: 'Ürün', node: (
+              <InlineEdit
+                fieldKey="productId"
+                type="select"
+                value={(v('productId') as string | null | undefined) ?? ''}
+                editing={editingField === 'productId'}
+                isDraft={drafts.productId !== undefined}
+                onStart={() => onStartEdit('productId')}
+                onCommit={(val) => onCommitDraft('productId', val || null)}
+                onCancel={onCancelEdit}
+                options={(() => {
+                  const pid =
+                    (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
+                  // Paket seçiliyse o pakete bağlı ürünleri öncelikle göster (cascade filter UI hint).
+                  // Tüm ürünleri yine yedek olarak sun ki paketsiz ürün de eklenebilsin.
+                  return [
+                    { value: '', label: '— Ürün Yok —' },
+                    ...catalogProducts.map((p) => ({
+                      value: p.id,
+                      label:
+                        `${p.name} (${p.code})` +
+                        (pid && p.id ? '' : '') /* paket filtresi UI yardımı; backend katı değil */,
+                    })),
+                  ];
+                })()}
+                renderDisplay={() => (
+                  <span className="text-sm text-slate-800">
+                    {(() => {
+                      const pid =
+                        (drafts.productId as string | null | undefined) ?? item.productId ?? null;
+                      if (!pid) return item.productName ?? '—';
+                      const found = catalogProducts.find((p) => p.id === pid);
+                      return found ? `${found.name} (${found.code})` : item.productName ?? pid;
+                    })()}
+                  </span>
+                )}
               />
             )},
             { label: 'Origin', node: (

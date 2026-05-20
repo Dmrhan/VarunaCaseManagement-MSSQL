@@ -88,6 +88,7 @@ import {
   type NoteVisibility,
   type SlaPolicy,
   type CaseChecklistTemplate,
+  type SupportLevel,
 } from '@/features/cases/types';
 import { CASE_FILE_MAX_COUNT, CASE_FILE_MAX_SIZE } from '@/features/cases/types';
 
@@ -277,6 +278,9 @@ export interface NewCaseInput {
   subCategory: string;
   requestType: CaseRequestType;
   productGroup?: string;
+  // WR-A7b — Catalog Product/Package referansları (opsiyonel).
+  productId?: string;
+  packageId?: string;
   assignedTeamId?: string;
   assignedTeamName?: string;
   assignedPersonId?: string;
@@ -1869,5 +1873,51 @@ export const lookupService = {
   fieldDefinitions: () => {
     const b = getCache();
     return b ? clone(b.fieldDefinitions) : [];
+  },
+  /**
+   * WR-A7b — Vaka açılış catalog lookup (Package/Product). Bootstrap'tan ayrı,
+   * companyId + opsiyonel accountId scope'unda anlık çekilir.
+   */
+  async caseCatalog(params: { companyId: string; accountId?: string | null }): Promise<{
+    companyId: string;
+    accountId: string | null;
+    packages: Array<{ id: string; code: string; name: string; supportLevel: SupportLevel }>;
+    products: Array<{
+      id: string;
+      code: string;
+      name: string;
+      supportLevel: SupportLevel;
+      productGroupId: string;
+    }>;
+    packageItems: Record<string, string[]>;
+    suggestedPackage: string | null;
+  }> {
+    const url = new URL('/api/lookups/catalog', window.location.origin);
+    url.searchParams.set('companyId', params.companyId);
+    if (params.accountId) url.searchParams.set('accountId', params.accountId);
+    const data = await apiFetch<{
+      companyId: string;
+      accountId: string | null;
+      packages: Array<{ id: string; code: string; name: string; supportLevel: SupportLevel }>;
+      products: Array<{
+        id: string;
+        code: string;
+        name: string;
+        supportLevel: SupportLevel;
+        productGroupId: string;
+      }>;
+      packageItems: Record<string, string[]>;
+      suggestedPackage: string | null;
+    }>(url.pathname + url.search, undefined, 'Katalog yüklenemedi');
+    return (
+      data ?? {
+        companyId: params.companyId,
+        accountId: params.accountId ?? null,
+        packages: [],
+        products: [],
+        packageItems: {},
+        suggestedPackage: null,
+      }
+    );
   },
 };

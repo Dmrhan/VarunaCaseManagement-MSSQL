@@ -87,6 +87,9 @@ const emptyForm = {
   subCategory: '',
   requestType: '' as '' | CaseRequestType,
   productGroup: '',
+  // WR-A7b — Catalog Product/Package referansları (opsiyonel).
+  productId: '',
+  packageId: '',
   assignedTeamId: '',
   assignedPersonId: '',
 
@@ -168,6 +171,23 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   // WR-A4 / PM-04 — Seçilen müşterinin (account+company scope) aktif proje listesi.
   const [projects, setProjects] = useState<AccountProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
+
+  // WR-A7b / PM-05 — Catalog (Package + Product) state.
+  const [catalogPackages, setCatalogPackages] = useState<
+    Array<{ id: string; code: string; name: string; supportLevel: 'L1' | 'L2' | 'L3' | 'Expert' }>
+  >([]);
+  const [catalogProducts, setCatalogProducts] = useState<
+    Array<{
+      id: string;
+      code: string;
+      name: string;
+      supportLevel: 'L1' | 'L2' | 'L3' | 'Expert';
+      productGroupId: string;
+    }>
+  >([]);
+  const [catalogPackageItems, setCatalogPackageItems] = useState<Record<string, string[]>>({});
+  const [catalogSuggestedPackage, setCatalogSuggestedPackage] = useState<string | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   // RUNA AI — kategori + başlık önerileri
   const [aiSuggestion, setAiSuggestion] = useState<CategorySuggestion | null>(null);
@@ -315,6 +335,51 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       setForm((f) => ({ ...f, assignedTeamId: '', assignedPersonId: '' }));
     }
   }, [teamsForCompany, form.assignedTeamId]);
+
+  // WR-A7b — companyId / accountId değiştikçe catalog lookup.
+  // accountId set ise suggestedPackage preselect; null ise sadece package listesi (DI.4 enforce).
+  useEffect(() => {
+    if (!open || !form.companyId) {
+      setCatalogPackages([]);
+      setCatalogProducts([]);
+      setCatalogPackageItems({});
+      setCatalogSuggestedPackage(null);
+      return;
+    }
+    let alive = true;
+    setCatalogLoading(true);
+    void lookupService
+      .caseCatalog({ companyId: form.companyId, accountId: form.accountId || null })
+      .then((data) => {
+        if (!alive) return;
+        setCatalogPackages(data.packages);
+        setCatalogProducts(data.products);
+        setCatalogPackageItems(data.packageItems);
+        setCatalogSuggestedPackage(data.suggestedPackage);
+        // suggestedPackage'i preselect (form.packageId boşsa).
+        setForm((f) =>
+          !f.packageId && data.suggestedPackage ? { ...f, packageId: data.suggestedPackage } : f,
+        );
+      })
+      .finally(() => {
+        if (alive) setCatalogLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, form.companyId, form.accountId]);
+
+  // WR-A7b — companyId / accountId değişirse seçili productId/packageId catalog'da yoksa sıfırla.
+  useEffect(() => {
+    if (form.productId && !catalogProducts.some((p) => p.id === form.productId)) {
+      setForm((f) => ({ ...f, productId: '' }));
+    }
+  }, [catalogProducts, form.productId]);
+  useEffect(() => {
+    if (form.packageId && !catalogPackages.some((p) => p.id === form.packageId)) {
+      setForm((f) => ({ ...f, packageId: '' }));
+    }
+  }, [catalogPackages, form.packageId]);
 
   // Kategori değişirse alt kategori geçersizleşebilir
   useEffect(() => {
@@ -499,6 +564,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       subCategory: form.subCategory,
       requestType: form.requestType as CaseRequestType,
       productGroup: form.productGroup || undefined,
+      // WR-A7b — Catalog product/package refs (opsiyonel; BFF DI.1-DI.6 enforce).
+      productId: form.productId || undefined,
+      packageId: form.packageId || undefined,
       assignedTeamId: team?.id,
       assignedTeamName: team?.name,
       assignedPersonId: person?.id,
@@ -1208,6 +1276,64 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
                     value={form.productGroup}
                     onChange={(e) => update('productGroup', e.target.value)}
                   />
+                </Field>
+                <Field
+                  label="Paket (Catalog)"
+                  hint={
+                    !form.companyId
+                      ? 'Önce şirket seç.'
+                      : catalogLoading
+                        ? 'Catalog yükleniyor…'
+                        : !form.accountId
+                          ? 'Paket bağlamak için müşteri zorunlu (DI.4).'
+                          : catalogSuggestedPackage && form.packageId === catalogSuggestedPackage
+                            ? 'Müşterinin AccountCompany paketi otomatik seçildi.'
+                            : 'Müşteri-şirket ilişkisindeki paket (DI.5).'
+                  }
+                >
+                  <Select
+                    value={form.packageId}
+                    onChange={(e) => update('packageId', e.target.value)}
+                    disabled={!form.companyId || !form.accountId || catalogLoading}
+                  >
+                    <option value="">— Paket yok —</option>
+                    {catalogPackages.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.code})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Ürün (Catalog)"
+                  hint={(() => {
+                    if (!form.companyId) return 'Önce şirket seç.';
+                    if (catalogLoading) return 'Catalog yükleniyor…';
+                    const product = catalogProducts.find((p) => p.id === form.productId);
+                    if (product) return `Destek seviyesi hint: ${product.supportLevel}`;
+                    return 'Vakaya bağlı ürün (opsiyonel).';
+                  })()}
+                >
+                  <Select
+                    value={form.productId}
+                    onChange={(e) => update('productId', e.target.value)}
+                    disabled={!form.companyId || catalogLoading}
+                  >
+                    <option value="">— Ürün yok —</option>
+                    {(() => {
+                      const packageProductIds = form.packageId
+                        ? catalogPackageItems[form.packageId] ?? []
+                        : null;
+                      const filtered = packageProductIds
+                        ? catalogProducts.filter((p) => packageProductIds.includes(p.id))
+                        : catalogProducts;
+                      return filtered.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.code})
+                        </option>
+                      ));
+                    })()}
+                  </Select>
                 </Field>
               </div>
 

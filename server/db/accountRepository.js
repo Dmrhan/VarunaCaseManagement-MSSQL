@@ -42,6 +42,26 @@ export class AccountValidationError extends Error {
 }
 
 /**
+ * WR-A7b / DI.1 — AccountCompany.packageId set/update edilirken paket aynı
+ * şirkete ait olmalı. Cross-tenant package ataması 400 ile reddedilir.
+ * Null geçerse no-op; caller patch.packageId = null'a karar verir.
+ */
+async function assertPackageInCompany({ packageId, companyId }) {
+  if (!packageId) return null;
+  const pkg = await prisma.package.findUnique({
+    where: { id: packageId },
+    select: { id: true, companyId: true, name: true, isActive: true },
+  });
+  if (!pkg || pkg.companyId !== companyId) {
+    throw new AccountValidationError(
+      'Paket başka bir şirkete ait; bu müşteri-şirket ilişkisine bağlanamaz.',
+      { status: 400, code: 'package_company_mismatch' },
+    );
+  }
+  return pkg;
+}
+
+/**
  * WR-A1 — Müşteri tipi validation. Geçersiz identifier 400 fırlatır.
  * Boş/undefined kabul edilir (caller default'a düşer).
  *
@@ -350,6 +370,7 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
           status: true,
           externalCustomerCode: true,
           packageName: true,
+          packageId: true,
           contractStartAt: true,
           contractEndAt: true,
           segment: true,
@@ -358,6 +379,16 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
             select: {
               name: true,
               settings: { select: { primaryColor: true } },
+            },
+          },
+          // WR-A7b — Catalog Package reference (varsa).
+          package: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              supportLevel: true,
+              isActive: true,
             },
           },
           products: {
@@ -501,6 +532,18 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       status: c.status,
       externalCustomerCode: c.externalCustomerCode ?? null,
       packageName: c.packageName ?? null,
+      packageId: c.packageId ?? null,
+      // WR-A7b — Catalog package özet kartı (varsa). UI hem packageName (legacy free text)
+      // hem package.name'i (catalog) gösterebilir.
+      package: c.package
+        ? {
+            id: c.package.id,
+            code: c.package.code,
+            name: c.package.name,
+            supportLevel: c.package.supportLevel,
+            isActive: c.package.isActive,
+          }
+        : null,
       contractStartAt: c.contractStartAt,
       contractEndAt: c.contractEndAt,
       segment: c.segment ?? null,
@@ -895,8 +938,8 @@ async function loadEditableAccountCompany({ accountId, accountCompanyId, user })
 /**
  * POST /api/accounts/:id/companies
  *
- * Body: { companyId, externalCustomerCode?, packageName?, contractStartAt?,
- *         contractEndAt?, segment?, status?, notes? }
+ * Body: { companyId, externalCustomerCode?, packageName?, packageId?,
+ *         contractStartAt?, contractEndAt?, segment?, status?, notes? }
  *
  * Doğrulamalar:
  *  - companyId zorunlu, izinli (SystemAdmin hariç)
@@ -904,6 +947,7 @@ async function loadEditableAccountCompany({ accountId, accountCompanyId, user })
  *  - status (varsa) VALID_STATUSES içinde
  *  - (accountId, companyId) ikilisi zaten varsa 409
  *  - (companyId, externalCustomerCode) çakışırsa 409
+ *  - WR-A7b / DI.1: packageId (varsa) aynı şirkete ait olmalı
  */
 export async function addCompanyRelation({ accountId, data, user }) {
   await assertAccountInScope(accountId, user.allowedCompanyIds);
@@ -933,6 +977,12 @@ export async function addCompanyRelation({ accountId, data, user }) {
     throw new AccountValidationError('Geçersiz status.');
   }
 
+  const packageId =
+    data?.packageId != null && data.packageId !== '' ? String(data.packageId) : null;
+  if (packageId) {
+    await assertPackageInCompany({ packageId, companyId });
+  }
+
   try {
     await prisma.accountCompany.create({
       data: {
@@ -940,6 +990,7 @@ export async function addCompanyRelation({ accountId, data, user }) {
         companyId,
         externalCustomerCode,
         packageName: data?.packageName ?? null,
+        packageId,
         contractStartAt: data?.contractStartAt ? new Date(data.contractStartAt) : null,
         contractEndAt: data?.contractEndAt ? new Date(data.contractEndAt) : null,
         segment: data?.segment ?? null,
@@ -972,9 +1023,12 @@ export async function addCompanyRelation({ accountId, data, user }) {
 /**
  * PATCH /api/accounts/:id/companies/:accountCompanyId
  *
- * Düzenlenebilir alanlar: externalCustomerCode, packageName, contractStartAt,
- * contractEndAt, segment, status, notes. companyId DEĞIŞTIRILEMEZ
- * (taşıma istenirse ayrı endpoint gerekir; cross-tenant audit gerektirir).
+ * Düzenlenebilir alanlar: externalCustomerCode, packageName, packageId,
+ * contractStartAt, contractEndAt, segment, status, notes. companyId
+ * DEĞIŞTIRILEMEZ (taşıma istenirse ayrı endpoint gerekir).
+ *
+ * WR-A7b — packageId set/update: package.companyId === AccountCompany.companyId.
+ * packageId clear (null/''): packageName SILINMEZ (D-A7BI.1; snapshot olarak korunur).
  */
 export async function updateCompanyRelation({ accountId, accountCompanyId, data, user }) {
   const row = await loadEditableAccountCompany({ accountId, accountCompanyId, user });
@@ -993,6 +1047,15 @@ export async function updateCompanyRelation({ accountId, accountCompanyId, data,
     patch.externalCustomerCode = code;
   }
   if (data?.packageName !== undefined) patch.packageName = data.packageName || null;
+  if (data?.packageId !== undefined) {
+    const nextPackageId =
+      data.packageId == null || data.packageId === '' ? null : String(data.packageId);
+    if (nextPackageId) {
+      await assertPackageInCompany({ packageId: nextPackageId, companyId: row.companyId });
+    }
+    patch.packageId = nextPackageId;
+    // D-A7BI.1 — packageId null'a düşürülse de packageName silinmez.
+  }
   if (data?.contractStartAt !== undefined) {
     patch.contractStartAt = data.contractStartAt ? new Date(data.contractStartAt) : null;
   }
@@ -1762,8 +1825,13 @@ export async function getCaseCustomerContext({ accountId, companyId, allowedComp
           status: true,
           externalCustomerCode: true,
           packageName: true,
+          packageId: true,
           contractStartAt: true,
           contractEndAt: true,
+          // WR-A7b — Catalog Package referansı.
+          package: {
+            select: { id: true, code: true, name: true, supportLevel: true, isActive: true },
+          },
           products: {
             where: { isActive: true },
             select: { id: true, productName: true, productCode: true },
@@ -1810,6 +1878,17 @@ export async function getCaseCustomerContext({ accountId, companyId, allowedComp
           status: ac.status,
           externalCustomerCode: ac.externalCustomerCode ?? null,
           packageName: ac.packageName ?? null,
+          packageId: ac.packageId ?? null,
+          // WR-A7b — Catalog package özet kartı.
+          package: ac.package
+            ? {
+                id: ac.package.id,
+                code: ac.package.code,
+                name: ac.package.name,
+                supportLevel: ac.package.supportLevel,
+                isActive: ac.package.isActive,
+              }
+            : null,
           contractStartAt: ac.contractStartAt,
           contractEndAt: ac.contractEndAt,
           activeProducts: (ac.products ?? []).map((p) => ({

@@ -217,6 +217,15 @@ export interface AccountListResponse {
 
 export interface AccountCompanyDetail extends AccountCompanyChip {
   packageName: string | null;
+  /** WR-A7b — Catalog Package referansı. */
+  packageId: string | null;
+  package: {
+    id: string;
+    code: string;
+    name: string;
+    supportLevel: 'L1' | 'L2' | 'L3' | 'Expert';
+    isActive: boolean;
+  } | null;
   contractStartAt: string | null;
   contractEndAt: string | null;
   segment: string | null;
@@ -352,6 +361,8 @@ export interface AccountCompanyMutationInput {
   companyId?: string;
   externalCustomerCode?: string | null;
   packageName?: string | null;
+  /** WR-A7b — Catalog Package referansı. */
+  packageId?: string | null;
   contractStartAt?: string | null;
   contractEndAt?: string | null;
   segment?: string | null;

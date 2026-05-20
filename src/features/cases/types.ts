@@ -400,6 +400,12 @@ export interface Case {
 
   productGroup?: string;
 
+  /** WR-A7b — Catalog Product / Package referansları + snapshot. */
+  productId?: string;
+  productName?: string;
+  packageId?: string;
+  packageName?: string;
+
   assignedTeamId?: string;
   assignedTeamName?: string;
   assignedPersonId?: string;
