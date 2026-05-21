@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Database, RefreshCcw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Database, RefreshCcw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Field, Select } from '@/components/ui/Field';
@@ -22,6 +22,9 @@ import { CommitStep } from './dataImport/CommitStep';
 import { ResultStep } from './dataImport/ResultStep';
 import { HistoryPanel } from './dataImport/HistoryPanel';
 import { STEP_ORDER, type Step, type ParsedSource } from './dataImport/types';
+import { Customer360Page } from './dataImport/customer360/Customer360Page';
+
+type ImportTarget = 'account' | 'customer360';
 
 /**
  * WR-A8 — Varuna Veri Aktarım Stüdyosu (Phase 1: Account only).
@@ -37,6 +40,7 @@ export function AdminDataImportPage() {
   const { user } = useAuth();
   void user;
 
+  const [target, setTarget] = useState<ImportTarget>('account');
   const manageable = useMemo(() => lookupService.companies(), []);
   const [companyId, setCompanyId] = useState<string>('');
   const [schema, setSchema] = useState<TargetSchemaResponse | null>(null);
@@ -163,14 +167,65 @@ export function AdminDataImportPage() {
             <Database size={18} /> Veri Aktarım Stüdyosu
           </h2>
           <p className="text-xs text-slate-500 dark:text-ndark-muted">
-            Müşteri verilerini Excel/CSV veya API üzerinden Varuna'ya güvenli, görsel ve geri alınabilir biçimde aktarın. Faz 1: müşteri (Account) hedefi.
+            Müşteri verilerini Excel/CSV veya API üzerinden Varuna'ya güvenli, görsel ve geri alınabilir biçimde aktarın.
           </p>
         </div>
-        <Button variant="ghost" onClick={resetFlow}>
-          <RefreshCcw size={12} />
-          Sıfırla
-        </Button>
+        {target === 'account' && (
+          <Button variant="ghost" onClick={resetFlow}>
+            <RefreshCcw size={12} />
+            Sıfırla
+          </Button>
+        )}
       </header>
+
+      {/* Phase 2a — Hedef seçici. "Müşteri Ana Kartı" Phase 1; "Customer 360" Phase 2a dry-run only. */}
+      <Card>
+        <CardBody>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setTarget('account')}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+                target === 'account'
+                  ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-text dark:border-ndark-accent'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted'
+              }`}
+            >
+              <Database size={14} />
+              Müşteri Ana Kartı (Phase 1)
+              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">canlı</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTarget('customer360')}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+                target === 'customer360'
+                  ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-text dark:border-ndark-accent'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted'
+              }`}
+            >
+              <Users size={14} />
+              Müşteri 360 (Phase 2a)
+              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">dry-run</span>
+            </button>
+          </div>
+        </CardBody>
+      </Card>
+
+      {target === 'customer360' && <Customer360Page />}
+      {target === 'account' && (
+        <Customer360PhaseOneBlock />
+      )}
+    </div>
+  );
+
+  // ─────────────────────────────────────────────────────────────────
+  // Phase 1 (Account) UI — extracted into an inline component so the
+  // existing flow is unchanged. Closure-based; reuses parent state.
+  // ─────────────────────────────────────────────────────────────────
+  function Customer360PhaseOneBlock() {
+    return (
+      <>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
         <div className="space-y-3">
@@ -322,6 +377,7 @@ export function AdminDataImportPage() {
           )}
         </div>
       </div>
-    </div>
-  );
+      </>
+    );
+  }
 }
