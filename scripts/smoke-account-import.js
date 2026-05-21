@@ -45,6 +45,11 @@
  *      + rollback report counts AccountCompany restores
  *  34. (Review Fix Issue 3) skipErrors=false blocks commit on errored rows
  *      (no mutation) → skipErrors=true allows partial commit
+ *  35. (Rollback no-swallow) AccountCompany restore failure surfaces:
+ *      job=rollback_partial, report.errorCount≥1, report.failedRows[],
+ *      row.status=rollback_error, errorsJson has AC failure message,
+ *      success counters NOT incremented for failed row, message safe.
+ *  36. Normal rollback still reports full success (regression guard).
  *
  * Note: API source live HTTP path covered with localhost mock endpoints
  * (BFF outbound to localhost) where feasible; otherwise covered with explicit
@@ -826,6 +831,173 @@ let mockServerUrl = null;
     where: { importJobId: drR.data.jobId, status: 'created' },
   });
   if (createdRow?.accountId) createdAccountIds.add(createdRow.accountId);
+}
+
+// 35) Issue (Rollback no-swallow) — AccountCompany restore başarısız olunca
+//     rollback yutmaz; satır rollback_error, errorsJson detayı, sayaç artmaz,
+//     job rollback_partial.
+{
+  const vknFx = genVkn(`800${stamp.slice(0, 6)}`);
+  const acct = await prisma.account.create({
+    data: {
+      name: 'AC Rollback Fail Fixture',
+      vkn: vknFx,
+      companyId: COMP_PAR,
+      customerType: 'Corporate',
+      companies: {
+        create: [{ companyId: COMP_PAR, externalCustomerCode: 'BEFORE-FAIL', status: 'active' }],
+      },
+    },
+    select: {
+      id: true,
+      companies: { where: { companyId: COMP_PAR }, select: { id: true } },
+    },
+  });
+  preexistingAccountIds.add(acct.id);
+  const acIdBeforeCommit = acct.companies[0].id;
+
+  // Dry-run + commit (externalCustomerCode AFTER-COMMIT)
+  const drR = await api(adminToken, '/api/admin/imports/account/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      mapping: [
+        { source: 'Müşteri Adı', targetKey: 'name' },
+        { source: 'VKN', targetKey: 'vkn' },
+        { source: 'Dış Müşteri Kodu', targetKey: 'externalCustomerCode' },
+      ],
+      rows: [
+        {
+          'Müşteri Adı': 'AC Rollback Fail Fixture',
+          VKN: vknFx,
+          'Dış Müşteri Kodu': 'AFTER-COMMIT',
+        },
+      ],
+      sourceMeta: { sourceType: 'file', fileName: 'rollback-fail.csv' },
+    }),
+  });
+  if (drR.data?.jobId) createdJobIds.add(drR.data.jobId);
+  await api(adminToken, '/api/admin/imports/account/commit', {
+    method: 'POST',
+    body: JSON.stringify({ companyId: COMP_PAR, jobId: drR.data.jobId, options: { skipErrors: true } }),
+  });
+
+  // SIMULATE FAILURE — AccountCompany row'unu rollback'den önce sil.
+  // (Account hala duruyor; rollback Account'u geri alabilir ama AC restore
+  //  başarısız olmalı — row beforeJson.accountCompany.id artık DB'de yok.)
+  await prisma.accountCompany.delete({ where: { id: acIdBeforeCommit } });
+
+  const rbR = await api(adminToken, `/api/admin/imports/jobs/${drR.data.jobId}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+  // 35a) Job status rollback_partial (no silent success)
+  record(
+    '35a) Rollback failure → job status=rollback_partial',
+    rbR.data?.job?.status === 'rollback_partial',
+    `status=${rbR.data?.job?.status}`,
+  );
+
+  // 35b) Report errorCount ≥ 1 + failedRows present
+  const errCount = rbR.data?.report?.errorCount ?? rbR.data?.report?.failedCount ?? 0;
+  const failedRows = rbR.data?.report?.failedRows ?? [];
+  record(
+    '35b) Rollback report exposes errorCount + failedRows',
+    errCount >= 1 && Array.isArray(failedRows) && failedRows.length >= 1,
+    `errorCount=${errCount} failedRows=${failedRows.length}`,
+  );
+
+  // 35c) Success counters NOT incremented for failed row
+  record(
+    '35c) Failed row does NOT increment rolledBackUpdatedCount',
+    (rbR.data?.report?.rolledBackUpdatedCount ?? 0) === 0,
+    `count=${rbR.data?.report?.rolledBackUpdatedCount}`,
+  );
+  record(
+    '35d) Failed row does NOT increment rolledBackAccountCompanyCount',
+    (rbR.data?.report?.rolledBackAccountCompanyCount ?? 0) === 0,
+    `count=${rbR.data?.report?.rolledBackAccountCompanyCount}`,
+  );
+
+  // 35e) ImportJobRow status=rollback_error + errorsJson has account_company message
+  const rrow = await prisma.importJobRow.findFirst({
+    where: { importJobId: drR.data.jobId, action: 'update' },
+    select: { status: true, errorsJson: true },
+  });
+  const errs = Array.isArray(rrow?.errorsJson) ? rrow.errorsJson : [];
+  const hasAcMessage = errs.some(
+    (e) => e?.code === 'account_company_rollback_failed' || (typeof e?.message === 'string' && e.message.includes('AccountCompany geri alınamadı')),
+  );
+  record(
+    '35e) Row status=rollback_error + errorsJson has AC failure',
+    rrow?.status === 'rollback_error' && hasAcMessage,
+    `status=${rrow?.status} hasAcMessage=${hasAcMessage}`,
+  );
+
+  // 35f) Error message safe — no stack trace tokens
+  const stackTraceLeak = errs.some(
+    (e) => typeof e?.message === 'string' && (e.message.includes('at /') || e.message.includes('node_modules')),
+  );
+  record('35f) Rollback error message has no stack trace leakage', !stackTraceLeak);
+}
+
+// 36) Normal rollback path still reports success (regression guard for #35)
+{
+  const vknOk = genVkn(`900${stamp.slice(0, 6)}`);
+  const acct = await prisma.account.create({
+    data: {
+      name: 'AC Rollback Success Fixture',
+      vkn: vknOk,
+      companyId: COMP_PAR,
+      customerType: 'Corporate',
+      companies: {
+        create: [{ companyId: COMP_PAR, externalCustomerCode: 'OK-OLD', status: 'active' }],
+      },
+    },
+    select: { id: true },
+  });
+  preexistingAccountIds.add(acct.id);
+
+  const drR = await api(adminToken, '/api/admin/imports/account/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      mapping: [
+        { source: 'Müşteri Adı', targetKey: 'name' },
+        { source: 'VKN', targetKey: 'vkn' },
+        { source: 'Dış Müşteri Kodu', targetKey: 'externalCustomerCode' },
+      ],
+      rows: [
+        {
+          'Müşteri Adı': 'AC Rollback Success Fixture',
+          VKN: vknOk,
+          'Dış Müşteri Kodu': 'OK-NEW',
+        },
+      ],
+      sourceMeta: { sourceType: 'file', fileName: 'rollback-success.csv' },
+    }),
+  });
+  if (drR.data?.jobId) createdJobIds.add(drR.data.jobId);
+  await api(adminToken, '/api/admin/imports/account/commit', {
+    method: 'POST',
+    body: JSON.stringify({ companyId: COMP_PAR, jobId: drR.data.jobId, options: { skipErrors: true } }),
+  });
+
+  const rbR = await api(adminToken, `/api/admin/imports/jobs/${drR.data.jobId}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  const ok =
+    rbR.data?.job?.status === 'rolled_back' &&
+    (rbR.data?.report?.errorCount ?? 0) === 0 &&
+    (rbR.data?.report?.rolledBackUpdatedCount ?? 0) === 1 &&
+    (rbR.data?.report?.rolledBackAccountCompanyCount ?? 0) === 1;
+  record(
+    '36) Normal rollback still reports full success',
+    ok,
+    `status=${rbR.data?.job?.status} updated=${rbR.data?.report?.rolledBackUpdatedCount} ac=${rbR.data?.report?.rolledBackAccountCompanyCount}`,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────

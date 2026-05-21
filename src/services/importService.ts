@@ -287,6 +287,21 @@ export const importService = {
           /** WR-A8 review fix (Issue 2) — Geri yüklenen AccountCompany ilişkisi sayısı. */
           rolledBackAccountCompanyCount?: number;
           failedCount: number;
+          /**
+           * WR-A8 review fix (no-swallow) — Başarısız rollback'lerin sayısı +
+           * her satırın hata detayı. operator UI'da kısmi rollback bu alanlardan
+           * okur.
+           */
+          errorCount?: number;
+          failedRows?: Array<{
+            rowNumber: number;
+            errors: Array<{
+              code: string;
+              targetKey: string | null;
+              label: string | null;
+              message: string;
+            }>;
+          }>;
           totalAttempted: number;
         };
       }

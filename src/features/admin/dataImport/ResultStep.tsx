@@ -27,6 +27,17 @@ const STATUS_LABEL: Record<ImportJob['status'], { label: string; tone: string }>
 export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
   const [busy, setBusy] = useState(false);
   const [confirmRollback, setConfirmRollback] = useState(false);
+  /** WR-A8 review fix (no-swallow) — son rollback raporu (kısmi başarı detayı). */
+  const [rollbackReport, setRollbackReport] = useState<
+    | {
+        errorCount?: number;
+        failedRows?: Array<{
+          rowNumber: number;
+          errors: Array<{ code: string; targetKey: string | null; label: string | null; message: string }>;
+        }>;
+      }
+    | null
+  >(null);
   const { toast } = useToast();
   const company = lookupService.companies().find((c) => c.id === job.companyId);
   const statusInfo = STATUS_LABEL[job.status];
@@ -68,13 +79,18 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
     setBusy(false);
     if (!r) return;
     const acCount = r.report.rolledBackAccountCompanyCount ?? 0;
+    const errCount = r.report.errorCount ?? r.report.failedCount ?? 0;
+    const ok = errCount === 0;
+    const acFragment = acCount > 0 ? `, ${acCount} müşteri kodu geri yüklendi` : '';
+    const message = ok
+      ? `Geri alındı · ${r.report.rolledBackCreatedCount} pasife alındı, ${r.report.rolledBackUpdatedCount} eski hale döndürüldü${acFragment}`
+      : `Geri alma kısmi · ${r.report.rolledBackCreatedCount} pasife alındı, ${r.report.rolledBackUpdatedCount} eski hale döndürüldü${acFragment} · ${errCount} satır geri alınamadı`;
     toast({
-      type: 'success',
-      message: `Geri alındı · ${r.report.rolledBackCreatedCount} pasife alındı, ${r.report.rolledBackUpdatedCount} eski hale döndürüldü${
-        acCount > 0 ? `, ${acCount} müşteri kodu geri yüklendi` : ''
-      }`,
-      duration: 4500,
+      type: ok ? 'success' : 'warn',
+      message,
+      duration: ok ? 4500 : 7000,
     });
+    setRollbackReport({ errorCount: errCount, failedRows: r.report.failedRows });
     onJobUpdated(r.job);
     setConfirmRollback(false);
   }
@@ -157,6 +173,41 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
                 {busy ? 'Geri alınıyor…' : 'Evet, Geri Al'}
               </Button>
             </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {rollbackReport && (rollbackReport.errorCount ?? 0) > 0 && (
+        <Card>
+          <CardBody className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 dark:text-amber-200">
+              <AlertCircle size={14} className="text-amber-500" />
+              Geri alma kısmi tamamlandı — {rollbackReport.errorCount} satır geri alınamadı
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-ndark-muted">
+              Aşağıdaki satırların Account veya AccountCompany kaydı rollback sırasında başarısız oldu. Müdahale gerekebilir.
+            </p>
+            <ul className="space-y-1 text-xs">
+              {(rollbackReport.failedRows ?? []).slice(0, 20).map((fr) => (
+                <li
+                  key={fr.rowNumber}
+                  className="rounded-md border border-amber-200 bg-amber-50 p-2 dark:border-amber-700/40 dark:bg-amber-900/20"
+                >
+                  <div className="font-medium text-amber-900 dark:text-amber-200">Satır #{fr.rowNumber}</div>
+                  <ul className="ml-3 list-disc text-amber-800 dark:text-amber-300">
+                    {fr.errors.map((e, i) => (
+                      <li key={i}>
+                        {e.label ? <strong>{e.label}: </strong> : null}
+                        {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+              {(rollbackReport.failedRows?.length ?? 0) > 20 && (
+                <li className="text-[10px] text-amber-700">… ve {rollbackReport.failedRows!.length - 20} satır daha</li>
+              )}
+            </ul>
           </CardBody>
         </Card>
       )}
