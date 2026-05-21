@@ -671,20 +671,49 @@ async function updateFromRow({ companyId, normalized }) {
 }
 
 /**
+ * Stack/multi-line trace içermeden kısa, kullanıcıya gösterilebilir hata mesajı.
+ */
+function safeErrorMessage(err) {
+  const msg = err?.message ?? err?.code ?? 'bilinmeyen hata';
+  return String(msg).split('\n')[0].slice(0, 240);
+}
+
+/** ImportJobRow.errorsJson'a yeni bir kayıt ekle (varsa array, yoksa yarat). */
+function appendRowErrors(existing, additions) {
+  const base = Array.isArray(existing) ? existing : [];
+  return [...base, ...additions];
+}
+
+/**
  * Rollback:
  *  - status=created → Account.isActive=false (+ AccountCompany.status='inactive')
  *  - status=updated → beforeJson'dan Account alanlarını + AccountCompany.externalCustomerCode geri yükle
  *  - status=skipped/error → atlanır
- *  - ImportJob.status → rolled_back (hepsi geri alındıysa) veya rollback_partial.
+ *
+ * Row status:
+ *  - 'rolled_back': Account + AccountCompany tam geri alındı.
+ *  - 'rollback_error': bir veya daha fazla restore başarısız oldu (errorsJson detay verir).
+ *
+ * Job status:
+ *  - failedCount=0 → 'rolled_back'
+ *  - bazı satırlar başarılı, bazıları başarısız → 'rollback_partial'
+ *  - hiçbir satır başarılı değilse mevcut job statüsüne (completed/partial) dokunulmaz
+ *    yerine 'rollback_partial' işaretlenir; operator UI'da hata sayısını görür.
  *
  * WR-A8 review fix (Issue 2):
- *   Önceden yalnız Account alanları geri yüklüyordu; import'un yazdığı
- *   AccountCompany.externalCustomerCode değişikliği rollback sonrasında
- *   "NEW" değerinde kalıyordu. Şimdi:
- *     - beforeJson.accountCompany varsa: externalCustomerCode + status restore
- *     - beforeJson.accountCompany null + afterJson.accountCompanyCreated:
- *       AccountCompany row commit'te yaratıldı → status='inactive' (soft
- *       deactivate; downstream cascade'i tetiklemez).
+ *   Önceden yalnız Account alanları geri yüklüyordu; commit'in yazdığı
+ *   AccountCompany.externalCustomerCode değişikliği rollback sonrası "NEW"
+ *   değerinde kalıyordu. Şimdi `beforeJson.accountCompany` taşınır ve restore
+ *   edilir; commit'in yarattığı yeni AccountCompany row'u rollback sırasında
+ *   soft-deactivate olur (status='inactive').
+ *
+ * WR-A8 review fix (Rollback no-swallow):
+ *   Önceki sürüm AccountCompany restore'larını `.catch(() => {})` ile
+ *   yutuyordu; başarısız restore sessizce kayboluyor, başarı sayacı yine
+ *   artıyordu. Bu sürümde her restore (Account + AccountCompany) ayrı
+ *   try/catch'te koşar; başarısızlık satırı `rollback_error` yapar, sayaç
+ *   YALNIZ tam başarıda artar. Job seviyesi `failedCount` + `failedRows`
+ *   üzerinden operator'a yansır.
  */
 export async function rollbackImportJob({ jobId, user }) {
   const job = await prisma.importJob.findUnique({
@@ -705,37 +734,55 @@ export async function rollbackImportJob({ jobId, user }) {
 
   const rows = await prisma.importJobRow.findMany({
     where: { importJobId: jobId, status: { in: ['created', 'updated'] } },
-    select: { id: true, status: true, accountId: true, beforeJson: true, afterJson: true },
+    select: {
+      id: true,
+      rowNumber: true,
+      status: true,
+      accountId: true,
+      beforeJson: true,
+      afterJson: true,
+      errorsJson: true,
+    },
   });
 
   let rolledBackCreated = 0;
   let rolledBackUpdated = 0;
   let rolledBackAccountCompany = 0;
   let failedCount = 0;
+  const failedRows = [];
 
   for (const r of rows) {
+    const rowErrors = [];
+
     if (!r.accountId) {
+      const e = {
+        code: 'rollback_missing_account_id',
+        targetKey: null,
+        label: null,
+        message: 'Rollback için accountId yok.',
+      };
+      rowErrors.push(e);
+      await prisma.importJobRow.update({
+        where: { id: r.id },
+        data: {
+          status: 'rollback_error',
+          errorsJson: appendRowErrors(r.errorsJson, rowErrors),
+          updatedAt: new Date(),
+        },
+      });
       failedCount += 1;
+      failedRows.push({ rowNumber: r.rowNumber, errors: rowErrors });
       continue;
     }
+
+    // ─── Step 1: Account restore ──────────────────────────────────
+    let accountOk = false;
     try {
       if (r.status === 'created') {
         await prisma.account.update({
           where: { id: r.accountId },
           data: { isActive: false },
         });
-        // WR-A8 review fix (Issue 2) — create yolu AccountCompany'yi de yaratmış
-        // olabilir; tutarlı pasif duruma götür.
-        const afterAc = r.afterJson?.accountCompany;
-        if (afterAc?.id) {
-          await prisma.accountCompany
-            .update({
-              where: { id: afterAc.id },
-              data: { status: 'inactive' },
-            })
-            .catch(() => {});
-        }
-        rolledBackCreated += 1;
       } else if (r.status === 'updated') {
         const before = r.beforeJson ?? {};
         const restore = {};
@@ -752,46 +799,100 @@ export async function rollbackImportJob({ jobId, user }) {
           where: { id: r.accountId },
           data: restore,
         });
-        rolledBackUpdated += 1;
+      }
+      accountOk = true;
+    } catch (err) {
+      rowErrors.push({
+        code: 'account_rollback_failed',
+        targetKey: null,
+        label: 'Account',
+        message: `Account geri alınamadı: ${safeErrorMessage(err)}`,
+      });
+    }
 
-        // WR-A8 review fix (Issue 2) — AccountCompany alanlarını da geri al.
+    // ─── Step 2: AccountCompany restore (ayrı try/catch) ──────────
+    // Account başarısız olsa bile AC için ayrıca dene; biri yutmasın diğerini.
+    // AC hatası `account_company_rollback_failed` koduyla raporlanır.
+    let acAttempted = false;
+    let acOk = false;
+    try {
+      if (r.status === 'created') {
+        const afterAc = r.afterJson?.accountCompany;
+        if (afterAc?.id) {
+          acAttempted = true;
+          await prisma.accountCompany.update({
+            where: { id: afterAc.id },
+            data: { status: 'inactive' },
+          });
+          acOk = true;
+        }
+      } else if (r.status === 'updated') {
+        const before = r.beforeJson ?? {};
+        const after = r.afterJson ?? {};
         const acBefore = before.accountCompany ?? null;
-        const afterJson = r.afterJson ?? {};
-        const acAfter = afterJson.accountCompany ?? null;
-        const acCreated = !!afterJson.accountCompanyCreated;
+        const acAfter = after.accountCompany ?? null;
+        const acCreated = !!after.accountCompanyCreated;
         if (acBefore?.id) {
-          // Mevcut ilişki güncellenmişti → eski değerleri geri yükle
           const acRestore = {};
           if (acBefore.externalCustomerCode !== undefined) {
             acRestore.externalCustomerCode = acBefore.externalCustomerCode;
           }
           if (acBefore.status !== undefined) acRestore.status = acBefore.status;
           if (Object.keys(acRestore).length > 0) {
-            await prisma.accountCompany
-              .update({ where: { id: acBefore.id }, data: acRestore })
-              .catch(() => {});
-            rolledBackAccountCompany += 1;
+            acAttempted = true;
+            await prisma.accountCompany.update({
+              where: { id: acBefore.id },
+              data: acRestore,
+            });
+            acOk = true;
           }
         } else if (acCreated && acAfter?.id) {
-          // İlişki bu commit tarafından yaratıldı → soft deactivate.
-          await prisma.accountCompany
-            .update({ where: { id: acAfter.id }, data: { status: 'inactive' } })
-            .catch(() => {});
-          rolledBackAccountCompany += 1;
+          acAttempted = true;
+          await prisma.accountCompany.update({
+            where: { id: acAfter.id },
+            data: { status: 'inactive' },
+          });
+          acOk = true;
         }
       }
+    } catch (err) {
+      rowErrors.push({
+        code: 'account_company_rollback_failed',
+        targetKey: 'externalCustomerCode',
+        label: 'AccountCompany',
+        message: `AccountCompany geri alınamadı: ${safeErrorMessage(err)}`,
+      });
+    }
+
+    // ─── Step 3: Outcome aggregation ──────────────────────────────
+    const hasErrors = rowErrors.length > 0;
+    if (hasErrors) {
+      await prisma.importJobRow.update({
+        where: { id: r.id },
+        data: {
+          status: 'rollback_error',
+          errorsJson: appendRowErrors(r.errorsJson, rowErrors),
+          updatedAt: new Date(),
+        },
+      });
+      failedCount += 1;
+      failedRows.push({ rowNumber: r.rowNumber, errors: rowErrors });
+      // Başarı sayacı arttırılmaz — kısmi başarı da olsa "tam başarı" raporlamayız.
+    } else {
       await prisma.importJobRow.update({
         where: { id: r.id },
         data: { status: 'rolled_back', updatedAt: new Date() },
       });
-    } catch (err) {
-      failedCount += 1;
+      if (r.status === 'created') rolledBackCreated += 1;
+      else if (r.status === 'updated') rolledBackUpdated += 1;
+      if (acAttempted && acOk) rolledBackAccountCompany += 1;
     }
+    // accountOk YALNIZ debugging amaçlı — counter'ları kontrol etmiyor.
+    void accountOk;
   }
 
-  const totalSucceeded = rolledBackCreated + rolledBackUpdated;
   const totalAttempted = rows.length;
-  const newStatus = failedCount === 0 ? 'rolled_back' : (totalSucceeded === 0 ? 'partial' : 'rollback_partial');
+  const newStatus = failedCount === 0 ? 'rolled_back' : 'rollback_partial';
 
   const updated = await prisma.importJob.update({
     where: { id: jobId },
@@ -816,7 +917,9 @@ export async function rollbackImportJob({ jobId, user }) {
       rolledBackUpdatedCount: rolledBackUpdated,
       rolledBackAccountCompanyCount: rolledBackAccountCompany,
       failedCount,
+      errorCount: failedCount,
       totalAttempted,
+      failedRows,
     },
   };
 }
