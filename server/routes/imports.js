@@ -34,12 +34,19 @@ import {
   listImportJobRows,
 } from '../db/importRepository.js';
 import { sampleFromApi } from '../lib/import/apiSourceClient.js';
+import {
+  describeCustomer360Schema,
+  autoMapEntityColumns,
+  validateEntityMapping,
+} from '../lib/import/targetSchemas/customer360TargetSchemas/index.js';
+import { dryRunCustomer360 } from '../lib/import/customer360DryRun.js';
 
 const router = Router();
 
 // Bu router'a özel daha büyük body limiti: client tarafında parse edilen CSV/XLSX
-// satırları (max 5000) JSON olarak gelebilir.
-router.use(jsonParser({ limit: '12mb' }));
+// satırları (max 5000) JSON olarak gelebilir. Phase 2a Customer 360 5 entity
+// taşıdığı için 24mb'a yükseltildi.
+router.use(jsonParser({ limit: '24mb' }));
 
 router.use(verifyJwt, requireRole('Admin', 'SystemAdmin'));
 
@@ -343,6 +350,68 @@ router.get(
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const rows = await listImportJobRows({ jobId, status, limit, offset });
     res.json({ value: rows });
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// Customer 360 (Phase 2a — schema + auto-map + validate + dry-run ONLY)
+// No commit, no rollback, no DB mutation. Phase 2b will add those.
+// ─────────────────────────────────────────────────────────────────
+
+router.get(
+  '/targets/customer360/schema',
+  asyncRoute(async (_req, res) => {
+    res.json(describeCustomer360Schema());
+  }),
+);
+
+router.post(
+  '/customer360/auto-map',
+  asyncRoute(async (req, res) => {
+    const { companyId, entity, columns } = req.body ?? {};
+    assertCompanyAdmin(req, companyId);
+    if (!entity || typeof entity !== 'string') {
+      throw new ImportError('entity zorunlu.', { code: 'entity_required' });
+    }
+    if (!Array.isArray(columns)) {
+      throw new ImportError('columns array zorunlu.', { code: 'columns_required' });
+    }
+    const suggestions = autoMapEntityColumns(entity, columns);
+    res.json({ ok: true, entity, suggestions });
+  }),
+);
+
+router.post(
+  '/customer360/validate',
+  asyncRoute(async (req, res) => {
+    const { companyId, entity, mapping } = req.body ?? {};
+    assertCompanyAdmin(req, companyId);
+    if (!entity || typeof entity !== 'string') {
+      throw new ImportError('entity zorunlu.', { code: 'entity_required' });
+    }
+    if (!Array.isArray(mapping)) {
+      throw new ImportError('mapping array zorunlu.', { code: 'mapping_required' });
+    }
+    const r = validateEntityMapping(entity, mapping);
+    res.json({ ok: r.ok, entity, errors: r.errors, warnings: r.warnings });
+  }),
+);
+
+router.post(
+  '/customer360/dry-run',
+  asyncRoute(async (req, res) => {
+    const { companyId, entities, sourceMeta } = req.body ?? {};
+    assertCompanyAdmin(req, companyId);
+    if (!entities || typeof entities !== 'object') {
+      throw new ImportError('entities zorunlu.', { code: 'entities_required' });
+    }
+    const result = await dryRunCustomer360({
+      companyId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      entities,
+      sourceMeta: sourceMeta ?? null,
+    });
+    res.json(result);
   }),
 );
 

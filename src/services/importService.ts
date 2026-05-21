@@ -179,6 +179,101 @@ export interface ApiSampleInput {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// WR-A8 Phase 2a — Customer 360 types
+// ─────────────────────────────────────────────────────────────────
+
+export const CUSTOMER_360_ENTITY_KEYS = [
+  'account',
+  'accountCompany',
+  'accountContact',
+  'accountAddress',
+  'accountProject',
+] as const;
+
+export type Customer360EntityKey = (typeof CUSTOMER_360_ENTITY_KEYS)[number];
+
+export interface Customer360EntityDescriptor {
+  entity: Customer360EntityKey;
+  version: string;
+  label: string;
+  description: string;
+  parentEntity: string | null;
+  relationshipKeys: string[];
+  fields: Array<TargetFieldDescriptor & {
+    description: string;
+    validationHint: string | null;
+    normalizationHint: string | null;
+    businessWarning: string | null;
+    sensitive: boolean;
+    pii: boolean;
+  }>;
+}
+
+export interface Customer360Relationship {
+  from: string;
+  to: string;
+  key: string;
+}
+
+export interface Customer360SchemaResponse {
+  target: 'customer360';
+  version: string;
+  entities: Customer360EntityDescriptor[];
+  relationships: Customer360Relationship[];
+  matchingRules: Record<Customer360EntityKey, string[]>;
+}
+
+export interface Customer360EntitySummary {
+  total: number;
+  create: number;
+  update: number;
+  skip: number;
+  error: number;
+  warning: number;
+}
+
+export interface Customer360CompletenessSlice {
+  have: number;
+  total: number;
+  pct: number;
+}
+
+export interface Customer360DryRunResponse {
+  ok: boolean;
+  commitAvailable: false;
+  message: string;
+  customer360SchemaVersion: string;
+  code?: string;
+  tcknLeaks?: Array<{ entity: string; columns: string[] }>;
+  tooManyRows?: Array<{ entity: string; count: number; max: number }>;
+  mappingValidation?: Record<string, MappingValidation>;
+  summary?: {
+    totalRows: number;
+    totalErrors: number;
+    totalWarnings: number;
+    byEntity: Record<Customer360EntityKey, Customer360EntitySummary>;
+    completenessScore: Record<string, Customer360CompletenessSlice>;
+    orphansByEntity: Record<string, number[]>;
+  };
+  skipErrorsPreview?: {
+    blockedIfSkipErrorsFalse: boolean;
+    cascadingSkipIfSkipErrorsTrue: Record<Customer360EntityKey, number>;
+  };
+  preview?: Record<
+    Customer360EntityKey,
+    Array<{
+      rowNumber: number;
+      action: 'create' | 'update' | 'skip' | 'error';
+      errors: Array<{ entity?: string; targetKey: string | null; label: string | null; message: string; code?: string }>;
+      warnings: Array<{ entity?: string; targetKey: string | null; label: string | null; message: string; code?: string }>;
+      normalized: Record<string, unknown>;
+      matchedAccountName: string | null;
+    }>
+  >;
+  relationships?: Customer360Relationship[];
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Service
 // ─────────────────────────────────────────────────────────────────
 
@@ -337,6 +432,57 @@ export const importService = {
       undefined,
       'Job satırları okunamadı',
     );
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // WR-A8 Phase 2a — Customer 360 (dry-run only)
+  // ─────────────────────────────────────────────────────────────
+
+  async customer360Schema(): Promise<Customer360SchemaResponse | undefined> {
+    return apiFetch<Customer360SchemaResponse>(
+      `${BASE}/targets/customer360/schema`,
+      undefined,
+      'Customer 360 şema okunamadı',
+    );
+  },
+
+  async customer360AutoMap(input: {
+    companyId: string;
+    entity: string;
+    columns: string[];
+  }): Promise<{ ok: boolean; entity: string; suggestions: MappingItem[] } | undefined> {
+    return postJson(`${BASE}/customer360/auto-map`, input, 'Otomatik eşleştirme başarısız');
+  },
+
+  async customer360Validate(input: {
+    companyId: string;
+    entity: string;
+    mapping: MappingItem[];
+  }): Promise<
+    | { ok: boolean; entity: string; errors: MappingValidation['errors']; warnings: MappingValidation['warnings'] }
+    | undefined
+  > {
+    return postJson(`${BASE}/customer360/validate`, input, 'Eşleştirme doğrulanamadı');
+  },
+
+  async customer360DryRun(input: {
+    companyId: string;
+    entities: Record<
+      string,
+      {
+        columns: string[];
+        mapping: MappingItem[];
+        rows: Array<Record<string, unknown>>;
+      }
+    >;
+    sourceMeta?: {
+      sourceType: 'file' | 'api';
+      fileName?: string | null;
+      sourceUrlMasked?: string | null;
+      dataPath?: string | null;
+    };
+  }): Promise<Customer360DryRunResponse | undefined> {
+    return postJson(`${BASE}/customer360/dry-run`, input, 'Customer 360 dry-run başarısız');
   },
 };
 
