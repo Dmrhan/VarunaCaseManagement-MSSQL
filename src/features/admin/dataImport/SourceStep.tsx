@@ -295,6 +295,11 @@ function ApiSourcePanel({ companyId, onParsed }: Props) {
       setError(r.message ?? 'API çağrısı başarısız.');
       return;
     }
+    // WR-A8 review fix (Issue 1) — Önceden rows: r.sample atanıyordu; dry-run/
+    // commit yalnız preview örneğini işliyordu. Şimdi r.rows (tüm satırlar)
+    // import için tutulur; r.sample yalnız preview UX'inde kullanılır.
+    const allRows = r.rows ?? r.sample ?? [];
+    const previewSample = (r.sample ?? allRows).slice(0, 5);
     onParsed({
       sourceType: 'api',
       fileName: null,
@@ -302,9 +307,9 @@ function ApiSourcePanel({ companyId, onParsed }: Props) {
       sourceUrlMasked: r.sourceUrlMasked ?? null,
       dataPath: dataPath.trim() || null,
       columns: r.columns ?? [],
-      rows: r.sample ?? [],
-      sample: (r.sample ?? []).slice(0, 5),
-      totalRows: r.totalRows ?? 0,
+      rows: allRows,
+      sample: previewSample,
+      totalRows: r.totalRows ?? allRows.length,
     });
   }
 

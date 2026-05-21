@@ -37,6 +37,14 @@
  *  28. API source missing env secret returns safe error
  *  29. API source response does not expose secret value to client
  *  30. settings-status / response payloads do not include raw secrets
+ *  31. (Review Fix Issue 1) API source returns FULL rows (not just sample)
+ *      + dry-run processes all rows (not preview subset)
+ *  32. (Review Fix Issue 1) API source row count above MAX_IMPORT_ROWS (5000)
+ *      → too_many_rows error
+ *  33. (Review Fix Issue 2) Rollback restores AccountCompany.externalCustomerCode
+ *      + rollback report counts AccountCompany restores
+ *  34. (Review Fix Issue 3) skipErrors=false blocks commit on errored rows
+ *      (no mutation) → skipErrors=true allows partial commit
  *
  * Note: API source live HTTP path covered with localhost mock endpoints
  * (BFF outbound to localhost) where feasible; otherwise covered with explicit
@@ -584,8 +592,248 @@ record(
 );
 
 // ─────────────────────────────────────────────────────────────────
+// REVIEW FIX SCENARIOS (WR-A8 Review)
+// ─────────────────────────────────────────────────────────────────
+
+// 31) Issue 1 — API source returns FULL rows (not sampled subset). Mock HTTP
+//     endpoint serves 120 rows; sampleLimit=5; dry-run must process all 120.
+let mockServer = null;
+let mockServerUrl = null;
+{
+  const http = await import('node:http');
+  const ROW_COUNT = 120;
+  const items = [];
+  for (let i = 0; i < ROW_COUNT; i++) {
+    items.push({
+      'Müşteri Adı': `MockSrc Co ${i.toString().padStart(3, '0')}`,
+      VKN: genVkn(`5${stamp.slice(0, 5)}${i.toString().padStart(2, '0').slice(-2)}`.slice(0, 9)),
+    });
+  }
+  mockServer = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ data: items }));
+  });
+  await new Promise((resolve) => mockServer.listen(0, '127.0.0.1', resolve));
+  const port = mockServer.address().port;
+  mockServerUrl = `http://127.0.0.1:${port}/`;
+
+  const r = await api(adminToken, '/api/admin/imports/account/sources/api/sample', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      url: mockServerUrl,
+      method: 'GET',
+      authType: 'none',
+      dataPath: 'data',
+      sampleLimit: 5,
+    }),
+  });
+  const okSample =
+    r.status === 200 &&
+    r.data?.ok === true &&
+    Array.isArray(r.data?.rows) &&
+    r.data.rows.length === ROW_COUNT &&
+    Array.isArray(r.data?.sample) &&
+    r.data.sample.length === 5 &&
+    r.data?.totalRows === ROW_COUNT;
+  record(
+    '31a) API source returns full rows (rows=120) and sample=5',
+    okSample,
+    `rows=${r.data?.rows?.length} sample=${r.data?.sample?.length} totalRows=${r.data?.totalRows}`,
+  );
+
+  // Dry-run with full rows must process all 120.
+  if (okSample) {
+    const drR = await api(adminToken, '/api/admin/imports/account/dry-run', {
+      method: 'POST',
+      body: JSON.stringify({
+        companyId: COMP_PAR,
+        mapping: [
+          { source: 'Müşteri Adı', targetKey: 'name' },
+          { source: 'VKN', targetKey: 'vkn' },
+        ],
+        rows: r.data.rows,
+        sourceMeta: {
+          sourceType: 'api',
+          sourceName: 'mock-source',
+          sourceUrlMasked: r.data.sourceUrlMasked,
+          dataPath: 'data',
+        },
+      }),
+    });
+    if (drR.data?.jobId) createdJobIds.add(drR.data.jobId);
+    const total = drR.data?.summary?.totalRows;
+    record('31b) Dry-run processes all 120 rows (not just sample 5)', total === ROW_COUNT, `totalRows=${total}`);
+  }
+}
+
+// 32) Issue 1 — API source row limit (>5000) returns clear error
+{
+  const http = await import('node:http');
+  const bigItems = [];
+  for (let i = 0; i < 5001; i++) bigItems.push({ name: `R${i}` });
+  const bigServer = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(bigItems));
+  });
+  await new Promise((resolve) => bigServer.listen(0, '127.0.0.1', resolve));
+  const port = bigServer.address().port;
+
+  const r = await api(adminToken, '/api/admin/imports/account/sources/api/sample', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      url: `http://127.0.0.1:${port}/`,
+      method: 'GET',
+      authType: 'none',
+    }),
+  });
+  bigServer.close();
+  record(
+    '32) API source >5000 rows → too_many_rows error',
+    r.status === 200 && r.data?.ok === false && r.data?.code === 'too_many_rows',
+    `code=${r.data?.code} totalRows=${r.data?.totalRows}`,
+  );
+}
+
+// 33) Issue 2 — Rollback restores AccountCompany.externalCustomerCode.
+{
+  const vknForUpdate = genVkn(`600${stamp.slice(0, 6)}`);
+  const acct = await prisma.account.create({
+    data: {
+      name: 'AC Rollback Fixture',
+      vkn: vknForUpdate,
+      companyId: COMP_PAR,
+      customerType: 'Corporate',
+      companies: {
+        create: [{ companyId: COMP_PAR, externalCustomerCode: 'OLD123', status: 'active' }],
+      },
+    },
+    select: { id: true },
+  });
+  preexistingAccountIds.add(acct.id);
+
+  // Dry-run that will UPDATE externalCustomerCode from OLD123 → NEW456
+  const drR = await api(adminToken, '/api/admin/imports/account/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      mapping: [
+        { source: 'Müşteri Adı', targetKey: 'name' },
+        { source: 'VKN', targetKey: 'vkn' },
+        { source: 'Dış Müşteri Kodu', targetKey: 'externalCustomerCode' },
+      ],
+      rows: [
+        {
+          'Müşteri Adı': 'AC Rollback Fixture',
+          VKN: vknForUpdate,
+          'Dış Müşteri Kodu': 'NEW456',
+        },
+      ],
+      sourceMeta: { sourceType: 'file', fileName: 'review-fix.csv' },
+    }),
+  });
+  if (drR.data?.jobId) createdJobIds.add(drR.data.jobId);
+  const commitR = await api(adminToken, '/api/admin/imports/account/commit', {
+    method: 'POST',
+    body: JSON.stringify({ companyId: COMP_PAR, jobId: drR.data.jobId, options: { skipErrors: true } }),
+  });
+
+  // Confirm commit updated AccountCompany.externalCustomerCode='NEW456'
+  const acAfter = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId: acct.id, companyId: COMP_PAR } },
+    select: { externalCustomerCode: true },
+  });
+  record(
+    '33a) Commit updates AccountCompany.externalCustomerCode',
+    acAfter?.externalCustomerCode === 'NEW456',
+    `current=${acAfter?.externalCustomerCode}`,
+  );
+
+  // Rollback
+  const rbR = await api(adminToken, `/api/admin/imports/jobs/${drR.data.jobId}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  const acAfterRb = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId: acct.id, companyId: COMP_PAR } },
+    select: { externalCustomerCode: true },
+  });
+  record(
+    '33b) Rollback restores externalCustomerCode to OLD123',
+    acAfterRb?.externalCustomerCode === 'OLD123',
+    `after rollback=${acAfterRb?.externalCustomerCode}`,
+  );
+  record(
+    '33c) Rollback report counts AccountCompany restore',
+    (rbR.data?.report?.rolledBackAccountCompanyCount ?? 0) >= 1,
+    `count=${rbR.data?.report?.rolledBackAccountCompanyCount}`,
+  );
+}
+
+// 34) Issue 3 — skipErrors=false blocks commit when errored rows exist; no DB
+//     mutation. skipErrors=true allows partial commit on the same job.
+{
+  const newVkn = genVkn(`700${stamp.slice(0, 6)}`);
+  const drR = await api(adminToken, '/api/admin/imports/account/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      mapping: MAPPING,
+      rows: [
+        { 'Müşteri Adı': 'SkipErr Valid', VKN: newVkn, Telefon: '', 'E-posta': '' },
+        { 'Müşteri Adı': 'SkipErr Bad', VKN: VKN_INVALID, Telefon: '', 'E-posta': '' },
+      ],
+      sourceMeta: { sourceType: 'file', fileName: 'review-fix-skiperrors.csv' },
+    }),
+  });
+  if (drR.data?.jobId) createdJobIds.add(drR.data.jobId);
+
+  // First attempt: skipErrors=false → 400 import_has_errors, no mutation.
+  const before = await prisma.account.count();
+  const blocked = await api(adminToken, '/api/admin/imports/account/commit', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      jobId: drR.data.jobId,
+      options: { skipErrors: false },
+    }),
+  });
+  const afterBlocked = await prisma.account.count();
+  record(
+    '34a) skipErrors=false → 400 import_has_errors',
+    blocked.status === 400 && blocked.data?.error === 'import_has_errors',
+    `status=${blocked.status} error=${blocked.data?.error}`,
+  );
+  record('34b) Blocked commit causes no DB mutation', before === afterBlocked);
+
+  // Second attempt: skipErrors=true → partial commit succeeds.
+  const allowed = await api(adminToken, '/api/admin/imports/account/commit', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      jobId: drR.data.jobId,
+      options: { skipErrors: true },
+    }),
+  });
+  record(
+    '34c) skipErrors=true → partial commit succeeds',
+    allowed.status === 200 && allowed.data?.ok === true && allowed.data?.job?.status === 'partial',
+    `status=${allowed.data?.job?.status} created=${allowed.data?.runStats?.createdCount}`,
+  );
+  // Collect the created Account for cleanup
+  const createdRow = await prisma.importJobRow.findFirst({
+    where: { importJobId: drR.data.jobId, status: 'created' },
+  });
+  if (createdRow?.accountId) createdAccountIds.add(createdRow.accountId);
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Cleanup
 // ─────────────────────────────────────────────────────────────────
+if (mockServer) {
+  await new Promise((resolve) => mockServer.close(resolve));
+}
 await cleanup();
 await prisma.$disconnect();
 

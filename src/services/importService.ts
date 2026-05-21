@@ -154,7 +154,15 @@ export interface ApiSampleResult {
   sourceUrlMasked?: string | null;
   columns?: string[];
   totalRows?: number;
+  /**
+   * WR-A8 review fix (Issue 1) — Tüm import satırları (sampleLimit'ten bağımsız;
+   * maks. MAX_IMPORT_ROWS=5000). Dry-run / commit yalnız `rows`'u kullanır.
+   */
+  rows?: Array<Record<string, unknown>>;
+  /** Preview için ilk N satır (sampleLimit). UX dışında kullanılmaz. */
   sample?: Array<Record<string, unknown>>;
+  /** code='too_many_rows' durumunda backend tarafından döndürülen limit. */
+  maxRows?: number | null;
 }
 
 export interface ApiSampleInput {
@@ -276,6 +284,8 @@ export const importService = {
         report: {
           rolledBackCreatedCount: number;
           rolledBackUpdatedCount: number;
+          /** WR-A8 review fix (Issue 2) — Geri yüklenen AccountCompany ilişkisi sayısı. */
+          rolledBackAccountCompanyCount?: number;
           failedCount: number;
           totalAttempted: number;
         };

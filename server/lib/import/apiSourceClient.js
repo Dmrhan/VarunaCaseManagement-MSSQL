@@ -19,6 +19,11 @@
 const DEFAULT_SAMPLE_LIMIT = 50;
 const MAX_SAMPLE_LIMIT = 500;
 const REQUEST_TIMEOUT_MS = 30000;
+/**
+ * WR-A8 review fix (Issue 1) — API kaynağı için kabul edilen maksimum satır.
+ * Yukarı bound dosya source ile aynı (5000); sampleLimit yalnız UI preview için.
+ */
+const MAX_IMPORT_ROWS = 5000;
 
 function resolveSecret(secretName) {
   if (!secretName || typeof secretName !== 'string') return null;
@@ -178,17 +183,37 @@ export async function sampleFromApi(input) {
     };
   }
 
-  const limit = Math.min(
+  // WR-A8 review fix (Issue 1) — Önceden yalnız sampleRows döndürülüyordu;
+  // commit yalnızca preview satırlarını işleyebiliyordu. Şimdi import için
+  // kabul edilen TÜM satırlar (MAX_IMPORT_ROWS sınırı) döner; sample yalnız
+  // preview UX'i için ayrı verilir.
+  if (arrayCandidate.length > MAX_IMPORT_ROWS) {
+    return {
+      ok: false,
+      code: 'too_many_rows',
+      message: `API kaynağı satır limiti aşıyor (${arrayCandidate.length} > ${MAX_IMPORT_ROWS}).`,
+      totalRows: arrayCandidate.length,
+      maxRows: MAX_IMPORT_ROWS,
+    };
+  }
+
+  const normalize = (r) => {
+    if (r && typeof r === 'object' && !Array.isArray(r)) return r;
+    return { value: r };
+  };
+  const rows = arrayCandidate.map(normalize);
+
+  const sampleSize = Math.min(
     Math.max(1, Number(sampleLimit) || DEFAULT_SAMPLE_LIMIT),
     MAX_SAMPLE_LIMIT,
   );
-  const sampleRows = arrayCandidate.slice(0, limit).map((r) => {
-    if (r && typeof r === 'object' && !Array.isArray(r)) return r;
-    return { value: r };
-  });
+  const sampleRows = rows.slice(0, sampleSize);
 
   const columnSet = new Set();
-  for (const r of sampleRows) {
+  // Sütun çıkarımı tüm satırlarda yapılır — sample satırlarda eksik alan
+  // bulunabilir (örn. opsiyonel kolonlar). Bu, mapping ekranında sütunun
+  // hiç görünmemesini engeller.
+  for (const r of rows) {
     for (const k of Object.keys(r)) columnSet.add(k);
   }
 
@@ -196,7 +221,8 @@ export async function sampleFromApi(input) {
     ok: true,
     sourceUrlMasked: maskUrl(url),
     columns: [...columnSet],
+    rows,
     sampleRows,
-    totalRows: arrayCandidate.length,
+    totalRows: rows.length,
   };
 }
