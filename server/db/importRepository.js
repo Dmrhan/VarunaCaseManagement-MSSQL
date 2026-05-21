@@ -26,8 +26,16 @@ import { maskVkn } from './accountRepository.js';
 
 const MAX_ROWS = 5000;
 
-/** Display-friendly snapshot — VKN maskelenir, TCKN dokunulmaz. */
-function snapshotAccount(account) {
+/**
+ * Display-friendly snapshot — VKN maskelenir, TCKN dokunulmaz.
+ *
+ * WR-A8 review fix (Issue 2) — snapshot artık AccountCompany detayını da
+ * taşır. `accountCompany`: bu import'un işlediği tenant scope'undaki
+ * AccountCompany ilişkisi (null = ilişki yok / yeni yaratıldı).
+ * `accountCompanyCreated`: true ise commit bu satır için yeni AccountCompany
+ * row'u yarattı (rollback bu durumda soft-deactivate eder).
+ */
+function snapshotAccount(account, accountCompany = null, accountCompanyCreated = false) {
   if (!account) return null;
   return {
     id: account.id,
@@ -41,6 +49,15 @@ function snapshotAccount(account) {
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
     isActive: account.isActive,
+    accountCompany: accountCompany
+      ? {
+          id: accountCompany.id,
+          companyId: accountCompany.companyId ?? null,
+          externalCustomerCode: accountCompany.externalCustomerCode ?? null,
+          status: accountCompany.status ?? null,
+        }
+      : null,
+    accountCompanyCreated,
   };
 }
 
@@ -318,6 +335,25 @@ export async function commitImportJob({ jobId, user, options = {} }) {
     throw err;
   }
 
+  // WR-A8 review fix (Issue 3) — skipErrors=false ve hatalı satır varsa commit
+  // bloklanır. Daha önce flag yok sayılıyordu; UI checkbox sahte güvenlik
+  // veriyordu. errorCount kontrolü ImportJobRow.status='error' bazlı yapılır.
+  const skipErrors = options?.skipErrors === true;
+  if (!skipErrors) {
+    const errorCount = await prisma.importJobRow.count({
+      where: { importJobId: jobId, status: 'error' },
+    });
+    if (errorCount > 0) {
+      const err = new Error(
+        "Hatalı satırlar varken içe aktarım başlatılamaz. Hatalı satırları düzeltin veya 'Hatalı satırları atla' seçeneğini işaretleyin.",
+      );
+      err.status = 400;
+      err.code = 'import_has_errors';
+      err.errorCount = errorCount;
+      throw err;
+    }
+  }
+
   await prisma.importJob.update({
     where: { id: jobId },
     data: { status: 'running', startedAt: new Date() },
@@ -506,12 +542,19 @@ async function createFromRow({ companyId, normalized }) {
       legalName: true,
       registrationNo: true,
       isActive: true,
+      companies: {
+        where: { companyId },
+        select: { id: true, companyId: true, externalCustomerCode: true, status: true },
+        take: 1,
+      },
     },
   });
+  const createdAc = created.companies?.[0] ?? null;
 
   return {
     accountId: created.id,
-    afterJson: snapshotAccount(created),
+    // create yolunda accountCompany her zaman bu commit tarafından yaratılmıştır.
+    afterJson: snapshotAccount(created, createdAc, /* accountCompanyCreated */ true),
   };
 }
 
@@ -542,7 +585,15 @@ async function updateFromRow({ companyId, normalized }) {
     throw err;
   }
 
-  const beforeJson = snapshotAccount(existing);
+  // WR-A8 review fix (Issue 2) — AccountCompany'nin commit öncesi snapshot'ı.
+  // Rollback bu satırdan eski externalCustomerCode'u geri yükler. Eğer hiç
+  // ilişki yoksa null kalır; bu durumda update path AccountCompany yaratacak
+  // ve rollback yeni satırı soft-deactivate edecek.
+  const existingAcBefore = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId: existing.id, companyId } },
+    select: { id: true, companyId: true, externalCustomerCode: true, status: true },
+  });
+  const beforeJson = snapshotAccount(existing, existingAcBefore, /* created */ false);
 
   // Sadece getirilen alanları (null değil) update et — boş alan eskiyi silmesin
   const patch = {};
@@ -574,16 +625,15 @@ async function updateFromRow({ companyId, normalized }) {
     },
   });
 
-  // AccountCompany upsert (selected companyId)
+  // AccountCompany upsert (selected companyId).
+  // WR-A8 review fix (Issue 2) — `accountCompanyCreated` flag rollback'in
+  // yeni yaratılan AccountCompany'yi soft-deactivate etmesi için taşınır.
+  let accountCompanyCreated = false;
   if (normalized.externalCustomerCode !== undefined && normalized.externalCustomerCode !== null) {
-    const existingAc = await prisma.accountCompany.findUnique({
-      where: { accountId_companyId: { accountId: existing.id, companyId } },
-      select: { id: true, externalCustomerCode: true },
-    });
-    if (existingAc) {
-      if (existingAc.externalCustomerCode !== normalized.externalCustomerCode) {
+    if (existingAcBefore) {
+      if (existingAcBefore.externalCustomerCode !== normalized.externalCustomerCode) {
         await prisma.accountCompany.update({
-          where: { id: existingAc.id },
+          where: { id: existingAcBefore.id },
           data: { externalCustomerCode: normalized.externalCustomerCode },
         });
       }
@@ -596,33 +646,45 @@ async function updateFromRow({ companyId, normalized }) {
           status: 'active',
         },
       });
+      accountCompanyCreated = true;
     }
-  } else {
-    // Eğer hiç AccountCompany yoksa selected companyId için, yine upsert et (kod olmadan)
-    const existingAc = await prisma.accountCompany.findUnique({
-      where: { accountId_companyId: { accountId: existing.id, companyId } },
-      select: { id: true },
+  } else if (!existingAcBefore) {
+    // Hiç AccountCompany yoksa kod olmadan da bağ kur — Account selected
+    // company'de görülsün.
+    await prisma.accountCompany.create({
+      data: { accountId: existing.id, companyId, status: 'active' },
     });
-    if (!existingAc) {
-      await prisma.accountCompany.create({
-        data: { accountId: existing.id, companyId, status: 'active' },
-      });
-    }
+    accountCompanyCreated = true;
   }
+
+  // Sonraki snapshot için güncel AccountCompany'yi tekrar oku.
+  const accountCompanyAfter = await prisma.accountCompany.findUnique({
+    where: { accountId_companyId: { accountId: existing.id, companyId } },
+    select: { id: true, companyId: true, externalCustomerCode: true, status: true },
+  });
 
   return {
     accountId: updated.id,
     beforeJson,
-    afterJson: snapshotAccount(updated),
+    afterJson: snapshotAccount(updated, accountCompanyAfter, accountCompanyCreated),
   };
 }
 
 /**
  * Rollback:
- *  - status=created → Account.isActive=false
- *  - status=updated → beforeJson'dan eski değerlere döndür
+ *  - status=created → Account.isActive=false (+ AccountCompany.status='inactive')
+ *  - status=updated → beforeJson'dan Account alanlarını + AccountCompany.externalCustomerCode geri yükle
  *  - status=skipped/error → atlanır
  *  - ImportJob.status → rolled_back (hepsi geri alındıysa) veya rollback_partial.
+ *
+ * WR-A8 review fix (Issue 2):
+ *   Önceden yalnız Account alanları geri yüklüyordu; import'un yazdığı
+ *   AccountCompany.externalCustomerCode değişikliği rollback sonrasında
+ *   "NEW" değerinde kalıyordu. Şimdi:
+ *     - beforeJson.accountCompany varsa: externalCustomerCode + status restore
+ *     - beforeJson.accountCompany null + afterJson.accountCompanyCreated:
+ *       AccountCompany row commit'te yaratıldı → status='inactive' (soft
+ *       deactivate; downstream cascade'i tetiklemez).
  */
 export async function rollbackImportJob({ jobId, user }) {
   const job = await prisma.importJob.findUnique({
@@ -648,6 +710,7 @@ export async function rollbackImportJob({ jobId, user }) {
 
   let rolledBackCreated = 0;
   let rolledBackUpdated = 0;
+  let rolledBackAccountCompany = 0;
   let failedCount = 0;
 
   for (const r of rows) {
@@ -661,6 +724,17 @@ export async function rollbackImportJob({ jobId, user }) {
           where: { id: r.accountId },
           data: { isActive: false },
         });
+        // WR-A8 review fix (Issue 2) — create yolu AccountCompany'yi de yaratmış
+        // olabilir; tutarlı pasif duruma götür.
+        const afterAc = r.afterJson?.accountCompany;
+        if (afterAc?.id) {
+          await prisma.accountCompany
+            .update({
+              where: { id: afterAc.id },
+              data: { status: 'inactive' },
+            })
+            .catch(() => {});
+        }
         rolledBackCreated += 1;
       } else if (r.status === 'updated') {
         const before = r.beforeJson ?? {};
@@ -679,6 +753,32 @@ export async function rollbackImportJob({ jobId, user }) {
           data: restore,
         });
         rolledBackUpdated += 1;
+
+        // WR-A8 review fix (Issue 2) — AccountCompany alanlarını da geri al.
+        const acBefore = before.accountCompany ?? null;
+        const afterJson = r.afterJson ?? {};
+        const acAfter = afterJson.accountCompany ?? null;
+        const acCreated = !!afterJson.accountCompanyCreated;
+        if (acBefore?.id) {
+          // Mevcut ilişki güncellenmişti → eski değerleri geri yükle
+          const acRestore = {};
+          if (acBefore.externalCustomerCode !== undefined) {
+            acRestore.externalCustomerCode = acBefore.externalCustomerCode;
+          }
+          if (acBefore.status !== undefined) acRestore.status = acBefore.status;
+          if (Object.keys(acRestore).length > 0) {
+            await prisma.accountCompany
+              .update({ where: { id: acBefore.id }, data: acRestore })
+              .catch(() => {});
+            rolledBackAccountCompany += 1;
+          }
+        } else if (acCreated && acAfter?.id) {
+          // İlişki bu commit tarafından yaratıldı → soft deactivate.
+          await prisma.accountCompany
+            .update({ where: { id: acAfter.id }, data: { status: 'inactive' } })
+            .catch(() => {});
+          rolledBackAccountCompany += 1;
+        }
       }
       await prisma.importJobRow.update({
         where: { id: r.id },
@@ -714,6 +814,7 @@ export async function rollbackImportJob({ jobId, user }) {
     report: {
       rolledBackCreatedCount: rolledBackCreated,
       rolledBackUpdatedCount: rolledBackUpdated,
+      rolledBackAccountCompanyCount: rolledBackAccountCompany,
       failedCount,
       totalAttempted,
     },

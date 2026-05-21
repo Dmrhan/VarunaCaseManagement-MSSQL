@@ -146,14 +146,24 @@ router.post(
     const result = await sampleFromApi({ url, method, authType, secretName, headersJson, bodyJson, dataPath, sampleLimit });
     if (!result.ok) {
       // 200 ile dön — UI client tarafında error kodunu işlesin
-      return res.status(200).json({ ok: false, code: result.code, message: result.message, status: result.status ?? null });
+      return res.status(200).json({
+        ok: false,
+        code: result.code,
+        message: result.message,
+        status: result.status ?? null,
+        totalRows: result.totalRows ?? null,
+        maxRows: result.maxRows ?? null,
+      });
     }
+    // WR-A8 review fix (Issue 1) — rows (tüm import için), sample (yalnız UI
+    // preview için) ayrı taşınır; client artık sadece sample'ı import etmez.
     res.json({
       ok: true,
       sourceName: sourceName ?? null,
       sourceUrlMasked: result.sourceUrlMasked,
       columns: result.columns,
       totalRows: result.totalRows,
+      rows: result.rows,
       sample: result.sampleRows,
     });
   }),
