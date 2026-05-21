@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Undo2, Copy, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -38,6 +38,18 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
       }
     | null
   >(null);
+
+  // WR-A8 review fix (UI state) — Operator history panel'den başka bir
+  // ImportJob açtığında ResultStep aynı instance ile mount kalıyor; rollback
+  // paneli önceki job'dan kalıyordu. Job id değişince rollback-spesifik
+  // state'i sıfırla. `busy` ve `confirmRollback` da güvenle reset edilir
+  // çünkü bunlar da yalnız aktif rollback akışına aittir.
+  useEffect(() => {
+    setRollbackReport(null);
+    setConfirmRollback(false);
+    setBusy(false);
+  }, [job?.id]);
+
   const { toast } = useToast();
   const company = lookupService.companies().find((c) => c.id === job.companyId);
   const statusInfo = STATUS_LABEL[job.status];
