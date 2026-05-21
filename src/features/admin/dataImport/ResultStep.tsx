@@ -67,9 +67,12 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
     const r = await importService.rollback(job.id);
     setBusy(false);
     if (!r) return;
+    const acCount = r.report.rolledBackAccountCompanyCount ?? 0;
     toast({
       type: 'success',
-      message: `Geri alındı · ${r.report.rolledBackCreatedCount} pasife alındı, ${r.report.rolledBackUpdatedCount} eski hale döndürüldü`,
+      message: `Geri alındı · ${r.report.rolledBackCreatedCount} pasife alındı, ${r.report.rolledBackUpdatedCount} eski hale döndürüldü${
+        acCount > 0 ? `, ${acCount} müşteri kodu geri yüklendi` : ''
+      }`,
       duration: 4500,
     });
     onJobUpdated(r.job);
