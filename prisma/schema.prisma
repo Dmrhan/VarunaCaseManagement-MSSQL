@@ -311,26 +311,28 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts         Account[]
-  accountCompanies AccountCompany[]
+  accounts          Account[]
+  accountCompanies  AccountCompany[]
   /// WR-A3 — Account adresleri tenant scope için Company'ye bağlı.
-  addresses        Address[]
-  teams            Team[]
-  cases            Case[]
-  slaPolicies      SLAPolicy[]
-  categories       CategoryDef[]
-  checklists       ChecklistTemplate[]
-  fieldDefinitions FieldDefinition[]
-  settings         CompanySettings?
-  userCompanies    UserCompany[]
+  addresses         Address[]
+  teams             Team[]
+  cases             Case[]
+  slaPolicies       SLAPolicy[]
+  categories        CategoryDef[]
+  checklists        ChecklistTemplate[]
+  fieldDefinitions  FieldDefinition[]
+  settings          CompanySettings?
+  userCompanies     UserCompany[]
   /// WR-A6 / PM-05 — tenant-scoped product catalog.
-  productGroups    ProductGroup[]
-  products         Product[]
+  productGroups     ProductGroup[]
+  products          Product[]
   /// WR-A7 / PM-05 — tenant-scoped package (contract bundle) catalog.
-  packages         Package[]
+  packages          Package[]
   /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımları (yalnız config; API
   /// çağrısı sonraki fazda). Her şirket için tek satır.
   externalKbSetting ExternalKbSetting?
+  /// WR-A8 — Data Integration Studio: import job geçmişi.
+  importJobs        ImportJob[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -657,7 +659,7 @@ model ProductGroup {
 }
 
 model Product {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   companyId      String
   productGroupId String
   code           String
@@ -668,13 +670,13 @@ model Product {
   /// Phase 2 Case create cascade'inde Product → Person → Team → L1 zincirinin
   /// ilk hint sinyali (A7b sonrası).
   supportLevel   SupportLevel @default(L1)
-  sortOrder      Int      @default(0)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  productGroup ProductGroup @relation(fields: [productGroupId], references: [id])
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productGroup ProductGroup  @relation(fields: [productGroupId], references: [id])
   /// WR-A7 — Reverse relation for PackageItem assignment.
   packageItems PackageItem[]
   /// WR-A7b — Reverse relation: bu ürünü referanslayan vakalar.
@@ -695,23 +697,23 @@ model Product {
 /// MUST equal Package.companyId. Prisma cannot enforce this at DB level;
 /// enforced in repository + smoke + data-contract.
 model Package {
-  id          String       @id @default(cuid())
-  companyId   String
-  code        String
-  name        String
-  description String?
+  id           String       @id @default(cuid())
+  companyId    String
+  code         String
+  name         String
+  description  String?
   supportLevel SupportLevel @default(L1)
-  sortOrder   Int          @default(0)
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  sortOrder    Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   items            PackageItem[]
   /// WR-A7b — Reverse relation: bu paketi referanslayan AccountCompany'ler.
   accountCompanies AccountCompany[]
   /// WR-A7b — Reverse relation: bu paketi referanslayan vakalar.
-  cases            Case[]            @relation("CasePackage")
+  cases            Case[]           @relation("CasePackage")
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -735,18 +737,18 @@ model PackageItem {
 }
 
 model Team {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
+  id                  String       @id @default(cuid())
+  name                String
+  description         String?
   // Multi-tenant izolasyon: her takım tek bir şirkete bağlı (holding modeli).
   // listQueries: WHERE companyId IN req.user.allowedCompanyIds.
-  companyId   String
-  isActive    Boolean  @default(true)
+  companyId           String
+  isActive            Boolean      @default(true)
   /// WR-A5 / PM-03 — Takımın varsayılan destek seviyesi. Case create cascade'inde
   /// (assignedPersonId yokken) kullanılır. Mevcut takımlar default L1.
   defaultSupportLevel SupportLevel @default(L1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   company Company  @relation(fields: [companyId], references: [id])
   members Person[]
@@ -756,19 +758,19 @@ model Team {
 }
 
 model Person {
-  id        String   @id @default(cuid())
-  name      String
-  email     String?
-  teamId    String?
-  isActive  Boolean  @default(true)
+  id           String       @id @default(cuid())
+  name         String
+  email        String?
+  teamId       String?
+  isActive     Boolean      @default(true)
   /// WR-B1 / PM-03 — Takım lideri bayrağı. Phase 2'de escalation hedef seçiminde
   /// hint sinyali; bu PR'da yalnız Admin toggle + smoke invariant.
-  isTeamLead Boolean @default(false)
+  isTeamLead   Boolean      @default(false)
   /// WR-A5 / PM-03 — Kişinin destek seviyesi. Case create cascade kaynağı.
   /// Default L1; rol-bazlı seed dağılımı (Agent L1, team lead L2, Admin Expert).
   supportLevel SupportLevel @default(L1)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   team  Team?  @relation(fields: [teamId], references: [id])
   cases Case[] @relation("CaseAssignedPerson")
@@ -1505,4 +1507,84 @@ model CaseLink {
   @@index([caseId])
   @@index([linkedCaseId])
   @@index([companyId])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-A8 — Data Integration Studio (Account import audit)
+// ─────────────────────────────────────────────────────────────────
+//
+// ImportJob + ImportJobRow ham satır, normalize edilmiş satır, eski/yeni alan
+// snapshot'larını saklar. Rollback yetkisi için yeterli denetim verisi taşır.
+// Şirket bazlı izole; Admin yalnızca kendi şirketinin job'larını görür/işler.
+
+model ImportJob {
+  id                  String    @id @default(cuid())
+  companyId           String
+  /// Phase 1: "account". İleride "case", "product" vb. eklenebilir.
+  targetType          String    @default("account")
+  /// "file" | "api"
+  sourceType          String
+  /// API kaynağı için kullanıcı tanımlı isim ya da dosya adı.
+  sourceName          String?
+  /// API kaynağı için (sadece host + path, secret'sız). Audit/debug için.
+  sourceUrlMasked     String?
+  fileName            String?
+  dataPath            String?
+  /// Hedef şema versiyonu (commit zamanı doğrulanır).
+  targetSchemaVersion String
+  /// "draft" | "validated" | "running" | "partial" | "completed" | "failed" | "rolled_back" | "rollback_partial"
+  status              String    @default("draft")
+  totalRows           Int       @default(0)
+  createCount         Int       @default(0)
+  updateCount         Int       @default(0)
+  skippedCount        Int       @default(0)
+  errorCount          Int       @default(0)
+  warningCount        Int       @default(0)
+  /// Auto-map önerileri, mapping snapshot, dry-run özeti vb.
+  summaryJson         Json?
+  createdByUserId     String?
+  createdAt           DateTime  @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+  rolledBackAt        DateTime?
+  rolledBackByUserId  String?
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rows    ImportJobRow[]
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([status])
+}
+
+model ImportJobRow {
+  id             String   @id @default(cuid())
+  importJobId    String
+  rowNumber      Int
+  /// "create" | "update" | "skip" | "error"
+  action         String   @default("skip")
+  /// "pending" | "processing" | "created" | "updated" | "skipped" | "error" | "rolled_back"
+  status         String   @default("pending")
+  /// Hangi Account'a denk geldi (update yolu) ya da yeni oluşturulan Account ID.
+  accountId      String?
+  /// Match key kullanıldı mı (VKN). Audit için.
+  matchKey       String?
+  errorsJson     Json?
+  warningsJson   Json?
+  /// Ham satır (kaynak alan adlarıyla).
+  rawJson        Json?
+  /// Normalize edilmiş satır (target field key'lerle).
+  normalizedJson Json?
+  /// Update öncesi Account snapshot (rollback için).
+  beforeJson     Json?
+  /// Update/create sonrası Account snapshot.
+  afterJson      Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+  @@index([importJobId, status])
+  @@index([accountId])
 }

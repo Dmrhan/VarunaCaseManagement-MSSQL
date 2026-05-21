@@ -10,6 +10,7 @@ import cronRouter from './routes/cron.js';
 import myRouter from './routes/my.js';
 import accountsRouter from './routes/accounts.js';
 import externalKbRouter from './routes/externalKb.js';
+import importsRouter from './routes/imports.js';
 import { prisma } from './db/client.js';
 
 /**
@@ -58,6 +59,9 @@ app.use('/api/auth', authRouter);
 app.use('/api/cases', casesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/lookups', lookupsRouter);
+// WR-A8: imports router admin router'dan ÖNCE mount edilir; aksi halde
+// '/api/admin' prefix'i match olur, verifyJwt iki kez koşar.
+app.use('/api/admin/imports', importsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/cron', cronRouter);
