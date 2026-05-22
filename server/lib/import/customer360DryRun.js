@@ -147,15 +147,23 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   }
 
   // Build accountCompany index for project parent resolution.
-  // Key: `${accountKey}|${companyCode}` → accountCompany row
+  // Key: `${accountKey}|${companyCode}` → accountCompany row.
+  // NOTE: This index is REBUILT after the accountCompany selected-company
+  // guard below — because the guard auto-binds empty companyCode to the
+  // wizard's selected company; the index must reflect post-bind keys so
+  // project rows can resolve them.
   const accountCompanyIndex = new Map();
-  for (const r of normalizedByEntity.accountCompany ?? []) {
-    if (r.errors.length > 0) continue;
-    const n = r.normalized;
-    if (n.accountKey && n.companyCode) {
-      accountCompanyIndex.set(`${n.accountKey}|${n.companyCode}`, r);
+  function rebuildAccountCompanyIndex() {
+    accountCompanyIndex.clear();
+    for (const r of normalizedByEntity.accountCompany ?? []) {
+      if (r.errors.length > 0) continue;
+      const n = r.normalized;
+      if (n.accountKey && n.companyCode) {
+        accountCompanyIndex.set(`${n.accountKey}|${n.companyCode}`, r);
+      }
     }
   }
+  rebuildAccountCompanyIndex();
   function resolveAccountCompanyKey(accountKey, companyCode) {
     if (!accountKey || !companyCode) return null;
     return accountCompanyIndex.get(`${accountKey}|${companyCode}`) ?? null;
@@ -170,7 +178,18 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     accountProject: [],
   };
 
-  // accountCompany — needs accountKey + companyCode (already required by schema)
+  // accountCompany — needs accountKey + must bind to wizard's selected company.
+  // WR-A8 Phase 2a review fix (selected-company guard):
+  //   - Önceki davranış: companyCode allowedCompanyIds içinde olması yeterliydi
+  //     → birden fazla şirkete erişimi olan admin için dry-run preview
+  //     tenant'ları karıştırabiliyordu.
+  //   - Yeni davranış: SELECTED companyId tek geçerli hedeftir.
+  //       • companyCode boş → selected company'ye otomatik bind.
+  //       • companyCode == selected company → OK.
+  //       • companyCode başka bir şirket (admin'in erişimi olsa bile)
+  //         → account_company_selected_company_mismatch.
+  //   allowedCompanyIds yalnız "kullanıcı selected company'ye erişebiliyor mu"
+  //   sorusunun yanıtıdır; satır-bazlı kabul kuralı değildir.
   for (const r of normalizedByEntity.accountCompany ?? []) {
     if (r.errors.length > 0) continue;
     const parent = resolveAccountKey(r.normalized.accountKey);
@@ -185,22 +204,31 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       r.errors.push(err);
       orphansByEntity.accountCompany.push(r.rowNumber);
     }
-    // Cross-tenant: if admin not allowed for companyCode → soft warn (Phase 2a
-    // doesn't have full company-code → companyId lookup; we leave that to 2b).
-    if (
-      r.normalized.companyCode &&
-      Array.isArray(allowedCompanyIds) &&
-      !allowedCompanyIds.includes(r.normalized.companyCode)
-    ) {
+    // Selected-company guard
+    if (!r.normalized.companyCode) {
+      // Source company alanı boş → selected company'ye bind.
+      r.normalized.companyCode = companyId;
+      r.warnings.push({
+        entity: 'accountCompany',
+        targetKey: 'companyCode',
+        label: 'Varuna Şirket Kodu',
+        code: 'auto_bound_to_selected_company',
+        message: `Şirket kodu belirtilmedi; seçili şirkete (${companyId}) bağlandı.`,
+      });
+    } else if (r.normalized.companyCode !== companyId) {
       r.errors.push({
         entity: 'accountCompany',
         targetKey: 'companyCode',
         label: 'Varuna Şirket Kodu',
-        code: 'cross_tenant_company',
-        message: `Bu şirkete (${r.normalized.companyCode}) erişim yetkin yok.`,
+        code: 'account_company_selected_company_mismatch',
+        message: 'İlişkili şirket satırı seçili şirketten farklı bir şirkete işaret ediyor. Aktarım yalnızca seçili şirkete yapılabilir.',
       });
     }
   }
+  // After bind+guard, indexes need to reflect new companyCode values
+  // (auto-bound rows now carry selected companyId) — project resolution
+  // depends on this.
+  rebuildAccountCompanyIndex();
 
   // accountContact — orphan + duplicate detection per account
   const contactDupTracker = new Map(); // `${accountKey}|${email}` → rowNumbers[]
@@ -312,6 +340,31 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
         label: 'Müşteri Anahtarı',
         code: 'orphan_child_row',
         message: `accountKey="${r.normalized.accountKey}" parent Account satırına eşleşmedi.`,
+      });
+      orphansByEntity.accountProject.push(r.rowNumber);
+      continue;
+    }
+    // WR-A8 Phase 2a review fix — Selected-company guard for project's
+    // accountCompanyKey, mirroring accountCompany.companyCode rule:
+    //   • boş → selected company'ye otomatik bind
+    //   • dolu ve seçili şirket → OK (resolve aşağıdaki indekste)
+    //   • dolu ve farklı şirket → mismatch error
+    if (!r.normalized.accountCompanyKey) {
+      r.normalized.accountCompanyKey = companyId;
+      r.warnings.push({
+        entity: 'accountProject',
+        targetKey: 'accountCompanyKey',
+        label: 'Şirket İlişki Anahtarı',
+        code: 'auto_bound_to_selected_company',
+        message: `Şirket ilişki anahtarı belirtilmedi; seçili şirkete (${companyId}) bağlandı.`,
+      });
+    } else if (r.normalized.accountCompanyKey !== companyId) {
+      r.errors.push({
+        entity: 'accountProject',
+        targetKey: 'accountCompanyKey',
+        label: 'Şirket İlişki Anahtarı',
+        code: 'account_company_selected_company_mismatch',
+        message: 'Proje satırı seçili şirketten farklı bir şirkete işaret ediyor. Aktarım yalnızca seçili şirkete yapılabilir.',
       });
       orphansByEntity.accountProject.push(r.rowNumber);
       continue;

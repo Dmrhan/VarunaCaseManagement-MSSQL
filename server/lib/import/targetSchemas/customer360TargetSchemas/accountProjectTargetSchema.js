@@ -15,7 +15,7 @@ import {
   parseDate,
 } from './_shared.js';
 
-export const ACCOUNT_PROJECT_VERSION = '2026-05-22.accountProject.v1';
+export const ACCOUNT_PROJECT_VERSION = '2026-05-22.accountProject.v2';
 
 export const ACCOUNT_PROJECT_FIELDS = [
   {
@@ -42,22 +42,24 @@ export const ACCOUNT_PROJECT_FIELDS = [
   {
     key: 'accountCompanyKey',
     label: 'Şirket İlişki Anahtarı',
-    description: 'AccountCompany ilişkisini belirleyen companyCode.',
+    description: 'AccountCompany ilişkisini belirleyen companyCode. Boş bırakılırsa wizard\'da seçili şirkete bağlanır.',
     example: 'COMP-UNIVERA',
     group: 'İlişki',
     type: 'text',
-    required: true,
+    // WR-A8 Phase 2a review fix — required:false; boş ise selected company
+    // kullanılır, dolu ise selected company ile eşleşmek zorunda.
+    required: false,
     aliases: ['accountcompanykey', 'şirket ilişki', 'companycode', 'company code'],
-    validationHint: 'accountKey + companyCode satırına eşleşmeli.',
+    validationHint: 'Boş bırakılabilir; selected company atanır. Dolu ise selected company ile eşleşmeli.',
     normalizationHint: null,
-    businessWarning: 'Eşleşmezse orphan project hatası.',
+    businessWarning: 'Selected company\'den farklı bir şirkete işaret ederse satır hatası.',
     sensitive: false,
     pii: false,
     createAllowed: true,
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 40, requiredLabel: 'Şirket ilişki anahtarı' });
+      return normalizeText(raw, { max: 40 });
     },
   },
   {
