@@ -94,31 +94,81 @@ async function persistJob({ user, companyId, dryRun, sourceMeta }) {
     select: { id: true, status: true, createdAt: true, startedAt: true },
   });
 
+  // WR-A8 Phase 2b hotfix (P2) — Build source-row indexes for
+  // parentRowNumber resolution BEFORE writing child entity rows. account
+  // matches by VKN or name (same keys customer360DryRun.resolveAccountKey
+  // uses); accountCompany matches by (accountKey, companyCode).
+  const accountByKey = new Map();
+  for (const r of dryRun.preview?.account ?? []) {
+    if (r.errors?.length > 0) continue;
+    const n = r.normalized ?? {};
+    if (n.vkn) accountByKey.set(`vkn:${n.vkn}`, r.rowNumber);
+    if (n.name) accountByKey.set(`name:${String(n.name).toLowerCase()}`, r.rowNumber);
+  }
+  function lookupAccountRowNumber(accountKey) {
+    if (!accountKey) return null;
+    const v = String(accountKey).trim();
+    if (!v) return null;
+    return (
+      accountByKey.get(`vkn:${v}`) ??
+      accountByKey.get(`name:${v.toLowerCase()}`) ??
+      null
+    );
+  }
+  const accountCompanyByKey = new Map();
+  for (const r of dryRun.preview?.accountCompany ?? []) {
+    if (r.errors?.length > 0) continue;
+    const n = r.normalized ?? {};
+    if (n.accountKey && n.companyCode) {
+      accountCompanyByKey.set(`${n.accountKey}|${n.companyCode}`, r.rowNumber);
+    }
+  }
+  function lookupAccountCompanyRowNumber(accountKey, companyCode) {
+    if (!accountKey || !companyCode) return null;
+    return accountCompanyByKey.get(`${accountKey}|${companyCode}`) ?? null;
+  }
+
   // Insert rows in entity order so a deterministic rowNumber space exists
   // PER entity (1..N within each entity). parentRowNumber links child → parent
-  // by accountKey resolution.
+  // by accountKey resolution (and accountCompanyKey for projects).
   const rowsByEntity = {};
   for (const entity of ENTITY_ORDER) {
     const previewRows = dryRun.preview?.[entity] ?? [];
     rowsByEntity[entity] = [];
     if (previewRows.length === 0) continue;
-    const inserts = previewRows.map((r) => ({
-      importJobId: job.id,
-      rowNumber: r.rowNumber,
-      entityType: entity,
-      action: r.action,
-      status: r.action === 'error' ? 'error' : (r.action === 'skip' ? 'skipped' : 'pending'),
-      relationshipKey: r.normalized?.accountKey
-        ? `accountKey:${r.normalized.accountKey}${
-            r.normalized.accountCompanyKey ? `|companyCode:${r.normalized.accountCompanyKey}` : ''
-          }`
-        : null,
-      matchKey: r.normalized?.vkn ?? null,
-      errorsJson: r.errors ?? [],
-      warningsJson: r.warnings ?? [],
-      rawJson: r.raw ?? null,
-      normalizedJson: r.normalized,
-    }));
+    const inserts = previewRows.map((r) => {
+      let parentRowNumber = null;
+      if (entity !== 'account') {
+        const accountKey = r.normalized?.accountKey;
+        if (entity === 'accountProject') {
+          // Project: prefer accountCompany parent (accountKey + companyCode);
+          // fall back to account parent if AC not resolved.
+          parentRowNumber =
+            lookupAccountCompanyRowNumber(accountKey, r.normalized?.accountCompanyKey) ??
+            lookupAccountRowNumber(accountKey);
+        } else {
+          parentRowNumber = lookupAccountRowNumber(accountKey);
+        }
+      }
+      return {
+        importJobId: job.id,
+        rowNumber: r.rowNumber,
+        entityType: entity,
+        parentRowNumber,
+        action: r.action,
+        status: r.action === 'error' ? 'error' : (r.action === 'skip' ? 'skipped' : 'pending'),
+        relationshipKey: r.normalized?.accountKey
+          ? `accountKey:${r.normalized.accountKey}${
+              r.normalized.accountCompanyKey ? `|companyCode:${r.normalized.accountCompanyKey}` : ''
+            }`
+          : null,
+        matchKey: r.normalized?.vkn ?? null,
+        errorsJson: r.errors ?? [],
+        warningsJson: r.warnings ?? [],
+        rawJson: r.raw ?? null,
+        normalizedJson: r.normalized,
+      };
+    });
     if (inserts.length > 0) {
       await prisma.importJobRow.createMany({ data: inserts });
     }
@@ -371,10 +421,15 @@ async function writeContact({ accountId, normalized }) {
 }
 
 async function writeAddress({ companyId, accountId, normalized }) {
-  // Soft uniqueness: (accountId, type, label) when label present, else
-  // (accountId, type, line1). No DB constraint; app-layer findFirst.
+  // Soft uniqueness: (accountId, companyId, type, label) when label present,
+  // else (accountId, companyId, type, line1). No DB constraint; app-layer
+  // findFirst. WR-A8 Phase 2b hotfix (P1): companyId is REQUIRED in the
+  // resolution criteria — Account can be global and span multiple tenants,
+  // so a Customer 360 import for company A must NEVER update or demote a
+  // company B address even when (type, label, line1) collide.
   const where = {
     accountId,
+    companyId,
     type: normalized.type,
     ...(normalized.label
       ? { label: normalized.label }
@@ -389,6 +444,14 @@ async function writeAddress({ companyId, accountId, normalized }) {
     },
   });
   if (existing) {
+    // Defense in depth: existing.companyId must equal selected companyId.
+    // The findFirst above already filters by companyId; this check guards
+    // against future refactor errors.
+    if (existing.companyId !== companyId) {
+      const err = new Error(`Address selected company guard ihlali (record companyId=${existing.companyId}, selected=${companyId}).`);
+      err.code = 'address_cross_tenant_guard';
+      throw err;
+    }
     const beforeJson = snapshotAddress(existing);
     const patch = {};
     if (normalized.line1 && normalized.line1 !== existing.line1) patch.line1 = normalized.line1;
@@ -413,8 +476,11 @@ async function writeAddress({ companyId, accountId, normalized }) {
         })
       : existing;
     if (patch.isDefault === true) {
+      // WR-A8 Phase 2b hotfix (P1) — default demotion MUST be scoped to
+      // selected companyId. Without it, demoting one company's default
+      // would clear another company's default for the same Account.
       await prisma.address.updateMany({
-        where: { accountId, type: normalized.type, id: { not: existing.id }, isDefault: true },
+        where: { accountId, companyId, type: normalized.type, id: { not: existing.id }, isDefault: true },
         data: { isDefault: false },
       });
     }
@@ -443,8 +509,9 @@ async function writeAddress({ companyId, accountId, normalized }) {
     },
   });
   if (created.isDefault === true) {
+    // WR-A8 Phase 2b hotfix (P1) — same tenant-scoped demotion as above.
     await prisma.address.updateMany({
-      where: { accountId, type: normalized.type, id: { not: created.id }, isDefault: true },
+      where: { accountId, companyId, type: normalized.type, id: { not: created.id }, isDefault: true },
       data: { isDefault: false },
     });
   }
@@ -866,15 +933,35 @@ export async function rollbackCustomer360({ jobId, user }) {
             await prisma.accountContact.update({ where: { id: r.recordId }, data: restore });
           }
         } else if (entity === 'accountAddress') {
+          // WR-A8 Phase 2b hotfix (P1) — selected-company guard on rollback.
+          // The recordId was written under job.companyId at commit time; if
+          // it somehow refers to a different tenant now (DB drift), refuse
+          // the restore. updateMany guards include companyId.
           if (r.status === 'created' && r.recordId) {
-            await prisma.address.update({ where: { id: r.recordId }, data: { isActive: false } });
+            const um = await prisma.address.updateMany({
+              where: { id: r.recordId, companyId: job.companyId },
+              data: { isActive: false },
+            });
+            if (um.count === 0) {
+              const err = new Error('Address rollback: kayıt bu şirkete ait değil.');
+              err.code = 'address_cross_tenant_rollback';
+              throw err;
+            }
           } else if (r.status === 'updated' && r.recordId && r.beforeJson) {
             const before = r.beforeJson;
             const restore = {};
             for (const k of ['label', 'line1', 'line2', 'district', 'city', 'state', 'postalCode', 'country', 'isDefault', 'isActive']) {
               if (before[k] !== undefined) restore[k] = before[k];
             }
-            await prisma.address.update({ where: { id: r.recordId }, data: restore });
+            const um = await prisma.address.updateMany({
+              where: { id: r.recordId, companyId: job.companyId },
+              data: restore,
+            });
+            if (um.count === 0) {
+              const err = new Error('Address rollback: kayıt bu şirkete ait değil.');
+              err.code = 'address_cross_tenant_rollback';
+              throw err;
+            }
           }
         } else if (entity === 'accountProject') {
           if (r.status === 'created' && r.recordId) {
