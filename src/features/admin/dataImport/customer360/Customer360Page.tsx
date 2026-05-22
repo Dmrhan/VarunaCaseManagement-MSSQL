@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Database, Upload, FileSpreadsheet, Globe2, RefreshCcw, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, Check } from 'lucide-react';
+import { Database, Upload, Download, FileSpreadsheet, Globe2, RefreshCcw, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, Check } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
@@ -23,6 +23,7 @@ import {
   parseCustomer360Xlsx,
   type Customer360Bundle,
 } from './parsers';
+import { downloadCustomer360Template } from './templateGenerator';
 import { RelationshipGraph } from './RelationshipGraph';
 import { MappingFieldSelect } from '../MappingFieldSelect';
 import { cn } from '@/components/ui/cn';
@@ -665,6 +666,20 @@ function FileSourcePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<{ name: string; size: number } | null>(null);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+
+  async function handleDownloadTemplate() {
+    setTemplateError(null);
+    setTemplateBusy(true);
+    try {
+      await downloadCustomer360Template();
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Şablon oluşturulamadı.');
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
 
   async function handleFile(file: File) {
     setError(null);
@@ -691,6 +706,25 @@ function FileSourcePanel({
 
   return (
     <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] text-slate-500 dark:text-ndark-muted">
+          Doldurulmuş şablon ile başlamak ister misiniz?
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleDownloadTemplate()}
+          disabled={templateBusy}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:border-brand-400 hover:bg-brand-50/40 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+        >
+          <Download size={12} />
+          {templateBusy ? 'Hazırlanıyor…' : 'Şablon İndir'}
+        </button>
+      </div>
+      {templateError && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-200">
+          {templateError}
+        </div>
+      )}
       <div
         onClick={() => inputRef.current?.click()}
         onDragOver={(e) => {
