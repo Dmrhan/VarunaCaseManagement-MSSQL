@@ -100,6 +100,14 @@ export interface AccountCompanyChip {
 
 export interface AccountProductSummary {
   id: string;
+  /** WR-A8 — Product Catalog FK (null for legacy free-text rows). */
+  productId: string | null;
+  /** Catalog'taki ürünün isActive durumu (null = catalog-linked değil). */
+  productCatalogActive?: boolean | null;
+  productSupportLevel?: 'L1' | 'L2' | 'L3' | 'Expert' | null;
+  productGroupId?: string | null;
+  productGroupName?: string | null;
+  /** Display name. Catalog-linked rows store a snapshot from Product.name. */
   productName: string;
   productCode: string | null;
   isActive: boolean;
@@ -394,6 +402,8 @@ export interface AccountProduct {
 
 export interface AccountProductMutationInput {
   accountCompanyId?: string;
+  /** WR-A8 — Product Catalog FK. Pass `null` to clear (revert to legacy free-text). */
+  productId?: string | null;
   productName?: string;
   productCode?: string | null;
   isActive?: boolean;

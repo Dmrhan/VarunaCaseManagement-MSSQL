@@ -557,6 +557,13 @@ model AccountProject {
 model AccountProduct {
   id               String    @id @default(cuid())
   accountCompanyId String
+  /// WR-A6/A8 — Tenant-scoped Product Catalog'a opsiyonel FK. Tanım:
+  ///  - Set ise: Product.companyId === AccountCompany.companyId invariantı
+  ///    app-layer'da enforce edilir (cross-tenant reddedilir, code=product_company_mismatch).
+  ///  - Null ise: legacy free-text (productName/productCode) modu korunur.
+  ///  Snapshot pattern (A7b): catalog set olsa bile productName/productCode
+  ///  alanları snapshot olarak yazılır → Product silinince/rename olunca display kırılmaz.
+  productId        String?
   productName      String
   productCode      String?
   isActive         Boolean   @default(true)
@@ -566,9 +573,12 @@ model AccountProduct {
   updatedAt        DateTime  @updatedAt
 
   accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+  /// onDelete: SetNull — Product silinirse AccountProduct snapshot (productName/Code) korunur.
+  product        Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@unique([accountCompanyId, productCode])
   @@index([accountCompanyId])
+  @@index([productId])
 }
 
 // AccountContact — Account altında kişi kayıtları (karar verici, teknik lider vb.).
@@ -675,12 +685,14 @@ model Product {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  productGroup ProductGroup  @relation(fields: [productGroupId], references: [id])
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productGroup    ProductGroup     @relation(fields: [productGroupId], references: [id])
   /// WR-A7 — Reverse relation for PackageItem assignment.
-  packageItems PackageItem[]
+  packageItems    PackageItem[]
   /// WR-A7b — Reverse relation: bu ürünü referanslayan vakalar.
-  cases        Case[]        @relation("CaseProduct")
+  cases           Case[]           @relation("CaseProduct")
+  /// WR-A8 — Reverse relation: bu ürünü referanslayan müşteri ürün satırları.
+  accountProducts AccountProduct[]
 
   @@unique([companyId, code])
   @@index([companyId])
