@@ -48,7 +48,9 @@ const README_LINES: string[] = [
   '',
   'BAĞLANTI ANAHTARLARI',
   '  accountKey         → Çocuk satırların hangi müşteriye ait olduğunu gösterir.',
-  '                        Account sayfasındaki VKN veya isim ile eşleşmelidir.',
+  '                        Account sayfasındaki VKN veya isim ile EŞLEŞMELİDİR.',
+  '                        En güvenli yöntem: çocuk satırlarda VKN değerini kopyalamak.',
+  '                        Aksi halde dry-run "yetim satır" hatası verir.',
   '  accountCompanyKey  → Projects sayfasında, projeyi hangi şirket ilişkisine bağlayacağınızı belirtir.',
   '                        Companies sayfasındaki companyCode değeri ile eşleşmelidir.',
   '  companyCode        → Boş bırakırsanız sistem seçili Varuna şirketine otomatik bağlar.',
@@ -90,7 +92,7 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
-        accountKey: 'ACME-1234567890',
+        accountKey: '1234567890',
         name: 'ACME Holding A.Ş.',
         customerType: 'Corporate',
         vkn: '1234567890',
@@ -99,7 +101,7 @@ const SHEETS: SheetSpec[] = [
         website: 'https://www.acme.com.tr',
       },
       {
-        accountKey: 'Beta Lojistik',
+        accountKey: '9876543210',
         name: 'Beta Lojistik Ltd. Şti.',
         customerType: 'Corporate',
         vkn: '9876543210',
@@ -120,14 +122,14 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
-        accountKey: 'ACME-1234567890',
+        accountKey: '1234567890',
         companyCode: '',
         externalCustomerCode: 'CUST-0001',
         packageName: 'Premium',
         status: 'Active',
       },
       {
-        accountKey: 'Beta Lojistik',
+        accountKey: '9876543210',
         companyCode: '',
         externalCustomerCode: 'CUST-0002',
         packageName: 'Standart',
@@ -147,7 +149,7 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
-        accountKey: 'ACME-1234567890',
+        accountKey: '1234567890',
         fullName: 'Ayşe Yılmaz',
         title: 'Satın Alma Müdürü',
         email: 'ayse.yilmaz@acme.com.tr',
@@ -155,7 +157,7 @@ const SHEETS: SheetSpec[] = [
         isPrimary: true,
       },
       {
-        accountKey: 'Beta Lojistik',
+        accountKey: '9876543210',
         fullName: 'Mehmet Demir',
         title: 'Operasyon Sorumlusu',
         email: 'mehmet.demir@betalojistik.com',
@@ -178,7 +180,7 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
-        accountKey: 'ACME-1234567890',
+        accountKey: '1234567890',
         type: 'Billing',
         label: 'Genel Merkez',
         line1: 'Levent Mah. Büyükdere Cad. No:120',
@@ -188,7 +190,7 @@ const SHEETS: SheetSpec[] = [
         isDefault: true,
       },
       {
-        accountKey: 'Beta Lojistik',
+        accountKey: '9876543210',
         type: 'Shipping',
         label: 'Depo',
         line1: 'Atatürk Org. San. Böl. 4. Sk. No:8',
@@ -212,7 +214,7 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
-        accountKey: 'ACME-1234567890',
+        accountKey: '1234567890',
         accountCompanyKey: '',
         projectCode: 'WMS-ROLLOUT',
         projectName: 'WMS Rollout 2026',
