@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Sparkles, RotateCcw, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
-import { Select } from '@/components/ui/Field';
+import { MappingFieldSelect } from './MappingFieldSelect';
 import {
   importService,
   type MappingItem,
@@ -191,18 +191,17 @@ export function MappingStep({ companyId, schema, source, mapping, onChange, onVa
                     </div>
                     <div className="flex items-center gap-2">
                       <ArrowRight size={12} className="shrink-0 text-slate-400" />
-                      <Select
-                        className="text-xs"
+                      <MappingFieldSelect
+                        className="flex-1"
                         value={c.mapped ?? ''}
-                        onChange={(e) => setMapping(c.col, e.target.value || null)}
-                      >
-                        <option value="">— eşleşmedi —</option>
-                        {schema.fields.map((f) => (
-                          <option key={f.key} value={f.key}>
-                            {f.label} {f.required ? '·zorunlu' : ''}
-                          </option>
-                        ))}
-                      </Select>
+                        onChange={(v) => setMapping(c.col, v)}
+                        options={schema.fields.map((f) => ({
+                          value: f.key,
+                          label: f.label,
+                          required: !!f.required,
+                          description: f.description,
+                        }))}
+                      />
                     </div>
                   </li>
                 );
