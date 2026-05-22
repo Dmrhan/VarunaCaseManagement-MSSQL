@@ -1,12 +1,17 @@
 /**
- * WR-A8 Phase 2a — Customer 360 dry-run engine.
+ * WR-A8 — Customer 360 dry-run engine.
  *
- * In-memory only. No DB writes. No ImportJob/ImportJobRow persistence.
+ * In-memory only. NO DB writes (the entity tables — Account /
+ * AccountCompany / AccountContact / Address / AccountProject — are
+ * untouched by this module). The downstream commit engine
+ * (server/lib/import/customer360CommitEngine.js) is what mutates entities
+ * and persists ImportJob/ImportJobRow audit. Smoke #13 asserts the
+ * zero-entity-mutation invariant of this dry-run path.
+ *
  * Returns per-entity counts, orphan child detection, completeness score,
- * and skipErrors preview (what would happen on commit if commit existed).
- *
- * Phase 2b will add commit + persistence + rollback. This file MUST keep
- * its zero-mutation invariant — smoke #13 asserts it.
+ * and a skipErrors preview ("what would happen if this were committed").
+ * The HTTP route layer computes the operator-facing `commitAvailable`
+ * boolean from this response.
  */
 
 import { prisma } from '../../db/client.js';
@@ -526,10 +531,19 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     cascadingSkipIfSkipErrorsTrue: computeCascadingSkip(normalizedByEntity, resolveAccountKey),
   };
 
+  // Note on `commitAvailable`: this engine returns a conservative default
+  // (false). The route layer (server/routes/imports.js
+  // POST /customer360/dry-run) computes the operator-facing
+  // `commitAvailable` by re-evaluating ok + no blocking code + schema
+  // version, and overrides this field. Keep this default false here so
+  // any direct (non-routed) caller is safe-by-default.
+  const messageForCommitReadiness = mappingHasError
+    ? 'Commit için dry-run hataları giderilmeli.'
+    : 'Dry-run tamamlandı. Uygun satırlar commit için hazır.';
   return {
     ok: !mappingHasError,
-    commitAvailable: false, // Phase 2a — explicit
-    message: 'Customer 360 Phase 2a yalnızca doğrulama ve dry-run sağlar. Gerçek aktarım Phase 2b\'de eklenecektir.',
+    commitAvailable: false,
+    message: messageForCommitReadiness,
     customer360SchemaVersion: CUSTOMER_360_VERSION,
     mappingValidation,
     summary: {

@@ -45,11 +45,12 @@ function emptyBundle(): Customer360Bundle {
 }
 
 /**
- * WR-A8 Phase 2a — Customer 360 dry-run-only workspace.
+ * WR-A8 — Customer 360 import workspace.
  *
- * Source → entity-aware mapping → dry-run impact preview. No commit, no
- * rollback. Banner explicitly says commitAvailable=false. Phase 2b adds
- * commit + rollback.
+ * Source → entity-aware mapping → dry-run preview → confirm → commit
+ * (dependency-ordered) → result panel + rollback action. Dry-run is
+ * always required before commit; commit/rollback semantics live in
+ * server/lib/import/customer360CommitEngine.js.
  */
 export function Customer360Page() {
   const { user } = useAuth();
@@ -258,7 +259,7 @@ export function Customer360Page() {
             <Database size={18} /> Müşteri 360 İçe Aktarım
           </h2>
           <p className="text-xs text-slate-500 dark:text-ndark-muted">
-            Müşteri ana kartı, ilişkili şirket, iletişim, adres ve proje verisini birlikte yükleyin. Bu sayfa Phase 2a'dır — yalnız doğrulama ve dry-run sağlar.
+            Müşteri ana kartı, ilişkili şirket, iletişim, adres ve proje verisini birlikte yükleyin. Dry-run sonrası güvenli commit ve rollback desteklenir.
           </p>
         </div>
         <Button variant="ghost" onClick={resetFlow}>
@@ -267,8 +268,8 @@ export function Customer360Page() {
         </Button>
       </header>
 
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-        <strong>Phase 2a:</strong> Bu sayfa Customer 360 verisini doğrular ve dry-run önizlemesi sağlar. Gerçek aktarım Phase 2b'de eklenecektir. Bu adımda DB'ye hiçbir kayıt yazılmaz.
+      <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-700/40 dark:bg-sky-900/20 dark:text-sky-200">
+        Önce dry-run ile etkiyi doğrulayın. Uygun satırlar commit edilebilir; commit sonrası rollback ile geri alınabilir.
       </div>
 
       <Card>
@@ -958,16 +959,29 @@ function DryRunSummaryCard({
 }) {
   const summary = dryRun.summary;
   const banner = dryRun.message;
+  const commitReady = dryRun.commitAvailable === true;
+  const hasErrors = (summary?.totalErrors ?? 0) > 0;
 
   return (
     <Card>
       <CardBody className="space-y-3">
-        <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-800 dark:border-sky-700/40 dark:bg-sky-900/20 dark:text-sky-200">
-          <CheckCircle2 size={14} className="mt-0.5" />
-          <div>
-            <strong>Dry-run yalnız Phase 2a.</strong> {banner} commitAvailable={String(dryRun.commitAvailable)}.
+        {commitReady ? (
+          <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+            <CheckCircle2 size={14} className="mt-0.5" />
+            <div>
+              <strong>Commit hazır.</strong> Dry-run tamamlandı. Aşağıdaki "Customer 360 Aktarımını Başlat" butonunu kullanın.
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            <AlertCircle size={14} className="mt-0.5" />
+            <div>
+              {hasErrors
+                ? 'Commit için dry-run hataları giderilmeli.'
+                : (banner || 'Dry-run sonucu commit için uygun değil.')}
+            </div>
+          </div>
+        )}
 
         {dryRun.code === 'tckn_import_blocked' && (
           <div className="rounded-md border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-200">
