@@ -511,6 +511,157 @@ record('25) Customer 360 schema version stable',
   typeof CUSTOMER_360_VERSION === 'string' && CUSTOMER_360_VERSION.length > 0,
   CUSTOMER_360_VERSION);
 
+// ─────────────────────────────────────────────────────────────────
+// WR-A8 Phase 2b HOTFIX (Codex review #210):
+//   26)  P1: Address upsert tenant scope — Customer 360 commit for company A
+//        must not touch company B address of the same global Account.
+//   27)  P1: Default demotion scoped — demoting selected company's default
+//        must not affect other company's default.
+//   28)  P1: Rollback restores only selected-company address.
+//   29)  P2: ImportJobRow.parentRowNumber populated for child entities.
+// ─────────────────────────────────────────────────────────────────
+
+// 26-28) Multi-tenant Address isolation
+const VKN_XT = genVkn(`910${stamp.slice(0,6)}`);
+let xtAccountId = null;
+let xtUniveraAddrId = null;
+let xtParamAddrId = null;
+{
+  // Build a global Account with two Addresses for the SAME type+label, one per company.
+  const acct = await prisma.account.create({
+    data: {
+      name: 'XTenant Addr Fixture',
+      vkn: VKN_XT,
+      customerType: 'Corporate',
+      companies: {
+        create: [
+          { companyId: COMP, status: 'active' },        // UNIVERA
+          { companyId: 'COMP-PARAM', status: 'active' }, // PARAM
+        ],
+      },
+    },
+    select: { id: true },
+  });
+  xtAccountId = acct.id;
+  preexistingAccountIds.add(acct.id);
+
+  const univeraAddr = await prisma.address.create({
+    data: {
+      accountId: acct.id, companyId: COMP, type: 'Billing',
+      label: 'HQ', line1: 'UNIVERA-OLD line', country: 'TR', isDefault: true,
+    },
+    select: { id: true },
+  });
+  const paramAddr = await prisma.address.create({
+    data: {
+      accountId: acct.id, companyId: 'COMP-PARAM', type: 'Billing',
+      label: 'HQ', line1: 'PARAM-untouched', country: 'TR', isDefault: true,
+    },
+    select: { id: true },
+  });
+  xtUniveraAddrId = univeraAddr.id;
+  xtParamAddrId = paramAddr.id;
+
+  // Commit Customer 360 (selected company = UNIVERA) that updates the address
+  // with same type+label → MUST hit UNIVERA address only.
+  const e = bundleForAccount(VKN_XT, 'XTenant Addr Fixture', {
+    code: `XT-${stamp}`, projectCode: `XTP-${stamp}`,
+    contactEmail: `xt-${stamp}@x.demo`,
+    addrLabel: 'HQ', line1: 'UNIVERA-NEW line',
+  });
+  const r = await commit(e, { skipErrors: true });
+  if (r.data?.job?.id) createdJobIds.add(r.data.job.id);
+
+  const univeraAfter = await prisma.address.findUnique({ where: { id: xtUniveraAddrId }, select: { line1: true, isDefault: true } });
+  const paramAfter = await prisma.address.findUnique({ where: { id: xtParamAddrId }, select: { line1: true, isDefault: true } });
+
+  record(
+    '26) Address upsert scope: UNIVERA address updated (line1 NEW)',
+    univeraAfter?.line1 === 'UNIVERA-NEW line',
+    `univera.line1=${univeraAfter?.line1}`,
+  );
+  record(
+    '26b) Address upsert scope: PARAM address untouched',
+    paramAfter?.line1 === 'PARAM-untouched',
+    `param.line1=${paramAfter?.line1}`,
+  );
+
+  // 27) Default demotion scoped — both rows had isDefault=true initially.
+  //     After commit, UNIVERA default should remain (1 default per company),
+  //     PARAM should NOT have been demoted.
+  record(
+    '27) Default demotion scoped: PARAM isDefault still true (not demoted by UNIVERA import)',
+    paramAfter?.isDefault === true,
+    `param.isDefault=${paramAfter?.isDefault}`,
+  );
+
+  // 28) Rollback restores UNIVERA, leaves PARAM alone.
+  const rbR = await api(adminToken, `/api/admin/imports/customer360/jobs/${r.data.job.id}/rollback`, {
+    method: 'POST', body: JSON.stringify({}),
+  });
+  const univeraAfterRb = await prisma.address.findUnique({ where: { id: xtUniveraAddrId }, select: { line1: true } });
+  const paramAfterRb = await prisma.address.findUnique({ where: { id: xtParamAddrId }, select: { line1: true } });
+  record(
+    '28) Rollback restores UNIVERA address',
+    univeraAfterRb?.line1 === 'UNIVERA-OLD line',
+    `univera.line1=${univeraAfterRb?.line1}`,
+  );
+  record(
+    '28b) Rollback leaves PARAM address untouched',
+    paramAfterRb?.line1 === 'PARAM-untouched',
+    `param.line1=${paramAfterRb?.line1}`,
+  );
+}
+
+// 29) parentRowNumber populated for child entities
+{
+  const vkn = genVkn(`920${stamp.slice(0,6)}`);
+  const e = bundleForAccount(vkn, 'Parent Audit Fixture', {
+    code: `PA-${stamp}`, projectCode: `PAP-${stamp}`, contactEmail: `pa-${stamp}@x.demo`, addrLabel: 'PA-HQ',
+  });
+  const r = await commit(e, { skipErrors: true });
+  if (r.data?.job?.id) createdJobIds.add(r.data.job.id);
+  const acct = await prisma.account.findUnique({ where: { vkn }, select: { id: true } });
+  if (acct?.id) createdAccountIds.add(acct.id);
+
+  const allRows = await prisma.importJobRow.findMany({
+    where: { importJobId: r.data.job.id },
+    select: { entityType: true, rowNumber: true, parentRowNumber: true, status: true },
+    orderBy: [{ entityType: 'asc' }, { rowNumber: 'asc' }],
+  });
+  const acctRow = allRows.find((row) => row.entityType === 'account');
+  const acCompanyRow = allRows.find((row) => row.entityType === 'accountCompany');
+  const contactRow = allRows.find((row) => row.entityType === 'accountContact');
+  const addressRow = allRows.find((row) => row.entityType === 'accountAddress');
+  const projectRow = allRows.find((row) => row.entityType === 'accountProject');
+
+  record(
+    '29a) Account row parentRowNumber is null (no parent)',
+    acctRow?.parentRowNumber === null,
+    `account.parent=${acctRow?.parentRowNumber}`,
+  );
+  record(
+    '29b) AccountCompany child points to Account row',
+    acCompanyRow?.parentRowNumber === acctRow?.rowNumber,
+    `accountCompany.parent=${acCompanyRow?.parentRowNumber} expected=${acctRow?.rowNumber}`,
+  );
+  record(
+    '29c) AccountContact child points to Account row',
+    contactRow?.parentRowNumber === acctRow?.rowNumber,
+    `accountContact.parent=${contactRow?.parentRowNumber}`,
+  );
+  record(
+    '29d) Address child points to Account row',
+    addressRow?.parentRowNumber === acctRow?.rowNumber,
+    `accountAddress.parent=${addressRow?.parentRowNumber}`,
+  );
+  record(
+    '29e) Project child points to AccountCompany row (preferred parent)',
+    projectRow?.parentRowNumber === acCompanyRow?.rowNumber,
+    `accountProject.parent=${projectRow?.parentRowNumber} expected=${acCompanyRow?.rowNumber}`,
+  );
+}
+
 await cleanup();
 await prisma.$disconnect();
 
