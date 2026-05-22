@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Database, RefreshCcw, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, Database, RefreshCcw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Field, Select } from '@/components/ui/Field';
@@ -23,6 +23,7 @@ import { ResultStep } from './dataImport/ResultStep';
 import { HistoryPanel } from './dataImport/HistoryPanel';
 import { STEP_ORDER, type Step, type ParsedSource } from './dataImport/types';
 import { Customer360Page } from './dataImport/customer360/Customer360Page';
+import { ImportHelpPanel } from './dataImport/ImportHelpPanel';
 
 type ImportTarget = 'account' | 'customer360';
 
@@ -41,6 +42,9 @@ export function AdminDataImportPage() {
   void user;
 
   const [target, setTarget] = useState<ImportTarget>('account');
+  // WR-A8 — In-page help drawer. Page-level state so opening/closing the
+  // panel does NOT reset target selection, source, mapping or dry-run state.
+  const [helpOpen, setHelpOpen] = useState(false);
   const manageable = useMemo(() => lookupService.companies(), []);
   const [companyId, setCompanyId] = useState<string>('');
   const [schema, setSchema] = useState<TargetSchemaResponse | null>(null);
@@ -170,13 +174,21 @@ export function AdminDataImportPage() {
             Müşteri verilerini Excel/CSV veya API üzerinden Varuna'ya güvenli, görsel ve geri alınabilir biçimde aktarın.
           </p>
         </div>
-        {target === 'account' && (
-          <Button variant="ghost" onClick={resetFlow}>
-            <RefreshCcw size={12} />
-            Sıfırla
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="ghost" onClick={() => setHelpOpen(true)}>
+            <BookOpen size={12} />
+            Nasıl çalışır?
           </Button>
-        )}
+          {target === 'account' && (
+            <Button variant="ghost" onClick={resetFlow}>
+              <RefreshCcw size={12} />
+              Sıfırla
+            </Button>
+          )}
+        </div>
       </header>
+
+      <ImportHelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {/* Hedef seçici. İki canlı modül: "Müşteri Ana Kartı" (Account-only) ve
           "Müşteri 360" (multi-entity commit + rollback). Her ikisi de dry-run
