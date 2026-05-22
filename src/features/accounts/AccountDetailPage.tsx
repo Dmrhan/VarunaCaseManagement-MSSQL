@@ -524,10 +524,32 @@ function ProductsSection({
                       {p.productCode}
                     </span>
                   )}
+                  {/* WR-A8 — Product Catalog linkage badge. */}
+                  {p.productId ? (
+                    <span
+                      className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      title="Bu ürün, şirketin Ürün Kataloğu'na bağlıdır."
+                    >
+                      Katalog
+                    </span>
+                  ) : (
+                    <span
+                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                      title="Manuel girilmiş ürün. Düzenleyerek katalogdan eşleştirebilirsiniz."
+                    >
+                      Manuel
+                    </span>
+                  )}
+                  {p.productSupportLevel && (
+                    <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                      {p.productSupportLevel}
+                    </span>
+                  )}
                   {!p.isActive && <Badge tint="slate">Pasif</Badge>}
                   <Badge tint="blue">{p.companyName}</Badge>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                  {p.productGroupName && <span>Grup: {p.productGroupName}</span>}
                   {p.startedAt && <span>Başlangıç: {formatDate(p.startedAt)}</span>}
                   {p.endedAt && <span>Bitiş: {formatDate(p.endedAt)}</span>}
                 </div>
