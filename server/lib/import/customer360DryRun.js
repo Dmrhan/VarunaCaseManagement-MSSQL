@@ -359,6 +359,10 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
         message: `Şirket ilişki anahtarı belirtilmedi; seçili şirkete (${companyId}) bağlandı.`,
       });
     } else if (r.normalized.accountCompanyKey !== companyId) {
+      // WR-A8 Phase 2a review fix — selected-company mismatch is a POLICY
+      // violation, not an orphan-resolution failure. Do NOT add to
+      // orphansByEntity (which feeds UI orphan counts + RelationshipGraph
+      // badges); error itself is enough to mark the row invalid.
       r.errors.push({
         entity: 'accountProject',
         targetKey: 'accountCompanyKey',
@@ -366,7 +370,6 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
         code: 'account_company_selected_company_mismatch',
         message: 'Proje satırı seçili şirketten farklı bir şirkete işaret ediyor. Aktarım yalnızca seçili şirkete yapılabilir.',
       });
-      orphansByEntity.accountProject.push(r.rowNumber);
       continue;
     }
     const parentAc = resolveAccountCompanyKey(r.normalized.accountKey, r.normalized.accountCompanyKey);

@@ -578,6 +578,18 @@ record('19) Customer 360 schema version stable', typeof CUSTOMER_360_VERSION ===
   const projRow = r.data?.preview?.accountProject?.[0];
   const hasMismatch = (projRow?.errors ?? []).some((e) => e.code === 'account_company_selected_company_mismatch');
   record('25) accountProject.accountCompanyKey != selected → mismatch', hasMismatch);
+
+  // 25b) (Review fix — orphan metric integrity) Selected-company mismatch
+  // must NOT be counted in summary.orphansByEntity.accountProject. Orphan
+  // counts feed the relationship graph badges + UI orphan messaging and
+  // should reflect only actual orphan-resolution failures
+  // (orphan_project_company / orphan_child_row), not policy violations.
+  const orphans = r.data?.summary?.orphansByEntity?.accountProject ?? [];
+  record(
+    '25b) Mismatch row NOT pushed to orphansByEntity.accountProject',
+    Array.isArray(orphans) && orphans.length === 0,
+    `orphans=${JSON.stringify(orphans)}`,
+  );
 }
 
 // 26) Project's accountCompanyKey empty → auto-bind + passes when parent AC exists.
