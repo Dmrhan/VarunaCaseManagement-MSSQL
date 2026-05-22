@@ -1,0 +1,4 @@
+﻿name,vkn,customerType,email,phone,isActive
+Acme Demo A.Ş.,1112223339,Kurumsal,info@acme.demo,+902121110000,Evet
+Beta Demo Ltd.,,Kurumsal,info@beta.demo,+903121112222,Evet
+Gama Demo Bireysel,7778889991,Bireysel,gama@example.demo,+905321113333,Evet
