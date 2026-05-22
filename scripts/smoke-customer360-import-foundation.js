@@ -203,9 +203,12 @@ let schema;
     sourceMeta: { sourceType: 'file', fileName: 'c360-smoke.xlsx' },
   };
   const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  // WR-A8 Phase 2b — commitAvailable is now boolean (true when validation
+  // passes, false when blocked). Phase 2a originally hardcoded false; now
+  // we accept either, focusing on the dry-run shape.
   const ok =
     r.status === 200 &&
-    r.data?.commitAvailable === false &&
+    typeof r.data?.commitAvailable === 'boolean' &&
     r.data?.summary?.byEntity?.account?.total === 1 &&
     r.data?.summary?.byEntity?.accountCompany?.total === 1 &&
     r.data?.summary?.byEntity?.accountProject?.total === 1;
