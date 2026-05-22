@@ -179,7 +179,7 @@ export interface ApiSampleInput {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// WR-A8 Phase 2a — Customer 360 types
+// WR-A8 — Customer 360 types
 // ─────────────────────────────────────────────────────────────────
 
 export const CUSTOMER_360_ENTITY_KEYS = [
@@ -240,9 +240,9 @@ export interface Customer360CompletenessSlice {
 
 export interface Customer360DryRunResponse {
   ok: boolean;
-  /** WR-A8 Phase 2b — true when registry-level validation passes (server still
-   *  re-validates on commit). Phase 2a was hardcoded false; now reflects real
-   *  commit eligibility. */
+  /** true when registry-level validation passes (no TCKN leak, no row-cap
+   *  overflow, schema version current, mapping ok). UI shows the commit
+   *  button when true; server still re-validates on commit. */
   commitAvailable: boolean;
   message: string;
   customer360SchemaVersion: string;
@@ -438,7 +438,7 @@ export const importService = {
   },
 
   // ─────────────────────────────────────────────────────────────
-  // WR-A8 Phase 2a — Customer 360 (dry-run only)
+  // WR-A8 — Customer 360 schema + dry-run (commit/rollback below)
   // ─────────────────────────────────────────────────────────────
 
   async customer360Schema(): Promise<Customer360SchemaResponse | undefined> {
