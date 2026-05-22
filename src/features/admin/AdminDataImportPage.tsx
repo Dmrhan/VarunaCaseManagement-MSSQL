@@ -178,7 +178,9 @@ export function AdminDataImportPage() {
         )}
       </header>
 
-      {/* Phase 2a — Hedef seçici. "Müşteri Ana Kartı" Phase 1; "Customer 360" Phase 2a dry-run only. */}
+      {/* Hedef seçici. İki canlı modül: "Müşteri Ana Kartı" (Account-only) ve
+          "Müşteri 360" (multi-entity commit + rollback). Her ikisi de dry-run
+          adımıyla başlar. */}
       <Card>
         <CardBody>
           <div className="flex gap-2">
@@ -205,8 +207,8 @@ export function AdminDataImportPage() {
               }`}
             >
               <Users size={14} />
-              Müşteri 360 (Phase 2a)
-              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">dry-run</span>
+              Müşteri 360
+              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">canlı</span>
             </button>
           </div>
         </CardBody>
