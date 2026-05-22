@@ -14,7 +14,7 @@ import { ACCOUNT_CONTACT_FIELDS, ACCOUNT_CONTACT_VERSION } from './accountContac
 import { ACCOUNT_ADDRESS_FIELDS, ACCOUNT_ADDRESS_VERSION } from './accountAddressTargetSchema.js';
 import { ACCOUNT_PROJECT_FIELDS, ACCOUNT_PROJECT_VERSION } from './accountProjectTargetSchema.js';
 
-export const CUSTOMER_360_VERSION = '2026-05-22.customer360.v1';
+export const CUSTOMER_360_VERSION = '2026-05-22.customer360.v2';
 
 /**
  * Entity registry. Each entry is the full descriptor.

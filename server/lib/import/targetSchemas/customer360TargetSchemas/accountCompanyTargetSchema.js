@@ -20,7 +20,7 @@ import {
   parseDate,
 } from './_shared.js';
 
-export const ACCOUNT_COMPANY_VERSION = '2026-05-22.accountCompany.v1';
+export const ACCOUNT_COMPANY_VERSION = '2026-05-22.accountCompany.v2';
 
 export const ACCOUNT_COMPANY_FIELDS = [
   {
@@ -47,22 +47,24 @@ export const ACCOUNT_COMPANY_FIELDS = [
   {
     key: 'companyCode',
     label: 'Varuna Şirket Kodu',
-    description: 'Bu ilişkinin bağlı olduğu Varuna company (örn. COMP-PARAM).',
+    description: 'Bu ilişkinin bağlı olduğu Varuna company (örn. COMP-PARAM). Boş bırakılırsa wizard\'da seçili şirkete bağlanır.',
     example: 'COMP-UNIVERA',
     group: 'İlişki',
     type: 'text',
-    required: true,
+    // WR-A8 Phase 2a review fix — required:false; boş ise selected company
+    // kullanılır, dolu ise selected company ile eşleşmek zorunda.
+    required: false,
     aliases: ['companycode', 'company code', 'şirket kodu', 'sirket kodu', 'tenant'],
-    validationHint: 'Varuna Company.id veya kod.',
+    validationHint: 'Varuna Company.id veya kod. Boş bırakılabilir; selected company atanır.',
     normalizationHint: 'Trim uygulanır.',
-    businessWarning: 'Admin yetkili olmadığı şirkete bağlamaya çalışırsa cross-tenant hatası verir.',
+    businessWarning: 'Selected company\'den farklı bir şirkete işaret ederse satır hatası (account_company_selected_company_mismatch).',
     sensitive: false,
     pii: false,
     createAllowed: true,
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 40, requiredLabel: 'Şirket kodu' });
+      return normalizeText(raw, { max: 40 });
     },
   },
   {

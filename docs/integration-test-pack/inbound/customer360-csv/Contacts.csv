@@ -1,0 +1,5 @@
+﻿accountKey,fullName,title,email,phone,isPrimary,isActive
+1112223339,Ayşe Demo,Satın Alma Müdürü,ayse@acme.demo,+905321110001,Evet,Evet
+1112223339,Mehmet Demo,Operasyon Şefi,mehmet@acme.demo,+905321110002,Hayır,Evet
+Beta Demo Ltd.,Cem Demo,Genel Müdür,cem@beta.demo,+905321110003,Evet,Evet
+7778889991,Selin Demo,,selin@example.demo,+905321110004,Evet,Evet

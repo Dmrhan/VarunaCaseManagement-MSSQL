@@ -29,6 +29,15 @@
  *  17. TCKN fields absent from schema; TCKN header in source rejected
  *  18. PII fields labeled sensitive (fullName, email, phone)
  *  19. existing Phase 1 account import smoke still passes (run separately)
+ *  20-27. (Review fix) Selected-company guard:
+ *     20  accountCompany.companyCode != selected → mismatch error
+ *     21  Mismatch row not counted as valid in impact summary
+ *     22  companyCode == selected → row passes
+ *     23  empty companyCode → auto-bind warning + passes
+ *     24  raw source companyId ignored (selected authoritative)
+ *     25  project accountCompanyKey != selected → mismatch error
+ *     26  empty project accountCompanyKey → auto-bind + resolves
+ *     27  schema reflects required=false on companyCode + accountCompanyKey
  */
 
 import { prisma } from '../server/db/client.js';
@@ -241,12 +250,16 @@ let schema;
 }
 
 // 7-12) Orphan/duplicate/invalid validation paths
+const VKN_NOAC = genVkn(`770${stamp.slice(0, 6)}`);
 {
   const payload = {
     companyId: COMP_PAR,
     entities: {
       account: { columns: ['name', 'vkn'], mapping: mappingFor('account'),
-        rows: [{ name: 'C360 Validation', vkn: VKN_B }] },
+        rows: [
+          { name: 'C360 Validation', vkn: VKN_B },
+          { name: 'C360 No AC', vkn: VKN_NOAC }, // account but no AC row → orphan_project_company candidate
+        ] },
       accountCompany: { columns: ['accountKey', 'companyCode'], mapping: [
         { source: 'accountKey', targetKey: 'accountKey' },
         { source: 'companyCode', targetKey: 'companyCode' },
@@ -266,8 +279,11 @@ let schema;
       accountProject: { columns: ['accountKey', 'accountCompanyKey', 'projectCode', 'projectName'], mapping: mappingFor('accountProject'),
         rows: [
           { accountKey: VKN_B, accountCompanyKey: COMP_PAR, projectCode: 'P1', projectName: 'OK' },
-          { accountKey: VKN_B, accountCompanyKey: 'COMP-MISSING', projectCode: 'P2', projectName: 'Bad AC' }, // orphan
-          { accountKey: '9999999999', accountCompanyKey: COMP_PAR, projectCode: 'P3', projectName: 'Orphan Acct' }, // orphan
+          // Account row exists but NO accountCompany row for VKN_NOAC → project
+          // resolution falls to orphan_project_company (AccountCompany-scoped
+          // validation invariant).
+          { accountKey: VKN_NOAC, accountCompanyKey: COMP_PAR, projectCode: 'P2', projectName: 'No AC' },
+          { accountKey: '9999999999', accountCompanyKey: COMP_PAR, projectCode: 'P3', projectName: 'Orphan Acct' }, // orphan account
         ] },
     },
     sourceMeta: { sourceType: 'file' },
@@ -411,6 +427,209 @@ let schema;
 
 // 19) regression — schema constants stable
 record('19) Customer 360 schema version stable', typeof CUSTOMER_360_VERSION === 'string' && CUSTOMER_360_VERSION.length > 0, CUSTOMER_360_VERSION);
+
+// ─────────────────────────────────────────────────────────────────
+// SELECTED-COMPANY GUARD (Phase 2a review fix)
+// Admin has access to UNIVERA + PARAM. Wizard selectedCompanyId varies.
+// ─────────────────────────────────────────────────────────────────
+
+// 20) Wizard selected UNIVERA + accountCompany.companyCode=PARAM → row error
+//     account_company_selected_company_mismatch.
+{
+  const vkn = genVkn(`910${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Tenant Mix A', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: 'COMP-PARAM' }] }, // ← cross-target
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: [], mapping: [], rows: [] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const acRow = r.data?.preview?.accountCompany?.[0];
+  const hasError = acRow?.errors?.some((e) => e.code === 'account_company_selected_company_mismatch');
+  record('20) accountCompany.companyCode != selected → mismatch error', !!hasError, acRow?.errors?.[0]?.message ?? '');
+}
+
+// 21) The same row must NOT be treated as valid in impact counts.
+{
+  const vkn = genVkn(`920${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Tenant Mix B', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: 'COMP-PARAM' }] },
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: [], mapping: [], rows: [] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const acSummary = r.data?.summary?.byEntity?.accountCompany;
+  record('21) Mismatch row not counted as valid (error=1, create/update=0)',
+    acSummary?.error === 1 && acSummary?.create === 0 && acSummary?.update === 0,
+    JSON.stringify(acSummary));
+}
+
+// 22) companyCode = UNIVERA (== selected) → row OK (no mismatch).
+{
+  const vkn = genVkn(`930${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Tenant Match', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: 'COMP-UNIVERA' }] },
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: [], mapping: [], rows: [] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const acRow = r.data?.preview?.accountCompany?.[0];
+  const noMismatch = !(acRow?.errors ?? []).some((e) => e.code === 'account_company_selected_company_mismatch');
+  record('22) companyCode == selected → row passes', noMismatch && acRow?.action !== 'error');
+}
+
+// 23) companyCode empty → auto-bind to selected company (warning + passes).
+{
+  const vkn = genVkn(`940${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Tenant Empty', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: '' }] }, // ← empty
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: [], mapping: [], rows: [] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const acRow = r.data?.preview?.accountCompany?.[0];
+  const autoBound = (acRow?.warnings ?? []).some((w) => w.code === 'auto_bound_to_selected_company');
+  const noMismatch = !(acRow?.errors ?? []).some((e) => e.code === 'account_company_selected_company_mismatch');
+  record('23) Empty companyCode → auto-bind + warning (no error)', autoBound && noMismatch && acRow?.action !== 'error');
+}
+
+// 24) Cross-tenant source companyId (raw row field) cannot override selected.
+//     Behavior: dry-run still emits 'source_company_id_ignored' soft warning
+//     on the account row when payload row has companyId field set to another tenant.
+{
+  const vkn = genVkn(`950${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn','companyId'], mapping: mappingFor('account'),
+        rows: [{ name: 'Override Attempt', vkn, companyId: 'COMP-PARAM' }] },
+      accountCompany: { columns: [], mapping: [], rows: [] },
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: [], mapping: [], rows: [] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const accRow = r.data?.preview?.account?.[0];
+  const ignored = (accRow?.warnings ?? []).some((w) => w.code === 'source_company_id_ignored');
+  record('24) Raw source companyId yok sayılır (selected authoritative)', ignored);
+}
+
+// 25) Project's accountCompanyKey != selected → mismatch error (project entity).
+{
+  const vkn = genVkn(`960${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Proj Mix', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: 'COMP-UNIVERA' }] },
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: ['accountKey','accountCompanyKey','projectCode','projectName'], mapping: mappingFor('accountProject'),
+        rows: [{ accountKey: vkn, accountCompanyKey: 'COMP-PARAM', projectCode: 'X1', projectName: 'Bad' }] },
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const projRow = r.data?.preview?.accountProject?.[0];
+  const hasMismatch = (projRow?.errors ?? []).some((e) => e.code === 'account_company_selected_company_mismatch');
+  record('25) accountProject.accountCompanyKey != selected → mismatch', hasMismatch);
+
+  // 25b) (Review fix — orphan metric integrity) Selected-company mismatch
+  // must NOT be counted in summary.orphansByEntity.accountProject. Orphan
+  // counts feed the relationship graph badges + UI orphan messaging and
+  // should reflect only actual orphan-resolution failures
+  // (orphan_project_company / orphan_child_row), not policy violations.
+  const orphans = r.data?.summary?.orphansByEntity?.accountProject ?? [];
+  record(
+    '25b) Mismatch row NOT pushed to orphansByEntity.accountProject',
+    Array.isArray(orphans) && orphans.length === 0,
+    `orphans=${JSON.stringify(orphans)}`,
+  );
+}
+
+// 26) Project's accountCompanyKey empty → auto-bind + passes when parent AC exists.
+{
+  const vkn = genVkn(`970${stamp.slice(0,6)}`);
+  const payload = {
+    companyId: 'COMP-UNIVERA',
+    entities: {
+      account: { columns: ['name','vkn'], mapping: mappingFor('account'),
+        rows: [{ name: 'Proj Empty', vkn }] },
+      accountCompany: { columns: ['accountKey','companyCode'], mapping: [
+        { source: 'accountKey', targetKey: 'accountKey' },
+        { source: 'companyCode', targetKey: 'companyCode' },
+      ], rows: [{ accountKey: vkn, companyCode: '' }] }, // bind to UNIVERA
+      accountContact: { columns: [], mapping: [], rows: [] },
+      accountAddress: { columns: [], mapping: [], rows: [] },
+      accountProject: { columns: ['accountKey','accountCompanyKey','projectCode','projectName'], mapping: mappingFor('accountProject'),
+        rows: [{ accountKey: vkn, accountCompanyKey: '', projectCode: 'AB1', projectName: 'OK' }] }, // bind to UNIVERA
+    },
+    sourceMeta: { sourceType: 'file' },
+  };
+  const r = await api(adminToken, '/api/admin/imports/customer360/dry-run', { method: 'POST', body: JSON.stringify(payload) });
+  const projRow = r.data?.preview?.accountProject?.[0];
+  const noMismatch = !(projRow?.errors ?? []).some((e) => e.code === 'account_company_selected_company_mismatch');
+  const autoBound = (projRow?.warnings ?? []).some((w) => w.code === 'auto_bound_to_selected_company');
+  record('26) Empty project accountCompanyKey → auto-bind + project resolves',
+    autoBound && noMismatch && projRow?.action !== 'error',
+    `action=${projRow?.action} warnings=${(projRow?.warnings ?? []).map(w=>w.code).join(',')} errors=${(projRow?.errors ?? []).map(e=>e.code).join(',')}`);
+}
+
+// 27) Schema reflects required=false on companyCode + accountCompanyKey.
+{
+  const ac = schema?.entities?.find((e) => e.entity === 'accountCompany');
+  const companyCode = ac?.fields?.find((f) => f.key === 'companyCode');
+  const proj = schema?.entities?.find((e) => e.entity === 'accountProject');
+  const acKey = proj?.fields?.find((f) => f.key === 'accountCompanyKey');
+  record('27) Schema: companyCode + accountCompanyKey now optional (auto-bind)',
+    companyCode?.required === false && acKey?.required === false,
+    `companyCode.required=${companyCode?.required} accountCompanyKey.required=${acKey?.required}`);
+}
 
 // ─────────────────────────────────────────────────────────────────
 await prisma.$disconnect();
