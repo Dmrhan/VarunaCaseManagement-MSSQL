@@ -24,6 +24,7 @@ import {
   type Customer360Bundle,
 } from './parsers';
 import { RelationshipGraph } from './RelationshipGraph';
+import { MappingFieldSelect } from '../MappingFieldSelect';
 import { cn } from '@/components/ui/cn';
 
 const ROW_CAPS: Record<Customer360EntityKey, number> = {
@@ -922,18 +923,17 @@ function EntityMappingCard({
                     </div>
                     <span className="shrink-0 text-[10px] text-slate-400">{mappedSet.has(col) ? 'eşlendi' : 'boşta'}</span>
                   </div>
-                  <Select
-                    className="text-xs"
+                  <MappingFieldSelect
                     value={cur}
-                    onChange={(e) => onUpdate(col, e.target.value || null)}
-                  >
-                    <option value="">— eşleşmedi —</option>
-                    {entityDesc.fields.map((f) => (
-                      <option key={f.key} value={f.key}>
-                        {f.label} {f.required ? '·zorunlu' : ''} {f.pii ? '·PII' : ''}
-                      </option>
-                    ))}
-                  </Select>
+                    onChange={(v) => onUpdate(col, v)}
+                    options={entityDesc.fields.map((f) => ({
+                      value: f.key,
+                      label: f.label,
+                      required: !!f.required,
+                      pii: !!f.pii,
+                      description: f.description,
+                    }))}
+                  />
                 </li>
               );
             })}
