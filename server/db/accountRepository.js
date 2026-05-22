@@ -394,11 +394,21 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
           products: {
             select: {
               id: true,
+              productId: true,
               productName: true,
               productCode: true,
               isActive: true,
               startedAt: true,
               endedAt: true,
+              // WR-A8 — catalog snapshot for UI badges (supportLevel + group).
+              product: {
+                select: {
+                  id: true,
+                  isActive: true,
+                  supportLevel: true,
+                  productGroup: { select: { id: true, name: true } },
+                },
+              },
             },
             orderBy: [{ isActive: 'desc' }, { productName: 'asc' }],
           },
@@ -550,6 +560,11 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       notes: c.notes ?? null,
       products: (c.products ?? []).map((p) => ({
         id: p.id,
+        productId: p.productId ?? null,
+        productCatalogActive: p.product ? p.product.isActive : null,
+        productSupportLevel: p.product?.supportLevel ?? null,
+        productGroupId: p.product?.productGroup?.id ?? null,
+        productGroupName: p.product?.productGroup?.name ?? null,
         productName: p.productName,
         productCode: p.productCode ?? null,
         isActive: p.isActive,
@@ -1283,12 +1298,25 @@ export async function listProducts({ accountId, companyId, user }) {
     select: {
       id: true,
       accountCompanyId: true,
+      productId: true,
       productName: true,
       productCode: true,
       isActive: true,
       startedAt: true,
       endedAt: true,
       accountCompany: { select: { companyId: true, company: { select: { name: true } } } },
+      // WR-A8 — catalog snapshot fields for UI display (supportLevel + group name).
+      // Legacy rows (productId=null) keep ProductGroup-less display.
+      product: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          isActive: true,
+          supportLevel: true,
+          productGroup: { select: { id: true, name: true } },
+        },
+      },
     },
   });
 
@@ -1298,6 +1326,12 @@ export async function listProducts({ accountId, companyId, user }) {
       accountCompanyId: p.accountCompanyId,
       companyId: p.accountCompany.companyId,
       companyName: p.accountCompany.company?.name ?? null,
+      // WR-A8 — Catalog linkage. Null for legacy rows.
+      productId: p.productId ?? null,
+      productCatalogActive: p.product ? p.product.isActive : null,
+      productSupportLevel: p.product?.supportLevel ?? null,
+      productGroupId: p.product?.productGroup?.id ?? null,
+      productGroupName: p.product?.productGroup?.name ?? null,
       productName: p.productName,
       productCode: p.productCode ?? null,
       isActive: p.isActive,
@@ -1305,6 +1339,38 @@ export async function listProducts({ accountId, companyId, user }) {
       endedAt: p.endedAt,
     })),
   };
+}
+
+/**
+ * WR-A8 — Validate that a Product catalog row belongs to the given
+ * companyId (the AccountCompany's company). Returns the product or
+ * throws AccountValidationError with code='product_company_mismatch'
+ * / 'product_not_found' / 'product_inactive'.
+ *
+ * @param {string} productId
+ * @param {string} expectedCompanyId  AccountCompany.companyId
+ */
+async function assertProductInCompany(productId, expectedCompanyId) {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, companyId: true, code: true, name: true, isActive: true },
+  });
+  if (!product) {
+    throw new AccountValidationError('Ürün bulunamadı.', { status: 404, code: 'product_not_found' });
+  }
+  if (product.companyId !== expectedCompanyId) {
+    throw new AccountValidationError(
+      'Seçilen ürün bu şirkete ait değil.',
+      { status: 400, code: 'product_company_mismatch' },
+    );
+  }
+  if (!product.isActive) {
+    throw new AccountValidationError(
+      'Seçilen ürün pasif. Aktif bir ürün seçin veya önce Yönetim Paneli → Ürün Kataloğu altında aktive edin.',
+      { status: 400, code: 'product_inactive' },
+    );
+  }
+  return product;
 }
 
 /**
@@ -1336,15 +1402,31 @@ export async function addProduct({ accountId, data, user }) {
     throw new AccountAccessError('Bu şirkete ürün ekleme yetkin yok.');
   }
 
-  const productName = typeof data?.productName === 'string' ? data.productName.trim() : '';
-  if (!productName) throw new AccountValidationError('Ürün adı zorunlu.');
-
-  const productCode = data?.productCode ? String(data.productCode).trim() || null : null;
+  // WR-A8 — productId optional FK. Two paths:
+  //  - Catalog: productId set → derive productName/Code from Product catalog
+  //    (snapshot). Free-text productName allowed only when productId is null.
+  //  - Legacy: productId null → free-text productName required (existing
+  //    behavior preserved for backward compatibility).
+  let productId = null;
+  let productName = '';
+  let productCode = data?.productCode ? String(data.productCode).trim() || null : null;
+  if (data?.productId) {
+    productId = String(data.productId).trim() || null;
+  }
+  if (productId) {
+    const catalogRow = await assertProductInCompany(productId, ac.companyId);
+    productName = catalogRow.name;
+    if (!productCode) productCode = catalogRow.code; // snapshot from catalog
+  } else {
+    productName = typeof data?.productName === 'string' ? data.productName.trim() : '';
+    if (!productName) throw new AccountValidationError('Ürün adı zorunlu.');
+  }
 
   try {
     const created = await prisma.accountProduct.create({
       data: {
         accountCompanyId,
+        productId,
         productName,
         productCode,
         isActive: data?.isActive === undefined ? true : !!data.isActive,
@@ -1375,6 +1457,25 @@ export async function updateProduct({ accountId, productId, data, user }) {
   if (!product) return null;
 
   const patch = {};
+
+  // WR-A8 — productId catalog link patch:
+  //  - undefined → leave catalog link alone
+  //  - null      → clear catalog link (legacy free-text mode)
+  //  - string id → set/replace catalog link; validate company scope
+  if (data?.productId !== undefined) {
+    if (data.productId === null || data.productId === '') {
+      patch.productId = null;
+    } else {
+      const newProductId = String(data.productId).trim();
+      const catalogRow = await assertProductInCompany(newProductId, product.accountCompany.companyId);
+      patch.productId = catalogRow.id;
+      // Snapshot from catalog if caller did NOT also provide a productName.
+      if (data?.productName === undefined) patch.productName = catalogRow.name;
+      // Snapshot code only if no explicit code change AND current is empty.
+      if (data?.productCode === undefined) patch.productCode = catalogRow.code;
+    }
+  }
+
   if (data?.productName !== undefined) {
     const trimmed = String(data.productName).trim();
     if (!trimmed) throw new AccountValidationError('Ürün adı boş olamaz.');

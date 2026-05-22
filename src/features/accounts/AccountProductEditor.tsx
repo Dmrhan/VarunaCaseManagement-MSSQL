@@ -11,6 +11,15 @@ import {
   type AccountProductSummary,
   type AccountProductMutationInput,
 } from '@/services/accountService';
+import { lookupService } from '@/services/caseService';
+
+interface CatalogProduct {
+  id: string;
+  code: string;
+  name: string;
+  supportLevel: 'L1' | 'L2' | 'L3' | 'Expert';
+  productGroupId: string;
+}
 
 interface AccountProductEditorProps {
   open: boolean;
@@ -50,6 +59,8 @@ export function AccountProductEditor({
   onSaved,
 }: AccountProductEditorProps) {
   const [accountCompanyId, setAccountCompanyId] = useState('');
+  /** WR-A8 — Product Catalog FK; '' = legacy free-text mode. */
+  const [productId, setProductId] = useState<string>('');
   const [productName, setProductName] = useState('');
   const [productCode, setProductCode] = useState('');
   const [startedAt, setStartedAt] = useState('');
@@ -59,28 +70,66 @@ export function AccountProductEditor({
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // WR-A8 — Catalog products for the selected AccountCompany's companyId.
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  /** Legacy override mode: edit existing row without forcing catalog link. */
+  const [legacyMode, setLegacyMode] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setErrors({});
     if (mode === 'edit' && product) {
       setAccountCompanyId(editAccountCompanyId ?? '');
+      setProductId(product.productId ?? '');
       setProductName(product.productName);
       setProductCode(product.productCode ?? '');
       setStartedAt(toDateInput(product.startedAt));
       setEndedAt(toDateInput(product.endedAt));
       setIsActive(product.isActive);
+      // Legacy row (no productId on existing record) → start in legacy mode.
+      setLegacyMode(!product.productId);
     } else {
       // Single company → otomatik seç.
       const defaultAcId =
         visibleCompanies.length === 1 ? visibleCompanies[0].accountCompanyId : '';
       setAccountCompanyId(defaultAcId);
+      setProductId('');
       setProductName('');
       setProductCode('');
       setStartedAt('');
       setEndedAt('');
       setIsActive(true);
+      setLegacyMode(false); // New rows default to catalog mode
     }
   }, [open, mode, product, editAccountCompanyId, visibleCompanies]);
+
+  // Fetch catalog for the AccountCompany's company.
+  useEffect(() => {
+    if (!open || !accountCompanyId) {
+      setCatalogProducts([]);
+      return;
+    }
+    const ac = visibleCompanies.find((c) => c.accountCompanyId === accountCompanyId);
+    if (!ac) {
+      setCatalogProducts([]);
+      return;
+    }
+    let alive = true;
+    setCatalogLoading(true);
+    void lookupService
+      .caseCatalog({ companyId: ac.companyId })
+      .then((data) => {
+        if (!alive) return;
+        setCatalogProducts((data.products ?? []) as CatalogProduct[]);
+      })
+      .finally(() => {
+        if (alive) setCatalogLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, accountCompanyId, visibleCompanies]);
 
   const selectedCompany = useMemo(
     () => visibleCompanies.find((c) => c.accountCompanyId === accountCompanyId) ?? null,
@@ -90,7 +139,12 @@ export function AccountProductEditor({
   function validate(): boolean {
     const errs: Record<string, string> = {};
     if (mode === 'add' && !accountCompanyId) errs.accountCompanyId = 'Şirket seç.';
-    if (!productName.trim()) errs.productName = 'Ürün adı zorunlu.';
+    // WR-A8 — Catalog mode requires productId. Legacy mode requires productName.
+    if (!legacyMode) {
+      if (!productId) errs.productId = 'Ürün kataloğundan bir ürün seç.';
+    } else {
+      if (!productName.trim()) errs.productName = 'Ürün adı zorunlu.';
+    }
     if (startedAt && endedAt && startedAt > endedAt) {
       errs.endedAt = 'Bitiş tarihi başlangıçtan önce olamaz.';
     }
@@ -107,7 +161,9 @@ export function AccountProductEditor({
     if (mode === 'add') {
       const body: AccountProductMutationInput = {
         accountCompanyId,
-        productName: productName.trim(),
+        // WR-A8 — Send productId when catalog mode; clear when legacy.
+        productId: legacyMode ? null : productId,
+        productName: legacyMode ? productName.trim() : undefined,
         productCode: productCode.trim() || null,
         isActive,
         startedAt: startedAt || null,
@@ -118,7 +174,9 @@ export function AccountProductEditor({
       if (updated) notify({ type: 'success', title: 'Ürün eklendi', message: '' });
     } else if (product) {
       const body: AccountProductMutationInput = {
-        productName: productName.trim(),
+        // Switching between catalog ↔ legacy is allowed.
+        productId: legacyMode ? null : productId,
+        productName: legacyMode ? productName.trim() : undefined,
         productCode: productCode.trim() || null,
         isActive,
         startedAt: startedAt || null,
@@ -214,21 +272,96 @@ export function AccountProductEditor({
           )}
         </Field>
 
-        <Field label="Ürün Adı" required error={errors.productName}>
-          <TextInput
-            value={productName}
-            onChange={(e) => setProductName(e.target.value)}
-            placeholder="Örn. ERP — Finans Modülü"
-            autoFocus
-          />
-        </Field>
-        <Field label="Ürün Kodu" hint="Opsiyonel — şirket içinde benzersiz">
-          <TextInput
-            value={productCode}
-            onChange={(e) => setProductCode(e.target.value)}
-            placeholder="Örn. ERP-FIN-01"
-          />
-        </Field>
+        {!legacyMode ? (
+          <Field
+            label="Ürün (katalogdan)"
+            required
+            error={errors.productId}
+            hint={
+              catalogLoading
+                ? 'Katalog yükleniyor…'
+                : accountCompanyId
+                  ? 'Yalnız aktif ürünler listelenir.'
+                  : 'Önce şirket seçin.'
+            }
+            actions={
+              mode === 'edit' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLegacyMode(true);
+                    setProductId('');
+                  }}
+                  className="text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline dark:text-ndark-muted dark:hover:text-ndark-text"
+                >
+                  Manuel ad gir
+                </button>
+              )
+            }
+          >
+            {!accountCompanyId ? (
+              <TextInput value="" disabled placeholder="Önce şirket seçin" />
+            ) : catalogProducts.length === 0 && !catalogLoading ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+                Bu şirket için aktif ürün kataloğu bulunamadı. Önce Yönetim Paneli → Ürün Kataloğu altında ürün tanımlayın.
+              </div>
+            ) : (
+              <Select
+                value={productId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setProductId(id);
+                  const cat = catalogProducts.find((p) => p.id === id);
+                  if (cat) {
+                    // Snapshot for legacy display fields; server will also re-snapshot.
+                    setProductName(cat.name);
+                    if (!productCode) setProductCode(cat.code);
+                  }
+                }}
+                autoFocus
+              >
+                <option value="">Ürün seç…</option>
+                {catalogProducts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.code ? `· ${p.code}` : ''} · {p.supportLevel}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        ) : (
+          <>
+            <Field
+              label="Ürün Adı (manuel)"
+              required
+              error={errors.productName}
+              hint="Legacy / kataloga eklenmemiş ürünler için."
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setLegacyMode(false)}
+                  className="text-[11px] font-medium text-brand-600 underline-offset-2 hover:underline dark:text-ndark-accent"
+                >
+                  Katalogdan seç
+                </button>
+              }
+            >
+              <TextInput
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
+                placeholder="Örn. ERP — Finans Modülü"
+                autoFocus
+              />
+            </Field>
+            <Field label="Ürün Kodu" hint="Opsiyonel — şirket içinde benzersiz">
+              <TextInput
+                value={productCode}
+                onChange={(e) => setProductCode(e.target.value)}
+                placeholder="Örn. ERP-FIN-01"
+              />
+            </Field>
+          </>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Başlangıç">
