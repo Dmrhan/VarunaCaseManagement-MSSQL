@@ -1542,6 +1542,10 @@ model ImportJob {
   warningCount        Int       @default(0)
   /// Auto-map önerileri, mapping snapshot, dry-run özeti vb.
   summaryJson         Json?
+  /// WR-A8 Phase 2b — Customer 360 per-entity create/update/skip/error
+  /// breakdown. account targetType için null kalır (Phase 1 scalar count'lar
+  /// yeterli). Customer 360 için: { account: {...}, accountCompany: {...}, ... }.
+  entityCountsJson    Json?
   createdByUserId     String?
   createdAt           DateTime  @default(now())
   startedAt           DateTime?
@@ -1558,33 +1562,50 @@ model ImportJob {
 }
 
 model ImportJobRow {
-  id             String   @id @default(cuid())
-  importJobId    String
-  rowNumber      Int
+  id              String   @id @default(cuid())
+  importJobId     String
+  rowNumber       Int
   /// "create" | "update" | "skip" | "error"
-  action         String   @default("skip")
-  /// "pending" | "processing" | "created" | "updated" | "skipped" | "error" | "rolled_back"
-  status         String   @default("pending")
+  action          String   @default("skip")
+  /// "pending" | "processing" | "created" | "updated" | "skipped" | "error" | "rolled_back" | "rollback_error"
+  status          String   @default("pending")
+  /// WR-A8 Phase 2b — Customer 360 satırı hangi entity'ye ait:
+  /// "account" | "accountCompany" | "accountContact" | "accountAddress" | "accountProject".
+  /// Phase 1 satırları için null (legacy account-only); Phase 2b satırları için zorunlu.
+  entityType      String?
+  /// Parent satırın rowNumber'ı (child entity'ler için audit/UI navigation).
+  /// Yalnız Customer 360 child row'larında doludur (account null bırakır).
+  parentRowNumber Int?
+  /// Relationship resolve için kullanılan key snapshot'ı ("vkn:1234567890",
+  /// "companyCode:COMP-UNIVERA" vb.).
+  relationshipKey String?
   /// Hangi Account'a denk geldi (update yolu) ya da yeni oluşturulan Account ID.
-  accountId      String?
+  /// Phase 1 ile geriye uyumluluk: account row'ları için doludur.
+  accountId       String?
+  /// WR-A8 Phase 2b — polymorphic kayıt ID'si. accountId zaten account satırları
+  /// için doluyor; non-account entity'ler (Contact/Address/Project/AC) için
+  /// recordId Prisma kaydının id'sini taşır.
+  recordId        String?
   /// Match key kullanıldı mı (VKN). Audit için.
-  matchKey       String?
-  errorsJson     Json?
-  warningsJson   Json?
+  matchKey        String?
+  errorsJson      Json?
+  warningsJson    Json?
   /// Ham satır (kaynak alan adlarıyla).
-  rawJson        Json?
+  rawJson         Json?
   /// Normalize edilmiş satır (target field key'lerle).
-  normalizedJson Json?
-  /// Update öncesi Account snapshot (rollback için).
-  beforeJson     Json?
-  /// Update/create sonrası Account snapshot.
-  afterJson      Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  normalizedJson  Json?
+  /// Update öncesi entity snapshot (rollback için).
+  beforeJson      Json?
+  /// Update/create sonrası entity snapshot.
+  afterJson       Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
 
   @@index([importJobId])
   @@index([importJobId, status])
+  @@index([importJobId, entityType])
   @@index([accountId])
+  @@index([recordId])
 }

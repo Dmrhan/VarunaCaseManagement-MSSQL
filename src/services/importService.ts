@@ -240,7 +240,10 @@ export interface Customer360CompletenessSlice {
 
 export interface Customer360DryRunResponse {
   ok: boolean;
-  commitAvailable: false;
+  /** WR-A8 Phase 2b — true when registry-level validation passes (server still
+   *  re-validates on commit). Phase 2a was hardcoded false; now reflects real
+   *  commit eligibility. */
+  commitAvailable: boolean;
   message: string;
   customer360SchemaVersion: string;
   code?: string;
@@ -484,7 +487,138 @@ export const importService = {
   }): Promise<Customer360DryRunResponse | undefined> {
     return postJson(`${BASE}/customer360/dry-run`, input, 'Customer 360 dry-run başarısız');
   },
+
+  async customer360Commit(input: {
+    companyId: string;
+    entities?: Record<
+      string,
+      { columns: string[]; mapping: MappingItem[]; rows: Array<Record<string, unknown>> }
+    >;
+    sourceMeta?: {
+      sourceType: 'file' | 'api';
+      fileName?: string | null;
+      sourceUrlMasked?: string | null;
+      dataPath?: string | null;
+    };
+    options?: { skipErrors?: boolean };
+    jobId?: string;
+  }): Promise<Customer360CommitResponse | undefined> {
+    return postJson(`${BASE}/customer360/commit`, input, 'Customer 360 commit başarısız');
+  },
+
+  async customer360Rollback(jobId: string): Promise<Customer360RollbackResponse | undefined> {
+    return postJson(`${BASE}/customer360/jobs/${encodeURIComponent(jobId)}/rollback`, {}, 'Customer 360 geri alma başarısız');
+  },
+
+  async customer360GetJob(jobId: string): Promise<Customer360JobDetail | undefined> {
+    return apiFetch<Customer360JobDetail>(
+      `${BASE}/customer360/jobs/${encodeURIComponent(jobId)}`,
+      undefined,
+      'Customer 360 job okunamadı',
+    );
+  },
+
+  async customer360GetJobRows(jobId: string, opts?: { entity?: string; status?: string; limit?: number; offset?: number }): Promise<{ value: Customer360JobRow[] } | undefined> {
+    const qs = new URLSearchParams();
+    if (opts?.entity) qs.set('entity', opts.entity);
+    if (opts?.status) qs.set('status', opts.status);
+    if (opts?.limit) qs.set('limit', String(opts.limit));
+    if (opts?.offset) qs.set('offset', String(opts.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiFetch<{ value: Customer360JobRow[] }>(
+      `${BASE}/customer360/jobs/${encodeURIComponent(jobId)}/rows${suffix}`,
+      undefined,
+      'Customer 360 job satırları okunamadı',
+    );
+  },
 };
+
+// ─────────────────────────────────────────────────────────────────
+// WR-A8 Phase 2b — Customer 360 commit / rollback / job types
+// ─────────────────────────────────────────────────────────────────
+
+export interface Customer360EntityStats {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  error: number;
+}
+
+export interface Customer360JobDetail {
+  id: string;
+  companyId: string;
+  targetType: 'customer360' | string;
+  sourceType: 'file' | 'api';
+  sourceName: string | null;
+  sourceUrlMasked?: string | null;
+  fileName: string | null;
+  dataPath?: string | null;
+  targetSchemaVersion?: string;
+  status:
+    | 'draft'
+    | 'validated'
+    | 'running'
+    | 'partial'
+    | 'completed'
+    | 'failed'
+    | 'rolled_back'
+    | 'rollback_partial';
+  totalRows: number;
+  createCount: number;
+  updateCount: number;
+  skippedCount: number;
+  errorCount: number;
+  warningCount: number;
+  summaryJson?: unknown;
+  entityCountsJson?: Record<string, Customer360EntityStats> | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  rolledBackAt: string | null;
+  rolledBackByUserId?: string | null;
+}
+
+export interface Customer360JobRow {
+  id: string;
+  rowNumber: number;
+  entityType: string | null;
+  parentRowNumber: number | null;
+  relationshipKey: string | null;
+  action: string;
+  status: string;
+  accountId: string | null;
+  recordId: string | null;
+  matchKey: string | null;
+  errorsJson: unknown;
+  warningsJson: unknown;
+  normalizedJson: unknown;
+  beforeJson: unknown;
+  afterJson: unknown;
+}
+
+export interface Customer360CommitResponse {
+  ok: boolean;
+  job: Customer360JobDetail;
+  runStats: { created: number; updated: number; skipped: number; error: number };
+  entityCounts: Record<string, Customer360EntityStats>;
+}
+
+export interface Customer360RollbackResponse {
+  ok: boolean;
+  job: Pick<Customer360JobDetail, 'id' | 'status' | 'rolledBackAt'>;
+  report: {
+    rolledBackByEntity: Record<string, { rolledBack: number; failed: number; skipped: number }>;
+    failedCount: number;
+    errorCount?: number;
+    failedRows: Array<{
+      rowNumber: number;
+      entity: string;
+      errors: Array<{ code: string; targetKey: string | null; label: string | null; message: string }>;
+    }>;
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Client-side CSV/XLSX parsing helpers

@@ -47,6 +47,15 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   const entityKeys = CUSTOMER_360_ENTITIES.map((e) => e.entity);
   const mappingValidation = {};
   for (const ek of entityKeys) {
+    const rows = entities?.[ek]?.rows ?? [];
+    // WR-A8 Phase 2b — Empty entities pass mapping validation. An admin
+    // importing only Account + AccountCompany shouldn't be forced to map
+    // Contact/Address/Project fields. Validator only runs for non-empty
+    // entity blocks.
+    if (rows.length === 0) {
+      mappingValidation[ek] = { ok: true, errors: [], warnings: [] };
+      continue;
+    }
     const m = entities?.[ek]?.mapping ?? [];
     mappingValidation[ek] = validateEntityMapping(ek, m);
   }

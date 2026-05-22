@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Database, Upload, FileSpreadsheet, Globe2, RefreshCcw, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Database, Upload, FileSpreadsheet, Globe2, RefreshCcw, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, Check } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
@@ -11,9 +11,13 @@ import {
   type Customer360DryRunResponse,
   type Customer360EntityKey,
   type Customer360SchemaResponse,
+  type Customer360CommitResponse,
+  type Customer360RollbackResponse,
   type MappingItem,
   CUSTOMER_360_ENTITY_KEYS,
 } from '@/services/importService';
+import { useToast } from '@/components/ui/Toast';
+import { Rocket, Undo2 } from 'lucide-react';
 import {
   flattenCustomer360Json,
   parseCustomer360Xlsx,
@@ -74,6 +78,16 @@ export function Customer360Page() {
   const [dryRun, setDryRun] = useState<Customer360DryRunResponse | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // WR-A8 Phase 2b — commit + rollback state.
+  const [skipErrors, setSkipErrors] = useState(true);
+  const [committing, setCommitting] = useState(false);
+  const [confirmCommit, setConfirmCommit] = useState(false);
+  const [commitResult, setCommitResult] = useState<Customer360CommitResponse | null>(null);
+  const [confirmRollback, setConfirmRollback] = useState(false);
+  const [rollbackBusy, setRollbackBusy] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState<Customer360RollbackResponse | null>(null);
+  const { toast } = useToast();
+
   useEffect(() => {
     if (!companyId && manageable.length > 0) setCompanyId(manageable[0].id);
   }, [companyId, manageable]);
@@ -99,6 +113,59 @@ export function Customer360Page() {
     setMappingByEntity({});
     setDryRun(null);
     setSelectedEntity('account');
+    setCommitResult(null);
+    setRollbackResult(null);
+    setConfirmCommit(false);
+    setConfirmRollback(false);
+  }
+
+  // WR-A8 Phase 2b — commit / rollback handlers
+  async function runCommit() {
+    if (!companyId || !sourceMeta) return;
+    setCommitting(true);
+    const payload: Record<string, { columns: string[]; mapping: MappingItem[]; rows: Array<Record<string, unknown>> }> = {};
+    for (const e of CUSTOMER_360_ENTITY_KEYS) {
+      payload[e] = {
+        columns: bundle[e].columns,
+        mapping: mappingByEntity[e] ?? [],
+        rows: bundle[e].rows,
+      };
+    }
+    const r = await importService.customer360Commit({
+      companyId,
+      entities: payload,
+      sourceMeta,
+      options: { skipErrors },
+    });
+    setCommitting(false);
+    setConfirmCommit(false);
+    if (!r) return;
+    setCommitResult(r);
+    setRollbackResult(null);
+    const stats = r.runStats;
+    toast({
+      type: r.job.status === 'completed' ? 'success' : r.job.status === 'partial' ? 'warn' : 'error',
+      message: `İçe aktarım ${r.job.status === 'completed' ? 'tamamlandı' : r.job.status === 'partial' ? 'kısmen tamamlandı' : 'başarısız'} · ${stats.created} oluşturuldu, ${stats.updated} güncellendi${stats.error > 0 ? `, ${stats.error} hata` : ''}`,
+      duration: 6000,
+    });
+  }
+
+  async function runRollback() {
+    if (!commitResult?.job?.id) return;
+    setRollbackBusy(true);
+    const r = await importService.customer360Rollback(commitResult.job.id);
+    setRollbackBusy(false);
+    setConfirmRollback(false);
+    if (!r) return;
+    setRollbackResult(r);
+    const failed = r.report.failedCount;
+    toast({
+      type: failed === 0 ? 'success' : 'warn',
+      message: failed === 0
+        ? 'Customer 360 aktarımı geri alındı.'
+        : `Customer 360 geri alma kısmi — ${failed} satır geri alınamadı.`,
+      duration: failed === 0 ? 4500 : 7000,
+    });
   }
 
   async function autoMapAll(b: Customer360Bundle) {
@@ -336,11 +403,247 @@ export function Customer360Page() {
             </Card>
 
             {dryRun && <DryRunSummaryCard dryRun={dryRun} schema={schema} selectedEntity={selectedEntity} />}
+
+            {/* WR-A8 Phase 2b — Commit panel */}
+            {dryRun && dryRun.commitAvailable && !commitResult && (
+              <Card>
+                <CardBody className="space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Rocket size={18} className="mt-0.5 text-brand-500" />
+                    <div className="flex-1">
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                        Customer 360 Aktarımına Hazır
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-ndark-muted">
+                        {dryRun.summary && (
+                          <>
+                            Toplam {dryRun.summary.totalRows} satır:
+                            {' '}
+                            <strong>{dryRun.summary.byEntity?.account?.total ?? 0}</strong> müşteri,
+                            {' '}
+                            <strong>{dryRun.summary.byEntity?.accountCompany?.total ?? 0}</strong> şirket ilişkisi,
+                            {' '}
+                            <strong>{dryRun.summary.byEntity?.accountContact?.total ?? 0}</strong> iletişim,
+                            {' '}
+                            <strong>{dryRun.summary.byEntity?.accountAddress?.total ?? 0}</strong> adres,
+                            {' '}
+                            <strong>{dryRun.summary.byEntity?.accountProject?.total ?? 0}</strong> proje.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  {(dryRun.summary?.totalErrors ?? 0) > 0 && (
+                    <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+                      <input
+                        type="checkbox"
+                        checked={skipErrors}
+                        onChange={(e) => setSkipErrors(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <strong>Hatalı satırları atla ve geçerli olanları aktar.</strong>{' '}
+                        {dryRun.summary?.totalErrors} hatalı satır mevcut. İşaretsiz bırakırsanız aktarım bloklanır.
+                      </span>
+                    </label>
+                  )}
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted">
+                    <AlertTriangle size={12} className="mr-1 inline" />
+                    Bu işlem müşteri ilişkileri, kişiler, adresler ve projeler üzerinde değişiklik yapar.
+                    Aktarım sonrası tek tıkla geri alınabilir (rollback).
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button onClick={() => setConfirmCommit(true)} disabled={committing}>
+                      <Rocket size={12} />
+                      Customer 360 Aktarımını Başlat
+                    </Button>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {confirmCommit && !commitResult && (
+              <Card>
+                <CardBody className="space-y-3">
+                  <div className="flex items-start gap-2 text-xs text-slate-700 dark:text-ndark-muted">
+                    <AlertCircle size={16} className="mt-0.5 text-amber-500" />
+                    <span>
+                      Onayladığınızda Customer 360 aktarımı başlar. Aktarım sonucu sayfada gösterilir.{' '}
+                      İhtiyaç olursa "Bu Aktarımı Geri Al" butonu kullanılabilir.
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setConfirmCommit(false)} disabled={committing}>
+                      Vazgeç
+                    </Button>
+                    <Button onClick={runCommit} disabled={committing}>
+                      {committing ? 'Aktarılıyor…' : 'Evet, Başlat'}
+                    </Button>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {commitResult && (
+              <CommitResultCard
+                commit={commitResult}
+                rollback={rollbackResult}
+                onRollbackClick={() => setConfirmRollback(true)}
+                onConfirmRollback={runRollback}
+                rollbackBusy={rollbackBusy}
+                confirming={confirmRollback}
+                onCancelConfirm={() => setConfirmRollback(false)}
+              />
+            )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Commit result card (with rollback)
+// ─────────────────────────────────────────────────────────────────
+
+function CommitResultCard({
+  commit,
+  rollback,
+  onRollbackClick,
+  onConfirmRollback,
+  rollbackBusy,
+  confirming,
+  onCancelConfirm,
+}: {
+  commit: Customer360CommitResponse;
+  rollback: Customer360RollbackResponse | null;
+  onRollbackClick: () => void;
+  onConfirmRollback: () => void;
+  rollbackBusy: boolean;
+  confirming: boolean;
+  onCancelConfirm: () => void;
+}) {
+  const job = commit.job;
+  const entityCounts = commit.entityCounts;
+  const canRollback = (job.status === 'completed' || job.status === 'partial') && !rollback;
+
+  const STATUS_TONE: Record<string, string> = {
+    completed: 'bg-emerald-100 text-emerald-700',
+    partial: 'bg-amber-100 text-amber-700',
+    failed: 'bg-rose-100 text-rose-700',
+    rolled_back: 'bg-slate-200 text-slate-700',
+    rollback_partial: 'bg-amber-100 text-amber-700',
+  };
+  const STATUS_LABEL: Record<string, string> = {
+    completed: 'Tamamlandı',
+    partial: 'Kısmen tamamlandı',
+    failed: 'Başarısız',
+    rolled_back: 'Geri alındı',
+    rollback_partial: 'Geri alma kısmi',
+  };
+
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+              Customer 360 Aktarım Sonucu
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+              Job <code className="font-mono">{job.id}</code>
+            </p>
+          </div>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${STATUS_TONE[job.status] ?? 'bg-slate-100 text-slate-600'}`}>
+            {STATUS_LABEL[job.status] ?? job.status}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+          {(Object.entries(entityCounts) as Array<[string, Customer360EntityStatsLocal]>).map(([ek, s]) => (
+            <div
+              key={ek}
+              className={cn(
+                'rounded-md border p-2 text-xs',
+                s.error > 0
+                  ? 'border-rose-200 bg-rose-50 dark:border-rose-700/40 dark:bg-rose-900/20'
+                  : 'border-emerald-200 bg-emerald-50 dark:border-emerald-700/40 dark:bg-emerald-900/20',
+              )}
+            >
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:text-ndark-muted">{ek}</div>
+              <div className="text-base font-bold">
+                {s.created}+ {s.updated}↺
+              </div>
+              <div className="text-[10px] text-slate-600">
+                toplam {s.total}{s.skipped > 0 ? ` · ${s.skipped} atlandı` : ''}{s.error > 0 ? ` · ${s.error} hata` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {canRollback && (
+            <Button variant="danger" onClick={onRollbackClick} disabled={rollbackBusy}>
+              <Undo2 size={12} />
+              Bu Aktarımı Geri Al
+            </Button>
+          )}
+          {rollback && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-ndark-muted">
+              <Check size={12} />
+              Geri alındı: {job.rolledBackAt ? new Date(job.rolledBackAt).toLocaleString('tr-TR') : 'şimdi'}
+            </span>
+          )}
+        </div>
+
+        {confirming && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs dark:border-rose-700/40 dark:bg-rose-900/20">
+            <div className="mb-2 flex items-start gap-2 text-rose-800 dark:text-rose-200">
+              <AlertCircle size={14} className="mt-0.5" />
+              <span>
+                Bu aktarım ile yapılan Account/AccountCompany güncellemeleri eski değerlerine döner;
+                oluşturulan iletişim, adres ve projeler pasife alınır. Devam etmek istiyor musunuz?
+              </span>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={onCancelConfirm} disabled={rollbackBusy}>
+                Vazgeç
+              </Button>
+              <Button variant="danger" onClick={onConfirmRollback} disabled={rollbackBusy}>
+                {rollbackBusy ? 'Geri alınıyor…' : 'Evet, Geri Al'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {rollback && rollback.report.failedCount > 0 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+            <div className="mb-1 font-semibold">
+              {rollback.report.failedCount} satır geri alınamadı (rollback_error)
+            </div>
+            <ul className="ml-3 list-disc">
+              {rollback.report.failedRows.slice(0, 10).map((fr, i) => (
+                <li key={i}>
+                  <strong>{fr.entity} #{fr.rowNumber}:</strong> {fr.errors[0]?.message ?? 'Bilinmeyen hata'}
+                </li>
+              ))}
+              {rollback.report.failedRows.length > 10 && (
+                <li className="text-[10px]">… ve {rollback.report.failedRows.length - 10} satır daha</li>
+              )}
+            </ul>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+interface Customer360EntityStatsLocal {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  error: number;
 }
 
 // ───────────────────────────────────────────────────────

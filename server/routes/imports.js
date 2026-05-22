@@ -40,6 +40,12 @@ import {
   validateEntityMapping,
 } from '../lib/import/targetSchemas/customer360TargetSchemas/index.js';
 import { dryRunCustomer360 } from '../lib/import/customer360DryRun.js';
+import {
+  commitCustomer360,
+  rollbackCustomer360,
+  getCustomer360Job,
+  listCustomer360JobRows,
+} from '../lib/import/customer360CommitEngine.js';
 
 const router = Router();
 
@@ -411,7 +417,75 @@ router.post(
       entities,
       sourceMeta: sourceMeta ?? null,
     });
-    res.json(result);
+    // WR-A8 Phase 2b — surface commitAvailable for UI: if registry-level
+    // validation passes, commit can proceed (server re-validates as well).
+    const commitAvailable = Boolean(
+      result.ok === true &&
+        !result.code &&
+        result.customer360SchemaVersion,
+    );
+    res.json({ ...result, commitAvailable });
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// Phase 2b — Commit + Rollback + Job audit (Customer 360)
+// ─────────────────────────────────────────────────────────────────
+
+router.post(
+  '/customer360/commit',
+  asyncRoute(async (req, res) => {
+    const { companyId, entities, sourceMeta, options, jobId } = req.body ?? {};
+    assertCompanyAdmin(req, companyId);
+    if (!jobId && (!entities || typeof entities !== 'object')) {
+      throw new ImportError('entities veya jobId zorunlu.', { code: 'entities_or_jobid_required' });
+    }
+    const result = await commitCustomer360({
+      user: req.user,
+      companyId,
+      entities,
+      sourceMeta: sourceMeta ?? null,
+      options: options ?? {},
+      jobId: jobId ?? null,
+    });
+    res.json({ ok: true, ...result });
+  }),
+);
+
+router.post(
+  '/customer360/jobs/:id/rollback',
+  asyncRoute(async (req, res) => {
+    const jobId = req.params.id;
+    const job = await getCustomer360Job({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!job) throw new ImportError('Import job bulunamadı.', { status: 404, code: 'job_not_found' });
+    assertCompanyAdmin(req, job.companyId);
+    const result = await rollbackCustomer360({ jobId, user: req.user });
+    res.json({ ok: true, ...result });
+  }),
+);
+
+router.get(
+  '/customer360/jobs/:id',
+  asyncRoute(async (req, res) => {
+    const jobId = req.params.id;
+    const job = await getCustomer360Job({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!job) return res.status(404).json({ error: 'job_not_found', message: 'Import job bulunamadı.' });
+    res.json(job);
+  }),
+);
+
+router.get(
+  '/customer360/jobs/:id/rows',
+  asyncRoute(async (req, res) => {
+    const jobId = req.params.id;
+    const job = await getCustomer360Job({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!job) return res.status(404).json({ error: 'job_not_found', message: 'Import job bulunamadı.' });
+    const entity = typeof req.query.entity === 'string' ? req.query.entity : null;
+    const status = typeof req.query.status === 'string' ? req.query.status : null;
+    const limit = req.query.limit ? Number(req.query.limit) : 500;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+    const rows = await listCustomer360JobRows({ jobId, entity, status, limit, offset });
+    res.json({ value: rows });
   }),
 );
 
