@@ -24,9 +24,13 @@
  *   - Person / User rows are NEVER deleted.
  *   - CaseActivity / CaseTransfer / CaseNote / history / audit are NEVER deleted.
  *   - Closed cases keep their assignedTeamId/Name snapshot (history preserved).
- *   - Only open cases have assignedTeamId/Name cleared.
- *   - Teams are soft-disabled (isActive=false) when referenced; hard-deleted
- *     only when zero references (no cases of any status, no members).
+ *   - Open-case clearing is SCOPED to UNIVERA cases only (companyId filter);
+ *     any cross-tenant drift (PARAM/FINROTA case assigned to a UNIVERA team)
+ *     is reported but NOT mutated.
+ *   - Teams are ALWAYS soft-disabled (isActive=false); never hard-deleted.
+ *     CaseTransfer.fromTeamId / toTeamId / aiSuggestedTeamId are string refs
+ *     (no FK), so deleting the Team row would break listTransfers name
+ *     resolution. Soft-disable keeps history queryable.
  *   - Categories (CategoryDef) and Checklists (ChecklistTemplate) are
  *     hard-deleted: Case stores denormalized snapshots, no FK reference.
  *   - Idempotent: a second --execute run finds zero/already-clean state.
@@ -149,10 +153,14 @@ async function planTeams(companyId) {
       perTeam: [],
       personRefs: 0,
       teamLeadRefs: 0,
-      openCaseRefs: 0,
-      closedCaseRefs: 0,
-      hardDeletable: [],
-      softDisableOnly: [],
+      univeraOpenCaseRefs: 0,
+      univeraClosedCaseRefs: 0,
+      crossTenantDrift: 0,
+      transferFromRefs: 0,
+      transferToRefs: 0,
+      transferAiRefs: 0,
+      teamsAlreadyDisabled: 0,
+      teamsToDisable: 0,
     };
   }
 
@@ -160,34 +168,77 @@ async function planTeams(companyId) {
   const teamLeadRefs = await prisma.person.count({
     where: { teamId: { in: teamIds }, isTeamLead: true },
   });
-  const openCaseRefs = await prisma.case.count({
-    where: { assignedTeamId: { in: teamIds }, status: { in: OPEN_CASE_STATUSES } },
+
+  // Open-case clearing scope: ONLY UNIVERA cases. Cross-tenant drift (a
+  // PARAM/FINROTA case mis-assigned to a UNIVERA team) is reported here but
+  // NOT mutated by this script.
+  const univeraOpenCaseRefs = await prisma.case.count({
+    where: {
+      companyId,
+      assignedTeamId: { in: teamIds },
+      status: { in: OPEN_CASE_STATUSES },
+    },
   });
-  const closedCaseRefs = await prisma.case.count({
-    where: { assignedTeamId: { in: teamIds }, NOT: { status: { in: OPEN_CASE_STATUSES } } },
+  const univeraClosedCaseRefs = await prisma.case.count({
+    where: {
+      companyId,
+      assignedTeamId: { in: teamIds },
+      NOT: { status: { in: OPEN_CASE_STATUSES } },
+    },
+  });
+  const crossTenantDrift = await prisma.case.count({
+    where: {
+      assignedTeamId: { in: teamIds },
+      NOT: { companyId },
+    },
   });
 
-  // Per-team breakdown to decide hard-delete vs soft-disable.
+  // CaseTransfer history references — preserved by soft-disable. Fields are
+  // string snapshots (no FK), but server/db/caseRepository.js listTransfers
+  // joins back to Team to resolve names, so the Team row must stay alive.
+  const transferFromRefs = await prisma.caseTransfer.count({
+    where: { fromTeamId: { in: teamIds } },
+  });
+  const transferToRefs = await prisma.caseTransfer.count({
+    where: { toTeamId: { in: teamIds } },
+  });
+  const transferAiRefs = await prisma.caseTransfer.count({
+    where: { aiSuggestedTeamId: { in: teamIds } },
+  });
+
+  // Per-team breakdown for reporting only — no longer drives hard-delete.
   const perTeam = [];
   for (const t of teams) {
     const members = await prisma.person.count({ where: { teamId: t.id } });
     const openCases = await prisma.case.count({
-      where: { assignedTeamId: t.id, status: { in: OPEN_CASE_STATUSES } },
+      where: { companyId, assignedTeamId: t.id, status: { in: OPEN_CASE_STATUSES } },
     });
     const closedCases = await prisma.case.count({
-      where: { assignedTeamId: t.id, NOT: { status: { in: OPEN_CASE_STATUSES } } },
+      where: { companyId, assignedTeamId: t.id, NOT: { status: { in: OPEN_CASE_STATUSES } } },
     });
-    perTeam.push({ ...t, members, openCases, closedCases });
+    const transferRefs = await prisma.caseTransfer.count({
+      where: { OR: [{ fromTeamId: t.id }, { toTeamId: t.id }, { aiSuggestedTeamId: t.id }] },
+    });
+    perTeam.push({ ...t, members, openCases, closedCases, transferRefs });
   }
 
-  // A team is hard-deletable ONLY when: no members AND no cases of any status.
-  // closedCases holds the FK; deleting would leave a dangling reference because
-  // Case.assignedTeamId has no onDelete cascade. So closed-case-bearing teams
-  // must stay (soft-disabled).
-  const hardDeletable = perTeam.filter((t) => t.members === 0 && t.openCases === 0 && t.closedCases === 0);
-  const softDisableOnly = perTeam.filter((t) => !(t.members === 0 && t.openCases === 0 && t.closedCases === 0));
+  const teamsAlreadyDisabled = teams.filter((t) => !t.isActive).length;
+  const teamsToDisable = teams.filter((t) => t.isActive).length;
 
-  return { teams, perTeam, personRefs, teamLeadRefs, openCaseRefs, closedCaseRefs, hardDeletable, softDisableOnly };
+  return {
+    teams,
+    perTeam,
+    personRefs,
+    teamLeadRefs,
+    univeraOpenCaseRefs,
+    univeraClosedCaseRefs,
+    crossTenantDrift,
+    transferFromRefs,
+    transferToRefs,
+    transferAiRefs,
+    teamsAlreadyDisabled,
+    teamsToDisable,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -247,16 +298,23 @@ async function main() {
     header('MODULE 3 — Teams (UNIVERA)');
     line('Team count', fmt(tmPlan.teams.length));
     for (const t of tmPlan.perTeam) {
-      const decision = t.members === 0 && t.openCases === 0 && t.closedCases === 0 ? 'HARD DELETE' : 'SOFT DISABLE';
-      line(`  · ${t.name}  members=${t.members} open=${t.openCases} closed=${t.closedCases}`,
-        `${t.isActive ? 'active' : 'inactive'} → ${decision}`);
+      line(`  · ${t.name}  members=${t.members} open=${t.openCases} closed=${t.closedCases} xfer=${t.transferRefs}`,
+        `${t.isActive ? 'active → SOFT DISABLE' : 'already inactive (no-op)'}`);
     }
     line('Person.teamId references to clear', fmt(tmPlan.personRefs));
     line('Person.isTeamLead flags to clear (subset)', fmt(tmPlan.teamLeadRefs));
-    line('Open cases — assignedTeamId/Name will be CLEARED', fmt(tmPlan.openCaseRefs));
-    line('Closed cases — assignedTeamId/Name PRESERVED (history)', fmt(tmPlan.closedCaseRefs));
-    line('Hard-deletable team count', fmt(tmPlan.hardDeletable.length));
-    line('Soft-disable team count', fmt(tmPlan.softDisableOnly.length));
+    line('UNIVERA open cases — assignedTeamId/Name will be CLEARED', fmt(tmPlan.univeraOpenCaseRefs));
+    line('UNIVERA closed cases — PRESERVED (history)', fmt(tmPlan.univeraClosedCaseRefs));
+    line('Cross-tenant drift (assigned to UNIVERA team, not UNIVERA case)', fmt(tmPlan.crossTenantDrift));
+    if (tmPlan.crossTenantDrift > 0) {
+      line('  → WARNING', 'reported only; this script does NOT mutate cross-tenant rows');
+    }
+    line('CaseTransfer.fromTeamId refs (preserved)', fmt(tmPlan.transferFromRefs));
+    line('CaseTransfer.toTeamId refs (preserved)', fmt(tmPlan.transferToRefs));
+    line('CaseTransfer.aiSuggestedTeamId refs (preserved)', fmt(tmPlan.transferAiRefs));
+    line('Teams already inactive (no-op)', fmt(tmPlan.teamsAlreadyDisabled));
+    line('Teams to soft-disable on execute', fmt(tmPlan.teamsToDisable));
+    line('Plan', 'SOFT DISABLE all UNIVERA teams; no hard delete, to preserve transfer/audit history');
   }
 
   header('PARAM / FINROTA baseline — NOT TOUCHED');
@@ -291,7 +349,7 @@ async function main() {
     const out = {
       categories: { subDeleted: 0, parentDeleted: 0 },
       checklists: { deleted: 0 },
-      teams: { personTeamCleared: 0, personLeadCleared: 0, openCaseCleared: 0, softDisabled: 0, hardDeleted: 0 },
+      teams: { personTeamCleared: 0, personLeadCleared: 0, openCaseCleared: 0, softDisabled: 0 },
     };
 
     // ── Module 1: Categories ── (re-fetch inside tx for fresh state)
@@ -326,10 +384,8 @@ async function main() {
         select: { id: true, isActive: true },
       });
       const teamIds = teamsInTx.map((t) => t.id);
-      const activeById = new Map(teamsInTx.map((t) => [t.id, t.isActive]));
       if (teamIds.length) {
         // 1) Clear Person.teamId (and isTeamLead) for members of UNIVERA teams.
-        // Capture isTeamLead count first (need it before update).
         const leadCount = await tx.person.count({ where: { teamId: { in: teamIds }, isTeamLead: true } });
         const personCleared = await tx.person.updateMany({
           where: { teamId: { in: teamIds } },
@@ -338,27 +394,28 @@ async function main() {
         out.teams.personTeamCleared = personCleared.count;
         out.teams.personLeadCleared = leadCount;
 
-        // 2) Clear open Case.assignedTeamId/assignedTeamName.
+        // 2) Clear open Case.assignedTeamId/assignedTeamName — SCOPED to
+        //    UNIVERA cases. Cross-tenant drift rows are reported in dry-run
+        //    but never mutated here.
         const openCleared = await tx.case.updateMany({
-          where: { assignedTeamId: { in: teamIds }, status: { in: OPEN_CASE_STATUSES } },
+          where: {
+            companyId: company.id,
+            assignedTeamId: { in: teamIds },
+            status: { in: OPEN_CASE_STATUSES },
+          },
           data: { assignedTeamId: null, assignedTeamName: null },
         });
         out.teams.openCaseCleared = openCleared.count;
 
-        // 3) Per-team: hard-delete if zero remaining refs (members + cases),
-        //    else soft-disable (isActive=false).
-        // After step 1: no members refer. After step 2: no open cases refer.
-        // Remaining refs can only be closed cases — those keep the FK.
-        for (const t of teamIds) {
-          const remaining = await tx.case.count({ where: { assignedTeamId: t } });
-          if (remaining === 0) {
-            await tx.team.delete({ where: { id: t } });
-            out.teams.hardDeleted += 1;
-          } else if (activeById.get(t) === true) {
-            await tx.team.update({ where: { id: t }, data: { isActive: false } });
-            out.teams.softDisabled += 1;
-          }
-        }
+        // 3) Soft-disable every UNIVERA team. NEVER hard-delete: CaseTransfer
+        //    history references team ids by string, and caseRepository's
+        //    listTransfers joins back to Team for name resolution — deleting
+        //    the row would orphan historical transfer views.
+        const disabled = await tx.team.updateMany({
+          where: { companyId: company.id, isActive: true },
+          data: { isActive: false },
+        });
+        out.teams.softDisabled = disabled.count;
       }
     }
 
@@ -376,9 +433,8 @@ async function main() {
   if (RUN_TM) {
     line('Person.teamId cleared', fmt(result.teams.personTeamCleared));
     line('Person.isTeamLead cleared', fmt(result.teams.personLeadCleared));
-    line('Open case assignedTeam cleared', fmt(result.teams.openCaseCleared));
-    line('Teams soft-disabled', fmt(result.teams.softDisabled));
-    line('Teams hard-deleted', fmt(result.teams.hardDeleted));
+    line('UNIVERA open case assignedTeam cleared', fmt(result.teams.openCaseCleared));
+    line('Teams soft-disabled (no hard-delete)', fmt(result.teams.softDisabled));
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -389,12 +445,19 @@ async function main() {
   const remainingActiveTeams = RUN_TM
     ? await prisma.team.count({ where: { companyId: company.id, isActive: true } })
     : null;
+  const totalUniveraTeams = RUN_TM
+    ? await prisma.team.count({ where: { companyId: company.id } })
+    : null;
   const remainingTeamMemberRefs = RUN_TM
     ? await prisma.person.count({ where: { team: { companyId: company.id } } })
     : null;
-  const remainingOpenCaseTeamRefs = RUN_TM
+  // UNIVERA-scoped check: open cases of UNIVERA companyId still pointing at a
+  // UNIVERA team. Cross-tenant drift is intentionally NOT mutated and not
+  // counted here.
+  const remainingUniveraOpenCaseTeamRefs = RUN_TM
     ? await prisma.case.count({
         where: {
+          companyId: company.id,
           assignedTeam: { companyId: company.id },
           status: { in: OPEN_CASE_STATUSES },
         },
@@ -421,8 +484,9 @@ async function main() {
   if (RUN_CHK)  line('UNIVERA ChecklistTemplate remaining', fmt(remainingChk));
   if (RUN_TM) {
     line('UNIVERA active Team remaining', fmt(remainingActiveTeams));
+    line('UNIVERA total Team rows preserved (soft-disabled)', fmt(totalUniveraTeams));
     line('Person rows still on UNIVERA teams', fmt(remainingTeamMemberRefs));
-    line('Open cases still assigned to UNIVERA teams', fmt(remainingOpenCaseTeamRefs));
+    line('UNIVERA open cases still on UNIVERA teams', fmt(remainingUniveraOpenCaseTeamRefs));
   }
   line('PARAM Team (unchanged)',         `${after.paramTeams} (was ${baseline.paramTeams})`);
   line('PARAM CategoryDef (unchanged)',  `${after.paramCategories} (was ${baseline.paramCategories})`);
@@ -439,7 +503,7 @@ async function main() {
   const ok =
     (!RUN_CATS || remainingCats === 0) &&
     (!RUN_CHK  || remainingChk === 0) &&
-    (!RUN_TM   || (remainingActiveTeams === 0 && remainingTeamMemberRefs === 0 && remainingOpenCaseTeamRefs === 0)) &&
+    (!RUN_TM   || (remainingActiveTeams === 0 && remainingTeamMemberRefs === 0 && remainingUniveraOpenCaseTeamRefs === 0)) &&
     after.paramTeams === baseline.paramTeams &&
     after.finrotaTeams === baseline.finrotaTeams &&
     after.paramCategories === baseline.paramCategories &&
@@ -463,7 +527,9 @@ async function main() {
   console.log('  - PARAM / FINROTA untouched');
   console.log('  - Cases / Accounts / Persons preserved');
   console.log('  - CaseActivity / CaseTransfer history preserved');
+  console.log('  - All UNIVERA teams soft-disabled (NO hard-delete) — transfer history preserved');
   console.log('  - Closed-case team assignment snapshots preserved');
+  console.log('  - Open-case clearing scoped to UNIVERA cases only');
   console.log('\nManual UI follow-up:');
   console.log('  · Yönetim → Kategori: UNIVERA listesi boş / aktif yok');
   console.log('  · Yönetim → Checklist: UNIVERA listesi boş / aktif yok');
