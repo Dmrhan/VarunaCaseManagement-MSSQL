@@ -60,6 +60,7 @@ export function AdminDataImportPage() {
   const [dryRunBusy, setDryRunBusy] = useState(false);
   const [resultJob, setResultJob] = useState<ImportJob | null>(null);
   const [resultStats, setResultStats] = useState<{ createdCount: number; updatedCount: number; skippedCount: number; errorCount: number } | null>(null);
+  const [resultMode, setResultMode] = useState<'live' | 'history'>('live');
   const [historyKey, setHistoryKey] = useState(0);
 
   useEffect(() => {
@@ -96,6 +97,7 @@ export function AdminDataImportPage() {
     setDryRun(null);
     setResultJob(null);
     setResultStats(null);
+    setResultMode('live');
     setStep('source');
     setCompleted(new Set());
   }
@@ -103,6 +105,14 @@ export function AdminDataImportPage() {
   // Source parsed → otomatik auto-map + adım 2'ye geç
   async function onSourceParsed(p: ParsedSource) {
     setSource(p);
+    // Defensive clear: a fresh upload must not leave stale resultJob /
+    // rollback context from a previous commit or a history-opened job
+    // visible downstream. The Stepper otherwise lets users jump back to
+    // 'result' and trigger rollback against the wrong job.
+    setResultJob(null);
+    setResultStats(null);
+    setResultMode('live');
+    setDryRun(null);
     markCompleted('source');
     if (companyId && p.columns.length > 0) {
       const r = await importService.autoMap({ companyId, columns: p.columns });
@@ -141,6 +151,7 @@ export function AdminDataImportPage() {
   function onCommitDone(job: ImportJob, runStats: { createdCount: number; updatedCount: number; skippedCount: number; errorCount: number }) {
     setResultJob(job);
     setResultStats(runStats);
+    setResultMode('live');
     markCompleted('preview');
     markCompleted('commit');
     setStep('result');
@@ -150,6 +161,7 @@ export function AdminDataImportPage() {
   function openHistoryJob(j: ImportJob) {
     setResultJob(j);
     setResultStats(null);
+    setResultMode('history');
     setStep('result');
     setCompleted(new Set(STEP_ORDER));
   }
@@ -334,6 +346,7 @@ export function AdminDataImportPage() {
                 <ResultStep
                   job={resultJob}
                   runStats={resultStats ?? undefined}
+                  mode={resultMode}
                   onNew={resetFlow}
                   onJobUpdated={(j) => {
                     setResultJob(j);
@@ -387,6 +400,7 @@ export function AdminDataImportPage() {
               companyId={companyId}
               onOpenJob={openHistoryJob}
               refreshKey={historyKey}
+              targetType="account"
             />
           )}
         </div>
