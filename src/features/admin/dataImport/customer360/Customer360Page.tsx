@@ -19,10 +19,17 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { Rocket, Undo2 } from 'lucide-react';
 import {
+  buildCustomer360BundleFromMappings,
   flattenCustomer360Json,
-  parseCustomer360Xlsx,
+  readCustomer360Workbook,
+  suggestSheetMappings,
+  type AutoSuggestResult,
   type Customer360Bundle,
+  type LegacyInfo,
+  type RawSheet,
+  type SheetMappingChoice,
 } from './parsers';
+import { SheetMappingStep } from './SheetMappingStep';
 import { downloadCustomer360Template } from './templateGenerator';
 import { RelationshipGraph } from './RelationshipGraph';
 import { MappingFieldSelect } from '../MappingFieldSelect';
@@ -73,8 +80,15 @@ export function Customer360Page() {
   const [parseInfo, setParseInfo] = useState<{
     unmappedSheets?: string[];
     overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+    legacy?: LegacyInfo;
   } | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+
+  // Sheet Mapping Wizard state — populated for XLSX uploads. API source
+  // skips this stage and produces a bundle directly.
+  const [rawSheets, setRawSheets] = useState<RawSheet[] | null>(null);
+  const [sheetSuggested, setSheetSuggested] = useState<AutoSuggestResult | null>(null);
+  const [sheetMappings, setSheetMappings] = useState<Record<string, SheetMappingChoice>>({});
 
   const [mappingByEntity, setMappingByEntity] = useState<Record<string, MappingItem[]>>({});
   const [selectedEntity, setSelectedEntity] = useState<Customer360EntityKey | null>('account');
@@ -120,6 +134,9 @@ export function Customer360Page() {
     setRollbackResult(null);
     setConfirmCommit(false);
     setConfirmRollback(false);
+    setRawSheets(null);
+    setSheetSuggested(null);
+    setSheetMappings({});
   }
 
   // WR-A8 Phase 2b — commit / rollback handlers
@@ -192,6 +209,69 @@ export function Customer360Page() {
     setMappingByEntity(next);
   }
 
+  function resetWizardDownstream() {
+    setMappingByEntity({});
+    setSelectedEntity('account');
+    setDryRun(null);
+    setCommitResult(null);
+    setRollbackResult(null);
+    setConfirmCommit(false);
+    setConfirmRollback(false);
+  }
+
+  function onSheetsParsed(
+    sheets: RawSheet[],
+    meta: {
+      sourceType: 'file' | 'api';
+      fileName: string | null;
+      sourceUrlMasked: string | null;
+      dataPath: string | null;
+    },
+    suggested: AutoSuggestResult,
+  ) {
+    setRawSheets(sheets);
+    setSheetSuggested(suggested);
+    setSheetMappings(suggested.perSheet);
+    setSourceMeta(meta);
+    setBundle(emptyBundle());
+    setParseInfo(null);
+    resetWizardDownstream();
+  }
+
+  async function onSheetMappingConfirm() {
+    if (!rawSheets) return;
+    const { bundle: b, perEntityOverflow, legacyInfo } = buildCustomer360BundleFromMappings(
+      rawSheets,
+      sheetMappings,
+      ROW_CAPS,
+    );
+    // Sheets the user left without entities AND without "Atla" → unmapped.
+    const unmappedSheets = rawSheets
+      .filter((s) => {
+        const m = sheetMappings[s.sheetName];
+        return !m || (!m.skip && m.entities.length === 0);
+      })
+      .map((s) => s.sheetName);
+    setBundle(b);
+    setParseInfo({
+      unmappedSheets,
+      overflow: perEntityOverflow,
+      legacy: legacyInfo ?? undefined,
+    });
+    // Clear the wizard so the field-mapping panels take over. Keep
+    // sheetSuggested/sheetMappings for "Geri" later (not used yet).
+    setRawSheets(null);
+    resetWizardDownstream();
+    await autoMapAll(b);
+  }
+
+  function onResetSheetSuggestions() {
+    if (!rawSheets) return;
+    const fresh = suggestSheetMappings(rawSheets);
+    setSheetSuggested(fresh);
+    setSheetMappings(fresh.perSheet);
+  }
+
   async function onBundleParsed(
     b: Customer360Bundle,
     meta: {
@@ -203,11 +283,15 @@ export function Customer360Page() {
     info: {
       unmappedSheets?: string[];
       overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+      legacy?: LegacyInfo;
     },
   ) {
     setBundle(b);
     setSourceMeta(meta);
     setParseInfo(info);
+    setRawSheets(null);
+    setSheetSuggested(null);
+    setSheetMappings({});
     setDryRun(null);
     await autoMapAll(b);
   }
@@ -343,14 +427,48 @@ export function Customer360Page() {
             </div>
 
             {sourceMode === 'file' ? (
-              <FileSourcePanel onBundle={onBundleParsed} />
+              <FileSourcePanel onSheets={onSheetsParsed} />
             ) : (
               <ApiSourcePanel companyId={companyId} onBundle={onBundleParsed} />
+            )}
+
+            {rawSheets && sheetSuggested && (
+              <SheetMappingStep
+                sheets={rawSheets}
+                suggested={sheetSuggested}
+                mappings={sheetMappings}
+                onChange={setSheetMappings}
+                onReset={onResetSheetSuggestions}
+                onConfirm={() => void onSheetMappingConfirm()}
+              />
             )}
 
             {parseError && (
               <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-200">
                 {parseError}
+              </div>
+            )}
+            {parseInfo?.legacy && (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+                <div>
+                  <strong>Eski müşteri listesi formatı algılandı ve Customer 360 formatına dönüştürüldü.</strong>
+                </div>
+                <div className="mt-1">
+                  {parseInfo.legacy.accountsSource} → Accounts/Companies, Detaylar → Contacts/Projects
+                </div>
+                <div className="mt-1 text-[11px] text-emerald-700/90 dark:text-emerald-200/90">
+                  Üretilen kayıtlar: Accounts {parseInfo.legacy.generatedCounts.account} · Companies{' '}
+                  {parseInfo.legacy.generatedCounts.accountCompany} · Contacts{' '}
+                  {parseInfo.legacy.generatedCounts.accountContact} · Projects{' '}
+                  {parseInfo.legacy.generatedCounts.accountProject} · Addresses{' '}
+                  {parseInfo.legacy.generatedCounts.accountAddress}
+                </div>
+                {parseInfo.legacy.ignoredFallback && (
+                  <div className="mt-1 text-[11px] text-emerald-700/80 dark:text-emerald-200/80">
+                    Not: "{parseInfo.legacy.ignoredFallback}" sayfası göz ardı edildi ("
+                    {parseInfo.legacy.accountsSource}" tercih edildi).
+                  </div>
+                )}
               </div>
             )}
             {parseInfo?.unmappedSheets && parseInfo.unmappedSheets.length > 0 && (
@@ -654,12 +772,12 @@ interface Customer360EntityStatsLocal {
 // ───────────────────────────────────────────────────────
 
 function FileSourcePanel({
-  onBundle,
+  onSheets,
 }: {
-  onBundle: (
-    b: Customer360Bundle,
+  onSheets: (
+    sheets: RawSheet[],
     meta: { sourceType: 'file' | 'api'; fileName: string | null; sourceUrlMasked: string | null; dataPath: string | null },
-    info: { unmappedSheets?: string[]; overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }> },
+    suggested: AutoSuggestResult,
   ) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -691,11 +809,11 @@ function FileSourcePanel({
     }
     setBusy(true);
     try {
-      const { bundle, unmappedSheets, perEntityOverflow } = await parseCustomer360Xlsx(file, ROW_CAPS);
-      onBundle(
-        bundle,
+      const { sheets, suggested } = await readCustomer360Workbook(file);
+      onSheets(
+        sheets,
         { sourceType: 'file', fileName: file.name, sourceUrlMasked: null, dataPath: null },
-        { unmappedSheets, overflow: perEntityOverflow },
+        suggested,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Dosya okunamadı.');
@@ -780,7 +898,11 @@ function ApiSourcePanel({
   onBundle: (
     b: Customer360Bundle,
     meta: { sourceType: 'file' | 'api'; fileName: string | null; sourceUrlMasked: string | null; dataPath: string | null },
-    info: { unmappedSheets?: string[]; overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }> },
+    info: {
+      unmappedSheets?: string[];
+      overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+      legacy?: LegacyInfo;
+    },
   ) => void;
 }) {
   const [url, setUrl] = useState('');
