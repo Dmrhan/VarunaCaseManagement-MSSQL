@@ -1,11 +1,30 @@
 /**
  * WR-A8 Phase 2a — Customer 360 client-side parsers.
  *
- * Multi-sheet XLSX → per-entity rows + columns.
+ * Multi-sheet XLSX → raw sheets → user-confirmed sheet mapping → per-entity
+ *   rows + columns (Customer360Bundle).
  * Nested API JSON → flattened per-entity rows with parent-key injection.
  *
- * No server-side body needed for these; BFF receives already-flattened
- * { entity → {columns, rows} } map and runs dry-run.
+ * The XLSX flow is split into two stages so an explicit Sheet Mapping
+ * Wizard can sit between upload and field mapping:
+ *
+ *   1. readCustomer360Workbook(file)
+ *        → { sheets: RawSheet[], suggested: AutoSuggestResult }
+ *        Reads every sheet, captures columns + sample + rows; auto-suggests
+ *        a per-sheet entity mapping using sheet-name aliases, the legacy
+ *        Genel/Genel Tekil/Detaylar preset, and header heuristics.
+ *
+ *   2. buildCustomer360BundleFromMappings(sheets, mappings, caps)
+ *        → { bundle, perEntityOverflow, legacyInfo? }
+ *        Concatenates rows across sheets per entity. When a sheet/entity
+ *        pair matches the legacy preset (Genel/Genel Tekil/Detaylar →
+ *        account/accountCompany/accountContact/accountProject) a dedicated
+ *        legacy transformer renames + normalizes columns. Otherwise rows
+ *        pass through with cell-level normalization (NULL/-/whitespace →
+ *        empty, trim, "33652.0" → "33652" on id-shaped columns).
+ *
+ * BFF receives the final flattened { entity → {columns, rows} } map and
+ * runs dry-run; no server-side change is needed for the wizard.
  */
 
 import { CUSTOMER_360_ENTITY_KEYS, type Customer360EntityKey } from '@/services/importService';
@@ -81,7 +100,6 @@ function normalizeHeaderName(s: string): string {
 /**
  * Find the actual key in a source row that matches any of the given header
  * candidates, comparing case-insensitively with collapsed whitespace.
- * Returns undefined when no candidate matches.
  */
 function pickHeader(row: Record<string, unknown>, candidates: string[]): string | undefined {
   const norm = new Map<string, string>();
@@ -93,10 +111,7 @@ function pickHeader(row: Record<string, unknown>, candidates: string[]): string 
   return undefined;
 }
 
-/**
- * Convert any cell value to a trimmed string. Treats sentinel "NULL", "-",
- * and whitespace-only as empty.
- */
+/** Trim + drop sentinel "NULL"/"-"/whitespace-only values. */
 function cleanCellString(v: unknown): string {
   if (v === undefined || v === null) return '';
   const s = String(v).trim();
@@ -105,11 +120,7 @@ function cleanCellString(v: unknown): string {
   return s;
 }
 
-/**
- * Strip a trailing ".0" / ".0000" from numeric-id strings produced by Excel
- * when ID-shaped values are stored as numbers (e.g. "33652.0" → "33652").
- * Non-numeric strings pass through unchanged.
- */
+/** "33652.0" → "33652" for ID-shaped values; otherwise unchanged. */
 function normalizeNumericId(v: unknown): string {
   const s = cleanCellString(v);
   if (!s) return '';
@@ -117,10 +128,7 @@ function normalizeNumericId(v: unknown): string {
   return m ? m[1] : s;
 }
 
-/**
- * Pull the leading "yyyy-mm-dd" out of a value like "2017-12-31 21:00:00.000".
- * Pass through other shapes; dry-run already normalizes safely.
- */
+/** "2017-12-31 21:00:00.000" → "2017-12-31"; other shapes pass through. */
 function normalizeDateString(v: unknown): string {
   const s = cleanCellString(v);
   if (!s) return '';
@@ -128,16 +136,21 @@ function normalizeDateString(v: unknown): string {
   return m ? m[1] : s;
 }
 
+/** id-shaped column heuristic: name contains key / id / code / vkn. */
+function isIdLikeColumnName(name: string): boolean {
+  const n = name.toLowerCase();
+  return /(?:^|[^a-z])(key|id|code|vkn|kod|sifre|şifresi)(?:[^a-z]|$)/.test(n);
+}
+
 // ─────────────────────────────────────────────────────────────────────
-// Legacy customer workbook (Genel / Genel Tekil / Detaylar) support.
-// Independent of selected company — detection is based on sheet shape only.
+// Legacy customer workbook detection (Genel / Genel Tekil / Detaylar)
 // ─────────────────────────────────────────────────────────────────────
 
 const LEGACY_SHEET_GENEL = 'genel';
 const LEGACY_SHEET_GENEL_TEKIL = 'genel tekil';
 const LEGACY_SHEET_DETAYLAR = 'detaylar';
 
-interface LegacyInfo {
+export interface LegacyInfo {
   /** Which sheet was used as the Accounts source. */
   accountsSource: 'Genel Tekil' | 'Genel';
   /** Sheet name we skipped because a preferred alternative was used. */
@@ -147,9 +160,9 @@ interface LegacyInfo {
 }
 
 /**
- * Detect the legacy customer Excel layout from sheet shape only — no
- * companyId / tenant lookup, no header content. The workbook is "legacy"
- * when it contains a Detaylar sheet plus either Genel Tekil or Genel.
+ * Workbook-shape-only detector — does NOT inspect tenant or column content.
+ * The workbook is "legacy" when it contains a Detaylar sheet AND either
+ * Genel Tekil or Genel.
  */
 export function detectLegacyCustomerWorkbook(sheetNames: string[]): boolean {
   const set = new Set(sheetNames.map((s) => normalizeHeaderName(s)));
@@ -157,73 +170,151 @@ export function detectLegacyCustomerWorkbook(sheetNames: string[]): boolean {
   return set.has(LEGACY_SHEET_GENEL_TEKIL) || set.has(LEGACY_SHEET_GENEL);
 }
 
-function findSheetByName(
-  wb: { SheetNames: string[]; Sheets: Record<string, unknown> },
-  norm: string,
-): { name: string; sheet: unknown } | null {
-  for (const sn of wb.SheetNames) {
-    if (normalizeHeaderName(sn) === norm) return { name: sn, sheet: wb.Sheets[sn] };
-  }
-  return null;
+// ─────────────────────────────────────────────────────────────────────
+// Sheet Mapping Wizard — raw sheets + auto-suggestion + bundle builder.
+// ─────────────────────────────────────────────────────────────────────
+
+export interface RawSheet {
+  sheetName: string;
+  rowCount: number;
+  columns: string[];
+  sampleRows: Array<Record<string, unknown>>; // first 3 rows for the wizard preview
+  rows: Array<Record<string, unknown>>;       // full row set (used at bundle build time)
+}
+
+export interface SheetMappingChoice {
+  /** Target entities this sheet contributes rows to. Multiple allowed. */
+  entities: Customer360EntityKey[];
+  /** Skip this sheet entirely (no warning, no rows). */
+  skip: boolean;
+}
+
+export interface AutoSuggestResult {
+  /** Suggested mapping per sheet (by sheetName). */
+  perSheet: Record<string, SheetMappingChoice>;
+  /** True when the Genel/Genel Tekil/Detaylar preset contributed any mapping. */
+  legacyPresetApplied: boolean;
+  /** Source sheet for Accounts when the legacy preset hit (e.g. "Genel Tekil"). */
+  legacyAccountsSource: string | null;
+  /** "Genel" name when we preferred Genel Tekil and skipped Genel as a duplicate. */
+  ignoredFallbackSheet: string | null;
 }
 
 /**
- * Convert a legacy customer workbook into a standard Customer360Bundle.
- * Behavior:
- *  - Accounts ← Genel Tekil (preferred) or Genel (fallback)
- *  - Companies ← one AccountCompany per Account row, companyCode left blank
- *    so the wizard's selected-company guard auto-binds.
- *  - Contacts ← Detaylar rows where any of fullName/email/phone is present.
- *  - Projects ← Detaylar rows where projectName is present.
- *  - Addresses ← empty (legacy layout has no address sheet).
- *
- * The parser is company-agnostic and never injects a companyCode. The
- * selected company in the wizard remains authoritative at dry-run time.
+ * Read every sheet of an uploaded XLSX into RawSheet[] + auto-suggested
+ * mappings. No bundle is produced here; that's the wizard's confirm step.
  */
-export function parseLegacyCustomerWorkbook(
-  wb: { SheetNames: string[]; Sheets: Record<string, unknown> },
-  caps: Record<Customer360EntityKey, number>,
-  utils: typeof import('xlsx')['utils'],
-): {
-  bundle: Customer360Bundle;
-  unmappedSheets: string[];
-  perEntityOverflow: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
-  legacyInfo: LegacyInfo;
-} {
-  const bundle = emptyBundle();
-  const perEntityOverflow: Array<{ entity: Customer360EntityKey; count: number; max: number }> = [];
+export async function readCustomer360Workbook(file: File): Promise<{
+  sheets: RawSheet[];
+  suggested: AutoSuggestResult;
+}> {
+  const { read, utils } = await import('xlsx');
+  const buf = await file.arrayBuffer();
+  const wb = read(buf, { type: 'array' });
 
-  const tekil = findSheetByName(wb, LEGACY_SHEET_GENEL_TEKIL);
-  const genel = findSheetByName(wb, LEGACY_SHEET_GENEL);
-  const detay = findSheetByName(wb, LEGACY_SHEET_DETAYLAR);
-  const accountsSourceObj = tekil ?? genel;
-  if (!accountsSourceObj || !detay) {
-    // Shouldn't reach here if detect ran first, but fail safe.
-    return {
-      bundle,
-      unmappedSheets: wb.SheetNames,
-      perEntityOverflow,
-      legacyInfo: {
-        accountsSource: 'Genel Tekil',
-        ignoredFallback: null,
-        generatedCounts: { account: 0, accountCompany: 0, accountContact: 0, accountAddress: 0, accountProject: 0 },
-      },
-    };
+  const sheets: RawSheet[] = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const rows = utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
+    const colSet = new Set<string>();
+    for (const r of rows) Object.keys(r).forEach((k) => colSet.add(k));
+    sheets.push({
+      sheetName,
+      rowCount: rows.length,
+      columns: [...colSet],
+      sampleRows: rows.slice(0, 3),
+      rows,
+    });
   }
-  const accountsSourceLabel: LegacyInfo['accountsSource'] =
-    accountsSourceObj === tekil ? 'Genel Tekil' : 'Genel';
-  const ignoredFallback = tekil && genel ? genel.name : null;
 
-  // ── Accounts + Companies (from Genel Tekil / Genel) ──
-  const accountsJson = utils.sheet_to_json<Record<string, unknown>>(accountsSourceObj.sheet as never, {
-    defval: '',
-    raw: false,
-  });
+  const suggested = suggestSheetMappings(sheets);
+  return { sheets, suggested };
+}
 
-  const accountRows: Array<Record<string, unknown>> = [];
-  const companyRows: Array<Record<string, unknown>> = [];
-  for (const r of accountsJson) {
-    const keys = {
+/**
+ * Auto-suggest per-sheet entity mappings. Sources, in priority order:
+ *   A. Sheet-name alias (`Accounts`, `Şirketler`, ...).
+ *   B. Legacy preset: Genel Tekil → account+accountCompany; Detaylar →
+ *      accountContact+accountProject; Genel → account+accountCompany if
+ *      Genel Tekil is absent, otherwise skipped as a duplicate.
+ *   C. Header heuristics on column names.
+ *
+ * Multiple entities per sheet are allowed (and used for legacy preset).
+ */
+export function suggestSheetMappings(sheets: RawSheet[]): AutoSuggestResult {
+  const perSheet: Record<string, SheetMappingChoice> = {};
+  const normalized = sheets.map((s) => ({ s, norm: normalizeHeaderName(s.sheetName) }));
+  const hasTekil = normalized.some((x) => x.norm === LEGACY_SHEET_GENEL_TEKIL);
+  let legacyPresetApplied = false;
+  let legacyAccountsSource: string | null = null;
+  let ignoredFallbackSheet: string | null = null;
+
+  for (const { s, norm } of normalized) {
+    const entities = new Set<Customer360EntityKey>();
+    let skip = false;
+
+    // A. Standard / Turkish alias.
+    const aliasHit = mapSheetNameToEntity(s.sheetName);
+    if (aliasHit) entities.add(aliasHit);
+
+    // B. Legacy preset.
+    if (norm === LEGACY_SHEET_GENEL_TEKIL) {
+      entities.add('account');
+      entities.add('accountCompany');
+      legacyPresetApplied = true;
+      legacyAccountsSource = s.sheetName;
+    } else if (norm === LEGACY_SHEET_GENEL) {
+      if (hasTekil) {
+        skip = true;
+        ignoredFallbackSheet = s.sheetName;
+      } else {
+        entities.add('account');
+        entities.add('accountCompany');
+        legacyPresetApplied = true;
+        legacyAccountsSource = s.sheetName;
+      }
+    } else if (norm === LEGACY_SHEET_DETAYLAR) {
+      entities.add('accountContact');
+      entities.add('accountProject');
+      legacyPresetApplied = true;
+    }
+
+    // C. Header heuristics — only if no name-based mapping produced anything
+    //    AND the sheet isn't being skipped.
+    if (entities.size === 0 && !skip) {
+      const headers = s.columns.map((c) => normalizeHeaderName(c));
+      const hasAny = (needles: string[]) =>
+        needles.some((n) => headers.some((h) => h.includes(n)));
+      if (hasAny(['müşteri ünvan', 'musteri unvan', 'unvan', 'vergi numarası', 'vergi numarasi', 'vkn']))
+        entities.add('account');
+      if (hasAny(['müşteri şifresi', 'musteri sifresi', 'externalcustomercode', 'cari kod', 'companycode']))
+        entities.add('accountCompany');
+      if (hasAny(['ilgili kişi', 'ilgili kisi', 'e posta', 'e-posta', 'cep telefonu', 'fullname']))
+        entities.add('accountContact');
+      if (hasAny(['adres', 'şehir', 'sehir', 'ilçe', 'ilce', 'ülke', 'ulke', 'posta kodu']))
+        entities.add('accountAddress');
+      if (hasAny(['proje adı', 'proje adi', 'destek başlangıç', 'destek baslangic', 'destek bitiş', 'destek bitis']))
+        entities.add('accountProject');
+    }
+
+    perSheet[s.sheetName] = { entities: [...entities], skip };
+  }
+
+  return { perSheet, legacyPresetApplied, legacyAccountsSource, ignoredFallbackSheet };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Per-entity legacy transformers (extracted so the wizard can reuse them
+// whenever the user pairs a legacy sheet name with a legacy target).
+// ─────────────────────────────────────────────────────────────────────
+
+function legacyAccountRowsFrom(rows: Array<Record<string, unknown>>): {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+} {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    const k = {
       parent: pickHeader(r, ['Parent record no', 'PARENT RECORD NO']),
       sifre: pickHeader(r, ['Müşteri Şifresi']),
       unvan: pickHeader(r, ['Müşteri Ünvan']),
@@ -231,188 +322,274 @@ export function parseLegacyCustomerWorkbook(
       tel1: pickHeader(r, ['Telefon No 1']),
       cep: pickHeader(r, ['Yeni Cep Telefonu', 'Cep Telefonu']),
     };
-    const accountKey = keys.parent ? normalizeNumericId(r[keys.parent]) : '';
-    const name = keys.unvan ? cleanCellString(r[keys.unvan]) : '';
-    // Skip wholly empty rows — happens at the tail of legacy exports.
-    if (!accountKey && !name) continue;
-    const externalCustomerCode = keys.sifre ? normalizeNumericId(r[keys.sifre]) : '';
-    const vkn = keys.vkn ? normalizeNumericId(r[keys.vkn]) : '';
-    const phone = keys.tel1 ? cleanCellString(r[keys.tel1]) : '';
-    const mobilePhone = keys.cep ? cleanCellString(r[keys.cep]) : '';
-
-    accountRows.push({
+    const accountKey = k.parent ? normalizeNumericId(r[k.parent]) : '';
+    const name = k.unvan ? cleanCellString(r[k.unvan]) : '';
+    if (!accountKey && !name) continue; // skip wholly empty tail rows
+    out.push({
       accountKey,
       name,
-      vkn,
-      phone,
-      // Surface the mobile number as a separate column so the mapping UI
-      // can route it (e.g. to phone if Telefon No 1 is empty). The target
-      // schema doesn't have a dedicated mobilePhone field, so we leave it
-      // unmapped by default.
-      mobilePhone,
+      vkn: k.vkn ? normalizeNumericId(r[k.vkn]) : '',
+      phone: k.tel1 ? cleanCellString(r[k.tel1]) : '',
+      // Surface mobile as a separate column so the field-mapping step can
+      // route it if Telefon No 1 is empty. No dedicated schema field, so it
+      // stays unmapped by default.
+      mobilePhone: k.cep ? cleanCellString(r[k.cep]) : '',
+      // Carry externalCustomerCode for reference even though it lives on
+      // AccountCompany — the field-mapping step ignores unmapped extras.
+      externalCustomerCode: k.sifre ? normalizeNumericId(r[k.sifre]) : '',
     });
-    companyRows.push({
+  }
+  return { rows: out, columns: ['accountKey', 'name', 'vkn', 'phone', 'mobilePhone', 'externalCustomerCode'] };
+}
+
+function legacyCompanyRowsFrom(rows: Array<Record<string, unknown>>): {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+} {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    const k = {
+      parent: pickHeader(r, ['Parent record no', 'PARENT RECORD NO']),
+      sifre: pickHeader(r, ['Müşteri Şifresi']),
+      unvan: pickHeader(r, ['Müşteri Ünvan']),
+    };
+    const accountKey = k.parent ? normalizeNumericId(r[k.parent]) : '';
+    const name = k.unvan ? cleanCellString(r[k.unvan]) : '';
+    if (!accountKey && !name) continue;
+    out.push({
       accountKey,
       companyCode: '',
-      externalCustomerCode,
+      externalCustomerCode: k.sifre ? normalizeNumericId(r[k.sifre]) : '',
       status: 'Aktif',
     });
   }
+  return { rows: out, columns: ['accountKey', 'companyCode', 'externalCustomerCode', 'status'] };
+}
 
-  // ── Contacts + Projects (from Detaylar) ──
-  const detayJson = utils.sheet_to_json<Record<string, unknown>>(detay.sheet as never, {
-    defval: '',
-    raw: false,
-  });
-  const contactRows: Array<Record<string, unknown>> = [];
-  const projectRows: Array<Record<string, unknown>> = [];
-  for (const r of detayJson) {
-    const keys = {
+function legacyContactRowsFrom(rows: Array<Record<string, unknown>>): {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+} {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    const k = {
       parent: pickHeader(r, ['PARENT RECORD NO', 'Parent record no']),
       fullName: pickHeader(r, ['İlgili Kişi Ad']),
       email: pickHeader(r, ['E posta', 'E-posta']),
       cep: pickHeader(r, ['Cep Telefonu']),
       tel1: pickHeader(r, ['Telefon No 1']),
       tel2: pickHeader(r, ['Telefon No 2']),
+    };
+    const accountKey = k.parent ? normalizeNumericId(r[k.parent]) : '';
+    const fullName = k.fullName ? cleanCellString(r[k.fullName]) : '';
+    const email = k.email ? cleanCellString(r[k.email]) : '';
+    const phone =
+      (k.cep && cleanCellString(r[k.cep])) ||
+      (k.tel1 && cleanCellString(r[k.tel1])) ||
+      (k.tel2 && cleanCellString(r[k.tel2])) ||
+      '';
+    if (!accountKey) continue;
+    if (!fullName && !email && !phone) continue; // skip empty contact rows
+    out.push({ accountKey, fullName, email, phone, title: '' });
+  }
+  return { rows: out, columns: ['accountKey', 'fullName', 'email', 'phone', 'title'] };
+}
+
+function legacyProjectRowsFrom(rows: Array<Record<string, unknown>>): {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+} {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    const k = {
+      parent: pickHeader(r, ['PARENT RECORD NO', 'Parent record no']),
       projectName: pickHeader(r, ['Proje Adı', 'Proje']),
       status: pickHeader(r, ['Destek Durumu']),
       start: pickHeader(r, ['Destek Başlangıç Tarih']),
       end: pickHeader(r, ['Destek Bitiş Tarih']),
     };
-    const accountKey = keys.parent ? normalizeNumericId(r[keys.parent]) : '';
-
-    const fullName = keys.fullName ? cleanCellString(r[keys.fullName]) : '';
-    const email = keys.email ? cleanCellString(r[keys.email]) : '';
-    const cep = keys.cep ? cleanCellString(r[keys.cep]) : '';
-    const tel1 = keys.tel1 ? cleanCellString(r[keys.tel1]) : '';
-    const tel2 = keys.tel2 ? cleanCellString(r[keys.tel2]) : '';
-    const contactPhone = cep || tel1 || tel2 || '';
-    // Skip contact when nothing identifying is present.
-    if (accountKey && (fullName || email || contactPhone)) {
-      contactRows.push({
-        accountKey,
-        fullName,
-        email,
-        phone: contactPhone,
-        title: '',
-      });
-    }
-
-    const projectName = keys.projectName ? cleanCellString(r[keys.projectName]) : '';
-    if (accountKey && projectName) {
-      projectRows.push({
-        accountKey,
-        accountCompanyKey: '',
-        projectName,
-        status: keys.status ? cleanCellString(r[keys.status]) : '',
-        startDate: keys.start ? normalizeDateString(r[keys.start]) : '',
-        endDate: keys.end ? normalizeDateString(r[keys.end]) : '',
-      });
-    }
+    const accountKey = k.parent ? normalizeNumericId(r[k.parent]) : '';
+    const projectName = k.projectName ? cleanCellString(r[k.projectName]) : '';
+    if (!accountKey || !projectName) continue; // skip empty project rows
+    out.push({
+      accountKey,
+      accountCompanyKey: '',
+      projectName,
+      status: k.status ? cleanCellString(r[k.status]) : '',
+      startDate: k.start ? normalizeDateString(r[k.start]) : '',
+      endDate: k.end ? normalizeDateString(r[k.end]) : '',
+    });
   }
-
-  // Pack into bundle using the standard EntityBlock shape.
-  const packs: Array<{ entity: Customer360EntityKey; rows: Array<Record<string, unknown>>; columns: string[] }> = [
-    { entity: 'account',         rows: accountRows, columns: ['accountKey', 'name', 'vkn', 'phone', 'mobilePhone'] },
-    { entity: 'accountCompany',  rows: companyRows, columns: ['accountKey', 'companyCode', 'externalCustomerCode', 'status'] },
-    { entity: 'accountContact',  rows: contactRows, columns: ['accountKey', 'fullName', 'email', 'phone', 'title'] },
-    { entity: 'accountProject',  rows: projectRows, columns: ['accountKey', 'accountCompanyKey', 'projectName', 'status', 'startDate', 'endDate'] },
-    // accountAddress: legacy layout has no source — leave empty block.
-  ];
-  for (const p of packs) {
-    const max = caps[p.entity] ?? 5000;
-    if (p.rows.length > max) perEntityOverflow.push({ entity: p.entity, count: p.rows.length, max });
-    bundle[p.entity] = {
-      columns: p.columns,
-      rows: p.rows,
-      sample: p.rows.slice(0, 5),
-      totalRows: p.rows.length,
-    };
-  }
-
-  // unmappedSheets: any source sheet NOT consumed by legacy conversion.
-  const consumed = new Set<string>();
-  consumed.add(accountsSourceObj.name);
-  consumed.add(detay.name);
-  const unmappedSheets = wb.SheetNames.filter((s) => !consumed.has(s));
-
   return {
-    bundle,
-    unmappedSheets,
-    perEntityOverflow,
-    legacyInfo: {
-      accountsSource: accountsSourceLabel,
-      ignoredFallback,
-      generatedCounts: {
-        account: accountRows.length,
-        accountCompany: companyRows.length,
-        accountContact: contactRows.length,
-        accountAddress: 0,
-        accountProject: projectRows.length,
-      },
-    },
+    rows: out,
+    columns: ['accountKey', 'accountCompanyKey', 'projectName', 'status', 'startDate', 'endDate'],
   };
 }
 
 /**
- * Parse multi-sheet XLSX file. Returns a bundle with one EntityBlock per
- * mapped sheet. Unmapped sheets are ignored (UI surfaces this in warning).
- *
- * If the workbook contains NO standard Customer 360 sheet names but matches
- * the legacy "Genel / Genel Tekil / Detaylar" shape, the legacy converter
- * runs instead and the result includes a `legacyInfo` block. When both
- * standard and legacy sheets appear together, the standard branch wins and
- * the legacy sheets show up as unmapped — matches the principle that the
- * canonical template is the source of truth.
+ * Decide whether a (sheet name, target entity) pair is a known legacy
+ * combination that should run through a dedicated transformer.
  */
-export async function parseCustomer360Xlsx(
-  file: File,
-  caps: Record<Customer360EntityKey, number>,
-): Promise<{
-  bundle: Customer360Bundle;
-  unmappedSheets: string[];
-  perEntityOverflow: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
-  legacyInfo?: LegacyInfo;
-}> {
-  const { read, utils } = await import('xlsx');
-  const buf = await file.arrayBuffer();
-  const wb = read(buf, { type: 'array' });
-
-  const hasStandard = wb.SheetNames.some((s) => mapSheetNameToEntity(s) !== null);
-  if (!hasStandard && detectLegacyCustomerWorkbook(wb.SheetNames)) {
-    return parseLegacyCustomerWorkbook(wb, caps, utils);
+function legacyTransformer(
+  sheetName: string,
+  entity: Customer360EntityKey,
+): ((rows: Array<Record<string, unknown>>) => { rows: Array<Record<string, unknown>>; columns: string[] }) | null {
+  const norm = normalizeHeaderName(sheetName);
+  if (norm === LEGACY_SHEET_GENEL_TEKIL || norm === LEGACY_SHEET_GENEL) {
+    if (entity === 'account') return legacyAccountRowsFrom;
+    if (entity === 'accountCompany') return legacyCompanyRowsFrom;
   }
+  if (norm === LEGACY_SHEET_DETAYLAR) {
+    if (entity === 'accountContact') return legacyContactRowsFrom;
+    if (entity === 'accountProject') return legacyProjectRowsFrom;
+  }
+  return null;
+}
 
+/**
+ * Passthrough row builder for arbitrary sheets. Cell-level normalization
+ * only: trim, drop NULL/-/whitespace, strip ".0" suffix on id-shaped
+ * columns. Dates are NOT normalized here because the target field is not
+ * known at this stage — field mapping + dry-run handle date parsing.
+ */
+function passthroughRows(
+  rows: Array<Record<string, unknown>>,
+  columns: string[],
+): { rows: Array<Record<string, unknown>>; columns: string[] } {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    const next: Record<string, unknown> = {};
+    let nonEmpty = false;
+    for (const c of columns) {
+      const raw = r[c];
+      let v: unknown;
+      if (typeof raw === 'number' || typeof raw === 'boolean') {
+        v = raw;
+        nonEmpty = true;
+      } else if (raw === undefined || raw === null) {
+        v = '';
+      } else {
+        const cleaned = cleanCellString(raw);
+        v = isIdLikeColumnName(c) ? normalizeNumericId(cleaned) : cleaned;
+        if (v !== '') nonEmpty = true;
+      }
+      next[c] = v;
+    }
+    if (nonEmpty) out.push(next);
+  }
+  return { rows: out, columns };
+}
+
+/**
+ * Build a Customer360Bundle from raw sheets + per-sheet entity mappings.
+ *
+ * Mapping semantics:
+ *  - mappings[sheetName].skip=true → ignored, never surfaces as unmapped.
+ *  - mappings[sheetName].entities=[] (and not skipped) → sheet stays
+ *    "unmapped" for UI purposes (caller can warn).
+ *  - mappings[sheetName].entities=[e1, e2] → each entity collects rows
+ *    from that sheet; if the (sheet, entity) pair matches the legacy
+ *    preset, the dedicated legacy transformer runs; otherwise rows
+ *    pass through with cell-level normalization.
+ *
+ * Multiple sheets per entity → row sets are concatenated, column lists
+ * unioned.
+ */
+export function buildCustomer360BundleFromMappings(
+  sheets: RawSheet[],
+  mappings: Record<string, SheetMappingChoice>,
+  caps: Record<Customer360EntityKey, number>,
+): {
+  bundle: Customer360Bundle;
+  perEntityOverflow: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+  legacyInfo: LegacyInfo | null;
+} {
   const bundle = emptyBundle();
-  const unmappedSheets: string[] = [];
   const perEntityOverflow: Array<{ entity: Customer360EntityKey; count: number; max: number }> = [];
 
-  for (const sheetName of wb.SheetNames) {
-    const entity = mapSheetNameToEntity(sheetName);
-    if (!entity) {
-      unmappedSheets.push(sheetName);
-      continue;
+  // entity → concatenated row set + union of column names
+  const acc: Record<Customer360EntityKey, { rows: Array<Record<string, unknown>>; columnSet: Set<string> }> = {
+    account: { rows: [], columnSet: new Set() },
+    accountCompany: { rows: [], columnSet: new Set() },
+    accountContact: { rows: [], columnSet: new Set() },
+    accountAddress: { rows: [], columnSet: new Set() },
+    accountProject: { rows: [], columnSet: new Set() },
+  };
+
+  let legacyConverted = false;
+  let legacyAccountsSourceName: string | null = null;
+  let legacyIgnoredFallback: string | null = null;
+
+  // Detect whether Genel was skipped because Genel Tekil mapped to account.
+  const sheetByNorm = new Map<string, RawSheet>();
+  for (const s of sheets) sheetByNorm.set(normalizeHeaderName(s.sheetName), s);
+  const tekilSheet = sheetByNorm.get(LEGACY_SHEET_GENEL_TEKIL);
+  const genelSheet = sheetByNorm.get(LEGACY_SHEET_GENEL);
+  if (tekilSheet && genelSheet) {
+    const tekilMap = mappings[tekilSheet.sheetName];
+    const genelMap = mappings[genelSheet.sheetName];
+    if (tekilMap?.entities.includes('account') && (genelMap?.skip || !genelMap?.entities.includes('account'))) {
+      legacyIgnoredFallback = genelSheet.sheetName;
     }
-    const ws = wb.Sheets[sheetName];
-    const json = utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
-    if (json.length === 0) continue;
-    const colSet = new Set<string>();
-    for (const r of json) Object.keys(r).forEach((k) => colSet.add(k));
-    const columns = [...colSet];
-    const max = caps[entity] ?? 5000;
-    if (json.length > max) {
-      perEntityOverflow.push({ entity, count: json.length, max });
-      // Cap at limit; UI will show overflow warning. dry-run also catches it.
-    }
-    bundle[entity] = {
-      columns,
-      rows: json,
-      sample: json.slice(0, 5),
-      totalRows: json.length,
-    };
   }
-  return { bundle, unmappedSheets, perEntityOverflow };
+
+  for (const sheet of sheets) {
+    const choice = mappings[sheet.sheetName];
+    if (!choice || choice.skip || choice.entities.length === 0) continue;
+
+    for (const entity of choice.entities) {
+      const transform = legacyTransformer(sheet.sheetName, entity);
+      const { rows, columns } = transform
+        ? transform(sheet.rows)
+        : passthroughRows(sheet.rows, sheet.columns);
+      if (transform) {
+        legacyConverted = true;
+        if (entity === 'account' && !legacyAccountsSourceName) legacyAccountsSourceName = sheet.sheetName;
+      }
+      for (const r of rows) acc[entity].rows.push(r);
+      for (const c of columns) acc[entity].columnSet.add(c);
+    }
+  }
+
+  for (const entity of CUSTOMER_360_ENTITY_KEYS) {
+    const a = acc[entity];
+    const max = caps[entity] ?? 5000;
+    if (a.rows.length > max) perEntityOverflow.push({ entity, count: a.rows.length, max });
+    if (a.rows.length === 0) {
+      bundle[entity] = EMPTY_BLOCK;
+    } else {
+      bundle[entity] = {
+        columns: [...a.columnSet],
+        rows: a.rows,
+        sample: a.rows.slice(0, 5),
+        totalRows: a.rows.length,
+      };
+    }
+  }
+
+  const legacyInfo: LegacyInfo | null = legacyConverted
+    ? {
+        accountsSource:
+          legacyAccountsSourceName && normalizeHeaderName(legacyAccountsSourceName) === LEGACY_SHEET_GENEL_TEKIL
+            ? 'Genel Tekil'
+            : 'Genel',
+        ignoredFallback: legacyIgnoredFallback,
+        generatedCounts: {
+          account: acc.account.rows.length,
+          accountCompany: acc.accountCompany.rows.length,
+          accountContact: acc.accountContact.rows.length,
+          accountAddress: acc.accountAddress.rows.length,
+          accountProject: acc.accountProject.rows.length,
+        },
+      }
+    : null;
+
+  return { bundle, perEntityOverflow, legacyInfo };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Nested API JSON flatten — unchanged.
+// ─────────────────────────────────────────────────────────────────────
 
 /**
  * Parse nested API JSON into bundle. Shape:
@@ -481,7 +658,6 @@ export function flattenCustomer360Json(
         if (!c || typeof c !== 'object' || Array.isArray(c)) continue;
         const row = { ...(c as Record<string, unknown>) };
         if (row.accountKey == null && accountKey) row.accountKey = accountKey;
-        // Project also needs accountCompanyKey — fall back to companyCode if present.
         if (row.accountCompanyKey == null && row.companyCode != null) {
           row.accountCompanyKey = row.companyCode;
         }
