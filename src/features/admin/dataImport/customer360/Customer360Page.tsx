@@ -73,6 +73,11 @@ export function Customer360Page() {
   const [parseInfo, setParseInfo] = useState<{
     unmappedSheets?: string[];
     overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+    legacy?: {
+      accountsSource: 'Genel Tekil' | 'Genel';
+      ignoredFallback: string | null;
+      generatedCounts: Record<Customer360EntityKey, number>;
+    };
   } | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -203,6 +208,11 @@ export function Customer360Page() {
     info: {
       unmappedSheets?: string[];
       overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+      legacy?: {
+        accountsSource: 'Genel Tekil' | 'Genel';
+        ignoredFallback: string | null;
+        generatedCounts: Record<Customer360EntityKey, number>;
+      };
     },
   ) {
     setBundle(b);
@@ -351,6 +361,29 @@ export function Customer360Page() {
             {parseError && (
               <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-700/40 dark:bg-rose-900/20 dark:text-rose-200">
                 {parseError}
+              </div>
+            )}
+            {parseInfo?.legacy && (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+                <div>
+                  <strong>Eski müşteri listesi formatı algılandı ve Customer 360 formatına dönüştürüldü.</strong>
+                </div>
+                <div className="mt-1">
+                  {parseInfo.legacy.accountsSource} → Accounts/Companies, Detaylar → Contacts/Projects
+                </div>
+                <div className="mt-1 text-[11px] text-emerald-700/90 dark:text-emerald-200/90">
+                  Üretilen kayıtlar: Accounts {parseInfo.legacy.generatedCounts.account} · Companies{' '}
+                  {parseInfo.legacy.generatedCounts.accountCompany} · Contacts{' '}
+                  {parseInfo.legacy.generatedCounts.accountContact} · Projects{' '}
+                  {parseInfo.legacy.generatedCounts.accountProject} · Addresses{' '}
+                  {parseInfo.legacy.generatedCounts.accountAddress}
+                </div>
+                {parseInfo.legacy.ignoredFallback && (
+                  <div className="mt-1 text-[11px] text-emerald-700/80 dark:text-emerald-200/80">
+                    Not: "{parseInfo.legacy.ignoredFallback}" sayfası göz ardı edildi ("
+                    {parseInfo.legacy.accountsSource}" tercih edildi).
+                  </div>
+                )}
               </div>
             )}
             {parseInfo?.unmappedSheets && parseInfo.unmappedSheets.length > 0 && (
@@ -659,7 +692,15 @@ function FileSourcePanel({
   onBundle: (
     b: Customer360Bundle,
     meta: { sourceType: 'file' | 'api'; fileName: string | null; sourceUrlMasked: string | null; dataPath: string | null },
-    info: { unmappedSheets?: string[]; overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }> },
+    info: {
+      unmappedSheets?: string[];
+      overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+      legacy?: {
+        accountsSource: 'Genel Tekil' | 'Genel';
+        ignoredFallback: string | null;
+        generatedCounts: Record<Customer360EntityKey, number>;
+      };
+    },
   ) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -691,11 +732,11 @@ function FileSourcePanel({
     }
     setBusy(true);
     try {
-      const { bundle, unmappedSheets, perEntityOverflow } = await parseCustomer360Xlsx(file, ROW_CAPS);
+      const { bundle, unmappedSheets, perEntityOverflow, legacyInfo } = await parseCustomer360Xlsx(file, ROW_CAPS);
       onBundle(
         bundle,
         { sourceType: 'file', fileName: file.name, sourceUrlMasked: null, dataPath: null },
-        { unmappedSheets, overflow: perEntityOverflow },
+        { unmappedSheets, overflow: perEntityOverflow, legacy: legacyInfo },
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Dosya okunamadı.');
@@ -780,7 +821,15 @@ function ApiSourcePanel({
   onBundle: (
     b: Customer360Bundle,
     meta: { sourceType: 'file' | 'api'; fileName: string | null; sourceUrlMasked: string | null; dataPath: string | null },
-    info: { unmappedSheets?: string[]; overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }> },
+    info: {
+      unmappedSheets?: string[];
+      overflow?: Array<{ entity: Customer360EntityKey; count: number; max: number }>;
+      legacy?: {
+        accountsSource: 'Genel Tekil' | 'Genel';
+        ignoredFallback: string | null;
+        generatedCounts: Record<Customer360EntityKey, number>;
+      };
+    },
   ) => void;
 }) {
   const [url, setUrl] = useState('');
