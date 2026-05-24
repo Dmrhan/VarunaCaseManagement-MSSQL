@@ -408,9 +408,15 @@ export const importService = {
     return postJson(`${BASE}/jobs/${encodeURIComponent(jobId)}/rollback`, {}, 'Geri alma başarısız');
   },
 
-  async listJobs(companyId?: string): Promise<{ value: ImportJob[] } | undefined> {
-    const q = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
-    return apiFetch<{ value: ImportJob[] }>(`${BASE}/jobs${q}`, undefined, 'Geçmiş okunamadı');
+  async listJobs(
+    companyId?: string,
+    opts?: { targetType?: 'account' | 'customer360' },
+  ): Promise<{ value: ImportJob[] } | undefined> {
+    const qs = new URLSearchParams();
+    if (companyId) qs.set('companyId', companyId);
+    if (opts?.targetType) qs.set('targetType', opts.targetType);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiFetch<{ value: ImportJob[] }>(`${BASE}/jobs${suffix}`, undefined, 'Geçmiş okunamadı');
   },
 
   async getJob(jobId: string): Promise<ImportJob | undefined> {

@@ -715,14 +715,25 @@ function appendRowErrors(existing, additions) {
  *   YALNIZ tam başarıda artar. Job seviyesi `failedCount` + `failedRows`
  *   üzerinden operator'a yansır.
  */
-export async function rollbackImportJob({ jobId, user }) {
+export async function rollbackImportJob({ jobId, user, expectedTargetType = null }) {
   const job = await prisma.importJob.findUnique({
     where: { id: jobId },
-    select: { id: true, companyId: true, status: true },
+    select: { id: true, companyId: true, status: true, targetType: true },
   });
   if (!job) {
     const err = new Error('Import job bulunamadı.');
     err.status = 404;
+    throw err;
+  }
+  // Defense-in-depth: even if the route already filtered by targetType via
+  // getImportJob, refuse to touch ImportJobRows of a wrong-type job. This
+  // is the rollback's last barrier against rolling back a Customer 360 job
+  // through the Phase 1 endpoint (or vice versa) when called from another
+  // call site.
+  if (expectedTargetType && job.targetType !== expectedTargetType) {
+    const err = new Error('Job hedef türü beklenenden farklı.');
+    err.status = 400;
+    err.code = 'wrong_target_type';
     throw err;
   }
   if (!['completed', 'partial'].includes(job.status)) {
@@ -927,12 +938,15 @@ export async function rollbackImportJob({ jobId, user }) {
 /**
  * Job listesi (allowedCompanyIds scope).
  */
-export async function listImportJobs({ allowedCompanyIds, companyId = null, limit = 50 }) {
+export async function listImportJobs({ allowedCompanyIds, companyId = null, targetType = null, limit = 50 }) {
   const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
   if (allowed.length === 0) return [];
   const where = {
     companyId: companyId ? companyId : { in: allowed },
   };
+  // Optional targetType filter — Phase 1 history must not show Customer 360
+  // jobs and vice-versa. Callers that omit it keep legacy behavior.
+  if (targetType) where.targetType = targetType;
   if (companyId && !allowed.includes(companyId)) return [];
   return prisma.importJob.findMany({
     where,
@@ -961,7 +975,7 @@ export async function listImportJobs({ allowedCompanyIds, companyId = null, limi
   });
 }
 
-export async function getImportJob({ jobId, allowedCompanyIds }) {
+export async function getImportJob({ jobId, allowedCompanyIds, expectedTargetType = null }) {
   const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
   const job = await prisma.importJob.findUnique({
     where: { id: jobId },
@@ -993,6 +1007,11 @@ export async function getImportJob({ jobId, allowedCompanyIds }) {
   });
   if (!job) return null;
   if (!allowed.includes(job.companyId)) return null;
+  // Cross-target guard: a Phase 1 caller must not be able to load a
+  // Customer 360 job by id (and vice versa). Mirrors getCustomer360Job in
+  // server/lib/import/customer360CommitEngine.js. Returns null so the
+  // route surfaces the same `job_not_found` response.
+  if (expectedTargetType && job.targetType !== expectedTargetType) return null;
   return job;
 }
 

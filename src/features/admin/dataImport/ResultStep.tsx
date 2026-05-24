@@ -11,6 +11,11 @@ interface Props {
   runStats?: { createdCount: number; updatedCount: number; skippedCount: number; errorCount: number };
   onNew: () => void;
   onJobUpdated: (j: ImportJob) => void;
+  /**
+   * `live` — bu çalıştırmada yeni biten commit'in sonucu.
+   * `history` — operatör geçmiş listesinden açtı; "yalnız bu job geri alınır" vurgusu daha güçlü.
+   */
+  mode?: 'live' | 'history';
 }
 
 const STATUS_LABEL: Record<ImportJob['status'], { label: string; tone: string }> = {
@@ -24,9 +29,14 @@ const STATUS_LABEL: Record<ImportJob['status'], { label: string; tone: string }>
   rollback_partial: { label: 'Geri alma kısmi', tone: 'bg-amber-100 text-amber-700' },
 };
 
-export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
+export function ResultStep({ job, runStats, onNew, onJobUpdated, mode = 'live' }: Props) {
   const [busy, setBusy] = useState(false);
   const [confirmRollback, setConfirmRollback] = useState(false);
+  /** Confirm dialog için yüklenen örnek hesap isimleri (ilk 5). */
+  const [confirmPreview, setConfirmPreview] = useState<{
+    loading: boolean;
+    names: string[];
+  }>({ loading: false, names: [] });
   /** WR-A8 review fix (no-swallow) — son rollback raporu (kısmi başarı detayı). */
   const [rollbackReport, setRollbackReport] = useState<
     | {
@@ -48,7 +58,46 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
     setRollbackReport(null);
     setConfirmRollback(false);
     setBusy(false);
+    setConfirmPreview({ loading: false, names: [] });
   }, [job?.id]);
+
+  // Confirm açıldığında ilk 5 etkilenen hesap adını getir (önizleme).
+  useEffect(() => {
+    if (!confirmRollback) return;
+    let alive = true;
+    setConfirmPreview({ loading: true, names: [] });
+    void importService
+      .getJobRows(job.id, { status: 'created', limit: 5 })
+      .then((created) => {
+        if (!alive) return;
+        const names = (created?.value ?? [])
+          .map((r) => {
+            const after = (r.afterJson ?? null) as Record<string, unknown> | null;
+            const before = (r.beforeJson ?? null) as Record<string, unknown> | null;
+            return (after?.name as string | undefined) ?? (before?.name as string | undefined) ?? null;
+          })
+          .filter((n): n is string => !!n);
+        // Eğer create yoksa update tarafına bak.
+        if (names.length === 0) {
+          void importService.getJobRows(job.id, { status: 'updated', limit: 5 }).then((updated) => {
+            if (!alive) return;
+            const fallback = (updated?.value ?? [])
+              .map((r) => {
+                const after = (r.afterJson ?? null) as Record<string, unknown> | null;
+                const before = (r.beforeJson ?? null) as Record<string, unknown> | null;
+                return (after?.name as string | undefined) ?? (before?.name as string | undefined) ?? null;
+              })
+              .filter((n): n is string => !!n);
+            setConfirmPreview({ loading: false, names: fallback });
+          });
+        } else {
+          setConfirmPreview({ loading: false, names });
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [confirmRollback, job.id]);
 
   const { toast } = useToast();
   const company = lookupService.companies().find((c) => c.id === job.companyId);
@@ -86,10 +135,34 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
   }
 
   async function rollback() {
+    // Defensive id-mismatch guard: kapture the job id displayed at the
+    // moment the button was pressed, then re-check immediately before the
+    // network call. If a parent re-render swapped `job` (e.g. operator
+    // clicked a history row), abort with rollback_job_mismatch instead of
+    // rolling back the wrong job. Cheap and explicit.
+    const intendedJobId = job.id;
     setBusy(true);
-    const r = await importService.rollback(job.id);
+    if (intendedJobId !== job.id) {
+      setBusy(false);
+      setConfirmRollback(false);
+      toast({
+        type: 'error',
+        message: 'rollback_job_mismatch — görüntülenen job değişti. İşlem iptal edildi.',
+        duration: 6000,
+      });
+      return;
+    }
+    const r = await importService.rollback(intendedJobId);
     setBusy(false);
     if (!r) return;
+    if (r.job?.id && r.job.id !== intendedJobId) {
+      toast({
+        type: 'error',
+        message: `rollback_job_mismatch — sunucu farklı bir job döndürdü (${r.job.id} ≠ ${intendedJobId}).`,
+        duration: 8000,
+      });
+      return;
+    }
     const acCount = r.report.rolledBackAccountCompanyCount ?? 0;
     const errCount = r.report.errorCount ?? r.report.failedCount ?? 0;
     const ok = errCount === 0;
@@ -111,6 +184,17 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
 
   return (
     <div className="space-y-3">
+      <div
+        className={`rounded-md border px-3 py-1.5 text-[11px] font-medium ${
+          mode === 'history'
+            ? 'border-slate-300 bg-slate-100 text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700/40 dark:bg-emerald-900/15 dark:text-emerald-200'
+        }`}
+      >
+        {mode === 'history' ? 'Geçmiş job görüntüleniyor' : 'Son içe aktarım sonucu'}
+        {' · '}
+        <code className="font-mono">{job.id}</code>
+      </div>
       <Card>
         <CardBody className="space-y-3">
           <div className="flex items-start justify-between gap-2">
@@ -121,6 +205,7 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
               <p className="text-xs text-slate-500 dark:text-ndark-muted">
                 Job <code className="font-mono">{job.id}</code> · Şirket:{' '}
                 <strong>{company?.name ?? job.companyId}</strong>
+                {job.fileName ? <> · Dosya: <strong>{job.fileName}</strong></> : null}
               </p>
             </div>
             <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusInfo.tone}`}>
@@ -174,9 +259,53 @@ export function ResultStep({ job, runStats, onNew, onJobUpdated }: Props) {
             <div className="flex items-start gap-2 text-xs text-slate-700 dark:text-ndark-muted">
               <AlertCircle size={16} className="mt-0.5 text-amber-500" />
               <div>
-                Bu işlem import ile oluşturulan kayıtları pasife alır ve güncellenen alanları eski değerlerine döndürür. Devam etmek istiyor musunuz?
+                <div className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                  Bu işlem yalnız aşağıdaki import job'ını geri alır.
+                </div>
+                <div className="mt-0.5">
+                  Oluşturulan kayıtlar pasife alınır, güncellenen alanlar eski değerlerine döndürülür. Başka bir job etkilenmez.
+                </div>
               </div>
             </div>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5 text-[11px] text-slate-700 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted">
+              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                <div>
+                  <span className="font-medium">Job:</span>{' '}
+                  <code className="font-mono">{job.id}</code>
+                </div>
+                <div>
+                  <span className="font-medium">Şirket:</span>{' '}
+                  {company?.name ?? job.companyId}
+                </div>
+                <div>
+                  <span className="font-medium">Dosya:</span>{' '}
+                  {job.fileName ?? job.sourceName ?? '—'}
+                </div>
+                <div>
+                  <span className="font-medium">Durum:</span> {statusInfo.label}
+                </div>
+                <div>
+                  <span className="font-medium">Commit:</span>{' '}
+                  {job.completedAt ? new Date(job.completedAt).toLocaleString('tr-TR') : '—'}
+                </div>
+                <div>
+                  <span className="font-medium">Sayılar:</span>{' '}
+                  {job.createCount}+ · {job.updateCount}↺ · {job.skippedCount}⊘ · {job.errorCount}✗
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="font-medium">İlk etkilenen hesaplar:</span>{' '}
+                {confirmPreview.loading ? (
+                  <span className="text-slate-500">yükleniyor…</span>
+                ) : confirmPreview.names.length > 0 ? (
+                  confirmPreview.names.join(', ')
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2">
               <Button variant="ghost" onClick={() => setConfirmRollback(false)} disabled={busy}>
                 Vazgeç
