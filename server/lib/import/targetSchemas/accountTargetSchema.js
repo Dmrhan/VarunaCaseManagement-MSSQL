@@ -151,7 +151,10 @@ export const ACCOUNT_TARGET_FIELDS = [
     },
     normalize(raw) {
       const s = asTrimmedString(raw);
-      if (!s) return { ok: true, normalized: null };
+      // Treat NULL-like sentinel values (legacy exports often use literal
+      // "NULL"/"-") the same as a blank cell so they reach the per-row
+      // no_tax_id warning path rather than the invalid-VKN error path.
+      if (!s || /^(null|-)$/i.test(s)) return { ok: true, normalized: null };
       const r = validateVkn(s);
       if (!r.ok) return { ok: false, normalized: null, reason: r.reason ?? 'VKN geçersiz.' };
       return { ok: true, normalized: r.normalized };
@@ -449,11 +452,22 @@ export function normalizeRow(rawRow, mapping) {
   const warnings = [];
   const normalized = {};
   let hasVkn = false;
+  // `rawVknPresent` reflects the SOURCE cell: was anything actually written
+  // there? It's intentionally separate from `hasVkn` (which reflects the
+  // NORMALIZED result). A row with a malformed VKN string has
+  // rawVknPresent=true (and an invalid-VKN error) but hasVkn=false. Without
+  // this split the same row would receive both the error and the misleading
+  // no_tax_id warning.
+  let rawVknPresent = false;
   for (const m of mapping) {
     if (!m.targetKey) continue;
     const f = KEY_INDEX.get(m.targetKey);
     if (!f) continue;
     const rawValue = rawRow[m.source];
+    if (f.key === 'vkn') {
+      const s = asTrimmedString(rawValue);
+      if (s && !/^(null|-)$/i.test(s)) rawVknPresent = true;
+    }
     const r = f.normalize(rawValue);
     if (!r.ok) {
       errors.push({ targetKey: f.key, label: f.label, message: r.reason });
@@ -468,12 +482,12 @@ export function normalizeRow(rawRow, mapping) {
       normalized._rawPhone = r.extra.rawPhone;
     }
   }
-  // Per-row tax-id warning. The mapping-level warning in validateMapping only
-  // fires when VKN is unmapped entirely; this catches the case where VKN is
-  // mapped but a specific row has an empty cell. Operators must NEVER be
-  // pushed to invent fake VKN/TCKN values — missing identity is warned, not
-  // blocked.
-  if (!hasVkn) {
+  // no_tax_id reflects ABSENCE of a source value, not "invalid value". A
+  // malformed VKN already errors; emitting the missing-identity warning on
+  // top would be contradictory and would inflate missingTaxIdCount metrics.
+  // Operators must never be pushed to invent fake VKN/TCKN — missing
+  // identity is warned, not blocked.
+  if (!rawVknPresent) {
     warnings.push({
       code: 'no_tax_id',
       targetKey: 'vkn',

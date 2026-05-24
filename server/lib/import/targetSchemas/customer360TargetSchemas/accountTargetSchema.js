@@ -62,7 +62,10 @@ export const ACCOUNT_FIELDS = [
     },
     normalize(raw) {
       const s = asTrimmedString(raw);
-      if (!s) return { ok: true, normalized: null };
+      // NULL-like sentinels ('NULL', '-') reach normalize as non-empty
+      // strings; treat them as missing so they take the no_tax_id warning
+      // path rather than producing a misleading invalid-VKN error.
+      if (!s || /^(null|-)$/i.test(s)) return { ok: true, normalized: null };
       const r = validateVkn(s);
       if (!r.ok) return { ok: false, normalized: null, reason: r.reason ?? 'VKN geçersiz.' };
       return { ok: true, normalized: r.normalized };
