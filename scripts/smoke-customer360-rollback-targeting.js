@@ -254,16 +254,20 @@ if (!jobA?.id || !jobB?.id) {
   process.exit(1);
 }
 
-// 3) Both jobs created active records across all entities
+// 3) Both jobs created active records across all entities.
+// CRITICAL: each entity set must be NON-EMPTY. `[].every(...)` is true,
+// so without an explicit length check this smoke would silently pass
+// even if AccountCompany / contact / address / project rows were never
+// created by commit — exactly the regression this guard exists to catch.
 const beforeA = await accountSnapshot(VKN_A);
 const beforeB = await accountSnapshot(VKN_B);
 const allActive = (snap) =>
   !!snap &&
   snap.accountActive === true &&
-  snap.companyStatuses.every((s) => s !== 'inactive') &&
-  snap.contactsActive.every(Boolean) &&
-  snap.addressesActive.every(Boolean) &&
-  snap.projectsActive.every(Boolean);
+  snap.companyStatuses.length > 0 && snap.companyStatuses.every((s) => s !== 'inactive') &&
+  snap.contactsActive.length > 0 && snap.contactsActive.every(Boolean) &&
+  snap.addressesActive.length > 0 && snap.addressesActive.every(Boolean) &&
+  snap.projectsActive.length > 0 && snap.projectsActive.every(Boolean);
 record('3) Both jobs created active records across all entities',
   allActive(beforeA) && allActive(beforeB),
   `A=${JSON.stringify(beforeA)} | B=${JSON.stringify(beforeB)}`,
@@ -279,13 +283,17 @@ record('4) Rollback Job B returns 200 ok',
 // 5) Job B rolled back; Job A untouched
 const afterRB_A = await accountSnapshot(VKN_A);
 const afterRB_B = await accountSnapshot(VKN_B);
+// Same non-empty rule as allActive: an entity set being missing should
+// NOT be treated as "rolled back". The rollback target legitimately
+// created one row of each entity, so a length === 0 result here means
+// the row vanished outside the rollback path and the smoke must fail.
 const fullyRolledBack = (snap) =>
   !!snap &&
   snap.accountActive === false &&
-  snap.companyStatuses.every((s) => s === 'inactive') &&
-  snap.contactsActive.every((v) => v === false) &&
-  snap.addressesActive.every((v) => v === false) &&
-  snap.projectsActive.every((v) => v === false);
+  snap.companyStatuses.length > 0 && snap.companyStatuses.every((s) => s === 'inactive') &&
+  snap.contactsActive.length > 0 && snap.contactsActive.every((v) => v === false) &&
+  snap.addressesActive.length > 0 && snap.addressesActive.every((v) => v === false) &&
+  snap.projectsActive.length > 0 && snap.projectsActive.every((v) => v === false);
 record('5a) Job B records rolled back across all entities',
   fullyRolledBack(afterRB_B),
   JSON.stringify(afterRB_B),
