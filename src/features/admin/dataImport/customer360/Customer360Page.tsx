@@ -721,11 +721,51 @@ function CommitResultCard({
           <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs dark:border-rose-700/40 dark:bg-rose-900/20">
             <div className="mb-2 flex items-start gap-2 text-rose-800 dark:text-rose-200">
               <AlertCircle size={14} className="mt-0.5" />
-              <span>
-                Bu aktarım ile yapılan Account/AccountCompany güncellemeleri eski değerlerine döner;
-                oluşturulan iletişim, adres ve projeler pasife alınır. Devam etmek istiyor musunuz?
-              </span>
+              <div>
+                <div className="text-sm font-semibold">
+                  Bu işlem yalnız aşağıdaki Customer 360 import job'ını geri alır.
+                </div>
+                <div className="mt-0.5">
+                  Account/AccountCompany güncellemeleri eski değerlerine döner; oluşturulan iletişim, adres ve projeler pasife alınır. Başka bir job etkilenmez.
+                </div>
+              </div>
             </div>
+
+            <div className="mb-2 rounded-md border border-rose-200 bg-white/80 p-2.5 text-[11px] text-slate-700 dark:border-rose-700/40 dark:bg-ndark-card dark:text-ndark-muted">
+              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                <div>
+                  <span className="font-medium">Job:</span>{' '}
+                  <code className="font-mono">{job.id}</code>
+                </div>
+                <div>
+                  <span className="font-medium">Şirket:</span>{' '}
+                  <code className="font-mono">{job.companyId}</code>
+                </div>
+                <div>
+                  <span className="font-medium">Kaynak:</span>{' '}
+                  {job.fileName ?? job.sourceName ?? (job.sourceUrlMasked ? 'API' : '—')}
+                </div>
+                <div>
+                  <span className="font-medium">Durum:</span>{' '}
+                  {STATUS_LABEL[job.status] ?? job.status}
+                </div>
+                <div>
+                  <span className="font-medium">Commit:</span>{' '}
+                  {job.completedAt ? new Date(job.completedAt).toLocaleString('tr-TR') : '—'}
+                </div>
+                <div>
+                  <span className="font-medium">Toplam satır:</span>{' '}
+                  {job.totalRows}
+                </div>
+              </div>
+              <div className="mt-1.5">
+                <span className="font-medium">Entity sayıları:</span>{' '}
+                {(Object.entries(entityCounts) as Array<[string, Customer360EntityStatsLocal]>)
+                  .map(([ek, s]) => `${ek} +${s.created} ↺${s.updated}`)
+                  .join(' · ')}
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2">
               <Button variant="ghost" onClick={onCancelConfirm} disabled={rollbackBusy}>
                 Vazgeç
