@@ -9,6 +9,11 @@ interface Props {
   onOpenJob: (j: ImportJob) => void;
   /** Sayım değişince yenile (commit/rollback sonrası) */
   refreshKey: number;
+  /**
+   * Tenant + targetType filtreli geçmiş. Phase 1 wizard `account` geçer,
+   * Customer 360 wizard `customer360` geçer; ikisi karışmaz.
+   */
+  targetType?: 'account' | 'customer360';
 }
 
 const STATUS_TONE: Record<ImportJob['status'], string> = {
@@ -33,7 +38,7 @@ const STATUS_LABEL: Record<ImportJob['status'], string> = {
   rollback_partial: 'Geri alma kısmi',
 };
 
-export function HistoryPanel({ companyId, onOpenJob, refreshKey }: Props) {
+export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType }: Props) {
   const [items, setItems] = useState<ImportJob[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -41,7 +46,7 @@ export function HistoryPanel({ companyId, onOpenJob, refreshKey }: Props) {
     if (!companyId) return;
     let alive = true;
     setLoading(true);
-    void importService.listJobs(companyId).then((r) => {
+    void importService.listJobs(companyId, targetType ? { targetType } : undefined).then((r) => {
       if (!alive) return;
       setItems(r?.value ?? []);
       setLoading(false);
@@ -49,7 +54,7 @@ export function HistoryPanel({ companyId, onOpenJob, refreshKey }: Props) {
     return () => {
       alive = false;
     };
-  }, [companyId, refreshKey]);
+  }, [companyId, refreshKey, targetType]);
 
   return (
     <Card>

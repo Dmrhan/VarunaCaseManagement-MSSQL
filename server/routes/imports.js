@@ -302,12 +302,24 @@ router.post(
   '/jobs/:id/rollback',
   asyncRoute(async (req, res) => {
     const jobId = req.params.id;
-    const job = await getImportJob({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    // Phase 1 endpoint must only ever roll back account-target jobs. The
+    // expectedTargetType guard in getImportJob + rollbackImportJob is the
+    // backstop against a Customer 360 job id reaching this route by way
+    // of a stale UI selection or a malformed client call.
+    const job = await getImportJob({
+      jobId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      expectedTargetType: 'account',
+    });
     if (!job) {
       throw new ImportError('Import job bulunamadı.', { status: 404, code: 'job_not_found' });
     }
     assertCompanyAdmin(req, job.companyId);
-    const result = await rollbackImportJob({ jobId, user: req.user });
+    const result = await rollbackImportJob({
+      jobId,
+      user: req.user,
+      expectedTargetType: 'account',
+    });
     res.json({ ok: true, job: result.job, report: result.report });
   }),
 );
@@ -321,10 +333,16 @@ router.get(
   asyncRoute(async (req, res) => {
     const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : null;
     const limit = req.query.limit ? Number(req.query.limit) : 50;
+    // Optional ?targetType=account|customer360 keeps each wizard's history
+    // list scoped to its own jobs. Phase 1 sends 'account', Customer 360
+    // sends 'customer360'. Omitting it preserves legacy "all jobs" listing.
+    const rawTarget = typeof req.query.targetType === 'string' ? req.query.targetType : null;
+    const targetType = rawTarget === 'account' || rawTarget === 'customer360' ? rawTarget : null;
     if (companyId) assertCompanyAdmin(req, companyId);
     const items = await listImportJobs({
       allowedCompanyIds: req.user.allowedCompanyIds,
       companyId,
+      targetType,
       limit,
     });
     res.json({ value: items });
@@ -335,7 +353,11 @@ router.get(
   '/jobs/:id',
   asyncRoute(async (req, res) => {
     const jobId = req.params.id;
-    const job = await getImportJob({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    const job = await getImportJob({
+      jobId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      expectedTargetType: 'account',
+    });
     if (!job) {
       return res.status(404).json({ error: 'job_not_found', message: 'Import job bulunamadı.' });
     }
@@ -347,7 +369,11 @@ router.get(
   '/jobs/:id/rows',
   asyncRoute(async (req, res) => {
     const jobId = req.params.id;
-    const job = await getImportJob({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    const job = await getImportJob({
+      jobId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      expectedTargetType: 'account',
+    });
     if (!job) {
       return res.status(404).json({ error: 'job_not_found', message: 'Import job bulunamadı.' });
     }
