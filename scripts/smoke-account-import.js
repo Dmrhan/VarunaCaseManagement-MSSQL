@@ -1009,21 +1009,29 @@ let mockServerUrl = null;
 // identity at all). A row with an invalid VKN must still error.
 {
   const stampTax = Date.now().toString().slice(-6);
-  const noVknRow = { 'Müşteri Adı': `NoVkn Smoke ${stampTax}`, VKN: '', Telefon: '', 'E-posta': '' };
-  const noNameNoVknRow = { 'Müşteri Adı': '', VKN: '', Telefon: '', 'E-posta': '' };
+  const noVknRow      = { 'Müşteri Adı': `NoVkn Smoke ${stampTax}`,      VKN: '',          Telefon: '', 'E-posta': '' };
+  const noNameNoVknRow= { 'Müşteri Adı': '',                              VKN: '',          Telefon: '', 'E-posta': '' };
+  // Malformed VKN: 9 digits → fails format. Must error AND NOT receive
+  // no_tax_id (which would be contradictory and would inflate metrics).
+  const malformedVknRow = { 'Müşteri Adı': `Malformed Smoke ${stampTax}`, VKN: '123456789', Telefon: '', 'E-posta': '' };
+  // NULL-like sentinel: legacy exports commonly write the literal 'NULL'.
+  // After the fix this counts as missing (warning), not malformed (error).
+  const nullSentinelRow = { 'Müşteri Adı': `NullSentinel Smoke ${stampTax}`, VKN: 'NULL',   Telefon: '', 'E-posta': '' };
   const dr = await api(adminToken, '/api/admin/imports/account/dry-run', {
     method: 'POST',
     body: JSON.stringify({
       companyId: COMP_PAR,
       mapping: MAPPING,
-      rows: [noVknRow, noNameNoVknRow],
+      rows: [noVknRow, noNameNoVknRow, malformedVknRow, nullSentinelRow],
       sourceMeta: { sourceType: 'file', fileName: 'no-vkn-smoke.csv' },
     }),
   });
   const okDr = dr.status === 200 && dr.data?.ok === true;
   record('37a) Dry-run accepts row without VKN (does not error)', okDr, `status=${dr.status}`);
-  const previewNoVkn = (dr.data?.preview ?? []).find((p) => p.rowNumber === 1);
-  const previewBoth = (dr.data?.preview ?? []).find((p) => p.rowNumber === 2);
+  const previewNoVkn   = (dr.data?.preview ?? []).find((p) => p.rowNumber === 1);
+  const previewBoth    = (dr.data?.preview ?? []).find((p) => p.rowNumber === 2);
+  const previewBad     = (dr.data?.preview ?? []).find((p) => p.rowNumber === 3);
+  const previewNullSnt = (dr.data?.preview ?? []).find((p) => p.rowNumber === 4);
   const hasNoTaxIdWarning = previewNoVkn?.warnings?.some((w) => w.code === 'no_tax_id');
   record('37b) Row-1 (no VKN, has name) gets no_tax_id warning', !!hasNoTaxIdWarning,
     `warnings=${JSON.stringify(previewNoVkn?.warnings)}`);
@@ -1033,9 +1041,25 @@ let mockServerUrl = null;
   record('37d) Row-2 (no name + no VKN) → error',
     previewBoth?.action === 'error' && previewBoth?.errors?.length > 0,
     `action=${previewBoth?.action} errors=${JSON.stringify(previewBoth?.errors)}`);
-  record('37e) Dry-run summary exposes missingTaxIdCount=1',
-    dr.data?.summary?.missingTaxIdCount === 1,
+  // Expect 2: row-1 (blank VKN) + row-4 (VKN='NULL', now treated as missing).
+  // Row-2 (no name) and row-3 (malformed VKN) error out and are excluded.
+  record('37e) Dry-run summary missingTaxIdCount counts only commit-eligible no-VKN rows (2)',
+    dr.data?.summary?.missingTaxIdCount === 2,
     `missingTaxIdCount=${dr.data?.summary?.missingTaxIdCount}`);
+  // Row-3: malformed VKN must error AND must NOT carry no_tax_id.
+  const malformedHasNoTaxIdWarning = previewBad?.warnings?.some((w) => w.code === 'no_tax_id');
+  record('37h) Row-3 (malformed VKN) → action=error',
+    previewBad?.action === 'error' && previewBad?.errors?.some((e) => e.targetKey === 'vkn'),
+    `action=${previewBad?.action} errors=${JSON.stringify(previewBad?.errors)}`);
+  record('37i) Row-3 (malformed VKN) does NOT carry no_tax_id warning',
+    malformedHasNoTaxIdWarning === false,
+    `warnings=${JSON.stringify(previewBad?.warnings)}`);
+  // Row-4: literal 'NULL' is treated as missing, not malformed.
+  const nullSntHasNoTaxId = previewNullSnt?.warnings?.some((w) => w.code === 'no_tax_id');
+  const nullSntVknError = previewNullSnt?.errors?.some((e) => e.targetKey === 'vkn');
+  record('37j) Row-4 (VKN="NULL") → no_tax_id warning, NO invalid VKN error',
+    !!nullSntHasNoTaxId && !nullSntVknError && previewNullSnt?.action === 'create',
+    `action=${previewNullSnt?.action} warnings=${JSON.stringify(previewNullSnt?.warnings)} errors=${JSON.stringify(previewNullSnt?.errors)}`);
 
   const dryRunJobIdNoVkn = dr.data?.jobId;
   if (dryRunJobIdNoVkn) {
@@ -1044,18 +1068,26 @@ let mockServerUrl = null;
       method: 'POST',
       body: JSON.stringify({ companyId: COMP_PAR, jobId: dryRunJobIdNoVkn, options: { skipErrors: true } }),
     });
-    record('37f) Commit succeeds (skipErrors=true) — no-VKN row created',
-      co.status === 200 && co.data?.ok && co.data?.runStats?.createdCount === 1,
+    // Two creates expected: blank-VKN row + NULL-sentinel row. Other two
+    // rows error out (no-name + malformed-VKN) and are skipped.
+    record('37f) Commit succeeds (skipErrors=true) — both no-VKN rows created',
+      co.status === 200 && co.data?.ok && co.data?.runStats?.createdCount === 2,
       `status=${co.status} runStats=${JSON.stringify(co.data?.runStats)}`);
-    // Verify the row landed in DB with vkn=null (no fake VKN generated).
-    const created = await prisma.account.findFirst({
+    // Verify both rows landed in DB with vkn=null (no fake VKN generated).
+    const createdBlank = await prisma.account.findFirst({
       where: { name: `NoVkn Smoke ${stampTax}` },
       select: { id: true, vkn: true, isActive: true },
     });
-    if (created?.id) createdAccountIds.add(created.id);
-    record('37g) Created Account has vkn=null (no fake VKN)',
-      !!created && created.vkn === null && created.isActive === true,
-      `vkn=${created?.vkn} isActive=${created?.isActive}`);
+    const createdNull = await prisma.account.findFirst({
+      where: { name: `NullSentinel Smoke ${stampTax}` },
+      select: { id: true, vkn: true, isActive: true },
+    });
+    if (createdBlank?.id) createdAccountIds.add(createdBlank.id);
+    if (createdNull?.id) createdAccountIds.add(createdNull.id);
+    record('37g) Both created Accounts have vkn=null (no fake VKN)',
+      !!createdBlank && createdBlank.vkn === null && createdBlank.isActive === true &&
+      !!createdNull && createdNull.vkn === null && createdNull.isActive === true,
+      `blank: vkn=${createdBlank?.vkn} isActive=${createdBlank?.isActive} | NULL: vkn=${createdNull?.vkn} isActive=${createdNull?.isActive}`);
   }
 }
 

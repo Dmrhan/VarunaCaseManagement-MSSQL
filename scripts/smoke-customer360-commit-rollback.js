@@ -700,7 +700,8 @@ let xtParamAddrId = null;
   );
 }
 
-// 31) Dry-run for no-VKN row emits no_tax_id warning + summary count
+// 31) Dry-run distinguishes blank VKN (warning) from malformed VKN (error)
+//     and from 'NULL' sentinel (treated as missing, not malformed).
 {
   const dr = await api(adminToken, '/api/admin/imports/customer360/dry-run', {
     method: 'POST',
@@ -710,19 +711,41 @@ let xtParamAddrId = null;
         account: {
           columns: ['name', 'vkn', 'email'],
           mapping: mappingFor('account'),
-          rows: [{ name: `C360 DR NoVkn ${stamp}`, vkn: '', email: '' }],
+          rows: [
+            { name: `C360 DR NoVkn ${stamp}`,        vkn: '',          email: '' }, // blank → warning
+            { name: `C360 DR Malformed ${stamp}`,    vkn: '123456789', email: '' }, // 9 digits → invalid VKN, NO warning
+            { name: `C360 DR NullSentinel ${stamp}`, vkn: 'NULL',      email: '' }, // 'NULL' → treated as missing
+          ],
         },
       },
       sourceMeta: { sourceType: 'file', fileName: 'novkn-dr.xlsx' },
     }),
   });
-  const previewAccount = dr.data?.preview?.account?.[0];
-  const hasWarn = previewAccount?.warnings?.some((w) => w.code === 'no_tax_id');
-  record('31a) Dry-run surfaces no_tax_id warning on the account row', !!hasWarn,
-    `warnings=${JSON.stringify(previewAccount?.warnings)}`);
-  record('31b) Dry-run summary.missingTaxIdCount === 1',
-    dr.data?.summary?.missingTaxIdCount === 1,
-    `missingTaxIdCount=${dr.data?.summary?.missingTaxIdCount}`);
+  const previewRows = dr.data?.preview?.account ?? [];
+  const blank      = previewRows.find((p) => p.rowNumber === 1);
+  const malformed  = previewRows.find((p) => p.rowNumber === 2);
+  const nullSnt    = previewRows.find((p) => p.rowNumber === 3);
+  const hasWarnOn = (r) => r?.warnings?.some((w) => w.code === 'no_tax_id');
+  const hasVknErrOn = (r) => r?.errors?.some((e) => e.targetKey === 'vkn');
+
+  record('31a) Row-1 (blank VKN) → no_tax_id warning + no error',
+    hasWarnOn(blank) && !hasVknErrOn(blank) && blank?.action !== 'error',
+    `warnings=${JSON.stringify(blank?.warnings)} action=${blank?.action}`,
+  );
+  record('31b) Row-2 (malformed VKN) → invalid VKN error, NO no_tax_id warning',
+    hasVknErrOn(malformed) && !hasWarnOn(malformed) && malformed?.action === 'error',
+    `errors=${JSON.stringify(malformed?.errors)} warnings=${JSON.stringify(malformed?.warnings)}`,
+  );
+  record('31c) Row-3 (VKN="NULL") → treated as missing: no_tax_id warning, no error',
+    hasWarnOn(nullSnt) && !hasVknErrOn(nullSnt) && nullSnt?.action !== 'error',
+    `warnings=${JSON.stringify(nullSnt?.warnings)} action=${nullSnt?.action}`,
+  );
+  // Expect 2 in missingTaxIdCount: blank + NULL sentinel. Malformed errors
+  // out so it must NOT be counted.
+  record('31d) summary.missingTaxIdCount === 2 (excludes malformed-VKN error row)',
+    dr.data?.summary?.missingTaxIdCount === 2,
+    `missingTaxIdCount=${dr.data?.summary?.missingTaxIdCount}`,
+  );
 }
 
 await cleanup();

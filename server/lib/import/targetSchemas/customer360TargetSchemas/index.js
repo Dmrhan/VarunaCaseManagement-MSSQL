@@ -212,11 +212,22 @@ export function normalizeEntityRow(entityKey, rawRow, mapping) {
   const errors = [];
   const warnings = [];
   const normalized = {};
+  // `rawVknPresent` reflects whether the SOURCE cell had a real value, not
+  // whether the normalized result happens to be null. A malformed VKN has
+  // rawVknPresent=true (and produces an invalid-VKN error); we must NOT
+  // also emit no_tax_id on those rows. Only truly missing source values
+  // ('', whitespace, 'NULL', '-') should trigger the warning.
+  let rawVknPresent = false;
   for (const m of mapping) {
     if (!m.targetKey) continue;
     const f = keyIndex.get(m.targetKey);
     if (!f) continue;
-    const r = f.normalize(rawRow[m.source]);
+    const rawValue = rawRow[m.source];
+    if (entityKey === 'account' && f.key === 'vkn') {
+      const s = String(rawValue ?? '').trim();
+      if (s && !/^(null|-)$/i.test(s)) rawVknPresent = true;
+    }
+    const r = f.normalize(rawValue);
     if (!r.ok) {
       errors.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.reason });
       continue;
@@ -227,14 +238,9 @@ export function normalizeEntityRow(entityKey, rawRow, mapping) {
     }
     if (r.warning) warnings.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.warning });
   }
-  // Per-row no_tax_id warning for the account entity. Mirrors the Phase 1
-  // accountTargetSchema.normalizeRow behavior: when VKN is mapped but a
-  // specific row has an empty cell, surface the missing-identity warning
-  // so operators see "X rows will be created without VKN" without ever
-  // being prompted to invent a fake one. TCKN is privacy-blocked above
-  // (detectTcknHeader); this warning covers the "no official identity"
-  // case for both shapes.
-  if (entityKey === 'account' && normalized.vkn == null) {
+  // no_tax_id fires only when the source provided no value. Malformed VKN
+  // rows already error and must not double-count toward missingTaxIdCount.
+  if (entityKey === 'account' && !rawVknPresent) {
     warnings.push({
       code: 'no_tax_id',
       entity: entityKey,
