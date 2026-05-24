@@ -297,6 +297,13 @@ Product Fit / Architecture Fit / **Performance & Architecture Gate** / Code Fit 
 - **PR/commit hash** "Next action" sütununa eklenir.
 - `PRODUCT_PLANNING_MATRIX.md` sadece business capability gerçekten değiştiyse güncellenir (yetenek scope büyüdü/küçüldü/yeniden adlandı). Salt status değişikliği matrix'i tetiklemez.
 
+### G. In-Product Help (Help Impact gate)
+Kullanıcıya görünür bir yüzey değişti mi (workflow adımı, buton/etiket, validation mesajı, rol/yetki, import/export semantiği, AI/KB davranışı)?
+- Evet → ilgili topic [`src/help/helpRegistry.ts`](../src/help/helpRegistry.ts) içinde güncellenir, `updatedAt` bump edilir.
+- Hayır → final report'taki `Help Impact:` satırında somut bir "Not needed: …" gerekçesi yer alır.
+
+Detaylı kurallar ve banned/required keyword listesi: [`IN_PRODUCT_HELP_STANDARD.md`](./IN_PRODUCT_HELP_STANDARD.md). Smoke: `node scripts/smoke-help-content.js`.
+
 ---
 
 ## 4. Agentic Planning Card Şablonu

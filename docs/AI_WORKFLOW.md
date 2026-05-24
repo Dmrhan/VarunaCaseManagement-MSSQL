@@ -440,7 +440,26 @@ Agents should update:
 - `docs/TEST_SCENARIOS.md` when a new feature ships that PMs/QA should
   manually test (add a scenario with persona + steps + expected)
 - `docs/HANDOVER.md` when handover-relevant decisions change
+- `docs/IN_PRODUCT_HELP_STANDARD.md` defines the in-product help
+  registry, the Help Impact gate, and the freshness smoke. Touch it
+  when those rules change; otherwise follow it.
 - `README.md` when local setup, commands, or doc links change
+
+## In-Product Help
+
+User-facing screens follow `docs/IN_PRODUCT_HELP_STANDARD.md`:
+
+- Critical screens (import/export, case workflows, account/customer
+  data, admin definitions, AI/KB, reporting, permissions) must expose
+  visible "Nasıl çalışır?" help.
+- Help copy stays in operator language; banned phrases (BFF, Prisma,
+  payload, adapter, Phase 2a/2b, internal layout names, …) cannot
+  appear in user-facing help.
+- Topics live in `src/help/helpRegistry.ts`; the freshness smoke at
+  `scripts/smoke-help-content.js` validates required keywords + banned
+  phrases per topic.
+- When workflow / labels / validation / role / import semantics change,
+  bump the topic and its `updatedAt`.
 
 ## Final Response Format
 
@@ -452,4 +471,7 @@ with the following sections (omit any that have nothing to report):
 - **Validation performed** - typecheck, build, manual smoke, etc.
 - **AI / dependency assumptions** - any external service or env
   assumption made
+- **Help Impact** - either `Updated: <topic/screen>` (with registry
+  bump if applicable) or `Not needed: <concrete reason>`. See
+  `docs/IN_PRODUCT_HELP_STANDARD.md` for when each applies.
 - **Follow-up risks** - what could go wrong, what was deferred
