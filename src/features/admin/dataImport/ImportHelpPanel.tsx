@@ -25,7 +25,6 @@ import {
   Download,
   Sparkles,
   Globe2,
-  Archive,
   ListChecks,
   ClipboardCheck,
   History,
@@ -58,7 +57,7 @@ const TOC: TocEntry[] = [
   { num: 11, title: 'Commit',                                hint: 'Gerçek aktarımı başlatır' },
   { num: 12, title: 'Rollback',                              hint: 'Aktarımı geri alır' },
   { num: 13, title: 'API kaynağı',                           hint: 'Excel yerine canlı entegrasyon' },
-  { num: 14, title: 'Eski (legacy) Excel düzenleri',          hint: 'Genel / Genel Tekil / Detaylar' },
+  { num: 14, title: 'Otomatik Sheet Önerileri',              hint: 'Standart şablon dışı dosyalar için başlangıç önerileri' },
   { num: 15, title: 'Veri güvenliği güvenceleri',            hint: 'Sınırlar, TCKN, sert silme yok' },
   { num: 16, title: 'Sık karşılaşılan durumlar',             hint: 'Hata avlama listesi' },
   { num: 17, title: 'Commit öncesi operator kontrol listesi', hint: 'Son onay öncesi 9 soru' },
@@ -254,14 +253,12 @@ export function ImportHelpPanel({ open, onClose }: Props) {
                 </div>
               </div>
               <ul className="ml-2 space-y-1">
-                <li>• <strong>Bir sayfa birden fazla entity'ye eşlenebilir.</strong> Örn:
-                  <span className="ml-1 font-mono text-[10px]">Genel Tekil → Müşteriler + Müşteri-Şirket</span>;
-                  <span className="ml-1 font-mono text-[10px]">Detaylar → İletişim + Projeler</span>.
-                </li>
+                <li>• <strong>Bir sayfa birden fazla veri tipine eşlenebilir.</strong> Örn. müşteri ve şirket ilişki
+                  bilgileri tek sayfadaysa o sayfayı hem "Müşteriler" hem "Müşteri-Şirket İlişkileri"ne bağlayabilirsiniz.</li>
                 <li>• Bilinmeyen sayfalar otomatik olarak alınmaz. Ya eşleştirin ya da <strong>Atla</strong> ile geçin.</li>
                 <li>• "Müşteriler"e en az bir sayfa eşlenmeden Devam butonu aktif olmaz.</li>
                 <li>• Sayfaları genişleterek kolon listesini ve ilk 3 örnek satırı görebilirsiniz.</li>
-                <li>• Eski "Genel / Genel Tekil / Detaylar" düzeni otomatik tanınır ve sihirbaz hazır öneri sunar (§14).</li>
+                <li>• Sistem, sayfa adları ve kolon başlıklarından yola çıkarak başlangıç önerileri sunabilir (bkz. §14).</li>
               </ul>
             </div>
           </AccordionItem>
@@ -437,25 +434,28 @@ export function ImportHelpPanel({ open, onClose }: Props) {
             </ul>
           </AccordionItem>
 
-          {/* §14 — Legacy layouts */}
+          {/* §14 — Auto sheet suggestions */}
           <AccordionItem
-            title="14. Eski (legacy) Excel düzenleri"
-            icon={<Archive size={14} />}
-            subtitle="Genel / Genel Tekil / Detaylar otomatik tanınır"
+            title="14. Otomatik Sheet Önerileri"
+            icon={<Sparkles size={14} />}
+            subtitle="Standart şablon dışı dosyalar için başlangıç önerileri"
             defaultOpen={false}
           >
-            <ul className="space-y-1.5 text-xs text-slate-700 dark:text-ndark-muted">
-              <li>• Bazı eski müşteri listeleri <code>Genel</code>, <code>Genel Tekil</code>, <code>Detaylar</code> sayfa düzeniyle gelir.</li>
-              <li>• Sistem bu düzeni tanır ve Sheet Eşleştirme Sihirbazı’nda önerilen eşleştirmeleri hazır sunar:
-                <ul className="mt-1 ml-4 space-y-0.5 list-disc">
-                  <li><strong>Genel Tekil</strong> → Müşteriler + Müşteri-Şirket İlişkileri</li>
-                  <li><strong>Detaylar</strong> → İletişim Kişileri + Projeler</li>
-                  <li><strong>Genel</strong> → Genel Tekil mevcutsa mükerrer olduğu için atlanır</li>
-                </ul>
-              </li>
-              <li>• Bu tanıma <strong>şirketten bağımsızdır</strong>; aynı düzendeki tüm dosyalar için çalışır.</li>
-              <li>• Öneri sadece bir başlangıç noktasıdır; istediğiniz sayfayı istediğiniz entity'ye yeniden bağlayabilirsiniz.</li>
-            </ul>
+            <div className="space-y-2 text-xs text-slate-700 dark:text-ndark-muted">
+              <p>
+                Dosyanız standart Varuna şablonunda olmasa bile sistem, sayfa adları ve kolon
+                başlıklarından yola çıkarak ilk eşleştirme önerilerini hazırlayabilir. Örneğin
+                müşteri adı, vergi numarası ve telefon bilgileri bulunan bir sayfa
+                <strong> "Müşteriler"</strong> olarak; ilgili kişi ve e-posta bilgileri bulunan bir
+                sayfa <strong>"İletişim Kişileri"</strong> olarak önerilebilir.
+              </p>
+              <p>
+                Bu öneriler yalnızca başlangıç noktasıdır. Her sayfanın hangi veri tipine
+                bağlanacağını siz belirlersiniz. Gerekirse bir sayfayı birden fazla veri tipine
+                bağlayabilir veya kullanmayacağınız sayfaları <strong>"Atla"</strong> olarak
+                işaretleyebilirsiniz. Bu aşamada veritabanına hiçbir kayıt yazılmaz.
+              </p>
+            </div>
           </AccordionItem>
 
           {/* §15 — Data safety */}
@@ -547,7 +547,7 @@ export function ImportHelpPanel({ open, onClose }: Props) {
             </ul>
           </AccordionItem>
 
-          {/* §8.5 — File format reminder kept for legacy users */}
+          {/* Ek — Standard 5-sheet file format reminder for users not using the template. */}
           <AccordionItem
             title="Ek — Müşteri 360 standart dosya formatı"
             icon={<FileSpreadsheet size={14} />}
