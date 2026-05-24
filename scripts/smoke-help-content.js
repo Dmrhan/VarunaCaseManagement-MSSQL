@@ -1,14 +1,21 @@
 /**
  * smoke-help-content.js — Varuna in-product help freshness check.
  *
- * Loads `src/help/helpRegistry.ts` (Node native TS type-stripping; Node 22+),
- * iterates every HelpTopic, and validates:
+ * Loads `src/help/helpRegistry.ts` and validates every HelpTopic:
  *
  *   1. Required structural fields (topic / audience / title / summary / sections).
  *   2. Every `requiredKeyword` appears in the topic's text (case-insensitive).
  *   3. No banned phrase appears anywhere in the topic
  *      (operator default banlist + topic-level additions, case-insensitive).
  *   4. `updatedAt`, when present, is a parseable ISO date.
+ *
+ * Loader: prefers Node 22+ native TypeScript type-stripping; falls back to
+ * the project's `typescript` devDependency (`transpileModule`) on older
+ * runtimes (CI is pinned to Node 20).
+ *
+ * Banned-phrase exceptions: a banned phrase that appears in user-visible
+ * topic text is exempted ONLY when the same line in the .ts source carries
+ * an `// allowed: <reason>` annotation. There is no silent allowlist.
  *
  * Exit codes:
  *   0 — every topic passes.
@@ -17,23 +24,73 @@
  * Usage:
  *   node --check scripts/smoke-help-content.js
  *   node scripts/smoke-help-content.js
- *
- * See `docs/IN_PRODUCT_HELP_STANDARD.md` for the contract.
  */
 
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const REGISTRY_PATH = resolve(process.cwd(), 'src/help/helpRegistry.ts');
 const REGISTRY_URL = pathToFileURL(REGISTRY_PATH).href;
+const REGISTRY_SRC = readFileSync(REGISTRY_PATH, 'utf8');
+
+const NODE_MAJOR = Number.parseInt(process.versions.node.split('.')[0], 10);
+
+// ─────────────────────────────────────────────────────────────────────
+// Loader: Node 22+ native TS strip → fallback to typescript devDep.
+// ─────────────────────────────────────────────────────────────────────
+
+async function loadRegistry() {
+  // Try native TypeScript type-stripping first (Node 22+).
+  if (NODE_MAJOR >= 22) {
+    try {
+      return await import(REGISTRY_URL);
+    } catch {
+      /* fall through to TS API compile */
+    }
+  }
+  // Fallback: compile via the project's TypeScript devDependency.
+  let ts;
+  try {
+    ts = (await import('typescript')).default;
+  } catch (err) {
+    console.error('[ABORT] Cannot load `typescript` devDependency for fallback compile.');
+    console.error(`  ${err && err.message ? err.message : err}`);
+    process.exit(1);
+  }
+  const out = ts.transpileModule(REGISTRY_SRC, {
+    fileName: REGISTRY_PATH,
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      isolatedModules: true,
+      esModuleInterop: true,
+    },
+  });
+  if (out.diagnostics && out.diagnostics.length > 0) {
+    for (const d of out.diagnostics) {
+      const text = typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText;
+      console.error(`[ts] ${text}`);
+    }
+  }
+  const tmpDir = mkdtempSync(join(tmpdir(), 'varuna-help-smoke-'));
+  const tmpFile = join(tmpDir, 'helpRegistry.mjs');
+  writeFileSync(tmpFile, out.outputText, 'utf8');
+  try {
+    return await import(pathToFileURL(tmpFile).href);
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 let HELP_TOPICS;
 let OPERATOR_DEFAULT_BANNED_PHRASES;
 try {
-  ({ HELP_TOPICS, OPERATOR_DEFAULT_BANNED_PHRASES } = await import(REGISTRY_URL));
+  ({ HELP_TOPICS, OPERATOR_DEFAULT_BANNED_PHRASES } = await loadRegistry());
 } catch (err) {
   console.error(`[ABORT] Could not load help registry at ${REGISTRY_PATH}.`);
-  console.error('Hint: Node 22+ supports .ts imports via type-stripping; older runtimes do not.');
   console.error(`  ${err && err.message ? err.message : err}`);
   process.exit(1);
 }
@@ -46,6 +103,62 @@ if (!Array.isArray(OPERATOR_DEFAULT_BANNED_PHRASES)) {
   console.error('[ABORT] OPERATOR_DEFAULT_BANNED_PHRASES export missing or not an array.');
   process.exit(1);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Source-line parsing for `// allowed:` exceptions.
+//
+// We slice the .ts source into per-topic line ranges (anchored on the
+// `topic: '<id>'` literal) so a banned phrase can be exempted ONLY for
+// the topic whose source carries the annotation. Cross-topic leakage
+// of allowances is not possible.
+// ─────────────────────────────────────────────────────────────────────
+
+function sliceTopicSourceLines(srcText, topicIds) {
+  const lines = srcText.split('\n');
+  /** @type {Array<{ id: string; line: number }>} */
+  const anchors = [];
+  for (let i = 0; i < lines.length; i++) {
+    for (const id of topicIds) {
+      // Match: topic: 'data-import-studio'   (single or double quote)
+      if (lines[i].includes(`topic: '${id}'`) || lines[i].includes(`topic: "${id}"`)) {
+        anchors.push({ id, line: i });
+        break;
+      }
+    }
+  }
+  /** @type {Map<string, string[]>} */
+  const blocks = new Map();
+  for (let i = 0; i < anchors.length; i++) {
+    const start = anchors[i].line;
+    const end = i + 1 < anchors.length ? anchors[i + 1].line : lines.length;
+    blocks.set(anchors[i].id, lines.slice(start, end));
+  }
+  return blocks;
+}
+
+/**
+ * For a topic, given the set of banned phrases that fired on its runtime
+ * text, return the subset that is exempted via `// allowed: <reason>`
+ * annotations in the topic's source lines.
+ */
+function exemptedByAllowed(topicLines, firedPhrases) {
+  const exempted = new Set();
+  for (const phrase of firedPhrases) {
+    const phraseLc = phrase.toLowerCase();
+    for (const line of topicLines) {
+      if (!line.toLowerCase().includes(phraseLc)) continue;
+      if (/\/\/\s*allowed:/i.test(line)) {
+        exempted.add(phrase);
+        break;
+      }
+    }
+  }
+  return exempted;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Validation core
+// ─────────────────────────────────────────────────────────────────────
 
 function fmt(n) { return String(n).padStart(3, ' '); }
 function header(title) {
@@ -63,9 +176,18 @@ function topicText(topic) {
   return parts.join('\n').toLowerCase();
 }
 
+const topicIds = HELP_TOPICS
+  .map((t) => (t && typeof t.topic === 'string' ? t.topic : null))
+  .filter((x) => !!x);
+const sourceBlocks = sliceTopicSourceLines(REGISTRY_SRC, topicIds);
+
 let totalTopics = 0;
 let totalViolations = 0;
+let totalExempted = 0;
+/** @type {Map<string, string[]>} */
 const violationsByTopic = new Map();
+/** @type {Array<{ id: string; phrase: string }>} */
+const exemptionLog = [];
 
 function record(topicId, line) {
   totalViolations += 1;
@@ -105,8 +227,6 @@ for (const topic of HELP_TOPICS) {
     });
   }
 
-  // 4) updatedAt parseable when present (checked early so we surface invalids
-  //    alongside structural problems).
   if (topic.updatedAt !== undefined) {
     if (typeof topic.updatedAt !== 'string' || Number.isNaN(Date.parse(topic.updatedAt))) {
       record(id, `topic.updatedAt is not a parseable ISO date (got ${JSON.stringify(topic.updatedAt)})`);
@@ -128,7 +248,7 @@ for (const topic of HELP_TOPICS) {
     }
   }
 
-  // 3) Banned phrases absent. Operator topics inherit default banlist.
+  // 3) Banned phrases absent (with `// allowed:` exceptions).
   const banSet = new Set();
   if (topic.audience === 'operator') {
     for (const b of OPERATOR_DEFAULT_BANNED_PHRASES) banSet.add(String(b).toLowerCase());
@@ -136,16 +256,33 @@ for (const topic of HELP_TOPICS) {
   if (Array.isArray(topic.bannedPhrases)) {
     for (const b of topic.bannedPhrases) banSet.add(String(b).toLowerCase());
   }
+  /** @type {Set<string>} */
+  const firedPhrases = new Set();
   for (const phrase of banSet) {
-    if (haystack.includes(phrase)) {
-      record(id, `banned phrase present: ${JSON.stringify(phrase)}`);
+    if (haystack.includes(phrase)) firedPhrases.add(phrase);
+  }
+  const topicLines = sourceBlocks.get(id) ?? [];
+  const exempted = exemptedByAllowed(topicLines, firedPhrases);
+  for (const phrase of firedPhrases) {
+    if (exempted.has(phrase)) {
+      totalExempted += 1;
+      exemptionLog.push({ id, phrase });
+      continue;
     }
+    record(id, `banned phrase present: ${JSON.stringify(phrase)}`);
   }
 }
 
 header('Help registry smoke');
-console.log(`  Topics checked  ${fmt(totalTopics)}`);
-console.log(`  Violations      ${fmt(totalViolations)}`);
+console.log(`  Topics checked       ${fmt(totalTopics)}`);
+console.log(`  Loader               ${NODE_MAJOR >= 22 ? 'native TS strip' : 'typescript.transpileModule fallback'}`);
+console.log(`  Banned exemptions    ${fmt(totalExempted)} (via // allowed:)`);
+console.log(`  Violations           ${fmt(totalViolations)}`);
+
+if (exemptionLog.length > 0) {
+  console.log('\n  Exempted banned phrases (allowed by topic):');
+  for (const e of exemptionLog) console.log(`    · ${e.id}: ${JSON.stringify(e.phrase)}`);
+}
 
 if (totalViolations === 0) {
   console.log('\n[PASS] All help topics satisfy the standard.');
