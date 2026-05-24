@@ -1001,6 +1001,65 @@ let mockServerUrl = null;
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 37) Missing-VKN scenarios — no_tax_id warning, not error
+// ─────────────────────────────────────────────────────────────────
+// Spec: operators should never invent fake VKN. A row with a customer
+// name but no VKN must commit successfully with a `no_tax_id` warning.
+// Inverse: a row with neither name nor VKN must still error (no usable
+// identity at all). A row with an invalid VKN must still error.
+{
+  const stampTax = Date.now().toString().slice(-6);
+  const noVknRow = { 'Müşteri Adı': `NoVkn Smoke ${stampTax}`, VKN: '', Telefon: '', 'E-posta': '' };
+  const noNameNoVknRow = { 'Müşteri Adı': '', VKN: '', Telefon: '', 'E-posta': '' };
+  const dr = await api(adminToken, '/api/admin/imports/account/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP_PAR,
+      mapping: MAPPING,
+      rows: [noVknRow, noNameNoVknRow],
+      sourceMeta: { sourceType: 'file', fileName: 'no-vkn-smoke.csv' },
+    }),
+  });
+  const okDr = dr.status === 200 && dr.data?.ok === true;
+  record('37a) Dry-run accepts row without VKN (does not error)', okDr, `status=${dr.status}`);
+  const previewNoVkn = (dr.data?.preview ?? []).find((p) => p.rowNumber === 1);
+  const previewBoth = (dr.data?.preview ?? []).find((p) => p.rowNumber === 2);
+  const hasNoTaxIdWarning = previewNoVkn?.warnings?.some((w) => w.code === 'no_tax_id');
+  record('37b) Row-1 (no VKN, has name) gets no_tax_id warning', !!hasNoTaxIdWarning,
+    `warnings=${JSON.stringify(previewNoVkn?.warnings)}`);
+  record('37c) Row-1 (no VKN, has name) → action=create (not error)',
+    previewNoVkn?.action === 'create',
+    `action=${previewNoVkn?.action}`);
+  record('37d) Row-2 (no name + no VKN) → error',
+    previewBoth?.action === 'error' && previewBoth?.errors?.length > 0,
+    `action=${previewBoth?.action} errors=${JSON.stringify(previewBoth?.errors)}`);
+  record('37e) Dry-run summary exposes missingTaxIdCount=1',
+    dr.data?.summary?.missingTaxIdCount === 1,
+    `missingTaxIdCount=${dr.data?.summary?.missingTaxIdCount}`);
+
+  const dryRunJobIdNoVkn = dr.data?.jobId;
+  if (dryRunJobIdNoVkn) {
+    createdJobIds.add(dryRunJobIdNoVkn);
+    const co = await api(adminToken, '/api/admin/imports/account/commit', {
+      method: 'POST',
+      body: JSON.stringify({ companyId: COMP_PAR, jobId: dryRunJobIdNoVkn, options: { skipErrors: true } }),
+    });
+    record('37f) Commit succeeds (skipErrors=true) — no-VKN row created',
+      co.status === 200 && co.data?.ok && co.data?.runStats?.createdCount === 1,
+      `status=${co.status} runStats=${JSON.stringify(co.data?.runStats)}`);
+    // Verify the row landed in DB with vkn=null (no fake VKN generated).
+    const created = await prisma.account.findFirst({
+      where: { name: `NoVkn Smoke ${stampTax}` },
+      select: { id: true, vkn: true, isActive: true },
+    });
+    if (created?.id) createdAccountIds.add(created.id);
+    record('37g) Created Account has vkn=null (no fake VKN)',
+      !!created && created.vkn === null && created.isActive === true,
+      `vkn=${created?.vkn} isActive=${created?.isActive}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Cleanup
 // ─────────────────────────────────────────────────────────────────
 if (mockServer) {

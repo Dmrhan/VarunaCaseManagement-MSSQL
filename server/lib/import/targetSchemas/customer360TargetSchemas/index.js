@@ -227,6 +227,22 @@ export function normalizeEntityRow(entityKey, rawRow, mapping) {
     }
     if (r.warning) warnings.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.warning });
   }
+  // Per-row no_tax_id warning for the account entity. Mirrors the Phase 1
+  // accountTargetSchema.normalizeRow behavior: when VKN is mapped but a
+  // specific row has an empty cell, surface the missing-identity warning
+  // so operators see "X rows will be created without VKN" without ever
+  // being prompted to invent a fake one. TCKN is privacy-blocked above
+  // (detectTcknHeader); this warning covers the "no official identity"
+  // case for both shapes.
+  if (entityKey === 'account' && normalized.vkn == null) {
+    warnings.push({
+      code: 'no_tax_id',
+      entity: entityKey,
+      targetKey: 'vkn',
+      label: 'VKN',
+      message: 'VKN/TCKN yok. Kayıt resmi kimlik olmadan oluşturulacak; ileride tamamlanabilir.',
+    });
+  }
   return { normalized, errors, warnings };
 }
 

@@ -67,7 +67,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Veri Aktarım Stüdyosu — Operatör Rehberi',
     summary:
       'Excel/CSV veya API kaynağından Varuna müşteri verilerine güvenli aktarım. Her commit öncesi dry-run zorunlu; her commit denetlenebilir ve desteklenen yerlerde geri alınabilir.',
-    updatedAt: '2026-05-24',
+    updatedAt: '2026-05-25',
     requiredKeywords: [
       'Sheet Eşleştirme',
       'Şablon İndir',
@@ -76,6 +76,8 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Rollback',
       'Geri al',
       'Şirket',
+      'VKN/TCKN',
+      'Sahte VKN/TCKN üretmeyin',
     ],
     bannedPhrases: [
       // Per-topic additions on top of OPERATOR_DEFAULT_BANNED_PHRASES.
@@ -137,6 +139,18 @@ export const HELP_TOPICS: HelpTopic[] = [
           'Sistem otomatik öneri yapar; her satırı manuel değiştirebilirsiniz.',
           'Zorunlu alanlar başlıkta belirgindir; eşleşmezse dry-run hata verir.',
           'Kullanmak istemediğiniz kolon için "eşleşmedi" seçin.',
+        ],
+      },
+      {
+        title: 'VKN/TCKN: Resmi Kimlik İsteğe Bağlıdır',
+        tone: 'info',
+        body: [
+          'VKN/TCKN doğru girilirse mevcut müşterilerle güçlü eşleşme sağlar (update).',
+          'Ancak VKN/TCKN zorunlu değildir. Kaynak dosyada yoksa kayıt yine de oluşturulur ve "VKN/TCKN yok" uyarısı kaydedilir; bu hata değildir.',
+          'Sahte VKN/TCKN üretmeyin. Eksik resmi kimlik, sahte bir değerden çok daha güvenlidir; ileride tamamlanabilir.',
+          'Geçerli bir VKN sağlanırsa checksum doğrulanır; geçersiz VKN hata verir.',
+          'TCKN içe aktarımı gizlilik kuralları gereği engellenmiştir.',
+          'Dry-run özeti, VKN/TCKN olmadan oluşturulacak müşteri sayısını (missingTaxIdCount) gösterir.',
         ],
       },
       {

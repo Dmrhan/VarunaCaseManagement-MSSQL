@@ -470,6 +470,7 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   let totalRows = 0;
   let totalErrors = 0;
   let totalWarnings = 0;
+  let missingTaxIdCount = 0; // account rows lacking VKN; surfaced in summary.
   for (const ek of entityKeys) {
     const rows = normalizedByEntity[ek] ?? [];
     const summary = { total: 0, create: 0, update: 0, skip: 0, error: 0, warning: 0 };
@@ -477,6 +478,11 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       summary.total += 1;
       summary[r.action] = (summary[r.action] ?? 0) + 1;
       if (r.warnings.length > 0) summary.warning += 1;
+      // Only count rows that will actually be inserted/updated without a
+      // tax id; rows that error out for other reasons won't reach the DB.
+      if (ek === 'account' && r.action !== 'error' && r.warnings?.some((w) => w.code === 'no_tax_id')) {
+        missingTaxIdCount += 1;
+      }
     }
     byEntity[ek] = summary;
     totalRows += summary.total;
@@ -550,6 +556,10 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       totalRows,
       totalErrors,
       totalWarnings,
+      // Account rows lacking VKN — operator sees how many customers will
+      // be created without an official tax id. TCKN ingestion is
+      // privacy-blocked separately via detectTcknHeader.
+      missingTaxIdCount,
       byEntity,
       completenessScore,
       orphansByEntity,

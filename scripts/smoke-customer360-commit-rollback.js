@@ -662,6 +662,69 @@ let xtParamAddrId = null;
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// 30) Missing-VKN scenarios — no_tax_id warning, commit succeeds
+// ─────────────────────────────────────────────────────────────────
+// Customer 360 mirrors Phase 1: a row with a customer name but no VKN
+// must commit successfully with a `no_tax_id` warning and no fake VKN
+// inserted in DB. Operators must never be pushed to invent identity.
+{
+  const noVknName = `C360 NoVkn Smoke ${stamp}`;
+  const noVknBundle = {
+    account: {
+      columns: ['name', 'vkn', 'email'],
+      mapping: mappingFor('account'),
+      rows: [{ name: noVknName, vkn: '', email: `novkn-${stamp}@smoke.demo` }],
+    },
+    // Children empty — keep the test focused on the account path.
+    accountCompany: { columns: [], mapping: [], rows: [] },
+    accountContact: { columns: [], mapping: [], rows: [] },
+    accountAddress: { columns: [], mapping: [], rows: [] },
+    accountProject: { columns: [], mapping: [], rows: [] },
+  };
+  const r = await commit(noVknBundle, { skipErrors: true });
+  const job = r.data?.job;
+  if (job?.id) createdJobIds.add(job.id);
+  const created = await prisma.account.findFirst({
+    where: { name: noVknName },
+    select: { id: true, vkn: true, isActive: true },
+  });
+  if (created?.id) createdAccountIds.add(created.id);
+  record('30a) Commit succeeds for account without VKN',
+    r.status === 200 && r.data?.ok && job?.status === 'completed',
+    `status=${r.status} jobStatus=${job?.status}`,
+  );
+  record('30b) Created Account has vkn=null (no fake VKN)',
+    !!created && created.vkn === null && created.isActive === true,
+    `vkn=${created?.vkn} isActive=${created?.isActive}`,
+  );
+}
+
+// 31) Dry-run for no-VKN row emits no_tax_id warning + summary count
+{
+  const dr = await api(adminToken, '/api/admin/imports/customer360/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      companyId: COMP,
+      entities: {
+        account: {
+          columns: ['name', 'vkn', 'email'],
+          mapping: mappingFor('account'),
+          rows: [{ name: `C360 DR NoVkn ${stamp}`, vkn: '', email: '' }],
+        },
+      },
+      sourceMeta: { sourceType: 'file', fileName: 'novkn-dr.xlsx' },
+    }),
+  });
+  const previewAccount = dr.data?.preview?.account?.[0];
+  const hasWarn = previewAccount?.warnings?.some((w) => w.code === 'no_tax_id');
+  record('31a) Dry-run surfaces no_tax_id warning on the account row', !!hasWarn,
+    `warnings=${JSON.stringify(previewAccount?.warnings)}`);
+  record('31b) Dry-run summary.missingTaxIdCount === 1',
+    dr.data?.summary?.missingTaxIdCount === 1,
+    `missingTaxIdCount=${dr.data?.summary?.missingTaxIdCount}`);
+}
+
 await cleanup();
 await prisma.$disconnect();
 
