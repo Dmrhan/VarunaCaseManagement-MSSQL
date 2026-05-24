@@ -146,8 +146,8 @@ export const ACCOUNT_TARGET_FIELDS = [
     createAllowed: true,
     updateAllowed: true,
     warningIfMissing: {
-      code: 'no_vkn',
-      message: 'VKN eşleşmezse mevcut müşteri güncellemesi yapılamaz; satırlar yeni müşteri olarak değerlendirilebilir.',
+      code: 'no_tax_id',
+      message: 'VKN/TCKN yok. Kayıt resmi kimlik olmadan oluşturulacak; ileride tamamlanabilir.',
     },
     normalize(raw) {
       const s = asTrimmedString(raw);
@@ -467,6 +467,19 @@ export function normalizeRow(rawRow, mapping) {
     if (r.extra?.rawPhone) {
       normalized._rawPhone = r.extra.rawPhone;
     }
+  }
+  // Per-row tax-id warning. The mapping-level warning in validateMapping only
+  // fires when VKN is unmapped entirely; this catches the case where VKN is
+  // mapped but a specific row has an empty cell. Operators must NEVER be
+  // pushed to invent fake VKN/TCKN values — missing identity is warned, not
+  // blocked.
+  if (!hasVkn) {
+    warnings.push({
+      code: 'no_tax_id',
+      targetKey: 'vkn',
+      label: 'VKN',
+      message: 'VKN/TCKN yok. Kayıt resmi kimlik olmadan oluşturulacak; ileride tamamlanabilir.',
+    });
   }
   return { normalized, errors, warnings, hasVkn };
 }

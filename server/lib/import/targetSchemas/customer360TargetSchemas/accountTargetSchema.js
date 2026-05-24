@@ -57,8 +57,8 @@ export const ACCOUNT_FIELDS = [
     createAllowed: true,
     updateAllowed: true,
     warningIfMissing: {
-      code: 'no_vkn',
-      message: 'VKN eşleşmezse mevcut müşteri güncellemesi yapılamaz.',
+      code: 'no_tax_id',
+      message: 'VKN/TCKN yok. Kayıt resmi kimlik olmadan oluşturulacak; ileride tamamlanabilir.',
     },
     normalize(raw) {
       const s = asTrimmedString(raw);

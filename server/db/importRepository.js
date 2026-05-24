@@ -149,6 +149,7 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
   let skippedCount = 0;
   let errorCount = 0;
   let warningCount = 0;
+  let missingTaxIdCount = 0;
 
   const resultRows = normalizedRows.map((r) => {
     let action = 'skip';
@@ -181,6 +182,12 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
     }
 
     if (r.warnings.length > 0) warningCount += 1;
+    // Count only rows that will actually be inserted/updated without a tax
+    // id. Rows that error out for other reasons won't reach the DB, so
+    // including them would inflate the operator-facing count.
+    if (action !== 'error' && r.warnings.some((w) => w.code === 'no_tax_id')) {
+      missingTaxIdCount += 1;
+    }
 
     return {
       rowNumber: r.rowNumber,
@@ -212,6 +219,10 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
       skippedCount,
       errorCount,
       warningCount,
+      // Rows that lacked VKN (and therefore TCKN — TCKN ingestion stays
+      // privacy-blocked separately). Surfaced so the wizard summary can
+      // tell operators "X rows will be created without an official tax id."
+      missingTaxIdCount,
       qualityScore,
     },
     rows: resultRows,
