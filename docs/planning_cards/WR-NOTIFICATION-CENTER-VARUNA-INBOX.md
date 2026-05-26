@@ -487,17 +487,19 @@ Bir satırın bilişsel yükü 4 saniyede tamamlanmalı:
   - sla_at_risk → `Vakayı Aç` + `Ertele` (1 saat preset)
   - pattern_alert → `Detayı Gör` (analytics'e link)
 
-### 7.E. Bell counter logic
+### 7.E. Bell counter logic (özet — tam strateji §7.K)
 
 ```
-İşler counter  = actionRequired=true AND state IN (Pending, InProgress)
+İşler counter      = actionRequired=true AND state IN (Pending, InProgress)
 Bildirimler counter = actionRequired=false AND state IN (Pending, InProgress)
-                    + (Phase 2A'dan sonra) readAt=null FYI satırlar (eski "unread bildirim" davranışı)
-Snoozed counter = state = Snoozed (drawer içinde gösterilir, bell'de gösterilmez)
-Done sekmesi    = state IN (Done, Dismissed, Expired), son 7 gün
+                     + (Phase 2B'den sonra readAt=null filtresi)
+Snoozed counter    = state = Snoozed (drawer içi, bell'de YOK)
+Done sekmesi       = state IN (Done, Dismissed, Expired), son 7 gün
 ```
 
 Sayaçlar 60s polling + `app:action-center-changed` event ile invalidate (mevcut). Phase 5'te WS push.
+
+> **Tam sayaç sözleşmesi, güven kuralları, performans, geçiş ve kabul kriterleri için bkz. §7.K — "Badge, Counter and Activity Signal Strategy".** §7.E sadece kısa formüller. Yeni adapter eklenirken veya badge davranışı tartışılırken referans §7.K'dır.
 
 ### 7.F. Boş durumlar — kelime kelime
 
@@ -550,6 +552,165 @@ Sözleşme: J/K her zaman list nav, Enter her zaman primary. Slack/Linear patter
 
 - "Done" / "Dismiss" sonrası 5sn toast: "Geri al". Phase 4.
 - Phase 2-3'te undo yok; satır listesinden bir sonraki refresh'te `Tamamlanan` sekmesinden geri açılır.
+
+### 7.K. Badge, Counter and Activity Signal Strategy
+
+Zil ve sayaçlar, inbox'ın **en görünür** parçasıdır. Bir kullanıcının inbox'a güvenip güvenmemesi, doğrudan badge'in doğruluğuna bağlıdır. Karşılığı olmayan bir kırmızı nokta, "zil çalmıyor" senaryosundan **daha hızlı** güveni bozar — kullanıcı önce şüphelenir, sonra "zaten bana ne olduğunu söylemiyor" diyerek bell'i kapatır. Bu bölüm sayaç sözleşmesini, görsel sinyal disiplinini, güven kurallarını, geçiş güvenliğini, performans bütçesini ve test edilebilir kabul kriterlerini tanımlar.
+
+#### 7.K.1 Badge türleri
+
+| Badge | Renk / vurgu | Amaç | Tetikleyen kind örnekleri |
+|---|---|---|---|
+| **Action-required** | Kırmızı (`bg-rose-600 text-white`) | "Senden bir karar / iş bekliyor" | `approval_pending`, `case_returned_to_assignee`, `dispatch_manual_confirm`, `manual_task` |
+| **FYI / unread** | Gri (`bg-slate-400 text-white`) | "Haberin olsun" | `approval_decided`, `case_assigned`, `case_transferred`, `pattern_alert`, `case_sla_at_risk` (FYI varyantı) |
+| **Mention** | Geçiş dönemi yardımcı işareti (küçük mavi nokta veya badge alt-süslemesi) | Yalnızca Phase 2A migration penceresi için; sonrasında FYI içine erir (§7.K.5). | `mention` |
+| **Critical / system** *(future, admin-only)* | Sarı veya mor (`bg-amber-500` / `bg-violet-600`) | "Operasyonel uyarı / sistem sağlığı" | `system_alert`, `case_sla_breach` |
+
+Phase 2A başında **iki badge görünür** (kırmızı + gri). Mention dönemsel olarak FYI'ya gömülür; ayrı bir sayaç pilot dönemi haricinde verilmez (§7.K.5). Critical/system badge yalnız admin/SystemAdmin kullanıcılarına gösterilir ve Phase 4+ kapsamındadır.
+
+#### 7.K.2 Sayaç semantiği — sıkı matematik
+
+```
+actionRequiredCount = COUNT(*) WHERE
+    actionRequired = true
+AND state IN ('Pending', 'InProgress')
+AND companyId IN allowedCompanyIds
+AND userId = current_user.id
+
+fyiCount = COUNT(*) WHERE
+    actionRequired = false
+AND state IN ('Pending', 'InProgress')
+AND (readAt IS NULL OR readAt IS NULL)        -- Phase 2B'den sonra readAt filtresi
+AND companyId IN allowedCompanyIds
+AND userId = current_user.id
+
+snoozedCount = COUNT(*) WHERE
+    state = 'Snoozed'
+AND companyId IN allowedCompanyIds
+AND userId = current_user.id
+-- snoozedCount drawer İÇİNDE gösterilir (Ertelenen sekmesi), zilde GÖSTERİLMEZ.
+```
+
+**Sayılmayanlar (her zaman):**
+
+- `Done`, `Dismissed`, `Expired` durumundaki satırlar.
+- `Suppressed` satırlar — zaten yazılmadılar (adapter `null` döndü), tabloda yoklar.
+- Kullanıcının `allowedCompanyIds` kapsamı dışındaki satırlar (varsa).
+- Başka kullanıcıya ait satırlar.
+- Snoozed satırlar — wake zamanına kadar **aktif sayaçtan kalkar**, otomatik lazy-wake'te (mevcut `lazySnoozeWakeUp`) `Pending`'e geri döndüğünde sayaca **tekrar dahil olur**.
+
+**Sayılanlar — incelikler:**
+
+- `InProgress` aksiyon zorunlu satır **hâlâ sayılır.** Kullanıcı vakayı açtı diye "İşler" sayacı düşmez; iş bitmedi.
+- `InProgress` FYI satırı, `readAt` set edilene kadar gri sayaçta sayılır (Phase 2B sonrası). Phase 2A'da `readAt` yok → `InProgress` FYI hâlâ sayılır; geçiş döneminde ufak overcount toleransı kabul edilir.
+- "Read" (`readAt` set) — gri sayaçtan çıkar; `Done` değildir, tamamen ayrı durum (§9.A, §8.A).
+
+**Mutlak kural:** badge sayısı = drawer'da o sekmedeki satır sayısı. Bell üstündeki rakam tıklayınca açılan drawer'da görünen liste sayısıyla **birebir** eşleşir.
+
+```
+bellActionBadge == drawer.tabs.İşler.count
+bellFyiBadge   == drawer.tabs.Bildirimler.count
+```
+
+Bu eşitlik bir code-level invariant'tır; testlenebilir (§7.K.7).
+
+#### 7.K.3 Activity signal — sayaç ötesinde sakin sinyaller
+
+Sayaç dışında ek sinyaller kullanılırsa **enterprise sakinliği** korunur. Hiçbir sinyal döngüye girmez; hiçbir sinyal kullanıcı dikkatini agresif çekmez.
+
+| Sinyal | Davranış | Phase |
+|---|---|---|
+| **"Yeni satır var" küçük puls** | Bell ikonu, son zaman drawer açıldığından beri yeni satır geldiyse: 1 saniye, tek atış, fade-out. Loop yok. | Phase 3 (opsiyonel) |
+| **"Son güncelleme N dakika önce"** | Drawer header'ı altında küçük gri yazı: `"Son güncelleme: az önce"` / `"3 dakika önce"`. Polling cycle ile yenilenir. | Phase 2B (opsiyonel) |
+| **Compact tooltip** | Bell hover: `"Aksiyonlarım — 3 iş, 5 bildirim"` (mevcut, korunur). aria-label aynı. | Phase 1 (canlı) |
+| **Toast / sound** | YOK. (§18.I). | — |
+| **Browser favicon dot** | YOK. Tarayıcı sekmesi notifikasyon disiplini ileride ayrı kart. | — |
+| **Tab title flash** | YOK. | — |
+
+Yasak davranışlar:
+
+- Sürekli pulse / animasyon (kullanıcı dikkati yorulur).
+- Renk parlama efekti (epilepsi/dikkat erişilebilirlik).
+- Ses çıkması (operasyonel sistem, müzik kutusu değil).
+- Sayfa başlığı titreşmesi (`"(3) Aksiyonlarım — Varuna"` gibi browser-tab odaklı urgency).
+
+#### 7.K.4 Trust rules — badge güvenilirliği
+
+Bunlar **invariant**lardır. Birini ihlal eden kod P1 bug'dır.
+
+| # | Kural | İhlal türü |
+|---|---|---|
+| T1 | Badge sayısı, açılan drawer'da o sekmedeki satır sayısına **eşit** olmalıdır. | "5 göster, drawer'da 3 var" → P1 |
+| T2 | Sayı sıfırdan büyükse drawer **mutlaka** o sekmede karşılığını gösterir. | "Sayı 1, drawer boş" → P1 (kritik) |
+| T3 | Badge yalnızca kullanıcının erişebileceği ve hakkı olduğu satırları sayar. | Cross-tenant satır sayılırsa veri sızıntısı + güven bozulması → güvenlik P0 |
+| T4 | Backend başarısızlığında badge **sessiz fail** olur — son bilinen değer korunur veya sıfır gösterilir; **asla** yanlış kırmızı rakam basılmaz. | Network hatasında `Math.random()` veya cached eski yüksek değer gösterilirse → P1 |
+| T5 | Snoozed satır wake olmadan aktif sayaçta görünmez. | Snooze tıkladıktan sonra kırmızı düşmüyorsa → P1 |
+| T6 | `dedupKey` ile birleştirilmiş satırlar tek sayılır. | Aynı dedupKey iki satır olarak gelirse adapter idempotency bozuk → P1 |
+| T7 | Badge poll interval'i 60s'den daha sık olmamalı (Phase 1-4); aşırı poll guard. | İstem dışı tight loop frontend bug'ı → P2 |
+
+#### 7.K.5 Migration rule — eski `MentionBellBadge` ile çift sayım önleme
+
+Phase 2A'nın **birinci** önceliği: hiçbir bildirim iki yerde sayılmamalı. Kullanıcı çift bell görür ve `3 + 3 = 6` zannederse, ürünün doğruluğunu sorgular.
+
+**Plan (Phase 2A — A1 senaryosu önerilen):**
+
+1. `MentionBellBadge` UI'dan **anında** gizlenir (`VITE_LEGACY_MENTION_BELL_ENABLED` default `false`).
+2. Aynı anda `CaseMention` create hook'u `emitActionItem({ kind: 'mention', actionRequired: false, ... })` çağırır.
+3. Yeni inbox'taki gri "Bildirimler" sayacı, eski mention sayacının yerini alır.
+4. Backfill scripti geçmiş bahsetmeleri tek seferlik aktarır — `firstSeenAt = now()` veya `readAt = now()` ile sessiz, "İşler" sayacını şişirmez.
+
+**Eğer geçici olarak iki bell birlikte tutulursa (B2 senaryosu — önerilmiyor):**
+
+| Kural | Uygulama |
+|---|---|
+| Her bahsetme yalnızca **bir** zilde sayılır. | Feature flag adapter'ı modüler kontrol eder. Adapter yazıldığında eski bell endpoint'i (`listUnreadMentions`) inbox'ta sayılan satırları **hariç tutar**. Veya tersi: yeni adapter geçici olarak kapalı kalır. ASLA **ikisi birden açık**. |
+| UI testinde toplam unread mention sayısı = eski bell + yeni bell ÇİFTLEMESİ olmamalı. | Bir entegrasyon smoke senaryosu bunu doğrular. |
+| Çift sayım gözlenirse rollback feature flag ile geri açılır. | İki gün içinde fix gelmezse Phase 2A revert edilir. |
+
+**Geçiş bitince:** eski mention bell ile beraber `listUnreadMentions` UI çağrısı da kalkar. `mention` kind satırları **yalnızca** "Bildirimler" sayacına dahil olur (mention ayrı bir badge değildir; §7.K.1'deki Mention badge'i Phase 2A pilot penceresi için ek mavi nokta seçeneği olarak konumlanır, default OFF).
+
+#### 7.K.6 Performance — tek hafif çağrıda tüm sayaçlar
+
+- **`GET /api/action-center/summary`** mevcut endpoint, üç sayacı **tek call**'da döner: `{ actionRequired, fyi, snoozed }`. Yeni badge türleri (mention pilot mode, critical/system) **aynı endpoint'in response'una eklenir** — yeni endpoint yaratılmaz.
+- Backend `computeBadgeCounts` (mevcut) 3 paralel `count()` query kullanır; index `(userId, state, actionRequired)` mevcut. Yeni filtre alanları (`readAt`, `category`) Phase 2B'de eklendiğinde aynı index'e taşınabilir veya `(userId, category, state)` yeni index.
+- **Polling interval:** 60s. `app:action-center-changed` custom event mutation sonrası **anında invalidate** (mevcut). Phase 5 WS push.
+- **Asla per-row badge fetch yapılmaz** — sayaç COUNT() ile çıkar, list query'siyle eşleştirilmez.
+- Performans bütçesi: `/summary` p50 ≤ 100ms, p95 ≤ 300ms (§13.H).
+- Sayaç hesaplama tek bir kullanıcı için (~200 active row maks) ~5-15ms; tipik tenant'lar için endişe edilmez.
+
+#### 7.K.7 Acceptance criteria — testlenebilir invariant'lar
+
+Aşağıdaki davranışlar Phase 2A'da PR review checklist'ine ve smoke test'lere mutlaka girer:
+
+| # | Senaryo | Beklenen badge davranışı |
+|---|---|---|
+| AC-1 | `submitApproval` çağrılır → eligible approver kullanıcısı için `approval_pending` yazılır. | Approver'ın "İşler" sayacı **+1**; submitter'ın badge'i değişmez. |
+| AC-2 | Approver `approve` çağırır. | Approver'ın "İşler" sayacı **-1** (Done); diğer eligible üyelerin "İşler" sayacı **-1** (Expired); submitter'ın "Bildirimler" sayacı **+1** (approval_decided FYI). |
+| AC-3 | Approver `reject` (ReturnToAssignee) çağırır. | Approver "İşler" **-1**; siblings **-1**; submitter "Bildirimler" **+1**; current assignee "İşler" **+1** (case_returned_to_assignee). |
+| AC-4 | Yorum içinde `@user` ile mention atılır (Phase 2A). | Mentioned user'ın "Bildirimler" sayacı **+1**. "İşler" sayacı değişmez (mention actionRequired=false). |
+| AC-5 | Kullanıcı bir satırı `snooze` ile 1 saat erteler. | İlgili sayaç **-1**. Drawer "Ertelenen" sekmesi **+1**. |
+| AC-6 | Snooze zamanı geçer + kullanıcı `/summary` çağırır. | Lazy-wake satırı `Pending`'e döndürür; "İşler" veya "Bildirimler" (kind'a göre) **+1**; "Ertelenen" **-1**. |
+| AC-7 | Kullanıcı `markDone` çağırır. | Aktif sayaç **-1** (immediate, custom event invalidate). "Tamamlanan" sekmesi **+1**. |
+| AC-8 | Kullanıcı `dismiss` çağırır. | Aktif sayaç **-1**; "Tamamlanan" sekmesi **+1** (Dismissed outcome). |
+| AC-9 | Kullanıcı bir FYI satırını okur (intersection observer; Phase 2B). | "Bildirimler" sayacı **-1**; satır state'i `InProgress` kalır ama `readAt` set olur. |
+| AC-10 | Backend `/summary` 500 dönerse. | Frontend badge eski son bilinen değeri korur **veya** sıfır gösterir; **asla** rastgele kırmızı rakam basmaz (§7.K.4 T4). |
+| AC-11 | SystemAdmin `?companyId=X` ile filtre uygular. | Sayaçlar yalnızca X tenant'ına ait satırları kapsar; cross-tenant aggregate ASLA varsayılan değildir. |
+| AC-12 | Aynı `dedupKey` ile iki kez emit edilen satır. | Tek satır; sayaç **+1** yalnızca bir kez. AC-12 idempotency invariant'ı (mevcut Phase 1 smoke kapsar). |
+
+**Smoke test mapping** (Phase 2A'da yazılacak `smoke-mention-inbox-flow.js` ve mevcut `smoke-action-center-phase1.js` kapsamı):
+
+- AC-1 → mevcut smoke #2 ("submit fires approval_pending ActionItem")
+- AC-2 → mevcut smoke #9, #17
+- AC-3 → mevcut smoke #10, #15, #19
+- AC-4 → Phase 2A'da yeni smoke (#1 mention emit)
+- AC-5 → mevcut smoke #11
+- AC-6 → mevcut smoke #12 (lazy wake-up)
+- AC-7 → mevcut smoke #6
+- AC-8 → mevcut smoke #13
+- AC-9 → Phase 2B'de yeni smoke
+- AC-10 → frontend integration test (Phase 3, manual)
+- AC-11 → Phase 1 hâlihazırda kapsıyor (`?companyId=` filter)
+- AC-12 → mevcut smoke #3 (idempotent dedupKey)
 
 ---
 
