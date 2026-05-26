@@ -686,6 +686,27 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
     for (const rule of matched) {
       if (!rule.template) continue; // defensive
 
+      // P2 review fix — rateLimitPerHour enforcement.
+      // Count non-Suppressed dispatches for (companyId, ruleId) in the last
+      // 60 minutes. Suppressed rows don't consume a slot (they never fired
+      // a real notification). If we are at or above the cap, every audience
+      // row in this rule becomes a Suppressed audit entry with
+      // suppressionReason='rate_limit_exceeded' — operator/admin can see
+      // the rule fired again but was throttled.
+      let rateLimited = false;
+      if (rule.rateLimitPerHour && rule.rateLimitPerHour > 0) {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        const recentCount = await prisma.notificationDispatch.count({
+          where: {
+            companyId: caseRow.companyId,
+            ruleId: rule.id,
+            createdAt: { gte: oneHourAgo },
+            state: { not: 'Suppressed' },
+          },
+        });
+        if (recentCount >= rule.rateLimitPerHour) rateLimited = true;
+      }
+
       // Audience resolution may produce 0..N rows per rule.audience entry.
       // Phase 2 currently emits ONE dispatch per audience row.
       for (const audienceRow of rule.audience) {
@@ -719,6 +740,16 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
         if (resolved.audienceIdentifier === 'unresolved') {
           state = 'Suppressed';
           suppressionReason = 'audience_unresolvable';
+        }
+
+        // Rate-limit takes precedence over normal emission — never insert
+        // an active row when the rule is throttled. Idempotency key is
+        // cleared so the Suppressed audit row never collides with the
+        // dedup unique index.
+        if (rateLimited && state !== 'Suppressed') {
+          state = 'Suppressed';
+          suppressionReason = 'rate_limit_exceeded';
+          idempotencyKey = null;
         }
 
         try {
@@ -850,7 +881,12 @@ export async function manualConfirmDispatch({ dispatchId, payload, user, allowed
   if (!allowed.includes(row.companyId)) {
     throw new NotificationAccessError();
   }
-  if (row.state === 'Sent' || row.state === 'Failed') {
+  // P1 review fix — Suppressed dispatches are immutable. They were already
+  // dropped (dedup, rate-limit, opt-out, audience_unresolvable) and must
+  // never be transitioned to Sent: that would falsify the audit trail
+  // because the customer never received this message. Sent/Failed are
+  // already final. Only Pending may transition to Sent via manual confirm.
+  if (row.state === 'Sent' || row.state === 'Failed' || row.state === 'Suppressed') {
     throw new NotificationValidationError(`Bu bildirim zaten ${row.state}.`, {
       status: 409,
       code: 'dispatch_already_finalized',

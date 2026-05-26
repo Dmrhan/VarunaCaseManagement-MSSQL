@@ -539,6 +539,163 @@ async function run() {
       `count=${dispatchesAfterSubmit.length}`,
     );
     dispatchesAfterSubmit.forEach((d) => created.dispatches.push(d.id));
+
+    // ─── Phase 2 review fixes ───────────────────────────────────────
+    // The next three scenarios exercise the post-review fixes shipped on
+    // the Phase 3 branch:
+    //   16) manualConfirmDispatch must 409 on Suppressed rows (audit
+    //       integrity — never flip a Suppressed row to Sent).
+    //   17) emitEvent must enforce rule.rateLimitPerHour by writing
+    //       Suppressed/rate_limit_exceeded rows once the cap is reached.
+    //   18) manual-confirming a rate-limited Suppressed row also 409s
+    //       (same audit invariant as 16, different path).
+
+    // ─── 16) Suppressed manual-confirm → 409 ────────────────────────
+    // Use scenario 12's already-suppressed dispatch (duplicate_within_window).
+    const existingSuppressed = await prisma.notificationDispatch.findFirst({
+      where: {
+        caseId: c1.id,
+        state: 'Suppressed',
+        suppressionReason: 'duplicate_within_window',
+      },
+    });
+    let r16 = false;
+    let r16msg = '';
+    if (!existingSuppressed) {
+      r16msg = 'no suppressed dispatch from prior scenarios';
+    } else {
+      try {
+        await manualConfirmDispatch({
+          dispatchId: existingSuppressed.id,
+          payload: { deliveryNote: 'invalid — should be blocked' },
+          user: { id: leadUser.id, fullName: leadUser.fullName },
+          allowedCompanyIds,
+        });
+      } catch (e) {
+        r16 = e instanceof NotificationValidationError && e.code === 'dispatch_already_finalized';
+        r16msg = e.code ?? e.message;
+      }
+      // State must NOT have changed.
+      const refetched = await prisma.notificationDispatch.findUnique({
+        where: { id: existingSuppressed.id },
+      });
+      r16 = r16 && refetched?.state === 'Suppressed' && refetched?.confirmedByUserId == null;
+      r16msg = `${r16msg} stateAfter=${refetched?.state}`;
+    }
+    record('16. manual-confirm on Suppressed → 409, state unchanged', r16, r16msg);
+
+    // ─── 17) rateLimitPerHour enforcement ──────────────────────────
+    // Fresh rule with rateLimitPerHour=1 and no suppressDuplicateWithinMinutes,
+    // so the only suppression source is the rate-limit guard. Use a unique
+    // case so prior counts don't leak in.
+    const tplRate = await createTemplate({
+      data: {
+        companyId: company.id,
+        key: `${PREFIX}_rate_tpl`,
+        name: 'rate tpl',
+        subjectTemplate: 'subj',
+        bodyTemplate: 'body',
+      },
+      user: { id: adminUser.id },
+      allowedCompanyIds,
+    });
+    created.templates.push(tplRate.id);
+    const ruleRate = await createRule({
+      data: {
+        companyId: company.id,
+        name: `${PREFIX}-rule-rate-limited`,
+        event: 'case_reopened',
+        conditions: {},
+        isMatchAll: true,
+        audience: [{ type: 'assignee' }],
+        templateId: tplRate.id,
+        channel: 'InApp',
+        mode: 'LogOnly',
+        rateLimitPerHour: 1,
+      },
+      user: { id: adminUser.id },
+      allowedCompanyIds,
+    });
+    created.rules.push(ruleRate.id);
+
+    const cRate1 = await caseRepository.create({
+      title: `${PREFIX}-case-rate-1`,
+      description: 'rate-limit first',
+      caseType: 'GeneralSupport',
+      priority: 'Medium',
+      origin: 'Telefon',
+      companyId: company.id,
+      companyName: company.name,
+      category: 'X',
+      subCategory: 'Y',
+      requestType: 'Talep',
+      assignedTeamId: team.id,
+      assignedTeamName: team.name,
+      assignedPersonId: memberPerson.id,
+      assignedPersonName: memberPerson.name,
+    });
+    created.cases.push(cRate1.id);
+    const cRate2 = await caseRepository.create({
+      title: `${PREFIX}-case-rate-2`,
+      description: 'rate-limit second',
+      caseType: 'GeneralSupport',
+      priority: 'Medium',
+      origin: 'Telefon',
+      companyId: company.id,
+      companyName: company.name,
+      category: 'X',
+      subCategory: 'Y',
+      requestType: 'Talep',
+      assignedTeamId: team.id,
+      assignedTeamName: team.name,
+      assignedPersonId: memberPerson.id,
+      assignedPersonName: memberPerson.name,
+    });
+    created.cases.push(cRate2.id);
+
+    const firstRate = await emitEvent({ event: 'case_reopened', caseId: cRate1.id });
+    const secondRate = await emitEvent({ event: 'case_reopened', caseId: cRate2.id });
+    firstRate.forEach((d) => created.dispatches.push(d.id));
+    secondRate.forEach((d) => created.dispatches.push(d.id));
+
+    const firstDispatch = firstRate.find((d) => d.ruleId === ruleRate.id);
+    const secondDispatch = secondRate.find((d) => d.ruleId === ruleRate.id);
+    record(
+      '17a. first emit under rate limit → Sent',
+      firstDispatch?.state === 'Sent' && firstDispatch?.suppressionReason == null,
+      `state=${firstDispatch?.state} reason=${firstDispatch?.suppressionReason}`,
+    );
+    record(
+      '17b. second emit at cap → Suppressed/rate_limit_exceeded',
+      secondDispatch?.state === 'Suppressed' &&
+        secondDispatch?.suppressionReason === 'rate_limit_exceeded',
+      `state=${secondDispatch?.state} reason=${secondDispatch?.suppressionReason}`,
+    );
+
+    // ─── 18) manual-confirm on rate-limited Suppressed → 409 ───────
+    let r18 = false;
+    let r18msg = '';
+    if (secondDispatch) {
+      try {
+        await manualConfirmDispatch({
+          dispatchId: secondDispatch.id,
+          payload: { deliveryNote: 'should be blocked too' },
+          user: { id: leadUser.id, fullName: leadUser.fullName },
+          allowedCompanyIds,
+        });
+      } catch (e) {
+        r18 = e instanceof NotificationValidationError && e.code === 'dispatch_already_finalized';
+        r18msg = e.code ?? e.message;
+      }
+      const refetched = await prisma.notificationDispatch.findUnique({
+        where: { id: secondDispatch.id },
+      });
+      r18 = r18 && refetched?.state === 'Suppressed' && refetched?.confirmedByUserId == null;
+      r18msg = `${r18msg} stateAfter=${refetched?.state}`;
+    } else {
+      r18msg = 'no rate-limited dispatch';
+    }
+    record('18. manual-confirm on rate-limited Suppressed → 409, state unchanged', r18, r18msg);
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
