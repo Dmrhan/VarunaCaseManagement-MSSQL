@@ -29,6 +29,48 @@
 
 import { prisma } from '../server/db/client.js';
 import { caseRepository } from '../server/db/caseRepository.js';
+import { pathToFileURL } from 'node:url';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+// ─────────────────────────────────────────────────────────────────
+// C3 review fix loader — pulls the pure reconciliation helper from
+// `src/features/cases/newCaseFormReconcile.ts`. Uses Node 22+ native
+// TypeScript strip when available; falls back to the project's own
+// `typescript` devDep on Node 20 (CI runtime) for portable execution.
+// ─────────────────────────────────────────────────────────────────
+const NODE_MAJOR = Number.parseInt(process.versions.node.split('.')[0], 10);
+const RECONCILE_PATH = resolve(process.cwd(), 'src/features/cases/newCaseFormReconcile.ts');
+
+async function loadReconcileHelper() {
+  if (NODE_MAJOR >= 22) {
+    try {
+      return await import(pathToFileURL(RECONCILE_PATH).href);
+    } catch {
+      /* fall through to ts transpile */
+    }
+  }
+  const ts = (await import('typescript')).default;
+  const src = readFileSync(RECONCILE_PATH, 'utf8');
+  const out = ts.transpileModule(src, {
+    fileName: RECONCILE_PATH,
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      isolatedModules: true,
+      esModuleInterop: true,
+    },
+  });
+  const tmpDir = mkdtempSync(join(tmpdir(), 'c3-reconcile-'));
+  const tmpFile = join(tmpDir, 'reconcile.mjs');
+  writeFileSync(tmpFile, out.outputText, 'utf8');
+  try {
+    return await import(pathToFileURL(tmpFile).href);
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 const stamp = Date.now();
 const PREFIX = `c3-anc-${stamp}`;
@@ -99,6 +141,93 @@ async function cleanup() {
     await prisma.accountCompany.deleteMany({ where: { accountId: id } }).catch(() => {});
     await prisma.account.delete({ where: { id } }).catch(() => {});
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// C3 review fix (pure helper) — unit-style assertions on the
+// reconciliation logic. Proves no mismatched (account, company) state
+// can survive a company change.
+// ─────────────────────────────────────────────────────────────────
+{
+  const { reconcileAccountForCompanyChange } = await loadReconcileHelper();
+
+  // a) accountId + companyId seed already established; subsequent company
+  //    change to a RELATED company keeps the account.
+  const a = reconcileAccountForCompanyChange({
+    accountId: 'acct-1', accountName: 'Acme',
+    newCompanyId: 'COMP-B',
+    accountCompanyIds: ['COMP-A', 'COMP-B'],
+    accountDirectCompanyId: null,
+  });
+  record('R-a) Account retained when new company is in account.companies',
+    a.accountRetained === true && a.accountId === 'acct-1' && a.accountName === 'Acme',
+    JSON.stringify(a));
+
+  // b) accountId-only seed → user picks RELATED company → account retained.
+  const b = reconcileAccountForCompanyChange({
+    accountId: 'acct-2', accountName: 'Beta',
+    newCompanyId: 'COMP-A',
+    accountCompanyIds: ['COMP-A', 'COMP-C'],
+    accountDirectCompanyId: null,
+  });
+  record('R-b) accountId-only seed + related company pick → account retained',
+    b.accountRetained === true && b.accountId === 'acct-2',
+    JSON.stringify(b));
+
+  // c) accountId-only seed → user picks UNRELATED company → account cleared.
+  //    This is the regression the Codex finding called out: mismatched
+  //    pair must not survive into submit.
+  const c = reconcileAccountForCompanyChange({
+    accountId: 'acct-3', accountName: 'Gamma',
+    newCompanyId: 'COMP-X',
+    accountCompanyIds: ['COMP-A', 'COMP-B'],
+    accountDirectCompanyId: null,
+  });
+  record('R-c) accountId-only seed + UNRELATED company pick → account cleared',
+    c.accountRetained === false &&
+    c.accountId === '' && c.accountName === '' &&
+    c.customerContactName === '' && c.customerContactPhone === '' &&
+    c.customerContactEmail === '' && c.customerCompanyName === '',
+    JSON.stringify(c));
+
+  // d) Account with no link evidence (empty AC list, null direct id) →
+  //    cleared. We intentionally do NOT shortcut on null direct id; the
+  //    backend's broader legacy fallback exists for tenant-visibility,
+  //    not for FE matching, and AccountDetailPage today cannot pass a
+  //    real direct companyId so treating null as a wildcard would let
+  //    mismatched accounts survive.
+  const d = reconcileAccountForCompanyChange({
+    accountId: 'acct-orphan', accountName: 'Orphan',
+    newCompanyId: 'COMP-Z',
+    accountCompanyIds: [],
+    accountDirectCompanyId: null,
+  });
+  record('R-d) Account with no link evidence is cleared on company change',
+    d.accountRetained === false && d.accountId === '' && d.accountName === '',
+    JSON.stringify(d));
+
+  // e) Account.companyId === newCompanyId (direct denormalized path) →
+  //    treated as linked even when AC array is empty.
+  const e = reconcileAccountForCompanyChange({
+    accountId: 'acct-dn', accountName: 'Direct',
+    newCompanyId: 'COMP-D',
+    accountCompanyIds: [],
+    accountDirectCompanyId: 'COMP-D',
+  });
+  record('R-e) Account.companyId direct match keeps account',
+    e.accountRetained === true && e.accountId === 'acct-dn',
+    JSON.stringify(e));
+
+  // f) No account set → patch is the empty-state shape.
+  const f = reconcileAccountForCompanyChange({
+    accountId: '', accountName: '',
+    newCompanyId: 'COMP-A',
+    accountCompanyIds: [],
+    accountDirectCompanyId: null,
+  });
+  record('R-f) No account selected → patch is empty-state and accountRetained=false',
+    f.accountRetained === false && f.accountId === '' && f.accountName === '',
+    JSON.stringify(f));
 }
 
 try {

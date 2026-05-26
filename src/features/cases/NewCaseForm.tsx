@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { reconcileAccountForCompanyChange } from './newCaseFormReconcile';
 import {
   AlertTriangle,
   Bot,
@@ -71,11 +72,23 @@ interface NewCaseFormProps {
    * accountId+companyId üzerinden doğal davranır; C3 burada manuel
    * preselect yapmaz. `accountName` müşteri seçici görsel kutusunun ilk
    * render'ında doldurulur — yoksa picker boş görünür.
+   *
+   * `accountCompanyIds`: caller (AccountDetailPage) account'un ilişkili
+   * olduğu şirket id'lerini pas geçer. Multi-company prefill durumunda
+   * operatör ilk şirketi seçtiğinde reconciliation sync yapılır
+   * (accountService.get round-trip beklemeden), ilgili şirketse account
+   * korunur, değilse temizlenir.
+   *
+   * `accountDirectCompanyId`: account'un denormalize edilmiş doğrudan
+   * companyId (legacy yol). Backend link-account guard'ı bu yolu da
+   * "linked" kabul eder; mirror semantiği için FE de aynı kuralı işler.
    */
   initialContext?: {
     accountId?: string;
     companyId?: string;
     accountName?: string;
+    accountCompanyIds?: string[];
+    accountDirectCompanyId?: string | null;
   };
 }
 
@@ -179,9 +192,16 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   // C3: initial-seed sırasında companyId effect'inin müşteri alanını
-  // temizlemesini engelleyen tek-atış flag. Operator'un sonradan şirketi
-  // değiştirmesi (user-driven) normal temizleme akışını yine tetikler.
+  // temizlemesini engelleyen tek-atış flag. Yalnız initialContext hem
+  // accountId hem companyId getirdiğinde true olur — accountId-only
+  // seed durumunda kullanıcının ilk şirket seçimi normal reconciliation
+  // yoluna girer ve account.companies kontrolüne tabi olur.
   const justSeededRef = useRef(false);
+  // C3 reconciliation: prop'tan gelen account.companies cache'i. Sync
+  // mismatch check için kullanılır; user company seçtiğinde fetch round-
+  // trip beklemez.
+  const [selectedAccountCompanyIds, setSelectedAccountCompanyIds] = useState<string[]>([]);
+  const [selectedAccountDirectCompanyId, setSelectedAccountDirectCompanyId] = useState<string | null>(null);
   const [duplicateCase, setDuplicateCase] = useState<Case | undefined>(undefined);
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
@@ -278,6 +298,9 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
       setAiCardCollapsed(false);
       setAiApplied(false);
       setTitleApplied(false);
+      setSelectedAccountCompanyIds([]);
+      setSelectedAccountDirectCompanyId(null);
+      justSeededRef.current = false;
     } else if (
       initialContext &&
       (initialContext.accountId || initialContext.companyId)
@@ -287,9 +310,21 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
       // suggestedPackage, account/company reconciliation) take over from
       // here using accountId+companyId as before. accountName seeds the
       // picker's visible row so the operator immediately sees who is
-      // pre-selected. `justSeededRef` makes the company-change effect
-      // honor the seed once instead of wiping accountId.
-      if (initialContext.accountId) justSeededRef.current = true;
+      // pre-selected.
+      //
+      // C3 review fix (Codex P1): `justSeededRef` is ONLY set when BOTH
+      // accountId AND companyId arrive together — i.e. single-company
+      // prefill from AccountDetail. In the multi-company path (accountId
+      // only), the operator's first company selection MUST go through
+      // normal reconciliation so a mismatched (account, company) pair
+      // never reaches the backend.
+      justSeededRef.current = Boolean(initialContext.accountId && initialContext.companyId);
+      // Cache account.companies coming from the caller so the company-
+      // change effect can decide synchronously whether to retain the
+      // account, without waiting for an accountService.get round-trip
+      // (which could race the user's company pick).
+      setSelectedAccountCompanyIds(initialContext.accountCompanyIds ?? []);
+      setSelectedAccountDirectCompanyId(initialContext.accountDirectCompanyId ?? null);
       setForm((f) => ({
         ...f,
         accountId: initialContext.accountId ?? f.accountId,
@@ -310,10 +345,12 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
   // kapanır (accountName='' olur), requester fields temizlenir.
   // WR-A4: proje seçimi de sıfırlanır (companyId değiştiyse eski proje irrelevant).
   useEffect(() => {
-    // C3: ilk açılışta initialContext.companyId seeding nedeniyle bu effect
-    // tetiklenir; o tek-atış geçişte müşteri alanını TEMİZLEME — operatörün
-    // gördüğü pre-fill kaybolur. Bir sonraki kullanıcı kaynaklı şirket
-    // değişiminde normal temizleme akışı çalışır.
+    // C3 (Codex P1 follow-up): initial seed only escapes reconciliation
+    // when BOTH accountId and companyId arrived together (single-company
+    // prefill). For accountId-only seed the first company selection lands
+    // here and goes through normal reconciliation against
+    // selectedAccountCompanyIds — preventing mismatched (account, company)
+    // submits.
     if (justSeededRef.current) {
       justSeededRef.current = false;
       setProjects([]);
@@ -329,17 +366,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
         !f.customerCompanyName &&
         !f.accountProjectId;
       if (noState) return f;
-      return {
-        ...f,
-        accountId: '',
-        accountName: '',
-        accountProjectId: '',
-        accountProjectName: '',
-        customerContactName: '',
-        customerContactPhone: '',
-        customerContactEmail: '',
-        customerCompanyName: '',
-      };
+      const { accountRetained: _retained, ...patch } = reconcileAccountForCompanyChange({
+        accountId: f.accountId,
+        accountName: f.accountName,
+        newCompanyId: f.companyId,
+        accountCompanyIds: selectedAccountCompanyIds,
+        accountDirectCompanyId: selectedAccountDirectCompanyId,
+      });
+      void _retained;
+      return { ...f, ...patch };
     });
     setProjects([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1458,6 +1493,16 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
           if (account) {
             // Customer seçildi — başvuran bilgileri artık alakasız, sıfırla
             // (kullanıcı önce customerless modda doldurmuş olabilir).
+            // C3 review fix: picker'dan gelen account.companies cache'i de
+            // güncelle ki sonraki company değişiminde sync reconciliation
+            // doğru kararı versin.
+            setSelectedAccountCompanyIds(
+              (account.companies ?? []).map((c) => c.companyId),
+            );
+            // AccountListItem hasn't surfaced Account.companyId (direct
+            // legacy field) in the list response; treat as null and let
+            // the relation-list be the source of truth.
+            setSelectedAccountDirectCompanyId(null);
             setForm((f) => ({
               ...f,
               accountId: account.id,
@@ -1469,6 +1514,8 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
             }));
           } else {
             // "Müşterisiz devam et" — accountId boş, accountName "Müşteri Yok" işaret.
+            setSelectedAccountCompanyIds([]);
+            setSelectedAccountDirectCompanyId(null);
             setForm((f) => ({ ...f, accountId: '', accountName: 'Müşterisiz vaka' }));
           }
         }}
