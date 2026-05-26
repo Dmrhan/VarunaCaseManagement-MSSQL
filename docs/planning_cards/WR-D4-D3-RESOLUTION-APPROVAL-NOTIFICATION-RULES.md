@@ -749,11 +749,129 @@ Render edilmiş final içerik `Dispatch.snapshotSubject` + `.snapshotBody`'ye ya
 
 ## 16. Implementation Split
 
-### Phase 0 — Planning Card (this card)
+### 16.0 Completion Boundary / Mail Provider Constraint
+
+> **Addendum.** Varuna currently has no reliable production outbound email
+> provider configured. The same constraint hit the user-invitation flow
+> earlier and must not block this workflow's launch. Active customer email
+> delivery is therefore explicitly **separated** from the minimum operable
+> completion of the approval + notification capability.
+
+Three completion levels are defined. Phases below are tagged by level so
+the boundary stays unambiguous during sequencing.
+
+#### Level A — Minimum Operable Completion (launch-eligible without an email provider)
+The capability is **considered launch-eligible** at Level A. Everything
+listed here must ship together; otherwise the capability is NOT done.
+
+- Resolution approval policy CRUD (admin UI).
+- Submit / approve / reject resolution approval, with `transitionStatus`
+  close guard.
+- Notification & communication **rule** CRUD (admin UI).
+- Notification **template** CRUD (admin UI, with preview + missing-variable
+  validation).
+- Customer response channel definition (`AccountCompany.preferredResponseChannel/
+  responseEmail/responsePhone/allowCustomerNotifications` + per-case
+  override).
+- Dispatch / audit log (immutable rows; admin viewer).
+- CaseDetail **communication preview** — operator sees, BEFORE confirming,
+  exactly which message will be sent to which audience over which channel,
+  with the rendered subject + body.
+- **Operator-confirmed manual customer communication.** Operator presses
+  "Copy message" (subject + body) or "Open mail draft" (mailto:), sends
+  it from their own client, then marks the dispatch as completed.
+- Audit on the manual completion stores `mode='manual'`, who confirmed,
+  when, channel, template snapshot, message body snapshot, and an
+  optional free-text "delivery note" (e.g. "phone call 14:32, customer
+  agreed").
+
+At Level A the operator can run the full business workflow end-to-end:
+internal approval governance + auditable customer communication. Nothing
+is silently sent; nothing is lost.
+
+#### Level B — Full Automated Completion (active delivery)
+Adds, on top of Level A:
+
+- Active email adapter (provider abstraction; provider TBD per §21 #6).
+- Provider configuration UI (per-tenant) + secrets via env names
+  (no plaintext API keys in DB).
+- Test send from the template editor.
+- Delivery status tracking (`Sent` / `Failed`) on dispatch rows.
+- Retry + failure handling (cron worker, exponential backoff, max
+  attempts, admin failure surfacing).
+- Per-tenant + per-rule explicit opt-in to switch a rule from
+  `mode='log_only'` (Level A default) to `mode='active'`.
+
+Level B is the **target end-state**, but it is gated behind a working
+production email provider. Until that exists, Level A is treated as the
+launch line.
+
+#### Level C — True Deferrals (out of core launch scope at every level)
+These are not part of the launch contract at any level — they wait for
+explicit product approval before scheduling:
+
+- WhatsApp / SMS providers and channels.
+- Customer portal acceptance flow (customer replies inside Varuna).
+- Advanced reminder automations beyond a single overdue/pending-reply
+  rule.
+- Analytics dashboards on approval/dispatch metrics.
+- External webhook destinations.
+
+### 16.1 Completion Definition (explicit)
+
+> **The capability is NOT done with only approval submit/approve/reject.**
+> Internal approval alone is a governance layer; without customer
+> communication it does not deliver business value.
+
+The capability is **minimally operable (Level A)** when **all** of the
+following are true:
+
+1. An operator with a policy-matched case can submit an approval, get a
+   decision from the resolved approver, and see the case correctly
+   blocked from `Cozuldu` while pending.
+2. A communication rule + template can be configured per tenant for
+   that policy's outcome events.
+3. The CaseDetail screen, **before any communication leaves Varuna**,
+   shows the operator the rendered audience list + channel + subject +
+   body that would be communicated.
+4. The operator can: **(a)** copy the rendered message, **(b)** open it
+   in their mail client as a draft, OR **(c)** mark the dispatch as
+   "handled by phone / handled externally" with an optional note.
+5. Every one of those operator confirmations is audited on the dispatch
+   row (`mode='manual'`, `state='Sent'`, snapshot subject + snapshot
+   body + confirmedByUserId + confirmedAt + optional note).
+
+The capability is **fully complete (Level B)** when, additionally, an
+active email adapter can deliver the same dispatch automatically with
+delivery status — and at least one tenant has explicitly opted in to
+that mode.
+
+### 16.2 Product Rule — Active Email Is Not a Launch Blocker
+
+Because outbound email is not production-ready in the Varuna environment
+today, **Level B (active email adapter) is NOT a prerequisite for
+launching this workflow.** A tenant can run the full approval +
+communication loop at Level A indefinitely; the manual-confirmation
+path is the contract.
+
+**Conditional clause:** If the product owner later decides that
+automatic customer email is mandatory for launch, **Phase 4 (Active
+Email Adapter) is promoted from optional future work to core launch
+scope** and the Level A → Level B boundary is closed before launch.
+That promotion is a product-owner decision and is tracked under §21
+open decisions.
+
+### 16.3 Phase Sequencing
+
+Each phase below is tagged with the level it contributes to. **Level A
+requires Phase 1 + Phase 2 + Phase 3 to all ship.** Level B requires
+Phase 4. Level C items are deferred until separately scheduled.
+
+### Phase 0 — Planning Card (this card) — *meta*
 - Bu doküman. Hiçbir kod değişikliği yok.
 - Output: operator+product onayı için karar matrisi.
 
-### Phase 1 — Resolution Approval Foundation
+### Phase 1 — Resolution Approval Foundation — *Level A (1/3)*
 **Scope:**
 - Schema: `ResolutionApprovalPolicy`, `CaseResolutionApproval`, `Case.approvalState`, `Case.currentApprovalId`.
 - Backend:
@@ -768,7 +886,7 @@ Render edilmiş final içerik `Dispatch.snapshotSubject` + `.snapshotBody`'ye ya
 - **No external sending.** Dispatch yok.
 - Smoke: §20.
 
-### Phase 2 — Notification Rule + Template Foundation
+### Phase 2 — Notification Rule + Template Foundation — *Level A (2/3)*
 **Scope:**
 - Schema: `NotificationRule`, `NotificationTemplate`, `NotificationDispatch`, `Case.communicationState`.
 - Backend:
@@ -778,16 +896,23 @@ Render edilmiş final içerik `Dispatch.snapshotSubject` + `.snapshotBody`'ye ya
   - Idempotency / suppress duplicates.
 - Admin UI: `/admin/notification-rules`, `/admin/notification-templates`, `/admin/notification-dispatches` (read-only viewer).
 - Case detail: dispatch timeline entries + manual_task channel UI.
+- **CaseDetail communication preview + manual-confirmation actions** (copy
+  message, open mailto draft, mark as handled-externally with note).
+  Audit on the dispatch row records confirmedByUserId, confirmedAt,
+  delivery note, and snapshot subject + body.
 - Smoke + data-contract.
 
-### Phase 3 — Customer Response Channel
+### Phase 3 — Customer Response Channel — *Level A (3/3)*
 **Scope:**
 - Schema: `AccountCompany.preferredResponseChannel/responseEmail/responsePhone/allowCustomerNotifications`, `Case.communicationChannelOverride`.
 - Backend: channel resolution chain (§10.3), dispatch audience resolver uses it.
 - UI: Account detail "İletişim Tercihleri" subsection, Case detail "Cevap Kanalı" badge + override modal.
-- manual_task channel: operator action panel.
+- manual_task channel: operator action panel (lives inside CaseDetail; surfaces the audience that needs a manual reach-out).
 
-### Phase 4 — Active Email Adapter
+> ✅ **End of Phase 3 = Level A reached.** Capability is launch-eligible
+> without a production email provider.
+
+### Phase 4 — Active Email Adapter — *Level B*
 **Scope:**
 - Email provider (Resend.com tahmini — §21 karar): env var `RESEND_API_KEY`, abstraction `server/lib/notifications/emailSender.js`.
 - Backend: dispatch worker (cron 1-5 dakika polling) → state='Pending' AND mode='active' AND channel='email' → send → state='Sent'/'Failed'.
@@ -796,14 +921,19 @@ Render edilmiş final içerik `Dispatch.snapshotSubject` + `.snapshotBody`'ye ya
 - Retry / backoff (max 3 attempts, exponential).
 - Failure surfacing: dispatch state + notification to admin.
 
-### Phase 5 — Reminder Automations
+> ⚠️ Phase 4 is **conditionally scoped**: if §21 #6 (provider decision)
+> is taken and a provider is available in the Varuna environment, Phase 4
+> ships and Level B is reached. If not, Level A remains the launch line
+> indefinitely.
+
+### Phase 5 — Reminder Automations — *Level C*
 **Scope:**
 - Cron job: pending approval > X hours → reminder dispatch.
 - Cron job: customer waiting (status=ThirdPartyWaiting or customer-pending) > X days → reminder.
 - SLA pause integration (existing slaThirdPartyWaitMin reuse).
 - Event taxonomy expand: `approval_overdue_reminder`, `pending_customer_reply_reminder`.
 
-### Phase 6+ — i18n + Webhook + SMS
+### Phase 6+ — i18n + Webhook + SMS — *Level C*
 - Template language support.
 - Webhook channel adapter.
 - SMS/WhatsApp providers.
@@ -812,6 +942,9 @@ Render edilmiş final içerik `Dispatch.snapshotSubject` + `.snapshotBody`'ye ya
 - **D4 (approval) önce, D3 (notification) sonra** çünkü approval olmadan dispatch'i tetikleyecek olay yok. Approval Phase 1'de standalone değer üretir (internal governance) — dispatch eklenmeden de operatör onay süreci yaşar.
 - D3 Phase 2'de geldiğinde D4 ile entegre — dispatch event'leri zaten approval ile fire ediliyor.
 - D4 standalone ship-edilebilir + revert-edilebilir (NotificationDispatch tablosu olmadan da çalışır).
+- **Phase 1 alone is not Level A.** It is internal governance only and
+  delivers no customer communication. Level A requires Phase 1 + 2 + 3
+  to ship together for the workflow to be operable in production.
 
 ---
 
@@ -992,6 +1125,12 @@ Notes:
 
 **⚠️ DO NOT RUN UNTIL APPROVED. ⚠️**
 
+> **Boundary reminder (per §16.0–16.2):** Phase 1 alone is **NOT Level A**
+> and **NOT the launch contract.** It is internal governance only; the
+> capability becomes launch-eligible after Phase 2 + Phase 3 also ship.
+> Sequence is: Phase 1 → Phase 2 → Phase 3 → Level A reached. Active
+> email (Phase 4 / Level B) remains conditional on §21 #6.
+>
 > **TASK:** WR-D4 Phase 1 — Resolution Approval Foundation (schema + admin policy CRUD + submit/approve/reject + audit + smoke; no external sending)
 >
 > **Context:** Bu task, [docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md](../planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md) Phase 1 scope'unu implemente eder. Notification engine (D3) ayrı PR — bu PR'da event firing hook'ları placeholder olarak hazırlanır ama dispatch yazımı yapılmaz.
