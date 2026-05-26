@@ -1053,6 +1053,247 @@ Metrikler `inbox_metrics` view'ı olarak Phase 4'te eklenir. Phase 1-3'te ad-hoc
 | K | **Phase 5 push devreye girince frontend state inconsistent.** | Phase 5'ten önce frontend state management Redux/Zustand ile merkezileştirilir; şu an local useState. |
 | L | **SLA bildirimi her saat tekrar.** | dedupKey günlük (`yyyy-mm-dd`) keyleme. |
 
+### 17.A. Persona-Based Demo Seed and Scenario Pack
+
+**Problem:** Inbox boş durduğu sürece kimse onu "ürün" olarak değerlendiremez. Pilot kullanıcısı, demo izleyicisi, ürün direktörü, satış ekibi — hepsi sayfayı açıp boş drawer gördüğünde "bu nasıl çalışıyor?" diye soramaz. Planning aşamasında konuşulması gereken görsel doğrulama, **gerçek görünümlü ama demo-tagged inbox satırları olmadan** yapılamaz. Bu bölüm, inbox UI'sini her rol için 4 dakikada anlamlı kılan demo veri planını tanımlar.
+
+#### 17.A.1 Seed felsefesi
+
+| İlke | Anlamı |
+|---|---|
+| **Yalnız demo, açıkça etiketli** | Tüm seedlenen `ActionItem`'lar `generatedBy = 'demo_seed:<persona>'` ön ekiyle yaratılır. Filtreleme + cleanup tek query'de mümkün. |
+| **Production tenant kirletilmez** | Komut zorunlu `--tenant <tenantId>` parametresi alır. Tenant adı `DEMO`, `STAGING`, veya `playground` prefix'i içermiyorsa script çalışmaz (içeride explicit guard). |
+| **Idempotent** | Aynı seed iki kez çalıştırılırsa `dedupKey` ile çift satır oluşmaz; senaryo değişmediyse mevcut satırlar güncellenir veya atlanır. |
+| **Reversible** | `--cleanup` modu yalnızca `generatedBy LIKE 'demo_seed:%'` satırları siler. Hiçbir gerçek user/case/approval verisi dokunulmaz. |
+| **Dry-run zorunlu** | `--execute` flag'i olmadan komut hiçbir yazma yapmaz. Default davranış = dry-run + plan rapor. |
+| **Tenant + kullanıcı scope'lu** | Seed `ActionItem.userId` her zaman bir demo user'ın id'sidir. Gerçek kullanıcılara atfetmez. Demo user'ları script kendisi yaratabilir veya mevcut demo users'ı bulur. |
+| **Pilot tenant'a "demo" verisi yazılmaz** | Pilot canlı tenant'lara (PARAM/UNIVERA/FINROTA gibi) `demo_seed` atılmaz; explicit `--allow-pilot-tenant` flag'i bile reddedilir. Pilot için ayrı QA tenant gerekiyorsa ayrı bir komut. |
+
+#### 17.A.2 Personalar
+
+Demo seed pack 6 rolde inbox üretmeli:
+
+| Persona | Demo user adı (öneri) | Aldığı satır tipleri |
+|---|---|---|
+| **Agent** | `demo-agent-ali` | İşler ağırlıklı + birkaç bildirim |
+| **Supervisor / Team Lead** | `demo-supervisor-ayse` | Multiple onay bekleyen + ekip FYI |
+| **CSM** | `demo-csm-canan` | Müşteri iletişim görevleri + enterprise mention |
+| **Backoffice** | `demo-backoffice-bora` | İç görev + mention |
+| **Admin** | `demo-admin-deniz` | Notification dispatch suppressed + template hatası |
+| **SystemAdmin** | `demo-sysadmin-emre` | Cross-tenant system alert + cron failure |
+
+Tüm demo user'lar `DEMO` tenant'ında yaşar. Persona başına dedicated UserCompany kaydı: ilgili `role` ile.
+
+#### 17.A.3 Persona-bazlı senaryo katalogu
+
+##### Agent — `demo-agent-ali`
+
+| # | Satır | Kind | actionRequired | Kategori (UI) | Notlar |
+|---|---|---|---|---|---|
+| A1 | "Çözüm önerin reddedildi — `#DEMO-2415` revize gerekli" | `case_returned_to_assignee` | true | İşler | reasonLabel: *"@demo-supervisor-ayse: müşteriye gönderilecek mesajı netleştir, açıklayıcı detay ekle."* |
+| A2 | "@demo-supervisor-ayse iç notta seni andı" | `mention` | false | Bildirimler | Phase 2A'dan sonra inbox'a düşer; mention preset metni: *"@demo-agent-ali bu vakada müşterinin önceki şikayetlerini de kontrol eder misin?"* |
+| A3 | "`#DEMO-2403` için SLA 4 saat kaldı" | `case_sla_at_risk` | true | İşler | Phase 3'te aktif olur; demo seed Phase 2'de bunu **işaretli** olarak ekleyebilir (kind enum'da hazır, kullanıcı sezgisi için seed'de görünmesi yeterli). |
+| A4 | "`#DEMO-2410` için müşteriye e-posta iletmen bekleniyor" | `dispatch_manual_confirm` | true | İşler | Phase 2B'de canlı adapter, ama seed pack içinde Phase 2A'dan itibaren mock satır olarak görülebilir. |
+| A5 | "Önerilen Aksiyonlar — RUNA Koç" | — | — | Inbox DIŞINDA | MyHome'daki "RUNA Önerileri" kartında ayrı; inbox sayaçlarına dahil değil (§4.B, §18.E). |
+
+Hedef inbox snapshot (Agent):
+- **İşler badge:** 3 (A1 + A3 + A4)
+- **Bildirimler badge:** 1 (A2)
+- Drawer İşler sekmesi 3 satır; Bildirimler 1 satır; Ertelenen 0; Tamamlanan 1-2 (geçmiş demo satır).
+
+##### Supervisor / Team Lead — `demo-supervisor-ayse`
+
+| # | Satır | Kind | actionRequired | Notlar |
+|---|---|---|---|---|
+| S1 | "Çözüm onayı bekliyor — `#DEMO-2415`" | `approval_pending` | true | İlk satır; Yazılım/Genel politikası |
+| S2 | "Çözüm onayı bekliyor — `#DEMO-2418`" | `approval_pending` | true | İkinci bekleyen |
+| S3 | "Çözüm onayı bekliyor — `#DEMO-2422`" | `approval_pending` | true | Üçüncü — supervisor inbox'ı yoğun gösterir |
+| S4 | "`#DEMO-2401` — @demo-supervisor-bilge tarafından onaylandı" | `approval_decided` | false | Başka supervisor karar verdi; bilgi FYI |
+| S5 | "@demo-agent-ali yorumda seni andı: *'bu eskalasyona girer mi?'*" | `mention` | false | Mentioned, yön bilgisi istiyor |
+| S6 | "Ekip SLA risk özeti — bugün 4 vaka riskli" | `pattern_alert` veya `system_alert` (Phase 3+) | false | Phase 3+'a kadar seed pack içinde "FYI" satırı olarak gözükür (final kind kararı §18 sonrası). |
+
+**NOT:** `case_returned_to_assignee` satırı **OLMAMALI** — supervisor vakanın atanan kişisi değilse bu satır ona düşmez (mevcut Phase 1 hotfix davranışı).
+
+Hedef:
+- **İşler:** 3 (S1+S2+S3)
+- **Bildirimler:** 3 (S4+S5+S6)
+
+##### CSM — `demo-csm-canan`
+
+| # | Satır | Kind | actionRequired | Notlar |
+|---|---|---|---|---|
+| C1 | "`#DEMO-2500` müşteri yanıtı bekleniyor — manuel iletim" | `dispatch_manual_confirm` | true | Phase 2B aktif; pack bunu pre-Phase-2B'de mock satır olarak gösterebilir |
+| C2 | "`#DEMO-2502` için müşteri cevap kanalı eksik" | `dispatch_review_needed` (Phase 4) | true | Müşteri iletişim kanalı tanımsız → CSM müdahalesi gerekli |
+| C3 | "@demo-agent-ali enterprise müşteri için yön sordu" | `mention` | false | Bildirim |
+| C4 | "`#DEMO-2440` çözüldü, müşteriye bilgilendirme yapıldı" | `approval_decided` | false | CSM bilgilendirme amaçlı |
+
+Hedef:
+- **İşler:** 2 (C1+C2)
+- **Bildirimler:** 2 (C3+C4)
+
+##### Backoffice — `demo-backoffice-bora`
+
+| # | Satır | Kind | actionRequired | Notlar |
+|---|---|---|---|---|
+| B1 | "`#DEMO-2330` sana transfer edildi — döküman doğrulaması" | `case_assigned` (Phase 2C) | true | Yeni atama satırı |
+| B2 | "@demo-csm-canan müşteri kontrat dokümanını sordu" | `mention` | false | Bilgi |
+| B3 | "Kontrol listesi tamamlanmadı — `#DEMO-2308`" | `manual_task` veya `dispatch_review_needed` (Phase 4+) | true | Phase 4+'da aktif; seed pack canlı olmadan önce mock olarak gösterilebilir |
+
+Hedef:
+- **İşler:** 2 (B1+B3)
+- **Bildirimler:** 1 (B2)
+
+##### Admin — `demo-admin-deniz`
+
+| # | Satır | Kind | actionRequired | Notlar |
+|---|---|---|---|---|
+| AD1 | "Bildirim kuralı çalıştı ama suppressed: kanal eksik (`AccountCompany #1240`)" | `dispatch_review_needed` (Phase 4) veya `system_alert` | true | Admin müdahalesi gerekli |
+| AD2 | "Şablon değişkeni hatalı — `confirm_resolution_v3` render fail" | `system_alert` | true | Admin onaylayıp şablonu düzeltmeli |
+| AD3 | "API entegrasyonu sağlık uyarısı — `external_kb_endpoint` 502" | `system_alert` | false (warn) | FYI severity=warn |
+| AD4 | "Demo tenant'ında bugün 12 yeni vaka açıldı" | `pattern_alert` (Phase 3) | false | Bilgi |
+
+Hedef:
+- **İşler:** 2 (AD1+AD2)
+- **Bildirimler:** 2 (AD3+AD4)
+
+##### SystemAdmin — `demo-sysadmin-emre`
+
+| # | Satır | Kind | actionRequired | Notlar |
+|---|---|---|---|---|
+| SA1 | "Cross-tenant: `STAGING` tenant'ında dispatch suppression rate %35" | `system_alert` (severity=critical) | true | İşler |
+| SA2 | "Cron `notification-dispatcher` 2 saattir failure" | `system_alert` (severity=critical) | true | İşler |
+| SA3 | "Pilot tenant `UNIVERA-DEMO` SLA breach oranı arttı (>%5)" | `system_alert` (severity=warn) | false | Bildirim |
+| SA4 | "Audit log: 3 farklı admin kullanıcısı son 24 saatte role değişikliği yaptı" | `system_alert` (severity=info) | false | İz bırakma |
+
+Hedef:
+- **İşler:** 2 (SA1+SA2)
+- **Bildirimler:** 2 (SA3+SA4)
+
+#### 17.A.4 Satır çeşitliliği — kontrol listesi
+
+Seed pack her persona için aşağıdaki çeşitliliği **mutlaka** içermeli ki review tüm UX boyutlarını kapsasın:
+
+| Çeşitlilik boyutu | Pack'te yer alır mı? |
+|---|---|
+| `actionRequired = true` satır | ✓ (her persona) |
+| `actionRequired = false` (FYI) satır | ✓ (her persona) |
+| `readAt = null` unread FYI (Phase 2B+) | ✓ (her persona en az 1 unread) |
+| `Snoozed` state — Ertelenen sekmesi dolu | ✓ (her persona en az 1) |
+| `Done` state — Tamamlanan sekmesi dolu | ✓ (her persona 2-3) |
+| `Expired` state — multi-approver wins/loses | ✓ (Supervisor pack'inde 1) |
+| Priority `90` (critical) | ✓ (her persona 1) |
+| Priority `70` (high) | ✓ (yaygın) |
+| Priority `50` (default) | ✓ (yaygın) |
+| Aynı `caseId` üzerinde 2+ satır (grouping demo) | ✓ (Agent A1+A2 aynı vakada; Supervisor S1+S5 aynı vakada) |
+| Today / Yesterday / Older grouping | ✓ (`createdAt` ofsetleriyle: bugün 4-5, dün 3-4, eski 5-7) |
+| `reasonLabel` zenginliği | ✓ (her satırda anlamlı; teknik kind sızıntısı yok) |
+| Mention preset (emoji/format korunarak) | ✓ (Agent A2, Supervisor S5, CSM C3, Backoffice B2) |
+| Müşteri-görünür vs içerik vs internal-only | ✓ (CSM C1 customer-facing; B2 internal-only; net etiket) |
+| `groupKey` ortak satırlar | ✓ (Supervisor S1+S5 aynı `groupKey = 'demo:DEMO-2415:approval'`) |
+
+Demo pack'in toplam satır sayısı: ~50-60 (6 persona × ~10 satır). Performans bütçesinin altında.
+
+#### 17.A.5 Visual / UX acceptance — review checklist
+
+Seed sonrası reviewer'ın **5 dakikada** doğrulayabileceği görsel kabul listesi:
+
+| # | Kontrol noktası | Doğru gözükmeli |
+|---|---|---|
+| V1 | Bell action badge | Persona'ya göre kırmızı sayı doğru (Agent 3, Supervisor 3, vb.) |
+| V2 | Bell FYI badge | Gri sayı doğru |
+| V3 | Drawer açılır | Backdrop + sağ panel; UI bozulmaz |
+| V4 | Drawer tab counts | Drawer açıldıktan sonra her sekmenin sayısı bell'le eşit (§7.K trust rule T1) |
+| V5 | Empty states | Boş sekmeler için anlamlı mesaj görülür (gerek varsa cleanup ile testlenir) |
+| V6 | Satır yoğunluğu | 5+ satırda drawer scrollable; her satır 2-3 satır yer kaplar |
+| V7 | İkon ve renkler | Her kind farklı icon (`ShieldCheck`/`Info`/`ShieldX`/...); action satırı amber arka plan |
+| V8 | Inline aksiyonlar | "Vakayı Aç" + kind'a özel primary action butonu görünür |
+| V9 | Grouping (Phase 3+'da) | Aynı `caseId`'deki satırlar accordion altında kümelenir; Phase 2A'da düz liste |
+| V10 | reasonLabel | Her satırda "Çünkü..." cümlesi anlamlı; teknik string yok |
+| V11 | Drawer vs Full-page (Phase 3+) | Drawer subset, full-page üçlü kolon; navigation tutarlı |
+| V12 | Role-based farklar | Supervisor 3 onay görür; Agent 0 onay görür; aynı tenant'ta iki ayrı kullanıcı belirgin farklı inbox'a sahip |
+
+Bu checklist'in tamamı geçilirse Phase 2A "pilot-demo-ready" sayılır. Phase 3 öncesi V9+V11 yeniden değerlendirilir.
+
+#### 17.A.6 Implementation guidance — `scripts/seed-varuna-inbox-demo.js`
+
+```
+node --env-file=.env scripts/seed-varuna-inbox-demo.js \
+     --tenant DEMO \
+     --persona Agent \
+     [--dry-run | --execute] \
+     [--cleanup] \
+     [--rows N]
+```
+
+**Flag özeti:**
+
+| Flag | Tanım | Default |
+|---|---|---|
+| `--tenant <id\|name>` | Hedef tenant. Adı `DEMO/STAGING/playground` prefix'i içermiyorsa **hata**. Pilot canlı tenant **asla** kabul edilmez. | yok (zorunlu) |
+| `--persona <name\|all>` | `Agent` / `Supervisor` / `CSM` / `Backoffice` / `Admin` / `SystemAdmin` / `all`. | `all` |
+| `--dry-run` | Hiçbir yazma yapmaz; üretilecek satırların tablo özetini ekrana basar. | **default** |
+| `--execute` | Gerçekten yazar (idempotent upsert). | OFF |
+| `--cleanup` | Yalnız `generatedBy LIKE 'demo_seed:%'` satırlarını siler. Tenant guard yine geçerli. | OFF |
+| `--rows N` | Persona başına satır sayısını ölçekle (default ~10). | 10 |
+| `--seed-users` | Persona demo user'ları yoksa yaratır; varsa atlar. | OFF (varsayar var) |
+
+**Veri etiketleme sözleşmesi:**
+
+- `generatedBy = 'demo_seed:<persona>'` — her satırda; cleanup tek koşullu DELETE.
+- `groupKey = 'demo:<caseNumber>:<kind>'` — demo prefix'li.
+- `dedupKey = 'demo:<persona>:<scenario-code>'` — script idempotent, tekrar çalıştırınca aynı satırı upsert eder.
+- `reasonLabel` doğal dil ve persona'ya özel. Teknik kind ismi sızıntısı yasak.
+- `companyId` = DEMO tenant'ın id'si; `userId` = persona demo user'ın id'si.
+- `caseId / caseNumber / caseTitle` = ya gerçek DEMO tenant case'inden, ya da script'in seed olarak yarattığı `DEMO-NNNN` numaralı sahte case'lerden.
+
+**Idempotency:**
+
+```js
+await prisma.actionItem.upsert({
+  where: { dedupKey: 'demo:agent-ali:case-returned-2415' },
+  create: { ... },
+  update: {
+    // demo veri zaten varsa state'i Pending'e döndür ki review temiz başlasın
+    state: 'Pending', doneAt: null, doneByUserId: null, ...
+  },
+});
+```
+
+**Cleanup safety:**
+
+```js
+// Tenant guard her zaman önce:
+if (!isDemoTenant(tenant)) throw new Error('refuses to touch non-demo tenant');
+
+await prisma.actionItem.deleteMany({
+  where: {
+    companyId: demoCompany.id,
+    generatedBy: { startsWith: 'demo_seed:' },
+  },
+});
+```
+
+Hiçbir gerçek user data, gerçek case, gerçek approval cleanup tarafından silinmez. Yalnız `generatedBy='demo_seed:*'` satırları.
+
+**Script konumu:** `scripts/seed-varuna-inbox-demo.js`. Mevcut smoke / seed komutlarıyla aynı pattern (`node --env-file=.env`). Phase 2A implementation prompt'una dahil edilir; seed komutu **production'da çalıştırılmaz** (Vercel'de cron yok; sadece dev/staging makinelerden manuel).
+
+#### 17.A.7 Acceptance criteria — seed sonrası
+
+| # | Kriter | Doğrulama |
+|---|---|---|
+| AS-1 | Her persona için seed çalıştırıldığında o persona'nın inbox'ı **boş değil** (en az 5 aktif satır + en az 1 done/dismiss/expired). | Drawer açılır, her sekme görünür kalabalıkta. |
+| AS-2 | Bell action ve FYI sayıları, drawer tab sayılarıyla **birebir** eşit (§7.K.4 T1). | Manuel + future automated. |
+| AS-3 | MyHome widget'ları (özellikle `Onayımda Bekleyenler`) seed'den beslenir; persona Supervisor ise 3 satır gösterir. | Görsel kontrol. |
+| AS-4 | Hiçbir gerçek tenant verisi `--execute` veya `--cleanup` tarafından mutated/deleted değil. | Seed öncesi/sonrası `COUNT(*)` `Case` ve `User` tabloları aynı kalır. |
+| AS-5 | `--cleanup` sonrası `ActionItem WHERE generatedBy LIKE 'demo_seed:%'` count = 0; gerçek satırlar etkilenmez. | DB query. |
+| AS-6 | Script `--dry-run` modunda çağrıldığında 0 yazma yapar; rapor ekrana basılır. | Smoke test. |
+| AS-7 | Tenant adı `DEMO/STAGING/playground` prefix'i içermiyorsa script reddeder. | Negative test scenario. |
+| AS-8 | Pilot live tenant id'si elle verilse bile script reddeder. | Negative test scenario; explicit pilot tenant deny list. |
+| AS-9 | Tekrar `--execute` çalıştırıldığında çift satır oluşmaz (idempotent upsert). | Aynı `dedupKey` ile mevcut satır güncellenir. |
+| AS-10 | Seed sonrası 6 persona için ayrı login → her birinin inbox'ı kendine özgü ve §17.A.3 tablolarıyla tutarlı. | Manuel + sales demo'ya hazır. |
+
+**Phase 2A entry criterion:** Phase 2A canlıya çıkmadan ÖNCE `seed-varuna-inbox-demo.js` çalışmalı; reviewer 6 persona'yı dolu inbox ile inceleyebilmeli. Aksi halde "demo edilebilir Phase 2A" tamamlanmamış sayılır. Boş drawer ile pilot'a çıkılmaz.
+
 ---
 
 ## 18. Açık ürün kararları
