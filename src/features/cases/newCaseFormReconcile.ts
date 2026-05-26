@@ -39,11 +39,18 @@ export interface ReconcilePatch {
   /** Always cleared on company change — project is AC-scoped. */
   accountProjectId: string;
   accountProjectName: string;
-  /** Cleared only when the account is cleared (not when it's kept). */
-  customerContactName?: string;
-  customerContactPhone?: string;
-  customerContactEmail?: string;
-  customerCompanyName?: string;
+  /**
+   * Requester/contact fields are ALWAYS cleared on company change,
+   * regardless of whether the account is retained. Mirrors the pre-C3
+   * blind-clear semantics so stale requester data never leaks across
+   * company contexts. The empty-state branch (no account selected,
+   * everything blank) is short-circuited by the caller's `noState`
+   * guard before this helper runs.
+   */
+  customerContactName: string;
+  customerContactPhone: string;
+  customerContactEmail: string;
+  customerCompanyName: string;
   /**
    * Caller hint — true when the helper concluded the account is still
    * valid for the new company and should be retained. Useful for the
@@ -71,15 +78,21 @@ export function reconcileAccountForCompanyChange(
     accountDirectCompanyId,
   } = input;
 
-  // No account selected → nothing to reconcile. Only project (always
-  // AC-scoped) gets cleared by the caller's effect anyway, but we return
-  // a stable patch shape so the caller can merge uniformly.
+  // No account selected → reset stale requester/contact fields. Before
+  // the C3 refactor, every company change blindly cleared these fields;
+  // the helper must preserve that invariant for the customerless branch
+  // too so requester data from a prior company context does not leak
+  // into a new company's case on submit.
   if (!accountId) {
     return {
       accountId: '',
       accountName: '',
       accountProjectId: '',
       accountProjectName: '',
+      customerContactName: '',
+      customerContactPhone: '',
+      customerContactEmail: '',
+      customerCompanyName: '',
       accountRetained: false,
     };
   }
@@ -110,6 +123,17 @@ export function reconcileAccountForCompanyChange(
       // safest — the project-effect will re-suggest if applicable.
       accountProjectId: '',
       accountProjectName: '',
+      // Requester/contact fields also clear on company change for
+      // consistency with pre-C3 blind-clear semantics. In normal flow
+      // these are already empty when an account is selected (the picker
+      // wipes them on account-pick), so this is usually a no-op; but
+      // when stale data exists (e.g. customerless-mode requester typed
+      // before a customer was later linked), we must not carry it into
+      // the new company.
+      customerContactName: '',
+      customerContactPhone: '',
+      customerContactEmail: '',
+      customerCompanyName: '',
       accountRetained: true,
     };
   }
