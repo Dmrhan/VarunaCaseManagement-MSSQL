@@ -41,6 +41,7 @@ import { AccountContactEditor } from './AccountContactEditor';
 import { AccountProductEditor } from './AccountProductEditor';
 import { AccountProjectEditor } from './AccountProjectEditor';
 import { AccountAddressEditor } from './AccountAddressEditor';
+import { NewCaseForm } from '@/features/cases/NewCaseForm';
 
 interface AccountDetailPageProps {
   accountId: string;
@@ -64,6 +65,9 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  // C3 — Account context'inden tam NewCaseForm açma akışı. QuickCaseModal
+  // header'da korunur; bu giriş noktası operatöre tam formu sunar.
+  const [newCaseOpen, setNewCaseOpen] = useState(false);
   const [companyEditor, setCompanyEditor] = useState<
     { mode: 'add' } | { mode: 'edit'; relation: AccountCompanyDetail } | null
   >(null);
@@ -141,6 +145,7 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
             account={account}
             isWriter={isWriter}
             onEdit={() => setEditOpen(true)}
+            onNewCase={() => setNewCaseOpen(true)}
           />
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
@@ -198,6 +203,33 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
             onSaved={(updated) => {
               setEditOpen(false);
               if (updated) setAccount(updated);
+            }}
+          />
+
+          {/* C3 — Account detail entry point for the full NewCaseForm. */}
+          <NewCaseForm
+            open={newCaseOpen}
+            onClose={() => setNewCaseOpen(false)}
+            onCreated={(created) => {
+              setNewCaseOpen(false);
+              // Refresh caseStats / recentCases so the new case appears in
+              // the right column without a manual refresh.
+              void load();
+              // If parent wired a case-selection callback (e.g. navigate to
+              // the case detail page), honor it.
+              if (onSelectCase) onSelectCase(created.id);
+            }}
+            initialContext={{
+              accountId: account.id,
+              accountName: account.name,
+              // Multi-company: AccountDetail currently lists all companies
+              // without a "current tab" selection. Single-company accounts
+              // get an obvious prefill; multi-company defers to the
+              // NewCaseForm combobox so the operator picks the right one.
+              companyId:
+                account.companies.length === 1
+                  ? account.companies[0].companyId
+                  : undefined,
             }}
           />
 
@@ -290,10 +322,13 @@ function DetailHeader({
   account,
   isWriter,
   onEdit,
+  onNewCase,
 }: {
   account: AccountDetail;
   isWriter: boolean;
   onEdit: () => void;
+  /** C3 — Account context'inden tam NewCaseForm açar. */
+  onNewCase: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -329,11 +364,16 @@ function DetailHeader({
           Eklendi: {formatDate(account.createdAt)}
         </p>
       </div>
-      {isWriter && (
-        <Button variant="outline" leftIcon={<Pencil size={14} />} onClick={onEdit}>
-          Düzenle
+      <div className="flex items-center gap-2">
+        <Button variant="outline" leftIcon={<Plus size={14} />} onClick={onNewCase}>
+          Yeni Vaka
         </Button>
-      )}
+        {isWriter && (
+          <Button variant="outline" leftIcon={<Pencil size={14} />} onClick={onEdit}>
+            Düzenle
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
