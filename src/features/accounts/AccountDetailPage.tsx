@@ -230,6 +230,17 @@ export function AccountDetailPage({ accountId, onBack, onSelectCase }: AccountDe
                 account.companies.length === 1
                   ? account.companies[0].companyId
                   : undefined,
+              // C3 review fix: pass the account's company-id set so
+              // NewCaseForm can reconcile synchronously on company change
+              // (multi-company prefill path). Without this the form would
+              // need an accountService.get round-trip that could race the
+              // operator's pick.
+              accountCompanyIds: account.companies.map((c) => c.companyId),
+              // AccountDetail API response does not surface the direct
+              // Account.companyId column; the relation array is the source
+              // of truth here. Pass null so the helper falls back to the
+              // relation-only check (mirrors backend semantics).
+              accountDirectCompanyId: null,
             }}
           />
 
