@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { markInProgressForCase } from '../db/actionItemRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
@@ -248,6 +249,10 @@ router.get(
   asyncRoute(async (req, res) => {
     const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
+    // WR-ACTION-CENTER Phase 1 — auto-InProgress: flip user's Pending
+    // ActionItems for this case to InProgress, stamp firstSeenAt.
+    // Fire-and-forget; case detail must never block on action-center write.
+    void markInProgressForCase({ caseId: req.params.id, userId: req.user.id });
     res.json(c);
   }),
 );

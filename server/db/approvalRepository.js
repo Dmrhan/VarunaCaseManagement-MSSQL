@@ -17,6 +17,11 @@
 
 import { prisma } from './client.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
+import {
+  emitActionItem,
+  closeActionItemsForApproval,
+  expireSiblingActionItemsForApproval,
+} from './actionItemRepository.js';
 
 /**
  * WR-D4 Phase 2 wire-up: approval lifecycle fires notification events.
@@ -275,9 +280,11 @@ export async function matchPolicyForCase(caseRow) {
 
 /**
  * Resolve the expected approver Person for a (policy, case) pair.
- * Returns { personId, persons } where:
- *  - `personId` is the canonical approver to snapshot on the approval row
- *  - `persons` is the full eligible set (for any-one approval Phase 1)
+ * Returns { personId, userId, persons, userIds } where:
+ *  - `personId` is the canonical approver Person to snapshot on the approval row
+ *  - `userId` is the corresponding User.id (Action Center inbox routing)
+ *  - `persons` is the eligible Person set (any-one approval Phase 1)
+ *  - `userIds` is the eligible User set (Action Center fan-out)
  * Returns null when no approver can be resolved (caller must 400).
  *
  * Resolution rules (per planning card §8, Phase 1 set):
@@ -286,6 +293,9 @@ export async function matchPolicyForCase(caseRow) {
  *  - Admin → Persons with Admin-role membership in case.companyId
  *  - SystemAdmin → Persons with SystemAdmin role (companyId scope skipped)
  *  - SpecificPerson → policy.approverPersonId (already validated at create-time)
+ *
+ * WR-ACTION-CENTER Phase 1 — userId/userIds added so Action Center can
+ * route inbox items without an extra query in submitApproval.
  */
 export async function resolveApprover({ policy, caseRow }) {
   if (!policy || !caseRow) return null;
@@ -302,7 +312,22 @@ export async function resolveApprover({ policy, caseRow }) {
         orderBy: { createdAt: 'asc' },
       });
       if (leads.length === 0) return null;
-      return { personId: leads[0].id, persons: leads };
+      // Map persons to users via personId → User.personId unique link.
+      const users = await prisma.user.findMany({
+        where: { personId: { in: leads.map((l) => l.id) }, isActive: true },
+        select: { id: true, personId: true },
+      });
+      const personIdToUserId = new Map(users.map((u) => [u.personId, u.id]));
+      const userIds = leads
+        .map((l) => personIdToUserId.get(l.id))
+        .filter((id) => !!id);
+      const firstUserId = personIdToUserId.get(leads[0].id) ?? null;
+      return {
+        personId: leads[0].id,
+        userId: firstUserId,
+        persons: leads,
+        userIds,
+      };
     }
     case 'SpecificPerson': {
       if (!policy.approverPersonId) return null;
@@ -311,36 +336,44 @@ export async function resolveApprover({ policy, caseRow }) {
         select: { id: true, isActive: true },
       });
       if (!p || !p.isActive) return null;
-      return { personId: p.id, persons: [{ id: p.id }] };
+      const u = await prisma.user.findFirst({
+        where: { personId: p.id, isActive: true },
+        select: { id: true },
+      });
+      return {
+        personId: p.id,
+        userId: u?.id ?? null,
+        persons: [{ id: p.id }],
+        userIds: u ? [u.id] : [],
+      };
     }
     case 'Supervisor':
     case 'Admin':
     case 'SystemAdmin': {
       // Role-based resolution uses UserCompany.role pivot.
       // Phase 1: a single person per role can approve any-one style.
-      // We surface the Person rows (joined through User.personId) so the
-      // approve endpoint can verify req.user is among the eligible set.
       const roleName = policy.approverType;
-      const userWhere = { role: roleName };
-      // SystemAdmin is global — no companyId filter on UserCompany.
       const memberships = await prisma.userCompany.findMany({
         where:
           roleName === 'SystemAdmin'
             ? { role: roleName }
             : { role: roleName, companyId: caseRow.companyId },
-        select: { user: { select: { id: true, personId: true } } },
+        select: { user: { select: { id: true, personId: true, isActive: true } } },
       });
-      // Filter to memberships whose User has a linked Person (otherwise
-      // we cannot stamp expectedApproverPersonId).
-      const personIds = memberships
-        .map((m) => m.user?.personId)
-        .filter((x) => !!x);
-      if (personIds.length === 0) return null;
-      // Pick the deterministic first (sorted) as snapshot; any of the
-      // set can approve at decide-time.
-      personIds.sort();
-      void userWhere;
-      return { personId: personIds[0], persons: personIds.map((id) => ({ id })) };
+      // Filter to memberships whose User has a linked Person AND is active.
+      const validMembers = memberships
+        .map((m) => m.user)
+        .filter((u) => !!u && !!u.personId && u.isActive !== false);
+      if (validMembers.length === 0) return null;
+      // Deterministic ordering by personId for stable snapshot pick.
+      validMembers.sort((a, b) => (a.personId > b.personId ? 1 : -1));
+      const snapshotMember = validMembers[0];
+      return {
+        personId: snapshotMember.personId,
+        userId: snapshotMember.id,
+        persons: validMembers.map((u) => ({ id: u.personId })),
+        userIds: validMembers.map((u) => u.id),
+      };
     }
     default:
       return null;
@@ -376,6 +409,9 @@ export async function submitApproval({ caseId, payload, user, allowedCompanyIds 
       supportLevel: true,
       assignedTeamId: true,
       approvalState: true,
+      // WR-ACTION-CENTER Phase 1 — denorm snapshots for ActionItem rows.
+      caseNumber: true,
+      title: true,
     },
   });
   if (!caseRow) {
@@ -474,6 +510,29 @@ export async function submitApproval({ caseId, payload, user, allowedCompanyIds 
     },
   });
 
+  // WR-ACTION-CENTER Phase 1 — emit approval_pending ActionItem(s).
+  // One per eligible approver userId (multi-approver fan-out for role-
+  // based approverType). dedupKey includes userId so each row is unique.
+  for (const approverUserId of resolved.userIds ?? []) {
+    void emitActionItem({
+      kind: 'approval_pending',
+      userId: approverUserId,
+      personId: resolved.personId,
+      companyId: caseRow.companyId,
+      objectType: 'CaseResolutionApproval',
+      objectId: approval.id,
+      caseId,
+      caseNumber: caseRow.caseNumber,
+      caseTitle: caseRow.title,
+      generatedBy: `policy:${policy.id}`,
+      groupKey: `${caseId}:approval`,
+      dedupKey: `${caseRow.companyId}:${approverUserId}:approval_pending:${approval.id}`,
+      priority: 70,
+      actionRequired: true,
+      reasonLabel: `Çünkü "${policy.name}" politikası kapsamında onaylayıcısın.`,
+    });
+  }
+
   return approval;
 }
 
@@ -542,6 +601,42 @@ export async function approveApproval({ approvalId, payload, user, allowedCompan
       approverName: user.fullName ?? '',
     },
   });
+
+  // WR-ACTION-CENTER Phase 1 — close decider's ActionItem (if any) + expire
+  // sibling approver ActionItems + emit FYI to the original submitter.
+  // All three are fire-and-forget; approval semantics never depend on them.
+  void closeActionItemsForApproval({
+    approvalId,
+    deciderUserId: user.id,
+    outcome: 'approved',
+  });
+  void expireSiblingActionItemsForApproval({
+    approvalId,
+    exceptUserId: user.id,
+  });
+  void (async () => {
+    // FYI to original submitter — fetch case denorm via the row we already have.
+    const caseRow = await prisma.case.findUnique({
+      where: { id: row.caseId },
+      select: { caseNumber: true, title: true },
+    });
+    void emitActionItem({
+      kind: 'approval_decided',
+      userId: row.submittedByUserId,
+      companyId: row.companyId,
+      objectType: 'CaseResolutionApproval',
+      objectId: approvalId,
+      caseId: row.caseId,
+      caseNumber: caseRow?.caseNumber ?? null,
+      caseTitle: caseRow?.title ?? null,
+      generatedBy: row.policyId ? `policy:${row.policyId}` : 'system',
+      groupKey: `${row.caseId}:approval`,
+      dedupKey: `${row.companyId}:${row.submittedByUserId}:approval_decided:${approvalId}`,
+      priority: 30,
+      actionRequired: false,
+      reasonLabel: 'Gönderdiğin çözüm onayı sonuçlandı: Onaylandı.',
+    });
+  })();
 
   return updated;
 }
@@ -627,6 +722,87 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
       approverName: user.fullName ?? '',
     },
   });
+
+  // WR-ACTION-CENTER Phase 1 — close decider, expire siblings, FYI to
+  // submitter, and (only for ReturnToAssignee) emit actionable
+  // case_returned_to_assignee item.
+  void closeActionItemsForApproval({
+    approvalId,
+    deciderUserId: user.id,
+    outcome: 'rejected',
+  });
+  void expireSiblingActionItemsForApproval({
+    approvalId,
+    exceptUserId: user.id,
+  });
+  void (async () => {
+    // P1 review fix — fetch CURRENT case assignment so we can route the
+    // case_returned_to_assignee actionable item to whoever is responsible
+    // NOW, not whoever submitted the approval (case may have been
+    // transferred between submit and reject; stale submitter must not
+    // receive a "revise and resubmit" action they no longer own).
+    //
+    // Product semantic chosen (a): ReturnToAssignee = "case stays with
+    // current assignee" — the case-level update path leaves assignedPersonId
+    // untouched for this behavior (only ReturnToTeam clears it). Therefore
+    // the actionable item must target the current assignedPersonId's User.
+    //
+    // The original submitter ALWAYS receives the approval_decided FYI so
+    // they know the outcome of their submission even after a transfer.
+    const caseRow = await prisma.case.findUnique({
+      where: { id: row.caseId },
+      select: { caseNumber: true, title: true, assignedPersonId: true },
+    });
+    const submitterId = row.submittedByUserId;
+    if (submitterId) {
+      void emitActionItem({
+        kind: 'approval_decided',
+        userId: submitterId,
+        companyId: row.companyId,
+        objectType: 'CaseResolutionApproval',
+        objectId: approvalId,
+        caseId: row.caseId,
+        caseNumber: caseRow?.caseNumber ?? null,
+        caseTitle: caseRow?.title ?? null,
+        generatedBy: row.policyId ? `policy:${row.policyId}` : 'system',
+        groupKey: `${row.caseId}:approval`,
+        dedupKey: `${row.companyId}:${submitterId}:approval_decided:${approvalId}`,
+        priority: 30,
+        actionRequired: false,
+        reasonLabel: `Gönderdiğin çözüm onayı sonuçlandı: Reddedildi — ${updated.rejectionReason ?? ''}`.slice(0, 500),
+      });
+    }
+    if (behavior === 'ReturnToAssignee' && caseRow?.assignedPersonId) {
+      // Look up the User linked to the current assignedPersonId. If the
+      // assignee has no User row (e.g. legacy person), we deliberately
+      // do NOT fall back to the submitter — better to leave the row
+      // unrouted than misdirect to a stale user. The approval_decided
+      // FYI above already informs the original submitter of the reject.
+      const assigneeUser = await prisma.user.findFirst({
+        where: { personId: caseRow.assignedPersonId, isActive: true },
+        select: { id: true },
+      });
+      if (assigneeUser) {
+        void emitActionItem({
+          kind: 'case_returned_to_assignee',
+          userId: assigneeUser.id,
+          personId: caseRow.assignedPersonId,
+          companyId: row.companyId,
+          objectType: 'CaseResolutionApproval',
+          objectId: approvalId,
+          caseId: row.caseId,
+          caseNumber: caseRow?.caseNumber ?? null,
+          caseTitle: caseRow?.title ?? null,
+          generatedBy: row.policyId ? `policy:${row.policyId}` : 'system',
+          groupKey: `${row.caseId}:approval`,
+          dedupKey: `${row.companyId}:${assigneeUser.id}:case_returned:${row.caseId}:${approvalId}`,
+          priority: 70,
+          actionRequired: true,
+          reasonLabel: 'Reddedildi — revize edip yeniden çözüm onayına gönder.',
+        });
+      }
+    }
+  })();
 
   return updated;
 }

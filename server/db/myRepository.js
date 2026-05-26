@@ -836,6 +836,36 @@ export async function getDashboard({ user }) {
     avgResolutionHours,
   };
 
+  // WR-ACTION-CENTER Phase 1 — pendingApprovalsInbox: real
+  // approval_pending ActionItems assigned to this user. UI shows in a
+  // new "Bekleyen Onaylarım" panel; distinct from the heuristic
+  // `pendingApprovals` array above (which the UI renames to
+  // "Önerilen Aksiyonlar").
+  let pendingApprovalsInbox = [];
+  if (allowedCompanyIds.length > 0) {
+    const rows = await prisma.actionItem.findMany({
+      where: {
+        userId,
+        kind: 'approval_pending',
+        state: { in: ['Pending', 'InProgress'] },
+        companyId: { in: allowedCompanyIds },
+      },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        caseId: true,
+        caseNumber: true,
+        caseTitle: true,
+        reasonLabel: true,
+        createdAt: true,
+        state: true,
+        firstSeenAt: true,
+      },
+    });
+    pendingApprovalsInbox = rows;
+  }
+
   return {
     greeting: {
       name: fullName.split(' ')[0] || fullName,
@@ -845,6 +875,7 @@ export async function getDashboard({ user }) {
     stats,
     todayCalendar,
     pendingApprovals,
+    pendingApprovalsInbox,
     myTopCases,
     performance,
     dailySummary,
