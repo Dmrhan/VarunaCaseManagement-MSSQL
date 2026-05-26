@@ -529,7 +529,10 @@ async function run() {
     });
 
     // Give the fire-and-forget event a beat to land.
-    await new Promise((res) => setTimeout(res, 1500));
+    // Bumped 1500 → 3000 after WR-ACTION-CENTER Phase 1 added parallel
+    // ActionItem upserts in submitApproval (more concurrent DB writes
+    // off the same fire-and-forget path).
+    await new Promise((res) => setTimeout(res, 3000));
     const dispatchesAfterSubmit = await prisma.notificationDispatch.findMany({
       where: { caseId: c4.id, event: 'resolution_submitted' },
     });

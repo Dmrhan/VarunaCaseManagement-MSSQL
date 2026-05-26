@@ -99,12 +99,26 @@ export interface DashboardDailySummary {
   avgResolutionHours: number;
 }
 
+/** WR-ACTION-CENTER Phase 1 — real approval_pending ActionItems. */
+export interface DashboardPendingApprovalItem {
+  id: string;
+  caseId: string | null;
+  caseNumber: string | null;
+  caseTitle: string | null;
+  reasonLabel: string;
+  createdAt: string;
+  state: 'Pending' | 'InProgress' | 'Snoozed' | 'Done' | 'Dismissed' | 'Expired';
+  firstSeenAt: string | null;
+}
+
 export interface DashboardData {
   greeting: { name: string; timeOfDay: 'morning' | 'afternoon' | 'evening' };
   urgentSignals: UrgentSignal[];
   stats: DashboardStats;
   todayCalendar: DashboardCalendarEvent[];
   pendingApprovals: PendingApproval[];
+  /** WR-ACTION-CENTER Phase 1 — real approval inbox (separate from heuristic pendingApprovals). */
+  pendingApprovalsInbox?: DashboardPendingApprovalItem[];
   myTopCases: DashboardTopCase[];
   performance: DashboardPerformance | null;
   dailySummary: DashboardDailySummary;

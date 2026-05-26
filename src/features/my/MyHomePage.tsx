@@ -31,8 +31,11 @@ import {
   type UrgentSignal,
 } from '@/services/myService';
 import { QuickReminderModal } from './QuickReminderModal';
+import { PendingApprovalsPanel } from './PendingApprovalsPanel';
 import { CaseListDrawer } from '@/features/cases/components/CaseListDrawer';
 import { caseService, apiFetch } from '@/services/caseService';
+import { featureFlags } from '@/config/featureFlags';
+import { ActionCenterDrawer } from '@/features/action-center/ActionCenterDrawer';
 import type { Case, CaseFilters } from '@/features/cases/types';
 
 const OPEN_STATUSES_TR = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'] as const;
@@ -91,6 +94,9 @@ export function MyHomePage({
     presetCaseLabel?: string;
     presetRemindAt?: Date | null;
   }>({ open: false });
+
+  // WR-ACTION-CENTER Phase 1 — drawer toggle for "Bekleyen Onaylarım → Eylem Merkezi" link.
+  const [actionCenterOpen, setActionCenterOpen] = useState(false);
 
   // KPI drawer state — tıklanan kart için açılır liste + quick edit
   const [drawer, setDrawer] = useState<{ open: boolean; kpi: DrawerKpi | null }>({
@@ -263,7 +269,16 @@ export function MyHomePage({
       {/* TWO COLUMN */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-3">
-          {/* AI Önerileri her zaman görünür — boş durum bile RUNA AI varlığını ifade eder. */}
+          {/* WR-ACTION-CENTER Phase 1 — Real approval inbox (separate from RUNA AI heuristic suggestions). */}
+          {featureFlags.actionCenterEnabled && (
+            <PendingApprovalsPanel
+              items={data.pendingApprovalsInbox ?? []}
+              onItemClick={onSelectCase}
+              onOpenDrawer={() => setActionCenterOpen(true)}
+            />
+          )}
+          {/* AI Önerileri her zaman görünür — boş durum bile RUNA AI varlığını ifade eder.
+              Decision #4: kept as heuristic suggestions; label clarified to "Önerilen Aksiyonlar". */}
           <AISuggestionsPanel
             approvals={visibleApprovals}
             onApply={applyApproval}
@@ -328,6 +343,18 @@ export function MyHomePage({
         }}
         onOpenCase={onSelectCase}
       />
+
+      {/* WR-ACTION-CENTER Phase 1 — drawer mount; opens from PendingApprovalsPanel "Eylem Merkezi" link. */}
+      {featureFlags.actionCenterEnabled && (
+        <ActionCenterDrawer
+          open={actionCenterOpen}
+          onClose={() => setActionCenterOpen(false)}
+          onCaseOpen={(caseId) => {
+            setActionCenterOpen(false);
+            onSelectCase(caseId);
+          }}
+        />
+      )}
 
       {/* KPI drawer — split list + quick edit. Card click → açılır,
           "Tam ekranda aç" CaseDetailPage'e gönderir, X ile MyHome geri. */}
@@ -593,7 +620,7 @@ function AISuggestionsPanel({
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
             <Sparkles size={16} />
           </span>
-          RUNA AI Önerileri
+          Önerilen Aksiyonlar
         </h2>
       </div>
       {!hasApprovals ? (

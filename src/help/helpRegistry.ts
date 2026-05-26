@@ -196,7 +196,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Çözüm Onayı ve Bildirim Kuralları',
     summary:
       'Çözüm onayı politikasına bağlı bildirim akışını tanımlar: Şablonlar mesaj içeriğini, Kurallar olay+kapsam+alıcı+kanal eşlemesini, Kayıtlar her tetiklenen bildirimin kalıcı denetim izini taşır. Şu an Varuna gerçek e-posta veya SMS göndermez; her müşteri iletişimi operatör tarafından manuel olarak ulaştırılır ve audit kaydı ile kapatılır.',
-    updatedAt: '2026-05-28',
+    updatedAt: '2026-05-29',
     requiredKeywords: [
       'Bildirim Şablon',
       'Bildirim Kural',
@@ -255,6 +255,12 @@ export const HELP_TOPICS: HelpTopic[] = [
       'approval_required',
       'matchPolicyForCase',
       'aktif gönderim',
+      // WR-ACTION-CENTER Phase 1 — Approval Visibility MVP
+      'Eylem Merkezi',
+      'Bekleyen Onaylarım',
+      'Önerilen Aksiyonlar',
+      'Ertele',
+      'Yok Say',
     ],
     bannedPhrases: [
       // Per-topic additions on top of the registry baseline. Operator-default
@@ -531,6 +537,17 @@ export const HELP_TOPICS: HelpTopic[] = [
           'Çözüm Onayı Politikaları ekranı yalnız onay zincirini tanımlar. Müşteri bildirim metni, kuralı veya kayıt görünümü bu ekranda yer ALMAZ.',
           'Müşteri iletişimi için ayrı ekranlar vardır: Bildirim Şablonları (mesaj içeriği), Bildirim Kuralları (event + audience eşlemesi), Bildirim Kayıtları (audit viewer). Operatör manuel iletişim kapanışını Vaka Detayı\'nın "İletişim Bildirimleri" kartından yapar.',
           'Bu ekranda da hiçbir aktif gönderim mümkün değildir. Aktif e-posta sağlayıcısı kararı (üretim sağlayıcı seçimi) sonrası devreye girecek; o zamana kadar mevcut hâl operasyonel olarak yeterlidir.',
+        ],
+      },
+      {
+        title: 'Eylem Merkezi — onay görünürlüğü (Phase 1)',
+        body: [
+          'Onaylayıcı atandığında ona "kendine düşen onay var" sinyali artık Eylem Merkezi üzerinden iletilir. Üst menüde yeni bir ikon (Eylem Merkezi) iki sayaç gösterir: kırmızı (eylem bekleyen) + gri (bildirim/FYI).',
+          'Onaylayıcının kendi sayfasında (Benim Sayfam) "Bekleyen Onaylarım" panelinde Pending onayları görür; "Eylem Merkezi" linkiyle drawer açılır.',
+          'Drawer içinde her satır için inline aksiyonlar: Vakayı Aç / Onayla / Reddet / Ertele / Yok Say. Onayla ve Reddet zaten varolan /api/approvals endpoint\'lerini çağırır — yeni bir karar yolu eklenmez.',
+          'Bir onaylayıcı karar verdiğinde aynı approval için diğer eligible onaylayıcıların inbox satırları "Expired" olur — kim ilk hareket ederse, diğerlerini zaman israfından kurtarır.',
+          'Vaka detayını drawer satırından açan kullanıcının ilgili Pending satırı otomatik "InProgress" olur — "üzerinde çalışıyorum" sinyalini açıkça verir.',
+          'Bekleyen Onaylarım paneli, daha önce var olan "Önerilen Aksiyonlar" (eski adıyla heuristik AI öneri) widget\'ından ayrıdır. İkisini karıştırma: biri gerçek onay kuyruğun, diğeri AI sezgisel önerisi.',
         ],
       },
     ],

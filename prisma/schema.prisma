@@ -1987,3 +1987,90 @@ model NotificationDispatch {
   @@index([companyId, event, createdAt(sort: Desc)])
   @@index([companyId, state])
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// WR-ACTION-CENTER Phase 1 — Approval Visibility MVP
+// ═══════════════════════════════════════════════════════════════════
+//
+// Single table covering Phase 1's three approval-related kinds:
+//   - approval_pending           (resolved approver receives)
+//   - approval_decided           (original submitter FYI)
+//   - case_returned_to_assignee  (rejected → assignee revise)
+//
+// Polymorphic via objectType/objectId — no FK to CaseResolutionApproval
+// or Case so cascades stay simple and Phase 2+ kinds can use the same
+// table without touching schema. See
+// docs/planning_cards/WR-ACTION-CENTER-PHASE1-APPROVAL-VISIBILITY.md §4.
+
+enum ActionItemKind {
+  approval_pending
+  approval_decided
+  case_returned_to_assignee
+  // Forward-compat enum values reserved for future phases — NOT emitted
+  // in Phase 1:
+  case_assigned
+  case_transferred
+  case_sla_at_risk
+  case_sla_breach
+  mention
+  watcher_event
+  dispatch_manual_confirm
+  dispatch_review_needed
+  pattern_alert
+  manual_task
+  system_alert
+}
+
+enum ActionItemState {
+  Pending
+  InProgress
+  Snoozed
+  Done
+  Dismissed
+  Expired
+}
+
+model ActionItem {
+  id              String          @id @default(cuid())
+  companyId       String          // tenant scope
+  userId          String          // target user
+  personId        String?         // optional Person snapshot (TeamLead routing)
+  kind            ActionItemKind
+  state           ActionItemState @default(Pending)
+  actionRequired  Boolean         @default(true)
+
+  // Polymorphic reference (no FK so cascade behavior stays simple)
+  objectType      String?
+  objectId        String?
+
+  // Denormalized snapshots for inbox rendering (avoid JOIN on list)
+  caseId          String?
+  caseNumber      String?
+  caseTitle       String?
+
+  // Routing + dedup
+  generatedBy     String?         // 'policy:<id>' | 'system' | 'user:<id>'
+  groupKey        String?
+  dedupKey        String?
+  priority        Int             @default(50)
+
+  // Explainability — required, never empty
+  reasonLabel     String
+
+  // Lifecycle timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  firstSeenAt     DateTime?
+  snoozedUntil    DateTime?
+  doneAt          DateTime?
+  doneByUserId    String?
+  doneOutcome     String?         // 'approved' | 'rejected' | 'acknowledged'
+  closeNote       String?
+
+  @@unique([dedupKey])
+  @@index([userId, state, createdAt(sort: Desc)])
+  @@index([userId, state, actionRequired])
+  @@index([companyId, kind, state])
+  @@index([objectType, objectId])
+  @@index([state, snoozedUntil])
+}

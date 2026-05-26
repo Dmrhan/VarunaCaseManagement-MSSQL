@@ -19,6 +19,8 @@ import {
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
+import { ActionCenterBell } from './features/action-center/ActionCenterBell';
+import { featureFlags } from './config/featureFlags';
 import { OperationsDashboardPage } from './features/analytics/OperationsDashboardPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
@@ -277,6 +279,8 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* WR-ACTION-CENTER Phase 1 — left of existing bell; two-counter design (Action + FYI). */}
+          {user && featureFlags.actionCenterEnabled && <ActionCenterBell onCaseOpen={openCase} />}
           {user && <MentionBellBadge onCaseClick={openCase} />}
           <button
             type="button"

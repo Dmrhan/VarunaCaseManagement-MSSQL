@@ -526,7 +526,9 @@ async function run() {
     });
 
     // Wait for fire-and-forget event emission to land.
-    await new Promise((res) => setTimeout(res, 2500));
+    // Bumped 2500 → 4000 after WR-ACTION-CENTER Phase 1 added parallel
+    // ActionItem upserts in approveApproval / rejectApproval.
+    await new Promise((res) => setTimeout(res, 4000));
 
     const approvedDispatches = await prisma.notificationDispatch.findMany({
       where: {
