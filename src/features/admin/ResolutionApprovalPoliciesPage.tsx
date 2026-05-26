@@ -20,6 +20,7 @@ import { adminService } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
 import type { CasePerson } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
+import { RESOLUTION_APPROVAL_POLICIES_HELP } from './helpContents';
 
 /**
  * WR-D4 Phase 1 — Çözüm Onayı Politikaları yönetim ekranı.
@@ -134,6 +135,8 @@ export function ResolutionApprovalPoliciesPage() {
         onSearchChange={setSearch}
         onAdd={() => setEditor({ mode: 'create' })}
         addLabel="Yeni Politika"
+        helpTitle={RESOLUTION_APPROVAL_POLICIES_HELP.title}
+        helpSections={RESOLUTION_APPROVAL_POLICIES_HELP.sections}
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
