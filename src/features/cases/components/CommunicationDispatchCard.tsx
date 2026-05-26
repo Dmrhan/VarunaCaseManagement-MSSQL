@@ -4,6 +4,7 @@ import {
   Copy,
   ExternalLink,
   History,
+  Info,
   Mail,
   MessageSquare,
   Send,
@@ -12,10 +13,12 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { HelpDrawer, HelpButton } from '@/components/ui/HelpDrawer';
 import {
   notificationService,
   type NotificationDispatch,
 } from '@/services/notificationService';
+import { CASE_DETAIL_COMMUNICATION_HELP } from '@/features/admin/helpContents';
 import type { Case } from '../types';
 
 /**
@@ -46,6 +49,7 @@ export function CommunicationDispatchCard({
   const [dispatches, setDispatches] = useState<NotificationDispatch[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmTarget, setConfirmTarget] = useState<NotificationDispatch | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -73,9 +77,21 @@ export function CommunicationDispatchCard({
             İletişim Bildirimleri
           </h3>
           {pending.length > 0 && <Badge tint="amber">{pending.length} bekliyor</Badge>}
-          <Badge tint="slate">log-only</Badge>
+          <Badge tint="slate">otomatik gönderim yok</Badge>
         </div>
+        <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
       </div>
+
+      {pending.length > 0 && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+          <Info size={12} className="mt-0.5 shrink-0 text-blue-500" />
+          <span>
+            Varuna mesajı kendiliğinden göndermez. Aşağıdaki butonlarla mesajı
+            iletip <strong>Manuel Olarak Hallettim</strong> ile audit kaydını kapatın;
+            Teslimat notu zorunludur.
+          </span>
+        </div>
+      )}
 
       {pending.length > 0 && (
         <div className="space-y-2">
@@ -128,6 +144,13 @@ export function CommunicationDispatchCard({
           }}
         />
       )}
+
+      <HelpDrawer
+        open={helpOpen}
+        title={CASE_DETAIL_COMMUNICATION_HELP.title}
+        sections={CASE_DETAIL_COMMUNICATION_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+      />
     </section>
   );
 }

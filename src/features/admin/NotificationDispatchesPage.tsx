@@ -14,6 +14,7 @@ import {
 } from '@/services/notificationService';
 import { lookupService } from '@/services/caseService';
 import { AdminListLayout } from './AdminListLayout';
+import { NOTIFICATION_DISPATCHES_HELP } from './helpContents';
 
 /**
  * WR-D4 Phase 2 — Dispatch viewer (read-only audit).
@@ -75,9 +76,11 @@ export function NotificationDispatchesPage() {
     <>
       <AdminListLayout
         title="Bildirim Kayıtları"
-        description="Her event tetiklenmesinde yazılan kalıcı audit satırları. Snapshot subject/body değiştirilemez."
+        description="Her olay tetiklenmesinde yazılan kalıcı denetim satırları. Snapshot Konu/Gövde değiştirilemez."
         count={total}
         searchEnabled={false}
+        helpTitle={NOTIFICATION_DISPATCHES_HELP.title}
+        helpSections={NOTIFICATION_DISPATCHES_HELP.sections}
         loading={loading}
         error={error}
         onRetry={() => void refresh()}

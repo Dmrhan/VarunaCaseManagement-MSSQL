@@ -15,6 +15,7 @@ import {
 } from '@/services/notificationService';
 import { lookupService } from '@/services/caseService';
 import { AdminListLayout } from './AdminListLayout';
+import { NOTIFICATION_TEMPLATES_HELP } from './helpContents';
 
 const VARIABLE_OPTIONS = [
   'case.number',
@@ -93,13 +94,15 @@ export function NotificationTemplatesPage() {
     <>
       <AdminListLayout
         title="Bildirim Şablonları"
-        description="Mustache-style {{değişkenler}} ile subject + body. Şablon değişse bile geçmiş dispatch'lerde snapshot korunur."
+        description="{{Değişken}} içeren Konu + Gövde mesajları. Şablon güncellense bile geçmiş bildirim kayıtları snapshot içeriklerini korur."
         count={filtered.length}
         searchPlaceholder="Anahtar, ad, açıklama veya şirkete göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
         onAdd={() => setEditor({ mode: 'create' })}
         addLabel="Yeni Şablon"
+        helpTitle={NOTIFICATION_TEMPLATES_HELP.title}
+        helpSections={NOTIFICATION_TEMPLATES_HELP.sections}
         loading={loading}
         error={error}
         onRetry={() => void refresh()}

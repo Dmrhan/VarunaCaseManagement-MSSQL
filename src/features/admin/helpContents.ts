@@ -338,6 +338,206 @@ Manuel Giriş      → Admin tarafından eklenen özel kaynaklar`,
   ],
 };
 
+export const CASE_DETAIL_COMMUNICATION_HELP: HelpContent = {
+  title: 'İletişim Bildirimleri — Operatör Rehberi',
+  sections: [
+    {
+      heading: 'Bu kart ne gösterir?',
+      content:
+        'Vaka kapanışı veya çözüm onayı akışı için tanımlanmış kuralların tetiklediği bildirim satırlarını gösterir. Her satır kimin bilgilendirilmesi gerektiğini, hangi kanaldan ve mesajın tam içeriğini taşır.',
+    },
+    {
+      heading: 'Otomatik gönderim YOKTUR',
+      content:
+        'Varuna şu an müşteriye veya iç ekibe kendiliğinden e-posta/SMS göndermez. Her mesaj operatör tarafından dış uygulamadan iletilir ve sonra Vaka Detayı\'nda kapatılır. Pano kopyalansa veya mail taslağı açılsa bile kayıt "Bekliyor" durumunda kalmaya devam eder — yalnız "Manuel Olarak Hallettim" eylemi durumu Sent yapar.',
+      warning:
+        'Sistem mesajı sessiz biçimde göndermez. Mesaj ulaşmadıysa müşteri haberdar değildir; mutlaka iletip onaylayın.',
+    },
+    {
+      heading: 'Üç eylem: Kopyala / Mail Taslağı / Manuel Onay',
+      content:
+        'Her bekleyen satır için 3 eylem vardır:',
+      example: `Mesajı Kopyala
+   → Konu + Gövde panoya kopyalanır;
+     kendi e-posta/SMS/CRM uygulamanıza
+     yapıştırırsınız.
+
+Mail Taslağı Aç
+   → Hedef e-postaysa varsayılan
+     mail uygulamasında alıcı/konu/gövde
+     dolu taslak açılır. Gönderim sizden.
+
+Manuel Olarak Hallettim
+   → Mesajı ilettiğinizi onaylar.
+     Açılan modalda Teslimat notu
+     zorunludur.`,
+    },
+    {
+      heading: 'Teslimat notu neden zorunlu?',
+      content:
+        'Manuel iletişim dış sistemde gerçekleşir; Varuna o anı doğrudan göremez. Teslimat notu denetim sırasında "ne yapıldı, ne zaman, hangi kanaldan" sorusunun yegane yanıtıdır. Onayla butonu not yazılmadan etkin olmaz.',
+      example: `İyi örnekler:
+✓ "14:32'de e-posta gönderildi, müşteri kabul etti."
+✓ "Telefonla aradım, mesaj bıraktım; yarın tekrar arayacağım."
+✓ "WhatsApp Business üzerinden 15:10'da iletildi."
+
+Zayıf örnekler:
+✗ "OK"
+✗ "Hallettim"`,
+      tip:
+        'Teslimat notu Bildirim Kayıtları detayında ve vaka aktivite log\'unda görünür. Açıklayıcı yazmak, ileride senin lehine olur.',
+    },
+    {
+      heading: 'Onay sonrası geri alma yok',
+      content:
+        'Bir bildirimi onayladığınızda kayıt değiştirilemez. Yanlış onay verildiyse vakaya açıklayıcı bir not ekleyin ve gerekirse durumu Süpervizörünüze iletin. "Geri al" tuşu yoktur — audit izi bilinçli olarak değişmez.',
+      warning:
+        'Bir alıcıya yanlışlıkla mesaj gönderildiyse bildirimi yine de Teslimat notu ile kapatıp ne yaşandığını yazın. Boş bırakmak veya silmek seçenek değildir.',
+    },
+    {
+      heading: 'Geçmiş ve durum etiketleri',
+      content:
+        'Kartın altındaki "Geçmiş" akordeonu daha önce tamamlanmış bildirim satırlarını gösterir. Durumlar: Sent (gönderildi/onaylandı), Failed (ileride gerçek gönderim eklendiğinde gönderim hatası), Suppressed (çift tetik veya hız sınırı yüzünden bilinçli olarak bastırıldı; aksiyon gerekmez).',
+    },
+  ],
+};
+
+export const NOTIFICATION_TEMPLATES_HELP: HelpContent = {
+  title: 'Bildirim Şablonları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Bildirim Şablonları, kurallar tetiklendiğinde yazılacak mesajın Konu ve Gövde içeriğini tanımlar. Bir şablon birden fazla kuralda kullanılabilir. Şablon güncellenirse versiyon numarası artar; ama daha önce üretilmiş Bildirim Kayıtları snapshot içeriklerini korur — geçmiş bozulmaz.',
+    },
+    {
+      heading: 'Konu, Gövde ve değişkenler',
+      content:
+        'Sabit metin serbestçe yazılır. Vaka bilgisini eklemek için {{değişken.adı}} kullanın. Editörde izinli değişkenlerin tam listesi gösterilir — tıklayarak Konu veya Gövde alanına ekleyebilirsiniz.',
+      example: `Konu: Vaka {{case.number}} — {{case.title}}
+
+Gövde:
+Merhaba {{assignee.name}},
+{{case.number}} numaralı vakanız
+{{case.status}} durumunda. Önceliği: {{case.priority}}.
+
+Çözüm özeti: {{resolution.summary}}`,
+    },
+    {
+      heading: 'Önizle ve eksik değişken doğrulaması',
+      content:
+        'Önizle butonu örnek vaka değerleriyle Konu + Gövde\'yi render eder. Şablonda kullanılan ama izinli listede olmayan veya boş gelen değişkenler "Eksik değişken" uyarısı olarak çıkar; mesaj operatörün önüne "[değişken eksik]" şeklinde görünür.',
+      tip:
+        'Önizleme örnek değerler kullanır. Gerçek bir vakayla render etmek için ileride şablon detayında "vaka ile önizle" seçeneğini kullanabilirsiniz.',
+    },
+    {
+      heading: 'Anahtar (key) ve versiyon',
+      content:
+        'Anahtar, şablonu sistemde referanslamak için kullanılır; küçük harf, rakam ve alt çizgi içerebilir, harfle başlamalıdır (örn. approval_pending_lead). Bir kez oluşturulduktan sonra değiştirilemez. Versiyon her kayıtta otomatik artar.',
+      warning:
+        'Şablon silinmez; "Aktif" kutusunu kapatarak pasifleştirin. Pasif şablonu yeni kurallar kullanamaz, ama geçmiş Bildirim Kayıtları snapshot içerikleriyle gözükmeye devam eder.',
+    },
+    {
+      heading: '"Müşteriye Gider" rozeti',
+      content:
+        'Bu kutuyu işaretlerseniz şablon listede "Müşteriye Gider" rozetiyle vurgulanır. Şu an Varuna otomatik müşteri e-postası göndermez; rozet, kuralda bu şablonu kullanırken Hedef Kitle seçimini iki kez düşünmeniz için bir hatırlatmadır.',
+    },
+    {
+      heading: 'Başlangıç durumu',
+      content:
+        'Yeni bir şirkette Bildirim Şablonları listesi boş başlar. Tenant için varsayılan şablon yüklü değildir — Admin\'in ilk işi tenant\'a özel şablonları kurmaktır. Şablon yoksa bağlı kural da oluşturulamaz; bildirim üretilmez.',
+    },
+  ],
+};
+
+export const NOTIFICATION_RULES_HELP: HelpContent = {
+  title: 'Bildirim Kuralları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Bir Bildirim Kuralı şunu söyler: "Bu olayda, bu kapsamdaki vakalarda, bu Hedef Kitleye, bu Şablonu, bu Kanaldan üret." Şablonsuz kural olmaz; önce şablonu oluşturun.',
+    },
+    {
+      heading: 'Olay (event) seçenekleri',
+      content:
+        'Kural sadece seçilen olayda tetiklenir. Olaylar Çözüm Onayı akışından gelir.',
+      example: `Çözüm onaya gönderildi
+Çözüm onaylandı
+Çözüm reddedildi
+Vaka kapatıldı
+Vaka yeniden açıldı`,
+    },
+    {
+      heading: 'Filtre (kapsam)',
+      content:
+        'Kuralın hangi vakalarda eşleşeceğini daraltır. Boş bırakılan alanlar "tümü" sayılır. Filtre alanları: Kategori, Alt Kategori, Öncelik, Destek Seviyesi, Takım.',
+    },
+    {
+      heading: '"Her vakaya uygula" güvenlik onayı',
+      content:
+        'Hiçbir filtre alanı doldurmadan kural kaydetmek isterseniz "Her vakaya uygula" onayı zorunludur. Tasarımla, yanlışlıkla broadcast eden kural kurulmasını engeller.',
+      warning:
+        'Onay verilmediğinde Kaydet butonu çalışmaz. Müşteri iletişimi içeren kurallarda bu onayı vermeden önce gerçekten her vakaya bildirim atmak istediğinizden emin olun.',
+    },
+    {
+      heading: 'Hedef Kitle (audience)',
+      content:
+        'Bir kuralda birden fazla Hedef Kitle satırı tanımlayabilirsiniz; her satır ayrı bir bildirim üretir. Türler: Atanan kişi, Takım Lideri, Süpervizör (şirket içi Supervisor), Admin (şirket içi Admin), Müşteri (birincil kontak), Sabit e-posta. Hedef çözülemezse (örn. atanan kişi yok) bildirim "Suppressed" olarak yazılır.',
+    },
+    {
+      heading: 'Kanal ve Mode',
+      content:
+        'Kanal: In-App, E-posta (manuel), Manuel Görev. Mode: LogOnly (sadece kayıt yazılır, operatör eylem beklenmez) veya Manual (operatör vaka detayında onaylar). "Aktif gönderim" modu şu an arayüzde yoktur — Varuna otomatik müşteri e-postası göndermez. Müşteri iletişimi operatör tarafından Vaka Detayı\'ndan manuel olarak kapatılır.',
+    },
+    {
+      heading: 'Tekrar bastırma ve hız sınırı',
+      content:
+        'Tekrar bastırma (dakika): aynı vaka + aynı alıcı + aynı şablon kombinasyonu bu pencerede ikinci kez tetiklenirse ikinci kayıt "Suppressed" yazılır. Saatlik üst sınır: aynı kural saatte en fazla X kez fire eder. İki alan da boş bırakılırsa hiçbir bastırma uygulanmaz.',
+      tip:
+        'Müşteri-facing kurallarda küçük bir tekrar bastırma penceresi (örn. 10 dk) ayarlamak hatalı çift tetiklemelere karşı güvenli bir varsayılandır.',
+    },
+  ],
+};
+
+export const NOTIFICATION_DISPATCHES_HELP: HelpContent = {
+  title: 'Bildirim Kayıtları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Bildirim Kayıtları, her tetiklenen kuralın çıktısını gösteren değiştirilemez denetim tablosudur. Her satır zaman, olay, kural, Hedef Kitle, kanal, mode ve durum bilgisini taşır. Konu + Gövde içeriği üretildiği anki versiyondan dondurulmuş (snapshot) kopyadır — şablon sonradan değiştirilse bile bu satır değişmez.',
+    },
+    {
+      heading: 'Kim görür?',
+      content:
+        'Süpervizör, CSM, Admin ve SystemAdmin rollerine açıktır. Agent ve Backoffice bu ekrana giremez. Ancak kendi vakalarındaki bildirimleri Vaka Detayı\'nın altındaki "İletişim Bildirimleri" kartında görebilirler.',
+    },
+    {
+      heading: 'PII maskeleme',
+      content:
+        'E-posta ve telefon gibi alıcı tanımlayıcıları listede maskelenmiş gösterilir (örn. ab***@firma.com). Snapshot Konu/Gövde detayını görmek için satırdaki "Görüntüle" butonunu kullanın.',
+    },
+    {
+      heading: 'Durum (state) anlamları',
+      content:
+        'Pending: bildirim oluşturuldu, operatör eylem bekliyor (manuel mode) veya henüz işlenmedi. Sent: dış sistemde iletildi ve manuel onaylandı; ya da LogOnly + In-App için doğrudan yazıldı. Suppressed: tekrar bastırma penceresi içinde geldi, hızı aştı veya hedef çözülemedi. Failed: ileride aktif gönderim modu eklendiğinde gönderim hatasını işaretler.',
+      example: `Suppressed sebepleri:
+• duplicate_within_window
+• rate_limited
+• audience_unresolvable
+• customer_opted_out`,
+    },
+    {
+      heading: 'Operatörün manuel kapattığı kayıtlar',
+      content:
+        'Manuel iletişim akışında operatör Vaka Detayı\'ndan "Manuel Olarak Hallettim" diyerek kaydı kapattığında satır Sent durumuna geçer, mode "Manual" olur ve Teslimat notu görüntülenebilir. Bu zorunlu nottur — operatör neyi nasıl ulaştırdığını yazmadan onay veremez.',
+      tip:
+        'Audit izi sonradan geri alınamaz. Yanlış onay verildiyse yeni bir vaka notu ekleyin ve gerekirse kuralı yeniden tetikleyecek bir aksiyon alın.',
+    },
+  ],
+};
+
 export const FIELDS_HELP: HelpContent = {
   title: 'Dinamik Alanlar',
   sections: [

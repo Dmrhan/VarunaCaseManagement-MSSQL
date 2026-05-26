@@ -20,6 +20,7 @@ import {
 } from '@/services/notificationService';
 import { lookupService } from '@/services/caseService';
 import { AdminListLayout } from './AdminListLayout';
+import { NOTIFICATION_RULES_HELP } from './helpContents';
 
 const EVENT_OPTIONS: { value: NotificationEvent; label: string }[] = [
   { value: 'resolution_submitted', label: 'Çözüm onaya gönderildi' },
@@ -113,13 +114,15 @@ export function NotificationRulesPage() {
     <>
       <AdminListLayout
         title="Bildirim Kuralları"
-        description="Event → audience + template + channel + mode. Phase 2: yalnız LogOnly veya Manual mode (aktif gönderim yok)."
+        description="Olay + Filtre + Hedef Kitle + Şablon + Kanal. Şu an yalnız LogOnly veya Manual mode; otomatik gönderim yok."
         count={filtered.length}
         searchPlaceholder="Ad, event veya şablona göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
         onAdd={() => setEditor({ mode: 'create' })}
         addLabel="Yeni Kural"
+        helpTitle={NOTIFICATION_RULES_HELP.title}
+        helpSections={NOTIFICATION_RULES_HELP.sections}
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
