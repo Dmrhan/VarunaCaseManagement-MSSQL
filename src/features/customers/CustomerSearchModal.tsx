@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Building2,
   Clock,
@@ -52,11 +52,15 @@ const RECENT_MAX = 10;
 const RECENT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RECENT_KEY_BASE = 'varuna.recentAccounts';
 
-interface RecentAccount {
+/**
+ * localStorage'da yalnız id + lastSeenAt tutulur. C2 review fix (P2):
+ * Account name, company chips ve VKN gibi PII'lar stale cache'ten doğrudan
+ * render edilmez. Panel açılışında server `accountService.list({ ids })`
+ * ile revalidate edilir; tenant scope dış WHERE'de zorunlu olduğundan
+ * yetkisiz id'ler dönmez → görünmez + cache'ten temizlenir.
+ */
+interface RecentPointer {
   id: string;
-  name: string;
-  vknMasked: string | null;
-  companies: AccountListItem['companies'];
   lastSeenAt: number;
 }
 
@@ -65,7 +69,7 @@ function recentStorageKey(userId: string | null | undefined): string | null {
   return `${RECENT_KEY_BASE}.${userId}`;
 }
 
-function readRecents(userId: string | null | undefined): RecentAccount[] {
+function readRecentPointers(userId: string | null | undefined): RecentPointer[] {
   const k = recentStorageKey(userId);
   if (!k || typeof window === 'undefined') return [];
   try {
@@ -76,32 +80,29 @@ function readRecents(userId: string | null | undefined): RecentAccount[] {
     const cutoff = Date.now() - RECENT_TTL_MS;
     return arr
       .filter((r) => r && typeof r.id === 'string' && typeof r.lastSeenAt === 'number' && r.lastSeenAt >= cutoff)
+      .map((r) => ({ id: r.id, lastSeenAt: r.lastSeenAt }))
       .slice(0, RECENT_MAX);
   } catch {
     return [];
   }
 }
 
-function pushRecent(userId: string | null | undefined, account: Pick<AccountListItem, 'id' | 'name' | 'vknMasked' | 'companies'>) {
+function writeRecentPointers(userId: string | null | undefined, pointers: RecentPointer[]) {
   const k = recentStorageKey(userId);
   if (!k || typeof window === 'undefined') return;
   try {
-    const existing = readRecents(userId);
-    const filtered = existing.filter((r) => r.id !== account.id);
-    const next: RecentAccount[] = [
-      {
-        id: account.id,
-        name: account.name,
-        vknMasked: account.vknMasked ?? null,
-        companies: account.companies ?? [],
-        lastSeenAt: Date.now(),
-      },
-      ...filtered,
-    ].slice(0, RECENT_MAX);
-    window.localStorage.setItem(k, JSON.stringify(next));
+    window.localStorage.setItem(k, JSON.stringify(pointers.slice(0, RECENT_MAX)));
   } catch {
-    /* localStorage write failures are non-fatal — silently ignore */
+    /* non-fatal */
   }
+}
+
+function pushRecentPointer(userId: string | null | undefined, accountId: string) {
+  if (!userId || !accountId) return;
+  const existing = readRecentPointers(userId);
+  const filtered = existing.filter((r) => r.id !== accountId);
+  const next: RecentPointer[] = [{ id: accountId, lastSeenAt: Date.now() }, ...filtered].slice(0, RECENT_MAX);
+  writeRecentPointers(userId, next);
 }
 
 /**
@@ -133,7 +134,11 @@ export function CustomerSearchModal({
   const [selected, setSelected] = useState<AccountListItem | null>(null);
   const [openCases, setOpenCases] = useState<Case[]>([]);
   const [loadingCases, setLoadingCases] = useState(false);
-  const [recents, setRecents] = useState<RecentAccount[]>([]);
+  // Recents are revalidated via the server on each modal open; the in-memory
+  // list is full AccountListItem rows so display logic shares the search
+  // branch's components. localStorage holds only id+timestamp.
+  const [recents, setRecents] = useState<AccountListItem[]>([]);
+  const [loadingRecents, setLoadingRecents] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -149,9 +154,41 @@ export function CustomerSearchModal({
       setOpenCases([]);
       setHighlightIdx(0);
       setCreateOpen(false);
+      setRecents([]);
+      setLoadingRecents(false);
       return;
     }
-    setRecents(readRecents(userId));
+    // C2 review fix (P2): server-side revalidate recents. Stale ids the
+    // user can no longer see are dropped both from the panel render AND
+    // from localStorage. PII (name, company chips) renders only from the
+    // server response — never from cache.
+    const pointers = readRecentPointers(userId);
+    if (pointers.length === 0) {
+      setRecents([]);
+    } else {
+      setLoadingRecents(true);
+      const ids = pointers.map((p) => p.id);
+      void accountService.list({ ids, limit: RECENT_MAX }).then((resp) => {
+        const validRows = resp?.accounts ?? [];
+        const validIds = new Set(validRows.map((r) => r.id));
+        // Preserve the operator's recency order (server response order is
+        // by createdAt or similar; we want the localStorage order).
+        const byId = new Map(validRows.map((r) => [r.id, r]));
+        const ordered = pointers
+          .filter((p) => validIds.has(p.id))
+          .map((p) => byId.get(p.id))
+          .filter((x): x is AccountListItem => !!x);
+        setRecents(ordered);
+        setLoadingRecents(false);
+        // Cleanup: any pointer whose id didn't come back is out of scope
+        // or deleted — drop it from localStorage so future opens are fast
+        // and the cache doesn't keep growing dead entries.
+        const survivors = pointers.filter((p) => validIds.has(p.id));
+        if (survivors.length !== pointers.length) {
+          writeRecentPointers(userId, survivors);
+        }
+      });
+    }
     const t = window.setTimeout(() => inputRef.current?.focus(), 80);
     return () => window.clearTimeout(t);
   }, [open, userId]);
@@ -205,29 +242,14 @@ export function CustomerSearchModal({
   }, [selected]);
 
   // Recent-vs-results panel switch: boş query → recent listesi gösterilir,
-  // dolu query → arama sonuçları.
+  // dolu query → arama sonuçları. Recents server'dan revalidate edildiği
+  // için doğrudan AccountListItem olarak render edilir.
   const showingRecents = !debounced;
-  const listItems: AccountListItem[] = useMemo(() => {
-    if (showingRecents) {
-      return recents.map((r) => ({
-        id: r.id,
-        name: r.name,
-        vknMasked: r.vknMasked,
-        phone: null,
-        phoneE164: null,
-        email: null,
-        isActive: true,
-        openCaseCount: 0,
-        totalCaseCount: 0,
-        companies: r.companies,
-      } as AccountListItem));
-    }
-    return results;
-  }, [showingRecents, recents, results]);
+  const listItems: AccountListItem[] = showingRecents ? recents : results;
 
   function selectAccount(account: AccountListItem) {
     setSelected(account);
-    pushRecent(userId, account);
+    pushRecentPointer(userId, account.id);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -254,13 +276,9 @@ export function CustomerSearchModal({
   function handleCreatedAccount(newAccount: { id: string; name: string; vknMasked?: string | null; companies?: AccountListItem['companies'] } | undefined) {
     setCreateOpen(false);
     if (!newAccount) return;
-    // Push to recents immediately so the operator sees the new entry.
-    pushRecent(userId, {
-      id: newAccount.id,
-      name: newAccount.name,
-      vknMasked: newAccount.vknMasked ?? null,
-      companies: newAccount.companies ?? [],
-    });
+    // C2 review fix (P2): only id stored; PII renders on next open from
+    // server revalidation, not from this snapshot.
+    pushRecentPointer(userId, newAccount.id);
     if (afterCreate === 'openCase') {
       // Caller will receive accountId via the existing onNewCase contract and
       // is responsible for pivoting into NewCaseForm.
@@ -324,7 +342,13 @@ export function CustomerSearchModal({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-3 scrollbar-thin">
-              {showingRecents && recents.length === 0 ? (
+              {showingRecents && loadingRecents ? (
+                <div className="space-y-2">
+                  <Skeleton height={70} />
+                  <Skeleton height={70} />
+                  <Skeleton height={70} />
+                </div>
+              ) : showingRecents && recents.length === 0 ? (
                 <EmptyState
                   size="sm"
                   icon={<Search size={18} />}

@@ -180,15 +180,22 @@ function shapeAccountRow(account, { caseAggregates }) {
  * her durumda dış WHERE'de korunur, OR sadece eşleştirme alanlarını genişletir:
  *   - name (contains, case-insensitive)
  *   - vkn (startsWith)
- *   - AccountCompany.externalCustomerCode (contains, case-insensitive) — C2
+ *   - AccountCompany.externalCustomerCode (contains, case-insensitive) — C2,
+ *     **scoped**: yalnız companyId filtresi (varsa) veya allowedCompanyIds
+ *     içindeki AccountCompany ilişkilerinde aranır. Yetkisiz tenant'taki
+ *     external kodla Account'a sızma engellenir.
  *   - contact phone/email (contains, case-insensitive)
  * companyId: filter (allowedCompanyIds içinde olmalı).
  * status: AccountCompany.status filter (active/churn/prospect/inactive).
+ * ids: belirli account id'leri ile sınırlandır (C2 recents revalidation).
+ *   buildScopeWhere ile birlikte uygulanır; out-of-scope id'ler doğal olarak
+ *   sonuçtan düşer.
  */
 export async function listAccounts({
   search,
   companyId,
   status,
+  ids,
   page = 1,
   limit = 25,
   allowedCompanyIds,
@@ -204,18 +211,33 @@ export async function listAccounts({
 
   const whereAnd = [buildScopeWhere(allowed)];
 
+  // C2 recents revalidation: restrict to explicit id set. Tenant scope
+  // already enforced by buildScopeWhere → out-of-scope ids drop out.
+  if (Array.isArray(ids)) {
+    if (ids.length === 0) {
+      return { accounts: [], total: 0, page: safePage, limit: safeLimit };
+    }
+    whereAnd.push({ id: { in: ids } });
+  }
+
   if (search && search.trim().length >= 2) {
     const q = search.trim();
+    // C2 review fix (P1): externalCustomerCode predicate is scoped INSIDE
+    // the same `companies.some` clause. Without the inner `companyId`
+    // constraint, an Account whose AC in a forbidden tenant carries the
+    // searched code would still surface (the outer scope already let it
+    // through via a separate allowed AC). Scoping the some-clause closes
+    // that leak: code-match only counts when it lives on an AC that's
+    // either the explicit companyId filter or in allowedCompanyIds.
+    const externalCodeAcScope = companyId ? companyId : { in: allowed };
     whereAnd.push({
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
         { vkn: { startsWith: q } },
-        // C2: müşterinin herhangi bir AccountCompany ilişkisindeki external
-        // kodu içerikle eşle. allowedCompanyIds dış WHERE'de zorlandığı için
-        // bu OR yalnız eşleştirme alanını genişletir, scope'u açmaz.
         {
           companies: {
             some: {
+              companyId: externalCodeAcScope,
               externalCustomerCode: { contains: q, mode: 'insensitive' },
             },
           },
