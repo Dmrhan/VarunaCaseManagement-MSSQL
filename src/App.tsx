@@ -52,6 +52,9 @@ import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { ResolutionApprovalPoliciesPage } from './features/admin/ResolutionApprovalPoliciesPage';
+import { NotificationTemplatesPage } from './features/admin/NotificationTemplatesPage';
+import { NotificationRulesPage } from './features/admin/NotificationRulesPage';
+import { NotificationDispatchesPage } from './features/admin/NotificationDispatchesPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
@@ -254,6 +257,9 @@ export default function App() {
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
         {view === 'admin-resolution-approval' && <ResolutionApprovalPoliciesPage />}
+        {view === 'admin-notification-templates' && <NotificationTemplatesPage />}
+        {view === 'admin-notification-rules' && <NotificationRulesPage />}
+        {view === 'admin-notification-dispatches' && <NotificationDispatchesPage />}
       </AdminLayout>
     );
   }

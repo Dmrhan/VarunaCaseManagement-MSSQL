@@ -59,6 +59,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
+import { CommunicationDispatchCard } from './components/CommunicationDispatchCard';
 import { TransferModal } from './components/TransferModal';
 import { SnoozeModal } from './components/SnoozeModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
@@ -2843,6 +2844,16 @@ function DetailTab({
       <ResolutionApprovalCard
         item={item}
         onApprovalChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
+
+      {/* WR-D4 Phase 2 — İletişim bildirimleri (yalnız bu vakaya dispatch varsa) */}
+      <CommunicationDispatchCard
+        item={item}
+        onChanged={() => {
           void caseService.get(item.id).then((c) => {
             if (c) onTransitionApplied(c);
           });
