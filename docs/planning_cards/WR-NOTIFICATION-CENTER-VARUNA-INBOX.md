@@ -1548,3 +1548,207 @@ Final report: files changed; smoke results; legacy bell deactivation confirmatio
 | Tarih | Versiyon | Not |
 |---|---|---|
 | 2026-05-26 | v0.1 | İlk plan (Phase 2A öncelikli). |
+| 2026-05-26 | v0.2 | §7.K Badge strategy + §17.A Demo seed pack. |
+| 2026-05-26 | v0.3 | §D Product Expectations Coverage Audit ve eksik konuların addenda'sı. |
+
+---
+
+## D. Product Expectations Coverage Audit and Addenda
+
+Bu ek bölüm, planning sürecinde paydaşların net olarak dile getirdiği 15 ürün beklentisini tek bir izlenebilir tabloda kart içindeki bölümlerle eşler ve eksik kalan ayrıntıları aynı yerde tamamlar. Her satırın amacı: implementation prompt yazıldığında "bu konu açıkça konuşulmadı" denilmesin.
+
+### D.1. Coverage Matrix
+
+| # | Beklenen ürün davranışı | Kart içindeki yeri | Yeterlilik |
+|---|---|---|---|
+| 1 | **Tek üst-sağ giriş noktası** (tek inbox/zil, rakip ziller yok). | §0, §2.3, §4.A, §17 (A satırı), §18.A, §19.A | ✓ tam |
+| 2 | **Zengin bahsetme satırları** — actor/avatar, `@mention` önizleme, emoji/reaction sinyalleri (destekleniyorsa). | §5.B, §6.C, §7.D, §17.A.3 (Agent A2 / Supervisor S5) → **§D.2-A** zenginleştirme ekleniyor | ✓ §D.2-A ile tam |
+| 3 | **Inline karar aksiyonları** — approve / reject / open / snooze / dismiss (güvenli olduğunda). | §7.D, §8 (action katalogu), §7.K.7 (acceptance) | ✓ tam |
+| 4 | **Görsel kategori sistemi** — onay / bahsetme / müşteri iletişimi / SLA / sistem / atama; ikon / renk / öncelik dili. | §4.B, §7.K.1 → **§D.2-B** konsolide map ekleniyor | ✓ §D.2-B ile tam |
+| 5 | **Drawer vs full-page bölünmesi** — drawer hızlı aksiyon, full-page arama / filtre / bulk / geçmiş. | §4.A, §7.B, §7.C, §13.A (route listesi) | ✓ tam |
+| 6 | **Read ≠ Done** birinci sınıf kural. | §6.C (`readAt`), §8.A, §9, §9.A | ✓ tam |
+| 7 | **Audit ve güven** — niçin geldi, kim ne yaptı, ne zaman, ne değişti. | §1, §6.C, §7.D, §13.J → **§D.2-C** "who/when/what" audit semantiği netleştiriliyor | ✓ §D.2-C ile tam |
+| 8 | **Backfill stratejisi** — eski bahsetme ve okunmamış öğeler; çift sayım yok. | §5.B, §12, §17.I, §19.A, §19.F (madde 7), §7.K.5 | ✓ tam |
+| 9 | **Persona-based demo seed** + opsiyonel "demo review mode". | §17.A → **§D.2-D** opsiyonel demo review banner pattern ekleniyor | ✓ §D.2-D ile tam |
+| 10 | **Bildirim gürültü bütçesi** — her event inbox'a girmez. | §16 (noise ratio metrik), §17.D (aksiyonsuz satır anti-pattern), §17.B → **§D.2-E** doktrin tek sayfada özetleniyor | ✓ §D.2-E ile tam |
+| 11 | **Mobile / dar viewport davranışı**. | §7.H | ✓ tam |
+| 12 | **Yüksek kaliteli empty state ve microcopy**. | §7.F, §15, §0.A.4 | ✓ tam |
+| 13 | **Büyük operator help drawer YASAK** — progressive disclosure, tooltip, reasonLabel, empty-state kopyası. | §0.A.4 (kalıcı kural), §15, §17 (G satırı), §7.B (Phase 1 hotfix dersi) | ✓ tam |
+| 14 | **Activity sinyali** — badge sayım, yeni-öğe highlight, "az önce", ANINDA optimistic sayaç güncelleme. | §7.K.2, §7.K.3, §7.K.7, §13.F → **§D.2-F** optimistic UI pattern ekleniyor | ✓ §D.2-F ile tam |
+| 15 | **İmplementasyondan ÖNCE final terminoloji kararı** — user-facing vs internal/sales label. | §4.C, §18.B (mevcut açık karar), §0.A.4 (Aksiyonlarım kalır) → **§D.2-G** karar checkpoint olarak netleştirildi | ✓ §D.2-G ile tam |
+
+### D.2. Eksik konuların addenda'sı
+
+Aşağıdaki 7 mini-bölüm, coverage matrix'te "▸ ek" işareti taşıyan maddeler için eksik kalan ayrıntıyı tamamlar. Hiçbiri yeni schema/migration/runtime gerektirmez; planlama netleştirme yapar.
+
+#### D.2-A. Zengin bahsetme satırı tasarımı
+
+Bahsetme satırı, diğer kind'lardan **görsel olarak ayırt edilebilir** olmalı. Tasarım kuralları:
+
+- **Actor avatarı (sol başında)** — küçük yuvarlak. Üç fallback hiyerarşisi: (1) varsa profil fotoğrafı, (2) yoksa baş harf monogramı (`AS` → "Ali Söz"), (3) tamamen anonim sistemse `User` lucide ikonu. Avatar 20×20 px, satır yüksekliğini bozmaz.
+- **Bahsetme preview metni** — yorum gövdesinin ilk 120 karakteri (`previewText` opsiyonel kolon §6.C). `@mention` syntax violet vurgu ile zarif italik; emoji'ler korunur (kodlama escape edilmez).
+- **Reaction / emoji desteği** — Phase 4'e ertelenir. Şartlı: vaka yorum sistemi reaction destekliyorsa (mevcutta yok) — satırda küçük reaction stripe gösterilebilir: `👍 2 · ❤ 1`. Yoksa stripe render edilmez. Asla **dummy reaction** eklenmez.
+- **Audit hover** — actor adına hover edildiğinde tooltip: "Ali Söz · 14:32". Phase 4+'ta user-profile deep link.
+- **Bahsetme row kind label**: "Sözü geçti" (önerilen, §D.2-B'deki KIND_LABEL map'inde). reasonLabel: *"@${actor.shortName} ${case.caseNumber} yorumunda seni andı."*
+- **Action vs FYI**: `mention` her zaman FYI (`actionRequired = false`). Mention'a yanıt vermek bir "iş" değildir — kullanıcı yorumu açar, gerekirse yanıtlar; satır otomatik `readAt` set olur.
+
+#### D.2-B. Konsolide kategori / icon / renk / öncelik master tablosu
+
+Bu tablo `KIND_LABEL`, `KIND_ICON`, kategori chip rengi ve default priority'yi tek yerde dondurur. Implementation prompt'unda referans olarak verilir.
+
+| Kategori (UI) | Kind | Ana Renk | Lucide Icon | KIND_LABEL (operatör) | Default `priority` | actionRequired |
+|---|---|---|---|---|---|---|
+| **Onaylar** | `approval_pending` | amber-600 (action) | `ShieldCheck` | "Çözüm onayı bekliyor" | 70 | true |
+| **Onaylar** | `approval_decided` | slate-500 (FYI) | `Info` | "Çözüm onayı sonuçlandı" | 30 | false |
+| **Onaylar** | `case_returned_to_assignee` | rose-600 (urgent) | `ShieldX` | "Revizyon gerekiyor" | 70 | true |
+| **Bahsetmeler** | `mention` | violet-600 | `AtSign` | "Sözü geçti" | 50 | false |
+| **Müşteri İletişimi** | `dispatch_manual_confirm` | blue-600 | `Mail` | "Müşteri iletişimi bekliyor" | 70 | true |
+| **Müşteri İletişimi** | `dispatch_review_needed` | orange-600 | `MailWarning` | "İletişim gözden geçirilmeli" | 80 | true |
+| **Atama** | `case_assigned` | emerald-600 | `UserCheck` | "Sana atandı" | 60 | true (Phase 2C'de tartışılır) |
+| **Atama** | `case_transferred` | slate-500 | `UserMinus` | "Vaka transfer edildi" | 30 | false |
+| **SLA** | `case_sla_at_risk` | amber-600 | `Clock` | "SLA riskli" | 80 | true |
+| **SLA** | `case_sla_breach` | rose-600 | `AlertTriangle` | "SLA aşıldı" | 90 | true (severity=critical) |
+| **Pattern / AI sinyali** | `pattern_alert` | violet-500 | `TrendingUp` | "Örüntü uyarısı" | 50 | false |
+| **Sistem** | `system_alert` | severity'ye göre değişken (info=slate / warn=amber / critical=rose) | `Bell` veya `AlertOctagon` | "Sistem uyarısı" | 60-90 | severity'ye göre |
+| **Görev** | `manual_task` | slate-600 | `ListChecks` | "Görev" | 50 | true |
+| **Watcher** | `watcher_event` | slate-400 | `Eye` | "İzlediğin vakada hareket" | 30 | false |
+
+**Renk semantik kuralları:**
+- **Kırmızı tonu (rose-600)** yalnız acil ve aksiyon zorunluluğu yüksek olan iki kind'da: `case_returned_to_assignee` ve `case_sla_breach`. Aksi halde "alarm yorgunluğu" oluşur.
+- **Amber** = aksiyon bekleyen ama acil olmayan kategoriler için ana ton.
+- **Violet** = bahsetme + AI/pattern — "insan-kaynaklı sosyal sinyal" tonu.
+- **Blue** = müşteri ile temas eden konular.
+- **Emerald** = atama / positive routing.
+- **Slate** = FYI / nötr / arşiv satırlar.
+
+Bu tablo bir kontrat'tır. Yeni kind eklenirse PR review'de bu tabloya satır eklemek zorunlu (§17.H anti-pattern: technical kind UI'ya sızar).
+
+#### D.2-C. Audit ve trust — kim, ne zaman, ne değişti
+
+`reasonLabel` "niçin geldi"yi söyler. Bunun yanı sıra trust audit için her satır şu alanları taşır (mevcut + planlanmış):
+
+| Soru | Alan | Phase |
+|---|---|---|
+| Bu satır niçin var? | `reasonLabel` (zorunlu, mevcut) | 1 |
+| Kim tetikledi? | `actorUserId` (opsiyonel, §6.C planlı kolon) | 2B+ |
+| Hangi politikadan / sistemden geldi? | `generatedBy` ("policy:`<id>`" / "system" / "user:`<id>`" / "demo_seed:`<persona>`") (mevcut) | 1 |
+| Ne zaman üretildi? | `createdAt` (mevcut) | 1 |
+| İlk ne zaman gördüm? | `firstSeenAt` (mevcut) | 1 |
+| Ne zaman okudum (FYI)? | `readAt` (planlı) | 2B+ |
+| Ne zaman ertelendi / wake'lendi? | `snoozedUntil` (mevcut) | 1 |
+| Kim kapattı? | `doneByUserId` (mevcut) | 1 |
+| Hangi sonuçla kapandı? | `doneOutcome` ('approved' / 'rejected' / 'acknowledged' / 'dismissed') (mevcut) | 1 |
+| Kapanırken not bıraktı mı? | `closeNote` (mevcut, opsiyonel kullanıcı notu) | 1 |
+| Kaynak nesne hangisi? | `objectType` + `objectId` (mevcut, polymorphic) | 1 |
+| Üzerine bağlı vaka? | `caseId` + denormalize snapshot (`caseNumber`, `caseTitle`) (mevcut) | 1 |
+
+**State-geçişi audit'i** mevcut `updatedAt` + outcome alanlarıyla **temel düzeyde** karşılanıyor. Phase 4'te zenginleştirilebilir:
+
+- Opsiyonel `actionItemActivity` tablosu — her state geçişinde 1 row (snooze, wake, mark-read, mark-done, dismiss, expire). Tam tarihçe.
+- UI: Phase 3 full-page inbox sağ önizleme panelinde "Geçmiş" listesi (§7.C zaten gösteriyor). Geçmiş = `CaseActivity` + opsiyonel `actionItemActivity` birleşimi.
+
+**Trust UI elementleri:**
+- Hover'da actor avatarı + ad + ts tooltip.
+- Row ayrıntılı görünümünde (Phase 3'te sağ panel) "Geçmiş" mini-timeline.
+- "Bu bildirim N gün önce sana atanmış kalmış" gibi yaşlanma uyarıları yok (toxicity risk). Sadece zaman damgası.
+
+#### D.2-D. Demo Review Mode (opsiyonel banner)
+
+`§17.A` demo seed pack'i tanımlar. Buna ek olarak, **review oturumlarında** (sales demo, ürün direktörü inceleme, pilot onboarding) operatöre **veri kaynağının demo olduğunu açıkça bildiren** bir banner pattern'i öneriliyor:
+
+| Özellik | Davranış |
+|---|---|
+| **Flag** | `VITE_INBOX_DEMO_MODE_BANNER` veya tenant adı `DEMO/STAGING/playground` prefix'i içeriyorsa otomatik aktif. |
+| **Banner içeriği** | Bell ve drawer'ın üstünde küçük, dismissible olmayan, gri/turuncu chip: *"Demo veri — gerçek kullanıcılara gösterilmez."* |
+| **Görsel ağırlık** | Yüksek değil. Page-fixed top bar'da değil; drawer içi alt başlıkta. Ürünü demo amaçlı kullanmıyorsa hiç görünmez. |
+| **Pilot tenant'larda davranış** | Otomatik OFF (pilot canlı tenant'lar demo prefix'i taşımaz). |
+| **Audit** | Banner görünür olduğunda inbox tıklama / aksiyon yapısı production metrik kümesine dahil edilmez (telemetri ayrı segment). |
+
+Bu mode hem demo izleyicisini koruma altına alır, hem de demo veri canlı sayılmasın diye sınır çizer. Implementation Phase 2A'da minimum: tenant prefix algılama + chip render.
+
+#### D.2-E. Gürültü bütçesi — inbox'a girmeyenler doktrini
+
+> Inbox = "**sana ait olan iş** ve **bilmen gereken sonuç**". Inbox değildir: aktivite log'u, audit kaydı, AI önerisi, "şu olabilir" sinyali, her atom-event.
+
+Hangi event'in inbox'a yazılacağı **adapter eklerken** sorulan tek soruyla belirlenir:
+
+> *"Bu satır olmasaydı kullanıcı yapmasını gereken bir şeyi kaçırır veya bilmesi gereken bir sonucu kaçırır mıydı?"*
+
+- **Hayır** → inbox'a yazılmaz. Tipik örnekler:
+  - Vaka activity log'undaki her field update (CaseActivity zaten audit ediyor).
+  - Bir kullanıcı kendi vakasına yorum yaptı (kendine inbox satırı yazma).
+  - AI suggestion / "muhtemelen" sinyali (RUNA Önerileri ayrı kart).
+  - Çoğu admin config değişikliği (audit log'da yeterli).
+  - SLA risk hesabı ama kullanıcı aktif değil → `case_sla_at_risk` ilgili kişiye yazılır, herkese yazılmaz.
+  - NotificationDispatch'in `Suppressed` olması (adapter zaten emit etmiyor, ayrıca FYI olarak inbox'a yazmak gürültü).
+- **Evet** → adapter ekle.
+
+**Gürültü bütçesi metriği** (§16):
+- Bir kullanıcı için günlük max `actionRequired=true` emit edilmiş satır sayısı **15-20** üstüne çıkmamalı. Üstüne çıkıyorsa bir adapter spam yapıyor; review.
+- FYI satırlar `actionRequired=false` günlük 30 üstü = "noise alarm", adapter'lar elenir.
+
+**Yeni adapter PR'ı için review checklist** (planning kuralı):
+1. reasonLabel boş bırakılamaz.
+2. dedupKey deterministic.
+3. Bu beklenen aktiviteyi yaparsam günlük max kaç satır üretir? Cevabı 10'dan çoksa → re-design (gruplama / suppression).
+4. Bu satırın `Primary action`'ı net mi? Yoksa `actionRequired = false`.
+5. §D.2-B kategori/icon/color/priority tablosuna satır eklendi mi?
+
+#### D.2-F. Optimistic count updates — anında sayaç düşümü
+
+Kullanıcı butonu tıkladığı an, server response'unu beklemeden frontend ANINDA badge'i günceller. Patron pattern:
+
+```
+User clicks "Tamamlandı"
+   ↓
+1. Frontend optimistic update:
+   - Local list state'i: item.state = 'Done' (immediate)
+   - Local badge state'i: actionRequired-- (immediate)
+   - Custom event app:action-center-changed dispatch
+   ↓
+2. API call: POST /api/action-center/:id/done
+   ↓
+3a. SUCCESS → server response ile state senkronlanır (no-op, zaten optimistic doğru); badge tutarlı kalır.
+3b. FAILURE → optimistic rollback: item.state geri 'InProgress', badge geri ++; error toast.
+```
+
+**Avantajlar:**
+- 60s polling beklenmesi gerekmez; UI hissi anında.
+- Çoklu sekme/pencere senaryosunda `app:action-center-changed` event ile diğer pencerelerin de tazelenmesi tetiklenir.
+- Klavye kullanıcısı için fluent: J/K + D ardı ardına basıldığında her aksiyon sayacı düşer, deneyim tıkanmaz.
+
+**Riskler:**
+- Optimistic state divergence — failure rollback testlenmiş olmalı. Phase 2B'de unit/integration test zorunlu.
+- Hızlı çoklu tıklama: `disabled={busy}` flag ile çift submission önleniyor (mevcut `ActionItemRow` pattern'i).
+- Server'da satır kaybolduysa veya state Already-Finalized hatası dönerse — UI bunu tespit eder ve veri yeniler.
+
+**Hangi aksiyonlar optimistic?**
+- markDone ✓
+- snooze ✓
+- dismiss ✓
+- read (Phase 2B) ✓
+- approve / reject — **optimistic DEĞİL**. Onay/red kararları server-side yetki kontrolü gerektirir (multi-approver, self-approval, eligibility). Client predict edemez. Loading state ile bekler, success/fail döndüğünde state senkronlanır.
+
+**Implementation hint:**
+- Tüm optimistic mutation'lar `actionCenterService.*` katmanından geçer; service ya optimistic patch'ı kuyruğa alır ya direkt local state'i mutate eder.
+- Phase 3'te Redux/Zustand benzeri merkezi state'e taşındığında optimistic logic store'a inerek daha temiz olur.
+
+#### D.2-G. Final terminoloji karar checkpoint'i
+
+§18.B'de "Aksiyonlarım" vs "Bildirim Merkezi" vs "Varuna Inbox" karar maddesi açık. §0.A.4 carry-forward "Aksiyonlarım" kullanıcı UI'sinde kalır diyor. Bu çelişki değil — §0.A.4 önerinin **operasyonel sürtünme nedeniyle güçlü** olduğunu ifade ediyor. **Kararın resmi olarak verildiği yer §18.B'dir** ve implementation prompt'u yazılmadan önce final hâlinin söz konusu prompt içinde **yazılı** olarak görünmesi gerekir.
+
+**Karar checkpoint kuralı:**
+
+> Phase 2A implementation prompt'u şu cümleyi içermek zorunda: *"Kullanıcı yüzeyi adı: `<final-decided-name>`. İç kod / satış malzemesi adı: Varuna Inbox. Bu kararın değiştirilmesi yeni bir planning revisyonu gerektirir."*
+
+Default: `<final-decided-name> = "Aksiyonlarım"` (B1, §18.B önerisi).
+
+**Eğer farklı seçilirse:**
+- B2 ("Bildirim Merkezi") — Phase 2A migration scope'una "rename across all surfaces" + helpRegistry update + smoke regex check eklenir.
+- B3 ("Varuna Inbox") — aynı şekilde; ek olarak satış/marketing materyali ile UI tutarlılığı denetlenir.
+
+**Tavsiye:** B1 ile devam (Phase 1'de canlıya çıktı, pilot tanıyor; rename churn yok). Bu kararı implementation prompt'tan ÖNCE yazılı verilmesi gerek.
+
+### D.3. Sonuç
+
+15 ürün beklentisinin tamamı şu an karta yansımış durumda — §0-§20 ana bölümler + §0.A closure + §7.K badge + §17.A demo seed + bu §D appendix toplamı. Phase 2A implementation prompt'u, §19.F'deki 7 açık karar finalize edildikten sonra bu kapsamın **bir alt kümesini** uygulayacak şekilde yazılır.
