@@ -1123,6 +1123,28 @@ export async function updateCompanyRelation({ accountId, accountCompanyId, data,
     patch.status = data.status;
   }
 
+  // WR-D4/D3 Phase 3 — customer response channel preferences.
+  // Free-form string accepted (email/phone/manual/portal); whitelist is
+  // enforced inside the channel resolver so adding a future channel value
+  // does not require this validation to change. Empty string → null.
+  if (data?.preferredResponseChannel !== undefined) {
+    const v = data.preferredResponseChannel;
+    patch.preferredResponseChannel = v == null || v === '' ? null : String(v).toLowerCase();
+  }
+  if (data?.responseEmail !== undefined) {
+    patch.responseEmail = data.responseEmail == null || data.responseEmail === ''
+      ? null
+      : String(data.responseEmail).trim();
+  }
+  if (data?.responsePhone !== undefined) {
+    patch.responsePhone = data.responsePhone == null || data.responsePhone === ''
+      ? null
+      : String(data.responsePhone).trim();
+  }
+  if (data?.allowCustomerNotifications !== undefined) {
+    patch.allowCustomerNotifications = !!data.allowCustomerNotifications;
+  }
+
   if (Object.keys(patch).length === 0) {
     return getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds });
   }

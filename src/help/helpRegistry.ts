@@ -196,7 +196,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Çözüm Onayı ve Bildirim Kuralları',
     summary:
       'Çözüm onayı politikasına bağlı bildirim akışını tanımlar: Şablonlar mesaj içeriğini, Kurallar olay+kapsam+alıcı+kanal eşlemesini, Kayıtlar her tetiklenen bildirimin kalıcı denetim izini taşır. Şu an Varuna gerçek e-posta veya SMS göndermez; her müşteri iletişimi operatör tarafından manuel olarak ulaştırılır ve audit kaydı ile kapatılır.',
-    updatedAt: '2026-05-26',
+    updatedAt: '2026-05-27',
     requiredKeywords: [
       'Bildirim Şablon',
       'Bildirim Kural',
@@ -226,6 +226,21 @@ export const HELP_TOPICS: HelpTopic[] = [
       'Admin',
       'SystemAdmin',
       'boş başlar',
+      // Phase 3 — Customer Response Channel additions
+      'İletişim Tercihleri',
+      'Cevap Kanalı',
+      'Override',
+      'preferredResponseChannel',
+      'responseEmail',
+      'responsePhone',
+      'allowCustomerNotifications',
+      'opt-out',
+      'customer_opted_out',
+      'no_channel_available',
+      'fallback',
+      'AccountCompany',
+      'rate_limit_exceeded',
+      'Suppressed',
     ],
     bannedPhrases: [
       // Per-topic additions on top of the registry baseline. Operator-default
@@ -391,6 +406,63 @@ export const HELP_TOPICS: HelpTopic[] = [
           'Yeni bir şirkette Şablonlar ve Kurallar boş başlar. Hiçbir tenant için varsayılan şablon yüklü değildir.',
           'Admin\'in ilk işi: o şirkette hangi olaylarda hangi mesajın gideceğini tasarlamak ve karşılığına şablon + kural çiftleri kurmak.',
           'Şablon ve kural yoksa hiç bildirim üretilmez. Sadece Çözüm Onayı akışı çalışmaya devam eder; ama Bildirim Kayıtları boş kalır.',
+        ],
+      },
+      {
+        title: 'Cevap Kanalı — müşteri tarafına nasıl ulaşılır',
+        body: [
+          'Bir kural Hedef Kitle="Müşteri (birincil kontak)" seçtiğinde, sistem bu vaka için müşteriye hangi kanaldan ulaşılacağına karar verir. Karar zinciri (fallback):',
+          '1) Vaka-bazlı Override (Case-level) — operatör bu vaka için manuel olarak ayarladıysa',
+          '2) AccountCompany.preferredResponseChannel — Müşteri-Şirket kaydındaki varsayılan',
+          '3) AccountContact.preferredChannel — Birincil kontağın kendi tercihi',
+          '4) Account.email / Account.phone — Eski denormalize alanlar (varsa email, yoksa phone)',
+          '5) Hiçbiri yok → "manual" (operatör manuel iletişim akışı)',
+          'Seçilen kanala karşılık gelen alıcı adresi (identifier) de paralel bir zincirden çözümlenir: e-posta için responseEmail → AccountContact.email → Account.email; telefon için responsePhone → AccountContact.phone → Account.phone.',
+          'Yapılandırılmış bir adres bulunmazsa kanal "manual"a düşer ve dispatch state="Pending", suppressionReason="no_channel_available" olarak yazılır. Operatör mesajı manuel iletir.',
+        ],
+      },
+      {
+        title: 'İletişim Tercihleri (AccountCompany) — admin yapılandırması',
+        body: [
+          'Müşteri-Şirket detayında "İletişim Tercihleri" subsection\'ı 4 alan içerir:',
+          '• preferredResponseChannel — bu müşteri-tenant bağı için varsayılan kanal (email / phone / manual).',
+          '• responseEmail / responsePhone — fallback zincirinin başında gelen adresler. Boşsa AccountContact.email/phone\'a düşülür.',
+          '• allowCustomerNotifications — opt-out kutusu. Kapalıysa müşteri-facing tüm dispatchler "Suppressed/customer_opted_out" yazılır; operatör manuel iletişim yapmaz.',
+          'Bu alanlar tek bir AccountCompany için per-tenant geçerlidir. Aynı müşterinin başka bir şirketteki bağında ayrı tercihler tutulabilir.',
+          'Roller: Admin / SystemAdmin yazabilir; Supervisor / CSM görüntüler.',
+        ],
+      },
+      {
+        title: 'Vaka-bazlı Override',
+        tone: 'info',
+        body: [
+          'CaseDetail "İletişim Bildirimleri" kartında üstte Cevap Kanalı badge\'i görünür: çözülmüş kanal, alıcı adresi (varsa) ve kaynak ("vakaya özel override" / "şirket tercihi" / "kontak tercihi" / "müşteri kaydı") gösterilir.',
+          'Override butonu (kalem ikonu) ile yalnız bu vakaya özel bir kanal tercihi atanabilir. Override sadece KANAL tipini değiştirir; alıcı adresi yine fallback zincirinden çözümlenir.',
+          'Override kaydedildikten sonra bu vakadaki sonraki bildirimler yeni kanal üzerinden render edilir. Eski bildirim kayıtları snapshot\'larıyla korunur.',
+          'Override = boş seçilirse vaka tekrar AccountCompany / AccountContact / Account fallback\'ine düşer.',
+        ],
+      },
+      {
+        title: 'Opt-out davranışı (customer_opted_out)',
+        tone: 'warning',
+        body: [
+          'AccountCompany.allowCustomerNotifications = false işaretliyse:',
+          '• Müşteri-facing tüm dispatch\'ler "Suppressed" durumunda yazılır (suppressionReason="customer_opted_out").',
+          '• Kart üzerinde net bir uyarı bandı görünür ve operatöre manuel iletişim teklif edilmez.',
+          'Bu seçenek müşteri tarafının açıkça talebi üzerine kullanılmalıdır. Audit izi ile kapatılan bir bildirim sonradan açılamaz.',
+          'İç audiences (atanan / takım lideri / süpervizör / admin) bu opt-out\'tan etkilenmez; iç bildirimler her halükarda kaydedilir.',
+        ],
+      },
+      {
+        title: 'Suppressed nedenleri — özet',
+        body: [
+          'Bir dispatch satırı Suppressed durumundaysa neden alanı şu değerlerden birini taşır:',
+          '• duplicate_within_window — Aynı (vaka, alıcı, şablon) ikilisi tekrar bastırma penceresi içinde ikinci kez tetiklendi.',
+          '• rate_limit_exceeded — Kural için saatlik üst sınır aşıldı; bir sonraki saat dönemine kadar başka satır yazılmaz.',
+          '• customer_opted_out — Müşteri otomatik bildirim almak istemiyor (AccountCompany.allowCustomerNotifications=false).',
+          '• no_channel_available — Kanal "email" veya "phone" seçildi ama uygun adres yok; operatör manuel ele alır (state=Pending kalır).',
+          '• audience_unresolvable — Atanan kişi/lider/supervisor çözülemedi.',
+          'Suppressed bir kayıt manuel-confirm akışı ile Sent\'e çevrilemez (409). Audit bütünlüğü için durum değiştirilemez.',
         ],
       },
       {

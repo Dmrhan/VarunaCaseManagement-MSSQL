@@ -153,6 +153,23 @@ export interface PreviewResponse {
   missing: string[];
 }
 
+/** WR-D4/D3 Phase 3 — customer channel resolution result for a case. */
+export type CustomerChannel = 'email' | 'phone' | 'manual' | 'portal' | null;
+export type CustomerChannelSource =
+  | 'case_override'
+  | 'account_company'
+  | 'account_contact'
+  | 'account_fallback'
+  | 'none';
+export interface CustomerChannelResolution {
+  caseOverride: string | null;
+  channel: CustomerChannel;
+  identifier: string | null;
+  contactName: string | null;
+  source: CustomerChannelSource;
+  suppressionReason: null | 'customer_opted_out' | 'no_channel_available';
+}
+
 export const notificationService = {
   /* ---------------- Templates ---------------- */
   async listTemplates(companyId?: string) {
@@ -229,6 +246,14 @@ export const notificationService = {
       'Bildirim kayıtları yükleniyor',
     );
   },
+  async getCustomerChannel(caseId: string) {
+    return apiFetch<CustomerChannelResolution>(
+      `/api/approvals/cases/${encodeURIComponent(caseId)}/customer-channel`,
+      undefined,
+      'Cevap kanalı bilgisi yükleniyor',
+    );
+  },
+
   async listForCase(caseId: string) {
     return apiFetch<{ value: NotificationDispatch[] }>(
       `/api/approvals/cases/${encodeURIComponent(caseId)}/dispatches`,

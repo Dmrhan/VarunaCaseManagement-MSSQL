@@ -399,6 +399,20 @@ Zayıf örnekler:
       content:
         'Kartın altındaki "Geçmiş" akordeonu daha önce tamamlanmış bildirim satırlarını gösterir. Durumlar: Sent (gönderildi/onaylandı), Failed (ileride gerçek gönderim eklendiğinde gönderim hatası), Suppressed (çift tetik veya hız sınırı yüzünden bilinçli olarak bastırıldı; aksiyon gerekmez).',
     },
+    {
+      heading: 'Cevap Kanalı badge\'i',
+      content:
+        'Kartın üst kısmında "Cevap Kanalı: ..." şeklinde bir bilgi bandı görünür. Bu, sistemin bu vaka için müşteriye nasıl ulaşacağını gösterir: kanal (e-posta / telefon / manuel), varsa alıcı adresi ve kaynağı (vakaya özel override, şirket tercihi, kontak tercihi veya müşteri kaydı fallback). Bilgi sadece bilgilendiricidir; kanal seçimini değiştirmek için sağdaki "Override" butonunu kullanın.',
+      tip:
+        'Override sadece KANAL tipini değiştirir; alıcı adresi yine AccountCompany → AccountContact → Account fallback zincirinden gelir.',
+    },
+    {
+      heading: 'Müşteri opt-out',
+      content:
+        'AccountCompany üzerinde "Otomatik bildirim almak istemiyor" işaretlendiyse, müşteri-facing dispatch\'ler "Suppressed/customer_opted_out" olarak yazılır ve kartta uyarı bandı görünür. Bu kayıtlar açıklayıcı audit içindir; manuel-confirm ile değiştirilemez.',
+      warning:
+        'Opt-out, müşterinin açık talebi üzerine işaretlenmelidir. İç bildirimler (atanan kişi / takım lideri / supervisor) bu kuralın dışındadır — yine gönderilir.',
+    },
   ],
 };
 

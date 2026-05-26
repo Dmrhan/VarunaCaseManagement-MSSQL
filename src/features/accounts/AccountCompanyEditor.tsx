@@ -75,6 +75,11 @@ export function AccountCompanyEditor({
   const [segment, setSegment] = useState('');
   const [status, setStatus] = useState('active');
   const [notes, setNotes] = useState('');
+  // WR-D4/D3 Phase 3 — customer response channel preferences (per AC link).
+  const [preferredResponseChannel, setPreferredResponseChannel] = useState('');
+  const [responseEmail, setResponseEmail] = useState('');
+  const [responsePhone, setResponsePhone] = useState('');
+  const [allowCustomerNotifications, setAllowCustomerNotifications] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -96,6 +101,10 @@ export function AccountCompanyEditor({
       setSegment(relation.segment ?? '');
       setStatus(relation.status || 'active');
       setNotes(relation.notes ?? '');
+      setPreferredResponseChannel(relation.preferredResponseChannel ?? '');
+      setResponseEmail(relation.responseEmail ?? '');
+      setResponsePhone(relation.responsePhone ?? '');
+      setAllowCustomerNotifications(relation.allowCustomerNotifications ?? true);
     } else {
       setCompanyId('');
       setExternalCustomerCode('');
@@ -106,6 +115,10 @@ export function AccountCompanyEditor({
       setSegment('');
       setStatus('active');
       setNotes('');
+      setPreferredResponseChannel('');
+      setResponseEmail('');
+      setResponsePhone('');
+      setAllowCustomerNotifications(true);
     }
   }, [open, mode, relation]);
 
@@ -170,6 +183,12 @@ export function AccountCompanyEditor({
     setSubmitting(true);
     let result: AccountDetail | undefined;
 
+    const commPrefsPatch = {
+      preferredResponseChannel: preferredResponseChannel || null,
+      responseEmail: responseEmail.trim() || null,
+      responsePhone: responsePhone.trim() || null,
+      allowCustomerNotifications,
+    };
     if (mode === 'add') {
       const body: AccountCompanyMutationInput = {
         companyId,
@@ -181,6 +200,7 @@ export function AccountCompanyEditor({
         segment: segment.trim() || null,
         status,
         notes: notes.trim() || null,
+        ...commPrefsPatch,
       };
       result = await accountService.addCompanyRelation(accountId, body);
       if (result) notify({ type: 'success', title: 'Şirket ilişkisi eklendi', message: '' });
@@ -194,6 +214,7 @@ export function AccountCompanyEditor({
         segment: segment.trim() || null,
         status,
         notes: notes.trim() || null,
+        ...commPrefsPatch,
       };
       result = await accountService.updateCompanyRelation(
         accountId,
@@ -392,6 +413,64 @@ export function AccountCompanyEditor({
             placeholder="Bu şirket bağlamına özel not (opsiyonel)"
           />
         </Field>
+
+        {/* WR-D4/D3 Phase 3 — İletişim Tercihleri (Customer Response Channel) */}
+        <fieldset className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            İletişim Tercihleri
+          </legend>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-ndark-muted">
+            Bu şirket–müşteri bağına özel cevap kanalı tercihi ve opt-out. Bildirim
+            kayıtlarındaki müşteri kitlesi (audience='customer_primary_contact')
+            bu alanları kullanır. Şu an Varuna otomatik gönderim yapmaz; bu
+            bilgiler operatörün manuel iletişim akışını yönlendirir.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Tercih edilen kanal">
+              <Select
+                value={preferredResponseChannel}
+                onChange={(e) => setPreferredResponseChannel(e.target.value)}
+              >
+                <option value="">Belirtilmemiş (zincire bırak)</option>
+                <option value="email">E-posta</option>
+                <option value="phone">Telefon</option>
+                <option value="manual">Manuel (operatör halleder)</option>
+              </Select>
+            </Field>
+            <Field label="Cevap e-postası" hint="responseEmail — AccountContact.email üstüne yazar">
+              <TextInput
+                type="email"
+                value={responseEmail}
+                onChange={(e) => setResponseEmail(e.target.value)}
+                placeholder="iletisim@firma.com"
+              />
+            </Field>
+            <Field label="Cevap telefonu" hint="responsePhone — AccountContact.phone üstüne yazar">
+              <TextInput
+                value={responsePhone}
+                onChange={(e) => setResponsePhone(e.target.value)}
+                placeholder="+90 555 ..."
+              />
+            </Field>
+            <Field label="Otomatik bildirim almak istiyor mu?">
+              <label className="flex items-start gap-2 pt-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={allowCustomerNotifications}
+                  onChange={(e) => setAllowCustomerNotifications(e.target.checked)}
+                />
+                <span>
+                  Evet — bildirim alır.
+                  <br />
+                  <span className="text-[11px] text-slate-500">
+                    Kapatılırsa tüm müşteri-facing dispatch kayıtları
+                    "customer_opted_out" sebebiyle Suppressed olur.
+                  </span>
+                </span>
+              </label>
+            </Field>
+          </div>
+        </fieldset>
       </form>
     </Modal>
   );

@@ -508,6 +508,24 @@ model AccountCompany {
   segment              String?
   status               String    @default("active") // active | churn | prospect | inactive
   notes                String?   @db.Text
+
+  // WR-D4/D3 Phase 3 — Customer Response Channel preferences (per
+  // tenant-customer link). Used by NotificationDispatch audience
+  // resolution to decide where customer-facing messages should land.
+  //
+  // - preferredResponseChannel: 'email' | 'phone' | 'manual' (free string
+  //   so 'portal' or other future channels can be plugged in without a
+  //   migration).
+  // - responseEmail / responsePhone: explicit override addresses. When
+  //   set, they win over AccountContact.email/phone (fallback chain
+  //   documented in §10.3 of the planning card).
+  // - allowCustomerNotifications: opt-out gate. When false, all customer-
+  //   facing dispatches are written as Suppressed/customer_opted_out.
+  preferredResponseChannel  String?
+  responseEmail             String?
+  responsePhone             String?
+  allowCustomerNotifications Boolean @default(true)
+
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -992,6 +1010,15 @@ model Case {
   // 'Manual' (operator confirmed), 'Dispatched' (Phase 4 active send), or
   // 'NotRequired' (no rule matched). Free-string for forward compat.
   communicationState String?
+
+  // WR-D4/D3 Phase 3 — per-case channel override. Operator can decide that
+  // for THIS case the customer should be reached on email even though
+  // AccountCompany prefers phone (or vice versa). Override is the channel
+  // preference only; the actual identifier still comes from the fallback
+  // chain (responseEmail → AccountContact.email → Account.email).
+  // Values mirror AccountCompany.preferredResponseChannel; free-string for
+  // forward compat with channels added later.
+  communicationChannelOverride String?
 
   // SLA
   slaResponseDueAt     DateTime?
