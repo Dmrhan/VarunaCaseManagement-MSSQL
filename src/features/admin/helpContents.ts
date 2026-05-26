@@ -338,6 +338,131 @@ Manuel Giriş      → Admin tarafından eklenen özel kaynaklar`,
   ],
 };
 
+export const RESOLUTION_APPROVAL_POLICIES_HELP: HelpContent = {
+  title: 'Çözüm Onayı Politikaları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Bir çözüm onayı politikası, "bu vaka kapanmadan önce kim onaylasın" sorusunun kurallı cevabıdır. Bir politika eşleştiğinde, vakayı çözen kişi önce çözüm özetini onaya gönderir; ilgili kişi onaylayana kadar vaka Çözüldü\'ye geçemez. Politika yoksa veya pasifse mevcut kapatma akışı aynen sürer — Agent doğrudan kapatır, ek bir adım yoktur.',
+      tip:
+        'Yeni bir tenant\'ta varsayılan politika yoktur. Hiçbir vaka onay gerektirmez; admin kasıtlı olarak hangi durumlarda onay isteneceğini kurar.',
+    },
+    {
+      heading: 'Eşleşme alanları — politika kime uygulanır',
+      content:
+        'Her politika tek bir şirkete (companyId) bağlıdır. Vaka için politikanın eşleşmesi için tüm dolu alanların vakanın alanlarıyla aynı olması gerekir. Boş bırakılan alan "tümü" sayılır.',
+      example: `Eşleşme alanları:
+  · Şirket           (companyId — zorunlu)
+  · Kategori         (örn. "Yazılım")
+  · Alt Kategori     (örn. "Raporlama")
+  · Öncelik          (Critical / High / Medium / Low)
+  · Destek Seviyesi  (Seviye1 / Seviye2 / Seviye3)
+  · Takım (assignedTeamId)`,
+      tip:
+        'Filtre alanlarını boş bırakırsan o politika şirketteki TÜM vakalara uygulanır. Bu istemediğin bir broadcast yaratabilir; politikayı dar tutmak güvenli pratiktir.',
+    },
+    {
+      heading: 'Sıra ve öncelik (sortOrder)',
+      content:
+        'Aynı vaka birden fazla politikaya uyabilir. Sistem öncelik sırasını şöyle çözer: önce sortOrder ASC (düşük sayı önce); aynı sortOrder içinde daha SPESİFİK politika kazanır (dolu alan sayısı çok olan); son eşitlikte oluşturma tarihi ASC. Bu sayede genel + özel politikalar birarada tutulabilir, özel olan önde çalışır.',
+      example: `Örnek senaryo:
+  Politika A: sortOrder=100, matchScope: { company: PARAM }
+  Politika B: sortOrder=200, matchScope: { company: PARAM, priority: Critical }
+
+PARAM + Critical bir vaka → A önce match (sortOrder 100), B ikinci sırada
+Aynı sortOrder olsaydı B kazanırdı (daha spesifik = 2 alan dolu).`,
+    },
+    {
+      heading: 'Onaylayıcı tipi (approverType)',
+      content:
+        'Politika eşleştiğinde sistem kimin onaylayacağını şu seçeneklerden birine göre çözer:',
+      example: `· Takım Lideri / Atanan Takımın Lideri
+    → Case.assignedTeamId üzerinden o takımın
+      isTeamLead=true ve isActive=true Person'ı
+
+· Süpervizör
+    → Vakanın şirketinde aktif Supervisor
+      rolündeki kullanıcılar
+
+· Admin
+    → Vakanın şirketinde aktif Admin
+      rolündeki kullanıcılar
+
+· Sistem Admin
+    → Global SystemAdmin rolü (şirket scope'u
+      uygulanmaz)
+
+· Belirli Bir Kişi (SpecificPerson)
+    → Politikada seçilen Person; takım ile
+      tenant uyumu BE'de doğrulanır`,
+      tip:
+        'Yetkili kişi çözülemezse (örn. takım lideri pasif olmuşsa) onaya gönderim 400 ile reddedilir. Politika düşmüş olmuyor; sadece onaylayıcı yok demektir — politikayı düzenleyip aktif bir onaylayıcı belirleyin.',
+    },
+    {
+      heading: 'Self-approval (kendi çözümünü onaylama)',
+      content:
+        'Varsayılan davranış: bir kişi kendi çözümünü onaylayamaz. Onayı gönderen ile çözülen onaylayıcı aynı kişiyse sistem 400 (self_approval_blocked) ile bloklar. Bu davranışı politikada açıkça "Kendi çözümünü onaylayabilir" kutusunu işaretleyerek devre dışı bırakabilirsiniz; o zaman tek-kişi ekiplerde onaylayıcı sıkışıklığı çözülür.',
+      warning:
+        'Self-approval kapalı bırakmak operasyonel disiplin için varsayılan pratiktir. Açtığınız politikalarda audit log\'da hangi kullanıcının kendini onayladığı her zaman görünür kalır.',
+    },
+    {
+      heading: 'Red davranışı (rejectionBehavior)',
+      content:
+        'Onaylayıcı reddederse politikadaki ayara göre vaka şu eylemlerden birini alır:',
+      example: `Atayana iade et (ReturnToAssignee — varsayılan)
+   → Vaka aynı kişide kalır; sadece red gerekçesi
+     CaseActivity'ye işlenir; agent revizyon yapıp
+     yeniden gönderir
+
+Takıma iade et (ReturnToTeam)
+   → assignedPersonId/Name temizlenir; vaka
+     takımına geri düşer, başka biri üstlenebilir
+
+Eskalasyona al (Escalate)
+   → Vaka durumu Eskalasyon'a geçer;
+     escalationLevel="Seviye1" atanır; red gerekçesi
+     CaseActivity'de gösterilir`,
+      tip:
+        'Reddedilen vakanın approvalState\'i "Rejected" olur ve operatör revize edip "Yeniden Onaya Gönder" diyebilir; yeni bir CaseResolutionApproval kaydı oluşur. Önceki red satırı immutable olarak kalır.',
+    },
+    {
+      heading: 'Aktif / Pasif politika',
+      content:
+        'Bir politika silinmez; satırdaki güç düğmesiyle pasifleştirilir. Pasif politika eşleşmeye katılmaz — sanki orada değilmiş gibi davranır. Geçmiş onay satırları (CaseResolutionApproval) pasif politika için snapshot\'larıyla saklanır.',
+      warning:
+        'Bir politikayı pasifleştirmeden önce o politika tarafından korunan vakaların kapanmasını engellemeyeceğini doğrulayın. Pasifleştirilen politika anında devre dışı kalır; yeni onay gerektirmeyen vakalar bu noktadan itibaren doğrudan kapanır.',
+    },
+    {
+      heading: 'Kapatma engeli (close guard)',
+      content:
+        'Vaka Çözüldü\'ye geçmek istediğinde sistem matchPolicyForCase çağırır. Bir politika eşleşiyor ve Case.approvalState ≠ Approved ise geçiş bloklanır (400 approval_required). Politika eşleşmiyor veya zaten Approved ise legacy kapatma davranışı sürer.',
+      example: `Akış:
+  Agent "Çözüldü" geçişi denedi
+    → matchPolicyForCase varsa
+        approvalState = null  → 400 approval_required (engelle)
+        approvalState = Pending → 400 approval_required (engelle)
+        approvalState = Approved → izin
+    → Politika yoksa
+        eski davranış (Agent kapatır)`,
+    },
+    {
+      heading: 'Bu ekran müşteriye bildirim YOLLAMAZ',
+      content:
+        'Politika oluşturmak veya onay vermek hiçbir müşteriye otomatik mesaj göndermez. Onay verildiğinde gerçekleşen tek şey: Case.approvalState=Approved + CaseActivity log + (varsa) ilgili event\'i tetikleyen NotificationRule\'ların dispatch satırı yazması (yine de gönderim manuel).',
+      warning:
+        'Müşteri iletişimi tamamen ayrı bir akıştır: Bildirim Şablonları + Bildirim Kuralları ekranlarında yapılandırılır; operatör Vaka Detayı\'ndaki "İletişim Bildirimleri" kartında manuel olarak iletir. Bu ekran sadece onay zincirini tanımlar.',
+    },
+    {
+      heading: 'Level A sınırı — şu an aktif gönderim YOK',
+      content:
+        'Varuna bugün hiçbir müşteri e-postası kendi başına göndermiyor. Onay verildikten sonra üretilen müşteri-facing dispatch satırları operatörün manuel olarak "Mesajı Kopyala / Mail Taslağı Aç / Manuel Olarak Hallettim" akışıyla kapatılır; Teslimat notu zorunludur, audit izi kalıcıdır.',
+      tip:
+        'Aktif e-posta sağlayıcısı entegrasyonu bir sonraki adımdır ve şu an scope dışıdır. Üretim sağlayıcı kararı (Resend / SMTP / vb.) verilene kadar mevcut hâl operasyonel olarak yeterlidir.',
+    },
+  ],
+};
+
 export const CASE_DETAIL_COMMUNICATION_HELP: HelpContent = {
   title: 'İletişim Bildirimleri — Operatör Rehberi',
   sections: [

@@ -196,7 +196,7 @@ export const HELP_TOPICS: HelpTopic[] = [
     title: 'Çözüm Onayı ve Bildirim Kuralları',
     summary:
       'Çözüm onayı politikasına bağlı bildirim akışını tanımlar: Şablonlar mesaj içeriğini, Kurallar olay+kapsam+alıcı+kanal eşlemesini, Kayıtlar her tetiklenen bildirimin kalıcı denetim izini taşır. Şu an Varuna gerçek e-posta veya SMS göndermez; her müşteri iletişimi operatör tarafından manuel olarak ulaştırılır ve audit kaydı ile kapatılır.',
-    updatedAt: '2026-05-27',
+    updatedAt: '2026-05-28',
     requiredKeywords: [
       'Bildirim Şablon',
       'Bildirim Kural',
@@ -241,6 +241,20 @@ export const HELP_TOPICS: HelpTopic[] = [
       'AccountCompany',
       'rate_limit_exceeded',
       'Suppressed',
+      // Resolution Approval Policies admin help (2026-05-28 follow-up)
+      'Çözüm Onayı Politika',
+      'sortOrder',
+      'approverType',
+      'Takım Lideri',
+      'SpecificPerson',
+      'self_approval_blocked',
+      'rejectionBehavior',
+      'ReturnToAssignee',
+      'ReturnToTeam',
+      'Escalate',
+      'approval_required',
+      'matchPolicyForCase',
+      'aktif gönderim',
     ],
     bannedPhrases: [
       // Per-topic additions on top of the registry baseline. Operator-default
@@ -472,6 +486,51 @@ export const HELP_TOPICS: HelpTopic[] = [
           '"Şablon kaydedilmiyor — Anahtar formatı geçersiz" → key alanı sadece küçük harf, rakam ve alt çizgi içerebilir; harfle başlamalıdır (örn. approval_pending_lead).',
           '"Kaydım Suppressed olarak göründü" → Tekrar bastırma penceresi içinde aynı (vaka, hedef, şablon) ikinci kez fire oldu, ya da hedef çözülemedi (örn. atanan kişi yok). Açıklama satırı kayıt detayında gösterilir.',
           '"Operatör Manuel Olarak Hallettim butonuna tıklayamıyor" → Teslimat notu alanı boş; yazınca buton aktifleşir.',
+        ],
+      },
+      {
+        title: 'Çözüm Onayı Politikaları — admin ekranı özet',
+        body: [
+          'Bu topic\'in onay tarafı bir kardeş ekran olan "Çözüm Onayı Politikaları" üzerinden yönetilir. Politika ne işe yarar, hangi alanlar eşleşme için kullanılır, kim onaylar, red davranışı nedir — politikaya özgü ayrıntılar o ekrandaki "? Yardım" panelinde toplu olarak yer alır.',
+          'Hızlı çerçeveleme: Bir politika eşleştiğinde matchPolicyForCase çağrılır; uygun onaylayıcı çözülür; onay verilene kadar approval_required ile Çözüldü\'ye geçiş bloklanır. Politika aktif değilse veya hiç eşleşmiyorsa legacy davranış sürer.',
+        ],
+      },
+      {
+        title: 'Politika eşleşme alanları (admin ekranında detaylı)',
+        body: [
+          'Bir politika bir şirkete (companyId) zorunlu bağlıdır. Filtre alanları: kategori, alt kategori, öncelik, destek seviyesi (örn. Seviye1), takım (assignedTeamId). Doldurulan her alan AND mantığıyla eşleşir; boş alan "tümü" sayılır.',
+          'sortOrder, aynı şirkette birden fazla politika çakışırsa hangisinin önce match edileceğini belirler (ASC; düşük sayı önce). Eşit sortOrder durumunda dolu alan sayısı çok olan kazanır (spesifiklik), son eşitlikte createdAt ASC.',
+        ],
+      },
+      {
+        title: 'Politika onaylayıcı tipleri',
+        body: [
+          'approverType seçenekleri ve nasıl çözüldükleri:',
+          '• Takım Lideri / Atanan Takımın Lideri — Case.assignedTeamId üzerinden isTeamLead=true & isActive=true bir Person',
+          '• Süpervizör — Vakanın şirketinde aktif Supervisor rolündeki kullanıcılar',
+          '• Admin — Vakanın şirketinde aktif Admin rolündeki kullanıcılar',
+          '• Sistem Admin — Global SystemAdmin rolü (şirket scope\'u uygulanmaz)',
+          '• Belirli Bir Kişi (SpecificPerson) — Politikada seçilen Person; BE tarafında o kişinin tenant uyumu doğrulanır',
+        ],
+      },
+      {
+        title: 'Self-approval ve red davranışları',
+        body: [
+          'Self-approval varsayılan kapalıdır. Onay göndereni resolved approver ile aynı kişiyse 400 self_approval_blocked döner. Politikada "Kendi çözümünü onaylayabilir" işaretlenirse bloğu kaldırırsınız; tek-kişi ekiplerde anlamlıdır ama audit izinde her zaman görünür kalır.',
+          'rejectionBehavior reddedilen vakaya ne olacağını belirler:',
+          '• ReturnToAssignee (varsayılan) — vaka aynı kişide kalır; agent revize edip yeniden gönderir',
+          '• ReturnToTeam — assignedPersonId/Name temizlenir, vaka takıma düşer',
+          '• Escalate — vaka durumu Eskalasyon\'a geçer; escalationLevel=Seviye1 atanır; red gerekçesi CaseActivity\'de',
+          'Pasif politika eşleşmez; politika silinmez, sadece güç düğmesiyle aktif/pasif yapılır. Geçmiş onay kayıtları snapshot\'larıyla saklanır.',
+        ],
+      },
+      {
+        title: 'Bu ekran ile bildirim ekranları arasındaki sınır',
+        tone: 'info',
+        body: [
+          'Çözüm Onayı Politikaları ekranı yalnız onay zincirini tanımlar. Müşteri bildirim metni, kuralı veya kayıt görünümü bu ekranda yer ALMAZ.',
+          'Müşteri iletişimi için ayrı ekranlar vardır: Bildirim Şablonları (mesaj içeriği), Bildirim Kuralları (event + audience eşlemesi), Bildirim Kayıtları (audit viewer). Operatör manuel iletişim kapanışını Vaka Detayı\'nın "İletişim Bildirimleri" kartından yapar.',
+          'Bu ekranda da hiçbir aktif gönderim mümkün değildir. Aktif e-posta sağlayıcısı kararı (üretim sağlayıcı seçimi) sonrası devreye girecek; o zamana kadar mevcut hâl operasyonel olarak yeterlidir.',
         ],
       },
     ],
