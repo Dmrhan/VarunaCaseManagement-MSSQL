@@ -228,6 +228,55 @@ async function cleanup() {
   record('R-f) No account selected → patch is empty-state and accountRetained=false',
     f.accountRetained === false && f.accountId === '' && f.accountName === '',
     JSON.stringify(f));
+
+  // g) Codex P2 regression — customerless flow with requester fields
+  //    filled. The caller's effect calls the helper because `noState` is
+  //    false (requester fields are set). The helper MUST clear those
+  //    fields so stale requester data does not leak into the new company.
+  const g = reconcileAccountForCompanyChange({
+    accountId: '', accountName: '',
+    newCompanyId: 'COMP-B',
+    accountCompanyIds: [],
+    accountDirectCompanyId: null,
+  });
+  record('R-g) No-account/customerless + company change → requester fields cleared',
+    g.accountRetained === false &&
+    g.accountId === '' && g.accountName === '' &&
+    g.customerContactName === '' && g.customerContactPhone === '' &&
+    g.customerContactEmail === '' && g.customerCompanyName === '',
+    JSON.stringify(g));
+
+  // h) Unrelated account branch also clears requester (mirror of R-c +
+  //    explicit requester-clear assertion).
+  const h = reconcileAccountForCompanyChange({
+    accountId: 'acct-unrelated', accountName: 'Unrelated',
+    newCompanyId: 'COMP-X',
+    accountCompanyIds: ['COMP-A', 'COMP-B'],
+    accountDirectCompanyId: null,
+  });
+  record('R-h) Unrelated account + company change → both account AND requester fields cleared',
+    h.accountRetained === false &&
+    h.accountId === '' && h.accountName === '' &&
+    h.customerContactName === '' && h.customerContactPhone === '' &&
+    h.customerContactEmail === '' && h.customerCompanyName === '',
+    JSON.stringify(h));
+
+  // i) Related account retained — accountId/accountName preserved.
+  //    Requester fields still clear (pre-C3 blind-clear semantics),
+  //    BUT critically the valid account context must survive.
+  const i = reconcileAccountForCompanyChange({
+    accountId: 'acct-related', accountName: 'Related Co',
+    newCompanyId: 'COMP-B',
+    accountCompanyIds: ['COMP-A', 'COMP-B'],
+    accountDirectCompanyId: null,
+  });
+  record('R-i) Related account retained → accountId/accountName kept; requester reset',
+    i.accountRetained === true &&
+    i.accountId === 'acct-related' && i.accountName === 'Related Co' &&
+    i.accountProjectId === '' && i.accountProjectName === '' &&
+    i.customerContactName === '' && i.customerContactPhone === '' &&
+    i.customerContactEmail === '' && i.customerCompanyName === '',
+    JSON.stringify(i));
 }
 
 try {
