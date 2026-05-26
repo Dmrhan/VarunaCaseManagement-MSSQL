@@ -36,9 +36,9 @@ const KIND_ICON = {
 } as const;
 
 const KIND_LABEL = {
-  approval_pending: 'Çözüm Onayı Bekliyor',
-  approval_decided: 'Onay sonuçlandı',
-  case_returned_to_assignee: 'Reddedildi — revize',
+  approval_pending: 'Çözüm onayı bekliyor',
+  approval_decided: 'Çözüm onayı sonuçlandı',
+  case_returned_to_assignee: 'Revizyon gerekiyor',
 } as const;
 
 export function ActionItemRow({

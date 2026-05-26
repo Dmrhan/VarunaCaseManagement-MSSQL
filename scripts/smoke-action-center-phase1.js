@@ -1,7 +1,7 @@
 /**
  * WR-ACTION-CENTER Phase 1 — Approval Visibility MVP smoke.
  *
- * Repository-level (HTTP yok). 19 scenarios:
+ * Repository-level (HTTP yok). 21 scenarios:
  *
  *   1.  setup           Create policy + agent + team lead + admin
  *   2.  submit          → approval_pending ActionItem appears for team lead
@@ -22,6 +22,8 @@
  *   17. Acceptance P1#1 non-snapshotted eligible Supervisor decides via fan-out + sibling Expired
  *   18. Acceptance P1#1 unrelated user (outside eligible set) still 403
  *   19. Acceptance P2#4 markDone closes case_returned_to_assignee (Tamamlandı inbox button)
+ *   20. Hotfix P1   decision-time self-approval guard blocks non-snapshot submitter on approve; other eligible Supervisor still decides
+ *   21. Hotfix P1   decision-time self-approval guard blocks reject path for submitter
  *
  * Run: node --env-file=.env scripts/smoke-action-center-phase1.js
  * Cleanup: all rows removed in finally{}.
@@ -958,6 +960,140 @@ async function run() {
       '19. P2#4 — markDone closes case_returned_to_assignee (Tamamlandı inbox button)',
       r19_done,
       `done=${r19_done} err=${r19_err}`,
+    );
+
+    // ─── 20. Self-approval guard at decision time — block submitter ────
+    // Bug: userIsEligibleApprover lets ANY eligible person decide, which
+    // lets a submitter who is also in the role's eligible set (but not
+    // the snapshotted approver) approve their own row. The submit-time
+    // check only compares user.personId to the snapshot.
+    //
+    // Setup: same supervisorPolicy (allowSelfApprove defaults to false).
+    // Submitter = the HIGHER-personId Supervisor (so the snapshot picks
+    // the LOWER one, leaving the submitter off-snapshot but eligible).
+    // Expect: submit succeeds; same-user approve → self_approval_blocked;
+    // approval still Pending; other eligible Supervisor approves → OK.
+    const submitterIsSup1 = sup1Person.id > sup2Person.id;
+    const selfSupUser = submitterIsSup1 ? sup1User : sup2User;
+    const selfSupPerson = submitterIsSup1 ? sup1Person : sup2Person;
+    const otherSupUser = submitterIsSup1 ? sup2User : sup1User;
+    const otherSupPerson = submitterIsSup1 ? sup2Person : sup1Person;
+
+    const c20 = await newCase('case-20-self-approval-decide');
+    const approval20 = await submitApproval({
+      caseId: c20.id,
+      payload: { resolutionSummary: 'self-approval decision-time guard test' },
+      user: {
+        id: selfSupUser.id,
+        personId: selfSupPerson.id,
+        fullName: selfSupPerson.name,
+        role: 'Supervisor',
+      },
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval20.id);
+    await waitForFireAndForget();
+
+    const approval20RowBefore = await prisma.caseResolutionApproval.findUnique({
+      where: { id: approval20.id },
+    });
+    // Sanity: submitter must not be the snapshot, otherwise the test is
+    // exercising the submit-time path, not the decide-time guard.
+    const snapshotIsNotSubmitter =
+      approval20RowBefore?.expectedApproverPersonId !== selfSupPerson.id;
+
+    let r20_blocked = false;
+    let r20_err = '';
+    try {
+      await approveApproval({
+        approvalId: approval20.id,
+        payload: {},
+        user: {
+          id: selfSupUser.id,
+          personId: selfSupPerson.id,
+          fullName: selfSupPerson.name,
+          role: 'Supervisor',
+        },
+        allowedCompanyIds,
+      });
+    } catch (e) {
+      r20_blocked = e?.code === 'self_approval_blocked';
+      r20_err = e?.code ?? e?.message;
+    }
+    const approval20AfterBlock = await prisma.caseResolutionApproval.findUnique({
+      where: { id: approval20.id },
+    });
+
+    let r20_otherOk = false;
+    let r20_otherErr = '';
+    try {
+      const u20 = await approveApproval({
+        approvalId: approval20.id,
+        payload: {},
+        user: {
+          id: otherSupUser.id,
+          personId: otherSupPerson.id,
+          fullName: otherSupPerson.name,
+          role: 'Supervisor',
+        },
+        allowedCompanyIds,
+      });
+      r20_otherOk = u20.state === 'Approved';
+    } catch (e) {
+      r20_otherErr = e?.code ?? e?.message;
+    }
+
+    record(
+      '20. Decision-time self-approval guard blocks non-snapshot submitter; other eligible can decide',
+      snapshotIsNotSubmitter &&
+        r20_blocked &&
+        approval20AfterBlock?.state === 'Pending' &&
+        r20_otherOk,
+      `snapshotIsNotSubmitter=${snapshotIsNotSubmitter} blocked=${r20_blocked} blockErr=${r20_err} ` +
+        `afterBlock=${approval20AfterBlock?.state} otherOk=${r20_otherOk} otherErr=${r20_otherErr}`,
+    );
+
+    // ─── 21. Self-approval guard — reject path is symmetric ────────────
+    const c21 = await newCase('case-21-self-reject-decide');
+    const approval21 = await submitApproval({
+      caseId: c21.id,
+      payload: { resolutionSummary: 'self-reject decision-time guard test' },
+      user: {
+        id: selfSupUser.id,
+        personId: selfSupPerson.id,
+        fullName: selfSupPerson.name,
+        role: 'Supervisor',
+      },
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval21.id);
+    await waitForFireAndForget();
+
+    let r21_blocked = false;
+    let r21_err = '';
+    try {
+      await rejectApproval({
+        approvalId: approval21.id,
+        payload: { rejectionReason: 'self-reject must be blocked' },
+        user: {
+          id: selfSupUser.id,
+          personId: selfSupPerson.id,
+          fullName: selfSupPerson.name,
+          role: 'Supervisor',
+        },
+        allowedCompanyIds,
+      });
+    } catch (e) {
+      r21_blocked = e?.code === 'self_approval_blocked';
+      r21_err = e?.code ?? e?.message;
+    }
+    const approval21After = await prisma.caseResolutionApproval.findUnique({
+      where: { id: approval21.id },
+    });
+    record(
+      '21. Decision-time self-approval guard blocks reject path for submitter',
+      r21_blocked && approval21After?.state === 'Pending',
+      `blocked=${r21_blocked} err=${r21_err} state=${approval21After?.state}`,
     );
   } catch (err) {
     console.error('smoke fatal:', err);
