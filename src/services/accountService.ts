@@ -241,6 +241,11 @@ export interface AccountCompanyDetail extends AccountCompanyChip {
   products: AccountProductSummary[];
   /** WR-A4 — AccountCompany altındaki projeler. */
   projects: AccountProjectSummary[];
+  /** WR-D4/D3 Phase 3 — customer response channel preferences. */
+  preferredResponseChannel: string | null;
+  responseEmail: string | null;
+  responsePhone: string | null;
+  allowCustomerNotifications: boolean;
 }
 
 export interface AccountContact {
@@ -383,6 +388,11 @@ export interface AccountCompanyMutationInput {
   segment?: string | null;
   status?: string;
   notes?: string | null;
+  /** WR-D4/D3 Phase 3 — customer response channel preferences. */
+  preferredResponseChannel?: string | null;
+  responseEmail?: string | null;
+  responsePhone?: string | null;
+  allowCustomerNotifications?: boolean;
 }
 
 export interface AccountContactMutationInput {

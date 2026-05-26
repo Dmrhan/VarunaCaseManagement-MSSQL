@@ -552,6 +552,173 @@ function ruleMatchesCase(rule, caseRow) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Customer response channel resolution (WR-D4/D3 Phase 3)
+// ─────────────────────────────────────────────────────────────────
+
+const CUSTOMER_CHANNEL_VALUES = ['email', 'phone', 'manual', 'portal'];
+
+function normalizeCustomerChannel(v) {
+  if (!v) return null;
+  const s = String(v).trim().toLowerCase();
+  if (!CUSTOMER_CHANNEL_VALUES.includes(s)) return null;
+  return s;
+}
+
+/**
+ * Resolve the customer communication target for a case.
+ *
+ * Fallback chain (planning card §10.3):
+ *   1. Case.communicationChannelOverride        → operator-set per-case
+ *   2. AccountCompany.preferredResponseChannel  → tenant default
+ *   3. AccountContact.preferredChannel          → contact's own pref
+ *   4. Account.email/phone (infer channel)      → legacy denorm
+ *   5. None → 'manual'
+ *
+ * Identifier (for the resolved channel) follows a parallel chain:
+ *   email: AccountCompany.responseEmail → AccountContact.email → Account.email
+ *   phone: AccountCompany.responsePhone → AccountContact.phone → Account.phone
+ *   manual / portal: no identifier — operator handles externally
+ *
+ * Opt-out: AccountCompany.allowCustomerNotifications === false collapses
+ * everything to suppressionReason='customer_opted_out'.
+ *
+ * @returns {Promise<{
+ *   channel: 'email'|'phone'|'manual'|'portal'|null,
+ *   identifier: string|null,
+ *   contactName: string|null,
+ *   source: 'case_override'|'account_company'|'account_contact'|'account_fallback'|'none',
+ *   suppressionReason: null|'customer_opted_out'|'no_channel_available',
+ * }>}
+ */
+export async function resolveCustomerCommunication({ caseRow }) {
+  if (!caseRow || !caseRow.accountId) {
+    return {
+      channel: 'manual',
+      identifier: null,
+      contactName: null,
+      source: 'none',
+      suppressionReason: 'no_channel_available',
+    };
+  }
+
+  const [accountCompany, primaryContact, account] = await Promise.all([
+    prisma.accountCompany.findUnique({
+      where: { accountId_companyId: { accountId: caseRow.accountId, companyId: caseRow.companyId } },
+      select: {
+        preferredResponseChannel: true,
+        responseEmail: true,
+        responsePhone: true,
+        allowCustomerNotifications: true,
+      },
+    }),
+    prisma.accountContact.findFirst({
+      where: { accountId: caseRow.accountId, isPrimary: true, isActive: true },
+      select: { fullName: true, email: true, phone: true, preferredChannel: true },
+    }),
+    prisma.account.findUnique({
+      where: { id: caseRow.accountId },
+      select: { email: true, phone: true },
+    }),
+  ]);
+
+  if (accountCompany && accountCompany.allowCustomerNotifications === false) {
+    return {
+      channel: null,
+      identifier: null,
+      contactName: primaryContact?.fullName ?? null,
+      source: 'account_company',
+      suppressionReason: 'customer_opted_out',
+    };
+  }
+
+  // Step 1: pick the channel via the fallback chain.
+  let channel = null;
+  let source = 'none';
+  const caseOverride = normalizeCustomerChannel(caseRow.communicationChannelOverride);
+  if (caseOverride) {
+    channel = caseOverride;
+    source = 'case_override';
+  } else if (accountCompany?.preferredResponseChannel) {
+    const v = normalizeCustomerChannel(accountCompany.preferredResponseChannel);
+    if (v) {
+      channel = v;
+      source = 'account_company';
+    }
+  }
+  if (!channel && primaryContact?.preferredChannel) {
+    const v = normalizeCustomerChannel(primaryContact.preferredChannel);
+    if (v) {
+      channel = v;
+      source = 'account_contact';
+    }
+  }
+  if (!channel) {
+    if (account?.email) {
+      channel = 'email';
+      source = 'account_fallback';
+    } else if (account?.phone) {
+      channel = 'phone';
+      source = 'account_fallback';
+    } else {
+      channel = 'manual';
+      source = 'none';
+    }
+  }
+
+  // Step 2: resolve identifier for the chosen channel.
+  let identifier = null;
+  if (channel === 'email') {
+    identifier =
+      accountCompany?.responseEmail ||
+      primaryContact?.email ||
+      account?.email ||
+      null;
+  } else if (channel === 'phone') {
+    identifier =
+      accountCompany?.responsePhone ||
+      primaryContact?.phone ||
+      account?.phone ||
+      null;
+  }
+
+  // Step 3: if a structured channel was chosen but no identifier exists,
+  // fall through to manual_task. The dispatch row stays Pending so the
+  // operator handles externally; suppressionReason hints why.
+  if ((channel === 'email' || channel === 'phone') && !identifier) {
+    return {
+      channel: 'manual',
+      identifier: null,
+      contactName: primaryContact?.fullName ?? null,
+      source,
+      suppressionReason: 'no_channel_available',
+    };
+  }
+
+  // Step 4: if the entire chain produced nothing (no override, no AC pref,
+  // no contact pref, no account.email/phone), we already landed at
+  // channel='manual' with source='none' above. Surface that as a
+  // no_channel_available hint so the audit row distinguishes it from a
+  // deliberate "manual" preference set by admin/operator.
+  if (channel === 'manual' && source === 'none') {
+    return {
+      channel,
+      identifier: null,
+      contactName: primaryContact?.fullName ?? null,
+      source,
+      suppressionReason: 'no_channel_available',
+    };
+  }
+
+  return {
+    channel,
+    identifier,
+    contactName: primaryContact?.fullName ?? null,
+    source,
+    suppressionReason: null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Audience resolution
 // ─────────────────────────────────────────────────────────────────
 
@@ -608,22 +775,42 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
       };
     }
     case 'customer_primary_contact': {
-      if (!caseRow.accountId) {
+      // WR-D4/D3 Phase 3 — customer response channel resolution.
+      // Delegates the full fallback chain + opt-out gate to the helper so
+      // suppression decisions (customer_opted_out, no_channel_available)
+      // are made in one place and the audit row captures them.
+      const resolution = await resolveCustomerCommunication({ caseRow });
+      const display = resolution.contactName ?? '';
+      if (resolution.suppressionReason === 'customer_opted_out') {
         return {
           audienceType: 'customer_primary_contact',
-          audienceIdentifier: 'unresolved',
-          display: '',
+          audienceIdentifier: 'opted_out',
+          display,
+          suppressionReason: 'customer_opted_out',
+          resolvedChannel: resolution.channel,
+          resolutionSource: resolution.source,
         };
       }
-      const primary = await prisma.accountContact.findFirst({
-        where: { accountId: caseRow.accountId, isPrimary: true, isActive: true },
-        select: { fullName: true, email: true, phone: true, preferredChannel: true },
-      });
-      const identifier = primary?.email || primary?.phone || 'unresolved';
+      if (resolution.suppressionReason === 'no_channel_available') {
+        // No structured channel — operator must reach the customer manually.
+        // Dispatch row stays Pending (operator-actionable), but the reason
+        // hint surfaces in the audit so the cause is visible.
+        return {
+          audienceType: 'customer_primary_contact',
+          audienceIdentifier: 'manual',
+          display,
+          suppressionReason: 'no_channel_available',
+          keepPending: true,
+          resolvedChannel: 'manual',
+          resolutionSource: resolution.source,
+        };
+      }
       return {
         audienceType: 'customer_primary_contact',
-        audienceIdentifier: identifier,
-        display: primary?.fullName ?? '',
+        audienceIdentifier: resolution.identifier ?? 'manual',
+        display,
+        resolvedChannel: resolution.channel,
+        resolutionSource: resolution.source,
       };
     }
     case 'static_email': {
@@ -740,6 +927,17 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
         if (resolved.audienceIdentifier === 'unresolved') {
           state = 'Suppressed';
           suppressionReason = 'audience_unresolvable';
+        }
+
+        // WR-D4/D3 Phase 3 — customer channel resolution may attach a
+        // suppressionReason ('customer_opted_out' opt-out, or
+        // 'no_channel_available' for the manual_task fallback). The
+        // resolver's `keepPending` flag lets a no-channel case stay
+        // Pending so the operator picks it up; only opt-out goes
+        // Suppressed.
+        if (!suppressionReason && resolved.suppressionReason) {
+          suppressionReason = resolved.suppressionReason;
+          if (!resolved.keepPending) state = 'Suppressed';
         }
 
         // Rate-limit takes precedence over normal emission — never insert

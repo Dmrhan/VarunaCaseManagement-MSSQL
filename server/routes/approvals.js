@@ -23,6 +23,7 @@ import {
   getTemplate,
   listDispatches,
   listDispatchesForCase,
+  resolveCustomerCommunication,
   listRules,
   listTemplates,
   manualConfirmDispatch,
@@ -406,6 +407,39 @@ router.get(
       return res.status(404).json({ error: 'not_found', message: 'Vaka bulunamadı.' });
     }
     res.json({ value: items });
+  }),
+);
+
+/**
+ * GET /api/approvals/cases/:caseId/customer-channel
+ *
+ * WR-D4/D3 Phase 3 — returns the resolved customer communication target
+ * for this case (channel + identifier + source + opt-out / no-channel
+ * suppression hints). Used by the CaseDetail Communication card badge.
+ */
+router.get(
+  '/cases/:caseId/customer-channel',
+  asyncRoute(async (req, res) => {
+    const caseRow = await prisma.case.findUnique({
+      where: { id: req.params.caseId },
+      select: {
+        id: true,
+        companyId: true,
+        accountId: true,
+        communicationChannelOverride: true,
+      },
+    });
+    if (!caseRow) {
+      return res.status(404).json({ error: 'not_found', message: 'Vaka bulunamadı.' });
+    }
+    if (!req.user.allowedCompanyIds.includes(caseRow.companyId)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Vaka erişimi yok.' });
+    }
+    const resolution = await resolveCustomerCommunication({ caseRow });
+    res.json({
+      caseOverride: caseRow.communicationChannelOverride,
+      ...resolution,
+    });
   }),
 );
 

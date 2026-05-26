@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   Copy,
   ExternalLink,
@@ -7,15 +8,19 @@ import {
   Info,
   Mail,
   MessageSquare,
+  Pencil,
+  Phone,
   Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Field, TextArea } from '@/components/ui/Field';
+import { Field, Select, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { HelpDrawer, HelpButton } from '@/components/ui/HelpDrawer';
+import { caseService } from '@/services/caseService';
 import {
   notificationService,
+  type CustomerChannelResolution,
   type NotificationDispatch,
 } from '@/services/notificationService';
 import { CASE_DETAIL_COMMUNICATION_HELP } from '@/features/admin/helpContents';
@@ -47,15 +52,21 @@ export function CommunicationDispatchCard({
 }) {
   const { toast } = useToast();
   const [dispatches, setDispatches] = useState<NotificationDispatch[] | null>(null);
+  const [channelResolution, setChannelResolution] = useState<CustomerChannelResolution | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmTarget, setConfirmTarget] = useState<NotificationDispatch | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
-    const r = await notificationService.listForCase(item.id);
+    const [d, ch] = await Promise.all([
+      notificationService.listForCase(item.id),
+      notificationService.getCustomerChannel(item.id),
+    ]);
     setLoading(false);
-    setDispatches(r?.value ?? []);
+    setDispatches(d?.value ?? []);
+    setChannelResolution(ch ?? null);
   }
 
   useEffect(() => {
@@ -81,6 +92,15 @@ export function CommunicationDispatchCard({
         </div>
         <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
       </div>
+
+      {/* WR-D4/D3 Phase 3 — Cevap Kanalı badge + override */}
+      {channelResolution && (
+        <ChannelBanner
+          resolution={channelResolution}
+          onOpenOverride={() => setOverrideOpen(true)}
+          canOverride={!!item.accountId}
+        />
+      )}
 
       {pending.length > 0 && (
         <div className="mb-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
@@ -151,7 +171,160 @@ export function CommunicationDispatchCard({
         sections={CASE_DETAIL_COMMUNICATION_HELP.sections}
         onClose={() => setHelpOpen(false)}
       />
+
+      {overrideOpen && (
+        <ChannelOverrideModal
+          caseId={item.id}
+          currentOverride={item.communicationChannelOverride ?? null}
+          resolution={channelResolution}
+          onClose={() => setOverrideOpen(false)}
+          onSaved={async () => {
+            setOverrideOpen(false);
+            await refresh();
+            onChanged?.();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function ChannelBanner({
+  resolution,
+  onOpenOverride,
+  canOverride,
+}: {
+  resolution: CustomerChannelResolution;
+  onOpenOverride: () => void;
+  canOverride: boolean;
+}) {
+  if (resolution.suppressionReason === 'customer_opted_out') {
+    return (
+      <div className="mb-3 flex items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={12} className="text-rose-500" />
+          <span>
+            <strong>Müşteri otomatik bildirim almak istemiyor.</strong> Müşteri-facing
+            dispatchler "Suppressed/customer_opted_out" olarak kaydedilir.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const channelLabel =
+    resolution.channel === 'email' ? 'E-posta'
+    : resolution.channel === 'phone' ? 'Telefon'
+    : resolution.channel === 'portal' ? 'Portal'
+    : 'Manuel';
+  const Icon = resolution.channel === 'email' ? Mail
+    : resolution.channel === 'phone' ? Phone
+    : MessageSquare;
+
+  const sourceLabel =
+    resolution.source === 'case_override' ? 'vakaya özel override'
+    : resolution.source === 'account_company' ? 'şirket tercihi'
+    : resolution.source === 'account_contact' ? 'kontak tercihi'
+    : resolution.source === 'account_fallback' ? 'müşteri kaydı'
+    : 'tanımsız';
+
+  const noChannel = resolution.suppressionReason === 'no_channel_available';
+
+  return (
+    <div
+      className={`mb-3 flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs ${
+        noChannel
+          ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200'
+          : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-ndark-border dark:bg-ndark-bg/40 dark:text-ndark-muted'
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <Icon size={12} className="mt-0.5 text-slate-500" />
+        <div>
+          <div>
+            <strong>Cevap Kanalı:</strong> {channelLabel}
+            {resolution.identifier && (
+              <span className="ml-1 font-mono text-[11px] text-slate-500">
+                ({resolution.identifier})
+              </span>
+            )}
+            <span className="ml-1 text-[11px] text-slate-500">— kaynak: {sourceLabel}</span>
+          </div>
+          {noChannel && (
+            <div className="mt-0.5 text-[11px]">
+              Yapılandırılmış bir e-posta/telefon yok; operatör mesajı manuel olarak iletir.
+            </div>
+          )}
+        </div>
+      </div>
+      {canOverride && (
+        <button
+          type="button"
+          onClick={onOpenOverride}
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+          title="Bu vaka için cevap kanalını değiştir"
+        >
+          <Pencil size={10} /> Override
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ChannelOverrideModal({
+  caseId,
+  currentOverride,
+  resolution,
+  onClose,
+  onSaved,
+}: {
+  caseId: string;
+  currentOverride: string | null;
+  resolution: CustomerChannelResolution | null;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [channel, setChannel] = useState(currentOverride ?? '');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    const r = await caseService.update(caseId, {
+      communicationChannelOverride: channel || null,
+    });
+    setSaving(false);
+    if (r !== undefined) await onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 dark:bg-black/60">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-text dark:ring-ndark-border">
+        <h2 className="mb-2 text-base font-semibold">Cevap Kanalı Override</h2>
+        <p className="mb-3 text-xs text-slate-600 dark:text-ndark-muted">
+          Bu vaka için müşteri ile hangi kanaldan iletişim kurulacağını değiştir. Override
+          yalnız bu vakaya etki eder; AccountCompany tercihini değiştirmez.
+        </p>
+        {resolution && resolution.source !== 'case_override' && (
+          <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:bg-ndark-bg/40 dark:text-ndark-muted">
+            Şu anki kanal: <strong>{resolution.channel ?? '—'}</strong> ({resolution.source})
+          </div>
+        )}
+        <Field label="Override kanalı">
+          <Select value={channel} onChange={(e) => setChannel(e.target.value)}>
+            <option value="">Override yok (zincire bırak)</option>
+            <option value="email">E-posta</option>
+            <option value="phone">Telefon</option>
+            <option value="manual">Manuel</option>
+          </Select>
+        </Field>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Vazgeç</Button>
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

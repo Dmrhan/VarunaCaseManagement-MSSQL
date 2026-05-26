@@ -381,6 +381,10 @@ export interface Case {
   status: CaseStatus;
   /** WR-D4 Phase 1 — çözüm onayı overlay state'i. */
   approvalState?: 'Pending' | 'Approved' | 'Rejected' | null;
+  /** WR-D4 Phase 2 — communication overlay denorm (free-string). */
+  communicationState?: string | null;
+  /** WR-D4/D3 Phase 3 — per-case channel override (email/phone/manual/portal). */
+  communicationChannelOverride?: string | null;
   priority: CasePriority;
   origin: CaseOrigin;
   originDescription?: string;
