@@ -178,7 +178,10 @@ async function run() {
       return c;
     }
 
-    async function waitForFireAndForget(ms = 1500) {
+    async function waitForFireAndForget(ms = 3000) {
+      // Bumped 1500 → 3000 after P1 fix added an extra sequential
+      // user.findFirst inside the rejectApproval void-async block.
+      // Total fire-and-forget tail now does ~4-5 DB round-trips.
       await new Promise((r) => setTimeout(r, ms));
     }
 
@@ -553,6 +556,167 @@ async function run() {
       !r14_threw && r14_returned === null && !r14b_threw,
       `bad=${r14_threw ? 'threw' : 'ok'} oot=${r14b_threw ? 'threw' : 'ok'}`,
     );
+
+    // ─── Codex P1 review fixes — Phase 1.5 ──────────────────────────
+    // 15. P1#1 — case_returned_to_assignee must target CURRENT assignee.
+    //    Submit as member, transfer case to a new assignee, reject with
+    //    ReturnToAssignee → case_returned_to_assignee must reach the new
+    //    assignee's user, NOT the stale submitter.
+    // 16. P1#2 — getDashboard pendingApprovalsInbox must filter by
+    //    allowedCompanyIds. Plant an ActionItem in companyY for user;
+    //    fetch getDashboard with allowedCompanyIds=[companyX] only →
+    //    pendingApprovalsInbox must be empty.
+
+    // ─── 15. transfer-then-reject must not route stale submitter ───
+    // Setup: a third Person + User to be the transferred-to assignee.
+    const newAssigneePerson = await prisma.person.create({
+      data: {
+        name: `${PREFIX}-newassignee`,
+        teamId: team.id,
+        isActive: true,
+        email: `${PREFIX}-newassignee@smoke.test`,
+      },
+    });
+    created.persons.push(newAssigneePerson.id);
+    const newAssigneeUser = await prisma.user.create({
+      data: {
+        id: randomUUID(),
+        email: `${PREFIX}-newassignee-user@smoke.test`,
+        fullName: newAssigneePerson.name,
+        personId: newAssigneePerson.id,
+        isActive: true,
+      },
+    });
+    created.users.push(newAssigneeUser.id);
+
+    // Fresh case, submitter = memberUser.
+    const c15 = await newCase('case-15-transfer');
+    const approval15 = await submitApproval({
+      caseId: c15.id,
+      payload: { resolutionSummary: 'submit before transfer' },
+      user: submitter,
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval15.id);
+    await waitForFireAndForget();
+
+    // Now transfer the case to the new assignee — only update
+    // assignedPersonId on Case (direct DB write keeps the test focused).
+    await prisma.case.update({
+      where: { id: c15.id },
+      data: {
+        assignedPersonId: newAssigneePerson.id,
+        assignedPersonName: newAssigneePerson.name,
+      },
+    });
+
+    // Reject with ReturnToAssignee.
+    await rejectApproval({
+      approvalId: approval15.id,
+      payload: { rejectionReason: 'transfer test — please revise' },
+      user: {
+        id: leadUser.id,
+        personId: leadPerson.id,
+        fullName: leadPerson.name,
+        role: 'Supervisor',
+      },
+      allowedCompanyIds,
+    });
+    await waitForFireAndForget();
+
+    // Verify:
+    //   a) case_returned_to_assignee exists for newAssigneeUser
+    //   b) NO case_returned_to_assignee for stale submitter (memberUser)
+    //   c) approval_decided FYI still went to submitter (audit transparency)
+    const returnToNew = await prisma.actionItem.findFirst({
+      where: {
+        kind: 'case_returned_to_assignee',
+        userId: newAssigneeUser.id,
+        caseId: c15.id,
+      },
+    });
+    const returnToStale = await prisma.actionItem.findFirst({
+      where: {
+        kind: 'case_returned_to_assignee',
+        userId: memberUser.id,
+        caseId: c15.id,
+      },
+    });
+    const submitterFyi = await prisma.actionItem.findFirst({
+      where: {
+        kind: 'approval_decided',
+        userId: memberUser.id,
+        caseId: c15.id,
+      },
+    });
+    if (returnToNew) created.actionItems.push(returnToNew.id);
+    if (submitterFyi) created.actionItems.push(submitterFyi.id);
+
+    record(
+      '15. P1#1 — case_returned_to_assignee targets current assignee, NOT stale submitter',
+      !!returnToNew && returnToNew.userId === newAssigneeUser.id &&
+        !returnToStale &&
+        !!submitterFyi && submitterFyi.actionRequired === false,
+      `newAssignee=${!!returnToNew} stale=${!!returnToStale} submitterFyi=${!!submitterFyi}`,
+    );
+
+    // ─── 16. P1#2 — getDashboard tenant filter ─────────────────────
+    // Plant an ActionItem for leadUser scoped to a DIFFERENT company.
+    // Then fetch dashboard with allowedCompanyIds restricted to ONLY
+    // the original company → the planted item must not surface.
+    if (secondCompany) {
+      const planted = await prisma.actionItem.create({
+        data: {
+          userId: leadUser.id,
+          companyId: secondCompany.id,
+          kind: 'approval_pending',
+          state: 'Pending',
+          actionRequired: true,
+          priority: 70,
+          reasonLabel: 'planted-other-company',
+        },
+      });
+      created.actionItems.push(planted.id);
+
+      // Import getDashboard dynamically.
+      const { getDashboard } = await import('../server/db/myRepository.js');
+      const dashOnlyCompanyA = await getDashboard({
+        user: {
+          id: leadUser.id,
+          fullName: leadPerson.name,
+          allowedCompanyIds: [company.id],
+          // companyRoles unused by getDashboard scope filter path
+        },
+      });
+      const inboxAfter = dashOnlyCompanyA?.pendingApprovalsInbox ?? [];
+      const leakedIds = inboxAfter
+        .filter((x) => x.id === planted.id)
+        .map((x) => x.id);
+
+      // Also re-fetch with FULL allowedCompanyIds to prove the item IS
+      // visible when scope permits — sanity check.
+      const dashBothCompanies = await getDashboard({
+        user: {
+          id: leadUser.id,
+          fullName: leadPerson.name,
+          allowedCompanyIds: [company.id, secondCompany.id],
+        },
+      });
+      const inboxFull = dashBothCompanies?.pendingApprovalsInbox ?? [];
+      const presentWhenAllowed = inboxFull.some((x) => x.id === planted.id);
+
+      record(
+        '16. P1#2 — getDashboard pendingApprovalsInbox respects allowedCompanyIds',
+        leakedIds.length === 0 && presentWhenAllowed,
+        `leakedWhenScoped=${leakedIds.length} visibleWhenAllowed=${presentWhenAllowed}`,
+      );
+    } else {
+      record(
+        '16. P1#2 — getDashboard pendingApprovalsInbox respects allowedCompanyIds',
+        true,
+        'skipped — only one active company in tenant set',
+      );
+    }
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });

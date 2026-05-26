@@ -736,9 +736,22 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
     exceptUserId: user.id,
   });
   void (async () => {
+    // P1 review fix — fetch CURRENT case assignment so we can route the
+    // case_returned_to_assignee actionable item to whoever is responsible
+    // NOW, not whoever submitted the approval (case may have been
+    // transferred between submit and reject; stale submitter must not
+    // receive a "revise and resubmit" action they no longer own).
+    //
+    // Product semantic chosen (a): ReturnToAssignee = "case stays with
+    // current assignee" — the case-level update path leaves assignedPersonId
+    // untouched for this behavior (only ReturnToTeam clears it). Therefore
+    // the actionable item must target the current assignedPersonId's User.
+    //
+    // The original submitter ALWAYS receives the approval_decided FYI so
+    // they know the outcome of their submission even after a transfer.
     const caseRow = await prisma.case.findUnique({
       where: { id: row.caseId },
-      select: { caseNumber: true, title: true },
+      select: { caseNumber: true, title: true, assignedPersonId: true },
     });
     const submitterId = row.submittedByUserId;
     if (submitterId) {
@@ -758,11 +771,22 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
         actionRequired: false,
         reasonLabel: `Gönderdiğin çözüm onayı sonuçlandı: Reddedildi — ${updated.rejectionReason ?? ''}`.slice(0, 500),
       });
-      // ReturnToAssignee: actionable item for the submitter to revise.
-      if (behavior === 'ReturnToAssignee') {
+    }
+    if (behavior === 'ReturnToAssignee' && caseRow?.assignedPersonId) {
+      // Look up the User linked to the current assignedPersonId. If the
+      // assignee has no User row (e.g. legacy person), we deliberately
+      // do NOT fall back to the submitter — better to leave the row
+      // unrouted than misdirect to a stale user. The approval_decided
+      // FYI above already informs the original submitter of the reject.
+      const assigneeUser = await prisma.user.findFirst({
+        where: { personId: caseRow.assignedPersonId, isActive: true },
+        select: { id: true },
+      });
+      if (assigneeUser) {
         void emitActionItem({
           kind: 'case_returned_to_assignee',
-          userId: submitterId,
+          userId: assigneeUser.id,
+          personId: caseRow.assignedPersonId,
           companyId: row.companyId,
           objectType: 'CaseResolutionApproval',
           objectId: approvalId,
@@ -771,7 +795,7 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
           caseTitle: caseRow?.title ?? null,
           generatedBy: row.policyId ? `policy:${row.policyId}` : 'system',
           groupKey: `${row.caseId}:approval`,
-          dedupKey: `${row.companyId}:${submitterId}:case_returned:${row.caseId}:${approvalId}`,
+          dedupKey: `${row.companyId}:${assigneeUser.id}:case_returned:${row.caseId}:${approvalId}`,
           priority: 70,
           actionRequired: true,
           reasonLabel: 'Reddedildi — revize edip yeniden çözüm onayına gönder.',
