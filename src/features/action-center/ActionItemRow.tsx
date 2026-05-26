@@ -215,6 +215,17 @@ export function ActionItemRow({
                   Okundu
                 </Button>
               )}
+              {item.kind === 'case_returned_to_assignee' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<CheckCircle2 size={11} />}
+                  onClick={() => void handleMarkDone()}
+                  disabled={busy}
+                >
+                  Tamamlandı
+                </Button>
+              )}
               <Button size="sm" variant="ghost" leftIcon={<Clock size={11} />} onClick={() => setSnoozeOpen((v) => !v)} disabled={busy}>
                 Ertele
               </Button>

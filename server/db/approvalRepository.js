@@ -381,6 +381,45 @@ export async function resolveApprover({ policy, caseRow }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Multi-approver authority check (Phase 1 acceptance fix)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Decide whether a user is authorized to approve or reject `row`.
+ *
+ * Phase 1 originally only allowed the snapshotted `expectedApproverPersonId`
+ * to decide, but `submitApproval` fans out `approval_pending` ActionItems
+ * to every eligible approver user (e.g. all Supervisor-role members). The
+ * snapshot-only check meant non-snapshotted but eligible users could see
+ * the inbox row but received 403 on click.
+ *
+ * Fix: snapshot still wins on the fast path; if the caller is not the
+ * snapshot, re-resolve the policy's current eligible set and accept any
+ * `personId` in it. Re-resolving at decision time honors team/role
+ * changes between submit and decide.
+ *
+ * Returns true when authorized, false otherwise. Caller must AND this
+ * with the override path and emit ApprovalAccessError on false.
+ */
+async function userIsEligibleApprover({ row, user }) {
+  if (!user?.personId) return false;
+  if (user.personId === row.expectedApproverPersonId) return true;
+  if (!row.policy) return false;
+  const caseRow = await prisma.case.findUnique({
+    where: { id: row.caseId },
+    select: { id: true, companyId: true, assignedTeamId: true },
+  });
+  if (!caseRow) return false;
+  const resolved = await resolveApprover({ policy: row.policy, caseRow });
+  if (!resolved) return false;
+  const eligible = resolved.persons ?? [];
+  for (const p of eligible) {
+    if (p?.id && p.id === user.personId) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Submit / Approve / Reject
 // ─────────────────────────────────────────────────────────────────
 
@@ -558,8 +597,8 @@ export async function approveApproval({ approvalId, payload, user, allowedCompan
   }
 
   const override = !!payload?.override && user?.role === 'SystemAdmin';
-  const isAssignedApprover = user?.personId && user.personId === row.expectedApproverPersonId;
-  if (!override && !isAssignedApprover) {
+  const authorized = override || (await userIsEligibleApprover({ row, user }));
+  if (!authorized) {
     throw new ApprovalAccessError('Bu onayı verme yetkin yok.');
   }
 
@@ -668,8 +707,8 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
   }
 
   const override = !!payload?.override && user?.role === 'SystemAdmin';
-  const isAssignedApprover = user?.personId && user.personId === row.expectedApproverPersonId;
-  if (!override && !isAssignedApprover) {
+  const authorized = override || (await userIsEligibleApprover({ row, user }));
+  if (!authorized) {
     throw new ApprovalAccessError('Bu onayı reddetme yetkin yok.');
   }
 
