@@ -379,6 +379,8 @@ export interface Case {
   description: string;
   caseType: CaseType;
   status: CaseStatus;
+  /** WR-D4 Phase 1 — çözüm onayı overlay state'i. */
+  approvalState?: 'Pending' | 'Approved' | 'Rejected' | null;
   priority: CasePriority;
   origin: CaseOrigin;
   originDescription?: string;

@@ -1,6 +1,7 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
+import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import crypto from 'node:crypto';
 
 // Snooze sebebi → CaseActivity log'unda görünen TR etiket.
@@ -1769,6 +1770,21 @@ export const caseRepository = {
     // TR → ASCII (DB enum identifier)
     const dbNext = toDb({ status: nextStatus }).status;
     const prevStatusTr = fromDb({ status: prev.status }).status; // history'de TR görünsün
+
+    // WR-D4 Phase 1 — Çözüm onayı zorunluluğu (close guard).
+    // Bir politika eşleşiyor ve approvalState !== 'Approved' ise Cozuldu'ya
+    // geçiş engellenir. Policy yoksa veya zaten onaylıysa legacy davranış sürer.
+    // approvalRepository ApprovalValidationError döndürür; route katmanı
+    // CaseValidationError'ı tanıdığı için aynı kod/mesajla yeniden fırlatıyoruz.
+    if (dbNext === 'Cozuldu' && prev.status !== 'Cozuldu') {
+      const blockErr = await checkApprovalCloseAllowed({ caseRow: prev });
+      if (blockErr) {
+        throw new CaseValidationError(blockErr.message, {
+          status: blockErr.status,
+          code: blockErr.code,
+        });
+      }
+    }
 
     const enteringPause = dbNext === 'ThirdPartyWaiting' && prev.status !== 'ThirdPartyWaiting';
     const leavingPause = prev.status === 'ThirdPartyWaiting' && dbNext !== 'ThirdPartyWaiting';

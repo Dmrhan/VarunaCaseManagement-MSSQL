@@ -11,6 +11,7 @@ import {
   Package,
   Settings2,
   Shield,
+  ShieldCheck,
   Sliders,
   Tag,
   Timer,
@@ -40,7 +41,8 @@ export type AdminView =
   | 'admin-external-kb'
   | 'admin-data-import'
   | 'admin-companies'
-  | 'admin-users';
+  | 'admin-users'
+  | 'admin-resolution-approval';
 
 export const ADMIN_VIEWS: AdminView[] = [
   'admin-categories',
@@ -57,6 +59,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-data-import',
   'admin-companies',
   'admin-users',
+  'admin-resolution-approval',
 ];
 
 export function isAdminView(v: string): v is AdminView {
@@ -85,10 +88,11 @@ const NAV: NavGroup[] = [
   {
     label: 'Yapılandırma',
     items: [
-      { key: 'admin-fields',       label: 'Dinamik Alanlar',           icon: <Sliders size={14} /> },
-      { key: 'admin-knowledge',    label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
-      { key: 'admin-external-kb',  label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
-      { key: 'admin-data-import',  label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
+      { key: 'admin-fields',              label: 'Dinamik Alanlar',           icon: <Sliders size={14} /> },
+      { key: 'admin-knowledge',           label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
+      { key: 'admin-external-kb',         label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
+      { key: 'admin-data-import',         label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
+      { key: 'admin-resolution-approval', label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
     ],
   },
   {

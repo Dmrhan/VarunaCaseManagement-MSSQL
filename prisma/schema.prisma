@@ -333,6 +333,8 @@ model Company {
   externalKbSetting ExternalKbSetting?
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs        ImportJob[]
+  /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
+  resolutionApprovalPolicies ResolutionApprovalPolicy[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -786,6 +788,10 @@ model Person {
 
   team  Team?  @relation(fields: [teamId], references: [id])
   cases Case[] @relation("CaseAssignedPerson")
+  /// WR-D4 Phase 1 — Policies whose approver is this specific person.
+  resolutionApprovalPolicies ResolutionApprovalPolicy[] @relation("ResolutionApprovalPolicyApprover")
+  /// WR-D4 Phase 1 — Approval cycles where this person is the resolved approver.
+  resolutionApprovalsAsApprover CaseResolutionApproval[] @relation("CaseResolutionApprovalApprover")
 }
 
 model ThirdParty {
@@ -969,6 +975,13 @@ model Case {
   resolutionNote     String?
   cancellationReason String?
 
+  // WR-D4 Phase 1 — Resolution approval overlay. Source of truth is
+  // CaseResolutionApproval (audit table); this denormalized field is
+  // updated whenever an approval row is inserted or decided so listings
+  // and CaseDetail can render the current state without joining.
+  // null = no approval cycle has ever started on this case.
+  approvalState ApprovalState?
+
   // SLA
   slaResponseDueAt     DateTime?
   slaResolutionDueAt   DateTime?
@@ -1054,6 +1067,8 @@ model Case {
   callLogs      CaseCallLog[]
   caseOffers    CaseOfferedSolution[]
   approvals     CaseApproval[]
+  /// WR-D4 Phase 1 — Per-case resolution approval cycles (immutable history).
+  resolutionApprovals CaseResolutionApproval[]
   notifications CaseNotification[]
   aiSuggestions AISuggestion[]
   mentions      CaseMention[]
@@ -1287,6 +1302,110 @@ model CaseApproval {
   @@index([caseId])
   @@index([companyId])
   @@index([decision])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WR-D4 Phase 1 — Resolution Approval Foundation
+// Internal approval governance before a case can be closed when a
+// matching ResolutionApprovalPolicy exists. No customer communication
+// in Phase 1 — that lives in Phase 2+ (NotificationRule/Template/
+// Dispatch). See docs/planning_cards/WR-D4-D3-...md §16 Phase 1.
+// ═══════════════════════════════════════════════════════════════════
+
+enum ApprovalState {
+  Pending
+  Approved
+  Rejected
+  Cancelled
+}
+
+enum ApproverType {
+  TeamLead          // Resolved as Person where teamId=case.assignedTeamId AND isTeamLead=true
+  AssignedTeamLead  // Alias for TeamLead — clearer semantics in admin UI
+  Supervisor        // Any active Supervisor in case.companyId
+  Admin             // Any active Admin in case.companyId
+  SystemAdmin       // Global override (no companyId scope check)
+  SpecificPerson    // Use ResolutionApprovalPolicy.approverPersonId
+}
+
+enum RejectionBehavior {
+  ReturnToAssignee  // Case stays with current assignee; note prepended
+  ReturnToTeam      // assignedPersonId cleared; assignedTeamId kept
+  Escalate          // status → Eskalasyon; escalationReason = rejection
+}
+
+/// WR-D4 — Per-tenant policy: when does a case require approval before
+/// closing, and who approves it. Phase 1 supports companyId scope +
+/// optional matchScope JSON filters (category/subCategory/priority/
+/// supportLevel/teamId). Soft-disable via isActive=false; hard delete
+/// not supported (audit trail).
+model ResolutionApprovalPolicy {
+  id                String            @id @default(cuid())
+  companyId         String
+  name              String
+  description       String?
+  isActive          Boolean           @default(true)
+  /// Lower number wins on match. Default 100.
+  sortOrder         Int               @default(100)
+  /// { category?, subCategory?, priority?, supportLevel?, teamId? }
+  /// All null = match-all. App-layer JSON filtering (MSSQL portable).
+  matchScope        Json
+  approverType      ApproverType
+  /// Required when approverType=SpecificPerson; else null.
+  approverPersonId  String?
+  /// Default false. When false, the submitter cannot also be the
+  /// resolved approver (submit returns 400 self_approval_blocked).
+  allowSelfApprove  Boolean           @default(false)
+  rejectionBehavior RejectionBehavior @default(ReturnToAssignee)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  createdByUserId   String?
+
+  company        Company @relation(fields: [companyId], references: [id])
+  approverPerson Person? @relation("ResolutionApprovalPolicyApprover", fields: [approverPersonId], references: [id])
+
+  approvals CaseResolutionApproval[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, sortOrder])
+}
+
+/// WR-D4 — A single approval cycle for a case. Immutable history: a
+/// rejected approval stays; reopen creates a new row. Snapshot fields
+/// (policyNameSnapshot) preserve audit even when the policy is later
+/// edited or deactivated.
+model CaseResolutionApproval {
+  id                       String        @id @default(cuid())
+  caseId                   String
+  companyId                String
+  policyId                 String?
+  policyNameSnapshot       String
+  state                    ApprovalState @default(Pending)
+  submittedByUserId        String
+  submittedAt              DateTime      @default(now())
+  /// Agent's resolution summary text. Becomes audit at submit time.
+  resolutionSummary        String
+  /// Optional draft message intended for the customer. Phase 1: not
+  /// sent anywhere; surfaces in approver's preview only.
+  customerMessageDraft     String?
+  /// Snapshot of the resolved approver at submit time. Used to filter
+  /// approver inboxes and to verify authority on approve/reject.
+  expectedApproverPersonId String?
+  decidedByUserId          String?
+  decidedAt                DateTime?
+  /// Required when state=Rejected. Free-text reason shown to submitter.
+  rejectionReason          String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  case             Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  policy           ResolutionApprovalPolicy? @relation(fields: [policyId], references: [id])
+  expectedApprover Person?                   @relation("CaseResolutionApprovalApprover", fields: [expectedApproverPersonId], references: [id])
+
+  @@index([caseId])
+  @@index([companyId, state])
+  @@index([expectedApproverPersonId, state])
+  @@index([caseId, state])
 }
 
 // CaseNotification — bildirim logları

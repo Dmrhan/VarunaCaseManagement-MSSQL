@@ -58,6 +58,7 @@ import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
+import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
 import { TransferModal } from './components/TransferModal';
 import { SnoozeModal } from './components/SnoozeModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
@@ -2837,6 +2838,16 @@ function DetailTab({
     <div className="space-y-5">
       {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
       <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+
+      {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
+      <ResolutionApprovalCard
+        item={item}
+        onApprovalChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
 
       {/* Inline edit bilgi notu */}
       <p className="flex items-center gap-1.5 text-[12px] text-slate-500">

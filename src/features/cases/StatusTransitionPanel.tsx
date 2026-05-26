@@ -488,6 +488,19 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
             </div>
           )}
 
+          {/* WR-D4 Phase 1 — Çözüm Onayı politikası eşleşiyorsa kullanıcıyı kart'a yönlendir.
+              Tam blok yukarıdaki ResolutionApprovalCard tarafından yapılır; burada sadece
+              operatör "Uygula"ya basmaya çalışırken hatırlatma çıkıyor. */}
+          {pending === 'Çözüldü' && item.approvalState && item.approvalState !== 'Approved' && (
+            <div className="flex items-start gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-200">
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+              <span>
+                Bu vaka için <strong>çözüm onayı zorunlu</strong>. Üstteki "Çözüm Onayı"
+                kartından önce onayı tamamla; sonra Çözüldü'ye geç.
+              </span>
+            </div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
               <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
