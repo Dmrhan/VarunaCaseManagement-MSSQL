@@ -2,6 +2,7 @@ import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
+import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
 import crypto from 'node:crypto';
 
 // Snooze sebebi → CaseActivity log'unda görünen TR etiket.
@@ -1874,6 +1875,13 @@ export const caseRepository = {
       message: `${updated.caseNumber}: ${prevStatusTr} → ${nextStatus}`,
       kind,
     });
+
+    // WR-D4 Phase 2 — close / reopen event emission (fire-and-forget).
+    if (dbNext === 'Cozuldu' && prev.status !== 'Cozuldu') {
+      void emitNotificationEvent({ event: 'case_closed', caseId: id });
+    } else if (dbNext === 'YenidenAcildi' && prev.status !== 'YenidenAcildi') {
+      void emitNotificationEvent({ event: 'case_reopened', caseId: id });
+    }
 
     return shape(updated);
   },

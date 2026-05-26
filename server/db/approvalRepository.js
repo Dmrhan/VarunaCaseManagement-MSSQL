@@ -16,6 +16,13 @@
  */
 
 import { prisma } from './client.js';
+import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
+
+/**
+ * WR-D4 Phase 2 wire-up: approval lifecycle fires notification events.
+ * Failures inside emitEvent are absorbed (logged, not thrown) so an event
+ * dispatch never blocks the underlying approval mutation.
+ */
 
 /**
  * Domain error: 400 with structured `code`. Route layer converts to
@@ -422,8 +429,8 @@ export async function submitApproval({ caseId, payload, user, allowedCompanyIds 
   }
 
   // Insert + denormalize Case.approvalState in a transaction.
-  return prisma.$transaction(async (tx) => {
-    const approval = await tx.caseResolutionApproval.create({
+  const approval = await prisma.$transaction(async (tx) => {
+    const created = await tx.caseResolutionApproval.create({
       data: {
         caseId,
         companyId: caseRow.companyId,
@@ -453,8 +460,21 @@ export async function submitApproval({ caseId, payload, user, allowedCompanyIds 
         note: policy.name,
       },
     });
-    return approval;
+    return created;
   });
+
+  // Phase 2 — event emission (out-of-transaction; never blocks).
+  void emitNotificationEvent({
+    event: 'resolution_submitted',
+    caseId,
+    approvalContext: {
+      resolutionSummary: approval.resolutionSummary,
+      customerMessageDraft: approval.customerMessageDraft,
+      approverName: '',
+    },
+  });
+
+  return approval;
 }
 
 /**
@@ -484,8 +504,8 @@ export async function approveApproval({ approvalId, payload, user, allowedCompan
     throw new ApprovalAccessError('Bu onayı verme yetkin yok.');
   }
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.caseResolutionApproval.update({
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.caseResolutionApproval.update({
       where: { id: approvalId },
       data: {
         state: 'Approved',
@@ -510,8 +530,20 @@ export async function approveApproval({ approvalId, payload, user, allowedCompan
         note: row.policyNameSnapshot,
       },
     });
-    return updated;
+    return u;
   });
+
+  void emitNotificationEvent({
+    event: 'resolution_approved',
+    caseId: row.caseId,
+    approvalContext: {
+      resolutionSummary: updated.resolutionSummary,
+      customerMessageDraft: updated.customerMessageDraft,
+      approverName: user.fullName ?? '',
+    },
+  });
+
+  return updated;
 }
 
 /**
@@ -548,8 +580,8 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
 
   const behavior = row.policy?.rejectionBehavior ?? 'ReturnToAssignee';
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.caseResolutionApproval.update({
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.caseResolutionApproval.update({
       where: { id: approvalId },
       data: {
         state: 'Rejected',
@@ -582,8 +614,21 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
         note: `${row.policyNameSnapshot} — ${rejectionReason}`,
       },
     });
-    return updated;
+    return u;
   });
+
+  void emitNotificationEvent({
+    event: 'resolution_rejected',
+    caseId: row.caseId,
+    approvalContext: {
+      resolutionSummary: updated.resolutionSummary,
+      customerMessageDraft: updated.customerMessageDraft,
+      rejectionReason: updated.rejectionReason,
+      approverName: user.fullName ?? '',
+    },
+  });
+
+  return updated;
 }
 
 // ─────────────────────────────────────────────────────────────────

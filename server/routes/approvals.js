@@ -14,29 +14,55 @@ import {
   submitApproval,
   updatePolicy,
 } from '../db/approvalRepository.js';
+import {
+  NotificationAccessError,
+  NotificationValidationError,
+  createRule,
+  createTemplate,
+  getRule,
+  getTemplate,
+  listDispatches,
+  listDispatchesForCase,
+  listRules,
+  listTemplates,
+  manualConfirmDispatch,
+  previewTemplate,
+  updateRule,
+  updateTemplate,
+} from '../db/notificationRepository.js';
 import { prisma } from '../db/client.js';
 
 /**
- * /api/approvals — WR-D4 Phase 1 Resolution Approval surface.
+ * /api/approvals — WR-D4/D3 Approval + Notification surface.
  *
- * Mounted as a single sibling router (NOT nested under /cases or /admin) so
- * tenant scope + role guards live in one place and there is no risk of
- * shadow-matching paths in the cases/admin routers.
+ * Single mount point (not nested under /cases or /admin) — tenant scope +
+ * role guards live in one place.
  *
- * Path map:
- *   GET    /policies                    — admin list (companyId optional filter)
- *   POST   /policies                    — admin create
- *   GET    /policies/:id                — admin read one
- *   PATCH  /policies/:id                — admin update
+ * Phase 1 (approval):
+ *   GET    /policies                  — admin list
+ *   POST   /policies                  — admin create
+ *   GET    /policies/:id              — admin read
+ *   PATCH  /policies/:id              — admin update
+ *   GET    /cases/:caseId             — case-scoped approval list + matched policy
+ *   POST   /cases/:caseId/submit      — submit resolution for approval
+ *   POST   /:approvalId/approve       — approve
+ *   POST   /:approvalId/reject        — reject
  *
- *   GET    /cases/:caseId               — case-scoped approval list + matched policy snapshot
- *   POST   /cases/:caseId/submit        — submit current resolution for approval
- *   POST   /:approvalId/approve         — approve a pending row
- *   POST   /:approvalId/reject          — reject a pending row (applies rejectionBehavior)
+ * Phase 2 (notification — log-only / manual):
+ *   GET    /notification-templates              — admin list
+ *   POST   /notification-templates              — admin create
+ *   GET    /notification-templates/:id          — admin read
+ *   PATCH  /notification-templates/:id          — admin update
+ *   POST   /notification-templates/:id/preview  — admin preview render
+ *   GET    /notification-rules                  — admin list
+ *   POST   /notification-rules                  — admin create
+ *   GET    /notification-rules/:id              — admin read
+ *   PATCH  /notification-rules/:id              — admin update
+ *   GET    /notification-dispatches             — admin viewer (filter list)
+ *   GET    /cases/:caseId/dispatches            — case-scoped dispatch list
+ *   POST   /dispatches/:id/manual-confirm       — operator manual-confirm
  *
- * Phase 1 NO external sending — see planning card §16. Approval lifecycle
- * hooks intentionally do NOT call NotificationDispatch (table not yet
- * created); Phase 2 (D3) adds it.
+ * No external sending — Phase 4 (active provider) adds delivery.
  */
 
 const router = Router();
@@ -45,16 +71,20 @@ router.use(verifyJwt);
 const POLICY_ADMIN_ROLES = ['Admin', 'SystemAdmin'];
 const SUBMIT_ROLES = ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'];
 const DECIDE_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+// WR-D4 Phase 2 — viewer roles per product decision: Supervisor+CSM+Admin+SystemAdmin.
+const DISPATCH_VIEWER_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+// Manual confirm = any operator working the case (case detail access).
+const DISPATCH_MANUAL_CONFIRM_ROLES = SUBMIT_ROLES;
 
 function asyncRoute(handler) {
   return async (req, res) => {
     try {
       await handler(req, res);
     } catch (err) {
-      if (err instanceof ApprovalAccessError) {
+      if (err instanceof ApprovalAccessError || err instanceof NotificationAccessError) {
         return res.status(err.status ?? 403).json({ error: err.code ?? 'forbidden', message: err.message });
       }
-      if (err instanceof ApprovalValidationError) {
+      if (err instanceof ApprovalValidationError || err instanceof NotificationValidationError) {
         return res
           .status(err.status ?? 400)
           .json({ error: err.code ?? 'validation_error', message: err.message });
@@ -213,6 +243,178 @@ router.post(
   asyncRoute(async (req, res) => {
     const updated = await rejectApproval({
       approvalId: req.params.approvalId,
+      payload: req.body ?? {},
+      user: req.user,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json(updated);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// WR-D4 Phase 2 — Notification Templates (admin CRUD)
+// ─────────────────────────────────────────────────────────────────
+
+router.get(
+  '/notification-templates',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : null;
+    const items = await listTemplates({ allowedCompanyIds: req.user.allowedCompanyIds, companyId });
+    res.json({ value: items });
+  }),
+);
+
+router.post(
+  '/notification-templates',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const created = await createTemplate({
+      data: req.body ?? {},
+      user: req.user,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.status(201).json(created);
+  }),
+);
+
+router.get(
+  '/notification-templates/:id',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const row = await getTemplate({ id: req.params.id, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'Şablon bulunamadı.' });
+    res.json(row);
+  }),
+);
+
+router.patch(
+  '/notification-templates/:id',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const updated = await updateTemplate({
+      id: req.params.id,
+      data: req.body ?? {},
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json(updated);
+  }),
+);
+
+router.post(
+  '/notification-templates/:id/preview',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const out = await previewTemplate({
+      templateId: req.params.id,
+      sampleCaseId: req.body?.sampleCaseId ?? null,
+      vars: req.body?.vars ?? null,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json(out);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// WR-D4 Phase 2 — Notification Rules (admin CRUD)
+// ─────────────────────────────────────────────────────────────────
+
+router.get(
+  '/notification-rules',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : null;
+    const items = await listRules({ allowedCompanyIds: req.user.allowedCompanyIds, companyId });
+    res.json({ value: items });
+  }),
+);
+
+router.post(
+  '/notification-rules',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const created = await createRule({
+      data: req.body ?? {},
+      user: req.user,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.status(201).json(created);
+  }),
+);
+
+router.get(
+  '/notification-rules/:id',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const row = await getRule({ id: req.params.id, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'Kural bulunamadı.' });
+    res.json(row);
+  }),
+);
+
+router.patch(
+  '/notification-rules/:id',
+  requireRole(...POLICY_ADMIN_ROLES),
+  asyncRoute(async (req, res) => {
+    const updated = await updateRule({
+      id: req.params.id,
+      data: req.body ?? {},
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json(updated);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// WR-D4 Phase 2 — Dispatch viewer + manual confirm
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/approvals/notification-dispatches
+ * Audit viewer for Supervisor+CSM+Admin+SystemAdmin (per product decision).
+ */
+router.get(
+  '/notification-dispatches',
+  requireRole(...DISPATCH_VIEWER_ROLES),
+  asyncRoute(async (req, res) => {
+    const out = await listDispatches({
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      companyId: typeof req.query.companyId === 'string' ? req.query.companyId : null,
+      event: typeof req.query.event === 'string' ? req.query.event : null,
+      state: typeof req.query.state === 'string' ? req.query.state : null,
+      limit: req.query.limit ? Number(req.query.limit) : 50,
+      offset: req.query.offset ? Number(req.query.offset) : 0,
+    });
+    res.json(out);
+  }),
+);
+
+/**
+ * GET /api/approvals/cases/:caseId/dispatches
+ * Per-case dispatch list — visible to anyone with case-read access
+ * (route layer relies on case scope guard in repo). Used by CaseDetail
+ * communication card.
+ */
+router.get(
+  '/cases/:caseId/dispatches',
+  asyncRoute(async (req, res) => {
+    const items = await listDispatchesForCase({
+      caseId: req.params.caseId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (items === null) {
+      return res.status(404).json({ error: 'not_found', message: 'Vaka bulunamadı.' });
+    }
+    res.json({ value: items });
+  }),
+);
+
+router.post(
+  '/dispatches/:id/manual-confirm',
+  requireRole(...DISPATCH_MANUAL_CONFIRM_ROLES),
+  asyncRoute(async (req, res) => {
+    const updated = await manualConfirmDispatch({
+      dispatchId: req.params.id,
       payload: req.body ?? {},
       user: req.user,
       allowedCompanyIds: req.user.allowedCompanyIds,

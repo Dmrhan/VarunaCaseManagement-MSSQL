@@ -1,12 +1,15 @@
 import { type ReactNode } from 'react';
 import {
   ArrowLeft,
+  Bell,
   BookOpen,
   Building2,
   ClipboardCheck,
   Database,
   FileText,
   FolderTree,
+  History,
+  MessageSquare,
   Network,
   Package,
   Settings2,
@@ -42,7 +45,10 @@ export type AdminView =
   | 'admin-data-import'
   | 'admin-companies'
   | 'admin-users'
-  | 'admin-resolution-approval';
+  | 'admin-resolution-approval'
+  | 'admin-notification-templates'
+  | 'admin-notification-rules'
+  | 'admin-notification-dispatches';
 
 export const ADMIN_VIEWS: AdminView[] = [
   'admin-categories',
@@ -60,6 +66,9 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-companies',
   'admin-users',
   'admin-resolution-approval',
+  'admin-notification-templates',
+  'admin-notification-rules',
+  'admin-notification-dispatches',
 ];
 
 export function isAdminView(v: string): v is AdminView {
@@ -92,7 +101,10 @@ const NAV: NavGroup[] = [
       { key: 'admin-knowledge',           label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
       { key: 'admin-external-kb',         label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
       { key: 'admin-data-import',         label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
-      { key: 'admin-resolution-approval', label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
+      { key: 'admin-resolution-approval',     label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
+      { key: 'admin-notification-templates',  label: 'Bildirim Şablonları',        icon: <MessageSquare size={14} /> },
+      { key: 'admin-notification-rules',      label: 'Bildirim Kuralları',          icon: <Bell size={14} /> },
+      { key: 'admin-notification-dispatches', label: 'Bildirim Kayıtları',          icon: <History size={14} /> },
     ],
   },
   {
