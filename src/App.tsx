@@ -51,6 +51,7 @@ import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
+import { ResolutionApprovalPoliciesPage } from './features/admin/ResolutionApprovalPoliciesPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
@@ -252,6 +253,7 @@ export default function App() {
         {view === 'admin-data-import' && <AdminDataImportPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
+        {view === 'admin-resolution-approval' && <ResolutionApprovalPoliciesPage />}
       </AdminLayout>
     );
   }
