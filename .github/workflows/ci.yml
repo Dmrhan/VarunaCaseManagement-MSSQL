@@ -2,9 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Minimum permissions for GITHUB_TOKEN. actions/checkout@v4 requires
+# contents:read; pull-requests:read covers PR event metadata. Even when
+# the repo "default workflow permissions" setting is restrictive, this
+# explicit block lets checkout succeed (resolves "git failed with exit
+# code 128 / The requested URL returned error: 403").
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   build:
