@@ -20,6 +20,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
+import { listAccounts } from '../server/db/accountRepository.js';
 
 const BFF = process.env.BFF_URL || 'http://localhost:3101';
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -203,6 +204,155 @@ if (fixtureContact?.email) {
     r.status === 200 && leaks.length === 0,
     `status=${r.status} count=${rows.length} leaks=${leaks.length}`,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// C2 review fix (P1 + P2) — direct repository probes. The dev DB rarely
+// has Accounts with TWO ACs both carrying externalCustomerCode, so we
+// synthesize a minimal fixture (1 account + 2 AC rows in two existing
+// companies, each with a unique stamped code), probe, then delete.
+// ─────────────────────────────────────────────────────────────────
+
+const distinctCompanies = await prisma.company.findMany({
+  select: { id: true },
+  take: 3,
+});
+let twoAcAccount = null;
+let tempAccountId = null;
+if (distinctCompanies.length >= 2) {
+  const stamp = Date.now().toString().slice(-6);
+  const created = await prisma.account.create({
+    data: {
+      name: `C2 Scope Probe ${stamp}`,
+      // No VKN (legitimate, per no_tax_id policy).
+      isActive: true,
+      // Direct companyId must be set so the account isn't treated as
+      // "legacy" by buildScopeWhere's `companyId: null` carveout (which
+      // would let every user see it regardless of allowedCompanyIds and
+      // mask the real scope behavior we're testing).
+      companyId: distinctCompanies[0].id,
+      companies: {
+        create: [
+          { companyId: distinctCompanies[0].id, status: 'active', externalCustomerCode: `SCOPE-A-${stamp}` },
+          { companyId: distinctCompanies[1].id, status: 'active', externalCustomerCode: `SCOPE-B-${stamp}` },
+        ],
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      companies: { select: { id: true, companyId: true, externalCustomerCode: true } },
+    },
+  });
+  tempAccountId = created.id;
+  twoAcAccount = created;
+}
+
+if (!twoAcAccount) {
+  skip('8) P1 scope-leak probe', 'no Account with ≥2 AC + externalCustomerCode in dev DB');
+  skip('9) P1 in-scope hit',  '(needs same fixture)');
+  skip('10) P2 ?ids= revalidation — out-of-scope dropped', '(needs same fixture)');
+  skip('11) P2 ?ids= revalidation — in-scope kept',        '(needs same fixture)');
+} else {
+  const acA = twoAcAccount.companies[0]; // we will give the user access ONLY to this company
+  const acB = twoAcAccount.companies[1]; // codeB lives here; must NOT leak when user is scoped to acA's company
+  const allowedScoped = [acA.companyId];
+
+  // 8) Search using acB's externalCustomerCode while user only has access
+  //    to acA's company. Before the P1 fix this Account would surface;
+  //    now it must be filtered out.
+  {
+    const out = await listAccounts({
+      search: acB.externalCustomerCode,
+      allowedCompanyIds: allowedScoped,
+      limit: 50,
+    });
+    const leaked = (out?.accounts ?? []).some((a) => a.id === twoAcAccount.id);
+    record('8) P1 — externalCustomerCode of forbidden tenant does NOT surface Account',
+      !leaked,
+      `account=${twoAcAccount.id} codeB="${acB.externalCustomerCode}" allowed=[${allowedScoped.join(',')}] leaked=${leaked}`,
+    );
+  }
+
+  // 9) Search using acA's externalCustomerCode while user has access to acA.
+  //    This must still match.
+  {
+    const out = await listAccounts({
+      search: acA.externalCustomerCode,
+      allowedCompanyIds: allowedScoped,
+      limit: 50,
+    });
+    const found = (out?.accounts ?? []).some((a) => a.id === twoAcAccount.id);
+    record('9) P1 — externalCustomerCode of allowed tenant DOES surface Account',
+      found,
+      `account=${twoAcAccount.id} codeA="${acA.externalCustomerCode}" found=${found}`,
+    );
+  }
+
+  // 10) P2 recents revalidation — passing the account id while scoped to
+  //     a tenant that doesn't include any of its AC must return empty.
+  //     We use the OPPOSITE company (acB) as the only allowed tenant so the
+  //     account *should* show; then we use a foreign companyId (a real one
+  //     from another seed) to prove out-of-scope drops.
+  const foreignCompany = await prisma.company.findFirst({
+    where: { id: { notIn: twoAcAccount.companies.map((c) => c.companyId) } },
+    select: { id: true },
+  });
+  if (foreignCompany) {
+    const out = await listAccounts({
+      ids: [twoAcAccount.id],
+      allowedCompanyIds: [foreignCompany.id],
+      limit: 50,
+    });
+    const leaked = (out?.accounts ?? []).some((a) => a.id === twoAcAccount.id);
+    record('10) P2 — ?ids= revalidation drops out-of-scope id (recents leak prevention)',
+      !leaked && (out?.accounts ?? []).length === 0,
+      `requestedId=${twoAcAccount.id} allowed=[${foreignCompany.id}] leaked=${leaked}`,
+    );
+  } else {
+    skip('10) P2 ?ids= revalidation — out-of-scope dropped', 'no foreign company available');
+  }
+
+  // 11) Inverse: scoped to a tenant the account legitimately belongs to,
+  //     ?ids= returns it. Proves the filter is not over-strict.
+  {
+    const out = await listAccounts({
+      ids: [twoAcAccount.id],
+      allowedCompanyIds: allowedScoped,
+      limit: 50,
+    });
+    const found = (out?.accounts ?? []).some((a) => a.id === twoAcAccount.id);
+    record('11) P2 — ?ids= keeps in-scope id (recents normal path)',
+      found,
+      `requestedId=${twoAcAccount.id} allowed=[${allowedScoped.join(',')}] found=${found}`,
+    );
+  }
+
+  // 12) Name regression on the same scoped user: searching by Account name
+  //     must still surface the account (the OR is name OR vkn OR external
+  //     code OR contact). The outer scope still allows the account because
+  //     it has at least one AC in `allowedScoped`.
+  if (twoAcAccount.name && twoAcAccount.name.length >= 2) {
+    const slice = twoAcAccount.name.slice(0, Math.min(4, twoAcAccount.name.length));
+    const out = await listAccounts({
+      search: slice,
+      allowedCompanyIds: allowedScoped,
+      limit: 50,
+    });
+    const found = (out?.accounts ?? []).some((a) => a.id === twoAcAccount.id);
+    record('12) Regression — name search still works under scoped allowedCompanyIds',
+      found,
+      `q="${slice}" found=${found}`,
+    );
+  } else {
+    skip('12) Name regression probe', 'fixture name too short');
+  }
+}
+
+// Cleanup synthesized fixture.
+if (tempAccountId) {
+  await prisma.accountCompany.deleteMany({ where: { accountId: tempAccountId } }).catch(() => {});
+  await prisma.account.delete({ where: { id: tempAccountId } }).catch(() => {});
 }
 
 await prisma.$disconnect();

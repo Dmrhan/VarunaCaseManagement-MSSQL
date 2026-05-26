@@ -298,6 +298,13 @@ export interface AccountListParams {
   search?: string;
   companyId?: string;
   status?: string;
+  /**
+   * C2 recents revalidation: explicit account ids. Server applies tenant
+   * scope on top, so an out-of-scope id passed from a stale localStorage
+   * cache silently drops out instead of leaking. Empty array returns
+   * empty result.
+   */
+  ids?: string[];
   page?: number;
   limit?: number;
 }
@@ -447,6 +454,7 @@ function buildQuery(params: AccountListParams): string {
   if (params.search && params.search.length >= 2) usp.set('search', params.search);
   if (params.companyId) usp.set('companyId', params.companyId);
   if (params.status) usp.set('status', params.status);
+  if (params.ids && params.ids.length > 0) usp.set('ids', params.ids.join(','));
   if (params.page) usp.set('page', String(params.page));
   if (params.limit) usp.set('limit', String(params.limit));
   const qs = usp.toString();
