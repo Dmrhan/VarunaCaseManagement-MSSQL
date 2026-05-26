@@ -63,6 +63,20 @@ interface NewCaseFormProps {
   onClose: () => void;
   onCreated: (c: Case) => void;
   onShowExisting?: (caseId: string) => void;
+  /**
+   * C3 / WR-C3 — Caller'dan gelen başlangıç bağlamı. AccountDetail'in
+   * "Yeni Vaka" butonu bu prop ile formu `{ accountId, companyId,
+   * accountName }` ile seed eder. Operatör müşteri/şirket'i değiştirebilir
+   * (locked değildir). Mevcut catalog/project/suggestedPackage effect'leri
+   * accountId+companyId üzerinden doğal davranır; C3 burada manuel
+   * preselect yapmaz. `accountName` müşteri seçici görsel kutusunun ilk
+   * render'ında doldurulur — yoksa picker boş görünür.
+   */
+  initialContext?: {
+    accountId?: string;
+    companyId?: string;
+    accountName?: string;
+  };
 }
 
 const emptyForm = {
@@ -159,11 +173,15 @@ const TYPE_CARD_META: Record<CaseType, { label: string; icon: React.ReactNode; t
   },
 };
 
-export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCaseFormProps) {
+export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialContext }: NewCaseFormProps) {
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  // C3: initial-seed sırasında companyId effect'inin müşteri alanını
+  // temizlemesini engelleyen tek-atış flag. Operator'un sonradan şirketi
+  // değiştirmesi (user-driven) normal temizleme akışını yine tetikler.
+  const justSeededRef = useRef(false);
   const [duplicateCase, setDuplicateCase] = useState<Case | undefined>(undefined);
   const [overrideDuplicate, setOverrideDuplicate] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
@@ -260,7 +278,30 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
       setAiCardCollapsed(false);
       setAiApplied(false);
       setTitleApplied(false);
+    } else if (
+      initialContext &&
+      (initialContext.accountId || initialContext.companyId)
+    ) {
+      // C3: seed the form with the caller's context. Picker / company
+      // combobox stay editable; downstream effects (catalog, project,
+      // suggestedPackage, account/company reconciliation) take over from
+      // here using accountId+companyId as before. accountName seeds the
+      // picker's visible row so the operator immediately sees who is
+      // pre-selected. `justSeededRef` makes the company-change effect
+      // honor the seed once instead of wiping accountId.
+      if (initialContext.accountId) justSeededRef.current = true;
+      setForm((f) => ({
+        ...f,
+        accountId: initialContext.accountId ?? f.accountId,
+        accountName: initialContext.accountName ?? f.accountName,
+        companyId: initialContext.companyId ?? f.companyId,
+      }));
     }
+    // We intentionally do NOT depend on initialContext identity here — if
+    // the modal is reopened with the same context object, behavior is the
+    // same as the first open. Re-seeding while the form is open could
+    // wipe operator edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Şirket değişince müşteri seçimini + başvuran bilgilerini sıfırla. Picker
@@ -269,6 +310,15 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting }: NewCas
   // kapanır (accountName='' olur), requester fields temizlenir.
   // WR-A4: proje seçimi de sıfırlanır (companyId değiştiyse eski proje irrelevant).
   useEffect(() => {
+    // C3: ilk açılışta initialContext.companyId seeding nedeniyle bu effect
+    // tetiklenir; o tek-atış geçişte müşteri alanını TEMİZLEME — operatörün
+    // gördüğü pre-fill kaybolur. Bir sonraki kullanıcı kaynaklı şirket
+    // değişiminde normal temizleme akışı çalışır.
+    if (justSeededRef.current) {
+      justSeededRef.current = false;
+      setProjects([]);
+      return;
+    }
     setForm((f) => {
       const noState =
         !f.accountId &&
