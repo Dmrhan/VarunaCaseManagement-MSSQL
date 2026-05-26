@@ -64,10 +64,19 @@ router.get(
   requireRole(...LIST_ROLES),
   asyncRoute(async (req, res) => {
     const { search, companyId, status, page, limit } = req.query;
+    // C2 recents revalidation: ?ids=a,b,c — explicit id filter combined with
+    // tenant scope. The repo drops out-of-scope ids via buildScopeWhere so a
+    // stale localStorage cache cannot surface forbidden accounts.
+    const rawIds = typeof req.query.ids === 'string' ? req.query.ids : '';
+    const parsedIds = rawIds
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
     const result = await accountRepository.listAccounts({
       search,
       companyId,
       status,
+      ids: rawIds ? parsedIds : undefined,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
       allowedCompanyIds: req.user.allowedCompanyIds,
