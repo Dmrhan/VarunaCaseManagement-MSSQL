@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bell, Loader2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
+import { HelpButton, HelpDrawer } from '@/components/ui/HelpDrawer';
+import { ACTION_CENTER_HELP } from '@/features/admin/helpContents';
 import {
   actionCenterService,
   ACTION_CENTER_EVENT,
@@ -38,6 +40,7 @@ export function ActionCenterDrawer({
   const [view, setView] = useState<ActionCenterView>('action');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ActionCenterListResponse | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -96,14 +99,17 @@ export function ActionCenterDrawer({
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-bg"
-            aria-label="Kapat"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-bg"
+              aria-label="Kapat"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </header>
 
         <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-2 py-2 text-xs dark:border-ndark-border">
@@ -171,6 +177,12 @@ export function ActionCenterDrawer({
           )}
         </div>
       </aside>
+      <HelpDrawer
+        open={helpOpen}
+        title={ACTION_CENTER_HELP.title}
+        sections={ACTION_CENTER_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+      />
     </>
   );
 }

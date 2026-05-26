@@ -1,7 +1,7 @@
 /**
  * WR-ACTION-CENTER Phase 1 — Approval Visibility MVP smoke.
  *
- * Repository-level (HTTP yok). Card §16.1's 14 scenarios:
+ * Repository-level (HTTP yok). 19 scenarios:
  *
  *   1.  setup           Create policy + agent + team lead + admin
  *   2.  submit          → approval_pending ActionItem appears for team lead
@@ -17,6 +17,11 @@
  *   12. lazy wake-up    snoozedUntil past → next summary brings back to Pending
  *   13. dismiss         state=Dismissed, closeNote set
  *   14. fire-and-forget submitApproval succeeds even when emitActionItem stubs throw
+ *   15. P1 review#1     case_returned_to_assignee targets CURRENT assignee, not stale submitter
+ *   16. P1 review#2     getDashboard pendingApprovalsInbox tenant-scoped
+ *   17. Acceptance P1#1 non-snapshotted eligible Supervisor decides via fan-out + sibling Expired
+ *   18. Acceptance P1#1 unrelated user (outside eligible set) still 403
+ *   19. Acceptance P2#4 markDone closes case_returned_to_assignee (Tamamlandı inbox button)
  *
  * Run: node --env-file=.env scripts/smoke-action-center-phase1.js
  * Cleanup: all rows removed in finally{}.
@@ -717,6 +722,243 @@ async function run() {
         'skipped — only one active company in tenant set',
       );
     }
+
+    // ─── Phase 1 ACCEPTANCE FIXES ────────────────────────────────────
+    // 17. P1#1 fan-out authority — non-snapshotted but eligible
+    //     Supervisor can decide via Action Center.
+    // 18. Unrelated user (no Supervisor membership) still 403.
+    // 19. P2#4 — markDone works for kind=case_returned_to_assignee
+    //     (the "Tamamlandı" inbox button reuses the same endpoint).
+
+    // Deactivate the AssignedTeamLead policy from setup so the new
+    // Supervisor-role policy is the one matchPolicyForCase resolves.
+    await prisma.resolutionApprovalPolicy.update({
+      where: { id: policy.id },
+      data: { isActive: false },
+    });
+
+    // Two Supervisor-role members.
+    const sup1Person = await prisma.person.create({
+      data: {
+        name: `${PREFIX}-sup1`,
+        teamId: team.id,
+        isActive: true,
+        email: `${PREFIX}-sup1@smoke.test`,
+      },
+    });
+    created.persons.push(sup1Person.id);
+    const sup1User = await prisma.user.create({
+      data: {
+        id: randomUUID(),
+        email: `${PREFIX}-sup1-user@smoke.test`,
+        fullName: sup1Person.name,
+        personId: sup1Person.id,
+        isActive: true,
+      },
+    });
+    created.users.push(sup1User.id);
+    await prisma.userCompany.create({
+      data: { userId: sup1User.id, companyId: company.id, role: 'Supervisor', isActive: true },
+    });
+
+    const sup2Person = await prisma.person.create({
+      data: {
+        name: `${PREFIX}-sup2`,
+        teamId: team.id,
+        isActive: true,
+        email: `${PREFIX}-sup2@smoke.test`,
+      },
+    });
+    created.persons.push(sup2Person.id);
+    const sup2User = await prisma.user.create({
+      data: {
+        id: randomUUID(),
+        email: `${PREFIX}-sup2-user@smoke.test`,
+        fullName: sup2Person.name,
+        personId: sup2Person.id,
+        isActive: true,
+      },
+    });
+    created.users.push(sup2User.id);
+    await prisma.userCompany.create({
+      data: { userId: sup2User.id, companyId: company.id, role: 'Supervisor', isActive: true },
+    });
+
+    const supervisorPolicy = await createPolicy({
+      data: {
+        companyId: company.id,
+        name: `${PREFIX}-supervisor-policy`,
+        approverType: 'Supervisor',
+        rejectionBehavior: 'ReturnToAssignee',
+      },
+      user: { id: adminUser.id },
+      allowedCompanyIds,
+    });
+    created.policies.push(supervisorPolicy.id);
+
+    // ─── 17. Non-snapshotted but eligible Supervisor decides ────────
+    const c17 = await newCase('case-17-multi-approver');
+    const approval17 = await submitApproval({
+      caseId: c17.id,
+      payload: { resolutionSummary: 'multi-approver authority test' },
+      user: submitter,
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval17.id);
+    await waitForFireAndForget();
+
+    // resolveApprover sorts Supervisor members by personId asc — pick the
+    // decoy as whichever supervisor is NOT the snapshotted first.
+    const approval17Row = await prisma.caseResolutionApproval.findUnique({
+      where: { id: approval17.id },
+    });
+    const snapshotIsSup1 = approval17Row.expectedApproverPersonId === sup1Person.id;
+    const snapshotUserId = snapshotIsSup1 ? sup1User.id : sup2User.id;
+    const decoyUserId = snapshotIsSup1 ? sup2User.id : sup1User.id;
+    const decoyPersonId = snapshotIsSup1 ? sup2Person.id : sup1Person.id;
+    const decoyPersonName = snapshotIsSup1 ? sup2Person.name : sup1Person.name;
+
+    const sup1Item = await prisma.actionItem.findFirst({
+      where: { userId: sup1User.id, objectId: approval17.id, kind: 'approval_pending' },
+    });
+    const sup2Item = await prisma.actionItem.findFirst({
+      where: { userId: sup2User.id, objectId: approval17.id, kind: 'approval_pending' },
+    });
+    if (sup1Item) created.actionItems.push(sup1Item.id);
+    if (sup2Item) created.actionItems.push(sup2Item.id);
+
+    let decoyApproved = false;
+    let decoyErr = null;
+    try {
+      const u17 = await approveApproval({
+        approvalId: approval17.id,
+        payload: {},
+        user: {
+          id: decoyUserId,
+          personId: decoyPersonId,
+          fullName: decoyPersonName,
+          role: 'Supervisor',
+        },
+        allowedCompanyIds,
+      });
+      decoyApproved = u17.state === 'Approved';
+    } catch (e) {
+      decoyErr = e?.code ?? e?.message;
+    }
+    await waitForFireAndForget();
+
+    const decoyItemAfter = await prisma.actionItem.findFirst({
+      where: { userId: decoyUserId, objectId: approval17.id },
+    });
+    const snapshotItemAfter = await prisma.actionItem.findFirst({
+      where: { userId: snapshotUserId, objectId: approval17.id },
+    });
+
+    record(
+      '17. P1#1 ACCEPT — non-snapshotted eligible Supervisor decides via fan-out + sibling Expired',
+      !!sup1Item && !!sup2Item &&
+        decoyApproved &&
+        decoyItemAfter?.state === 'Done' &&
+        snapshotItemAfter?.state === 'Expired',
+      `bothEmitted=${!!sup1Item && !!sup2Item} decoyApproved=${decoyApproved} ` +
+        `decoyAfter=${decoyItemAfter?.state} snapshotAfter=${snapshotItemAfter?.state} err=${decoyErr ?? ''}`,
+    );
+
+    // ─── 18. Unrelated user (no Supervisor membership) still 403 ────
+    const c18 = await newCase('case-18-unrelated-403');
+    const approval18 = await submitApproval({
+      caseId: c18.id,
+      payload: { resolutionSummary: 'unrelated user must be 403' },
+      user: submitter,
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval18.id);
+    await waitForFireAndForget();
+
+    let r18_forbidden = false;
+    let r18_err = '';
+    try {
+      await approveApproval({
+        approvalId: approval18.id,
+        payload: {},
+        user: {
+          id: memberUser.id, // not a Supervisor; not in resolved.persons
+          personId: memberPerson.id,
+          fullName: memberPerson.name,
+          role: 'Agent',
+        },
+        allowedCompanyIds,
+      });
+    } catch (e) {
+      r18_forbidden = e?.code === 'APPROVAL_FORBIDDEN';
+      r18_err = e?.code ?? e?.message;
+    }
+    const approval18After = await prisma.caseResolutionApproval.findUnique({
+      where: { id: approval18.id },
+    });
+    record(
+      '18. P1#1 ACCEPT — unrelated user (outside eligible set) still 403, state unchanged',
+      r18_forbidden && approval18After?.state === 'Pending',
+      `forbidden=${r18_forbidden} err=${r18_err} state=${approval18After?.state}`,
+    );
+
+    // ─── 19. P2#4 — markDone closes case_returned_to_assignee row ───
+    const c19 = await newCase('case-19-tamamlandi');
+    const approval19 = await submitApproval({
+      caseId: c19.id,
+      payload: { resolutionSummary: 'will be rejected, then assignee marks Done' },
+      user: submitter,
+      allowedCompanyIds,
+    });
+    created.approvals.push(approval19.id);
+    await waitForFireAndForget();
+
+    // Reject as sup1 (eligible Supervisor) → case_returned_to_assignee
+    // routed to memberUser (the case assignee).
+    await rejectApproval({
+      approvalId: approval19.id,
+      payload: { rejectionReason: 'tamamlandı testi — revize et' },
+      user: {
+        id: sup1User.id,
+        personId: sup1Person.id,
+        fullName: sup1Person.name,
+        role: 'Supervisor',
+      },
+      allowedCompanyIds,
+    });
+    await waitForFireAndForget();
+
+    const returnItem19 = await prisma.actionItem.findFirst({
+      where: {
+        kind: 'case_returned_to_assignee',
+        userId: memberUser.id,
+        caseId: c19.id,
+      },
+    });
+    if (returnItem19) created.actionItems.push(returnItem19.id);
+
+    let r19_done = false;
+    let r19_err = '';
+    if (returnItem19) {
+      try {
+        const updated19 = await markDone({
+          id: returnItem19.id,
+          userId: memberUser.id,
+          allowedCompanyIds,
+          payload: { outcome: 'acknowledged' },
+        });
+        r19_done = updated19?.state === 'Done' && updated19?.doneByUserId === memberUser.id;
+      } catch (e) {
+        r19_err = e?.code ?? e?.message;
+      }
+    } else {
+      r19_err = 'no case_returned_to_assignee row emitted';
+    }
+    record(
+      '19. P2#4 — markDone closes case_returned_to_assignee (Tamamlandı inbox button)',
+      r19_done,
+      `done=${r19_done} err=${r19_err}`,
+    );
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
