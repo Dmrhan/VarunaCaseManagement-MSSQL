@@ -412,6 +412,14 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
           contractEndAt: true,
           segment: true,
           notes: true,
+          // WR-D4/D3 Phase 3 — customer response channel preferences.
+          // Without these in the select the AccountCompanyEditor edit
+          // form would load undefined values and round-trip them as
+          // null/defaults on submit, silently resetting stored prefs.
+          preferredResponseChannel: true,
+          responseEmail: true,
+          responsePhone: true,
+          allowCustomerNotifications: true,
           company: {
             select: {
               name: true,
@@ -595,6 +603,15 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       contractEndAt: c.contractEndAt,
       segment: c.segment ?? null,
       notes: c.notes ?? null,
+      // WR-D4/D3 Phase 3 — surface customer response channel prefs to
+      // AccountCompanyEditor so the form initializes with stored values
+      // (and on save round-trips them rather than overwriting with
+      // editor defaults).
+      preferredResponseChannel: c.preferredResponseChannel ?? null,
+      responseEmail: c.responseEmail ?? null,
+      responsePhone: c.responsePhone ?? null,
+      allowCustomerNotifications:
+        typeof c.allowCustomerNotifications === 'boolean' ? c.allowCustomerNotifications : true,
       products: (c.products ?? []).map((p) => ({
         id: p.id,
         productId: p.productId ?? null,
@@ -1001,6 +1018,61 @@ async function loadEditableAccountCompany({ accountId, accountCompanyId, user })
  *  - (companyId, externalCustomerCode) çakışırsa 409
  *  - WR-A7b / DI.1: packageId (varsa) aynı şirkete ait olmalı
  */
+/**
+ * WR-D4/D3 Phase 3 — Shared normalizer for AccountCompany customer
+ * response channel preferences. Used by both addCompanyRelation (create)
+ * and updateCompanyRelation (update).
+ *
+ * Modes:
+ *  - mode='create': returns the FULL prefs object suitable for prisma.create
+ *    `data:`. Missing fields fall back to safe defaults so an admin who
+ *    creates an AC relation without touching the prefs panel still gets
+ *    explicit values (allowCustomerNotifications defaults to true via
+ *    schema; here we leave it undefined so Prisma's @default(true) wins
+ *    when not provided).
+ *  - mode='update': returns ONLY the fields actually present in `data`
+ *    (so absent fields stay untouched — critical for the "edit unrelated
+ *    field shouldn't reset prefs" invariant).
+ *
+ * Whitelisting of the channel value (email/phone/manual/portal/...) is
+ * deliberately deferred to the channel resolver in
+ * notificationRepository so adding a future channel does not require
+ * changing this function.
+ */
+function normalizeAccountCompanyCommPrefs(data, { mode }) {
+  const out = {};
+  const has = (k) => Object.prototype.hasOwnProperty.call(data ?? {}, k);
+
+  if (has('preferredResponseChannel')) {
+    const v = data.preferredResponseChannel;
+    out.preferredResponseChannel = v == null || v === '' ? null : String(v).toLowerCase();
+  } else if (mode === 'create') {
+    out.preferredResponseChannel = null;
+  }
+
+  if (has('responseEmail')) {
+    const v = data.responseEmail;
+    out.responseEmail = v == null || v === '' ? null : String(v).trim();
+  } else if (mode === 'create') {
+    out.responseEmail = null;
+  }
+
+  if (has('responsePhone')) {
+    const v = data.responsePhone;
+    out.responsePhone = v == null || v === '' ? null : String(v).trim();
+  } else if (mode === 'create') {
+    out.responsePhone = null;
+  }
+
+  if (has('allowCustomerNotifications')) {
+    out.allowCustomerNotifications = !!data.allowCustomerNotifications;
+  }
+  // create mode intentionally omits allowCustomerNotifications when absent
+  // so the schema @default(true) applies.
+
+  return out;
+}
+
 export async function addCompanyRelation({ accountId, data, user }) {
   await assertAccountInScope(accountId, user.allowedCompanyIds);
 
@@ -1035,6 +1107,12 @@ export async function addCompanyRelation({ accountId, data, user }) {
     await assertPackageInCompany({ packageId, companyId });
   }
 
+  // WR-D4/D3 Phase 3 — review fix P1#1: persist customer response channel
+  // preferences at create time. AccountCompanyEditor sends these fields
+  // in both create and update flows; previously create silently dropped
+  // them and the freshly-created row always loaded with default prefs.
+  const commPrefs = normalizeAccountCompanyCommPrefs(data ?? {}, { mode: 'create' });
+
   try {
     await prisma.accountCompany.create({
       data: {
@@ -1048,6 +1126,7 @@ export async function addCompanyRelation({ accountId, data, user }) {
         segment: data?.segment ?? null,
         notes: data?.notes ?? null,
         status,
+        ...commPrefs,
       },
     });
   } catch (err) {
@@ -1124,26 +1203,10 @@ export async function updateCompanyRelation({ accountId, accountCompanyId, data,
   }
 
   // WR-D4/D3 Phase 3 — customer response channel preferences.
-  // Free-form string accepted (email/phone/manual/portal); whitelist is
-  // enforced inside the channel resolver so adding a future channel value
-  // does not require this validation to change. Empty string → null.
-  if (data?.preferredResponseChannel !== undefined) {
-    const v = data.preferredResponseChannel;
-    patch.preferredResponseChannel = v == null || v === '' ? null : String(v).toLowerCase();
-  }
-  if (data?.responseEmail !== undefined) {
-    patch.responseEmail = data.responseEmail == null || data.responseEmail === ''
-      ? null
-      : String(data.responseEmail).trim();
-  }
-  if (data?.responsePhone !== undefined) {
-    patch.responsePhone = data.responsePhone == null || data.responsePhone === ''
-      ? null
-      : String(data.responsePhone).trim();
-  }
-  if (data?.allowCustomerNotifications !== undefined) {
-    patch.allowCustomerNotifications = !!data.allowCustomerNotifications;
-  }
+  // Shared normalizer (mode='update' = only-present-keys) preserves
+  // unspecified fields. Editing an unrelated AccountCompany field MUST
+  // NOT reset stored prefs.
+  Object.assign(patch, normalizeAccountCompanyCommPrefs(data ?? {}, { mode: 'update' }));
 
   if (Object.keys(patch).length === 0) {
     return getAccount(accountId, { allowedCompanyIds: user.allowedCompanyIds });

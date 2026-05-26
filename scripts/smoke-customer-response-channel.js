@@ -43,6 +43,11 @@ import {
   createPolicy,
   submitApproval,
 } from '../server/db/approvalRepository.js';
+import {
+  addCompanyRelation,
+  getAccount,
+  updateCompanyRelation,
+} from '../server/db/accountRepository.js';
 import { caseRepository } from '../server/db/caseRepository.js';
 
 const stamp = Date.now();
@@ -562,6 +567,148 @@ async function run() {
       );
     } else {
       record('15b. Level A manual-confirm completes the customer comm loop', false, 'no dispatch');
+    }
+
+    // ─── Phase 3 review fixes (Codex P1 #1 + #2) ────────────────────
+    // Round-trip integrity for AccountCompany customer response channel
+    // preferences across addCompanyRelation (create) and updateCompanyRelation
+    // (update + edit-preserves invariant).
+    //
+    // The bug bundle:
+    //   #1 — addCompanyRelation silently dropped the 4 commPrefs fields
+    //        so AccountCompanyEditor's create flow never persisted them.
+    //   #2 — getAccount did not return the 4 commPrefs columns; the editor
+    //        loaded them as undefined → defaulted → submitted back as
+    //        null/true → overwrote stored values.
+
+    // Need a separate company id (the existing acContactPref is already on
+    // `company.id` — duplicate (accountId, companyId) is unique-blocked.
+    // Pick a second active company for these scenarios, or fall back if
+    // none exists.
+    const secondCompany = await prisma.company.findFirst({
+      where: { id: { not: company.id }, isActive: true },
+      select: { id: true },
+    });
+    if (!secondCompany) {
+      record('16-19. AccountCompany commPrefs round-trip', false, 'second active company not found in tenant set');
+    } else {
+      const allowedForPrefs = [company.id, secondCompany.id];
+      const adminUserForAcc = { id: adminUser.id, role: 'SystemAdmin', allowedCompanyIds: allowedForPrefs };
+
+      // 16) Create with explicit commPrefs → persisted on reload
+      const prefsAccount = await prisma.account.create({
+        data: { name: `${PREFIX}-acc-prefs`, companyId: secondCompany.id },
+      });
+      created.accounts.push(prefsAccount.id);
+
+      await addCompanyRelation({
+        accountId: prefsAccount.id,
+        data: {
+          companyId: secondCompany.id,
+          preferredResponseChannel: 'phone',
+          responseEmail: 'create@smoke.test',
+          responsePhone: '+905550999000',
+          allowCustomerNotifications: false,
+        },
+        user: adminUserForAcc,
+      });
+
+      const reloaded16 = await getAccount(prefsAccount.id, { allowedCompanyIds: allowedForPrefs });
+      const ac16 = reloaded16?.companies?.find((c) => c.companyId === secondCompany.id);
+      // Track the created AC for cleanup.
+      if (ac16?.accountCompanyId) created.accountCompanies.push(ac16.accountCompanyId);
+
+      record(
+        '16. addCompanyRelation persists all 4 commPrefs fields',
+        ac16?.preferredResponseChannel === 'phone' &&
+          ac16?.responseEmail === 'create@smoke.test' &&
+          ac16?.responsePhone === '+905550999000' &&
+          ac16?.allowCustomerNotifications === false,
+        `channel=${ac16?.preferredResponseChannel} email=${ac16?.responseEmail} phone=${ac16?.responsePhone} allow=${ac16?.allowCustomerNotifications}`,
+      );
+
+      // 17) Edit an UNRELATED field (notes) → commPrefs preserved.
+      // Reflects the editor's real submit shape: the loaded relation is
+      // round-tripped, so all commPrefs reappear in the patch body. The
+      // bug was that they came back as defaults; now they come back as the
+      // actual stored values.
+      await updateCompanyRelation({
+        accountId: prefsAccount.id,
+        accountCompanyId: ac16.accountCompanyId,
+        data: {
+          notes: 'edit-only-notes',
+          // Form round-trips loaded values:
+          preferredResponseChannel: ac16.preferredResponseChannel,
+          responseEmail: ac16.responseEmail,
+          responsePhone: ac16.responsePhone,
+          allowCustomerNotifications: ac16.allowCustomerNotifications,
+        },
+        user: adminUserForAcc,
+      });
+      const reloaded17 = await getAccount(prefsAccount.id, { allowedCompanyIds: allowedForPrefs });
+      const ac17 = reloaded17?.companies?.find((c) => c.accountCompanyId === ac16.accountCompanyId);
+      record(
+        '17. updateCompanyRelation editing unrelated field preserves commPrefs',
+        ac17?.preferredResponseChannel === 'phone' &&
+          ac17?.responseEmail === 'create@smoke.test' &&
+          ac17?.responsePhone === '+905550999000' &&
+          ac17?.allowCustomerNotifications === false &&
+          ac17?.notes === 'edit-only-notes',
+        `channel=${ac17?.preferredResponseChannel} email=${ac17?.responseEmail} allow=${ac17?.allowCustomerNotifications}`,
+      );
+
+      // 18) Edit can intentionally change commPrefs.
+      await updateCompanyRelation({
+        accountId: prefsAccount.id,
+        accountCompanyId: ac16.accountCompanyId,
+        data: {
+          preferredResponseChannel: 'email',
+          responseEmail: 'updated@smoke.test',
+          responsePhone: '',
+          allowCustomerNotifications: true,
+        },
+        user: adminUserForAcc,
+      });
+      const reloaded18 = await getAccount(prefsAccount.id, { allowedCompanyIds: allowedForPrefs });
+      const ac18 = reloaded18?.companies?.find((c) => c.accountCompanyId === ac16.accountCompanyId);
+      record(
+        '18. updateCompanyRelation intentionally changes commPrefs (channel + email + clear phone + opt-in)',
+        ac18?.preferredResponseChannel === 'email' &&
+          ac18?.responseEmail === 'updated@smoke.test' &&
+          ac18?.responsePhone === null &&
+          ac18?.allowCustomerNotifications === true,
+        `channel=${ac18?.preferredResponseChannel} email=${ac18?.responseEmail} phone=${ac18?.responsePhone} allow=${ac18?.allowCustomerNotifications}`,
+      );
+
+      // 19) Opt-out (allowCustomerNotifications=false) persists and remains
+      //     false after an unrelated edit (reverse of #17 with opt-out
+      //     explicitly the target invariant).
+      await updateCompanyRelation({
+        accountId: prefsAccount.id,
+        accountCompanyId: ac16.accountCompanyId,
+        data: { allowCustomerNotifications: false },
+        user: adminUserForAcc,
+      });
+      await updateCompanyRelation({
+        accountId: prefsAccount.id,
+        accountCompanyId: ac16.accountCompanyId,
+        data: {
+          segment: 'pilot',
+          // Editor would round-trip current loaded prefs:
+          preferredResponseChannel: 'email',
+          responseEmail: 'updated@smoke.test',
+          responsePhone: null,
+          allowCustomerNotifications: false,
+        },
+        user: adminUserForAcc,
+      });
+      const reloaded19 = await getAccount(prefsAccount.id, { allowedCompanyIds: allowedForPrefs });
+      const ac19 = reloaded19?.companies?.find((c) => c.accountCompanyId === ac16.accountCompanyId);
+      record(
+        '19. allowCustomerNotifications=false persists across unrelated edits',
+        ac19?.allowCustomerNotifications === false && ac19?.segment === 'pilot',
+        `allow=${ac19?.allowCustomerNotifications} segment=${ac19?.segment}`,
+      );
     }
   } catch (err) {
     console.error('smoke fatal:', err);
