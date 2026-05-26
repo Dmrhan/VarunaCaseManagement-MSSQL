@@ -601,6 +601,19 @@ export async function approveApproval({ approvalId, payload, user, allowedCompan
   if (!authorized) {
     throw new ApprovalAccessError('Bu onayı verme yetkin yok.');
   }
+  // Decision-time self-approval guard. Submit-time check only catches the
+  // case where the submitter equals the snapshotted approverPersonId. For
+  // role-based policies with multi-approver fan-out, a submitter who is
+  // *also* in the eligible set (but not snapshotted) would otherwise slip
+  // past userIsEligibleApprover and approve their own submission. Block
+  // here so allowSelfApprove=false is honored regardless of which eligible
+  // user decides. SystemAdmin override path still bypasses, by design.
+  if (!override && row.policy?.allowSelfApprove === false && row.submittedByUserId === user.id) {
+    throw new ApprovalValidationError(
+      'Kendi gönderdiğin çözüm onayını onaylayamazsın; bu politika self-approval\'a izin vermiyor.',
+      { code: 'self_approval_blocked', status: 403 },
+    );
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const u = await tx.caseResolutionApproval.update({
@@ -710,6 +723,15 @@ export async function rejectApproval({ approvalId, payload, user, allowedCompany
   const authorized = override || (await userIsEligibleApprover({ row, user }));
   if (!authorized) {
     throw new ApprovalAccessError('Bu onayı reddetme yetkin yok.');
+  }
+  // Decision-time self-approval guard — see approveApproval above for the
+  // rationale. Reject path is symmetric: a submitter who is also eligible
+  // for the role-based policy must not be able to reject their own row.
+  if (!override && row.policy?.allowSelfApprove === false && row.submittedByUserId === user.id) {
+    throw new ApprovalValidationError(
+      'Kendi gönderdiğin çözüm onayını reddedemezsin; bu politika self-approval\'a izin vermiyor.',
+      { code: 'self_approval_blocked', status: 403 },
+    );
   }
 
   const behavior = row.policy?.rejectionBehavior ?? 'ReturnToAssignee';

@@ -30,7 +30,7 @@ export function PendingApprovalsPanel({
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
             <ShieldCheck size={16} />
           </span>
-          Bekleyen Onaylarım
+          Onayımda Bekleyenler
           {count > 0 && <Badge tint="amber">{count}</Badge>}
         </h2>
         {count > 0 && (
@@ -39,7 +39,7 @@ export function PendingApprovalsPanel({
             onClick={onOpenDrawer}
             className="text-xs font-medium text-violet-600 hover:underline dark:text-violet-300"
           >
-            Eylem Merkezi
+            Aksiyonlarım
           </button>
         )}
       </div>

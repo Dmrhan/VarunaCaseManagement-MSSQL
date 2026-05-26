@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bell, Loader2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
-import { HelpButton, HelpDrawer } from '@/components/ui/HelpDrawer';
-import { ACTION_CENTER_HELP } from '@/features/admin/helpContents';
 import {
   actionCenterService,
   ACTION_CENTER_EVENT,
@@ -13,17 +11,17 @@ import {
 import { ActionItemRow } from './ActionItemRow';
 
 /**
- * WR-ACTION-CENTER Phase 1 — Right-side drawer.
+ * WR-ACTION-CENTER Phase 1 — Right-side drawer ("Aksiyonlarım").
  *
- * 4 tabs: Eylem Bekleyen / Bildirimler / Ertelenen / Yapıldı.
+ * 4 tabs: İşler / Bildirimler / Ertelenen / Tamamlanan.
  * Polls every 30s while open; refreshes on `app:action-center-changed`.
  */
 
 const TABS: { value: ActionCenterView; label: string }[] = [
-  { value: 'action', label: 'Eylem Bekleyen' },
+  { value: 'action', label: 'İşler' },
   { value: 'fyi', label: 'Bildirimler' },
   { value: 'snoozed', label: 'Ertelenen' },
-  { value: 'done', label: 'Yapıldı' },
+  { value: 'done', label: 'Tamamlanan' },
 ];
 
 const POLL_MS = 30000;
@@ -40,7 +38,6 @@ export function ActionCenterDrawer({
   const [view, setView] = useState<ActionCenterView>('action');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ActionCenterListResponse | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -84,7 +81,7 @@ export function ActionCenterDrawer({
       />
       <aside
         role="complementary"
-        aria-label="Eylem Merkezi"
+        aria-label="Aksiyonlarım"
         className="fixed inset-y-0 right-0 z-50 flex w-96 max-w-[92vw] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-card"
       >
         <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-ndark-border dark:bg-ndark-bg/30">
@@ -92,24 +89,21 @@ export function ActionCenterDrawer({
             <Bell size={16} className="text-violet-600 dark:text-violet-400" />
             <div>
               <div className="text-sm font-semibold text-slate-800 dark:text-ndark-text">
-                Eylem Merkezi
+                Aksiyonlarım
               </div>
               <div className="text-[11px] text-slate-500 dark:text-ndark-muted">
-                Sana atanmış işler ve bildirimler
+                Sana atanan işler ve bilgilendirmeler
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <HelpButton onClick={() => setHelpOpen((v) => !v)} active={helpOpen} />
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-bg"
-              aria-label="Kapat"
-            >
-              <X size={14} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-ndark-bg"
+            aria-label="Kapat"
+          >
+            <X size={14} />
+          </button>
         </header>
 
         <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-2 py-2 text-xs dark:border-ndark-border">
@@ -153,10 +147,10 @@ export function ActionCenterDrawer({
           {!loading && items.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 text-center text-xs text-slate-500 dark:text-ndark-muted">
               <Bell size={24} className="mb-2 text-emerald-500" />
-              {view === 'action' && <span>Bekleyen eylem yok — temizsin.</span>}
-              {view === 'fyi' && <span>Yeni bildirim yok.</span>}
-              {view === 'snoozed' && <span>Ertelediğin öğe yok.</span>}
-              {view === 'done' && <span>Son 7 günde tamamlanmış öğe yok.</span>}
+              {view === 'action' && <span>Şu an senden aksiyon bekleyen iş yok.</span>}
+              {view === 'fyi' && <span>Yeni bilgilendirme yok.</span>}
+              {view === 'snoozed' && <span>Ertelenmiş iş yok.</span>}
+              {view === 'done' && <span>Son 7 günde tamamlanmış iş yok.</span>}
             </div>
           )}
           {!loading && items.length > 0 && (
@@ -177,12 +171,6 @@ export function ActionCenterDrawer({
           )}
         </div>
       </aside>
-      <HelpDrawer
-        open={helpOpen}
-        title={ACTION_CENTER_HELP.title}
-        sections={ACTION_CENTER_HELP.sections}
-        onClose={() => setHelpOpen(false)}
-      />
     </>
   );
 }

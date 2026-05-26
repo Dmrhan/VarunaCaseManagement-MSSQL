@@ -47,7 +47,7 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
   }, [refresh]);
 
   const { actionRequired, fyi } = counts;
-  const tooltip = `${actionRequired} eylem bekliyor, ${fyi} bildirim`;
+  const tooltip = `Aksiyonlarım — ${actionRequired} iş bekliyor, ${fyi} bildirim`;
 
   return (
     <>
