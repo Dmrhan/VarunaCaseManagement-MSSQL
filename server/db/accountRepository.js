@@ -176,7 +176,12 @@ function shapeAccountRow(account, { caseAggregates }) {
 /**
  * GET /api/accounts — liste.
  *
- * search: min 2 char. (name contains) OR (vkn startsWith) OR (contact phone/email contains).
+ * search: min 2 char. Aşağıdaki alanlar OR'lanır — tenant scope (allowedCompanyIds)
+ * her durumda dış WHERE'de korunur, OR sadece eşleştirme alanlarını genişletir:
+ *   - name (contains, case-insensitive)
+ *   - vkn (startsWith)
+ *   - AccountCompany.externalCustomerCode (contains, case-insensitive) — C2
+ *   - contact phone/email (contains, case-insensitive)
  * companyId: filter (allowedCompanyIds içinde olmalı).
  * status: AccountCompany.status filter (active/churn/prospect/inactive).
  */
@@ -205,6 +210,16 @@ export async function listAccounts({
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
         { vkn: { startsWith: q } },
+        // C2: müşterinin herhangi bir AccountCompany ilişkisindeki external
+        // kodu içerikle eşle. allowedCompanyIds dış WHERE'de zorlandığı için
+        // bu OR yalnız eşleştirme alanını genişletir, scope'u açmaz.
+        {
+          companies: {
+            some: {
+              externalCustomerCode: { contains: q, mode: 'insensitive' },
+            },
+          },
+        },
         {
           contacts: {
             some: {
