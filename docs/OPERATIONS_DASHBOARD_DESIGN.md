@@ -3172,6 +3172,8 @@ Dashboard **AI Fabric** ürün vaadini taşır:
 
 ## 7. Açık sorular
 
+> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Bu §7'deki 50 numbered soru orada R(esolved) / P(ending) / D(eferred) etiketleri ile OD-XXX ID'leri altında izlenir (Q11 OD-089 RESOLVED, Q26 OD-172 OBSOLETE, geri kalanlar PENDING/DEFERRED). Yeni karar verildiğinde önce OPEN_DECISIONS.md güncellenir.
+
 1. **Granularity hour vs day**: 7 günden kısa aralıkta hour, fazla aralıkta day mı? Yoksa kullanıcı seçimi mi? (Önerilen: otomatik — aralık ≤ 7g → hour)
 2. **Top N kaç olsun**: Top 10 takım, top 20 kategori, top 10 müşteri yeterli mi? Çoğu enterprise dashboard 10 ile başlar; "Tümünü gör" link'i drill-down açar.
 3. **Saat dilimi**: Tüm metrikler `Europe/Istanbul` timezone'da göster (Action Summary'deki kural). Backend UTC, frontend convert.

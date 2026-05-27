@@ -169,6 +169,8 @@ Bağımlılık zinciri başka türlü baskı yapmadıkça aşağıdaki sıra uyg
 
 ## Do Not Forget / Product Decisions Needed
 
+> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Aşağıdaki 15 madde orada OD-020 (TCKN strategy = RESOLVED), OD-007 (Phone uniqueness = RESOLVED), OD-008 (Import rules = RESOLVED), OD-025 (Public form auth), OD-110/111 (Jira sync + reopen), OD-112 (AloTech), OD-113 (Caller ID), OD-030 (Pattern source), OD-114 (AD/Emakin) gibi ID'lerle izlenir. Yeni karar alındığında bu tabloyu güncellemek yerine önce OPEN_DECISIONS.md güncellenir; gelecek refactor turunda bu tablo OPEN_DECISIONS.md'ye migrate edilecek.
+
 Aşağıdaki kararlar verilmeden ilgili item başlamaz. Toplantı/karar sprint'inin ana ajandası:
 
 | # | Karar | İlgili ID | Seçenekler / sorular |

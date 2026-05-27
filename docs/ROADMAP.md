@@ -8,6 +8,8 @@ PRODUCT_SPEC.md mevcut ürün davranışını tanımlar. ROADMAP.md gelecek
 PRODUCT_SPEC.md öncelikli kabul edilir — bir özellik shipped olunca buraya
 ekleniyor demektir.
 
+> **Açık ürün/teknik kararlar için canonical register:** [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md) — bu doc'taki PENDING / DEFERRED future direction item'ları ilgili OD-XXX kararlarına bağlıdır.
+
 **Status etiketleri:**
 - **Proposed** — fikir aşamasında, tasarım/karar bekliyor
 - **Planned** — onaylanmış, sprintliği bekliyor

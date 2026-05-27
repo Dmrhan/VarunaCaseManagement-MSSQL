@@ -228,6 +228,8 @@ dashboard-chat     → top 30 + KPI context soru-cevap
 15. Açık Karar Noktaları
 KonuDurumSLA 7/24✅ KararlandıAI modeli (OpenAI)✅ AktifJira → SLA pause⚠️ NetleştirilmeliDuplicate override✅ KararlandıFAZ 2 DB stack✅ Supabase Postgres (Frankfurt EU) + Prisma 6Auth çözümü✅ Supabase Auth (email/password + Google OAuth)Dosya storage✅ Supabase Storage (signed upload URL pattern)OpenAI DPA (KVKK)⚠️ Hukuk ekibi
 
+> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). "Jira → SLA pause" = OD-001 PENDING; "OpenAI DPA (KVKK)" = OD-021 PENDING. PR-D PRODUCT_SPEC refresh turunda bu tablo OPEN_DECISIONS.md'ye migrate edilecek.
+
 16. Değişiklik Kaydı
 v2.1 — Mayıs 2026
 
