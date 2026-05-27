@@ -281,7 +281,10 @@ export default function App() {
         <div className="flex items-center gap-1">
           {/* WR-ACTION-CENTER Phase 1 — left of existing bell; two-counter design (Action + FYI). */}
           {user && featureFlags.actionCenterEnabled && <ActionCenterBell onCaseOpen={openCase} />}
-          {user && <MentionBellBadge onCaseClick={openCase} />}
+          {/* WR-NOTIFICATION-CENTER Phase 2A — eski bahsetme zili default
+              gizli. VITE_LEGACY_MENTION_BELL_ENABLED=true ile acil
+              rollback yolu olarak geri açılabilir. */}
+          {user && featureFlags.legacyMentionBellEnabled && <MentionBellBadge onCaseClick={openCase} />}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}

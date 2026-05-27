@@ -49,6 +49,8 @@ const ALLOWED_KINDS_PHASE1 = new Set([
   'approval_pending',
   'approval_decided',
   'case_returned_to_assignee',
+  // WR-NOTIFICATION-CENTER Phase 2A — mention adapter.
+  'mention',
 ]);
 
 const ACTIVE_STATES = ['Pending', 'InProgress', 'Snoozed'];
@@ -81,6 +83,150 @@ function trimOptional(value, max) {
     });
   }
   return s;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-NOTIFICATION-CENTER Phase 2A — mention helpers
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Content-derived deterministic dedup key for mention ActionItems.
+ *
+ * Surrogate `CaseMention.id` is NOT used because:
+ *  - Prisma `createMany` does not return generated ids; the live adapter
+ *    runs at the call site BEFORE we hold any ids.
+ *  - A content-derived key lets the backfill script reuse the exact
+ *    same key from existing CaseMention rows without an id round-trip.
+ *
+ * Both the live mention adapter and the backfill script MUST call this
+ * helper. Do not duplicate this string template elsewhere.
+ */
+export function buildMentionDedupKey({ caseId, noteId, mentionedUserId }) {
+  if (!caseId || !noteId || !mentionedUserId) {
+    throw new Error(
+      '[buildMentionDedupKey] caseId, noteId, mentionedUserId zorunlu.',
+    );
+  }
+  return `mention:${caseId}:${noteId}:${mentionedUserId}`;
+}
+
+/**
+ * Strip `@[Name](userId)` mention markup; collapse whitespace; truncate
+ * to `max` chars (default 80) with trailing ellipsis when truncated.
+ * Returns empty string if input would be empty after cleaning.
+ */
+function buildMentionPreview(raw, max = 80) {
+  if (!raw) return '';
+  const stripped = String(raw)
+    // `@[Display](userId)` → `Display`
+    .replace(/@\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    // Normalize all whitespace into single spaces
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!stripped) return '';
+  if (stripped.length <= max) return stripped;
+  return stripped.slice(0, max) + '…';
+}
+
+/**
+ * Build mention reasonLabel per planning card §D.2-A + Phase 2A L4.
+ *   `@Ali Söz 25-001234 yorumunda seni andı: "ilk 80 char..."`
+ * Empty preview omits the trailing `: "…"` clause.
+ */
+function buildMentionReasonLabel({ actorDisplay, caseNumber, preview }) {
+  const display = actorDisplay || 'Kullanıcı';
+  const number = caseNumber || '';
+  const base = `@${display} ${number} yorumunda seni andı`.trim();
+  return preview ? `${base}: "${preview}".` : `${base}.`;
+}
+
+/**
+ * WR-NOTIFICATION-CENTER Phase 2A — emit one mention ActionItem per
+ * mentioned user. Fire-and-forget; never throws. Note/reply creation
+ * must NOT await any individual emit.
+ *
+ * Order of checks per recipient (planning card R6 → R8.a):
+ *   1. R6 — self-mention skip (actor === recipient).
+ *   2. R8.a — defensive UserCompany active membership check. In normal
+ *      flow `addNote`/`addReply` validation already proved this; here we
+ *      run a second time so a future call-site drift can't sneak past.
+ *   3. Build content-derived dedupKey + L4 reasonLabel preview.
+ *   4. emitActionItem upsert.
+ *
+ * @param {Object} args
+ * @param {string} args.caseId
+ * @param {string} args.companyId
+ * @param {string} args.noteId            — id of just-created CaseNote
+ * @param {string[]} args.mentionedUserIds — recipients (parsed)
+ * @param {string} args.actorUserId
+ * @param {string} [args.actorDisplay]    — fullName / authorName preferred
+ * @param {string} [args.caseNumber]
+ * @param {string} [args.caseTitle]
+ * @param {string} [args.noteContent]     — raw, mention-markup preserved
+ */
+export async function emitMentionsForNote({
+  caseId,
+  companyId,
+  noteId,
+  mentionedUserIds,
+  actorUserId,
+  actorDisplay,
+  caseNumber,
+  caseTitle,
+  noteContent,
+}) {
+  try {
+    if (!caseId || !companyId || !noteId) return;
+    const recipients = Array.isArray(mentionedUserIds) ? mentionedUserIds : [];
+    if (recipients.length === 0) return;
+    const preview = buildMentionPreview(noteContent, 80);
+    const reasonLabel = buildMentionReasonLabel({
+      actorDisplay,
+      caseNumber,
+      preview,
+    });
+    for (const mentionedUserId of recipients) {
+      // R6 — self-mention skip
+      if (!mentionedUserId || mentionedUserId === actorUserId) continue;
+      // R8.a — defensive tenant guard; the existing invalid_mentions
+      // validation in addNote/addReply already passed, so this should
+      // normally be true. Future drift is the only failure mode.
+      const member = await prisma.userCompany.findFirst({
+        where: {
+          userId: mentionedUserId,
+          companyId,
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      if (!member) continue;
+      void emitActionItem({
+        kind: 'mention',
+        userId: mentionedUserId,
+        companyId,
+        objectType: 'CaseMention',
+        // R2 — surrogate id is unreliable under createMany; rely on
+        // dedupKey for idempotency instead.
+        objectId: null,
+        caseId,
+        caseNumber: caseNumber ?? null,
+        caseTitle: caseTitle ?? null,
+        generatedBy: actorUserId ? `user:${actorUserId}` : 'system',
+        groupKey: `${caseId}:mention`,
+        dedupKey: buildMentionDedupKey({
+          caseId,
+          noteId,
+          mentionedUserId,
+        }),
+        priority: 50,
+        actionRequired: false,
+        reasonLabel,
+      });
+    }
+  } catch (err) {
+    // Fire-and-forget contract — note/reply creation must never block.
+    console.error('[action-center:emit-mentions] fatal', err?.code, err?.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────

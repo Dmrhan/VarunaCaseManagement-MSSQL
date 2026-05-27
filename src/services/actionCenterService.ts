@@ -16,7 +16,8 @@ import { apiFetch } from './caseService';
 export type ActionItemKind =
   | 'approval_pending'
   | 'approval_decided'
-  | 'case_returned_to_assignee';
+  | 'case_returned_to_assignee'
+  | 'mention';
 
 export type ActionItemState =
   | 'Pending'

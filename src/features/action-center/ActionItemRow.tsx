@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  AtSign,
   CheckCircle2,
   Clock,
   Info,
@@ -19,27 +20,92 @@ import {
 import { approvalService } from '@/services/approvalService';
 
 /**
- * WR-ACTION-CENTER Phase 1 — Single inbox row.
+ * WR-ACTION-CENTER Phase 1 + WR-NOTIFICATION-CENTER Phase 2A — Single
+ * inbox row.
  *
  * Mini-actions per kind:
  *   - approval_pending           → [Vakayı Aç] [Onayla] [Reddet]
  *   - approval_decided           → [Vakayı Aç] [Okundu]
- *   - case_returned_to_assignee  → [Vakayı Aç]
+ *   - case_returned_to_assignee  → [Vakayı Aç] [Tamamlandı]
+ *   - mention                    → [Yorumu Aç] [Okundu]
  *
  * Snooze + Dismiss available as secondary controls.
+ *
+ * L3 (planning card §D.2-F + Phase 2A): rows created within the last
+ * 30 minutes get a subtle left border (amber for action-required,
+ * violet for mention/FYI). No animation; purely CSS.
+ *
+ * L5 (Phase 2A): mention rows render a deterministic monogram avatar
+ * instead of the AtSign icon (Lucide icon is fallback when actor info
+ * is fully missing).
  */
 
 const KIND_ICON = {
   approval_pending: ShieldCheck,
   approval_decided: Info,
   case_returned_to_assignee: ShieldX,
+  mention: AtSign,
 } as const;
 
 const KIND_LABEL = {
   approval_pending: 'Çözüm onayı bekliyor',
   approval_decided: 'Çözüm onayı sonuçlandı',
   case_returned_to_assignee: 'Revizyon gerekiyor',
+  mention: 'Sözü geçti',
 } as const;
+
+// L5 monogram palette — stable hash → index. Random color YASAK; tek
+// renk fallback YASAK (yalnız actor info hiç yoksa AtSign icon'a düşer).
+const MONOGRAM_PALETTE = [
+  'bg-violet-100 text-violet-700',
+  'bg-blue-100 text-blue-700',
+  'bg-emerald-100 text-emerald-700',
+  'bg-amber-100 text-amber-700',
+  'bg-slate-100 text-slate-700',
+] as const;
+
+function stableHashIndex(seed: string, mod: number): number {
+  // djb2 — küçük, deterministik, dependency-free.
+  let h = 5381;
+  for (let i = 0; i < seed.length; i++) {
+    h = ((h << 5) + h + seed.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) % mod;
+}
+
+/** Extract `actorDisplay` from a mention reasonLabel. Falls back to
+ *  generated-by hint if reasonLabel doesn't follow the L4 template. */
+function extractActorSeed(item: ActionItem): { seed: string; initials: string } | null {
+  // L4 template: `@${actorDisplay} ${caseNumber} yorumunda seni andı: "..."`
+  const match = item.reasonLabel?.match(/^@([^\s]+(?:\s[^\s]+)?)\s/);
+  if (match && match[1]) {
+    const display = match[1];
+    const parts = display.split(/\s+/).filter(Boolean);
+    const initials = parts
+      .slice(0, 2)
+      .map((p) => p.charAt(0).toUpperCase())
+      .join('');
+    if (initials) {
+      // seed = generatedBy if available (stable per actor user id), else display
+      const seed = item.generatedBy?.startsWith('user:')
+        ? item.generatedBy.slice('user:'.length)
+        : display;
+      return { seed, initials };
+    }
+  }
+  // Last resort: generatedBy user id as seed; no initials.
+  if (item.generatedBy?.startsWith('user:')) {
+    return { seed: item.generatedBy.slice('user:'.length), initials: '' };
+  }
+  return null;
+}
+
+/** Was this row created within the last 30 minutes? */
+function isRecent(item: ActionItem): boolean {
+  if (!item.createdAt) return false;
+  const ageMs = Date.now() - new Date(item.createdAt).getTime();
+  return ageMs >= 0 && ageMs < 30 * 60 * 1000;
+}
 
 export function ActionItemRow({
   item,
@@ -61,6 +127,16 @@ export function ActionItemRow({
 
   const Icon = KIND_ICON[item.kind] ?? Info;
   const titleLabel = KIND_LABEL[item.kind] ?? item.kind;
+  const isMention = item.kind === 'mention';
+  // L5 — mention monogram avatar (stable hash; AtSign fallback if actor
+  // info missing entirely).
+  const monogram = isMention ? extractActorSeed(item) : null;
+  const monogramClass =
+    monogram && monogram.initials
+      ? MONOGRAM_PALETTE[stableHashIndex(monogram.seed, MONOGRAM_PALETTE.length)]
+      : null;
+  // L3 — 30-minute "recent" highlight (subtle left border).
+  const recent = isRecent(item);
 
   async function handleApprove() {
     if (!item.objectId) return;
@@ -147,16 +223,43 @@ export function ActionItemRow({
 
   const isAction = item.actionRequired && (view === 'action' || view === 'snoozed');
 
+  // L3 recent highlight — applied as an extra left border on top of the
+  // existing surface border. Kind-aware color: amber for action,
+  // violet for mention/FYI.
+  const recentBorder = recent
+    ? isAction
+      ? 'border-l-2 !border-l-amber-300'
+      : 'border-l-2 !border-l-violet-300'
+    : '';
+
   return (
     <div
       className={`rounded-md border px-3 py-2.5 ${
         isAction
           ? 'border-amber-200 bg-amber-50/40 dark:border-amber-800/50 dark:bg-amber-950/20'
           : 'border-slate-200 bg-slate-50/40 dark:border-ndark-border dark:bg-ndark-bg/30'
-      }`}
+      } ${recentBorder}`}
     >
       <div className="flex items-start gap-2">
-        <Icon size={14} className={isAction ? 'mt-0.5 text-amber-600' : 'mt-0.5 text-slate-500'} />
+        {isMention && monogram && monogram.initials ? (
+          <span
+            className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${monogramClass}`}
+            aria-hidden
+          >
+            {monogram.initials}
+          </span>
+        ) : (
+          <Icon
+            size={14}
+            className={
+              isMention
+                ? 'mt-0.5 text-violet-500'
+                : isAction
+                  ? 'mt-0.5 text-amber-600'
+                  : 'mt-0.5 text-slate-500'
+            }
+          />
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1 text-xs">
             <span className="font-medium text-slate-800 dark:text-ndark-text">{titleLabel}</span>
@@ -186,7 +289,17 @@ export function ActionItemRow({
             <div className="mt-2 flex flex-wrap gap-1">
               {item.caseId && (
                 <Button size="sm" variant="outline" onClick={() => onCaseOpen(item.caseId!)} disabled={busy}>
-                  Vakayı Aç
+                  {isMention ? 'Yorumu Aç' : 'Vakayı Aç'}
+                </Button>
+              )}
+              {isMention && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleMarkDone()}
+                  disabled={busy}
+                >
+                  Okundu
                 </Button>
               )}
               {item.kind === 'approval_pending' && item.objectId && (
