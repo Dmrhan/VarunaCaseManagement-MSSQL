@@ -1,7 +1,7 @@
 /**
  * WR-ACTION-CENTER Phase 1 — Approval Visibility MVP smoke.
  *
- * Repository-level (HTTP yok). 21 scenarios:
+ * Repository-level (HTTP yok). 25 scenarios:
  *
  *   1.  setup           Create policy + agent + team lead + admin
  *   2.  submit          → approval_pending ActionItem appears for team lead
@@ -24,6 +24,10 @@
  *   19. Acceptance P2#4 markDone closes case_returned_to_assignee (Tamamlandı inbox button)
  *   20. Hotfix P1   decision-time self-approval guard blocks non-snapshot submitter on approve; other eligible Supervisor still decides
  *   21. Hotfix P1   decision-time self-approval guard blocks reject path for submitter
+ *   22. Phase 2C P0 unsnooze (actionRequired) — state=Pending; snoozedUntil=null; returns to İşler
+ *   23. Phase 2C P0 unsnooze (FYI) — state=Pending; actionRequired=false; returns to Bildirimler
+ *   24. Phase 2C P0 unsnooze on non-Snoozed row → 409 action_item_not_snoozed
+ *   25. Phase 2C P0 unsnooze owner guard — wrong user → ActionItemAccessError, state unchanged
  *
  * Run: node --env-file=.env scripts/smoke-action-center-phase1.js
  * Cleanup: all rows removed in finally{}.
@@ -43,6 +47,7 @@ import {
   markInProgressForCase,
   snooze,
   summaryForUser,
+  unsnooze,
 } from '../server/db/actionItemRepository.js';
 import {
   approveApproval,
@@ -1094,6 +1099,146 @@ async function run() {
       '21. Decision-time self-approval guard blocks reject path for submitter',
       r21_blocked && approval21After?.state === 'Pending',
       `blocked=${r21_blocked} err=${r21_err} state=${approval21After?.state}`,
+    );
+
+    // ─── WR-NOTIFICATION-CENTER Phase 2C P0 — manual unsnooze ────────
+    // 22. Snooze an actionRequired=true item then unsnooze →
+    //     returns to active queue, state=Pending, snoozedUntil=null.
+    // 23. Snooze an actionRequired=false (FYI) item then unsnooze →
+    //     same lifecycle, lands back in Bildirimler logical bucket
+    //     (state=Pending + actionRequired=false).
+    // 24. Calling unsnooze on a non-Snoozed row returns 409 with
+    //     code action_item_not_snoozed.
+    // 25. Another user cannot unsnooze someone else's item (owner +
+    //     tenant guard via loadOwnedItemOr403).
+
+    // ─── 22. actionRequired item snooze → unsnooze ───────────────────
+    let unsnoozeAction = await prisma.actionItem.create({
+      data: {
+        userId: leadUser.id,
+        companyId: company.id,
+        kind: 'approval_pending',
+        state: 'Pending',
+        actionRequired: true,
+        priority: 70,
+        reasonLabel: '22 — snooze-undo action item',
+      },
+    });
+    created.actionItems.push(unsnoozeAction.id);
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const snoozedAction = await snooze({
+      id: unsnoozeAction.id,
+      userId: leadUser.id,
+      allowedCompanyIds,
+      payload: { snoozedUntil: future.toISOString() },
+    });
+    const restoredAction = await unsnooze({
+      id: unsnoozeAction.id,
+      userId: leadUser.id,
+      allowedCompanyIds,
+    });
+    record(
+      '22. unsnooze (actionRequired) — state=Pending; snoozedUntil=null; returns to İşler',
+      snoozedAction.state === 'Snoozed' &&
+        snoozedAction.snoozedUntil != null &&
+        restoredAction.state === 'Pending' &&
+        restoredAction.snoozedUntil === null &&
+        restoredAction.actionRequired === true,
+      `snoozed.state=${snoozedAction.state} restored.state=${restoredAction.state} ` +
+        `restored.snoozedUntil=${restoredAction.snoozedUntil} actionReq=${restoredAction.actionRequired}`,
+    );
+
+    // ─── 23. FYI item snooze → unsnooze ──────────────────────────────
+    let unsnoozeFyi = await prisma.actionItem.create({
+      data: {
+        userId: leadUser.id,
+        companyId: company.id,
+        kind: 'approval_decided',
+        state: 'Pending',
+        actionRequired: false,
+        priority: 30,
+        reasonLabel: '23 — snooze-undo FYI item',
+      },
+    });
+    created.actionItems.push(unsnoozeFyi.id);
+    await snooze({
+      id: unsnoozeFyi.id,
+      userId: leadUser.id,
+      allowedCompanyIds,
+      payload: { snoozedUntil: future.toISOString() },
+    });
+    const restoredFyi = await unsnooze({
+      id: unsnoozeFyi.id,
+      userId: leadUser.id,
+      allowedCompanyIds,
+    });
+    record(
+      '23. unsnooze (FYI) — state=Pending; snoozedUntil=null; actionRequired=false (Bildirimler)',
+      restoredFyi.state === 'Pending' &&
+        restoredFyi.snoozedUntil === null &&
+        restoredFyi.actionRequired === false,
+      `state=${restoredFyi.state} snoozedUntil=${restoredFyi.snoozedUntil} actionReq=${restoredFyi.actionRequired}`,
+    );
+
+    // ─── 24. Non-snoozed unsnooze → 409 action_item_not_snoozed ──────
+    let r24_blocked = false;
+    let r24_err = '';
+    // restoredFyi above is now Pending — calling unsnooze should 409.
+    try {
+      await unsnooze({
+        id: restoredFyi.id,
+        userId: leadUser.id,
+        allowedCompanyIds,
+      });
+    } catch (e) {
+      r24_blocked = e?.code === 'action_item_not_snoozed';
+      r24_err = e?.code ?? e?.message;
+    }
+    record(
+      '24. unsnooze on non-Snoozed row → 409 action_item_not_snoozed',
+      r24_blocked,
+      `code=${r24_err}`,
+    );
+
+    // ─── 25. Owner/tenant guard — wrong user cannot unsnooze ─────────
+    // Snooze a row owned by leadUser; memberUser tries to unsnooze.
+    let unsnoozeOwnerCheck = await prisma.actionItem.create({
+      data: {
+        userId: leadUser.id,
+        companyId: company.id,
+        kind: 'approval_pending',
+        state: 'Pending',
+        actionRequired: true,
+        priority: 70,
+        reasonLabel: '25 — owner guard fixture',
+      },
+    });
+    created.actionItems.push(unsnoozeOwnerCheck.id);
+    await snooze({
+      id: unsnoozeOwnerCheck.id,
+      userId: leadUser.id,
+      allowedCompanyIds,
+      payload: { snoozedUntil: future.toISOString() },
+    });
+    let r25_forbidden = false;
+    let r25_err = '';
+    try {
+      await unsnooze({
+        id: unsnoozeOwnerCheck.id,
+        userId: memberUser.id,
+        allowedCompanyIds,
+      });
+    } catch (e) {
+      r25_forbidden = e instanceof ActionItemAccessError;
+      r25_err = e?.code ?? e?.message;
+    }
+    const ownerRowAfter = await prisma.actionItem.findUnique({
+      where: { id: unsnoozeOwnerCheck.id },
+    });
+    record(
+      '25. unsnooze owner guard — wrong user → ActionItemAccessError, state unchanged',
+      r25_forbidden && ownerRowAfter?.state === 'Snoozed',
+      `forbidden=${r25_forbidden} err=${r25_err} state=${ownerRowAfter?.state}`,
     );
   } catch (err) {
     console.error('smoke fatal:', err);
