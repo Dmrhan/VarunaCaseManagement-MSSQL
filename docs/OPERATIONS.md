@@ -693,7 +693,8 @@ curl -X POST http://localhost:3101/api/cron/qa-score \
 
 ## Release Checklist
 
-Kod veya schema degisikligi iceren release icin:
+Kod veya schema degisikligi iceren release icin (degisiklik tipi
+basina gerekli kapilarin tam listesi: [docs/QUALITY_GATES.md](QUALITY_GATES.md)):
 
 - `npm run build` basarili
 - Prisma migration dosyalari commitlenmis
@@ -715,5 +716,7 @@ Documentation-only release icin build check yeterlidir.
 - `README.md`: Proje ozeti ve gelistirme komutlari
 - `docs/API.md`: Endpoint dokumantasyonu
 - `docs/ARCHITECTURE.md`: Sistem mimarisi ve tasarim kararlari
+- `docs/QUALITY_GATES.md`: Degisiklik tipi basina zorunlu kapilar matrisi
+- `docs/AI_WORKFLOW.md`: AI ajan disiplini, review checklist, smoke gate kullanimi
 - `.env.example`: Environment template
 - `prisma/schema.prisma`: Veri modeli
