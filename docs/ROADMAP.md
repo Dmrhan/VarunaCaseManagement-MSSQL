@@ -131,87 +131,56 @@ PRODUCT_SPEC.md, then keep only future enhancements in this roadmap.
 
 ## Recent Ships / Platform Capabilities
 
-Bu bölüm production'da çalışan ana yetenekleri envanterler. Backlog'dan
-shipped'e geçen kalemler buraya tek satır olarak düşülür; detay için
-ilgili planning card veya PRODUCT_SPEC referansı verilir.
+Bu bölüm production'da çalışan ana yetenekleri **capability area'ya göre
+gruplar**; her satır tek bir yetenektir. Detay için ilgili planning card
+veya kod referansı verilir. Bu liste changelog değil — yalnızca bugün
+ürünün ne yapabildiğinin envanteridir.
 
-### Action Center / Aksiyonlarım inbox
-**Status:** Shipped (WR-NOTIFICATION-CENTER Phase 1/2A/2B/2C)
-**Source:** `docs/planning_cards/WR-NOTIFICATION-CENTER-VARUNA-INBOX.md`
-Unified inbox: `kind ∈ {approval, mention, watcher_event, system_alert}`.
-Snooze/done/dismiss + dedupKey + tenant scope. Live emit + backfill
-(legacy CaseNotification → ActionItem). Legacy mention bell hâlâ
-fallback olarak `VITE_LEGACY_MENTION_BELL_ENABLED` flag arkasında.
+> **Spec refresh notu:** Aşağıdaki kalemlerin çoğu PRODUCT_SPEC.md
+> güncelleme turunda ürün davranışı bölümüne taşınacak — "To be moved
+> into PRODUCT_SPEC during product spec refresh." Şimdilik shipped
+> inventory burada.
 
-### Resolution Approval flow
-**Status:** Shipped
-**Source:** `docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md`
-`server/db/approvalRepository.js` — policy matching, submit/approve,
-sibling expiry. ActionItem `kind='approval'` üzerinden inbox'ta görünür.
-Smoke: `scripts/smoke-resolution-approval-flow.js`.
+### Master Data / Account
+- **A2** VKN / TCKN HMAC + last4 + masked storage + phone E.164 normalize + validate endpoints — `docs/planning_cards/WR-A2.md`
+- **A3** Multi-address model (Billing/Shipping/Visit/HQ/Branch); country-agnostic — `docs/planning_cards/WR-A3.md`
+- **A4** AccountProject Phase 1 — `Account → AccountCompany → AccountProject → Case` hiyerarşisi; `Company.projectsEnabled` opt-in — `docs/planning_cards/WR-A4.md`
+- **A6** ProductGroup + Product + `Product.supportLevel` catalog (admin CRUD + lookup bootstrap) — `docs/planning_cards/WR-A6.md`, `WR-A6-PRODUCT-SUPPORT-LEVEL.md`
+- **A7** Package + PackageItem catalog (legacy `AccountCompany.packageName` deprecated, korunur) — `docs/planning_cards/WR-A7.md`
+- **A7b** `Case.productId/packageId` + `AccountCompany.packageId` FK; NewCaseForm + AccountCompanyEditor pickers; DI.1-DI.6 invariants; supportLevel cascade (explicit > Product > Person > Team > L1) — `docs/planning_cards/WR-A7B-INTEGRATED.md`
+- **A8 Phase 1 + 2a Foundation** — Veri Aktarım Stüdyosu (Account import: Stepper + audit + soft rollback); Customer 360 multi-target schema registry + dry-run (no DB mutation) — `docs/planning_cards/WR-A8-PHASE2-CUSTOMER-360-IMPORT.md`
+- **Customer 360 Phase A/B/C2 + deterministic Customer Match suggestions** — Account/AccountCompany/AccountContact/AccountAddress modelleri; AI YOK + auto-link YOK + stable scoring (VKN/telefon/e-posta/ad benzerliği) — `server/db/customerMatchRepository.js`
 
-### Customer 360 — Phase A/B/C2 + deterministic Customer Match
-**Status:** Shipped (Phase D Step 2 prod 2026-05-18)
-**Source:** `docs/planning_cards/` + `server/db/customerMatchRepository.js`
-Account + AccountCompany + AccountContact + AccountAddress modelleri.
-Suggestion engine: AI YOK; auto-link YOK; deterministic + stable scoring
-(VKN, telefon, e-posta, ad benzerliği). Smoke kapsamı: 12+ smoke script.
+### Team & Organization
+- **A5** SupportLevel L1/L2 enum (L3/Expert future-proof); `Case.supportLevel` + `Team.defaultSupportLevel` + `Person.supportLevel` defaults
+- **B1** `Person.isTeamLead` flag — aynı takımda çoklu lead destekli; A5 ile birlikte tek PR — `docs/planning_cards/WR-A5-B1.md`
 
-### Customerless case flow / `customerMatchPending`
-**Status:** Shipped
-Case `accountId=null` geçerli; `customerMatchPending` flag + filter +
-CasesListPage chip + CaseDetailPage match suggestions. Smoke:
-`scripts/smoke-customerless-case-flow.js`.
+### Case Operations
+- **C1** Üstlen / Claim — atomik `updateMany WHERE assignedPersonId IS NULL`; CasesListPage + CaseDetailPage entry points; 409 conflict response — `docs/planning_cards/WR-C1.md`
+- **Customerless case flow / `customerMatchPending`** — `Case.accountId=null` geçerli; flag + list filter + chip + CaseDetailPage match suggestions; smoke `smoke-customerless-case-flow.js`
+- **Case Watcher + Linked Cases** — `CaseWatcher` model + scope-guarded add/remove; `CaseLink` types Related/Duplicate/Parent; `linkRepo` + activity log + watcher self-add suppression (Phase 2C Codex P2)
+- **Reply threading + reactions** — `CaseNote.parentNoteId` + `replyCount` + `ReplyItem`; `CaseNoteReaction` normalized table + `reactionRepo.toggle()` + ActionItem emission (FAZ 2 §4 kısmi — Canlı Özet alt-kalemi BACKLOG P3 Yazman AI'a foldlandı)
+- **Customer Pulse — case detail + new case flow** — full detail in §"Customer Context Intelligence" above
+- **AI Status Report / Durum Raporu** — `server/routes/ai.js` brief/insights/explain/report/drilldown-assistant endpoint'leri; Operations Dashboard + Report Studio konsumasyonu
+- **Watcher Inbox UI (Phase 5c)** — `src/features/my/WatcherInboxPage.tsx` (sidebar > Çalışma Alanım > İzleyici Inbox); kart grid + statü/zaman filtreleri; bell drawer hızlı erişim için kalır
+- **CasesList link count indicator (Phase 5b)** — violet chip `🔗 N` (N>0); `outgoingLinks._count` üzerinden
 
-### External KB console
-**Status:** Shipped
-`server/db/externalKbSettingRepository.js` + admin UI. Smokes:
-`smoke-external-kb-console.js`, `smoke-external-kb-settings.js`.
+### Notifications & Action Center
+- **Action Center / Aksiyonlarım inbox** — WR-NOTIFICATION-CENTER Phase 1/2A/2B/2C; unified inbox `kind ∈ {approval, mention, watcher_event, system_alert}`; snooze/done/dismiss + dedupKey + tenant scope + live emit + backfill; legacy `MentionBellBadge` fallback flag `VITE_LEGACY_MENTION_BELL_ENABLED` — `docs/planning_cards/WR-NOTIFICATION-CENTER-VARUNA-INBOX.md`
+- **D4 Resolution Approval flow** — `approvalRepository.js`: policy matching + matchPolicyForCase precedence + resolveApprover + submit/approve/reject + sibling expiry; ActionItem `kind='approval'` integration; transitionStatus close guard (`approval_required`) — `docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md`
+- **D3 Notification rules + templates + dispatch + customer response channel (Level A)** — `NotificationRule` + `NotificationTemplate` ({{mustache}} render + snapshot + missing-var preview) + `NotificationDispatch` immutable audit + `AccountCompany` response channel fields + per-case `communicationChannelOverride`; manual-confirm flow (copy/mailto/handled-externally + suppression reasons); **aktif e-posta gönderimi yok** (Level B+ deferred)
+- **CaseNotification retention / cleanup cron (Phase 5a)** — `POST /api/cron/notification-cleanup`; `readAt NOT NULL` + 30g+ delete; okunmamışlar korunur; GitHub Actions/UptimeRobot tetikli
 
-### Watcher Inbox UI
-**Status:** Shipped (Phase 5c)
-`src/features/my/WatcherInboxPage.tsx` — sidebar > Çalışma Alanım >
-**İzleyici Inbox**. İzlenen vakalar (kart grid) + son okunmamış generic
-CaseNotification'lar (top 10) + statü/zaman filtreleri. Bell drawer
-hızlı erişim için kalır.
+### Admin & Knowledge
+- **External KB console** — `externalKbSettingRepository.js` + admin UI; smokes `smoke-external-kb-console.js`, `smoke-external-kb-settings.js`
 
-### Reply threading + reactions
-**Status:** Shipped (Faz 2 §4 — kısmi)
-- `CaseNote.parentNoteId` self-relation + `replyCount` (`prisma/schema.prisma:1210-1221`)
-- `CaseNoteReaction` normalized table (NOT Json field — spec'ten sapma) (`schema.prisma:1230-1244`)
-- `ReplyItem` component + reply composer (`CaseDetailPage.tsx`)
-- `reactionRepo.toggle()` (`caseRepository.js:3145`) + ActionItem emission
-
-Kalan alt-kalem: "Canlı Özet kartı" (BACKLOG P3 Yazman AI'a foldlandı).
-Aktivite-seviye reactions (`CaseActivity.reactions`) intentionally
-not-implemented — only note reactions kabul edildi.
-
-### Customer Pulse — case detail + new case flow
-**Status:** Shipped (Phase 1-5)
-Detay yukarıda "Customer Context Intelligence" bölümünde.
-
-### AI Status Report / Durum Raporu
-**Status:** Shipped
-`server/routes/ai.js` brief/insights/explain/report/drilldown-assistant
-endpoint'leri. Operations Dashboard + Report Studio konsumasyonu.
-
-### Sidebar/header redesign
-**Status:** Shipped (commits 2026-04 — 2026-05)
-Kullanıcı + tema kontrolleri sidebar'dan üst-sağ header'a taşındı,
-bottom items pinned, voice button revize, Müşteri Ara header'a. Sidebar
-default dar (icon-only), hover ile genişler.
-
-### CaseNotification retention / cleanup cron
-**Status:** Shipped (Phase 5a)
-`POST /api/cron/notification-cleanup` — `readAt NOT NULL` + 30g+ rows
-delete; okunmamışlar korunur. GitHub Actions/UptimeRobot tarafından
-tetiklenir.
-
-### CasesList link count indicator
-**Status:** Shipped (Phase 5b)
-Vakalar listesinde başlık yanında violet chip `🔗 N` (N>0 ise).
-`outgoingLinks._count` üzerinden hesaplanır; tam liste için Bağlantılar
-sekmesi.
+### Architecture & Quality Posture
+- **G5** Branding / favicon polish — `index.html` head: favicon + apple-touch-icon (1024×1024 PNG) + Türkçe meta description + light/dark `theme-color`
+- **G6** Release regression smoke harness — `scripts/smoke-release-regression.js` (20 senaryo: customer/customerless/strict/project/product/package/DI invariants/supportLevel cascade/claim/lookup scope/TCKN privacy uçtan uca)
+- **H1** Case list server-side `pageSize` cap — `Math.min(200, limit || 25)` defensive cap (Account list pattern'i takip)
+- **H2** Drawer reopen client cache — `src/services/clientCache.ts` module-level Map + TTL 30s; mutation-driven prefix/predicate invalidation; logout'ta full clear
+- **F7** AI telemetry verification smoke — `scripts/smoke-ai-telemetry.js` (38 senaryo; 19/19 AI endpoint `logAIUsage` coverage + privacy guard)
+- **Sidebar / header redesign turu (2026-04 — 2026-05)** — user + tema kontrolleri header'a; bottom items pinned; voice button revize; Müşteri Ara header'a; sidebar default dar (icon-only), hover ile genişler
 
 ---
 
@@ -304,29 +273,16 @@ edildikten sonra burası açılır.
 Şu an üretimde olan ama eksikleri olan veya kısmi özellikler. Test eden
 ekibe `docs/TEST_SCENARIOS.md` ile birlikte verilir.
 
+> **Not:** Önceden bu bölümde "Shipped" etiketiyle listelenen 3 kalem
+> (Watcher Inbox UI, CasesList link count indicator, CaseNotification
+> retention cleanup) canonical olarak §"Recent Ships / Platform
+> Capabilities" altına taşındı — bunlar limitation değil, prod yetenek.
+
 ### E-posta bildirimi
 **Status:** Not implemented
 Tüm `CaseNotification` satırları `channel='InApp'` olarak yazılır.
 Hiçbir notification e-posta tetiklemez. Faz 2 §6 kapsamında WebSocket /
 30sn poll modeline geçildiğinde e-posta opsiyonel kanal olarak eklenebilir.
-
-### Watcher Inbox UI
-**Status:** Shipped (Phase 5c)
-Yeni sayfa: sidebar > Çalışma Alanım > **İzleyici Inbox**. İzlenen
-vakalar (kart grid) + son okunmamış generic CaseNotification'lar (top 10)
-+ statü/zaman filtreleri. Bell drawer hızlı erişim için kalır.
-
-### CasesList link count indicator
-**Status:** Shipped (Phase 5b)
-Vakalar listesinde başlık yanında violet chip `🔗 N` görünür (sadece N>0).
-`outgoingLinks._count` üzerinden hesaplanır; tam liste için Bağlantılar
-sekmesi.
-
-### CaseNotification retention / cleanup
-**Status:** Shipped (Phase 5a)
-`POST /api/cron/notification-cleanup` — `readAt NOT NULL` ve 30g+ eski
-satırları siler; okunmamış bildirimler korunur. Cron tetiklenmesi
-(GitHub Actions / Vercel Cron) ops ekibi tarafından yapılandırılır.
 
 ### Eski notlara reaksiyon bildirimi
 **Status:** Partial — PR #68 sonrası yeni notlar etkilenir
