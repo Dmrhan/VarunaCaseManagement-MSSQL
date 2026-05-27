@@ -274,7 +274,16 @@ async function run() {
         continue;
       }
 
-      // R7 — state mapping
+      // R7 — state mapping.
+      //
+      // CONTRACT — dry-run report semantics:
+      //   created_pending / created_done are "would-create" counts in
+      //   --dry-run mode and "actually-created" counts in --execute
+      //   mode. The counter increments BEFORE the prisma.create call so
+      //   operators see operator-impact preview without writing.
+      //   Eligibility / skip / dedup checks run identically in both
+      //   modes, so the dry-run impact projection equals the next
+      //   --execute outcome (with the same input set).
       const isSeen = !!row.seenAt;
       const c = await caseInfo(row.caseId);
       const display = await actorDisplay(row.mentionedBy);

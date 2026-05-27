@@ -268,27 +268,137 @@ async function run() {
       `inFyi=${inFyi} inAction=${inAction}`,
     );
 
-    // ─── M5: Backfill dry-run ───
-    // Spawn the backfill script via direct import path is awkward; we
-    // verify the contract by exercising the helper-driven logic that
-    // backfill uses. The script-level dry-run is exercised via M6.
+    // ─── M5: Backfill dry-run reports would-create counts ───
+    //
+    // CONTRACT — operator pre-flight check:
+    //   --dry-run must produce a meaningful would-create projection so
+    //   operators can see operational impact BEFORE writing. Therefore
+    //   created_pending / created_done count eligibility-passing,
+    //   not-yet-deduped candidates regardless of whether writes occur.
+    //
+    // Setup: two fresh CaseMention rows planted directly via
+    //   prisma.caseMention.create (bypassing live adapter so they have
+    //   no ActionItem yet):
+    //     · one with seenAt = null  → would-create Pending
+    //     · one with seenAt = past  → would-create Done (migrated-read)
+    // Both target recipients with active UserCompany so no skip
+    // counter fires.
+    //
+    // Assertions:
+    //   1) dry-run report.created_pending >= 1
+    //   2) dry-run report.created_done >= 1
+    //   3) DB ActionItem count for these two dedupKeys unchanged
+    //      (still zero) after dry-run
+    //   4) execute then materializes those two rows
+    //   5) report shape complete (8 counters + dry_run flag)
+    const c5a = await newCase('case-m5a-unseen');
+    const note5a = await prisma.caseNote.create({
+      data: {
+        caseId: c5a.id,
+        companyId: companyA.id,
+        authorName: actor.user.fullName,
+        authorId: actor.user.id,
+        content: 'M5 fixture — unseen historical mention',
+        visibility: 'Internal',
+      },
+    });
+    created.notes.push(note5a.id);
+    const m5a = await prisma.caseMention.create({
+      data: {
+        caseId: c5a.id,
+        noteId: note5a.id,
+        companyId: companyA.id,
+        mentionedUserId: recipient2.user.id,
+        mentionedBy: actor.user.id,
+        createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        seenAt: null,
+      },
+    });
+    created.mentions.push(m5a.id);
+
+    const c5b = await newCase('case-m5b-seen');
+    const note5b = await prisma.caseNote.create({
+      data: {
+        caseId: c5b.id,
+        companyId: companyA.id,
+        authorName: actor.user.fullName,
+        authorId: actor.user.id,
+        content: 'M5 fixture — already-seen historical mention',
+        visibility: 'Internal',
+      },
+    });
+    created.notes.push(note5b.id);
+    const m5b = await prisma.caseMention.create({
+      data: {
+        caseId: c5b.id,
+        noteId: note5b.id,
+        companyId: companyA.id,
+        mentionedUserId: recipient3.user.id,
+        mentionedBy: actor.user.id,
+        createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+        seenAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+      },
+    });
+    created.mentions.push(m5b.id);
+
+    const dedupKey5a = buildMentionDedupKey({
+      caseId: c5a.id, noteId: note5a.id, mentionedUserId: recipient2.user.id,
+    });
+    const dedupKey5b = buildMentionDedupKey({
+      caseId: c5b.id, noteId: note5b.id, mentionedUserId: recipient3.user.id,
+    });
+
+    const preCount = await prisma.actionItem.count({
+      where: { dedupKey: { in: [dedupKey5a, dedupKey5b] } },
+    });
+
     const dryReport = await simulateBackfill({
       windowDays: 30,
       execute: false,
       restrictCompanyId: companyA.id,
     });
-    record(
-      'M5. backfill dry-run — yapısı doğru, yazma yok',
+
+    const postDryCount = await prisma.actionItem.count({
+      where: { dedupKey: { in: [dedupKey5a, dedupKey5b] } },
+    });
+
+    const reportShapeOk =
       typeof dryReport === 'object' &&
-        dryReport.dry_run === true &&
-        typeof dryReport.scanned === 'number' &&
-        typeof dryReport.created_pending === 'number' &&
-        typeof dryReport.created_done === 'number' &&
-        typeof dryReport.skipped_dedup === 'number' &&
-        typeof dryReport.skipped_self_mention === 'number' &&
-        typeof dryReport.skipped_no_membership === 'number' &&
-        typeof dryReport.skipped_inactive_membership === 'number',
-      `scanned=${dryReport?.scanned}`,
+      dryReport.dry_run === true &&
+      typeof dryReport.scanned === 'number' &&
+      typeof dryReport.created_pending === 'number' &&
+      typeof dryReport.created_done === 'number' &&
+      typeof dryReport.skipped_dedup === 'number' &&
+      typeof dryReport.skipped_self_mention === 'number' &&
+      typeof dryReport.skipped_no_membership === 'number' &&
+      typeof dryReport.skipped_inactive_membership === 'number';
+
+    // Now execute and verify the two fixtures actually materialize.
+    const execReport = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    const ai5a = await prisma.actionItem.findUnique({ where: { dedupKey: dedupKey5a } });
+    const ai5b = await prisma.actionItem.findUnique({ where: { dedupKey: dedupKey5b } });
+    if (ai5a) created.actionItems.push(ai5a.id);
+    if (ai5b) created.actionItems.push(ai5b.id);
+
+    record(
+      'M5. backfill dry-run reports would-create counts; execute then materializes',
+      reportShapeOk &&
+        dryReport.created_pending >= 1 &&
+        dryReport.created_done >= 1 &&
+        preCount === 0 &&
+        postDryCount === 0 &&
+        !!ai5a && ai5a.state === 'Pending' &&
+        !!ai5b && ai5b.state === 'Done' && ai5b.doneOutcome === 'migrated-read' &&
+        execReport.created_pending >= 1 &&
+        execReport.created_done >= 1,
+      `dry.would-create=${dryReport.created_pending}/${dryReport.created_done} ` +
+        `preCount=${preCount} postDry=${postDryCount} ` +
+        `ai5a.state=${ai5a?.state} ai5b.state=${ai5b?.state} ` +
+        `exec.created=${execReport.created_pending}/${execReport.created_done}`,
     );
 
     // ─── M6: Backfill idempotency (simulation) ───
@@ -647,6 +757,9 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
     const reasonLabel = preview
       ? `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda seni andı: "${preview}".`.replace(/  +/g, ' ').trim()
       : `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda seni andı.`.replace(/  +/g, ' ').trim();
+    // Mirror the production backfill script contract: counter increments
+    // BEFORE the prisma.create guard, so dry-run produces a meaningful
+    // would-create count operator preview.
     if (row.seenAt) {
       report.created_done += 1;
       if (execute) {
