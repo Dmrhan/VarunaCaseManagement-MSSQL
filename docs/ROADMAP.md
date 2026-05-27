@@ -171,7 +171,7 @@ veya kod referansı verilir. Bu liste changelog değil — yalnızca bugün
 - **Action Center / Aksiyonlarım inbox** — WR-NOTIFICATION-CENTER Phase 1/2A/2B/2C; unified inbox `kind ∈ {approval, mention, watcher_event, system_alert}`; snooze/done/dismiss + dedupKey + tenant scope + live emit + backfill; legacy `MentionBellBadge` fallback flag `VITE_LEGACY_MENTION_BELL_ENABLED` — `docs/planning_cards/WR-NOTIFICATION-CENTER-VARUNA-INBOX.md`
 - **D4 Resolution Approval flow** — `approvalRepository.js`: policy matching + matchPolicyForCase precedence + resolveApprover + submit/approve/reject + sibling expiry; ActionItem `kind='approval'` integration; transitionStatus close guard (`approval_required`) — `docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md`
 - **D3 Notification rules + templates + dispatch + customer response channel (Level A)** — `NotificationRule` + `NotificationTemplate` ({{mustache}} render + snapshot + missing-var preview) + `NotificationDispatch` immutable audit + `AccountCompany` response channel fields + per-case `communicationChannelOverride`; manual-confirm flow (copy/mailto/handled-externally + suppression reasons); **aktif e-posta gönderimi yok** (Level B+ deferred)
-- **CaseNotification retention / cleanup cron (Phase 5a)** — `POST /api/cron/notification-cleanup`; `readAt NOT NULL` + 30g+ delete; okunmamışlar korunur; GitHub Actions/UptimeRobot tetikli
+- **CaseNotification retention / cleanup endpoint (Phase 5a)** — `POST /api/cron/notification-cleanup`; `readAt NOT NULL` + 30g+ delete; okunmamışlar korunur. **Endpoint mevcut**, ancak **zamanlayıcı (scheduler) bu repo'da yapılandırılmadı** — Vercel Cron, GitHub Actions, veya UptimeRobot ile dış zamanlama ops setup item'ı olarak kalır.
 
 ### Admin & Knowledge
 - **External KB console** — `externalKbSettingRepository.js` + admin UI; smokes `smoke-external-kb-console.js`, `smoke-external-kb-settings.js`
@@ -250,8 +250,12 @@ polling. Yakın-vade revisiting beklenmiyor.
 **Priority:** Medium (cost gate)
 **Status:** Proposed
 **Trigger:** Daily cron limit aşılırsa
-Bugün GitHub Actions/UptimeRobot dual-auth pattern (`cron.js:9-11`).
-Vercel Pro'ya geçiş = `vercel.json` crons array etkin + ext-trigger
+Cron route'ları repo'da dual-auth pattern destekliyor (`cron.js:9-11`:
+`CRON_SECRET` + GitHub Actions `GITHUB_TOKEN` accept). **Mevcut
+durumda zamanlayıcı bu repo'da yapılandırılmadı** — `vercel.json`'da
+`crons` array'i yok; cron'ları dışarıdan tetiklemek için Vercel Cron
+(Pro plan), GitHub Actions workflow, veya UptimeRobot ops setup
+gerekir. Vercel Pro'ya geçiş = `vercel.json crons` etkin + ext-trigger
 ihtiyacı kalkar.
 
 ### Notification — Channel matrix + businessHours + daily digest

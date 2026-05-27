@@ -1,5 +1,7 @@
 # Agentic Planning Card — A7b Case ↔ Product/Package/Project Integration
 
+> **⚠ SUPERSEDED:** This card is retained for history only. The canonical implementation card is [`docs/planning_cards/WR-A7B-INTEGRATED.md`](WR-A7B-INTEGRATED.md), which consolidated the 4-phase split (A7b-1..A7b-4) proposed below into a single integrated PR (shipped 2026-05-20 via PR #181 + review fix #182). The phased plan that follows did **not** ship as separate PRs — read this file only for design context.
+
 - **Work Register ID:** A7b (planning only — implementation gated on this card's approval)
 - **Product Planning Matrix IDs touched:** PM-04 (AccountProject), PM-05 (Catalog: Product + Package), PM-03 (Support Level)
 - **Product capability:** Case create/edit'inde Account → AccountCompany → (Package / Product / Project) bağı + supportLevel cascade'i. Vaka açılışından raporlamaya kadar uçtan uca tier-aware iş akışı için temel.

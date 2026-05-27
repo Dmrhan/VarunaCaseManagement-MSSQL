@@ -84,10 +84,12 @@ Bu iki anahtar Supabase Storage bucket yönetimi + signed upload URL üretimi i�
 
 ---
 
-## Sonraki adımlar
+## Sonraki adımlar (tarihsel — orijinal Supabase entegrasyon turundan)
 
-- [ ] Auth/RBAC: Supabase Auth + 5 rol matrisi
-- [ ] Bildirim sistemi (§14): in-app toast + Resend mail
+- [x] Auth/RBAC: Supabase Auth + 6 rol matrisi — **shipped** (Agent / Backoffice / Supervisor / CSM / Admin / SystemAdmin; `verifyJwt` middleware). Detay: `docs/AUTH_SETUP.md`, `docs/PRODUCT_SPEC.md §2`.
+- [ ] Bildirim sistemi: in-app + e-posta — **kısmi**. In-app Action Center / Aksiyonlarım inbox + D3 Notification rules/templates Level A **shipped** (Mayıs 2026). Aktif e-posta (Resend) Level B+ deferred → `docs/BACKLOG.md` P2 "Resend email MVP" + `docs/OPEN_DECISIONS.md` OD-051.
+
+> Bu liste 2026-01 Supabase entegrasyon turundan kalan tarihsel adımlardır. Canonical canlı statü: `docs/ROADMAP.md §"Recent Ships"` + `docs/BACKLOG.md`.
 
 ---
 

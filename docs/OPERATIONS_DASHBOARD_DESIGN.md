@@ -3170,9 +3170,11 @@ Dashboard **AI Fabric** ürün vaadini taşır:
 
 ---
 
-## 7. Açık sorular
+## 7. Açık sorular → [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md)
 
-> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Bu §7'deki 50 numbered soru orada R(esolved) / P(ending) / D(eferred) etiketleri ile OD-XXX ID'leri altında izlenir (Q11 OD-089 RESOLVED, Q26 OD-172 OBSOLETE, geri kalanlar PENDING/DEFERRED). Yeni karar verildiğinde önce OPEN_DECISIONS.md güncellenir.
+**Canonical karar register'ı:** `docs/OPEN_DECISIONS.md`. Aşağıdaki 50 numbered soru **tarihsel referans** olarak korunmuştur — canlı statü için OPEN_DECISIONS.md'deki OD-XXX ID'leri (Q11 → OD-089 RESOLVED, Q26 → OD-172 OBSOLETE, geri kalanlar PENDING/DEFERRED) izleyin. Bu liste güncellenmez; yeni karar verildiğinde **önce** OPEN_DECISIONS.md güncellenir.
+
+> _Aşağıdaki 50-soru listesi 2026-05-27 PR-C oluşturma anındaki snapshot'tır; yalnız tarihsel referans amaçlıdır. Her sorunun bireysel OD-XXX karşılığı OPEN_DECISIONS.md'de §"5. Analytics / Reporting" ve §"7. Architecture / Operations" + §"8. UX / Help / Quality" bölümlerinde dağılmış durumda._
 
 1. **Granularity hour vs day**: 7 günden kısa aralıkta hour, fazla aralıkta day mı? Yoksa kullanıcı seçimi mi? (Önerilen: otomatik — aralık ≤ 7g → hour)
 2. **Top N kaç olsun**: Top 10 takım, top 20 kategori, top 10 müşteri yeterli mi? Çoğu enterprise dashboard 10 ile başlar; "Tümünü gör" link'i drill-down açar.
