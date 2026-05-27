@@ -167,11 +167,11 @@ Bağımlılık zinciri başka türlü baskı yapmadıkça aşağıdaki sıra uyg
 
 ---
 
-## Do Not Forget / Product Decisions Needed
+## Do Not Forget / Product Decisions Needed → [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md)
 
-> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Aşağıdaki 15 madde orada OD-020 (TCKN strategy = RESOLVED), OD-007 (Phone uniqueness = RESOLVED), OD-008 (Import rules = RESOLVED), OD-025 (Public form auth), OD-110/111 (Jira sync + reopen), OD-112 (AloTech), OD-113 (Caller ID), OD-030 (Pattern source), OD-114 (AD/Emakin) gibi ID'lerle izlenir. Yeni karar alındığında bu tabloyu güncellemek yerine önce OPEN_DECISIONS.md güncellenir; gelecek refactor turunda bu tablo OPEN_DECISIONS.md'ye migrate edilecek.
+**Canonical karar register'ı:** `docs/OPEN_DECISIONS.md`. Aşağıdaki 15 madde **tarihsel referans** olarak korunmuştur — canlı statü için OPEN_DECISIONS.md'deki ID'leri (OD-020 TCKN strategy = RESOLVED, OD-007 Phone uniqueness = RESOLVED, OD-008 Import rules = RESOLVED, OD-025 Public form auth = PENDING, OD-110/111 Jira sync + reopen, OD-112 AloTech, OD-113 Caller ID, OD-030 Pattern source, OD-114 AD/Emakin) izleyin. Bu tablo güncellenmez; yeni karar alındığında **önce** OPEN_DECISIONS.md güncellenir.
 
-Aşağıdaki kararlar verilmeden ilgili item başlamaz. Toplantı/karar sprint'inin ana ajandası:
+> _Aşağıdaki tablo 2026-05-27 PR-C oluşturma anındaki snapshot'tır; yalnız tarihsel referans amaçlıdır._
 
 | # | Karar | İlgili ID | Seçenekler / sorular |
 |---|---|---|---|

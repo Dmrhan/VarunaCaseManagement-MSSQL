@@ -673,9 +673,11 @@ Bölüm 5.6'daki Risk Göstergesi rolü orijinal olarak 4 sinyal kaynağıyla ç
 
 ---
 
-## Açık Karar Noktaları
+## Açık Karar Noktaları → [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md)
 
-> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Bu tablodaki kararlar OD-050 (WebSocket vs polling), OD-051 (Resend), OD-052 (SMS provider), OD-032 (sentiment cache), OD-024 (Kiracı AI anahtarı şifreleme), OD-053 (digest saati), OD-033 (Risk Lens ML), OD-005 (Niyet eşiği), OD-006 (etki katsayısı), OD-004 (başarı kriteri zorunluluğu) ID'leri ile orada izlenir.
+**Canonical karar register'ı:** `docs/OPEN_DECISIONS.md`. Aşağıdaki tablo **tarihsel referans** olarak korunmuştur — canlı statü için OPEN_DECISIONS.md'deki ID'leri (OD-050 WebSocket vs polling, OD-051 Resend, OD-052 SMS provider, OD-032 sentiment cache, OD-024 Kiracı AI anahtarı, OD-053 digest saati, OD-033 Risk Lens ML, OD-005 Niyet eşiği, OD-006 etki katsayısı, OD-004 başarı kriteri zorunluluğu) izleyin. Bu tablo güncellenmez; statü değişiklikleri OPEN_DECISIONS.md'de yapılır.
+
+> _Aşağıdaki tablo 2026-05-27 PR-C oluşturma anındaki snapshot'tır; yalnız tarihsel referans amaçlıdır._
 
 | Konu | Soru | Öneri | Öncelik |
 |---|---|---|---|

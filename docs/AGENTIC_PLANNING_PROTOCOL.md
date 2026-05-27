@@ -308,7 +308,7 @@ Detaylı kurallar ve banned/required keyword listesi: [`IN_PRODUCT_HELP_STANDARD
 
 ## 4. Agentic Planning Card Şablonu
 
-Aşağıdaki şablonu kopyala ve her yeni item için doldur. Card'ı `docs/planning_cards/` altında `WR-{ID}.md` adıyla saklamak iyi pratiktir (klasör henüz yok; ilk Card açıldığında oluşturulur).
+Aşağıdaki şablonu kopyala ve her yeni item için doldur. Card'ı `docs/planning_cards/` altında `WR-{ID}.md` adıyla saklamak iyi pratiktir (klasör mevcut; 20+ Card şipped/aktif örneklerle dolu).
 
 ```markdown
 # Agentic Planning Card — {Kısa başlık}

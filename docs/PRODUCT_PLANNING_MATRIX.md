@@ -56,7 +56,7 @@
 
 **Toplam:** 20 capability (P0=3 + P1=11 + P2=6).
 
-**WR kapsama kontrolü:** 41/41 WORK_REGISTER item bu matrix'te en az bir capability altında temsil ediliyor (none omitted).
+**WR kapsama kontrolü:** Ürün-facing iş kapasiteleri (WR sections A/B/C/D/E/F/G, ~40 item) bu matrix altında PM-XX olarak temsil edilir. **WR-H grubu** (Architecture & Performance Mitigations — H1/H2/H3) ve bazı iç-kalite item'ları (örn. F7 AI telemetry verification smoke, G6 release regression smoke harness) bilinçli olarak PM mapping dışında bırakılmıştır — bunlar müşteri-facing capability değil, mühendislik posture'udur. Canonical takipleri `docs/WORK_REGISTER.md §H` ile `docs/ROADMAP.md §"Recent Ships → Architecture & Quality Posture"` altında yapılır. Yeni mühendislik-iç item'lar PM eklenmeden WR'de doğrudan kayıt altına alınabilir.
 
 ---
 
