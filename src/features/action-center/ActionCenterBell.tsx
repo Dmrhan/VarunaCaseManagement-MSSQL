@@ -27,6 +27,13 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const mountedRef = useRef(true);
 
+  // Bell summary refresh — already silent-by-design:
+  //  - no loading spinner state on the bell itself,
+  //  - on a null response (network/backend failure) the previous
+  //    counts are preserved (no reset to zero),
+  //  - badge number updates instantaneously when new counts arrive,
+  //    no fade/spin animation.
+  // No further change needed for the silent-polling hotfix.
   const refresh = useCallback(async () => {
     const r = await actionCenterService.summary();
     if (!mountedRef.current) return;

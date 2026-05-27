@@ -39,18 +39,49 @@ export function ActionCenterDrawer({
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ActionCenterListResponse | null>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const r = await actionCenterService.list({ view, limit: 50 });
-    setLoading(false);
-    setData(r ?? null);
-  }, [view]);
+  /**
+   * Refresh modes (hotfix — silent polling):
+   *
+   *   silent=false  Default. Sets the loading spinner; on a null
+   *                 response also clears `data` so the empty state is
+   *                 honored. Used for initial open and tab change.
+   *
+   *   silent=true   No spinner, no list flicker. On a successful
+   *                 response we patch in the new data; on a null
+   *                 response we KEEP the previous data so a transient
+   *                 network failure during background polling does not
+   *                 blank the drawer. Used for interval polling and
+   *                 ACTION_CENTER_EVENT (post-action) refreshes.
+   */
+  const refresh = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      if (!silent) setLoading(true);
+      const r = await actionCenterService.list({ view, limit: 50 });
+      if (!silent) setLoading(false);
+      if (r) {
+        setData(r);
+        return;
+      }
+      // r is undefined/null (network or backend failure):
+      if (!silent) setData(null);
+      // Silent path intentionally keeps the previous `data` snapshot so
+      // background polling failures never wipe the visible list.
+    },
+    [view],
+  );
 
   useEffect(() => {
     if (!open) return;
+    // Initial open / tab change → user-perceived "fresh load", loading
+    // spinner OK.
     void refresh();
-    const interval = window.setInterval(() => void refresh(), POLL_MS);
-    const handler = () => void refresh();
+    // 30s background polling — silent (no flicker).
+    const interval = window.setInterval(() => void refresh({ silent: true }), POLL_MS);
+    // Post-action invalidate from rows / other windows — silent (the
+    // mutation that triggered this already gave the user feedback;
+    // the list should update in place).
+    const handler = () => void refresh({ silent: true });
     window.addEventListener(ACTION_CENTER_EVENT, handler);
     return () => {
       window.clearInterval(interval);
@@ -82,9 +113,15 @@ export function ActionCenterDrawer({
       <aside
         role="complementary"
         aria-label="Aksiyonlarım"
-        className="fixed inset-y-0 right-0 z-50 flex w-96 max-w-[92vw] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-card"
+        // WR-NOTIFICATION-CENTER Phase 2A §7.B.1 DR-1..DR-10 sizing:
+        //   desktop: clamp(420px, 34vw, 640px)
+        //   tablet:  min(90vw, 560px)
+        //   mobile:  full-screen
+        // Layout-shift YOK; desktop'ta backdrop yok; mobile'da kalır.
+        className="fixed inset-y-0 right-0 z-50 flex max-w-[92vw] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-card"
+        style={{ width: 'clamp(420px, 34vw, 640px)' }}
       >
-        <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-ndark-border dark:bg-ndark-bg/30">
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-ndark-border dark:bg-ndark-bg/30">
           <div className="flex items-center gap-2">
             <Bell size={16} className="text-violet-600 dark:text-violet-400" />
             <div>
@@ -106,7 +143,7 @@ export function ActionCenterDrawer({
           </button>
         </header>
 
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-2 py-2 text-xs dark:border-ndark-border">
+        <nav className="sticky top-[60px] z-10 flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 py-2 text-xs dark:border-ndark-border dark:bg-ndark-card">
           {TABS.map((tab) => {
             const active = tab.value === view;
             const count =
@@ -160,15 +197,30 @@ export function ActionCenterDrawer({
                   key={it.id}
                   item={it}
                   view={view}
+                  // Current product behavior: any row's "Vakayı Aç" /
+                  // "Yorumu Aç" button navigates to the case AND closes
+                  // the drawer. Documented as intentional; do not change
+                  // without a product decision.
                   onCaseOpen={(caseId) => {
                     onCaseOpen(caseId);
                     onClose();
                   }}
-                  onChanged={() => void refresh()}
+                  // Post-mutation refresh — silent so the list updates
+                  // in place without flicker. The mutation already gave
+                  // the user feedback (busy button → toast on failure);
+                  // we just need the list to reflect the new state.
+                  onChanged={() => void refresh({ silent: true })}
                 />
               ))}
             </div>
           )}
+        </div>
+
+        {/* L2 footer chip — every drawer view; explains the 30-day
+            backfill window for the new operator. Sticky at the bottom;
+            scroll-internal content does not push it. */}
+        <div className="shrink-0 border-t border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+          Son 30 gündeki aksiyon ve bildirimleri görüyorsun.
         </div>
       </aside>
     </>
