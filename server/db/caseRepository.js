@@ -3,7 +3,10 @@ import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
-import { emitMentionsForNote } from './actionItemRepository.js';
+import {
+  emitMentionsForNote,
+  emitGenericNotification,
+} from './actionItemRepository.js';
 import crypto from 'node:crypto';
 
 // Snooze sebebi → CaseActivity log'unda görünen TR etiket.
@@ -2673,6 +2676,24 @@ async function notifyWatchers({ caseId, companyId, message, kind }) {
         payload: { message, kind },
       })),
     });
+    // WR-NOTIFICATION-CENTER Phase 2B — fire-and-forget Aksiyonlarım
+    // emit per watcher. Same payload shape as the legacy notification;
+    // dedupKey is content-derived so reruns don't double-emit.
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true, title: true },
+    });
+    for (const w of watchers) {
+      void emitGenericNotification({
+        caseId,
+        companyId,
+        eventType: 'watcher_update',
+        recipientUserId: w.userId,
+        payload: { message, kind },
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+      });
+    }
   } catch (err) {
     console.warn('[notifyWatchers]', err?.message ?? err);
   }
@@ -2770,6 +2791,11 @@ export const watcherRepo = {
     // CaseNotification — eklenen kullanıcıya "izleyici eklendi" bildirim.
     // Payload shape diğer notification yazıcılarıyla aynı: { message, kind }.
     // (Smoke Audit P2.2 — UI tek shape okuyabilsin.)
+    const watcherAddedPayload = {
+      message: `Sizi ${c?.caseNumber ?? caseId} vakasında izleyici olarak eklendi`,
+      kind: 'watcher_added',
+      addedBy,
+    };
     await prisma.caseNotification.create({
       data: {
         caseId,
@@ -2777,12 +2803,23 @@ export const watcherRepo = {
         eventType: 'watcher_added',
         channel: 'InApp',
         recipient: userId,
-        payload: {
-          message: `Sizi ${c?.caseNumber ?? caseId} vakasında izleyici olarak eklendi`,
-          kind: 'watcher_added',
-          addedBy,
-        },
+        payload: watcherAddedPayload,
       },
+    });
+
+    // WR-NOTIFICATION-CENTER Phase 2B — Aksiyonlarım emit (FYI).
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true, title: true },
+    });
+    void emitGenericNotification({
+      caseId,
+      companyId,
+      eventType: 'watcher_added',
+      recipientUserId: userId,
+      payload: watcherAddedPayload,
+      caseNumber: caseSnapshot?.caseNumber,
+      caseTitle: caseSnapshot?.title,
     });
 
     return { id: created.id, userId, addedBy, addedAt: created.addedAt };
@@ -3134,6 +3171,12 @@ export const reactionRepo = {
         });
         const reactorName = reactor?.fullName ?? reactor?.email ?? 'Bir kullanıcı';
         const symbol = NOTE_REACTION_SYMBOL[emoji] ?? emoji;
+        const reactionPayload = {
+          message: `${reactorName} notunuza ${symbol} tepkisi verdi`,
+          kind: 'reaction',
+          emoji,
+          noteId,
+        };
         await prisma.caseNotification.create({
           data: {
             caseId,
@@ -3141,13 +3184,22 @@ export const reactionRepo = {
             eventType: 'note_reaction',
             channel: 'InApp',
             recipient: note.authorId,
-            payload: {
-              message: `${reactorName} notunuza ${symbol} tepkisi verdi`,
-              kind: 'reaction',
-              emoji,
-              noteId,
-            },
+            payload: reactionPayload,
           },
+        });
+        // WR-NOTIFICATION-CENTER Phase 2B — Aksiyonlarım emit (FYI).
+        const caseSnapshot = await prisma.case.findUnique({
+          where: { id: caseId },
+          select: { caseNumber: true, title: true },
+        });
+        void emitGenericNotification({
+          caseId,
+          companyId,
+          eventType: 'note_reaction',
+          recipientUserId: note.authorId,
+          payload: reactionPayload,
+          caseNumber: caseSnapshot?.caseNumber,
+          caseTitle: caseSnapshot?.title,
         });
       } catch (err) {
         console.warn('[reactionRepo.notify]', err?.message ?? err);

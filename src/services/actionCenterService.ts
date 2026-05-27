@@ -17,7 +17,12 @@ export type ActionItemKind =
   | 'approval_pending'
   | 'approval_decided'
   | 'case_returned_to_assignee'
-  | 'mention';
+  | 'mention'
+  // WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification migration.
+  // watcher_event covers watcher_added / watcher_update / note_reaction.
+  // system_alert covers transfer_warning (supervisor-side warning).
+  | 'watcher_event'
+  | 'system_alert';
 
 export type ActionItemState =
   | 'Pending'

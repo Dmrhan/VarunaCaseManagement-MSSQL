@@ -118,6 +118,7 @@ export async function triggerTransferRootCause({ caseId, companyId, transferCoun
     });
     if (supervisors.length > 0) {
       const message = `⚠️ ${caseNumber} aynı vakada ${transferCount}. kez aktarıldı`;
+      const transferPayload = { message, transferCount };
       await prisma.caseNotification.createMany({
         data: supervisors.map((s) => ({
           caseId,
@@ -125,9 +126,30 @@ export async function triggerTransferRootCause({ caseId, companyId, transferCoun
           eventType: 'transfer_warning',
           channel: 'InApp',
           recipient: s.userId,
-          payload: { message, transferCount },
+          payload: transferPayload,
         })),
       });
+      // WR-NOTIFICATION-CENTER Phase 2B — Aksiyonlarım emit per
+      // supervisor as a system_alert (FYI; operational warning).
+      const caseSnapshot = await prisma.case.findUnique({
+        where: { id: caseId },
+        select: { caseNumber: true, title: true },
+      });
+      // Lazy import to avoid circular dependency (transferAi → case
+      // repository → transferAi). actionItemRepository has no such
+      // chain so we can import normally at module scope.
+      const { emitGenericNotification } = await import('../db/actionItemRepository.js');
+      for (const s of supervisors) {
+        void emitGenericNotification({
+          caseId,
+          companyId,
+          eventType: 'transfer_warning',
+          recipientUserId: s.userId,
+          payload: transferPayload,
+          caseNumber: caseSnapshot?.caseNumber ?? caseNumber,
+          caseTitle: caseSnapshot?.title,
+        });
+      }
     }
   } catch (err) {
     console.warn('[transfer-warning] supervisor notify hatası:', err?.message ?? err);

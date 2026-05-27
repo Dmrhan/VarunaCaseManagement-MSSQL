@@ -51,6 +51,12 @@ const ALLOWED_KINDS_PHASE1 = new Set([
   'case_returned_to_assignee',
   // WR-NOTIFICATION-CENTER Phase 2A — mention adapter.
   'mention',
+  // WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification migration.
+  // watcher_event covers watcher_added / watcher_update / note_reaction
+  // (all "vakada hareket / sosyal sinyal" semantic). system_alert
+  // covers transfer_warning (operational warning to supervisors).
+  'watcher_event',
+  'system_alert',
 ]);
 
 const ACTIVE_STATES = ['Pending', 'InProgress', 'Snoozed'];
@@ -226,6 +232,177 @@ export async function emitMentionsForNote({
   } catch (err) {
     // Fire-and-forget contract — note/reply creation must never block.
     console.error('[action-center:emit-mentions] fatal', err?.code, err?.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification helpers
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Tiny deterministic hash for dedupKey discriminators. djb2 chosen for
+ * being dependency-free and stable across Node versions. Output is a
+ * compact base-36 string suitable for embedding in a key.
+ */
+function djb2(input) {
+  const s = String(input ?? '');
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+/**
+ * Content-derived deterministic dedup key for a CaseNotification-backed
+ * ActionItem. Shared by the live adapter (Phase 2B writers) and the
+ * backfill script so both paths agree on identity.
+ *
+ * Why content-derived (not CaseNotification.id):
+ *  - Half of the writers use `prisma.caseNotification.createMany` which
+ *    does not return generated ids.
+ *  - Backfill would have ids; mixing id-based and content-based keys
+ *    creates a duplicate between live (no id) and backfill (id) for the
+ *    same logical notification.
+ *  - One formula = one source of truth = R5 parity rule from Phase 2A.
+ *
+ * Payload discriminator is hashed via djb2 so the key stays compact and
+ * deterministic regardless of message length. Different payloads —
+ * different reactions, different update messages, different transfer
+ * counts — produce different keys.
+ */
+export function buildNotificationDedupKey({
+  caseId,
+  eventType,
+  recipientUserId,
+  payload,
+}) {
+  if (!caseId || !eventType || !recipientUserId) {
+    throw new Error(
+      '[buildNotificationDedupKey] caseId, eventType, recipientUserId zorunlu.',
+    );
+  }
+  const message = payload?.message ?? '';
+  const noteId = payload?.noteId ?? '';
+  const emoji = payload?.emoji ?? '';
+  const transferCount = payload?.transferCount ?? '';
+  const kind = payload?.kind ?? '';
+  const discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  const disc = djb2(discInput);
+  return `notification:${caseId}:${eventType}:${recipientUserId}:${disc}`;
+}
+
+/**
+ * Translate a CaseNotification.eventType to the ActionItemKind it
+ * should land under. Returns null for unknown eventTypes so the
+ * adapter can silently skip them (forward-compat: a new writer added
+ * later without a mapping will not blow up the adapter — it will
+ * simply not surface in Aksiyonlarım until the mapping is added here).
+ *
+ * Mapping rationale (planning card §17.A coverage table):
+ *   watcher_added   → watcher_event  (FYI; "vakada hareket")
+ *   watcher_update  → watcher_event  (FYI; same semantic family)
+ *   note_reaction   → watcher_event  (FYI; reasonLabel carries emoji)
+ *   transfer_warning→ system_alert   (FYI; supervisor-side warning)
+ */
+function notificationKindFor(eventType) {
+  switch (eventType) {
+    case 'watcher_added':
+    case 'watcher_update':
+    case 'note_reaction':
+      return 'watcher_event';
+    case 'transfer_warning':
+      return 'system_alert';
+    default:
+      return null;
+  }
+}
+
+/**
+ * WR-NOTIFICATION-CENTER Phase 2B — emit a single ActionItem for a
+ * generic CaseNotification. Fire-and-forget; never throws. Callers
+ * use `void` and never await rejection.
+ *
+ * Order of checks (same R6/R8 discipline as mention adapter):
+ *   1. Recipient is a User.id (legacy bell already only delivers to
+ *      User.ids; we trust that contract).
+ *   2. R8.a — defensive UserCompany active membership re-check.
+ *   3. notificationKindFor(eventType) — unknown types silently skip.
+ *   4. Build content-derived dedupKey via the shared helper.
+ *   5. emitActionItem upsert (state Pending; actionRequired false;
+ *      reasonLabel = payload.message — already an operator-ready
+ *      sentence in Turkish).
+ *
+ * @param {Object} args
+ * @param {string} args.caseId
+ * @param {string} args.companyId
+ * @param {string} args.eventType        — 'watcher_added' | 'watcher_update' | 'note_reaction' | 'transfer_warning'
+ * @param {string} args.recipientUserId
+ * @param {Object} [args.payload]
+ * @param {string} [args.caseNumber]
+ * @param {string} [args.caseTitle]
+ */
+export async function emitGenericNotification({
+  caseId,
+  companyId,
+  eventType,
+  recipientUserId,
+  payload,
+  caseNumber,
+  caseTitle,
+}) {
+  try {
+    if (!caseId || !companyId || !eventType || !recipientUserId) return;
+    const kind = notificationKindFor(eventType);
+    if (!kind) {
+      // Unknown eventType — silent skip (forward-compat).
+      return;
+    }
+    // R8.a defensive UserCompany guard. The writer already targets a
+    // User.id with active access (legacy bell semantics); a future
+    // drift would surface as a silent skip here.
+    const member = await prisma.userCompany.findFirst({
+      where: {
+        userId: recipientUserId,
+        companyId,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!member) return;
+    const dedupKey = buildNotificationDedupKey({
+      caseId,
+      eventType,
+      recipientUserId,
+      payload,
+    });
+    const reasonLabel = String(
+      payload?.message ?? `${eventType} bildirimi.`,
+    ).slice(0, 500);
+    void emitActionItem({
+      kind,
+      userId: recipientUserId,
+      companyId,
+      objectType: 'CaseNotification',
+      objectId: null, // R2 — surrogate id may not be available (createMany).
+      caseId,
+      caseNumber: caseNumber ?? null,
+      caseTitle: caseTitle ?? null,
+      generatedBy: `system:notification:${eventType}`,
+      groupKey: `${caseId}:${kind}`,
+      dedupKey,
+      // FYI severity — none of the migrated eventTypes carry an
+      // explicit "you must act" semantic in legacy bell behavior.
+      priority: eventType === 'transfer_warning' ? 70 : 50,
+      actionRequired: false,
+      reasonLabel,
+    });
+  } catch (err) {
+    console.error(
+      '[action-center:emit-generic-notification] fatal',
+      err?.code,
+      err?.message,
+    );
   }
 }
 
