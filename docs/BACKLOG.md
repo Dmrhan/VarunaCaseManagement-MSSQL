@@ -1,6 +1,6 @@
 # Backlog — Active Work
 
-**Last audited:** 2026-05-27
+**Last audited:** 2026-05-27 (Hidden Backlog Fragment Audit sonrası PR-B consolidation)
 
 Sahiplik:
 - Report Studio'ya özgü backlog → [docs/REPORT_STUDIO_BACKLOG.md](REPORT_STUDIO_BACKLOG.md)
@@ -48,6 +48,29 @@ Eylemler:
 ---
 
 ## P1 — Scale / Reliability
+
+### Phase 5C — 4 admin ekranı create flow doğrulaması (verify-first)
+
+`docs/FAZ1_5_RELEASE_NOTES.md §"Açık Konular"` line 308-312 raporu: Takımlar & Üyeler, SLA Kuralları, Kontrol Listesi, Kategori & Alt Kategori admin ekranlarında create denemesi 400 dönüyor (companyId picker / nullable yanıltıcı). Dinamik Alanlar zaten düzeltildi.
+
+**Eylem:**
+- Önce verify: bugün PARAM Admin ile `/admin/teams` create → 400 mü? Reproduces ediyorsa P1 prod bug, tek bir fix PR.
+- Reproduce etmiyorsa: release notes'tan "ileri sprint" notunu temizle (FAZ1_5_RELEASE_NOTES.md güncelle), bu backlog item closed.
+
+**Çaba:** 30dk verify + tetiklendiyse 1-2 saat fix.
+
+### TCKN DPO read trail / audit log (KVKK promise)
+
+`docs/planning_cards/MASTER_DATA_DECISION_SPRINT.md` + WR-A2'de açık decision sprint sorusu: "TCKN read/write audit table — yeni mi yoksa mevcut AIUsageLog pattern'i mi taklit eder?" — backend HMAC + last4 + masked storage shipped (A2 ✓), ama "kim TCKN'i ne zaman okudu" audit table DPO sözleşme yükümlülüğü olarak promised ama implement edilmedi.
+
+**Eylem:**
+- Karar: ayrı `TCKNAuditLog` tablosu mu yoksa `AIUsageLog` benzeri pattern mi?
+- Read site'larına audit emit ekle (TCKN search endpoint shipped olduğunda da kapsanır)
+- Admin görünür DPO raporu
+
+**Risk:** KVKK denetiminde "read trail yok" → veri sorumluluğu sorunu.
+
+**Çaba:** Karar + 1 gün.
 
 ### Vitest framework + first critical tests (önceki #7)
 
@@ -212,6 +235,103 @@ Bu tek bir backlog item değil — **continuous design-debt log**. Her soruya R(
 
 **Çaba:** Yarım gün (taram + etiketleme).
 
+### A8 Phase 2b — Customer 360 Import commit path
+
+`docs/planning_cards/WR-A8-PHASE2-CUSTOMER-360-IMPORT.md` + `docs/integration-test-pack/README.md`: Phase 2a Foundation prod'da ama **dry-run only**. "Phase 2b commit yolu hazır olunca aynı dosyalar commit testi için kullanılabilir" — bugün yok.
+
+**Eylem:**
+- Commit-confirm dialog (operatör onayı)
+- Dependency-ordered commit (Account → Company → Contact → Address → Project)
+- Reverse rollback + per-entity no-swallow surfacing
+- Açık sorular planning §"Bilinçli Bırakılanlar"da: isPrimary/isDefault uniqueness, duplicate contact severity, companyCode resolution, AccountProject.defaultSupportLevel modelde yok (P3 backlog'da var), date format esnekliği, composite schema version
+
+**Risk:** Bu sprint dalgasının (Master Data) en büyük açık production gap. Phase 2c (polish/PII/MSSQL audit/flat CSV) ROADMAP'a.
+
+**Çaba:** 3-5 gün.
+
+### CasesList advanced filters — supportLevel / accountProjectId / productId / packageId
+
+3 planning card'da (WR-A4, WR-A5-B1, WR-A7B-INTEGRATED) "list-filter UI Phase 2'ye" diye not düşülmüş. Backend query param hazır, UI chip filter eksik.
+
+**Eylem:** CasesListPage'e 4 chip filter + URL sync; CaseLink incoming edges fix (P2 yukarıda) ile aynı sprint mantıklı.
+
+**Çaba:** 1 gün.
+
+### ActionItem Done retention / archive cron
+
+`docs/planning_cards/WR-ACTION-CENTER-PHASE1-APPROVAL-VISIBILITY.md` §17.3 + WR-ACTION-CENTER §16.2 + WR-NOTIFICATION-CENTER §19.B: "Done retention 30 days, Phase 2 will add the cron / archive." Mevcut tahmin: 30 günde 30K satır. Index handles, ama temizlik yok.
+
+**Eylem:**
+- `ActionItemArchive` tablosu (soft-archive, 30g+ Done satırları)
+- `POST /api/cron/actionitem-archive` endpoint
+- Mevcut `notification-cleanup` cron pattern'i reuse
+
+**Çaba:** 0.5 gün.
+
+### TCKN-by-search UI
+
+WR-A2 out-of-scope: "TCKN ile müşteri ara — backend hazır olur, UI bu PR'da yok." Backend `tcknHash` indexli, frontline'ın TCKN'le arama yapabilmesi vaadedildi. P1 "TCKN DPO audit log" ile aynı KVKK contextinde.
+
+**Eylem:** AccountSearchPicker'a TCKN input alanı (formatlı, max 11 hane); backend HMAC karşılaştırma; audit emit P1 ile birlikte.
+
+**Çaba:** 0.5 gün.
+
+### Customer search refactor (full)
+
+WR-C2 Ready. Mevcut CustomerSearchModal sınırlı (sadece name/vkn prefix); klavye navigasyon zayıf. "Customer disambiguation fields" (yukarıda P2'de var) yalnız sonuç satırını zenginleştirir — bu refactor arama deneyiminin tamamı:
+- Name + vkn + externalCode + phone + email arama
+- Klavye navigation (↑↓ Enter ESC)
+- Recent customers (son 5 görülen)
+- "Yeni müşteri" inline create
+
+**Çaba:** 1.5 gün.
+
+### Account → New Case full form (önceki WR-C3)
+
+Account detail'den "Yeni vaka oluştur" trigger'ı bugün sınırlı modal/page. Pre-fill account korunarak tüm New Case alanları açık olmalı (multi-company edge case'leri ile birlikte).
+
+**Çaba:** 1 gün. Bağımlılık: Customer search refactor (yukarıda) sonrası.
+
+### Cron / job health monitoring (önceki WR-F2)
+
+P1 "Observability stub"'un cron-health alt-kalemi burada genişletilir: `CronRun` tablosu (jobName, startedAt, endedAt, status, error) + admin dashboard "son N saatte hangi cron çalıştı, kim fail etti".
+
+**Not:** P1 "Observability stub" `/api/cron/health` endpoint'i için pointer içeriyor; bu item tablo + UI'ı kapsar. Önce Observability stub şipse, bu daha küçük bir slice olur.
+
+**Çaba:** 1 gün (P1 sonrası).
+
+### SavedView — cross-page list saves
+
+WR-F4 Ready. ROADMAP "Pinned / saved dashboard views" yalnız Operations Dashboard scope'unu kapsıyor. Bu daha geniş: `SavedView` tablosu (userId, entity, filters JSON, isDefault) — Cases/Accounts/Admin list'leri için.
+
+**Eylem:** Schema + bar UI (kullanıcı favori filter setini kaydeder/seçer).
+
+**Çaba:** 1.5 gün.
+
+### List filtering convention + sort param + cursor pagination (önceki WR-F5)
+
+Cases/Accounts/Admin list'leri farklı filter convention (CSV vs single, sort param yok). Önce convention doc (`docs/ARCHITECTURE.md`'a ek), sonra additive endpoint changes — eski URL param'ları kırılmaz.
+
+**Eylem:** Convention doc + sort param (`?sort=field:dir`) + opsiyonel cursor pagination (büyük tablolarda).
+
+**Çaba:** 1 gün convention + 1 gün rollout.
+
+### QA Playbook doc (önceki WR-F3)
+
+WR-F3 Ready: docs/ altına `QA_PLAYBOOK.md`. QAScoresPage var ama skor yorumlama rehberi yok — "skor 60 ne demek, threshold neyse aksiyon ne".
+
+**Eylem:** Skor kategorileri + threshold'lar + role-bazlı aksiyon listesi; pure doc-only quick win.
+
+**Çaba:** 2 saat.
+
+### Dashboard ve analitik dokümantasyonu (README §"Faz Planı" unchecked)
+
+`README.md:258` "[ ] Dashboard ve analitik dokümantasyonu" — Operations Dashboard + Report Studio prod'da; operatör-facing kullanım rehberi yok. Hidden Backlog Audit Agent A bulgusu.
+
+**Eylem:** `docs/OPERATIONS_DASHBOARD_GUIDE.md` (operator-facing) — 11 KPI tile + Report Studio export + drilldown + filter convention. Sonra README'deki checkbox işaretle.
+
+**Çaba:** Yarım gün doc.
+
 ---
 
 ## P3 — AI Fabric Expansion
@@ -325,6 +445,93 @@ Agent merge yapmıyor (yetkisi yok); ama "Mükerrer olabilir" flag bırakabilmel
 
 **Çaba:** Karar + 0.5 gün kod.
 
+### Watcher `notificationProfile` enum (FAZ2 §2)
+
+`docs/FAZ2_COLLAB_SPEC.md §2` `CaseWatcher.notificationProfile` ENUM (instant / digest / critical_only / muted) — schema'da yok. Bugün her watcher event'i instant emitliyor; watcher tercihi yok.
+
+**Eylem:** Schema migration + watcher add/edit UI; `digest` profili Resend MVP (P2) sonrası fonksiyonel olur.
+
+**Çaba:** 1 gün.
+
+### SLA / escalation / routing tier-aware rewrite
+
+`docs/planning_cards/WR-A5-B1.md` "Next phase": A5 SupportLevel cascade ✓ (Product > Person > Team > L1), ama 3 downstream tüketici eksik:
+- SLA matching tier-aware (`SLAPolicy` × `supportLevel`)
+- Escalation engine tier dispatch
+- Routing / auto-assign by tier
+
+Bu A5/A6/A7b shipping'in ana iş çıktısıydı; downstream tüketici hiç tracked değildi.
+
+**Çaba:** 2 gün (3 ayrı PR olarak split edilebilir).
+
+### CategoryLayer classification field (önceki WR-D2)
+
+`CategoryDef`'e yatay sınıflandırma (Backoffice / Mobile / Dinamik Rapor / Sabit Rapor) — N-level tree DEĞİL. Schema'da hiç yok.
+
+**Eylem:** `CategoryLayerDef` (id, companyId, name, code, isActive) + `CategoryDef.layerId` nullable FK + admin CRUD + case form/filter chip.
+
+**Karar:** Layer tablo mu enum mu? (config'lik istenirse tablo)
+
+**Çaba:** 1 gün.
+
+### CaseTimeEntry / start-end time tracking (önceki WR-C7)
+
+PM-20 capability. Vakaya harcanan süre alanı yok; sadece status timestamps. Schema: `CaseTimeEntry { caseId, personId, startedAt, endedAt, durationMin, note }` + Case detail timer.
+
+**Risk:** Pause/resume edge case'leri, mobile sync zorluğu.
+
+**Çaba:** 1.5 gün.
+
+### CategoryDef ↔ productGroupId catalog link (önceki WR-D1)
+
+Bugün `CategoryDef` ve `productGroup` ayrı; ilişki örtük. SLA/Checklist eşleştirme netleşir.
+
+**Eylem:** `CategoryDef.productGroupId?` FK + admin mapping UI; A6 sonrası ele alınmalı.
+
+**Çaba:** 0.5 gün.
+
+### Supervisor customerless matching queue + bulk match/dismiss (önceki WR-C4)
+
+Phase D Step 2 deterministic match ✓; tekil link akışı ✓. Eksik: Supervisor için dedicated matching queue UI (yaş + öncelik + suggestion confidence sıralı) + toplu işlem (bulk match/dismiss).
+
+**Not:** Mevcut P3 "suggestedDuplicateOf supervisor review queue" duplicate-flag review; bu kalem bulk-match-or-dismiss kuyruğu. İkisi DISTINCT — birlikte ele alınabilir ama scope ayrı.
+
+**Çaba:** 1.5 gün.
+
+### CaseInfoRequest / Bilgi Bekleniyor flow (önceki WR-C8)
+
+"Müşteriden ek bilgi/dosya iste" özel akışı yok; not içinde yazılıyor. Yeni `CaseInfoRequest` entity + yeni status `BilgiBekleniyor` + idempotent reminder.
+
+**NEEDS_PRODUCT_DECISION:** Public form auth modeli (token TTL, rate limit) + KVKK uygunluk.
+
+**Çaba:** Karar + 2 gün.
+
+### AccountProject.defaultSupportLevel inheritance (önceki WR-A4 Phase 3)
+
+A4 shipped Phase 1 ile `AccountProject` modeli prod'da; spec'te `defaultSupportLevel` field promise edildi ama Phase 1 scope'unda yoktu. A5 (✓) ve A6 (✓) shipped — bu artık unblocked.
+
+**Eylem:** Schema migration (nullable) + cascade `AccountProject → Person → Team → L1` zinciri (Product > AccountProject > Person > Team > L1).
+
+**Çaba:** 1 gün.
+
+### Bekçi AI scope clarification (FAZ2 §5.5)
+
+`docs/FAZ2_COLLAB_SPEC.md §5.5`: "Saatlik zamanlayıcı, durmuş vaka hatırlatıcı, örüntü tespiti." Shipped `PatternAlert` cron ile **scope çakışıyor mu?** Karar gerek:
+- Aynı işin reformulation'ı mı? (PatternAlert'i yeniden adlandır)
+- Yeni cron mu? ("durmuş vaka" PatternAlert'ten farklı sinyal)
+
+**NEEDS_PRODUCT_DECISION:** Önce bu, sonra implementation.
+
+**Çaba:** Karar + (yeni cron ise) 1 gün.
+
+### CaseActivity AI-field filter discipline (TEST_SCENARIOS §11)
+
+`docs/TEST_SCENARIOS.md §11`: "AI metadata field updates feed'i kirletmemeli (örn. `aiCategorySuggestion` field)." Bu kural koddave action-summary API hint'inde dolaylı uygulanıyor ama hiç audit edilmedi.
+
+**Eylem:** smoke-data-contracts'a yeni `defineGroup` ekle: "Activity Feed Field Filter Contract" — `CaseActivity` rows için AI metadata field path'lerinin row üretmediğini doğrula.
+
+**Çaba:** 2 saat (yeni smoke group).
+
 ---
 
 ## P4 — Future / Decision-blocked
@@ -344,6 +551,63 @@ Aksiyonlarım inbox `ActionItem.caseId` üzerinden navigation zaten tek tık ç�
 **Not:** Önceki #28'in "deepLink field doldur" premise'i artık geçersiz — `CaseNotification.deepLink` field hiç yokmuş, ActionItem akışı bu kontekstte odaklı navigation'ı zaten sunuyor.
 
 **Çaba:** 1-2 saat.
+
+### Jira distribution report (WR-E1)
+
+Jira'ya gönderilen vakaların kategori dağılım raporu — `/api/reports/jira-distribution` + Admin → Raporlar tablo. Mühendislik kapasitesi planlama.
+
+**Trigger:** WR-E2 (Jira sync) shipped olmadan anlamsız. Onun bağımlısı.
+
+### Jira 10-min sync (WR-E2 NEEDS_DECISION)
+
+Jira ↔ Case otomatik status/comment senkronizasyonu. Cron (10dk) + `JiraIssue` tablosu + Case'e yansıt.
+
+**Karar bekleyen:** Cron vs webhook? Auth model? — Eng + Ürün direktörü.
+
+### Jira reopen policy (WR-E3 NEEDS_DECISION)
+
+Case Jira'da resolved sonra reopen edilince: yeni issue mu, eski reopen mu? Audit log zorunlu.
+
+**Karar bekleyen:** Politika seçimi.
+
+### AD / Emakin enterprise SSO (WR-B4 NEEDS_DECISION)
+
+Active Directory / Emakin → Person + role auto-provision. SCIM ya da custom sync. UNIVERA enterprise sözleşmesi.
+
+**Karar bekleyen:** Provider (Azure AD / Okta / Emakin) + sync sıklığı + role mapping.
+**Trigger:** İlk enterprise tenant onboarding.
+
+### AloTech çağrı status mapping (WR-E4 NEEDS_DECISION)
+
+AloTech webhook → `Case.callStatus` field veya `CaseActivity` event. Inbound call kontekstini zenginleştirir.
+
+**Karar bekleyen:** AloTech credentials, multi-tenant config.
+**Trigger:** AloTech sözleşme onayı.
+
+### Incoming call auto-open case (WR-E5 NEEDS_DECISION)
+
+Telefon çaldığında Caller ID → Account lookup → "Mevcut case mi yeni mi?" modal. Frontline saniyeler.
+
+**Karar bekleyen:** Caller ID → Account match stratejisi (paylaşılan telefon edge case).
+**Bağımlılık:** WR-E4 + Customer search refactor (P2).
+
+### PatternAlert detail / action source decision (WR-F6 NEEDS_DECISION)
+
+`PatternAlert` shipped ama UI'da kullanıcıya açıklayıcı detay/aksiyon önerisi zayıf. Aksiyon önerisi kaynağı: static rule? AI? hybrid?
+
+**Karar bekleyen:** Ürün direktörü kaynak tercihi.
+
+### TCKN pepper rotation runbook + `scripts/rehash-tckn.js`
+
+WR-A2 shipped ama `TCKN_HASH_PEPPER` annual rotation tooling yok. KVKK gereği yıllık batch rehash gerekir. TECHNICAL_DEBT'te detay var; bu item operatör runbook + rehash script'ini takvimlendirir.
+
+**Trigger:** İlk pepper rotation gerekliliği (yıllık veya security incident).
+
+### Auth domain restriction (AUTH_SETUP §4d)
+
+`server/db/auth.js`'a domain check ekle (örn. `@univera.com.tr` allowlist) veya Google Console domain restriction. Bugün her authenticated user her domain ile giriyor.
+
+**Trigger:** İkinci paying tenant onboarding (multi-domain çakışma riski).
 
 ---
 
