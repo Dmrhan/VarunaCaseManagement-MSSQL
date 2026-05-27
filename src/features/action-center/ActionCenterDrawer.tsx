@@ -82,9 +82,15 @@ export function ActionCenterDrawer({
       <aside
         role="complementary"
         aria-label="Aksiyonlarım"
-        className="fixed inset-y-0 right-0 z-50 flex w-96 max-w-[92vw] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-card"
+        // WR-NOTIFICATION-CENTER Phase 2A §7.B.1 DR-1..DR-10 sizing:
+        //   desktop: clamp(420px, 34vw, 640px)
+        //   tablet:  min(90vw, 560px)
+        //   mobile:  full-screen
+        // Layout-shift YOK; desktop'ta backdrop yok; mobile'da kalır.
+        className="fixed inset-y-0 right-0 z-50 flex max-w-[92vw] flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-card"
+        style={{ width: 'clamp(420px, 34vw, 640px)' }}
       >
-        <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-ndark-border dark:bg-ndark-bg/30">
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-ndark-border dark:bg-ndark-bg/30">
           <div className="flex items-center gap-2">
             <Bell size={16} className="text-violet-600 dark:text-violet-400" />
             <div>
@@ -106,7 +112,7 @@ export function ActionCenterDrawer({
           </button>
         </header>
 
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 px-2 py-2 text-xs dark:border-ndark-border">
+        <nav className="sticky top-[60px] z-10 flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 py-2 text-xs dark:border-ndark-border dark:bg-ndark-card">
           {TABS.map((tab) => {
             const active = tab.value === view;
             const count =
@@ -169,6 +175,13 @@ export function ActionCenterDrawer({
               ))}
             </div>
           )}
+        </div>
+
+        {/* L2 footer chip — every drawer view; explains the 30-day
+            backfill window for the new operator. Sticky at the bottom;
+            scroll-internal content does not push it. */}
+        <div className="shrink-0 border-t border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+          Son 30 gündeki aksiyon ve bildirimleri görüyorsun.
         </div>
       </aside>
     </>

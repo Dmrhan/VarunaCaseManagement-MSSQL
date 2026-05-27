@@ -3,6 +3,7 @@ import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
+import { emitMentionsForNote } from './actionItemRepository.js';
 import crypto from 'node:crypto';
 
 // Snooze sebebi → CaseActivity log'unda görünen TR etiket.
@@ -1181,6 +1182,26 @@ export const caseRepository = {
           mentionedBy,
         })),
       });
+
+      // WR-NOTIFICATION-CENTER Phase 2A — inbox emit per mentioned user.
+      // Fire-and-forget; note creation never awaits this. Above validation
+      // already enforced active-user + active-UserCompany; the adapter
+      // re-runs a defensive R8.a check inside the helper.
+      const caseSnapshot = await prisma.case.findUnique({
+        where: { id },
+        select: { caseNumber: true, title: true },
+      });
+      void emitMentionsForNote({
+        caseId: id,
+        companyId,
+        noteId: created.id,
+        mentionedUserIds,
+        actorUserId: mentionedBy,
+        actorDisplay: note.authorName,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+        noteContent: note.content,
+      });
     }
 
     // Aktivite akışında "Not eklendi" satırı — content preview ile.
@@ -1325,6 +1346,25 @@ export const caseRepository = {
           mentionedUserId: uid,
           mentionedBy,
         })),
+      });
+
+      // WR-NOTIFICATION-CENTER Phase 2A — inbox emit per mentioned user.
+      // Same pattern as addNote (above); fire-and-forget; reply creation
+      // never awaits this.
+      const caseSnapshot = await prisma.case.findUnique({
+        where: { id: caseId },
+        select: { caseNumber: true, title: true },
+      });
+      void emitMentionsForNote({
+        caseId,
+        companyId,
+        noteId: created.id,
+        mentionedUserIds,
+        actorUserId: mentionedBy,
+        actorDisplay: reply.authorName,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+        noteContent: content,
       });
     }
 

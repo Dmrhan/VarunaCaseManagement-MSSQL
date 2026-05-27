@@ -29,4 +29,11 @@ const IS_DEV = typeof import.meta !== 'undefined' && import.meta.env?.DEV === tr
 export const featureFlags = {
   /** Action Center bell + MyHome panel. Phase 1 — Approval Visibility MVP. */
   actionCenterEnabled: readFlag('VITE_ACTION_CENTER_ENABLED', IS_DEV),
+  /**
+   * WR-NOTIFICATION-CENTER Phase 2A — restores the old right-side
+   * MentionBellBadge if true. Default false → only the unified
+   * Aksiyonlarım bell renders. Phase 3'te tamamen kaldırılacak;
+   * Phase 2A boyunca acil rollback yolu olarak ayakta durur.
+   */
+  legacyMentionBellEnabled: readFlag('VITE_LEGACY_MENTION_BELL_ENABLED', false),
 };
