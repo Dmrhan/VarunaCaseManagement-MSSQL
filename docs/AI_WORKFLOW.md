@@ -236,7 +236,11 @@ documents the cleanup discipline. Actual deletions require an explicit
 ## Workflow Size Guide
 
 Scale the workflow to the size and risk of the change. When in doubt,
-size up rather than down.
+size up rather than down. The per-change-type **Quality Gate Matrix**
+in `docs/QUALITY_GATES.md` says exactly which checks are mandatory for
+which kind of change (docs-only, frontend-only, backend endpoint,
+schema migration, tenant/auth sensitive, AI feature, cron, import /
+export, hotfix, release PR).
 
 **Small changes:**
 - Typos, copy changes, minor UI polish, documentation wording.
@@ -376,17 +380,25 @@ refuse to seed and ask.
 
 `npm run smoke:data-contracts` is the standard regression gate for any
 change that touches cross-module data contracts. The script is
-read-only and groups contract checks by domain:
+read-only and groups contract checks by domain. The active group list
+lives in `scripts/smoke-data-contracts.js` (search for `defineGroup(`);
+new product areas add their own group rather than amending an existing
+one. Representative examples (non-exhaustive):
 
-- Identity Contract — `User.id` vs `Person.id` mixups + FK existence
-- Account / Case Integrity — AccountCompany/Product/Contact FK and
-  shared/legacy `Account.companyId` handling
-- Tenant Scope Contract — `allowedCompanyIds` enforcement across
-  list/search/count/filter paths, plus persona-based visibility
-- Demo Seed Drift — required demo companies/persons/users + role
-  assignments
-- Customer Picker Contract — role split (`LIST_ROLES` vs
+- **Identity Contract** — `User.id` vs `Person.id` mixups + FK existence
+- **Account / Case Integrity** — AccountCompany / Product / Contact FK
+  and shared/legacy `Account.companyId` handling
+- **Tenant Scope Contract** — `allowedCompanyIds` enforcement across
+  list / search / count / filter paths, plus persona-based visibility
+- **Demo Seed Drift** — required demo companies / persons / users +
+  role assignments
+- **Customer Picker Contract** — role split (`LIST_ROLES` vs
   `DETAIL_READ_ROLES`) and scoped case-count behavior
+- **AI Telemetry Contract** — `logAIUsage` coverage on shipped AI call
+  sites + privacy guard (no raw prompt / PII leakage)
+
+For per-change-type gate requirements (when this smoke is mandatory vs
+optional), see `docs/QUALITY_GATES.md`.
 
 ### When this gate is mandatory
 

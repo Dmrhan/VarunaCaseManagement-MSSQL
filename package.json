@@ -21,7 +21,10 @@
     "db:reset": "prisma migrate reset",
     "test:pattern": "node --env-file=.env scripts/test-pattern-alert.js",
     "test:qa": "node --env-file=.env scripts/test-qa-scores.js",
-    "smoke:data-contracts": "node --env-file=.env scripts/smoke-data-contracts.js"
+    "smoke:data-contracts": "node --env-file=.env scripts/smoke-data-contracts.js",
+    "smoke:help-content": "node scripts/smoke-help-content.js",
+    "smoke:ai-telemetry": "node --env-file=.env scripts/smoke-ai-telemetry.js",
+    "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

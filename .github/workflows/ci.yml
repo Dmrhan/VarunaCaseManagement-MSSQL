@@ -54,3 +54,13 @@ jobs:
         # migration'lar Vercel deploy'ında uygulanır, type check + schema doğrulamasını
         # önceki adımlarda yaptık.
         run: npx vite build
+
+      - name: Help registry script syntax check
+        # Static parse — fail fast on syntax errors before invoking the smoke.
+        run: node --check scripts/smoke-help-content.js
+
+      - name: Help registry freshness smoke
+        # Reads src/help/helpRegistry.ts (TypeScript), validates required keywords,
+        # banned phrases, and `updatedAt` for every HelpTopic. No DB/env needed —
+        # see docs/IN_PRODUCT_HELP_STANDARD.md §"Smoke check".
+        run: npm run smoke:help-content
