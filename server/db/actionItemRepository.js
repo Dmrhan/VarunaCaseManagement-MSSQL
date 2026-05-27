@@ -287,9 +287,60 @@ export function buildNotificationDedupKey({
   const emoji = payload?.emoji ?? '';
   const transferCount = payload?.transferCount ?? '';
   const kind = payload?.kind ?? '';
-  const discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  const fromTeam = payload?.fromTeam ?? '';
+  const toTeam = payload?.toTeam ?? '';
+  let discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  // Phase 2C cleanup follow-up — legacy `transfer` payload is
+  // { fromTeam, toTeam, caseNumber } with no message/transferCount/kind,
+  // so the original discriminator above hashes to the SAME value for
+  // every transfer on the same (caseId, recipient) pair. Multiple
+  // transfers (different from/to teams) would collapse to one
+  // ActionItem and bump skipped_dedup instead, losing notifications.
+  // Append from/to team identity ONLY when those fields are present so
+  // the formula stays backward-compatible with already-materialized
+  // dedup keys for the four Phase 2B eventTypes (their payloads do not
+  // populate fromTeam/toTeam).
+  if (fromTeam || toTeam) {
+    discInput += `|${fromTeam}|${toTeam}`;
+  }
   const disc = djb2(discInput);
   return `notification:${caseId}:${eventType}:${recipientUserId}:${disc}`;
+}
+
+/**
+ * Pre-Phase-2C-cleanup-followup formula for transfer dedup keys —
+ * recomputes the old hash input (no fromTeam/toTeam suffix). Used by
+ * the backfill to detect transfer ActionItems that were materialized
+ * by a previous `--execute` run BEFORE the fromTeam/toTeam
+ * discriminator was added (Codex P2 review on PR #287).
+ *
+ * Without checking the legacy key, a rerun of `--execute` for a tenant
+ * that already migrated transfer rows would fail to find the existing
+ * ActionItem via the NEW key and would create a duplicate. This helper
+ * lets the backfill match the row under its stored key shape.
+ *
+ * Do NOT use for new emissions — the live adapter and the new backfill
+ * path always emit via `buildNotificationDedupKey`. This is migration-
+ * read-side only.
+ */
+export function buildLegacyTransferDedupKey({
+  caseId,
+  recipientUserId,
+  payload,
+}) {
+  if (!caseId || !recipientUserId) {
+    throw new Error(
+      '[buildLegacyTransferDedupKey] caseId, recipientUserId zorunlu.',
+    );
+  }
+  const message = payload?.message ?? '';
+  const noteId = payload?.noteId ?? '';
+  const emoji = payload?.emoji ?? '';
+  const transferCount = payload?.transferCount ?? '';
+  const kind = payload?.kind ?? '';
+  const discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  const disc = djb2(discInput);
+  return `notification:${caseId}:transfer:${recipientUserId}:${disc}`;
 }
 
 /**
