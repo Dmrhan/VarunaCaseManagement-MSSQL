@@ -1,389 +1,285 @@
-# Backlog — Kalan İşler
+# Backlog — Active Work
 
-> Bu doküman geliştirme oturumları arasında **unutmamak için** tutuluyor.
-> Her madde kendi içinde anlamlı yazılmıştır — başka bir dokümanı açmana gerek
-> kalmadan ne yapacağını, neden yapacağını ve kaldığın yeri görebilirsin.
+**Last audited:** 2026-05-27
 
-**Son güncelleme:** 2026-05-14
-**Kapsam:** Faz 1 / Faz 1.5 hardening + Operations Dashboard kalan fazlar +
-Faz 2 Collab eksik bölümleri + Collab Hardening + ileri sprint adayları.
+Sahiplik:
+- Report Studio'ya özgü backlog → [docs/REPORT_STUDIO_BACKLOG.md](REPORT_STUDIO_BACKLOG.md)
+- Gelecek ürün yönü + shipped capability envanteri → [docs/ROADMAP.md](ROADMAP.md)
+- Teknik borç + temizlik riskleri → [docs/TECHNICAL_DEBT.md](TECHNICAL_DEBT.md)
 
-**Renk kodları:**
-- 🔴 **Kritik** — production güveni / güvenlik / canlı veriyi etkileyen
-- 🟡 **Yüksek değer** — sık talep gören özellik veya temel kalite
-- 🟢 **Düşük öncelik** — ileri sprint, ürün kararı bekliyor ya da nice-to-have
+Bu liste **aktif** iştir — 2–4 hafta içinde dokunulabilir kalemler. Shipped özellikler ve uzak-gelecek planları burada görünmez; bunlar yukarıdaki canonical dokümanlarda.
 
----
-
-## ~~🔴 1) OpenAI API key prefix/suffix loglama — production'da kapat~~ ✅ SHIPPED
-
-**Durum:** Tamamlandı (2026-05-15, PR sonrası prod'a indi).
-
-**Ne yapıldı?**
-`server/routes/ai.js:51-58` startup logging `if (process.env.NODE_ENV !== 'production')` gate'iyle sarmalandı. Production log'larında key prefix/suffix artık yazılmaz; dev'de debugging için kalır. Model + rate limit info her ortamda güvenli kaldı.
+Öncelik modeli:
+- **P0 Production Trust** — güvenlik / veri bütünlüğü açıkları
+- **P1 Scale / Reliability** — güvenli büyümenin temeli
+- **P2 Product Value** — kullanıcıya görünür iyileştirmeler
+- **P3 AI Fabric Expansion** — Faz 2 AI rolleri + sinyalleri
+- **P4 Future / Decision-blocked** — nice-to-have veya trigger-bekleyen
 
 ---
 
-## 🔴 2) Status transition state machine — backend'de illegal geçişleri reddet
+## P0 — Production Trust
 
-**Ne yapacağız?**
-`server/db/caseRepository.js:922` içindeki `transitionStatus()` herhangi bir `nextStatus` değerini kabul ediyor; **yasal geçiş kontrolü yok**. State machine ekle:
-- `Açık → İncelemede / Eskalasyon / İptalEdildi`
-- `İncelemede → Açık / 3rdPartyBekleniyor / Eskalasyon / Çözüldü / İptalEdildi`
-- `3rdPartyBekleniyor → İncelemede / Çözüldü / İptalEdildi`
-- `Eskalasyon → İncelemede / Çözüldü / İptalEdildi`
-- `Çözüldü → YenidenAcildi` (özel kural)
-- `YenidenAcildi → İncelemede / Eskalasyon / Çözüldü / İptalEdildi`
-- `İptalEdildi → (terminal, hiçbir geçiş yok)`
-İllegal geçişte 422 `invalid_transition` dön.
+### Status transition state machine (önceki #2)
 
-**Neden önemli?**
-UI bugün geçişleri engelliyor, ama API'ye doğrudan curl atılırsa "İptalEdildi → Açık" gibi anlamsız atlamalar mümkün. Demo / pen-test riski.
+`server/db/caseRepository.js:1808` `transitionStatus()` herhangi bir `nextStatus`'u kabul ediyor; **yasal-geçiş kontrolü yok**. UI'daki `StatusTransitionPanel` doğru kuralları biliyor — aynı matrisi backend'e taşı, illegal geçişte 422 `invalid_transition` dön.
 
-**Mevcut durum:** Açık. UI'da `StatusTransitionPanel` doğru geçişleri zaten biliyor — aynı mantığı backend'e kopyala.
-**Çaba:** 2-3 saat
-**Bağımlılık:** Yok
+**Çaba:** 2-3 saat (Vitest landed sonrası 1 günlük test ekle).
+**Risk:** Demo / pen-test riski; agent rol'lü kullanıcı doğrudan API çağırırsa `İptalEdildi → Açık` gibi atlamalar mümkün.
 
----
+### Multi-tenant isolation smoke (önceki #6)
 
-## 🔴 3) Role permission hardening — merkezi rol matrisi
+`/api/cases/*`, `/api/lookups/*`, `/api/admin/*`, `/api/ai/*` için cross-tenant denial smoke yok. Phase 1/2/3 dashboard endpoint'leri smoke-covered, geri kalan backbone değil.
 
-**Ne yapacağız?**
-Cases route'unda yer yer dağınık `elevated = ['Supervisor','Admin','SystemAdmin']` kontrolleri var. Şunlar için **API katmanında rol gate'i**:
-- **İptal et** — kim yapabilir? (öneri: atanan kişi + Supervisor+)
-- **Yeniden Aç (Çözüldü → YenidenAcildi)** — kim?
-- **Eskalasyon başlat/seviye değiştir** — kim?
-- **Bulk update** — sadece Supervisor+ mı?
-- **Transfer** — atanan + Supervisor+ mı?
+**Çaba:** Yarım gün (Vitest geldikten sonra `tenant-isolation.test.js` matrisi olarak yaz).
+**Risk:** Bir tek endpoint `allowedCompanyIds` filtresini atlarsa başka müşterinin verisini sızdırır — en yıkıcı bug sınıfı.
 
-Ürün kararı gerek; sen karar verince merkezi bir `server/lib/casePolicy.js` modülüne taşı.
+### Role permission centralization — `casePolicy.js` (önceki #3)
 
-**Neden önemli?**
-Bugün UI bu butonları gizliyor ama API'de gate yok. Agent role'lü kullanıcı doğrudan API çağırırsa bypass edebilir.
+`server/routes/cases.js` içinde 19 ayrı `elevated`/`Supervisor`/`Admin`/`SystemAdmin` kontrolü var (lines 556, 590, 656 + `requireRole` listeleri 305, 333, 362). `CUSTOMER_MATCH_QUEUE_ROLES` (line 76) gibi subtly different sets var.
 
-**Mevcut durum:** Açık + ürün kararı bekliyor.
-**Çaba:** Karar sonrası 1 gün
-**Bağımlılık:** Senin "kim ne yapabilir?" matris kararın
+Eylemler:
+- (a) Bekleyen ürün kararı: kim İptalEder/YenidenAçar/Eskalasyon başlatır/Bulk update/Transfer eder?
+- (b) Karar sonrası `server/lib/casePolicy.js` modülüne tüm matris taşınır
+- (c) Mevcut dağınık liste'ler tarama + drift düzeltme
+
+**Çaba:** Karar sonrası 1 gün.
 
 ---
 
-## 🔴 4) AI Accept/Reject — FE telemetri wiring
+## P1 — Scale / Reliability
 
-**Ne yapacağız?**
-Backend'de `PATCH /api/ai/usage/:id/accept` endpoint'i hazır (`server/routes/ai.js:1102`), her AI yanıtı `usageLogId` döndürüyor. **AMA hiçbir FE çağırmıyor.**
-- `aiService.markAccepted(usageLogId, accepted: boolean)` metodu ekle.
-- AI önerisi gösteren her yere (NewCaseForm suggest-category, SupervisorSummary, ChurnConversion, DraftResolution, TransferSuggest, CustomerPulseSummary, Operations brief/insights/explain/report/drilldown-assistant) "Uygula / Yoksay" butonları + PATCH.
+### Vitest framework + first critical tests (önceki #7)
 
-**Neden önemli?**
-AI Kullanım Panosu'nda `acceptanceRate` şu an sürekli `null` görünüyor. Madde 7 panosu (`/api/analytics/ai-usage`) bu olmadan ölü; AI öneri kalitesini ölçemiyoruz.
+`package.json` no vitest/jest. Tek formel test `server/analytics/__tests__/metricFormulas.test.js`. Bu meta-prerequisite — P0 #2/#5/#6 burayı bekliyor.
 
-**Mevcut durum:** Backend hazır, FE eksik.
-**Çaba:** 3-4 saat
-**Bağımlılık:** Yok
-
----
-
-## 🟡 5) SLA edge case smoke
-
-**Ne yapacağız?**
-`transitionStatus` pause/resume mantığı çalışıyor (3rdPartyBekleniyor → SLA durur, çıkınca devam eder + `slaResolutionDueAt` kaydırılır). **Smoke edilmeyen senaryolar:**
-- Çözüldü/İptal'de SLA gerçekten duruyor mu? (UI'da gösterim ne, DB'de durum ne?)
-- Snooze ile SLA ilişkisi (snooze edilen vaka SLA saatini durduruyor mu?)
-- Bulk status update SLA pause mantığını bypass ediyor mu? (`bulkUpdateStatus` ayrı kod yolu var: `server/db/caseRepository.js:782`)
-- Timezone (`Europe/Istanbul` vs UTC) drift'i var mı?
-
-Tek bir smoke script: `scripts/smoke-sla-edge-cases.js`.
-
-**Neden önemli?**
-SLA müşteriye verilen söz; yanlış durup-kalkması ciddi anlaşma riski.
-
-**Mevcut durum:** Pause/resume var; geri kalan kontrolsüz.
-**Çaba:** Yarım gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 6) Multi-tenant isolation smoke (Faz 1 endpoint'leri)
-
-**Ne yapacağız?**
-Customer Pulse + Analytics overview/drilldown için smoke var. **Eksik smoke'lar:**
-- `/api/cases/*` (list, detail, create, update, transition, notes, watchers, links)
-- `/api/lookups/*` (categories, products, teams, etc.)
-- `/api/admin/*` (Companies, Categories, Checklist, SLA, Fields, Teams, KnowledgeSources)
-- `/api/ai/*` (suggest-category, supervisor-summary, churn, draft, transfer, customer-pulse)
-- Attachments / file access (eğer varsa)
-
-Her endpoint için: PARAM kullanıcısı UNIVERA verisine ulaşabiliyor mu? (Hayır olmalı.)
-
-**Neden önemli?**
-Çok-tenant ürünün en kritik garantisi. Bir tek endpoint'in `allowedCompanyIds` filtresini atlaması başka müşterinin verisini sızdırır.
-
-**Mevcut durum:** Phase 1/2/3 dashboard endpoint'leri smoke'lu, geri kalan değil.
-**Çaba:** Yarım gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 7) Test framework (Vitest) entegrasyonu
-
-**Ne yapacağız?**
-Tek formel test: `server/analytics/__tests__/metricFormulas.test.js` (31/31 paf node-assert ile). Geri kalan her şey ad-hoc smoke script. Vitest kur, temel akışlar için test yaz:
+İlk test setresi (kurulum sonrası):
 - Case create → assignment → transition akışı
-- Note ekleme + mention → CaseMention satırı + bildirim
+- Mention → CaseMention + ActionItem emit
 - Watcher add/remove + scope kontrolü
 - SLA pause/resume sayaçları
-- AI suggest-category prompt schema doğrulaması
+- Tenant isolation matrix (P0 #6 ile birlikte)
 - Auth: Agent ↔ Supervisor ↔ Admin yetki sınırları
 
-CI entegrasyonu için ayrı dilim — şimdilik lokal `npm test`.
+**Çaba:** 1 gün (kurulum + ~10 test).
 
-**Neden önemli?**
-Smoke script'leri elle çağırılıyor; geliştirme hızı arttıkça regresyon yakalama düşük. Test yoksa her PR önce sen son kullanıcı oluyorsun.
+### SLA edge case tests (önceki #5)
 
-**Mevcut durum:** Sıfır framework.
-**Çaba:** 1 gün (kurulum + ~10 temel test)
-**Bağımlılık:** Yok
+Pause/resume var, ama smoke yapılmamış edge case'ler:
+- Çözüldü/İptal'de SLA gerçekten duruyor mu (UI vs DB)?
+- Snooze SLA saatini durduruyor mu?
+- `bulkUpdateStatus` (`caseRepository.js:782`) pause mantığını bypass ediyor mu?
+- Timezone (`Europe/Istanbul` vs UTC) drift'i var mı?
 
----
+Vitest landed sonrası tek dosya: `server/__tests__/sla-edge-cases.test.js`.
 
-## 🟡 8) Smart QA — caseId / companyId AI çağrılarında explicit
+**Çaba:** Yarım gün.
 
-**Ne yapacağız?**
-Bazı AI çağrılarında `caseId` + `companyId` body'de explicit gönderiliyor (suggestCategory ✓), bazılarında implicit fallback'e güveniliyor (multi-company supervisor için "ana şirket" varsayımı yanıltıcı). Tarama:
-- `aiService.supervisorSummary` → case objesi geçiyor; içinde companyId var mı kontrol et
-- `aiService.churnConversion` → aynı
-- `aiService.draftResolution` → aynı
-- `aiService.callSummary` → aynı
+### AI cost guard / per-company token cap (yeni)
 
-Eksik olan her birine `caseId` + `companyId` explicit ekle.
+`server/lib/aiClient.js` ve `server/routes/ai.js` tek global `OPENAI_API_KEY` üzerinden çalışıyor; `AIUsageLog.tokenCount` post-hoc kaydediliyor ama kimse okumuyor. Runaway loop veya compromised key bütçeyi yakabilir.
 
-**Neden önemli?**
-Madde 6 (AI Accept/Reject) ile birlikte AI Kullanım Panosu'nun doğru telemetri üretmesi için. Aksi halde supervisor'ın 3 şirketten birinde yaptığı AI önerisi yanlış şirkete loglanır.
+Eylem:
+- Per-companyId günlük token cap + 80% threshold admin alert
+- `AIUsageLog` üzerinden cron-based daily spend digest
+- Limit aşımı: 503 + dashboard uyarısı
 
-**Mevcut durum:** suggestCategory ✓, geri kalanı şüpheli.
-**Çaba:** 2 saat (tarama + düzeltme)
-**Bağımlılık:** Yok
+**Çaba:** 1 gün.
 
----
+### Observability stub (yeni)
 
-## 🟡 9) Faz 2 §11/§12/§13 — Sınıflandırıcı AI'a 3 yeni alan
+Sıfır Sentry/Datadog/Prometheus. AIUsageLog dışında kimse hatayı/metriği okumuyor. QA Score Batch cron sadece console'a log atıyor. No `/metrics` endpoint, no synthetic checks.
 
-**Ne yapacağız?**
-Üçü birlikte iş çıkar (FAZ2 spec, PRD v2 eki):
-- **§11 Vaka Niyeti** (caseIntent: Bilgi/Çözüm/Telafi/Eskalasyon/Belirsiz) — `Case` modeline alan + Sınıflandırıcı AI önerisi
-- **§12 Müşteri Etki Katsayısı** (impactScope: Tek/Şube/Bayi Ağı) — alan + AI önerisi
-- **§13 Başarı Kriteri** (successCriteria: tek cümle metin) — alan + AI varsayılan önerisi
+Önerilen ilk dilim:
+- Sentry/Logflare entegrasyonu (prod errors)
+- AIUsageLog daily spend digest endpoint
+- Cron health log endpoint (`/api/cron/health` — son N saatte kim ne çalıştı?)
 
-Schema migration + suggest-category response'a 3 alan ekle + UI'da göster.
+**Çaba:** 1 gün.
 
-**Neden önemli?**
-§14 Risk Göstergesi'nin 6-sinyal entegrasyonunun ham girdileri. Ayrıca §11/§12 sinyalleri Bekçi AI (örüntü tespiti) ağırlıklandırmasını besler.
+### Legacy dead code cleanup (önceki #16)
 
-**Mevcut durum:** Faz 2 spec'inde tanımlı, kod yok.
-**Çaba:** 1.5 gün (migration + AI prompt güncellemesi + UI)
-**Bağımlılık:** Yok
+Faz 4a'da bilerek bırakılan iki dosya artık import edilmiyor:
+- `src/features/analytics/CaseAnalyticsPage.tsx` (678 satır)
+- `src/features/analytics/RunaAiChatPanel.tsx` (459 satır)
+
+Toplam: 1137 satır dead. Grep ile cross-src import check: 0 hit.
+
+**Çaba:** 30 dakika — quick win.
 
 ---
 
-## 🟡 10) Bundle splitting (Vite chunk warning)
+## P2 — Product Value
 
-**Ne yapacağız?**
-Her build'de Vite uyarı veriyor: tek eager `index-*.js` ~1.4MB (gzip 370KB). Hiçbir `React.lazy` yok, 17+ page eager. `polished-wondering-waffle.md` planı:
+### Bundle splitting (önceki #10)
+
+Vite tek eager `index-*.js` ~1.4MB (gzip 370KB). Hiçbir `React.lazy` yok, 17+ page eager. `polished-wondering-waffle.md` planı:
 - 11 Admin*Page → lazy
-- AIUsagePage / PatternsPage / QAScoresPage / CaseAnalyticsPage / MyCalendarPage / RunaAiChatPanel → lazy
-- 2 `<Suspense>` boundary (admin block + main content) + `PageFallback` skeleton
-- `vite.config.ts` `manualChunks` — recharts/lucide-react vendor chunk'ları, admin/analytics route bazlı chunk'lar
+- AIUsagePage/PatternsPage/QAScoresPage/CaseAnalyticsPage/MyCalendarPage → lazy
+- 2 `<Suspense>` boundary + `PageFallback` skeleton
+- `vite.config.ts` `manualChunks` — recharts/lucide-react vendor + admin/analytics route chunks
 
-**Neden önemli?**
-Frontline kullanıcı (Agent) admin chunk'ını boş yere indiriyor. Hedef: eager bundle ~600-700KB.
+Hedef: eager bundle ~600-700KB.
 
-**Mevcut durum:** Plan dosyası mevcut, kod değişikliği yok.
-**Çaba:** 1 gün
-**Bağımlılık:** Yok
+**Çaba:** 1 gün.
 
----
+### firstResponseTimeMin metric instrumentation (önceki #13)
 
-## 🟡 11) Phase 5b — XLSX / PDF export
-
-**Ne yapacağız?**
-Şu an Report Studio sadece **Markdown copy** + **browser print** sunuyor. Gerçek dosya indirme yok. Ekle:
-- **XLSX**: `xlsx` veya `exceljs` paketi; KPI + breakdown'lar ayrı sheet; drilldown row dump için ayrı endpoint (paginated)
-- **Server-rendered PDF**: `puppeteer` ya da `pdfkit`; Report Studio preview HTML → PDF
-- Export dosyasına scope/audit metadata göm (formulaVersion, metricAuditId, asOf)
-- Frontend "Export" menüsü Report Studio footer'da
-
-**Neden önemli?**
-En sık talep edilen iş çıktısı. Yönetici brief'i için PDF, finans/operasyon için XLSX.
-
-**Mevcut durum:** Phase 5a (Markdown + print) prod'da.
-**Çaba:** 2-3 gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 12) Phase 6 — PPTX export
-
-**Ne yapacağız?**
-Yönetici sunumları için PowerPoint export. Her major section = bir slayt:
-1. Kapak (title + scope + period)
-2. KPI özet
-3. Trend grafiği
-4. Riskli müşteriler
-5. AI özet + öneriler
-6. Appendix
-
-`pptxgenjs` paketi.
-
-**Neden önemli?**
-Executive lens kullanıcıları yönetim toplantılarına götürüyor. Bugün manuel olarak slayt hazırlanıyor.
-
-**Mevcut durum:** Yok.
-**Çaba:** 2 gün
-**Bağımlılık:** Phase 5b (PDF) tamamlanırsa altyapı yeniden kullanılır
-
----
-
-## 🟡 13) firstResponseTimeMin metrik instrumentation
-
-**Ne yapacağız?**
-Phase 1'de `notAvailable: ['firstResponseTimeMin']` olarak işaretledik — "ilk yanıt zamanı için case event'i yok" demiştik. Şimdi event yaz:
+`server/analytics/metricFormulas.js:13` Phase 1'de `notAvailable` listesinde. Event yaz:
 - Vaka oluştuğunda → `Case.createdAt`
-- İlk **dış** not / iletişim event'i → yeni alan `firstAgentResponseAt`
-- `metricFormulas.js`'e formül + `operationsAggregator`'a alan ekle
+- İlk **dış** not/iletişim event'i → yeni alan `firstAgentResponseAt`
+- Formula + `operationsAggregator` alanı
 
-**Neden önemli?**
-"Ortalama ilk yanıt süresi" SLA komitelerinin en sevdiği metrik. Çözüm süresi (TTR) çok geç bir sinyal.
+**Çaba:** Yarım gün.
 
-**Mevcut durum:** Schema alanı yok, KPI tile null gösteriyor.
-**Çaba:** Yarım gün
-**Bağımlılık:** Yok
+### Auto-watcher on assign / mention / transfer (yeni — önceki #27 + #31 birleşik)
+
+Spec der ki atanan kişi + mention edilen kişi otomatik watcher olur; kod hiç yapmıyor. Ayrıca transfer'de eski atanan kişi otomatik watcher olmuyor.
+
+- `emitMentionsForNote` (`actionItemRepository.js:173-236`) sadece ActionItem yazıyor, `watcherRepo.add` çağırmıyor
+- Transfer (`caseRepository.js:1944-2065`) assignment'ı değiştiriyor ama eski sahibi CaseWatcher'a eklemiyor
+- `notifyWatchers` zaten transfer event'i emit ediyor (`caseRepository.js:2049`); sadece auto-watcher eksik
+
+**Çaba:** 0.5 gün.
+
+### CaseLink incoming edges fix (yeni — önceki #30 split-a)
+
+`server/db/caseRepository.js:2929-2966` `linkRepo.list` yalnız `where: { caseId }` filtreliyor — Parent/Related linkleri hedef vakadan **görünmez**. Duplicate symmetric ✓; diğer 2 tip için tek-uçtan görünüm bug'ı.
+
+Eylem: union query (`caseId OR linkedCaseId`) + her dönüş satırına `direction: 'outgoing' | 'incoming'` etiketi.
+
+**Çaba:** 0.5 gün.
+
+### Watcher permissions doc + smoke matrix (önceki #27 kalanı)
+
+Route-layer kuralları kodda mevcut ama undocumented. Self-add unrestricted, other-add `Supervisor+|assigned owner`, delete `self|elevated only` (`cases.js:546-605`).
+
+- Doc: `docs/PRODUCT_SPEC.md`'ye matrix ekle
+- Smoke: 8 hücreli (self/other × add/remove × Agent/Supervisor) test scripti
+- Yukarıdaki "Auto-watcher" kalemiyle birleşik kapatılabilir
+
+**Çaba:** 0.5 gün.
+
+### Resend email MVP (önceki #22 split-a)
+
+Şu an tüm `CaseNotification`/`ActionItem` rows `channel='InApp'`. `server/db/notificationRepository.js:15` "no SMTP" explicit not. Approval/mention/SLA breach gibi yüksek-değer event'ler için e-posta tetikleme MVP'si:
+
+- Resend SDK entegrasyonu
+- Transactional template (basit Turkish)
+- `ActionItem.kind IN ('approval', 'mention')` veya `priority>=70` için email send
+- channel matrix + businessHours + günlük digest → ROADMAP "Notification — Channel matrix + businessHours + daily digest" altına taşındı (MVP-sonrası follow-up)
+
+**Çaba:** 1 gün.
+
+### AI Accept/Reject FE telemetry wiring (önceki #4)
+
+Backend hazır: `PATCH /api/ai/usage/:id/accept` (`server/routes/ai.js:1133`), `acceptanceRate` hesaplaması (`server/routes/analytics.js:127`). FE'de hiçbir caller yok — `usageLogId` UI'larda debug label olarak görünüyor sadece. Sonuç: AIUsagePage'de `acceptanceRate` sürekli `null`.
+
+- `aiService.markAccepted(usageLogId, accepted: boolean)` ekle
+- 8 AI surface'e "Uygula / Yoksay" butonu: NewCaseForm suggest-category, SupervisorSummary, ChurnConversion, DraftResolution, TransferSuggest, CustomerPulseSummary, Operations brief/insights/explain/report/drilldown-assistant
+
+**Çaba:** 3-4 saat.
+
+### Smart QA — explicit caseId/companyId in AI calls (önceki #8)
+
+`aiService.ts` interfaces 4'te eksik: `ResolutionDraftInput`, `SupervisorSummaryInput`, `ChurnConversionInput`, `CallSummaryInput`. Sunucu yan `c.id`/`c.companyId` fallback'e güveniyor — multi-company supervisor için "ana şirket" varsayımı yanıltıcı.
+
+**Çaba:** 2 saat (4 interface + 4 caller).
+
+### Customer disambiguation fields in agent search (Müşteri Eşleştirme #2 split-a)
+
+Aynı müşteri için iki kayıt açılması, müşteri verisinin en hızlı kirlendiği nokta. Account search sonuçlarında her satırda:
+- Bağlı şirket chip'leri
+- `externalCustomerCode` (Müşteri Dış Kodu)
+- Maskeli VKN, telefon, e-posta
+- `isActive`, `openCaseCount`, `lastCaseAt`
+
+Agent merge yapmıyor; sadece görünür kıl. (Supervisor review queue ayrı kalem → P3.)
+
+**Çaba:** 1 gün.
+
+### Drilldown row inline actions (önceki #38)
+
+`OperationsDashboardPage.tsx:1795-1846` `DrilldownRow` sadece "open case" navigation sunuyor. Drawer'da satırdan: assign/escalate/comment hızlı aksiyonu.
+
+**Çaba:** 1 gün.
+
+### 50 OPS design-question continuous decision log (önceki #46)
+
+`docs/OPERATIONS_DASHBOARD_DESIGN.md §7` (3173-3232) 50 numbered open question. Bir kısmı zaten dolaylı karara bağlanmış (Q11 ✓, Q26 persona enum ✓ — kod açıkça reddediyor).
+
+Bu tek bir backlog item değil — **continuous design-debt log**. Her soruya R(esolved)/P(ending)/D(efer) etiketi at; karar verilenleri PR'lerle silmemek için ayrı section'a taşı. #13 firstResponseTime, #14 backlogChangePct, #38 drilldown gibi backlog kalemleri bu §7 sorularına bağlı.
+
+**Çaba:** Yarım gün (taram + etiketleme).
 
 ---
 
-## 🟡 14) backlogChangePct — BacklogSnapshot tablosu
+## P3 — AI Fabric Expansion
 
-**Ne yapacağız?**
-Phase 1'de "approximate" olarak işaretledik. Gerçek günlük backlog snapshot tablosu yaz:
-- Cron her gün 00:00 (Istanbul) → `BacklogSnapshot { date, companyId, openCount, slaRiskCount, byPriority Json }`
-- 90 gün retention
-- `backlogChangePct` formülü: (bugün - 7gün önce) / 7gün önce × 100
+### §11/§12/§13 — 3 classifier fields (önceki #9)
 
-**Neden önemli?**
-"Açık vakalar artıyor mu/azalıyor mu?" — trend olmadan tek nokta sayı yetersiz.
+Sınıflandırıcı AI'a `caseIntent` (Bilgi/Çözüm/Telafi/Eskalasyon/Belirsiz) + `impactScope` (Tek/Şube/Bayi Ağı) + `successCriteria` (tek cümle metin) ekle.
 
-**Mevcut durum:** Approximations listesinde.
-**Çaba:** 1 gün
-**Bağımlılık:** Yok (cron var)
+Schema migration + `/suggest-category` response'a 3 alan + UI'da göster.
 
----
+**Neden P3:** Risk Lens (#aşağı) ve Yönlendirici AI tarafından tüketilir. Bu olmadan §14 Risk Score eksik kalır.
 
-## 🟡 15) METRIC_FIXTURES.md PENDING değerleri
+**Çaba:** 1.5 gün.
 
-**Ne yapacağız?**
-`docs/METRIC_FIXTURES.md` Phase 1 PR review için yazıldı, PENDING değerler kaldı. Smoke verisinden gerçek baseline'ları doldur:
-- Per-role openCases / totalCases / slaViolationRatePct (multi-role smoke'tan)
-- Beklenen byStatus / byPriority dağılımları
+### §5.2 Araştırıcı AI — additional suggestions (önceki #18)
 
-**Neden önemli?**
-Regression test temeli — fixture'lar değişirse uyarı.
-
-**Mevcut durum:** Doküman var, sayılar boş.
-**Çaba:** 1 saat
-**Bağımlılık:** Yok
-
----
-
-## 🟡 16) Legacy dead code temizliği
-
-**Ne yapacağız?**
-Phase 2'de `OperationsDashboardPage`'i `view === 'dashboard'` üzerinde mount ettik; eski iki dosya artık import edilmiyor:
-- `src/features/analytics/CaseAnalyticsPage.tsx` (~680 satır, eski in-memory dashboard)
-- `src/features/analytics/RunaAiChatPanel.tsx` (~200 satır, eski floating chat panel)
-
-Tek commit: dosyaları sil + git history korur. Phase 4a'da bilerek bırakmıştık.
-
-**Neden önemli?**
-TS check + bundle hâlâ bu dosyaları tarıyor. ~880 satır kuru çalışma.
-
-**Mevcut durum:** Tree'de duruyor, kullanım yok.
-**Çaba:** 30 dakika
-**Bağımlılık:** Yok
-
----
-
-## 🟡 17) Faz 2 §4 — Tepki + reply threading + Canlı Özet
-
-**Ne yapacağız?**
-Etkinlik akışına 3 ekleme:
-- **Tepkiler**: notlara ve aktivite satırlarına 4 sabit emoji (👀✅⚠️❓). `CaseNote.reactions Json` + `CaseActivity.reactions Json` alanları (spec'te var). UI'da hover butonları.
-- **Reply threading**: notlara `parentNoteId` ile 1-seviye yanıt
-- **Canlı Özet kartı** (Yazman AI bölümünde — bkz. madde 19)
-
-**Neden önemli?**
-Slack-tarzı collab. Bugün 5 sekme arası dağınık etkileşim; tepki/yanıt = düşük efor, yüksek değer hızlı geri bildirim.
-
-**Mevcut durum:** Mention'lar prod, tepki/threading yok.
-**Çaba:** 1.5 gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 18) Faz 2 §5.2 — Araştırıcı AI
-
-**Ne yapacağız?**
-Sağ panelde "🕵 Araştırıcı" kartı, vaka açılış + 5sn arka plan:
-- Müşterinin son 90g'deki benzer vakaları → bağlantı önerisi
+`/suggest-links` (`ai.js:932`) zaten benzer geçmiş vakaları öneriyor (30g window — spec 90g; karar gerek). Sağ panel "🕵 Araştırıcı" kartı + 2 yeni öneri:
 - Bu kategori için en aktif çözen → takipçi önerisi
 - Müşteri temsilcisi → takipçi önerisi
 
-Mevcut `aiService.suggestLinks` zaten bunun bir parçası — paneli inşa et + diğer 2 öneri tipi ekle.
+**Çaba:** 1 gün.
 
-**Neden önemli?**
-"Bu müşteriyi daha önce kim çözdü?" — bugün manuel arama.
+### §5.3 Yazman AI + Canlı Özet (önceki #19 + #17 alt-kalem)
 
-**Mevcut durum:** suggestLinks endpoint'i var; panel + diğer öneriler yok.
-**Çaba:** 1 gün
-**Bağımlılık:** §2 (Watcher) ve §3 (Linked Cases) altyapıları zaten prod'da
-
----
-
-## 🟡 19) Faz 2 §5.3 — Yazman AI
-
-**Ne yapacağız?**
 İki çıktı:
-- **Canlı Özet kartı** — 10+ olay biriktiğinde akış başında, son 24 saatin 2 cümlelik özeti, 1 saat önbellek
-- **Devir notu** — "Devralacağım" butonu basıldığında: "Şu an sahibi X. Sonraki adım Y. Risk Z."
+- **Canlı Özet kartı** — 10+ olay biriktiğinde akış başında, son 24 saat 2 cümle özet, 1 saat önbellek (önceki #17 alt-kalem buraya birleştirildi)
+- **Devir notu** — "Devralacağım" butonunda: "Şu an sahibi X. Sonraki adım Y. Risk Z."
 
-**Neden önemli?**
-Yeni gelen ekip üyesi vakayı 30 saniyede özetleyip devralabilsin (Faz 2 başarı kriterinden).
+**Çaba:** 1 gün.
 
-**Mevcut durum:** Yok.
-**Çaba:** 1 gün
-**Bağımlılık:** §4 etkinlik akışı (öncelikle aynı dilimde gelebilir)
+### §5.4 Yönlendirici AI (önceki #20)
 
----
-
-## 🟡 20) Faz 2 §5.4 — Yönlendirici AI
-
-**Ne yapacağız?**
 Sağ panelde mini kart, tek cümle + tek aksiyon butonu:
 - "Çözüldü'ye geçmek için denetim listesinde 2 madde kaldı."
 - "Bu müşteriyi son 7g önce aradın. Tekrar arama önerilir."
-- "Başarı kriteri: 'Müşteri cihazın çalıştığını teyit eder.' Henüz teyit alınmadı."
 
-**Neden önemli?**
-Agent'ın "şu an ne yapsam?" anına net cevap.
+**Çaba:** 0.5 gün.
 
-**Mevcut durum:** Yok.
-**Çaba:** 0.5 gün
-**Bağımlılık:** §13 Başarı Kriteri (madde 9) işe yarar kılar
+**Bağımlılık:** §11/§12/§13 classifier fields (#9) işe yarar kılar.
 
----
+### §8 Duygu Tonu Analizi (önceki #24)
 
-## 🟡 21) Faz 2 §5.6 + §14 — Risk Göstergesi (Risk Lens)
+`CaseSentimentSnapshot` modeli (sentiment: positive/neutral/negative/angry, score -1.0..+1.0, sourceType). Her not/çağrı geldiğinde 5dk gecikmeli toplu AI sentiment. Vaka kartında ton trendi.
 
-**Ne yapacağız?**
-Vaka başlığında renkli etiket (Yeşil/Sarı/Kırmızı), tek skor 0-100. Sinyal ağırlık tablosu (spec §14):
+**Çaba:** 1.5 gün.
+
+**Bağımlılık:** Risk Lens'in §14 sinyal ağırlık tablosunu beslemek için zorunlu.
+
+### §7 Alt Görevler (CaseSubTask) (önceki #23)
+
+`CaseSubTask` modeli (status: todo/in_progress/done/cancelled, required: bool, displayOrder, assignedUserId). "Çözüldü"ye geçişte tüm `required` görevler `done` olmalı.
+
+**Tech-design Q:** Yeni `CaseSubTask` tablosu mu yoksa mevcut `checklistItems Json` (`schema.prisma:1059`) extend mi? Kickoff'ta karara bağla.
+
+**Çaba:** 1.5 gün.
+
+### §9 Eksik Bilgi Tespiti (CategoryRequiredInfo) (önceki #25)
+
+`CategoryRequiredInfo` modeli (categoryId, fieldName, requiredFor: open/resolve, prompt). Vaka açılışında AI eksik bilgileri tespit eder, agent'a sorar.
+
+**NEEDS_PRODUCT_DECISION:** Çözüm öncesi denetim — eksik varsa **engelle** mi yoksa **uyar** mı? (backlog'da zaten not vardı, karar bekliyor.)
+
+**Çaba:** 1.5 gün.
+
+### §14 Risk Lens — 0-100 score (önceki #21)
+
+Vaka başlığında renkli etiket (Yeşil/Sarı/Kırmızı), tek skor. Spec §14 sinyal ağırlıkları:
+
 | Sinyal | Katkı |
 |---|---|
 | SLA riski | 0-25 |
@@ -398,341 +294,121 @@ Vaka başlığında renkli etiket (Yeşil/Sarı/Kırmızı), tek skor 0-100. Sin
 
 Skor 75+ ise Yönlendirici + Bekçi tetiklenir.
 
-**Neden önemli?**
-Tek bakışta "bu vakayla acil ilgilen / sıraya at" sinyali. Bugün agent her vakayı eşit görüyor.
+**Bağımlılık (bloklu):** Bu kalem son AI Fabric dilimi — tüm sinyaller (#9, #24, varlık §4 reactions) hazır olunca uygulanabilir.
 
-**Mevcut durum:** Yok.
-**Çaba:** 1 gün (madde 9 ve 17 sonrası tüm sinyaller hazır olunca)
-**Bağımlılık:** §11/§12 (madde 9) + §8 duygu tonu (madde 24) + §4 tepki (madde 17)
+**Çaba:** 1 gün (signal aggregator + UI).
 
----
+### backlogChangePct — BacklogSnapshot tablosu (önceki #14)
 
-## 🟡 22) Faz 2 §6 — Bildirim kanal matrisi + Resend e-posta
+`server/analytics/operationsAggregator.js:149` `approximations: []`. Gerçek günlük snapshot:
+- Cron her gün 00:00 (Istanbul) → `BacklogSnapshot { date, companyId, openCount, slaRiskCount, byPriority Json }`
+- 90 gün retention
+- Formula: (bugün - 7gün önce) / 7gün önce × 100
 
-**Ne yapacağız?**
-Bugün `CaseNotification` modeli var ama dağıtım sadece in-app. Eksik:
-- **Kanal matrisi** (spec'teki tablo): mesai içi vs dışı, etiketleme/atama/SLA/eskalasyon her biri için kanal seçimi
-- **Resend e-posta entegrasyonu** (sağlayıcı: Resend, karar verilmiş)
-- **Günlük digest** (09:00 e-posta) takipçi profili `digest` olanlar için
-- **Mesai saatleri** ayarı CompanySettings'te (varsayılan 09:00-18:00 Pzt-Cuma)
-- SMS sağlayıcısı (NetGSM/İletimerkezi) — ileri sprint
+**Çaba:** 1 gün.
 
-**Neden önemli?**
-Bildirim gürültüsünü %50 azaltmak (Faz 2 başarı kriteri). Bugün ya hiçbir şey ya her şey.
+**Bağımlılık:** OPS §7 Q14 karar (Phase 5 optional flag).
 
-**Mevcut durum:** Model var, dağıtım yok.
-**Çaba:** 2 gün
-**Bağımlılık:** Resend API key + CompanySettings extension
+### suggestedDuplicateOf supervisor review queue (Müşteri Eşleştirme #2 split-b)
 
----
+Agent merge yapmıyor (yetkisi yok); ama "Mükerrer olabilir" flag bırakabilmeli. Yeni alan + supervisor review queue UI.
 
-## 🟡 23) Faz 2 §7 — Alt Görevler (CaseSubTask)
+**NEEDS_PRODUCT_DECISION:** flag mekanizması — `AccountFlag` ayrı tablo mı yoksa `Account.suspectedDuplicateOf` self-FK mı?
 
-**Ne yapacağız?**
-Vaka detayına yeni bölüm: "Alt Görevler (3/5)" ilerleme çubuğu. Her satır: onay kutusu, başlık, atama, son tarih.
-- `CaseSubTask` modeli (status: todo/in_progress/done/cancelled, required: bool, displayOrder, assignedUserId)
-- "Çözüldü"ye geçişte tüm `required: true` görevler `done` olmalı (yoksa engelle)
-- Alt göreve atanan kişi otomatik watcher
-- Kategori bazında şablon önerisi (Yönlendirici AI)
+**Çaba:** 1 gün (karar sonrası).
 
-**Neden önemli?**
-Karmaşık vakalarda atomik adımlar görünür olur. "Çözüm öncesi şu 3 şey yapılmış olmalı" enforcement'ı sağlar.
+### Blocking link type decision (önceki #30 split-b)
 
-**Mevcut durum:** Yok.
-**Çaba:** 1.5 gün
-**Bağımlılık:** Yok
+`linkRepo.add` (`caseRepository.js:2972`) yalnız `Related|Duplicate|Parent` kabul ediyor. Spec'te "Blocking" tipi geçiyor ama kod hiç yok.
+
+**NEEDS_PRODUCT_DECISION:** Blocking gerçekten gerekli mi yoksa spec'ten çıkar mı?
+
+**Çaba:** Karar + 0.5 gün kod.
 
 ---
 
-## 🟡 24) Faz 2 §8 — Duygu Tonu Analizi
+## P4 — Future / Decision-blocked
 
-**Ne yapacağız?**
-- `CaseSentimentSnapshot` modeli (sentiment: positive/neutral/negative/angry, score -1.0..+1.0, sourceType: note/call_log/chat)
-- Her not/çağrı geldiğinde toplu (5dk gecikme) AI sentiment çağrısı
-- Vaka kartında ton trendi göster (önceki snapshot vs son)
-- Negative/angry → Risk Göstergesi (madde 21) ağırlığa katkı
+### externalCustomerCode tenant-configurable validation (önceki externalCustomerCode item)
 
-**Neden önemli?**
-Müşterinin tonu bozuluyor sinyali, agent farkına varmadan yönetici müdahalesi tetikler.
+`/^\d{5}$/` 3 yerde hard-coded (`accountRepository.js:669`, `AccountCompanyEditor.tsx:42`, `AccountFormModal.tsx:34`). `CompanySettings.externalCustomerCodePattern` benzeri tenant-config gerek.
 
-**Mevcut durum:** Yok.
-**Çaba:** 1.5 gün
-**Bağımlılık:** §6 toplu cron işleyici altyapısı
+**Trigger:** Yeni paying tenant 5-hane rakam dışı format ister.
 
----
+**Çaba:** 1 gün.
 
-## 🟡 25) Faz 2 §9 — Eksik Bilgi Tespiti (CategoryRequiredInfo)
+### Mention notification — scroll-to-note focus highlight (önceki #28 — küçültülmüş)
 
-**Ne yapacağız?**
-Her kategori için "şu alanlar olmadan vaka açılamaz/kapanamaz" tanımı:
-- `CategoryRequiredInfo` modeli (categoryId, fieldName, requiredFor: open/resolve, prompt)
-- Vaka açılışında AI eksik bilgileri tespit eder, agent'a sorar
-- Çözüm öncesi denetim — eksik varsa engelle (veya uyar — karar gerek)
+Aksiyonlarım inbox `ActionItem.caseId` üzerinden navigation zaten tek tık çözüyor. Geriye kalan: vakaya gidince ilgili notu 2sn highlight ile vurgulama (URL hash fragment).
 
-**Neden önemli?**
-"Müşterinin telefon numarasını sormayı unutmak" gibi tekrar eden açıklar. Knowledge debt kategori bazında saklanır.
+**Not:** Önceki #28'in "deepLink field doldur" premise'i artık geçersiz — `CaseNotification.deepLink` field hiç yokmuş, ActionItem akışı bu kontekstte odaklı navigation'ı zaten sunuyor.
 
-**Mevcut durum:** Yok.
-**Çaba:** 1.5 gün
-**Bağımlılık:** Admin'de CategoryRequiredInfo CRUD ekranı
+**Çaba:** 1-2 saat.
 
 ---
 
-## 🟡 26) Faz 2 §10 — Kiracı bazlı AI ayarları
+## Closed / Obsolete / Moved
 
-**Ne yapacağız?**
-Bugün tek global `OPENAI_API_KEY`. CompanySettings'e ekle:
-- `aiProvider` (OpenAI/Anthropic/disabled)
-- `aiApiKey` (Supabase Vault ile şifreli)
-- `aiMonthlyTokenLimit` (companyId başına)
-- Limit aşılırsa AI çağrıları 503 + dashboard'da uyarı
+Bu kalemler ya shipped, ya canonical başka dokümanda, ya karar verildi.
 
-`AIUsageLog`'tan companyId başına aylık token toplamı zaten alınabiliyor (madde 6 hazırsa) — kontrol mantığı oradan geçer.
+### Shipped — ROADMAP "Recent Ships / Platform Capabilities"
 
-**Neden önemli?**
-Multi-tenant SaaS olarak satılırken her müşteri kendi AI bütçesini yönetmeli. Bugün global key tüm müşteriler arasında paylaşılıyor.
+Bu shipped iş envanteri artık `docs/ROADMAP.md`'de "Recent Ships / Platform Capabilities" altında:
 
-**Mevcut durum:** Yok.
-**Çaba:** 2 gün
-**Bağımlılık:** Supabase Vault entegrasyonu
+- ~~#1 OpenAI API key prefix/suffix logging~~ — shipped 2026-05-15 (`server/routes/ai.js:54` NODE_ENV gate)
+- **#17 (kısmı)** §4 Tepkiler + reply threading — `CaseNoteReaction` tablosu + `CaseNote.parentNoteId` + `ReplyItem`. (Alt-kalem "Canlı Özet kartı" → P3 Yazman AI'a foldlandı.)
+- **#45** Sidebar/header redesign — commits `52bfdb6`, `dc47b6d`, `921f2d3` ile shipped
+- **Müşteri Eşleştirme — Müşterisiz vaka akışı** — `customerMatchPending` field + filter + `CaseDetailPage:2546` match suggestions
 
----
+Audit gap detection — daha önce backlog/roadmap'ta hiç yer almayan major ship'ler de ROADMAP'a eklendi:
+- Action Center / Aksiyonlarım inbox (WR-NOTIFICATION-CENTER Phase 1/2A/2B/2C)
+- Resolution Approval flow (kind=approval, `approvalRepository.js`)
+- Customer 360 Phase A/B/C2 + deterministic Customer Match (`customerMatchRepository.js`)
+- External KB console
+- Watcher Inbox UI (zaten ROADMAP'taydı — Phase 5c)
+- AI Status Report / Durum Raporu
 
-## 🟡 27) Watcher permissions matrisi (Collab Hardening)
+### Moved — Report Studio'ya özgü
 
-**Ne yapacağız?**
-Bugün:
-- Kim watcher ekleyebilir? (Şu an: route'ta gate yok — herkes ekleyebilir)
-- Kim başkasını watcher'dan çıkarabilir? (Self + Supervisor+ — bu var)
-- Kim başkasını watcher olarak ekleyebilir? (Belirsiz)
-- Atanan kişi otomatik watcher mı? (Spec evet diyor — kontrol et)
-- Mention edilen kişi otomatik watcher mı? (Spec evet — kontrol et)
+Şu 4 kalem `docs/REPORT_STUDIO_BACKLOG.md`'de zaten canonical olarak var:
 
-Net policy + smoke testi.
+- **#11** Phase 5b XLSX/PDF → RSB P1 "XLSX/CSV Export" + "Server-side PDF"
+- **#34** Scheduled reports → RSB P2 "Scheduled Reports"
+- **#35** Public share links → RSB P2 "Email / Share" altında
+- **#36** Report history → RSB P2 "Report History"
 
-**Neden önemli?**
-"Vakayı kim takip ediyor" şeffaflığı; kötü niyetli watcher ekleme/çıkarma engeli.
+### Moved — ROADMAP (future product direction / cross-cutting)
 
-**Mevcut durum:** Hiç kayıtlı değil; smoke yapılmamış.
-**Çaba:** 0.5 gün
-**Bağımlılık:** Yok
+- **#12** Phase 6 PPTX export → OPS §6 zaten out-of-scope; ROADMAP "future export formats"
+- **#26** Faz 2 §10 Kiracı bazlı AI ayarları → ikinci paying tenant'a kadar gate; ROADMAP "Commercialization"
+- **#32** Mobile / dark mode polish turu → ongoing quality posture, ROADMAP "Known Limitations"
+- **#33** Audit replay UI (MetricQueryAudit) → admin convenience; ROADMAP "Admin Tooling"
+- **#37** Real-time refresh (WebSocket/SSE) → OPS §6 out-of-scope; ROADMAP "Scale"
+- **#39** Karşılaştırmalı period selector → ROADMAP "Operations Dashboard polish"
+- **#40** Pinned / saved dashboard view'leri → ROADMAP "Operations Dashboard polish"
+- **#41** A11y / klavye navigasyon audit → cross-cutting quality bar; ROADMAP "Known Limitations"
+- **#43** Vercel Hobby → Pro cron geçişi → infra/billing karar; ROADMAP "Infra"
+- **Müşteri Eşleştirme — ileri faz** (matching queue / duplicate detection / account merge) → ROADMAP "Customer Context Intelligence — Phase F (Account Merge)"
 
----
+### Moved — TECHNICAL_DEBT
 
-## 🟡 28) Mention notification deep-link
+- **#15** METRIC_FIXTURES.md PENDING values
+- **#29** CaseNote.authorId backfill cron
+- **#42** snooze-wakeup cron route `/api/cron` prefix taşıma
 
-**Ne yapacağız?**
-`CaseNotification.deepLink` alanı Faz 2 spec'inde tanımlı (`/cases/:id?focus=event-:activityId`) ama mention bildirimi üretildiğinde **doldurulmuyor**. Mention oluştuğunda CaseNotification yarat, deepLink alanını doldur, bell drawer'da tıklayınca vakaya gidip ilgili not'u vurgula (2sn flash).
+Yanı sıra audit gap detection sonucu doğan yeni borç maddeleri:
+- Phase 2C dual-write / legacy CaseNotification deprecation timeline
+- ActionItem.objectType/Id polymorphism (FK olmaması) referansiyel bütünlük riski
 
-**Neden önemli?**
-"Beni etiketlemişler" → 5 tıklama sonra notu buluyorsun. Deep-link tek tık.
+### Closed — Decision-recorded
 
-**Mevcut durum:** Schema alanı var, üretim yok.
-**Çaba:** 0.5 gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 29) CaseNote.authorId backfill cron
-
-**Ne yapacağız?**
-PR #68'de `CaseNote.authorId` alanı eklendi (nullable). Eski notlar `authorId=NULL` taşıyor — reaksiyon eklenirse not sahibine bildirim üretilmez.
-- Tek seferlik backfill: `CaseActivity` (note_added event'i) üzerinden eski notların yazarını eşle, `CaseNote.authorId`'yi doldur
-- Tek script: `scripts/backfill-note-author.js`
-
-**Neden önemli?**
-Tepki bildirimleri (madde 17) tüm tarihçede çalışsın.
-
-**Mevcut durum:** Yeni notlar tamam, eski notlar boş.
-**Çaba:** 2 saat
-**Bağımlılık:** Madde 17 öncesi yapılmalı
-
----
-
-## 🟡 30) Linked case symmetric — Parent/Related/Blocking
-
-**Ne yapacağız?**
-Duplicate symmetric çalışıyor (test senaryosunda doğrulanmış). Diğer 3 tip için:
-- **Parent**: A parent of B ise B'de "Üst vaka: A" görünmeli (asymmetric ama iki uçtan da görünür)
-- **Related**: symmetric (A related B = B related A) — kontrol et
-- **Blocking**: asymmetric (A blocks B; B is blocked by A) — iki uçtan farklı etiket göstermek lazım
-
-`linkRepo.list`'in döndürdüğü görünümler iki uç için tutarlı mı?
-
-**Neden önemli?**
-"Bu vaka neyle bağlı?" — sadece bir uçtan görünürse ilişki yarıda kaldı izlenimi.
-
-**Mevcut durum:** Duplicate ✓, diğerleri belirsiz.
-**Çaba:** 0.5 gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 31) Transfer watcher notification
-
-**Ne yapacağız?**
-Vaka aktarıldığında:
-- Eski atanan kişi (transfer öncesi sahibi) otomatik watcher olur
-- Tüm watcher'lara "Vaka X takıma/kişiye aktarıldı" bildirimi gider
-- Yeni atanan kişi otomatik watcher
-- CaseActivity'de transfer event'i (zaten var mı kontrol et)
-
-**Neden önemli?**
-Transfer "vakanın bana ait olmadığı" anı; eski sahip bilgisini kaybetmemeli.
-
-**Mevcut durum:** Hiç kayıtlı değil.
-**Çaba:** 0.5 gün
-**Bağımlılık:** Madde 22 (kanal matrisi) idealdir ama olmadan da çalışır
-
----
-
-## 🟡 32) Mobile / dark mode polish turu
-
-**Ne yapacağız?**
-ROADMAP'ta "General flow works, not mobile-first" notuyla geçiyor. Spesifik polish:
-- Modal/popover overflow (KeyboardShortcutsModal, CustomerCardModal, ReportStudioModal mobile)
-- Drilldown drawer mobile (genişlik kontrolü)
-- Sidebar collapse/expand mobile geçişi
-- Dashboard FilterBar wrap davranışı dar ekranda
-- Dark mode legibility audit (Operations Dashboard, Report Studio, AI surfaces tek tek gez)
-
-**Neden önemli?**
-Yöneticinin telefondan kontrol etmesi temel senaryo.
-
-**Mevcut durum:** Çalışıyor ama çatlaklar var.
-**Çaba:** 1 gün
-**Bağımlılık:** Yok
-
----
-
-## 🟡 Müşteri Eşleştirme Edge Case'leri
-
-**Tetik:** Account 360 Phase B başlarken karara bağlanmalı.
-**Öncelik:** 🟡 Yüksek
-
-**Neden önemli?**
-Phase A schema + BFF teslim edildi (Account, AccountCompany, AccountContact). Phase B UI'a geçmeden önce gerçek hayatta çıkacak iki büyük edge case'i (müşterisiz vaka + mükerrer kayıt) ürün kararıyla netleştirmek gerek. Aksi halde Agent ekranında "müşteri bulamadım" / "iki müşteri çıktı, hangisi?" durumları çözümsüz kalır.
-
-### 1) Müşterisiz vaka akışı
-
-Agent bazen vakayı açarken müşteriyi sistemde bulamaz (henüz girilmemiş, holding adıyla geldi, dış sistem kodu bilinmiyor). Bu durumda:
-
-- Case create'te `accountId = null` **geçerli kalmalı** (mevcut schema zaten destekliyor — `Case.accountId` opsiyonel).
-- Agent müşteri bulamazsa vakayı **müşterisiz açabilmeli**, akış kesilmesin.
-- Vaka otomatik olarak **"Müşteri eşleştirme bekliyor"** durumuyla işaretlenmeli (yeni flag veya `customerMatchPending` benzeri Case alanı).
-- Case listesinde **"Müşteri eşleştirme bekliyor" filtresi** eklenmeli — Agent ve Supervisor görsün.
-- Supervisor / Admin için **unlinked cases queue** tasarlanmalı — günlük temizlik kuyruğu.
-
-### 2) Mükerrer kayıt önleme (Agent disambiguation)
-
-Aynı müşteri için iki kayıt açılması, müşteri verisinin en hızlı kirlendiği nokta. Agent arama yaptığında karar verebilsin diye:
-
-- Arama sonuçlarında her satırda **disambiguation alanları** gösterilmeli:
-  - Bağlı şirket chip'leri (tenant tarafında tanımlı şirketler)
-  - `externalCustomerCode` (Müşteri Dış Kodu — ERP/CRM/3. parti referansı)
-  - Maskeli VKN
-  - Telefon, e-posta
-  - `isActive`, `openCaseCount`, `lastCaseAt`
-- Agent **merge işlemi yapmamalı** — yetkisi yok.
-- Agent **"Mükerrer olabilir" flag'i** bırakabilmeli (yeni alan: `AccountFlag` veya `Account.suspectedDuplicateOf`).
-- Flag **Supervisor / Admin review kuyruğuna** düşmeli — Phase D'de inceleme + merge UI'ı gelir.
-
-### 3) İleride (ayrı/kontrollü faz)
-
-- **Customer matching queue ekranı** — Supervisor/Admin için müşteri eşleştirme bekleyen vakaları temizleme arayüzü.
-- **Duplicate detection** — sistem otomatik öneri üretsin:
-  - Aynı VKN
-  - Aynı telefon / e-posta
-  - Benzer ad (Levenshtein / tokenized match)
-- **Account merge** — yüksek riskli operasyon, ayrı faz:
-  - Master account seçimi
-  - Taşınacak vaka / şirket ilişkisi / kontak ön izlemesi (dry-run)
-  - Audit log zorunlu
-  - Source account pasife alma **veya** `Account.mergedIntoAccountId` ile soft-delete (vakalar geçmişte hâlâ izlenebilsin)
-
-**Faz notları:**
-- **Phase B/C** (UI + ürün/kod/paket): disambiguation alanları + unlinked cases queue tasarlanabilir — düşük riskli, görünür değer üretir.
-- **Account merge** Phase B/C kapsamı dışında; veri kaybı / audit riski yüksek, kendi başına bir faz olarak ele alınmalı (Phase F gibi).
-
-**Mevcut durum:** Phase A schema + BFF hazır; edge case ürün kararı bekliyor.
-**Çaba:** Phase B/C içinde disambiguation 1 gün, unlinked queue 1-2 gün; merge fazı ayrı 3-5 gün.
-**Bağımlılık:** Account 360 Phase B (UI).
-
----
-
-## 🟡 externalCustomerCode validation tenant-configurable
-
-`externalCustomerCode` (Müşteri Dış Kodu) şu an **tüm tenant'lar için sabit
-5-hane rakam** regex'iyle doğrulanıyor (`^\d{5}$`). Üretim kullanımında bazı
-müşteriler farklı ERP/CRM/3. parti kod formatları kullanır:
-
-- Bazı tenant'lar 5 hane rakam (mevcut format) ister
-- Bazıları alfanümerik ERP kodu kullanır (örn. `ACC-00123`)
-- Bazıları sözleşme numarası, vergi dairesi kodu vb. saklamak ister
-
-İleride: `CompanySettings.externalCustomerCodePattern` benzeri bir alan
-(regex veya format adı) eklenip backend doğrulaması tenant'a göre çalışmalı.
-UI hint metni de tenant'a göre dinamik olmalı.
-
-**Mevcut durum:** Phase C2'de generic UI copy yapıldı ("Müşteri Dış Kodu"),
-ama validation hala 5-hane sabit. Şu an blocker değil; yeni tenant onboard
-sırasında planlanmalı.
-**Çaba:** 1 gün (schema + validation + UI helper).
-**Bağımlılık:** Yeni tenant ihtiyacı.
-
----
-
-## 🟢 33-46) Düşük öncelik / ileri sprint
-
-Bu kalemler ürün kararı, ileri sprint ya da yeterli talep gelmedikçe ertelenir:
-
-- **33. Audit replay UI** — `MetricQueryAudit` tablosunu görüntüleyen admin sayfası
-- **34. Scheduled reports** — cron + e-posta ile haftalık/aylık otomatik rapor
-- **35. Public share links** — read-only token ile dış kullanıcıya rapor paylaşımı
-- **36. Report history** — kim ne zaman hangi raporu üretti, indirilebilir geçmiş
-- **37. Real-time refresh** — 30sn polling yerine WebSocket / SSE
-- **38. Drilldown row inline aksiyonlar** — drawer'da satırdan assign/escalate/yorum
-- **39. Karşılaştırmalı period selector** — "geçen hafta vs bu hafta" yan yana
-- **40. Pinned / saved dashboard view'leri** — kullanıcı favori filtre setini kaydeder
-- **41. A11y / klavye navigasyon audit** — WCAG / screen reader uyumu
-- **42. snooze-wakeup cron route'unu `/api/cron` prefix'ine taşı** — tarihsel sebep
-- **43. Vercel Hobby → Pro cron geçişi** — günde 1 sınırını aşmak için
-- **44. Persona enum (CSLeadership/ProductManager/CustomerSuccessLead)** — Phase 5+'da deferred edildi, gerekirse iste
-- **45. Sidebar/header redesign turu** — Faz 2 öncesi planlanmıştı, kısmen yapıldı
-- **46. 50 design-question karara bağlama** — `docs/OPERATIONS_DASHBOARD_DESIGN.md §7`'deki açık karar listesi (delta 7g/30g, byTeam avg/median, retention payda Churn-only mi tüm vakalar mı, vs.)
-
----
-
-## Önerilen sıralama
-
-**Hafta 1 — Hardening sprint:**
-1. Madde 1 (key logging gate) — 15dk
-2. Madde 4 (AI Accept/Reject FE) — 3sa
-3. Madde 8 (Smart QA explicit) — 2sa
-4. Madde 16 (legacy temizlik) — 30dk
-5. Madde 2 (transition state machine) — 3sa
-6. Madde 3 (role permissions — ürün kararı sonrası) — 1 gün
-7. Madde 5 (SLA edge case smoke) — yarım gün
-8. Madde 6 (multi-tenant smoke) — yarım gün
-
-**Hafta 2 — Ürün ileri:**
-1. Madde 9 (Faz 2 §11/§12/§13) — 1.5 gün
-2. Madde 17 (§4 tepki + threading) — 1.5 gün
-3. Madde 29 (note authorId backfill) — 2sa
-4. Madde 28 (mention deep-link) — 0.5 gün
-
-**Hafta 3 — Operations Dashboard ileri:**
-1. Madde 11 (Phase 5b XLSX/PDF) — 2 gün
-2. Madde 10 (bundle splitting) — 1 gün
-3. Madde 13 (firstResponseTime) — yarım gün
-
-Sonrası: §5.x AI rolleri (madde 18-21), §6 bildirim kanal matrisi (22), §7-§8 (Alt Görev + Duygu Tonu)...
+- **#44** Persona enum (CSLeadership/ProductManager/CustomerSuccessLead) — `server/analytics/scopeDerivation.js:14` "EKLENMEZ" karar zaten kodda. Bu roller flag/scope ile yönetiliyor, enum ile değil.
 
 ---
 
 ## Bu listeyi güncel tutmak
 
-- Bir madde shipped olunca üstüne `~strikethrough~` ya da satırı sil
-- Yeni iş geldiğinde uygun renk koduyla ekle
-- Her dilim PR'ı bu dokümana referans verebilir
-- Auto-memory'ye bu dosyanın varlığı not düşülmeli; gelecek oturum "neler eksik?" sorusunda buradan baksın
+- Aktif madde shipped olunca: BACKLOG'dan sil + ROADMAP'a "Recent Ships" satırı düş (1 cümle, planning_card link)
+- Yeni iş geldiğinde: uygun P-priority altına ekle; eski numara/etiket gerekmiyor — sadece kısa açıklama + dosya:satır kanıt
+- 50 OPS design-question (#46) cevaplandıkça → ilgili backlog kalemi açılabilir/kapatılabilir
+- Audit cycle önerisi: her major release sonrası 5-10 dakikalık reality check (backlog vs git log)
