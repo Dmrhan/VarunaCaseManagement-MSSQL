@@ -40,11 +40,13 @@
  *     scanned:                      <int>,
  *     created_pending:              <int>,
  *     created_done:                 <int>,
- *     skipped_dedup:                <int>,
- *     skipped_unmapped_event_type:  <int>,
- *     skipped_no_membership:        <int>,
- *     skipped_inactive_membership:  <int>,
- *     skipped_self_follow:          <int>,  // watcher_added: addedBy === recipient
+ *     skipped_dedup:                          <int>,
+ *     skipped_unmapped_event_type:            <int>,  // truly unknown
+ *     skipped_no_membership:                  <int>,
+ *     skipped_inactive_membership:            <int>,
+ *     skipped_self_follow:                    <int>,  // watcher_added: addedBy === recipient
+ *     skipped_legacy_mention_notification:    <int>,  // legacy CaseNotification eventType='mention'
+ *                                                       // (canonical path is CaseMention)
  *     dry_run:                      <bool>,
  *   }
  *
@@ -57,7 +59,10 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { buildNotificationDedupKey } from '../server/db/actionItemRepository.js';
+import {
+  buildNotificationDedupKey,
+  buildNotificationReasonLabel,
+} from '../server/db/actionItemRepository.js';
 
 // ─────────────────────────────────────────────────────────────────
 // CLI parsing
@@ -131,6 +136,7 @@ const SUPPORTED_EVENT_TYPES = new Set([
   'watcher_added',
   'watcher_update',
   'note_reaction',
+  'transfer',          // Phase 2C cleanup — legacy demo seed eventType.
   'transfer_warning',
 ]);
 
@@ -138,6 +144,7 @@ const EVENT_TO_KIND = {
   watcher_added: 'watcher_event',
   watcher_update: 'watcher_event',
   note_reaction: 'watcher_event',
+  transfer: 'watcher_event',
   transfer_warning: 'system_alert',
 };
 
@@ -192,6 +199,17 @@ async function run() {
     // recipient (user followed themselves). Live adapter already skips
     // these; backfill must mirror or it re-creates the inbox noise.
     skipped_self_follow: 0,
+    // Phase 2C cleanup: legacy `eventType='mention'` CaseNotification
+    // rows (written by scripts/seed-full-demo-scenarios.js and any
+    // historical pre-Phase-2A code paths). The canonical mention
+    // migration is CaseMention → kind='mention' via
+    // emitMentionsForNote / scripts/backfill-mention-to-inbox.js;
+    // creating an ActionItem from a legacy CaseNotification mention
+    // would duplicate the canonical row with a different dedupKey
+    // shape. Explicit skip + own counter so the operator's
+    // skipped_unmapped_event_type number stays reserved for truly
+    // unknown future eventTypes.
+    skipped_legacy_mention_notification: 0,
     dry_run: args.dryRun,
   };
 
@@ -238,6 +256,15 @@ async function run() {
     for (const row of batch) {
       report.scanned += 1;
       // Unmapped eventType — silent skip (forward-compat).
+      // Phase 2C cleanup — legacy `eventType='mention'` CaseNotification
+      // is owned by the canonical CaseMention adapter. Skip explicitly
+      // so the row neither duplicates the canonical mention ActionItem
+      // nor inflates skipped_unmapped_event_type. Must be checked
+      // BEFORE the SUPPORTED_EVENT_TYPES guard.
+      if (row.eventType === 'mention') {
+        report.skipped_legacy_mention_notification += 1;
+        continue;
+      }
       if (!SUPPORTED_EVENT_TYPES.has(row.eventType)) {
         report.skipped_unmapped_event_type += 1;
         continue;
@@ -287,9 +314,11 @@ async function run() {
       // (Same contract as backfill-mention-to-inbox.js.)
       const kind = EVENT_TO_KIND[row.eventType];
       const c = await caseInfo(row.caseId);
-      const reasonLabel = String(
-        row.payload?.message ?? `${row.eventType} bildirimi.`,
-      ).slice(0, 500);
+      // Phase 2C cleanup — shared reasonLabel builder. Special-cases
+      // 'transfer' to use payload.fromTeam/payload.toTeam (legacy demo
+      // seed format with no payload.message); never leaks raw
+      // eventType into operator-facing copy.
+      const reasonLabel = buildNotificationReasonLabel(row.eventType, row.payload);
       const isSeen = !!row.readAt;
       const priority = row.eventType === 'transfer_warning' ? 70 : 50;
 

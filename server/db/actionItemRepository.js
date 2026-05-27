@@ -303,19 +303,80 @@ export function buildNotificationDedupKey({
  *   watcher_added   → watcher_event  (FYI; "vakada hareket")
  *   watcher_update  → watcher_event  (FYI; same semantic family)
  *   note_reaction   → watcher_event  (FYI; reasonLabel carries emoji)
- *   transfer_warning→ system_alert   (FYI; supervisor-side warning)
+ *   transfer        → watcher_event  (FYI; "vaka aktarımı"; legacy
+ *                                     demo seed eventType — Phase 2C
+ *                                     cleanup)
+ *   transfer_warning→ system_alert   (FYI; supervisor-side warning,
+ *                                     distinct from the routine
+ *                                     'transfer' event above)
+ *
+ * NOT mapped here (intentional):
+ *   mention — canonical migration path is CaseMention →
+ *             emitMentionsForNote (kind='mention'); a legacy
+ *             CaseNotification eventType='mention' must NOT also
+ *             produce a duplicate kind='mention' ActionItem. The
+ *             backfill explicitly skips these rows with the
+ *             skipped_legacy_mention_notification counter.
  */
 function notificationKindFor(eventType) {
   switch (eventType) {
     case 'watcher_added':
     case 'watcher_update':
     case 'note_reaction':
+    case 'transfer':
       return 'watcher_event';
     case 'transfer_warning':
       return 'system_alert';
     default:
       return null;
   }
+}
+
+/**
+ * Build the human-readable reasonLabel for a generic notification
+ * ActionItem. Shared by the live adapter (emitGenericNotification)
+ * and the backfill script so the operator-facing copy stays
+ * consistent regardless of code path.
+ *
+ *   transfer       — prefers `payload.fromTeam` + `payload.toTeam`
+ *                    and renders a full Turkish sentence:
+ *                      "Vaka transfer edildi: <from> ekibinden
+ *                       <to> ekibine."
+ *                    Falls back to payload.message or a generic
+ *                    "Vaka transfer edildi." if either team is missing.
+ *
+ *   other kinds    — use payload.message verbatim (current live
+ *                    writers always populate this). If for some reason
+ *                    payload.message is missing, use the per-kind
+ *                    operator-friendly fallback below — NOT the raw
+ *                    eventType string (R1 / planning card §17.H —
+ *                    "Technical kind UI'ya sızar" anti-pattern).
+ *
+ * Returns a string capped at 500 chars (ActionItem.reasonLabel is a
+ * single-line column; UI truncates further).
+ */
+export function buildNotificationReasonLabel(eventType, payload) {
+  // transfer needs special handling: legacy demo seed writes
+  // { fromTeam, toTeam, caseNumber } with no message field.
+  if (eventType === 'transfer') {
+    if (payload?.fromTeam && payload?.toTeam) {
+      return `Vaka transfer edildi: ${payload.fromTeam} ekibinden ${payload.toTeam} ekibine.`.slice(0, 500);
+    }
+    if (payload?.message) return String(payload.message).slice(0, 500);
+    return 'Vaka transfer edildi.';
+  }
+  if (payload?.message) {
+    return String(payload.message).slice(0, 500);
+  }
+  // Per-event Turkish fallbacks so the raw eventType never leaks if a
+  // writer omits payload.message.
+  const fallbacks = {
+    watcher_added: 'İzleyici eklendi.',
+    watcher_update: 'Vakada hareket var.',
+    note_reaction: 'Notuna tepki geldi.',
+    transfer_warning: 'Transfer uyarısı.',
+  };
+  return fallbacks[eventType] ?? 'Vaka bildirimi.';
 }
 
 /**
@@ -376,9 +437,7 @@ export async function emitGenericNotification({
       recipientUserId,
       payload,
     });
-    const reasonLabel = String(
-      payload?.message ?? `${eventType} bildirimi.`,
-    ).slice(0, 500);
+    const reasonLabel = buildNotificationReasonLabel(eventType, payload);
     void emitActionItem({
       kind,
       userId: recipientUserId,

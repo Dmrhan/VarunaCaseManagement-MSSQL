@@ -1,10 +1,12 @@
 /**
- * WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification flow smoke.
+ * WR-NOTIFICATION-CENTER Phase 2B+2C — generic CaseNotification flow smoke.
  *
- * Repository-level (no HTTP). 12 scenarios covering the four migrated
+ * Repository-level (no HTTP). 16 scenarios covering the four migrated
  * eventTypes + backfill + tenant scope + read mapping + watcher
  * self-add suppression (Codex P2) + backfill-side self-follow guard
- * (Codex P2 follow-up):
+ * (Codex P2 follow-up) + Phase 2C legacy eventType classification
+ * (`transfer` mapped, `mention` explicitly skipped, unknown eventTypes
+ * still flagged, canonical CaseMention path untouched):
  *
  *   G1   watcher_added → live emit
  *        watcherRepo.add writes CaseNotification + emits ActionItem
@@ -70,6 +72,33 @@
  *        Drift fixture targeting a user with isActive=false UC →
  *        backfill skipped_inactive_membership++ and no ActionItem.
  *
+ *   G13  Legacy `transfer` CaseNotification → ActionItem (Phase 2C)
+ *        Legacy demo-seed eventType='transfer' (with payload
+ *        { fromTeam, toTeam, caseNumber } and no `message` field)
+ *        is now a supported eventType. Asserts:
+ *          - ActionItem created, kind=watcher_event, FYI
+ *          - reasonLabel built via buildNotificationReasonLabel
+ *            ("Vaka transfer edildi: Destek ekibinden Operasyon ekibine.")
+ *          - No raw eventType string leakage into the Turkish copy
+ *
+ *   G14  Legacy `mention` CaseNotification → no ActionItem (Phase 2C)
+ *        Canonical path is CaseMention → kind='mention' via
+ *        emitMentionsForNote. Legacy demo-seed eventType='mention'
+ *        rows must skip with the new counter:
+ *          - No ActionItem written for the case+recipient
+ *          - report.skipped_legacy_mention_notification >= 1
+ *
+ *   G15  Truly unknown eventType → still unmapped (Phase 2C)
+ *        Forward-compat guarantee: after `mention` and `transfer`
+ *        gained their own classification, skipped_unmapped_event_type
+ *        stays reserved for genuinely future-unknown eventTypes.
+ *
+ *   G16  Canonical CaseMention exists → no duplicate (Phase 2C)
+ *        Even when a kind='mention' ActionItem already exists for a
+ *        case+recipient (canonical path), a parallel legacy
+ *        CaseNotification eventType='mention' must NOT produce a
+ *        second mention ActionItem. Backfill skip + dedupKey guard.
+ *
  * Run: node --env-file=.env scripts/smoke-generic-notification-flow.js
  * Cleanup: all rows removed in finally{}.
  */
@@ -79,6 +108,7 @@ import { prisma } from '../server/db/client.js';
 import { caseRepository, watcherRepo, reactionRepo } from '../server/db/caseRepository.js';
 import {
   buildNotificationDedupKey,
+  buildNotificationReasonLabel,
   emitGenericNotification,
   listForUser,
 } from '../server/db/actionItemRepository.js';
@@ -661,6 +691,222 @@ async function run() {
       `skipped_self_follow=${selfFollowBackfillReport.skipped_self_follow} ` +
         `aiAfterBackfill=${!!selfFollowAiAfterBackfill}`,
     );
+
+    // ─── G13: legacy `transfer` CaseNotification → ActionItem ──────
+    // Phase 2C cleanup. The full-demo seed writes eventType='transfer'
+    // CaseNotification rows with payload { fromTeam, toTeam, caseNumber }
+    // and no `message` field. Backfill must:
+    //   - Recognize 'transfer' as a supported eventType
+    //   - Land it under kind='watcher_event' (FYI, gri "Bildirimler")
+    //   - Build a rich Turkish reasonLabel via buildNotificationReasonLabel
+    //     ("Vaka transfer edildi: <from> ekibinden <to> ekibine.")
+    const c13 = await newCase('case-g13-transfer', actor.person);
+    const transferPayloadG13 = {
+      fromTeam: 'Destek',
+      toTeam: 'Operasyon',
+      caseNumber: c13.caseNumber,
+    };
+    const cnG13 = await prisma.caseNotification.create({
+      data: {
+        caseId: c13.id,
+        companyId: companyA.id,
+        eventType: 'transfer',
+        channel: 'InApp',
+        recipient: watcher1.user.id,
+        payload: transferPayloadG13,
+        sentAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        readAt: null,
+      },
+    });
+    created.notifications.push(cnG13.id);
+    const dedupG13 = buildNotificationDedupKey({
+      caseId: c13.id,
+      eventType: 'transfer',
+      recipientUserId: watcher1.user.id,
+      payload: transferPayloadG13,
+    });
+    const reportG13 = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    const aiG13 = await prisma.actionItem.findUnique({ where: { dedupKey: dedupG13 } });
+    if (aiG13) created.actionItems.push(aiG13.id);
+    const expectedReasonG13 = buildNotificationReasonLabel('transfer', transferPayloadG13);
+    record(
+      'G13. legacy transfer CaseNotification → ActionItem (kind=watcher_event, rich Turkish reasonLabel)',
+      !!aiG13 &&
+        aiG13.kind === 'watcher_event' &&
+        aiG13.actionRequired === false &&
+        aiG13.userId === watcher1.user.id &&
+        aiG13.reasonLabel === expectedReasonG13 &&
+        aiG13.reasonLabel.includes('Destek') &&
+        aiG13.reasonLabel.includes('Operasyon') &&
+        // Guard against raw-eventType leakage fallback (R1): the label
+        // must NOT be the generic "transfer bildirimi." or any "<eventType>
+        // bildirimi." pattern. The Turkish word "transfer" in "Vaka
+        // transfer edildi" is the intended human-readable copy and is OK.
+        !aiG13.reasonLabel.endsWith('bildirimi.'),
+      `kind=${aiG13?.kind} reason="${aiG13?.reasonLabel}" scanned=${reportG13.scanned}`,
+    );
+
+    // ─── G14: legacy `mention` CaseNotification → no ActionItem ────
+    // Phase 2C cleanup. The canonical mention path is CaseMention →
+    // emitMentionsForNote (kind='mention'). A legacy demo-seed
+    // CaseNotification eventType='mention' MUST NOT also produce a
+    // duplicate ActionItem; instead the backfill bumps its own counter
+    // skipped_legacy_mention_notification so the operator-facing report
+    // distinguishes "known-skipped legacy noise" from "truly unknown
+    // future eventType".
+    const c14 = await newCase('case-g14-legacy-mention', actor.person);
+    const mentionPayloadG14 = {
+      message: `${actor.user.fullName} sizi G14 notunda andı`,
+      noteId: 'g14-fake-note-id',
+    };
+    const cnG14 = await prisma.caseNotification.create({
+      data: {
+        caseId: c14.id,
+        companyId: companyA.id,
+        eventType: 'mention',
+        channel: 'InApp',
+        recipient: watcher2.user.id,
+        payload: mentionPayloadG14,
+        sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        readAt: null,
+      },
+    });
+    created.notifications.push(cnG14.id);
+    const reportG14 = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    // We can't probe by dedupKey because the simulator never builds
+    // one for legacy mention rows (skip happens before the dedup step).
+    // Instead, prove the side-effect: no ActionItem references this case
+    // for this user.
+    const aiG14Any = await prisma.actionItem.findFirst({
+      where: { caseId: c14.id, userId: watcher2.user.id },
+    });
+    record(
+      'G14. legacy mention CaseNotification → no ActionItem; skipped_legacy_mention_notification artar',
+      !aiG14Any && reportG14.skipped_legacy_mention_notification >= 1,
+      `aiAny=${!!aiG14Any} skipped_legacy_mention=${reportG14.skipped_legacy_mention_notification}`,
+    );
+
+    // ─── G15: truly unknown eventType still increments unmapped ────
+    // Phase 2C cleanup. After classifying `mention` and `transfer`
+    // explicitly, the skipped_unmapped_event_type counter must stay
+    // reserved for FUTURE unknown eventTypes (forward-compat). Plant a
+    // fixture with a deliberately fake eventType to prove the unmapped
+    // path still fires and no ActionItem leaks through.
+    const c15 = await newCase('case-g15-unknown', actor.person);
+    const fakeEventTypeG15 = 'future_unknown_event_g15';
+    const cnG15 = await prisma.caseNotification.create({
+      data: {
+        caseId: c15.id,
+        companyId: companyA.id,
+        eventType: fakeEventTypeG15,
+        channel: 'InApp',
+        recipient: watcher3.user.id,
+        payload: { message: 'G15 — yarının eventType\'ı', kind: 'future' },
+        sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        readAt: null,
+      },
+    });
+    created.notifications.push(cnG15.id);
+    const reportG15 = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    const aiG15Any = await prisma.actionItem.findFirst({
+      where: { caseId: c15.id, userId: watcher3.user.id },
+    });
+    record(
+      'G15. truly unknown eventType → no ActionItem; skipped_unmapped_event_type artar',
+      !aiG15Any && reportG15.skipped_unmapped_event_type >= 1,
+      `aiAny=${!!aiG15Any} skipped_unmapped=${reportG15.skipped_unmapped_event_type} ` +
+        `skipped_legacy_mention=${reportG15.skipped_legacy_mention_notification}`,
+    );
+
+    // ─── G16: canonical mention path intact — no duplicate ─────────
+    // Phase 2C cleanup. Even if a CaseMention already exists for a
+    // note+recipient (canonical path created via emitMentionsForNote),
+    // a parallel legacy CaseNotification eventType='mention' for the
+    // same caseId+recipient must not produce a SECOND mention
+    // ActionItem. The canonical kind='mention' ActionItem stays alone;
+    // backfill's mention-skip + dedupKey mean nothing duplicates.
+    const c16 = await newCase('case-g16-canonical', actor.person);
+    const noteG16 = await prisma.caseNote.create({
+      data: {
+        caseId: c16.id,
+        companyId: companyA.id,
+        authorName: actor.user.fullName,
+        authorId: actor.user.id,
+        content: `@[${watcher1.user.fullName}](${watcher1.user.id}) G16 canonical mention.`,
+        visibility: 'Internal',
+      },
+    });
+    created.notes.push(noteG16.id);
+    // Plant the canonical mention ActionItem directly via the production
+    // dedupKey shape so we exercise dedup without round-tripping the
+    // CaseMention table.
+    const canonicalDedupG16 = `mention:${c16.id}:${noteG16.id}:${watcher1.user.id}`;
+    const canonicalAiG16 = await prisma.actionItem.create({
+      data: {
+        kind: 'mention',
+        userId: watcher1.user.id,
+        companyId: companyA.id,
+        objectType: 'CaseMention',
+        objectId: null,
+        caseId: c16.id,
+        caseNumber: c16.caseNumber,
+        caseTitle: c16.title,
+        generatedBy: `user:${actor.user.id}`,
+        groupKey: `${c16.id}:mention`,
+        dedupKey: canonicalDedupG16,
+        priority: 50,
+        actionRequired: false,
+        reasonLabel: `@${actor.user.fullName} ${c16.caseNumber} yorumunda seni andı.`,
+        state: 'Pending',
+      },
+    });
+    created.actionItems.push(canonicalAiG16.id);
+    // Now plant a legacy CaseNotification eventType='mention' for the
+    // same case+recipient. Different shape but same logical event.
+    const cnG16 = await prisma.caseNotification.create({
+      data: {
+        caseId: c16.id,
+        companyId: companyA.id,
+        eventType: 'mention',
+        channel: 'InApp',
+        recipient: watcher1.user.id,
+        payload: {
+          message: `${actor.user.fullName} sizi G16 notunda andı`,
+          noteId: noteG16.id,
+        },
+        sentAt: new Date(Date.now() - 1 * 60 * 1000),
+        readAt: null,
+      },
+    });
+    created.notifications.push(cnG16.id);
+    const reportG16 = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    const allAiForG16 = await prisma.actionItem.findMany({
+      where: { caseId: c16.id, userId: watcher1.user.id },
+    });
+    const mentionAiForG16 = allAiForG16.filter((a) => a.kind === 'mention');
+    record(
+      'G16. canonical CaseMention exists → legacy mention CaseNotification yields NO duplicate',
+      mentionAiForG16.length === 1 &&
+        mentionAiForG16[0].id === canonicalAiG16.id &&
+        reportG16.skipped_legacy_mention_notification >= 1,
+      `mentionAi=${mentionAiForG16.length} legacy_skip=${reportG16.skipped_legacy_mention_notification}`,
+    );
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
@@ -718,6 +964,7 @@ const SUPPORTED_EVENT_TYPES = new Set([
   'watcher_added',
   'watcher_update',
   'note_reaction',
+  'transfer',          // Phase 2C cleanup — legacy demo seed eventType.
   'transfer_warning',
 ]);
 
@@ -725,6 +972,7 @@ const EVENT_TO_KIND = {
   watcher_added: 'watcher_event',
   watcher_update: 'watcher_event',
   note_reaction: 'watcher_event',
+  transfer: 'watcher_event',
   transfer_warning: 'system_alert',
 };
 
@@ -745,6 +993,7 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
     skipped_no_membership: 0,
     skipped_inactive_membership: 0,
     skipped_self_follow: 0,
+    skipped_legacy_mention_notification: 0,
     dry_run: !execute,
   };
   const rows = await prisma.caseNotification.findMany({
@@ -757,6 +1006,14 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
   });
   for (const row of rows) {
     report.scanned += 1;
+    // Phase 2C cleanup — legacy `eventType='mention'` CaseNotification
+    // is owned by the canonical CaseMention adapter. Skip BEFORE the
+    // SUPPORTED_EVENT_TYPES guard so it lands in its own counter, not
+    // skipped_unmapped_event_type.
+    if (row.eventType === 'mention') {
+      report.skipped_legacy_mention_notification += 1;
+      continue;
+    }
     if (!SUPPORTED_EVENT_TYPES.has(row.eventType)) {
       report.skipped_unmapped_event_type += 1;
       continue;
@@ -798,9 +1055,7 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
       where: { id: row.caseId },
       select: { caseNumber: true, title: true },
     });
-    const reasonLabel = String(
-      row.payload?.message ?? `${row.eventType} bildirimi.`,
-    ).slice(0, 500);
+    const reasonLabel = buildNotificationReasonLabel(row.eventType, row.payload);
     const priority = row.eventType === 'transfer_warning' ? 70 : 50;
     // Counter increments BEFORE the prisma.create write guard so dry-run
     // produces a meaningful would-create projection.
