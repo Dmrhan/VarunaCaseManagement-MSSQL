@@ -1,9 +1,10 @@
 /**
  * WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification flow smoke.
  *
- * Repository-level (no HTTP). 11 scenarios covering the four migrated
+ * Repository-level (no HTTP). 12 scenarios covering the four migrated
  * eventTypes + backfill + tenant scope + read mapping + watcher
- * self-add suppression (Codex P2):
+ * self-add suppression (Codex P2) + backfill-side self-follow guard
+ * (Codex P2 follow-up):
  *
  *   G1   watcher_added → live emit
  *        watcherRepo.add writes CaseNotification + emits ActionItem
@@ -56,6 +57,16 @@
  *          - CaseWatcher row CREATED (self-follow preserved)
  *          - CaseNotification row CREATED (legacy bell unchanged)
  *          - ActionItem row NOT created (Aksiyonlarım self-noise YOK)
+ *
+ *   G12  Backfill self-follow guard (Codex P2 follow-up)
+ *        After G11, the self-follow CaseNotification is still in
+ *        the DB but no dedup ActionItem was written. Without a
+ *        backfill-side skip, scripts/backfill-notification-to-inbox.js
+ *        --execute would recreate the inbox noise. Asserts:
+ *          - simulateBackfill (execute) sees the row, increments
+ *            skipped_self_follow
+ *          - ActionItem at the deterministic dedupKey still NOT
+ *            created after backfill
  *        Drift fixture targeting a user with isActive=false UC →
  *        backfill skipped_inactive_membership++ and no ActionItem.
  *
@@ -623,6 +634,33 @@ async function run() {
         !selfFollowAi,
       `watcher=${!!selfWatcherRow} notification=${!!selfNotificationRow} actionItem=${!!selfFollowAi}`,
     );
+
+    // ─── G12: Codex P2 follow-up — backfill must NOT recreate the
+    //         self-follow inbox row that the live adapter skipped.
+    // The CaseNotification row planted by watcherRepo.add (G11) is
+    // still in the DB; without backfill-side suppression a later
+    // backfill --execute would create an ActionItem because no
+    // dedup row was written. Asserts:
+    //   1. backfill --execute runs over the past 30 days including
+    //      our self-follow CaseNotification
+    //   2. report.skipped_self_follow >= 1
+    //   3. ActionItem at the deterministic dedupKey is STILL not
+    //      created after backfill
+    const selfFollowBackfillReport = await simulateBackfill({
+      windowDays: 30,
+      execute: true,
+      restrictCompanyId: companyA.id,
+    });
+    const selfFollowAiAfterBackfill = await prisma.actionItem.findUnique({
+      where: { dedupKey: selfFollowDedup },
+    });
+    record(
+      'G12. backfill self-follow skip — Codex P2 follow-up; ActionItem still NOT created after --execute',
+      selfFollowBackfillReport.skipped_self_follow >= 1 &&
+        !selfFollowAiAfterBackfill,
+      `skipped_self_follow=${selfFollowBackfillReport.skipped_self_follow} ` +
+        `aiAfterBackfill=${!!selfFollowAiAfterBackfill}`,
+    );
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
@@ -706,6 +744,7 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
     skipped_unmapped_event_type: 0,
     skipped_no_membership: 0,
     skipped_inactive_membership: 0,
+    skipped_self_follow: 0,
     dry_run: !execute,
   };
   const rows = await prisma.caseNotification.findMany({
@@ -720,6 +759,15 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
     report.scanned += 1;
     if (!SUPPORTED_EVENT_TYPES.has(row.eventType)) {
       report.skipped_unmapped_event_type += 1;
+      continue;
+    }
+    // Codex P2 follow-up — mirror the production backfill self-follow skip.
+    if (
+      row.eventType === 'watcher_added' &&
+      row.payload?.addedBy &&
+      row.payload.addedBy === row.recipient
+    ) {
+      report.skipped_self_follow += 1;
       continue;
     }
     const uc = await prisma.userCompany.findFirst({
