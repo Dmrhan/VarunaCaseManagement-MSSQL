@@ -820,6 +820,36 @@ export async function snooze({ id, userId, allowedCompanyIds, payload }) {
   });
 }
 
+/**
+ * WR-NOTIFICATION-CENTER Phase 2C P0 — manual unsnooze.
+ *
+ * Brings a Snoozed row back into the active queue without waiting for
+ * snoozedUntil to lapse. Mirrors the owner/tenant guard used by
+ * snooze/done/dismiss; only Snoozed rows are accepted (others 409 with
+ * action_item_not_snoozed).
+ *
+ * State change is minimal and reversible:
+ *   state = 'Pending'
+ *   snoozedUntil = null
+ * Other lifecycle stamps (closeNote, doneAt, doneByUserId, doneOutcome,
+ * firstSeenAt) are intentionally NOT touched. The row's actionRequired
+ * flag dictates whether it lands back in İşler (true) or Bildirimler
+ * (false) on the next read — no logic needed here.
+ */
+export async function unsnooze({ id, userId, allowedCompanyIds }) {
+  const row = await loadOwnedItemOr403({ id, userId, allowedCompanyIds });
+  if (row.state !== 'Snoozed') {
+    throw new ActionItemValidationError(
+      `Eylem öğesi şu an ${row.state}; ertelemeyi kaldırılamaz.`,
+      { status: 409, code: 'action_item_not_snoozed' },
+    );
+  }
+  return prisma.actionItem.update({
+    where: { id },
+    data: { state: 'Pending', snoozedUntil: null },
+  });
+}
+
 export async function dismiss({ id, userId, allowedCompanyIds, payload }) {
   const row = await loadOwnedItemOr403({ id, userId, allowedCompanyIds });
   if (['Done', 'Dismissed', 'Expired'].includes(row.state)) {
