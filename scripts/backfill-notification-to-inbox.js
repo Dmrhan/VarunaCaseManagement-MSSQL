@@ -60,6 +60,7 @@
 
 import { prisma } from '../server/db/client.js';
 import {
+  buildLegacyTransferDedupKey,
   buildNotificationDedupKey,
   buildNotificationReasonLabel,
 } from '../server/db/actionItemRepository.js';
@@ -300,8 +301,26 @@ async function run() {
         recipientUserId: row.recipient,
         payload: row.payload,
       });
-      const existing = await prisma.actionItem.findUnique({
-        where: { dedupKey },
+      // Codex P2 follow-up — transfer rows that were materialized by a
+      // previous backfill --execute (PR #286, before fromTeam/toTeam was
+      // added to the discriminator) live under a DIFFERENT dedupKey
+      // shape. Without looking up the legacy key as well, the rerun
+      // would not find the existing ActionItem and would duplicate it.
+      // Only `transfer` needs this because it is the only eventType
+      // whose formula changed; for all others the lookup-key === the
+      // stored key.
+      const lookupKeys = [dedupKey];
+      if (row.eventType === 'transfer') {
+        lookupKeys.push(
+          buildLegacyTransferDedupKey({
+            caseId: row.caseId,
+            recipientUserId: row.recipient,
+            payload: row.payload,
+          }),
+        );
+      }
+      const existing = await prisma.actionItem.findFirst({
+        where: { dedupKey: { in: lookupKeys } },
         select: { id: true },
       });
       if (existing) {

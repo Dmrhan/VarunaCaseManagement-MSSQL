@@ -308,6 +308,42 @@ export function buildNotificationDedupKey({
 }
 
 /**
+ * Pre-Phase-2C-cleanup-followup formula for transfer dedup keys —
+ * recomputes the old hash input (no fromTeam/toTeam suffix). Used by
+ * the backfill to detect transfer ActionItems that were materialized
+ * by a previous `--execute` run BEFORE the fromTeam/toTeam
+ * discriminator was added (Codex P2 review on PR #287).
+ *
+ * Without checking the legacy key, a rerun of `--execute` for a tenant
+ * that already migrated transfer rows would fail to find the existing
+ * ActionItem via the NEW key and would create a duplicate. This helper
+ * lets the backfill match the row under its stored key shape.
+ *
+ * Do NOT use for new emissions — the live adapter and the new backfill
+ * path always emit via `buildNotificationDedupKey`. This is migration-
+ * read-side only.
+ */
+export function buildLegacyTransferDedupKey({
+  caseId,
+  recipientUserId,
+  payload,
+}) {
+  if (!caseId || !recipientUserId) {
+    throw new Error(
+      '[buildLegacyTransferDedupKey] caseId, recipientUserId zorunlu.',
+    );
+  }
+  const message = payload?.message ?? '';
+  const noteId = payload?.noteId ?? '';
+  const emoji = payload?.emoji ?? '';
+  const transferCount = payload?.transferCount ?? '';
+  const kind = payload?.kind ?? '';
+  const discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  const disc = djb2(discInput);
+  return `notification:${caseId}:transfer:${recipientUserId}:${disc}`;
+}
+
+/**
  * Translate a CaseNotification.eventType to the ActionItemKind it
  * should land under. Returns null for unknown eventTypes so the
  * adapter can silently skip them (forward-compat: a new writer added
