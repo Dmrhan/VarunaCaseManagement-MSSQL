@@ -281,10 +281,18 @@ export default function App() {
         <div className="flex items-center gap-1">
           {/* WR-ACTION-CENTER Phase 1 — left of existing bell; two-counter design (Action + FYI). */}
           {user && featureFlags.actionCenterEnabled && <ActionCenterBell onCaseOpen={openCase} />}
-          {/* WR-NOTIFICATION-CENTER Phase 2A — eski bahsetme zili default
-              gizli. VITE_LEGACY_MENTION_BELL_ENABLED=true ile acil
-              rollback yolu olarak geri açılabilir. */}
-          {user && featureFlags.legacyMentionBellEnabled && <MentionBellBadge onCaseClick={openCase} />}
+          {/* WR-NOTIFICATION-CENTER Phase 2A — legacy MentionBellBadge.
+              Görünür olduğu iki yol:
+                1) Action Center kapalıyken FALLBACK — kullanıcı bildirim
+                   girişi olmadan kalmasın (Codex P1 review fix).
+                2) VITE_LEGACY_MENTION_BELL_ENABLED=true emergency rollback /
+                   debug yolu — Action Center açık olsa bile zorla görünür.
+              Yani: Action Center'ın YALNIZ aktif olduğu kullanım yolunda
+              ve legacy flag false iken eski bell gizlenir. */}
+          {user &&
+            (!featureFlags.actionCenterEnabled || featureFlags.legacyMentionBellEnabled) && (
+              <MentionBellBadge onCaseClick={openCase} />
+            )}
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
