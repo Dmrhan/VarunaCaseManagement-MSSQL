@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import {
+  AlertTriangle,
   AtSign,
   CheckCircle2,
   Clock,
+  Eye,
   Info,
   ShieldCheck,
   ShieldX,
@@ -45,6 +47,9 @@ const KIND_ICON = {
   approval_decided: Info,
   case_returned_to_assignee: ShieldX,
   mention: AtSign,
+  // WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification kinds.
+  watcher_event: Eye,
+  system_alert: AlertTriangle,
 } as const;
 
 const KIND_LABEL = {
@@ -52,6 +57,11 @@ const KIND_LABEL = {
   approval_decided: 'Çözüm onayı sonuçlandı',
   case_returned_to_assignee: 'Revizyon gerekiyor',
   mention: 'Sözü geçti',
+  // Phase 2B labels. reasonLabel (taken verbatim from
+  // CaseNotification.payload.message) carries the per-event detail;
+  // this title is the calm category header.
+  watcher_event: 'Vakada hareket',
+  system_alert: 'Sistem uyarısı',
 } as const;
 
 // L5 monogram palette — stable hash → index. Random color YASAK; tek
@@ -337,6 +347,15 @@ export function ActionItemRow({
                   disabled={busy}
                 >
                   Tamamlandı
+                </Button>
+              )}
+              {/* WR-NOTIFICATION-CENTER Phase 2B — FYI rows migrated
+                  from CaseNotification get "Okundu" alongside the
+                  shared "Vakayı Aç" button. Same markDone endpoint as
+                  approval_decided FYI. */}
+              {(item.kind === 'watcher_event' || item.kind === 'system_alert') && (
+                <Button size="sm" variant="outline" onClick={() => void handleMarkDone()} disabled={busy}>
+                  Okundu
                 </Button>
               )}
               <Button size="sm" variant="ghost" leftIcon={<Clock size={11} />} onClick={() => setSnoozeOpen((v) => !v)} disabled={busy}>
