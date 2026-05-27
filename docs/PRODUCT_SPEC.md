@@ -53,12 +53,14 @@ Storage  : localStorage key: 'varuna-theme'
 Faz planı:
 FAZ 0 — Mock UI                       ✅ TAMAMLANDI
 FAZ 1 — Tanım Ekranları               ✅ TAMAMLANDI
-FAZ 2 — BFF + DB                      ✅ TAMAMLANDI (Supabase Postgres + Prisma 6, 19 tablo)
+FAZ 2 — BFF + DB                      ✅ TAMAMLANDI (Supabase Postgres + Prisma 6, ~50 tablo)
 FAZ 3 — Dosya Yükleme                 ✅ TAMAMLANDI (Supabase Storage, signed upload URL)
-FAZ 4 — Drawer İyileştirme            🟡 KISMİ (Transfer + Checklist tamamlandı)
-FAZ 5 — KPI Dashboard                 ✅ TAMAMLANDI
+FAZ 4 — CaseDetailPage (3-kolon full page) ✅ TAMAMLANDI (Drawer konsepti yerine full page; Transfer + Checklist + Resolution Approval entegre)
+FAZ 5 — Operations Dashboard + Report Studio + Action Center ✅ TAMAMLANDI
 Auth/RBAC                             ✅ TAMAMLANDI (Supabase Auth + 6 rol)
 Custom Fields + Şirket Ayarları       ✅ TAMAMLANDI (FieldDefinition + CompanySettings)
+
+> **2026-05 ship dalgası** (Master Data Decision Sprint + Notification/Approval Level A): Account customerType + VKN/TCKN privacy + Multi-address + AccountProject Phase 1 + SupportLevel L1/L2 + Person.isTeamLead + Product/Package catalog + Case product/package integration + Import Studio Phase 1 + Customer 360 Phase 2a Foundation + Resolution Approval flow + Notification rules/templates/customer response channel Level A + Action Center / Aksiyonlarım inbox + Watcher Inbox UI + Reply threading + reactions + Customerless flow + Customer Pulse + AI Status Report + deterministic Customer Match. Detaylı liste: [docs/ROADMAP.md](ROADMAP.md) §"Recent Ships / Platform Capabilities".
 
 3. Vaka Tipleri (CaseType)
 3.1 GeneralSupport — Genel Destek
@@ -74,8 +76,7 @@ Tetiklenme → Veri Hazırlığı → Agent Atama → Outbound Call Log
 → Disposition/Outcome → Follow-up → Hedef Değerlendirme
 → Kapatma VEYA Churn'e Dönüşüm
 
-FAZ 1'de Financial Status + Product Usage manuel girilir.
-FAZ 2'de İ-Şube entegrasyonuyla otomatik dolar.
+Bugün: Financial Status + Product Usage **manuel** girilir. İ-Şube veya benzeri dış sistem entegrasyonu **planlanmadı** — ROADMAP.md "Future Product Direction" veya OPEN_DECISIONS.md'ye eklenmeden committed sayılmaz. Yeni paying tenant data-source entegrasyonu isterse OPEN_DECISIONS'ta açık karar olarak izlenecek.
 
 3.3 Churn — Churn Yönetimi
 Müşteri iptal sinyali verdiğinde veya ProactiveTracking'den dönüşüm olduğunda.
@@ -166,8 +167,10 @@ Devir   : TransferCaseModal
           - ActivityTab: amber tint "↪ Devredildi: X → Y"
           - İç not olarak da kaydedilir
 
-10. AI Davranış Matrisi (FAZ 1)
-SenaryoAI RolüOnay?Yeni vaka — açıklama (debounce 800ms, min 20 karakter)Kategori + öncelik önerisi (RUNA AI kartı)HayırDuplicateBenzerlik skoru + özetHayırÇözüldü geçişi"✦ Taslak Üret" → resolution_note dolarHayırVaka analizi (sağ panel)"✦ Analiz Et" → özet + SLA bilgisiHayırYeni call logcallSummary otomatik → aiCallBriefHayırChurn dönüşüm"✦ Değerlendir" → risk + öneriEvet — AgentDashboard chattop 30 + KPI context ile soru-cevapHayır
+10. AI Davranış Matrisi (vaka iş akışı)
+SenaryoAI RolüOnay?Yeni vaka — açıklama (debounce 800ms, min 20 karakter)Kategori + öncelik önerisi (RUNA AI kartı)HayırDuplicateBenzerlik skoru + özetHayırÇözüldü geçişi"✦ Taslak Üret" → resolution_note dolarHayırVaka analizi (sağ panel)"✦ Analiz Et" → özet + SLA bilgisiHayırYeni call logcallSummary otomatik → aiCallBriefHayırChurn dönüşüm"✦ Değerlendir" → risk + öneriEvet — AgentTransfer önerisitransfer-suggest → uygun ekip/kişi önerisiHayırBenzer vakalar (Linked Cases)suggest-links → son 30g geçmiş benzeri vakaHayırMüşteri özeti (Customer Pulse)customer-pulse-summary → risk + tavsiyeHayır
+
+> Operations Dashboard / Report Studio AI yüzeyleri (Brief / Insights / Explain Metric / Drilldown Assistant / Report Draft) ayrı bir analitik yüzey ailesidir; vaka iş akışı dışındadır. Bkz. §12 "Ekran Mimarisi" ve §14 AI Endpoint'leri.
 
 11. RUNA AI Marka Kimliği
 src/components/ui/RunaAiCard.tsx
@@ -181,13 +184,26 @@ btn-p   : { background: '#4B0FAE', color: '#FFFFFF' }  ← inline style
 btn-s   : { background: 'transparent', border: '1px solid #9B7FD4', color: '#E0D0FF' }
 btn-d   : { background: '#E24B4A', color: '#FFFFFF' }
 loading : "✦ RUNA AI analiz ediyor..." + pulse skeleton
-Kullanım noktaları (5):
 
-NewCaseForm → kategori önerisi
-StatusTransitionPanel → Çözüldü → taslak
-CaseDetailPage sağ panel → vaka özeti
-CaseDetailPage ProactiveTracking → churn risk
-CaseAnalyticsPage → floating chat
+Kullanım noktaları (vaka iş akışı):
+- NewCaseForm → kategori + öncelik önerisi (suggest-category)
+- NewCaseForm → başlık önerisi (suggest-title)
+- StatusTransitionPanel → "Çözüldü" taslağı (draft-resolution)
+- CaseDetailPage sağ panel → supervisor özeti (supervisor-summary)
+- CaseDetailPage ProactiveTracking → churn değerlendirmesi (churn-conversion)
+- CaseDetailPage call log → otomatik call özet (call-summary)
+- CaseDetailPage Linked Cases → benzer vakalar (suggest-links)
+- TransferCaseModal → uygun ekip önerisi (transfer-suggest)
+- Customer Pulse panel (case detail + new case flow) → müşteri durumu (customer-pulse-summary)
+
+Kullanım noktaları (analitik / dashboard):
+- Operations Dashboard → AI Brief kartı (operations-brief)
+- Operations Dashboard → Insights tile'ları (operations-insights)
+- Operations Dashboard → "Explain Metric" modal (operations-explain-metric)
+- Operations Dashboard → Drilldown Assistant kartı (operations-drilldown-assist)
+- Report Studio → AI Report Draft (operations-report-draft)
+
+**NOT:** Eski `CaseAnalyticsPage` floating chat (`RunaAiChatPanel`) bugün **dead code** — BACKLOG P1 "Legacy dead code cleanup" altında silinmek üzere bekliyor. Analitik AI yüzeyleri yukarıdaki Operations Dashboard / Report Studio surface'leri tarafından devralındı.
 
 
 12. Ekran Mimarisi
@@ -201,16 +217,23 @@ Sıralama: tüm kolonlar tıklanabilir, default: Son Güncelleme azalan
 CaseDetailPage — Full Page 3 Kolon
 NOT: Drawer değil. currentPage='case-detail' → CaseDetailPage render.
 [Sol 320px] | [Ana flex-1] | [Sağ 360px — aiGeneratedFlag=true ise]
-Sol panel: Müşteri kartı, SLA, atama, hızlı aksiyonlar, KPI tile'lar
-Ana içerik: StatusTransitionPanel (üstte sabit) + 5 sekme (Detay/Aktivite/Notlar/Dosyalar/Çağrı Logları)
-Sağ panel: RUNA AI özet + tip bağımlı detay
-Dashboard AI Chat (RunaAiChatPanel)
-Konum  : CaseAnalyticsPage — sağ alt fixed
-Buton  : 56x56px #4B0FAE daire, R ikonu
-Panel  : 380x500px, border-radius:16px
-Context: Top 30 vaka snapshot + 9 KPI + SLA durumu
-Endpoint: POST /api/ai/dashboard-chat
-Hazır sorular: 5 adet chip
+Sol panel: Müşteri kartı (Customer Pulse panel dahil), SLA, atama, hızlı aksiyonlar, KPI tile'lar, deterministic customer-match suggestions (customerless flow için)
+Ana içerik: StatusTransitionPanel (üstte sabit, Resolution Approval gate dahil) + 5 sekme (Detay/Aktivite/Notlar+Reply threading+reactions/Dosyalar/Çağrı Logları) + Linked Cases sekmesi
+Sağ panel: RUNA AI özet (supervisor-summary) + tip bağımlı detay (churn için churn-conversion, vb.)
+
+Operations Dashboard / Report Studio (page key: "dashboard")
+- 11 KPI tile + breakdown + drilldown drawer
+- AI Brief kartı + Insights tile'ları + "Explain Metric" modal + Drilldown Assistant
+- Report Studio modal: AI Report Draft + Markdown copy + browser print (XLSX/PDF/PPTX → REPORT_STUDIO_BACKLOG)
+
+Action Center / Aksiyonlarım (sağ-üst bell + drawer)
+- Unified inbox: `kind ∈ {approval, mention, watcher_event, system_alert}`
+- "İşler" (actionRequired=true, kırmızı sayaç) ve "Bildirimler" (FYI, gri sayaç) sekmeleri
+- Snooze / Done / Dismiss + dedupKey
+- Phase 3 ileride wide-surface `/inbox` planlanıyor (OD-070/071/072 PENDING)
+
+Watcher Inbox UI (sidebar > Çalışma Alanım > İzleyici Inbox)
+- İzlenen vakalar kart grid + son okunmamış generic CaseNotification'lar (top 10) + statü/zaman filtreleri
 
 13. Tanım Ekranları (Admin — 9 ekran, /admin layout, SystemAdmin gate)
 EkranPage KeyKategori & Alt Kategoriadmin-categoriesSLA Kuralları (5-tuple)admin-sla3rd Party Tanımlarıadmin-thirdpartyBelge Türü Tanımlarıadmin-documentsKontrol Listesi (3-tuple+items)admin-checklistTakım Tanımları + Üye Yönetimiadmin-teamsTeklif Tanımlarıadmin-offered-solutionsDinamik Alanlar (Custom Fields)admin-fieldsŞirket Ayarlarıadmin-company-settings
@@ -218,19 +241,52 @@ Her ekranda HelpDrawer: "? Yardım" butonu, sağdan 320px, ESC kapanır.
 /admin layout SystemAdmin rolüne kapalı; AdminLayout.tsx role gate uygular.
 
 14. AI Endpoint'leri (BFF — /api/ai/*)
-suggest-category   → kategori + öncelik + güven skoru (JSON)
-draft-resolution   → çözüm notu taslağı
-supervisor-summary → özet + SLA bilgisi (JSON)
-churn-conversion   → risk değerlendirmesi (JSON)
-call-summary       → çağrı notu özeti (otomatik)
-dashboard-chat     → top 30 + KPI context soru-cevap
 
-15. Açık Karar Noktaları
-KonuDurumSLA 7/24✅ KararlandıAI modeli (OpenAI)✅ AktifJira → SLA pause⚠️ NetleştirilmeliDuplicate override✅ KararlandıFAZ 2 DB stack✅ Supabase Postgres (Frankfurt EU) + Prisma 6Auth çözümü✅ Supabase Auth (email/password + Google OAuth)Dosya storage✅ Supabase Storage (signed upload URL pattern)OpenAI DPA (KVKK)⚠️ Hukuk ekibi
+**Vaka iş akışı:**
+- `suggest-category`         → kategori + öncelik + güven skoru (JSON Schema strict)
+- `suggest-title`            → başlık önerisi
+- `draft-resolution`         → çözüm notu taslağı
+- `supervisor-summary`       → vaka özeti + SLA durumu (JSON)
+- `churn-conversion`         → churn risk değerlendirmesi (JSON)
+- `call-summary`             → çağrı notu özeti (yeni log oluştuğunda otomatik tetiklenir)
+- `transfer-suggest`         → uygun ekip/kişi önerisi (TransferCaseModal)
+- `suggest-links`            → benzer geçmiş vakalar (30g pencere; OD-018 spec'i 90g öneriyor — PENDING)
+- `customer-pulse-summary`   → müşteri durumu özet + tavsiye
 
-> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). "Jira → SLA pause" = OD-001 PENDING; "OpenAI DPA (KVKK)" = OD-021 PENDING. PR-D PRODUCT_SPEC refresh turunda bu tablo OPEN_DECISIONS.md'ye migrate edilecek.
+**Operations Dashboard / Report Studio:**
+- `operations-brief`             → dashboard AI Brief kartı
+- `operations-insights`          → KPI insight tile'ları
+- `operations-explain-metric`    → "Bu metrik ne anlama geliyor?" modal
+- `operations-drilldown-assist`  → drilldown drawer AI yardımcı
+- `operations-report-draft`      → Report Studio AI taslağı
+
+**Telemetri:**
+- `PATCH /usage/:id/accept`  → AI önerisi Accept/Reject feedback (BACKLOG P2 "AI Accept/Reject FE telemetry wiring" item'i FE caller'larını ekleyecek)
+
+**Deprecated:**
+- ~~`dashboard-chat`~~ → `CaseAnalyticsPage` RunaAiChatPanel için tasarlandı; surface bugün dead code (BACKLOG P1 cleanup). Endpoint kodda hâlâ duruyor; legacy cleanup PR'ında silinir.
+
+15. Açık Karar Noktaları → [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md)
+
+Açık ürün/teknik kararlar canonical olarak `docs/OPEN_DECISIONS.md`'de izlenir. Bu spec içindeki ürün davranışına etki eden iki açık karar:
+
+- **OD-001 Jira → SLA pause politikası** (PENDING) — Jira'ya devredilen vakada SLA durur mu?
+- **OD-021 OpenAI DPA (KVKK)** (PENDING) — Hukuk ekibi onayı production rollout öncesi gerekli.
+
+Diğer kararlar (kararlandı sayılanlar — SLA 7/24, AI modeli OpenAI, Duplicate override, DB/Auth/Storage stack) bu spec içinde yansıyor; ayrı bir karar listesi tutulmuyor.
 
 16. Değişiklik Kaydı
+v2.2 — Mayıs 2026 sonu (PR-D PRODUCT_SPEC refresh)
+
+- Faz planı güncellendi: "FAZ 4 — Drawer İyileştirme KISMİ" → "FAZ 4 — CaseDetailPage 3-kolon full page TAMAMLANDI"; FAZ 5 "KPI Dashboard" → "Operations Dashboard + Report Studio + Action Center"
+- §3.2 İ-Şube auto-fill cümlesi düzeltildi: committed plan değil, gelecek karar olarak işaretlendi
+- §10 AI Davranış Matrisi'nden dead `dashboard-chat` satırı kaldırıldı; transfer-suggest + suggest-links + customer-pulse-summary eklendi
+- §11 RUNA AI surface listesi 5 → 14 surface (9 yeni: suggest-title, transfer-suggest, suggest-links, customer-pulse-summary, operations-brief/insights/explain/drilldown/report); `CaseAnalyticsPage` dead-code referansı kaldırıldı
+- §12 Ekran Mimarisi: dead `RunaAiChatPanel` sub-section kaldırıldı; Operations Dashboard / Report Studio / Action Center / Watcher Inbox UI eklendi
+- §14 AI Endpoint'leri 6 → 15 endpoint + telemetry + deprecated section (dashboard-chat)
+- §15 Açık Karar Noktaları tablosu OPEN_DECISIONS.md'ye işaret eden kısa pointer'a indirgendi
+- 2026-05 Master Data Decision Sprint shipped wave envanteri Faz planı altına satır olarak eklendi (detay → ROADMAP §"Recent Ships")
+
 v2.1 — Mayıs 2026
 
 FAZ 2 BFF + DB tamamlandı: Supabase Postgres (Frankfurt EU) + Prisma 6, 19 tablo, repository pattern (MSSQL portable)
