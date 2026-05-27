@@ -6,6 +6,7 @@ Sahiplik:
 - Report Studio'ya özgü backlog → [docs/REPORT_STUDIO_BACKLOG.md](REPORT_STUDIO_BACKLOG.md)
 - Gelecek ürün yönü + shipped capability envanteri → [docs/ROADMAP.md](ROADMAP.md)
 - Teknik borç + temizlik riskleri → [docs/TECHNICAL_DEBT.md](TECHNICAL_DEBT.md)
+- Ürün/teknik kararlar (canonical) → [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md) — `NEEDS_PRODUCT_DECISION` etiketi olan kalemler OD-XXX ID'leri ile orada izlenir
 
 Bu liste **aktif** iştir — 2–4 hafta içinde dokunulabilir kalemler. Shipped özellikler ve uzak-gelecek planları burada görünmez; bunlar yukarıdaki canonical dokümanlarda.
 
@@ -227,13 +228,11 @@ Agent merge yapmıyor; sadece görünür kıl. (Supervisor review queue ayrı ka
 
 **Çaba:** 1 gün.
 
-### 50 OPS design-question continuous decision log (önceki #46)
+### 50 OPS design-question continuous decision log (önceki #46) — **MIGRATED**
 
-`docs/OPERATIONS_DASHBOARD_DESIGN.md §7` (3173-3232) 50 numbered open question. Bir kısmı zaten dolaylı karara bağlanmış (Q11 ✓, Q26 persona enum ✓ — kod açıkça reddediyor).
+`docs/OPERATIONS_DASHBOARD_DESIGN.md §7` 50 design question artık [`docs/OPEN_DECISIONS.md`](OPEN_DECISIONS.md)'de R/P/D etiketli + ID'li (OD-080..OD-100 + OD-130..OD-138 + OD-160..OD-173 dağıtımı). Q11 RESOLVED, Q26 OBSOLETE, geri kalanlar PENDING/DEFERRED durumunda kayıtlı. Backlog item olarak kapanır.
 
-Bu tek bir backlog item değil — **continuous design-debt log**. Her soruya R(esolved)/P(ending)/D(efer) etiketi at; karar verilenleri PR'lerle silmemek için ayrı section'a taşı. #13 firstResponseTime, #14 backlogChangePct, #38 drilldown gibi backlog kalemleri bu §7 sorularına bağlı.
-
-**Çaba:** Yarım gün (taram + etiketleme).
+**Action remaining:** Bireysel OD-XXX kararları alındıkça canonical register'ı güncelle. Bu item'ın kendisi PR-C ile kapanmıştır.
 
 ### A8 Phase 2b — Customer 360 Import commit path
 

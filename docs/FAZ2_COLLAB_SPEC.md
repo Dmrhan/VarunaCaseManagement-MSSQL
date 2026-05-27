@@ -675,6 +675,8 @@ Bölüm 5.6'daki Risk Göstergesi rolü orijinal olarak 4 sinyal kaynağıyla ç
 
 ## Açık Karar Noktaları
 
+> Canonical karar register'ı: [docs/OPEN_DECISIONS.md](OPEN_DECISIONS.md). Bu tablodaki kararlar OD-050 (WebSocket vs polling), OD-051 (Resend), OD-052 (SMS provider), OD-032 (sentiment cache), OD-024 (Kiracı AI anahtarı şifreleme), OD-053 (digest saati), OD-033 (Risk Lens ML), OD-005 (Niyet eşiği), OD-006 (etki katsayısı), OD-004 (başarı kriteri zorunluluğu) ID'leri ile orada izlenir.
+
 | Konu | Soru | Öneri | Öncelik |
 |---|---|---|---|
 | WebSocket vs yoklama | Uygulama içi bildirim için 30 sn yoklama yeterli mi? | Faz 2: yoklama → Faz 3: WebSocket | Sen + ürün |
