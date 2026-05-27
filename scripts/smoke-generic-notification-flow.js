@@ -1,7 +1,7 @@
 /**
  * WR-NOTIFICATION-CENTER Phase 2B+2C — generic CaseNotification flow smoke.
  *
- * Repository-level (no HTTP). 16 scenarios covering the four migrated
+ * Repository-level (no HTTP). 17 scenarios covering the four migrated
  * eventTypes + backfill + tenant scope + read mapping + watcher
  * self-add suppression (Codex P2) + backfill-side self-follow guard
  * (Codex P2 follow-up) + Phase 2C legacy eventType classification
@@ -80,6 +80,12 @@
  *          - reasonLabel built via buildNotificationReasonLabel
  *            ("Vaka transfer edildi: Destek ekibinden Operasyon ekibine.")
  *          - No raw eventType string leakage into the Turkish copy
+ *
+ *   G13b Distinct (from,to) transfers must not dedup-collide
+ *        Codex P2 follow-up — buildNotificationDedupKey discriminator
+ *        must include fromTeam/toTeam or two consecutive transfers on
+ *        the same (case, recipient) collapse into one ActionItem and
+ *        the second is miscounted as skipped_dedup.
  *
  *   G14  Legacy `mention` CaseNotification → no ActionItem (Phase 2C)
  *        Canonical path is CaseMention → kind='mention' via
@@ -700,54 +706,102 @@ async function run() {
     //   - Land it under kind='watcher_event' (FYI, gri "Bildirimler")
     //   - Build a rich Turkish reasonLabel via buildNotificationReasonLabel
     //     ("Vaka transfer edildi: <from> ekibinden <to> ekibine.")
+    //
+    // Codex P2 follow-up — two distinct transfers on the SAME case+recipient
+    // must produce TWO ActionItems. Before the dedup-key fix the legacy
+    // payload { fromTeam, toTeam } had no representation in the discriminator
+    // so multiple transfers collapsed to one ActionItem and the second was
+    // miscounted as skipped_dedup (losing the notification).
     const c13 = await newCase('case-g13-transfer', actor.person);
-    const transferPayloadG13 = {
+    const transferPayloadG13a = {
       fromTeam: 'Destek',
       toTeam: 'Operasyon',
       caseNumber: c13.caseNumber,
     };
-    const cnG13 = await prisma.caseNotification.create({
+    const transferPayloadG13b = {
+      fromTeam: 'Operasyon',
+      toTeam: 'Mali İşler',
+      caseNumber: c13.caseNumber,
+    };
+    const cnG13a = await prisma.caseNotification.create({
       data: {
         caseId: c13.id,
         companyId: companyA.id,
         eventType: 'transfer',
         channel: 'InApp',
         recipient: watcher1.user.id,
-        payload: transferPayloadG13,
+        payload: transferPayloadG13a,
         sentAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
         readAt: null,
       },
     });
-    created.notifications.push(cnG13.id);
-    const dedupG13 = buildNotificationDedupKey({
+    created.notifications.push(cnG13a.id);
+    const cnG13b = await prisma.caseNotification.create({
+      data: {
+        caseId: c13.id,
+        companyId: companyA.id,
+        eventType: 'transfer',
+        channel: 'InApp',
+        recipient: watcher1.user.id,
+        payload: transferPayloadG13b,
+        sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        readAt: null,
+      },
+    });
+    created.notifications.push(cnG13b.id);
+    const dedupG13a = buildNotificationDedupKey({
       caseId: c13.id,
       eventType: 'transfer',
       recipientUserId: watcher1.user.id,
-      payload: transferPayloadG13,
+      payload: transferPayloadG13a,
+    });
+    const dedupG13b = buildNotificationDedupKey({
+      caseId: c13.id,
+      eventType: 'transfer',
+      recipientUserId: watcher1.user.id,
+      payload: transferPayloadG13b,
     });
     const reportG13 = await simulateBackfill({
       windowDays: 30,
       execute: true,
       restrictCompanyId: companyA.id,
     });
-    const aiG13 = await prisma.actionItem.findUnique({ where: { dedupKey: dedupG13 } });
-    if (aiG13) created.actionItems.push(aiG13.id);
-    const expectedReasonG13 = buildNotificationReasonLabel('transfer', transferPayloadG13);
+    const aiG13a = await prisma.actionItem.findUnique({ where: { dedupKey: dedupG13a } });
+    const aiG13b = await prisma.actionItem.findUnique({ where: { dedupKey: dedupG13b } });
+    if (aiG13a) created.actionItems.push(aiG13a.id);
+    if (aiG13b) created.actionItems.push(aiG13b.id);
+    const expectedReasonG13a = buildNotificationReasonLabel('transfer', transferPayloadG13a);
+    const expectedReasonG13b = buildNotificationReasonLabel('transfer', transferPayloadG13b);
     record(
       'G13. legacy transfer CaseNotification → ActionItem (kind=watcher_event, rich Turkish reasonLabel)',
-      !!aiG13 &&
-        aiG13.kind === 'watcher_event' &&
-        aiG13.actionRequired === false &&
-        aiG13.userId === watcher1.user.id &&
-        aiG13.reasonLabel === expectedReasonG13 &&
-        aiG13.reasonLabel.includes('Destek') &&
-        aiG13.reasonLabel.includes('Operasyon') &&
+      !!aiG13a &&
+        aiG13a.kind === 'watcher_event' &&
+        aiG13a.actionRequired === false &&
+        aiG13a.userId === watcher1.user.id &&
+        aiG13a.reasonLabel === expectedReasonG13a &&
+        aiG13a.reasonLabel.includes('Destek') &&
+        aiG13a.reasonLabel.includes('Operasyon') &&
         // Guard against raw-eventType leakage fallback (R1): the label
         // must NOT be the generic "transfer bildirimi." or any "<eventType>
         // bildirimi." pattern. The Turkish word "transfer" in "Vaka
         // transfer edildi" is the intended human-readable copy and is OK.
-        !aiG13.reasonLabel.endsWith('bildirimi.'),
-      `kind=${aiG13?.kind} reason="${aiG13?.reasonLabel}" scanned=${reportG13.scanned}`,
+        !aiG13a.reasonLabel.endsWith('bildirimi.'),
+      `kind=${aiG13a?.kind} reason="${aiG13a?.reasonLabel}" scanned=${reportG13.scanned}`,
+    );
+
+    // ─── G13b: Codex P2 — distinct-pair transfers must not collide ──
+    // Same case + same recipient, but different (fromTeam,toTeam). The
+    // dedup key discriminator must include fromTeam/toTeam or the second
+    // transfer collapses into the first.
+    record(
+      'G13b. distinct (fromTeam,toTeam) transfers → distinct dedupKey + distinct ActionItems',
+      dedupG13a !== dedupG13b &&
+        !!aiG13a &&
+        !!aiG13b &&
+        aiG13a.id !== aiG13b.id &&
+        aiG13b.reasonLabel === expectedReasonG13b &&
+        aiG13b.reasonLabel.includes('Mali İşler'),
+      `dedupDistinct=${dedupG13a !== dedupG13b} aiA=${!!aiG13a} aiB=${!!aiG13b}`,
     );
 
     // ─── G14: legacy `mention` CaseNotification → no ActionItem ────

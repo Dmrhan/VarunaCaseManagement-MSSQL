@@ -287,7 +287,22 @@ export function buildNotificationDedupKey({
   const emoji = payload?.emoji ?? '';
   const transferCount = payload?.transferCount ?? '';
   const kind = payload?.kind ?? '';
-  const discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  const fromTeam = payload?.fromTeam ?? '';
+  const toTeam = payload?.toTeam ?? '';
+  let discInput = `${kind}|${noteId}|${emoji}|${transferCount}|${message}`;
+  // Phase 2C cleanup follow-up — legacy `transfer` payload is
+  // { fromTeam, toTeam, caseNumber } with no message/transferCount/kind,
+  // so the original discriminator above hashes to the SAME value for
+  // every transfer on the same (caseId, recipient) pair. Multiple
+  // transfers (different from/to teams) would collapse to one
+  // ActionItem and bump skipped_dedup instead, losing notifications.
+  // Append from/to team identity ONLY when those fields are present so
+  // the formula stays backward-compatible with already-materialized
+  // dedup keys for the four Phase 2B eventTypes (their payloads do not
+  // populate fromTeam/toTeam).
+  if (fromTeam || toTeam) {
+    discInput += `|${fromTeam}|${toTeam}`;
+  }
   const disc = djb2(discInput);
   return `notification:${caseId}:${eventType}:${recipientUserId}:${disc}`;
 }
