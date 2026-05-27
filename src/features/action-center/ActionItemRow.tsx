@@ -6,6 +6,7 @@ import {
   Clock,
   Eye,
   Info,
+  RotateCcw,
   ShieldCheck,
   ShieldX,
   XCircle,
@@ -211,6 +212,20 @@ export function ActionItemRow({
     }
   }
 
+  // WR-NOTIFICATION-CENTER Phase 2C P0 — manual unsnooze. Pulls the
+  // row back into the active queue without waiting for snoozedUntil to
+  // lapse. Drawer event invalidates other surfaces; row's onChanged
+  // triggers a silent local refresh (no flicker).
+  async function handleUnsnooze() {
+    setBusy(true);
+    const r = await actionCenterService.unsnooze(item.id);
+    setBusy(false);
+    if (r) {
+      emitActionCenterChanged();
+      onChanged?.();
+    }
+  }
+
   function presetSnooze(presetKey: 'hour' | 'tomorrow' | 'monday') {
     const now = new Date();
     let target: Date;
@@ -360,6 +375,35 @@ export function ActionItemRow({
               )}
               <Button size="sm" variant="ghost" leftIcon={<Clock size={11} />} onClick={() => setSnoozeOpen((v) => !v)} disabled={busy}>
                 Ertele
+              </Button>
+              <Button size="sm" variant="ghost" leftIcon={<XCircle size={11} />} onClick={() => setDismissOpen((v) => !v)} disabled={busy}>
+                Yok Say
+              </Button>
+            </div>
+          )}
+
+          {/* WR-NOTIFICATION-CENTER Phase 2C P0 — Ertelenen sekmesi
+              için ayrı mini-aksiyon bloğu. Kullanıcı snoozedUntil
+              gelmeden satırı manuel olarak geri çekebilsin diye
+              "Ertelemeyi Kaldır" burada görünür. "Ertele" YOK
+              (zaten ertelenmiş satır), "Onayla / Reddet / Okundu /
+              Tamamlandı" YOK (ertelenirken aksiyona girilemez —
+              önce unsnooze, sonra İşler/Bildirimler'de eylem). */}
+          {view === 'snoozed' && item.state === 'Snoozed' && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {item.caseId && (
+                <Button size="sm" variant="outline" onClick={() => onCaseOpen(item.caseId!)} disabled={busy}>
+                  {isMention ? 'Yorumu Aç' : 'Vakayı Aç'}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<RotateCcw size={11} />}
+                onClick={() => void handleUnsnooze()}
+                disabled={busy}
+              >
+                Ertelemeyi Kaldır
               </Button>
               <Button size="sm" variant="ghost" leftIcon={<XCircle size={11} />} onClick={() => setDismissOpen((v) => !v)} disabled={busy}>
                 Yok Say

@@ -8,6 +8,7 @@ import {
   markDone,
   snooze,
   summaryForUser,
+  unsnooze,
 } from '../db/actionItemRepository.js';
 
 /**
@@ -142,6 +143,27 @@ router.post(
       userId: req.user.id,
       allowedCompanyIds: req.user.allowedCompanyIds,
       payload: req.body ?? {},
+    });
+    res.json(updated);
+  }),
+);
+
+/**
+ * POST /api/action-center/:id/unsnooze
+ *
+ * WR-NOTIFICATION-CENTER Phase 2C P0 — manual undo of an existing
+ * snooze before snoozedUntil lapses. No body required. Owner-only +
+ * tenant-scoped via shared loadOwnedItemOr403. Returns the updated
+ * ActionItem (state=Pending, snoozedUntil=null). 409 with
+ * action_item_not_snoozed when the row is not currently Snoozed.
+ */
+router.post(
+  '/:id/unsnooze',
+  asyncRoute(async (req, res) => {
+    const updated = await unsnooze({
+      id: req.params.id,
+      userId: req.user.id,
+      allowedCompanyIds: req.user.allowedCompanyIds,
     });
     res.json(updated);
   }),

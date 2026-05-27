@@ -143,6 +143,20 @@ export const actionCenterService = {
       'Yok sayılamadı',
     );
   },
+
+  /**
+   * WR-NOTIFICATION-CENTER Phase 2C P0 — manual unsnooze.
+   * Returns the row back into the active queue (state=Pending,
+   * snoozedUntil=null). Toast on failure ("Ertelemeyi kaldırma
+   * başarısız"); apiFetch handles 4xx surface.
+   */
+  async unsnooze(id: string) {
+    return apiFetch<ActionItem>(
+      `/api/action-center/${encodeURIComponent(id)}/unsnooze`,
+      { method: 'POST' },
+      'Ertelemeyi kaldırma başarısız',
+    );
+  },
 };
 
 export const ACTION_CENTER_EVENT = 'app:action-center-changed';
