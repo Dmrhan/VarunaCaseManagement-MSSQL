@@ -44,6 +44,7 @@
  *     skipped_unmapped_event_type:  <int>,
  *     skipped_no_membership:        <int>,
  *     skipped_inactive_membership:  <int>,
+ *     skipped_self_follow:          <int>,  // watcher_added: addedBy === recipient
  *     dry_run:                      <bool>,
  *   }
  *
@@ -187,6 +188,10 @@ async function run() {
     skipped_unmapped_event_type: 0,
     skipped_no_membership: 0,
     skipped_inactive_membership: 0,
+    // Codex P2 follow-up: watcher_added rows where payload.addedBy ===
+    // recipient (user followed themselves). Live adapter already skips
+    // these; backfill must mirror or it re-creates the inbox noise.
+    skipped_self_follow: 0,
     dry_run: args.dryRun,
   };
 
@@ -235,6 +240,20 @@ async function run() {
       // Unmapped eventType — silent skip (forward-compat).
       if (!SUPPORTED_EVENT_TYPES.has(row.eventType)) {
         report.skipped_unmapped_event_type += 1;
+        continue;
+      }
+      // Codex P2 follow-up — watcher self-follow suppression.
+      // Live adapter at caseRepository.watcherRepo.add skips the
+      // ActionItem emit when userId === addedBy, but the CaseNotification
+      // row is still written (legacy bell behavior preserved). Without
+      // mirroring the same skip here, backfill would re-create the
+      // self-noise inbox row on `--execute`.
+      if (
+        row.eventType === 'watcher_added' &&
+        row.payload?.addedBy &&
+        row.payload.addedBy === row.recipient
+      ) {
+        report.skipped_self_follow += 1;
         continue;
       }
       // R8.b — UserCompany active membership for the recipient.
