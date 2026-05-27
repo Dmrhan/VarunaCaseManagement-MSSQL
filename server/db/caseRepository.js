@@ -2808,19 +2808,31 @@ export const watcherRepo = {
     });
 
     // WR-NOTIFICATION-CENTER Phase 2B — Aksiyonlarım emit (FYI).
-    const caseSnapshot = await prisma.case.findUnique({
-      where: { id: caseId },
-      select: { caseNumber: true, title: true },
-    });
-    void emitGenericNotification({
-      caseId,
-      companyId,
-      eventType: 'watcher_added',
-      recipientUserId: userId,
-      payload: watcherAddedPayload,
-      caseNumber: caseSnapshot?.caseNumber,
-      caseTitle: caseSnapshot?.title,
-    });
+    //
+    // Codex P2 (Phase 2C P0 fix) — self-add suppression:
+    //   When a user self-follows (userId === addedBy), the inbox would
+    //   otherwise show "Sizi <case> vakasında izleyici olarak eklendi"
+    //   to themselves — noise. The watcher write, CaseActivity row and
+    //   the legacy CaseNotification record above remain UNCHANGED
+    //   (watcher self-follow behavior preserved); only the new
+    //   Aksiyonlarım emit is skipped here. Mirrors the same self-skip
+    //   discipline used by reactionRepo (line 3129) and emitMentionsForNote
+    //   (R6).
+    if (userId !== addedBy) {
+      const caseSnapshot = await prisma.case.findUnique({
+        where: { id: caseId },
+        select: { caseNumber: true, title: true },
+      });
+      void emitGenericNotification({
+        caseId,
+        companyId,
+        eventType: 'watcher_added',
+        recipientUserId: userId,
+        payload: watcherAddedPayload,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+      });
+    }
 
     return { id: created.id, userId, addedBy, addedAt: created.addedAt };
   },

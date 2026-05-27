@@ -1,8 +1,9 @@
 /**
  * WR-NOTIFICATION-CENTER Phase 2B — generic CaseNotification flow smoke.
  *
- * Repository-level (no HTTP). 10 scenarios covering the four migrated
- * eventTypes + backfill + tenant scope + read mapping:
+ * Repository-level (no HTTP). 11 scenarios covering the four migrated
+ * eventTypes + backfill + tenant scope + read mapping + watcher
+ * self-add suppression (Codex P2):
  *
  *   G1   watcher_added → live emit
  *        watcherRepo.add writes CaseNotification + emits ActionItem
@@ -49,6 +50,12 @@
  *        ActionItem is written.
  *
  *   G10  Inactive UserCompany drift
+ *
+ *   G11  Watcher self-add suppression (Codex P2 / Phase 2C P0 fix)
+ *        User follows themselves (userId === addedBy):
+ *          - CaseWatcher row CREATED (self-follow preserved)
+ *          - CaseNotification row CREATED (legacy bell unchanged)
+ *          - ActionItem row NOT created (Aksiyonlarım self-noise YOK)
  *        Drift fixture targeting a user with isActive=false UC →
  *        backfill skipped_inactive_membership++ and no ActionItem.
  *
@@ -559,6 +566,62 @@ async function run() {
       'G10. inactive-UserCompany drift — ActionItem YOK; skipped_inactive_membership artar',
       !aiG10 && driftReport.skipped_inactive_membership >= 1,
       `aiG10=${!!aiG10} skipped_inactive_membership=${driftReport.skipped_inactive_membership}`,
+    );
+
+    // ─── G11: Codex P2 — watcher self-add suppression ───────────────
+    // When userId === addedBy (user follows themselves), the legacy
+    // bell still wrote a "Sizi izleyici olarak eklendi" notification
+    // and the Aksiyonlarım inbox would have echoed it back — noise.
+    // Phase 2C P0 fix: skip the ActionItem emit while preserving:
+    //   - CaseWatcher row (self-follow IS allowed)
+    //   - CaseActivity "izleyici eklendi" entry
+    //   - CaseNotification record (legacy bell behavior unchanged)
+    const c11 = await newCase('case-g11-self-follow', actor.person);
+    const selfFollowResult = await watcherRepo.add({
+      caseId: c11.id,
+      userId: actor.user.id,        // self
+      addedBy: actor.user.id,       // === userId
+      allowedCompanyIds: [companyA.id],
+      actor: actor.user.fullName,
+    });
+    if (selfFollowResult?.id) created.watchers.push(selfFollowResult.id);
+    await waitForFireAndForget();
+
+    // Self-follow legacy artifacts MUST still exist.
+    const selfWatcherRow = await prisma.caseWatcher.findFirst({
+      where: { caseId: c11.id, userId: actor.user.id },
+    });
+    const selfNotificationRow = await prisma.caseNotification.findFirst({
+      where: {
+        caseId: c11.id,
+        eventType: 'watcher_added',
+        recipient: actor.user.id,
+      },
+    });
+    if (selfNotificationRow) created.notifications.push(selfNotificationRow.id);
+
+    // Inbox emit MUST be suppressed for self-add.
+    const selfFollowDedup = buildNotificationDedupKey({
+      caseId: c11.id,
+      eventType: 'watcher_added',
+      recipientUserId: actor.user.id,
+      payload: {
+        message: `Sizi ${c11.caseNumber} vakasında izleyici olarak eklendi`,
+        kind: 'watcher_added',
+        addedBy: actor.user.id,
+      },
+    });
+    const selfFollowAi = await prisma.actionItem.findUnique({
+      where: { dedupKey: selfFollowDedup },
+    });
+
+    record(
+      'G11. watcher self-add (userId === addedBy) — ActionItem skip; watcher+notification preserved',
+      !!selfFollowResult?.id &&
+        !!selfWatcherRow &&
+        !!selfNotificationRow &&
+        !selfFollowAi,
+      `watcher=${!!selfWatcherRow} notification=${!!selfNotificationRow} actionItem=${!!selfFollowAi}`,
     );
   } catch (err) {
     console.error('smoke fatal:', err);
