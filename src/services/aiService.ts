@@ -311,11 +311,53 @@ export const aiService = {
 
   /**
    * Vaka aktarımı önerisi — RUNA AI mevcut takım dışında en uygun takımı seçer
-   * + reasonCode + reasonText + confidence döner. usageLogId ileride
-   * "Uygula/Yoksay" telemetrisi için saklanır (UI tarafında PATCH /usage/:id/accept).
+   * + reasonCode + reasonText + confidence döner. usageLogId,
+   * `markUsageAccepted` ile Uygula/Yoksay telemetrisini doldurur
+   * (PATCH /usage/:id/accept → AIUsagePage.acceptanceRate).
    */
   async transferSuggest(caseId: string) {
     return postJson<TransferSuggestion>('/transfer-suggest', { caseId });
+  },
+
+  /**
+   * AI önerisinin uygulandı/yoksayıldı durumunu kaydeder
+   * (PATCH /api/ai/usage/:id/accept). AIUsagePage.acceptanceRate buradan
+   * beslenir. Fire-and-forget: ana akışı asla bloklamaz, hata yutulur
+   * (sadece console.warn). Eldeki `usageLogId` null/undefined ise no-op.
+   */
+  async markUsageAccepted(
+    usageLogId: string | null | undefined,
+    accepted: boolean,
+  ): Promise<boolean> {
+    if (!usageLogId) return false;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    try {
+      const { getAccessToken } = await import('./supabase');
+      const token = await getAccessToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const r = await fetch(
+        `${API_BASE}/usage/${encodeURIComponent(usageLogId)}/accept`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ accepted }),
+          signal: ctrl.signal,
+        },
+      );
+      if (!r.ok) {
+        console.warn(`[ai] usage accept ← ${r.status}`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      const isAbort = (e as { name?: string })?.name === 'AbortError';
+      console.warn(`[ai] usage accept ${isAbort ? 'TIMEOUT' : 'ERROR'}`, e);
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   async operationsBrief(input: OperationsBaseRequest) {
