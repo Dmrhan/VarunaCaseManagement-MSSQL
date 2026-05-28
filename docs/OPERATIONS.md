@@ -375,17 +375,13 @@ Response:
 { "ok": true, "deleted": 42, "cutoff": "2026-04-12T00:00:00.000Z" }
 ```
 
-Onerilen periyot: **gunluk** (orn. 02:30 UTC, qa-score-batch'ten sonra).
-
-> **Not (2026-05-28 audit):** Endpoint mevcut **ancak bu repo'da
-> herhangi bir zamanlayici (scheduler) yapilandirilmadi.**
-> `.github/workflows/` altinda pattern-detect / qa-score-batch /
-> snooze-wakeup icin cron workflow'lari var; `notification-cleanup`
-> icin yok. `vercel.json` `crons` array'i bos. Cron tetiklemek icin
-> GitHub Actions workflow eklemek (mevcut `snooze-wakeup.yml` clone),
-> Vercel Cron yapilandirmak veya UptimeRobot kullanmak gerekir —
-> ops setup gorevi olarak acik. Tetiklenmedigi surece okunmus
-> `CaseNotification` satirlari birikir.
+Periyot: **gunluk 03:00 UTC** — `.github/workflows/notification-cleanup.yml`
+GitHub Actions workflow'u tarafindan tetiklenir (qa-score-batch 02:00
+UTC'den sonra calisir, snooze-wakeup */5dk ile cakismaz). Manuel
+tetiklemek icin: GitHub Actions UI → "Notification Cleanup Cron"
+workflow → "Run workflow" (workflow_dispatch). Auth pattern: ayni
+`x-uptime-secret: ${{ secrets.CRON_SECRET }}` header'i (digger 3 cron
+workflow'uyla ayni).
 
 ## Cron Testleri
 
