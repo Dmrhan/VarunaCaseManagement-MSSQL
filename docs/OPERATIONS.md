@@ -71,7 +71,7 @@ TCKN_HASH_PEPPER=
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend auth dogrulama ve storage islemleri |
 | `CRON_SECRET` | Cron endpointlerini koruyan secret |
 | `OPENAI_API_KEY` | AI endpointleri icin OpenAI key |
-| `TCKN_HASH_PEPPER` | **KVKK (Individual musteri kayitlari icin zorunlu).** 32+ karakterlik random secret. `server/utils/accountValidation.js` plain TCKN'i HMAC-SHA256 ile hash'ler; pepper bu HMAC'in anahtaridir. Atlanirsa Individual musteri create/update/search akislari `400 tckn_system_unconfigured` doner (safe-fail). Rotation: **forward-only** — eski hash'ler eski pepper'la sealed kalir. Runbook: `docs/TECHNICAL_DEBT.md §"TCKN pepper rotation owner / runbook"`. |
+| `TCKN_HASH_PEPPER` | **KVKK (Individual musteri kayitlari icin zorunlu).** 16+ karakterlik random secret (production: `openssl rand -hex 32`). `server/utils/accountValidation.js::hashTckn` plain TCKN'i HMAC-SHA256 ile hash'ler; pepper bu HMAC'in anahtaridir. Atlanirsa veya 16 haneden kisaysa **Individual musteri create / update** akislari (TCKN ile) `400 tckn_pepper_missing` doner (safe-fail; plain TCKN asla saklanmaz). Okuma/listeleme/search bu hata kodunu fırlatmaz. Rotation: **forward-only** — eski hash'ler eski pepper'la sealed kalir. Runbook: `docs/TECHNICAL_DEBT.md §"TCKN pepper rotation owner / runbook"`. |
 
 ### Frontend
 
