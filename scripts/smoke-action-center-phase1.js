@@ -1240,6 +1240,117 @@ async function run() {
       r25_forbidden && ownerRowAfter?.state === 'Snoozed',
       `forbidden=${r25_forbidden} err=${r25_err} state=${ownerRowAfter?.state}`,
     );
+
+    // ─── 26. PR-3b — archive revive on dedup upsert ────────────────
+    // Codex P1 finding (after PR-3 / OD-073): list and badge filters
+    // now exclude `archivedAt IS NOT NULL`. If a row was archived by
+    // the retention cron and then re-emitted with the same dedupKey,
+    // the upsert UPDATE branch must clear `archivedAt` — otherwise
+    // the unique index prevents a fresh row and the user never sees
+    // the revived item.
+    //
+    // Scenario:
+    //   1. Create an ActionItem via emitActionItem with explicit dedupKey
+    //   2. Mark it Done (terminal state)
+    //   3. Set archivedAt = past (simulate retention cron)
+    //   4. Re-emit same dedupKey via emitActionItem
+    //   5. Assert: archivedAt is null, state is Pending, single row
+    //   6. Assert: appears in active list (view=action) again
+    const r26DedupKey = `pr3b-revive-test-${stamp}`;
+    const r26Reason = 'PR-3b smoke — revive test reason';
+    const r26Emit1 = await emitActionItem({
+      kind: 'approval_pending',
+      userId: leadUser.id,
+      personId: leadPerson.id,
+      companyId: company.id,
+      objectType: 'CaseResolutionApproval',
+      objectId: null,
+      caseId: c2.id,
+      caseNumber: c2.caseNumber,
+      caseTitle: c2.title,
+      dedupKey: r26DedupKey,
+      priority: 70,
+      actionRequired: true,
+      reasonLabel: r26Reason,
+    });
+    if (r26Emit1?.id) created.actionItems.push(r26Emit1.id);
+
+    // Simulate retention cron: mark Done + archivedAt = 31 days ago.
+    const r26ArchivedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    if (r26Emit1?.id) {
+      await prisma.actionItem.update({
+        where: { id: r26Emit1.id },
+        data: {
+          state: 'Done',
+          doneAt: r26ArchivedAt,
+          doneByUserId: leadUser.id,
+          doneOutcome: 'archived-test',
+          archivedAt: r26ArchivedAt,
+        },
+      });
+    }
+
+    // Confirm archived row is invisible in active list (PR-3 contract).
+    const r26ListWhileArchived = r26Emit1
+      ? await listForUser({
+          userId: leadUser.id,
+          allowedCompanyIds,
+          view: 'action',
+        })
+      : { items: [] };
+    const r26WasHidden = !r26ListWhileArchived.items.some((i) => i.id === r26Emit1?.id);
+
+    // Re-emit same dedupKey → upsert UPDATE branch fires.
+    const r26Emit2 = r26Emit1
+      ? await emitActionItem({
+          kind: 'approval_pending',
+          userId: leadUser.id,
+          personId: leadPerson.id,
+          companyId: company.id,
+          objectType: 'CaseResolutionApproval',
+          objectId: null,
+          caseId: c2.id,
+          caseNumber: c2.caseNumber,
+          caseTitle: c2.title,
+          dedupKey: r26DedupKey,
+          priority: 70,
+          actionRequired: true,
+          reasonLabel: r26Reason,
+        })
+      : null;
+
+    const r26RowAfter = r26Emit1
+      ? await prisma.actionItem.findUnique({ where: { id: r26Emit1.id } })
+      : null;
+    const r26AllRows = r26Emit1
+      ? await prisma.actionItem.findMany({ where: { dedupKey: r26DedupKey } })
+      : [];
+
+    // Confirm revived row now appears in active list.
+    const r26ListAfterRevive = r26Emit1
+      ? await listForUser({
+          userId: leadUser.id,
+          allowedCompanyIds,
+          view: 'action',
+        })
+      : { items: [] };
+    const r26ReappearedInActive = r26ListAfterRevive.items.some(
+      (i) => i.id === r26Emit1?.id,
+    );
+
+    record(
+      '26. PR-3b — re-emit archived dedupKey row → archivedAt cleared, state Pending, visible in active list',
+      !!r26Emit1 &&
+        !!r26Emit2 &&
+        r26WasHidden &&
+        r26RowAfter?.archivedAt === null &&
+        r26RowAfter?.state === 'Pending' &&
+        r26AllRows.length === 1 && // unique dedupKey upserted same row
+        r26ReappearedInActive,
+      `emit1=${!!r26Emit1?.id} emit2=${!!r26Emit2?.id} hiddenWhileArchived=${r26WasHidden} ` +
+        `archivedAtAfter=${r26RowAfter?.archivedAt} stateAfter=${r26RowAfter?.state} ` +
+        `rowCount=${r26AllRows.length} visibleInActive=${r26ReappearedInActive}`,
+    );
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
