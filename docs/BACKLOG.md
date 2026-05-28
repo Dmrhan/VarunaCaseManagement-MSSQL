@@ -195,14 +195,21 @@ Route-layer kuralları kodda mevcut ama undocumented. Self-add unrestricted, oth
 
 **Çaba:** 1 gün.
 
-### AI Accept/Reject FE telemetry wiring (önceki #4)
+### AI Accept/Reject FE telemetry wiring (önceki #4) — kısmı
 
-Backend hazır: `PATCH /api/ai/usage/:id/accept` (`server/routes/ai.js:1133`), `acceptanceRate` hesaplaması (`server/routes/analytics.js:127`). FE'de hiçbir caller yok — `usageLogId` UI'larda debug label olarak görünüyor sadece. Sonuç: AIUsagePage'de `acceptanceRate` sürekli `null`.
+**Durum (2026-05-28, PR-4a):** Backend zaten hazırdı (`PATCH /api/ai/usage/:id/accept` — `server/routes/ai.js:1133`, `acceptanceRate` — `server/routes/analytics.js:127`). FE caller eklendi:
 
-- `aiService.markAccepted(usageLogId, accepted: boolean)` ekle
-- 8 AI surface'e "Uygula / Yoksay" butonu: NewCaseForm suggest-category, SupervisorSummary, ChurnConversion, DraftResolution, TransferSuggest, CustomerPulseSummary, Operations brief/insights/explain/report/drilldown-assistant
+- `aiService.markUsageAccepted(usageLogId, accepted)` — fire-and-forget, ana akışı bloklamaz
+- **Bağlananlar:**
+  - `suggest-title` — `NewCaseForm`: Uygula (`applyAllFromAi` + `applyTitleOnly`) → `accepted=true`; Yoksay (`dismissAiCard`) → `accepted=false`
+  - `transfer-suggest` — `TransferModal`: "Öneriyi Uygula" → `accepted=true`; submit-time farklı takım seçimi → `accepted=false`
+- **Bağlanamayanlar (BFF `usageLogId` döndürmüyor — ayrı PR gerekir):**
+  - `suggest-category`, `draft-resolution`, `supervisor-summary`, `churn-conversion`, `call-summary`, `customer-pulse-summary`, `suggest-links`, `dashboard-chat`
+  - Bu endpoint'ler `aiHandler` auto-log akışında — handler'lar `req.aiLog.skipAutoLog = true` + manuel `logAIUsage()` ile dönüp `usageLogId`'yi response'a eklemeli.
+- **Bağlamak anlamsız:**
+  - `operations-brief|insights|explain-metric|report-draft|drilldown-assist` — `usageLogId` mevcut ama UI yüzeyinde "Uygula" aksiyonu yok (pasif okuma kartları). Kapatma butonu (`onDismiss`) belirsiz: kullanıcı içeriği okuyup kapatmış da olabilir, beğenmemiş de olabilir. Sahte sinyal üretmemek için bağlanmadı.
 
-**Çaba:** 3-4 saat.
+**Sonraki adım (P3):** Yukarıdaki 8 endpoint için BFF'i `usageLogId` döndürecek şekilde güncelle, ardından her surface'in mevcut Uygula/Yoksay aksiyonunu (varsa) telemetriye bağla. Operations kartlarına "Faydalı / Faydalı değil" gibi explicit feedback yüzeyi eklemek ayrı UX kararı — bu PR'da kapsam dışı.
 
 ### Smart QA — explicit caseId/companyId in AI calls (önceki #8)
 
