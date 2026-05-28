@@ -1,0 +1,17 @@
+name: Notification Cleanup Cron
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger notification cleanup
+        run: |
+          curl -X POST \
+            -H "x-uptime-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            https://varuna-case-management.vercel.app/api/cron/notification-cleanup
