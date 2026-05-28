@@ -50,15 +50,15 @@ Eylemler:
 
 ## P1 — Scale / Reliability
 
-### Phase 5C — 4 admin ekranı create flow doğrulaması (verify-first)
+### ~~Phase 5C — 4 admin ekranı create flow doğrulaması (verify-first)~~ → **CLOSED (Resolved 2026-05-28)**
 
-`docs/FAZ1_5_RELEASE_NOTES.md §"Açık Konular"` line 308-312 raporu: Takımlar & Üyeler, SLA Kuralları, Kontrol Listesi, Kategori & Alt Kategori admin ekranlarında create denemesi 400 dönüyor (companyId picker / nullable yanıltıcı). Dinamik Alanlar zaten düzeltildi.
+Half-Shipped Audit (2026-05-28) bu item'ı statik koddan doğruladı — 4 admin ekranın 4'ünde de Phase 5C company picker mevcut:
+- `src/features/admin/AdminTeamsPage.tsx:319,408,429` (explicit yorum: "Phase 5C — companyId zorunlu")
+- `src/features/admin/AdminSlaPage.tsx:389,421`
+- `src/features/admin/AdminChecklistPage.tsx:517,618`
+- `src/features/admin/AdminCategoriesPage.tsx:563,593,621` (SystemAdmin için null kabul)
 
-**Eylem:**
-- Önce verify: bugün PARAM Admin ile `/admin/teams` create → 400 mü? Reproduces ediyorsa P1 prod bug, tek bir fix PR.
-- Reproduce etmiyorsa: release notes'tan "ileri sprint" notunu temizle (FAZ1_5_RELEASE_NOTES.md güncelle), bu backlog item closed.
-
-**Çaba:** 30dk verify + tetiklendiyse 1-2 saat fix.
+Release notes §"Açık Konular" stale; FAZ1_5_RELEASE_NOTES.md'de "Resolved 2026-Q2" işaretlendi. Bu item closed.
 
 ### TCKN DPO read trail / audit log (KVKK promise)
 
@@ -234,19 +234,17 @@ Agent merge yapmıyor; sadece görünür kıl. (Supervisor review queue ayrı ka
 
 **Action remaining:** Bireysel OD-XXX kararları alındıkça canonical register'ı güncelle. Bu item'ın kendisi PR-C ile kapanmıştır.
 
-### A8 Phase 2b — Customer 360 Import commit path
+### ~~A8 Phase 2b — Customer 360 Import commit path~~ → **CLOSED — Shipped (commit `f987bdc`)**
 
-`docs/planning_cards/WR-A8-PHASE2-CUSTOMER-360-IMPORT.md` + `docs/integration-test-pack/README.md`: Phase 2a Foundation prod'da ama **dry-run only**. "Phase 2b commit yolu hazır olunca aynı dosyalar commit testi için kullanılabilir" — bugün yok.
+Half-Shipped Audit (2026-05-28) `git log -- server/routes/imports.js` ile doğruladı: commit `f987bdc` "feat(import): WR-A8 Phase 2b — Customer 360 commit + rollback" zaten landed. Mevcut yüzeyler:
+- Backend: `server/routes/imports.js:462 POST /customer360/commit` + `:482 POST /customer360/jobs/:id/rollback`
+- FE service: `src/services/importService.ts customer360Commit + customer360Rollback`
+- UI: `src/features/admin/dataImport/customer360/Customer360Page.tsx` consumes both
+- Smoke: `scripts/smoke-customer360-commit-rollback.js`
 
-**Eylem:**
-- Commit-confirm dialog (operatör onayı)
-- Dependency-ordered commit (Account → Company → Contact → Address → Project)
-- Reverse rollback + per-entity no-swallow surfacing
-- Açık sorular planning §"Bilinçli Bırakılanlar"da: isPrimary/isDefault uniqueness, duplicate contact severity, companyCode resolution, AccountProject.defaultSupportLevel modelde yok (P3 backlog'da var), date format esnekliği, composite schema version
+Açık sorular (OD-009..OD-014) shipped'ten önce default'lara bağlandı; runtime'da bu default davranışların doğrulanması ayrı **smoke iş** olarak izlenir (PR-5 audit follow-up). ROADMAP Recent Ships'e "A8 Phase 2b commit + rollback" tek-satır eklendi.
 
-**Risk:** Bu sprint dalgasının (Master Data) en büyük açık production gap. Phase 2c (polish/PII/MSSQL audit/flat CSV) ROADMAP'a.
-
-**Çaba:** 3-5 gün.
+**Phase 2c** (polish/PII/MSSQL audit/flat CSV) ROADMAP "Future Direction" altına bırakıldı.
 
 ### CasesList advanced filters — supportLevel / accountProjectId / productId / packageId
 
