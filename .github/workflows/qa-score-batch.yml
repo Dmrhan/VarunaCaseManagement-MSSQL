@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Trigger QA score batch
         run: |
-          curl -X POST \
+          curl --fail-with-body -X POST \
             -H "x-uptime-secret: ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             https://varuna-case-management.vercel.app/api/cron/qa-score-batch
