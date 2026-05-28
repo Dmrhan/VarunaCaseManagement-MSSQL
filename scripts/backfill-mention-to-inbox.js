@@ -289,8 +289,8 @@ async function run() {
       const display = await actorDisplay(row.mentionedBy);
       const preview = buildPreview(await noteContent(row.noteId));
       const reasonLabel = preview
-        ? `@${display} ${c.caseNumber ?? ''} yorumunda seni andı: "${preview}".`.replace(/  +/g, ' ').trim()
-        : `@${display} ${c.caseNumber ?? ''} yorumunda seni andı.`.replace(/  +/g, ' ').trim();
+        ? `@${display} ${c.caseNumber ?? ''} yorumunda senden bahsetti: "${preview}".`.replace(/  +/g, ' ').trim()
+        : `@${display} ${c.caseNumber ?? ''} yorumunda senden bahsetti.`.replace(/  +/g, ' ').trim();
 
       if (isSeen) {
         report.created_done += 1;
