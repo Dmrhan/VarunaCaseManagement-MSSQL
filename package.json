@@ -24,7 +24,10 @@
     "smoke:data-contracts": "node --env-file=.env scripts/smoke-data-contracts.js",
     "smoke:help-content": "node scripts/smoke-help-content.js",
     "smoke:ai-telemetry": "node --env-file=.env scripts/smoke-ai-telemetry.js",
-    "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js"
+    "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js",
+    "smoke:pr5-static-guards": "node scripts/smoke-pr5-static-guards.js",
+    "smoke:account-tckn-search": "node --env-file=.env scripts/smoke-account-tckn-search.js",
+    "smoke:admin-create-phase5c": "node --env-file=.env scripts/smoke-admin-create-phase5c.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
