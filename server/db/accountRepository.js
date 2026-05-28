@@ -7,6 +7,7 @@ import {
   hashTckn,
   maskTcknLast4,
   normalizePhoneE164,
+  tcknPepperAvailable,
 } from '../utils/accountValidation.js';
 
 /**
@@ -180,6 +181,10 @@ function shapeAccountRow(account, { caseAggregates }) {
  * her durumda dış WHERE'de korunur, OR sadece eşleştirme alanlarını genişletir:
  *   - name (contains, case-insensitive)
  *   - vkn (startsWith)
+ *   - tcknHash (exact) — PR-4b: sadece query tam 11 hane + validateTckn.ok +
+ *     TCKN_HASH_PEPPER mevcutsa eklenir. Pepper yoksa sessizce skip (read path
+ *     UX'i bozmamak için throw etmez; write path 400 fail aksine). Plain TCKN
+ *     ya da tcknHash response'a girmez; sadece tcknMasked görünür.
  *   - AccountCompany.externalCustomerCode (contains, case-insensitive) — C2,
  *     **scoped**: yalnız companyId filtresi (varsa) veya allowedCompanyIds
  *     içindeki AccountCompany ilişkilerinde aranır. Yetkisiz tenant'taki
@@ -230,10 +235,24 @@ export async function listAccounts({
     // that leak: code-match only counts when it lives on an AC that's
     // either the explicit companyId filter or in allowedCompanyIds.
     const externalCodeAcScope = companyId ? companyId : { in: allowed };
+
+    // WR-A2 / PR-4b — TCKN-by-search. Sadece 11 haneli + valid + pepper
+    // available iken hash branch eklenir. Aksi halde sessizce skip (write
+    // path 400 firlatir; read path UX'i bozmamak icin asla throw etmez).
+    // Plain TCKN log'a, response'a, hash'in disinda DB sorgusuna gitmez —
+    // hashTckn icindeki validateTckn normalize ediyor, ayni HMAC = ayni
+    // write-time hash. Audit log obligation (OD-022) hala pending.
+    let tcknHashBranch = null;
+    if (/^\d{11}$/.test(q) && validateTckn(q).ok && tcknPepperAvailable()) {
+      const { hash } = hashTckn(q);
+      tcknHashBranch = { tcknHash: hash };
+    }
+
     whereAnd.push({
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
         { vkn: { startsWith: q } },
+        ...(tcknHashBranch ? [tcknHashBranch] : []),
         {
           companies: {
             some: {
