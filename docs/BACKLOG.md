@@ -249,7 +249,7 @@ Half-Shipped Audit (2026-05-28) `git log -- server/routes/imports.js` ile doğru
 - UI: `src/features/admin/dataImport/customer360/Customer360Page.tsx` consumes both
 - Smoke: `scripts/smoke-customer360-commit-rollback.js`
 
-Açık sorular (OD-009..OD-014) shipped'ten önce default'lara bağlandı; runtime'da bu default davranışların doğrulanması ayrı **smoke iş** olarak izlenir (PR-5 audit follow-up). ROADMAP Recent Ships'e "A8 Phase 2b commit + rollback" tek-satır eklendi.
+Açık sorular (OD-009..OD-014) shipped'ten önce default'lara bağlandı; runtime'da bu default davranışların doğrulanması ayrı **smoke iş** olarak izlenir (PR-5 audit follow-up — `scripts/smoke-customer360-commit-rollback.js` 21 senaryoyla zaten kapsıyor, edge cases için ek aksiyon yok). ROADMAP Recent Ships'e "A8 Phase 2b commit + rollback" tek-satır eklendi.
 
 **Phase 2c** (polish/PII/MSSQL audit/flat CSV) ROADMAP "Future Direction" altına bırakıldı.
 
@@ -284,6 +284,24 @@ Eligibility rule: `state IN ('Done','Dismissed','Expired') AND archivedAt IS NUL
 - **DPO read trail / audit log** ([OD-022] hala PENDING) — TCKN search emit etmiyor. Audit table karar verildiğinde `tcknHash` lookup site'ına emit ekle (1 ek satır).
 
 **Çaba (kalanlar):** ~1 saat.
+
+### Half-Shipped Audit follow-up — PR-5 smoke coverage → **CLOSED**
+
+PR-5 (2026-05-28) ekledi:
+- `scripts/smoke-pr5-static-guards.js` — 12 statik kontrol: AI telemetri timing (Apply-click telemetri **yazmaz**, submit-success yazar, dismiss yazar), `--fail-with-body` 5 cron workflow'da, ActionItem upsert update branch `archivedAt: null`, accountRepository TCKN privacy (gate + select leak yok).
+- `scripts/smoke-admin-create-phase5c.js` — 4 admin ekranı (Teams / SLA / Checklists / Categories) için POST happy path + missing-companyId 4xx guard. PC-110 regression koruması.
+- `scripts/smoke-account-tckn-search.js` — PR-4b'de eklendi, npm script olarak `smoke:account-tckn-search` ile bağlandı (7 senaryo).
+- `package.json`: `smoke:pr5-static-guards`, `smoke:account-tckn-search`, `smoke:admin-create-phase5c` script'leri.
+
+Kapsanan riskler:
+- AI Accept/Reject telemetri timing (Codex P1 PR-4a-b regression guard) ✓
+- Cron silent 5xx (PR-2b regression guard) ✓
+- ActionItem archive revive (PR-3b regression guard) ✓
+- TCKN privacy (PR-4b regression guard) ✓
+- Phase 5C admin create companyId regression (PC-110) ✓
+- Customer 360 import commit + rollback — mevcut `smoke-customer360-commit-rollback.js` 21 senaryoyla kapsadığı için ek aksiyon yok ✓
+
+Kalan parça yok; bu item kapanır.
 
 ### Customer search refactor (full)
 
