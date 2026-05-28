@@ -77,6 +77,36 @@ DB-backed; not in default CI. Run locally for AI changes. Asserts that
 shipped AI call sites still write `AIUsageLog` rows with the right
 fields and without PII leakage.
 
+### `smoke:pr5-static-guards`
+
+Pure file-string static guard (no DB, no HTTP). Cheap; safe in CI.
+Locks four Half-Shipped Audit risk surfaces against silent regression:
+- AI Accept/Reject telemetry timing (Apply-click MUST NOT write;
+  submit-success / dismiss DO write).
+- Cron workflows use `curl --fail-with-body` (no silent 5xx).
+- `ActionItem` upsert update branch clears `archivedAt: null`.
+- `accountRepository` listAccounts gates the `tcknHash` branch on
+  11-digit + `validateTckn.ok` + `tcknPepperAvailable()`, and no
+  Prisma `select` block exposes `tcknHash`.
+
+Run locally before any change in TransferModal, NewCaseForm AI card,
+cron workflows, `actionItemRepository.emitActionItem`, or
+`accountRepository.listAccounts`.
+
+### `smoke:account-tckn-search`
+
+DB-backed; requires running BFF + `TCKN_HASH_PEPPER`. Exercises the
+PR-4b TCKN-by-search end to end: valid TCKN matches, invalid does not,
+unrelated valid TCKN does not, response never leaks plain TCKN or
+`tcknHash`, tenant scope path still drops out-of-scope rows.
+
+### `smoke:admin-create-phase5c`
+
+DB-backed; requires running BFF. Exercises Phase 5C admin create flows
+(Teams / SLA / Checklists / Categories) — positive happy path + missing
+`companyId` 4xx guard. Protects against `400 companyId required`
+regressions in the per-tenant admin UI picker.
+
 ### Tenant / auth review
 
 When the change touches `allowedCompanyIds`, role gates, account /
