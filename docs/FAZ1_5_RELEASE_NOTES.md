@@ -302,17 +302,34 @@ UI'da "yetkilendirme bekleniyor" mesajı UX iyileştirmesi sonraki turda.
 
 ## Açık Konular (Faz 2 Öncesi)
 
-### Phase 5C — Tanım Ekranlarında Şirket Picker
-4 admin ekranı backend'de `companyId`'yi zorunlu kıldı ama UI'da seçici yok
-→ bugün create yapılırsa 400. Ekranlar:
-- Takımlar & Üyeler
-- SLA Kuralları
-- Kontrol Listesi
-- Kategori & Alt Kategori (nullable, sessizce sistem geneli yaratıyor — yanıltıcı)
-- Dinamik Alanlar (companyId zorunlu, picker var ama "Tümü" seçeneği kaldırıldı)
+### ~~Phase 5C — Tanım Ekranlarında Şirket Picker~~ → **Resolved 2026-Q2 (historical)**
 
-Her ekrana **şirket seçici** + form'da zorunlu companyId + tablo'da şirket
-sütunu gerekiyor.
+**Bu konu Faz 2 başlangıcında çözüldü.** Targeted Half-Shipped Audit
+(2026-05-28) statik kod doğrulamasıyla 4 admin ekranın 4'ünde de Phase
+5C company picker'ın mevcut olduğunu teyit etti:
+
+| Ekran | Picker konumu (kanıt) |
+|---|---|
+| Takımlar & Üyeler | `src/features/admin/AdminTeamsPage.tsx:319,408,429` (explicit yorum "Phase 5C — companyId zorunlu") |
+| SLA Kuralları | `src/features/admin/AdminSlaPage.tsx:389,421` |
+| Kontrol Listesi | `src/features/admin/AdminChecklistPage.tsx:517,618` |
+| Kategori & Alt Kategori | `src/features/admin/AdminCategoriesPage.tsx:563,593,621` (SystemAdmin için `null` kabul → sistem geneli kategori) |
+| Dinamik Alanlar | `src/features/admin/AdminFieldsPage.tsx:34` (Phase 4c kapsamında zaten yapılmıştı) |
+
+Backend tarafında `assertCompanyAdmin(req, body.companyId)` guard'ı her
+admin create endpoint'inde mevcut (`server/routes/admin.js:114-...`).
+
+> **Tarihsel kayıt** (orijinal release notes paragrafı — durum
+> bugün geçerli **değil**, yalnız ne zaman çözüldüğünü göstermek için
+> korundu):
+>
+> _4 admin ekranı backend'de `companyId`'yi zorunlu kıldı ama UI'da
+> seçici yok → bugün create yapılırsa 400. Ekranlar: Takımlar &
+> Üyeler, SLA Kuralları, Kontrol Listesi, Kategori & Alt Kategori
+> (nullable, sessizce sistem geneli yaratıyor — yanıltıcı), Dinamik
+> Alanlar (companyId zorunlu, picker var ama "Tümü" seçeneği
+> kaldırıldı). Her ekrana **şirket seçici** + form'da zorunlu
+> companyId + tablo'da şirket sütunu gerekiyor._
 
 ### Smart QA Lite — Görünürlüğü Artırılacak
 - Frontend AI çağrılarına `caseId` + `companyId` explicit eklenmeli (şu an

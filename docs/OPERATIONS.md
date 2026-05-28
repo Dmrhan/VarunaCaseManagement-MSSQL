@@ -60,6 +60,7 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=
 OPENAI_API_KEY=
+TCKN_HASH_PEPPER=
 ```
 
 | Degisken | Kullanim |
@@ -70,6 +71,7 @@ OPENAI_API_KEY=
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend auth dogrulama ve storage islemleri |
 | `CRON_SECRET` | Cron endpointlerini koruyan secret |
 | `OPENAI_API_KEY` | AI endpointleri icin OpenAI key |
+| `TCKN_HASH_PEPPER` | **KVKK (Individual musteri kayitlari icin zorunlu).** 32+ karakterlik random secret. `server/utils/accountValidation.js` plain TCKN'i HMAC-SHA256 ile hash'ler; pepper bu HMAC'in anahtaridir. Atlanirsa Individual musteri create/update/search akislari `400 tckn_system_unconfigured` doner (safe-fail). Rotation: **forward-only** — eski hash'ler eski pepper'la sealed kalir. Runbook: `docs/TECHNICAL_DEBT.md §"TCKN pepper rotation owner / runbook"`. |
 
 ### Frontend
 
@@ -374,7 +376,16 @@ Response:
 ```
 
 Onerilen periyot: **gunluk** (orn. 02:30 UTC, qa-score-batch'ten sonra).
-GitHub Actions / Vercel Cron / UptimeRobot ile tetiklenebilir.
+
+> **Not (2026-05-28 audit):** Endpoint mevcut **ancak bu repo'da
+> herhangi bir zamanlayici (scheduler) yapilandirilmadi.**
+> `.github/workflows/` altinda pattern-detect / qa-score-batch /
+> snooze-wakeup icin cron workflow'lari var; `notification-cleanup`
+> icin yok. `vercel.json` `crons` array'i bos. Cron tetiklemek icin
+> GitHub Actions workflow eklemek (mevcut `snooze-wakeup.yml` clone),
+> Vercel Cron yapilandirmak veya UptimeRobot kullanmak gerekir —
+> ops setup gorevi olarak acik. Tetiklenmedigi surece okunmus
+> `CaseNotification` satirlari birikir.
 
 ## Cron Testleri
 

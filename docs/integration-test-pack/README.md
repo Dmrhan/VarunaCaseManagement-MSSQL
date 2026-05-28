@@ -1,6 +1,6 @@
 # Varuna Integration Test Pack
 
-Manuel ve yarı-otomatik QA için kullanılan hazır test fixture'ları. Şu an yalnız Customer 360 Phase 2a dry-run senaryolarını kapsar.
+Manuel ve yarı-otomatik QA için kullanılan hazır test fixture'ları. Customer 360 Phase 2a dry-run + Phase 2b commit/rollback senaryolarını kapsar.
 
 ## Üretim
 
@@ -101,6 +101,19 @@ Generator deterministic — aynı satırlar, aynı VKN'ler, aynı dosya boyutlar
 
 ## Bu fixture'lar ne YAPMAZ
 
-- DB mutation yapmaz (Phase 2a dry-run only).
+- Dry-run akışı DB mutation yapmaz (Phase 2a tasarımı gereği).
 - Phase 1 Account import path'iyle alakası yoktur (`Müşteri Ana Kartı` sekmesinde test edilmez).
-- Phase 2b commit yolu hazır olunca aynı dosyalar **commit testi için kullanılabilir**, ama önce confirm dialog gereklidir — şu an yok.
+
+## Phase 2b commit + rollback testi (shipped 2026-Q2)
+
+Phase 2b commit + rollback artık production'da. Aynı fixture'lar **commit testi için kullanılabilir** — `Customer360Page.tsx` confirm dialog'u + commit/rollback butonları içerir. Smoke: `scripts/smoke-customer360-commit-rollback.js`.
+
+Manuel commit akışı:
+
+1. Yukarıdaki "UI üzerinden manuel test" adımlarını uygula (dry-run yeşil olunca).
+2. **"Aktar"** butonuna bas (Phase 2a banner artık `commitAvailable: true` döner).
+3. Confirm dialog'da değişiklik özetini onayla.
+4. `accountRepository.count` + `accountCompanyRepository.count` ile satır sayılarının arttığını doğrula.
+5. Test sonrası **"Geri Al"** butonu ile aynı `jobId` üzerinden rollback dene; sayılar başlangıç state'ine dönmeli.
+
+Endpoint referansları: `POST /api/admin/imports/customer360/commit` + `POST /api/admin/imports/customer360/jobs/:id/rollback` (`server/routes/imports.js`).

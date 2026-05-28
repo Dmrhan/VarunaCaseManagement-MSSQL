@@ -150,7 +150,7 @@ veya kod referansı verilir. Bu liste changelog değil — yalnızca bugün
 - **A6** ProductGroup + Product + `Product.supportLevel` catalog (admin CRUD + lookup bootstrap) — `docs/planning_cards/WR-A6.md`, `WR-A6-PRODUCT-SUPPORT-LEVEL.md`
 - **A7** Package + PackageItem catalog (legacy `AccountCompany.packageName` deprecated, korunur) — `docs/planning_cards/WR-A7.md`
 - **A7b** `Case.productId/packageId` + `AccountCompany.packageId` FK; NewCaseForm + AccountCompanyEditor pickers; DI.1-DI.6 invariants; supportLevel cascade (explicit > Product > Person > Team > L1) — `docs/planning_cards/WR-A7B-INTEGRATED.md`
-- **A8 Phase 1 + 2a Foundation** — Veri Aktarım Stüdyosu (Account import: Stepper + audit + soft rollback); Customer 360 multi-target schema registry + dry-run (no DB mutation) — `docs/planning_cards/WR-A8-PHASE2-CUSTOMER-360-IMPORT.md`
+- **A8 Phase 1 + 2a + 2b** — Veri Aktarım Stüdyosu (Account import: Stepper + audit + soft rollback); Customer 360 multi-target schema registry + dry-run; **Phase 2b commit + rollback** (`POST /api/admin/imports/customer360/commit` + `…/jobs/:id/rollback`); UI: `src/features/admin/dataImport/customer360/Customer360Page.tsx`; smoke `scripts/smoke-customer360-commit-rollback.js` — Phase 2b shipped via commit `f987bdc`. Phase 2c (polish/PII/MSSQL audit/flat CSV) Future Direction'da — `docs/planning_cards/WR-A8-PHASE2-CUSTOMER-360-IMPORT.md`
 - **Customer 360 Phase A/B/C2 + deterministic Customer Match suggestions** — Account/AccountCompany/AccountContact/AccountAddress modelleri; AI YOK + auto-link YOK + stable scoring (VKN/telefon/e-posta/ad benzerliği) — `server/db/customerMatchRepository.js`
 
 ### Team & Organization
