@@ -108,6 +108,10 @@ try {
   record('2. POST /admin/teams w/o companyId → 4xx',
     teamR2.status >= 400 && teamR2.status < 500,
     `status=${teamR2.status} error=${teamR2.data?.error ?? '-'}`);
+  // PR-5b: if the negative path regresses and accidentally creates a row,
+  // still capture the id so cleanup can remove the orphan. Assertion above
+  // already failed in that case — we do NOT mask the regression.
+  if (teamR2.status < 300 && teamR2.data?.id) cleanup.teamIds.push(teamR2.data.id);
 
   // ─── 3) SLA Policies ──────────────────────────────────────────────
   console.log('\n── SLA Policies ──');
@@ -144,6 +148,7 @@ try {
   record('4. POST /admin/sla-policies w/o companyId → 4xx',
     slaR2.status >= 400 && slaR2.status < 500,
     `status=${slaR2.status} error=${slaR2.data?.error ?? '-'}`);
+  if (slaR2.status < 300 && slaR2.data?.id) cleanup.slaIds.push(slaR2.data.id);
 
   // ─── 5) Checklists ────────────────────────────────────────────────
   console.log('\n── Checklists ──');
@@ -176,6 +181,7 @@ try {
   record('6. POST /admin/checklists w/o companyId → 4xx',
     chkR2.status >= 400 && chkR2.status < 500,
     `status=${chkR2.status} error=${chkR2.data?.error ?? '-'}`);
+  if (chkR2.status < 300 && chkR2.data?.id) cleanup.checklistIds.push(chkR2.data.id);
 
   // ─── 7) Categories (per-tenant; null companyId requires SystemAdmin) ──
   console.log('\n── Categories ──');
@@ -199,6 +205,7 @@ try {
   record('8. POST /admin/categories w/o companyId (non-SystemAdmin) → 4xx',
     catR2.status >= 400 && catR2.status < 500,
     `status=${catR2.status} error=${catR2.data?.error ?? '-'}`);
+  if (catR2.status < 300 && catR2.data?.id) cleanup.categoryIds.push(catR2.data.id);
 } finally {
   // Cleanup
   for (const id of cleanup.teamIds) {
