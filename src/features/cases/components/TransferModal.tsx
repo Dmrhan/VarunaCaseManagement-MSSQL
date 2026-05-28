@@ -131,6 +131,7 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
     setToTeamId(aiSuggestion.suggestedTeamId);
     setReasonCode(aiSuggestion.reasonCode);
     setReasonText(aiSuggestion.reasonText);
+    void aiService.markUsageAccepted(aiSuggestion.usageLogId, true);
   }
 
   const reasonOk =
@@ -164,6 +165,17 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
     if (!updated) {
       setSubmitting(false);
       return; // toast apiFetch tarafından gösterildi
+    }
+
+    // Telemetri (PR-4a / AIUsagePage.acceptanceRate):
+    // - applyAiSuggestion zaten accepted=true gönderdiyse ve kullanıcı
+    //   son anda farklı takım seçtiyse, submit-time çağrı doğru sinyali yazar.
+    // - Aynı takım seçildiyse accepted=true; backend idempotent UPDATE.
+    if (aiSuggestion?.usageLogId) {
+      void aiService.markUsageAccepted(
+        aiSuggestion.usageLogId,
+        toTeamId === aiSuggestion.suggestedTeamId,
+      );
     }
 
     onTransferred(updated);

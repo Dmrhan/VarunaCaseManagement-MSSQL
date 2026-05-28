@@ -589,7 +589,10 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
       priority: aiSuggestion.priority,
     }));
     setAiApplied(true);
-    if (aiTitle?.title) setTitleApplied(true);
+    if (aiTitle?.title) {
+      setTitleApplied(true);
+      void aiService.markUsageAccepted(aiTitle.usageLogId, true);
+    }
     setAiCardCollapsed(true);
     toast({ type: 'success', message: 'RUNA AI önerileri uygulandı.', duration: 2000 });
   }
@@ -598,9 +601,13 @@ export function NewCaseForm({ open, onClose, onCreated, onShowExisting, initialC
     if (!aiTitle) return;
     setForm((f) => ({ ...f, title: aiTitle.title }));
     setTitleApplied(true);
+    void aiService.markUsageAccepted(aiTitle.usageLogId, true);
   }
 
   function dismissAiCard() {
+    if (aiTitle && !titleApplied) {
+      void aiService.markUsageAccepted(aiTitle.usageLogId, false);
+    }
     setAiCardCollapsed(true);
   }
 
