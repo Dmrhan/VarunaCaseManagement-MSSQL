@@ -69,7 +69,7 @@ const KIND_STYLE: Record<ActionItemKind, KindStyle> = {
   },
   mention: {
     icon: AtSign,
-    label: 'Sözü geçti',
+    label: 'Senden bahsedildi',
     iconBox:
       'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200 dark:bg-violet-950/30 dark:text-violet-300 dark:ring-violet-900/40',
   },
@@ -105,7 +105,7 @@ function stableHashIndex(seed: string, mod: number): number {
 }
 
 /** Extract actor display from mention reasonLabel.
- *  Template: `@${actorDisplay} ${caseNumber} yorumunda seni andı: "..."` */
+ *  Template: `@${actorDisplay} ${caseNumber} yorumunda senden bahsetti: "..."` */
 function extractActorSeed(item: ActionItem): { seed: string; initials: string } | null {
   const match = item.reasonLabel?.match(/^@([^\s]+(?:\s[^\s]+)?)\s/);
   if (match && match[1]) {

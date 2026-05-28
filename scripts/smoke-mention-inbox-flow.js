@@ -191,7 +191,7 @@ async function run() {
         ai1.priority === 50 &&
         ai1.state === 'Pending' &&
         ai1.userId === recipient1.user.id &&
-        ai1.reasonLabel?.includes('yorumunda seni andı'),
+        ai1.reasonLabel?.includes('yorumunda senden bahsetti'),
       `kind=${ai1?.kind} priority=${ai1?.priority} state=${ai1?.state} reasonLabel=${ai1?.reasonLabel ? 'set' : 'missing'}`,
     );
 
@@ -755,8 +755,8 @@ async function simulateBackfill({ windowDays, execute, restrictCompanyId }) {
       return s.length <= 80 ? s : s.slice(0, 80) + '…';
     })();
     const reasonLabel = preview
-      ? `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda seni andı: "${preview}".`.replace(/  +/g, ' ').trim()
-      : `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda seni andı.`.replace(/  +/g, ' ').trim();
+      ? `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda senden bahsetti: "${preview}".`.replace(/  +/g, ' ').trim()
+      : `@${actorDisp} ${c?.caseNumber ?? ''} yorumunda senden bahsetti.`.replace(/  +/g, ' ').trim();
     // Mirror the production backfill script contract: counter increments
     // BEFORE the prisma.create guard, so dry-run produces a meaningful
     // would-create count operator preview.

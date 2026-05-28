@@ -1013,7 +1013,7 @@ async function run() {
         dedupKey: canonicalDedupG16,
         priority: 50,
         actionRequired: false,
-        reasonLabel: `@${actor.user.fullName} ${c16.caseNumber} yorumunda seni andı.`,
+        reasonLabel: `@${actor.user.fullName} ${c16.caseNumber} yorumunda senden bahsetti.`,
         state: 'Pending',
       },
     });

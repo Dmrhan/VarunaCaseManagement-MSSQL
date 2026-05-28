@@ -136,13 +136,13 @@ function buildMentionPreview(raw, max = 80) {
 
 /**
  * Build mention reasonLabel per planning card §D.2-A + Phase 2A L4.
- *   `@Ali Söz 25-001234 yorumunda seni andı: "ilk 80 char..."`
+ *   `@Ali Söz 25-001234 yorumunda senden bahsetti: "ilk 80 char..."`
  * Empty preview omits the trailing `: "…"` clause.
  */
 function buildMentionReasonLabel({ actorDisplay, caseNumber, preview }) {
   const display = actorDisplay || 'Kullanıcı';
   const number = caseNumber || '';
-  const base = `@${display} ${number} yorumunda seni andı`.trim();
+  const base = `@${display} ${number} yorumunda senden bahsetti`.trim();
   return preview ? `${base}: "${preview}".` : `${base}.`;
 }
 
