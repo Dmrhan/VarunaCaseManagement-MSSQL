@@ -272,13 +272,18 @@ OD-073 retention politikası (30 gün) Half-Shipped Audit PR-3 ile soft-archive 
 
 Eligibility rule: `state IN ('Done','Dismissed','Expired') AND archivedAt IS NULL AND updatedAt < (now - 30 days)`. `updatedAt` cutoff alanı seçildi çünkü Expired durumu doneAt yazmaz; updatedAt evrensel terminal-time'i yakalar.
 
-### TCKN-by-search UI
+### TCKN-by-search UI — kısmı
 
-WR-A2 out-of-scope: "TCKN ile müşteri ara — backend hazır olur, UI bu PR'da yok." Backend `tcknHash` indexli, frontline'ın TCKN'le arama yapabilmesi vaadedildi. P1 "TCKN DPO audit log" ile aynı KVKK contextinde.
+**Durum (2026-05-28, PR-4b):**
+- `server/db/accountRepository.js::listAccounts`: 11 hane + valid TCKN + `tcknPepperAvailable()` koşullarında `OR` clause'a `{ tcknHash: HMAC(q, pepper) }` eklendi; aksi halde sessizce skip. `tcknHash` veya plain TCKN response'a girmez (mevcut `shapeAccountRow` zaten `tcknMasked` only). Tenant scope `buildScopeWhere` üzerinden korundu.
+- `src/features/accounts/AccountSearchPicker.tsx`: placeholder "TCKN (11 hane)" eklendi, 11 hane sorgusunda `/api/lookups/validate-tckn` ile inline hint (TCKN ile aranıyor / TCKN geçersiz), result row'da `tcknMasked` chip.
+- `docs/API.md`: `GET /api/accounts` search dimensions güncellendi.
 
-**Eylem:** AccountSearchPicker'a TCKN input alanı (formatlı, max 11 hane); backend HMAC karşılaştırma; audit emit P1 ile birlikte.
+**Kapsam dışı (sonraki PR'lar):**
+- **CustomerSearchModal** + **AccountsListPage**: aynı backend'i kullandıkları için TCKN otomatik çalışır ama UI ipucu (placeholder + chip + format hint) bu PR'da eklenmedi.
+- **DPO read trail / audit log** ([OD-022] hala PENDING) — TCKN search emit etmiyor. Audit table karar verildiğinde `tcknHash` lookup site'ına emit ekle (1 ek satır).
 
-**Çaba:** 0.5 gün.
+**Çaba (kalanlar):** ~1 saat.
 
 ### Customer search refactor (full)
 
