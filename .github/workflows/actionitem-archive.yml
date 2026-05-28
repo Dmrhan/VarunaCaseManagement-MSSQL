@@ -1,0 +1,17 @@
+name: ActionItem Archive Cron
+
+on:
+  schedule:
+    - cron: '20 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger ActionItem archive
+        run: |
+          curl --fail-with-body -X POST \
+            -H "x-uptime-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            https://varuna-case-management.vercel.app/api/cron/actionitem-archive

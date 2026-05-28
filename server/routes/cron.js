@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { runPatternDetect } from '../cron/patternDetect.js';
 import { runQaScoreBatch, runScoreCase } from '../cron/qaScoreBatch.js';
 import { runNotificationCleanup } from '../cron/notificationCleanup.js';
+import { runActionItemArchive } from '../cron/actionItemArchive.js';
 
 /**
  * /api/cron/* — uzaktan tetiklenen periyodik işler.
@@ -71,6 +72,26 @@ router.post('/notification-cleanup', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[cron:notification-cleanup]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * ActionItem soft archive (OD-073 / Half-Shipped Audit PR-3).
+ *
+ * Terminal state'teki (Done/Dismissed/Expired) ve `updatedAt` 30 gunden
+ * eski olan satirlara `archivedAt = now()` set eder. **Hicbir satir
+ * DELETE edilmez.** Aktif inbox queries `archivedAt: null` filtresiyle
+ * archived satirlari gizler. Onerilen periyot: gunluk 03:20 UTC.
+ */
+router.post('/actionitem-archive', async (req, res) => {
+  if (!checkCronSecret(req, res)) return;
+  try {
+    const result = await runActionItemArchive();
+    if (!result.ok) return res.status(500).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('[cron:actionitem-archive]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

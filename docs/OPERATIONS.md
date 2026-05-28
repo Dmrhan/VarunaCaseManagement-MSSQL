@@ -383,6 +383,31 @@ workflow → "Run workflow" (workflow_dispatch). Auth pattern: ayni
 `x-uptime-secret: ${{ secrets.CRON_SECRET }}` header'i (digger 3 cron
 workflow'uyla ayni).
 
+### ActionItem Archive
+
+```txt
+POST /api/cron/actionitem-archive
+```
+
+OD-073 retention politikasi — terminal state'teki ActionItem'lara
+(Done/Dismissed/Expired) `updatedAt` 30 gunden eskiyse
+`archivedAt = now()` set eder. **Hicbir satir DELETE edilmez** (soft
+archive); deep-link / audit replay senaryolarinda `findUnique`
+calismaya devam eder. Aktif inbox queries (`listForUser`,
+`summaryForUser`, `computeBadgeCounts`, MyHome pendingApprovals)
+`archivedAt: null` filtresiyle archived satirlari gizler. Idempotent.
+
+Response:
+
+```json
+{ "ok": true, "archived": 17, "cutoff": "2026-04-28T03:20:00.000Z" }
+```
+
+Periyot: **gunluk 03:20 UTC** — `.github/workflows/actionitem-archive.yml`
+GitHub Actions workflow'u tarafindan tetiklenir (notification-cleanup
+03:00 UTC'den sonra). `workflow_dispatch` ile manuel tetik mevcut.
+Auth pattern: digger cron'larla ayni `x-uptime-secret`.
+
 ## Cron Testleri
 
 Local scriptler:

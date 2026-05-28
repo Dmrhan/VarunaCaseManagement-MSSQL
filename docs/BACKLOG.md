@@ -254,16 +254,16 @@ Açık sorular (OD-009..OD-014) shipped'ten önce default'lara bağlandı; runti
 
 **Çaba:** 1 gün.
 
-### ActionItem Done retention / archive cron
+### ~~ActionItem Done retention / archive cron~~ → **CLOSED — Shipped (Half-Shipped Audit PR-3)**
 
-`docs/planning_cards/WR-ACTION-CENTER-PHASE1-APPROVAL-VISIBILITY.md` §17.3 + WR-ACTION-CENTER §16.2 + WR-NOTIFICATION-CENTER §19.B: "Done retention 30 days, Phase 2 will add the cron / archive." Mevcut tahmin: 30 günde 30K satır. Index handles, ama temizlik yok.
+OD-073 retention politikası (30 gün) Half-Shipped Audit PR-3 ile soft-archive olarak implement edildi:
+- Schema: `ActionItem.archivedAt DateTime?` + index `[state, updatedAt]` (migration `20260528100000_add_action_item_archived_at`)
+- Cron handler: `server/cron/actionItemArchive.js` → `runActionItemArchive()` updateMany ile `archivedAt = now()` set eder (DELETE yok)
+- Route: `POST /api/cron/actionitem-archive` (`server/routes/cron.js`)
+- Workflow: `.github/workflows/actionitem-archive.yml` — günlük 03:20 UTC
+- Aktif inbox queries (`listForUser`, `computeBadgeCounts`, MyHome pendingApprovals) `archivedAt: null` filtresiyle archived satırları gizler — mutations by id (deep-link) çalışmaya devam eder.
 
-**Eylem:**
-- `ActionItemArchive` tablosu (soft-archive, 30g+ Done satırları)
-- `POST /api/cron/actionitem-archive` endpoint
-- Mevcut `notification-cleanup` cron pattern'i reuse
-
-**Çaba:** 0.5 gün.
+Eligibility rule: `state IN ('Done','Dismissed','Expired') AND archivedAt IS NULL AND updatedAt < (now - 30 days)`. `updatedAt` cutoff alanı seçildi çünkü Expired durumu doneAt yazmaz; updatedAt evrensel terminal-time'i yakalar.
 
 ### TCKN-by-search UI
 
