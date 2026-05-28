@@ -785,6 +785,11 @@ export async function listForUser({
   const where = {
     userId,
     companyId: companyScope,
+    // OD-073 — soft archive: hide rows that the retention cron already
+    // moved out of the active inbox. Mutations keyed by id still work
+    // on archived rows (deep-link scenarios) — only list/badge queries
+    // filter archivedAt.
+    archivedAt: null,
     ...resolveViewFilter(view),
   };
 
@@ -815,7 +820,9 @@ export async function listForUser({
 }
 
 async function computeBadgeCounts(userId, companyScope) {
-  const baseWhere = { userId, companyId: companyScope };
+  // OD-073 — soft archive: badge sayaçları yalnız aktif (archivedAt=null)
+  // satırları sayar; cron 30 gün sonra terminal item'ları archive eder.
+  const baseWhere = { userId, companyId: companyScope, archivedAt: null };
   const [actionRequired, fyi, snoozed] = await Promise.all([
     prisma.actionItem.count({
       where: { ...baseWhere, state: { in: ['Pending', 'InProgress'] }, actionRequired: true },

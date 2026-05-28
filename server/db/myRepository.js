@@ -849,6 +849,7 @@ export async function getDashboard({ user }) {
         kind: 'approval_pending',
         state: { in: ['Pending', 'InProgress'] },
         companyId: { in: allowedCompanyIds },
+        archivedAt: null, // OD-073 — exclude soft-archived items
       },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       take: 5,

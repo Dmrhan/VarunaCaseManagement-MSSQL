@@ -311,34 +311,34 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accounts          Account[]
-  accountCompanies  AccountCompany[]
+  accounts                   Account[]
+  accountCompanies           AccountCompany[]
   /// WR-A3 — Account adresleri tenant scope için Company'ye bağlı.
-  addresses         Address[]
-  teams             Team[]
-  cases             Case[]
-  slaPolicies       SLAPolicy[]
-  categories        CategoryDef[]
-  checklists        ChecklistTemplate[]
-  fieldDefinitions  FieldDefinition[]
-  settings          CompanySettings?
-  userCompanies     UserCompany[]
+  addresses                  Address[]
+  teams                      Team[]
+  cases                      Case[]
+  slaPolicies                SLAPolicy[]
+  categories                 CategoryDef[]
+  checklists                 ChecklistTemplate[]
+  fieldDefinitions           FieldDefinition[]
+  settings                   CompanySettings?
+  userCompanies              UserCompany[]
   /// WR-A6 / PM-05 — tenant-scoped product catalog.
-  productGroups     ProductGroup[]
-  products          Product[]
+  productGroups              ProductGroup[]
+  products                   Product[]
   /// WR-A7 / PM-05 — tenant-scoped package (contract bundle) catalog.
-  packages          Package[]
+  packages                   Package[]
   /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımları (yalnız config; API
   /// çağrısı sonraki fazda). Her şirket için tek satır.
-  externalKbSetting ExternalKbSetting?
+  externalKbSetting          ExternalKbSetting?
   /// WR-A8 — Data Integration Studio: import job geçmişi.
-  importJobs        ImportJob[]
+  importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
   resolutionApprovalPolicies ResolutionApprovalPolicy[]
   /// WR-D4 Phase 2 — tenant-scoped notification rules + templates + dispatch log.
-  notificationRules     NotificationRule[]
-  notificationTemplates NotificationTemplate[]
-  notificationDispatches NotificationDispatch[]
+  notificationRules          NotificationRule[]
+  notificationTemplates      NotificationTemplate[]
+  notificationDispatches     NotificationDispatch[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -521,13 +521,13 @@ model AccountCompany {
   //   documented in §10.3 of the planning card).
   // - allowCustomerNotifications: opt-out gate. When false, all customer-
   //   facing dispatches are written as Suppressed/customer_opted_out.
-  preferredResponseChannel  String?
-  responseEmail             String?
-  responsePhone             String?
+  preferredResponseChannel   String?
+  responseEmail              String?
+  responsePhone              String?
   allowCustomerNotifications Boolean @default(true)
 
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -808,12 +808,12 @@ model Person {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  team  Team?  @relation(fields: [teamId], references: [id])
-  cases Case[] @relation("CaseAssignedPerson")
+  team                          Team?                      @relation(fields: [teamId], references: [id])
+  cases                         Case[]                     @relation("CaseAssignedPerson")
   /// WR-D4 Phase 1 — Policies whose approver is this specific person.
-  resolutionApprovalPolicies ResolutionApprovalPolicy[] @relation("ResolutionApprovalPolicyApprover")
+  resolutionApprovalPolicies    ResolutionApprovalPolicy[] @relation("ResolutionApprovalPolicyApprover")
   /// WR-D4 Phase 1 — Approval cycles where this person is the resolved approver.
-  resolutionApprovalsAsApprover CaseResolutionApproval[] @relation("CaseResolutionApprovalApprover")
+  resolutionApprovalsAsApprover CaseResolutionApproval[]   @relation("CaseResolutionApprovalApprover")
 }
 
 model ThirdParty {
@@ -1099,26 +1099,26 @@ model Case {
   /// WR-A7b — Catalog Package referansı (opsiyonel).
   package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: Restrict)
 
-  notes         CaseNote[]
-  attachments   CaseAttachment[]
-  history       CaseActivity[]
-  callLogs      CaseCallLog[]
-  caseOffers    CaseOfferedSolution[]
-  approvals     CaseApproval[]
+  notes                  CaseNote[]
+  attachments            CaseAttachment[]
+  history                CaseActivity[]
+  callLogs               CaseCallLog[]
+  caseOffers             CaseOfferedSolution[]
+  approvals              CaseApproval[]
   /// WR-D4 Phase 1 — Per-case resolution approval cycles (immutable history).
-  resolutionApprovals CaseResolutionApproval[]
+  resolutionApprovals    CaseResolutionApproval[]
   /// WR-D4 Phase 2 — Per-case notification dispatch log (rule engine output).
   notificationDispatches NotificationDispatch[]
-  notifications CaseNotification[]
-  aiSuggestions AISuggestion[]
-  mentions      CaseMention[]
-  reminders     CaseReminder[]
-  transfers     CaseTransfer[]
-  watchers      CaseWatcher[]
+  notifications          CaseNotification[]
+  aiSuggestions          AISuggestion[]
+  mentions               CaseMention[]
+  reminders              CaseReminder[]
+  transfers              CaseTransfer[]
+  watchers               CaseWatcher[]
   // Case A → linkedCaseId: A "outgoing" links (CaseLinkSource).
   // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
-  outgoingLinks CaseLink[]            @relation("CaseLinkSource")
-  incomingLinks CaseLink[]            @relation("CaseLinkTarget")
+  outgoingLinks          CaseLink[]               @relation("CaseLinkSource")
+  incomingLinks          CaseLink[]               @relation("CaseLinkTarget")
 
   @@index([accountId])
   @@index([accountProjectId])
@@ -1360,18 +1360,18 @@ enum ApprovalState {
 }
 
 enum ApproverType {
-  TeamLead          // Resolved as Person where teamId=case.assignedTeamId AND isTeamLead=true
-  AssignedTeamLead  // Alias for TeamLead — clearer semantics in admin UI
-  Supervisor        // Any active Supervisor in case.companyId
-  Admin             // Any active Admin in case.companyId
-  SystemAdmin       // Global override (no companyId scope check)
-  SpecificPerson    // Use ResolutionApprovalPolicy.approverPersonId
+  TeamLead // Resolved as Person where teamId=case.assignedTeamId AND isTeamLead=true
+  AssignedTeamLead // Alias for TeamLead — clearer semantics in admin UI
+  Supervisor // Any active Supervisor in case.companyId
+  Admin // Any active Admin in case.companyId
+  SystemAdmin // Global override (no companyId scope check)
+  SpecificPerson // Use ResolutionApprovalPolicy.approverPersonId
 }
 
 enum RejectionBehavior {
-  ReturnToAssignee  // Case stays with current assignee; note prepended
-  ReturnToTeam      // assignedPersonId cleared; assignedTeamId kept
-  Escalate          // status → Eskalasyon; escalationReason = rejection
+  ReturnToAssignee // Case stays with current assignee; note prepended
+  ReturnToTeam // assignedPersonId cleared; assignedTeamId kept
+  Escalate // status → Eskalasyon; escalationReason = rejection
 }
 
 /// WR-D4 — Per-tenant policy: when does a case require approval before
@@ -1804,23 +1804,23 @@ model ImportJobRow {
 // §5, §9, §11, §16.3 (Phase 2).
 
 enum DispatchChannel {
-  InApp       // Operator notification (CaseNotification reused at app layer)
-  Email       // Rendered email body; Phase 2 = manual confirm; Phase 4 = active send
-  ManualTask  // Operator task panel — "phone this customer / send SMS manually"
-  Webhook     // Phase 4+
+  InApp // Operator notification (CaseNotification reused at app layer)
+  Email // Rendered email body; Phase 2 = manual confirm; Phase 4 = active send
+  ManualTask // Operator task panel — "phone this customer / send SMS manually"
+  Webhook // Phase 4+
 }
 
 enum DispatchMode {
-  LogOnly  // Default Phase 2 — dispatch row created, no operator action expected
-  Manual   // Operator manually confirms (copy/mailto/handled-externally)
-  Active   // Phase 4 — actual send via provider; blocked at API layer in Phase 2
+  LogOnly // Default Phase 2 — dispatch row created, no operator action expected
+  Manual // Operator manually confirms (copy/mailto/handled-externally)
+  Active // Phase 4 — actual send via provider; blocked at API layer in Phase 2
 }
 
 enum DispatchState {
-  Pending     // Manual mode: awaiting operator confirm. Active mode: queued.
-  Sent        // Manual confirm succeeded OR provider delivery confirmed (Phase 4).
-  Failed      // Phase 4 provider error.
-  Suppressed  // Idempotency dedup / rate-limit / customer opt-out.
+  Pending // Manual mode: awaiting operator confirm. Active mode: queued.
+  Sent // Manual confirm succeeded OR provider delivery confirmed (Phase 4).
+  Failed // Phase 4 provider error.
+  Suppressed // Idempotency dedup / rate-limit / customer opt-out.
 }
 
 /// WR-D4 Phase 2 — A rule maps an event + matching conditions to an
@@ -1869,8 +1869,8 @@ model NotificationRule {
   updatedAt       DateTime @updatedAt
   createdByUserId String?
 
-  company  Company              @relation(fields: [companyId], references: [id])
-  template NotificationTemplate @relation(fields: [templateId], references: [id])
+  company    Company                @relation(fields: [companyId], references: [id])
+  template   NotificationTemplate   @relation(fields: [templateId], references: [id])
   dispatches NotificationDispatch[]
 
   @@index([companyId, event, isActive])
@@ -1934,10 +1934,10 @@ model NotificationDispatch {
   caseId    String
   companyId String
 
-  event              String
-  ruleId             String?
-  ruleNameSnapshot   String
-  templateId         String?
+  event                   String
+  ruleId                  String?
+  ruleNameSnapshot        String
+  templateId              String?
   templateKeySnapshot     String
   templateVersionSnapshot Int
 
@@ -1949,7 +1949,7 @@ model NotificationDispatch {
 
   channel DispatchChannel
   mode    DispatchMode
-  state   DispatchState  @default(Pending)
+  state   DispatchState   @default(Pending)
 
   /// Rendered final subject + body — written at dispatch creation.
   snapshotSubject String
@@ -1970,9 +1970,9 @@ model NotificationDispatch {
   deliveryNote      String?
 
   /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
-  dispatchedAt   DateTime?
-  failureReason  String?
-  attempts       Int       @default(0)
+  dispatchedAt  DateTime?
+  failureReason String?
+  attempts      Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2031,41 +2031,46 @@ enum ActionItemState {
 }
 
 model ActionItem {
-  id              String          @id @default(cuid())
-  companyId       String          // tenant scope
-  userId          String          // target user
-  personId        String?         // optional Person snapshot (TeamLead routing)
-  kind            ActionItemKind
-  state           ActionItemState @default(Pending)
-  actionRequired  Boolean         @default(true)
+  id             String          @id @default(cuid())
+  companyId      String // tenant scope
+  userId         String // target user
+  personId       String? // optional Person snapshot (TeamLead routing)
+  kind           ActionItemKind
+  state          ActionItemState @default(Pending)
+  actionRequired Boolean         @default(true)
 
   // Polymorphic reference (no FK so cascade behavior stays simple)
-  objectType      String?
-  objectId        String?
+  objectType String?
+  objectId   String?
 
   // Denormalized snapshots for inbox rendering (avoid JOIN on list)
-  caseId          String?
-  caseNumber      String?
-  caseTitle       String?
+  caseId     String?
+  caseNumber String?
+  caseTitle  String?
 
   // Routing + dedup
-  generatedBy     String?         // 'policy:<id>' | 'system' | 'user:<id>'
-  groupKey        String?
-  dedupKey        String?
-  priority        Int             @default(50)
+  generatedBy String? // 'policy:<id>' | 'system' | 'user:<id>'
+  groupKey    String?
+  dedupKey    String?
+  priority    Int     @default(50)
 
   // Explainability — required, never empty
-  reasonLabel     String
+  reasonLabel String
 
   // Lifecycle timestamps
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  firstSeenAt     DateTime?
-  snoozedUntil    DateTime?
-  doneAt          DateTime?
-  doneByUserId    String?
-  doneOutcome     String?         // 'approved' | 'rejected' | 'acknowledged'
-  closeNote       String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  firstSeenAt  DateTime?
+  snoozedUntil DateTime?
+  doneAt       DateTime?
+  doneByUserId String?
+  doneOutcome  String? // 'approved' | 'rejected' | 'acknowledged'
+  closeNote    String?
+
+  // OD-073 — soft archive. Set by `actionItemArchive` cron 30 days
+  // after terminal state transition; never hard-deleted. Active inbox
+  // queries filter `archivedAt: null`.
+  archivedAt DateTime?
 
   @@unique([dedupKey])
   @@index([userId, state, createdAt(sort: Desc)])
@@ -2073,4 +2078,5 @@ model ActionItem {
   @@index([companyId, kind, state])
   @@index([objectType, objectId])
   @@index([state, snoozedUntil])
+  @@index([state, updatedAt]) // archive cron scan
 }
