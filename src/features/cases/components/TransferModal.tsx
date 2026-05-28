@@ -126,12 +126,16 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
     }
   }, [toPersonId, personsForTeam]);
 
+  // PR-4a-b Codex fix: Apply sadece form'u prefill eder, accept telemetrisi
+  // YAZMAZ. Kullanici sonradan modal'i iptal edebilir, baska takim secebilir
+  // veya transfer fail olabilir — bu yollar acceptanceRate'i sismelendirir.
+  // Tek dogru sinyal noktasi: handleSubmit icinde transferCase basariyla
+  // dondukten sonra final toTeamId ile karar yazilir.
   function applyAiSuggestion() {
     if (!aiSuggestion) return;
     setToTeamId(aiSuggestion.suggestedTeamId);
     setReasonCode(aiSuggestion.reasonCode);
     setReasonText(aiSuggestion.reasonText);
-    void aiService.markUsageAccepted(aiSuggestion.usageLogId, true);
   }
 
   const reasonOk =
@@ -167,10 +171,10 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
       return; // toast apiFetch tarafından gösterildi
     }
 
-    // Telemetri (PR-4a / AIUsagePage.acceptanceRate):
-    // - applyAiSuggestion zaten accepted=true gönderdiyse ve kullanıcı
-    //   son anda farklı takım seçtiyse, submit-time çağrı doğru sinyali yazar.
-    // - Aynı takım seçildiyse accepted=true; backend idempotent UPDATE.
+    // Telemetri (PR-4a / PR-4a-b / AIUsagePage.acceptanceRate):
+    // Sadece transferCase basariyla doner ve modal abandone edilmediyse
+    // burada calisir. Final toTeamId == AI'nin onerdigi takim ise accepted,
+    // aksi halde rejected. Fire-and-forget — UX'i bloklamaz.
     if (aiSuggestion?.usageLogId) {
       void aiService.markUsageAccepted(
         aiSuggestion.usageLogId,
