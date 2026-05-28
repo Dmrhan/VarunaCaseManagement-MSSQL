@@ -601,6 +601,14 @@ export async function emitActionItem(payload) {
           doneOutcome: null,
           closeNote: null,
           snoozedUntil: null,
+          // Codex P1 (PR-3b) — clear archivedAt so a revived item
+          // re-appears in active inbox/badge queries. Active list and
+          // badge filters added `archivedAt: null` (PR-3 / OD-073).
+          // Without this clear, a row that was archived by retention
+          // cron and then re-emitted via the same dedupKey would
+          // remain invisible because the unique index prevents
+          // creating a fresh row.
+          archivedAt: null,
         },
       });
     }
