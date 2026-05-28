@@ -521,7 +521,7 @@ Notlar:
 
 Query parametreleri:
 
-- `search` — min 2 char. Match: `name` (contains), `vkn` (startsWith), contact `phone`/`email` (contains)
+- `search` — min 2 char. Match: `name` (contains), `vkn` (startsWith), `AccountCompany.externalCustomerCode` (contains, tenant-scoped), contact `phone`/`email` (contains). **TCKN (PR-4b):** sorgu tam 11 hane + valid TCKN checksum + `TCKN_HASH_PEPPER` set ise sunucu HMAC hesaplayıp `tcknHash` üzerinden eşleştirir. Pepper yoksa veya 11 hane geçersizse TCKN branch'i sessizce skip edilir (diğer alanlar aranır). Yanıt yalnızca `tcknMasked` (`"*******1234"`) verir; plain TCKN ve `tcknHash` response'a hiçbir yolla girmez.
 - `companyId` — izinli sirket icindeki bir companyId; izinsizse bos liste doner
 - `status` — AccountCompany.status filter (`active` | `churn` | `prospect` | `inactive`)
 - `page` (default 1), `limit` (default 25, max 100)
@@ -535,6 +535,7 @@ Response:
       "id": "cuid",
       "name": "Acme A.Ş.",
       "vknMasked": "123***890",
+      "tcknMasked": null,
       "phone": "+90...",
       "email": "info@acme.com",
       "isActive": true,

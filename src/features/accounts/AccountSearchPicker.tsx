@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Field, TextInput } from '@/components/ui/Field';
 import {
   accountService,
+  validateTcknRemote,
   type AccountListItem,
 } from '@/services/accountService';
 
@@ -52,6 +53,11 @@ export function AccountSearchPicker({
   const [items, setItems] = useState<AccountListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // PR-4b — 11 haneli sayısal sorgu için TCKN format ipucu. Validation
+  // backend'de zaten yapılır (pepper yoksa branch sessizce skip); buradaki
+  // hint sadece UX feedback: "rakam doğru ama TCKN değil" olduğunda kullanıcı
+  // anlasın. Search çağrısı buna bağlı değil — backend her zaman güvenli.
+  const [tcknHint, setTcknHint] = useState<string | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -60,6 +66,7 @@ export function AccountSearchPicker({
       setDebounced('');
       setItems([]);
       setError(null);
+      setTcknHint(null);
       return;
     }
   }, [open]);
@@ -100,6 +107,30 @@ export function AccountSearchPicker({
     if (open) void load();
   }, [open, load]);
 
+  // PR-4b — Debounced query 11 hane rakamsa TCKN format'ı kontrol et.
+  // Geçersizse "TCKN geçersiz" hint, geçerliyse "TCKN ile aranıyor" hint.
+  // Aksi halde temizle. Backend search bu hint'ten bağımsız: hash branch
+  // sadece valid + pepper available iken eklenir, aksi durumda diğer
+  // alanlarda (name/vkn/code/phone/email) arama devam eder.
+  useEffect(() => {
+    let cancelled = false;
+    if (!debounced || !/^\d{11}$/.test(debounced)) {
+      setTcknHint(null);
+      return;
+    }
+    void validateTcknRemote(debounced).then((r) => {
+      if (cancelled) return;
+      if (!r) {
+        setTcknHint(null);
+        return;
+      }
+      setTcknHint(r.valid ? 'TCKN ile aranıyor.' : 'TCKN geçersiz.');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced]);
+
   return (
     <Modal
       open={open}
@@ -124,7 +155,7 @@ export function AccountSearchPicker({
             <TextInput
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Müşteri adı, VKN (5+ hane), telefon veya e-posta ile ara…"
+              placeholder="Müşteri adı, VKN, TCKN (11 hane), telefon, e-posta veya müşteri kodu…"
               className="pl-9 pr-9"
               autoFocus
               aria-label="Müşteri ara"
@@ -140,6 +171,17 @@ export function AccountSearchPicker({
               </button>
             )}
           </div>
+          {tcknHint && (
+            <div
+              className={`mt-1 text-[11px] ${
+                tcknHint === 'TCKN geçersiz.'
+                  ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-slate-500 dark:text-ndark-muted'
+              }`}
+            >
+              {tcknHint}
+            </div>
+          )}
         </Field>
         {allowNullSelection && (
           <Button
@@ -160,7 +202,7 @@ export function AccountSearchPicker({
             size="sm"
             icon={<Search size={16} />}
             title="Aramaya başla"
-            description="En az 2 karakter yaz. Ad, VKN, telefon veya e-posta üzerinde arama yapılır."
+            description="En az 2 karakter yaz. Ad, VKN, TCKN (tam 11 hane), telefon, e-posta veya müşteri kodu üzerinde arama yapılır."
           />
         ) : error ? (
           <EmptyState
@@ -256,6 +298,9 @@ function AccountResultRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-600 dark:text-ndark-muted">
             {account.vknMasked && (
               <span className="font-mono">VKN {account.vknMasked}</span>
+            )}
+            {account.tcknMasked && (
+              <span className="font-mono">TCKN {account.tcknMasked}</span>
             )}
             {account.phone && <span>{account.phone}</span>}
             {account.email && <span className="truncate">{account.email}</span>}
