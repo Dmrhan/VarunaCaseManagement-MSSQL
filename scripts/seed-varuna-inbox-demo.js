@@ -166,7 +166,7 @@ function buildPersonaScenarios(personaUserId, companyId) {
         caseNumber: 'DEMO-2415',
         caseTitle: 'POS terminali sürekli yeniden başlatma',
         reasonLabel:
-          '@Ayşe Söz DEMO-2415 yorumunda seni andı: "Bu vakanın önceki şikayetlerine de bak — tekrar eden bir örüntü olabilir."',
+          '@Ayşe Söz DEMO-2415 yorumunda senden bahsetti: "Bu vakanın önceki şikayetlerine de bak — tekrar eden bir örüntü olabilir."',
         createdAgoH: 0,
         createdAgoM: 18,
       },
@@ -193,7 +193,7 @@ function buildPersonaScenarios(personaUserId, companyId) {
         caseNumber: 'DEMO-2401',
         caseTitle: 'Sözleşme yenileme talebi',
         reasonLabel:
-          '@Mehmet Yıldız DEMO-2401 yorumunda seni andı: "Müşteri haftaya görüşmek istiyor."',
+          '@Mehmet Yıldız DEMO-2401 yorumunda senden bahsetti: "Müşteri haftaya görüşmek istiyor."',
         createdAgoH: 28,
       },
     ],
@@ -243,7 +243,7 @@ function buildPersonaScenarios(personaUserId, companyId) {
         caseNumber: 'DEMO-2422',
         caseTitle: 'Eskalasyon talebi',
         reasonLabel:
-          '@Ali Söz DEMO-2422 yorumunda seni andı: "Bu vaka eskalasyon kapsamına girer mi, sizin görüşünüz?"',
+          '@Ali Söz DEMO-2422 yorumunda senden bahsetti: "Bu vaka eskalasyon kapsamına girer mi, sizin görüşünüz?"',
         createdAgoH: 0,
         createdAgoM: 25,
       },
@@ -269,7 +269,7 @@ function buildPersonaScenarios(personaUserId, companyId) {
         caseNumber: 'DEMO-2530',
         caseTitle: 'Kurumsal müşteri panik geçirdi',
         reasonLabel:
-          '@Ahmet Kaya DEMO-2530 yorumunda seni andı: "Kurumsal müşteri için hemen yön ister misin?"',
+          '@Ahmet Kaya DEMO-2530 yorumunda senden bahsetti: "Kurumsal müşteri için hemen yön ister misin?"',
         createdAgoH: 1,
       },
       {
@@ -309,7 +309,7 @@ function buildPersonaScenarios(personaUserId, companyId) {
         caseNumber: 'DEMO-2308',
         caseTitle: 'Sözleşme kopyası gerekli',
         reasonLabel:
-          '@Ceyda Demir DEMO-2308 yorumunda seni andı: "Müşterinin kontrat kopyasına ihtiyacımız var, sen ulaşabilir misin?"',
+          '@Ceyda Demir DEMO-2308 yorumunda senden bahsetti: "Müşterinin kontrat kopyasına ihtiyacımız var, sen ulaşabilir misin?"',
         createdAgoH: 2,
       },
     ],
