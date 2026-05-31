@@ -1358,10 +1358,18 @@ export const caseRepository = {
         where: { id: caseId },
         select: { caseNumber: true, title: true },
       });
+      // Codex P1 hotfix — `created.id` is the REPLY note id; its
+      // parentNoteId is `noteId` (this addReply call's arg, already
+      // validated to be top-level by the max_depth guard above).
+      // `noteId` for dedup must stay as `created.id` so two distinct
+      // replies that mention the same user dedupe per-reply, not
+      // per-parent-thread. `parentNoteId` is what the inline-reply
+      // composer needs to target the thread root.
       void emitMentionsForNote({
         caseId,
         companyId,
         noteId: created.id,
+        parentNoteId: noteId,
         mentionedUserIds,
         actorUserId: mentionedBy,
         actorDisplay: reply.authorName,

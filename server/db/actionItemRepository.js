@@ -163,6 +163,24 @@ function buildMentionReasonLabel({ actorDisplay, caseNumber, preview }) {
  * @param {string} args.caseId
  * @param {string} args.companyId
  * @param {string} args.noteId            — id of just-created CaseNote
+ *                                            (where the mention literally
+ *                                            lives — top-level OR reply).
+ *                                            Used for dedupKey so two
+ *                                            mentions in two distinct
+ *                                            replies of the same parent
+ *                                            do NOT collapse.
+ * @param {string|null} [args.parentNoteId] — when the mention came from
+ *                                            a reply note, the id of its
+ *                                            top-level parent. Set as the
+ *                                            ActionItem `objectId` so the
+ *                                            Aksiyonlarım inline-reply
+ *                                            composer posts to the
+ *                                            top-level thread (a reply
+ *                                            note is not a valid reply
+ *                                            target — backend rejects
+ *                                            with max_depth). Omit when
+ *                                            the source note is itself
+ *                                            top-level.
  * @param {string[]} args.mentionedUserIds — recipients (parsed)
  * @param {string} args.actorUserId
  * @param {string} [args.actorDisplay]    — fullName / authorName preferred
@@ -174,6 +192,7 @@ export async function emitMentionsForNote({
   caseId,
   companyId,
   noteId,
+  parentNoteId = null,
   mentionedUserIds,
   actorUserId,
   actorDisplay,
@@ -191,6 +210,14 @@ export async function emitMentionsForNote({
       caseNumber,
       preview,
     });
+    // Inline-reply target — the top-level note id of the thread that
+    // contains the mention. For top-level note sources, `noteId` IS the
+    // thread root. For reply sources, the caller passes `parentNoteId`
+    // (already validated to be top-level by addReply's max_depth guard).
+    // Reply note ids must NEVER appear here, otherwise the composer
+    // hits POST /notes/:noteId/reply → backend max_depth → "Cevap
+    // gönderilemedi" (Codex P1).
+    const replyTargetNoteId = parentNoteId ?? noteId;
     for (const mentionedUserId of recipients) {
       // R6 — self-mention skip
       if (!mentionedUserId || mentionedUserId === actorUserId) continue;
@@ -210,13 +237,14 @@ export async function emitMentionsForNote({
         kind: 'mention',
         userId: mentionedUserId,
         companyId,
-        // Live-emit path has the parent noteId in hand → point at the
-        // CaseNote so the Aksiyonlarım inline-reply composer can post
-        // directly to /notes/:noteId/reply. Backfill path keeps
+        // Live-emit path points at the THREAD ROOT (top-level note) so
+        // the Aksiyonlarım inline-reply composer can post directly to
+        // /notes/:noteId/reply. Reply note ids are forbidden here —
+        // see replyTargetNoteId computation above. Backfill path keeps
         // objectId=null (legacy CaseMention shape) — UI falls back to a
         // fresh internal note on the case when objectId is null.
         objectType: 'CaseNote',
-        objectId: noteId,
+        objectId: replyTargetNoteId,
         caseId,
         caseNumber: caseNumber ?? null,
         caseTitle: caseTitle ?? null,
