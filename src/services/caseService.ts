@@ -1119,6 +1119,86 @@ export const caseService = {
   },
 
   /**
+   * Kendi notunu/yanıtını sil. Backend yetki + cascade güvenliği
+   * kontrolü yapar. Discriminated union döner — UI 403/409 mesajlarını
+   * doğru gösterebilsin diye structured.
+   *
+   * Reasons:
+   *  - 'forbidden'     → başka kullanıcının notu (UI butonu zaten gizli olmalı)
+   *  - 'orphan'        → authorId NULL eski not
+   *  - 'has_replies'   → yanıtı olan top-level note (soft-delete yok)
+   *  - 'not_found'     → vaka veya not bulunamadı (cross-tenant 404 dahil)
+   *  - 'unknown'       → network/5xx
+   */
+  async deleteNote(
+    caseId: string,
+    noteId: string,
+  ): Promise<
+    | { ok: true }
+    | { ok: false; reason: 'forbidden' | 'orphan' | 'has_replies' | 'not_found' | 'unknown'; message?: string; status?: number }
+  > {
+    if (USE_MOCK) {
+      await delay(60);
+      const idx = store.findIndex((c) => c.id === caseId);
+      if (idx < 0) return { ok: false, reason: 'not_found' };
+      const note = store[idx].notes.find((n) => n.id === noteId);
+      if (!note) return { ok: false, reason: 'not_found' };
+      // Mock doesn't track currentUserId — allow.
+      store[idx] = {
+        ...store[idx],
+        notes: store[idx].notes
+          .filter((n) => n.id !== noteId)
+          .map((n) =>
+            note.parentNoteId && n.id === note.parentNoteId
+              ? { ...n, replyCount: Math.max(0, (n.replyCount ?? 0) - 1) }
+              : n,
+          ),
+      };
+      return { ok: true };
+    }
+    const token = await getAccessToken();
+    const headers = new Headers();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let r: Response;
+    try {
+      r = await fetch(
+        `${API_BASE}/${encodeURIComponent(caseId)}/notes/${encodeURIComponent(noteId)}`,
+        { method: 'DELETE', headers },
+      );
+    } catch {
+      return { ok: false, reason: 'unknown' };
+    }
+    if (r.ok) {
+      invalidateCaseDetail(caseId);
+      return { ok: true };
+    }
+    let bodyError: string | undefined;
+    let bodyMessage: string | undefined;
+    try {
+      const body = await r.json();
+      bodyError = body?.error;
+      bodyMessage = body?.message;
+    } catch {
+      // ignore
+    }
+    if (r.status === 401) {
+      window.dispatchEvent(new CustomEvent('app:unauthenticated'));
+      return { ok: false, reason: 'forbidden', message: bodyMessage, status: r.status };
+    }
+    if (r.status === 403) {
+      const reason = bodyError === 'orphan' ? 'orphan' : 'forbidden';
+      return { ok: false, reason, message: bodyMessage, status: r.status };
+    }
+    if (r.status === 404) {
+      return { ok: false, reason: 'not_found', message: bodyMessage, status: r.status };
+    }
+    if (r.status === 409 && bodyError === 'has_replies') {
+      return { ok: false, reason: 'has_replies', message: bodyMessage, status: r.status };
+    }
+    return { ok: false, reason: 'unknown', message: bodyMessage, status: r.status };
+  },
+
+  /**
    * Bir nota emoji reaksiyonu toggle eder.
    * Backend ayni (note, user, emoji) varsa kaldirir, yoksa ekler.
    * Mock'ta currentUserId bilinmedigi icin reaction'lar atlanir.
