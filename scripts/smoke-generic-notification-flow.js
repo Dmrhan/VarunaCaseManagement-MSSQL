@@ -128,9 +128,170 @@ import {
   listForUser,
 } from '../server/db/actionItemRepository.js';
 
+// ─────────────────────────────────────────────────────────────────
+// Safety guard — refuse to run against production-like environments.
+// Prior leaked-data investigation found 217 rows from interrupted
+// runs (SIGINT killed Node before finally{} could fire). This guard
+// is the FIRST line of defense; SIGINT cleanup handler below is the
+// second.
+// ─────────────────────────────────────────────────────────────────
+{
+  const args = process.argv.slice(2);
+  const confirmSmokeDb = args.includes('--confirm-smoke-db');
+  const reasons = [];
+  if (process.env.NODE_ENV === 'production') reasons.push('NODE_ENV=production');
+  if (process.env.VERCEL === '1' || process.env.VERCEL === 'true') {
+    reasons.push('VERCEL marker set');
+  }
+  const dbUrl = process.env.DATABASE_URL ?? '';
+  if (/\bprod(uction)?\b/i.test(dbUrl)) reasons.push('DATABASE_URL hostname contains "prod"');
+  if (/\blive\b/i.test(dbUrl)) reasons.push('DATABASE_URL hostname contains "live"');
+  if (reasons.length > 0 && !confirmSmokeDb) {
+    console.error('\n⛔  Refusing to run smoke against production-like environment:');
+    reasons.forEach((r) => console.error(`     - ${r}`));
+    console.error('\nIf this is the correct dev DB, re-run with --confirm-smoke-db.');
+    process.exit(2);
+  }
+}
+
 const stamp = Date.now();
 const PREFIX = `gnf_${stamp}`;
 const results = [];
+
+// Module-level cleanup registry — referenced by both the finally{}
+// block AND the SIGINT/SIGTERM handler installed at the bottom of
+// the file. Single source of truth so interrupted runs leave no
+// orphans behind.
+const created = {
+  actionItems: [],
+  notifications: [],
+  watchers: [],
+  cases: [],
+  notes: [],
+  userCompanies: [],
+  users: [],
+  persons: [],
+  teams: [],
+};
+let cleanupInProgress = false;
+
+/**
+ * Best-effort delete-many — captures errors per table so the summary
+ * can report exactly which step failed. Returns { ok, error?, table }.
+ */
+async function tryDelete(table, fn) {
+  try {
+    const r = await fn();
+    return { table, ok: true, count: r?.count ?? null };
+  } catch (err) {
+    return { table, ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+/**
+ * Run cleanup in reverse FK order. Single source of truth — referenced
+ * by finally{} (normal exit) AND the SIGINT/SIGTERM handler
+ * (interrupted exit). Idempotent via `cleanupInProgress` so a SIGINT
+ * during finally{} doesn't double-run.
+ */
+async function runCleanup({ trigger }) {
+  if (cleanupInProgress) return;
+  cleanupInProgress = true;
+  console.log(`\n[cleanup:${trigger}] starting…`);
+  const ops = [];
+
+  if (created.actionItems.length) {
+    ops.push(await tryDelete('ActionItem (by id)', () =>
+      prisma.actionItem.deleteMany({ where: { id: { in: created.actionItems } } }),
+    ));
+  }
+  if (created.notifications.length) {
+    ops.push(await tryDelete('CaseNotification (by id)', () =>
+      prisma.caseNotification.deleteMany({ where: { id: { in: created.notifications } } }),
+    ));
+  }
+  if (created.watchers.length) {
+    ops.push(await tryDelete('CaseWatcher (by id)', () =>
+      prisma.caseWatcher.deleteMany({ where: { id: { in: created.watchers } } }),
+    ));
+  }
+  if (created.cases.length) {
+    ops.push(await tryDelete('ActionItem (by caseId)', () =>
+      prisma.actionItem.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('CaseNotification (by caseId)', () =>
+      prisma.caseNotification.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('CaseWatcher (by caseId)', () =>
+      prisma.caseWatcher.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('CaseMention (by caseId)', () =>
+      prisma.caseMention.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('CaseNote (by caseId)', () =>
+      prisma.caseNote.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('CaseActivity (by caseId)', () =>
+      prisma.caseActivity.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await tryDelete('Case (by id)', () =>
+      prisma.case.deleteMany({ where: { id: { in: created.cases } } }),
+    ));
+  }
+  if (created.userCompanies.length) {
+    ops.push(await tryDelete('UserCompany (by id)', () =>
+      prisma.userCompany.deleteMany({ where: { id: { in: created.userCompanies } } }),
+    ));
+  }
+  if (created.users.length) {
+    ops.push(await tryDelete('User (by id)', () =>
+      prisma.user.deleteMany({ where: { id: { in: created.users } } }),
+    ));
+  }
+  if (created.persons.length) {
+    ops.push(await tryDelete('Person (by id)', () =>
+      prisma.person.deleteMany({ where: { id: { in: created.persons } } }),
+    ));
+  }
+  if (created.teams.length) {
+    ops.push(await tryDelete('Team (by id)', () =>
+      prisma.team.deleteMany({ where: { id: { in: created.teams } } }),
+    ));
+  }
+
+  const failed = ops.filter((o) => !o.ok);
+  if (failed.length === 0) {
+    console.log(`[cleanup:${trigger}] OK — ${ops.length} tables clean.`);
+  } else {
+    console.error(`[cleanup:${trigger}] ${failed.length}/${ops.length} table cleanup(s) FAILED:`);
+    failed.forEach((f) => console.error(`  - ${f.table}: ${f.error}`));
+    console.error(
+      `[cleanup:${trigger}] Run scripts/cleanup-gnf-smoke-data.js for inventory.`,
+    );
+  }
+}
+
+// SIGINT/SIGTERM handler — interrupted runs MUST clean up. Without
+// this, prior runs leaked 217 rows across 11 tables when killed
+// mid-execution. Handler runs cleanup then exits 130 (SIGINT) /
+// 143 (SIGTERM) per POSIX convention.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    console.error(`\n[signal:${sig}] received — running cleanup before exit…`);
+    try {
+      await runCleanup({ trigger: sig });
+    } catch (err) {
+      console.error(`[signal:${sig}] cleanup threw:`, err?.message ?? err);
+    } finally {
+      try {
+        await prisma.$disconnect();
+      } catch {
+        // ignore
+      }
+      process.exit(sig === 'SIGINT' ? 130 : 143);
+    }
+  });
+}
 
 function record(name, ok, detail = '') {
   results.push({ name, ok, detail });
@@ -161,17 +322,9 @@ async function run() {
   if (companyB) console.log(`Company B: ${companyB.id} (${companyB.name})\n`);
   else console.log('Company B: none — G8 tenant scope test skipped\n');
 
-  const created = {
-    actionItems: [],
-    cases: [],
-    notes: [],
-    notifications: [],
-    persons: [],
-    users: [],
-    userCompanies: [],
-    teams: [],
-    watchers: [],
-  };
+  // `created` is module-level — referenced by both finally{} below
+  // AND the SIGINT/SIGTERM handler at the bottom of the file. Do not
+  // re-declare here.
 
   try {
     // ─── Setup: team, actor, three recipients (watchers), one
@@ -1056,35 +1209,7 @@ async function run() {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
   } finally {
-    if (created.actionItems.length) {
-      await prisma.actionItem.deleteMany({ where: { id: { in: created.actionItems } } }).catch(() => {});
-    }
-    if (created.notifications.length) {
-      await prisma.caseNotification.deleteMany({ where: { id: { in: created.notifications } } }).catch(() => {});
-    }
-    if (created.watchers.length) {
-      await prisma.caseWatcher.deleteMany({ where: { id: { in: created.watchers } } }).catch(() => {});
-    }
-    if (created.cases.length) {
-      await prisma.actionItem.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseNotification.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseWatcher.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseNote.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseActivity.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.case.deleteMany({ where: { id: { in: created.cases } } }).catch(() => {});
-    }
-    if (created.userCompanies.length) {
-      await prisma.userCompany.deleteMany({ where: { id: { in: created.userCompanies } } }).catch(() => {});
-    }
-    if (created.users.length) {
-      await prisma.user.deleteMany({ where: { id: { in: created.users } } }).catch(() => {});
-    }
-    if (created.persons.length) {
-      await prisma.person.deleteMany({ where: { id: { in: created.persons } } }).catch(() => {});
-    }
-    if (created.teams.length) {
-      await prisma.team.deleteMany({ where: { id: { in: created.teams } } }).catch(() => {});
-    }
+    await runCleanup({ trigger: 'finally' });
     await prisma.$disconnect();
   }
 
