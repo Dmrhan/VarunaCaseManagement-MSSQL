@@ -210,10 +210,13 @@ export async function emitMentionsForNote({
         kind: 'mention',
         userId: mentionedUserId,
         companyId,
-        objectType: 'CaseMention',
-        // R2 — surrogate id is unreliable under createMany; rely on
-        // dedupKey for idempotency instead.
-        objectId: null,
+        // Live-emit path has the parent noteId in hand → point at the
+        // CaseNote so the Aksiyonlarım inline-reply composer can post
+        // directly to /notes/:noteId/reply. Backfill path keeps
+        // objectId=null (legacy CaseMention shape) — UI falls back to a
+        // fresh internal note on the case when objectId is null.
+        objectType: 'CaseNote',
+        objectId: noteId,
         caseId,
         caseNumber: caseNumber ?? null,
         caseTitle: caseTitle ?? null,

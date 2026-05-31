@@ -6,6 +6,7 @@ import {
   Clock,
   Eye,
   Info,
+  Reply,
   RotateCcw,
   ShieldCheck,
   ShieldX,
@@ -19,11 +20,13 @@ import { formatRowTime } from '@/lib/format';
 import {
   actionCenterService,
   emitActionCenterChanged,
+  replyToMentionActionItem,
   type ActionItem,
   type ActionItemKind,
   type ActionCenterView,
 } from '@/services/actionCenterService';
 import { approvalService } from '@/services/approvalService';
+import { useAuth } from '@/services/AuthContext';
 
 /**
  * WR-ACTION-CENTER Phase 1 + WR-NOTIFICATION-CENTER UX redesign.
@@ -151,6 +154,12 @@ export function ActionItemRow({
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [closeNote, setCloseNote] = useState('');
+  // Mention inline reply composer state.
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyDraft, setReplyDraft] = useState('');
+  const [replyBusy, setReplyBusy] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const { user } = useAuth();
 
   const style = KIND_STYLE[item.kind] ?? {
     icon: Info,
@@ -242,6 +251,38 @@ export function ActionItemRow({
     if (r) {
       emitActionCenterChanged();
       onChanged?.();
+    }
+  }
+
+  // Mention inline reply — persisted to Case notes; ActionItem auto-closes.
+  async function handleReplySend() {
+    const trimmed = replyDraft.trim();
+    if (!trimmed || replyBusy) return;
+    setReplyBusy(true);
+    setReplyError(null);
+    const authorName = user?.fullName?.trim() || 'Kullanıcı';
+    const result = await replyToMentionActionItem({
+      item,
+      content: trimmed,
+      authorName,
+    });
+    setReplyBusy(false);
+    if (result.error === 'no_case' || result.error === 'note_failed') {
+      setReplyError('Cevap gönderilemedi.');
+      return;
+    }
+    // Reply persisted. Drop draft.
+    setReplyDraft('');
+    setReplyOpen(false);
+    emitActionCenterChanged();
+    onChanged?.();
+    if (result.doneFailed) {
+      // Note saved but markDone failed — keep row visible, surface a
+      // hint. Manual "Okundu" closes it.
+      setReplyError('Cevap kaydedildi, ancak bildirim kapatılamadı. "Okundu" ile kapatabilirsin.');
+      // Re-open the composer panel so the warning is visible (textarea
+      // is empty so re-submit cannot duplicate).
+      setReplyOpen(true);
     }
   }
 
@@ -412,6 +453,20 @@ export function ActionItemRow({
             </Button>
           )}
 
+          {/* Mention inline reply — composer expands below; caseId
+              required so the reply has a target. */}
+          {isMention && item.caseId && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Reply size={11} />}
+              onClick={() => setReplyOpen((v) => !v)}
+              disabled={busy || replyBusy}
+            >
+              Cevap Ver
+            </Button>
+          )}
+
           {/* Read acknowledge — FYI rows */}
           {(item.kind === 'mention' ||
             item.kind === 'approval_decided' ||
@@ -552,6 +607,45 @@ export function ActionItemRow({
             </Button>
             <Button size="sm" onClick={() => void handleReject()} disabled={busy || !rejectReason.trim()}>
               {busy ? 'Reddediliyor…' : 'Reddet'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Mention inline reply composer */}
+      {replyOpen && isMention && (
+        <div className="mt-2 space-y-2 rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2 text-xs dark:border-violet-900/40 dark:bg-violet-950/20">
+          <TextArea
+            rows={3}
+            value={replyDraft}
+            onChange={(e) => {
+              setReplyDraft(e.target.value);
+              if (replyError) setReplyError(null);
+            }}
+            placeholder="Cevabını yaz..."
+            disabled={replyBusy}
+          />
+          {replyError && (
+            <div className="text-[11px] text-rose-700 dark:text-rose-300">{replyError}</div>
+          )}
+          <div className="flex justify-end gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setReplyOpen(false);
+                setReplyError(null);
+              }}
+              disabled={replyBusy}
+            >
+              İptal
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleReplySend()}
+              disabled={replyBusy || !replyDraft.trim()}
+            >
+              {replyBusy ? 'Gönderiliyor…' : 'Gönder'}
             </Button>
           </div>
         </div>
