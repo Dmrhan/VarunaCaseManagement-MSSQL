@@ -161,7 +161,13 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
   // New note state
   const [noteText, setNoteText] = useState('');
   const [noteVisibility, setNoteVisibility] = useState<NoteVisibility>('Internal');
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const noteRef = useRef<MentionTextareaHandle>(null);
+  // Synchronous double-submit guard — React state updates batch across
+  // an await; a second click before setNoteSubmitting paints would
+  // sneak past `noteSubmitting`. The ref flips synchronously.
+  const noteSubmittingRef = useRef(false);
 
   const offeredSolutions = useMemo(() => lookupService.offeredSolutions(), []);
   // Phase C2: account bilgisi artık /api/cases/:id/customer-context'tan; bootstrap kullanılmıyor.
@@ -275,20 +281,80 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
 
   async function handleAddNote() {
     if (!item || !noteText.trim()) return;
-    const created = await caseService.addNote(item.id, {
-      content: noteText.trim(),
-      visibility: noteVisibility,
-      authorName: 'Mock User',
-    });
-    if (created) {
-      setItem({ ...item, notes: [created, ...item.notes] });
-      setNoteText('');
-      toast({
-        type: 'success',
-        message: noteVisibility === 'Internal' ? 'İç not eklendi.' : 'Müşteriye görünür not eklendi.',
-        duration: 2500,
+    // Ref guard catches the rare double-click that lands before
+    // setNoteSubmitting paints; React state guard catches everything
+    // after first paint. Both must clear on completion.
+    if (noteSubmittingRef.current) return;
+    noteSubmittingRef.current = true;
+    setNoteSubmitting(true);
+    setNoteError(null);
+    try {
+      const created = await caseService.addNote(item.id, {
+        content: noteText.trim(),
+        visibility: noteVisibility,
+        authorName: user?.fullName ?? 'Kullanıcı',
       });
+      if (created) {
+        // Backend short-window guard may return an EXISTING row (rapid
+        // duplicate). De-dup the local list so the same note never
+        // appears twice in the UI.
+        const alreadyPresent = item.notes.some((n) => n.id === created.id);
+        setItem(
+          alreadyPresent ? item : { ...item, notes: [created, ...item.notes] },
+        );
+        setNoteText('');
+        toast({
+          type: 'success',
+          message: noteVisibility === 'Internal' ? 'İç not eklendi.' : 'Müşteriye görünür not eklendi.',
+          duration: 2500,
+        });
+      } else {
+        // apiFetch already surfaced a toast; keep draft and show inline
+        // hint so the user knows they can retry without retyping.
+        setNoteError('Not gönderilemedi. Tekrar deneyebilirsin.');
+      }
+    } finally {
+      noteSubmittingRef.current = false;
+      setNoteSubmitting(false);
     }
+  }
+
+  // Delete own note/reply — author-only at backend; UI hides the
+  // button when not eligible, but the API enforces it.
+  async function handleDeleteNote(noteId: string): Promise<boolean> {
+    if (!item) return false;
+    const r = await caseService.deleteNote(item.id, noteId);
+    if (r.ok) {
+      // Remove from list and decrement parent.replyCount when the
+      // deleted row was a reply we currently track via list metadata.
+      const deleted = item.notes.find((n) => n.id === noteId);
+      const parentId = deleted?.parentNoteId ?? null;
+      setItem({
+        ...item,
+        notes: item.notes
+          .filter((n) => n.id !== noteId)
+          .map((n) =>
+            parentId && n.id === parentId
+              ? { ...n, replyCount: Math.max(0, (n.replyCount ?? 0) - 1) }
+              : n,
+          ),
+      });
+      toast({ type: 'success', message: 'Not silindi.', duration: 2000 });
+      return true;
+    }
+    // Structured error → user-facing message; UI keeps the row visible.
+    const msg =
+      r.reason === 'has_replies'
+        ? (r.message ?? 'Yanıtı olan ana not silinemez.')
+        : r.reason === 'forbidden'
+          ? (r.message ?? 'Bu notu silme yetkin yok.')
+          : r.reason === 'orphan'
+            ? (r.message ?? 'Yazarı belirlenemeyen eski not silinemez.')
+            : r.reason === 'not_found'
+              ? 'Not bulunamadı.'
+              : 'Not silinemedi.';
+    toast({ type: 'error', message: msg, duration: 3500 });
+    return false;
   }
 
   // Reply eklendiginde parent note'un replyCount alanini increment et —
@@ -828,10 +894,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 item={item}
                 noteText={noteText}
                 noteVisibility={noteVisibility}
-                onChangeText={setNoteText}
+                noteSubmitting={noteSubmitting}
+                noteError={noteError}
+                onChangeText={(s) => {
+                  setNoteText(s);
+                  if (noteError) setNoteError(null);
+                }}
                 onChangeVisibility={setNoteVisibility}
                 onSubmit={handleAddNote}
                 onReplyAdded={handleReplyAdded}
+                onDeleteNote={handleDeleteNote}
+                currentUserId={user?.id ?? null}
                 inputRef={noteRef}
               />
             )}
@@ -4313,19 +4386,27 @@ function NotesTab({
   item,
   noteText,
   noteVisibility,
+  noteSubmitting,
+  noteError,
   onChangeText,
   onChangeVisibility,
   onSubmit,
   onReplyAdded,
+  onDeleteNote,
+  currentUserId,
   inputRef,
 }: {
   item: Case;
   noteText: string;
   noteVisibility: NoteVisibility;
+  noteSubmitting: boolean;
+  noteError: string | null;
   onChangeText: (s: string) => void;
   onChangeVisibility: (v: NoteVisibility) => void;
   onSubmit: () => void;
   onReplyAdded: (parentNoteId: string) => void;
+  onDeleteNote: (noteId: string) => Promise<boolean>;
+  currentUserId: string | null;
   inputRef: React.RefObject<MentionTextareaHandle>;
 }) {
   const [voiceListening, setVoiceListening] = useState(false);
@@ -4386,12 +4467,17 @@ function NotesTab({
               <Button
                 size="sm"
                 onClick={onSubmit}
-                disabled={!noteText.trim()}
+                disabled={!noteText.trim() || noteSubmitting}
                 leftIcon={<Send size={14} />}
               >
-                Not Ekle
+                {noteSubmitting ? 'Gönderiliyor…' : 'Not Ekle'}
               </Button>
             </div>
+            {noteError && (
+              <div className="mt-2 text-[11.5px] font-medium text-rose-600 dark:text-red-400">
+                {noteError}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4417,7 +4503,9 @@ function NotesTab({
               caseId={item.id}
               note={n}
               currentName={currentName}
+              currentUserId={currentUserId}
               onReplyAdded={onReplyAdded}
+              onDeleteNote={onDeleteNote}
             />
           ))}
         </ul>
@@ -4595,18 +4683,46 @@ function NoteCard({
   caseId,
   note,
   currentName,
+  currentUserId,
   onReplyAdded,
+  onDeleteNote,
 }: {
   caseId: string;
   note: CaseNote;
   currentName: string;
+  currentUserId: string | null;
   onReplyAdded: (parentNoteId: string) => void;
+  onDeleteNote: (noteId: string) => Promise<boolean>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [replies, setReplies] = useState<CaseNote[] | null>(null);
   const [loadingReplies, setLoadingReplies] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
+  // Own top-level note is deletable when:
+  //  - authorId matches current user (backend enforces too)
+  //  - replyCount === 0 (parent-with-replies blocked at 409; we hide
+  //    the button instead of letting the user trigger an error toast).
+  const isOwnAndChildless =
+    !!currentUserId &&
+    !!note.authorId &&
+    note.authorId === currentUserId &&
+    (note.replyCount ?? 0) === 0;
+  // Deleting parent removes its children too via SetNull (which makes
+  // them orphan top-level); we block that case in backend with
+  // has_replies. UI mirrors with the replyCount check above.
+
+  async function handleDelete() {
+    if (deleting) return;
+    if (!window.confirm('Bu notu silmek istiyor musun?')) return;
+    setDeleting(true);
+    await onDeleteNote(note.id);
+    // On success the parent state filters this card out of the list, so
+    // this component unmounts. On error the toast already fired; just
+    // re-enable the button.
+    setDeleting(false);
+  }
 
   const isInternal = note.visibility === 'Internal';
   const pill = isInternal
@@ -4677,6 +4793,18 @@ function NoteCard({
         >
           {formatRelative(note.createdAt)}
         </span>
+        {isOwnAndChildless && (
+          <button
+            type="button"
+            onClick={() => void handleDelete()}
+            disabled={deleting}
+            title="Notu sil"
+            aria-label="Notu sil"
+            className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:text-ndark-muted dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
 
       {/* Body */}
@@ -4727,7 +4855,23 @@ function NoteCard({
           ) : (
             <ul className="flex flex-col gap-2">
               {(replies ?? []).map((r) => (
-                <ReplyItem key={r.id} caseId={caseId} reply={r} parentAuthor={note.authorName} />
+                <ReplyItem
+                  key={r.id}
+                  caseId={caseId}
+                  reply={r}
+                  parentAuthor={note.authorName}
+                  currentUserId={currentUserId}
+                  onDelete={async () => {
+                    const ok = await onDeleteNote(r.id);
+                    if (ok) {
+                      // Drop the reply from local thread; parent.replyCount
+                      // is decremented at parent state via onDeleteNote's
+                      // own handler. Then refresh local list.
+                      setReplies((prev) => (prev ? prev.filter((x) => x.id !== r.id) : prev));
+                    }
+                    return ok;
+                  }}
+                />
               ))}
             </ul>
           )}
@@ -4749,11 +4893,34 @@ function NoteCard({
   );
 }
 
-function ReplyItem({ caseId, reply, parentAuthor }: { caseId: string; reply: CaseNote; parentAuthor: string }) {
+function ReplyItem({
+  caseId,
+  reply,
+  parentAuthor,
+  currentUserId,
+  onDelete,
+}: {
+  caseId: string;
+  reply: CaseNote;
+  parentAuthor: string;
+  currentUserId: string | null;
+  onDelete: () => Promise<boolean>;
+}) {
+  const [deleting, setDeleting] = useState(false);
   const isInternal = reply.visibility === 'Internal';
   const pill = isInternal
     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
     : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+  // Replies are always leaf nodes (max 1 depth enforced server-side),
+  // so any owned reply is deletable.
+  const isOwn = !!currentUserId && !!reply.authorId && reply.authorId === currentUserId;
+  async function handleDelete() {
+    if (deleting) return;
+    if (!window.confirm('Bu yanıtı silmek istiyor musun?')) return;
+    setDeleting(true);
+    await onDelete();
+    setDeleting(false);
+  }
   return (
     <li className="rounded-lg border-l-2 border-brand-400 bg-white px-3 py-2 shadow-sm dark:border-brand-500 dark:bg-ndark-card">
       <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-400 dark:text-ndark-muted">
@@ -4783,6 +4950,18 @@ function ReplyItem({ caseId, reply, parentAuthor }: { caseId: string; reply: Cas
         >
           {formatRelative(reply.createdAt)}
         </span>
+        {isOwn && (
+          <button
+            type="button"
+            onClick={() => void handleDelete()}
+            disabled={deleting}
+            title="Yanıtı sil"
+            aria-label="Yanıtı sil"
+            className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50 dark:text-ndark-muted dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
       <div className="mt-1.5 pl-9">
         <MentionContent
@@ -4819,6 +4998,10 @@ function ReplyComposer({
   // Reply parent visibility'i miras alir; kullanici degistirebilir.
   const [visibility, setVisibility] = useState<NoteVisibility>(parentVisibility);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Synchronous double-submit guard — see note-safety task. State alone
+  // is insufficient because React state updates batch across an await.
+  const busyRef = useRef(false);
   const composerRef = useRef<MentionTextareaHandle>(null);
   useEffect(() => {
     composerRef.current?.focus();
@@ -4870,11 +5053,21 @@ function ReplyComposer({
               <Button
                 size="sm"
                 onClick={async () => {
-                  if (!text.trim() || busy) return;
+                  if (!text.trim() || busy || busyRef.current) return;
+                  busyRef.current = true;
                   setBusy(true);
-                  const ok = await onSubmit(text.trim(), visibility);
-                  if (ok) setText('');
-                  setBusy(false);
+                  setError(null);
+                  try {
+                    const ok = await onSubmit(text.trim(), visibility);
+                    if (ok) {
+                      setText('');
+                    } else {
+                      setError('Yanıt gönderilemedi. Tekrar deneyebilirsin.');
+                    }
+                  } finally {
+                    busyRef.current = false;
+                    setBusy(false);
+                  }
                 }}
                 disabled={!text.trim() || busy}
                 leftIcon={<Send size={13} />}
@@ -4883,6 +5076,11 @@ function ReplyComposer({
               </Button>
             </div>
           </div>
+          {error && (
+            <div className="mt-1.5 text-[11px] font-medium text-rose-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
         </div>
       </div>
     </div>

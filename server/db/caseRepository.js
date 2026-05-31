@@ -88,6 +88,140 @@ function shape(c) {
 }
 
 /**
+ * Per-process in-flight registry for note/reply creates — guards against
+ * truly-concurrent identical create requests (browser HTTP/2 multiplexed
+ * double-click). Single-instance scope; sufficient for current BFF
+ * deployment. Sequential duplicates (within 5s after completion) are
+ * caught by the DB short-window guard inside addNote/addReply.
+ *
+ * Key format: `note|<caseId>|<userId>|<visibility>|<content>` (top-level)
+ *             `reply|<caseId>|<parentNoteId>|<userId>|<visibility>|<content>`
+ * Entry lifetime: in-flight + 5s post-settlement window.
+ */
+const noteCreateInFlight = new Map();
+
+function coalesceNoteCreate(key, factory) {
+  const existing = noteCreateInFlight.get(key);
+  if (existing) return existing;
+  const p = factory();
+  noteCreateInFlight.set(key, p);
+  // Hold for 5s after settlement so a back-to-back retry sees the
+  // cached promise and returns the same row (defense in depth alongside
+  // the DB short-window guard).
+  p.catch(() => {}).finally(() => {
+    setTimeout(() => {
+      if (noteCreateInFlight.get(key) === p) noteCreateInFlight.delete(key);
+    }, 5000);
+  });
+  return p;
+}
+
+/**
+ * Core write path for addNote — extracted so the public addNote can
+ * wrap it with in-flight coalescing + short-window DB guard. Performs:
+ *  1. @mention parse + cross-tenant validation
+ *  2. caseNote.create
+ *  3. CaseMention rows + fire-and-forget mention ActionItem emit
+ *  4. CaseActivity NoteAdded
+ *  5. Watcher notification
+ *  6. case.updatedAt bump
+ */
+async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
+  const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+  const matches = [...(note.content ?? '').matchAll(mentionRegex)];
+  const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
+
+  if (mentionedUserIds.length > 10) {
+    return { error: 'Bir notta en fazla 10 kişi etiketlenebilir.' };
+  }
+
+  if (mentionedUserIds.length > 0) {
+    const valid = await prisma.user.findMany({
+      where: {
+        id: { in: mentionedUserIds },
+        isActive: true,
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true },
+    });
+    const validIds = new Set(valid.map((v) => v.id));
+    const invalid = mentionedUserIds.filter((uid) => !validIds.has(uid));
+    if (invalid.length > 0) {
+      return {
+        error: `Etiketlenen ${invalid.length} kullanıcı bu şirkette bulunamadı veya pasif.`,
+      };
+    }
+  }
+
+  const created = await prisma.caseNote.create({
+    data: {
+      caseId: id,
+      companyId,
+      authorName: note.authorName,
+      authorId: mentionedBy ?? null,
+      content: note.content,
+      visibility: note.visibility,
+    },
+  });
+
+  if (mentionedUserIds.length > 0 && mentionedBy) {
+    await prisma.caseMention.createMany({
+      data: mentionedUserIds.map((uid) => ({
+        caseId: id,
+        noteId: created.id,
+        companyId,
+        mentionedUserId: uid,
+        mentionedBy,
+      })),
+    });
+
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id },
+      select: { caseNumber: true, title: true },
+    });
+    void emitMentionsForNote({
+      caseId: id,
+      companyId,
+      noteId: created.id,
+      mentionedUserIds,
+      actorUserId: mentionedBy,
+      actorDisplay: note.authorName,
+      caseNumber: caseSnapshot?.caseNumber,
+      caseTitle: caseSnapshot?.title,
+      noteContent: note.content,
+    });
+  }
+
+  const cleanedPreview = (note.content ?? '')
+    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
+    .slice(0, 200);
+  await prisma.caseActivity.create({
+    data: {
+      caseId: id,
+      companyId,
+      action: note.visibility === 'Customer' ? 'Müşteri notu eklendi' : 'İç not eklendi',
+      actionType: 'NoteAdded',
+      note: cleanedPreview,
+      actor: note.authorName,
+    },
+  });
+
+  const noteCase = await prisma.case.findUnique({
+    where: { id },
+    select: { caseNumber: true },
+  });
+  await notifyWatchers({
+    caseId: id,
+    companyId,
+    message: `${noteCase?.caseNumber ?? id}'de yeni not: ${cleanedPreview.slice(0, 80)}`,
+    kind: 'note',
+  });
+
+  await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
+  return created;
+}
+
+/**
  * CaseAccessError — repository-seviyesi 403 sinyal.
  * Mutation'lar başında scope check başarısız olursa fırlatılır; route layer
  * bunu HTTP 403'e çevirir.
@@ -1130,113 +1264,42 @@ export const caseRepository = {
    * (cron, test) mention skip — note yine kaydedilir.
    */
   async addNote(id, note, allowedCompanyIds, mentionedBy) {
-    const companyId = await assertCaseInScope(id, allowedCompanyIds);
-    if (!companyId) return null;
+    // Two-layer duplicate guard (note safety task §C):
+    //   Layer 1 — in-flight coalescing: concurrent identical creates
+    //     (HTTP/2 multiplexed double-click) share the same promise.
+    //   Layer 2 — DB short-window: sequential identical create within
+    //     5s of completion returns the existing row.
+    // Both layers gate only on authenticated calls (mentionedBy set);
+    // cron/mock paths (mentionedBy=null) skip because identity is
+    // ambiguous.
+    const _impl = async () => {
+      const companyId = await assertCaseInScope(id, allowedCompanyIds);
+      if (!companyId) return null;
 
-    // Parse @[Name](userId) tag'leri (dedup userId)
-    const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
-    const matches = [...(note.content ?? '').matchAll(mentionRegex)];
-    const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
-
-    if (mentionedUserIds.length > 10) {
-      return { error: 'Bir notta en fazla 10 kişi etiketlenebilir.' };
-    }
-
-    // Cross-tenant koruma: tüm mention'lar aynı şirkette + aktif olmalı.
-    if (mentionedUserIds.length > 0) {
-      const valid = await prisma.user.findMany({
-        where: {
-          id: { in: mentionedUserIds },
-          isActive: true,
-          companies: { some: { companyId, isActive: true } },
-        },
-        select: { id: true },
-      });
-      const validIds = new Set(valid.map((v) => v.id));
-      const invalid = mentionedUserIds.filter((uid) => !validIds.has(uid));
-      if (invalid.length > 0) {
-        return {
-          error: `Etiketlenen ${invalid.length} kullanıcı bu şirkette bulunamadı veya pasif.`,
-        };
+      if (mentionedBy && note.content) {
+        const dupeWindow = new Date(Date.now() - 5000);
+        const existing = await prisma.caseNote.findFirst({
+          where: {
+            caseId: id,
+            authorId: mentionedBy,
+            content: note.content,
+            visibility: note.visibility,
+            parentNoteId: null,
+            createdAt: { gte: dupeWindow },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (existing) return existing;
       }
+
+      return _addNoteWriteAndEmit({ id, note, companyId, mentionedBy });
+    };
+
+    if (mentionedBy && note.content) {
+      const key = `note|${id}|${mentionedBy}|${note.visibility}|${note.content}`;
+      return coalesceNoteCreate(key, _impl);
     }
-
-    const created = await prisma.caseNote.create({
-      data: {
-        caseId: id,
-        companyId,
-        authorName: note.authorName,
-        // mentionedBy = req.user.id (route'tan); reaction bildirimleri için
-        // CaseNote.authorId olarak tutulur. mentionedBy yoksa null.
-        authorId: mentionedBy ?? null,
-        content: note.content,
-        visibility: note.visibility,
-      },
-    });
-
-    // Mention satırları yaz (mentionedBy yoksa skip — note yine kaydedildi).
-    if (mentionedUserIds.length > 0 && mentionedBy) {
-      await prisma.caseMention.createMany({
-        data: mentionedUserIds.map((uid) => ({
-          caseId: id,
-          noteId: created.id,
-          companyId,
-          mentionedUserId: uid,
-          mentionedBy,
-        })),
-      });
-
-      // WR-NOTIFICATION-CENTER Phase 2A — inbox emit per mentioned user.
-      // Fire-and-forget; note creation never awaits this. Above validation
-      // already enforced active-user + active-UserCompany; the adapter
-      // re-runs a defensive R8.a check inside the helper.
-      const caseSnapshot = await prisma.case.findUnique({
-        where: { id },
-        select: { caseNumber: true, title: true },
-      });
-      void emitMentionsForNote({
-        caseId: id,
-        companyId,
-        noteId: created.id,
-        mentionedUserIds,
-        actorUserId: mentionedBy,
-        actorDisplay: note.authorName,
-        caseNumber: caseSnapshot?.caseNumber,
-        caseTitle: caseSnapshot?.title,
-        noteContent: note.content,
-      });
-    }
-
-    // Aktivite akışında "Not eklendi" satırı — content preview ile.
-    // @mention tag'leri kullanıcıyı kafa karıştırmasın diye düz isimle değiştirilir.
-    const cleanedPreview = (note.content ?? '')
-      .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
-      .slice(0, 200);
-    await prisma.caseActivity.create({
-      data: {
-        caseId: id,
-        companyId,
-        action: note.visibility === 'Customer' ? 'Müşteri notu eklendi' : 'İç not eklendi',
-        actionType: 'NoteAdded',
-        note: cleanedPreview,
-        actor: note.authorName,
-      },
-    });
-
-    // FAZ 2 Collab — vakaya watcher olarak eklenenlere bildirim
-    const noteCase = await prisma.case.findUnique({
-      where: { id },
-      select: { caseNumber: true },
-    });
-    await notifyWatchers({
-      caseId: id,
-      companyId,
-      message: `${noteCase?.caseNumber ?? id}'de yeni not: ${cleanedPreview.slice(0, 80)}`,
-      kind: 'note',
-    });
-
-    await prisma.case.update({ where: { id }, data: { updatedAt: new Date() } });
-    return created;
+    return _impl();
   },
 
   /**
@@ -1274,21 +1337,47 @@ export const caseRepository = {
    *  - Watcher bildirimleri tetiklenir.
    */
   async addReply(caseId, noteId, reply, allowedCompanyIds, mentionedBy) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
-    if (!companyId) return null;
+    // Trim content here so the in-flight key + dup guard use the canonical
+    // form. Empty/max_depth/scope errors come back via the inner _impl
+    // and short-circuit before any in-flight registration would matter.
+    const contentTrimmedKey = (reply.content ?? '').trim();
+    const _impl = async () => {
+      const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+      if (!companyId) return null;
 
-    const parent = await prisma.caseNote.findUnique({
-      where: { id: noteId },
-      select: { id: true, caseId: true, parentNoteId: true, authorName: true },
-    });
-    if (!parent || parent.caseId !== caseId) return null;
-    if (parent.parentNoteId !== null) {
-      return { error: 'max_depth', message: 'Bir yanıta yanıt verilemez (max 1 derinlik).' };
-    }
+      const parent = await prisma.caseNote.findUnique({
+        where: { id: noteId },
+        select: { id: true, caseId: true, parentNoteId: true, authorName: true },
+      });
+      if (!parent || parent.caseId !== caseId) return null;
+      if (parent.parentNoteId !== null) {
+        return { error: 'max_depth', message: 'Bir yanıta yanıt verilemez (max 1 derinlik).' };
+      }
 
-    const content = (reply.content ?? '').trim();
-    if (!content) {
-      return { error: 'empty', message: 'Yanıt boş olamaz.' };
+      const content = contentTrimmedKey;
+      if (!content) {
+        return { error: 'empty', message: 'Yanıt boş olamaz.' };
+      }
+
+    // Short-window duplicate guard — same shape as addNote, scoped to
+    // this thread (parentNoteId=noteId). Two rapid identical replies
+    // within 5 seconds collapse to the first row; parent.replyCount
+    // is NOT double-incremented and the activity log / watcher notify
+    // do NOT fire twice.
+    if (mentionedBy) {
+      const dupeWindow = new Date(Date.now() - 5000);
+      const existing = await prisma.caseNote.findFirst({
+        where: {
+          caseId,
+          parentNoteId: noteId,
+          authorId: mentionedBy,
+          content,
+          visibility: reply.visibility,
+          createdAt: { gte: dupeWindow },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) return existing;
     }
 
     // @[Name](userId) tag parse (addNote ile aynı kural)
@@ -1404,8 +1493,111 @@ export const caseRepository = {
       kind: 'note',
     });
 
+      await prisma.case.update({ where: { id: caseId }, data: { updatedAt: new Date() } });
+      return created;
+    };
+
+    if (mentionedBy && contentTrimmedKey) {
+      const key = `reply|${caseId}|${noteId}|${mentionedBy}|${reply.visibility}|${contentTrimmedKey}`;
+      return coalesceNoteCreate(key, _impl);
+    }
+    return _impl();
+  },
+
+  /**
+   * Vaka notu / yanıtı silme (note safety task).
+   *
+   * Yetki modeli:
+   *  - Sadece `CaseNote.authorId === currentUserId` olan kullanıcı silebilir.
+   *  - Vaka scope'u (allowedCompanyIds) zorlanır — yabancı tenant 403.
+   *  - authorId NULL olan eski notlar silinemez (sahiplik tespit edilemez).
+   *
+   * Cascade güvenliği (schema migration YOK):
+   *  - Reactions: schema cascade ile gider (CaseNoteReaction.onDelete: Cascade)
+   *  - Mentions: schema'da FK yok → manuel deleteMany ile temizlenir
+   *  - Replies: parent→replies relation onDelete: SetNull. Yetimleşmemesi
+   *    için top-level note `replyCount > 0` ise `note_has_replies` 409
+   *    döner. Yanıtı olan ana not silmek için önce yanıtların silinmesi
+   *    veya soft-delete migration'u gerekir.
+   *  - Reply silinince parent.replyCount transactional decrement edilir.
+   *  - CaseActivity: text-only "Not silindi" / "Not yanıtı silindi" satırı
+   *    yazılır (actionType=null — yeni enum value eklemiyoruz; eski enum
+   *    set'i değişmez).
+   *
+   * Dönüş:
+   *  - { success: true } başarı
+   *  - null → vaka bulunamadı / not bulunamadı / cross-tenant
+   *  - { error: 'forbidden', message } → kendi notu değil
+   *  - { error: 'orphan', message } → authorId NULL eski not
+   *  - { error: 'has_replies', message } → top-level note + replyCount > 0
+   */
+  async deleteNote(caseId, noteId, allowedCompanyIds, currentUserId) {
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const note = await prisma.caseNote.findUnique({
+      where: { id: noteId },
+      select: {
+        id: true,
+        caseId: true,
+        authorId: true,
+        authorName: true,
+        content: true,
+        parentNoteId: true,
+        replyCount: true,
+      },
+    });
+    if (!note || note.caseId !== caseId) return null;
+
+    if (!note.authorId) {
+      return {
+        error: 'orphan',
+        message: 'Yazarı belirlenemeyen eski not silinemez.',
+      };
+    }
+    if (note.authorId !== currentUserId) {
+      return {
+        error: 'forbidden',
+        message: 'Sadece kendi notunu silebilirsin.',
+      };
+    }
+    if (note.parentNoteId === null && note.replyCount > 0) {
+      return {
+        error: 'has_replies',
+        message: 'Yanıtı olan bir ana not silinemez. Önce yanıtları silmelisin.',
+      };
+    }
+
+    // Transactional: mention cleanup + note delete + parent counter
+    // decrement (if reply).
+    await prisma.$transaction(async (tx) => {
+      // CaseMention has no schema FK to CaseNote — manual cleanup.
+      await tx.caseMention.deleteMany({ where: { noteId } });
+      await tx.caseNote.delete({ where: { id: noteId } });
+      if (note.parentNoteId) {
+        await tx.caseNote.update({
+          where: { id: note.parentNoteId },
+          data: { replyCount: { decrement: 1 } },
+        });
+      }
+    });
+
+    // Activity log — actionType left null intentionally (no new enum).
+    const preview = (note.content ?? '')
+      .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
+      .slice(0, 200);
+    await prisma.caseActivity.create({
+      data: {
+        caseId,
+        companyId,
+        action: note.parentNoteId ? 'Not yanıtı silindi' : 'Not silindi',
+        note: preview,
+        actor: note.authorName,
+      },
+    });
+
     await prisma.case.update({ where: { id: caseId }, data: { updatedAt: new Date() } });
-    return created;
+    return { success: true };
   },
 
   /**

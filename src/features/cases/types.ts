@@ -203,6 +203,8 @@ export interface CaseNote {
   id: string;
   caseId: string;
   authorName: string;
+  /** User.id — sahiplik tabanlı delete butonu için. Eski notlarda null. */
+  authorId?: string | null;
   content: string;
   visibility: NoteVisibility;
   /** Parent note id — null/undefined ise top-level. Reply ise parent.id. */

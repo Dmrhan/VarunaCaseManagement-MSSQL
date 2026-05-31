@@ -799,6 +799,39 @@ router.post(
 );
 
 /**
+ * DELETE /api/cases/:id/notes/:noteId — kendi notunu/yanıtını silme.
+ *
+ * Yetki: yalnız `CaseNote.authorId === req.user.id`. Cross-tenant 404,
+ * başka kullanıcının notu 403, authorId NULL eski not 403 ("orphan"),
+ * yanıtı olan top-level note 409 ("has_replies" — soft-delete yok).
+ *
+ * Hard delete: mention rows manuel temizlenir (FK yok), reactions
+ * schema cascade ile gider. Reply silinince parent.replyCount
+ * decrement edilir. CaseActivity'ye "Not silindi" text-only satır
+ * (actionType=null, yeni enum value yok).
+ */
+router.delete(
+  '/:id/notes/:noteId',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.deleteNote(
+      req.params.id,
+      req.params.noteId,
+      req.user.allowedCompanyIds,
+      req.user.id,
+    );
+    if (result === null) return res.status(404).json({ error: 'Vaka veya not bulunamadı' });
+    if (result.error === 'forbidden' || result.error === 'orphan') {
+      return res.status(403).json(result);
+    }
+    if (result.error === 'has_replies') {
+      return res.status(409).json(result);
+    }
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
+/**
  * POST /api/cases/:id/notes/:noteId/reactions — bir nota emoji reaksiyonu toggle eder.
  * body: { emoji: 'thumbs_up' | 'eyes' | 'check' | 'important' | 'thanks' }
  * Davranis: ayni kullanici ayni emoji ikinci kez tiklarsa kaldirilir.
