@@ -1,4 +1,5 @@
-import { apiFetch } from './caseService';
+import { apiFetch, caseService } from './caseService';
+import type { CaseNote } from '@/features/cases/types';
 
 /**
  * WR-ACTION-CENTER Phase 1 — Approval Visibility MVP client.
@@ -158,6 +159,68 @@ export const actionCenterService = {
     );
   },
 };
+
+/**
+ * Aksiyonlarım > Bildirimler — mention satırında inline cevap akışı.
+ *
+ * Davranış:
+ *  - item.objectType === 'CaseNote' && item.objectId varsa → ilgili nota
+ *    reply olarak yazılır (POST /api/cases/:id/notes/:noteId/reply).
+ *  - Aksi halde (legacy emit veya backfill: objectId=null) → vakaya
+ *    yeni bir İç Not (Internal) olarak yazılır.
+ *  - Cevap kalıcı vaka sohbet kaydıdır; ActionItem sadece çalışma yüzeyi.
+ *
+ * Sonra: aynı ActionItem markDone({ outcome: 'replied' }) ile kapanır.
+ *
+ * Dönüş sözleşmesi:
+ *  - { reply, doneMarked: true } → her şey başarılı.
+ *  - { reply, doneMarked: false, doneFailed: true } → not yazıldı ama
+ *    markDone başarısız. UI inline uyarı gösterir, kullanıcı manuel
+ *    "Okundu" diyebilir. NOT yeniden yazılmaz.
+ *  - { error: 'no_case' } → caseId yok (defansif; UI butonu gizlemeli).
+ *  - { error: 'note_failed' } → not/reply yazımı başarısız (apiFetch
+ *    zaten toast attı). ActionItem aktif kalır.
+ */
+export async function replyToMentionActionItem({
+  item,
+  content,
+  authorName,
+}: {
+  item: ActionItem;
+  content: string;
+  authorName: string;
+}): Promise<{
+  reply?: CaseNote;
+  doneMarked?: boolean;
+  doneFailed?: boolean;
+  error?: 'no_case' | 'note_failed';
+}> {
+  if (!item.caseId) return { error: 'no_case' };
+
+  const trimmed = content.trim();
+  if (!trimmed) return { error: 'note_failed' };
+
+  const payload = {
+    content: trimmed,
+    visibility: 'Internal' as const,
+    authorName,
+  };
+
+  let reply: CaseNote | undefined;
+  if (item.objectType === 'CaseNote' && item.objectId) {
+    reply = await caseService.addReply(item.caseId, item.objectId, payload);
+  } else {
+    reply = await caseService.addNote(item.caseId, payload);
+  }
+
+  if (!reply) return { error: 'note_failed' };
+
+  const done = await actionCenterService.markDone(item.id, { outcome: 'replied' });
+  if (!done) {
+    return { reply, doneMarked: false, doneFailed: true };
+  }
+  return { reply, doneMarked: true };
+}
 
 export const ACTION_CENTER_EVENT = 'app:action-center-changed';
 

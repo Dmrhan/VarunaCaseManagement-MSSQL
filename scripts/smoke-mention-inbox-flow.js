@@ -183,16 +183,27 @@ async function run() {
     });
     const ai1 = await prisma.actionItem.findUnique({ where: { dedupKey: expectedDedup1 } });
     if (ai1) created.actionItems.push(ai1.id);
+    // Inline-reply contract: live-emit path MUST point at the parent
+    // CaseNote (objectType='CaseNote', objectId=noteId) so the
+    // Aksiyonlarım "Cevap Ver" composer can reply directly. Backfill
+    // path keeps objectId=null (legacy CaseMention shape).
+    const m1NoteIdForAssert = (await prisma.caseNote.findFirst({
+      where: { caseId: c1.id }, orderBy: { createdAt: 'desc' },
+    })).id;
     record(
-      'M1. live emit via addNote — mention ActionItem yazılır',
+      'M1. live emit via addNote — mention ActionItem yazılır + objectType/objectId',
       !!ai1 &&
         ai1.kind === 'mention' &&
         ai1.actionRequired === false &&
         ai1.priority === 50 &&
         ai1.state === 'Pending' &&
         ai1.userId === recipient1.user.id &&
+        ai1.objectType === 'CaseNote' &&
+        ai1.objectId === m1NoteIdForAssert &&
         ai1.reasonLabel?.includes('yorumunda senden bahsetti'),
-      `kind=${ai1?.kind} priority=${ai1?.priority} state=${ai1?.state} reasonLabel=${ai1?.reasonLabel ? 'set' : 'missing'}`,
+      `kind=${ai1?.kind} priority=${ai1?.priority} state=${ai1?.state} ` +
+        `objectType=${ai1?.objectType} objectId=${ai1?.objectId === m1NoteIdForAssert ? 'noteId' : ai1?.objectId} ` +
+        `reasonLabel=${ai1?.reasonLabel ? 'set' : 'missing'}`,
     );
 
     // ─── M2: Dedup idempotency ───
