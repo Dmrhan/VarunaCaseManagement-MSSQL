@@ -163,14 +163,22 @@ export const actionCenterService = {
 /**
  * Aksiyonlarım > Bildirimler — mention satırında inline cevap akışı.
  *
- * Davranış:
- *  - item.objectType === 'CaseNote' && item.objectId varsa → ilgili nota
- *    reply olarak yazılır (POST /api/cases/:id/notes/:noteId/reply).
- *  - Aksi halde (legacy emit veya backfill: objectId=null) → vakaya
- *    yeni bir İç Not (Internal) olarak yazılır.
- *  - Cevap kalıcı vaka sohbet kaydıdır; ActionItem sadece çalışma yüzeyi.
+ * Davranış (Codex P1 hotfix sonrası):
+ *  - item.objectType === 'CaseNote' && item.objectId varsa → silent
+ *    tryAddReply. Live-emit path artık her zaman top-level note id'sini
+ *    yazıyor; bu yol normalde başarılı olur.
+ *  - tryAddReply `max_depth` veya `not_found` döndürürse → kaynak satır
+ *    legacy/bozuk demektir (örn. bu fix öncesi reply-id atanmış eski
+ *    satır, ya da parent silinmiş). Vakaya yeni iç not olarak yazılır;
+ *    kullanıcıya max_depth toast'ı GÖSTERİLMEZ.
+ *  - tryAddReply `forbidden` veya `unknown` döndürürse → composer
+ *    `Cevap gönderilemedi.` inline hatası gösterir.
+ *  - objectId yoksa → doğrudan addNote.
  *
- * Sonra: aynı ActionItem markDone({ outcome: 'replied' }) ile kapanır.
+ * Cevap her durumda vakanın kalıcı sohbet kaydıdır. ActionItem sadece
+ * çalışma yüzeyi.
+ *
+ * Sonra: ActionItem markDone({ outcome: 'replied' }) ile kapanır.
  *
  * Dönüş sözleşmesi:
  *  - { reply, doneMarked: true } → her şey başarılı.
@@ -178,8 +186,8 @@ export const actionCenterService = {
  *    markDone başarısız. UI inline uyarı gösterir, kullanıcı manuel
  *    "Okundu" diyebilir. NOT yeniden yazılmaz.
  *  - { error: 'no_case' } → caseId yok (defansif; UI butonu gizlemeli).
- *  - { error: 'note_failed' } → not/reply yazımı başarısız (apiFetch
- *    zaten toast attı). ActionItem aktif kalır.
+ *  - { error: 'note_failed' } → not/reply yazımı başarısız. ActionItem
+ *    aktif kalır.
  */
 export async function replyToMentionActionItem({
   item,
@@ -208,7 +216,20 @@ export async function replyToMentionActionItem({
 
   let reply: CaseNote | undefined;
   if (item.objectType === 'CaseNote' && item.objectId) {
-    reply = await caseService.addReply(item.caseId, item.objectId, payload);
+    const r = await caseService.tryAddReply(item.caseId, item.objectId, payload);
+    if (r.ok) {
+      reply = r.note;
+    } else if (r.reason === 'max_depth' || r.reason === 'not_found') {
+      // Legacy/bad target (örn. Codex P1 hotfix'inden önce reply-id
+      // atanmış eski ActionItem, ya da parent silinmiş). Sessizce
+      // taze top-level internal note'a düş — objectId=null path'iyle
+      // aynı sonuç. Composer max_depth'i hiçbir zaman göstermez.
+      reply = await caseService.addNote(item.caseId, payload);
+    } else {
+      // forbidden / unknown / empty — composer kendi inline
+      // "Cevap gönderilemedi." mesajını gösterir.
+      return { error: 'note_failed' };
+    }
   } else {
     reply = await caseService.addNote(item.caseId, payload);
   }

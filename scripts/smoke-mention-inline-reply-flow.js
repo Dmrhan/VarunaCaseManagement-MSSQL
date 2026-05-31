@@ -496,6 +496,231 @@ async function run() {
         replyChildren === 1,
       `first.state=${first.state} secondCode=${secondCode} replyChildren=${replyChildren}`,
     );
+
+    // ─── R6: Mention in TOP-LEVEL note → objectId = top-level note id ───
+    //
+    // Codex P1 hotfix contract — the live emit must point at a thread
+    // root. For a top-level note that's the note itself.
+    const c6 = await newCase('case-r6');
+    const note6Content = `Top-level mention @[${recipient.person.name}](${recipient.user.id}).`;
+    await caseRepository.addNote(
+      c6.id,
+      { authorName: actor.user.fullName, content: note6Content, visibility: 'Internal' },
+      [companyA.id],
+      actor.user.id,
+    );
+    await waitForFireAndForget();
+    const topNote6 = await prisma.caseNote.findFirst({
+      where: { caseId: c6.id, parentNoteId: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (topNote6) created.notes.push(topNote6.id);
+    const ai6 = await prisma.actionItem.findUnique({
+      where: {
+        dedupKey: buildMentionDedupKey({
+          caseId: c6.id, noteId: topNote6.id, mentionedUserId: recipient.user.id,
+        }),
+      },
+    });
+    if (ai6) created.actionItems.push(ai6.id);
+    const objectIdIsTopLevel6 =
+      ai6?.objectType === 'CaseNote' && ai6?.objectId === topNote6.id;
+    // Inline-reply happy path posts as a reply to topNote6.
+    const r6Reply = await caseRepository.addReply(
+      c6.id,
+      ai6.objectId,
+      { authorName: recipient.user.fullName, content: 'R6 reply', visibility: 'Internal' },
+      [companyA.id],
+      recipient.user.id,
+    );
+    if (r6Reply?.id) created.notes.push(r6Reply.id);
+    const r6Done = await markDone({
+      id: ai6.id,
+      userId: recipient.user.id,
+      allowedCompanyIds: [companyA.id],
+      payload: { outcome: 'replied' },
+    });
+    record(
+      'R6. mention in TOP-LEVEL note — objectId=topNote.id; inline reply succeeds; markDone OK',
+      objectIdIsTopLevel6 &&
+        !!r6Reply && !r6Reply.error && r6Reply.parentNoteId === topNote6.id &&
+        r6Done.state === 'Done',
+      `objIdMatch=${objectIdIsTopLevel6} reply.parent=${r6Reply?.parentNoteId === topNote6.id} ` +
+        `replyErr=${r6Reply?.error ?? 'none'} doneState=${r6Done.state}`,
+    );
+
+    // ─── R7: Mention in REPLY note → objectId = parent (top-level) ───
+    //
+    // Codex P1 hotfix — when a reply note contains a mention, the
+    // ActionItem objectId MUST be the parent thread root, NOT the
+    // reply id. Otherwise the inline composer would POST to a reply
+    // and hit backend max_depth.
+    const c7 = await newCase('case-r7');
+    // Step 1: actor writes a top-level note (no mention).
+    await caseRepository.addNote(
+      c7.id,
+      {
+        authorName: actor.user.fullName,
+        content: 'R7 top-level kickoff',
+        visibility: 'Internal',
+      },
+      [companyA.id],
+      actor.user.id,
+    );
+    const topNote7 = await prisma.caseNote.findFirst({
+      where: { caseId: c7.id, parentNoteId: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (topNote7) created.notes.push(topNote7.id);
+    // Step 2: actor adds a reply that mentions recipient.
+    const replyContent7 = `Şu mention reply içinden @[${recipient.person.name}](${recipient.user.id}).`;
+    const replyNote7 = await caseRepository.addReply(
+      c7.id,
+      topNote7.id,
+      { authorName: actor.user.fullName, content: replyContent7, visibility: 'Internal' },
+      [companyA.id],
+      actor.user.id,
+    );
+    if (replyNote7?.id) created.notes.push(replyNote7.id);
+    await waitForFireAndForget();
+    // dedupKey uses the reply note id (so two distinct replies mentioning
+    // the same user dedupe per-reply, not per-parent).
+    const ai7 = await prisma.actionItem.findUnique({
+      where: {
+        dedupKey: buildMentionDedupKey({
+          caseId: c7.id, noteId: replyNote7.id, mentionedUserId: recipient.user.id,
+        }),
+      },
+    });
+    if (ai7) created.actionItems.push(ai7.id);
+    // objectId MUST be the top-level parent, NOT the reply id.
+    const objectIdIsParent7 =
+      ai7?.objectType === 'CaseNote' &&
+      ai7?.objectId === topNote7.id &&
+      ai7?.objectId !== replyNote7.id;
+    // Inline reply via that objectId → backend should accept (parent
+    // is top-level). Result attaches under topNote7, not replyNote7.
+    const r7Reply = await caseRepository.addReply(
+      c7.id,
+      ai7.objectId,
+      { authorName: recipient.user.fullName, content: 'R7 inline reply', visibility: 'Internal' },
+      [companyA.id],
+      recipient.user.id,
+    );
+    if (r7Reply?.id) created.notes.push(r7Reply.id);
+    const r7Done = await markDone({
+      id: ai7.id,
+      userId: recipient.user.id,
+      allowedCompanyIds: [companyA.id],
+      payload: { outcome: 'replied' },
+    });
+    record(
+      'R7. mention in REPLY — objectId=parentTopLevel (NOT reply id); inline reply attaches to parent thread; markDone OK',
+      objectIdIsParent7 &&
+        !!r7Reply && !r7Reply.error && r7Reply.parentNoteId === topNote7.id &&
+        r7Done.state === 'Done',
+      `objIdParent=${objectIdIsParent7} objIdVsReply=${ai7?.objectId !== replyNote7.id} ` +
+        `r7Reply.parent=${r7Reply?.parentNoteId === topNote7.id} ` +
+        `replyErr=${r7Reply?.error ?? 'none'} doneState=${r7Done.state}`,
+    );
+
+    // ─── R8: Defensive fallback — legacy objectId points at a reply ───
+    //
+    // Pre-hotfix shipped rows may carry objectId = <reply note id>.
+    // Backend correctly returns { error: 'max_depth' } when the composer
+    // posts to such an id. The client (tryAddReply → addNote fallback)
+    // MUST recover by writing a fresh top-level internal note, then
+    // markDone. UI must NOT surface max_depth.
+    //
+    // Repo-level assertion of the contract:
+    //   (a) addReply on a reply note id returns { error: 'max_depth' }
+    //   (b) addNote on the same case succeeds and is parentNoteId=null
+    //   (c) markDone on the legacy ActionItem closes it
+    const c8 = await newCase('case-r8');
+    // Build a real top-level + reply pair.
+    await caseRepository.addNote(
+      c8.id,
+      { authorName: actor.user.fullName, content: 'R8 kickoff', visibility: 'Internal' },
+      [companyA.id],
+      actor.user.id,
+    );
+    const topNote8 = await prisma.caseNote.findFirst({
+      where: { caseId: c8.id, parentNoteId: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (topNote8) created.notes.push(topNote8.id);
+    const replyNote8 = await caseRepository.addReply(
+      c8.id,
+      topNote8.id,
+      { authorName: actor.user.fullName, content: 'R8 reply (no mention)', visibility: 'Internal' },
+      [companyA.id],
+      actor.user.id,
+    );
+    if (replyNote8?.id) created.notes.push(replyNote8.id);
+    // Plant a legacy-shape ActionItem with objectId = REPLY id.
+    const legacyDedup8 = `legacy-bad-${randomUUID()}`;
+    const legacyAi8 = await prisma.actionItem.create({
+      data: {
+        kind: 'mention',
+        userId: recipient.user.id,
+        companyId: companyA.id,
+        objectType: 'CaseNote',
+        objectId: replyNote8.id, // ← BAD: points at a reply note
+        caseId: c8.id,
+        caseNumber: c8.caseNumber,
+        caseTitle: c8.title,
+        generatedBy: `user:${actor.user.id}`,
+        groupKey: `${c8.id}:mention`,
+        dedupKey: legacyDedup8,
+        priority: 50,
+        actionRequired: false,
+        reasonLabel: 'legacy bad-objectId fixture',
+        state: 'Pending',
+      },
+    });
+    created.actionItems.push(legacyAi8.id);
+
+    // (a) Direct addReply against the reply id → max_depth.
+    const badReply = await caseRepository.addReply(
+      c8.id,
+      replyNote8.id,
+      { authorName: recipient.user.fullName, content: 'should fail', visibility: 'Internal' },
+      [companyA.id],
+      recipient.user.id,
+    );
+
+    // (b) Fallback path: addNote succeeds; new note is top-level.
+    const notesBefore8 = await prisma.caseNote.count({
+      where: { caseId: c8.id, parentNoteId: null },
+    });
+    const fallbackNote = await caseRepository.addNote(
+      c8.id,
+      { authorName: recipient.user.fullName, content: 'R8 fallback note', visibility: 'Internal' },
+      [companyA.id],
+      recipient.user.id,
+    );
+    if (fallbackNote?.id) created.notes.push(fallbackNote.id);
+    const notesAfter8 = await prisma.caseNote.count({
+      where: { caseId: c8.id, parentNoteId: null },
+    });
+
+    // (c) markDone closes the legacy ActionItem.
+    const r8Done = await markDone({
+      id: legacyAi8.id,
+      userId: recipient.user.id,
+      allowedCompanyIds: [companyA.id],
+      payload: { outcome: 'replied' },
+    });
+
+    record(
+      'R8. defensive fallback — addReply→max_depth on reply-id; addNote fallback writes top-level; markDone OK',
+      badReply?.error === 'max_depth' &&
+        !!fallbackNote && !fallbackNote.error && fallbackNote.parentNoteId === null &&
+        notesAfter8 === notesBefore8 + 1 &&
+        r8Done.state === 'Done',
+      `badReply.err=${badReply?.error} fallback.parent=${fallbackNote?.parentNoteId} ` +
+        `topDelta=${notesAfter8 - notesBefore8} doneState=${r8Done.state}`,
+    );
   } catch (err) {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });

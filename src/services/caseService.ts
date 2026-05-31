@@ -1049,6 +1049,76 @@ export const caseService = {
   },
 
   /**
+   * Silent variant — used by the Aksiyonlarım inline-reply composer so
+   * we can detect `max_depth` / `not_found` and fall back to a fresh
+   * top-level note without showing the user an intermediate error toast.
+   *
+   * Returns a discriminated union; never shows a toast (the outer
+   * fallback either calls `addNote` and uses its own toast on failure,
+   * or surfaces `forbidden`/`unknown` via the composer's inline error).
+   *
+   * Mock mode mirrors `addReply` semantics (no max_depth check in mock).
+   */
+  async tryAddReply(
+    caseId: string,
+    noteId: string,
+    reply: { content: string; visibility: NoteVisibility; authorName: string },
+  ): Promise<
+    | { ok: true; note: CaseNote }
+    | { ok: false; reason: 'max_depth' | 'not_found' | 'forbidden' | 'empty' | 'unknown'; status?: number }
+  > {
+    if (USE_MOCK) {
+      const note = await this.addReply(caseId, noteId, reply);
+      return note ? { ok: true, note } : { ok: false, reason: 'unknown' };
+    }
+    const token = await getAccessToken();
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let r: Response;
+    try {
+      r = await fetch(`${API_BASE}/${caseId}/notes/${noteId}/reply`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reply),
+      });
+    } catch {
+      return { ok: false, reason: 'unknown' };
+    }
+    if (r.ok) {
+      let note: CaseNote;
+      try {
+        note = (await r.json()) as CaseNote;
+      } catch {
+        return { ok: false, reason: 'unknown', status: r.status };
+      }
+      invalidateCaseDetail(caseId);
+      return { ok: true, note };
+    }
+    // Parse structured error so the caller can decide between fallback
+    // (max_depth / not_found) and hard failure (forbidden / unknown).
+    let bodyError: string | undefined;
+    try {
+      const body = await r.json();
+      bodyError = body?.error;
+    } catch {
+      // ignore
+    }
+    if (r.status === 401) {
+      window.dispatchEvent(new CustomEvent('app:unauthenticated'));
+      return { ok: false, reason: 'forbidden', status: r.status };
+    }
+    if (r.status === 403) return { ok: false, reason: 'forbidden', status: r.status };
+    if (r.status === 404) return { ok: false, reason: 'not_found', status: r.status };
+    if (r.status === 400 && bodyError === 'max_depth') {
+      return { ok: false, reason: 'max_depth', status: r.status };
+    }
+    if (r.status === 400 && bodyError === 'empty') {
+      return { ok: false, reason: 'empty', status: r.status };
+    }
+    return { ok: false, reason: 'unknown', status: r.status };
+  },
+
+  /**
    * Bir nota emoji reaksiyonu toggle eder.
    * Backend ayni (note, user, emoji) varsa kaldirir, yoksa ekler.
    * Mock'ta currentUserId bilinmedigi icin reaction'lar atlanir.
