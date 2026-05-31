@@ -1,28 +1,29 @@
 #!/usr/bin/env node
 /**
- * GNF smoke data cleanup — DRY RUN by default.
+ * GNF smoke data cleanup — DRY RUN default; --execute opt-in.
  *
  * `scripts/smoke-generic-notification-flow.js` ile başka prefix'li smoke
- * dosyaları (mention-inbox, inline-reply, case-note-safety) interrupt
- * edildiğinde finally{} cleanup'ı çalışmaz. Bu script:
+ * dosyaları interrupt edildiğinde finally{} cleanup'ı çalışmaz. Bu
+ * script:
  *
  *   • Smoke prefix'li (gnf_ default) tüm leaked entity'leri tarar
  *   • DB kimliğini ve prod-likeness'i raporlar
  *   • Tablo başına sayım + ilk birkaç örnek satır gösterir
- *   • Phase 2'de yapılacak DELETE sırasını yazdırır
- *   • Hiçbir şey silmez
+ *   • --execute YOK ise: yapılacak DELETE sırasını yazdırır, silmez
+ *   • --execute VAR ise: reverse-FK sırasında per-table transactional
+ *     delete uygular, before/after sayım + final doğrulama yapar
  *
  * Flags:
- *   --dry-run          (default; her durumda dry-run davranır)
+ *   --dry-run          (default davranış; flag verilmeden de dry-run)
+ *   --execute          gerçekten sil. Prod-like env'de --confirm-smoke-db
+ *                      ZORUNLU; aksi halde refüze edilir.
  *   --prefix=gnf_      smoke prefix (default gnf_; mif_, mir_, cns_ de
  *                      kullanılabilir)
  *   --confirm-smoke-db prod-like DB güvenlik kontrolünü açıkça onayla
  *                      (NODE_ENV=production veya VERCEL=1 ise yine red)
  *
- * Phase 2 (deletion): bu script bilinçli olarak --execute desteklemez.
- * Silme açık onay sonrası ayrı PR'da eklenecek.
- *
  * Run: node --env-file=.env scripts/cleanup-gnf-smoke-data.js
+ *      node --env-file=.env scripts/cleanup-gnf-smoke-data.js --execute
  */
 
 import { prisma } from '../server/db/client.js';
@@ -31,6 +32,7 @@ const args = process.argv.slice(2);
 const PREFIX =
   args.find((a) => a.startsWith('--prefix='))?.slice('--prefix='.length) ?? 'gnf_';
 const CONFIRM_SMOKE_DB = args.includes('--confirm-smoke-db');
+const EXECUTE = args.includes('--execute');
 const PRINT_SAMPLE = 5;
 
 function maskDbUrl(url) {
@@ -59,13 +61,15 @@ function fmtRow(obj, fields) {
   return fields.map((f) => `${f}=${JSON.stringify(obj[f])}`).join(' ');
 }
 
-async function discover() {
-  console.log(`🔍 GNF smoke data — DRY RUN inventory (prefix="${PREFIX}")`);
-  console.log(`Connected DB: ${maskDbUrl(process.env.DATABASE_URL)}`);
-  console.log(`NODE_ENV    : ${process.env.NODE_ENV ?? '<unset>'}`);
-  console.log(`VERCEL      : ${process.env.VERCEL ?? '<unset>'}`);
+async function discover({ phaseLabel = 'DRY RUN inventory', printBanner = true } = {}) {
+  if (printBanner) {
+    console.log(`🔍 GNF smoke data — ${phaseLabel} (prefix="${PREFIX}")`);
+    console.log(`Connected DB: ${maskDbUrl(process.env.DATABASE_URL)}`);
+    console.log(`NODE_ENV    : ${process.env.NODE_ENV ?? '<unset>'}`);
+    console.log(`VERCEL      : ${process.env.VERCEL ?? '<unset>'}`);
+  }
 
-  // ── Safety: refuse production-like envs ────────────────────────────
+  // ── Safety: refuse production-like envs (also gates --execute) ─────
   const prodMarkers = looksProdLike();
   if (prodMarkers.length > 0) {
     console.log('\n⛔  Production-like environment detected:');
@@ -74,9 +78,9 @@ async function discover() {
       console.log('\nRefusing to inventory without --confirm-smoke-db.');
       console.log('Re-run with --confirm-smoke-db ONLY if this is the correct DB.');
       process.exitCode = 2;
-      return;
+      return null;
     }
-    console.log('\n--confirm-smoke-db passed; proceeding with READ-ONLY inventory.');
+    console.log('\n--confirm-smoke-db passed; proceeding.');
   }
 
   // Smoke prefix patterns — every smoke file uses `${PREFIX}-{label}` and
@@ -248,38 +252,169 @@ async function discover() {
     console.log(`✓ No leaked "${PREFIX}" data found. DB is clean for this prefix.`);
   } else {
     console.log(`Found ${totalAffected} leaked rows across ${plan.length} tables.`);
-    console.log('Phase 2 would delete in the order above (reverse FK order).');
-    console.log('No data was deleted in this phase.');
+    if (!EXECUTE) {
+      console.log('Phase 2 would delete in the order above (reverse FK order).');
+      console.log('No data was deleted in this phase. Re-run with --execute to delete.');
+    }
   }
-  // Echo discovered ids in JSON form for follow-up scripting convenience.
-  if (totalAffected > 0) {
-    header('Affected ID sets (for Phase 2 script handoff)');
-    console.log(
-      JSON.stringify(
-        {
-          teamIds,
-          personIds,
-          userIds,
-          caseIds,
-          userCompanyIds: userCompanies.map((uc) => uc.id),
-          actionItemIds: actionItems.map((a) => a.id),
-          notificationIds: notifications.map((n) => n.id),
-          watcherIds: watchers.map((w) => w.id),
-          noteIds: notes.map((n) => n.id),
-          mentionIds: mentions.map((m) => m.id),
-        },
-        null,
-        2,
-      ),
+
+  return {
+    teamIds,
+    personIds,
+    userIds,
+    caseIds,
+    userCompanyIds: userCompanies.map((uc) => uc.id),
+    actionItemIds: actionItems.map((a) => a.id),
+    notificationIds: notifications.map((n) => n.id),
+    watcherIds: watchers.map((w) => w.id),
+    noteIds: notes.map((n) => n.id),
+    mentionIds: mentions.map((m) => m.id),
+    activitiesCount: activities,
+    totalAffected,
+  };
+}
+
+/**
+ * Per-table transactional delete in reverse-FK order. Each operation is
+ * its own transaction so a single-table failure does not leave the
+ * whole cleanup half-applied AND so the partial-progress count is
+ * surfaceable in the failure summary. Returns { perTable, totalDeleted,
+ * failures }.
+ */
+async function executeDelete(inv) {
+  const ops = [];
+
+  async function step(table, fn) {
+    try {
+      const result = await prisma.$transaction(async (tx) => fn(tx));
+      const count = result?.count ?? 0;
+      ops.push({ table, ok: true, count });
+      console.log(`   ✓ ${table.padEnd(28, ' ')} ${String(count).padStart(5, ' ')} rows`);
+    } catch (err) {
+      ops.push({ table, ok: false, error: err?.message ?? String(err) });
+      console.error(`   ✗ ${table.padEnd(28, ' ')} FAILED — ${err?.message ?? err}`);
+    }
+  }
+
+  header('EXECUTE — per-table transactional deletes');
+
+  if (inv.actionItemIds.length || inv.caseIds.length) {
+    await step('ActionItem (by id)', (tx) =>
+      tx.actionItem.deleteMany({ where: { id: { in: inv.actionItemIds } } }),
+    );
+    if (inv.caseIds.length) {
+      await step('ActionItem (by caseId)', (tx) =>
+        tx.actionItem.deleteMany({ where: { caseId: { in: inv.caseIds } } }),
+      );
+    }
+  }
+  if (inv.caseIds.length) {
+    await step('CaseNotification', (tx) =>
+      tx.caseNotification.deleteMany({ where: { caseId: { in: inv.caseIds } } }),
+    );
+    await step('CaseMention', (tx) =>
+      tx.caseMention.deleteMany({ where: { caseId: { in: inv.caseIds } } }),
+    );
+    await step('CaseWatcher', (tx) =>
+      tx.caseWatcher.deleteMany({ where: { caseId: { in: inv.caseIds } } }),
+    );
+    await step('CaseActivity', (tx) =>
+      tx.caseActivity.deleteMany({ where: { caseId: { in: inv.caseIds } } }),
+    );
+    // CaseNote: delete replies first (parentNoteId IS NOT NULL) so the
+    // parent's onDelete:SetNull cascade has nothing to mutate. For our
+    // leaked dataset replies are 0, but the two-step keeps the script
+    // safe for future leaks that include thread replies.
+    await step('CaseNote (replies)', (tx) =>
+      tx.caseNote.deleteMany({
+        where: { caseId: { in: inv.caseIds }, parentNoteId: { not: null } },
+      }),
+    );
+    await step('CaseNote (top-level)', (tx) =>
+      tx.caseNote.deleteMany({
+        where: { caseId: { in: inv.caseIds }, parentNoteId: null },
+      }),
+    );
+    await step('Case', (tx) =>
+      tx.case.deleteMany({ where: { id: { in: inv.caseIds } } }),
     );
   }
+  if (inv.userCompanyIds.length) {
+    await step('UserCompany', (tx) =>
+      tx.userCompany.deleteMany({ where: { id: { in: inv.userCompanyIds } } }),
+    );
+  }
+  if (inv.userIds.length) {
+    await step('User', (tx) =>
+      tx.user.deleteMany({ where: { id: { in: inv.userIds } } }),
+    );
+  }
+  if (inv.personIds.length) {
+    await step('Person', (tx) =>
+      tx.person.deleteMany({ where: { id: { in: inv.personIds } } }),
+    );
+  }
+  if (inv.teamIds.length) {
+    await step('Team', (tx) =>
+      tx.team.deleteMany({ where: { id: { in: inv.teamIds } } }),
+    );
+  }
+
+  const totalDeleted = ops.reduce((acc, o) => acc + (o.ok ? o.count : 0), 0);
+  const failures = ops.filter((o) => !o.ok);
+  return { perTable: ops, totalDeleted, failures };
 }
 
 async function main() {
   try {
-    await discover();
+    const before = await discover();
+    if (before === null) return; // prod guard refused
+
+    if (!EXECUTE) {
+      return;
+    }
+
+    if (before.totalAffected === 0) {
+      header('EXECUTE');
+      console.log('Nothing to delete — DB already clean.');
+      return;
+    }
+
+    // Re-check production guard before destructive op (defense in depth;
+    // discover() already checked but env can race in CI orchestration).
+    const prodMarkers = looksProdLike();
+    if (prodMarkers.length > 0 && !CONFIRM_SMOKE_DB) {
+      console.error('\n⛔  Production-like env at execute-time — refusing to delete.');
+      process.exitCode = 2;
+      return;
+    }
+
+    const result = await executeDelete(before);
+
+    header('Post-delete verification');
+    console.log(`Deleted ${result.totalDeleted} rows across ${result.perTable.length} steps.`);
+    if (result.failures.length > 0) {
+      console.error(`⚠️  ${result.failures.length} step(s) FAILED:`);
+      result.failures.forEach((f) => console.error(`     - ${f.table}: ${f.error}`));
+    }
+
+    // Re-run discovery; quiet header so the second pass is visibly the
+    // verification, not a fresh inventory.
+    const after = await discover({ phaseLabel: 'POST-EXECUTE verification', printBanner: false });
+    if (!after) return; // shouldn't happen; prod guard would have fired earlier
+
+    header('Final report');
+    console.log(`Before  : ${before.totalAffected} rows`);
+    console.log(`Deleted : ${result.totalDeleted} rows`);
+    console.log(`After   : ${after.totalAffected} rows`);
+    if (after.totalAffected === 0) {
+      console.log(`\n✅ Clean — no "${PREFIX}" rows remaining.`);
+    } else {
+      console.error(`\n⚠️  ${after.totalAffected} rows still match "${PREFIX}". Investigate before re-running.`);
+      process.exitCode = 1;
+    }
   } catch (err) {
-    console.error('\nDiscovery failed:', err);
+    console.error('\nScript failed:', err);
     process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
