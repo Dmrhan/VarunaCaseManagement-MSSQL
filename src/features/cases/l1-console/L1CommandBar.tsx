@@ -11,12 +11,16 @@
  *   - Status / Priority / SLA / Case-type chips
  *   - Assigned team + person meta line
  *
- * Disabled placeholders (Phase 2B+):
+ * Wired in Phase 2G:
+ *   - Devret           — TransferModal hoisted by L1CaseResolutionConsole;
+ *                        AI suggest + reason chips reused as-is from the
+ *                        existing modal
+ *
+ * Disabled placeholders (Phase 2H+):
  *   - Kaydet           — inline drafts not yet ported; no state to save
  *   - Çağrı Başlat     — call session state + ActiveCallBanner not ported
  *   - Durum Raporu     — StatusReportModal lives inside CaseDetailPage
  *                        body (~lines 2481-2620); needs extraction
- *   - Devret           — TransferModal hoist + AI suggest wiring TBD
  *   - Ertele           — SnoozeModal hoist TBD
  *   - More menu        — Jira / Yazdır / İptal — same modal hoist gap
  *
@@ -50,10 +54,14 @@ export function L1CommandBar({
   item,
   onBack,
   onShowCustomer,
+  onTransferClick,
 }: {
   item: Case;
   onBack: () => void;
   onShowCustomer?: (accountId: string) => void;
+  /** Devret aksiyonu — parent TransferModal'ı açar. Undefined ise
+   *  buton disabled placeholder olarak kalır (Phase 2A davranışı). */
+  onTransferClick?: () => void;
 }) {
   const isSnoozeActive = !!item.slaPausedAt;
   return (
@@ -170,8 +178,13 @@ export function L1CommandBar({
             variant="outline"
             size="sm"
             leftIcon={<UserPlus size={12} />}
-            disabled
-            title={`Devret — ${PLACEHOLDER_TITLE} (TransferModal + AI suggest hoist edilecek)`}
+            onClick={onTransferClick}
+            disabled={!onTransferClick}
+            title={
+              onTransferClick
+                ? 'Vakayı başka bir takıma/kişiye devret'
+                : `Devret — ${PLACEHOLDER_TITLE}`
+            }
           >
             Devret
           </Button>
