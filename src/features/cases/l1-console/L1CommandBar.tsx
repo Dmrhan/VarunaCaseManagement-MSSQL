@@ -1,54 +1,84 @@
 /**
- * L1CommandBar — Phase 2A.
+ * L1CommandBar — Phase 2H Layout Hygiene.
  *
- * Top command bar for the L1 Case Resolution Console. Visual parity
- * with CaseDetailPage's header so an operator switching between V1
- * and V2 has zero cognitive load.
+ * Slim 2-row operational header. Previous (Phase 2A-2G) version put
+ * breadcrumb + title + chip row + Takım/Sorumlu meta + 6 disabled
+ * top-level buttons in ~110px. The product shape review found the
+ * disabled buttons created false affordances and that triplicated
+ * Status/Priority/SLA rendering invited clone drift with
+ * CaseDetailPage.
  *
- * Active in Phase 2A:
- *   - Back navigation (wired to parent's `onBack`)
- *   - Case number + title + customer chip
- *   - Status / Priority / SLA / Case-type chips
- *   - Assigned team + person meta line
+ * New shape (~64-72px total):
  *
- * Wired in Phase 2G:
- *   - Devret           — TransferModal hoisted by L1CaseResolutionConsole;
- *                        AI suggest + reason chips reused as-is from the
- *                        existing modal
+ *   Row 1 — identity + primary action
+ *     [<] Vakalar > {caseNumber} — {accountName}   {title trunc}      [Devret][⋮]
  *
- * Disabled placeholders (Phase 2H+):
- *   - Kaydet           — inline drafts not yet ported; no state to save
- *   - Çağrı Başlat     — call session state + ActiveCallBanner not ported
- *   - Durum Raporu     — StatusReportModal lives inside CaseDetailPage
- *                        body (~lines 2481-2620); needs extraction
- *   - Ertele           — SnoozeModal hoist TBD
- *   - More menu        — Jira / Yazdır / İptal — same modal hoist gap
+ *   Row 2 — operational chips + assignment
+ *     <CaseHeaderChips> · Sorumlu: {name}
  *
- * Each disabled button keeps its label + icon visible so V2 testers
- * can verify the action surface is complete; `title` attribute
- * explains the deferred wiring.
+ * Active in this phase:
+ *   - Back navigation (onBack)
+ *   - Compact breadcrumb (accountName clickable when onShowCustomer set)
+ *   - Title (single line, truncated)
+ *   - Devret (top-level when onTransferClick provided; Phase 2G wiring)
+ *   - Overflow kebab (Kaydet / Çağrı Başlat / Durum Raporu / Ertele
+ *     as DISABLED menu items with deferred-phase tooltips — no more
+ *     misleading top-level affordances)
+ *
+ * Phase 2I+ migrations expected from the kebab:
+ *   - Kaydet           — only when a real batched-edit surface exists
+ *                        (currently L1 saves optimistically per field)
+ *   - Çağrı Başlat     — better as customer-chip context action, not
+ *                        a header button
+ *   - Durum Raporu     — StatusReportModal extraction
+ *   - Ertele           — SnoozeModal hoist
  */
 
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  Building2,
   ChevronRight,
-  Clock,
   Clock3,
   MoreHorizontal,
   Phone,
   Save,
-  ShieldAlert,
   Sparkles,
   UserPlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { StatusPill, PriorityBadge, CaseTypeBadge } from '@/components/ui/StatusPill';
-import { formatRelative } from '@/lib/format';
 import type { Case } from '../types';
+import { CaseHeaderChips } from '../components/CaseHeaderChips';
 
-const PLACEHOLDER_TITLE = 'Sonraki L1 fazında bağlanacak (Phase 2B+).';
+const PLACEHOLDER_TITLE = 'Sonraki L1 fazında bağlanacak (Phase 2I+).';
+
+interface KebabItem {
+  label: string;
+  icon: React.ReactNode;
+  title: string;
+}
+
+const KEBAB_ITEMS: KebabItem[] = [
+  {
+    label: 'Kaydet',
+    icon: <Save size={12} />,
+    title: `Kaydet — ${PLACEHOLDER_TITLE} (L1 zaten alan-bazında optimistic kaydeder; batched-edit surface oluşunca top-level olur)`,
+  },
+  {
+    label: 'Çağrı Başlat',
+    icon: <Phone size={12} />,
+    title: `Çağrı Başlat — ${PLACEHOLDER_TITLE} (müşteri chip context'inde ActiveCallBanner pattern'iyle gelecek)`,
+  },
+  {
+    label: 'Durum Raporu',
+    icon: <Sparkles size={12} />,
+    title: `Durum Raporu — ${PLACEHOLDER_TITLE} (StatusReportModal CaseDetailPage'den ayıklanacak)`,
+  },
+  {
+    label: 'Ertele',
+    icon: <Clock3 size={12} />,
+    title: `Ertele — ${PLACEHOLDER_TITLE} (SnoozeModal hoist edilecek)`,
+  },
+];
 
 export function L1CommandBar({
   item,
@@ -60,120 +90,74 @@ export function L1CommandBar({
   onBack: () => void;
   onShowCustomer?: (accountId: string) => void;
   /** Devret aksiyonu — parent TransferModal'ı açar. Undefined ise
-   *  buton disabled placeholder olarak kalır (Phase 2A davranışı). */
+   *  buton disabled olarak kalır. */
   onTransferClick?: () => void;
 }) {
-  const isSnoozeActive = !!item.slaPausedAt;
+  const [kebabOpen, setKebabOpen] = useState(false);
+  const kebabRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!kebabOpen) return;
+    function onClick(e: MouseEvent) {
+      if (!kebabRef.current?.contains(e.target as Node)) {
+        setKebabOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [kebabOpen]);
+
   return (
     <header className="border-b border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
-      <div className="flex flex-wrap items-start gap-4 px-6 py-3">
-        {/* Back */}
+      {/* ── Row 1 — identity + primary action ──────────────────────── */}
+      <div className="flex items-center gap-3 px-6 py-2">
         <button
           type="button"
           onClick={onBack}
-          className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-bg"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-bg"
           title="Vakalar listesine dön"
           aria-label="Geri"
         >
           <ArrowLeft size={16} />
         </button>
 
-        {/* Identity + chips */}
         <div className="min-w-0 flex-1">
-          <nav className="flex flex-wrap items-center gap-1 text-xs text-slate-500 dark:text-ndark-muted">
-            <button type="button" onClick={onBack} className="hover:text-brand-700 hover:underline">
+          {/* Compact breadcrumb */}
+          <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+            <button
+              type="button"
+              onClick={onBack}
+              className="hover:text-brand-700 hover:underline"
+            >
               Vakalar
             </button>
-            <ChevronRight size={11} className="text-slate-400" />
+            <ChevronRight size={10} className="text-slate-400" />
             <span className="font-mono text-slate-700 dark:text-ndark-text">{item.caseNumber}</span>
             {item.accountName && (
               <>
                 <span className="text-slate-400">—</span>
-                <span className="truncate text-slate-600 dark:text-ndark-muted">{item.accountName}</span>
+                {item.accountId && onShowCustomer ? (
+                  <button
+                    type="button"
+                    onClick={() => onShowCustomer(item.accountId)}
+                    className="truncate text-slate-600 hover:text-brand-700 hover:underline dark:text-ndark-muted"
+                    title="Müşteri kartını aç"
+                  >
+                    {item.accountName}
+                  </button>
+                ) : (
+                  <span className="truncate text-slate-600 dark:text-ndark-muted">{item.accountName}</span>
+                )}
               </>
             )}
-          </nav>
-          <h1 className="mt-0.5 truncate text-lg font-semibold text-slate-900 dark:text-ndark-text">
+          </div>
+          <h1 className="truncate text-sm font-semibold leading-tight text-slate-900 dark:text-ndark-text">
             {item.title}
           </h1>
-
-          {/* Operational chips */}
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            {item.accountId && onShowCustomer && (
-              <button
-                type="button"
-                onClick={() => onShowCustomer(item.accountId)}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
-                title="Müşteri kartını aç"
-              >
-                <Building2 size={11} />
-                {item.accountName}
-              </button>
-            )}
-            <StatusPill status={item.status} />
-            <PriorityBadge priority={item.priority} />
-            {item.slaViolation && (
-              <Badge tint="rose" icon={<ShieldAlert size={12} />}>
-                SLA İhlali
-              </Badge>
-            )}
-            {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
-            {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-              <Badge tint="slate" icon={<Clock size={12} />}>
-                Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-              </Badge>
-            )}
-            <CaseTypeBadge type={item.caseType} />
-          </div>
-
-          {/* Assignment meta line — read-only display */}
-          {(item.assignedTeamName || item.assignedPersonName) && (
-            <div className="mt-1 text-[11.5px] text-slate-500 dark:text-ndark-muted">
-              {item.assignedTeamName && (
-                <span>
-                  Takım: <span className="text-slate-700 dark:text-ndark-text">{item.assignedTeamName}</span>
-                </span>
-              )}
-              {item.assignedTeamName && item.assignedPersonName && (
-                <span className="mx-2 text-slate-400">·</span>
-              )}
-              {item.assignedPersonName && (
-                <span>
-                  Sorumlu: <span className="text-slate-700 dark:text-ndark-text">{item.assignedPersonName}</span>
-                </span>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* Actions — disabled placeholders in Phase 2A. */}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Save size={12} />}
-            disabled
-            title={`Kaydet — ${PLACEHOLDER_TITLE} (draft state Workbench fazıyla gelecek)`}
-          >
-            Kaydet
-          </Button>
-          <Button
-            size="sm"
-            leftIcon={<Phone size={12} />}
-            disabled
-            title={`Çağrı Başlat — ${PLACEHOLDER_TITLE} (ActiveCallBanner + modal hoist edilecek)`}
-          >
-            Çağrı Başlat
-          </Button>
-          <button
-            type="button"
-            disabled
-            title={`Durum Raporu — ${PLACEHOLDER_TITLE} (StatusReportModal CaseDetailPage'den ayıklanacak)`}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-300 bg-white px-3 text-xs font-medium text-violet-500 opacity-60 dark:border-violet-900/60 dark:bg-ndark-card dark:text-violet-400"
-          >
-            <Sparkles size={12} />
-            Durum Raporu
-          </button>
+        {/* Primary action + overflow kebab */}
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -188,27 +172,68 @@ export function L1CommandBar({
           >
             Devret
           </Button>
-          {!isSnoozeActive && (
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Clock3 size={12} />}
-              disabled
-              title={`Ertele — ${PLACEHOLDER_TITLE} (SnoozeModal hoist edilecek)`}
+
+          <div ref={kebabRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setKebabOpen((v) => !v)}
+              title="Daha fazla aksiyon"
+              aria-label="Daha fazla aksiyon"
+              aria-expanded={kebabOpen}
+              aria-haspopup="menu"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:bg-ndark-bg"
             >
-              Ertele
-            </Button>
-          )}
-          <button
-            type="button"
-            disabled
-            title={`Daha fazla aksiyon — ${PLACEHOLDER_TITLE}`}
-            aria-label="Daha fazla aksiyon"
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-400 opacity-60 dark:border-ndark-border dark:bg-ndark-card"
-          >
-            <MoreHorizontal size={14} />
-          </button>
+              <MoreHorizontal size={14} />
+            </button>
+            {kebabOpen && (
+              <ul
+                role="menu"
+                className="absolute right-0 top-full z-20 mt-1 min-w-[220px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg dark:border-ndark-border dark:bg-ndark-card"
+              >
+                {KEBAB_ITEMS.map((kbi) => (
+                  <li key={kbi.label} role="menuitem">
+                    <button
+                      type="button"
+                      disabled
+                      title={kbi.title}
+                      className="flex w-full cursor-not-allowed items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-400 dark:text-ndark-muted"
+                    >
+                      <span className="shrink-0">{kbi.icon}</span>
+                      <span className="flex-1 truncate">{kbi.label}</span>
+                      <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-300 dark:text-ndark-muted/60">
+                        Yakında
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* ── Row 2 — chips + assignment ─────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 px-6 py-1.5 text-xs dark:border-ndark-border/60">
+        <CaseHeaderChips item={item} />
+        {(item.assignedTeamName || item.assignedPersonName) && (
+          <span className="ml-auto text-[11px] text-slate-500 dark:text-ndark-muted">
+            {item.assignedTeamName && (
+              <>
+                Takım:{' '}
+                <span className="text-slate-700 dark:text-ndark-text">{item.assignedTeamName}</span>
+              </>
+            )}
+            {item.assignedTeamName && item.assignedPersonName && (
+              <span className="mx-1.5 text-slate-400">·</span>
+            )}
+            {item.assignedPersonName && (
+              <>
+                Sorumlu:{' '}
+                <span className="text-slate-700 dark:text-ndark-text">{item.assignedPersonName}</span>
+              </>
+            )}
+          </span>
+        )}
       </div>
     </header>
   );

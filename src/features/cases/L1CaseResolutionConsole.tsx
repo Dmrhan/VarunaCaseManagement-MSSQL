@@ -111,7 +111,13 @@ export function L1CaseResolutionConsole({
           setTransferOpen(true);
         }}
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {/* Phase 2H Layout Hygiene — outer grid clips; each column owns
+          its own scroll. Previously this used `overflow-auto` and
+          shared one scroll container for Workbench + DecisionRail,
+          which pushed the right rail (RUNA AI + readiness checklist)
+          out of view as soon as the Notes thread grew. Now the rail
+          stays put while the Workbench scrolls independently. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <L1WorkbenchPanel item={item} onItemUpdate={setItem} />
         <L1DecisionRail item={item} />
       </div>
