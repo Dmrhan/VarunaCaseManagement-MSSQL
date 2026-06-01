@@ -1,23 +1,30 @@
 /**
- * L1WorkbenchPanel — Phase 2D.
+ * L1WorkbenchPanel — Phase 2F.
  *
  * Operational workbench for the L1 Case Resolution Console. Sections
- * 1/2/4/5 remain read-only previews of existing case fields. Section
- * 3 ("Çalışma") now mounts the full CaseNotesSection reused from
- * CaseDetailPage — composer, replies, mentions, reactions,
- * delete-own, voice dictation, duplicate-safe submit — all backed by
- * the same caseService calls. No second notes implementation.
+ * are now a mix of read-only previews (Şu an / Sorun / Bağlantılar)
+ * and fully wired reuses (Statü ve Kapanış / Çalışma / Kanıt). Every
+ * mutation flows through the same backend endpoints CaseDetailPage
+ * already uses — no second state machine, no second notes/files
+ * system.
  *
- * Sections:
+ * Sections (top → bottom):
  *   1. Şu an              — current operational state snapshot
- *   2. Sorun              — problem definition
- *   3. Çalışma            — full Notes experience (composer + thread)
- *   4. Kanıt / Dosyalar   — latest files preview (Phase 2D-Files TBD)
- *   5. Bağlantılar / Çağrı — linked cases + call log compact preview
+ *   2. Statü ve Kapanış   — StatusTransitionPanel (reused) — state
+ *                            machine + required fields + AI draft
+ *   3. Sorun              — problem definition (read-only)
+ *   4. Çalışma            — full Notes experience (composer + thread)
+ *   5. Kanıt / Dosyalar   — full Files experience (upload + list)
+ *   6. Bağlantılar / Çağrı — linked cases + call log compact preview
+ *
+ * After a successful status transition the panel calls `onItemUpdate`
+ * which flows up to L1CaseResolutionConsole → setItem; CommandBar +
+ * DecisionRail re-render with the new status automatically.
  */
 
 import {
   Activity,
+  CheckCircle2,
   Clock,
   FileText,
   Link2,
@@ -30,6 +37,7 @@ import { Badge } from '@/components/ui/Badge';
 import { StatusPill, PriorityBadge } from '@/components/ui/StatusPill';
 import { formatRelative, formatDateTime } from '@/lib/format';
 import type { Case } from '../types';
+import { StatusTransitionPanel } from '../StatusTransitionPanel';
 import { CaseNotesSection } from '../components/CaseNotes';
 import { FilesTab } from '../components/CaseFiles';
 
@@ -157,7 +165,12 @@ export function L1WorkbenchPanel({
         </div>
       </Section>
 
-      {/* ─── 2. Sorun ─── */}
+      {/* ─── 2. Statü ve Kapanış — StatusTransitionPanel reused ─── */}
+      <Section title="Statü ve Kapanış" icon={<CheckCircle2 size={13} />}>
+        <StatusTransitionPanel item={item} onApplied={onItemUpdate} />
+      </Section>
+
+      {/* ─── 3. Sorun ─── */}
       <Section title="Sorun" icon={<Sparkles size={13} />}>
         {item.description ? (
           <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700 dark:text-ndark-text">
