@@ -101,8 +101,12 @@ export function L1CaseResolutionConsole({
         caseItem={item}
         onClose={() => setTransferOpen(false)}
         onTransferred={(updated) => {
+          // Codex P2 fix — TransferModal calls onTransferred BEFORE it
+          // fetches the transfer-brief and switches to its success
+          // panel. Closing here would skip the brief UI; mirror
+          // CaseDetailPage and only mutate state. Modal dismisses via
+          // its own success Close button → onClose.
           setItem(updated);
-          setTransferOpen(false);
         }}
       />
     </div>
