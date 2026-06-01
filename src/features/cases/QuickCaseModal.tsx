@@ -266,6 +266,25 @@ export function QuickCaseModal({
   const [transferReasonCode, setTransferReasonCode] = useState<TransferReasonCode | ''>('');
   const [transferReasonText, setTransferReasonText] = useState('');
 
+  // Resolve-on-create (L1 success path) — mutually exclusive with transfer.
+  // Same backend contract as StatusTransitionPanel: addNote (internal) +
+  // transitionStatus(item.id, 'Çözüldü', { resolutionNote }). Existing
+  // resolution-approval policy is honored — if backend returns approval-
+  // pending state the case still gets created, the note is still saved,
+  // and the user lands on the case so the approval can be submitted from
+  // Case Detail / L1 Console.
+  const [resolveEnabled, setResolveEnabled] = useState(false);
+  const [resolveExpanded, setResolveExpanded] = useState(false);
+  const [resolveControls, setResolveControls] = useState('');
+  const [resolveNote, setResolveNote] = useState('');
+  const RESOLVE_OUTCOMES = [
+    'Çözüldü',
+    'Geçici çözüm uygulandı',
+    'Müşteri bilgilendirildi',
+  ] as const;
+  type ResolveOutcome = (typeof RESOLVE_OUTCOMES)[number];
+  const [resolveOutcome, setResolveOutcome] = useState<ResolveOutcome>('Çözüldü');
+
   // Team-filtered persons for the transfer picker
   const transferTeamsForCompany = useMemo(
     () => teams.filter((t) => t.companyId === form.companyId && t.isActive),
@@ -299,6 +318,11 @@ export function QuickCaseModal({
       setTransferToPersonId('');
       setTransferReasonCode('');
       setTransferReasonText('');
+      setResolveEnabled(false);
+      setResolveExpanded(false);
+      setResolveControls('');
+      setResolveNote('');
+      setResolveOutcome('Çözüldü');
       setPhase('idle');
       setGlobalError(null);
       return;
@@ -553,7 +577,11 @@ export function QuickCaseModal({
     (form.customerless || !!form.accountId) &&
     (!projectsRequired || !form.accountId || !!form.accountProjectId) &&
     (form.origin !== 'Diğer' || !!form.originDescription.trim()) &&
-    (!transferEnabled || (!!transferToTeamId && reasonOk));
+    (!transferEnabled || (!!transferToTeamId && reasonOk)) &&
+    (!resolveEnabled || !!resolveNote.trim()) &&
+    // Devret ve Çözümle oluştur mutually exclusive (UI zaten gizler;
+    // submit guard belt-and-braces)
+    !(transferEnabled && resolveEnabled);
 
   // ── Submit orchestration ─────────────────────────────────────────
   async function handleSubmit() {
@@ -635,10 +663,53 @@ export function QuickCaseModal({
       }
     }
 
-    // ── Transfer (post-create) ────────────────────────────────────────
+    // ── Resolve (post-create) — addNote internal + transitionStatus(Çözüldü)
+    // Same backend contract as StatusTransitionPanel. If existing
+    // resolution-approval policy blocks the direct close, the
+    // transition endpoint returns undefined; we surface a warning
+    // and the user opens the case to complete approval submission.
+    let resolveOk = false;
+    let resolveFail = false;
+    let resolveApprovalPending = false;
+    if (resolveEnabled && resolveNote.trim()) {
+      setPhase('transferring'); // reuse phase chip for "post-create work"
+      const controlsTrimmed = resolveControls.trim();
+      const noteTrimmed = resolveNote.trim();
+      const noteContent =
+        `Sonuç: ${resolveOutcome}\n\nÇözüm notu:\n${noteTrimmed}` +
+        (controlsTrimmed ? `\n\nMüşteriye yaptırılan kontroller:\n${controlsTrimmed}` : '');
+      // Step 1: internal note — keeps the historical record even if the
+      // close transition is blocked downstream.
+      await caseService.addNote(created.id, {
+        content: noteContent,
+        visibility: 'Internal',
+        authorName: 'Hızlı Vaka',
+      });
+      // Step 2: transition to Çözüldü using the same endpoint
+      // StatusTransitionPanel calls. resolutionNote is the same field
+      // the panel uses.
+      const updated = await caseService.transitionStatus(created.id, 'Çözüldü', {
+        resolutionNote: noteTrimmed,
+      });
+      if (updated) {
+        if (updated.status === 'Çözüldü') {
+          resolveOk = true;
+          created = updated;
+        } else {
+          // Backend accepted the request but approval policy intercepted —
+          // case is in approval_pending state; reflects updated.approvalState.
+          resolveApprovalPending = true;
+          created = updated;
+        }
+      } else {
+        resolveFail = true;
+      }
+    }
+
+    // ── Transfer (post-create) — mutually exclusive with resolve ─────
     let transferOk = false;
     let transferFail = false;
-    if (transferEnabled && transferToTeamId && transferReasonCode) {
+    if (transferEnabled && transferToTeamId && transferReasonCode && !resolveEnabled) {
       setPhase('transferring');
       const reasonLabel =
         TRANSFER_REASON_CHIPS.find((c) => c.code === transferReasonCode)?.label ??
@@ -675,8 +746,17 @@ export function QuickCaseModal({
     if (transferEnabled) {
       summaryParts.push(transferOk ? 'devir tamamlandı' : 'devir TAMAMLANAMADI');
     }
+    if (resolveEnabled) {
+      summaryParts.push(
+        resolveOk
+          ? 'Çözüldü olarak işaretlendi'
+          : resolveApprovalPending
+            ? 'çözüm onay bekliyor'
+            : 'Çözüldü durumuna geçirilemedi',
+      );
+    }
 
-    const hasFailure = filesFail > 0 || transferFail;
+    const hasFailure = filesFail > 0 || transferFail || resolveFail || resolveApprovalPending;
     toast({
       type: hasFailure ? 'warn' : 'success',
       title: hasFailure ? 'Vaka açıldı — bazı adımlar başarısız' : 'Vaka oluşturuldu',
@@ -686,14 +766,16 @@ export function QuickCaseModal({
     });
 
     if (hasFailure) {
-      // Keep modal open so user can see file errors / retry transfer.
-      // Reset phase to idle so user can act.
+      // Keep modal open so user can see errors / retry from Case Detail.
       setPhase('idle');
-      setGlobalError(
-        transferFail
-          ? 'Vaka açıldı ancak devir tamamlanamadı. "Detayı Aç" ile vakayı açıp tekrar deneyebilirsin.'
-          : 'Vaka açıldı ancak bazı dosyalar yüklenemedi.',
-      );
+      const errorMessage = resolveFail
+        ? 'Vaka açıldı ancak çözüldü durumuna geçirilemedi.'
+        : resolveApprovalPending
+          ? 'Vaka açıldı ve çözüm notu eklendi; çözüm onay politikası bekliyor. "Detayı Aç" ile onay akışını tamamla.'
+          : transferFail
+            ? 'Vaka açıldı ancak devir tamamlanamadı. "Detayı Aç" ile vakayı açıp tekrar deneyebilirsin.'
+            : 'Vaka açıldı ancak bazı dosyalar yüklenemedi.';
+      setGlobalError(errorMessage);
     } else {
       onClose();
       onCreated(created);
@@ -1294,13 +1376,99 @@ export function QuickCaseModal({
             )}
           </div>
 
-          {/* 14. Devret hazırlığı */}
+          {/* 14. Çözümle oluştur (L1 success path) — mutex with Devret */}
+          <div className="rounded-md border border-emerald-200 bg-emerald-50/30 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/15">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                className={`flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-ndark-text ${
+                  transferEnabled ? 'opacity-50' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={resolveEnabled}
+                  disabled={transferEnabled}
+                  onChange={(e) => {
+                    setResolveEnabled(e.target.checked);
+                    setResolveExpanded(e.target.checked);
+                  }}
+                />
+                <CheckCircle2 size={12} className="text-emerald-600" />
+                Vaka açıldıktan sonra çözüldü olarak işaretle
+              </label>
+              {resolveEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setResolveExpanded((v) => !v)}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 dark:text-ndark-muted"
+                >
+                  {resolveExpanded ? 'Gizle' : 'Aç'}
+                </button>
+              )}
+            </div>
+            {transferEnabled && (
+              <p className="mt-1 text-[11px] italic text-slate-500 dark:text-ndark-muted">
+                Devret aktif — aynı anda Çözümle oluştur kullanılamaz.
+              </p>
+            )}
+            {resolveEnabled && resolveExpanded && (
+              <div className="mt-3 space-y-2.5">
+                <Field
+                  label="Müşteriye yaptırılan kontroller (opsiyonel)"
+                  hint="Telefon görüşmesinde müşterinin denediği adımlar, kontroller, çıktılar."
+                >
+                  <TextArea
+                    rows={2}
+                    placeholder="Örn. uygulamayı yeniden başlattı, İzmir şubede test yaptı, POS bağlantısını kontrol etti…"
+                    value={resolveControls}
+                    onChange={(e) => setResolveControls(e.target.value)}
+                  />
+                </Field>
+                <Field label="Çözüm notu" required>
+                  <TextArea
+                    rows={3}
+                    placeholder="Sorun nasıl çözüldü?"
+                    value={resolveNote}
+                    onChange={(e) => setResolveNote(e.target.value)}
+                  />
+                </Field>
+                <Field label="Sonuç" hint="Sonuç etiketi çözüm notuna eklenir; statü her durumda 'Çözüldü'.">
+                  <div className="flex flex-wrap gap-1.5">
+                    {RESOLVE_OUTCOMES.map((o) => {
+                      const active = resolveOutcome === o;
+                      return (
+                        <button
+                          key={o}
+                          type="button"
+                          onClick={() => setResolveOutcome(o)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition ${
+                            active
+                              ? 'bg-emerald-600 text-white ring-emerald-600'
+                              : 'bg-white text-slate-600 ring-slate-300 hover:bg-slate-50 dark:bg-ndark-card dark:text-ndark-text dark:ring-ndark-border'
+                          }`}
+                        >
+                          {o}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+              </div>
+            )}
+          </div>
+
+          {/* 15. Devret hazırlığı */}
           <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
             <div className="flex items-center justify-between gap-2">
-              <label className="flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-ndark-text">
+              <label
+                className={`flex items-center gap-2 text-[12px] font-medium text-slate-700 dark:text-ndark-text ${
+                  resolveEnabled ? 'opacity-50' : ''
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={transferEnabled}
+                  disabled={resolveEnabled}
                   onChange={(e) => {
                     setTransferEnabled(e.target.checked);
                     setTransferExpanded(e.target.checked);
@@ -1319,6 +1487,11 @@ export function QuickCaseModal({
                 </button>
               )}
             </div>
+            {resolveEnabled && (
+              <p className="mt-1 text-[11px] italic text-slate-500 dark:text-ndark-muted">
+                Çözümle oluştur aktif — aynı anda Devret kullanılamaz.
+              </p>
+            )}
             {transferEnabled && transferExpanded && (
               <div className="mt-3 space-y-2.5">
                 <Field label="Devredilecek Takım" required>
