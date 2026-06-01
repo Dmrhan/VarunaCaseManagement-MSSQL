@@ -1,21 +1,19 @@
 /**
- * L1WorkbenchPanel — Phase 2B.
+ * L1WorkbenchPanel — Phase 2D.
  *
- * Read-only workbench shell for the L1 Case Resolution Console. Five
- * operational sections, each one a calm summary of an existing case
- * field — no composer, no upload, no transition action wiring yet.
- * Real interactive content (notes composer, file upload, status
- * actions) lands in later phases via component reuse, not rewrite.
+ * Operational workbench for the L1 Case Resolution Console. Sections
+ * 1/2/4/5 remain read-only previews of existing case fields. Section
+ * 3 ("Çalışma") now mounts the full CaseNotesSection reused from
+ * CaseDetailPage — composer, replies, mentions, reactions,
+ * delete-own, voice dictation, duplicate-safe submit — all backed by
+ * the same caseService calls. No second notes implementation.
  *
  * Sections:
  *   1. Şu an              — current operational state snapshot
  *   2. Sorun              — problem definition
- *   3. Çalışma            — latest notes + activity preview
- *   4. Kanıt / Dosyalar   — latest files preview
+ *   3. Çalışma            — full Notes experience (composer + thread)
+ *   4. Kanıt / Dosyalar   — latest files preview (Phase 2D-Files TBD)
  *   5. Bağlantılar / Çağrı — linked cases + call log compact preview
- *
- * Empty states stay short and matter-of-fact so they don't shout in
- * the operational view.
  */
 
 import {
@@ -32,8 +30,8 @@ import { Badge } from '@/components/ui/Badge';
 import { StatusPill, PriorityBadge } from '@/components/ui/StatusPill';
 import { formatRelative, formatBytes, formatDateTime } from '@/lib/format';
 import type { Case } from '../types';
+import { CaseNotesSection } from '../components/CaseNotes';
 
-const NOTE_PREVIEW_COUNT = 3;
 const FILE_PREVIEW_COUNT = 3;
 
 function Section({
@@ -76,11 +74,16 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function L1WorkbenchPanel({ item }: { item: Case }) {
-  const latestNotes = item.notes
-    .filter((n) => !n.parentNoteId)
-    .slice(0, NOTE_PREVIEW_COUNT);
-  const totalNoteCount = item.notes.filter((n) => !n.parentNoteId).length;
+export function L1WorkbenchPanel({
+  item,
+  onItemUpdate,
+}: {
+  item: Case;
+  onItemUpdate: (next: Case) => void;
+}) {
+  // Notes preview lives inside the embedded <CaseNotesSection /> which
+  // owns its own state. Section 3 ("Çalışma") shows the full experience
+  // now, so the standalone preview slice was removed.
   // Codex P2 fix — history is appended newest-last by caseService (mock:
   // `[...prev.history, entry]`), so `history[0]` is the oldest event
   // (typically "Vaka oluşturuldu"). Sort explicitly by `at` desc so the
@@ -207,45 +210,10 @@ export function L1WorkbenchPanel({ item }: { item: Case }) {
         </div>
       </Section>
 
-      {/* ─── 3. Çalışma ─── */}
-      <Section
-        title="Çalışma"
-        icon={<MessageSquare size={13} />}
-        rightSlot={
-          totalNoteCount > 0 && (
-            <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
-              {totalNoteCount} not
-            </span>
-          )
-        }
-      >
-        {latestNotes.length === 0 ? (
-          <EmptyLine>Henüz not eklenmemiş.</EmptyLine>
-        ) : (
-          <ul className="space-y-2">
-            {latestNotes.map((n) => (
-              <li
-                key={n.id}
-                className="rounded-md border border-slate-100 bg-slate-50/60 px-3 py-2 dark:border-ndark-border/60 dark:bg-ndark-bg/30"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2 text-[11.5px]">
-                  <span className="font-medium text-slate-700 dark:text-ndark-text">
-                    {n.authorName}
-                  </span>
-                  <span className="text-slate-400 dark:text-ndark-muted">
-                    {formatRelative(n.createdAt)} ·{' '}
-                    {n.visibility === 'Internal' ? 'İç Not' : 'Müşteriye Görünür'}
-                  </span>
-                </div>
-                <p className="mt-1 line-clamp-3 text-[12.5px] leading-snug text-slate-700 dark:text-ndark-text">
-                  {n.content}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
+      {/* ─── 3. Çalışma — full Notes experience (reused) ─── */}
+      <Section title="Çalışma" icon={<MessageSquare size={13} />}>
         {latestActivity && (
-          <div className="mt-3 border-t border-slate-100 pt-2 text-[11.5px] text-slate-500 dark:border-ndark-border/60 dark:text-ndark-muted">
+          <div className="mb-3 rounded-md border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11.5px] text-slate-500 dark:border-ndark-border/60 dark:bg-ndark-bg/30 dark:text-ndark-muted">
             <span className="font-medium text-slate-700 dark:text-ndark-text">
               Son aktivite:
             </span>{' '}
@@ -253,9 +221,7 @@ export function L1WorkbenchPanel({ item }: { item: Case }) {
             <span className="text-slate-400">· {formatRelative(latestActivity.at)}</span>
           </div>
         )}
-        <p className="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2 text-[11.5px] italic text-slate-500 dark:border-ndark-border/60 dark:bg-ndark-bg/30 dark:text-ndark-muted">
-          Notlar burada mevcut bileşen reuse edilerek gelecek.
-        </p>
+        <CaseNotesSection item={item} onItemUpdate={onItemUpdate} />
       </Section>
 
       {/* ─── 4. Kanıt / Dosyalar ─── */}
