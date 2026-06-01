@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CasesListPage } from './features/cases/CasesListPage';
 import { CaseDetailPage } from './features/cases/CaseDetailPage';
+import { L1CaseResolutionConsole } from './features/cases/L1CaseResolutionConsole';
 import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { ActionCenterBell } from './features/action-center/ActionCenterBell';
 import { featureFlags } from './config/featureFlags';
@@ -636,12 +637,16 @@ export default function App() {
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
           {view === 'kb-viewer' && <KnowledgeBasePage />}
           {view === 'case-detail' && selectedCaseId && (
-            <CaseDetailPage
-              caseId={selectedCaseId}
-              onBack={backToList}
-              onShowCustomer={(id) => setCustomerCardId(id)}
-              onOpenAccount={canReadAccounts(user?.role) ? openAccount : undefined}
-            />
+            featureFlags.l1CaseConsoleEnabled ? (
+              <L1CaseResolutionConsole caseId={selectedCaseId} />
+            ) : (
+              <CaseDetailPage
+                caseId={selectedCaseId}
+                onBack={backToList}
+                onShowCustomer={(id) => setCustomerCardId(id)}
+                onOpenAccount={canReadAccounts(user?.role) ? openAccount : undefined}
+              />
+            )
           )}
           {view === 'accounts' && (
             canReadAccounts(user?.role) ? (
