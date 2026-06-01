@@ -22,6 +22,7 @@ import type { Case } from './types';
 import { L1CommandBar } from './l1-console/L1CommandBar';
 import { L1WorkbenchPanel } from './l1-console/L1WorkbenchPanel';
 import { L1DecisionRail } from './l1-console/L1DecisionRail';
+import { TransferModal } from './components/TransferModal';
 
 export function L1CaseResolutionConsole({
   caseId,
@@ -35,6 +36,8 @@ export function L1CaseResolutionConsole({
   const [item, setItem] = useState<Case | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Devret modal'ı — TransferModal mevcut implementasyon kullanılır.
+  const [transferOpen, setTransferOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -83,11 +86,25 @@ export function L1CaseResolutionConsole({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <L1CommandBar item={item} onBack={onBack} onShowCustomer={onShowCustomer} />
+      <L1CommandBar
+        item={item}
+        onBack={onBack}
+        onShowCustomer={onShowCustomer}
+        onTransferClick={() => setTransferOpen(true)}
+      />
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <L1WorkbenchPanel item={item} onItemUpdate={setItem} />
         <L1DecisionRail item={item} />
       </div>
+      <TransferModal
+        open={transferOpen}
+        caseItem={item}
+        onClose={() => setTransferOpen(false)}
+        onTransferred={(updated) => {
+          setItem(updated);
+          setTransferOpen(false);
+        }}
+      />
     </div>
   );
 }
