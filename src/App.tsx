@@ -638,7 +638,11 @@ export default function App() {
           {view === 'kb-viewer' && <KnowledgeBasePage />}
           {view === 'case-detail' && selectedCaseId && (
             featureFlags.l1CaseConsoleEnabled ? (
-              <L1CaseResolutionConsole caseId={selectedCaseId} />
+              <L1CaseResolutionConsole
+                caseId={selectedCaseId}
+                onBack={backToList}
+                onShowCustomer={(id) => setCustomerCardId(id)}
+              />
             ) : (
               <CaseDetailPage
                 caseId={selectedCaseId}
