@@ -467,7 +467,7 @@ function NoteCard({
   currentName: string;
   currentUserId: string | null;
   onReplyAdded: (parentNoteId: string) => void;
-  onDeleteNote: (noteId: string) => Promise<boolean>;
+  onDeleteNote: (noteId: string, parentNoteIdHint?: string | null) => Promise<boolean>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [replies, setReplies] = useState<CaseNote[] | null>(null);
@@ -617,7 +617,10 @@ function NoteCard({
                   parentAuthor={note.authorName}
                   currentUserId={currentUserId}
                   onDelete={async () => {
-                    const ok = await onDeleteNote(r.id);
+                    // Pass `note.id` as parentNoteIdHint — replies are
+                    // lazy-loaded and the parent state can't infer it
+                    // from item.notes (Codex P2 fix).
+                    const ok = await onDeleteNote(r.id, note.id);
                     if (ok) {
                       setReplies((prev) => (prev ? prev.filter((x) => x.id !== r.id) : prev));
                     }
@@ -660,7 +663,14 @@ export interface NotesTabProps {
   onChangeVisibility: (v: NoteVisibility) => void;
   onSubmit: () => void;
   onReplyAdded: (parentNoteId: string) => void;
-  onDeleteNote: (noteId: string) => Promise<boolean>;
+  /**
+   * Codex P2 fix — replies are lazy-loaded via `caseService.listReplies`
+   * so they aren't in `item.notes` and the handler can't infer
+   * `parentNoteId` from there. NoteCard passes `parentNoteIdHint` when
+   * deleting a reply so the caller can decrement `parent.replyCount`
+   * correctly.
+   */
+  onDeleteNote: (noteId: string, parentNoteIdHint?: string | null) => Promise<boolean>;
   currentUserId: string | null;
   inputRef: RefObject<MentionTextareaHandle>;
 }
@@ -845,11 +855,18 @@ export function CaseNotesSection({
     });
   }
 
-  async function handleDeleteNote(noteId: string): Promise<boolean> {
+  async function handleDeleteNote(
+    noteId: string,
+    parentNoteIdHint?: string | null,
+  ): Promise<boolean> {
     const r = await caseService.deleteNote(item.id, noteId);
     if (r.ok) {
+      // Replies are lazy-loaded via listReplies and not present in
+      // item.notes; the caller (NoteCard) supplies parentNoteIdHint so
+      // parent.replyCount can still be decremented correctly. Top-level
+      // notes lookup via item.notes is the fallback.
       const deleted = item.notes.find((n) => n.id === noteId);
-      const parentId = deleted?.parentNoteId ?? null;
+      const parentId = parentNoteIdHint ?? deleted?.parentNoteId ?? null;
       onItemUpdate({
         ...item,
         notes: item.notes

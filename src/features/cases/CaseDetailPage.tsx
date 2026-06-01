@@ -314,14 +314,19 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
 
   // Delete own note/reply — author-only at backend; UI hides the
   // button when not eligible, but the API enforces it.
-  async function handleDeleteNote(noteId: string): Promise<boolean> {
+  async function handleDeleteNote(
+    noteId: string,
+    parentNoteIdHint?: string | null,
+  ): Promise<boolean> {
     if (!item) return false;
     const r = await caseService.deleteNote(item.id, noteId);
     if (r.ok) {
-      // Remove from list and decrement parent.replyCount when the
-      // deleted row was a reply we currently track via list metadata.
+      // Replies are lazy-loaded via listReplies and not in item.notes;
+      // the caller (NoteCard) supplies parentNoteIdHint so
+      // parent.replyCount decrements correctly. item.notes lookup is
+      // the fallback for top-level deletions (Codex P2 fix).
       const deleted = item.notes.find((n) => n.id === noteId);
-      const parentId = deleted?.parentNoteId ?? null;
+      const parentId = parentNoteIdHint ?? deleted?.parentNoteId ?? null;
       setItem({
         ...item,
         notes: item.notes
