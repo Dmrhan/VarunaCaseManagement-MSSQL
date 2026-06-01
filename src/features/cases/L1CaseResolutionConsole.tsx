@@ -16,7 +16,7 @@
  *     parity with CaseDetailPage.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { caseService } from '@/services/caseService';
 import type { Case } from './types';
 import { L1CommandBar } from './l1-console/L1CommandBar';
@@ -47,6 +47,13 @@ export function L1CaseResolutionConsole({
   // çalışır). Bunun yerine güncellenmiş case'i pending'de tut ve modal
   // onClose ile kapanınca uygula.
   const [pendingTransferUpdate, setPendingTransferUpdate] = useState<Case | null>(null);
+  // Codex P2 (second follow-up) — onClose ve onTransferred arasındaki
+  // mid-flight race. Eğer kullanıcı modal'ı X / Escape ile transfer
+  // hâlâ in-flight iken kapatırsa onClose pending=null ile çalışır;
+  // sonra onTransferred geldiğinde pending'e koyar ama uygulanmaz.
+  // Ref ile sync flag tutarak onTransferred geldiğinde modal'ın hâlâ
+  // açık olup olmadığını closure-stale olmadan kontrol ederiz.
+  const transferOpenRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -99,7 +106,10 @@ export function L1CaseResolutionConsole({
         item={item}
         onBack={onBack}
         onShowCustomer={onShowCustomer}
-        onTransferClick={() => setTransferOpen(true)}
+        onTransferClick={() => {
+          transferOpenRef.current = true;
+          setTransferOpen(true);
+        }}
       />
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <L1WorkbenchPanel item={item} onItemUpdate={setItem} />
@@ -109,6 +119,10 @@ export function L1CaseResolutionConsole({
         open={transferOpen}
         caseItem={item}
         onClose={() => {
+          // Synchronously flip the ref so any in-flight onTransferred
+          // callback that fires AFTER this point sees the modal as
+          // closed and applies the update directly.
+          transferOpenRef.current = false;
           // Apply the deferred transfer result here so CommandBar /
           // Workbench / DecisionRail refresh AFTER the modal is gone.
           // Mutating earlier would re-trigger TransferModal's open-time
@@ -121,7 +135,16 @@ export function L1CaseResolutionConsole({
           setTransferOpen(false);
         }}
         onTransferred={(updated) => {
-          setPendingTransferUpdate(updated);
+          // Mid-flight close guard — if the user already dismissed the
+          // modal via X / Escape before transferCase resolved, the
+          // ref is already false and there's no future onClose to
+          // apply the pending update; setItem immediately so the L1
+          // console doesn't stay on the stale team/transferCount.
+          if (transferOpenRef.current) {
+            setPendingTransferUpdate(updated);
+          } else {
+            setItem(updated);
+          }
         }}
       />
     </div>
