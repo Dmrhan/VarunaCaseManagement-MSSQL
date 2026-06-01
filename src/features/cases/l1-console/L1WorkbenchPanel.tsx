@@ -28,11 +28,11 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { StatusPill, PriorityBadge } from '@/components/ui/StatusPill';
-import { formatRelative, formatBytes, formatDateTime } from '@/lib/format';
+import { formatRelative, formatDateTime } from '@/lib/format';
 import type { Case } from '../types';
 import { CaseNotesSection } from '../components/CaseNotes';
+import { FilesTab } from '../components/CaseFiles';
 
-const FILE_PREVIEW_COUNT = 3;
 
 function Section({
   title,
@@ -94,14 +94,8 @@ export function L1WorkbenchPanel({
         (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
       )[0]
     : undefined;
-  // Codex P2 fix — files are prepended newest-first by caseService (mock:
-  // `[file, ...prev.files]`); the previous `.slice(-N).reverse()` was
-  // picking the oldest three. Sort by `uploadedAt` desc for the same
-  // robustness reason.
-  const latestFiles = [...item.files]
-    .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
-    .slice(0, FILE_PREVIEW_COUNT);
-  const totalFileCount = item.files.length;
+  // Phase 2E — files preview removed; the embedded <FilesTab /> below
+  // owns the full list. linkCount stays for Section 5.
   const linkCount = item.linkCount ?? 0;
   const callLogCount = item.callLogs?.length ?? 0;
   const latestCall = item.callLogs?.[0];
@@ -224,40 +218,9 @@ export function L1WorkbenchPanel({
         <CaseNotesSection item={item} onItemUpdate={onItemUpdate} />
       </Section>
 
-      {/* ─── 4. Kanıt / Dosyalar ─── */}
-      <Section
-        title="Kanıt / Dosyalar"
-        icon={<FileText size={13} />}
-        rightSlot={
-          totalFileCount > 0 && (
-            <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
-              {totalFileCount} dosya
-            </span>
-          )
-        }
-      >
-        {latestFiles.length === 0 ? (
-          <EmptyLine>Henüz dosya eklenmemiş.</EmptyLine>
-        ) : (
-          <ul className="space-y-1.5">
-            {latestFiles.map((f) => (
-              <li
-                key={f.id}
-                className="flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[12.5px] dark:border-ndark-border/60 dark:bg-ndark-bg/30"
-              >
-                <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-ndark-text">
-                  {f.fileName}
-                </span>
-                <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
-                  {formatBytes(f.fileSize)} · {formatRelative(f.uploadedAt)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2 text-[11.5px] italic text-slate-500 dark:border-ndark-border/60 dark:bg-ndark-bg/30 dark:text-ndark-muted">
-          Dosya yükleme mevcut Dosyalar bileşeni reuse edilerek gelecek.
-        </p>
+      {/* ─── 4. Kanıt / Dosyalar — full Files experience (reused) ─── */}
+      <Section title="Kanıt / Dosyalar" icon={<FileText size={13} />}>
+        <FilesTab item={item} onItemUpdated={onItemUpdate} />
       </Section>
 
       {/* ─── 5. Bağlantılar / Çağrı ─── */}
