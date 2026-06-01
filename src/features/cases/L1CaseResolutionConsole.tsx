@@ -111,13 +111,17 @@ export function L1CaseResolutionConsole({
           setTransferOpen(true);
         }}
       />
-      {/* Phase 2H Layout Hygiene — outer grid clips; each column owns
-          its own scroll. Previously this used `overflow-auto` and
-          shared one scroll container for Workbench + DecisionRail,
-          which pushed the right rail (RUNA AI + readiness checklist)
-          out of view as soon as the Notes thread grew. Now the rail
-          stays put while the Workbench scrolls independently. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {/* Phase 2H Layout Hygiene — outer grid is responsive scroll.
+          On lg+ (2-col side-by-side): clip the grid and let each child
+          (L1WorkbenchPanel / L1DecisionRail) own its own
+          `overflow-y-auto` so the rail stays put while the Workbench
+          scrolls independently.
+          On <lg (single-col stacked): rail sits below Workbench, so the
+          grid itself must scroll — children's intrinsic heights grow
+          naturally and the user reaches the rail by scrolling the page.
+          Codex P2 fix — a static `overflow-hidden` here clipped the
+          stacked layout and trapped the rail below the fold. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:overflow-hidden">
         <L1WorkbenchPanel item={item} onItemUpdate={setItem} />
         <L1DecisionRail item={item} />
       </div>
