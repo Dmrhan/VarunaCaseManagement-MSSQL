@@ -38,6 +38,15 @@ export function L1CaseResolutionConsole({
   const [error, setError] = useState<string | null>(null);
   // Devret modal'ı — TransferModal mevcut implementasyon kullanılır.
   const [transferOpen, setTransferOpen] = useState(false);
+  // Codex P2 follow-up — TransferModal'ın open-time effect'i
+  // `[open, caseItem.id, caseItem.transferCount]` deps ile çalışır ve
+  // toTeamId / brief / success state'lerini sıfırlar. Eğer
+  // onTransferred içinden setItem(updated) çağırırsak transferCount
+  // anında değişir → effect tetiklenir → modal brief panelini
+  // gösterirken state reset olur (toTeamId boşalır, AI suggest yeniden
+  // çalışır). Bunun yerine güncellenmiş case'i pending'de tut ve modal
+  // onClose ile kapanınca uygula.
+  const [pendingTransferUpdate, setPendingTransferUpdate] = useState<Case | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -99,10 +108,20 @@ export function L1CaseResolutionConsole({
       <TransferModal
         open={transferOpen}
         caseItem={item}
-        onClose={() => setTransferOpen(false)}
-        onTransferred={(updated) => {
-          setItem(updated);
+        onClose={() => {
+          // Apply the deferred transfer result here so CommandBar /
+          // Workbench / DecisionRail refresh AFTER the modal is gone.
+          // Mutating earlier would re-trigger TransferModal's open-time
+          // effect (deps on caseItem.transferCount) and wipe the brief
+          // panel mid-flow.
+          if (pendingTransferUpdate) {
+            setItem(pendingTransferUpdate);
+            setPendingTransferUpdate(null);
+          }
           setTransferOpen(false);
+        }}
+        onTransferred={(updated) => {
+          setPendingTransferUpdate(updated);
         }}
       />
     </div>
