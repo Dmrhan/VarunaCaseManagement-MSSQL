@@ -115,7 +115,18 @@ export function L1DecisionRail({ item }: { item: Case }) {
     typeof item.aiConfidenceScore === 'number'
       ? Math.round(Math.max(0, Math.min(1, item.aiConfidenceScore)) * 100)
       : null;
-  const hasAiAnalysis = !!(item.aiSummary || item.aiFollowupRecommendation);
+  // Codex P2 fix — NewCaseForm AI suggestion path persists predictions
+  // (aiCategoryPrediction / aiPriorityPrediction / aiConfidenceScore)
+  // without aiSummary or aiFollowupRecommendation. Earlier check missed
+  // those cases and rendered the empty state + hid the prediction
+  // badges, making AI-assisted intakes look unanalyzed.
+  const hasAiAnalysis = !!(
+    item.aiSummary ||
+    item.aiFollowupRecommendation ||
+    item.aiCategoryPrediction ||
+    item.aiPriorityPrediction ||
+    typeof item.aiConfidenceScore === 'number'
+  );
 
   // ── Customer health derived ─────────────────────────────────────
   const isChurn = item.caseType === 'Churn';
