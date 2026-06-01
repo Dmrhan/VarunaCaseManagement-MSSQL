@@ -85,7 +85,7 @@ export function L1CaseResolutionConsole({
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <L1CommandBar item={item} onBack={onBack} onShowCustomer={onShowCustomer} />
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <L1WorkbenchPanel caseId={item.id} />
+        <L1WorkbenchPanel item={item} />
         <L1DecisionRail caseId={item.id} />
       </div>
     </div>
