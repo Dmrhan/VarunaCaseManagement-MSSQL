@@ -36,4 +36,11 @@ export const featureFlags = {
    * Phase 2A boyunca acil rollback yolu olarak ayakta durur.
    */
   legacyMentionBellEnabled: readFlag('VITE_LEGACY_MENTION_BELL_ENABLED', false),
+  /**
+   * L1 Case Resolution Console Phase 1 — şu an layout-only shell.
+   * true → klasik CaseDetailPage yerine L1CaseResolutionConsole render
+   * edilir. Default false (hem dev hem prod) — flag açık olmadığında
+   * mevcut Case Detail davranışı bire bir korunur, zero runtime impact.
+   */
+  l1CaseConsoleEnabled: readFlag('VITE_L1_CASE_CONSOLE_ENABLED', false),
 };
