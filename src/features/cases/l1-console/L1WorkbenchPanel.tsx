@@ -81,8 +81,23 @@ export function L1WorkbenchPanel({ item }: { item: Case }) {
     .filter((n) => !n.parentNoteId)
     .slice(0, NOTE_PREVIEW_COUNT);
   const totalNoteCount = item.notes.filter((n) => !n.parentNoteId).length;
-  const latestActivity = item.history?.[0];
-  const latestFiles = item.files.slice(-FILE_PREVIEW_COUNT).reverse();
+  // Codex P2 fix — history is appended newest-last by caseService (mock:
+  // `[...prev.history, entry]`), so `history[0]` is the oldest event
+  // (typically "Vaka oluşturuldu"). Sort explicitly by `at` desc so the
+  // workbench shows the actual latest activity regardless of upstream
+  // order.
+  const latestActivity = item.history?.length
+    ? [...item.history].sort(
+        (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+      )[0]
+    : undefined;
+  // Codex P2 fix — files are prepended newest-first by caseService (mock:
+  // `[file, ...prev.files]`); the previous `.slice(-N).reverse()` was
+  // picking the oldest three. Sort by `uploadedAt` desc for the same
+  // robustness reason.
+  const latestFiles = [...item.files]
+    .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+    .slice(0, FILE_PREVIEW_COUNT);
   const totalFileCount = item.files.length;
   const linkCount = item.linkCount ?? 0;
   const callLogCount = item.callLogs?.length ?? 0;
