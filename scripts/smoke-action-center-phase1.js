@@ -30,7 +30,19 @@
  *   25. Phase 2C P0 unsnooze owner guard — wrong user → ActionItemAccessError, state unchanged
  *
  * Run: node --env-file=.env scripts/smoke-action-center-phase1.js
- * Cleanup: all rows removed in finally{}.
+ *
+ * Cleanup: registry-based delete in finally{} + prefix-based fallback
+ * (PREFIX includes Date.now() so it can never match other runs or
+ * real data). SIGINT/SIGTERM trigger the same helpers so Ctrl-C
+ * leaves no stray rows.
+ *
+ * Production guard: refuses to run when NODE_ENV=production or VERCEL=1.
+ * For prod-looking DATABASE_URLs (contains "prod" / "live"), requires
+ * --confirm-smoke-db to opt in.
+ *
+ * If finally{}/signal cleanup is bypassed (process killed -9, host
+ * crash, etc.), run `scripts/cleanup-acp1-smoke-data.js` to sweep
+ * leaked rows by prefix.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -57,13 +69,208 @@ import {
 } from '../server/db/approvalRepository.js';
 import { caseRepository } from '../server/db/caseRepository.js';
 
+// ── Production guard ────────────────────────────────────────────────
+// Refuse to run against a production-like DB unless the operator has
+// explicitly opted in with --confirm-smoke-db. NODE_ENV=production or
+// VERCEL=1 cannot be overridden by the flag (defense in depth).
+const SMOKE_ARGS = process.argv.slice(2);
+const CONFIRM_SMOKE_DB = SMOKE_ARGS.includes('--confirm-smoke-db');
+function looksProdLike() {
+  const reasons = [];
+  if (process.env.NODE_ENV === 'production') reasons.push('NODE_ENV=production');
+  if (process.env.VERCEL === '1' || process.env.VERCEL === 'true') reasons.push('VERCEL marker set');
+  const url = process.env.DATABASE_URL ?? '';
+  if (/\bprod(uction)?\b/i.test(url)) reasons.push('DATABASE_URL hostname contains "prod"');
+  if (/\blive\b/i.test(url)) reasons.push('DATABASE_URL hostname contains "live"');
+  return reasons;
+}
+{
+  const prodMarkers = looksProdLike();
+  const hard = prodMarkers.some(
+    (r) => r === 'NODE_ENV=production' || r === 'VERCEL marker set',
+  );
+  if (hard) {
+    console.error('⛔ Refusing to run smoke against production environment:');
+    prodMarkers.forEach((r) => console.error(`     - ${r}`));
+    process.exit(2);
+  }
+  if (prodMarkers.length > 0 && !CONFIRM_SMOKE_DB) {
+    console.error('⛔ DATABASE_URL looks production-like:');
+    prodMarkers.forEach((r) => console.error(`     - ${r}`));
+    console.error('   Pass --confirm-smoke-db to acknowledge and proceed.');
+    process.exit(2);
+  }
+}
+
 const stamp = Date.now();
 const PREFIX = `acp1_${stamp}`;
 const results = [];
+
+// Module-level registry so the SIGINT/SIGTERM handler (which fires
+// outside run()'s `finally`) can still see what was created.
+const created = {
+  actionItems: [],
+  cases: [],
+  approvals: [],
+  policies: [],
+  teams: [],
+  persons: [],
+  users: [],
+};
+
 function record(name, ok, detail = '') {
   results.push({ name, ok, detail });
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`);
 }
+
+// ── Cleanup helpers ─────────────────────────────────────────────────
+// Per-table try/catch so a single failure doesn't strand the rest;
+// failures are surfaced in a summary instead of being silently swallowed.
+async function safeDelete(label, fn) {
+  try {
+    const r = await fn();
+    return { label, ok: true, count: r?.count ?? 0 };
+  } catch (err) {
+    return { label, ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+async function cleanupCreatedRegistry() {
+  const ops = [];
+  if (created.actionItems.length) {
+    ops.push(await safeDelete('ActionItem (by id)', () =>
+      prisma.actionItem.deleteMany({ where: { id: { in: created.actionItems } } }),
+    ));
+  }
+  if (created.cases.length) {
+    ops.push(await safeDelete('ActionItem (by caseId)', () =>
+      prisma.actionItem.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await safeDelete('CaseResolutionApproval', () =>
+      prisma.caseResolutionApproval.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await safeDelete('NotificationDispatch', () =>
+      prisma.notificationDispatch.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await safeDelete('CaseActivity', () =>
+      prisma.caseActivity.deleteMany({ where: { caseId: { in: created.cases } } }),
+    ));
+    ops.push(await safeDelete('Case', () =>
+      prisma.case.deleteMany({ where: { id: { in: created.cases } } }),
+    ));
+  }
+  if (created.policies.length) {
+    ops.push(await safeDelete('ResolutionApprovalPolicy', () =>
+      prisma.resolutionApprovalPolicy.deleteMany({ where: { id: { in: created.policies } } }),
+    ));
+  }
+  if (created.users.length) {
+    ops.push(await safeDelete('User', () =>
+      prisma.user.deleteMany({ where: { id: { in: created.users } } }),
+    ));
+  }
+  if (created.persons.length) {
+    ops.push(await safeDelete('Person', () =>
+      prisma.person.deleteMany({ where: { id: { in: created.persons } } }),
+    ));
+  }
+  if (created.teams.length) {
+    ops.push(await safeDelete('Team', () =>
+      prisma.team.deleteMany({ where: { id: { in: created.teams } } }),
+    ));
+  }
+  return ops;
+}
+
+// Fallback: when an interrupt fires before IDs are recorded (e.g.
+// the smoke is killed during the very first inserts), the registry
+// may be empty but rows already exist with our PREFIX. Sweep by
+// title/name match — bounded to this run's `PREFIX` which embeds
+// the unix timestamp, so it can never match another smoke run or
+// real data.
+async function cleanupByPrefix() {
+  const startsWith = { startsWith: PREFIX };
+  const ops = [];
+  const cases = await prisma.case
+    .findMany({ where: { title: startsWith }, select: { id: true } })
+    .catch(() => []);
+  const caseIds = cases.map((c) => c.id);
+  if (caseIds.length) {
+    ops.push(await safeDelete('fallback ActionItem (by caseId)', () =>
+      prisma.actionItem.deleteMany({ where: { caseId: { in: caseIds } } }),
+    ));
+    ops.push(await safeDelete('fallback CaseResolutionApproval', () =>
+      prisma.caseResolutionApproval.deleteMany({ where: { caseId: { in: caseIds } } }),
+    ));
+    ops.push(await safeDelete('fallback NotificationDispatch', () =>
+      prisma.notificationDispatch.deleteMany({ where: { caseId: { in: caseIds } } }),
+    ));
+    ops.push(await safeDelete('fallback CaseActivity', () =>
+      prisma.caseActivity.deleteMany({ where: { caseId: { in: caseIds } } }),
+    ));
+    ops.push(await safeDelete('fallback Case', () =>
+      prisma.case.deleteMany({ where: { id: { in: caseIds } } }),
+    ));
+  }
+  ops.push(await safeDelete('fallback ResolutionApprovalPolicy', () =>
+    prisma.resolutionApprovalPolicy.deleteMany({ where: { name: startsWith } }),
+  ));
+  ops.push(await safeDelete('fallback User (email)', () =>
+    prisma.user.deleteMany({ where: { email: startsWith } }),
+  ));
+  ops.push(await safeDelete('fallback User (fullName)', () =>
+    prisma.user.deleteMany({ where: { fullName: startsWith } }),
+  ));
+  ops.push(await safeDelete('fallback Person (email)', () =>
+    prisma.person.deleteMany({ where: { email: startsWith } }),
+  ));
+  ops.push(await safeDelete('fallback Person (name)', () =>
+    prisma.person.deleteMany({ where: { name: startsWith } }),
+  ));
+  ops.push(await safeDelete('fallback Team', () =>
+    prisma.team.deleteMany({ where: { name: startsWith } }),
+  ));
+  return ops;
+}
+
+function reportCleanupOps(ops, header) {
+  if (!ops.length) return;
+  console.log(`\n[smoke cleanup] ${header}`);
+  const failures = ops.filter((o) => !o.ok);
+  for (const op of ops) {
+    if (op.ok) {
+      console.log(`  ✓ ${op.label}: ${op.count}`);
+    } else {
+      console.error(`  ✗ ${op.label}: ${op.error}`);
+    }
+  }
+  if (failures.length > 0) {
+    console.error(`[smoke cleanup] ${failures.length} step(s) FAILED — leaked rows may remain.`);
+    process.exitCode = process.exitCode || 1;
+  }
+}
+
+// SIGINT / SIGTERM handler — finally{} in run() does not fire on
+// signal-induced exit, so we attempt the same cleanup here.
+let cleaningUp = false;
+async function signalCleanup(signal) {
+  if (cleaningUp) return;
+  cleaningUp = true;
+  console.error(`\n[smoke] ${signal} received — running cleanup before exit…`);
+  try {
+    const ops = await cleanupCreatedRegistry();
+    reportCleanupOps(ops, 'signal cleanup (registry)');
+    const fallback = await cleanupByPrefix();
+    reportCleanupOps(fallback, 'signal cleanup (prefix fallback)');
+  } catch (err) {
+    console.error('[smoke] signal cleanup failed:', err);
+  } finally {
+    await prisma.$disconnect().catch(() => {});
+    process.exit(130);
+  }
+}
+process.on('SIGINT', () => signalCleanup('SIGINT'));
+process.on('SIGTERM', () => signalCleanup('SIGTERM'));
 
 async function pickCompany() {
   const c = await prisma.company.findFirst({
@@ -83,16 +290,6 @@ async function run() {
   });
   const allowedCompanyIds = [company.id];
   console.log(`Company: ${company.id} (${company.name})\n`);
-
-  const created = {
-    actionItems: [],
-    cases: [],
-    approvals: [],
-    policies: [],
-    teams: [],
-    persons: [],
-    users: [],
-  };
 
   try {
     // ─── 1. setup ───
@@ -1355,29 +1552,12 @@ async function run() {
     console.error('smoke fatal:', err);
     results.push({ name: 'fatal', ok: false, detail: err?.message });
   } finally {
-    // Cleanup order (no FK from ActionItem so independent delete is fine).
-    if (created.actionItems.length) {
-      await prisma.actionItem.deleteMany({ where: { id: { in: created.actionItems } } }).catch(() => {});
-    }
-    if (created.cases.length) {
-      await prisma.actionItem.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseResolutionApproval.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.notificationDispatch.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.caseActivity.deleteMany({ where: { caseId: { in: created.cases } } }).catch(() => {});
-      await prisma.case.deleteMany({ where: { id: { in: created.cases } } }).catch(() => {});
-    }
-    if (created.policies.length) {
-      await prisma.resolutionApprovalPolicy.deleteMany({ where: { id: { in: created.policies } } }).catch(() => {});
-    }
-    if (created.users.length) {
-      await prisma.user.deleteMany({ where: { id: { in: created.users } } }).catch(() => {});
-    }
-    if (created.persons.length) {
-      await prisma.person.deleteMany({ where: { id: { in: created.persons } } }).catch(() => {});
-    }
-    if (created.teams.length) {
-      await prisma.team.deleteMany({ where: { id: { in: created.teams } } }).catch(() => {});
-    }
+    // Normal path cleanup — same helpers used by the SIGINT handler so
+    // signal-induced cleanup and finally{} cleanup behave identically.
+    const ops = await cleanupCreatedRegistry();
+    reportCleanupOps(ops, 'finally cleanup (registry)');
+    const fallback = await cleanupByPrefix();
+    reportCleanupOps(fallback, 'finally cleanup (prefix fallback)');
     await prisma.$disconnect();
   }
 
