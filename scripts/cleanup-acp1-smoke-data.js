@@ -177,12 +177,12 @@ async function discover({ phaseLabel = 'DRY RUN inventory', printBanner = true }
   const approvals = caseIds.length
     ? await prisma.caseResolutionApproval.findMany({
         where: { caseId: { in: caseIds } },
-        select: { id: true, caseId: true, policyId: true, status: true },
+        select: { id: true, caseId: true, policyId: true, state: true },
       })
     : [];
   console.log(`CaseResolutionApproval: ${approvals.length}`);
   approvals.slice(0, PRINT_SAMPLE).forEach((a) =>
-    console.log(`   ${fmtRow(a, ['caseId', 'policyId', 'status'])}`),
+    console.log(`   ${fmtRow(a, ['caseId', 'policyId', 'state'])}`),
   );
 
   const dispatches = caseIds.length
