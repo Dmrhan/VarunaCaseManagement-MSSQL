@@ -47,16 +47,31 @@ function maskDbUrl(url) {
   return url.replace(/:\/\/[^@]*@/, '://***@');
 }
 
-function looksProdLike() {
+// Hard markers — never overridable by --confirm-smoke-db. NODE_ENV
+// and VERCEL are set by the platform; if either says we're in
+// production, this destructive cleanup must refuse, period.
+function hardProdMarkers() {
   const reasons = [];
   if (process.env.NODE_ENV === 'production') reasons.push('NODE_ENV=production');
   if (process.env.VERCEL === '1' || process.env.VERCEL === 'true') {
     reasons.push('VERCEL marker set');
   }
+  return reasons;
+}
+
+// Soft markers — DATABASE_URL hostname looks production-ish. These
+// can be opted past with --confirm-smoke-db, since dev/staging DBs
+// sometimes embed "live" or similar substrings.
+function softProdMarkers() {
+  const reasons = [];
   const url = process.env.DATABASE_URL ?? '';
   if (/\bprod(uction)?\b/i.test(url)) reasons.push('DATABASE_URL hostname contains "prod"');
   if (/\blive\b/i.test(url)) reasons.push('DATABASE_URL hostname contains "live"');
   return reasons;
+}
+
+function looksProdLike() {
+  return [...hardProdMarkers(), ...softProdMarkers()];
 }
 
 function header(title) {
@@ -75,10 +90,17 @@ async function discover({ phaseLabel = 'DRY RUN inventory', printBanner = true }
     console.log(`VERCEL      : ${process.env.VERCEL ?? '<unset>'}`);
   }
 
-  const prodMarkers = looksProdLike();
-  if (prodMarkers.length > 0) {
-    console.log('\n⛔  Production-like environment detected:');
-    prodMarkers.forEach((r) => console.log(`     - ${r}`));
+  const hardMarkers = hardProdMarkers();
+  const softMarkers = softProdMarkers();
+  if (hardMarkers.length > 0) {
+    console.error('\n⛔  Production environment detected — refusing (non-overridable):');
+    hardMarkers.forEach((r) => console.error(`     - ${r}`));
+    process.exitCode = 2;
+    return null;
+  }
+  if (softMarkers.length > 0) {
+    console.log('\n⛔  Production-like DATABASE_URL detected:');
+    softMarkers.forEach((r) => console.log(`     - ${r}`));
     if (!CONFIRM_SMOKE_DB) {
       console.log('\nRefusing without --confirm-smoke-db.');
       process.exitCode = 2;
@@ -380,9 +402,20 @@ async function main() {
       console.log('Nothing to delete.');
       return;
     }
-    const prodMarkers = looksProdLike();
-    if (prodMarkers.length > 0 && !CONFIRM_SMOKE_DB) {
-      console.error('\n⛔  Production-like env at execute-time — refusing.');
+    // Re-check at execute time as defense in depth — env can change
+    // between discover() and execute() (long-running shell, exporter
+    // injects vars, etc.). Hard markers always reject, soft markers
+    // require --confirm-smoke-db.
+    const hardAtExecute = hardProdMarkers();
+    if (hardAtExecute.length > 0) {
+      console.error('\n⛔  Production environment at execute-time — refusing (non-overridable):');
+      hardAtExecute.forEach((r) => console.error(`     - ${r}`));
+      process.exitCode = 2;
+      return;
+    }
+    const softAtExecute = softProdMarkers();
+    if (softAtExecute.length > 0 && !CONFIRM_SMOKE_DB) {
+      console.error('\n⛔  Production-like DATABASE_URL at execute-time — refusing.');
       process.exitCode = 2;
       return;
     }
