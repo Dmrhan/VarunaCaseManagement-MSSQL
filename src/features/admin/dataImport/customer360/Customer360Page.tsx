@@ -33,7 +33,9 @@ import { SheetMappingStep } from './SheetMappingStep';
 import { downloadCustomer360Template } from './templateGenerator';
 import { RelationshipGraph } from './RelationshipGraph';
 import { MappingFieldSelect } from '../MappingFieldSelect';
+import { HistoryPanel } from '../HistoryPanel';
 import { cn } from '@/components/ui/cn';
+import type { ImportJob } from '@/services/importService';
 
 const ROW_CAPS: Record<Customer360EntityKey, number> = {
   account: 5000,
@@ -103,6 +105,15 @@ export function Customer360Page() {
   const [confirmRollback, setConfirmRollback] = useState(false);
   const [rollbackBusy, setRollbackBusy] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<Customer360RollbackResponse | null>(null);
+  // Customer 360 import geçmişi (Phase 2b sonrası eklendi).
+  // Aynı oturumdaki commitResult'a ek olarak ESKİ Customer 360 job'ları
+  // listelenir ve completed/partial olanlar için "Geri Al" aksiyonu
+  // sunulur. Backend `POST /customer360/jobs/:id/rollback` kullanılır;
+  // Phase 1 account import'tan ayrı (targetType=customer360 filtreli).
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [historyRollbackJob, setHistoryRollbackJob] = useState<ImportJob | null>(null);
+  const [historyRollbackBusy, setHistoryRollbackBusy] = useState(false);
+  const [historyRollbackResult, setHistoryRollbackResult] = useState<Customer360RollbackResponse | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -178,11 +189,34 @@ export function Customer360Page() {
     setConfirmRollback(false);
     if (!r) return;
     setRollbackResult(r);
+    setHistoryRefreshKey((k) => k + 1);
     const failed = r.report.failedCount;
     toast({
       type: failed === 0 ? 'success' : 'warn',
       message: failed === 0
         ? 'Customer 360 aktarımı geri alındı.'
+        : `Customer 360 geri alma kısmi — ${failed} satır geri alınamadı.`,
+      duration: failed === 0 ? 4500 : 7000,
+    });
+  }
+
+  // Geçmiş listesinden rollback. Aynı backend endpoint kullanılır
+  // (POST /api/admin/imports/customer360/jobs/:id/rollback). Phase 1
+  // rollback fonksiyonu (importService.rollback) ÇAĞRILMAZ.
+  async function runHistoryRollback() {
+    const job = historyRollbackJob;
+    if (!job) return;
+    setHistoryRollbackBusy(true);
+    const r = await importService.customer360Rollback(job.id);
+    setHistoryRollbackBusy(false);
+    if (!r) return;
+    setHistoryRollbackResult(r);
+    setHistoryRefreshKey((k) => k + 1);
+    const failed = r.report.failedCount;
+    toast({
+      type: failed === 0 ? 'success' : 'warn',
+      message: failed === 0
+        ? `Customer 360 aktarımı geri alındı (${job.fileName ?? job.sourceName ?? job.id}).`
         : `Customer 360 geri alma kısmi — ${failed} satır geri alınamadı.`,
       duration: failed === 0 ? 4500 : 7000,
     });
@@ -618,6 +652,79 @@ export function Customer360Page() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Customer 360 import history — targetType=customer360 filtered;
+          Phase 1 account history is rendered separately in
+          AdminDataImportPage and never appears here. */}
+      {companyId && (
+        <HistoryPanel
+          companyId={companyId}
+          targetType="customer360"
+          title="Customer 360 Aktarım Geçmişi"
+          refreshKey={historyRefreshKey}
+          onOpenJob={() => {
+            /* placeholder — Customer 360'ta job detayı henüz ayrı sayfa
+               olarak yok; satır click no-op. Rollback action butonu
+               üzerinden tetiklenir. */
+          }}
+          renderActions={(j) => {
+            const status = j.status;
+            const canRollback = status === 'completed' || status === 'partial';
+            if (canRollback) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistoryRollbackJob(j);
+                    setHistoryRollbackResult(null);
+                  }}
+                  className="flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-700/40 dark:bg-ndark-card dark:text-rose-300 dark:hover:bg-rose-900/20"
+                >
+                  <Undo2 size={11} />
+                  Geri Al
+                </button>
+              );
+            }
+            if (status === 'rolled_back') {
+              return (
+                <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-600 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted">
+                  Geri alındı
+                </span>
+              );
+            }
+            if (status === 'rollback_partial') {
+              return (
+                <span
+                  title={
+                    j.errorCount > 0
+                      ? `${j.errorCount} satır geri alınamadı`
+                      : 'Kısmi geri alma — bazı satırlar geri alınamadı'
+                  }
+                  className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+                >
+                  Kısmi geri alma{j.errorCount > 0 ? ` · ${j.errorCount} satır` : ''}
+                </span>
+              );
+            }
+            // draft / validated / running / failed → aksiyon yok
+            return null;
+          }}
+        />
+      )}
+
+      {historyRollbackJob && (
+        <HistoryRollbackConfirmCard
+          job={historyRollbackJob}
+          companyName={manageable.find((c) => c.id === historyRollbackJob.companyId)?.name}
+          busy={historyRollbackBusy}
+          result={historyRollbackResult}
+          onCancel={() => {
+            setHistoryRollbackJob(null);
+            setHistoryRollbackResult(null);
+          }}
+          onConfirm={runHistoryRollback}
+        />
       )}
     </div>
   );
@@ -1315,6 +1422,140 @@ function DryRunSummaryCard({
               </div>
             )}
           </>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// History rollback confirmation card
+// ─────────────────────────────────────────────────────────────────
+//
+// Geçmiş listesinden seçilen Customer 360 job'ı için onay paneli +
+// rollback sonucu özeti. Backend `POST /customer360/jobs/:id/rollback`
+// endpoint'ini importService.customer360Rollback üzerinden çağırır.
+
+function HistoryRollbackConfirmCard({
+  job,
+  companyName,
+  busy,
+  result,
+  onCancel,
+  onConfirm,
+}: {
+  job: ImportJob;
+  companyName: string | undefined;
+  busy: boolean;
+  result: Customer360RollbackResponse | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const sourceLabel = job.fileName ?? job.sourceName ?? 'aktarım';
+  const dateLabel = new Date(job.createdAt).toLocaleString('tr-TR');
+  const finalStatus = result?.job?.status ?? null;
+  const failed = result?.report?.failedCount ?? 0;
+  const failedRows = result?.report?.failedRows ?? [];
+
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-700/40 dark:bg-rose-900/20">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-rose-700 dark:text-rose-300" />
+          <div className="space-y-1 text-xs text-rose-900 dark:text-rose-200">
+            <div className="font-semibold">Customer 360 aktarımını geri al</div>
+            <div>
+              Bu işlem yalnız bu Customer 360 aktarım job'ını geri alır.
+              Aynı şirketteki diğer aktarımlar ve Phase 1 Müşteri Ana Kartı
+              aktarımları etkilenmez.
+            </div>
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-2">
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Job ID</dt>
+            <dd className="truncate font-mono text-slate-800 dark:text-ndark-text">{job.id}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Kaynak</dt>
+            <dd className="truncate text-slate-800 dark:text-ndark-text">{sourceLabel}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Tarih</dt>
+            <dd className="text-slate-800 dark:text-ndark-text">{dateLabel}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Şirket</dt>
+            <dd className="truncate text-slate-800 dark:text-ndark-text">
+              {companyName ?? job.companyId}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Oluşturulan</dt>
+            <dd className="text-slate-800 dark:text-ndark-text">{job.createCount}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Güncellenen</dt>
+            <dd className="text-slate-800 dark:text-ndark-text">{job.updateCount}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Atlanan</dt>
+            <dd className="text-slate-800 dark:text-ndark-text">{job.skippedCount}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500 dark:text-ndark-muted">Hatalı</dt>
+            <dd className="text-slate-800 dark:text-ndark-text">{job.errorCount}</dd>
+          </div>
+        </dl>
+
+        {!result && (
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" onClick={onCancel} disabled={busy}>
+              Vazgeç
+            </Button>
+            <Button variant="danger" onClick={onConfirm} disabled={busy}>
+              <Undo2 size={12} />
+              {busy ? 'Geri alınıyor…' : 'Evet, Geri Al'}
+            </Button>
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-2">
+            <div
+              className={cn(
+                'rounded-md border px-3 py-2 text-xs',
+                finalStatus === 'rolled_back'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700/40 dark:bg-emerald-900/20 dark:text-emerald-200'
+                  : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200',
+              )}
+            >
+              {finalStatus === 'rolled_back'
+                ? 'Customer 360 aktarımı tamamen geri alındı.'
+                : `Customer 360 geri alma kısmi tamamlandı — ${failed} satır geri alınamadı.`}
+            </div>
+            {failedRows.length > 0 && (
+              <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] dark:border-rose-700/40 dark:bg-rose-900/20">
+                <div className="mb-1 font-semibold text-rose-900 dark:text-rose-200">
+                  İlk {Math.min(10, failedRows.length)} hatalı satır
+                </div>
+                <ul className="space-y-1 text-rose-900 dark:text-rose-200">
+                  {failedRows.slice(0, 10).map((r, i) => (
+                    <li key={`${r.entity}-${r.rowNumber}-${i}`}>
+                      <span className="font-mono">[{r.entity} #{r.rowNumber}]</span>{' '}
+                      {(r.errors[0]?.message) ?? 'hata'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex justify-end">
+              <Button variant="ghost" onClick={onCancel}>
+                Kapat
+              </Button>
+            </div>
+          </div>
         )}
       </CardBody>
     </Card>
