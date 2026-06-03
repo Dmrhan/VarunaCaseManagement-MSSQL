@@ -7,6 +7,7 @@
  */
 
 import { apiFetch } from './caseService';
+import { getAccessToken } from '@/services/supabase';
 
 const BASE = '/api/admin/imports';
 
@@ -303,6 +304,50 @@ export const importService = {
 
   templateUrl(): string {
     return `${BASE}/account/template.csv`;
+  },
+
+  /**
+   * Authenticated CSV template download. A plain `<a href download>`
+   * cannot attach the `Authorization: Bearer …` header that
+   * `/api/admin/imports/account/template.csv` requires (router has
+   * `verifyJwt + requireRole('Admin','SystemAdmin')`), so the
+   * download silently produced an HTML error response and the
+   * button appeared dead. Customer 360 sidesteps this by generating
+   * its XLSX client-side; for account we keep the server endpoint
+   * (so column list stays in lockstep with `generateAccountTemplateCsv`)
+   * but fetch it through this helper which attaches the same JWT
+   * `apiFetch` uses, then triggers the file download via blob.
+   */
+  async downloadAccountTemplate(): Promise<void> {
+    const token = await getAccessToken();
+    const headers = new Headers();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const r = await fetch(this.templateUrl(), { headers });
+    if (!r.ok) {
+      let serverMessage = '';
+      try {
+        const body = await r.json();
+        serverMessage = body?.message ?? body?.error ?? '';
+      } catch {
+        try {
+          serverMessage = await r.text();
+        } catch {
+          // body yok
+        }
+      }
+      throw new Error(
+        serverMessage || `Şablon indirilemedi (HTTP ${r.status}).`,
+      );
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'varuna-musteri-ana-karti-sablon.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 
   async parseFile(input: {
