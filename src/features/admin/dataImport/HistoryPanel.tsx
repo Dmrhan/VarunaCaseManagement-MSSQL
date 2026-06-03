@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { History, Clock } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -14,6 +14,14 @@ interface Props {
    * Customer 360 wizard `customer360` geçer; ikisi karışmaz.
    */
   targetType?: 'account' | 'customer360';
+  /** Başlık. Default "Geçmiş". */
+  title?: string;
+  /**
+   * Her satırın alt kısmına ek aksiyon (örn. Customer 360 "Geri Al"
+   * butonu). Phase 1 wizard bu prop'u geçmez ve mevcut salt-tıklanabilir
+   * satır davranışı bire bir korunur.
+   */
+  renderActions?: (job: ImportJob) => ReactNode;
 }
 
 const STATUS_TONE: Record<ImportJob['status'], string> = {
@@ -38,7 +46,7 @@ const STATUS_LABEL: Record<ImportJob['status'], string> = {
   rollback_partial: 'Geri alma kısmi',
 };
 
-export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType }: Props) {
+export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType, title, renderActions }: Props) {
   const [items, setItems] = useState<ImportJob[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -61,7 +69,7 @@ export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType }: P
       <CardBody className="space-y-2">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-ndark-text">
-            <History size={14} /> Geçmiş
+            <History size={14} /> {title ?? 'Geçmiş'}
           </h3>
           <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
             {items.length} kayıt
@@ -78,11 +86,14 @@ export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType }: P
             {items.map((j) => (
               <li
                 key={j.id}
-                onClick={() => onOpenJob(j)}
-                className="cursor-pointer rounded-md border border-slate-200 bg-white p-2 text-xs transition-colors hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:hover:bg-ndark-surface"
+                className="rounded-md border border-slate-200 bg-white p-2 text-xs transition-colors dark:border-ndark-border dark:bg-ndark-card"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => onOpenJob(j)}
+                    className="-m-1 min-w-0 flex-1 cursor-pointer rounded p-1 text-left hover:bg-slate-50 dark:hover:bg-ndark-surface"
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="truncate font-medium text-slate-800 dark:text-ndark-text">
                         {j.fileName ?? j.sourceName ?? 'aktarım'}
@@ -101,8 +112,11 @@ export function HistoryPanel({ companyId, onOpenJob, refreshKey, targetType }: P
                       {j.createCount}+ · {j.updateCount}↺ · {j.skippedCount}⊘
                       {j.errorCount > 0 ? ` · ${j.errorCount}✗` : ''}
                     </div>
-                  </div>
+                  </button>
                 </div>
+                {renderActions && (
+                  <div className="mt-1.5 flex justify-end">{renderActions(j)}</div>
+                )}
               </li>
             ))}
           </ul>
