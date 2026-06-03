@@ -12,22 +12,32 @@ import {
   normalizeBoolean,
   normalizeEnum,
   normalizeText,
+  parentCompanyRecordNoField,
+  parentRecordNoField,
   parseDate,
+  recordNoField,
+  sourceProjectIdField,
 } from './_shared.js';
 
-export const ACCOUNT_PROJECT_VERSION = '2026-05-22.accountProject.v2';
+export const ACCOUNT_PROJECT_VERSION = '2026-06-03.accountProject.v3';
 
 export const ACCOUNT_PROJECT_FIELDS = [
+  recordNoField({
+    description: 'Bu Projects sheet satırının dosya içi kimliği.',
+  }),
+  parentRecordNoField(),
+  parentCompanyRecordNoField(),
+  sourceProjectIdField(),
   {
     key: 'accountKey',
     label: 'Müşteri Anahtarı',
-    description: 'Üst parent Account satırına bağlayan anahtar.',
+    description: 'Üst parent Account satırına bağlayan anahtar. parentRecordNo dolu ise opsiyoneldir.',
     example: '1234567890',
     group: 'İlişki',
     type: 'text',
-    required: true,
+    required: false,
     aliases: ['accountkey', 'müşteri anahtarı', 'parent vkn'],
-    validationHint: 'Parent account satırlarından birine eşleşmeli.',
+    validationHint: 'Parent account satırlarından birine eşleşmeli (veya parentRecordNo verilmeli).',
     normalizationHint: null,
     businessWarning: null,
     sensitive: false,
@@ -36,7 +46,7 @@ export const ACCOUNT_PROJECT_FIELDS = [
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 80, requiredLabel: 'Müşteri anahtarı' });
+      return normalizeText(raw, { max: 80 });
     },
   },
   {

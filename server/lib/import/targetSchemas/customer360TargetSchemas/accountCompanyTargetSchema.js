@@ -17,22 +17,28 @@ import {
   normalizeBoolean,
   normalizeEnum,
   normalizeText,
+  parentRecordNoField,
   parseDate,
+  recordNoField,
 } from './_shared.js';
 
-export const ACCOUNT_COMPANY_VERSION = '2026-05-22.accountCompany.v2';
+export const ACCOUNT_COMPANY_VERSION = '2026-06-03.accountCompany.v3';
 
 export const ACCOUNT_COMPANY_FIELDS = [
+  recordNoField({
+    description: 'Bu Companies sheet satırının dosya içi kimliği. Projects sheet parentCompanyRecordNo ile buraya bağlanabilir.',
+  }),
+  parentRecordNoField(),
   {
     key: 'accountKey',
     label: 'Müşteri Anahtarı',
-    description: 'Parent Account satırına bağlayan anahtar (VKN veya externalCustomerCode).',
+    description: 'Parent Account satırına bağlayan anahtar (VKN veya externalCustomerCode). parentRecordNo dolu ise opsiyoneldir.',
     example: '1234567890',
     group: 'İlişki',
     type: 'text',
-    required: true,
+    required: false,
     aliases: ['accountkey', 'müşteri anahtarı', 'account vkn', 'parent vkn', 'parent key'],
-    validationHint: 'Parent account satırlarından birine eşleşmeli.',
+    validationHint: 'Parent account satırlarından birine eşleşmeli (veya parentRecordNo verilmeli).',
     normalizationHint: 'Trim uygulanır.',
     businessWarning: 'Eşleşme bulunamazsa orphan row hatası verir.',
     sensitive: false,
@@ -41,7 +47,7 @@ export const ACCOUNT_COMPANY_FIELDS = [
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 80, requiredLabel: 'Müşteri anahtarı' });
+      return normalizeText(raw, { max: 80 });
     },
   },
   {
@@ -75,7 +81,21 @@ export const ACCOUNT_COMPANY_FIELDS = [
     group: 'Kimlik',
     type: 'text',
     required: false,
-    aliases: ['externalcustomercode', 'external customer code', 'dış müşteri kodu', 'dis musteri kodu', 'müşteri kodu', 'customer code'],
+    aliases: [
+      'externalcustomercode',
+      'external_customer_code',
+      'external customer code',
+      'dış müşteri kodu',
+      'dis musteri kodu',
+      'müşteri kodu',
+      'musteri_kodu',
+      'müşteri_kodu',
+      'müşteri no',
+      'musteri no',
+      'customer code',
+      'customercode',
+      'customer_code',
+    ],
     validationHint: 'Şirket içinde unique olmalı.',
     normalizationHint: null,
     businessWarning: null,

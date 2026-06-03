@@ -1,4 +1,4 @@
-﻿accountKey,companyCode,externalCustomerCode,packageName,segment,status
-1112223339,COMP-UNIVERA,90001,Premium,Key Account,active
-Beta Demo Ltd.,,90002,Standard,,active
-7778889991,COMP-UNIVERA,90003,Basic,,active
+﻿recordNo,parentRecordNo,accountKey,companyCode,externalCustomerCode,packageName,segment,status
+AC001,A001,1112223339,COMP-UNIVERA,90001,Premium,Key Account,active
+AC002,A002,Beta Demo Ltd.,,90002,Standard,,active
+AC003,A003,7778889991,COMP-UNIVERA,90003,Basic,,active

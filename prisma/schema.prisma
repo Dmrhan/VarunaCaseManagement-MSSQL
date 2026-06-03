@@ -565,6 +565,10 @@ model AccountProject {
   endDate          DateTime?
   description      String?       @db.Text
   isActive         Boolean       @default(true)
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountCompanyId, sourceExternalId) to
+  /// update the same Project row instead of creating a duplicate.
+  sourceExternalId String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -574,6 +578,7 @@ model AccountProject {
   @@unique([accountCompanyId, code])
   @@index([accountCompanyId])
   @@index([accountCompanyId, isActive])
+  @@index([accountCompanyId, sourceExternalId])
 }
 
 // AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.
@@ -620,6 +625,11 @@ model AccountContact {
   isActive         Boolean  @default(true)
   /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.
   preferredChannel String?
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountId, sourceExternalId) to update
+  /// the same Contact row instead of creating a duplicate. App-layer
+  /// uniqueness only — no DB unique to keep imports race-tolerant.
+  sourceExternalId String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -627,6 +637,7 @@ model AccountContact {
 
   @@index([accountId])
   @@index([phoneE164])
+  @@index([accountId, sourceExternalId])
 }
 
 /// WR-A3 / PM-02 — Account address book. Country-agnostic; TR default.
@@ -635,27 +646,31 @@ model AccountContact {
 /// `isDefault` uniqueness per (accountId, companyId, type) enforced at app layer
 /// inside Prisma transactions (no DB unique to avoid soft-delete race windows).
 model Address {
-  id         String      @id @default(cuid())
-  accountId  String
+  id               String      @id @default(cuid())
+  accountId        String
   /// Denormalized tenant scope. Must equal an AccountCompany.companyId where
   /// AccountCompany.accountId = this.accountId (BFF-enforced).
-  companyId  String
-  type       AddressType
+  companyId        String
+  type             AddressType
   /// Optional human label (e.g. "İstanbul merkez ofis", "Adana şube").
-  label      String?
-  line1      String
-  line2      String?
-  district   String?
+  label            String?
+  line1            String
+  line2            String?
+  district         String?
   /// Nullable: country-agnostic — some countries / address formats omit a city.
-  city       String?
-  state      String?
-  postalCode String?
+  city             String?
+  state            String?
+  postalCode       String?
   /// ISO 3166-1 alpha-2 (uppercase). App-layer format validation `^[A-Z]{2}$`.
-  country    String      @default("TR")
-  isDefault  Boolean     @default(false)
-  isActive   Boolean     @default(true)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  country          String      @default("TR")
+  isDefault        Boolean     @default(false)
+  isActive         Boolean     @default(true)
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountId, sourceExternalId) to update
+  /// the same Address row instead of creating a duplicate.
+  sourceExternalId String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
   company Company @relation(fields: [companyId], references: [id])
@@ -664,6 +679,7 @@ model Address {
   @@index([companyId])
   @@index([accountId, type])
   @@index([accountId, isDefault])
+  @@index([accountId, sourceExternalId])
 }
 
 /// WR-A6 / PM-05 — Tenant-scoped product catalog (foundation only).
