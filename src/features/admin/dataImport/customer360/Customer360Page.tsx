@@ -173,6 +173,10 @@ export function Customer360Page() {
     if (!r) return;
     setCommitResult(r);
     setRollbackResult(null);
+    // Codex P2 — Customer 360 commit yeni bir job yaratır; history paneli
+    // o job'ı görsün diye refreshKey'i bump et. Rollback yollarında zaten
+    // bump var; commit yolu da artık simetrik.
+    setHistoryRefreshKey((k) => k + 1);
     const stats = r.runStats;
     toast({
       type: r.job.status === 'completed' ? 'success' : r.job.status === 'partial' ? 'warn' : 'error',
