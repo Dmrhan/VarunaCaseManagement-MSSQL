@@ -47,14 +47,33 @@ const README_LINES: string[] = [
   '  Projects   → AccountCompany altında projeler. Doğrudan müşteriye değil, şirket ilişkisine bağlanır.',
   '',
   'BAĞLANTI ANAHTARLARI',
-  '  accountKey         → Çocuk satırların hangi müşteriye ait olduğunu gösterir.',
+  '  recordNo           → Dosya İÇİ satır kimliği. Her sheet\'te tekil olmalı. Account/AccountCompany',
+  '                        ID\'si DEĞİLDİR ve kalıcı saklanmaz; yalnız parent-child bağı için kullanılır.',
+  '  parentRecordNo     → Child sheet\'lerde (Contacts/Addresses/Companies/Projects): Accounts',
+  '                        sheet\'inden bir recordNo\'ya işaret eder. accountKey/vkn/name fallback\'inden',
+  '                        ÖNCE değerlendirilir.',
+  '  parentCompanyRecordNo → Sadece Projects: Companies sheet\'inden bir recordNo. Boşsa',
+  '                          accountCompanyKey/companyCode fallback\'i kullanılır.',
+  '  accountKey         → Çocuk satırların hangi müşteriye ait olduğunu gösterir (parentRecordNo yoksa).',
   '                        Account sayfasındaki VKN veya isim ile EŞLEŞMELİDİR.',
-  '                        En güvenli yöntem: çocuk satırlarda VKN değerini kopyalamak.',
-  '                        Aksi halde dry-run "yetim satır" hatası verir.',
-  '  accountCompanyKey  → Projects sayfasında, projeyi hangi şirket ilişkisine bağlayacağınızı belirtir.',
-  '                        Companies sayfasındaki companyCode değeri ile eşleşmelidir.',
+  '  accountCompanyKey  → Projects sayfasında, projeyi hangi şirket ilişkisine bağlayacağınızı belirtir',
+  '                        (parentCompanyRecordNo yoksa). Companies companyCode ile eşleşmelidir.',
   '  companyCode        → Boş bırakırsanız sistem seçili Varuna şirketine otomatik bağlar.',
   '                        Farklı bir kod yazarsanız ve seçili şirketle uyuşmazsa satır reddedilir.',
+  '',
+  'KALICI KAYNAK ID\'LERİ (sourceContactId / sourceAddressId / sourceProjectId)',
+  '  Bunlar dış ERP/CRM\'deki Contact/Address/Project kimliğidir. İlk import\'ta child kayıt yaratılır;',
+  '  aynı ID ile yapılan ikinci import o kaydı YENİDEN YARATMAZ, mevcut satırı GÜNCELLER.',
+  '  Boş bırakırsanız fallback eşleşme (Contact: e-posta/telefon, Address: tür+etiket+line1, Project:',
+  '  projectCode) devreye girer ve dry-run "kalıcı kaynak ID yok; fallback kullanıldı" uyarısı verir.',
+  '  Aynı sheet içinde aynı sourceContact/Address/ProjectId iki kez geçerse dry-run HATA verir.',
+  '',
+  'MÜŞTERİ KODU (externalCustomerCode, Companies sheet)',
+  '  Şirket bazlı (tenant-scoped) tekildir. Phase 1 Müşteri Ana Kartı aktarımı ve dry-run,',
+  '  bu kodu VKN/TCKN\'den ÖNCE eşleştirme anahtarı olarak değerlendirir. Mevcut müşteri kodu',
+  '  ile gelen satırın VKN/TCKN\'si mevcut müşterinin kimliğinden FARKLI ise import',
+  '  "Müşteri kodu X mevcut müşteriyle eşleşti ancak VKN/TCKN farklı" hatasıyla reddedilir;',
+  '  account otomatik birleştirilmez.',
   '',
   'ZORUNLU ALANLAR (Customer 360 target schema kaynağına göre)',
   '  Aşağıdaki sütunlar boş bırakılamaz:',
@@ -85,6 +104,7 @@ const SHEETS: SheetSpec[] = [
   {
     sheetName: 'Accounts',
     columns: [
+      { key: 'recordNo', width: 12 },
       { key: 'accountKey', required: true, width: 22 },
       { key: 'name', required: true, width: 30 },
       { key: 'customerType', width: 14 },
@@ -95,6 +115,7 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
+        recordNo: 'A001',
         accountKey: '1234567890',
         name: 'ACME Holding A.Ş.',
         customerType: 'Corporate',
@@ -104,6 +125,7 @@ const SHEETS: SheetSpec[] = [
         website: 'https://www.acme.com.tr',
       },
       {
+        recordNo: 'A002',
         accountKey: '9876543210',
         name: 'Beta Lojistik Ltd. Şti.',
         customerType: 'Corporate',
@@ -117,6 +139,8 @@ const SHEETS: SheetSpec[] = [
   {
     sheetName: 'Companies',
     columns: [
+      { key: 'recordNo', width: 12 },
+      { key: 'parentRecordNo', width: 14 },
       { key: 'accountKey', required: true, width: 22 },
       { key: 'companyCode', width: 16 },
       { key: 'externalCustomerCode', width: 22 },
@@ -125,6 +149,8 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
+        recordNo: 'AC001',
+        parentRecordNo: 'A001',
         accountKey: '1234567890',
         companyCode: '',
         externalCustomerCode: 'CUST-0001',
@@ -132,6 +158,8 @@ const SHEETS: SheetSpec[] = [
         status: 'Active',
       },
       {
+        recordNo: 'AC002',
+        parentRecordNo: 'A002',
         accountKey: '9876543210',
         companyCode: '',
         externalCustomerCode: 'CUST-0002',
@@ -143,6 +171,9 @@ const SHEETS: SheetSpec[] = [
   {
     sheetName: 'Contacts',
     columns: [
+      { key: 'recordNo', width: 12 },
+      { key: 'parentRecordNo', width: 14 },
+      { key: 'sourceContactId', width: 18 },
       { key: 'accountKey', required: true, width: 22 },
       { key: 'fullName', required: true, width: 24 },
       { key: 'title', width: 22 },
@@ -152,6 +183,9 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
+        recordNo: 'C001',
+        parentRecordNo: 'A001',
+        sourceContactId: 'ERP-CN-1001',
         accountKey: '1234567890',
         fullName: 'Ayşe Yılmaz',
         title: 'Satın Alma Müdürü',
@@ -160,6 +194,9 @@ const SHEETS: SheetSpec[] = [
         isPrimary: true,
       },
       {
+        recordNo: 'C002',
+        parentRecordNo: 'A002',
+        sourceContactId: 'ERP-CN-2001',
         accountKey: '9876543210',
         fullName: 'Mehmet Demir',
         title: 'Operasyon Sorumlusu',
@@ -172,6 +209,9 @@ const SHEETS: SheetSpec[] = [
   {
     sheetName: 'Addresses',
     columns: [
+      { key: 'recordNo', width: 12 },
+      { key: 'parentRecordNo', width: 14 },
+      { key: 'sourceAddressId', width: 18 },
       { key: 'accountKey', required: true, width: 22 },
       { key: 'type', width: 12 },
       { key: 'label', width: 18 },
@@ -183,6 +223,9 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
+        recordNo: 'D001',
+        parentRecordNo: 'A001',
+        sourceAddressId: 'ERP-ADR-1001',
         accountKey: '1234567890',
         type: 'Billing',
         label: 'Genel Merkez',
@@ -193,6 +236,9 @@ const SHEETS: SheetSpec[] = [
         isDefault: true,
       },
       {
+        recordNo: 'D002',
+        parentRecordNo: 'A002',
+        sourceAddressId: 'ERP-ADR-2001',
         accountKey: '9876543210',
         type: 'Shipping',
         label: 'Depo',
@@ -207,6 +253,10 @@ const SHEETS: SheetSpec[] = [
   {
     sheetName: 'Projects',
     columns: [
+      { key: 'recordNo', width: 12 },
+      { key: 'parentRecordNo', width: 14 },
+      { key: 'parentCompanyRecordNo', width: 18 },
+      { key: 'sourceProjectId', width: 18 },
       { key: 'accountKey', required: true, width: 22 },
       { key: 'accountCompanyKey', width: 18 },
       { key: 'projectCode', required: true, width: 18 },
@@ -217,6 +267,10 @@ const SHEETS: SheetSpec[] = [
     ],
     rows: [
       {
+        recordNo: 'P001',
+        parentRecordNo: 'A001',
+        parentCompanyRecordNo: 'AC001',
+        sourceProjectId: 'ERP-PRJ-1001',
         accountKey: '1234567890',
         accountCompanyKey: '',
         projectCode: 'WMS-ROLLOUT',

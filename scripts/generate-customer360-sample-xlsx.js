@@ -67,38 +67,38 @@ const VKN_GAMA = genVkn('777888999'); // → 7778889991
 // 3 accounts × 3 companies × 4 contacts × 3 addresses × 2 projects
 // ─────────────────────────────────────────────────────────────────
 const validAccounts = [
-  { name: 'Acme Demo A.Ş.', vkn: VKN_ACME, customerType: 'Kurumsal', email: 'info@acme.demo', phone: '+902121110000', isActive: 'Evet' },
+  { recordNo: 'A001', name: 'Acme Demo A.Ş.', vkn: VKN_ACME, customerType: 'Kurumsal', email: 'info@acme.demo', phone: '+902121110000', isActive: 'Evet' },
   // No-VKN account → warning (warningIfMissing.no_vkn) ama satır geçerli
-  { name: 'Beta Demo Ltd.', vkn: '', customerType: 'Kurumsal', email: 'info@beta.demo', phone: '+903121112222', isActive: 'Evet' },
-  { name: 'Gama Demo Bireysel', vkn: VKN_GAMA, customerType: 'Bireysel', email: 'gama@example.demo', phone: '+905321113333', isActive: 'Evet' },
+  { recordNo: 'A002', name: 'Beta Demo Ltd.', vkn: '', customerType: 'Kurumsal', email: 'info@beta.demo', phone: '+903121112222', isActive: 'Evet' },
+  { recordNo: 'A003', name: 'Gama Demo Bireysel', vkn: VKN_GAMA, customerType: 'Bireysel', email: 'gama@example.demo', phone: '+905321113333', isActive: 'Evet' },
 ];
 
 const validCompanies = [
-  // Selected company (COMP-UNIVERA) için açık eşleşme
-  { accountKey: VKN_ACME, companyCode: 'COMP-UNIVERA', externalCustomerCode: '90001', packageName: 'Premium', segment: 'Key Account', status: 'active' },
-  // Boş companyCode → auto-bind to selected (warning)
-  { accountKey: 'Beta Demo Ltd.', companyCode: '', externalCustomerCode: '90002', packageName: 'Standard', segment: '', status: 'active' },
-  { accountKey: VKN_GAMA, companyCode: 'COMP-UNIVERA', externalCustomerCode: '90003', packageName: 'Basic', segment: '', status: 'active' },
+  // Selected company (COMP-UNIVERA) için açık eşleşme, parentRecordNo → A001
+  { recordNo: 'AC001', parentRecordNo: 'A001', accountKey: VKN_ACME, companyCode: 'COMP-UNIVERA', externalCustomerCode: '90001', packageName: 'Premium', segment: 'Key Account', status: 'active' },
+  // Boş companyCode → auto-bind to selected (warning). parentRecordNo → A002 (Beta, no VKN)
+  { recordNo: 'AC002', parentRecordNo: 'A002', accountKey: 'Beta Demo Ltd.', companyCode: '', externalCustomerCode: '90002', packageName: 'Standard', segment: '', status: 'active' },
+  { recordNo: 'AC003', parentRecordNo: 'A003', accountKey: VKN_GAMA, companyCode: 'COMP-UNIVERA', externalCustomerCode: '90003', packageName: 'Basic', segment: '', status: 'active' },
 ];
 
 const validContacts = [
-  { accountKey: VKN_ACME, fullName: 'Ayşe Demo', title: 'Satın Alma Müdürü', email: 'ayse@acme.demo', phone: '+905321110001', isPrimary: 'Evet', isActive: 'Evet' },
-  { accountKey: VKN_ACME, fullName: 'Mehmet Demo', title: 'Operasyon Şefi', email: 'mehmet@acme.demo', phone: '+905321110002', isPrimary: 'Hayır', isActive: 'Evet' },
-  { accountKey: 'Beta Demo Ltd.', fullName: 'Cem Demo', title: 'Genel Müdür', email: 'cem@beta.demo', phone: '+905321110003', isPrimary: 'Evet', isActive: 'Evet' },
-  { accountKey: VKN_GAMA, fullName: 'Selin Demo', title: '', email: 'selin@example.demo', phone: '+905321110004', isPrimary: 'Evet', isActive: 'Evet' },
+  { recordNo: 'C001', parentRecordNo: 'A001', sourceContactId: 'ERP-CN-1001', accountKey: VKN_ACME, fullName: 'Ayşe Demo', title: 'Satın Alma Müdürü', email: 'ayse@acme.demo', phone: '+905321110001', isPrimary: 'Evet', isActive: 'Evet' },
+  { recordNo: 'C002', parentRecordNo: 'A001', sourceContactId: 'ERP-CN-1002', accountKey: VKN_ACME, fullName: 'Mehmet Demo', title: 'Operasyon Şefi', email: 'mehmet@acme.demo', phone: '+905321110002', isPrimary: 'Hayır', isActive: 'Evet' },
+  { recordNo: 'C003', parentRecordNo: 'A002', sourceContactId: 'ERP-CN-2001', accountKey: 'Beta Demo Ltd.', fullName: 'Cem Demo', title: 'Genel Müdür', email: 'cem@beta.demo', phone: '+905321110003', isPrimary: 'Evet', isActive: 'Evet' },
+  { recordNo: 'C004', parentRecordNo: 'A003', sourceContactId: 'ERP-CN-3001', accountKey: VKN_GAMA, fullName: 'Selin Demo', title: '', email: 'selin@example.demo', phone: '+905321110004', isPrimary: 'Evet', isActive: 'Evet' },
 ];
 
 const validAddresses = [
-  { accountKey: VKN_ACME, type: 'Billing', label: 'Merkez Ofis', line1: 'Atatürk Bulvarı No:5', district: 'Çankaya', city: 'Ankara', postalCode: '06420', country: 'TR', isDefault: 'Evet', isActive: 'Evet' },
-  { accountKey: 'Beta Demo Ltd.', type: 'Headquarters', label: 'Berlin HQ', line1: 'Friedrichstrasse 100', city: 'Berlin', postalCode: '10117', country: 'DE', isDefault: 'Evet', isActive: 'Evet' },
-  { accountKey: VKN_GAMA, type: 'Shipping', label: 'Amsterdam Warehouse', line1: 'Damrak 45', city: 'Amsterdam', postalCode: '1012LL', country: 'NL', isDefault: 'Evet', isActive: 'Evet' },
+  { recordNo: 'D001', parentRecordNo: 'A001', sourceAddressId: 'ERP-ADR-1001', accountKey: VKN_ACME, type: 'Billing', label: 'Merkez Ofis', line1: 'Atatürk Bulvarı No:5', district: 'Çankaya', city: 'Ankara', postalCode: '06420', country: 'TR', isDefault: 'Evet', isActive: 'Evet' },
+  { recordNo: 'D002', parentRecordNo: 'A002', sourceAddressId: 'ERP-ADR-2001', accountKey: 'Beta Demo Ltd.', type: 'Headquarters', label: 'Berlin HQ', line1: 'Friedrichstrasse 100', city: 'Berlin', postalCode: '10117', country: 'DE', isDefault: 'Evet', isActive: 'Evet' },
+  { recordNo: 'D003', parentRecordNo: 'A003', sourceAddressId: 'ERP-ADR-3001', accountKey: VKN_GAMA, type: 'Shipping', label: 'Amsterdam Warehouse', line1: 'Damrak 45', city: 'Amsterdam', postalCode: '1012LL', country: 'NL', isDefault: 'Evet', isActive: 'Evet' },
 ];
 
 const validProjects = [
-  // accountCompanyKey selected company ile aynı → OK
-  { accountKey: VKN_ACME, accountCompanyKey: 'COMP-UNIVERA', projectCode: 'RT-001', projectName: 'Rota Optimizasyon', status: 'Active', startDate: '2025-03-01', endDate: '2026-12-31', isActive: 'Evet' },
-  // accountCompanyKey boş → selected'a auto-bind (warning)
-  { accountKey: VKN_GAMA, accountCompanyKey: '', projectCode: 'BR-002', projectName: 'Bireysel Saha', status: 'Active', startDate: '2025-06-01', endDate: '', isActive: 'Evet' },
+  // accountCompanyKey selected company ile aynı → OK. parentCompanyRecordNo AC001'e bağlanır.
+  { recordNo: 'P001', parentRecordNo: 'A001', parentCompanyRecordNo: 'AC001', sourceProjectId: 'ERP-PRJ-1001', accountKey: VKN_ACME, accountCompanyKey: 'COMP-UNIVERA', projectCode: 'RT-001', projectName: 'Rota Optimizasyon', status: 'Active', startDate: '2025-03-01', endDate: '2026-12-31', isActive: 'Evet' },
+  // accountCompanyKey boş → selected'a auto-bind (warning); parentCompanyRecordNo de boş, fallback.
+  { recordNo: 'P002', parentRecordNo: 'A003', parentCompanyRecordNo: '', sourceProjectId: 'ERP-PRJ-3001', accountKey: VKN_GAMA, accountCompanyKey: '', projectCode: 'BR-002', projectName: 'Bireysel Saha', status: 'Active', startDate: '2025-06-01', endDate: '', isActive: 'Evet' },
 ];
 
 // ─────────────────────────────────────────────────────────────────

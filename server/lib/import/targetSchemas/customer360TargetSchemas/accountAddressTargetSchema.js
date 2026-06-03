@@ -12,21 +12,31 @@ import {
   normalizeCountryIso2,
   normalizeEnum,
   normalizeText,
+  parentRecordNoField,
+  recordNoField,
+  sourceAddressIdField,
 } from './_shared.js';
 
-export const ACCOUNT_ADDRESS_VERSION = '2026-05-22.accountAddress.v1';
+export const ACCOUNT_ADDRESS_VERSION = '2026-06-03.accountAddress.v2';
 
 export const ACCOUNT_ADDRESS_FIELDS = [
+  recordNoField({
+    description: 'Bu Addresses sheet satırının dosya içi kimliği.',
+  }),
+  parentRecordNoField(),
+  sourceAddressIdField(),
   {
     key: 'accountKey',
     label: 'Müşteri Anahtarı',
-    description: 'Parent Account satırına bağlayan anahtar.',
+    description: 'Parent Account satırına bağlayan anahtar (VKN veya ad). parentRecordNo dolu ise opsiyoneldir.',
     example: '1234567890',
     group: 'İlişki',
+    // Phase 2c — parentRecordNo öncelikli; accountKey artık satır
+    // seviyesinde required değil.
     type: 'text',
-    required: true,
+    required: false,
     aliases: ['accountkey', 'müşteri anahtarı', 'parent vkn'],
-    validationHint: 'Parent account satırlarından birine eşleşmeli.',
+    validationHint: 'Parent account satırlarından birine eşleşmeli (veya parentRecordNo verilmeli).',
     normalizationHint: null,
     businessWarning: 'Eşleşmezse orphan address hatası.',
     sensitive: false,
@@ -35,7 +45,7 @@ export const ACCOUNT_ADDRESS_FIELDS = [
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 80, requiredLabel: 'Müşteri anahtarı' });
+      return normalizeText(raw, { max: 80 });
     },
   },
   {

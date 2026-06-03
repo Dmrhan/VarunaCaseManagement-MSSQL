@@ -11,22 +11,34 @@ import {
   normalizeBoolean,
   normalizePhoneE164,
   normalizeText,
+  parentRecordNoField,
+  recordNoField,
+  sourceContactIdField,
   validateEmail,
 } from './_shared.js';
 
-export const ACCOUNT_CONTACT_VERSION = '2026-05-22.accountContact.v1';
+export const ACCOUNT_CONTACT_VERSION = '2026-06-03.accountContact.v2';
 
 export const ACCOUNT_CONTACT_FIELDS = [
+  recordNoField({
+    description: 'Bu Contacts sheet satırının dosya içi kimliği. (Üst kayda parentRecordNo ile bağlanır.)',
+  }),
+  parentRecordNoField(),
+  sourceContactIdField(),
   {
     key: 'accountKey',
     label: 'Müşteri Anahtarı',
-    description: 'Parent Account satırına bağlayan anahtar.',
+    description: 'Parent Account satırına bağlayan anahtar (VKN veya ad). parentRecordNo dolu ise opsiyoneldir.',
     example: '1234567890',
     group: 'İlişki',
+    // Phase 2c — parentRecordNo varsa dry-run engine fallback'tan önce
+    // parent'ı bulabildiği için accountKey artık satır seviyesinde
+    // zorunlu değildir. resolveParentForChild + orphan_child_row akışı
+    // iki yolu da koruyor.
     type: 'text',
-    required: true,
+    required: false,
     aliases: ['accountkey', 'müşteri anahtarı', 'account vkn', 'parent vkn'],
-    validationHint: 'Parent account satırlarından birine eşleşmeli.',
+    validationHint: 'Parent account satırlarından birine eşleşmeli (veya parentRecordNo verilmeli).',
     normalizationHint: null,
     businessWarning: 'Eşleşmezse orphan contact hatası.',
     sensitive: false,
@@ -35,7 +47,7 @@ export const ACCOUNT_CONTACT_FIELDS = [
     updateAllowed: false,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 80, requiredLabel: 'Müşteri anahtarı' });
+      return normalizeText(raw, { max: 80 });
     },
   },
   {

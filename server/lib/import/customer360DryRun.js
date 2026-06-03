@@ -160,6 +160,105 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     );
   }
 
+  // ─── recordNo / parentRecordNo support (Phase 2c) ────────────────
+  // Dosya İÇİNDEKİ parent-child anahtarı. Her sheet için recordNo
+  // tekilliği kontrol edilir; child sheet'lerin parentRecordNo'ları
+  // önce Accounts/Companies recordNo index'leri üzerinden çözülür,
+  // sonra mevcut accountKey/companyCode fallback'ine düşülür.
+  const accountByRecordNo = new Map();
+  function indexAccountRecordNos() {
+    accountByRecordNo.clear();
+    const seen = new Map(); // recordNo → first rowNumber
+    for (const r of normalizedByEntity.account ?? []) {
+      const rec = r.normalized.recordNo;
+      if (!rec) continue;
+      if (seen.has(rec)) {
+        r.errors.push({
+          entity: 'account',
+          targetKey: 'recordNo',
+          label: 'Kayıt No (Dosya İçi)',
+          code: 'duplicate_record_no_in_sheet',
+          message: `recordNo="${rec}" Accounts sheet'inde tekil değil (satırlar: ${seen.get(rec)}, ${r.rowNumber}).`,
+        });
+        // mark previously-seen row too
+        const prev = (normalizedByEntity.account ?? []).find((x) => x.rowNumber === seen.get(rec));
+        if (prev && !prev.errors.some((e) => e.code === 'duplicate_record_no_in_sheet' && e.targetKey === 'recordNo')) {
+          prev.errors.push({
+            entity: 'account',
+            targetKey: 'recordNo',
+            label: 'Kayıt No (Dosya İçi)',
+            code: 'duplicate_record_no_in_sheet',
+            message: `recordNo="${rec}" Accounts sheet'inde tekil değil (satırlar: ${seen.get(rec)}, ${r.rowNumber}).`,
+          });
+        }
+        continue;
+      }
+      seen.set(rec, r.rowNumber);
+      if (r.errors.length === 0) accountByRecordNo.set(rec, r);
+    }
+  }
+  indexAccountRecordNos();
+  function resolveAccountByParentRecordNo(parentRecordNo) {
+    if (!parentRecordNo) return null;
+    return accountByRecordNo.get(String(parentRecordNo).trim()) ?? null;
+  }
+
+  // Helper used by all child entities: try parentRecordNo first; on
+  // success, write resolved row's accountKey back into normalized so the
+  // downstream existing fallback (accountKey → resolveAccountKey) keeps
+  // working unchanged for commit-time parent linkage. Returns the parent
+  // row or null. Emits no errors here — caller decides.
+  function resolveParentForChild(childRow) {
+    const n = childRow.normalized;
+    if (n.parentRecordNo) {
+      const parent = resolveAccountByParentRecordNo(n.parentRecordNo);
+      if (parent) {
+        // Promote parent's key (vkn||name) to accountKey if missing so the
+        // rest of the engine (and commit-time persistJob) can resolve it
+        // via the existing vkn/name path.
+        if (!n.accountKey) {
+          n.accountKey = parent.normalized.vkn ?? parent.normalized.name ?? null;
+        }
+        return { parent, source: 'parentRecordNo' };
+      }
+      // parentRecordNo present but unresolved → hard error
+      childRow.errors.push({
+        entity: childRow.entityType ?? childRow.entity ?? null,
+        targetKey: 'parentRecordNo',
+        label: 'Üst Kayıt No (Account)',
+        code: 'parent_record_no_not_found',
+        message: `parentRecordNo="${n.parentRecordNo}" Accounts sheet içinde bulunamadı.`,
+      });
+      return { parent: null, source: 'parentRecordNo_invalid' };
+    }
+    // Fallback to existing accountKey/vkn/name behavior
+    const fallback = resolveAccountKey(n.accountKey);
+    return { parent: fallback, source: fallback ? 'accountKey' : 'missing' };
+  }
+
+  // Sheet-level duplicate detection helper for source IDs (Contact /
+  // Address / Project). Duplicate same-sheet source IDs are HARD errors.
+  function flagDuplicateSourceIds(entity, sourceField, label) {
+    const rows = normalizedByEntity[entity] ?? [];
+    const seen = new Map();
+    for (const r of rows) {
+      if (r.errors.length > 0) continue;
+      const v = r.normalized[sourceField];
+      if (!v) continue;
+      if (seen.has(v)) {
+        const firstRn = seen.get(v);
+        const firstRow = rows.find((x) => x.rowNumber === firstRn);
+        const msg = `${label}="${v}" sheet içinde birden fazla kez geçiyor (satırlar: ${firstRn}, ${r.rowNumber}).`;
+        r.errors.push({ entity, targetKey: sourceField, label, code: 'duplicate_source_id_in_sheet', message: msg });
+        if (firstRow && !firstRow.errors.some((e) => e.code === 'duplicate_source_id_in_sheet' && e.targetKey === sourceField)) {
+          firstRow.errors.push({ entity, targetKey: sourceField, label, code: 'duplicate_source_id_in_sheet', message: msg });
+        }
+      } else {
+        seen.set(v, r.rowNumber);
+      }
+    }
+  }
+
   // Build accountCompany index for project parent resolution.
   // Key: `${accountKey}|${companyCode}` → accountCompany row.
   // NOTE: This index is REBUILT after the accountCompany selected-company
@@ -206,7 +305,12 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   //   sorusunun yanıtıdır; satır-bazlı kabul kuralı değildir.
   for (const r of normalizedByEntity.accountCompany ?? []) {
     if (r.errors.length > 0) continue;
-    const parent = resolveAccountKey(r.normalized.accountKey);
+    // Phase 2c — parentRecordNo öncelikli
+    const { parent, source } = resolveParentForChild({ ...r, entity: 'accountCompany' });
+    if (source === 'parentRecordNo_invalid') {
+      orphansByEntity.accountCompany.push(r.rowNumber);
+      continue;
+    }
     if (!parent) {
       const err = {
         entity: 'accountCompany',
@@ -244,12 +348,55 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   // depends on this.
   rebuildAccountCompanyIndex();
 
+  // Phase 2c — AccountCompany recordNo index for Project.parentCompanyRecordNo.
+  // Duplicate recordNo within Companies sheet → error.
+  const accountCompanyByRecordNo = new Map();
+  {
+    const seen = new Map();
+    for (const r of normalizedByEntity.accountCompany ?? []) {
+      const rec = r.normalized.recordNo;
+      if (!rec) continue;
+      if (seen.has(rec)) {
+        r.errors.push({
+          entity: 'accountCompany',
+          targetKey: 'recordNo',
+          label: 'Kayıt No (Dosya İçi)',
+          code: 'duplicate_record_no_in_sheet',
+          message: `recordNo="${rec}" Companies sheet'inde tekil değil (satırlar: ${seen.get(rec)}, ${r.rowNumber}).`,
+        });
+        const prev = (normalizedByEntity.accountCompany ?? []).find((x) => x.rowNumber === seen.get(rec));
+        if (prev && !prev.errors.some((e) => e.code === 'duplicate_record_no_in_sheet' && e.targetKey === 'recordNo')) {
+          prev.errors.push({
+            entity: 'accountCompany',
+            targetKey: 'recordNo',
+            label: 'Kayıt No (Dosya İçi)',
+            code: 'duplicate_record_no_in_sheet',
+            message: `recordNo="${rec}" Companies sheet'inde tekil değil (satırlar: ${seen.get(rec)}, ${r.rowNumber}).`,
+          });
+        }
+        continue;
+      }
+      seen.set(rec, r.rowNumber);
+      if (r.errors.length === 0) accountCompanyByRecordNo.set(rec, r);
+    }
+  }
+  function resolveAccountCompanyByParentCompanyRecordNo(recordNo) {
+    if (!recordNo) return null;
+    return accountCompanyByRecordNo.get(String(recordNo).trim()) ?? null;
+  }
+
   // accountContact — orphan + duplicate detection per account
   const contactDupTracker = new Map(); // `${accountKey}|${email}` → rowNumbers[]
   const primaryByAccount = new Map(); // accountKey → count
+  // Phase 2c — dup sourceContactId within sheet (error)
+  flagDuplicateSourceIds('accountContact', 'sourceContactId', 'Kaynak Contact ID');
   for (const r of normalizedByEntity.accountContact ?? []) {
     if (r.errors.length > 0) continue;
-    const parent = resolveAccountKey(r.normalized.accountKey);
+    const { parent, source } = resolveParentForChild({ ...r, entity: 'accountContact' });
+    if (source === 'parentRecordNo_invalid') {
+      orphansByEntity.accountContact.push(r.rowNumber);
+      continue;
+    }
     if (!parent) {
       r.errors.push({
         entity: 'accountContact',
@@ -260,6 +407,16 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       });
       orphansByEntity.accountContact.push(r.rowNumber);
       continue;
+    }
+    // Phase 2c — missing sourceContactId → warning ("fallback used")
+    if (!r.normalized.sourceContactId) {
+      r.warnings.push({
+        entity: 'accountContact',
+        targetKey: 'sourceContactId',
+        label: 'Kaynak Contact ID',
+        code: 'missing_source_id_fallback',
+        message: 'Kalıcı kaynak ID yok; güncelleme için e-posta/telefon/ad fallback kullanılacak.',
+      });
     }
     if (r.normalized.email) {
       const k = `${r.normalized.accountKey}|${r.normalized.email.toLowerCase()}`;
@@ -306,9 +463,15 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
 
   // accountAddress — orphan + isDefault uniqueness per (accountKey, type)
   const defaultByAccountType = new Map();
+  // Phase 2c — dup sourceAddressId within sheet (error)
+  flagDuplicateSourceIds('accountAddress', 'sourceAddressId', 'Kaynak Address ID');
   for (const r of normalizedByEntity.accountAddress ?? []) {
     if (r.errors.length > 0) continue;
-    const parent = resolveAccountKey(r.normalized.accountKey);
+    const { parent, source } = resolveParentForChild({ ...r, entity: 'accountAddress' });
+    if (source === 'parentRecordNo_invalid') {
+      orphansByEntity.accountAddress.push(r.rowNumber);
+      continue;
+    }
     if (!parent) {
       r.errors.push({
         entity: 'accountAddress',
@@ -319,6 +482,15 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       });
       orphansByEntity.accountAddress.push(r.rowNumber);
       continue;
+    }
+    if (!r.normalized.sourceAddressId) {
+      r.warnings.push({
+        entity: 'accountAddress',
+        targetKey: 'sourceAddressId',
+        label: 'Kaynak Address ID',
+        code: 'missing_source_id_fallback',
+        message: 'Kalıcı kaynak ID yok; güncelleme için tür+etiket+adres fallback kullanılacak.',
+      });
     }
     if (r.normalized.isDefault === true) {
       const k = `${r.normalized.accountKey}|${r.normalized.type}`;
@@ -344,9 +516,17 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
 
   // accountProject — orphan + AccountCompany resolution + projectCode uniqueness
   const projectCodeByCompany = new Map();
+  // Phase 2c — dup sourceProjectId within sheet (error)
+  flagDuplicateSourceIds('accountProject', 'sourceProjectId', 'Kaynak Proje ID');
   for (const r of normalizedByEntity.accountProject ?? []) {
     if (r.errors.length > 0) continue;
-    const parentAccount = resolveAccountKey(r.normalized.accountKey);
+    // Phase 2c — parentRecordNo (→ Account) first
+    const parentInfo = resolveParentForChild({ ...r, entity: 'accountProject' });
+    if (parentInfo.source === 'parentRecordNo_invalid') {
+      orphansByEntity.accountProject.push(r.rowNumber);
+      continue;
+    }
+    const parentAccount = parentInfo.parent;
     if (!parentAccount) {
       r.errors.push({
         entity: 'accountProject',
@@ -357,6 +537,34 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       });
       orphansByEntity.accountProject.push(r.rowNumber);
       continue;
+    }
+    // Phase 2c — parentCompanyRecordNo (→ AccountCompany) before fallback
+    if (r.normalized.parentCompanyRecordNo) {
+      const parentCompany = resolveAccountCompanyByParentCompanyRecordNo(r.normalized.parentCompanyRecordNo);
+      if (parentCompany) {
+        if (!r.normalized.accountCompanyKey) {
+          r.normalized.accountCompanyKey = parentCompany.normalized.companyCode ?? null;
+        }
+      } else {
+        r.errors.push({
+          entity: 'accountProject',
+          targetKey: 'parentCompanyRecordNo',
+          label: 'Üst Şirket Kayıt No (AccountCompany)',
+          code: 'parent_company_record_no_not_found',
+          message: `parentCompanyRecordNo="${r.normalized.parentCompanyRecordNo}" Companies sheet içinde bulunamadı.`,
+        });
+        orphansByEntity.accountProject.push(r.rowNumber);
+        continue;
+      }
+    }
+    if (!r.normalized.sourceProjectId) {
+      r.warnings.push({
+        entity: 'accountProject',
+        targetKey: 'sourceProjectId',
+        label: 'Kaynak Proje ID',
+        code: 'missing_source_id_fallback',
+        message: 'Kalıcı kaynak ID yok; güncelleme için proje adı/kodu fallback kullanılacak.',
+      });
     }
     // WR-A8 Phase 2a review fix — Selected-company guard for project's
     // accountCompanyKey, mirroring accountCompany.companyCode rule:

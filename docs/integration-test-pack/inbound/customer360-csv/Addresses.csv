@@ -1,4 +1,4 @@
-﻿accountKey,type,label,line1,district,city,postalCode,country,isDefault,isActive
-1112223339,Billing,Merkez Ofis,Atatürk Bulvarı No:5,Çankaya,Ankara,06420,TR,Evet,Evet
-Beta Demo Ltd.,Headquarters,Berlin HQ,Friedrichstrasse 100,,Berlin,10117,DE,Evet,Evet
-7778889991,Shipping,Amsterdam Warehouse,Damrak 45,,Amsterdam,1012LL,NL,Evet,Evet
+﻿recordNo,parentRecordNo,sourceAddressId,accountKey,type,label,line1,district,city,postalCode,country,isDefault,isActive
+D001,A001,ERP-ADR-1001,1112223339,Billing,Merkez Ofis,Atatürk Bulvarı No:5,Çankaya,Ankara,06420,TR,Evet,Evet
+D002,A002,ERP-ADR-2001,Beta Demo Ltd.,Headquarters,Berlin HQ,Friedrichstrasse 100,,Berlin,10117,DE,Evet,Evet
+D003,A003,ERP-ADR-3001,7778889991,Shipping,Amsterdam Warehouse,Damrak 45,,Amsterdam,1012LL,NL,Evet,Evet

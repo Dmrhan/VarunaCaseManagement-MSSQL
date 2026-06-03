@@ -211,6 +211,7 @@ function snapshotContact(c) {
     id: c.id, accountId: c.accountId, fullName: c.fullName, title: c.title ?? null,
     email: c.email ?? null, phone: c.phone ?? null, phoneE164: c.phoneE164 ?? null,
     isPrimary: c.isPrimary, isActive: c.isActive,
+    sourceExternalId: c.sourceExternalId ?? null,
   };
 }
 function snapshotAddress(a) {
@@ -220,6 +221,7 @@ function snapshotAddress(a) {
     label: a.label ?? null, line1: a.line1, line2: a.line2 ?? null,
     district: a.district ?? null, city: a.city ?? null, state: a.state ?? null,
     postalCode: a.postalCode ?? null, country: a.country, isDefault: a.isDefault, isActive: a.isActive,
+    sourceExternalId: a.sourceExternalId ?? null,
   };
 }
 function snapshotProject(p) {
@@ -229,6 +231,7 @@ function snapshotProject(p) {
     status: p.status, startDate: p.startDate ? new Date(p.startDate).toISOString() : null,
     endDate: p.endDate ? new Date(p.endDate).toISOString() : null,
     description: p.description ?? null, isActive: p.isActive,
+    sourceExternalId: p.sourceExternalId ?? null,
   };
 }
 
@@ -343,24 +346,31 @@ async function writeAccountCompany({ companyId, accountId, normalized }) {
 }
 
 async function writeContact({ accountId, normalized }) {
-  // Match by (accountId, email) when email present; fallback (accountId, phoneE164).
+  // Phase 2c — sourceContactId TRY FIRST. Persistent external/ERP id —
+  // second import with same value updates the same row instead of
+  // creating a duplicate. Fall back to email then phoneE164 only when
+  // sourceContactId is empty or no match found.
+  const contactSelect = {
+    id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
+    phoneE164: true, isPrimary: true, isActive: true, sourceExternalId: true,
+  };
   let existing = null;
-  if (normalized.email) {
+  if (normalized.sourceContactId) {
+    existing = await prisma.accountContact.findFirst({
+      where: { accountId, sourceExternalId: normalized.sourceContactId },
+      select: contactSelect,
+    });
+  }
+  if (!existing && normalized.email) {
     existing = await prisma.accountContact.findFirst({
       where: { accountId, email: normalized.email },
-      select: {
-        id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
-        phoneE164: true, isPrimary: true, isActive: true,
-      },
+      select: contactSelect,
     });
   }
   if (!existing && normalized.phone) {
     existing = await prisma.accountContact.findFirst({
       where: { accountId, phoneE164: normalized.phone },
-      select: {
-        id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
-        phoneE164: true, isPrimary: true, isActive: true,
-      },
+      select: contactSelect,
     });
   }
   if (existing) {
@@ -375,14 +385,14 @@ async function writeContact({ accountId, normalized }) {
     }
     if (normalized.isPrimary !== undefined && normalized.isPrimary !== null) patch.isPrimary = normalized.isPrimary;
     if (normalized.isActive !== undefined && normalized.isActive !== null) patch.isActive = normalized.isActive;
+    if (normalized.sourceContactId && normalized.sourceContactId !== existing.sourceExternalId) {
+      patch.sourceExternalId = normalized.sourceContactId;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.accountContact.update({
           where: { id: existing.id },
           data: patch,
-          select: {
-            id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
-            phoneE164: true, isPrimary: true, isActive: true,
-          },
+          select: contactSelect,
         })
       : existing;
     // isPrimary uniqueness: if this update set isPrimary=true, demote others.
@@ -405,11 +415,9 @@ async function writeContact({ accountId, normalized }) {
       phoneE164: normalized.phone ?? null,
       isPrimary: normalized.isPrimary ?? false,
       isActive: normalized.isActive ?? true,
+      sourceExternalId: normalized.sourceContactId ?? null,
     },
-    select: {
-      id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
-      phoneE164: true, isPrimary: true, isActive: true,
-    },
+    select: contactSelect,
   });
   if (created.isPrimary === true) {
     await prisma.accountContact.updateMany({
@@ -421,28 +429,33 @@ async function writeContact({ accountId, normalized }) {
 }
 
 async function writeAddress({ companyId, accountId, normalized }) {
-  // Soft uniqueness: (accountId, companyId, type, label) when label present,
-  // else (accountId, companyId, type, line1). No DB constraint; app-layer
-  // findFirst. WR-A8 Phase 2b hotfix (P1): companyId is REQUIRED in the
-  // resolution criteria — Account can be global and span multiple tenants,
-  // so a Customer 360 import for company A must NEVER update or demote a
-  // company B address even when (type, label, line1) collide.
-  const where = {
-    accountId,
-    companyId,
-    type: normalized.type,
-    ...(normalized.label
-      ? { label: normalized.label }
-      : { line1: normalized.line1 }),
+  // Phase 2c — sourceAddressId TRY FIRST. Persistent external/ERP id —
+  // tenant-scoped (companyId enforced). Fall back to soft (accountId,
+  // companyId, type, label||line1) only when sourceAddressId empty or no
+  // match. WR-A8 Phase 2b hotfix (P1) tenant guard preserved on both paths.
+  const addressSelect = {
+    id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
+    line2: true, district: true, city: true, state: true, postalCode: true, country: true,
+    isDefault: true, isActive: true, sourceExternalId: true,
   };
-  const existing = await prisma.address.findFirst({
-    where,
-    select: {
-      id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
-      line2: true, district: true, city: true, state: true, postalCode: true, country: true,
-      isDefault: true, isActive: true,
-    },
-  });
+  let existing = null;
+  if (normalized.sourceAddressId) {
+    existing = await prisma.address.findFirst({
+      where: { accountId, companyId, sourceExternalId: normalized.sourceAddressId },
+      select: addressSelect,
+    });
+  }
+  if (!existing) {
+    const where = {
+      accountId,
+      companyId,
+      type: normalized.type,
+      ...(normalized.label
+        ? { label: normalized.label }
+        : { line1: normalized.line1 }),
+    };
+    existing = await prisma.address.findFirst({ where, select: addressSelect });
+  }
   if (existing) {
     // Defense in depth: existing.companyId must equal selected companyId.
     // The findFirst above already filters by companyId; this check guards
@@ -464,15 +477,14 @@ async function writeAddress({ companyId, accountId, normalized }) {
     if (normalized.isDefault !== undefined && normalized.isDefault !== null) patch.isDefault = normalized.isDefault;
     if (normalized.isActive !== undefined && normalized.isActive !== null) patch.isActive = normalized.isActive;
     if (normalized.label !== undefined && normalized.label !== null && normalized.label !== existing.label) patch.label = normalized.label;
+    if (normalized.sourceAddressId && normalized.sourceAddressId !== existing.sourceExternalId) {
+      patch.sourceExternalId = normalized.sourceAddressId;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.address.update({
           where: { id: existing.id },
           data: patch,
-          select: {
-            id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
-            line2: true, district: true, city: true, state: true, postalCode: true, country: true,
-            isDefault: true, isActive: true,
-          },
+          select: addressSelect,
         })
       : existing;
     if (patch.isDefault === true) {
@@ -501,12 +513,9 @@ async function writeAddress({ companyId, accountId, normalized }) {
       country: normalized.country ?? 'TR',
       isDefault: normalized.isDefault ?? false,
       isActive: normalized.isActive ?? true,
+      sourceExternalId: normalized.sourceAddressId ?? null,
     },
-    select: {
-      id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
-      line2: true, district: true, city: true, state: true, postalCode: true, country: true,
-      isDefault: true, isActive: true,
-    },
+    select: addressSelect,
   });
   if (created.isDefault === true) {
     // WR-A8 Phase 2b hotfix (P1) — same tenant-scoped demotion as above.
@@ -519,15 +528,26 @@ async function writeAddress({ companyId, accountId, normalized }) {
 }
 
 async function writeProject({ accountCompanyId, normalized }) {
-  // (accountCompanyId, code) is @@unique.
+  // Phase 2c — sourceProjectId TRY FIRST. Fall back to (accountCompanyId,
+  // code) unique match only when sourceProjectId empty or no match.
+  const projectSelect = {
+    id: true, accountCompanyId: true, code: true, name: true, status: true,
+    startDate: true, endDate: true, description: true, isActive: true, sourceExternalId: true,
+  };
   const code = normalized.projectCode;
-  const existing = await prisma.accountProject.findUnique({
-    where: { accountCompanyId_code: { accountCompanyId, code } },
-    select: {
-      id: true, accountCompanyId: true, code: true, name: true, status: true,
-      startDate: true, endDate: true, description: true, isActive: true,
-    },
-  });
+  let existing = null;
+  if (normalized.sourceProjectId) {
+    existing = await prisma.accountProject.findFirst({
+      where: { accountCompanyId, sourceExternalId: normalized.sourceProjectId },
+      select: projectSelect,
+    });
+  }
+  if (!existing) {
+    existing = await prisma.accountProject.findUnique({
+      where: { accountCompanyId_code: { accountCompanyId, code } },
+      select: projectSelect,
+    });
+  }
   if (existing) {
     const beforeJson = snapshotProject(existing);
     const patch = {};
@@ -537,14 +557,14 @@ async function writeProject({ accountCompanyId, normalized }) {
     if (normalized.endDate) patch.endDate = new Date(normalized.endDate);
     if (normalized.description !== undefined && normalized.description !== null) patch.description = normalized.description;
     if (normalized.isActive !== undefined && normalized.isActive !== null) patch.isActive = normalized.isActive;
+    if (normalized.sourceProjectId && normalized.sourceProjectId !== existing.sourceExternalId) {
+      patch.sourceExternalId = normalized.sourceProjectId;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.accountProject.update({
           where: { id: existing.id },
           data: patch,
-          select: {
-            id: true, accountCompanyId: true, code: true, name: true, status: true,
-            startDate: true, endDate: true, description: true, isActive: true,
-          },
+          select: projectSelect,
         })
       : existing;
     return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotProject(updated) };
@@ -559,11 +579,9 @@ async function writeProject({ accountCompanyId, normalized }) {
       endDate: normalized.endDate ? new Date(normalized.endDate) : null,
       description: normalized.description ?? null,
       isActive: normalized.isActive ?? true,
+      sourceExternalId: normalized.sourceProjectId ?? null,
     },
-    select: {
-      id: true, accountCompanyId: true, code: true, name: true, status: true,
-      startDate: true, endDate: true, description: true, isActive: true,
-    },
+    select: projectSelect,
   });
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotProject(created) };
 }
