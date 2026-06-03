@@ -16,6 +16,24 @@ const MAX_ROWS = 5000;
 
 export function SourceStep({ companyId, onParsed }: Props) {
   const [mode, setMode] = useState<'file' | 'api'>('file');
+  // Şablon indirme — backend endpoint JWT bekliyor; <a href download>
+  // plain anchor olduğundan Authorization header taşımıyordu ve buton
+  // sessizce 401 alıyordu. importService.downloadAccountTemplate()
+  // authed fetch + blob trigger ile çalışır.
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+
+  async function handleDownloadTemplate() {
+    setTemplateError(null);
+    setTemplateBusy(true);
+    try {
+      await importService.downloadAccountTemplate();
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Şablon indirilemedi.');
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -30,15 +48,21 @@ export function SourceStep({ companyId, onParsed }: Props) {
                 Veriyi Excel/CSV dosyasından veya harici bir API'den alıp Varuna müşteri alanlarına eşleştirin.
               </p>
             </div>
-            <a
-              href={importService.templateUrl()}
-              className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-              download
+            <button
+              type="button"
+              onClick={() => void handleDownloadTemplate()}
+              disabled={templateBusy}
+              className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
             >
               <Download size={12} />
-              Şablon İndir
-            </a>
+              {templateBusy ? 'Hazırlanıyor…' : 'Şablon İndir'}
+            </button>
           </div>
+          {templateError && (
+            <p className="text-xs text-rose-600 dark:text-rose-400">
+              {templateError}
+            </p>
+          )}
 
           <div className="flex gap-2">
             <button
