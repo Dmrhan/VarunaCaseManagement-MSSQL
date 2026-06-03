@@ -144,6 +144,38 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
     : [];
   const acByAccountId = new Map(existingAcs.map((ac) => [ac.accountId, ac]));
 
+  // Phase 2c — Customer code stabilization (Phase 1 import). Pre-resolve
+  // accounts by AccountCompany.externalCustomerCode within the SELECTED
+  // company. This is a tenant-scoped, more specific match key than VKN
+  // and takes PRIORITY. When the same row has both externalCustomerCode
+  // AND a VKN/TCKN that conflicts with the linked Account's identity,
+  // we emit an error rather than silently update — preventing account
+  // merge / overwrite via the import.
+  const codeKeys = [];
+  for (const r of normalizedRows) {
+    const c = r.normalized?.externalCustomerCode;
+    if (c) codeKeys.push(c);
+  }
+  const existingAcsByCode = codeKeys.length
+    ? await prisma.accountCompany.findMany({
+        where: { companyId, externalCustomerCode: { in: [...new Set(codeKeys)] } },
+        select: { id: true, accountId: true, externalCustomerCode: true, packageName: true },
+      })
+    : [];
+  const acByCode = new Map(existingAcsByCode.map((ac) => [ac.externalCustomerCode, ac]));
+  const codeMatchedAccountIds = existingAcsByCode.map((ac) => ac.accountId);
+  const codeMatchedAccounts = codeMatchedAccountIds.length
+    ? await prisma.account.findMany({
+        where: { id: { in: codeMatchedAccountIds } },
+        select: {
+          id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
+          customerType: true, legalName: true, registrationNo: true, isActive: true,
+          tcknHash: true,
+        },
+      })
+    : [];
+  const accountById = new Map(codeMatchedAccounts.map((a) => [a.id, a]));
+
   let createCount = 0;
   let updateCount = 0;
   let skippedCount = 0;
@@ -157,10 +189,47 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
     let matchedAccountVknMasked = null;
     let fieldDiff = null;
 
+    // Phase 2c — Customer code stabilization helper
+    const code = r.normalized?.externalCustomerCode;
+    const codeAc = code ? acByCode.get(code) : null;
+    const codeMatchedAccount = codeAc ? accountById.get(codeAc.accountId) : null;
+
     if (r.errors.length > 0) {
       action = 'error';
       errorCount += 1;
+    } else if (codeMatchedAccount) {
+      // (1) externalCustomerCode match path — tenant-scoped, highest priority
+      // Conflict: incoming VKN/TCKN differs from linked Account's identity?
+      const vknConflict =
+        r.normalized.vkn && codeMatchedAccount.vkn && r.normalized.vkn !== codeMatchedAccount.vkn;
+      // TCKN ingestion is privacy-blocked in Phase 1 (no plain TCKN field);
+      // we still check hash if a future field is added. Today: pre-existing
+      // tcknHash on the matched Account vs. incoming has no overlap.
+      if (vknConflict) {
+        r.errors.push({
+          targetKey: 'externalCustomerCode',
+          label: 'Dış Müşteri Kodu',
+          code: 'external_customer_code_identity_conflict',
+          message: `Müşteri kodu ${code} mevcut müşteriyle eşleşti ancak VKN/TCKN farklı.`,
+        });
+        action = 'error';
+        errorCount += 1;
+      } else {
+        action = 'update';
+        matchedAccountName = codeMatchedAccount.name;
+        matchedAccountVknMasked = maskVkn(codeMatchedAccount.vkn);
+        fieldDiff = computeFieldDiff(codeMatchedAccount, codeAc, r.normalized);
+        const hasAccountChange = Object.keys(fieldDiff.account).length > 0;
+        const hasAcChange = Object.keys(fieldDiff.accountCompany).length > 0;
+        if (!hasAccountChange && !hasAcChange) {
+          action = 'skip';
+          skippedCount += 1;
+        } else {
+          updateCount += 1;
+        }
+      }
     } else if (r.normalized.vkn && existingByVkn.has(r.normalized.vkn)) {
+      // (2) VKN match path — existing fallback behavior
       action = 'update';
       const existingAcc = existingByVkn.get(r.normalized.vkn);
       matchedAccountName = existingAcc.name;
@@ -570,29 +639,46 @@ async function createFromRow({ companyId, normalized }) {
 }
 
 async function updateFromRow({ companyId, normalized }) {
-  if (!normalized?.vkn) {
-    const err = new Error('Update için VKN gerekli.');
-    err.code = 'missing_vkn';
+  // Phase 2c — Customer code stabilization. Allow update by AccountCompany
+  // (companyId, externalCustomerCode) when VKN is absent. The dry-run
+  // determines action='update' on this same key; the commit must locate
+  // the existing Account through the same path.
+  const accountSelect = {
+    id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
+    customerType: true, legalName: true, registrationNo: true, isActive: true,
+  };
+  let existing = null;
+  if (normalized?.vkn) {
+    existing = await prisma.account.findUnique({
+      where: { vkn: normalized.vkn },
+      select: accountSelect,
+    });
+  } else if (normalized?.externalCustomerCode) {
+    const ac = await prisma.accountCompany.findUnique({
+      where: { companyId_externalCustomerCode: { companyId, externalCustomerCode: normalized.externalCustomerCode } },
+      select: { accountId: true },
+    });
+    if (ac) {
+      existing = await prisma.account.findUnique({
+        where: { id: ac.accountId },
+        select: accountSelect,
+      });
+    }
+  } else {
+    const err = new Error('Update için VKN veya externalCustomerCode gerekli.');
+    err.code = 'missing_match_key';
     throw err;
   }
-  const existing = await prisma.account.findUnique({
-    where: { vkn: normalized.vkn },
-    select: {
-      id: true,
-      name: true,
-      vkn: true,
-      phone: true,
-      phoneE164: true,
-      email: true,
-      customerType: true,
-      legalName: true,
-      registrationNo: true,
-      isActive: true,
-    },
-  });
   if (!existing) {
-    const err = new Error('Güncellenecek müşteri bulunamadı (VKN değişmiş olabilir).');
+    const err = new Error('Güncellenecek müşteri bulunamadı (VKN/externalCustomerCode değişmiş olabilir).');
     err.code = 'account_not_found';
+    throw err;
+  }
+  // Phase 2c — defense in depth. Even if dry-run skipped the conflict
+  // check, refuse to silently overwrite identity at commit time.
+  if (normalized?.vkn && existing.vkn && normalized.vkn !== existing.vkn) {
+    const err = new Error(`Müşteri kodu mevcut müşteriyle eşleşti ancak VKN/TCKN farklı.`);
+    err.code = 'external_customer_code_identity_conflict';
     throw err;
   }
 

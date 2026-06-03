@@ -12,13 +12,17 @@ import {
   normalizeCustomerType,
   normalizePhoneE164,
   normalizeText,
+  recordNoField,
   validateEmail,
   validateVkn,
 } from './_shared.js';
 
-export const ACCOUNT_VERSION = '2026-05-22.account.v2';
+export const ACCOUNT_VERSION = '2026-06-03.account.v3';
 
 export const ACCOUNT_FIELDS = [
+  recordNoField({
+    description: 'Bu Accounts sheet satırının dosya içi kimliği. Contact/Address/AccountCompany/Project child sheet\'leri parentRecordNo ile buraya bağlanır. Kalıcı saklanmaz.',
+  }),
   {
     key: 'name',
     label: 'Müşteri Adı',

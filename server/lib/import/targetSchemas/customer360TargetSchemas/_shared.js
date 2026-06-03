@@ -149,3 +149,211 @@ export function normalizeText(input, { max = 250, requiredLabel = null } = {}) {
 }
 
 export { validateVkn, normalizePhoneE164 };
+
+// ─── Relationship + Persistent Source ID field factories ─────────────
+//
+// Customer 360 importları artık iki ek kavramı destekler:
+//
+//   recordNo / parentRecordNo / parentCompanyRecordNo
+//     Dosya İÇİNDEKİ parent-child bağı (Accounts sheet satırı ↔ child
+//     sheet satırları). Kalıcı saklanmaz; ImportJobRow.normalizedJson
+//     içinde audit için tutulur. Account/AC kimliği DEĞİLDİR; her
+//     import bu key'leri sıfırdan tanımlayabilir.
+//
+//   sourceContactId / sourceAddressId / sourceProjectId
+//     Kalıcı external/ERP/CRM ID. AccountContact/Address/AccountProject
+//     üzerindeki sourceExternalId kolonuna yazılır. İkinci import aynı
+//     ID ile geldiğinde mevcut child row UPDATE edilir, yeni kayıt
+//     yaratılmaz.
+//
+// Aşağıdaki factory'ler tek tip alan tanımlarını her entity'de
+// tekrar yazmaktan kaçınır.
+
+const REL_TEXT_MAX = 64;
+
+function relAliases(extra = []) {
+  return [
+    'recordno',
+    'record_no',
+    'record no',
+    'kayıt no',
+    'kayit no',
+    'kaynak kayıt no',
+    'kaynak kayit no',
+    'sourcerecordno',
+    'source_record_no',
+    'source record no',
+    ...extra,
+  ];
+}
+
+export function recordNoField({ description = 'Dosya içindeki satır kimliği. Child kayıtlar parent\'a bu numara ile bağlanır. Kalıcı saklanmaz.' } = {}) {
+  return {
+    key: 'recordNo',
+    label: 'Kayıt No (Dosya İçi)',
+    description,
+    example: 'A001',
+    group: 'İlişki',
+    type: 'text',
+    required: false,
+    aliases: relAliases(),
+    validationHint: '1-64 karakter, dosya içinde aynı sheet\'te tekildir.',
+    normalizationHint: 'Trim uygulanır.',
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: false,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: REL_TEXT_MAX });
+    },
+  };
+}
+
+export function parentRecordNoField() {
+  return {
+    key: 'parentRecordNo',
+    label: 'Üst Kayıt No (Account)',
+    description: 'Bu child kaydın bağlanacağı Account satırının recordNo değeri.',
+    example: 'A001',
+    group: 'İlişki',
+    type: 'text',
+    required: false,
+    aliases: [
+      'parentrecordno',
+      'parent_record_no',
+      'parent record no',
+      'üst kayıt no',
+      'ust kayit no',
+      'parentsourcerecordno',
+      'parent_source_record_no',
+      'account_record_no',
+      'accountrecordno',
+    ],
+    validationHint: 'Accounts sheet içindeki bir recordNo değerine eşit olmalı.',
+    normalizationHint: 'Trim uygulanır.',
+    businessWarning: 'Boşsa fallback olarak accountKey/vkn/name eşleştirmesi kullanılır.',
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: false,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: REL_TEXT_MAX });
+    },
+  };
+}
+
+export function parentCompanyRecordNoField() {
+  return {
+    key: 'parentCompanyRecordNo',
+    label: 'Üst Şirket Kayıt No (AccountCompany)',
+    description: 'Project için: AccountCompany satırının recordNo değeri.',
+    example: 'AC001',
+    group: 'İlişki',
+    type: 'text',
+    required: false,
+    aliases: [
+      'parentcompanyrecordno',
+      'parent_company_record_no',
+      'parent company record no',
+      'üst şirket kayıt no',
+      'ust sirket kayit no',
+      'accountcompanyrecordno',
+      'company_record_no',
+    ],
+    validationHint: 'Companies sheet içindeki bir recordNo değerine eşit olmalı.',
+    normalizationHint: 'Trim uygulanır.',
+    businessWarning: 'Boşsa fallback olarak accountCompanyKey/companyCode eşleştirmesi kullanılır.',
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: false,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: REL_TEXT_MAX });
+    },
+  };
+}
+
+function sourceIdField({ key, label, description, exampleId, aliasGroup }) {
+  return {
+    key,
+    label,
+    description,
+    example: exampleId,
+    group: 'Kalıcı Kaynak',
+    type: 'text',
+    required: false,
+    aliases: aliasGroup,
+    validationHint: '1-128 karakter; aynı sheet içinde tekil olmalı.',
+    normalizationHint: 'Trim uygulanır.',
+    businessWarning: 'Verilmezse fallback eşleşmeye (e-posta/telefon/ad veya kod) geçilir.',
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: 128 });
+    },
+  };
+}
+
+export function sourceContactIdField() {
+  return sourceIdField({
+    key: 'sourceContactId',
+    label: 'Kaynak Contact ID',
+    description: 'Dış sistemdeki Contact kimliği. Tekrar importta aynı kaydı günceller.',
+    exampleId: 'ERP-CN-1001',
+    aliasGroup: [
+      'sourcecontactid',
+      'source_contact_id',
+      'contactexternalid',
+      'contact_external_id',
+      'externalcontactid',
+      'external_contact_id',
+      'erp_contact_id',
+      'crm_contact_id',
+    ],
+  });
+}
+
+export function sourceAddressIdField() {
+  return sourceIdField({
+    key: 'sourceAddressId',
+    label: 'Kaynak Address ID',
+    description: 'Dış sistemdeki adres kimliği. Tekrar importta aynı kaydı günceller.',
+    exampleId: 'ERP-ADR-1001',
+    aliasGroup: [
+      'sourceaddressid',
+      'source_address_id',
+      'addressexternalid',
+      'address_external_id',
+      'externaladdressid',
+      'external_address_id',
+      'erp_address_id',
+      'crm_address_id',
+    ],
+  });
+}
+
+export function sourceProjectIdField() {
+  return sourceIdField({
+    key: 'sourceProjectId',
+    label: 'Kaynak Proje ID',
+    description: 'Dış sistemdeki proje kimliği. Tekrar importta aynı kaydı günceller.',
+    exampleId: 'ERP-PRJ-1001',
+    aliasGroup: [
+      'sourceprojectid',
+      'source_project_id',
+      'projectexternalid',
+      'project_external_id',
+      'externalprojectid',
+      'external_project_id',
+      'erp_project_id',
+      'crm_project_id',
+    ],
+  });
+}

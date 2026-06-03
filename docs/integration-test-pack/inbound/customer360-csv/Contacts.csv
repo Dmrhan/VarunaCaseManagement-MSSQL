@@ -1,5 +1,5 @@
-﻿accountKey,fullName,title,email,phone,isPrimary,isActive
-1112223339,Ayşe Demo,Satın Alma Müdürü,ayse@acme.demo,+905321110001,Evet,Evet
-1112223339,Mehmet Demo,Operasyon Şefi,mehmet@acme.demo,+905321110002,Hayır,Evet
-Beta Demo Ltd.,Cem Demo,Genel Müdür,cem@beta.demo,+905321110003,Evet,Evet
-7778889991,Selin Demo,,selin@example.demo,+905321110004,Evet,Evet
+﻿recordNo,parentRecordNo,sourceContactId,accountKey,fullName,title,email,phone,isPrimary,isActive
+C001,A001,ERP-CN-1001,1112223339,Ayşe Demo,Satın Alma Müdürü,ayse@acme.demo,+905321110001,Evet,Evet
+C002,A001,ERP-CN-1002,1112223339,Mehmet Demo,Operasyon Şefi,mehmet@acme.demo,+905321110002,Hayır,Evet
+C003,A002,ERP-CN-2001,Beta Demo Ltd.,Cem Demo,Genel Müdür,cem@beta.demo,+905321110003,Evet,Evet
+C004,A003,ERP-CN-3001,7778889991,Selin Demo,,selin@example.demo,+905321110004,Evet,Evet
