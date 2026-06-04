@@ -68,7 +68,7 @@ const VKN_GAMA = genVkn('777888999'); // → 7778889991
 // ─────────────────────────────────────────────────────────────────
 const validAccounts = [
   // Phase 3 — örnek: 3 telefon slot + primary slot 2
-  { recordNo: 'A001', name: 'Acme Demo A.Ş.', vkn: VKN_ACME, customerType: 'Kurumsal', email: 'info@acme.demo', phone: '+902121110000', phoneType: 'switchboard', phoneExtension: '101', phone2: '+905321119000', phone2Type: 'mobile', phone3: '+905321119001', phone3Type: 'whatsapp', primaryPhoneSlot: 2, isActive: 'Evet' },
+  { recordNo: 'A001', name: 'Acme Demo A.Ş.', vkn: VKN_ACME, taxOffice: 'Kadıköy Vergi Dairesi', customerType: 'Kurumsal', email: 'info@acme.demo', phone: '+902121110000', phoneType: 'switchboard', phoneExtension: '101', phone2: '+905321119000', phone2Type: 'mobile', phone3: '+905321119001', phone3Type: 'whatsapp', primaryPhoneSlot: 2, isActive: 'Evet' },
   // No-VKN account → warning (warningIfMissing.no_vkn) ama satır geçerli; 1 telefon
   { recordNo: 'A002', name: 'Beta Demo Ltd.', vkn: '', customerType: 'Kurumsal', email: 'info@beta.demo', phone: '+903121112222', phoneType: 'work', primaryPhoneSlot: 1, isActive: 'Evet' },
   { recordNo: 'A003', name: 'Gama Demo Bireysel', vkn: VKN_GAMA, customerType: 'Bireysel', email: 'gama@example.demo', phone: '+905321113333', phoneType: 'mobile', primaryPhoneSlot: 1, isActive: 'Evet' },
