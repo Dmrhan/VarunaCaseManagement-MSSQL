@@ -15,9 +15,16 @@ import {
   recordNoField,
   validateEmail,
   validateVkn,
+  // Phase 2 + Phase 3 phone metadata + slots
+  phoneTypeSlot1FieldC360,
+  phoneExtensionSlot1FieldC360,
+  phoneSlotFieldC360,
+  phoneSlotTypeFieldC360,
+  phoneSlotExtensionFieldC360,
+  primaryPhoneSlotFieldC360,
 } from './_shared.js';
 
-export const ACCOUNT_VERSION = '2026-06-03.account.v3';
+export const ACCOUNT_VERSION = '2026-06-04.account.v4';
 
 export const ACCOUNT_FIELDS = [
   recordNoField({
@@ -167,6 +174,19 @@ export const ACCOUNT_FIELDS = [
       return { ok: true, normalized: e164, extra: { rawPhone: s } };
     },
   },
+  // Phase 2 — slot 1 phone metadata
+  phoneTypeSlot1FieldC360(),
+  phoneExtensionSlot1FieldC360(),
+  // Phase 3 — slot 2
+  phoneSlotFieldC360(2),
+  phoneSlotTypeFieldC360(2),
+  phoneSlotExtensionFieldC360(2),
+  // Phase 3 — slot 3
+  phoneSlotFieldC360(3),
+  phoneSlotTypeFieldC360(3),
+  phoneSlotExtensionFieldC360(3),
+  // Phase 3 — primary slot
+  primaryPhoneSlotFieldC360(),
   {
     key: 'email',
     label: 'E-posta',

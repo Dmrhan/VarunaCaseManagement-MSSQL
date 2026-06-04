@@ -339,6 +339,222 @@ export function sourceAddressIdField() {
   });
 }
 
+// ─── Phase 3 — Account 3 phone slots metadata helpers ────────────────
+// Schema descriptor field factories for phoneType / phoneExtension /
+// primaryPhoneSlot and slot 2/3 phone+type+extension; Phase 1 + C360
+// arasında alias kümeleri tek yerde tutulur.
+
+const PHONE_TYPES_VALID = new Set(['mobile', 'work', 'switchboard', 'whatsapp', 'other']);
+const PHONE_TYPE_TR_MAP = {
+  cep: 'mobile', mobil: 'mobile', mobile: 'mobile', gsm: 'mobile',
+  'iş': 'work', is: 'work', work: 'work',
+  santral: 'switchboard', switchboard: 'switchboard',
+  whatsapp: 'whatsapp', wp: 'whatsapp',
+  'diğer': 'other', diger: 'other', other: 'other',
+};
+
+export function normalizePhoneTypeC360(raw) {
+  const s = asTrimmedString(raw);
+  if (!s) return { ok: true, normalized: null };
+  const lower = s.toLowerCase();
+  if (PHONE_TYPE_TR_MAP[lower]) return { ok: true, normalized: PHONE_TYPE_TR_MAP[lower] };
+  if (PHONE_TYPES_VALID.has(lower)) return { ok: true, normalized: lower };
+  return { ok: false, normalized: null, reason: `Telefon tipi tanınmadı (${s}).` };
+}
+
+export function normalizePhoneExtensionC360(raw) {
+  const s = asTrimmedString(raw);
+  if (!s) return { ok: true, normalized: null };
+  if (!/^[A-Za-z0-9-]{1,10}$/.test(s)) {
+    return { ok: false, normalized: null, reason: 'Dahili numara 1-10 karakter alfa-numerik olmalı.' };
+  }
+  return { ok: true, normalized: s };
+}
+
+export function normalizePrimaryPhoneSlotC360(raw) {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, normalized: null };
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).trim(), 10);
+  if (n !== 1 && n !== 2 && n !== 3) {
+    return { ok: false, normalized: null, reason: 'Birincil telefon slot 1, 2 veya 3 olmalı.' };
+  }
+  return { ok: true, normalized: n };
+}
+
+function commonAliasesPhoneSlot(slotNo) {
+  const slotEng = slotNo === 2 ? 'phone2' : 'phone3';
+  const slotEng2 = slotNo === 2 ? 'phone_2' : 'phone_3';
+  const slotTrAlt = slotNo === 2 ? 'telefon2' : 'telefon3';
+  const slotTrAlt2 = slotNo === 2 ? 'telefon_2' : 'telefon_3';
+  const slotTr = slotNo === 2 ? 'ikinci_telefon' : 'ucuncu_telefon';
+  const extras = slotNo === 3 ? ['üçüncü_telefon', 'üçüncütelefon', 'ucuncutelefon'] : ['ikincitelefon'];
+  return [
+    slotEng, slotEng2, slotTrAlt, slotTrAlt2, slotTr,
+    ...extras,
+    `${slotEng}e164`, `${slotEng}_e164`,
+  ];
+}
+
+export function phoneSlotFieldC360(slotNo) {
+  const slotEng = slotNo === 2 ? 'phone2' : 'phone3';
+  const slotLabel = slotNo === 2 ? 'İkinci' : 'Üçüncü';
+  return {
+    key: slotEng,
+    label: `${slotLabel} Telefon`,
+    description: `${slotLabel} müşteri telefonu (opsiyonel). E.164 normalize edilir.`,
+    example: '+902121234567',
+    group: 'İletişim',
+    type: 'phone',
+    required: false,
+    aliases: commonAliasesPhoneSlot(slotNo),
+    validationHint: 'TR formatları + E.164 desteklenir.',
+    normalizationHint: 'E.164 normalize edilir.',
+    businessWarning: null,
+    sensitive: true,
+    pii: true,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize(raw) {
+      const s = asTrimmedString(raw);
+      if (!s) return { ok: true, normalized: null };
+      const e164 = normalizePhoneE164(s);
+      if (!e164) return { ok: false, normalized: null, reason: `${slotLabel} telefon E.164 formatına çevrilemedi.` };
+      return { ok: true, normalized: e164, extra: { rawPhone: s } };
+    },
+  };
+}
+
+export function phoneSlotTypeFieldC360(slotNo) {
+  const slotEng = slotNo === 2 ? 'phone2' : 'phone3';
+  const slotLabel = slotNo === 2 ? 'İkinci' : 'Üçüncü';
+  const slotTrAlt = slotNo === 2 ? 'telefon2' : 'telefon3';
+  const slotTr = slotNo === 2 ? 'ikinci_telefon' : 'ucuncu_telefon';
+  const slotTr3 = slotNo === 3 ? ['üçüncü_telefon_tipi'] : [];
+  return {
+    key: `${slotEng}Type`,
+    label: `${slotLabel} Telefon Tipi`,
+    description: 'cep / iş / santral / whatsapp / diğer',
+    example: 'santral',
+    group: 'İletişim',
+    type: 'text',
+    required: false,
+    aliases: [
+      `${slotEng}type`, `${slotEng}_type`,
+      `${slotTrAlt}_tipi`, `${slotTr}_tipi`,
+      ...slotTr3,
+    ],
+    validationHint: null,
+    normalizationHint: 'Türkçe etiketler İngilizce key\'e map edilir.',
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize: normalizePhoneTypeC360,
+  };
+}
+
+export function phoneSlotExtensionFieldC360(slotNo) {
+  const slotEng = slotNo === 2 ? 'phone2' : 'phone3';
+  const slotLabel = slotNo === 2 ? 'İkinci' : 'Üçüncü';
+  const slotTrAlt = slotNo === 2 ? 'telefon2' : 'telefon3';
+  const slotTr = slotNo === 2 ? 'ikinci_telefon' : 'ucuncu_telefon';
+  const slotTr3 = slotNo === 3 ? ['üçüncü_telefon_dahili'] : [];
+  return {
+    key: `${slotEng}Extension`,
+    label: `${slotLabel} Telefon Dahili`,
+    description: '1-10 karakter dahili numara (opsiyonel).',
+    example: '123',
+    group: 'İletişim',
+    type: 'text',
+    required: false,
+    aliases: [
+      `${slotEng}extension`, `${slotEng}_extension`,
+      `${slotEng}_dahili`, `${slotTrAlt}_dahili`, `${slotTr}_dahili`,
+      ...slotTr3,
+    ],
+    validationHint: null,
+    normalizationHint: null,
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize: normalizePhoneExtensionC360,
+  };
+}
+
+export function phoneTypeSlot1FieldC360() {
+  return {
+    key: 'phoneType',
+    label: 'Telefon Tipi',
+    description: 'cep / iş / santral / whatsapp / diğer',
+    example: 'cep',
+    group: 'İletişim',
+    type: 'text',
+    required: false,
+    aliases: ['phonetype', 'phone_type', 'telefon_tipi', 'telefon tipi', 'ana_telefon_tipi'],
+    validationHint: null,
+    normalizationHint: 'Türkçe etiketler İngilizce key\'e map edilir.',
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize: normalizePhoneTypeC360,
+  };
+}
+
+export function phoneExtensionSlot1FieldC360() {
+  return {
+    key: 'phoneExtension',
+    label: 'Telefon Dahili',
+    description: '1-10 karakter dahili numara (opsiyonel).',
+    example: '123',
+    group: 'İletişim',
+    type: 'text',
+    required: false,
+    aliases: ['phoneextension', 'phone_extension', 'phone_dahili', 'telefon_dahili', 'dahili', 'extension', 'ext'],
+    validationHint: null,
+    normalizationHint: null,
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize: normalizePhoneExtensionC360,
+  };
+}
+
+export function primaryPhoneSlotFieldC360() {
+  return {
+    key: 'primaryPhoneSlot',
+    label: 'Birincil Telefon Slot',
+    description: '1, 2 veya 3. Boş ise ilk dolu telefon birincil sayılır.',
+    example: '1',
+    group: 'İletişim',
+    type: 'number',
+    required: false,
+    aliases: [
+      'primaryphoneslot', 'primary_phone_slot',
+      'birincil_telefon_slot', 'birinciltelefonslot', 'ana_telefon_slot',
+    ],
+    validationHint: '1 / 2 / 3 veya boş.',
+    normalizationHint: null,
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize: normalizePrimaryPhoneSlotC360,
+  };
+}
+
 export function sourceProjectIdField() {
   return sourceIdField({
     key: 'sourceProjectId',

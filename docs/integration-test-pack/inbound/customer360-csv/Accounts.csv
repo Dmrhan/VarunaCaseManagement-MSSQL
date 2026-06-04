@@ -1,4 +1,4 @@
-﻿recordNo,name,vkn,customerType,email,phone,isActive
-A001,Acme Demo A.Ş.,1112223339,Kurumsal,info@acme.demo,+902121110000,Evet
-A002,Beta Demo Ltd.,,Kurumsal,info@beta.demo,+903121112222,Evet
-A003,Gama Demo Bireysel,7778889991,Bireysel,gama@example.demo,+905321113333,Evet
+﻿recordNo,name,vkn,customerType,email,phone,phoneType,phoneExtension,phone2,phone2Type,phone3,phone3Type,primaryPhoneSlot,isActive
+A001,Acme Demo A.Ş.,1112223339,Kurumsal,info@acme.demo,+902121110000,switchboard,101,+905321119000,mobile,+905321119001,whatsapp,2,Evet
+A002,Beta Demo Ltd.,,Kurumsal,info@beta.demo,+903121112222,work,,,,,,1,Evet
+A003,Gama Demo Bireysel,7778889991,Bireysel,gama@example.demo,+905321113333,mobile,,,,,,1,Evet
