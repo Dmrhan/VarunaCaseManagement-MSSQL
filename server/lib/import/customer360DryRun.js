@@ -202,30 +202,59 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   // Phase 3 — Account 3 phone slot row-level validation. primaryPhone-
   // Slot dolu olmayan slotu işaret edemez; aynı E.164 birden fazla
   // slotta yer alamaz.
+  //
+  // Effective-state check (Codex P2): Update senaryosunda mevcut Account
+  // VKN match'i ile bulunabilir. Row body sadece phone2 verirse, mevcut
+  // phoneE164 + yeni phone2 effective slot setini oluşturur; row-level
+  // sample (yalnız row'daki dolu slot'lar) bunu kaçırıyordu.
+  const accountVkns = (normalizedByEntity.account ?? [])
+    .filter((r) => r.errors.length === 0 && r.normalized.vkn)
+    .map((r) => r.normalized.vkn);
+  let existingByVknForSlots = new Map();
+  if (accountVkns.length > 0) {
+    const existingRows = await prisma.account.findMany({
+      where: { vkn: { in: [...new Set(accountVkns)] } },
+      select: { vkn: true, phoneE164: true, phone2E164: true, phone3E164: true, primaryPhoneSlot: true },
+    });
+    existingByVknForSlots = new Map(existingRows.map((a) => [a.vkn, a]));
+  }
+
   for (const r of normalizedByEntity.account ?? []) {
     if (r.errors.length > 0) continue;
     const n = r.normalized;
-    const slotsE164 = [n.phone ?? null, n.phone2 ?? null, n.phone3 ?? null];
-    if (n.primaryPhoneSlot) {
-      const idx = n.primaryPhoneSlot - 1;
-      if (!slotsE164[idx]) {
+    const current = n.vkn ? existingByVknForSlots.get(n.vkn) : null;
+    const isUpdate = !!current;
+    // Update yolu: caller bir slot vermediyse mevcut DB değeri korunur;
+    // create yolu: caller vermediği slot null kalır.
+    const effE164 = [
+      n.phone !== undefined ? n.phone ?? null : isUpdate ? current.phoneE164 ?? null : null,
+      n.phone2 !== undefined ? n.phone2 ?? null : isUpdate ? current.phone2E164 ?? null : null,
+      n.phone3 !== undefined ? n.phone3 ?? null : isUpdate ? current.phone3E164 ?? null : null,
+    ];
+    // primaryPhoneSlot empty-check de effective state'te.
+    const primaryCandidate = n.primaryPhoneSlot ?? (isUpdate ? current.primaryPhoneSlot : null);
+    if (primaryCandidate) {
+      const idx = primaryCandidate - 1;
+      if (!effE164[idx]) {
         r.errors.push({
           entity: 'account',
           targetKey: 'primaryPhoneSlot',
           label: 'Birincil Telefon Slot',
           code: 'primary_phone_slot_empty',
-          message: `primaryPhoneSlot=${n.primaryPhoneSlot} ama o slot boş.`,
+          message: `primaryPhoneSlot=${primaryCandidate} ama o slot boş.`,
         });
       }
     }
-    const filled = slotsE164.filter(Boolean);
+    const filled = effE164.filter(Boolean);
     if (filled.length > 0 && new Set(filled).size !== filled.length) {
       r.errors.push({
         entity: 'account',
         targetKey: 'phone',
         label: 'Telefon',
         code: 'duplicate_phone_across_slots',
-        message: 'Aynı telefon numarası birden fazla slotta yer alıyor.',
+        message: isUpdate
+          ? 'Bu telefon numarası mevcut müşteride başka bir slotta zaten kayıtlı.'
+          : 'Aynı telefon numarası birden fazla slotta yer alıyor.',
       });
     }
   }

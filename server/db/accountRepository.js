@@ -1113,6 +1113,15 @@ export async function updateAccount({ accountId, data, user }) {
       typeof data.taxOffice === 'string' && data.taxOffice.trim() ? data.taxOffice.trim() : null;
   }
 
+  // Codex P2 defensive cleanup — Account Individual'a geçerken kurumsal-
+  // only descriptive metadata (taxOffice) DB'de kalmasın. UI form bunu
+  // body'de null gönderiyor; backend ek savunma katmanı: patch'te
+  // customerType=Individual ise taxOffice null'a düşürülür (caller boş
+  // bıraksa bile).
+  if (patch.customerType === 'Individual' && !Object.prototype.hasOwnProperty.call(patch, 'taxOffice')) {
+    patch.taxOffice = null;
+  }
+
   // WR-A2 — TCKN update: yalnızca Individual customerType. Plain TCKN saklanmaz.
   // null/'' → clear; valid TCKN → re-hash; invalid → 400.
   if (data?.tckn !== undefined) {
