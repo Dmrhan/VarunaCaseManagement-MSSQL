@@ -191,6 +191,13 @@ function snapshotAccount(a) {
   if (!a) return null;
   return {
     id: a.id, name: a.name, vkn: a.vkn ?? null, phone: a.phone ?? null, phoneE164: a.phoneE164 ?? null,
+    // Phase 2 + Phase 3 — slot 1 metadata + slot 2/3 + primary
+    phoneType: a.phoneType ?? null, phoneExtension: a.phoneExtension ?? null,
+    phone2: a.phone2 ?? null, phone2E164: a.phone2E164 ?? null,
+    phone2Type: a.phone2Type ?? null, phone2Extension: a.phone2Extension ?? null,
+    phone3: a.phone3 ?? null, phone3E164: a.phone3E164 ?? null,
+    phone3Type: a.phone3Type ?? null, phone3Extension: a.phone3Extension ?? null,
+    primaryPhoneSlot: a.primaryPhoneSlot ?? null,
     email: a.email ?? null, customerType: a.customerType,
     legalName: a.legalName ?? null, registrationNo: a.registrationNo ?? null, isActive: a.isActive,
   };
@@ -242,14 +249,21 @@ function snapshotProject(p) {
 
 async function writeAccount(row, normalized) {
   // VKN exact match. If VKN missing → always create new account.
+  // Phase 3 — select all phone slots so snapshot/before captures them
+  // and rollback can restore.
+  const accountSelect = {
+    id: true, name: true, vkn: true,
+    phone: true, phoneE164: true, phoneType: true, phoneExtension: true,
+    phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
+    phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
+    primaryPhoneSlot: true,
+    email: true, customerType: true, legalName: true, registrationNo: true, isActive: true,
+  };
   let existing = null;
   if (normalized.vkn) {
     existing = await prisma.account.findUnique({
       where: { vkn: normalized.vkn },
-      select: {
-        id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
-        customerType: true, legalName: true, registrationNo: true, isActive: true,
-      },
+      select: accountSelect,
     });
   }
   if (existing) {
@@ -265,19 +279,44 @@ async function writeAccount(row, normalized) {
       patch.phone = normalized._rawPhone ?? normalized.phone;
       patch.phoneE164 = normalized.phone;
     }
+    // Phase 2 — slot 1 metadata
+    if (normalized.phoneType !== undefined && normalized.phoneType !== null) patch.phoneType = normalized.phoneType;
+    if (normalized.phoneExtension !== undefined && normalized.phoneExtension !== null) patch.phoneExtension = normalized.phoneExtension;
+    // Phase 3 — slot 2
+    if (normalized.phone2 !== undefined && normalized.phone2 !== null) {
+      patch.phone2 = normalized._rawPhone2 ?? normalized.phone2;
+      patch.phone2E164 = normalized.phone2;
+    }
+    if (normalized.phone2Type !== undefined && normalized.phone2Type !== null) patch.phone2Type = normalized.phone2Type;
+    if (normalized.phone2Extension !== undefined && normalized.phone2Extension !== null) patch.phone2Extension = normalized.phone2Extension;
+    // Phase 3 — slot 3
+    if (normalized.phone3 !== undefined && normalized.phone3 !== null) {
+      patch.phone3 = normalized._rawPhone3 ?? normalized.phone3;
+      patch.phone3E164 = normalized.phone3;
+    }
+    if (normalized.phone3Type !== undefined && normalized.phone3Type !== null) patch.phone3Type = normalized.phone3Type;
+    if (normalized.phone3Extension !== undefined && normalized.phone3Extension !== null) patch.phone3Extension = normalized.phone3Extension;
+    if (normalized.primaryPhoneSlot !== undefined && normalized.primaryPhoneSlot !== null) {
+      patch.primaryPhoneSlot = normalized.primaryPhoneSlot;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.account.update({
           where: { id: existing.id },
           data: patch,
-          select: {
-            id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
-            customerType: true, legalName: true, registrationNo: true, isActive: true,
-          },
+          select: accountSelect,
         })
       : existing;
     return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccount(updated) };
   }
   // Create — Phase 1 standardization: Account.id `cus_<22>` formatında.
+  // Slot 1/2/3 alanları ve primaryPhoneSlot da burada yazılır. Caller
+  // primaryPhoneSlot vermezse ilk dolu slot birincil sayılır.
+  let primaryPhoneSlot = normalized.primaryPhoneSlot ?? null;
+  if (primaryPhoneSlot === null) {
+    if (normalized.phone) primaryPhoneSlot = 1;
+    else if (normalized.phone2) primaryPhoneSlot = 2;
+    else if (normalized.phone3) primaryPhoneSlot = 3;
+  }
   const newId = await generateUniqueAccountId();
   const created = await prisma.account.create({
     data: {
@@ -286,16 +325,24 @@ async function writeAccount(row, normalized) {
       vkn: normalized.vkn ?? null,
       phone: normalized._rawPhone ?? null,
       phoneE164: normalized.phone ?? null,
+      phoneType: normalized.phoneType ?? null,
+      phoneExtension: normalized.phoneExtension ?? null,
+      phone2: normalized._rawPhone2 ?? null,
+      phone2E164: normalized.phone2 ?? null,
+      phone2Type: normalized.phone2Type ?? null,
+      phone2Extension: normalized.phone2Extension ?? null,
+      phone3: normalized._rawPhone3 ?? null,
+      phone3E164: normalized.phone3 ?? null,
+      phone3Type: normalized.phone3Type ?? null,
+      phone3Extension: normalized.phone3Extension ?? null,
+      primaryPhoneSlot,
       email: normalized.email ?? null,
       customerType: normalized.customerType ?? 'Corporate',
       legalName: normalized.legalName ?? null,
       registrationNo: normalized.registrationNo ?? null,
       isActive: normalized.isActive ?? true,
     },
-    select: {
-      id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
-      customerType: true, legalName: true, registrationNo: true, isActive: true,
-    },
+    select: accountSelect,
   });
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotAccount(created) };
 }
@@ -921,7 +968,14 @@ export async function rollbackCustomer360({ jobId, user }) {
           } else if (r.status === 'updated' && r.recordId && r.beforeJson) {
             const before = r.beforeJson;
             const restore = {};
-            for (const k of ['name', 'phone', 'phoneE164', 'email', 'customerType', 'legalName', 'registrationNo', 'isActive']) {
+            for (const k of [
+              'name', 'phone', 'phoneE164', 'email', 'customerType', 'legalName', 'registrationNo', 'isActive',
+              // Phase 2 + Phase 3 — slot 1 metadata + slot 2/3 + primary
+              'phoneType', 'phoneExtension',
+              'phone2', 'phone2E164', 'phone2Type', 'phone2Extension',
+              'phone3', 'phone3E164', 'phone3Type', 'phone3Extension',
+              'primaryPhoneSlot',
+            ]) {
               if (before[k] !== undefined) restore[k] = before[k];
             }
             await prisma.account.update({ where: { id: r.recordId }, data: restore });

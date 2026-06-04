@@ -45,6 +45,18 @@ function snapshotAccount(account, accountCompany = null, accountCompanyCreated =
     vknMasked: maskVkn(account.vkn),
     phone: account.phone ?? null,
     phoneE164: account.phoneE164 ?? null,
+    // Phase 2 + Phase 3 — slot 1 metadata + slot 2/3 + primary
+    phoneType: account.phoneType ?? null,
+    phoneExtension: account.phoneExtension ?? null,
+    phone2: account.phone2 ?? null,
+    phone2E164: account.phone2E164 ?? null,
+    phone2Type: account.phone2Type ?? null,
+    phone2Extension: account.phone2Extension ?? null,
+    phone3: account.phone3 ?? null,
+    phone3E164: account.phone3E164 ?? null,
+    phone3Type: account.phone3Type ?? null,
+    phone3Extension: account.phone3Extension ?? null,
+    primaryPhoneSlot: account.primaryPhoneSlot ?? null,
     email: account.email ?? null,
     customerType: account.customerType,
     legalName: account.legalName ?? null,
@@ -125,6 +137,17 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
           vkn: true,
           phone: true,
           phoneE164: true,
+          phoneType: true,
+          phoneExtension: true,
+          phone2: true,
+          phone2E164: true,
+          phone2Type: true,
+          phone2Extension: true,
+          phone3: true,
+          phone3E164: true,
+          phone3Type: true,
+          phone3Extension: true,
+          primaryPhoneSlot: true,
           email: true,
           customerType: true,
           legalName: true,
@@ -304,7 +327,15 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
  * Sadece değer farklılığı olan alanları döner.
  */
 function computeFieldDiff(existingAccount, existingAc, normalized) {
-  const accountKeys = ['name', 'vkn', 'phone', 'email', 'customerType', 'legalName', 'registrationNo', 'isActive'];
+  const accountKeys = [
+    'name', 'vkn',
+    'phone', 'phoneType', 'phoneExtension',
+    // Phase 3 — slot 2/3 + primary
+    'phone2', 'phone2Type', 'phone2Extension',
+    'phone3', 'phone3Type', 'phone3Extension',
+    'primaryPhoneSlot',
+    'email', 'customerType', 'legalName', 'registrationNo', 'isActive',
+  ];
   const out = { account: {}, accountCompany: {} };
   for (const k of accountKeys) {
     if (normalized[k] === undefined) continue;
@@ -588,6 +619,24 @@ async function createFromRow({ companyId, normalized }) {
 
   const phoneRaw = normalized._rawPhone ?? null;
   const phoneE164 = normalized.phone ?? null;
+  // Phase 2 + Phase 3 — slot 1 metadata + slot 2/3 (paralel) + primary.
+  const phoneType = normalized.phoneType ?? null;
+  const phoneExtension = normalized.phoneExtension ?? null;
+  const phone2Raw = normalized._rawPhone2 ?? null;
+  const phone2E164 = normalized.phone2 ?? null;
+  const phone2Type = normalized.phone2Type ?? null;
+  const phone2Extension = normalized.phone2Extension ?? null;
+  const phone3Raw = normalized._rawPhone3 ?? null;
+  const phone3E164 = normalized.phone3 ?? null;
+  const phone3Type = normalized.phone3Type ?? null;
+  const phone3Extension = normalized.phone3Extension ?? null;
+  // primaryPhoneSlot: caller verirse onu kullan, aksi halde ilk dolu slot.
+  let primaryPhoneSlot = normalized.primaryPhoneSlot ?? null;
+  if (primaryPhoneSlot === null) {
+    if (phoneE164) primaryPhoneSlot = 1;
+    else if (phone2E164) primaryPhoneSlot = 2;
+    else if (phone3E164) primaryPhoneSlot = 3;
+  }
   const externalCustomerCode = normalized.externalCustomerCode ?? null;
 
   // Phase 1 import — yeni Account standart `cus_<22>` formatında.
@@ -599,6 +648,17 @@ async function createFromRow({ companyId, normalized }) {
       vkn: normalized.vkn ?? null,
       phone: phoneRaw,
       phoneE164,
+      phoneType,
+      phoneExtension,
+      phone2: phone2Raw,
+      phone2E164,
+      phone2Type,
+      phone2Extension,
+      phone3: phone3Raw,
+      phone3E164,
+      phone3Type,
+      phone3Extension,
+      primaryPhoneSlot,
       email: normalized.email ?? null,
       customerType: normalized.customerType ?? 'Corporate',
       legalName: normalized.legalName ?? null,
@@ -621,6 +681,17 @@ async function createFromRow({ companyId, normalized }) {
       vkn: true,
       phone: true,
       phoneE164: true,
+      phoneType: true,
+      phoneExtension: true,
+      phone2: true,
+      phone2E164: true,
+      phone2Type: true,
+      phone2Extension: true,
+      phone3: true,
+      phone3E164: true,
+      phone3Type: true,
+      phone3Extension: true,
+      primaryPhoneSlot: true,
       email: true,
       customerType: true,
       legalName: true,
@@ -708,6 +779,28 @@ async function updateFromRow({ companyId, normalized }) {
     patch.phone = normalized._rawPhone ?? normalized.phone;
     patch.phoneE164 = normalized.phone;
   }
+  // Phase 2 — slot 1 metadata
+  if (normalized.phoneType !== undefined && normalized.phoneType !== null) patch.phoneType = normalized.phoneType;
+  if (normalized.phoneExtension !== undefined && normalized.phoneExtension !== null) patch.phoneExtension = normalized.phoneExtension;
+  // Phase 3 — slot 2 (phone+E164+Type+Extension)
+  if (normalized.phone2 !== undefined && normalized.phone2 !== null) {
+    patch.phone2 = normalized._rawPhone2 ?? normalized.phone2;
+    patch.phone2E164 = normalized.phone2;
+  }
+  if (normalized.phone2Type !== undefined && normalized.phone2Type !== null) patch.phone2Type = normalized.phone2Type;
+  if (normalized.phone2Extension !== undefined && normalized.phone2Extension !== null) patch.phone2Extension = normalized.phone2Extension;
+  // Phase 3 — slot 3
+  if (normalized.phone3 !== undefined && normalized.phone3 !== null) {
+    patch.phone3 = normalized._rawPhone3 ?? normalized.phone3;
+    patch.phone3E164 = normalized.phone3;
+  }
+  if (normalized.phone3Type !== undefined && normalized.phone3Type !== null) patch.phone3Type = normalized.phone3Type;
+  if (normalized.phone3Extension !== undefined && normalized.phone3Extension !== null) patch.phone3Extension = normalized.phone3Extension;
+  // primaryPhoneSlot: dolu/boş slot'lara göre sanity. Backend Account
+  // updateAccount kuralları aynısı — boş slotu işaret edemez.
+  if (normalized.primaryPhoneSlot !== undefined && normalized.primaryPhoneSlot !== null) {
+    patch.primaryPhoneSlot = normalized.primaryPhoneSlot;
+  }
 
   const updated = await prisma.account.update({
     where: { id: existing.id },
@@ -718,6 +811,17 @@ async function updateFromRow({ companyId, normalized }) {
       vkn: true,
       phone: true,
       phoneE164: true,
+      phoneType: true,
+      phoneExtension: true,
+      phone2: true,
+      phone2E164: true,
+      phone2Type: true,
+      phone2Extension: true,
+      phone3: true,
+      phone3E164: true,
+      phone3Type: true,
+      phone3Extension: true,
+      primaryPhoneSlot: true,
       email: true,
       customerType: true,
       legalName: true,

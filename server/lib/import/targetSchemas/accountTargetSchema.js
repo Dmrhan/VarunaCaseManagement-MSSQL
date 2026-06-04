@@ -17,8 +17,121 @@ import {
 } from '../../../utils/accountValidation.js';
 import { CUSTOMER_TYPE_VALUES } from '../../../db/enumMap.js';
 
-export const ACCOUNT_TARGET_VERSION = '2026-05-22.account.v1';
+export const ACCOUNT_TARGET_VERSION = '2026-06-04.account.v2';
 export const ACCOUNT_TARGET_TYPE = 'account';
+
+// Phase 2 + Phase 3 phone metadata — geçerli telefon tipleri.
+const VALID_PHONE_TYPES = new Set(['mobile', 'work', 'switchboard', 'whatsapp', 'other']);
+const PHONE_TYPE_TR_LABEL_MAP = {
+  cep: 'mobile', mobil: 'mobile', mobile: 'mobile', gsm: 'mobile',
+  'iş': 'work', is: 'work', work: 'work', is_telefonu: 'work',
+  santral: 'switchboard', switchboard: 'switchboard',
+  whatsapp: 'whatsapp', wp: 'whatsapp', 'whats app': 'whatsapp',
+  'diğer': 'other', diger: 'other', other: 'other',
+};
+
+function normalizePhoneType(raw) {
+  const s = asTrimmedString(raw);
+  if (!s) return { ok: true, normalized: null };
+  const lower = s.toLowerCase();
+  if (PHONE_TYPE_TR_LABEL_MAP[lower]) return { ok: true, normalized: PHONE_TYPE_TR_LABEL_MAP[lower] };
+  if (VALID_PHONE_TYPES.has(lower)) return { ok: true, normalized: lower };
+  return { ok: false, normalized: null, reason: `Telefon tipi tanınmadı (${s}). cep/iş/santral/whatsapp/diğer kullanın.` };
+}
+
+function normalizePhoneExtension(raw) {
+  const s = asTrimmedString(raw);
+  if (!s) return { ok: true, normalized: null };
+  if (!/^[A-Za-z0-9-]{1,10}$/.test(s)) {
+    return { ok: false, normalized: null, reason: 'Dahili numara 1-10 karakter alfa-numerik olmalı.' };
+  }
+  return { ok: true, normalized: s };
+}
+
+function normalizePrimaryPhoneSlot(raw) {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, normalized: null };
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).trim(), 10);
+  if (n !== 1 && n !== 2 && n !== 3) {
+    return { ok: false, normalized: null, reason: 'Birincil telefon slot 1, 2 veya 3 olmalı.' };
+  }
+  return { ok: true, normalized: n };
+}
+
+// Phase 3 — slot 2/3 field declaration factory. phoneSlot 'phone2' veya 'phone3'.
+function phoneSlotFields(slotKey, slotNo) {
+  const slotLabel = slotNo === 2 ? 'İkinci' : 'Üçüncü';
+  const slotTr = slotNo === 2 ? 'ikinci_telefon' : 'ucuncu_telefon';
+  const slotTrAlt = slotNo === 2 ? 'telefon2' : 'telefon3';
+  const slotTrAlt2 = slotNo === 2 ? 'telefon_2' : 'telefon_3';
+  const slotEng = slotNo === 2 ? 'phone2' : 'phone3';
+  const slotEng2 = slotNo === 2 ? 'phone_2' : 'phone_3';
+  return [
+    {
+      key: slotKey,
+      label: `${slotLabel} Telefon`,
+      group: 'İletişim',
+      required: false,
+      type: 'phone',
+      aliases: [
+        slotEng, slotEng2, slotTrAlt, slotTrAlt2, slotTr,
+        ...(slotNo === 3 ? ['üçüncü_telefon', 'ucuncutelefon', 'üçüncütelefon'] : ['ikincitelefon']),
+        `${slotEng}E164`, `${slotEng}_e164`,
+      ],
+      description: `${slotLabel} müşteri telefonu (opsiyonel). Boş bırakılabilir.`,
+      example: '+902121234567',
+      writable: true,
+      createAllowed: true,
+      updateAllowed: true,
+      normalize(raw) {
+        const s = asTrimmedString(raw);
+        if (!s) return { ok: true, normalized: null };
+        const e164 = normalizePhoneE164(s);
+        if (!e164) {
+          return { ok: false, normalized: null, reason: `${slotLabel} telefon E.164 formatına çevrilemedi.` };
+        }
+        return { ok: true, normalized: e164, extra: { rawPhone: s } };
+      },
+    },
+    {
+      key: `${slotKey}Type`,
+      label: `${slotLabel} Telefon Tipi`,
+      group: 'İletişim',
+      required: false,
+      type: 'text',
+      aliases: [
+        `${slotEng}type`, `${slotEng}_type`,
+        `${slotTrAlt}_tipi`, `${slotTr}_tipi`,
+        ...(slotNo === 3 ? ['ucuncu_telefon_tipi', 'üçüncü_telefon_tipi'] : ['ikinci_telefon_tipi']),
+      ],
+      description: 'cep / iş / santral / whatsapp / diğer',
+      example: 'santral',
+      writable: true,
+      createAllowed: true,
+      updateAllowed: true,
+      normalize: normalizePhoneType,
+    },
+    {
+      key: `${slotKey}Extension`,
+      label: `${slotLabel} Telefon Dahili`,
+      group: 'İletişim',
+      required: false,
+      type: 'text',
+      aliases: [
+        `${slotEng}extension`, `${slotEng}_extension`,
+        `${slotEng}_dahili`, `${slotTrAlt}_dahili`,
+        ...(slotNo === 3
+          ? ['ucuncu_telefon_dahili', 'üçüncü_telefon_dahili']
+          : ['ikinci_telefon_dahili']),
+      ],
+      description: '1-10 karakter dahili numara (opsiyonel).',
+      example: '123',
+      writable: true,
+      createAllowed: true,
+      updateAllowed: true,
+      normalize: normalizePhoneExtension,
+    },
+  ];
+}
 
 const CUSTOMER_TYPE_LABEL_MAP = {
   individual: 'Individual',
@@ -276,8 +389,8 @@ export const ACCOUNT_TARGET_FIELDS = [
     group: 'İletişim',
     required: false,
     type: 'phone',
-    aliases: ['phone', 'telefon', 'gsm', 'tel', 'mobile', 'cep'],
-    description: 'Müşteri telefonu. E.164 formatına çevrilir.',
+    aliases: ['phone', 'telefon', 'gsm', 'tel', 'mobile', 'cep', 'phone1', 'phone_1', 'telefon1', 'telefon_1', 'phone1e164', 'phone_e164'],
+    description: 'Müşteri ana telefonu. E.164 formatına çevrilir.',
     example: '+905321112233',
     writable: true,
     createAllowed: true,
@@ -292,6 +405,55 @@ export const ACCOUNT_TARGET_FIELDS = [
       // raw display + e164 normalize: caller iki alanı da yazsın diye object döner
       return { ok: true, normalized: e164, extra: { rawPhone: s } };
     },
+  },
+  // Phase 2 phone metadata — slot 1 tip + dahili.
+  {
+    key: 'phoneType',
+    label: 'Telefon Tipi',
+    group: 'İletişim',
+    required: false,
+    type: 'text',
+    aliases: ['phonetype', 'phone_type', 'telefon_tipi', 'telefon tipi', 'ana_telefon_tipi'],
+    description: 'cep / iş / santral / whatsapp / diğer',
+    example: 'cep',
+    writable: true,
+    createAllowed: true,
+    updateAllowed: true,
+    normalize: normalizePhoneType,
+  },
+  {
+    key: 'phoneExtension',
+    label: 'Telefon Dahili',
+    group: 'İletişim',
+    required: false,
+    type: 'text',
+    aliases: ['phoneextension', 'phone_extension', 'phone_dahili', 'telefon_dahili', 'dahili', 'extension', 'ext'],
+    description: '1-10 karakter dahili numara (opsiyonel).',
+    example: '123',
+    writable: true,
+    createAllowed: true,
+    updateAllowed: true,
+    normalize: normalizePhoneExtension,
+  },
+  // Phase 3 — slot 2 ve 3.
+  ...phoneSlotFields('phone2', 2),
+  ...phoneSlotFields('phone3', 3),
+  {
+    key: 'primaryPhoneSlot',
+    label: 'Birincil Telefon Slot',
+    group: 'İletişim',
+    required: false,
+    type: 'number',
+    aliases: [
+      'primaryphoneslot', 'primary_phone_slot',
+      'birincil_telefon_slot', 'birinciltelefonslot', 'ana_telefon_slot',
+    ],
+    description: '1, 2 veya 3. Boş ise ilk dolu telefon birincil sayılır.',
+    example: '1',
+    writable: true,
+    createAllowed: true,
+    updateAllowed: true,
+    normalize: normalizePrimaryPhoneSlot,
   },
   {
     key: 'email',
@@ -484,8 +646,38 @@ export function normalizeRow(rawRow, mapping) {
     }
     if (r.warning) warnings.push({ targetKey: f.key, label: f.label, message: r.warning });
     if (r.extra?.rawPhone) {
-      normalized._rawPhone = r.extra.rawPhone;
+      // Phase 3 — slot başına raw display alanını ayır. Slot 1 = _rawPhone,
+      // slot 2 = _rawPhone2, slot 3 = _rawPhone3. createFromRow/updateFromRow
+      // bu alanları phone/phone2/phone3 display kolonlarına yazar.
+      if (f.key === 'phone') normalized._rawPhone = r.extra.rawPhone;
+      else if (f.key === 'phone2') normalized._rawPhone2 = r.extra.rawPhone;
+      else if (f.key === 'phone3') normalized._rawPhone3 = r.extra.rawPhone;
     }
+  }
+
+  // Phase 3 — slot-bazlı validasyon: primaryPhoneSlot dolu slot'u işaret
+  // etmeli; cross-slot duplicate E.164 hata olarak yansır.
+  const slot1E164 = normalized.phone ?? null;
+  const slot2E164 = normalized.phone2 ?? null;
+  const slot3E164 = normalized.phone3 ?? null;
+  const slotsE164 = [slot1E164, slot2E164, slot3E164];
+  if (normalized.primaryPhoneSlot) {
+    const idx = normalized.primaryPhoneSlot - 1;
+    if (!slotsE164[idx]) {
+      errors.push({
+        targetKey: 'primaryPhoneSlot',
+        label: 'Birincil Telefon Slot',
+        message: `primaryPhoneSlot=${normalized.primaryPhoneSlot} ama o slot boş.`,
+      });
+    }
+  }
+  const filledSlots = slotsE164.filter(Boolean);
+  if (filledSlots.length > 0 && new Set(filledSlots).size !== filledSlots.length) {
+    errors.push({
+      targetKey: 'phone',
+      label: 'Telefon',
+      message: 'Aynı telefon numarası birden fazla slotta yer alıyor.',
+    });
   }
   // no_tax_id reflects ABSENCE of a source value, not "invalid value". A
   // malformed VKN already errors; emitting the missing-identity warning on
