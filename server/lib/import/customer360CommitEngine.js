@@ -33,6 +33,7 @@
 import { prisma } from '../../db/client.js';
 import { CUSTOMER_360_VERSION } from './targetSchemas/customer360TargetSchemas/index.js';
 import { dryRunCustomer360 } from './customer360DryRun.js';
+import { generateUniqueAccountId } from '../../utils/accountId.js';
 
 const ENTITY_ORDER = ['account', 'accountCompany', 'accountContact', 'accountAddress', 'accountProject'];
 const ROLLBACK_ORDER = [...ENTITY_ORDER].reverse();
@@ -276,9 +277,11 @@ async function writeAccount(row, normalized) {
       : existing;
     return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccount(updated) };
   }
-  // Create
+  // Create — Phase 1 standardization: Account.id `cus_<22>` formatında.
+  const newId = await generateUniqueAccountId();
   const created = await prisma.account.create({
     data: {
+      id: newId,
       name: normalized.name,
       vkn: normalized.vkn ?? null,
       phone: normalized._rawPhone ?? null,

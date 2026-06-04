@@ -27,7 +27,8 @@
     "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js",
     "smoke:pr5-static-guards": "node scripts/smoke-pr5-static-guards.js",
     "smoke:account-tckn-search": "node --env-file=.env scripts/smoke-account-tckn-search.js",
-    "smoke:admin-create-phase5c": "node --env-file=.env scripts/smoke-admin-create-phase5c.js"
+    "smoke:admin-create-phase5c": "node --env-file=.env scripts/smoke-admin-create-phase5c.js",
+    "smoke:account-id-standard": "node --env-file=.env scripts/smoke-account-id-standardization.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
