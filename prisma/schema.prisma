@@ -447,40 +447,56 @@ model ExternalKbSetting {
 // kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
 // ve mevcut Case scope sorguları için geri uyumlu kalır.
 model Account {
-  id             String       @id @default(cuid())
-  name           String
+  id               String       @id @default(cuid())
+  name             String
   /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
   /// WR-A2: format + checksum validation app-layer'da (server/utils/accountValidation.js).
-  vkn            String?      @unique
-  companyId      String?
-  email          String?
+  vkn              String?      @unique
+  companyId        String?
+  email            String?
   /// Display amaçlı orijinal telefon (kullanıcı girdiği format). WR-A2'de phoneE164 ayrı tutulur.
-  phone          String?
+  phone            String?
   /// WR-A2 — E.164 normalize (örn. "+905325551234"). Search/index için.
   /// **DB unique constraint YOK** — paylaşılan call center numarası iki Account'ta görünebilir.
-  phoneE164      String?
+  phoneE164        String?
   /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
   /// 'switchboard' | 'whatsapp' | 'other'. Storage'daki canonical değer
   /// E.164 phoneE164 alanı; phoneType yalnız operasyonel sinyal.
-  phoneType      String?
+  phoneType        String?
   /// Phase 2 phone metadata — dahili numara (santral arkası). E.164
   /// phoneE164'a APPEND edilmez; ayrı kolonda tutulur. 1-10 char.
-  phoneExtension String?
-  isActive       Boolean      @default(true)
+  phoneExtension   String?
+  /// Phase 3 — Account başına 3 telefon slot. Slot 1 yukarıdaki phone*
+  /// alanları; slot 2/3 ek paralel kolonlardır. Generic PhoneNumber
+  /// tablosu eklenmedi — sabit max=3 ürün kuralı.
+  phone2           String?
+  phone2E164       String?
+  phone2Type       String?
+  phone2Extension  String?
+  phone3           String?
+  phone3E164       String?
+  phone3Type       String?
+  phone3Extension  String?
+  /// Phase 3 — Hangi slot Account için "birincil telefon" (1/2/3).
+  /// Null ise UI ilk dolu slotu birincil kabul eder. Backend her create/
+  /// update'te boş olmayan ilk slota normalize eder; boş slotu işaret
+  /// edemez.
+  primaryPhoneSlot Int?
+  isActive         Boolean      @default(true)
   /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
-  customerType   CustomerType @default(Corporate)
+  customerType     CustomerType @default(Corporate)
   /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
-  legalName      String?
+  legalName        String?
   /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
-  registrationNo String?
+  registrationNo   String?
   /// WR-A2 / Decision Sprint #1 — TCKN HMAC-SHA256(plain, TCKN_HASH_PEPPER), 64-char hex.
   /// **Plain TCKN ASLA saklanmaz.** Global unique → duplicate Bireysel müşteri önleme.
   /// Pepper env yoksa write path 400 fail; read path (search) sessizce skip.
-  tcknHash       String?      @unique
+  tcknHash         String?      @unique
   /// WR-A2 — Display için son 4 hane (örn "1234"). UI'da "*******1234" maskeli gösterilir.
-  tcknLast4      String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  tcknLast4        String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   company   Company?         @relation(fields: [companyId], references: [id])
   cases     Case[]
@@ -493,6 +509,8 @@ model Account {
   @@index([name])
   @@index([customerType])
   @@index([phoneE164])
+  @@index([phone2E164])
+  @@index([phone3E164])
 }
 
 // AccountCompany — Account ile Company arasında per-tenant ilişki.

@@ -58,10 +58,14 @@ export function AccountFormModal({
 
   const [name, setName] = useState('');
   const [vkn, setVkn] = useState('');
-  const [phone, setPhone] = useState('');
-  // Phase 2 phone metadata — Account tek slot.
-  const [phoneType, setPhoneType] = useState<string>('');
-  const [phoneExtension, setPhoneExtension] = useState<string>('');
+  // Phase 3 — Account başına 3 telefon slot. State array; visibleSlotCount
+  // ile 1/2/3 slot görünür. Slot 1 her zaman görünür; "+ Telefon ekle"
+  // ile 2 ve 3 açılır. "Remove" slot 2/3'i temizler ve üst slot'a kaydırır.
+  type Slot = { phone: string; type: string; extension: string };
+  const emptySlot = (): Slot => ({ phone: '', type: '', extension: '' });
+  const [slots, setSlots] = useState<Slot[]>([emptySlot(), emptySlot(), emptySlot()]);
+  const [visibleSlotCount, setVisibleSlotCount] = useState<number>(1);
+  const [primarySlot, setPrimarySlot] = useState<number>(1); // 1/2/3
   const [email, setEmail] = useState('');
   const [isActive, setIsActive] = useState(true);
   // WR-A1 — Müşteri tipi + (opsiyonel) kurumsal alanlar.
@@ -88,9 +92,26 @@ export function AccountFormModal({
       setName(account.name);
       // vknMasked plaintext değil — edit'te boş başla, kullanıcı değiştirmek istemezse göndermez.
       setVkn('');
-      setPhone(account.phone ?? '');
-      setPhoneType(account.phoneType ?? '');
-      setPhoneExtension(account.phoneExtension ?? '');
+      // Phase 3 — 3 slot init.
+      const initSlots: Slot[] = [
+        { phone: account.phone ?? '', type: account.phoneType ?? '', extension: account.phoneExtension ?? '' },
+        { phone: account.phone2 ?? '', type: account.phone2Type ?? '', extension: account.phone2Extension ?? '' },
+        { phone: account.phone3 ?? '', type: account.phone3Type ?? '', extension: account.phone3Extension ?? '' },
+      ];
+      setSlots(initSlots);
+      // visibleSlotCount = en yüksek dolu slot'tan max(1)
+      let vis = 1;
+      if (initSlots[2].phone) vis = 3;
+      else if (initSlots[1].phone) vis = 2;
+      setVisibleSlotCount(vis);
+      // primary: backend null verdiyse first non-empty
+      const primary = account.primaryPhoneSlot ?? null;
+      if (primary === 1 || primary === 2 || primary === 3) {
+        setPrimarySlot(primary);
+      } else {
+        const first = initSlots.findIndex((s) => s.phone);
+        setPrimarySlot(first === -1 ? 1 : first + 1);
+      }
       setEmail(account.email ?? '');
       setIsActive(account.isActive);
       setCustomerType(account.customerType ?? 'Corporate');
@@ -99,9 +120,9 @@ export function AccountFormModal({
     } else {
       setName('');
       setVkn('');
-      setPhone('');
-      setPhoneType('');
-      setPhoneExtension('');
+      setSlots([emptySlot(), emptySlot(), emptySlot()]);
+      setVisibleSlotCount(1);
+      setPrimarySlot(1);
       setEmail('');
       setIsActive(true);
       setCustomerType('Corporate');
@@ -191,16 +212,42 @@ export function AccountFormModal({
     if (!validate()) return;
     setSubmitting(true);
 
+    // Phase 3 — slot snapshot (visible olanları gönder; hidden slot'ları null'a düşür).
+    const visibleSlots: Slot[] = slots.map((s, i) =>
+      i < visibleSlotCount ? s : emptySlot(),
+    );
+    // Cross-slot duplicate E.164 önlemi: backend de doğrular; UI'da
+    // hızlı geri bildirim verelim.
+    const e164s = visibleSlots.map((s) => s.phone.trim()).filter(Boolean);
+    if (new Set(e164s).size !== e164s.length) {
+      setErrors({ phones: 'Aynı telefon numarası birden fazla slotta yer alıyor.' });
+      setSubmitting(false);
+      return;
+    }
+    // Effective primary: visible iken UI'da seçili; aksi halde first non-empty.
+    let effPrimary = primarySlot;
+    if (effPrimary > visibleSlotCount || !visibleSlots[effPrimary - 1].phone) {
+      const firstFilled = visibleSlots.findIndex((s) => s.phone);
+      effPrimary = firstFilled === -1 ? 1 : firstFilled + 1;
+    }
+
     let saved: AccountDetail | undefined;
     if (mode === 'create') {
       const body = {
         name: name.trim(),
         // WR-A1: Bireysel'de VKN gönderilmez; helper text TCKN A2'ye işaret ediyor.
         vkn: isIndividual ? null : vkn.trim() || null,
-        phone: phone.trim() || null,
-        // Phase 2 phone metadata
-        phoneType: phone.trim() ? phoneType || null : null,
-        phoneExtension: phone.trim() ? phoneExtension.trim() || null : null,
+        // Phase 3 — slot 1/2/3
+        phone: visibleSlots[0].phone.trim() || null,
+        phoneType: visibleSlots[0].phone.trim() ? visibleSlots[0].type || null : null,
+        phoneExtension: visibleSlots[0].phone.trim() ? visibleSlots[0].extension.trim() || null : null,
+        phone2: visibleSlots[1].phone.trim() || null,
+        phone2Type: visibleSlots[1].phone.trim() ? visibleSlots[1].type || null : null,
+        phone2Extension: visibleSlots[1].phone.trim() ? visibleSlots[1].extension.trim() || null : null,
+        phone3: visibleSlots[2].phone.trim() || null,
+        phone3Type: visibleSlots[2].phone.trim() ? visibleSlots[2].type || null : null,
+        phone3Extension: visibleSlots[2].phone.trim() ? visibleSlots[2].extension.trim() || null : null,
+        primaryPhoneSlot: e164s.length > 0 ? effPrimary : null,
         email: email.trim() || null,
         customerType,
         legalName: isIndividual ? null : legalName.trim() || null,
@@ -217,15 +264,20 @@ export function AccountFormModal({
       saved = await accountService.create(body);
       if (saved) notify({ type: 'success', title: 'Müşteri eklendi', message: saved.name });
     } else if (account) {
+      // Phase 3 — update body. Her slot ayrı pair olarak gönderilir;
+      // slot fields'ı her zaman gönder (backend atomic pair semantik).
       const body = {
         name: name.trim() !== account.name ? name.trim() : undefined,
-        phone: phone.trim() !== (account.phone ?? '') ? phone.trim() || null : undefined,
-        phoneType:
-          phoneType !== (account.phoneType ?? '') ? (phone.trim() ? phoneType || null : null) : undefined,
-        phoneExtension:
-          phoneExtension.trim() !== (account.phoneExtension ?? '')
-            ? (phone.trim() ? phoneExtension.trim() || null : null)
-            : undefined,
+        phone: visibleSlots[0].phone.trim() || null,
+        phoneType: visibleSlots[0].phone.trim() ? visibleSlots[0].type || null : null,
+        phoneExtension: visibleSlots[0].phone.trim() ? visibleSlots[0].extension.trim() || null : null,
+        phone2: visibleSlots[1].phone.trim() || null,
+        phone2Type: visibleSlots[1].phone.trim() ? visibleSlots[1].type || null : null,
+        phone2Extension: visibleSlots[1].phone.trim() ? visibleSlots[1].extension.trim() || null : null,
+        phone3: visibleSlots[2].phone.trim() || null,
+        phone3Type: visibleSlots[2].phone.trim() ? visibleSlots[2].type || null : null,
+        phone3Extension: visibleSlots[2].phone.trim() ? visibleSlots[2].extension.trim() || null : null,
+        primaryPhoneSlot: e164s.length > 0 ? effPrimary : null,
         email: email.trim() !== (account.email ?? '') ? email.trim() || null : undefined,
         isActive: isActive !== account.isActive ? isActive : undefined,
         // VKN sadece kullanıcı dolu bıraktıysa gönderilir; boşsa mevcut kalır.
@@ -349,38 +401,136 @@ export function AccountFormModal({
               maxLength={10}
             />
           </Field>
-          <Field label="Telefon" hint="Türkiye dışı için ülke kodu seçin">
-            <PhoneInput
-              value={phone || null}
-              onChange={(e164) => setPhone(e164 ?? '')}
-            />
-          </Field>
         </div>
-        {/* Phase 2 phone metadata — telefon varsa tip + dahili gösterilir. */}
-        {phone && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Telefon Tipi">
-              <Select value={phoneType} onChange={(e) => setPhoneType(e.target.value)}>
-                <option value="">— seçiniz —</option>
-                {PHONE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {PHONE_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Dahili" hint="Santral arkası (1-10 karakter, opsiyonel)">
-              <TextInput
-                value={phoneExtension}
-                onChange={(e) => setPhoneExtension(e.target.value)}
-                placeholder="örn. 123"
-                inputMode="numeric"
-                maxLength={10}
-                autoComplete="off"
-              />
-            </Field>
+
+        {/* Phase 3 — Telefonlar: en fazla 3 slot, dinamik göster/gizle. */}
+        <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+              Telefonlar
+            </h3>
+            {errors.phones && (
+              <span className="text-xs text-rose-600 dark:text-rose-400">{errors.phones}</span>
+            )}
           </div>
-        )}
+          {slots.slice(0, visibleSlotCount).map((slot, idx) => {
+            const slotNo = idx + 1;
+            const slotLabel = slotNo === 1 ? 'Ana telefon' : `Telefon ${slotNo}`;
+            return (
+              <div
+                key={idx}
+                className="rounded-md border border-slate-100 bg-slate-50 p-2 dark:border-ndark-border/60 dark:bg-ndark-surface/40"
+              >
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="primaryPhone"
+                      checked={primarySlot === slotNo}
+                      onChange={() => setPrimarySlot(slotNo)}
+                      disabled={!slot.phone}
+                      title="Birincil telefon olarak işaretle"
+                      className="h-3.5 w-3.5 cursor-pointer text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`${slotLabel} birincil`}
+                    />
+                    <span className="text-xs font-medium text-slate-700 dark:text-ndark-text">
+                      {slotLabel}
+                    </span>
+                    {primarySlot === slotNo && slot.phone && (
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        Birincil
+                      </span>
+                    )}
+                  </div>
+                  {slotNo > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Slot'u sil + alt slotları yukarı kaydır.
+                        const next = [...slots];
+                        for (let i = idx; i < 2; i++) next[i] = next[i + 1];
+                        next[2] = emptySlot();
+                        setSlots(next);
+                        setVisibleSlotCount((v) => Math.max(1, v - 1));
+                        // Primary kayma: silinen slot primary idi veya altındakiler kaydıysa
+                        if (primarySlot === slotNo) {
+                          // ilk dolu slotu birincil yap
+                          const first = next.findIndex((s) => s.phone);
+                          setPrimarySlot(first === -1 ? 1 : first + 1);
+                        } else if (primarySlot > slotNo) {
+                          setPrimarySlot(primarySlot - 1);
+                        }
+                      }}
+                      className="flex items-center gap-1 rounded p-1 text-xs text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:text-ndark-muted dark:hover:bg-rose-900/20 dark:hover:text-rose-300"
+                      title={`${slotLabel} sil`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <PhoneInput
+                    value={slot.phone || null}
+                    onChange={(e164) => {
+                      const next = [...slots];
+                      next[idx] = { ...next[idx], phone: e164 ?? '' };
+                      setSlots(next);
+                      // Phone temizlendiyse ve birincil bu slot ise → first non-empty
+                      if (!e164 && primarySlot === slotNo) {
+                        const first = next.findIndex((s) => s.phone);
+                        setPrimarySlot(first === -1 ? 1 : first + 1);
+                      } else if (e164 && primarySlot !== slotNo) {
+                        // Yeni slot ilk dolu slot ise birincil yap
+                        const firstFilled = next.findIndex((s) => s.phone);
+                        if (firstFilled === idx) setPrimarySlot(slotNo);
+                      }
+                    }}
+                  />
+                  {slot.phone && (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Select
+                        value={slot.type}
+                        onChange={(e) => {
+                          const next = [...slots];
+                          next[idx] = { ...next[idx], type: e.target.value };
+                          setSlots(next);
+                        }}
+                      >
+                        <option value="">— tip seç —</option>
+                        {PHONE_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {PHONE_TYPE_LABELS[t]}
+                          </option>
+                        ))}
+                      </Select>
+                      <TextInput
+                        value={slot.extension}
+                        onChange={(e) => {
+                          const next = [...slots];
+                          next[idx] = { ...next[idx], extension: e.target.value };
+                          setSlots(next);
+                        }}
+                        placeholder="Dahili (opsiyonel)"
+                        inputMode="numeric"
+                        maxLength={10}
+                        autoComplete="off"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {visibleSlotCount < 3 && (
+            <button
+              type="button"
+              onClick={() => setVisibleSlotCount((v) => v + 1)}
+              className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted dark:hover:bg-ndark-surface"
+            >
+              <Plus size={12} /> Telefon ekle
+            </button>
+          )}
+        </div>
 
         {/* WR-A1 — Kurumsal/Kamu/Vakıf-STK için opsiyonel ticari unvan + sicil no. */}
         {!isIndividual && (

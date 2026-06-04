@@ -154,6 +154,16 @@ function shapeAccountRow(account, { caseAggregates }) {
     // Phase 2 phone metadata
     phoneType: account.phoneType ?? null,
     phoneExtension: account.phoneExtension ?? null,
+    // Phase 3 — slot 2/3 + primaryPhoneSlot
+    phone2: account.phone2 ?? null,
+    phone2E164: account.phone2E164 ?? null,
+    phone2Type: account.phone2Type ?? null,
+    phone2Extension: account.phone2Extension ?? null,
+    phone3: account.phone3 ?? null,
+    phone3E164: account.phone3E164 ?? null,
+    phone3Type: account.phone3Type ?? null,
+    phone3Extension: account.phone3Extension ?? null,
+    primaryPhoneSlot: account.primaryPhoneSlot ?? null,
     email: account.email ?? null,
     isActive: account.isActive,
     // WR-A1 / PM-01 — Müşteri tipi + opsiyonel ticari unvan/sicil no.
@@ -257,6 +267,11 @@ export async function listAccounts({
         { name: { contains: q, mode: 'insensitive' } },
         { vkn: { startsWith: q } },
         ...(tcknHashBranch ? [tcknHashBranch] : []),
+        // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
+        // phone1E164 mevcut, phone2E164 + phone3E164 eklendi.
+        { phoneE164: { contains: q, mode: 'insensitive' } },
+        { phone2E164: { contains: q, mode: 'insensitive' } },
+        { phone3E164: { contains: q, mode: 'insensitive' } },
         {
           companies: {
             some: {
@@ -322,6 +337,16 @@ export async function listAccounts({
         phoneE164: true, // WR-A2
         phoneType: true, // Phase 2
         phoneExtension: true, // Phase 2
+        // Phase 3 — slot 2/3 + primary
+        phone2: true,
+        phone2E164: true,
+        phone2Type: true,
+        phone2Extension: true,
+        phone3: true,
+        phone3E164: true,
+        phone3Type: true,
+        phone3Extension: true,
+        primaryPhoneSlot: true,
         email: true,
         isActive: true,
         // WR-A1
@@ -597,6 +622,16 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     phoneE164: account.phoneE164 ?? null, // WR-A2
     phoneType: account.phoneType ?? null, // Phase 2
     phoneExtension: account.phoneExtension ?? null, // Phase 2
+    // Phase 3 — slot 2/3 + primaryPhoneSlot
+    phone2: account.phone2 ?? null,
+    phone2E164: account.phone2E164 ?? null,
+    phone2Type: account.phone2Type ?? null,
+    phone2Extension: account.phone2Extension ?? null,
+    phone3: account.phone3 ?? null,
+    phone3E164: account.phone3E164 ?? null,
+    phone3Type: account.phone3Type ?? null,
+    phone3Extension: account.phone3Extension ?? null,
+    primaryPhoneSlot: account.primaryPhoneSlot ?? null,
     email: account.email ?? null,
     isActive: account.isActive,
     createdAt: account.createdAt,
@@ -804,6 +839,41 @@ export async function createAccount({ data, user }) {
   const phoneType = normalizePhoneType(data?.phoneType) ?? null;
   const phoneExtension = normalizePhoneExtension(data?.phoneExtension) ?? null;
 
+  // Phase 3 — slot 2 ve 3.
+  const slot2 = normalizePhoneSlotInput(
+    data?.phone2 !== undefined || data?.phone2Type !== undefined || data?.phone2Extension !== undefined
+      ? { phone: data?.phone2, phoneType: data?.phone2Type, phoneExtension: data?.phone2Extension }
+      : null,
+  );
+  const slot3 = normalizePhoneSlotInput(
+    data?.phone3 !== undefined || data?.phone3Type !== undefined || data?.phone3Extension !== undefined
+      ? { phone: data?.phone3, phoneType: data?.phone3Type, phoneExtension: data?.phone3Extension }
+      : null,
+  );
+
+  // Birden fazla slotta aynı E.164 → soft duplicate; kabul edip warn
+  // yerine error (data quality). UI tarafında submit öncesi check var.
+  {
+    const list = [phoneE164, slot2?.phoneE164 ?? null, slot3?.phoneE164 ?? null].filter(Boolean);
+    if (new Set(list).size !== list.length) {
+      throw new AccountValidationError('Aynı telefon numarası birden fazla slotta yer alıyor.');
+    }
+  }
+
+  const slots = [
+    { phoneE164 },
+    { phoneE164: slot2?.phoneE164 ?? null },
+    { phoneE164: slot3?.phoneE164 ?? null },
+  ];
+  let primaryPhoneSlot = normalizePrimaryPhoneSlot(data?.primaryPhoneSlot, slots);
+  if (primaryPhoneSlot === undefined) {
+    // Caller belirtmediyse ilk dolu slotu birincil yap.
+    primaryPhoneSlot = firstNonEmptyPhoneSlot(slots);
+  } else if (primaryPhoneSlot === null) {
+    // Null kabul edildi; ilk dolu slotu birincil sayan UI'a güven.
+    primaryPhoneSlot = firstNonEmptyPhoneSlot(slots);
+  }
+
   // WR-A2 — TCKN: yalnızca Individual customerType için kabul edilir.
   // Plain TCKN ASLA DB'ye yazılmaz; HMAC hash + last4 hesaplanır, plain bellekte
   // bırakılıp atılır (variable scope sonrası GC).
@@ -844,6 +914,16 @@ export async function createAccount({ data, user }) {
         phoneE164,
         phoneType,
         phoneExtension,
+        // Phase 3 — slot 2/3 + primary
+        phone2: slot2?.phoneRaw ?? null,
+        phone2E164: slot2?.phoneE164 ?? null,
+        phone2Type: slot2?.phoneType ?? null,
+        phone2Extension: slot2?.phoneExtension ?? null,
+        phone3: slot3?.phoneRaw ?? null,
+        phone3E164: slot3?.phoneE164 ?? null,
+        phone3Type: slot3?.phoneType ?? null,
+        phone3Extension: slot3?.phoneExtension ?? null,
+        primaryPhoneSlot,
         email: data?.email ?? null,
         customerType,
         legalName,
@@ -916,6 +996,54 @@ export async function updateAccount({ accountId, data, user }) {
   // Phase 2 phone metadata
   if (data?.phoneType !== undefined) patch.phoneType = normalizePhoneType(data.phoneType);
   if (data?.phoneExtension !== undefined) patch.phoneExtension = normalizePhoneExtension(data.phoneExtension);
+
+  // Phase 3 — slot 2 ve 3 + primaryPhoneSlot.
+  // Slot fields atomik pair olarak yazılır: phone+E164+type+extension. Yalnız
+  // herhangi bir slot alanı body'de geliyorsa o slot'un atomic update'i
+  // yapılır. Slot boş gönderilirse 4 alanı null'a düşer.
+  function patchSlot(slotIdx, slotKeys) {
+    const anyProvided = slotKeys.some((k) => data?.[k] !== undefined);
+    if (!anyProvided) return null;
+    const norm = normalizePhoneSlotInput({
+      phone: data[slotKeys[0]],
+      phoneType: data[slotKeys[2]],
+      phoneExtension: data[slotKeys[3]],
+    });
+    patch[slotKeys[0]] = norm.phoneRaw;
+    patch[slotKeys[1]] = norm.phoneE164;
+    patch[slotKeys[2]] = norm.phoneType;
+    patch[slotKeys[3]] = norm.phoneExtension;
+    return norm.phoneE164;
+  }
+  const slot2NewE164 = patchSlot(2, ['phone2', 'phone2E164', 'phone2Type', 'phone2Extension']);
+  const slot3NewE164 = patchSlot(3, ['phone3', 'phone3E164', 'phone3Type', 'phone3Extension']);
+
+  // Cross-slot duplicate check (data quality).
+  {
+    // Effective post-patch values
+    const effSlot1 = patch.phoneE164 !== undefined ? patch.phoneE164 : undefined;
+    const effSlot2 = slot2NewE164;
+    const effSlot3 = slot3NewE164;
+    const sample = [effSlot1, effSlot2, effSlot3].filter((v) => typeof v === 'string' && v);
+    if (sample.length > 0 && new Set(sample).size !== sample.length) {
+      throw new AccountValidationError('Aynı telefon numarası birden fazla slotta yer alıyor.');
+    }
+  }
+
+  // primaryPhoneSlot — geçerli iken assign; null/missing → ileride
+  // post-update finalize'da default'lanır (DB read sonrası).
+  if (data?.primaryPhoneSlot !== undefined) {
+    if (data.primaryPhoneSlot === null) {
+      patch.primaryPhoneSlot = null;
+    } else {
+      const n = typeof data.primaryPhoneSlot === 'string' ? Number.parseInt(data.primaryPhoneSlot, 10) : data.primaryPhoneSlot;
+      if (n !== 1 && n !== 2 && n !== 3) {
+        throw new AccountValidationError('Birincil telefon slot 1, 2 veya 3 olmalı.');
+      }
+      patch.primaryPhoneSlot = n;
+    }
+  }
+
   if (data?.email !== undefined) patch.email = data.email || null;
   if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
 
@@ -988,6 +1116,45 @@ export async function updateAccount({ accountId, data, user }) {
           code: err.code ?? 'tckn_error',
         });
       }
+    }
+  }
+
+  // Phase 3 — primaryPhoneSlot finalize. Phone slot'larından herhangi
+  // biri değiştiyse veya primaryPhoneSlot explicit verildiyse: post-
+  // patch effective state'i hesapla; primary kuralları:
+  //   - explicit primary ve hedef slot boş → fallback to first non-empty
+  //   - null primary ve dolu slot var → first non-empty
+  //   - explicit primary geçerli → değiştirme
+  const touchesPhones =
+    Object.prototype.hasOwnProperty.call(patch, 'phoneE164') ||
+    Object.prototype.hasOwnProperty.call(patch, 'phone2E164') ||
+    Object.prototype.hasOwnProperty.call(patch, 'phone3E164') ||
+    Object.prototype.hasOwnProperty.call(patch, 'primaryPhoneSlot');
+  if (touchesPhones) {
+    const current = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: {
+        phoneE164: true,
+        phone2E164: true,
+        phone3E164: true,
+        primaryPhoneSlot: true,
+      },
+    });
+    const eff1 = Object.prototype.hasOwnProperty.call(patch, 'phoneE164') ? patch.phoneE164 : current?.phoneE164 ?? null;
+    const eff2 = Object.prototype.hasOwnProperty.call(patch, 'phone2E164') ? patch.phone2E164 : current?.phone2E164 ?? null;
+    const eff3 = Object.prototype.hasOwnProperty.call(patch, 'phone3E164') ? patch.phone3E164 : current?.phone3E164 ?? null;
+    const slots = [{ phoneE164: eff1 }, { phoneE164: eff2 }, { phoneE164: eff3 }];
+    const effPrimary = Object.prototype.hasOwnProperty.call(patch, 'primaryPhoneSlot')
+      ? patch.primaryPhoneSlot
+      : current?.primaryPhoneSlot ?? null;
+    if (effPrimary !== null && effPrimary !== undefined) {
+      const target = slots[effPrimary - 1];
+      if (!target || !target.phoneE164) {
+        // primary yapılan slot boşaldı → fallback
+        patch.primaryPhoneSlot = firstNonEmptyPhoneSlot(slots);
+      }
+    } else {
+      patch.primaryPhoneSlot = firstNonEmptyPhoneSlot(slots);
     }
   }
 
@@ -1322,6 +1489,57 @@ function normalizePhoneExtension(input) {
     throw new AccountValidationError('Dahili numara 1-10 karakter alfa-numerik olmalı.');
   }
   return trimmed;
+}
+
+// Phase 3 — 3 slot için tek-yer normalize. Slot 1 (phone/phoneE164/...
+// /phoneType/phoneExtension), 2 (phone2/...), 3 (phone3/...). Input
+// slot fields'ı: { phone, phoneType, phoneExtension }. Çıktı: yazılacak
+// kolonların map'i (boş ise null'a düşer; type/extension phone yoksa
+// kullanıcı vermediyse null'a normalize).
+function normalizePhoneSlotInput(slot) {
+  if (slot === undefined) return undefined;
+  if (slot === null) {
+    return { phoneRaw: null, phoneE164: null, phoneType: null, phoneExtension: null };
+  }
+  const rawIn = slot.phone;
+  const phoneRaw = typeof rawIn === 'string' && rawIn.trim() ? rawIn.trim() : null;
+  const phoneE164 = phoneRaw ? normalizePhoneE164(phoneRaw) : null;
+  // type & extension yalnız phone dolu iken anlamlı; phone null ise
+  // metadata da sıfırlanır.
+  let phoneType = null;
+  let phoneExtension = null;
+  if (phoneRaw) {
+    phoneType = normalizePhoneType(slot.phoneType) ?? null;
+    phoneExtension = normalizePhoneExtension(slot.phoneExtension) ?? null;
+  }
+  return { phoneRaw, phoneE164, phoneType, phoneExtension };
+}
+
+// Phase 3 — primaryPhoneSlot normalize.
+//  - undefined  → caller defaultlamaz, iz bırakma
+//  - null       → primaryPhoneSlot=null (UI ilk dolu slotu birincil kabul)
+//  - 1/2/3      → o slotun dolu olduğunu doğrula; aksi halde fail
+//  - başka      → fail
+function normalizePrimaryPhoneSlot(input, slots) {
+  if (input === undefined) return undefined;
+  if (input === null) return null;
+  const n = typeof input === 'string' ? Number.parseInt(input, 10) : input;
+  if (n !== 1 && n !== 2 && n !== 3) {
+    throw new AccountValidationError('Birincil telefon slot 1, 2 veya 3 olmalı.');
+  }
+  const target = slots[n - 1];
+  if (!target || !target.phoneE164) {
+    throw new AccountValidationError('Birincil olarak işaretlenen telefon slotu boş.');
+  }
+  return n;
+}
+
+// Boş olmayan ilk slotu döner (1/2/3). Hiçbiri yoksa null.
+function firstNonEmptyPhoneSlot(slots) {
+  for (let i = 0; i < slots.length; i++) {
+    if (slots[i]?.phoneE164) return i + 1;
+  }
+  return null;
 }
 
 async function loadEditableContact({ accountId, contactId, user }) {

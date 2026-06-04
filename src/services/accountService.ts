@@ -206,6 +206,17 @@ export interface AccountListItem {
   /** Phase 2 — telefon metadata (UI display'de "Cep · ... · Dahili"). */
   phoneType: string | null;
   phoneExtension: string | null;
+  /** Phase 3 — 3 telefon slot. Slot 2 ve 3 opsiyonel paralel kolonlar. */
+  phone2: string | null;
+  phone2E164: string | null;
+  phone2Type: string | null;
+  phone2Extension: string | null;
+  phone3: string | null;
+  phone3E164: string | null;
+  phone3Type: string | null;
+  phone3Extension: string | null;
+  /** 1 / 2 / 3 — null ise ilk dolu slot birincil sayılır. */
+  primaryPhoneSlot: number | null;
   email: string | null;
   isActive: boolean;
   /** WR-A1 / PM-01 — Müşteri tipi (default Corporate). */
@@ -293,6 +304,16 @@ export interface AccountDetail {
   /** Phase 2 — telefon metadata. */
   phoneType: string | null;
   phoneExtension: string | null;
+  /** Phase 3 — 3 telefon slot + birincil işaretçi. */
+  phone2: string | null;
+  phone2E164: string | null;
+  phone2Type: string | null;
+  phone2Extension: string | null;
+  phone3: string | null;
+  phone3E164: string | null;
+  phone3Type: string | null;
+  phone3Extension: string | null;
+  primaryPhoneSlot: number | null;
   email: string | null;
   isActive: boolean;
   createdAt: string;
@@ -340,6 +361,16 @@ export interface AccountCreateInput {
   phoneType?: string | null;
   /** Phase 2 phone metadata — dahili numara. */
   phoneExtension?: string | null;
+  /** Phase 3 — slot 2 (opsiyonel) */
+  phone2?: string | null;
+  phone2Type?: string | null;
+  phone2Extension?: string | null;
+  /** Phase 3 — slot 3 (opsiyonel) */
+  phone3?: string | null;
+  phone3Type?: string | null;
+  phone3Extension?: string | null;
+  /** Phase 3 — birincil slot (1/2/3). null verirse backend ilk dolu slotu ayarlar. */
+  primaryPhoneSlot?: number | null;
   email?: string | null;
   /** WR-A1 — default Corporate. */
   customerType?: CustomerType;
@@ -357,6 +388,16 @@ export interface AccountUpdateInput {
   /** Phase 2 phone metadata. */
   phoneType?: string | null;
   phoneExtension?: string | null;
+  /** Phase 3 — slot 2 */
+  phone2?: string | null;
+  phone2Type?: string | null;
+  phone2Extension?: string | null;
+  /** Phase 3 — slot 3 */
+  phone3?: string | null;
+  phone3Type?: string | null;
+  phone3Extension?: string | null;
+  /** Phase 3 — birincil slot. */
+  primaryPhoneSlot?: number | null;
   email?: string | null;
   isActive?: boolean;
   /** WR-A1. */
