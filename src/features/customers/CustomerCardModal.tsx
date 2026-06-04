@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Building2, ExternalLink, Inbox, Mail, Phone, Sparkles } from 'lucide-react';
+import { Building2, Copy, ExternalLink, Inbox, Mail, Phone, Sparkles } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { notify } from '@/components/ui/Toast';
 import { caseService } from '@/services/caseService';
 import { accountService, type AccountDetail } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
@@ -95,6 +96,7 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
                 VKN {account.vknMasked}
               </div>
             )}
+            {account?.id && <SystemCustomerIdLine id={account.id} />}
           </div>
 
           {account?.companies && account.companies.length > 0 && (
@@ -225,6 +227,37 @@ function SummaryTile({
       ) : (
         <div className="mt-0.5 text-xl font-semibold">{value}</div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Sistem Müşteri ID satırı — Account.id Varuna'nın global stabil
+ * müşteri kimliği. Kart modal kompakt olduğu için mono küçük + copy
+ * icon ile gösterilir, label "Sistem Müşteri ID".
+ */
+function SystemCustomerIdLine({ id }: { id: string }) {
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(id);
+      notify({ type: 'success', message: 'Müşteri ID kopyalandı.', duration: 2500 });
+    } catch {
+      // sessiz no-op
+    }
+  }
+  return (
+    <div className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+      <span className="text-slate-400 dark:text-ndark-dim">Sistem Müşteri ID</span>
+      <span className="max-w-[180px] truncate">{id}</span>
+      <button
+        type="button"
+        onClick={copy}
+        title="Sistem Müşteri ID'yi kopyala"
+        aria-label="Sistem Müşteri ID'yi kopyala"
+        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+      >
+        <Copy size={10} />
+      </button>
     </div>
   );
 }
