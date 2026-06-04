@@ -3,6 +3,7 @@ import { Trash2, UserRound } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextInput } from '@/components/ui/Field';
+import { PhoneInput } from '@/components/ui/PhoneInput';
 import { notify } from '@/components/ui/Toast';
 import {
   accountService,
@@ -191,11 +192,10 @@ export function AccountContactEditor({
               placeholder="iletisim@firma.com"
             />
           </Field>
-          <Field label="Telefon">
-            <TextInput
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+90 212 555 00 00"
+          <Field label="Telefon" hint="Türkiye dışı için ülke kodu seçin">
+            <PhoneInput
+              value={phone || null}
+              onChange={(e164) => setPhone(e164 ?? '')}
             />
           </Field>
         </div>
