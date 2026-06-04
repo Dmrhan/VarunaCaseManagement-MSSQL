@@ -440,6 +440,18 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       vkn: true,
       phone: true,
       phoneE164: true, // WR-A2
+      phoneType: true, // Phase 2 — Codex P2 fix (PR #371)
+      phoneExtension: true, // Phase 2
+      // Phase 3 — 3 phone slots + primaryPhoneSlot
+      phone2: true,
+      phone2E164: true,
+      phone2Type: true,
+      phone2Extension: true,
+      phone3: true,
+      phone3E164: true,
+      phone3Type: true,
+      phone3Extension: true,
+      primaryPhoneSlot: true,
       email: true,
       isActive: true,
       companyId: true,
