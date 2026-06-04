@@ -238,6 +238,63 @@ export function getCountryOptions(): CountryOption[] {
  * Arama filtresi — ülke adı, ISO-2 ve dial code üzerinden case-insensitive
  * substring match.
  */
+// ── Phase 2 phone metadata ──────────────────────────────────────────
+export const PHONE_TYPES = ['mobile', 'work', 'switchboard', 'whatsapp', 'other'] as const;
+export type PhoneType = (typeof PHONE_TYPES)[number];
+
+export const PHONE_TYPE_LABELS: Record<PhoneType, string> = {
+  mobile: 'Cep',
+  work: 'İş',
+  switchboard: 'Santral',
+  whatsapp: 'WhatsApp',
+  other: 'Diğer',
+};
+
+export function isValidPhoneType(input: string | null | undefined): input is PhoneType {
+  return typeof input === 'string' && (PHONE_TYPES as readonly string[]).includes(input);
+}
+
+/**
+ * Dahili numara validasyonu: 1-10 karakter alfa-numerik + dash.
+ */
+export function isValidPhoneExtension(input: string | null | undefined): boolean {
+  if (input == null) return true;
+  const s = String(input).trim();
+  if (s === '') return true;
+  return /^[A-Za-z0-9-]{1,10}$/.test(s);
+}
+
+/**
+ * Compact display: "Cep · +90 532 111 22 33 · Dahili 123 · Birincil"
+ * Sadece dolu parçalar gösterilir; boş input için "" döner.
+ */
+export function formatPhoneCompact(input: {
+  phone: string | null | undefined;
+  phoneType?: string | null;
+  phoneExtension?: string | null;
+  isPrimary?: boolean | null;
+  defaultCountry?: CountryIso2;
+}): string {
+  const parts: string[] = [];
+  if (input.phoneType && isValidPhoneType(input.phoneType)) {
+    parts.push(PHONE_TYPE_LABELS[input.phoneType]);
+  } else if (input.phoneType) {
+    parts.push(input.phoneType);
+  }
+  const phone = input.phone;
+  if (phone) {
+    const display = formatPhoneForDisplay(phone, input.defaultCountry ?? 'TR');
+    parts.push(display);
+  }
+  if (input.phoneExtension && input.phoneExtension.trim()) {
+    parts.push(`Dahili ${input.phoneExtension.trim()}`);
+  }
+  if (input.isPrimary) {
+    parts.push('Birincil');
+  }
+  return parts.join(' · ');
+}
+
 export function filterCountries(query: string, options?: CountryOption[]): CountryOption[] {
   const list = options ?? getCountryOptions();
   const q = query.trim().toLowerCase().replace(/^\+/, '');

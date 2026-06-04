@@ -4,6 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextInput } from '@/components/ui/Field';
 import { PhoneInput } from '@/components/ui/PhoneInput';
+import { PHONE_TYPES, PHONE_TYPE_LABELS } from '@/utils/phone';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
@@ -58,6 +59,9 @@ export function AccountFormModal({
   const [name, setName] = useState('');
   const [vkn, setVkn] = useState('');
   const [phone, setPhone] = useState('');
+  // Phase 2 phone metadata — Account tek slot.
+  const [phoneType, setPhoneType] = useState<string>('');
+  const [phoneExtension, setPhoneExtension] = useState<string>('');
   const [email, setEmail] = useState('');
   const [isActive, setIsActive] = useState(true);
   // WR-A1 — Müşteri tipi + (opsiyonel) kurumsal alanlar.
@@ -85,6 +89,8 @@ export function AccountFormModal({
       // vknMasked plaintext değil — edit'te boş başla, kullanıcı değiştirmek istemezse göndermez.
       setVkn('');
       setPhone(account.phone ?? '');
+      setPhoneType(account.phoneType ?? '');
+      setPhoneExtension(account.phoneExtension ?? '');
       setEmail(account.email ?? '');
       setIsActive(account.isActive);
       setCustomerType(account.customerType ?? 'Corporate');
@@ -94,6 +100,8 @@ export function AccountFormModal({
       setName('');
       setVkn('');
       setPhone('');
+      setPhoneType('');
+      setPhoneExtension('');
       setEmail('');
       setIsActive(true);
       setCustomerType('Corporate');
@@ -190,6 +198,9 @@ export function AccountFormModal({
         // WR-A1: Bireysel'de VKN gönderilmez; helper text TCKN A2'ye işaret ediyor.
         vkn: isIndividual ? null : vkn.trim() || null,
         phone: phone.trim() || null,
+        // Phase 2 phone metadata
+        phoneType: phone.trim() ? phoneType || null : null,
+        phoneExtension: phone.trim() ? phoneExtension.trim() || null : null,
         email: email.trim() || null,
         customerType,
         legalName: isIndividual ? null : legalName.trim() || null,
@@ -209,6 +220,12 @@ export function AccountFormModal({
       const body = {
         name: name.trim() !== account.name ? name.trim() : undefined,
         phone: phone.trim() !== (account.phone ?? '') ? phone.trim() || null : undefined,
+        phoneType:
+          phoneType !== (account.phoneType ?? '') ? (phone.trim() ? phoneType || null : null) : undefined,
+        phoneExtension:
+          phoneExtension.trim() !== (account.phoneExtension ?? '')
+            ? (phone.trim() ? phoneExtension.trim() || null : null)
+            : undefined,
         email: email.trim() !== (account.email ?? '') ? email.trim() || null : undefined,
         isActive: isActive !== account.isActive ? isActive : undefined,
         // VKN sadece kullanıcı dolu bıraktıysa gönderilir; boşsa mevcut kalır.
@@ -339,6 +356,31 @@ export function AccountFormModal({
             />
           </Field>
         </div>
+        {/* Phase 2 phone metadata — telefon varsa tip + dahili gösterilir. */}
+        {phone && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Telefon Tipi">
+              <Select value={phoneType} onChange={(e) => setPhoneType(e.target.value)}>
+                <option value="">— seçiniz —</option>
+                {PHONE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {PHONE_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Dahili" hint="Santral arkası (1-10 karakter, opsiyonel)">
+              <TextInput
+                value={phoneExtension}
+                onChange={(e) => setPhoneExtension(e.target.value)}
+                placeholder="örn. 123"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+        )}
 
         {/* WR-A1 — Kurumsal/Kamu/Vakıf-STK için opsiyonel ticari unvan + sicil no. */}
         {!isIndividual && (

@@ -4,6 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { notify } from '@/components/ui/Toast';
+import { formatPhoneCompact } from '@/utils/phone';
 import { caseService } from '@/services/caseService';
 import { accountService, type AccountDetail } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
@@ -122,7 +123,12 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-ndark-muted">
               {account?.phone && (
                 <span className="inline-flex items-center gap-1">
-                  <Phone size={11} /> {account.phone}
+                  <Phone size={11} />
+                  {formatPhoneCompact({
+                    phone: account.phone,
+                    phoneType: account.phoneType,
+                    phoneExtension: account.phoneExtension,
+                  })}
                 </span>
               )}
               {account?.email && (
