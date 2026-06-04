@@ -5,6 +5,7 @@ import {
   Building2,
   Calendar,
   Clock,
+  Copy,
   FolderKanban,
   Inbox,
   Mail,
@@ -16,6 +17,7 @@ import {
   Star,
   Users,
 } from 'lucide-react';
+import { notify } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
@@ -341,6 +343,16 @@ function DetailHeader({
   /** C3 — Account context'inden tam NewCaseForm açar. */
   onNewCase: () => void;
 }) {
+  // "Sistem Müşteri ID" — Account.id Varuna'nın global stabil müşteri
+  // kimliği; admin/destek ekipleri için copy-able bir metadata chip.
+  async function copySystemCustomerId() {
+    try {
+      await navigator.clipboard.writeText(account.id);
+      notify({ type: 'success', message: 'Müşteri ID kopyalandı.', duration: 2500 });
+    } catch {
+      // Clipboard reddedildiyse sessiz no-op.
+    }
+  }
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
@@ -360,6 +372,22 @@ function DetailHeader({
               VKN {account.vknMasked}
             </span>
           )}
+          <span
+            className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
+            title="Sistem Müşteri ID — Varuna global müşteri kimliği"
+          >
+            <span className="text-slate-400 dark:text-ndark-dim">ID</span>
+            <span className="max-w-[200px] truncate">{account.id}</span>
+            <button
+              type="button"
+              onClick={copySystemCustomerId}
+              title="Sistem Müşteri ID'yi kopyala"
+              aria-label="Sistem Müşteri ID'yi kopyala"
+              className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+            >
+              <Copy size={10} />
+            </button>
+          </span>
           {/* WR-A2 — TCKN maskeli display (yalnız Individual + tcknMasked dolu ise).
               Plain TCKN UI'a hiç gelmez; sadece "*******1234" maskeli string backend'den döner. */}
           {account.customerType === 'Individual' && account.tcknMasked && (
@@ -390,9 +418,34 @@ function DetailHeader({
 }
 
 function GeneralSection({ account }: { account: AccountDetail }) {
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(account.id);
+      notify({ type: 'success', message: 'Müşteri ID kopyalandı.', duration: 2500 });
+    } catch {
+      // sessiz no-op
+    }
+  }
   return (
     <SectionCard title="Genel Bilgiler">
       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex w-32 shrink-0 items-center gap-1 text-slate-500 dark:text-ndark-muted">
+            <Inbox size={12} /> Sistem Müşteri ID
+          </span>
+          <span className="inline-flex items-center gap-1 font-mono text-xs text-slate-700 dark:text-ndark-text">
+            <span className="break-all">{account.id}</span>
+            <button
+              type="button"
+              onClick={copyId}
+              title="Müşteri ID'yi kopyala"
+              aria-label="Müşteri ID'yi kopyala"
+              className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+            >
+              <Copy size={12} />
+            </button>
+          </span>
+        </div>
         <Row
           icon={<Building2 size={12} />}
           label="Müşteri Tipi"

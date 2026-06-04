@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
+  Copy,
   Mail,
   Pencil,
   Phone,
@@ -10,6 +11,7 @@ import {
   Search,
   Users,
 } from 'lucide-react';
+import { notify } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
@@ -346,6 +348,7 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
                   <div className="font-medium text-slate-900 dark:text-ndark-text">
                     {row.name}
                   </div>
+                  <AccountIdInline id={row.id} />
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-ndark-text">
                   {row.vknMasked ?? <span className="text-slate-400 dark:text-ndark-dim">—</span>}
@@ -415,6 +418,7 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
                     VKN {row.vknMasked}
                   </div>
                 )}
+                <AccountIdInline id={row.id} />
               </div>
               <Badge tint={row.isActive ? 'emerald' : 'slate'}>
                 {row.isActive ? 'Aktif' : 'Pasif'}
@@ -442,6 +446,40 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Account.id inline display — Account.id Varuna'nın global müşteri
+ * kimliğidir; UI'da müşteri sistem ID'si olarak surface'lenir. Kopyala
+ * aksiyonu ile destek/operasyon ekipleri ID'yi clipboard'a alabilir.
+ * Tek satır mono small slate-tone; row click'i tetiklemesin diye
+ * stopPropagation uygulanır.
+ */
+function AccountIdInline({ id }: { id: string }) {
+  async function handleCopy(e: React.MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(id);
+      notify({ type: 'success', message: 'Müşteri ID kopyalandı.', duration: 2500 });
+    } catch {
+      // Clipboard erişimi reddedildiyse sessiz no-op; konsola da yazılmaz.
+    }
+  }
+  return (
+    <div className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+      <span className="text-slate-400 dark:text-ndark-dim">ID:</span>
+      <span className="truncate">{id}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title="Müşteri ID'sini kopyala"
+        aria-label="Müşteri ID'sini kopyala"
+        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+      >
+        <Copy size={10} />
+      </button>
     </div>
   );
 }
