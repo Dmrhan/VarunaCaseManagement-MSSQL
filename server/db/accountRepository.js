@@ -1155,6 +1155,16 @@ export async function updateAccount({ accountId, data, user }) {
     const eff1 = Object.prototype.hasOwnProperty.call(patch, 'phoneE164') ? patch.phoneE164 : current?.phoneE164 ?? null;
     const eff2 = Object.prototype.hasOwnProperty.call(patch, 'phone2E164') ? patch.phone2E164 : current?.phone2E164 ?? null;
     const eff3 = Object.prototype.hasOwnProperty.call(patch, 'phone3E164') ? patch.phone3E164 : current?.phone3E164 ?? null;
+    // Codex P2 — effective cross-slot duplicate check. Tek slot PATCH'inde
+    // diğer slot'lar body'de undefined olduğu için yukarıdaki erken check
+    // bunları kaçırır; burada DB'den okunan mevcut değerlerle birleşik
+    // sample yapılır.
+    {
+      const effSample = [eff1, eff2, eff3].filter((v) => typeof v === 'string' && v);
+      if (effSample.length > 0 && new Set(effSample).size !== effSample.length) {
+        throw new AccountValidationError('Aynı telefon numarası birden fazla slotta yer alıyor.');
+      }
+    }
     const slots = [{ phoneE164: eff1 }, { phoneE164: eff2 }, { phoneE164: eff3 }];
     const effPrimary = Object.prototype.hasOwnProperty.call(patch, 'primaryPhoneSlot')
       ? patch.primaryPhoneSlot
