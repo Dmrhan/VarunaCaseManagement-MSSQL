@@ -301,11 +301,17 @@ export function AccountFormModal({
               ? null
               : registrationNo.trim() || null
             : undefined,
-        taxOffice:
-          taxOffice.trim() !== (account.taxOffice ?? '')
-            ? isIndividual
-              ? null
-              : taxOffice.trim() || null
+        // Codex P2 — Corporate→Individual geçişinde Vergi Dairesi state'i
+        // input gizli olduğundan değişmeyebilir; equality check undefined
+        // döndürüp Individual'a geçişte stale taxOffice DB'de kalır.
+        // isIndividual branch'i öncelikli: kurumsal alan tipinden bağımsız
+        // null gönderilir (mevcut dolu ise temizlenir).
+        taxOffice: isIndividual
+          ? account.taxOffice
+            ? null
+            : undefined
+          : taxOffice.trim() !== (account.taxOffice ?? '')
+            ? taxOffice.trim() || null
             : undefined,
         // WR-A2 — TCKN edit: yalnızca Individual + dolu input gönderilir.
         // Boş gönderme = "değişme" (clear için ayrıca null gönderme).

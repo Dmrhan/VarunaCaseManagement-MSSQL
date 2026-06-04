@@ -302,6 +302,21 @@ async function writeAccount(row, normalized) {
     if (normalized.primaryPhoneSlot !== undefined && normalized.primaryPhoneSlot !== null) {
       patch.primaryPhoneSlot = normalized.primaryPhoneSlot;
     }
+    // Codex P2 (commit-time defense in depth) — effective state cross-slot
+    // duplicate. Patch'te değişen slot ile existing slotlar birleştirilir;
+    // duplicate olursa commit fail (atomic). Dry-run zaten yakalar; bu
+    // savunma katmanı doğrudan API tüketicilerini de korur.
+    {
+      const eff1 = Object.prototype.hasOwnProperty.call(patch, 'phoneE164') ? patch.phoneE164 : existing.phoneE164 ?? null;
+      const eff2 = Object.prototype.hasOwnProperty.call(patch, 'phone2E164') ? patch.phone2E164 : existing.phone2E164 ?? null;
+      const eff3 = Object.prototype.hasOwnProperty.call(patch, 'phone3E164') ? patch.phone3E164 : existing.phone3E164 ?? null;
+      const filled = [eff1, eff2, eff3].filter((v) => typeof v === 'string' && v);
+      if (filled.length > 0 && new Set(filled).size !== filled.length) {
+        const err = new Error('Bu telefon numarası mevcut müşteride başka bir slotta zaten kayıtlı.');
+        err.code = 'duplicate_phone_across_slots';
+        throw err;
+      }
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.account.update({
           where: { id: existing.id },

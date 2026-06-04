@@ -234,7 +234,15 @@ export function normalizeEntityRow(entityKey, rawRow, mapping) {
     }
     if (r.normalized !== null) {
       normalized[f.key] = r.normalized;
-      if (r.extra?.rawPhone) normalized._rawPhone = r.extra.rawPhone;
+      // Slot-spesifik raw phone display. Phase 3 — Account 3 telefon
+      // slot. Eskiden tüm phone field'ları _rawPhone'a yazıyordu;
+      // slot 2/3 slot 1'i ezerdi. Field key'ine göre ayır.
+      if (r.extra?.rawPhone) {
+        if (f.key === 'phone') normalized._rawPhone = r.extra.rawPhone;
+        else if (f.key === 'phone2') normalized._rawPhone2 = r.extra.rawPhone;
+        else if (f.key === 'phone3') normalized._rawPhone3 = r.extra.rawPhone;
+        else normalized._rawPhone = r.extra.rawPhone; // legacy (Contact/Address yokken)
+      }
     }
     if (r.warning) warnings.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.warning });
   }
