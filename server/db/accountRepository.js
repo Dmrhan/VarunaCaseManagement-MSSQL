@@ -10,6 +10,7 @@ import {
   tcknPepperAvailable,
 } from '../utils/accountValidation.js';
 import { generateUniqueAccountId } from '../utils/accountId.js';
+import { generateTurkishSearchVariants } from '../utils/turkishSearch.js';
 
 /**
  * Phase A — Account 360 repository.
@@ -263,9 +264,17 @@ export async function listAccounts({
       tcknHashBranch = { tcknHash: hash };
     }
 
+    // Turkish-aware: Postgres ILIKE "İ" (U+0130) → "i" + combining dot
+    // çıkartıyor; plain ASCII "i" eşleşmiyor. Free-text alanlarda (name,
+    // contact email) tüm TR varyantlarını OR ile dene. Telefon/VKN/
+    // externalCustomerCode sayısal/kod olduğu için orijinal q ile gider.
+    const nameVariants = generateTurkishSearchVariants(q);
+    const nameOR = nameVariants.map((v) => ({ name: { contains: v, mode: 'insensitive' } }));
+    const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v, mode: 'insensitive' } }));
+
     whereAnd.push({
       OR: [
-        { name: { contains: q, mode: 'insensitive' } },
+        ...nameOR,
         { vkn: { startsWith: q } },
         ...(tcknHashBranch ? [tcknHashBranch] : []),
         // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
@@ -286,7 +295,7 @@ export async function listAccounts({
             some: {
               OR: [
                 { phone: { contains: q, mode: 'insensitive' } },
-                { email: { contains: q, mode: 'insensitive' } },
+                ...contactEmailOR,
               ],
             },
           },
