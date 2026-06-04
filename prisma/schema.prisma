@@ -459,6 +459,13 @@ model Account {
   /// WR-A2 — E.164 normalize (örn. "+905325551234"). Search/index için.
   /// **DB unique constraint YOK** — paylaşılan call center numarası iki Account'ta görünebilir.
   phoneE164      String?
+  /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
+  /// 'switchboard' | 'whatsapp' | 'other'. Storage'daki canonical değer
+  /// E.164 phoneE164 alanı; phoneType yalnız operasyonel sinyal.
+  phoneType      String?
+  /// Phase 2 phone metadata — dahili numara (santral arkası). E.164
+  /// phoneE164'a APPEND edilmez; ayrı kolonda tutulur. 1-10 char.
+  phoneExtension String?
   isActive       Boolean      @default(true)
   /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
   customerType   CustomerType @default(Corporate)
@@ -621,6 +628,15 @@ model AccountContact {
   phone            String?
   /// WR-A2 — E.164 normalize. Account.phoneE164 ile aynı kural; DB unique yok.
   phoneE164        String?
+  /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
+  /// 'switchboard' | 'whatsapp' | 'other'.
+  phoneType        String?
+  /// Phase 2 phone metadata — dahili numara. phoneE164'a append edilmez.
+  phoneExtension   String?
+  /// Account içinde "birincil iletişim" işaretçisi. Bu PR'da telefon
+  /// "Birincil Telefon" semantiği de buraya yığılır — başka contact
+  /// "isPrimary=true" yapıldığında commit engine bu alanı otomatik
+  /// demote eder (server/lib/import/customer360CommitEngine.js).
   isPrimary        Boolean  @default(false)
   isActive         Boolean  @default(true)
   /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.

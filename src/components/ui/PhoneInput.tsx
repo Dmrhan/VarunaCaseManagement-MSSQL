@@ -76,13 +76,17 @@ export function PhoneInput({
     return value;
   });
 
-  // Eğer dışarıdan value tamamen değişirse (form reset / re-fetch),
-  // local state'i tazele. value === null && national !== "" durumunda
-  // "kullanıcı silmiş olabilir" — re-init.
-  const lastValueRef = useRef(value);
+  // Codex P2 fix — Sadece DIŞARIDAN (form reset / yeniden fetch / başka
+  // bir form alanından replace) gelen değişiklikte local state'i
+  // tazele. Bizim emit ettiğimiz değer prop'a geri yansırsa (geçersiz
+  // ara değer → onChange(null) → parent re-render → value=null) re-init
+  // çalışmamalı; yoksa kullanıcının yazdığı kısmi numara sıfırlanır.
+  // `lastEmittedRef` son emit edilen E.164'i tutar; gelen prop bununla
+  // eşleşiyorsa change bizden geldi, geçilir.
+  const lastEmittedRef = useRef<string | null>(value);
   useEffect(() => {
-    if (lastValueRef.current === value) return;
-    lastValueRef.current = value;
+    if (lastEmittedRef.current === value) return;
+    lastEmittedRef.current = value;
     const next = parsePhoneParts(value, defaultCountry);
     setCountry(next.country ?? defaultCountry);
     if (!value) {
@@ -135,6 +139,10 @@ export function PhoneInput({
     // international numara (örn. "+49 30 12 34 56 7") yapıştırırsa
     // parse onu da yakalar.
     const parsed = parsePhoneParts(rawNational, nextCountry);
+    // Codex P2 fix — ne emit ettiğimizi hatırla ki parent prop=null'a
+    // dönerse useEffect'i bizim emit'imizden gelen değişiklik olarak
+    // tanısın ve local state'i sıfırlamasın.
+    lastEmittedRef.current = parsed.e164;
     onChange(parsed.e164);
   }
 
