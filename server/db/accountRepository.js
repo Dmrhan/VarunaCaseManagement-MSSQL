@@ -170,6 +170,7 @@ function shapeAccountRow(account, { caseAggregates }) {
     customerType: account.customerType,
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
+    taxOffice: account.taxOffice ?? null,
     // WR-A2 — TCKN: sadece maskeli display ("*******1234"). Plain TCKN ve tcknHash
     // ASLA response'ta yer almaz.
     tcknMasked: maskTcknLast4(account.tcknLast4),
@@ -353,6 +354,7 @@ export async function listAccounts({
         customerType: true,
         legalName: true,
         registrationNo: true,
+        taxOffice: true,
         // WR-A2 — tcknHash select edilmez (privacy); sadece tcknLast4 (mask için).
         tcknLast4: true,
         companies: {
@@ -460,6 +462,7 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
       customerType: true,
       legalName: true,
       registrationNo: true,
+      taxOffice: true,
       // WR-A2 — tcknHash select edilmez; sadece tcknLast4 (mask için).
       tcknLast4: true,
       companies: {
@@ -653,6 +656,7 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     tcknMasked: maskTcknLast4(account.tcknLast4),
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
+    taxOffice: account.taxOffice ?? null,
     companies: visibleCompanies.map((c) => ({
       // Phase C1: PATCH/DELETE endpoint'leri için stable AccountCompany.id.
       accountCompanyId: c.id,
@@ -844,6 +848,9 @@ export async function createAccount({ data, user }) {
     typeof data?.registrationNo === 'string' && data.registrationNo.trim()
       ? data.registrationNo.trim()
       : null;
+  // Vergi Dairesi — descriptive metadata, opsiyonel.
+  const taxOffice =
+    typeof data?.taxOffice === 'string' && data.taxOffice.trim() ? data.taxOffice.trim() : null;
 
   // WR-A2 — Phone E.164 normalize (display + e164 ayrı saklanır).
   const phoneRaw = typeof data?.phone === 'string' && data.phone.trim() ? data.phone.trim() : null;
@@ -940,6 +947,7 @@ export async function createAccount({ data, user }) {
         customerType,
         legalName,
         registrationNo,
+        taxOffice,
         tcknHash,
         tcknLast4,
         // Legacy: ilk company'i companyId'ye yaz — mevcut Case scope sorguları çalışsın.
@@ -1099,6 +1107,10 @@ export async function updateAccount({ accountId, data, user }) {
       typeof data.registrationNo === 'string' && data.registrationNo.trim()
         ? data.registrationNo.trim()
         : null;
+  }
+  if (data?.taxOffice !== undefined) {
+    patch.taxOffice =
+      typeof data.taxOffice === 'string' && data.taxOffice.trim() ? data.taxOffice.trim() : null;
   }
 
   // WR-A2 — TCKN update: yalnızca Individual customerType. Plain TCKN saklanmaz.

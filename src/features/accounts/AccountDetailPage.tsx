@@ -368,6 +368,12 @@ function DetailHeader({
           <Badge tint={account.customerType === 'Individual' ? 'sky' : 'indigo'}>
             {CUSTOMER_TYPE_LABELS[account.customerType] ?? account.customerType}
           </Badge>
+          {/* Vergi Dairesi VKN'den önce — yalnız kurumsal/dolu iken. */}
+          {account.customerType !== 'Individual' && account.taxOffice && (
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
+              Vergi Dairesi: <span className="font-medium">{account.taxOffice}</span>
+            </span>
+          )}
           {account.vknMasked && (
             <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted">
               VKN {account.vknMasked}
@@ -452,7 +458,10 @@ function GeneralSection({ account }: { account: AccountDetail }) {
           label="Müşteri Tipi"
           value={CUSTOMER_TYPE_LABELS[account.customerType] ?? account.customerType}
         />
-        {/* WR-A1 — Kurumsal alanlar dolu ise göster. */}
+        {/* WR-A1 — Kurumsal alanlar dolu ise göster. Vergi Dairesi VKN'den önce. */}
+        {account.customerType !== 'Individual' && account.taxOffice && (
+          <Row icon={<Building2 size={12} />} label="Vergi Dairesi" value={account.taxOffice} />
+        )}
         {account.legalName && (
           <Row icon={<Building2 size={12} />} label="Ticari Unvan" value={account.legalName} />
         )}

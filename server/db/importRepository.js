@@ -60,6 +60,7 @@ function snapshotAccount(account, accountCompany = null, accountCompanyCreated =
     email: account.email ?? null,
     customerType: account.customerType,
     legalName: account.legalName ?? null,
+    taxOffice: account.taxOffice ?? null,
     registrationNo: account.registrationNo ?? null,
     isActive: account.isActive,
     accountCompany: accountCompany
@@ -152,6 +153,7 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
           customerType: true,
           legalName: true,
           registrationNo: true,
+          taxOffice: true,
           isActive: true,
         },
       })
@@ -193,7 +195,7 @@ export async function dryRunAccountImport({ companyId, mapping, rows }) {
         where: { id: { in: codeMatchedAccountIds } },
         select: {
           id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
-          customerType: true, legalName: true, registrationNo: true, isActive: true,
+          customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
           tcknHash: true,
         },
       })
@@ -334,7 +336,7 @@ function computeFieldDiff(existingAccount, existingAc, normalized) {
     'phone2', 'phone2Type', 'phone2Extension',
     'phone3', 'phone3Type', 'phone3Extension',
     'primaryPhoneSlot',
-    'email', 'customerType', 'legalName', 'registrationNo', 'isActive',
+    'email', 'customerType', 'legalName', 'registrationNo', 'taxOffice', 'isActive',
   ];
   const out = { account: {}, accountCompany: {} };
   for (const k of accountKeys) {
@@ -663,6 +665,7 @@ async function createFromRow({ companyId, normalized }) {
       customerType: normalized.customerType ?? 'Corporate',
       legalName: normalized.legalName ?? null,
       registrationNo: normalized.registrationNo ?? null,
+      taxOffice: normalized.taxOffice ?? null,
       isActive: normalized.isActive ?? true,
       companyId, // legacy bağ — scope sorguları
       companies: {
@@ -696,6 +699,7 @@ async function createFromRow({ companyId, normalized }) {
       customerType: true,
       legalName: true,
       registrationNo: true,
+      taxOffice: true,
       isActive: true,
       companies: {
         where: { companyId },
@@ -720,7 +724,7 @@ async function updateFromRow({ companyId, normalized }) {
   // the existing Account through the same path.
   const accountSelect = {
     id: true, name: true, vkn: true, phone: true, phoneE164: true, email: true,
-    customerType: true, legalName: true, registrationNo: true, isActive: true,
+    customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
   };
   let existing = null;
   if (normalized?.vkn) {
@@ -774,6 +778,7 @@ async function updateFromRow({ companyId, normalized }) {
   if (normalized.customerType !== undefined && normalized.customerType !== null) patch.customerType = normalized.customerType;
   if (normalized.legalName !== undefined && normalized.legalName !== null) patch.legalName = normalized.legalName;
   if (normalized.registrationNo !== undefined && normalized.registrationNo !== null) patch.registrationNo = normalized.registrationNo;
+  if (normalized.taxOffice !== undefined && normalized.taxOffice !== null) patch.taxOffice = normalized.taxOffice;
   if (normalized.isActive !== undefined && normalized.isActive !== null) patch.isActive = normalized.isActive;
   if (normalized.phone !== undefined && normalized.phone !== null) {
     patch.phone = normalized._rawPhone ?? normalized.phone;
@@ -826,6 +831,7 @@ async function updateFromRow({ companyId, normalized }) {
       customerType: true,
       legalName: true,
       registrationNo: true,
+      taxOffice: true,
       isActive: true,
     },
   });

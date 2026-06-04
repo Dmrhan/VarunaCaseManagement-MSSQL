@@ -489,6 +489,10 @@ model Account {
   legalName        String?
   /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
   registrationNo   String?
+  /// Vergi Dairesi — kurumsal müşteri ana kartında VKN'den önce gösterilir.
+  /// Bireysel müşterilerde tipik olarak NULL. Yalnız descriptive metadata;
+  /// matching/import key DEĞİL, search index'i yok.
+  taxOffice        String?
   /// WR-A2 / Decision Sprint #1 — TCKN HMAC-SHA256(plain, TCKN_HASH_PEPPER), 64-char hex.
   /// **Plain TCKN ASLA saklanmaz.** Global unique → duplicate Bireysel müşteri önleme.
   /// Pepper env yoksa write path 400 fail; read path (search) sessizce skip.

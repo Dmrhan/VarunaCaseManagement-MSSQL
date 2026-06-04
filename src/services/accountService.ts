@@ -223,6 +223,8 @@ export interface AccountListItem {
   customerType: CustomerType;
   legalName: string | null;
   registrationNo: string | null;
+  /** Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir. */
+  taxOffice: string | null;
   /** WR-A2 — TCKN maskeli display ("*******1234"); plain TCKN ASLA API'da yok. */
   tcknMasked: string | null;
   companies: AccountCompanyChip[];
@@ -323,6 +325,8 @@ export interface AccountDetail {
   customerType: CustomerType;
   legalName: string | null;
   registrationNo: string | null;
+  /** Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir. */
+  taxOffice: string | null;
   companies: AccountCompanyDetail[];
   contacts: AccountContact[];
   /** WR-A3 / PM-02 — country-agnostic address list. Tenant-scope filtered. */
@@ -376,6 +380,8 @@ export interface AccountCreateInput {
   customerType?: CustomerType;
   legalName?: string | null;
   registrationNo?: string | null;
+  /** Vergi Dairesi (opsiyonel, kurumsal). */
+  taxOffice?: string | null;
   /** WR-A2 — Plain TCKN. **Yalnız submit transient**; cache/storage'da tutulmaz, response'ta dönmez. */
   tckn?: string | null;
   companies: AccountCompanyCreateInput[];
@@ -404,6 +410,8 @@ export interface AccountUpdateInput {
   customerType?: CustomerType;
   legalName?: string | null;
   registrationNo?: string | null;
+  /** Vergi Dairesi (opsiyonel, kurumsal). */
+  taxOffice?: string | null;
   /** WR-A2 — Plain TCKN (submit transient only). null/'' → TCKN clear. */
   tckn?: string | null;
 }

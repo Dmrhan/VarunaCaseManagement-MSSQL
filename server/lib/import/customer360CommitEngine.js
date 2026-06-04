@@ -199,7 +199,9 @@ function snapshotAccount(a) {
     phone3Type: a.phone3Type ?? null, phone3Extension: a.phone3Extension ?? null,
     primaryPhoneSlot: a.primaryPhoneSlot ?? null,
     email: a.email ?? null, customerType: a.customerType,
-    legalName: a.legalName ?? null, registrationNo: a.registrationNo ?? null, isActive: a.isActive,
+    legalName: a.legalName ?? null, registrationNo: a.registrationNo ?? null,
+    taxOffice: a.taxOffice ?? null,
+    isActive: a.isActive,
   };
 }
 function snapshotAccountCompany(ac) {
@@ -257,7 +259,7 @@ async function writeAccount(row, normalized) {
     phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
     phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
     primaryPhoneSlot: true,
-    email: true, customerType: true, legalName: true, registrationNo: true, isActive: true,
+    email: true, customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
   };
   let existing = null;
   if (normalized.vkn) {
@@ -274,6 +276,7 @@ async function writeAccount(row, normalized) {
     if (normalized.customerType !== undefined && normalized.customerType !== null) patch.customerType = normalized.customerType;
     if (normalized.legalName !== undefined && normalized.legalName !== null) patch.legalName = normalized.legalName;
     if (normalized.registrationNo !== undefined && normalized.registrationNo !== null) patch.registrationNo = normalized.registrationNo;
+    if (normalized.taxOffice !== undefined && normalized.taxOffice !== null) patch.taxOffice = normalized.taxOffice;
     if (normalized.isActive !== undefined && normalized.isActive !== null) patch.isActive = normalized.isActive;
     if (normalized.phone !== undefined && normalized.phone !== null) {
       patch.phone = normalized._rawPhone ?? normalized.phone;
@@ -340,6 +343,7 @@ async function writeAccount(row, normalized) {
       customerType: normalized.customerType ?? 'Corporate',
       legalName: normalized.legalName ?? null,
       registrationNo: normalized.registrationNo ?? null,
+      taxOffice: normalized.taxOffice ?? null,
       isActive: normalized.isActive ?? true,
     },
     select: accountSelect,
@@ -969,7 +973,7 @@ export async function rollbackCustomer360({ jobId, user }) {
             const before = r.beforeJson;
             const restore = {};
             for (const k of [
-              'name', 'phone', 'phoneE164', 'email', 'customerType', 'legalName', 'registrationNo', 'isActive',
+              'name', 'phone', 'phoneE164', 'email', 'customerType', 'legalName', 'registrationNo', 'taxOffice', 'isActive',
               // Phase 2 + Phase 3 — slot 1 metadata + slot 2/3 + primary
               'phoneType', 'phoneExtension',
               'phone2', 'phone2E164', 'phone2Type', 'phone2Extension',
