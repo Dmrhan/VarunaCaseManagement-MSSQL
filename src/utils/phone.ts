@@ -295,6 +295,59 @@ export function formatPhoneCompact(input: {
   return parts.join(' · ');
 }
 
+/**
+ * Phase 3 — Account 3 telefon slot'unun compact listesini döner.
+ * primaryPhoneSlot null ise ilk dolu slot birincil sayılır.
+ * Boş slot'lar atlanır. Birincil slot başa konur ve "Birincil" prefix
+ * ile gösterilir.
+ */
+export interface AccountPhoneSlotsInput {
+  phone: string | null;
+  phoneType?: string | null;
+  phoneExtension?: string | null;
+  phone2: string | null;
+  phone2Type?: string | null;
+  phone2Extension?: string | null;
+  phone3: string | null;
+  phone3Type?: string | null;
+  phone3Extension?: string | null;
+  primaryPhoneSlot?: number | null;
+  defaultCountry?: CountryIso2;
+}
+
+export interface AccountPhoneDisplay {
+  slot: number;
+  isPrimary: boolean;
+  text: string;
+}
+
+export function listAccountPhones(input: AccountPhoneSlotsInput): AccountPhoneDisplay[] {
+  const slots = [
+    { slot: 1, phone: input.phone, phoneType: input.phoneType, phoneExtension: input.phoneExtension },
+    { slot: 2, phone: input.phone2, phoneType: input.phone2Type, phoneExtension: input.phone2Extension },
+    { slot: 3, phone: input.phone3, phoneType: input.phone3Type, phoneExtension: input.phone3Extension },
+  ].filter((s) => !!s.phone);
+  if (slots.length === 0) return [];
+  // Birincil belirle: explicit veya ilk slot.
+  let primarySlot = input.primaryPhoneSlot;
+  if (!primarySlot || !slots.find((s) => s.slot === primarySlot)) {
+    primarySlot = slots[0].slot;
+  }
+  // Birincili başa al.
+  slots.sort((a, b) => (a.slot === primarySlot ? -1 : b.slot === primarySlot ? 1 : a.slot - b.slot));
+  return slots.map((s) => ({
+    slot: s.slot,
+    isPrimary: s.slot === primarySlot,
+    text: formatPhoneCompact({
+      phone: s.phone,
+      phoneType: s.phoneType,
+      phoneExtension: s.phoneExtension,
+      isPrimary: s.slot === primarySlot,
+      defaultCountry: input.defaultCountry,
+    }),
+  }));
+}
+
 export function filterCountries(query: string, options?: CountryOption[]): CountryOption[] {
   const list = options ?? getCountryOptions();
   const q = query.trim().toLowerCase().replace(/^\+/, '');

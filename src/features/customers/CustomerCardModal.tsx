@@ -4,7 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { notify } from '@/components/ui/Toast';
-import { formatPhoneCompact } from '@/utils/phone';
+import { listAccountPhones } from '@/utils/phone';
 import { caseService } from '@/services/caseService';
 import { accountService, type AccountDetail } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
@@ -119,25 +119,39 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
             </div>
           )}
 
-          {(account?.phone || account?.email) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-ndark-muted">
-              {account?.phone && (
-                <span className="inline-flex items-center gap-1">
-                  <Phone size={11} />
-                  {formatPhoneCompact({
-                    phone: account.phone,
-                    phoneType: account.phoneType,
-                    phoneExtension: account.phoneExtension,
-                  })}
-                </span>
-              )}
-              {account?.email && (
-                <span className="inline-flex items-center gap-1 truncate">
-                  <Mail size={11} /> <span className="truncate">{account.email}</span>
-                </span>
-              )}
-            </div>
-          )}
+          {(() => {
+            // Phase 3 — Account 3 telefon slot. Birincil ilk, kalanlar arkasında.
+            const phones = account
+              ? listAccountPhones({
+                  phone: account.phone,
+                  phoneType: account.phoneType,
+                  phoneExtension: account.phoneExtension,
+                  phone2: account.phone2,
+                  phone2Type: account.phone2Type,
+                  phone2Extension: account.phone2Extension,
+                  phone3: account.phone3,
+                  phone3Type: account.phone3Type,
+                  phone3Extension: account.phone3Extension,
+                  primaryPhoneSlot: account.primaryPhoneSlot,
+                })
+              : [];
+            if (phones.length === 0 && !account?.email) return null;
+            return (
+              <div className="flex flex-col gap-1 text-xs text-slate-600 dark:text-ndark-muted">
+                {phones.map((p) => (
+                  <span key={p.slot} className="inline-flex items-center gap-1">
+                    <Phone size={11} />
+                    {p.text}
+                  </span>
+                ))}
+                {account?.email && (
+                  <span className="inline-flex items-center gap-1 truncate">
+                    <Mail size={11} /> <span className="truncate">{account.email}</span>
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-3 gap-2">
             <SummaryTile label="Toplam Vaka" value={cases.length} loading={loading} />
