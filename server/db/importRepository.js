@@ -1008,14 +1008,21 @@ export async function rollbackImportJob({ jobId, user, expectedTargetType = null
       } else if (r.status === 'updated') {
         const before = r.beforeJson ?? {};
         const restore = {};
-        if (before.name !== undefined) restore.name = before.name;
-        if (before.email !== undefined) restore.email = before.email;
-        if (before.phone !== undefined) restore.phone = before.phone;
-        if (before.phoneE164 !== undefined) restore.phoneE164 = before.phoneE164;
-        if (before.customerType !== undefined) restore.customerType = before.customerType;
-        if (before.legalName !== undefined) restore.legalName = before.legalName;
-        if (before.registrationNo !== undefined) restore.registrationNo = before.registrationNo;
-        if (before.isActive !== undefined) restore.isActive = before.isActive;
+        // Codex P2 — Phase 1 rollback eski phone slot metadata + slot 2/3
+        // + primaryPhoneSlot + taxOffice alanlarını restore etmiyordu;
+        // import bunları yazdığı için rollback de yansıtmalı.
+        const restoreKeys = [
+          'name', 'email',
+          'phone', 'phoneE164', 'phoneType', 'phoneExtension',
+          'phone2', 'phone2E164', 'phone2Type', 'phone2Extension',
+          'phone3', 'phone3E164', 'phone3Type', 'phone3Extension',
+          'primaryPhoneSlot',
+          'customerType', 'legalName', 'registrationNo', 'taxOffice',
+          'isActive',
+        ];
+        for (const k of restoreKeys) {
+          if (before[k] !== undefined) restore[k] = before[k];
+        }
         // VKN'yi rollback ETMİYORUZ — import VKN değiştirmemeli, match key buydu.
         await prisma.account.update({
           where: { id: r.accountId },
