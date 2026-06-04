@@ -72,6 +72,8 @@ export function AccountFormModal({
   const [customerType, setCustomerType] = useState<CustomerType>('Corporate');
   const [legalName, setLegalName] = useState('');
   const [registrationNo, setRegistrationNo] = useState('');
+  // Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir.
+  const [taxOffice, setTaxOffice] = useState('');
   // WR-A2 — TCKN: yalnız submit transient. Sadece state'te tutulur; submit
   // sonrası temizlenir. localStorage / sessionStorage / cache'e YAZILMAZ.
   const [tckn, setTckn] = useState('');
@@ -117,6 +119,7 @@ export function AccountFormModal({
       setCustomerType(account.customerType ?? 'Corporate');
       setLegalName(account.legalName ?? '');
       setRegistrationNo(account.registrationNo ?? '');
+      setTaxOffice(account.taxOffice ?? '');
     } else {
       setName('');
       setVkn('');
@@ -128,6 +131,7 @@ export function AccountFormModal({
       setCustomerType('Corporate');
       setLegalName('');
       setRegistrationNo('');
+      setTaxOffice('');
       const defaultCompanyId = companies.length === 1 ? companies[0].id : '';
       setRows([{ ...emptyCompanyRow(), companyId: defaultCompanyId }]);
     }
@@ -252,6 +256,7 @@ export function AccountFormModal({
         customerType,
         legalName: isIndividual ? null : legalName.trim() || null,
         registrationNo: isIndividual ? null : registrationNo.trim() || null,
+        taxOffice: isIndividual ? null : taxOffice.trim() || null,
         // WR-A2 — Plain TCKN sadece submit transient; backend hash + last4'e çevirir.
         tckn: isIndividual && tckn.trim() ? tckn.trim() : undefined,
         companies: rows.map<AccountCompanyCreateInput>((r) => ({
@@ -295,6 +300,12 @@ export function AccountFormModal({
             ? isIndividual
               ? null
               : registrationNo.trim() || null
+            : undefined,
+        taxOffice:
+          taxOffice.trim() !== (account.taxOffice ?? '')
+            ? isIndividual
+              ? null
+              : taxOffice.trim() || null
             : undefined,
         // WR-A2 — TCKN edit: yalnızca Individual + dolu input gönderilir.
         // Boş gönderme = "değişme" (clear için ayrıca null gönderme).
@@ -380,6 +391,18 @@ export function AccountFormModal({
         </Field>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Vergi Dairesi — yalnız kurumsal/kamu/vakıf-stk; VKN'den önce. */}
+          {!isIndividual && (
+            <Field label="Vergi Dairesi" hint="Fatura ve sözleşmelerde görünen kayıtlı vergi dairesi (opsiyonel).">
+              <TextInput
+                value={taxOffice}
+                onChange={(e) => setTaxOffice(e.target.value)}
+                placeholder="Örn. Kadıköy Vergi Dairesi"
+                autoComplete="off"
+                maxLength={120}
+              />
+            </Field>
+          )}
           <Field
             label="VKN"
             hint={

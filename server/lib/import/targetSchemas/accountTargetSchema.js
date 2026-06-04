@@ -17,7 +17,7 @@ import {
 } from '../../../utils/accountValidation.js';
 import { CUSTOMER_TYPE_VALUES } from '../../../db/enumMap.js';
 
-export const ACCOUNT_TARGET_VERSION = '2026-06-04.account.v2';
+export const ACCOUNT_TARGET_VERSION = '2026-06-04.account.v3';
 export const ACCOUNT_TARGET_TYPE = 'account';
 
 // Phase 2 + Phase 3 phone metadata — geçerli telefon tipleri.
@@ -378,6 +378,29 @@ export const ACCOUNT_TARGET_FIELDS = [
       const s = asTrimmedString(raw);
       if (!s) return { ok: true, normalized: null };
       if (s.length > 60) return { ok: false, normalized: null, reason: 'Sicil no 60 karakteri aşamaz.' };
+      return { ok: true, normalized: s };
+    },
+  },
+  {
+    key: 'taxOffice',
+    label: 'Vergi Dairesi',
+    group: 'Yasal',
+    required: false,
+    type: 'text',
+    aliases: [
+      'taxoffice', 'tax_office', 'tax office',
+      'taxofficename', 'tax_office_name',
+      'vergi_dairesi', 'vergidairesi', 'vergi dairesi',
+    ],
+    description: 'Kurumsal müşterinin vergi dairesi (opsiyonel). Eşleştirme anahtarı değildir.',
+    example: 'Kadıköy Vergi Dairesi',
+    writable: true,
+    createAllowed: true,
+    updateAllowed: true,
+    normalize(raw) {
+      const s = asTrimmedString(raw);
+      if (!s) return { ok: true, normalized: null };
+      if (s.length > 120) return { ok: false, normalized: null, reason: 'Vergi Dairesi 120 karakteri aşamaz.' };
       return { ok: true, normalized: s };
     },
   },

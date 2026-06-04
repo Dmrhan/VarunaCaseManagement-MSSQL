@@ -92,6 +92,12 @@ export function CustomerCardModal({ open, accountId, onClose, onShowCase }: Cust
             <div className="text-lg font-semibold text-slate-900 dark:text-ndark-text">
               {account?.name ?? '…'}
             </div>
+            {/* Vergi Dairesi — yalnız kurumsal/dolu iken, VKN'den önce. */}
+            {account?.customerType !== 'Individual' && account?.taxOffice && (
+              <div className="text-xs text-slate-500 dark:text-ndark-muted">
+                Vergi Dairesi: <span className="text-slate-700 dark:text-ndark-text">{account.taxOffice}</span>
+              </div>
+            )}
             {account?.vknMasked && (
               <div className="font-mono text-xs text-slate-500 dark:text-ndark-muted">
                 VKN {account.vknMasked}

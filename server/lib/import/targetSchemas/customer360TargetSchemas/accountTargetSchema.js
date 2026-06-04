@@ -24,7 +24,7 @@ import {
   primaryPhoneSlotFieldC360,
 } from './_shared.js';
 
-export const ACCOUNT_VERSION = '2026-06-04.account.v4';
+export const ACCOUNT_VERSION = '2026-06-04.account.v5';
 
 export const ACCOUNT_FIELDS = [
   recordNoField({
@@ -147,6 +147,31 @@ export const ACCOUNT_FIELDS = [
     warningIfMissing: null,
     normalize(raw) {
       return normalizeText(raw, { max: 60 });
+    },
+  },
+  {
+    key: 'taxOffice',
+    label: 'Vergi Dairesi',
+    description: 'Kurumsal müşterinin vergi dairesi (opsiyonel). Eşleştirme anahtarı değildir.',
+    example: 'Kadıköy Vergi Dairesi',
+    group: 'Yasal',
+    type: 'text',
+    required: false,
+    aliases: [
+      'taxoffice', 'tax_office', 'tax office',
+      'taxofficename', 'tax_office_name',
+      'vergi_dairesi', 'vergidairesi', 'vergi dairesi',
+    ],
+    validationHint: 'Maks 120 karakter.',
+    normalizationHint: null,
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: 120 });
     },
   },
   {
