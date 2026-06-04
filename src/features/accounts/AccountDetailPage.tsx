@@ -18,7 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { notify } from '@/components/ui/Toast';
-import { formatPhoneCompact } from '@/utils/phone';
+import { formatPhoneCompact, listAccountPhones } from '@/utils/phone';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
@@ -459,19 +459,38 @@ function GeneralSection({ account }: { account: AccountDetail }) {
         {account.registrationNo && (
           <Row icon={<Inbox size={12} />} label="Sicil No" value={account.registrationNo} />
         )}
-        <Row
-          icon={<Phone size={12} />}
-          label="Telefon"
-          value={
-            account.phone
-              ? formatPhoneCompact({
-                  phone: account.phone,
-                  phoneType: account.phoneType,
-                  phoneExtension: account.phoneExtension,
-                })
-              : null
+        {(() => {
+          // Phase 3 — Account başına 3 telefon slot. Birincil ilk satırda,
+          // diğer dolu slot'lar alt satırlarda gösterilir. Boş slot'lar
+          // atlanır.
+          const phones = listAccountPhones({
+            phone: account.phone,
+            phoneType: account.phoneType,
+            phoneExtension: account.phoneExtension,
+            phone2: account.phone2,
+            phone2Type: account.phone2Type,
+            phone2Extension: account.phone2Extension,
+            phone3: account.phone3,
+            phone3Type: account.phone3Type,
+            phone3Extension: account.phone3Extension,
+            primaryPhoneSlot: account.primaryPhoneSlot,
+          });
+          if (phones.length === 0) {
+            return <Row icon={<Phone size={12} />} label="Telefon" value={null} />;
           }
-        />
+          return (
+            <>
+              {phones.map((p, idx) => (
+                <Row
+                  key={p.slot}
+                  icon={idx === 0 ? <Phone size={12} /> : undefined}
+                  label={idx === 0 ? 'Telefon' : ' '}
+                  value={p.text}
+                />
+              ))}
+            </>
+          );
+        })()}
         <Row icon={<Mail size={12} />} label="E-posta" value={account.email} />
         <Row icon={<Calendar size={12} />} label="Eklendi" value={formatDate(account.createdAt)} />
         <Row
