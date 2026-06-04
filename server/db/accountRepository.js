@@ -9,6 +9,7 @@ import {
   normalizePhoneE164,
   tcknPepperAvailable,
 } from '../utils/accountValidation.js';
+import { generateUniqueAccountId } from '../utils/accountId.js';
 
 /**
  * Phase A — Account 360 repository.
@@ -818,9 +819,14 @@ export async function createAccount({ data, user }) {
   }
 
   // Atomik: Account + AccountCompany kayıtları aynı transaction.
+  // Account.id yeni standart `cus_<22 char>` formatında üretilir;
+  // legacy cuid'li mevcut kayıtlar dokunulmaz. Şema default'u cuid()
+  // korunur — explicit `id` passed olduğundan default tetiklenmez.
+  const newId = await generateUniqueAccountId();
   try {
     const created = await prisma.account.create({
       data: {
+        id: newId,
         name,
         vkn,
         phone: phoneRaw,

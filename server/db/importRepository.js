@@ -15,6 +15,7 @@
  */
 
 import { prisma } from './client.js';
+import { generateUniqueAccountId } from '../utils/accountId.js';
 import {
   ACCOUNT_TARGET_VERSION,
   describeAccountTargetSchema,
@@ -589,8 +590,11 @@ async function createFromRow({ companyId, normalized }) {
   const phoneE164 = normalized.phone ?? null;
   const externalCustomerCode = normalized.externalCustomerCode ?? null;
 
+  // Phase 1 import — yeni Account standart `cus_<22>` formatında.
+  const newId = await generateUniqueAccountId();
   const created = await prisma.account.create({
     data: {
+      id: newId,
       name,
       vkn: normalized.vkn ?? null,
       phone: phoneRaw,
