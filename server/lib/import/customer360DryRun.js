@@ -198,6 +198,38 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     }
   }
   indexAccountRecordNos();
+
+  // Phase 3 — Account 3 phone slot row-level validation. primaryPhone-
+  // Slot dolu olmayan slotu işaret edemez; aynı E.164 birden fazla
+  // slotta yer alamaz.
+  for (const r of normalizedByEntity.account ?? []) {
+    if (r.errors.length > 0) continue;
+    const n = r.normalized;
+    const slotsE164 = [n.phone ?? null, n.phone2 ?? null, n.phone3 ?? null];
+    if (n.primaryPhoneSlot) {
+      const idx = n.primaryPhoneSlot - 1;
+      if (!slotsE164[idx]) {
+        r.errors.push({
+          entity: 'account',
+          targetKey: 'primaryPhoneSlot',
+          label: 'Birincil Telefon Slot',
+          code: 'primary_phone_slot_empty',
+          message: `primaryPhoneSlot=${n.primaryPhoneSlot} ama o slot boş.`,
+        });
+      }
+    }
+    const filled = slotsE164.filter(Boolean);
+    if (filled.length > 0 && new Set(filled).size !== filled.length) {
+      r.errors.push({
+        entity: 'account',
+        targetKey: 'phone',
+        label: 'Telefon',
+        code: 'duplicate_phone_across_slots',
+        message: 'Aynı telefon numarası birden fazla slotta yer alıyor.',
+      });
+    }
+  }
+
   function resolveAccountByParentRecordNo(parentRecordNo) {
     if (!parentRecordNo) return null;
     return accountByRecordNo.get(String(parentRecordNo).trim()) ?? null;
