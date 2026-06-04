@@ -203,6 +203,9 @@ export interface AccountListItem {
   phone: string | null;
   /** WR-A2 — E.164 normalize edilmiş telefon (search/dedup için iç UI). */
   phoneE164: string | null;
+  /** Phase 2 — telefon metadata (UI display'de "Cep · ... · Dahili"). */
+  phoneType: string | null;
+  phoneExtension: string | null;
   email: string | null;
   isActive: boolean;
   /** WR-A1 / PM-01 — Müşteri tipi (default Corporate). */
@@ -253,7 +256,12 @@ export interface AccountContact {
   fullName: string;
   title: string | null;
   phone: string | null;
+  /** Phase 2 phone metadata — telefon tipi (cep/iş/santral/whatsapp/diğer). */
+  phoneType: string | null;
+  /** Phase 2 phone metadata — santral arkası dahili numara. */
+  phoneExtension: string | null;
   email: string | null;
+  /** Primary contact/phone for the account. Set true demote others. */
   isPrimary: boolean;
   isActive: boolean;
   preferredChannel: string | null;
@@ -282,6 +290,9 @@ export interface AccountDetail {
   phone: string | null;
   /** WR-A2 — E.164 normalize edilmiş telefon. */
   phoneE164: string | null;
+  /** Phase 2 — telefon metadata. */
+  phoneType: string | null;
+  phoneExtension: string | null;
   email: string | null;
   isActive: boolean;
   createdAt: string;
@@ -325,6 +336,10 @@ export interface AccountCreateInput {
   name: string;
   vkn?: string | null;
   phone?: string | null;
+  /** Phase 2 phone metadata — 'mobile' | 'work' | 'switchboard' | 'whatsapp' | 'other'. */
+  phoneType?: string | null;
+  /** Phase 2 phone metadata — dahili numara. */
+  phoneExtension?: string | null;
   email?: string | null;
   /** WR-A1 — default Corporate. */
   customerType?: CustomerType;
@@ -339,6 +354,9 @@ export interface AccountUpdateInput {
   name?: string;
   vkn?: string | null;
   phone?: string | null;
+  /** Phase 2 phone metadata. */
+  phoneType?: string | null;
+  phoneExtension?: string | null;
   email?: string | null;
   isActive?: boolean;
   /** WR-A1. */
@@ -400,6 +418,9 @@ export interface AccountContactMutationInput {
   title?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Phase 2 phone metadata. */
+  phoneType?: string | null;
+  phoneExtension?: string | null;
   isPrimary?: boolean;
   isActive?: boolean;
   preferredChannel?: string | null;

@@ -18,6 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { notify } from '@/components/ui/Toast';
+import { formatPhoneCompact } from '@/utils/phone';
 import { useAuth } from '@/services/AuthContext';
 import {
   accountService,
@@ -458,7 +459,19 @@ function GeneralSection({ account }: { account: AccountDetail }) {
         {account.registrationNo && (
           <Row icon={<Inbox size={12} />} label="Sicil No" value={account.registrationNo} />
         )}
-        <Row icon={<Phone size={12} />} label="Telefon" value={account.phone} />
+        <Row
+          icon={<Phone size={12} />}
+          label="Telefon"
+          value={
+            account.phone
+              ? formatPhoneCompact({
+                  phone: account.phone,
+                  phoneType: account.phoneType,
+                  phoneExtension: account.phoneExtension,
+                })
+              : null
+          }
+        />
         <Row icon={<Mail size={12} />} label="E-posta" value={account.email} />
         <Row icon={<Calendar size={12} />} label="Eklendi" value={formatDate(account.createdAt)} />
         <Row
@@ -958,7 +971,13 @@ function ContactsSection({
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-ndark-muted">
                   {c.phone && (
                     <span className="inline-flex items-center gap-1">
-                      <Phone size={11} /> {c.phone}
+                      <Phone size={11} />
+                      {formatPhoneCompact({
+                        phone: c.phone,
+                        phoneType: c.phoneType,
+                        phoneExtension: c.phoneExtension,
+                        // isPrimary contact-level badge yukarıda gösteriliyor
+                      })}
                     </span>
                   )}
                   {c.email && (

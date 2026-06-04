@@ -151,6 +151,9 @@ function shapeAccountRow(account, { caseAggregates }) {
     phone: account.phone ?? null,
     // WR-A2 — phoneE164 search/dedup için iç UI'a geri döner; internal use only.
     phoneE164: account.phoneE164 ?? null,
+    // Phase 2 phone metadata
+    phoneType: account.phoneType ?? null,
+    phoneExtension: account.phoneExtension ?? null,
     email: account.email ?? null,
     isActive: account.isActive,
     // WR-A1 / PM-01 — Müşteri tipi + opsiyonel ticari unvan/sicil no.
@@ -317,6 +320,8 @@ export async function listAccounts({
         vkn: true,
         phone: true,
         phoneE164: true, // WR-A2
+        phoneType: true, // Phase 2
+        phoneExtension: true, // Phase 2
         email: true,
         isActive: true,
         // WR-A1
@@ -500,6 +505,8 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
           fullName: true,
           title: true,
           phone: true,
+          phoneType: true,
+          phoneExtension: true,
           email: true,
           isPrimary: true,
           isActive: true,
@@ -588,6 +595,8 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     vknMasked: maskVkn(account.vkn),
     phone: account.phone ?? null,
     phoneE164: account.phoneE164 ?? null, // WR-A2
+    phoneType: account.phoneType ?? null, // Phase 2
+    phoneExtension: account.phoneExtension ?? null, // Phase 2
     email: account.email ?? null,
     isActive: account.isActive,
     createdAt: account.createdAt,
@@ -792,6 +801,8 @@ export async function createAccount({ data, user }) {
   // WR-A2 — Phone E.164 normalize (display + e164 ayrı saklanır).
   const phoneRaw = typeof data?.phone === 'string' && data.phone.trim() ? data.phone.trim() : null;
   const phoneE164 = phoneRaw ? normalizePhoneE164(phoneRaw) : null;
+  const phoneType = normalizePhoneType(data?.phoneType) ?? null;
+  const phoneExtension = normalizePhoneExtension(data?.phoneExtension) ?? null;
 
   // WR-A2 — TCKN: yalnızca Individual customerType için kabul edilir.
   // Plain TCKN ASLA DB'ye yazılmaz; HMAC hash + last4 hesaplanır, plain bellekte
@@ -831,6 +842,8 @@ export async function createAccount({ data, user }) {
         vkn,
         phone: phoneRaw,
         phoneE164,
+        phoneType,
+        phoneExtension,
         email: data?.email ?? null,
         customerType,
         legalName,
@@ -900,6 +913,9 @@ export async function updateAccount({ accountId, data, user }) {
     patch.phone = newPhone;
     patch.phoneE164 = newPhone ? normalizePhoneE164(newPhone) : null;
   }
+  // Phase 2 phone metadata
+  if (data?.phoneType !== undefined) patch.phoneType = normalizePhoneType(data.phoneType);
+  if (data?.phoneExtension !== undefined) patch.phoneExtension = normalizePhoneExtension(data.phoneExtension);
   if (data?.email !== undefined) patch.email = data.email || null;
   if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
 
@@ -1283,6 +1299,31 @@ function normalizeContactChannel(channel) {
   return lower;
 }
 
+// Phase 2 phone metadata — geçerli telefon tipi + dahili numara normalize.
+const VALID_PHONE_TYPES = new Set(['mobile', 'work', 'switchboard', 'whatsapp', 'other']);
+
+function normalizePhoneType(input) {
+  if (input === undefined) return undefined;
+  if (input === null || input === '') return null;
+  const lower = String(input).trim().toLowerCase();
+  if (!VALID_PHONE_TYPES.has(lower)) {
+    throw new AccountValidationError('Geçersiz telefon tipi.');
+  }
+  return lower;
+}
+
+function normalizePhoneExtension(input) {
+  if (input === undefined) return undefined;
+  if (input === null) return null;
+  const trimmed = String(input).trim();
+  if (trimmed === '') return null;
+  // 1-10 karakter, alfa-numerik + dash.
+  if (!/^[A-Za-z0-9-]{1,10}$/.test(trimmed)) {
+    throw new AccountValidationError('Dahili numara 1-10 karakter alfa-numerik olmalı.');
+  }
+  return trimmed;
+}
+
 async function loadEditableContact({ accountId, contactId, user }) {
   await assertAccountInScope(accountId, user.allowedCompanyIds);
   const row = await prisma.accountContact.findUnique({
@@ -1308,6 +1349,8 @@ export async function addContact({ accountId, data, user }) {
   if (!fullName) throw new AccountValidationError('Ad Soyad zorunlu.');
 
   const preferredChannel = normalizeContactChannel(data?.preferredChannel);
+  const phoneType = normalizePhoneType(data?.phoneType);
+  const phoneExtension = normalizePhoneExtension(data?.phoneExtension);
 
   const wantPrimary = !!data?.isPrimary;
   await prisma.$transaction(async (tx) => {
@@ -1324,6 +1367,8 @@ export async function addContact({ accountId, data, user }) {
         title: data?.title || null,
         email: data?.email || null,
         phone: data?.phone || null,
+        phoneType: phoneType ?? null,
+        phoneExtension: phoneExtension ?? null,
         isPrimary: wantPrimary,
         isActive: data?.isActive === undefined ? true : !!data.isActive,
         preferredChannel: preferredChannel ?? null,
@@ -1353,6 +1398,8 @@ export async function updateContact({ accountId, contactId, data, user }) {
   if (data?.title !== undefined) patch.title = data.title || null;
   if (data?.email !== undefined) patch.email = data.email || null;
   if (data?.phone !== undefined) patch.phone = data.phone || null;
+  if (data?.phoneType !== undefined) patch.phoneType = normalizePhoneType(data.phoneType);
+  if (data?.phoneExtension !== undefined) patch.phoneExtension = normalizePhoneExtension(data.phoneExtension);
   if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
   if (data?.preferredChannel !== undefined) {
     patch.preferredChannel = normalizeContactChannel(data.preferredChannel);
@@ -2102,6 +2149,8 @@ export async function getCaseCustomerContext({ accountId, companyId, allowedComp
           fullName: true,
           title: true,
           phone: true,
+          phoneType: true,
+          phoneExtension: true,
           email: true,
           preferredChannel: true,
         },

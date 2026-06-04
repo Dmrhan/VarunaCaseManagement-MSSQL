@@ -4,6 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextInput } from '@/components/ui/Field';
 import { PhoneInput } from '@/components/ui/PhoneInput';
+import { PHONE_TYPES, PHONE_TYPE_LABELS } from '@/utils/phone';
 import { notify } from '@/components/ui/Toast';
 import {
   accountService,
@@ -47,6 +48,9 @@ export function AccountContactEditor({
   const [title, setTitle] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  // Phase 2 phone metadata
+  const [phoneType, setPhoneType] = useState<string>('');
+  const [phoneExtension, setPhoneExtension] = useState<string>('');
   const [preferredChannel, setPreferredChannel] = useState('');
   const [isPrimary, setIsPrimary] = useState(false);
   const [isActive, setIsActive] = useState(true);
@@ -62,6 +66,8 @@ export function AccountContactEditor({
       setTitle(contact.title ?? '');
       setEmail(contact.email ?? '');
       setPhone(contact.phone ?? '');
+      setPhoneType(contact.phoneType ?? '');
+      setPhoneExtension(contact.phoneExtension ?? '');
       setPreferredChannel(contact.preferredChannel ?? '');
       setIsPrimary(contact.isPrimary);
       setIsActive(contact.isActive);
@@ -70,6 +76,8 @@ export function AccountContactEditor({
       setTitle('');
       setEmail('');
       setPhone('');
+      setPhoneType('');
+      setPhoneExtension('');
       setPreferredChannel('');
       setIsPrimary(false);
       setIsActive(true);
@@ -94,6 +102,8 @@ export function AccountContactEditor({
       title: title.trim() || null,
       email: email.trim() || null,
       phone: phone.trim() || null,
+      phoneType: phone.trim() ? phoneType || null : null,
+      phoneExtension: phone.trim() ? phoneExtension.trim() || null : null,
       preferredChannel: preferredChannel || null,
       isPrimary,
       isActive,
@@ -199,6 +209,31 @@ export function AccountContactEditor({
             />
           </Field>
         </div>
+        {/* Phase 2 phone metadata — telefon varsa tip + dahili gösterilir. */}
+        {phone && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Telefon Tipi">
+              <Select value={phoneType} onChange={(e) => setPhoneType(e.target.value)}>
+                <option value="">— seçiniz —</option>
+                {PHONE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {PHONE_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Dahili" hint="Santral arkası (1-10 karakter, opsiyonel)">
+              <TextInput
+                value={phoneExtension}
+                onChange={(e) => setPhoneExtension(e.target.value)}
+                placeholder="örn. 123"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+        )}
 
         <Field label="Tercih Edilen Kanal">
           <Select value={preferredChannel} onChange={(e) => setPreferredChannel(e.target.value)}>
