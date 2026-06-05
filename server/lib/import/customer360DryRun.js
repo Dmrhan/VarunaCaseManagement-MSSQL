@@ -194,7 +194,14 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
         continue;
       }
       seen.set(rec, r.rowNumber);
-      if (r.errors.length === 0) accountByRecordNo.set(rec, r);
+      // Always index by recordNo — including rows that themselves have
+      // errors. Lookup-time (resolveParentForChild) decides between
+      // "found-clean", "found-with-errors", and "missing", so child rows
+      // never misreport an existing parent as not found. Prior to this
+      // change, an Account with invalid VKN was excluded here, and child
+      // sheets reported `parent_record_no_not_found` for a row that
+      // clearly existed.
+      accountByRecordNo.set(rec, r);
     }
   }
   indexAccountRecordNos();
@@ -274,6 +281,21 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     if (n.parentRecordNo) {
       const parent = resolveAccountByParentRecordNo(n.parentRecordNo);
       if (parent) {
+        // Parent found. But parent itself may carry errors (e.g., missing
+        // required name). Distinguish "parent has errors" from "parent
+        // missing" so the user fixes the right row. We still treat this
+        // as an orphan from the child's perspective (caller routes the
+        // child to orphansByEntity); only the error CODE differs.
+        if (parent.errors.length > 0) {
+          childRow.errors.push({
+            entity: childRow.entityType ?? childRow.entity ?? null,
+            targetKey: 'parentRecordNo',
+            label: 'Üst Kayıt No (Account)',
+            code: 'parent_record_no_parent_has_errors',
+            message: `parentRecordNo="${n.parentRecordNo}" Accounts sheet'inde bulundu fakat o satırda hata var; child satırı bu nedenle aktarılamaz.`,
+          });
+          return { parent: null, source: 'parentRecordNo_invalid' };
+        }
         // Promote parent's key (vkn||name) to accountKey if missing so the
         // rest of the engine (and commit-time persistJob) can resolve it
         // via the existing vkn/name path.
@@ -282,7 +304,7 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
         }
         return { parent, source: 'parentRecordNo' };
       }
-      // parentRecordNo present but unresolved → hard error
+      // parentRecordNo present but truly not in the sheet → hard error
       childRow.errors.push({
         entity: childRow.entityType ?? childRow.entity ?? null,
         targetKey: 'parentRecordNo',
@@ -528,6 +550,19 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   flagDuplicateSourceIds('accountAddress', 'sourceAddressId', 'Kaynak Address ID');
   for (const r of normalizedByEntity.accountAddress ?? []) {
     if (r.errors.length > 0) continue;
+    // Import-friendly: blank line1 → satırı tamamen skip et, Account'a
+    // dokunma. (DB'de line1 NOT NULL; null ile fake adres oluşturmuyoruz.)
+    if (!r.normalized.line1) {
+      r.warnings.push({
+        entity: 'accountAddress',
+        targetKey: 'line1',
+        label: 'Sokak/Cadde',
+        code: 'address_line1_missing_skipped',
+        message: 'Adres satırında Sokak/Cadde boş olduğu için adres oluşturulmadı. Müşteri kaydı etkilenmedi.',
+      });
+      r.shouldSkip = true;
+      continue;
+    }
     const { parent, source } = resolveParentForChild({ ...r, entity: 'accountAddress' });
     if (source === 'parentRecordNo_invalid') {
       orphansByEntity.accountAddress.push(r.rowNumber);
@@ -726,6 +761,10 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     for (const r of normalizedByEntity[ek] ?? []) {
       if (r.errors.length > 0) {
         r.action = 'error';
+      } else if (r.shouldSkip) {
+        // Row deliberately skipped (e.g., address with blank line1).
+        // Commit engine honors action==='skip' → no DB write.
+        r.action = 'skip';
       } else {
         // Phase 2a: child entities reported as "create" only (commit semantics
         // and DB-based update detection arrive in 2b).
@@ -749,7 +788,15 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
       if (r.warnings.length > 0) summary.warning += 1;
       // Only count rows that will actually be inserted/updated without a
       // tax id; rows that error out for other reasons won't reach the DB.
-      if (ek === 'account' && r.action !== 'error' && r.warnings?.some((w) => w.code === 'no_tax_id')) {
+      // missingTaxIdCount accounts for BOTH truly missing (no_tax_id) and
+      // invalid-and-dropped (invalid_vkn_ignored) VKN rows. Both reach the
+      // DB without an official identifier, so they share the "create
+      // without tax id" counter for UI surfacing.
+      if (
+        ek === 'account' &&
+        r.action !== 'error' &&
+        r.warnings?.some((w) => w.code === 'no_tax_id' || w.code === 'invalid_vkn_ignored')
+      ) {
         missingTaxIdCount += 1;
       }
     }

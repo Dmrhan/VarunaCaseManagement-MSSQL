@@ -78,7 +78,23 @@ export const ACCOUNT_FIELDS = [
       // path rather than producing a misleading invalid-VKN error.
       if (!s || /^(null|-)$/i.test(s)) return { ok: true, normalized: null };
       const r = validateVkn(s);
-      if (!r.ok) return { ok: false, normalized: null, reason: r.reason ?? 'VKN geçersiz.' };
+      if (!r.ok) {
+        // Customer 360 — invalid VKN is import-friendly: do NOT hard-fail
+        // the Account row. Drop the value (we never store invalid VKN as
+        // an identity), warn the user, and proceed. Parent Account stays
+        // matchable by recordNo / name; downstream children no longer
+        // misreport "parent not found" just because VKN length was wrong.
+        // Strict TCKN behavior is unaffected (TCKN guard runs upstream,
+        // separately, and blocks plain TCKN headers entirely).
+        return {
+          ok: true,
+          normalized: null,
+          warning: {
+            code: 'invalid_vkn_ignored',
+            message: `VKN "${s}" geçerli 10 haneli VKN olmadığı için resmi kimlik olarak kullanılmadı. Kayıt VKN olmadan aktarılacak.`,
+          },
+        };
+      }
       return { ok: true, normalized: r.normalized };
     },
   },
