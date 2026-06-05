@@ -259,6 +259,77 @@ try {
     record('C1: Address errors empty', (addrRow?.errors ?? []).length === 0, JSON.stringify(addrRow?.errors));
   }
 
+/* ─── Codex P2 follow-up: blank-line1 skip ordering + completeness ───── */
+
+  // D1: blank-line1 row + valid row share sourceAddressId → valid wins,
+  //     blank row only carries the skip warning.
+  {
+    const res = await runEngine({
+      account: [{ recordNo: 'D1', name: 'GAMMA' }],
+      accountAddress: [
+        { parentRecordNo: 'D1', type: 'Billing', line1: 'Geçerli Sokak', country: 'TR', sourceAddressId: 'ADDR1' },
+        { parentRecordNo: 'D1', type: 'Billing', line1: '', country: 'TR', sourceAddressId: 'ADDR1' },
+      ],
+    });
+    const rows = res.preview?.accountAddress ?? [];
+    const validRow = rows.find((r) => r.normalized?.line1 === 'Geçerli Sokak');
+    const blankRow = rows.find((r) => !r.normalized?.line1);
+    record(
+      'D1: valid row no duplicate_source_id_in_sheet',
+      validRow && !(validRow.errors ?? []).some((e) => e.code === 'duplicate_source_id_in_sheet'),
+      JSON.stringify(validRow?.errors),
+    );
+    record('D1: valid row action !== error', validRow?.action !== 'error', `action=${validRow?.action}`);
+    record(
+      'D1: blank row → address_line1_missing_skipped warning',
+      blankRow && (blankRow.warnings ?? []).some((w) => w.code === 'address_line1_missing_skipped'),
+    );
+    record(
+      'D1: blank row → no duplicate_source_id_in_sheet error',
+      blankRow && !(blankRow.errors ?? []).some((e) => e.code === 'duplicate_source_id_in_sheet'),
+      JSON.stringify(blankRow?.errors),
+    );
+    record('D1: blank row action === skip', blankRow?.action === 'skip', `action=${blankRow?.action}`);
+  }
+
+  // D2: two valid rows with same sourceAddressId still error (regression)
+  {
+    const res = await runEngine({
+      account: [{ recordNo: 'D2', name: 'DELTA' }],
+      accountAddress: [
+        { parentRecordNo: 'D2', type: 'Billing', line1: 'Sokak A', country: 'TR', sourceAddressId: 'ADDR2' },
+        { parentRecordNo: 'D2', type: 'Billing', line1: 'Sokak B', country: 'TR', sourceAddressId: 'ADDR2' },
+      ],
+    });
+    const rows = res.preview?.accountAddress ?? [];
+    const dupErrors = rows.filter((r) => (r.errors ?? []).some((e) => e.code === 'duplicate_source_id_in_sheet'));
+    record('D2: both valid rows flagged duplicate_source_id_in_sheet', dupErrors.length === 2);
+  }
+
+  // D3: completeness — skipped (blank line1) row must NOT count
+  {
+    const res = await runEngine({
+      account: [{ recordNo: 'D3', name: 'EPSILON' }],
+      accountAddress: [
+        { parentRecordNo: 'D3', type: 'Billing', line1: '', country: 'TR' },
+      ],
+    });
+    const have = res.summary?.completenessScore?.accountsWithAddress?.have;
+    record('D3: skipped-only → completeness have === 0', have === 0, `have=${have}`);
+  }
+
+  // D4: completeness — single valid address row counts
+  {
+    const res = await runEngine({
+      account: [{ recordNo: 'D4', name: 'ZETA' }],
+      accountAddress: [
+        { parentRecordNo: 'D4', type: 'Billing', line1: 'Real Sokak', country: 'TR' },
+      ],
+    });
+    const have = res.summary?.completenessScore?.accountsWithAddress?.have;
+    record('D4: valid address → completeness have === 1', have === 1, `have=${have}`);
+  }
+
   // Scenario A3: valid 10-digit VKN with checksum
   {
     // 10000000146 is a known-valid checksum from existing smoke

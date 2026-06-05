@@ -321,11 +321,17 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
 
   // Sheet-level duplicate detection helper for source IDs (Contact /
   // Address / Project). Duplicate same-sheet source IDs are HARD errors.
+  //
+  // Codex P2 fix: skipped rows (e.g., address blank-line1 marked
+  // shouldSkip in a pre-pass) MUST be excluded from this check. A
+  // skipped row never reaches the DB; flagging it as a duplicate would
+  // wrongly block the VALID row carrying the same sourceAddressId.
   function flagDuplicateSourceIds(entity, sourceField, label) {
     const rows = normalizedByEntity[entity] ?? [];
     const seen = new Map();
     for (const r of rows) {
       if (r.errors.length > 0) continue;
+      if (r.shouldSkip) continue;
       const v = r.normalized[sourceField];
       if (!v) continue;
       if (seen.has(v)) {
@@ -546,23 +552,30 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
 
   // accountAddress — orphan + isDefault uniqueness per (accountKey, type)
   const defaultByAccountType = new Map();
-  // Phase 2c — dup sourceAddressId within sheet (error)
+  // Codex P2 fix — blank-line1 skip pre-pass MUST run before
+  // flagDuplicateSourceIds and the orphan/isDefault loop. Otherwise:
+  //   (a) a skipped row with the same sourceAddressId as a VALID row
+  //       would wrongly flag the valid row as duplicate;
+  //   (b) skipped rows would still be considered for parent resolution,
+  //       wasting work on rows we won't write.
+  for (const r of normalizedByEntity.accountAddress ?? []) {
+    if (r.errors.length > 0) continue;
+    if (r.normalized.line1) continue;
+    r.warnings.push({
+      entity: 'accountAddress',
+      targetKey: 'line1',
+      label: 'Sokak/Cadde',
+      code: 'address_line1_missing_skipped',
+      message: 'Adres satırında Sokak/Cadde boş olduğu için adres oluşturulmadı. Müşteri kaydı etkilenmedi.',
+    });
+    r.shouldSkip = true;
+  }
+  // Phase 2c — dup sourceAddressId within sheet (error). Skipped rows
+  // are excluded inside the helper.
   flagDuplicateSourceIds('accountAddress', 'sourceAddressId', 'Kaynak Address ID');
   for (const r of normalizedByEntity.accountAddress ?? []) {
     if (r.errors.length > 0) continue;
-    // Import-friendly: blank line1 → satırı tamamen skip et, Account'a
-    // dokunma. (DB'de line1 NOT NULL; null ile fake adres oluşturmuyoruz.)
-    if (!r.normalized.line1) {
-      r.warnings.push({
-        entity: 'accountAddress',
-        targetKey: 'line1',
-        label: 'Sokak/Cadde',
-        code: 'address_line1_missing_skipped',
-        message: 'Adres satırında Sokak/Cadde boş olduğu için adres oluşturulmadı. Müşteri kaydı etkilenmedi.',
-      });
-      r.shouldSkip = true;
-      continue;
-    }
+    if (r.shouldSkip) continue;
     const { parent, source } = resolveParentForChild({ ...r, entity: 'accountAddress' });
     if (source === 'parentRecordNo_invalid') {
       orphansByEntity.accountAddress.push(r.rowNumber);
@@ -819,7 +832,11 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     if (r.errors.length === 0 && r.normalized.accountKey) accountsWithContact.add(r.normalized.accountKey);
   }
   for (const r of normalizedByEntity.accountAddress ?? []) {
-    if (r.errors.length === 0 && r.normalized.accountKey) accountsWithAddress.add(r.normalized.accountKey);
+    // Codex P2 fix — skipped rows (blank line1) won't be written, so
+    // they must not improve address coverage.
+    if (r.errors.length === 0 && !r.shouldSkip && r.normalized.accountKey) {
+      accountsWithAddress.add(r.normalized.accountKey);
+    }
   }
   for (const r of normalizedByEntity.accountProject ?? []) {
     if (r.errors.length === 0 && r.normalized.accountKey) accountsWithProject.add(r.normalized.accountKey);
