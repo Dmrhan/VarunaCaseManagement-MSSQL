@@ -554,11 +554,13 @@ export const importService = {
       sourceUrlMasked?: string | null;
       dataPath?: string | null;
     };
+    mappingByEntity?: Record<string, MappingItem[]>;
   }): Promise<Customer360DryRunResponse | undefined> {
     const fd = new FormData();
     fd.append('companyId', input.companyId);
     fd.append('file', input.file, input.file.name);
     if (input.sourceMeta) fd.append('sourceMeta', JSON.stringify(input.sourceMeta));
+    if (input.mappingByEntity) fd.append('mapping', JSON.stringify(input.mappingByEntity));
     return apiFetch<Customer360DryRunResponse>(
       `${BASE}/customer360/dry-run-xlsx`,
       { method: 'POST', body: fd },
@@ -601,6 +603,7 @@ export const importService = {
     };
     options?: { skipErrors?: boolean };
     maxRowsPerCall?: number;
+    mappingByEntity?: Record<string, MappingItem[]>;
   }): Promise<Customer360CommitResponse | undefined> {
     const fd = new FormData();
     fd.append('companyId', input.companyId);
@@ -608,6 +611,7 @@ export const importService = {
     if (input.sourceMeta) fd.append('sourceMeta', JSON.stringify(input.sourceMeta));
     if (input.options) fd.append('options', JSON.stringify(input.options));
     if (typeof input.maxRowsPerCall === 'number') fd.append('maxRowsPerCall', String(input.maxRowsPerCall));
+    if (input.mappingByEntity) fd.append('mapping', JSON.stringify(input.mappingByEntity));
     return apiFetch<Customer360CommitResponse>(
       `${BASE}/customer360/commit-xlsx`,
       { method: 'POST', body: fd },

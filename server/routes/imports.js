@@ -475,6 +475,40 @@ router.post(
 //     bu endpoint o pipeline'a köprü DEĞİL, "medium-large" için PARÇA.
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Codex P2 fix — multipart xlsx route'larında kullanıcının onayladığı
+ * eşleştirmeyi (`mappingByEntity`) sunucu-tarafı bundle'a uygula. Yoksa
+ * mevcut identity fallback (`source === targetKey`) korunur (standart
+ * Customer 360 şablonu zaten kolon başlıklarını target field key olarak
+ * taşıdığı için identity güvenli).
+ *
+ * mappingByEntity shape: Record<entityKey, Array<{source, targetKey}>>.
+ * Per-entity yokluğu identity'ye düşer; per-entity boş array verilirse
+ * normalize çalıştırılmaz (registry'nin "mapping yok" davranışı).
+ *
+ * Doğrulamalar:
+ *   - mappingByEntity null/undefined → tümü identity.
+ *   - Entity bilinmiyorsa o key sessizce atlanır (bundle dışı).
+ *   - source/targetKey string değilse o mapping satırı atılır (defansif).
+ */
+function buildXlsxEntitiesPayload(parsedBundle, userMapping) {
+  const out = {};
+  const map = userMapping && typeof userMapping === 'object' ? userMapping : null;
+  for (const [entityKey, block] of Object.entries(parsedBundle)) {
+    const userEntityMapping = map?.[entityKey];
+    let mapping;
+    if (Array.isArray(userEntityMapping)) {
+      mapping = userEntityMapping.filter(
+        (m) => m && typeof m.source === 'string' && typeof m.targetKey === 'string',
+      );
+    } else {
+      mapping = block.columns.map((c) => ({ source: c, targetKey: c }));
+    }
+    out[entityKey] = { columns: block.columns, mapping, rows: block.rows };
+  }
+  return out;
+}
+
 const xlsxUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
@@ -536,10 +570,15 @@ router.post(
         throw new ImportError('sourceMeta JSON parse edilemedi.', { code: 'source_meta_invalid' });
       }
     }
-    // Eğer client mapping göndermediyse server-side bundle'dan auto-map
-    // varsayılan olarak yapılır (dry-run engine her entity için
-    // mapping[]==[]) ile aynı path'i yürütür: kolon adı → field key birebir
-    // match'i registry tarafından sağlanır.
+    // Codex P2 fix — kullanıcı UI'da custom field mapping yapmış olabilir;
+    // varsa mappingByEntity ile gelir, yoksa identity fallback (kolon ===
+    // field key) korunur. Çift parse'li body güvenli (boyut multer
+    // limit'inde).
+    let mappingByEntity = null;
+    if (req.body?.mapping) {
+      try { mappingByEntity = JSON.parse(req.body.mapping); }
+      catch { throw new ImportError('mapping JSON parse edilemedi.', { code: 'mapping_invalid' }); }
+    }
 
     const parsed = parseCustomer360Workbook(file.buffer);
     if (!parsed.ok) {
@@ -551,20 +590,7 @@ router.post(
       });
     }
 
-    // Bundle'ı dry-run engine kontratına uyarlayan mapping üret:
-    //   server-side bundle kolonları zaten target field key'lerine birebir
-    //   eşit (standart şablonda kolon başlığı field key). registry
-    //   normalize edebilsin diye explicit {source,targetKey} mapping
-    //   geçiyoruz; aksi halde dryRunCustomer360 boş mapping bekler ve
-    //   normalize hiç çalışmaz.
-    const entitiesPayload = {};
-    for (const [entityKey, block] of Object.entries(parsed.bundle)) {
-      entitiesPayload[entityKey] = {
-        columns: block.columns,
-        mapping: block.columns.map((c) => ({ source: c, targetKey: c })),
-        rows: block.rows,
-      };
-    }
+    const entitiesPayload = buildXlsxEntitiesPayload(parsed.bundle, mappingByEntity);
 
     const result = await dryRunCustomer360({
       companyId,
@@ -675,6 +701,14 @@ router.post(
       const n = Number(req.body.maxRowsPerCall);
       if (Number.isFinite(n) && n > 0) options.maxRowsPerCall = Math.floor(n);
     }
+    // Codex P2 fix — kullanıcının onayladığı mapping commit'te de aynen
+    // uygulanır; dry-run preview ile commit sonucunun aynı normalize
+    // path'ini yürütmesini garanti eder. Yoksa identity fallback.
+    let mappingByEntity = null;
+    if (req.body?.mapping) {
+      try { mappingByEntity = JSON.parse(req.body.mapping); }
+      catch { throw new ImportError('mapping JSON parse edilemedi.', { code: 'mapping_invalid' }); }
+    }
 
     const parsed = parseCustomer360Workbook(file.buffer);
     if (!parsed.ok) {
@@ -686,15 +720,7 @@ router.post(
       });
     }
 
-    // Server-side bundle → dryRunCustomer360 contract.
-    const entitiesPayload = {};
-    for (const [entityKey, block] of Object.entries(parsed.bundle)) {
-      entitiesPayload[entityKey] = {
-        columns: block.columns,
-        mapping: block.columns.map((c) => ({ source: c, targetKey: c })),
-        rows: block.rows,
-      };
-    }
+    const entitiesPayload = buildXlsxEntitiesPayload(parsed.bundle, mappingByEntity);
 
     const result = await commitCustomer360({
       user: req.user,

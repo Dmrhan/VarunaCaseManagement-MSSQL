@@ -236,6 +236,10 @@ export function Customer360Page() {
           sourceMeta,
           options: { skipErrors },
           maxRowsPerCall: 500,
+          // Codex P2 fix — kullanıcının UI'da onayladığı field mapping'i
+          // sunucu identity fallback'ine bırakmıyoruz; dry-run preview ile
+          // commit aynı normalize path'ini yürütsün.
+          mappingByEntity,
         });
       }
       if (!r) {
@@ -498,6 +502,8 @@ export function Customer360Page() {
           companyId,
           file: sourceFile,
           sourceMeta,
+          // Codex P2 fix — kullanıcı UI mapping'i identity'ye düşmesin.
+          mappingByEntity,
         });
         setBusy(false);
         if (!r) return;
