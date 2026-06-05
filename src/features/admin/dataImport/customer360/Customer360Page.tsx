@@ -32,6 +32,7 @@ import {
 import { SheetMappingStep } from './SheetMappingStep';
 import { downloadCustomer360Template } from './templateGenerator';
 import { RelationshipGraph } from './RelationshipGraph';
+import { evaluateDryRunPayload } from './payloadGuard';
 import { MappingFieldSelect } from '../MappingFieldSelect';
 import { HistoryPanel } from '../HistoryPanel';
 import { cn } from '@/components/ui/cn';
@@ -336,7 +337,6 @@ export function Customer360Page() {
 
   async function runDryRun() {
     if (!companyId || !sourceMeta) return;
-    setBusy(true);
     const payload: Record<string, { columns: string[]; mapping: MappingItem[]; rows: Array<Record<string, unknown>> }> = {};
     for (const e of CUSTOMER_360_ENTITY_KEYS) {
       payload[e] = {
@@ -345,6 +345,21 @@ export function Customer360Page() {
         rows: bundle[e].rows,
       };
     }
+    // Preflight — sunucu body limit'i ~2 MB. JSON.stringify(payload) bunu
+    // aşıyorsa POST etmeyiz; kullanıcıya sebebi söyleyen toast atıp dururuz.
+    // Aksi halde Express body parser 413 dönüp generic "Sunucu hatası"
+    // gösterilirdi (server tarafında structured 413 handler eklendi ama
+    // dosyayı yine de göndermek bandwidth + UX israfı).
+    const guard = evaluateDryRunPayload({ companyId, entities: payload, sourceMeta });
+    if (!guard.ok) {
+      toast({
+        type: 'error',
+        message: guard.message ?? 'Customer 360 dry-run için dosya çok büyük.',
+        duration: 8000,
+      });
+      return;
+    }
+    setBusy(true);
     const r = await importService.customer360DryRun({
       companyId,
       entities: payload,

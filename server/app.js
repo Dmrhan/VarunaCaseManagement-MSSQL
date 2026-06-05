@@ -75,4 +75,31 @@ app.use('/api/action-center', actionCenterRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
+// Body-parser 413 → structured JSON. express.json yukarıda body'yi parse
+// ederken size limit aşılırsa next(err) ile error-handling middleware'e
+// düşer; default davranış HTML "PayloadTooLargeError" sayfasıdır ve
+// frontend (apiFetch) onu jeneirk "Sunucu hatası" olarak gösterirdi.
+// Burada error code/maxBytes/receivedBytes ile structured JSON döner,
+// apiFetch bunu doğrudan kullanıcıya yansıtabilir.
+//
+// Not: Hotfix A — sadece truthful error response. Body limit'in kendisi
+// (2mb global vs 24mb router override) bu PR'da değiştirilmiyor. Sebep:
+// import dışı tüm endpoint'ler 2mb için tasarlandı; global'i toptan
+// büyütmek attack-surface artırır. C360 büyük dosya akışı için Phase B
+// (multipart upload + sunucu-tarafı parse) ayrı PR'a saklanıyor.
+app.use((err, _req, res, next) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    const maxBytes = typeof err.limit === 'number' ? err.limit : 2 * 1024 * 1024;
+    const receivedBytes = typeof err.length === 'number' ? err.length : null;
+    return res.status(413).json({
+      code: 'payload_too_large',
+      message:
+        'İstek gövdesi sunucu sınırının üstünde. Müşteri 360 büyük dosyaları parçalara bölüp yeniden deneyin.',
+      maxBytes,
+      receivedBytes,
+    });
+  }
+  return next(err);
+});
+
 export default app;
