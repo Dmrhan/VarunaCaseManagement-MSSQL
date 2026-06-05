@@ -539,6 +539,33 @@ export const importService = {
     return postJson(`${BASE}/customer360/dry-run`, input, 'Customer 360 dry-run başarısız');
   },
 
+  /**
+   * Phase B — multipart server-side dry-run. Frontend parsed JSON gövdesi
+   * 2 MB body limit'ine takıldığında bu endpoint kullanılır. Ham XLSX'i
+   * FormData ile yollar, server tarafında parse + dry-run çalışır;
+   * response shape JSON dry-run ile birebir uyumludur.
+   */
+  async customer360DryRunXlsx(input: {
+    companyId: string;
+    file: File;
+    sourceMeta?: {
+      sourceType: 'file' | 'api';
+      fileName?: string | null;
+      sourceUrlMasked?: string | null;
+      dataPath?: string | null;
+    };
+  }): Promise<Customer360DryRunResponse | undefined> {
+    const fd = new FormData();
+    fd.append('companyId', input.companyId);
+    fd.append('file', input.file, input.file.name);
+    if (input.sourceMeta) fd.append('sourceMeta', JSON.stringify(input.sourceMeta));
+    return apiFetch<Customer360DryRunResponse>(
+      `${BASE}/customer360/dry-run-xlsx`,
+      { method: 'POST', body: fd },
+      'Customer 360 sunucu dry-run başarısız',
+    );
+  },
+
   async customer360Commit(input: {
     companyId: string;
     entities?: Record<

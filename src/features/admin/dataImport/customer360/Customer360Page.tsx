@@ -90,6 +90,10 @@ export function Customer360Page() {
   // Sheet Mapping Wizard state — populated for XLSX uploads. API source
   // skips this stage and produces a bundle directly.
   const [rawSheets, setRawSheets] = useState<RawSheet[] | null>(null);
+  // Phase B — server-side XLSX dry-run fallback'i için ham File ref tutuyoruz.
+  // payloadGuard small-flow'u engellediğinde sourceFile + sourceMeta.sourceType==='file'
+  // varsa multipart endpoint'e bu File yollanır.
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sheetSuggested, setSheetSuggested] = useState<AutoSuggestResult | null>(null);
   const [sheetMappings, setSheetMappings] = useState<Record<string, SheetMappingChoice>>({});
 
@@ -137,6 +141,7 @@ export function Customer360Page() {
   function resetFlow() {
     setBundle(emptyBundle());
     setSourceMeta(null);
+    setSourceFile(null);
     setParseInfo(null);
     setParseError(null);
     setMappingByEntity({});
@@ -346,12 +351,28 @@ export function Customer360Page() {
       };
     }
     // Preflight — sunucu body limit'i ~2 MB. JSON.stringify(payload) bunu
-    // aşıyorsa POST etmeyiz; kullanıcıya sebebi söyleyen toast atıp dururuz.
-    // Aksi halde Express body parser 413 dönüp generic "Sunucu hatası"
-    // gösterilirdi (server tarafında structured 413 handler eklendi ama
-    // dosyayı yine de göndermek bandwidth + UX israfı).
+    // aşıyorsa Phase A small-flow yerine Phase B (multipart XLSX) yoluna
+    // düşeriz. Bunun için elimizdeki ham File ref'i (sourceFile) gerekir;
+    // yoksa (örn. sourceType==='api') kullanıcıya parçalama mesajı.
     const guard = evaluateDryRunPayload({ companyId, entities: payload, sourceMeta });
     if (!guard.ok) {
+      if (sourceFile && sourceMeta.sourceType === 'file') {
+        toast({
+          type: 'info',
+          message: `Dosya büyük olduğu için sunucu tarafında dry-run çalıştırılıyor (~${Math.round((sourceFile.size / (1024 * 1024)) * 10) / 10} MB).`,
+          duration: 4000,
+        });
+        setBusy(true);
+        const r = await importService.customer360DryRunXlsx({
+          companyId,
+          file: sourceFile,
+          sourceMeta,
+        });
+        setBusy(false);
+        if (!r) return;
+        setDryRun(r);
+        return;
+      }
       toast({
         type: 'error',
         message: guard.message ?? 'Customer 360 dry-run için dosya çok büyük.',
@@ -480,7 +501,7 @@ export function Customer360Page() {
             </div>
 
             {sourceMode === 'file' ? (
-              <FileSourcePanel onSheets={onSheetsParsed} />
+              <FileSourcePanel onSheets={onSheetsParsed} onPickFile={setSourceFile} />
             ) : (
               <ApiSourcePanel companyId={companyId} onBundle={onBundleParsed} />
             )}
@@ -939,12 +960,14 @@ interface Customer360EntityStatsLocal {
 
 function FileSourcePanel({
   onSheets,
+  onPickFile,
 }: {
   onSheets: (
     sheets: RawSheet[],
     meta: { sourceType: 'file' | 'api'; fileName: string | null; sourceUrlMasked: string | null; dataPath: string | null },
     suggested: AutoSuggestResult,
   ) => void;
+  onPickFile?: (file: File) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -975,6 +998,7 @@ function FileSourcePanel({
     }
     setBusy(true);
     try {
+      onPickFile?.(file);
       const { sheets, suggested } = await readCustomer360Workbook(file);
       onSheets(
         sheets,
