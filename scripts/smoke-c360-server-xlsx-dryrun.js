@@ -65,6 +65,36 @@ record(
   'alias: unknown sheet → null',
   __testing__.mapSheetNameToEntity('RandomSheet') === null,
 );
+// Codex P2 — all-caps English alias'lar tr-TR lower altında 'I' → 'ı'
+// dönüşümü yüzünden kaçıyordu. Dual-locale lookup'la artık tutmalı.
+record(
+  'alias: "COMPANIES" → accountCompany (P2: ASCII I, not dotless)',
+  __testing__.mapSheetNameToEntity('COMPANIES') === 'accountCompany',
+);
+record(
+  'alias: "CONTACTS" → accountContact',
+  __testing__.mapSheetNameToEntity('CONTACTS') === 'accountContact',
+);
+record(
+  'alias: "ACCOUNTS" → account',
+  __testing__.mapSheetNameToEntity('ACCOUNTS') === 'account',
+);
+record(
+  'alias: "ADDRESSES" → accountAddress',
+  __testing__.mapSheetNameToEntity('ADDRESSES') === 'accountAddress',
+);
+record(
+  'alias: "PROJECTS" → accountProject',
+  __testing__.mapSheetNameToEntity('PROJECTS') === 'accountProject',
+);
+record(
+  'alias: "İLİŞKİLİ ŞİRKET" (all-caps TR) → accountCompany',
+  __testing__.mapSheetNameToEntity('İLİŞKİLİ ŞİRKET') === 'accountCompany',
+);
+record(
+  'alias: "MÜŞTERİ ANA KARTI" → account',
+  __testing__.mapSheetNameToEntity('MÜŞTERİ ANA KARTI') === 'account',
+);
 
 record('legacy: "Genel" detected', __testing__.isLegacySheet('Genel') === true);
 record('legacy: "Genel Tekil" detected', __testing__.isLegacySheet('Genel Tekil') === true);
@@ -93,6 +123,27 @@ record('cell: undefined → ""', __testing__.normalizeCell(undefined) === '');
     record('parser: accountCompany.totalRows === 1', r.bundle.accountCompany.totalRows === 1);
     record('parser: accountProject.totalRows === 1', r.bundle.accountProject.totalRows === 1);
     record('parser: info.mappedSheets === 5', r.info.mappedSheets.length === 5);
+  }
+}
+
+// Codex P2 — all-caps EN sheet adlarıyla happy path: hiçbir sheet
+// unmapped'a düşmemeli, çocuk entity sayıları 0 olmamalı.
+{
+  const buf = buildWorkbookBuffer([
+    { name: 'ACCOUNTS', rows: [{ vkn: '1234567890', name: 'ACME LTD' }] },
+    { name: 'COMPANIES', rows: [{ accountKey: '1234567890', externalCustomerCode: 'A001' }] },
+    { name: 'CONTACTS', rows: [{ accountKey: '1234567890', email: 'a@b.com' }] },
+    { name: 'ADDRESSES', rows: [{ accountKey: '1234567890', line1: 'Sokak 1' }] },
+    { name: 'PROJECTS', rows: [{ accountCompanyKey: 'A001', code: 'P-1' }] },
+  ]);
+  const r = parseCustomer360Workbook(buf);
+  record('parser: all-caps EN sheets → ok', r.ok === true);
+  if (r.ok) {
+    record('parser: COMPANIES → accountCompany totalRows === 1', r.bundle.accountCompany.totalRows === 1);
+    record('parser: CONTACTS → accountContact totalRows === 1', r.bundle.accountContact.totalRows === 1);
+    record('parser: ADDRESSES → accountAddress totalRows === 1', r.bundle.accountAddress.totalRows === 1);
+    record('parser: PROJECTS → accountProject totalRows === 1', r.bundle.accountProject.totalRows === 1);
+    record('parser: no unmapped sheets', r.info.unmappedSheets.length === 0);
   }
 }
 
@@ -239,6 +290,21 @@ try {
 }
 
 // ─── PART C: source-grep — no schema migration, no commit/rollback change ─
+
+// Codex P2 — Customer360Page handleFile: onPickFile parse SUCCESS sonrası
+// çağrılmalı. Aksi halde parse fail olunca sourceFile yeni dosyaya işaret
+// eder ama bundle/sourceMeta eski; large-flow yanlış mapping ile yeni
+// dosyayı yollar.
+const pageSrc = fs.readFileSync('src/features/admin/dataImport/customer360/Customer360Page.tsx', 'utf8');
+const handleFileBlock = pageSrc.split('async function handleFile(')[1] ?? '';
+const tryBlock = handleFileBlock.split('setBusy(true);')[1]?.split('} catch')[0] ?? '';
+const onPickFilePosition = tryBlock.indexOf('onPickFile?.');
+const onSheetsPosition = tryBlock.indexOf('onSheets(');
+record(
+  'handleFile: onPickFile is called AFTER onSheets (parse-success only)',
+  onPickFilePosition > 0 && onSheetsPosition > 0 && onPickFilePosition > onSheetsPosition,
+  `onSheets at ${onSheetsPosition}, onPickFile at ${onPickFilePosition}`,
+);
 
 const importSvcSrc = fs.readFileSync('src/services/importService.ts', 'utf8');
 record(
