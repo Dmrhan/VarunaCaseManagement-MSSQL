@@ -186,9 +186,11 @@ export async function apiFetch<T = unknown>(
   }
   if (!r.ok) {
     let serverMessage = '';
+    let serverMaxBytes: number | null = null;
     try {
       const body = await r.json();
       serverMessage = body?.message ?? body?.error ?? '';
+      if (typeof body?.maxBytes === 'number') serverMaxBytes = body.maxBytes;
     } catch {
       try {
         serverMessage = await r.text();
@@ -200,10 +202,23 @@ export async function apiFetch<T = unknown>(
     if (r.status === 401) {
       window.dispatchEvent(new CustomEvent('app:unauthenticated'));
     }
+    // 413: payload too large. Gövde JSON parse olmasa bile (Express
+    // default HTML hatası) kullanıcıya truthful + aksiyonable mesaj
+    // gösteriyoruz; "Sunucu hatası — yöneticine bildir." asla bu durumda
+    // çıkmasın.
+    let displayMessage = serverMessage || 'Sunucu hatası — yöneticine bildir.';
+    if (r.status === 413) {
+      const limitMb = serverMaxBytes ? Math.round((serverMaxBytes / (1024 * 1024)) * 10) / 10 : null;
+      displayMessage =
+        serverMessage ||
+        (limitMb
+          ? `Dosya dry-run için çok büyük (sunucu sınırı ~${limitMb} MB). Dosyayı daha küçük parçalara bölüp yeniden deneyin.`
+          : 'Dosya dry-run için çok büyük. Dosyayı daha küçük parçalara bölüp yeniden deneyin.');
+    }
     notify({
       type: 'error',
       title: `${errorContext} başarısız (${r.status})`,
-      message: serverMessage || 'Sunucu hatası — yöneticine bildir.',
+      message: displayMessage,
       duration: 6000,
     });
     console.error('[apiFetch]', r.status, path, serverMessage);
