@@ -611,6 +611,131 @@ router.post(
   }),
 );
 
+// ─────────────────────────────────────────────────────────────────
+// Customer 360 — Tick-mode commit (Hobby/serverless 60s ceiling)
+//
+// Büyük dosyalar (5k+ müşteri) tek call'da hem 2 MB body limit'i hem 60s
+// function ceiling'i aşıyor. Çözüm:
+//   1. POST /customer360/commit-xlsx  — multipart raw XLSX + ilk tick.
+//      Body 2 MB sınırından bağımsız; sunucu parse + dry-run + persist +
+//      maxRowsPerCall kadar satır işler. jobId + progress döner.
+//   2. POST /customer360/jobs/:id/commit-tick — küçük JSON body
+//      ({ maxRowsPerCall, skipErrors }). Resume yolu üzerinden sonraki
+//      tick'i işler. Frontend hasMore=false olana kadar loop'lar.
+//
+// Maliyet/kapsam: hâlâ 5k–10k aralığı için pragmatic; permanent 100k–1M
+// async pipeline OD-174'te. Müşteri Ana Kartı (Phase 1) import yolu
+// dokunulmadı.
+// ─────────────────────────────────────────────────────────────────
+
+router.post(
+  '/customer360/commit-xlsx',
+  (req, res, next) => {
+    xlsxUpload.single('file')(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({
+            code: 'payload_too_large',
+            message:
+              'Dosya 25 MB sunucu sınırının üstünde. Excel\'i parçalara bölüp her parçayı ayrı commit ile yükleyin.',
+            maxBytes: 25 * 1024 * 1024,
+          });
+        }
+        return res.status(400).json({ code: err.code ?? 'multer_error', message: err.message });
+      }
+      if (err?.code === 'unsupported_file_type') {
+        return res.status(415).json({ code: 'unsupported_file_type', message: err.message });
+      }
+      return res.status(400).json({ code: 'upload_failed', message: err?.message ?? 'Yükleme başarısız.' });
+    });
+  },
+  asyncRoute(async (req, res) => {
+    const file = req.file;
+    if (!file || !file.buffer) {
+      throw new ImportError('file zorunlu (multipart/form-data alanı).', { code: 'file_required' });
+    }
+
+    const companyId = (req.body?.companyId ?? '').toString().trim();
+    assertCompanyAdmin(req, companyId);
+
+    let sourceMeta = null;
+    if (req.body?.sourceMeta) {
+      try { sourceMeta = JSON.parse(req.body.sourceMeta); }
+      catch { throw new ImportError('sourceMeta JSON parse edilemedi.', { code: 'source_meta_invalid' }); }
+    }
+    let options = { skipErrors: true };
+    if (req.body?.options) {
+      try {
+        const parsed = JSON.parse(req.body.options);
+        options = { ...options, ...parsed };
+      } catch { throw new ImportError('options JSON parse edilemedi.', { code: 'options_invalid' }); }
+    }
+    if (req.body?.maxRowsPerCall) {
+      const n = Number(req.body.maxRowsPerCall);
+      if (Number.isFinite(n) && n > 0) options.maxRowsPerCall = Math.floor(n);
+    }
+
+    const parsed = parseCustomer360Workbook(file.buffer);
+    if (!parsed.ok) {
+      const status = parsed.error.code === 'unsupported_legacy_layout' ? 422 : 400;
+      return res.status(status).json({
+        code: parsed.error.code,
+        message: parsed.error.message,
+        meta: parsed.error.meta ?? null,
+      });
+    }
+
+    // Server-side bundle → dryRunCustomer360 contract.
+    const entitiesPayload = {};
+    for (const [entityKey, block] of Object.entries(parsed.bundle)) {
+      entitiesPayload[entityKey] = {
+        columns: block.columns,
+        mapping: block.columns.map((c) => ({ source: c, targetKey: c })),
+        rows: block.rows,
+      };
+    }
+
+    const result = await commitCustomer360({
+      user: req.user,
+      companyId,
+      entities: entitiesPayload,
+      sourceMeta: sourceMeta ?? {
+        sourceType: 'file',
+        fileName: file.originalname ?? 'workbook.xlsx',
+        byteSize: file.size,
+      },
+      options,
+      jobId: null,
+    });
+    res.json({ ok: true, ...result, serverParseInfo: parsed.info });
+  }),
+);
+
+router.post(
+  '/customer360/jobs/:id/commit-tick',
+  asyncRoute(async (req, res) => {
+    const jobId = req.params.id;
+    const job = await getCustomer360Job({ jobId, allowedCompanyIds: req.user.allowedCompanyIds });
+    if (!job) throw new ImportError('Import job bulunamadı.', { status: 404, code: 'job_not_found' });
+    assertCompanyAdmin(req, job.companyId);
+    const options = { skipErrors: true, ...(req.body?.options ?? {}) };
+    if (req.body?.maxRowsPerCall) {
+      const n = Number(req.body.maxRowsPerCall);
+      if (Number.isFinite(n) && n > 0) options.maxRowsPerCall = Math.floor(n);
+    }
+    const result = await commitCustomer360({
+      user: req.user,
+      companyId: job.companyId,
+      entities: null,
+      sourceMeta: null,
+      options,
+      jobId,
+    });
+    res.json({ ok: true, ...result });
+  }),
+);
+
 router.post(
   '/customer360/jobs/:id/rollback',
   asyncRoute(async (req, res) => {
