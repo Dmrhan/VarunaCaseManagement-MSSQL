@@ -81,24 +81,39 @@ const LEGACY_SHEET_NORMALIZED = new Set([
   'detay',
 ]);
 
+/**
+ * Header normalize — iki locale formu birden döner:
+ *   - tr-TR lower: "İLİŞKİLİ ŞİRKET" → "ilişkili şirket" (TR doğru)
+ *   - ASCII lower: "COMPANIES" → "companies" (EN doğru)
+ *
+ * tr-TR locale lower ASCII 'I' karakterini DOTLESS 'ı'ya çevirir;
+ * dolayısıyla "COMPANIES" → "companıes" → alias eşleşmez. Codex P2
+ * bunu kaçırıyordu. Lookup her iki formu da dener; biri map'te varsa
+ * o döner. Diğer Türkçe harfler (Ş/Ç/Ğ/Ö/Ü) zaten ASCII'de yok, iki
+ * form aynı sonucu verir.
+ */
+function normalizeHeaderForms(s) {
+  if (s == null) return { tr: '', ascii: '' };
+  const trimmed = String(s).trim().replace(/\s+/g, ' ');
+  return {
+    tr: trimmed.toLocaleLowerCase('tr-TR'),
+    ascii: trimmed.toLowerCase(),
+  };
+}
+
 function normalizeHeaderName(s) {
-  if (s == null) return '';
-  // Sadece tr-TR locale lower + whitespace squash. NFD ile decompose
-  // ETMİYORUZ — alias map key'leri NFC; NFD ardından bytes farklı çıkar.
-  // tr-TR lowercase "İ" → "i", "I" → "ı"; diğer Türkçe harfler birebir.
-  return String(s)
-    .toLocaleLowerCase('tr-TR')
-    .trim()
-    .replace(/\s+/g, ' ');
+  // Backward-compat: tek değer döner (tr form). Sadece eski test'ler için.
+  return normalizeHeaderForms(s).tr;
 }
 
 function mapSheetNameToEntity(sheetName) {
-  const norm = normalizeHeaderName(sheetName);
-  return SHEET_ALIASES[norm] ?? null;
+  const { tr, ascii } = normalizeHeaderForms(sheetName);
+  return SHEET_ALIASES[tr] ?? SHEET_ALIASES[ascii] ?? null;
 }
 
 function isLegacySheet(sheetName) {
-  return LEGACY_SHEET_NORMALIZED.has(normalizeHeaderName(sheetName));
+  const { tr, ascii } = normalizeHeaderForms(sheetName);
+  return LEGACY_SHEET_NORMALIZED.has(tr) || LEGACY_SHEET_NORMALIZED.has(ascii);
 }
 
 /**

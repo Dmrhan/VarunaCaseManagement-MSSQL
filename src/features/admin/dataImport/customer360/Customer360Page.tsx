@@ -998,13 +998,17 @@ function FileSourcePanel({
     }
     setBusy(true);
     try {
-      onPickFile?.(file);
       const { sheets, suggested } = await readCustomer360Workbook(file);
       onSheets(
         sheets,
         { sourceType: 'file', fileName: file.name, sourceUrlMasked: null, dataPath: null },
         suggested,
       );
+      // Codex P2 — File ref'i parse başarılı olduktan SONRA kaydet.
+      // Aksi halde parse fail olursa parent bundle/sourceMeta eski
+      // workbook'a aitken sourceFile yeni dosyayı işaret eder; large-
+      // payload fallback eski mapping ile yeni dosyayı POST edebilirdi.
+      onPickFile?.(file);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Dosya okunamadı.');
     } finally {
