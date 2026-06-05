@@ -25,7 +25,7 @@ Phase B (commit `6cf615c`) sunucu tarafı multipart XLSX dry-run köprüsü ekle
 - Standart şablon sheet alias'ları desteklenir; legacy preset (Genel/Genel Tekil/Detaylar) server path'inde reddedilir, client small-flow legacy transformer'larına düşer.
 - Commit hâlâ sync; large workbook'lar için Vercel serverless 60s/900s duration sınırı risk.
 
-**Permanent çözüm (ROADMAP "Future Product Direction" + OD-018):**
+**Permanent çözüm (ROADMAP "Future Product Direction" + OD-174):**
 
 - Signed-URL Supabase Storage upload (browser → storage doğrudan, BFF metadata).
 - Yeni tablolar: `ImportJob` extension + `ImportJobFile` + `ImportStagingRow` + `ImportValidationIssue`.
