@@ -509,19 +509,32 @@ function AccountIdInline({ id }: { id: string }) {
 }
 
 function CustomerTypeBadge({ type }: { type: AccountListItem['customerType'] }) {
-  // Customer 360 import sonrası gelen Türkçe enum'lar (Bireysel/Kurumsal/
-  // Kamu/Vakıf-STK) + legacy English ('Individual'/'Corporate') ve
-  // 'individual'/'corporate' lowercase varyantları için kısaltma + tint.
-  // Backend datasını DEĞİŞTİRMİYORUZ; sadece görüntü.
+  // CustomerType wire values gerçek API yanıtında EN değerler taşır:
+  //   'Individual' | 'Corporate' | 'Government' | 'NonProfit'
+  // Prisma `@map("Bireysel"|"Kurumsal"|"Kamu"|"Vakıf-STK")` ile DB'de TR
+  // saklanır ama client her zaman EN görür. Codex P2 fix: önceki revizyon
+  // Government / NonProfit'i kaçırıp slate fallback ("Gov" / "Non")
+  // gösteriyordu.
+  //
+  // Defensive olarak DB-internal TR + lowercase EN varyantları da
+  // tutuluyor (legacy / future-proof). Backend datası DEĞİŞMİYOR; sadece
+  // görüntü mapping'i.
   const map: Record<string, { short: string; tint: 'blue' | 'amber' | 'violet' | 'slate' }> = {
+    // Current wire values (canonical)
+    Individual: { short: 'Bir', tint: 'amber' },
+    Corporate: { short: 'Kur', tint: 'blue' },
+    Government: { short: 'Kam', tint: 'violet' },
+    NonProfit: { short: 'Vak', tint: 'violet' },
+    // Lowercase wire variants (defensive)
+    individual: { short: 'Bir', tint: 'amber' },
+    corporate: { short: 'Kur', tint: 'blue' },
+    government: { short: 'Kam', tint: 'violet' },
+    nonprofit: { short: 'Vak', tint: 'violet' },
+    // DB-internal TR (only if surface'ed directly somewhere)
     Bireysel: { short: 'Bir', tint: 'amber' },
     Kurumsal: { short: 'Kur', tint: 'blue' },
     Kamu: { short: 'Kam', tint: 'violet' },
     'Vakıf-STK': { short: 'Vak', tint: 'violet' },
-    Individual: { short: 'Bir', tint: 'amber' },
-    Corporate: { short: 'Kur', tint: 'blue' },
-    individual: { short: 'Bir', tint: 'amber' },
-    corporate: { short: 'Kur', tint: 'blue' },
   };
   const key = String(type ?? '');
   const cfg = map[key] ?? { short: key.slice(0, 3) || '—', tint: 'slate' };
