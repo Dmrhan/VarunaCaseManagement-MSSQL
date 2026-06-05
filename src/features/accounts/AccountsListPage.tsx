@@ -522,17 +522,17 @@ function CustomerTypeBadge({ type }: { type: AccountListItem['customerType'] }) 
   const map: Record<string, { short: string; tint: 'blue' | 'amber' | 'violet' | 'slate' }> = {
     // Current wire values (canonical)
     Individual: { short: 'Bir', tint: 'amber' },
-    Corporate: { short: 'Kur', tint: 'blue' },
+    Corporate: { short: 'KRM', tint: 'blue' },
     Government: { short: 'Kam', tint: 'violet' },
     NonProfit: { short: 'Vak', tint: 'violet' },
     // Lowercase wire variants (defensive)
     individual: { short: 'Bir', tint: 'amber' },
-    corporate: { short: 'Kur', tint: 'blue' },
+    corporate: { short: 'KRM', tint: 'blue' },
     government: { short: 'Kam', tint: 'violet' },
     nonprofit: { short: 'Vak', tint: 'violet' },
     // DB-internal TR (only if surface'ed directly somewhere)
     Bireysel: { short: 'Bir', tint: 'amber' },
-    Kurumsal: { short: 'Kur', tint: 'blue' },
+    Kurumsal: { short: 'KRM', tint: 'blue' },
     Kamu: { short: 'Kam', tint: 'violet' },
     'Vakıf-STK': { short: 'Vak', tint: 'violet' },
   };
