@@ -122,7 +122,11 @@ export function AccountsListPage({ onSelectAccount }: AccountsListPageProps) {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
+    // Full-width grid: parent app shell zaten genişliği yönetir
+    // (`max-w-7xl` daha önce sayfayı 1280px'te ortalıyordu, böylece
+    // 1920px ekranlarda dar kart gibi görünüyordu). CasesListPage
+    // pattern'i ile aynı: tek başına `space-y-4`.
+    <div className="space-y-4">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-ndark-text">Müşteriler</h1>
@@ -143,7 +147,7 @@ export function AccountsListPage({ onSelectAccount }: AccountsListPageProps) {
 
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <Field label="Ara">
               <div className="relative">
                 <Search
@@ -197,6 +201,11 @@ export function AccountsListPage({ onSelectAccount }: AccountsListPageProps) {
               </Select>
             </Field>
           </div>
+          {data && (
+            <div className="hidden md:flex md:items-end md:pb-2 text-[11px] text-slate-500 dark:text-ndark-muted whitespace-nowrap">
+              <span><strong className="text-slate-700 dark:text-ndark-text">{data.total.toLocaleString('tr-TR')}</strong> müşteri</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -283,20 +292,22 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
-                <th className="px-4 py-3">Müşteri</th>
-                <th className="px-4 py-3">VKN</th>
-                <th className="px-4 py-3">Şirketler</th>
-                <th className="px-4 py-3">İletişim</th>
-                <th className="px-4 py-3">Açık</th>
-                <th className="px-4 py-3">Toplam</th>
-                <th className="px-4 py-3">Durum</th>
-                {isWriter && <th className="px-4 py-3"></th>}
+                <th className="px-3 py-2.5">Müşteri</th>
+                <th className="px-3 py-2.5">Tip</th>
+                <th className="px-3 py-2.5">VKN</th>
+                <th className="px-3 py-2.5">V.D.</th>
+                <th className="px-3 py-2.5">Şirketler</th>
+                <th className="px-3 py-2.5">İletişim</th>
+                <th className="px-3 py-2.5">Açık</th>
+                <th className="px-3 py-2.5">Toplam</th>
+                <th className="px-3 py-2.5">Durum</th>
+                {isWriter && <th className="px-3 py-2.5"></th>}
               </tr>
             </thead>
             <tbody>
-              <TableRowSkeleton cols={isWriter ? 8 : 7} />
-              <TableRowSkeleton cols={isWriter ? 8 : 7} />
-              <TableRowSkeleton cols={isWriter ? 8 : 7} />
+              <TableRowSkeleton cols={isWriter ? 10 : 9} />
+              <TableRowSkeleton cols={isWriter ? 10 : 9} />
+              <TableRowSkeleton cols={isWriter ? 10 : 9} />
             </tbody>
           </table>
         </div>
@@ -322,19 +333,22 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-ndark-border dark:bg-ndark-card">
-      {/* Desktop / tablet */}
-      <div className="hidden md:block">
+      {/* Desktop / tablet. overflow-x-auto: dar viewport'ta yatay scroll;
+          1440-1920px'te tek bakışta tüm kolonlar. */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
-              <th className="px-4 py-3 font-medium">Müşteri Adı</th>
-              <th className="px-4 py-3 font-medium">VKN</th>
-              <th className="px-4 py-3 font-medium">Şirketler</th>
-              <th className="px-4 py-3 font-medium">İletişim</th>
-              <th className="px-4 py-3 text-right font-medium">Açık</th>
-              <th className="px-4 py-3 text-right font-medium">Toplam</th>
-              <th className="px-4 py-3 font-medium">Durum</th>
-              {isWriter && <th className="px-4 py-3" />}
+              <th className="px-3 py-2.5 font-medium">Müşteri Adı</th>
+              <th className="px-3 py-2.5 font-medium">Tip</th>
+              <th className="px-3 py-2.5 font-medium">VKN</th>
+              <th className="px-3 py-2.5 font-medium">V.D.</th>
+              <th className="px-3 py-2.5 font-medium">Şirketler</th>
+              <th className="px-3 py-2.5 font-medium">İletişim</th>
+              <th className="px-3 py-2.5 text-right font-medium">Açık</th>
+              <th className="px-3 py-2.5 text-right font-medium">Toplam</th>
+              <th className="px-3 py-2.5 font-medium">Durum</th>
+              {isWriter && <th className="px-3 py-2.5 w-10" />}
             </tr>
           </thead>
           <tbody>
@@ -344,22 +358,32 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
                 onClick={() => onSelect(row.id)}
                 className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50 last:border-b-0 dark:border-ndark-border/60 dark:hover:bg-ndark-surface"
               >
-                <td className="px-4 py-3">
+                <td className="px-3 py-2.5 min-w-[220px]">
                   <div className="font-medium text-slate-900 dark:text-ndark-text">
                     {row.name}
                   </div>
                   <AccountIdInline id={row.id} />
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-ndark-text">
+                <td className="px-3 py-2.5">
+                  <CustomerTypeBadge type={row.customerType} />
+                </td>
+                <td className="px-3 py-2.5 font-mono text-xs text-slate-700 dark:text-ndark-text whitespace-nowrap">
                   {row.vknMasked ?? <span className="text-slate-400 dark:text-ndark-dim">—</span>}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-2.5 text-xs text-slate-700 dark:text-ndark-text">
+                  {row.taxOffice ? (
+                    <span className="block max-w-[140px] truncate" title={row.taxOffice}>{row.taxOffice}</span>
+                  ) : (
+                    <span className="text-slate-400 dark:text-ndark-dim">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 max-w-[340px]">
                   <CompanyChips companies={row.companies} />
                 </td>
-                <td className="px-4 py-3 text-xs text-slate-700 dark:text-ndark-text">
+                <td className="px-3 py-2.5 text-xs text-slate-700 dark:text-ndark-text max-w-[220px]">
                   <ContactCell phone={row.phone} email={row.email} />
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-3 py-2.5 text-right tabular-nums">
                   <span
                     className={
                       row.openCaseCount > 0
@@ -370,16 +394,16 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
                     {row.openCaseCount}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right text-slate-700 dark:text-ndark-text">
+                <td className="px-3 py-2.5 text-right tabular-nums text-slate-700 dark:text-ndark-text">
                   {row.totalCaseCount}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-2.5">
                   <Badge tint={row.isActive ? 'emerald' : 'slate'}>
                     {row.isActive ? 'Aktif' : 'Pasif'}
                   </Badge>
                 </td>
                 {isWriter && (
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-3 py-2.5 text-right">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -481,6 +505,30 @@ function AccountIdInline({ id }: { id: string }) {
         <Copy size={10} />
       </button>
     </div>
+  );
+}
+
+function CustomerTypeBadge({ type }: { type: AccountListItem['customerType'] }) {
+  // Customer 360 import sonrası gelen Türkçe enum'lar (Bireysel/Kurumsal/
+  // Kamu/Vakıf-STK) + legacy English ('Individual'/'Corporate') ve
+  // 'individual'/'corporate' lowercase varyantları için kısaltma + tint.
+  // Backend datasını DEĞİŞTİRMİYORUZ; sadece görüntü.
+  const map: Record<string, { short: string; tint: 'blue' | 'amber' | 'violet' | 'slate' }> = {
+    Bireysel: { short: 'Bir', tint: 'amber' },
+    Kurumsal: { short: 'Kur', tint: 'blue' },
+    Kamu: { short: 'Kam', tint: 'violet' },
+    'Vakıf-STK': { short: 'Vak', tint: 'violet' },
+    Individual: { short: 'Bir', tint: 'amber' },
+    Corporate: { short: 'Kur', tint: 'blue' },
+    individual: { short: 'Bir', tint: 'amber' },
+    corporate: { short: 'Kur', tint: 'blue' },
+  };
+  const key = String(type ?? '');
+  const cfg = map[key] ?? { short: key.slice(0, 3) || '—', tint: 'slate' };
+  return (
+    <span title={key} className="inline-block">
+      <Badge tint={cfg.tint}>{cfg.short}</Badge>
+    </span>
   );
 }
 
