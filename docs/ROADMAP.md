@@ -221,7 +221,7 @@ Supabase Vault entegrasyonu gerek.
 **Priority:** Medium (when triggered)
 **Status:** Proposed (design doc'lu)
 **Trigger:** Tek tenant'tan 25 MB üstü gerçek workbook talebi gelirse veya UNIVERA çeyreklik göçü 25 MB'i aşarsa
-Phase B server-side XLSX dry-run köprüsü 5k–20k satır aralığında çalışıyor; 100k+ için staging + cron worker mimarisi şart. Tasarım kararı OD-018'de (architecture audit doc'u tamam, kod henüz değil).
+Phase B server-side XLSX dry-run köprüsü 5k–20k satır aralığında çalışıyor; 100k+ için staging + cron worker mimarisi şart. Tasarım kararı OD-174'te (architecture audit doc'u tamam, kod henüz değil).
 - Browser parsed JSON yerine signed-URL Supabase Storage upload
 - `ImportJob` + `ImportJobFile` + `ImportStagingRow` + `ImportValidationIssue` tabloları
 - Vercel cron tick (parse → validate → commit, 500-5000 satır/batch, resumable, `FOR UPDATE SKIP LOCKED`)
