@@ -1,6 +1,6 @@
 # Open Decisions Register
 
-**Last audited:** 2026-05-27 (Hidden Backlog Fragment Audit PR-C consolidation)
+**Last audited:** 2026-06-05 (post-May28 shipped sync; OD-174 eklendi)
 **Owner:** Ürün direktörü (connect@univera.com.tr)
 
 > Bu dosya **kararların canonical hâlidir** — daha önce 5 ayrı doc'a dağılmış product / tech kararları tek noktada toplanmıştır:
@@ -733,6 +733,16 @@ Her karar şu alanları taşır (compact format, gerekirse sub-line):
 - **Decision:** Phase 2 sonrası kim test eder, hangi sürede, feedback yöntemi?
 - **Status:** **PENDING**
 - **Source:** OPS §7 Q41
+
+### OD-174 — Customer 360 100k–1M satır import mimarisi
+- **Decision:** Phase B server-side XLSX dry-run köprüsü (25 MB, sync, multer + xlsx) yeterli mi, yoksa permanent async pipeline (Storage upload + staging + cron worker) şart mı?
+- **Context:** Bridge 5k–20k satır kapsamlı; 100k+ için Vercel serverless duration ve memory ceiling kırılır. Architecture audit + 7-fazlı plan (Phase 1 upload metadata → Phase 7 CSV streaming) hazır; kod implementasyonu beklemede.
+- **Options:** (a) Köprü yeterli — talep gelmedikçe permanent pipeline başlatma, (b) UNIVERA çeyreklik göçü trigger, başlat, (c) Şimdi başlat (proaktif scale)
+- **Recommended default:** (a) — trigger gelmedikçe başlatma; bridge yeterli olduğu sürece kod maliyetinden kaçın
+- **Status:** **DEFERRED**
+- **Owner:** Ürün direktörü
+- **Target timing:** Tek tenant'tan 25 MB üstü gerçek workbook talebi, veya UNIVERA çeyreklik göçü 25 MB'yi aşarsa
+- **Source:** docs/TECHNICAL_DEBT.md → "Customer 360 large import — async pipeline still future"; docs/ROADMAP.md "Future Product Direction"
 
 ---
 

@@ -4,11 +4,36 @@ Bu doküman bilinen teknik borç ve geleceğe ertelenmiş işleri kayıt altına
 Her madde tetikleme koşulu (trigger) ile birlikte yazılır — durumu değişen
 maddeler güncellenir veya kaldırılır.
 
-**Son güncelleme:** 2026-05-27 (Hidden Backlog Fragment Audit + PR-B consolidation)
+**Son güncelleme:** 2026-06-05 (post-May28 shipped sync; C360 async pipeline + smoke leak hardening eklendi)
 
 > Aktif backlog için → [docs/BACKLOG.md](BACKLOG.md)
 > Future product direction için → [docs/ROADMAP.md](ROADMAP.md)
 > Report Studio için → [docs/REPORT_STUDIO_BACKLOG.md](REPORT_STUDIO_BACKLOG.md)
+
+---
+
+## Customer 360 large import — async pipeline still future, server-side XLSX is bridge
+
+**Trigger:** Tek tenant'tan 25 MB üstü gerçek workbook talebi, veya UNIVERA çeyreklik göçü 25 MB'yi aşarsa.
+
+**Status:** Bridge active (5k–20k satır kapsamlı), permanent pipeline tasarımda
+
+Phase B (commit `6cf615c`) sunucu tarafı multipart XLSX dry-run köprüsü ekledi: tarayıcı parsed JSON yerine ham `.xlsx`'i multer ile 25 MB tavanlı POST eder, sunucu `xlsx` ile parse + mevcut `dryRunCustomer360` engine çalıştırır. **Bilinçli sınırlamalar:**
+
+- 25 MB file size hard ceiling (multer memory storage). 100k+ satır XLSX rahatlıkla aşar.
+- 5k account / 10k çocuk entity row caps Phase 2a'dan beri aynı.
+- Standart şablon sheet alias'ları desteklenir; legacy preset (Genel/Genel Tekil/Detaylar) server path'inde reddedilir, client small-flow legacy transformer'larına düşer.
+- Commit hâlâ sync; large workbook'lar için Vercel serverless 60s/900s duration sınırı risk.
+
+**Permanent çözüm (ROADMAP "Future Product Direction" + OD-018):**
+
+- Signed-URL Supabase Storage upload (browser → storage doğrudan, BFF metadata).
+- Yeni tablolar: `ImportJob` extension + `ImportJobFile` + `ImportStagingRow` + `ImportValidationIssue`.
+- Cron-tick worker (parse → validate → commit, 500–5000 satır/batch, `FOR UPDATE SKIP LOCKED` claim, `heartbeatAt` resumable, `nextBatchCursor`).
+- Dry-run summary aggregate SQL; UI sayfalı issue listesi (preview körü yerine).
+- CSV streaming 100k+ için resmî format; XLSX max ~50k.
+
+**Risk:** Bridge yeterli sayılırsa permanent pipeline çalışması ötelenir. Trigger geldiğinde 7-fazlı plan hazır (architecture audit tamamlandı).
 
 ---
 

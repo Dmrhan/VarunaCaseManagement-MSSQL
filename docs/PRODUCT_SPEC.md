@@ -61,6 +61,8 @@ Auth/RBAC                             ✅ TAMAMLANDI (Supabase Auth + 6 rol)
 Custom Fields + Şirket Ayarları       ✅ TAMAMLANDI (FieldDefinition + CompanySettings)
 
 > **2026-05 ship dalgası** (Master Data Decision Sprint + Notification/Approval Level A): Account customerType + VKN/TCKN privacy + Multi-address + AccountProject Phase 1 + SupportLevel L1/L2 + Person.isTeamLead + Product/Package catalog + Case product/package integration + Import Studio Phase 1 + Customer 360 Phase 2a Foundation + Resolution Approval flow + Notification rules/templates/customer response channel Level A + Action Center / Aksiyonlarım inbox + Watcher Inbox UI + Reply threading + reactions + Customerless flow + Customer Pulse + AI Status Report + deterministic Customer Match. Detaylı liste: [docs/ROADMAP.md](ROADMAP.md) §"Recent Ships / Platform Capabilities".
+>
+> **2026-05-28 → 2026-06-05 ship dalgası** (post-cleanup): Action Center UX redesign + mention inline reply; case notes safety (submit guard / dup prevention / own-note delete); L1 Case Resolution Console (Phase 1 + 2A-CommandBar + 2B-Workbench + 2C-DecisionRail + 2D-Notes + 2E-Files + 2F-Status + 2G-Transfer); Quick Case V2 (L1 intake + Çözümle oluştur); Customer 360 Phase 2b commit + rollback UI + Phase 2c iterative (template download authed, relationship keys + persistent child IDs, **Phase B server-side XLSX dry-run** 25 MB multipart köprü, truthful 413 + preflight, import-friendly identity warnings); Account ID standardization (`cus_<22 char Crockford>`); international phone input + 3 dynamic slot + primary + type/extension metadata; corporate `taxOffice`; Turkish-aware customer search (İ↔i case-fold). Smoke data hygiene (GNF/ACP1).
 
 3. Vaka Tipleri (CaseType)
 3.1 GeneralSupport — Genel Destek
