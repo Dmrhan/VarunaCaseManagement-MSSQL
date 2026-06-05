@@ -38,6 +38,100 @@ import { generateUniqueAccountId } from '../../utils/accountId.js';
 const ENTITY_ORDER = ['account', 'accountCompany', 'accountContact', 'accountAddress', 'accountProject'];
 const ROLLBACK_ORDER = [...ENTITY_ORDER].reverse();
 
+// Phase C-light — commit roundtrip reduction.
+//
+// (1) Per-entity prefetch: scope-wide findMany ONCE before the row loop,
+//     instead of per-row findUnique/findFirst. Net ~10k → ~5 lookup roundtrips
+//     for a 1000-customer + 5-entity import.
+// (2) Bounded concurrency per entity (within ENTITY_ORDER barriers): writes
+//     still go to Supabase pooler but in parallel batches; wall-clock drops
+//     from O(N×latency) toward O(N/concurrency × latency). 8 is a safe
+//     ceiling for default Supabase pooler + Prisma client (≈10 connections).
+// (3) Entity dependency order preserved (account → AC → contact/address/
+//     project). Parent IDs map populated after each entity's barrier so child
+//     entities never read stale data.
+// (4) ImportJobRow audit semantics unchanged — each row still receives its
+//     own status/recordId/beforeJson/afterJson update. Update calls run in
+//     the same bounded-concurrency batch as the write so total roundtrips
+//     halve in wall-clock terms.
+
+const COMMIT_CONCURRENCY = Math.max(
+  1,
+  Math.min(16, Number(process.env.C360_COMMIT_CONCURRENCY) || 8),
+);
+
+async function runWithConcurrency(items, worker, concurrency = COMMIT_CONCURRENCY) {
+  if (!items?.length) return [];
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function pump() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      try {
+        results[i] = { ok: true, value: await worker(items[i], i) };
+      } catch (err) {
+        results[i] = { ok: false, error: err };
+      }
+    }
+  }
+  const lanes = Array.from({ length: Math.min(concurrency, items.length) }, () => pump());
+  await Promise.all(lanes);
+  return results;
+}
+
+const TIMING_DEBUG = process.env.C360_IMPORT_DEBUG_TIMING === 'true';
+
+function makeTimer() {
+  const t0 = process.hrtime.bigint();
+  const marks = [];
+  return {
+    mark(label) {
+      const t = process.hrtime.bigint();
+      const ms = Number(t - t0) / 1e6;
+      marks.push({ label, ms: Math.round(ms) });
+    },
+    summary() {
+      const t = process.hrtime.bigint();
+      const total = Math.round(Number(t - t0) / 1e6);
+      return { totalMs: total, marks };
+    },
+    log(prefix = '[c360 commit]') {
+      if (!TIMING_DEBUG) return;
+      const s = this.summary();
+      // eslint-disable-next-line no-console
+      console.log(`${prefix} total=${s.totalMs}ms`, s.marks.map((m) => `${m.label}=${m.ms}ms`).join(' '));
+    },
+  };
+}
+
+// Hoisted select constants — used by both write functions and prefetch.
+const ACCOUNT_SELECT = {
+  id: true, name: true, vkn: true,
+  phone: true, phoneE164: true, phoneType: true, phoneExtension: true,
+  phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
+  phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
+  primaryPhoneSlot: true,
+  email: true, customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
+};
+const ACCOUNT_COMPANY_SELECT = {
+  id: true, accountId: true, companyId: true, externalCustomerCode: true,
+  packageName: true, segment: true, contractStartAt: true, contractEndAt: true, status: true,
+};
+const CONTACT_SELECT = {
+  id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
+  phoneE164: true, isPrimary: true, isActive: true, sourceExternalId: true,
+};
+const ADDRESS_SELECT = {
+  id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
+  line2: true, district: true, city: true, state: true, postalCode: true, country: true,
+  isDefault: true, isActive: true, sourceExternalId: true,
+};
+const PROJECT_SELECT = {
+  id: true, accountCompanyId: true, code: true, name: true, status: true,
+  startDate: true, endDate: true, description: true, isActive: true, sourceExternalId: true,
+};
+
 class CommitError extends Error {
   constructor(message, { status = 400, code = 'commit_error', extra = {} } = {}) {
     super(message);
@@ -249,20 +343,18 @@ function snapshotProject(p) {
 // Per-entity write functions (each returns recordId + before/after)
 // ─────────────────────────────────────────────────────────────────
 
-async function writeAccount(row, normalized) {
+async function writeAccount(row, normalized, prefetched = undefined) {
   // VKN exact match. If VKN missing → always create new account.
   // Phase 3 — select all phone slots so snapshot/before captures them
   // and rollback can restore.
-  const accountSelect = {
-    id: true, name: true, vkn: true,
-    phone: true, phoneE164: true, phoneType: true, phoneExtension: true,
-    phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
-    phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
-    primaryPhoneSlot: true,
-    email: true, customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
-  };
-  let existing = null;
-  if (normalized.vkn) {
+  //
+  // Phase C-light: caller may pass `prefetched` (an Account row from a
+  // pre-batch findMany({vkn: { in: ... }})). When supplied, we skip the
+  // per-row findUnique entirely. Falls back to live find for safety if
+  // prefetched is undefined and vkn is present.
+  const accountSelect = ACCOUNT_SELECT;
+  let existing = prefetched ?? null;
+  if (existing === null && normalized.vkn && prefetched === undefined) {
     existing = await prisma.account.findUnique({
       where: { vkn: normalized.vkn },
       select: accountSelect,
@@ -366,14 +458,18 @@ async function writeAccount(row, normalized) {
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotAccount(created) };
 }
 
-async function writeAccountCompany({ companyId, accountId, normalized }) {
-  const existing = await prisma.accountCompany.findUnique({
-    where: { accountId_companyId: { accountId, companyId } },
-    select: {
-      id: true, accountId: true, companyId: true, externalCustomerCode: true,
-      packageName: true, segment: true, contractStartAt: true, contractEndAt: true, status: true,
-    },
-  });
+async function writeAccountCompany({ companyId, accountId, normalized, prefetched = undefined }) {
+  // Phase C-light: per-row findUnique avoided when prefetched is provided
+  // (caller did one findMany({ accountId: { in: [...] }, companyId }) and
+  // built a Map<accountId, row>). Live find still runs when prefetched is
+  // undefined (safety net for resume / partial paths).
+  let existing = prefetched ?? null;
+  if (existing === null && prefetched === undefined) {
+    existing = await prisma.accountCompany.findUnique({
+      where: { accountId_companyId: { accountId, companyId } },
+      select: ACCOUNT_COMPANY_SELECT,
+    });
+  }
   if (existing) {
     const beforeJson = snapshotAccountCompany(existing);
     const patch = {};
@@ -387,10 +483,7 @@ async function writeAccountCompany({ companyId, accountId, normalized }) {
       ? await prisma.accountCompany.update({
           where: { id: existing.id },
           data: patch,
-          select: {
-            id: true, accountId: true, companyId: true, externalCustomerCode: true,
-            packageName: true, segment: true, contractStartAt: true, contractEndAt: true, status: true,
-          },
+          select: ACCOUNT_COMPANY_SELECT,
         })
       : existing;
     return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccountCompany(updated) };
@@ -406,41 +499,53 @@ async function writeAccountCompany({ companyId, accountId, normalized }) {
       contractEndAt: normalized.contractEndAt ? new Date(normalized.contractEndAt) : null,
       status: normalized.status ?? 'active',
     },
-    select: {
-      id: true, accountId: true, companyId: true, externalCustomerCode: true,
-      packageName: true, segment: true, contractStartAt: true, contractEndAt: true, status: true,
-    },
+    select: ACCOUNT_COMPANY_SELECT,
   });
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotAccountCompany(created) };
 }
 
-async function writeContact({ accountId, normalized }) {
+async function writeContact({ accountId, normalized, prefetched = undefined }) {
   // Phase 2c — sourceContactId TRY FIRST. Persistent external/ERP id —
   // second import with same value updates the same row instead of
   // creating a duplicate. Fall back to email then phoneE164 only when
   // sourceContactId is empty or no match found.
-  const contactSelect = {
-    id: true, accountId: true, fullName: true, title: true, email: true, phone: true,
-    phoneE164: true, isPrimary: true, isActive: true, sourceExternalId: true,
-  };
+  //
+  // Phase C-light: caller may pass `prefetched` = the FULL list of existing
+  // AccountContact rows for the parent accountId (one findMany ahead of
+  // the batch). We resolve the three-alternative match in memory in the
+  // same priority order (source → email → phoneE164). Falls back to live
+  // findFirst calls when prefetched is undefined.
+  const contactSelect = CONTACT_SELECT;
   let existing = null;
-  if (normalized.sourceContactId) {
-    existing = await prisma.accountContact.findFirst({
-      where: { accountId, sourceExternalId: normalized.sourceContactId },
-      select: contactSelect,
-    });
-  }
-  if (!existing && normalized.email) {
-    existing = await prisma.accountContact.findFirst({
-      where: { accountId, email: normalized.email },
-      select: contactSelect,
-    });
-  }
-  if (!existing && normalized.phone) {
-    existing = await prisma.accountContact.findFirst({
-      where: { accountId, phoneE164: normalized.phone },
-      select: contactSelect,
-    });
+  if (Array.isArray(prefetched)) {
+    if (normalized.sourceContactId) {
+      existing = prefetched.find((c) => c.sourceExternalId === normalized.sourceContactId) ?? null;
+    }
+    if (!existing && normalized.email) {
+      existing = prefetched.find((c) => c.email === normalized.email) ?? null;
+    }
+    if (!existing && normalized.phone) {
+      existing = prefetched.find((c) => c.phoneE164 === normalized.phone) ?? null;
+    }
+  } else {
+    if (normalized.sourceContactId) {
+      existing = await prisma.accountContact.findFirst({
+        where: { accountId, sourceExternalId: normalized.sourceContactId },
+        select: contactSelect,
+      });
+    }
+    if (!existing && normalized.email) {
+      existing = await prisma.accountContact.findFirst({
+        where: { accountId, email: normalized.email },
+        select: contactSelect,
+      });
+    }
+    if (!existing && normalized.phone) {
+      existing = await prisma.accountContact.findFirst({
+        where: { accountId, phoneE164: normalized.phone },
+        select: contactSelect,
+      });
+    }
   }
   if (existing) {
     const beforeJson = snapshotContact(existing);
@@ -497,33 +602,46 @@ async function writeContact({ accountId, normalized }) {
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotContact(created) };
 }
 
-async function writeAddress({ companyId, accountId, normalized }) {
+async function writeAddress({ companyId, accountId, normalized, prefetched = undefined }) {
   // Phase 2c — sourceAddressId TRY FIRST. Persistent external/ERP id —
   // tenant-scoped (companyId enforced). Fall back to soft (accountId,
   // companyId, type, label||line1) only when sourceAddressId empty or no
   // match. WR-A8 Phase 2b hotfix (P1) tenant guard preserved on both paths.
-  const addressSelect = {
-    id: true, accountId: true, companyId: true, type: true, label: true, line1: true,
-    line2: true, district: true, city: true, state: true, postalCode: true, country: true,
-    isDefault: true, isActive: true, sourceExternalId: true,
-  };
+  //
+  // Phase C-light: `prefetched` = list of existing Address rows already
+  // scoped to (accountId, companyId). In-memory match runs the same
+  // priority order. Live findFirst calls only when prefetched is undefined.
+  const addressSelect = ADDRESS_SELECT;
   let existing = null;
-  if (normalized.sourceAddressId) {
-    existing = await prisma.address.findFirst({
-      where: { accountId, companyId, sourceExternalId: normalized.sourceAddressId },
-      select: addressSelect,
-    });
-  }
-  if (!existing) {
-    const where = {
-      accountId,
-      companyId,
-      type: normalized.type,
-      ...(normalized.label
-        ? { label: normalized.label }
-        : { line1: normalized.line1 }),
-    };
-    existing = await prisma.address.findFirst({ where, select: addressSelect });
+  if (Array.isArray(prefetched)) {
+    if (normalized.sourceAddressId) {
+      existing = prefetched.find((a) => a.sourceExternalId === normalized.sourceAddressId) ?? null;
+    }
+    if (!existing) {
+      existing = prefetched.find((a) => {
+        if (a.type !== normalized.type) return false;
+        if (normalized.label) return a.label === normalized.label;
+        return a.line1 === normalized.line1;
+      }) ?? null;
+    }
+  } else {
+    if (normalized.sourceAddressId) {
+      existing = await prisma.address.findFirst({
+        where: { accountId, companyId, sourceExternalId: normalized.sourceAddressId },
+        select: addressSelect,
+      });
+    }
+    if (!existing) {
+      const where = {
+        accountId,
+        companyId,
+        type: normalized.type,
+        ...(normalized.label
+          ? { label: normalized.label }
+          : { line1: normalized.line1 }),
+      };
+      existing = await prisma.address.findFirst({ where, select: addressSelect });
+    }
   }
   if (existing) {
     // Defense in depth: existing.companyId must equal selected companyId.
@@ -596,26 +714,35 @@ async function writeAddress({ companyId, accountId, normalized }) {
   return { kind: 'created', recordId: created.id, beforeJson: null, afterJson: snapshotAddress(created) };
 }
 
-async function writeProject({ accountCompanyId, normalized }) {
+async function writeProject({ accountCompanyId, normalized, prefetched = undefined }) {
   // Phase 2c — sourceProjectId TRY FIRST. Fall back to (accountCompanyId,
   // code) unique match only when sourceProjectId empty or no match.
-  const projectSelect = {
-    id: true, accountCompanyId: true, code: true, name: true, status: true,
-    startDate: true, endDate: true, description: true, isActive: true, sourceExternalId: true,
-  };
+  //
+  // Phase C-light: `prefetched` = list of existing AccountProject rows for
+  // this accountCompanyId; in-memory match runs the same priority order.
+  const projectSelect = PROJECT_SELECT;
   const code = normalized.projectCode;
   let existing = null;
-  if (normalized.sourceProjectId) {
-    existing = await prisma.accountProject.findFirst({
-      where: { accountCompanyId, sourceExternalId: normalized.sourceProjectId },
-      select: projectSelect,
-    });
-  }
-  if (!existing) {
-    existing = await prisma.accountProject.findUnique({
-      where: { accountCompanyId_code: { accountCompanyId, code } },
-      select: projectSelect,
-    });
+  if (Array.isArray(prefetched)) {
+    if (normalized.sourceProjectId) {
+      existing = prefetched.find((p) => p.sourceExternalId === normalized.sourceProjectId) ?? null;
+    }
+    if (!existing) {
+      existing = prefetched.find((p) => p.code === code) ?? null;
+    }
+  } else {
+    if (normalized.sourceProjectId) {
+      existing = await prisma.accountProject.findFirst({
+        where: { accountCompanyId, sourceExternalId: normalized.sourceProjectId },
+        select: projectSelect,
+      });
+    }
+    if (!existing) {
+      existing = await prisma.accountProject.findUnique({
+        where: { accountCompanyId_code: { accountCompanyId, code } },
+        select: projectSelect,
+      });
+    }
   }
   if (existing) {
     const beforeJson = snapshotProject(existing);
@@ -774,14 +901,18 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
 
   let totals = { created: 0, updated: 0, skipped: 0, error: 0 };
   const entityCounts = {};
+  const timer = makeTimer();
 
   for (const entity of ENTITY_ORDER) {
     const rows = rowsByEntity[entity] ?? [];
     const eStats = { created: 0, updated: 0, skipped: 0, error: 0, total: rows.length };
+
+    // Pass 1 — drain terminal-state / skipped rows synchronously (no DB
+    // hit; just stats and parent-map propagation). Collect writeable rows
+    // for the prefetch + concurrent pass.
+    const writeable = [];
     for (const row of rows) {
-      // Idempotent retry: skip rows already in a terminal state.
       if (row.status === 'created' || row.status === 'updated' || row.status === 'rolled_back') {
-        // Still propagate parent map for subsequent children.
         if (entity === 'account' && row.accountId) rememberAccount(row.normalizedJson, row.accountId);
         if (entity === 'accountCompany' && row.recordId && row.normalizedJson?.accountKey && row.normalizedJson?.companyCode) {
           accountCompanyIdByKey.set(`${row.normalizedJson.accountKey}|${row.normalizedJson.companyCode}`, row.recordId);
@@ -792,28 +923,138 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
       }
       if (row.status === 'skipped') { eStats.skipped += 1; continue; }
       if (row.status === 'error') { eStats.error += 1; continue; }
+      writeable.push(row);
+    }
+
+    // Pass 2 — Phase C-light prefetch. Single findMany per entity slashes
+    // per-row findUnique/findFirst calls (~10k → 5 lookup roundtrips for a
+    // 1000-customer × 5-entity import). Prefetch maps fed into write
+    // functions via the new `prefetched` argument.
+    let prefetchByVkn = null;
+    let prefetchAcByAccountId = null;
+    let contactPrefetchByAccountId = null;
+    let addressPrefetchByAccountId = null;
+    let projectPrefetchByAcId = null;
+    let acFallbackByAccountId = null;
+    let resolvedParentIds = null;
+
+    if (entity === 'account') {
+      const vkns = [];
+      for (const row of writeable) {
+        if (row.action === 'skip') continue;
+        const v = row.normalizedJson?.vkn;
+        if (v) vkns.push(v);
+      }
+      if (vkns.length > 0) {
+        const found = await prisma.account.findMany({
+          where: { vkn: { in: [...new Set(vkns)] } },
+          select: ACCOUNT_SELECT,
+        });
+        prefetchByVkn = new Map(found.map((a) => [a.vkn, a]));
+      }
+      timer.mark('prefetch:account');
+    } else if (entity === 'accountCompany' || entity === 'accountContact' || entity === 'accountAddress' || entity === 'accountProject') {
+      // Resolve parent account IDs for this batch (in memory; uses the
+      // already-populated accountIdByKey).
+      resolvedParentIds = new Map(); // row.id → parentAccountId|null
+      const ids = new Set();
+      for (const row of writeable) {
+        if (row.action === 'skip') { resolvedParentIds.set(row.id, null); continue; }
+        const pid = resolveAccountId(row.normalizedJson?.accountKey);
+        resolvedParentIds.set(row.id, pid);
+        if (pid) ids.add(pid);
+      }
+      if (entity === 'accountCompany' && ids.size > 0) {
+        const found = await prisma.accountCompany.findMany({
+          where: { accountId: { in: [...ids] }, companyId },
+          select: ACCOUNT_COMPANY_SELECT,
+        });
+        prefetchAcByAccountId = new Map(found.map((ac) => [ac.accountId, ac]));
+      } else if (entity === 'accountContact' && ids.size > 0) {
+        const found = await prisma.accountContact.findMany({
+          where: { accountId: { in: [...ids] } },
+          select: CONTACT_SELECT,
+        });
+        contactPrefetchByAccountId = new Map();
+        for (const c of found) {
+          const arr = contactPrefetchByAccountId.get(c.accountId);
+          if (arr) arr.push(c); else contactPrefetchByAccountId.set(c.accountId, [c]);
+        }
+      } else if (entity === 'accountAddress' && ids.size > 0) {
+        const found = await prisma.address.findMany({
+          where: { accountId: { in: [...ids] }, companyId },
+          select: ADDRESS_SELECT,
+        });
+        addressPrefetchByAccountId = new Map();
+        for (const a of found) {
+          const arr = addressPrefetchByAccountId.get(a.accountId);
+          if (arr) arr.push(a); else addressPrefetchByAccountId.set(a.accountId, [a]);
+        }
+      } else if (entity === 'accountProject' && ids.size > 0) {
+        // For projects we need AC IDs first. Read from already-populated
+        // accountCompanyIdByKey and prefetch AC fallback for any (accountId,
+        // companyId) pairs missing from the in-batch map.
+        const acIds = new Set();
+        const missingAcParents = new Set();
+        for (const row of writeable) {
+          if (row.action === 'skip') continue;
+          const n = row.normalizedJson;
+          if (!n?.accountKey || !n?.accountCompanyKey) continue;
+          const key = `${n.accountKey}|${n.accountCompanyKey}`;
+          const acId = accountCompanyIdByKey.get(key);
+          if (acId) acIds.add(acId);
+          else {
+            const pid = resolvedParentIds.get(row.id);
+            if (pid) missingAcParents.add(pid);
+          }
+        }
+        if (missingAcParents.size > 0) {
+          const fallback = await prisma.accountCompany.findMany({
+            where: { accountId: { in: [...missingAcParents] }, companyId },
+            select: { id: true, accountId: true },
+          });
+          acFallbackByAccountId = new Map(fallback.map((ac) => [ac.accountId, ac.id]));
+          for (const ac of fallback) acIds.add(ac.id);
+        }
+        if (acIds.size > 0) {
+          const found = await prisma.accountProject.findMany({
+            where: { accountCompanyId: { in: [...acIds] } },
+            select: PROJECT_SELECT,
+          });
+          projectPrefetchByAcId = new Map();
+          for (const p of found) {
+            const arr = projectPrefetchByAcId.get(p.accountCompanyId);
+            if (arr) arr.push(p); else projectPrefetchByAcId.set(p.accountCompanyId, [p]);
+          }
+        }
+      }
+      timer.mark(`prefetch:${entity}`);
+    }
+
+    // Pass 3 — bounded concurrent writes. Within an entity, rows are
+    // independent (parent maps already populated). Across entities the
+    // outer for-of preserves account → AC → siblings ordering.
+    await runWithConcurrency(writeable, async (row) => {
       if (row.action === 'skip') {
         await prisma.importJobRow.update({ where: { id: row.id }, data: { status: 'skipped', updatedAt: new Date() } });
         eStats.skipped += 1;
-        continue;
+        return;
       }
-
       const normalized = row.normalizedJson ?? {};
       try {
         if (entity === 'account') {
-          const r = await writeAccount(row, normalized);
+          const prefetched = prefetchByVkn && normalized.vkn ? (prefetchByVkn.get(normalized.vkn) ?? null) : (prefetchByVkn ? null : undefined);
+          const r = await writeAccount(row, normalized, prefetched);
           await prisma.importJobRow.update({
             where: { id: row.id },
             data: { status: r.kind, accountId: r.recordId, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
           rememberAccount(normalized, r.recordId);
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
-          continue;
+          return;
         }
 
-        // Resolve parent account for child entities
-        const accountKey = normalized.accountKey;
-        const parentAccountId = resolveAccountId(accountKey);
+        const parentAccountId = resolvedParentIds.get(row.id);
         if (!parentAccountId) {
           await prisma.importJobRow.update({
             where: { id: row.id },
@@ -822,56 +1063,61 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
               errorsJson: appendRowErrors(row.errorsJson, [{
                 entity, targetKey: 'accountKey', label: 'Müşteri Anahtarı',
                 code: 'parent_account_unresolved',
-                message: `Parent Account ${entity} satırı için resolve edilemedi (accountKey="${accountKey}"). Parent satır skipErrors veya hatalı olabilir.`,
+                message: `Parent Account ${entity} satırı için resolve edilemedi (accountKey="${normalized.accountKey}"). Parent satır skipErrors veya hatalı olabilir.`,
               }]),
               updatedAt: new Date(),
             },
           });
           eStats.error += 1;
-          continue;
+          return;
         }
 
         if (entity === 'accountCompany') {
-          const r = await writeAccountCompany({ companyId, accountId: parentAccountId, normalized });
+          const prefetched = prefetchAcByAccountId ? (prefetchAcByAccountId.get(parentAccountId) ?? null) : undefined;
+          const r = await writeAccountCompany({ companyId, accountId: parentAccountId, normalized, prefetched });
           await prisma.importJobRow.update({
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
-          // Map (accountKey, companyCode) → AC.id for downstream projects.
           if (normalized.accountKey && normalized.companyCode) {
             accountCompanyIdByKey.set(`${normalized.accountKey}|${normalized.companyCode}`, r.recordId);
           }
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
-          continue;
+          return;
         }
 
         if (entity === 'accountContact') {
-          const r = await writeContact({ accountId: parentAccountId, normalized });
+          const prefetched = contactPrefetchByAccountId ? (contactPrefetchByAccountId.get(parentAccountId) ?? []) : undefined;
+          const r = await writeContact({ accountId: parentAccountId, normalized, prefetched });
           await prisma.importJobRow.update({
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
-          continue;
+          return;
         }
 
         if (entity === 'accountAddress') {
-          const r = await writeAddress({ companyId, accountId: parentAccountId, normalized });
+          const prefetched = addressPrefetchByAccountId ? (addressPrefetchByAccountId.get(parentAccountId) ?? []) : undefined;
+          const r = await writeAddress({ companyId, accountId: parentAccountId, normalized, prefetched });
           await prisma.importJobRow.update({
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
-          continue;
+          return;
         }
 
         if (entity === 'accountProject') {
-          // accountCompanyKey was bound to selected companyId in dry-run.
           const acKey = `${normalized.accountKey}|${normalized.accountCompanyKey}`;
-          const accountCompanyId = accountCompanyIdByKey.get(acKey);
+          let accountCompanyId = accountCompanyIdByKey.get(acKey);
+          if (!accountCompanyId && acFallbackByAccountId) {
+            const fid = acFallbackByAccountId.get(parentAccountId);
+            if (fid) { accountCompanyId = fid; accountCompanyIdByKey.set(acKey, fid); }
+          }
           if (!accountCompanyId) {
-            // Try to look up an existing AccountCompany for (parentAccountId, companyId)
-            // — when the source had no accountCompany row but the relation exists in DB.
+            // Last-resort live lookup (preserves prior behavior for paths
+            // not covered by the batched prefetch — e.g. resume).
             const existingAc = await prisma.accountCompany.findUnique({
               where: { accountId_companyId: { accountId: parentAccountId, companyId } },
               select: { id: true },
@@ -890,18 +1136,19 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
                 },
               });
               eStats.error += 1;
-              continue;
+              return;
             }
+            accountCompanyId = existingAc.id;
             accountCompanyIdByKey.set(acKey, existingAc.id);
           }
-          const finalAcId = accountCompanyIdByKey.get(acKey);
-          const r = await writeProject({ accountCompanyId: finalAcId, normalized });
+          const prefetched = projectPrefetchByAcId ? (projectPrefetchByAcId.get(accountCompanyId) ?? []) : undefined;
+          const r = await writeProject({ accountCompanyId, normalized, prefetched });
           await prisma.importJobRow.update({
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
-          continue;
+          return;
         }
       } catch (err) {
         await prisma.importJobRow.update({
@@ -918,13 +1165,16 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
         });
         eStats.error += 1;
       }
-    }
+    });
+    timer.mark(`commit:${entity}`);
+
     entityCounts[entity] = eStats;
     totals.created += eStats.created;
     totals.updated += eStats.updated;
     totals.skipped += eStats.skipped;
     totals.error += eStats.error;
   }
+  timer.log('[c360 commit]');
 
   const hasError = totals.error > 0;
   const status = hasError ? 'partial' : 'completed';

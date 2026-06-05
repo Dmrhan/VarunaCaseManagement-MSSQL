@@ -159,7 +159,6 @@ export function Customer360Page() {
   // WR-A8 Phase 2b — commit / rollback handlers
   async function runCommit() {
     if (!companyId || !sourceMeta) return;
-    setCommitting(true);
     const payload: Record<string, { columns: string[]; mapping: MappingItem[]; rows: Array<Record<string, unknown>> }> = {};
     for (const e of CUSTOMER_360_ENTITY_KEYS) {
       payload[e] = {
@@ -168,6 +167,27 @@ export function Customer360Page() {
         rows: bundle[e].rows,
       };
     }
+    // Phase C-light commit guard — sunucu body limit'i hâlâ 2 MB. dry-run
+    // multipart yolundan döndüyse commit JSON gövdesi yine sync path'ten
+    // gitmek zorunda; aynı eşik geçerli. Aşarsa POST'tan önce truthful
+    // toast'la dururuz. (Permanent çözüm: Phase D async pipeline / OD-174.)
+    const commitGuard = evaluateDryRunPayload({
+      companyId,
+      entities: payload,
+      sourceMeta,
+      options: { skipErrors },
+    });
+    if (!commitGuard.ok) {
+      toast({
+        type: 'error',
+        message:
+          `Aktarım sonucu çok büyük (~${commitGuard.size.mb} MB; sunucu sınırı ~${commitGuard.serverLimitMb} MB). ` +
+          'Bu dosya için optimize commit yetmez; lütfen Excel\'i parçalara bölün veya async aktarım hattını bekleyin.',
+        duration: 9000,
+      });
+      return;
+    }
+    setCommitting(true);
     const r = await importService.customer360Commit({
       companyId,
       entities: payload,
