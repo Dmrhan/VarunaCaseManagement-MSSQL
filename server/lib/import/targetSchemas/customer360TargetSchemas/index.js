@@ -244,7 +244,22 @@ export function normalizeEntityRow(entityKey, rawRow, mapping) {
         else normalized._rawPhone = r.extra.rawPhone; // legacy (Contact/Address yokken)
       }
     }
-    if (r.warning) warnings.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.warning });
+    if (r.warning) {
+      // Geriye dönük: eski normalize'lar string warning döndürüyordu.
+      // Phase B+ — bazı normalize'lar structured {code, message} döner
+      // (örn. account.vkn invalid_vkn_ignored). İki formu da destekle.
+      if (typeof r.warning === 'string') {
+        warnings.push({ entity: entityKey, targetKey: f.key, label: f.label, message: r.warning });
+      } else {
+        warnings.push({
+          entity: entityKey,
+          targetKey: f.key,
+          label: f.label,
+          code: r.warning.code,
+          message: r.warning.message,
+        });
+      }
+    }
   }
   // no_tax_id fires only when the source provided no value. Malformed VKN
   // rows already error and must not double-count toward missingTaxIdCount.

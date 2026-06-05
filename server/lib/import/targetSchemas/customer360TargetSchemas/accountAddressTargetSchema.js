@@ -112,7 +112,12 @@ export const ACCOUNT_ADDRESS_FIELDS = [
     updateAllowed: true,
     warningIfMissing: null,
     normalize(raw) {
-      return normalizeText(raw, { max: 250, requiredLabel: 'Adres satırı 1' });
+      // Import-friendly: blank line1 normalize-level error'a düşmüyor;
+      // dry-run engine satırı `address_line1_missing_skipped` uyarısıyla
+      // 'skip' aksiyonuna alıyor. Müşteri kaydı (Account) etkilenmiyor.
+      // Schema'da line1 NOT NULL; skip = "satırı hiç yazmama"; null line1
+      // ile fake Address oluşturmuyoruz.
+      return normalizeText(raw, { max: 250 });
     },
   },
   {
