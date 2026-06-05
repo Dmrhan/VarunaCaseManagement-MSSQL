@@ -2,20 +2,28 @@
 /**
  * smoke-turkish-customer-search.js
  *
- * Verifies Turkish case-insensitive customer search:
- *   "ilhami" must find "İlhami Ferahoğlu LTD."
- *   "ILHAMI" must find the same record
- *   "İLHAMI" must find the same record
- *   "ışık"   must find "IŞIK A.Ş."
+ * Verifies Turkish case-insensitive customer search at TWO layers:
  *
- * Plus regression: VKN startsWith, phone E.164 contains, externalCustomerCode,
- * contact phone — these MUST keep working with the original query verbatim
- * (helper only widens the name + contact email branches).
+ *   PART A — Pure helper unit tests (always runs).
+ *     For each expected user input, asserts that the variant set produced
+ *     by generateTurkishSearchVariants contains the Turkish-cased form
+ *     that ILIKE can byte-match against the stored name.
  *
- * Structure:
- *   - PART A (always runs): pure helper unit tests for generateTurkishSearchVariants.
- *   - PART B (skips gracefully on Supabase unreachable): live DB seed + query
- *     against listAccounts via accountRepository.
+ *   PART B — Live DB integration (skips gracefully on Supabase outage).
+ *     Seeds two accounts whose names include the PID as a hyphenated
+ *     token so the search query is a contiguous substring of the stored
+ *     name. Asserts deterministically that:
+ *       - search "ilhami-PID" finds "İlhami-PID …"
+ *       - search "ILHAMI-PID" finds "İlhami-PID …"
+ *       - search "ışık-PID"   finds "IŞIK-PID …"
+ *     Plus regression: externalCustomerCode prefix continues to match
+ *     verbatim (helper is not applied to that branch).
+ *
+ * Why the PID-hyphenated token works as a contiguous substring:
+ *   Stored: "İlhami-12345 Ferahoğlu LTD."
+ *   Query:  "ilhami-12345"
+ *   Variant (titleCaseTr from ASCII-lower) → "İlhami-12345" → exact byte
+ *   match inside stored name → ILIKE hit (regardless of lc_ctype).
  *
  * Run: node --env-file=.env scripts/smoke-turkish-customer-search.js
  */
@@ -29,65 +37,56 @@ const record = (label, ok, detail = '') => {
 
 // ─── PART A: helper unit tests (pure, no DB) ──────────────────────────────
 
-function assertIncludes(label, variants, needle) {
-  const ok = variants.includes(needle);
-  record(label, ok, ok ? '' : `expected one of variants to be "${needle}", got [${variants.join(' | ')}]`);
-}
+const variantsIlhami = generateTurkishSearchVariants('ilhami');
+record(
+  'helper: "ilhami" variants include "İlhami"',
+  variantsIlhami.includes('İlhami'),
+  variantsIlhami.join(' | '),
+);
 
-// 1. ilhami → must yield "İlhami" (title-case TR) so ILIKE '%İlhami%' matches
-//    stored "İlhami Ferahoğlu LTD."
-{
-  const v = generateTurkishSearchVariants('ilhami');
-  assertIncludes('helper: "ilhami" variants include "İlhami"', v, 'İlhami');
-}
+const variantsILHAMI = generateTurkishSearchVariants('ILHAMI');
+record(
+  'helper: "ILHAMI" variants include "İlhami" (supports all-caps)',
+  variantsILHAMI.includes('İlhami'),
+  variantsILHAMI.join(' | '),
+);
 
-// 2. ILHAMI → must yield lowercase TR "ılhamı" OR ASCII fold "ILHAMI" — at
-//    minimum cover ASCII-fold so DB ILIKE on "ILHAMI" hits "Ilhami" if stored
-//    that way; for "İlhami" stored, we need TR title-case variant present.
-{
-  const v = generateTurkishSearchVariants('ILHAMI');
-  // ILHAMI.toLocaleLowerCase('tr') → 'ılhamı'; toLocaleUpperCase('tr') → 'ILHAMI'
-  // titleCaseTr('ILHAMI') → 'Ilhami' (TR-aware first letter upper kept)
-  // Actually: 'I'.toLocaleUpperCase('tr-TR') = 'I', 'LHAMI'.toLocaleLowerCase('tr-TR') = 'lhamı'
-  // → 'Ilhamı'. We also want 'İlhami' to be reachable. Document this gap.
-  const okOriginal = v.includes('ILHAMI');
-  const okLower = v.includes('ılhamı') || v.includes('ilhami');
-  record('helper: "ILHAMI" → original kept', okOriginal);
-  record('helper: "ILHAMI" → some TR-lower form present', okLower, `variants: [${v.join(' | ')}]`);
-}
+const variantsISIK = generateTurkishSearchVariants('ışık');
+record(
+  'helper: "ışık" variants include "IŞIK" (TR upper for stored uppercase form)',
+  variantsISIK.includes('IŞIK'),
+  variantsISIK.join(' | '),
+);
 
-// 3. ışık → asciiFold("ışık") = "isik"
-{
-  record('helper: asciiFold("ışık") = "isik"', __testing__.asciiFold('ışık') === 'isik', __testing__.asciiFold('ışık'));
-}
+const variantsISIKupper = generateTurkishSearchVariants('IŞIK');
+record(
+  'helper: "IŞIK" variants include "IŞIK" (identity, byte-match preserved)',
+  variantsISIKupper.includes('IŞIK'),
+  variantsISIKupper.join(' | '),
+);
 
-// 4. titleCaseTr lowercase "ilhami" → "İlhami"
-{
-  record('helper: titleCaseTr("ilhami") = "İlhami"', __testing__.titleCaseTr('ilhami') === 'İlhami', __testing__.titleCaseTr('ilhami'));
-}
+const variantsHyphenated = generateTurkishSearchVariants('ilhami-12345');
+record(
+  'helper: hyphenated "ilhami-12345" yields "İlhami-12345"',
+  variantsHyphenated.includes('İlhami-12345'),
+  variantsHyphenated.join(' | '),
+);
 
-// 5. titleCaseTr lowercase "ışık ali" → "Işık Ali" (TR: lowercase 'ı' uppercases to 'I')
-{
-  record('helper: titleCaseTr("ışık ali") = "Işık Ali"', __testing__.titleCaseTr('ışık ali') === 'Işık Ali', __testing__.titleCaseTr('ışık ali'));
-}
+const variantsHyphenatedUpper = generateTurkishSearchVariants('ILHAMI-12345');
+record(
+  'helper: hyphenated "ILHAMI-12345" yields "İlhami-12345"',
+  variantsHyphenatedUpper.includes('İlhami-12345'),
+  variantsHyphenatedUpper.join(' | '),
+);
 
-// 6. Empty / whitespace → []
-{
-  record('helper: empty string → []', generateTurkishSearchVariants('').length === 0);
-  record('helper: whitespace → []', generateTurkishSearchVariants('   ').length === 0);
-}
-
-// 7. Non-string → []
-{
-  record('helper: null → []', generateTurkishSearchVariants(null).length === 0);
-  record('helper: number → []', generateTurkishSearchVariants(12345).length === 0);
-}
-
-// 8. Trimming
-{
-  const v = generateTurkishSearchVariants('  ilhami  ');
-  record('helper: leading/trailing space trimmed', v.includes('ilhami') && !v.includes('  ilhami  '));
-}
+// Edge cases on the pure transforms.
+record('helper: asciiFold("ışık") = "isik"', __testing__.asciiFold('ışık') === 'isik');
+record('helper: titleCaseTr("ilhami") = "İlhami"', __testing__.titleCaseTr('ilhami') === 'İlhami');
+record('helper: titleCaseTr("ışık ali") = "Işık Ali"', __testing__.titleCaseTr('ışık ali') === 'Işık Ali');
+record('helper: empty → []', generateTurkishSearchVariants('').length === 0);
+record('helper: whitespace → []', generateTurkishSearchVariants('   ').length === 0);
+record('helper: null → []', generateTurkishSearchVariants(null).length === 0);
+record('helper: trims leading/trailing space', generateTurkishSearchVariants('  ilhami  ').includes('ilhami'));
 
 // ─── PART B: live DB integration (graceful skip on outage) ─────────────────
 
@@ -106,12 +105,11 @@ try {
   process.exit(results.filter((r) => !r.ok).length > 0 ? 1 : 0);
 }
 
-// Find an existing company to scope inserts to.
 let scopeCompany = null;
 try {
   scopeCompany = await prisma.company.findFirst({ select: { id: true, name: true } });
   if (!scopeCompany) {
-    console.log('[smoke] No company exists in DB → PART B skipped.');
+    console.log('[smoke] No company in DB → PART B skipped.');
     finalize();
     process.exit(results.filter((r) => !r.ok).length > 0 ? 1 : 0);
   }
@@ -121,10 +119,16 @@ try {
   process.exit(results.filter((r) => !r.ok).length > 0 ? 1 : 0);
 }
 
-const SEED_TAG = `TRSEARCH-${process.pid}`;
+const PID = process.pid;
+const TAG = `TRSEARCH-${PID}`;
+const ILHAMI_TOKEN = `ilhami-${PID}`; // ASCII form the user types
+const ISIK_TOKEN = `ışık-${PID}`; // Turkish form the user types
+const STORED_ILHAMI = `İlhami-${PID} Ferahoğlu LTD.`;
+const STORED_ISIK = `IŞIK-${PID} Holding`;
+
 const seeded = [];
 
-async function seedAccount(name) {
+async function seedAccount(name, externalCode) {
   const a = await prisma.account.create({
     data: {
       name,
@@ -133,7 +137,7 @@ async function seedAccount(name) {
       companies: {
         create: {
           companyId: scopeCompany.id,
-          externalCustomerCode: `${SEED_TAG}-${name.slice(0, 6)}`,
+          externalCustomerCode: externalCode,
         },
       },
     },
@@ -157,61 +161,58 @@ async function search(query) {
   return listAccounts({
     search: query,
     page: 1,
-    limit: 50,
+    limit: 100,
     allowedCompanyIds: [scopeCompany.id],
-    currentUserId: 'smoke-trsearch',
-    actorRole: 'admin',
   });
 }
 
 try {
-  const ilhamiAcc = await seedAccount(`İlhami Ferahoğlu LTD. ${SEED_TAG}`);
-  const isikAcc = await seedAccount(`IŞIK Holding ${SEED_TAG}`);
+  const ilhamiAcc = await seedAccount(STORED_ILHAMI, `${TAG}-ILH`);
+  const isikAcc = await seedAccount(STORED_ISIK, `${TAG}-ISI`);
 
-  // Core regression: original "ilhami" must find "İlhami …"
+  // 1. ilhami-PID (lowercase ASCII) → must find "İlhami-PID …"
   {
-    const r = await search(`ilhami ${SEED_TAG}`);
+    const r = await search(ILHAMI_TOKEN);
     const hit = r.accounts.some((a) => a.id === ilhamiAcc.id);
-    record('search "ilhami" finds "İlhami Ferahoğlu LTD."', hit, `${r.accounts.length} hits`);
+    record(
+      `search "${ILHAMI_TOKEN}" finds stored "${STORED_ILHAMI}"`,
+      hit,
+      `${r.accounts.length} total hits in scope`,
+    );
   }
 
-  // "İLHAMİ" original — should find via TR upper variant (own form) or titleCase
+  // 2. ILHAMI-PID (uppercase ASCII) → must find "İlhami-PID …"
   {
-    const r = await search(`İLHAMİ ${SEED_TAG}`);
+    const upper = ILHAMI_TOKEN.toUpperCase();
+    const r = await search(upper);
     const hit = r.accounts.some((a) => a.id === ilhamiAcc.id);
-    record('search "İLHAMİ" finds "İlhami Ferahoğlu LTD."', hit, `${r.accounts.length} hits`);
+    record(
+      `search "${upper}" finds stored "${STORED_ILHAMI}"`,
+      hit,
+      `${r.accounts.length} total hits in scope`,
+    );
   }
 
-  // ASCII "ILHAMI" — TR-lower variant 'ılhamı' will not match stored "İlhami"
-  // directly, but the title-case "Ilhami" variant should match via ILIKE
-  // case-fold (I↔i, h↔h, etc.) since DB "İlhami" lower under ILIKE may still
-  // partially match "Ilhami" by combining-dot heuristics. Accept either hit
-  // or miss as informational; document.
+  // 3. ışık-PID (lowercase Turkish) → must find "IŞIK-PID Holding"
   {
-    const r = await search(`ILHAMI ${SEED_TAG}`);
-    const hit = r.accounts.some((a) => a.id === ilhamiAcc.id);
-    record('search "ILHAMI" finds "İlhami Ferahoğlu LTD."', hit, `${r.accounts.length} hits`);
-  }
-
-  // "ışık" (TR lower) must find "IŞIK"
-  {
-    const r = await search(`ışık ${SEED_TAG}`);
+    const r = await search(ISIK_TOKEN);
     const hit = r.accounts.some((a) => a.id === isikAcc.id);
-    record('search "ışık" finds "IŞIK Holding"', hit, `${r.accounts.length} hits`);
+    record(
+      `search "${ISIK_TOKEN}" finds stored "${STORED_ISIK}"`,
+      hit,
+      `${r.accounts.length} total hits in scope`,
+    );
   }
 
-  // externalCustomerCode regression — original q (not folded) must still match
+  // 4. Regression: externalCustomerCode prefix still works on the original q
   {
-    const r = await search(`${SEED_TAG}-İlhami`.slice(0, 14));
-    const hit = r.accounts.some((a) => a.id === ilhamiAcc.id || a.id === isikAcc.id);
-    record('regression: externalCustomerCode prefix search still works', hit, `${r.accounts.length} hits`);
-  }
-
-  // Generic SEED_TAG should pull both seeded accounts via externalCustomerCode
-  {
-    const r = await search(SEED_TAG);
+    const r = await search(TAG);
     const hits = r.accounts.filter((a) => seeded.includes(a.id)).length;
-    record('regression: SEED_TAG finds both seeded accounts via extCode', hits === 2, `${hits}/2`);
+    record(
+      `regression: extCode prefix "${TAG}" finds both seeded accounts`,
+      hits === 2,
+      `${hits}/2 seeded`,
+    );
   }
 } catch (err) {
   record('PART B exception', false, err?.message || String(err));

@@ -74,6 +74,13 @@ export function generateTurkishSearchVariants(q) {
   set.add(folded);
   set.add(folded.toLowerCase());
   set.add(folded.toUpperCase());
+  // ASCII-lower → TR title-case. "ILHAMI" gibi all-caps Latin girdilerde
+  // titleCaseTr direkt çağrı 'Ilhamı' verir ('I' upper-tr 'I' + 'LHAMI'
+  // lower-tr 'lhamı'). Stored "İlhami …" ile byte-match için 'i' → 'İ'
+  // dönüşümü gerek — bunun için önce ASCII'ye fold edip plain lower yap,
+  // sonra titleCaseTr ile ilk harfi 'İ'ye çevir.
+  set.add(titleCaseTr(folded.toLowerCase()));
+  set.add(titleCaseTr(trimmed.toLowerCase()));
 
   return [...set].filter((v) => v && v.length > 0);
 }
