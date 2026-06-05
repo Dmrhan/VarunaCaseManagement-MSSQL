@@ -16,7 +16,9 @@
  */
 
 import { Router, json as jsonParser } from 'express';
+import multer from 'multer';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { parseCustomer360Workbook } from '../lib/import/customer360XlsxParser.js';
 import {
   describeAccountTargetSchema,
   autoMapAccountColumns,
@@ -451,6 +453,137 @@ router.post(
         result.customer360SchemaVersion,
     );
     res.json({ ...result, commitAvailable });
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// Customer 360 — Server-side XLSX dry-run (multipart)
+//
+// Frontend büyük workbook'u parse edip JSON gövdesi olarak yollayamaz
+// (2 MB express body limit + 24 MB router override ineffective). Bu
+// endpoint XLSX'i multipart/form-data ile alır, server-side parse edip
+// mevcut dryRunCustomer360 engine'ini çalıştırır. Yanıt shape'i JSON
+// dry-run ile birebir uyumludur; UI aynı render path'ini kullanır.
+//
+// Sınırlamalar (Phase B):
+//   - Sadece standart Customer 360 şablonu (5 sheet, TR/EN alias).
+//   - Legacy preset (Genel/Genel Tekil/Detaylar) DESTEKLENMEZ; client
+//     bu workbook'lar için mevcut small-flow'da kalır.
+//   - 25 MB file size limit (multer).
+//   - 5k account / 10k çocuk entity satır cap'i hâlâ geçerli.
+//   - 100k+ / 1M satır için async ImportJob pipeline ayrı PR'da gelecek;
+//     bu endpoint o pipeline'a köprü DEĞİL, "medium-large" için PARÇA.
+// ─────────────────────────────────────────────────────────────────
+
+const xlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter(_req, file, cb) {
+    const okMime =
+      file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      file.mimetype === 'application/vnd.ms-excel' ||
+      file.mimetype === 'application/octet-stream' || // bazı tarayıcılar
+      file.mimetype === 'application/zip'; // XLSX aslında zip
+    const okExt = /\.xlsx?$/i.test(file.originalname ?? '');
+    if (!okMime && !okExt) {
+      return cb(
+        Object.assign(new Error('Sadece XLSX dosyaları kabul edilir.'), {
+          code: 'unsupported_file_type',
+          status: 415,
+        }),
+      );
+    }
+    cb(null, true);
+  },
+});
+
+router.post(
+  '/customer360/dry-run-xlsx',
+  (req, res, next) => {
+    xlsxUpload.single('file')(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({
+            code: 'payload_too_large',
+            message:
+              'Dosya 25 MB sunucu sınırının üstünde. Lütfen Excel\'i daha küçük parçalara bölüp her parçayı ayrı dry-run + commit ile yükleyin.',
+            maxBytes: 25 * 1024 * 1024,
+          });
+        }
+        return res.status(400).json({ code: err.code ?? 'multer_error', message: err.message });
+      }
+      if (err?.code === 'unsupported_file_type') {
+        return res.status(415).json({ code: 'unsupported_file_type', message: err.message });
+      }
+      return res.status(400).json({ code: 'upload_failed', message: err?.message ?? 'Yükleme başarısız.' });
+    });
+  },
+  asyncRoute(async (req, res) => {
+    const file = req.file;
+    if (!file || !file.buffer) {
+      throw new ImportError('file zorunlu (multipart/form-data alanı).', { code: 'file_required' });
+    }
+
+    const companyId = (req.body?.companyId ?? '').toString().trim();
+    assertCompanyAdmin(req, companyId);
+
+    let sourceMeta = null;
+    if (req.body?.sourceMeta) {
+      try {
+        sourceMeta = JSON.parse(req.body.sourceMeta);
+      } catch {
+        throw new ImportError('sourceMeta JSON parse edilemedi.', { code: 'source_meta_invalid' });
+      }
+    }
+    // Eğer client mapping göndermediyse server-side bundle'dan auto-map
+    // varsayılan olarak yapılır (dry-run engine her entity için
+    // mapping[]==[]) ile aynı path'i yürütür: kolon adı → field key birebir
+    // match'i registry tarafından sağlanır.
+
+    const parsed = parseCustomer360Workbook(file.buffer);
+    if (!parsed.ok) {
+      const status = parsed.error.code === 'unsupported_legacy_layout' ? 422 : 400;
+      return res.status(status).json({
+        code: parsed.error.code,
+        message: parsed.error.message,
+        meta: parsed.error.meta ?? null,
+      });
+    }
+
+    // Bundle'ı dry-run engine kontratına uyarlayan mapping üret:
+    //   server-side bundle kolonları zaten target field key'lerine birebir
+    //   eşit (standart şablonda kolon başlığı field key). registry
+    //   normalize edebilsin diye explicit {source,targetKey} mapping
+    //   geçiyoruz; aksi halde dryRunCustomer360 boş mapping bekler ve
+    //   normalize hiç çalışmaz.
+    const entitiesPayload = {};
+    for (const [entityKey, block] of Object.entries(parsed.bundle)) {
+      entitiesPayload[entityKey] = {
+        columns: block.columns,
+        mapping: block.columns.map((c) => ({ source: c, targetKey: c })),
+        rows: block.rows,
+      };
+    }
+
+    const result = await dryRunCustomer360({
+      companyId,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+      entities: entitiesPayload,
+      sourceMeta: sourceMeta ?? {
+        sourceType: 'file',
+        fileName: file.originalname ?? 'workbook.xlsx',
+        byteSize: file.size,
+      },
+    });
+    const commitAvailable = Boolean(
+      result.ok === true && !result.code && result.customer360SchemaVersion,
+    );
+    res.json({
+      ...result,
+      commitAvailable,
+      serverParseInfo: parsed.info,
+    });
   }),
 );
 
