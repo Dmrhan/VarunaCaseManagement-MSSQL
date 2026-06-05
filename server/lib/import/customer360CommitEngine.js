@@ -30,6 +30,7 @@
  * All filters use scalar columns (entityType, status, importJobId).
  */
 
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db/client.js';
 import { CUSTOMER_360_VERSION } from './targetSchemas/customer360TargetSchemas/index.js';
 import { dryRunCustomer360 } from './customer360DryRun.js';
@@ -81,6 +82,92 @@ async function runWithConcurrency(items, worker, concurrency = COMMIT_CONCURRENC
 }
 
 const TIMING_DEBUG = process.env.C360_IMPORT_DEBUG_TIMING === 'true';
+
+// Phase D-tick — job-level lease.
+//
+// Concurrent-tick guard: only one tick at a time may process a given
+// ImportJob. Acquired lease lives in ImportJob.{leaseTickId, leaseAt,
+// heartbeatAt}; release/stale-TTL clears them. TTL=2dk is well above
+// Hobby's 60s function ceiling.
+//
+// Resumable status set is INTENTIONALLY narrow: ['running', 'partial']
+// only. `failed` jobs are NOT auto-resumable — they require explicit
+// rollback or a new commit (would need a separate
+// `job_failed_resumable` flag we don't store today).
+
+const LEASE_TTL_MS = 2 * 60 * 1000;
+const RESUMABLE_STATUSES = ['running', 'partial'];
+
+async function acquireLease(jobId) {
+  const tickId = randomUUID();
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - LEASE_TTL_MS);
+  const result = await prisma.importJob.updateMany({
+    where: {
+      id: jobId,
+      targetType: 'customer360',
+      status: { in: RESUMABLE_STATUSES },
+      OR: [
+        { leaseTickId: null },
+        { heartbeatAt: { lt: staleBefore } },
+      ],
+    },
+    data: { leaseTickId: tickId, leaseAt: now, heartbeatAt: now },
+  });
+  if (result.count === 1) return tickId;
+
+  // Diagnose why we couldn't acquire so callers see a truthful error code.
+  const job = await prisma.importJob.findUnique({
+    where: { id: jobId },
+    select: { status: true, leaseTickId: true, heartbeatAt: true, targetType: true },
+  });
+  if (!job) throw new CommitError('Job bulunamadı.', { status: 404, code: 'job_not_found' });
+  if (job.targetType !== 'customer360') {
+    throw new CommitError('Job customer360 targetType değil.', { status: 400, code: 'wrong_target_type' });
+  }
+  if (job.status === 'completed') {
+    throw new CommitError('Bu içe aktarım zaten tamamlanmış.', { status: 400, code: 'job_already_completed' });
+  }
+  if (job.status === 'failed') {
+    throw new CommitError(
+      'Bu içe aktarım başarısız sonlandı; tick mode ile devam ettirilemez. Önce geri alın, sonra yeni bir içe aktarım başlatın.',
+      { status: 400, code: 'job_failed_not_resumable' },
+    );
+  }
+  if (job.status === 'rolled_back' || job.status === 'rollback_partial') {
+    throw new CommitError('Geri alınmış içe aktarım yeniden başlatılamaz.', { status: 400, code: 'job_rolled_back' });
+  }
+  if (job.status === 'draft' || job.status === 'validated') {
+    throw new CommitError(`Bu durumdaki job tick ile commit edilemez: ${job.status}.`, { status: 400, code: 'invalid_status' });
+  }
+  // Status resumable + lease held by another active tick.
+  throw new CommitError(
+    'Bu içe aktarım şu an başka bir sekme/işlem tarafından işleniyor.',
+    { status: 409, code: 'job_already_processing' },
+  );
+}
+
+async function releaseLease(jobId, tickId) {
+  await prisma.importJob.updateMany({
+    where: { id: jobId, leaseTickId: tickId },
+    data: { leaseTickId: null, heartbeatAt: null },
+  });
+}
+
+async function refreshHeartbeat(jobId, tickId) {
+  const r = await prisma.importJob.updateMany({
+    where: { id: jobId, leaseTickId: tickId },
+    data: { heartbeatAt: new Date() },
+  });
+  if (r.count !== 1) {
+    // Lease stolen (stale TTL elapsed mid-tick) → abort to avoid
+    // double-processing under a stolen lease.
+    throw new CommitError(
+      'Tick lease başka bir tick tarafından devralındı; aktarım yarıda kesildi.',
+      { status: 409, code: 'lease_lost' },
+    );
+  }
+}
 
 function makeTimer() {
   const t0 = process.hrtime.bigint();
@@ -829,7 +916,21 @@ export async function commitCustomer360({ user, companyId, entities, sourceMeta,
   }
 
   const persisted = await persistJob({ user, companyId, dryRun, sourceMeta });
-  return processJob({ user, companyId, job: persisted.job, rowsByEntity: persisted.rowsByEntity });
+  // Fresh job is created with status='running' inside persistJob → safe
+  // to acquire the lease immediately.
+  const tickId = await acquireLease(persisted.job.id);
+  try {
+    return await processJob({
+      user,
+      companyId,
+      job: persisted.job,
+      rowsByEntity: persisted.rowsByEntity,
+      maxRowsPerCall: options.maxRowsPerCall ?? null,
+      tickId,
+    });
+  } finally {
+    await releaseLease(persisted.job.id, tickId);
+  }
 }
 
 async function resumeCommit({ user, companyId, jobId, options }) {
@@ -848,22 +949,51 @@ async function resumeCommit({ user, companyId, jobId, options }) {
       status: 409, code: 'import_schema_changed',
     });
   }
-  if (!['running', 'partial', 'failed'].includes(job.status)) {
+  // Phase D-tick — resume status set narrowed. `failed` is no longer
+  // auto-resumable here; acquireLease() below also rejects with a
+  // truthful code (job_failed_not_resumable). `completed` / `rolled_back`
+  // similarly rejected by acquireLease.
+  if (!RESUMABLE_STATUSES.includes(job.status)) {
+    if (job.status === 'failed') {
+      throw new CommitError(
+        'Bu içe aktarım başarısız sonlandı; tick mode ile devam ettirilemez. Önce geri alın, sonra yeni bir içe aktarım başlatın.',
+        { status: 400, code: 'job_failed_not_resumable' },
+      );
+    }
+    if (job.status === 'completed') {
+      throw new CommitError('Bu içe aktarım zaten tamamlanmış.', { status: 400, code: 'job_already_completed' });
+    }
+    if (job.status === 'rolled_back' || job.status === 'rollback_partial') {
+      throw new CommitError('Geri alınmış içe aktarım yeniden başlatılamaz.', { status: 400, code: 'job_rolled_back' });
+    }
     throw new CommitError(`Bu durumdaki job tekrar commit edilemez: ${job.status}`, { status: 400, code: 'invalid_status' });
   }
-  // Load all rows grouped by entity (status='pending' will be processed).
-  const rowsByEntity = {};
-  for (const entity of ENTITY_ORDER) {
-    rowsByEntity[entity] = await prisma.importJobRow.findMany({
-      where: { importJobId: jobId, entityType: entity },
-      orderBy: { rowNumber: 'asc' },
+  // Atomic claim — concurrent tick / stale-TTL handled inside helper.
+  const tickId = await acquireLease(jobId);
+  try {
+    const rowsByEntity = {};
+    for (const entity of ENTITY_ORDER) {
+      rowsByEntity[entity] = await prisma.importJobRow.findMany({
+        where: { importJobId: jobId, entityType: entity },
+        orderBy: { rowNumber: 'asc' },
+      });
+    }
+    await prisma.importJob.update({ where: { id: jobId }, data: { status: 'running' } });
+    return await processJob({
+      user,
+      companyId,
+      job: { id: jobId },
+      rowsByEntity,
+      resume: true,
+      maxRowsPerCall: options.maxRowsPerCall ?? null,
+      tickId,
     });
+  } finally {
+    await releaseLease(jobId, tickId);
   }
-  await prisma.importJob.update({ where: { id: jobId }, data: { status: 'running' } });
-  return processJob({ user, companyId, job: { id: jobId }, rowsByEntity, resume: true });
 }
 
-async function processJob({ user, companyId, job, rowsByEntity, resume = false }) {
+async function processJob({ user, companyId, job, rowsByEntity, resume = false, maxRowsPerCall = null, tickId = null }) {
   void user;
   // Index of (entity, rowNumber) → recordId for parent resolution by child entities.
   // We populate `account` after writing accounts; then accountCompany; etc.
@@ -903,7 +1033,24 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
   const entityCounts = {};
   const timer = makeTimer();
 
+  // Phase D-tick — Hobby plan 60s function ceiling'i için: tick-mode.
+  // maxRowsPerCall verilirse o tick içinde EN FAZLA bu kadar "writeable"
+  // satır işlenir; geri kalan 'pending' olarak DB'de durmaya devam eder
+  // ve job status='running' kalır. Frontend bir sonraki tick'i jobId ile
+  // çağırır. maxRowsPerCall=null → mevcut tek seferde tüm satırları işle
+  // davranışı (Pro plan / küçük dosyalar).
+  const tickEnabled = typeof maxRowsPerCall === 'number' && maxRowsPerCall > 0;
+  let processedThisTick = 0;
+  let tickStoppedEarly = false;
+  const tickStoppedEntities = new Set();
+
   for (const entity of ENTITY_ORDER) {
+    if (tickStoppedEarly) {
+      // Tick budget exhausted before reaching this entity — leave its
+      // rows as pending; the next call (resume path) will load them.
+      tickStoppedEntities.add(entity);
+      continue;
+    }
     const rows = rowsByEntity[entity] ?? [];
     const eStats = { created: 0, updated: 0, skipped: 0, error: 0, total: rows.length };
 
@@ -924,6 +1071,28 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
       if (row.status === 'skipped') { eStats.skipped += 1; continue; }
       if (row.status === 'error') { eStats.error += 1; continue; }
       writeable.push(row);
+    }
+
+    // Tick budget — cap writeable to remaining quota. Deferred rows stay
+    // 'pending' in DB; next tick (resume) loads them.
+    let deferredCount = 0;
+    if (tickEnabled) {
+      const remaining = maxRowsPerCall - processedThisTick;
+      if (remaining <= 0) {
+        // Budget already exhausted — defer entire entity.
+        tickStoppedEarly = true;
+        tickStoppedEntities.add(entity);
+        entityCounts[entity] = eStats;
+        totals.created += eStats.created;
+        totals.updated += eStats.updated;
+        totals.skipped += eStats.skipped;
+        totals.error += eStats.error;
+        continue;
+      }
+      if (writeable.length > remaining) {
+        deferredCount = writeable.length - remaining;
+        writeable.length = remaining;
+      }
     }
 
     // Pass 2 — Phase C-light prefetch. Single findMany per entity slashes
@@ -1173,8 +1342,64 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
     totals.updated += eStats.updated;
     totals.skipped += eStats.skipped;
     totals.error += eStats.error;
+
+    if (tickEnabled) {
+      processedThisTick += writeable.length;
+      if (deferredCount > 0) {
+        tickStoppedEarly = true;
+        tickStoppedEntities.add(entity);
+      }
+    }
+    // Refresh lease heartbeat between entities. Lease lost → 409 thrown,
+    // outer try/finally still releases gracefully (releaseLease no-ops
+    // when leaseTickId mismatches).
+    if (tickId) await refreshHeartbeat(job.id, tickId);
   }
   timer.log('[c360 commit]');
+
+  // Tick mode — if budget cut us off OR any pending rows remain across
+  // entities, DON'T finalize. Job stays 'running'; counters persisted so
+  // the next tick (and the UI) see incremental progress.
+  let pendingTotal = 0;
+  if (tickEnabled) {
+    for (const entity of ENTITY_ORDER) {
+      const rows = rowsByEntity[entity] ?? [];
+      for (const row of rows) {
+        if (row.status === 'pending' || row.status === 'processing') pendingTotal += 1;
+      }
+    }
+    // Anything we deferred this tick is still 'pending' in DB.
+    if (tickStoppedEarly || pendingTotal > 0) {
+      const partialJob = await prisma.importJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'running',
+          createCount: totals.created,
+          updateCount: totals.updated,
+          skippedCount: totals.skipped,
+          errorCount: totals.error,
+          entityCountsJson: entityCounts,
+        },
+        select: {
+          id: true, status: true, totalRows: true, createCount: true, updateCount: true,
+          skippedCount: true, errorCount: true, warningCount: true, startedAt: true, completedAt: true,
+          entityCountsJson: true,
+        },
+      });
+      return {
+        job: partialJob,
+        runStats: totals,
+        entityCounts,
+        progress: {
+          tickMode: true,
+          processedThisTick,
+          hasMore: true,
+          pendingRowsRemaining: pendingTotal,
+          stoppedAtEntities: [...tickStoppedEntities],
+        },
+      };
+    }
+  }
 
   const hasError = totals.error > 0;
   const status = hasError ? 'partial' : 'completed';
@@ -1197,7 +1422,14 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false }
     },
   });
 
-  return { job: finalJob, runStats: totals, entityCounts };
+  return {
+    job: finalJob,
+    runStats: totals,
+    entityCounts,
+    progress: tickEnabled
+      ? { tickMode: true, processedThisTick, hasMore: false, pendingRowsRemaining: 0, stoppedAtEntities: [] }
+      : undefined,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────

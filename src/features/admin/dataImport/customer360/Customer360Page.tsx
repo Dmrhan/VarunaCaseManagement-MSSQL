@@ -107,6 +107,20 @@ export function Customer360Page() {
   const [committing, setCommitting] = useState(false);
   const [confirmCommit, setConfirmCommit] = useState(false);
   const [commitResult, setCommitResult] = useState<Customer360CommitResponse | null>(null);
+  // Phase D-tick — büyük dosya commit'inde UI'ya canlı tick ilerlemesi
+  // gösterilir. Toplam = totalRows; processed = createCount+updateCount+
+  // skippedCount+errorCount. Tick döngüsü tamamlanınca null'a döner.
+  const [commitTickProgress, setCommitTickProgress] = useState<{
+    processed: number;
+    total: number;
+    lastEntity: string | null;
+  } | null>(null);
+  // Tick mid-error → kullanıcının aynı sayfadan devam etmesi için
+  // jobId tutarız. "Devam Et" butonu pendingResumeJobId set iken
+  // gözükür. HistoryPanel resume bu PR'da yok (deferred); sayfa
+  // yenilenirse jobId kaybolur, HistoryPanel'den manual rollback
+  // veya yeniden yükleme gerekir.
+  const [pendingResumeJobId, setPendingResumeJobId] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState(false);
   const [rollbackBusy, setRollbackBusy] = useState(false);
   const [rollbackResult, setRollbackResult] = useState<Customer360RollbackResponse | null>(null);
@@ -124,6 +138,19 @@ export function Customer360Page() {
   useEffect(() => {
     if (!companyId && manageable.length > 0) setCompanyId(manageable[0].id);
   }, [companyId, manageable]);
+
+  // Phase D-tick — committing süresince tarayıcıyı kapatma uyarısı.
+  // Standart `onbeforeunload` davranışı: returnValue set ederse native
+  // confirm dialog tetiklenir. Tick döngüsü bitince listener kaldırılır.
+  useEffect(() => {
+    if (!committing) return undefined;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [committing]);
 
   useEffect(() => {
     let alive = true;
@@ -154,9 +181,95 @@ export function Customer360Page() {
     setRawSheets(null);
     setSheetSuggested(null);
     setSheetMappings({});
+    setCommitTickProgress(null);
+    setPendingResumeJobId(null);
   }
 
   // WR-A8 Phase 2b — commit / rollback handlers
+  // Phase D-tick — Hobby plan 60s function ceiling ve 2 MB body limit
+  // altında büyük dosya commit'i için tick-mode multipart yolu.
+  function handleCommitFinal(r: Customer360CommitResponse) {
+    setCommitResult(r);
+    setRollbackResult(null);
+    setHistoryRefreshKey((k) => k + 1);
+    setCommitTickProgress(null);
+    setPendingResumeJobId(null);
+    const stats = r.runStats;
+    toast({
+      type: r.job.status === 'completed' ? 'success' : r.job.status === 'partial' ? 'warn' : 'error',
+      message: `İçe aktarım ${r.job.status === 'completed' ? 'tamamlandı' : r.job.status === 'partial' ? 'kısmen tamamlandı' : 'başarısız'} · ${stats.created} oluşturuldu, ${stats.updated} güncellendi${stats.error > 0 ? `, ${stats.error} hata` : ''}`,
+      duration: 6000,
+    });
+  }
+
+  function updateTickProgress(r: Customer360CommitResponse) {
+    const total = r.job.totalRows ?? 0;
+    const processed = (r.job.createCount ?? 0) + (r.job.updateCount ?? 0) + (r.job.skippedCount ?? 0) + (r.job.errorCount ?? 0);
+    const stoppedAt = r.progress?.stoppedAtEntities?.[0] ?? null;
+    setCommitTickProgress({ processed, total, lastEntity: stoppedAt });
+  }
+
+  async function runChunkedCommit(fromJobId: string | null = null) {
+    if (!companyId || !sourceMeta) return;
+    if (!sourceFile || sourceMeta.sourceType !== 'file') {
+      toast({
+        type: 'error',
+        message: 'Büyük commit modu için ham .xlsx dosyası gerekir. Lütfen dosyayı yeniden yükleyin.',
+        duration: 6000,
+      });
+      return;
+    }
+    setCommitting(true);
+    setConfirmCommit(false);
+    try {
+      let r: Customer360CommitResponse | undefined;
+      if (fromJobId) {
+        r = await importService.customer360CommitTick({
+          jobId: fromJobId,
+          maxRowsPerCall: 1000,
+          options: { skipErrors },
+        });
+      } else {
+        r = await importService.customer360CommitXlsx({
+          companyId,
+          file: sourceFile,
+          sourceMeta,
+          options: { skipErrors },
+          maxRowsPerCall: 500,
+        });
+      }
+      if (!r) {
+        // apiFetch already toasted; remember jobId for retry if we
+        // know one. For commit-xlsx initial failure we don't have a
+        // jobId yet so user just re-clicks the button.
+        if (fromJobId) setPendingResumeJobId(fromJobId);
+        return;
+      }
+      updateTickProgress(r);
+      while (r?.progress?.hasMore) {
+        const jobId = r.job.id;
+        const next = await importService.customer360CommitTick({
+          jobId,
+          maxRowsPerCall: 1000,
+          options: { skipErrors },
+        });
+        if (!next) {
+          // Tick mid-error — preserve jobId so the user can hit "Devam Et"
+          // from the same screen. HistoryPanel resume is deferred to a
+          // follow-up PR; if the browser is closed the jobId is lost and
+          // the user must rollback or wait for HistoryPanel resume.
+          setPendingResumeJobId(jobId);
+          return;
+        }
+        r = next;
+        updateTickProgress(r);
+      }
+      handleCommitFinal(r!);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
   async function runCommit() {
     if (!companyId || !sourceMeta) return;
     const payload: Record<string, { columns: string[]; mapping: MappingItem[]; rows: Array<Record<string, unknown>> }> = {};
@@ -167,10 +280,6 @@ export function Customer360Page() {
         rows: bundle[e].rows,
       };
     }
-    // Phase C-light commit guard — sunucu body limit'i hâlâ 2 MB. dry-run
-    // multipart yolundan döndüyse commit JSON gövdesi yine sync path'ten
-    // gitmek zorunda; aynı eşik geçerli. Aşarsa POST'tan önce truthful
-    // toast'la dururuz. (Permanent çözüm: Phase D async pipeline / OD-174.)
     const commitGuard = evaluateDryRunPayload({
       companyId,
       entities: payload,
@@ -178,11 +287,24 @@ export function Customer360Page() {
       options: { skipErrors },
     });
     if (!commitGuard.ok) {
+      // Phase D-tick: küçük JSON commit yolu büyüdü → multipart commit-xlsx
+      // + tick döngüsüne düş. Bu yol Hobby 60s function ceiling'i altında
+      // ~500-1000 satır/tick işler; sayfa kapatılmamalı (banner + onbefore-
+      // unload listener tick döngüsü boyunca aktif).
+      if (sourceFile && sourceMeta.sourceType === 'file') {
+        toast({
+          type: 'info',
+          message: `Dosya büyük (~${commitGuard.size.mb} MB); sunucu tarafında parça parça commit ediliyor. Bu sekmeyi kapatmayın.`,
+          duration: 5000,
+        });
+        await runChunkedCommit(null);
+        return;
+      }
       toast({
         type: 'error',
         message:
           `Aktarım sonucu çok büyük (~${commitGuard.size.mb} MB; sunucu sınırı ~${commitGuard.serverLimitMb} MB). ` +
-          'Bu dosya için optimize commit yetmez; lütfen Excel\'i parçalara bölün veya async aktarım hattını bekleyin.',
+          'Excel\'i parçalara bölün veya XLSX kaynağı ile yükleyin.',
         duration: 9000,
       });
       return;
@@ -197,18 +319,7 @@ export function Customer360Page() {
     setCommitting(false);
     setConfirmCommit(false);
     if (!r) return;
-    setCommitResult(r);
-    setRollbackResult(null);
-    // Codex P2 — Customer 360 commit yeni bir job yaratır; history paneli
-    // o job'ı görsün diye refreshKey'i bump et. Rollback yollarında zaten
-    // bump var; commit yolu da artık simetrik.
-    setHistoryRefreshKey((k) => k + 1);
-    const stats = r.runStats;
-    toast({
-      type: r.job.status === 'completed' ? 'success' : r.job.status === 'partial' ? 'warn' : 'error',
-      message: `İçe aktarım ${r.job.status === 'completed' ? 'tamamlandı' : r.job.status === 'partial' ? 'kısmen tamamlandı' : 'başarısız'} · ${stats.created} oluşturuldu, ${stats.updated} güncellendi${stats.error > 0 ? `, ${stats.error} hata` : ''}`,
-      duration: 6000,
-    });
+    handleCommitFinal(r);
   }
 
   async function runRollback() {
@@ -693,6 +804,64 @@ export function Customer360Page() {
                     </Button>
                     <Button onClick={runCommit} disabled={committing}>
                       {committing ? 'Aktarılıyor…' : 'Evet, Başlat'}
+                    </Button>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* Phase D-tick — active import banner. committing süresince
+                ekranın üstünde sabit dismiss edilemez uyarı. onbeforeunload
+                listener committing useEffect içinde. */}
+            {committing && commitTickProgress && (
+              <Card>
+                <CardBody className="space-y-2">
+                  <div className="flex items-start gap-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                    <span>
+                      Aktarım sürüyor — <b>bu sekmeyi kapatmayın.</b> Sayfa kapatılırsa içe aktarım yarıda kalır;
+                      sonraki sürümde Geçmiş panelinden "Devam Et" eklenecek.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-ndark-muted">
+                    <span>
+                      İşlenen: <b>{commitTickProgress.processed}</b> / {commitTickProgress.total}
+                      {commitTickProgress.lastEntity && ` · son entity: ${commitTickProgress.lastEntity}`}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded bg-slate-200 dark:bg-ndark-surface">
+                    <div
+                      className="h-full bg-amber-500 transition-all"
+                      style={{
+                        width: `${commitTickProgress.total > 0 ? Math.min(100, Math.round((commitTickProgress.processed / commitTickProgress.total) * 100)) : 0}%`,
+                      }}
+                    />
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* Phase D-tick — same-screen retry after tick mid-error.
+                jobId preserved; user can click "Devam Et" to resume the
+                same job from where it stopped. Browser refresh loses the
+                jobId (HistoryPanel resume is a follow-up PR). */}
+            {pendingResumeJobId && !committing && (
+              <Card>
+                <CardBody className="space-y-3">
+                  <div className="flex items-start gap-2 text-xs text-rose-800 dark:text-rose-200">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0 text-rose-600" />
+                    <span>
+                      Aktarım yarıda kesildi. Aynı içe aktarım kaldığı yerden sürdürülebilir.
+                      Sayfayı yenilerseniz devam butonu kaybolur; bu durumda Geçmiş'ten manuel geri alma gerekir.
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setPendingResumeJobId(null)}>
+                      Kapat
+                    </Button>
+                    <Button onClick={() => void runChunkedCommit(pendingResumeJobId)}>
+                      <Rocket size={12} />
+                      Devam Et
                     </Button>
                   </div>
                 </CardBody>
