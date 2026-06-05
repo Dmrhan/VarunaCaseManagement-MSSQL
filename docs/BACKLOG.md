@@ -1,6 +1,6 @@
 # Backlog — Active Work
 
-**Last audited:** 2026-05-27 (Hidden Backlog Fragment Audit sonrası PR-B consolidation)
+**Last audited:** 2026-06-05 (post-May28 shipped sync — A8 Phase 2c iterative + C360 server-side bridge + Account ID/phone/taxOffice/Turkish search shipped notları işlendi)
 
 Sahiplik:
 - Report Studio'ya özgü backlog → [docs/REPORT_STUDIO_BACKLOG.md](REPORT_STUDIO_BACKLOG.md)
@@ -251,7 +251,7 @@ Half-Shipped Audit (2026-05-28) `git log -- server/routes/imports.js` ile doğru
 
 Açık sorular (OD-009..OD-014) shipped'ten önce default'lara bağlandı; runtime'da bu default davranışların doğrulanması ayrı **smoke iş** olarak izlenir (PR-5 audit follow-up — `scripts/smoke-customer360-commit-rollback.js` 21 senaryoyla zaten kapsıyor, edge cases için ek aksiyon yok). ROADMAP Recent Ships'e "A8 Phase 2b commit + rollback" tek-satır eklendi.
 
-**Phase 2c** (polish/PII/MSSQL audit/flat CSV) ROADMAP "Future Direction" altına bırakıldı.
+**Phase 2c** iteratively shipped 2026-06-03 → 2026-06-05: Müşteri Ana Kartı template download authed (`c94d1f5`), Customer 360 history paneli + rollback access (`9e5e97b`, refresh-after-commit Codex `35b7e1e`), relationship keys + persistent child IDs + Phase 1 customer code (`5ce1a89`), **Phase B server-side XLSX dry-run** (multipart 25 MB köprü; `6cf615c` + Codex `8dad0b5`), truthful 413 + preflight (`f52d758`), import-friendly identity (`9c248f2` invalid_vkn_ignored warning + parent truthful + address line1 skip; Codex follow-up `4673a30` skip-ordering + completeness). 100k–1M satır kalıcı async pipeline OD-174 (DEFERRED — trigger gelmedikçe başlatma).
 
 ### CasesList advanced filters — supportLevel / accountProjectId / productId / packageId
 
