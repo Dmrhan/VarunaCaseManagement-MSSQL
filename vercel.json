@@ -6,5 +6,10 @@
   "installCommand": "npm install",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
-  ]
+  ],
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 300
+    }
+  }
 }
