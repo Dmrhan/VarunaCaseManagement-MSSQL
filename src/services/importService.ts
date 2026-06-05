@@ -554,11 +554,13 @@ export const importService = {
       sourceUrlMasked?: string | null;
       dataPath?: string | null;
     };
+    mappingByEntity?: Record<string, MappingItem[]>;
   }): Promise<Customer360DryRunResponse | undefined> {
     const fd = new FormData();
     fd.append('companyId', input.companyId);
     fd.append('file', input.file, input.file.name);
     if (input.sourceMeta) fd.append('sourceMeta', JSON.stringify(input.sourceMeta));
+    if (input.mappingByEntity) fd.append('mapping', JSON.stringify(input.mappingByEntity));
     return apiFetch<Customer360DryRunResponse>(
       `${BASE}/customer360/dry-run-xlsx`,
       { method: 'POST', body: fd },
@@ -582,6 +584,51 @@ export const importService = {
     jobId?: string;
   }): Promise<Customer360CommitResponse | undefined> {
     return postJson(`${BASE}/customer360/commit`, input, 'Customer 360 commit başarısız');
+  },
+
+  /**
+   * Phase D-tick — multipart commit-xlsx + tick döngüsü. Hobby plan 60s
+   * function ceiling'i için: ham XLSX'i FormData ile yolla, sunucu parse +
+   * dry-run + persist + ilk tick'i (maxRowsPerCall satır) işle. Yanıt
+   * `progress.hasMore=true` ise jobId ile commitTick'i loop'la.
+   */
+  async customer360CommitXlsx(input: {
+    companyId: string;
+    file: File;
+    sourceMeta?: {
+      sourceType: 'file' | 'api';
+      fileName?: string | null;
+      sourceUrlMasked?: string | null;
+      dataPath?: string | null;
+    };
+    options?: { skipErrors?: boolean };
+    maxRowsPerCall?: number;
+    mappingByEntity?: Record<string, MappingItem[]>;
+  }): Promise<Customer360CommitResponse | undefined> {
+    const fd = new FormData();
+    fd.append('companyId', input.companyId);
+    fd.append('file', input.file, input.file.name);
+    if (input.sourceMeta) fd.append('sourceMeta', JSON.stringify(input.sourceMeta));
+    if (input.options) fd.append('options', JSON.stringify(input.options));
+    if (typeof input.maxRowsPerCall === 'number') fd.append('maxRowsPerCall', String(input.maxRowsPerCall));
+    if (input.mappingByEntity) fd.append('mapping', JSON.stringify(input.mappingByEntity));
+    return apiFetch<Customer360CommitResponse>(
+      `${BASE}/customer360/commit-xlsx`,
+      { method: 'POST', body: fd },
+      'Customer 360 commit (xlsx) başarısız',
+    );
+  },
+
+  async customer360CommitTick(input: {
+    jobId: string;
+    maxRowsPerCall?: number;
+    options?: { skipErrors?: boolean };
+  }): Promise<Customer360CommitResponse | undefined> {
+    return postJson(
+      `${BASE}/customer360/jobs/${encodeURIComponent(input.jobId)}/commit-tick`,
+      { maxRowsPerCall: input.maxRowsPerCall, options: input.options },
+      'Customer 360 commit tick başarısız',
+    );
   },
 
   async customer360Rollback(jobId: string): Promise<Customer360RollbackResponse | undefined> {
@@ -681,6 +728,18 @@ export interface Customer360CommitResponse {
   job: Customer360JobDetail;
   runStats: { created: number; updated: number; skipped: number; error: number };
   entityCounts: Record<string, Customer360EntityStats>;
+  progress?: {
+    tickMode: boolean;
+    processedThisTick: number;
+    hasMore: boolean;
+    pendingRowsRemaining: number;
+    stoppedAtEntities: string[];
+  };
+  serverParseInfo?: {
+    mappedSheets: Array<{ sheetName: string; entity: string }>;
+    unmappedSheets: string[];
+    perEntityCounts: Record<string, number>;
+  };
 }
 
 export interface Customer360RollbackResponse {

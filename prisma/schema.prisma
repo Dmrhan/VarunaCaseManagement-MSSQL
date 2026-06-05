@@ -1777,6 +1777,13 @@ model ImportJob {
   completedAt         DateTime?
   rolledBackAt        DateTime?
   rolledBackByUserId  String?
+  /// Phase D-tick — concurrent-tick lease. Bir tick acquire ettiğinde
+  /// leaseTickId set olur; release veya stale TTL (2dk) sonra null'a
+  /// döner. Sadece customer360 tick path'i yazar; Phase 1 import'ta hep
+  /// null. Additive + nullable: mevcut tüm satırlar dokunulmaz.
+  leaseTickId         String?
+  leaseAt             DateTime?
+  heartbeatAt         DateTime?
 
   company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   rows    ImportJobRow[]
