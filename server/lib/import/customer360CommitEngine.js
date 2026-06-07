@@ -276,12 +276,23 @@ async function persistJob({ user, companyId, dryRun, sourceMeta }) {
     select: { id: true, status: true, createdAt: true, startedAt: true },
   });
 
+  // **BUG FIX**: Previously this code read `dryRun.preview?.<entity>`,
+  // which is intentionally capped at the first 100 rows for UI display
+  // (customer360DryRun.js builds `preview` via `rows.slice(0, 100)`).
+  // For any import with >100 rows in a given entity, persistJob silently
+  // dropped the remainder, and commit/rollback only saw the first 100.
+  // Source of truth for commit is now `dryRun.rowsForCommit` — the full
+  // normalized row collection. `dryRun.preview` stays UI-only.
+  const allRowsByEntity = dryRun.rowsForCommit ?? dryRun.preview ?? {};
+  // (Fallback to preview kept for any legacy caller that hasn't been
+  // updated yet; the new dry-run engine always emits rowsForCommit.)
+
   // WR-A8 Phase 2b hotfix (P2) — Build source-row indexes for
   // parentRowNumber resolution BEFORE writing child entity rows. account
   // matches by VKN or name (same keys customer360DryRun.resolveAccountKey
   // uses); accountCompany matches by (accountKey, companyCode).
   const accountByKey = new Map();
-  for (const r of dryRun.preview?.account ?? []) {
+  for (const r of allRowsByEntity.account ?? []) {
     if (r.errors?.length > 0) continue;
     const n = r.normalized ?? {};
     if (n.vkn) accountByKey.set(`vkn:${n.vkn}`, r.rowNumber);
@@ -298,7 +309,7 @@ async function persistJob({ user, companyId, dryRun, sourceMeta }) {
     );
   }
   const accountCompanyByKey = new Map();
-  for (const r of dryRun.preview?.accountCompany ?? []) {
+  for (const r of allRowsByEntity.accountCompany ?? []) {
     if (r.errors?.length > 0) continue;
     const n = r.normalized ?? {};
     if (n.accountKey && n.companyCode) {
@@ -315,10 +326,10 @@ async function persistJob({ user, companyId, dryRun, sourceMeta }) {
   // by accountKey resolution (and accountCompanyKey for projects).
   const rowsByEntity = {};
   for (const entity of ENTITY_ORDER) {
-    const previewRows = dryRun.preview?.[entity] ?? [];
+    const fullRows = allRowsByEntity[entity] ?? [];
     rowsByEntity[entity] = [];
-    if (previewRows.length === 0) continue;
-    const inserts = previewRows.map((r) => {
+    if (fullRows.length === 0) continue;
+    const inserts = fullRows.map((r) => {
       let parentRowNumber = null;
       if (entity !== 'account') {
         const accountKey = r.normalized?.accountKey;
