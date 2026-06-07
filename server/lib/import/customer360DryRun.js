@@ -848,18 +848,27 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     accountsWithProject: { have: accountsWithProject.size, total: totalAccounts, pct: totalAccounts > 0 ? Math.round((accountsWithProject.size / totalAccounts) * 100) : 0 },
   };
 
-  // Preview: first 100 rows per entity (Phase 2a UI display).
+  // Preview: first 100 rows per entity (Phase 2a UI display). UI-ONLY.
+  // DO NOT use this for persistence — see rowsForCommit below.
   const preview = {};
+  // Full commit-time row collection. persistJob MUST use this, not preview;
+  // previously persistJob was reading preview → only first 100 rows per
+  // entity were committed for large imports. Same per-row shape as preview
+  // plus `shouldSkip` and `_rawPhone*` extras used by the commit engine.
+  const rowsForCommit = {};
   for (const ek of entityKeys) {
     const rows = normalizedByEntity[ek] ?? [];
-    preview[ek] = rows.slice(0, 100).map((r) => ({
+    const fullMapped = rows.map((r) => ({
       rowNumber: r.rowNumber,
       action: r.action,
       errors: r.errors,
       warnings: r.warnings,
       normalized: r.normalized,
       matchedAccountName: r.matchedAccountName ?? null,
+      shouldSkip: r.shouldSkip === true,
     }));
+    rowsForCommit[ek] = fullMapped;
+    preview[ek] = fullMapped.slice(0, 100);
   }
 
   // skipErrors preview (what would happen on a hypothetical commit).
@@ -899,9 +908,29 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
     },
     skipErrorsPreview,
     preview,
+    rowsForCommit,
     relationships: CUSTOMER_360_RELATIONSHIPS,
     sourceMeta: sourceMeta ?? null,
   };
+}
+
+/**
+ * HTTP response sanitizer — `rowsForCommit` is an internal field used by
+ * commitCustomer360/persistJob to persist the FULL normalized row set
+ * (the prior bug was using UI preview slice). It MUST NOT be sent to the
+ * browser because:
+ *   (a) it can be tens of MB for large imports (4985 rows × ~5 entities)
+ *   (b) it duplicates what `preview` already exposes for UI rendering
+ *   (c) it's not part of the dry-run preview contract
+ *
+ * Route handlers call this before res.json(...). Engine output stays
+ * unchanged so commit / tick mode continue to see the full set.
+ */
+export function stripCommitRowsFromDryRunResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  // eslint-disable-next-line no-unused-vars
+  const { rowsForCommit, ...rest } = result;
+  return rest;
 }
 
 function computeCascadingSkip(normalizedByEntity, resolveAccountKey) {
