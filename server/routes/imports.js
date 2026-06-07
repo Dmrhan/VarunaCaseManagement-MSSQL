@@ -41,7 +41,7 @@ import {
   autoMapEntityColumns,
   validateEntityMapping,
 } from '../lib/import/targetSchemas/customer360TargetSchemas/index.js';
-import { dryRunCustomer360 } from '../lib/import/customer360DryRun.js';
+import { dryRunCustomer360, stripCommitRowsFromDryRunResult } from '../lib/import/customer360DryRun.js';
 import {
   commitCustomer360,
   rollbackCustomer360,
@@ -452,7 +452,10 @@ router.post(
         !result.code &&
         result.customer360SchemaVersion,
     );
-    res.json({ ...result, commitAvailable });
+    // Strip rowsForCommit before sending to browser — it's an internal
+    // field used by persistJob only; could be tens of MB for large
+    // imports and is not part of the dry-run preview contract.
+    res.json({ ...stripCommitRowsFromDryRunResult(result), commitAvailable });
   }),
 );
 
@@ -605,8 +608,10 @@ router.post(
     const commitAvailable = Boolean(
       result.ok === true && !result.code && result.customer360SchemaVersion,
     );
+    // Strip rowsForCommit before sending to browser (internal commit-time
+    // field; not part of dry-run preview contract).
     res.json({
-      ...result,
+      ...stripCommitRowsFromDryRunResult(result),
       commitAvailable,
       serverParseInfo: parsed.info,
     });

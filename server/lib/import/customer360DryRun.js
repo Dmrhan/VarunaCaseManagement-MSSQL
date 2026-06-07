@@ -914,6 +914,25 @@ export async function dryRunCustomer360({ companyId, allowedCompanyIds, entities
   };
 }
 
+/**
+ * HTTP response sanitizer — `rowsForCommit` is an internal field used by
+ * commitCustomer360/persistJob to persist the FULL normalized row set
+ * (the prior bug was using UI preview slice). It MUST NOT be sent to the
+ * browser because:
+ *   (a) it can be tens of MB for large imports (4985 rows × ~5 entities)
+ *   (b) it duplicates what `preview` already exposes for UI rendering
+ *   (c) it's not part of the dry-run preview contract
+ *
+ * Route handlers call this before res.json(...). Engine output stays
+ * unchanged so commit / tick mode continue to see the full set.
+ */
+export function stripCommitRowsFromDryRunResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  // eslint-disable-next-line no-unused-vars
+  const { rowsForCommit, ...rest } = result;
+  return rest;
+}
+
 function computeCascadingSkip(normalizedByEntity, resolveAccountKey) {
   const blockedAccounts = new Set();
   for (const r of normalizedByEntity.account ?? []) {
