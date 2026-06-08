@@ -954,7 +954,120 @@ export const adminService = {
       return { ok: true, item };
     },
   },
+
+  // ─────────────────────────────────────────────────────────────────
+  // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
+  // ─────────────────────────────────────────────────────────────────
+  taxonomyDefs: {
+    async list(filter: TaxonomyDefListFilter): Promise<TaxonomyDef[]> {
+      const qs = new URLSearchParams();
+      qs.set('companyId', filter.companyId);
+      if (filter.taxonomyType) qs.set('taxonomyType', filter.taxonomyType);
+      if (filter.isActive !== undefined) qs.set('isActive', String(filter.isActive));
+      if (filter.parentId !== undefined) qs.set('parentId', filter.parentId ?? '');
+      const data = await apiFetch<{ value: TaxonomyDef[] }>(
+        `${ADMIN_BASE}/taxonomy-defs?${qs.toString()}`,
+        undefined,
+        'Taxonomy listesi yüklenemedi',
+      );
+      if (!data) return [];
+      return data.value ?? [];
+    },
+    async create(input: TaxonomyDefInput): Promise<AdminResult<TaxonomyDef>> {
+      const item = await apiFetch<TaxonomyDef>(
+        `${ADMIN_BASE}/taxonomy-defs`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+        'Taxonomy oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(id: string, patch: Partial<TaxonomyDefInput>): Promise<AdminResult<TaxonomyDef>> {
+      const item = await apiFetch<TaxonomyDef>(
+        `${ADMIN_BASE}/taxonomy-defs/${id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) },
+        'Taxonomy güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<TaxonomyDef>> {
+      return this.update(id, { isActive });
+    },
+    async deactivate(
+      id: string,
+    ): Promise<{ ok: true } | { ok: false; error: string }> {
+      // Soft delete — backend her zaman isActive=false yapar.
+      const result = await apiFetch<{ id: string; deactivated: boolean }>(
+        `${ADMIN_BASE}/taxonomy-defs/${id}`,
+        { method: 'DELETE' },
+        'Pasifleştirme başarısız',
+      );
+      if (!result) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true };
+    },
+  },
 };
+
+// ─────────────────────────────────────────────────────────────────
+// Smart Ticket TaxonomyDef
+// ─────────────────────────────────────────────────────────────────
+
+export const SMART_TICKET_TAXONOMY_TYPES = [
+  'platform',
+  'businessProcess',
+  'operationType',
+  'affectedObject',
+  'impact',
+  'rootCauseGroup',
+  'rootCauseDetail',
+  'resolutionType',
+  'permanentPrevention',
+] as const;
+
+export type SmartTicketTaxonomyType = (typeof SMART_TICKET_TAXONOMY_TYPES)[number];
+
+export const SMART_TICKET_TAXONOMY_TYPE_LABELS: Record<SmartTicketTaxonomyType, string> = {
+  platform:            'Platform',
+  businessProcess:     'İş Süreci',
+  operationType:       'İşlem Tipi',
+  affectedObject:      'Etkilenen Nesne',
+  impact:              'Etki',
+  rootCauseGroup:      'Kök Neden Grubu',
+  rootCauseDetail:     'Kök Neden Detayı',
+  resolutionType:      'Çözüm Tipi',
+  permanentPrevention: 'Kalıcı Önlem',
+};
+
+export interface TaxonomyDef {
+  id: string;
+  companyId: string;
+  taxonomyType: SmartTicketTaxonomyType;
+  code: string;
+  label: string;
+  parentId: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxonomyDefInput {
+  companyId: string;
+  taxonomyType: SmartTicketTaxonomyType;
+  code: string;
+  label: string;
+  parentId?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface TaxonomyDefListFilter {
+  companyId: string;
+  taxonomyType?: SmartTicketTaxonomyType;
+  isActive?: boolean;
+  parentId?: string | null;
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Knowledge Sources types
