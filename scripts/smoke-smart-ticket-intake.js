@@ -198,6 +198,81 @@ if (createdCase) {
   }
 }
 
+// ─── 7-8) UI state-management regression (Codex PR-1c P2-A / P2-B) ───────
+//
+// SmartTicketNewPage'in inline form mantığının pure replica'sı. UI'ın
+// company change'de taxonomy alanlarını sıfırladığını ve projectsRequired
+// tenant'larda proje seçilmemişse submit'in disabled olduğunu doğrular.
+// Eğer SmartTicketNewPage logic'i değişirse bu blok da güncellenmelidir.
+
+console.log('');
+console.log('── 7-8) UI state-management regression ─────────────────');
+
+// P2-A: company change effect → taxonomy ve müşteri alanları sıfırlanmalı.
+function companyChangeReset(prev /*: form */) {
+  return {
+    ...prev,
+    accountId: '',
+    accountName: '',
+    accountProjectId: '',
+    accountProjectName: '',
+    platform: '',
+    businessProcess: '',
+    operationType: '',
+    affectedObject: '',
+    impact: '',
+  };
+}
+const stale = {
+  companyId: 'A',
+  accountId: 'acc-A',
+  accountName: 'Acc A',
+  accountProjectId: 'prj-1',
+  accountProjectName: 'P1',
+  title: 'x',
+  description: 'y',
+  platform: 'plat.foo',
+  businessProcess: 'bp.bar',
+  operationType: 'ot.baz',
+  affectedObject: 'ao.qux',
+  impact: 'imp.high',
+};
+const afterChange = { ...companyChangeReset(stale), companyId: 'B' };
+const cleared = ['accountId', 'accountName', 'accountProjectId', 'accountProjectName',
+  'platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'];
+const stillDirty = cleared.filter((k) => afterChange[k] !== '');
+if (stillDirty.length === 0) ok('7) P2-A: company change taxonomy/müşteri/proje sıfırlar');
+else bad('7) P2-A: company change stale fields', stillDirty.join(','));
+
+// P2-B: canSubmit projectsRequired gating.
+function canSubmit(state, projectsEnabled, projectsRequired) {
+  const projectOk =
+    !projectsEnabled || !projectsRequired || !state.accountId || !!state.accountProjectId;
+  return (
+    !!state.companyId &&
+    !!state.accountId &&
+    String(state.title || '').trim().length > 0 &&
+    String(state.description || '').trim().length > 0 &&
+    projectOk
+  );
+}
+const filled = {
+  companyId: 'A',
+  accountId: 'acc-A',
+  accountProjectId: '',
+  title: 'Hello',
+  description: 'World',
+};
+const submitBlocked = canSubmit(filled, true, true) === false;
+const submitOk = canSubmit({ ...filled, accountProjectId: 'prj-1' }, true, true) === true;
+const submitOkWhenNotRequired = canSubmit(filled, true, false) === true;
+if (submitBlocked && submitOk && submitOkWhenNotRequired) {
+  ok('8) P2-B: projectsRequired tenant\'ta proje yok → submit disabled, seçilince enable');
+} else {
+  bad('8) P2-B: canSubmit gating',
+    `blocked=${submitBlocked} ok=${submitOk} notRequiredOk=${submitOkWhenNotRequired}`);
+}
+
 // ─── Cleanup ──────────────────────────────────────────────────────────────
 
 if (!KEEP && created.length > 0) {

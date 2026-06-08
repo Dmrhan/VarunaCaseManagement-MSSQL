@@ -100,6 +100,16 @@ export function SmartTicketNewPage({
   const defaultCompanyId = companies[0]?.id ?? '';
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
 
+  // WR-A4 / PM-04 — Şirket bazlı proje opt-in / zorunluluk flag'leri.
+  // selectedCompany bootstrap-cached lookup'tan gelir; backend
+  // CompanySettings.projectsEnabled/projectsRequired ile aynı.
+  const selectedCompany = useMemo(
+    () => companies.find((c) => c.id === form.companyId) ?? null,
+    [companies, form.companyId],
+  );
+  const projectsEnabled = !!selectedCompany?.projectsEnabled;
+  const projectsRequired = !!selectedCompany?.projectsRequired;
+
   const [taxonomies, setTaxonomies] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
   const [taxonomiesLoading, setTaxonomiesLoading] = useState(false);
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
@@ -167,7 +177,11 @@ export function SmartTicketNewPage({
     };
   }, [form.accountId, form.companyId]);
 
-  // Şirket değişince müşteri/proje sıfırla.
+  // Şirket değişince müşteri/proje + Smart Ticket taxonomy seçimlerini
+  // sıfırla. Taxonomy listesi per-tenant; eski şirketin code'ları yeni
+  // şirkette geçersiz olur, üstelik bu PR'da server-side cross-tenant
+  // taxonomy code validation YOK → stale değerleri formda tutmamak için
+  // burada agresif reset (Codex PR-1c review P2-A fix).
   useEffect(() => {
     setForm((f) => ({
       ...f,
@@ -175,6 +189,11 @@ export function SmartTicketNewPage({
       accountName: '',
       accountProjectId: '',
       accountProjectName: '',
+      platform: '',
+      businessProcess: '',
+      operationType: '',
+      affectedObject: '',
+      impact: '',
     }));
   }, [form.companyId]);
 
@@ -201,11 +220,19 @@ export function SmartTicketNewPage({
     return companies.find((c) => c.id === form.companyId)?.name ?? '';
   }
 
+  // Codex PR-1c review P2-B fix — projectsRequired=true tenant'larda backend
+  // (caseRepository.create) `project_required` ile reddediyor. Submit'i UI'da
+  // gating'le ki kullanıcı formu tamamlayıp ancak POST sonrası hata almasın.
+  // Mevcut NewCaseForm gating mantığıyla eşdeğer (NewCaseForm.tsx#732).
+  const projectRequirementSatisfied =
+    !projectsEnabled || !projectsRequired || !form.accountId || !!form.accountProjectId;
+
   const canSubmit =
     !!form.companyId &&
     !!form.accountId &&
     form.title.trim().length > 0 &&
     form.description.trim().length > 0 &&
+    projectRequirementSatisfied &&
     !submitting;
 
   async function handleSubmit() {
@@ -307,13 +334,28 @@ export function SmartTicketNewPage({
                 <Users2 size={14} className="text-slate-400" />
               </button>
             </Field>
-            {projects.length > 0 && (
-              <Field label="Proje" hint="Opsiyonel — müşterinin aktif projeleri">
+            {/* Proje alanı şu üç durumda gösterilir:
+                 - şirkette projectsEnabled=true VE müşteri seçildi (NewCaseForm
+                   pattern'i); projectsRequired=true ise zorunlu rozet.
+                 - flag kapalı tenant'larda müşterinin aktif projesi varsa yine
+                   opsiyonel olarak göster (legacy davranışı koru). */}
+            {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
+              <Field
+                label="Proje"
+                required={projectsEnabled && projectsRequired && !!form.accountId}
+                hint={
+                  projectsEnabled && projectsRequired && !!form.accountId
+                    ? 'Bu şirket için proje zorunlu.'
+                    : 'Opsiyonel — müşterinin aktif projeleri.'
+                }
+              >
                 <Select
                   value={form.accountProjectId}
                   onChange={(e) => handleSelectProject(e.target.value)}
                 >
-                  <option value="">— Proje yok —</option>
+                  <option value="">
+                    {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
+                  </option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
