@@ -138,7 +138,11 @@ router.get('/taxonomies', async (req, res) => {
       return;
     }
   }
-  if (allowed.length > 0 && !allowed.includes(companyId)) {
+  // SECURITY: Zero-scope kullanıcı (UserCompany linki yok) için empty
+  // allowedCompanyIds **bypass değildir** — açık membership zorunlu. Eski
+  // `allowed.length > 0 && …` short-circuit cross-tenant lookup'a izin
+  // veriyordu; getCaseCatalog WR-A7b düzeltmesi ile aynı pattern.
+  if (!allowed.includes(companyId)) {
     res.status(403).json({ error: 'forbidden_company', message: 'Bu şirkete erişim yok.' });
     return;
   }
