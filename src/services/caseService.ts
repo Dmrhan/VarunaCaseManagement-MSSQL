@@ -590,6 +590,23 @@ export const caseService = {
       thirdPartyName?: string;
       escalationLevel?: EscalationLevel;
       escalationReason?: string;
+      /**
+       * WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış metadata'sı.
+       * Yalnız Smart Ticket Case'leri için ve Cozuldu transition'ında
+       * anlamlıdır. Backend tarafında customFields.smartTicket.closure
+       * altına deep-merge edilir; opening alanları (platform vs.) ve
+       * diğer customFields anahtarları aynen korunur.
+       */
+      smartTicketClosure?: {
+        rootCauseGroup?: string;
+        rootCauseGroupLabel?: string;
+        rootCauseDetail?: string;
+        rootCauseDetailLabel?: string;
+        resolutionType?: string;
+        resolutionTypeLabel?: string;
+        permanentPrevention?: string;
+        permanentPreventionLabel?: string;
+      };
     },
   ): Promise<Case | undefined> {
     if (USE_MOCK) {
