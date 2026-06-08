@@ -86,6 +86,12 @@ interface CasesListPageProps {
   onClearPatternFilter?: () => void;
   /** AI Briefing — örüntü alarmı için Detay → tıklamasında patterns sayfasına geçiş. */
   onShowPatterns?: () => void;
+  /**
+   * WR-Smart-Ticket Phase 1c — Akıllı Ticket Aç buton callback. App seviyesinden
+   * gelir; featureFlags.smartTicketIntakeEnabled açıkken header'da görünür.
+   * Flag kapalıyken prop verilmez → button render edilmez (zero-cost guard).
+   */
+  onOpenSmartTicket?: () => void;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -209,6 +215,7 @@ export function CasesListPage({
   patternCasesFilter,
   onClearPatternFilter,
   onShowPatterns,
+  onOpenSmartTicket,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
@@ -638,6 +645,16 @@ export function CasesListPage({
           <Button leftIcon={<Plus size={14} />} onClick={() => setNewOpen(true)}>
             Yeni Vaka
           </Button>
+          {onOpenSmartTicket && (
+            <Button
+              variant="outline"
+              leftIcon={<Sparkles size={14} className="text-brand-500" />}
+              onClick={onOpenSmartTicket}
+              title="Akıllı Ticket akışıyla vaka aç"
+            >
+              Akıllı Ticket
+            </Button>
+          )}
         </div>
       </div>
 

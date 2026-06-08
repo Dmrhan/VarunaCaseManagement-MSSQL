@@ -43,4 +43,13 @@ export const featureFlags = {
    * mevcut Case Detail davranışı bire bir korunur, zero runtime impact.
    */
   l1CaseConsoleEnabled: readFlag('VITE_L1_CASE_CONSOLE_ENABLED', false),
+  /**
+   * WR-Smart-Ticket Phase 1c — ayrı "Akıllı Ticket Aç" intake screen.
+   * true → Case List'te bir giriş butonu görünür ve `smart-ticket-new`
+   * view'i render edilir. Default false — flag kapalıyken Quick Case ve
+   * New Case akışları **bire bir** korunur; intake screen reachable
+   * değildir. Backend tarafında hiçbir değişiklik yok (POST /api/cases
+   * + customFields.smartTicket).
+   */
+  smartTicketIntakeEnabled: readFlag('VITE_SMART_TICKET_INTAKE_ENABLED', IS_DEV),
 };

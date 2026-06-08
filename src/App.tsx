@@ -62,8 +62,9 @@ import { NotificationDispatchesPage } from './features/admin/NotificationDispatc
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
+import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -622,6 +623,11 @@ export default function App() {
               patternCasesFilter={patternCasesFilter}
               onClearPatternFilter={() => setPatternCasesFilter(null)}
               onShowPatterns={() => setView('analytics-patterns')}
+              onOpenSmartTicket={
+                featureFlags.smartTicketIntakeEnabled
+                  ? () => setView('smart-ticket-new')
+                  : undefined
+              }
             />
           )}
           {view === 'dashboard' && <OperationsDashboardPage onSelectCase={openCase} />}
@@ -671,6 +677,12 @@ export default function App() {
             ) : (
               <ForbiddenView />
             )
+          )}
+          {view === 'smart-ticket-new' && featureFlags.smartTicketIntakeEnabled && (
+            <SmartTicketNewPage
+              onCancel={() => setView('cases')}
+              onCreated={(caseId) => openCase(caseId)}
+            />
           )}
         </main>
       </div>
