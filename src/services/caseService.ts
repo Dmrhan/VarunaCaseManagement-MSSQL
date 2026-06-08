@@ -590,6 +590,23 @@ export const caseService = {
       thirdPartyName?: string;
       escalationLevel?: EscalationLevel;
       escalationReason?: string;
+      /**
+       * WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış metadata'sı.
+       * Yalnız Smart Ticket Case'leri için ve Cozuldu transition'ında
+       * anlamlıdır. Backend tarafında customFields.smartTicket.closure
+       * altına deep-merge edilir; opening alanları (platform vs.) ve
+       * diğer customFields anahtarları aynen korunur.
+       */
+      smartTicketClosure?: {
+        rootCauseGroup?: string;
+        rootCauseGroupLabel?: string;
+        rootCauseDetail?: string;
+        rootCauseDetailLabel?: string;
+        resolutionType?: string;
+        resolutionTypeLabel?: string;
+        permanentPrevention?: string;
+        permanentPreventionLabel?: string;
+      };
     },
   ): Promise<Case | undefined> {
     if (USE_MOCK) {
@@ -2085,4 +2102,72 @@ export const lookupService = {
       }
     );
   },
+
+  /**
+   * WR-Smart-Ticket Phase 1c — per-tenant taxonomy fetch.
+   * GET /api/lookups/taxonomies?companyId=...
+   *
+   * Response shape (PR-1a sözleşmesi):
+   *   {
+   *     companyId,
+   *     taxonomies: {
+   *       platform:        [{ code, label, sortOrder, metadata? }, ...],
+   *       businessProcess: [...],
+   *       ...
+   *       rootCauseGroup:  [{ code, label, sortOrder,
+   *                           children: [{ code, label, sortOrder }, ...] }, ...]
+   *     }
+   *   }
+   *
+   * NOT: bootstrap'a dahil edilmedi — Smart Ticket intake'i flag-arkası
+   * şu an. Flag açıldığında intake screen on-demand çağırır; mevcut
+   * Quick Case / New Case akışı bu lookup'tan etkilenmez.
+   */
+  async smartTicketTaxonomies(companyId: string): Promise<SmartTicketTaxonomyResponse> {
+    const url = new URL('/api/lookups/taxonomies', window.location.origin);
+    url.searchParams.set('companyId', companyId);
+    const data = await apiFetch<SmartTicketTaxonomyResponse>(
+      url.pathname + url.search,
+      undefined,
+      'Akıllı Ticket taxonomy listesi yüklenemedi',
+    );
+    return (
+      data ?? {
+        companyId,
+        taxonomies: {
+          platform: [],
+          businessProcess: [],
+          operationType: [],
+          affectedObject: [],
+          impact: [],
+          rootCauseGroup: [],
+          resolutionType: [],
+          permanentPrevention: [],
+        },
+      }
+    );
+  },
 };
+
+export interface SmartTicketTaxonomyItem {
+  code: string;
+  label: string;
+  sortOrder: number;
+  metadata?: unknown;
+}
+export interface SmartTicketRootCauseGroup extends SmartTicketTaxonomyItem {
+  children: SmartTicketTaxonomyItem[];
+}
+export interface SmartTicketTaxonomyResponse {
+  companyId: string;
+  taxonomies: {
+    platform: SmartTicketTaxonomyItem[];
+    businessProcess: SmartTicketTaxonomyItem[];
+    operationType: SmartTicketTaxonomyItem[];
+    affectedObject: SmartTicketTaxonomyItem[];
+    impact: SmartTicketTaxonomyItem[];
+    rootCauseGroup: SmartTicketRootCauseGroup[];
+    resolutionType: SmartTicketTaxonomyItem[];
+    permanentPrevention: SmartTicketTaxonomyItem[];
+  };
+}

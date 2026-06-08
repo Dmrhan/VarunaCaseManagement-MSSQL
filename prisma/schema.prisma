@@ -339,6 +339,11 @@ model Company {
   notificationRules          NotificationRule[]
   notificationTemplates      NotificationTemplate[]
   notificationDispatches     NotificationDispatch[]
+  /// WR-Smart-Ticket Phase 1a — tenant-scoped generic taxonomy
+  /// (Platform / İş Süreci / İşlem Tipi / Etkilenen Nesne / Etki / Kök
+  /// Neden Grubu / Detay / Çözüm Tipi / Kalıcı Önlem). Global entries
+  /// (companyId=null) yer almıyor bu liste — yalnız per-tenant.
+  taxonomies                 TaxonomyDef[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -824,6 +829,58 @@ model PackageItem {
 
   @@id([packageId, productId])
   @@index([productId])
+}
+
+/// WR-Smart-Ticket Phase 1a — generic, per-tenant taxonomy table for
+/// Smart Ticket intake/closure dropdowns. NOT a replacement for
+/// CategoryDef / requestType / Product / etc.; this is an additive
+/// vocabulary surface so admins can configure UNIVERA-specific (and
+/// other tenants') opening/closure metadata without code changes.
+///
+/// taxonomyType (string; CHECK opsiyonel ileride) seçilen değerler:
+///   "platform"            — Açılış: Backoffice / Mobil
+///   "businessProcess"     — Açılış: İş Süreci (UNIVERA: 36 değer)
+///   "operationType"       — Açılış: İşlem Tipi (UNIVERA: 25 değer)
+///   "affectedObject"      — Açılış: Etkilenen Nesne (UNIVERA: 218 değer)
+///   "impact"              — Açılış: Etki (UNIVERA: 6 değer)
+///   "rootCauseGroup"      — Kapanış: Kök Neden Grubu (parent rows)
+///   "rootCauseDetail"     — Kapanış: Kök Neden Detayı (children of rootCauseGroup;
+///                                                       UNIVERA: 73 toplam parent+detay)
+///   "resolutionType"      — Kapanış: Çözüm Tipi (UNIVERA: 12 değer)
+///   "permanentPrevention" — Kapanış: Kalıcı Önlem (UNIVERA: 8 değer)
+///
+/// Hierarchy: yalnız rootCauseDetail rows parent (rootCauseGroup row id)
+/// taşır. Diğer tip rows parentId=null.
+///
+/// Scope: tüm rows tenant-scoped (companyId NOT NULL bu fazda). Global
+/// (companyId=null) ileride opsiyonel; şimdilik her tenant kendi seedini
+/// taşır. UNIVERA seed script ile XLSX'ten import edilir.
+///
+/// Constraints:
+///   - (companyId, taxonomyType, code) unique → idempotent re-seed
+///   - parent + child farklı taxonomyType taşır (rootCauseGroup → rootCauseDetail)
+///   - active/sortOrder UI ordering için; metadata JSON ileri kullanım
+model TaxonomyDef {
+  id           String   @id @default(cuid())
+  companyId    String
+  taxonomyType String
+  code         String
+  label        String
+  parentId     String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  /// Forward-compat: { kbAliases?: string[]; description?: string; … }
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children TaxonomyDef[] @relation("TaxonomyHierarchy")
+
+  @@unique([companyId, taxonomyType, code])
+  @@index([companyId, taxonomyType, isActive, sortOrder])
+  @@index([parentId])
 }
 
 model Team {

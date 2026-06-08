@@ -725,3 +725,31 @@ Field Key : "customer_segment"`,
   ],
 };
 
+
+export const TAXONOMY_DEFS_HELP: HelpContent = {
+  title: 'Akıllı Ticket Tanımları',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Smart Ticket akışındaki dropdown\'lar için per-tenant taxonomy tanımlarını yönetir. 9 tip taxonomy desteklenir: Platform, İş Süreci, İşlem Tipi, Etkilenen Nesne, Etki, Kök Neden Grubu, Kök Neden Detayı, Çözüm Tipi, Kalıcı Önlem.',
+    },
+    {
+      heading: 'Kök Neden hiyerarşisi',
+      content:
+        'Kök Neden Grubu ve Kök Neden Detayı 2 seviyeli hiyerarşi oluşturur. Detay satırı oluştururken üst grup seçimi zorunludur. Bir Grubu pasifleştirirseniz detayları DB\'de kalır ama dropdown\'larda gözükmez.',
+    },
+    {
+      heading: 'Kod (code) alanı',
+      content:
+        'Kod, şirket + taxonomy tipi içinde benzersizdir. ASCII slug formatı önerilir (örn. bp.crm_islemleri). Aynı kod farklı şirketlerde veya farklı taxonomy tiplerinde tekrar kullanılabilir.',
+    },
+    {
+      heading: 'Silme / pasifleştirme',
+      content:
+        'Sil yok — yalnız "Pasifleştir" (isActive=false) vardır. Pasif kayıt mevcut vakalardaki referansları etkilemez; sadece yeni intake dropdown\'larında saklanır.',
+      warning:
+        'Bu PR\'da Smart Ticket intake ekranı henüz yok. Tanımlar şu an Case akışına dahil edilmiyor — mevcut Kategori/Alt Kategori/İstek Tipi alanları aynen çalışmaya devam ediyor.',
+    },
+  ],
+};

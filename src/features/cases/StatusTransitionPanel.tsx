@@ -18,7 +18,13 @@ import { Field, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
-import { caseService, lookupService } from '@/services/caseService';
+import {
+  caseService,
+  lookupService,
+  type SmartTicketTaxonomyResponse,
+  type SmartTicketRootCauseGroup,
+  type SmartTicketTaxonomyItem,
+} from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
 import { MentionTextarea } from './components/MentionTextarea';
 
@@ -136,9 +142,24 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
   const [drafting, setDrafting] = useState(false);
   const { toast } = useToast();
 
+  // WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış metadata'sı.
+  // Vaka Smart Ticket intake'inden açıldıysa Çözüldü kararında ek
+  // dropdown'lar gösterilir. Diğer vakalarda görünmez.
+  const isSmartTicket = !!(item.customFields as { smartTicket?: unknown } | undefined)?.smartTicket;
+  const [closureRcg, setClosureRcg] = useState('');
+  const [closureRcd, setClosureRcd] = useState('');
+  const [closureRt, setClosureRt] = useState('');
+  const [closurePp, setClosurePp] = useState('');
+  const [closureTax, setClosureTax] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
+  const [closureTaxLoading, setClosureTaxLoading] = useState(false);
+
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
 
-  // Vaka değişince akış sıfırlanır
+  // Vaka değişince akış sıfırlanır.
+  // Codex PR-1e review P2 fix — Panel reuse (örn. L1WorkbenchPanel başka
+  // case gönderdiğinde) önceki tenant'ın closure taxonomy cache'i ekrana
+  // sızıp yanlış code/label persist edilebiliyordu. closureTax'i de
+  // sıfırlıyoruz; yeni item için aşağıdaki fetch effect tetiklenir.
   useEffect(() => {
     setPending(null);
     setResolutionNote('');
@@ -147,7 +168,49 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setEscalationLevel('');
     setEscalationReason('');
     setError(null);
+    setClosureRcg('');
+    setClosureRcd('');
+    setClosureRt('');
+    setClosurePp('');
+    setClosureTax(null);
   }, [item.id]);
+
+  // Smart Ticket → Çözüldü kararı seçildiğinde taxonomy listelerini çek.
+  // Endpoint per-tenant; companyId bilgisi Case üzerinde mevcut.
+  useEffect(() => {
+    let alive = true;
+    if (!isSmartTicket || pending !== 'Çözüldü' || closureTax) return;
+    setClosureTaxLoading(true);
+    void lookupService
+      .smartTicketTaxonomies(item.companyId)
+      .then((res: SmartTicketTaxonomyResponse) => {
+        if (!alive) return;
+        setClosureTax(res.taxonomies);
+      })
+      .catch(() => {
+        if (!alive) return;
+        // Sessiz fallback: taxonomy çekilemezse alanlar disabled kalır,
+        // case close bloke olmaz (spec).
+        setClosureTax(null);
+      })
+      .finally(() => {
+        if (alive) setClosureTaxLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isSmartTicket, pending, item.companyId, closureTax]);
+
+  // Kök Neden Grubu değişince Detay seçimini sıfırla.
+  useEffect(() => {
+    setClosureRcd('');
+  }, [closureRcg]);
+
+  const closureRcgList: SmartTicketRootCauseGroup[] = closureTax?.rootCauseGroup ?? [];
+  const closureRcdList: SmartTicketTaxonomyItem[] =
+    closureRcgList.find((g) => g.code === closureRcg)?.children ?? [];
+  const closureRtList: SmartTicketTaxonomyItem[] = closureTax?.resolutionType ?? [];
+  const closurePpList: SmartTicketTaxonomyItem[] = closureTax?.permanentPrevention ?? [];
 
   async function handleDraftResolution() {
     setDrafting(true);
@@ -215,6 +278,32 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setSubmitting(true);
     setError(null);
     const tp = thirdParties.find((t) => t.id === thirdPartyId);
+
+    // Yapılandırılmış kapanış payload'u — yalnız Smart Ticket Case'i +
+    // Çözüldü kararı + en az bir alan dolu durumunda. Backend
+    // customFields.smartTicket.closure altına deep-merge eder; opening
+    // alanları + diğer dinamik customFields aynen korunur.
+    const closureLabels = (() => {
+      const rcg = closureRcgList.find((g) => g.code === closureRcg);
+      const rcd = closureRcdList.find((d) => d.code === closureRcd);
+      const rt = closureRtList.find((r) => r.code === closureRt);
+      const pp = closurePpList.find((p) => p.code === closurePp);
+      return {
+        rootCauseGroup: closureRcg || undefined,
+        rootCauseGroupLabel: rcg?.label,
+        rootCauseDetail: closureRcd || undefined,
+        rootCauseDetailLabel: rcd?.label,
+        resolutionType: closureRt || undefined,
+        resolutionTypeLabel: rt?.label,
+        permanentPrevention: closurePp || undefined,
+        permanentPreventionLabel: pp?.label,
+      };
+    })();
+    const closureHasAnyField =
+      isSmartTicket &&
+      pending === 'Çözüldü' &&
+      (closureRcg || closureRcd || closureRt || closurePp);
+
     const updated = await caseService.transitionStatus(item.id, pending, {
       resolutionNote: pending === 'Çözüldü' ? resolutionNote.trim() : undefined,
       cancellationReason: pending === 'İptalEdildi' ? cancelReason.trim() : undefined,
@@ -222,6 +311,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
       thirdPartyName: pending === '3rdPartyBekleniyor' ? tp?.name : undefined,
       escalationLevel: pending === 'Eskalasyon' && escalationLevel ? (escalationLevel as EscalationLevel) : undefined,
       escalationReason: pending === 'Eskalasyon' ? escalationReason.trim() : undefined,
+      smartTicketClosure: closureHasAnyField ? closureLabels : undefined,
     });
     setSubmitting(false);
     if (updated) {
@@ -400,6 +490,97 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                   rows={3}
                 />
               </Field>
+
+              {/* WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış alanları.
+                  Yalnız Smart Ticket Case'lerinde gösterilir. Hepsi opsiyonel
+                  — taxonomy boş olabilir; close bloke olmaz. Submit'te
+                  smartTicketClosure payload backend deep-merge ile
+                  customFields.smartTicket.closure'a yazar. */}
+              {isSmartTicket && (
+                <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
+                      Akıllı Ticket Kapanış Bilgileri (opsiyonel)
+                    </span>
+                    {closureTaxLoading && (
+                      <span className="text-[11px] text-slate-500">yükleniyor…</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Field label="Kök Neden Grubu">
+                      <Select
+                        value={closureRcg}
+                        onChange={(e) => setClosureRcg(e.target.value)}
+                        disabled={closureTaxLoading || closureRcgList.length === 0}
+                      >
+                        <option value="">— Seçim yok —</option>
+                        {closureRcgList.map((g) => (
+                          <option key={g.code} value={g.code}>
+                            {g.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field
+                      label="Kök Neden Detayı"
+                      hint={
+                        closureRcg && closureRcdList.length === 0
+                          ? 'Bu grubun detay satırı yok.'
+                          : undefined
+                      }
+                    >
+                      <Select
+                        value={closureRcd}
+                        onChange={(e) => setClosureRcd(e.target.value)}
+                        disabled={
+                          closureTaxLoading || !closureRcg || closureRcdList.length === 0
+                        }
+                      >
+                        <option value="">— Seçim yok —</option>
+                        {closureRcdList.map((d) => (
+                          <option key={d.code} value={d.code}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Çözüm Tipi">
+                      <Select
+                        value={closureRt}
+                        onChange={(e) => setClosureRt(e.target.value)}
+                        disabled={closureTaxLoading || closureRtList.length === 0}
+                      >
+                        <option value="">— Seçim yok —</option>
+                        {closureRtList.map((r) => (
+                          <option key={r.code} value={r.code}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Kalıcı Önlem">
+                      <Select
+                        value={closurePp}
+                        onChange={(e) => setClosurePp(e.target.value)}
+                        disabled={closureTaxLoading || closurePpList.length === 0}
+                      >
+                        <option value="">— Seçim yok —</option>
+                        {closurePpList.map((p) => (
+                          <option key={p.code} value={p.code}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
+                    Bu alanlar opsiyoneldir ve vaka kapatma için zorunlu
+                    değildir. Doldurulursa kapanışla aynı transaction içinde
+                    <code className="ml-1 font-mono">customFields.smartTicket.closure</code> alanına
+                    yazılır; mevcut Smart Ticket açılış bilgileri korunur.
+                  </p>
+                </div>
+              )}
             </>
           )}
 

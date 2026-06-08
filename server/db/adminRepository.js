@@ -1909,4 +1909,255 @@ export const packageRepo = {
   },
 };
 
-export { AdminError };
+// ─────────────────────────────────────────────────────────────────
+// TaxonomyDef — WR-Smart-Ticket Phase 1b admin CRUD.
+// Per-tenant (companyId zorunlu). Hiyerarşi: rootCauseDetail satırları
+// rootCauseGroup parent'a bağlanır; diğer 7 tip flat. Bu repo HARD DELETE
+// yapmaz — `remove` her zaman isActive=false ile soft delete uygular.
+// ─────────────────────────────────────────────────────────────────
+
+const SMART_TICKET_TAXONOMY_TYPES = [
+  'platform',
+  'businessProcess',
+  'operationType',
+  'affectedObject',
+  'impact',
+  'rootCauseGroup',
+  'rootCauseDetail',
+  'resolutionType',
+  'permanentPrevention',
+];
+const TAXONOMY_TYPE_SET = new Set(SMART_TICKET_TAXONOMY_TYPES);
+
+function assertTaxonomyAllowed(companyId, allowedCompanyIds) {
+  // SECURITY: empty allowedCompanyIds bypass değil — explicit membership
+  // şart. Lookups endpoint Codex P1 fix'iyle aynı pattern.
+  const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
+  if (!allowed.includes(companyId)) {
+    throw new AdminError('Bu şirkete taxonomy erişim yetkin yok.', 403);
+  }
+}
+
+function assertTaxonomyType(taxonomyType) {
+  if (!taxonomyType || !TAXONOMY_TYPE_SET.has(taxonomyType)) {
+    throw new AdminError(
+      `taxonomyType geçersiz. Geçerli değerler: ${SMART_TICKET_TAXONOMY_TYPES.join(', ')}`,
+      400,
+    );
+  }
+}
+
+function trimRequired(value, label) {
+  if (typeof value !== 'string') throw new AdminError(`${label} gerekli.`, 400);
+  const out = value.trim();
+  if (!out) throw new AdminError(`${label} gerekli.`, 400);
+  return out;
+}
+
+const TAXONOMY_DEF_SELECT = {
+  id: true,
+  companyId: true,
+  taxonomyType: true,
+  code: true,
+  label: true,
+  parentId: true,
+  isActive: true,
+  sortOrder: true,
+  createdAt: true,
+  updatedAt: true,
+};
+
+async function assertParentValid({
+  taxonomyType,
+  parentId,
+  companyId,
+  excludeId = null,
+}) {
+  if (taxonomyType === 'rootCauseDetail') {
+    if (!parentId) {
+      throw new AdminError('rootCauseDetail için parent (Kök Neden Grubu) zorunlu.', 400);
+    }
+    const parent = await prisma.taxonomyDef.findUnique({
+      where: { id: parentId },
+      select: { id: true, companyId: true, taxonomyType: true },
+    });
+    if (!parent) throw new AdminError('Parent satır bulunamadı.', 400);
+    if (parent.companyId !== companyId) {
+      throw new AdminError('Parent farklı şirkete ait — cross-tenant referans reddedildi.', 400);
+    }
+    if (parent.taxonomyType !== 'rootCauseGroup') {
+      throw new AdminError("rootCauseDetail parent'ı rootCauseGroup tipinde olmalı.", 400);
+    }
+    if (excludeId && parent.id === excludeId) {
+      throw new AdminError('Bir satır kendi parent\'ı olamaz.', 400);
+    }
+    return parentId;
+  }
+  if (parentId) {
+    throw new AdminError(`${taxonomyType} tipi için parent kullanılmaz.`, 400);
+  }
+  return null;
+}
+
+export const taxonomyDefRepo = {
+  /**
+   * ID üzerinden companyId döndürür (route-level per-company admin guard
+   * için — assertCompanyAdmin çağrılır). Bulunamazsa null.
+   */
+  async getCompanyId(id) {
+    const row = await prisma.taxonomyDef.findUnique({
+      where: { id },
+      select: { companyId: true },
+    });
+    return row?.companyId ?? null;
+  },
+
+  async list({ companyId, taxonomyType, isActive, parentId } = {}, allowedCompanyIds) {
+    assertTaxonomyAllowed(companyId, allowedCompanyIds);
+    const where = { companyId };
+    if (taxonomyType) {
+      assertTaxonomyType(taxonomyType);
+      where.taxonomyType = taxonomyType;
+    }
+    if (isActive === true || isActive === false) where.isActive = isActive;
+    if (parentId !== undefined) {
+      where.parentId = parentId === null || parentId === '' ? null : parentId;
+    }
+    return prisma.taxonomyDef.findMany({
+      where,
+      select: TAXONOMY_DEF_SELECT,
+      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }, { label: 'asc' }],
+    });
+  },
+
+  async create(input, allowedCompanyIds) {
+    const companyId = trimRequired(input?.companyId, 'companyId');
+    assertTaxonomyAllowed(companyId, allowedCompanyIds);
+    const taxonomyType = trimRequired(input?.taxonomyType, 'taxonomyType');
+    assertTaxonomyType(taxonomyType);
+    const code = trimRequired(input?.code, 'code');
+    const label = trimRequired(input?.label, 'label');
+    const parentId = await assertParentValid({
+      taxonomyType,
+      parentId: input?.parentId ?? null,
+      companyId,
+    });
+
+    const dup = await prisma.taxonomyDef.findUnique({
+      where: { companyId_taxonomyType_code: { companyId, taxonomyType, code } },
+      select: { id: true },
+    });
+    if (dup) {
+      const err = new AdminError(
+        `Bu şirket+taxonomy tipinde "${code}" kodu zaten mevcut.`,
+        409,
+      );
+      err.code = 'taxonomy_def_duplicate_code';
+      throw err;
+    }
+
+    return prisma.taxonomyDef.create({
+      data: {
+        companyId,
+        taxonomyType,
+        code,
+        label,
+        parentId,
+        isActive: input?.isActive ?? true,
+        sortOrder: Number.isFinite(input?.sortOrder) ? Number(input.sortOrder) : 0,
+      },
+      select: TAXONOMY_DEF_SELECT,
+    });
+  },
+
+  async update(id, patch, allowedCompanyIds) {
+    const target = await prisma.taxonomyDef.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        companyId: true,
+        taxonomyType: true,
+        code: true,
+        parentId: true,
+      },
+    });
+    if (!target) throw new AdminError('Taxonomy satırı bulunamadı.', 404);
+    assertTaxonomyAllowed(target.companyId, allowedCompanyIds);
+
+    // companyId ve taxonomyType immutable — değiştirilemez (entegrasyon
+    // riskini ve hierarchy invariant'ını korumak için). Frontend disabled
+    // gösterir; backend yine de defensive ret eder.
+    if (patch?.companyId && patch.companyId !== target.companyId) {
+      throw new AdminError('Şirket değiştirilemez.', 400);
+    }
+    if (patch?.taxonomyType && patch.taxonomyType !== target.taxonomyType) {
+      throw new AdminError('Taxonomy tipi değiştirilemez.', 400);
+    }
+
+    const nextCode =
+      typeof patch?.code === 'string' && patch.code.trim() !== target.code
+        ? trimRequired(patch.code, 'code')
+        : target.code;
+    if (nextCode !== target.code) {
+      const dup = await prisma.taxonomyDef.findUnique({
+        where: {
+          companyId_taxonomyType_code: {
+            companyId: target.companyId,
+            taxonomyType: target.taxonomyType,
+            code: nextCode,
+          },
+        },
+        select: { id: true },
+      });
+      if (dup && dup.id !== id) {
+        const err = new AdminError(
+          `Bu şirket+taxonomy tipinde "${nextCode}" kodu zaten mevcut.`,
+          409,
+        );
+        err.code = 'taxonomy_def_duplicate_code';
+        throw err;
+      }
+    }
+
+    let nextParentId = target.parentId;
+    if (patch?.parentId !== undefined) {
+      nextParentId = await assertParentValid({
+        taxonomyType: target.taxonomyType,
+        parentId: patch.parentId === '' ? null : patch.parentId,
+        companyId: target.companyId,
+        excludeId: id,
+      });
+    }
+
+    const data = { code: nextCode, parentId: nextParentId };
+    if (patch?.label !== undefined) data.label = trimRequired(patch.label, 'label');
+    if (patch?.isActive !== undefined) data.isActive = Boolean(patch.isActive);
+    if (patch?.sortOrder !== undefined && Number.isFinite(Number(patch.sortOrder))) {
+      data.sortOrder = Number(patch.sortOrder);
+    }
+
+    return prisma.taxonomyDef.update({
+      where: { id },
+      data,
+      select: TAXONOMY_DEF_SELECT,
+    });
+  },
+
+  async remove(id, allowedCompanyIds) {
+    // SOFT DELETE — spec gereği hard delete yasak. isActive=false yapılır.
+    // rootCauseGroup pasifleştirilirse children kalır (Smart Ticket UI ileri
+    // PR'da `includeInactive=false` ile listeleyecek; child'lar parent'siz
+    // gözükmez çünkü filter where parent.isActive=true ile birleşir orada).
+    const target = await prisma.taxonomyDef.findUnique({
+      where: { id },
+      select: { id: true, companyId: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Taxonomy satırı bulunamadı.', 404);
+    assertTaxonomyAllowed(target.companyId, allowedCompanyIds);
+    if (!target.isActive) return { id, deactivated: true, alreadyInactive: true };
+    await prisma.taxonomyDef.update({ where: { id }, data: { isActive: false } });
+    return { id, deactivated: true };
+  },
+};
+
+export { AdminError, SMART_TICKET_TAXONOMY_TYPES };

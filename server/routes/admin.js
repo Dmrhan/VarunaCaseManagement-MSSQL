@@ -14,6 +14,7 @@ import {
   productRepo,
   packageRepo,
   slaPolicyRepo,
+  taxonomyDefRepo,
   teamRepo,
   thirdPartyRepo,
   userRepo,
@@ -713,6 +714,72 @@ router.patch('/external-kb-settings/:companyId', asyncRoute(async (req, res) => 
   delete patch.updatedAt;
   const item = await externalKbSettingRepo.upsert(companyId, patch);
   res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
+// Per-tenant. Soft delete only (DELETE → isActive=false). companyId query
+// zorunlu; assertCompanyAdmin scope kontrolü her uçta.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/taxonomy-defs', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+
+  const taxonomyType =
+    typeof req.query.taxonomyType === 'string' && req.query.taxonomyType.length > 0
+      ? req.query.taxonomyType
+      : undefined;
+  let isActive;
+  if (req.query.isActive === 'true') isActive = true;
+  else if (req.query.isActive === 'false') isActive = false;
+  let parentId;
+  if (req.query.parentId !== undefined) {
+    parentId = req.query.parentId === '' || req.query.parentId === 'null' ? null : String(req.query.parentId);
+  }
+
+  const items = await taxonomyDefRepo.list(
+    { companyId, taxonomyType, isActive, parentId },
+    req.user.allowedCompanyIds,
+  );
+  res.json({ value: items });
+}));
+
+router.post('/taxonomy-defs', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const item = await taxonomyDefRepo.create(body, req.user.allowedCompanyIds);
+  res.status(201).json(item);
+}));
+
+// Codex PR-1b review fix — ID-based PATCH/DELETE handler'ları yalnız
+// `allowedCompanyIds` set'ine güveniyordu. Bu set kullanıcının HERHANGİ bir
+// rolde aktif UserCompany linki olan tüm şirketleri içerir (Agent dahil)
+// — yani başka şirkette Admin olup bu şirkette Agent olan kullanıcı taxonomy
+// mutasyonu yapabiliyordu. Package routes'taki WR-A7 review fix pattern'ini
+// uygula: target satırın companyId'si üzerinden assertCompanyAdmin.
+async function assertTaxonomyDefCompanyAdmin(req, id) {
+  const companyId = await taxonomyDefRepo.getCompanyId(id);
+  if (!companyId) throw new AdminError('Taxonomy satırı bulunamadı.', 404);
+  assertCompanyAdmin(req, companyId);
+  return companyId;
+}
+
+router.patch('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
+  await assertTaxonomyDefCompanyAdmin(req, req.params.id);
+  const item = await taxonomyDefRepo.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+  );
+  res.json(item);
+}));
+
+router.delete('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
+  await assertTaxonomyDefCompanyAdmin(req, req.params.id);
+  const result = await taxonomyDefRepo.remove(req.params.id, req.user.allowedCompanyIds);
+  res.json(result);
 }));
 
 export default router;

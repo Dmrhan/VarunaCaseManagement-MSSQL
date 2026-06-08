@@ -456,6 +456,67 @@ function sanitizeRequesterContext(raw) {
  * ihmal edilebilir (zaten case mutation'larının çoğu kendi findUnique'ini
  * yapıyor); cron yolu (processSnoozeWakeups) bu helper'ı çağırmıyor zaten.
  */
+// WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış metadata'sını mevcut
+// Case.customFields üzerine deep-merge eder. Yalnız transitionStatus
+// içinden çağrılır (Cozuldu'ya geçiş guard'ından sonra).
+//
+// Sözleşme:
+//   - prev.customFields.smartTicket var olmalı (Case Smart Ticket intake'ten
+//     açılmış olmalı). Yoksa `smart_ticket_closure_requires_opening` 400.
+//   - Diğer customFields dalları (örn. FieldDefinition tabanlı dinamik
+//     alanlar) AYNEN korunur — sadece smartTicket dalı yeniden yazılır.
+//   - smartTicket içindeki opening alanları (platform/businessProcess/…)
+//     AYNEN korunur — sadece `closure` alt-objesi set edilir.
+//   - version + updatedAt server-side stamplenir; client gönderemez.
+const SMART_TICKET_CLOSURE_VERSION = 1;
+function buildSmartTicketClosureMerge(prev, closureInput) {
+  if (!closureInput || typeof closureInput !== 'object') {
+    throw new CaseValidationError('Geçersiz Smart Ticket closure payload.', {
+      status: 400,
+      code: 'smart_ticket_closure_invalid',
+    });
+  }
+  const existing =
+    prev.customFields && typeof prev.customFields === 'object' ? prev.customFields : {};
+  const existingSt =
+    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : null;
+  if (!existingSt) {
+    throw new CaseValidationError(
+      'Smart Ticket kapanış metadata\'sı yalnız Smart Ticket akışıyla açılmış vakalara yazılabilir.',
+      { status: 400, code: 'smart_ticket_closure_requires_opening' },
+    );
+  }
+  // Client'ın gönderebileceği alanları sıkı pickle — başka anahtar persist
+  // edilmesin. Hepsi opsiyonel; ama UI submit'inde temel alanlar dolu olur.
+  const pick = (k) => {
+    const v = closureInput[k];
+    return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  };
+  const closure = {
+    rootCauseGroup: pick('rootCauseGroup'),
+    rootCauseGroupLabel: pick('rootCauseGroupLabel'),
+    rootCauseDetail: pick('rootCauseDetail'),
+    rootCauseDetailLabel: pick('rootCauseDetailLabel'),
+    resolutionType: pick('resolutionType'),
+    resolutionTypeLabel: pick('resolutionTypeLabel'),
+    permanentPrevention: pick('permanentPrevention'),
+    permanentPreventionLabel: pick('permanentPreventionLabel'),
+    version: SMART_TICKET_CLOSURE_VERSION,
+    updatedAt: new Date().toISOString(),
+  };
+  // Undefined alanları temizle (Postgres JSON içinde null tutmaktansa hiç koyma).
+  for (const k of Object.keys(closure)) {
+    if (closure[k] === undefined) delete closure[k];
+  }
+  return {
+    ...existing,
+    smartTicket: {
+      ...existingSt,
+      closure,
+    },
+  };
+}
+
 async function assertCaseInScope(caseId, allowedCompanyIds) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
@@ -2030,6 +2091,17 @@ export const caseRepository = {
       }
     }
 
+    // WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış metadata'sı.
+    // payload.smartTicketClosure verilirse Smart Ticket Case'inin
+    // customFields.smartTicket.closure alanına deep-merge edilir.
+    // Approval guard'dan sonra hazırlanır (atomicity: aynı prisma.update
+    // call'unda diğer transition alanlarıyla birlikte yazılır; guard
+    // patlarsa hiçbir şey yazılmaz).
+    let mergedCustomFields = prev.customFields;
+    if (payload.smartTicketClosure) {
+      mergedCustomFields = buildSmartTicketClosureMerge(prev, payload.smartTicketClosure);
+    }
+
     const enteringPause = dbNext === 'ThirdPartyWaiting' && prev.status !== 'ThirdPartyWaiting';
     const leavingPause = prev.status === 'ThirdPartyWaiting' && dbNext !== 'ThirdPartyWaiting';
 
@@ -2105,6 +2177,7 @@ export const caseRepository = {
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
         resolvedAt: dbNext === 'Cozuldu' ? new Date() : prev.resolvedAt,
+        ...(mergedCustomFields !== prev.customFields ? { customFields: mergedCustomFields } : {}),
         history: { create: historyEntries },
       },
       include: CASE_INCLUDE,
