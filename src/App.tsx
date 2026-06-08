@@ -36,6 +36,7 @@ import { CustomerSearchModal } from './features/customers/CustomerSearchModal';
 import { AdminThirdPartyPage } from './features/admin/AdminThirdPartyPage';
 import { AdminDocumentsPage } from './features/admin/AdminDocumentsPage';
 import { AdminTeamsPage } from './features/admin/AdminTeamsPage';
+import { AdminTaxonomyDefsPage } from './features/admin/AdminTaxonomyDefsPage';
 import { AdminCategoriesPage } from './features/admin/AdminCategoriesPage';
 import { AdminSlaPage } from './features/admin/AdminSlaPage';
 import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
@@ -251,6 +252,7 @@ export default function App() {
         {view === 'admin-documents' && <AdminDocumentsPage />}
         {view === 'admin-checklist' && <AdminChecklistPage />}
         {view === 'admin-teams' && <AdminTeamsPage />}
+        {view === 'admin-taxonomy-defs' && <AdminTaxonomyDefsPage />}
         {view === 'admin-offered-solutions' && <AdminOfferedSolutionsPage />}
         {view === 'admin-product-catalog' && <AdminProductCatalogPage />}
         {view === 'admin-fields' && <AdminFieldsPage />}

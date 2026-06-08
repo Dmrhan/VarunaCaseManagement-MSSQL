@@ -48,7 +48,8 @@ export type AdminView =
   | 'admin-resolution-approval'
   | 'admin-notification-templates'
   | 'admin-notification-rules'
-  | 'admin-notification-dispatches';
+  | 'admin-notification-dispatches'
+  | 'admin-taxonomy-defs';
 
 export const ADMIN_VIEWS: AdminView[] = [
   'admin-categories',
@@ -69,6 +70,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-notification-templates',
   'admin-notification-rules',
   'admin-notification-dispatches',
+  'admin-taxonomy-defs',
 ];
 
 export function isAdminView(v: string): v is AdminView {
@@ -92,6 +94,7 @@ const NAV: NavGroup[] = [
       { key: 'admin-offered-solutions', label: 'Teklif Tanımları',         icon: <Tag size={14} /> },
       { key: 'admin-product-catalog',   label: 'Ürün Kataloğu',            icon: <Package size={14} /> },
       { key: 'admin-teams',             label: 'Takımlar & Üyeler',        icon: <Users2 size={14} /> },
+      { key: 'admin-taxonomy-defs',     label: 'Akıllı Ticket Tanımları',  icon: <Tag size={14} /> },
     ],
   },
   {
