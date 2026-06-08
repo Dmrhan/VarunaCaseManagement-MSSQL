@@ -159,7 +159,19 @@ router.get('/taxonomies', async (req, res) => {
 
   try {
     const where = { companyId };
-    if (taxonomyTypeRaw) where.taxonomyType = taxonomyTypeRaw;
+    if (taxonomyTypeRaw === 'rootCauseGroup') {
+      // Endpoint sözleşmesi rootCauseDetail rows'u parent rootCauseGroup
+      // öğelerinin `children` dizisine gömüyor. Filter sadece
+      // rootCauseGroup'a daraltırsa detay satırları çekilmez → her grup
+      // children: [] döner ve closure dropdown'unda detay seçenekleri
+      // kaybolur. Bu sebeple filter='rootCauseGroup' geldiğinde detail
+      // satırlarını da çekip nesting'i kuruyoruz (detail flat listede
+      // görünmez — byType'da rootCauseDetail listesi olmadığı için
+      // aşağıdaki döngü `if (!list) continue` ile düşer).
+      where.taxonomyType = { in: ['rootCauseGroup', 'rootCauseDetail'] };
+    } else if (taxonomyTypeRaw) {
+      where.taxonomyType = taxonomyTypeRaw;
+    }
     if (!includeInactive) where.isActive = true;
 
     const rows = await prisma.taxonomyDef.findMany({

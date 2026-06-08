@@ -248,6 +248,33 @@ if (!companyId) {
         `${groupsWithoutChildren.length} grup child'sız (örn. ${groupsWithoutChildren.slice(0, 3).map((g) => g.code).join(', ')})`,
       );
     }
+
+    // 8. Endpoint simülasyonu: ?taxonomyType=rootCauseGroup filter'ı verilirse
+    //    where rootCauseGroup'a daraltılmamalı — detail satırları da çekilmeli
+    //    ki nested children dolu dönsün (Codex P2 regression guard).
+    const filteredRows = await prisma.taxonomyDef.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        taxonomyType: { in: ['rootCauseGroup', 'rootCauseDetail'] },
+      },
+      select: { id: true, taxonomyType: true, parentId: true },
+    });
+    const childMapSim = new Map();
+    for (const r of filteredRows) {
+      if (r.taxonomyType === 'rootCauseDetail' && r.parentId) {
+        if (!childMapSim.has(r.parentId)) childMapSim.set(r.parentId, 0);
+        childMapSim.set(r.parentId, childMapSim.get(r.parentId) + 1);
+      }
+    }
+    const groupsWithChildrenSim = filteredRows
+      .filter((r) => r.taxonomyType === 'rootCauseGroup')
+      .filter((g) => (childMapSim.get(g.id) ?? 0) > 0).length;
+    if (groupsWithChildrenSim > 0) {
+      ok(`?taxonomyType=rootCauseGroup nested children dolu (${groupsWithChildrenSim} grup)`);
+    } else {
+      bad('?taxonomyType=rootCauseGroup nested children boş', 'detail rows çekilmemiş olabilir');
+    }
   }
 }
 
