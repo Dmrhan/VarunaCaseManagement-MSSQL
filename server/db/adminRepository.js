@@ -2000,6 +2000,18 @@ async function assertParentValid({
 }
 
 export const taxonomyDefRepo = {
+  /**
+   * ID üzerinden companyId döndürür (route-level per-company admin guard
+   * için — assertCompanyAdmin çağrılır). Bulunamazsa null.
+   */
+  async getCompanyId(id) {
+    const row = await prisma.taxonomyDef.findUnique({
+      where: { id },
+      select: { companyId: true },
+    });
+    return row?.companyId ?? null;
+  },
+
   async list({ companyId, taxonomyType, isActive, parentId } = {}, allowedCompanyIds) {
     assertTaxonomyAllowed(companyId, allowedCompanyIds);
     const where = { companyId };

@@ -753,7 +753,21 @@ router.post('/taxonomy-defs', asyncRoute(async (req, res) => {
   res.status(201).json(item);
 }));
 
+// Codex PR-1b review fix — ID-based PATCH/DELETE handler'ları yalnız
+// `allowedCompanyIds` set'ine güveniyordu. Bu set kullanıcının HERHANGİ bir
+// rolde aktif UserCompany linki olan tüm şirketleri içerir (Agent dahil)
+// — yani başka şirkette Admin olup bu şirkette Agent olan kullanıcı taxonomy
+// mutasyonu yapabiliyordu. Package routes'taki WR-A7 review fix pattern'ini
+// uygula: target satırın companyId'si üzerinden assertCompanyAdmin.
+async function assertTaxonomyDefCompanyAdmin(req, id) {
+  const companyId = await taxonomyDefRepo.getCompanyId(id);
+  if (!companyId) throw new AdminError('Taxonomy satırı bulunamadı.', 404);
+  assertCompanyAdmin(req, companyId);
+  return companyId;
+}
+
 router.patch('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
+  await assertTaxonomyDefCompanyAdmin(req, req.params.id);
   const item = await taxonomyDefRepo.update(
     req.params.id,
     req.body ?? {},
@@ -763,6 +777,7 @@ router.patch('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
 }));
 
 router.delete('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
+  await assertTaxonomyDefCompanyAdmin(req, req.params.id);
   const result = await taxonomyDefRepo.remove(req.params.id, req.user.allowedCompanyIds);
   res.json(result);
 }));

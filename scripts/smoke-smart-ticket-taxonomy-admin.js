@@ -353,6 +353,49 @@ if (bp && otherCompanyId) {
   note('14) update companyId değiştirme', 'ikinci company yok, SKIP');
 }
 
+// ─── Senaryo 15: Route-level RBAC guard simülasyonu ──────────────────────
+//
+// Codex PR-1b review fix — ID-based PATCH/DELETE handler'ları artık
+// `assertCompanyAdmin(req, target.companyId)` çağırıyor. Bu test, helper'ın
+// "başka şirkette Admin, bu şirkette Agent" senaryosunda hata fırlattığını
+// doğrular. assertCompanyAdmin mantığı route'tan inline replikası — eğer
+// admin.js'deki helper değişirse bu blok da güncellenmeli.
+
+function assertCompanyAdminSim(req, targetCompanyId) {
+  if (!targetCompanyId) throw new Error('companyId gerekli.');
+  const link = req.user.companyRoles?.find((r) => r.companyId === targetCompanyId);
+  if (!link || (link.role !== 'Admin' && link.role !== 'SystemAdmin')) {
+    const err = new Error('Bu şirket için admin yetkin yok.');
+    err.status = 403;
+    throw err;
+  }
+}
+
+if (otherCompanyId) {
+  const reqAdminElsewhere = {
+    user: {
+      companyRoles: [
+        { companyId, role: 'Admin' },
+        { companyId: otherCompanyId, role: 'Agent' },
+      ],
+      allowedCompanyIds: [companyId, otherCompanyId],
+    },
+  };
+  await expectThrows(
+    '15) RBAC: başka şirkette Admin + hedefte Agent → 403',
+    403,
+    async () => assertCompanyAdminSim(reqAdminElsewhere, otherCompanyId),
+  );
+  try {
+    assertCompanyAdminSim(reqAdminElsewhere, companyId);
+    ok('16) RBAC: hedef şirkette Admin → izin verilir');
+  } catch (err) {
+    bad('16) RBAC: same-tenant admin', err?.message ?? String(err));
+  }
+} else {
+  note('15-16) route-level RBAC', 'ikinci şirket yok, SKIP');
+}
+
 // ─── Cleanup ──────────────────────────────────────────────────────────────
 
 if (!KEEP && created.length > 0) {
