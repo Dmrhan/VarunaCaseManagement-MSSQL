@@ -14,6 +14,7 @@ import {
 } from '@/services/caseService';
 import { accountService, type AccountListItem } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
+import { resolveSmartTicketMapping } from './mapping';
 
 /**
  * WR-Smart-Ticket Phase 1c — ayrı "Akıllı Ticket Aç" intake screen.
@@ -38,9 +39,9 @@ import type { Case } from '@/features/cases/types';
  *    platform / businessProcess / operationType / affectedObject / impact
  */
 
-const SMART_TICKET_CATEGORY = 'Akıllı Ticket';
-const SMART_TICKET_SUBCATEGORY = 'Genel';
-const SMART_TICKET_REQUEST_TYPE = 'Talep' as const;
+// Mapping fallback'leri ./mapping modülünden geliyor. Eskiden bu dosyada
+// hard-coded olarak kullanılan sabitler artık `resolveSmartTicketMapping`
+// kararının "fallback" dalında dönüyor (Phase 1d).
 
 const TAXONOMY_FIELDS: Array<{
   key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact';
@@ -240,11 +241,39 @@ export function SmartTicketNewPage({
     setSubmitting(true);
     setError(null);
 
-    const smartTicket: Record<string, string> = {};
+    // Smart Ticket → klasik Case alanları mapping (Phase 1d).
+    // resolveSmartTicketMapping per-tenant taxonomy metadata'sına bakar;
+    // mapping yoksa "fallback" döner ve Case yine sorunsuz açılır.
+    const mapping = resolveSmartTicketMapping(taxonomies, {
+      platform: form.platform || undefined,
+      businessProcess: form.businessProcess || undefined,
+      operationType: form.operationType || undefined,
+      affectedObject: form.affectedObject || undefined,
+      impact: form.impact || undefined,
+    });
+
+    // customFields.smartTicket: orijinal code + label + mapping kararı.
+    // - Code'lar her zaman saklanır → klasik alanlara map edilseler bile
+    //   intake context'i kaybolmaz (raporlama / audit / future closure).
+    // - Label'lar bootstrap-cache benzeri downstream raporlar lookup yapmasın
+    //   diye snapshot olarak yazılır.
+    // - appliedMapping: hangi alanın hangi kaynaktan geldiği ve son değerleri.
+    const smartTicket: Record<string, unknown> = {};
     for (const f of TAXONOMY_FIELDS) {
       const v = form[f.key];
-      if (v) smartTicket[f.key] = v;
+      if (!v) continue;
+      smartTicket[f.key] = v;
+      const list = taxonomies?.[f.key] ?? [];
+      const item = list.find((it) => it.code === v);
+      if (item?.label) smartTicket[`${f.key}Label`] = item.label;
     }
+    smartTicket.appliedMapping = {
+      source: mapping.source,
+      category: mapping.category,
+      subCategory: mapping.subCategory,
+      requestType: mapping.requestType,
+      trace: mapping.trace,
+    };
 
     try {
       const created: Case = await caseService.create({
@@ -263,11 +292,13 @@ export function SmartTicketNewPage({
               accountProjectName: form.accountProjectName || undefined,
             }
           : {}),
-        // Smart Ticket bu PR'da klasik kategori alanlarına EŞLENMİYOR.
-        // Şeman güvende — sabit fallback ile case create devam eder.
-        category: SMART_TICKET_CATEGORY,
-        subCategory: SMART_TICKET_SUBCATEGORY,
-        requestType: SMART_TICKET_REQUEST_TYPE,
+        // Mapping kararı: businessProcess.metadata varsa map; yoksa fallback.
+        // Case create mapping yokluğunda HİÇBİR ZAMAN patlamaz — mapping.source
+        // 'fallback' olur ve kullanıcıya gözüken Case kategorisi
+        // "Akıllı Ticket / Genel / Talep" şeklinde kalır.
+        category: mapping.category,
+        subCategory: mapping.subCategory,
+        requestType: mapping.requestType,
         customFields: {
           smartTicket,
         },
@@ -423,11 +454,7 @@ export function SmartTicketNewPage({
                 );
               })}
             </div>
-            <p className="mt-3 text-[11px] text-slate-500 dark:text-ndark-muted">
-              Bu alanlar henüz mevcut Kategori/Alt Kategori/İstek Tipi alanlarına
-              eşlenmiyor — yalnızca customFields.smartTicket içine kaydediliyor.
-              Eşleme sonraki sürümde devreye alınacak.
-            </p>
+            <MappingPreview taxonomies={taxonomies} form={form} />
           </div>
 
           {error && (
@@ -457,3 +484,65 @@ export function SmartTicketNewPage({
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Mapping preview — kullanıcı submit'ten önce hangi klasik
+// Kategori/Alt Kategori/İstek Tipi alanlarına eşlendiğini görsün.
+// Read-only; UI submit logic'i aynı resolveSmartTicketMapping'i kullanır.
+// ─────────────────────────────────────────────────────────────────
+function MappingPreview({
+  taxonomies,
+  form,
+}: {
+  taxonomies: SmartTicketTaxonomyResponse['taxonomies'] | null;
+  form: SmartTicketFormState;
+}) {
+  const mapping = resolveSmartTicketMapping(taxonomies, {
+    platform: form.platform || undefined,
+    businessProcess: form.businessProcess || undefined,
+    operationType: form.operationType || undefined,
+    affectedObject: form.affectedObject || undefined,
+    impact: form.impact || undefined,
+  });
+  const mapped = mapping.source !== 'fallback';
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-[12px] text-slate-600 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="font-medium text-slate-700 dark:text-ndark-text">
+          Eşleme önizleme (klasik Case alanları)
+        </span>
+        <span
+          className={
+            mapped
+              ? 'rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+              : 'rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted'
+          }
+        >
+          kaynak: {mapping.source}
+        </span>
+      </div>
+      <ul className="space-y-0.5">
+        <li>
+          Kategori: <span className="font-medium">{mapping.category}</span>{' '}
+          <span className="text-slate-400">({mapping.trace.category})</span>
+        </li>
+        <li>
+          Alt Kategori: <span className="font-medium">{mapping.subCategory}</span>{' '}
+          <span className="text-slate-400">({mapping.trace.subCategory})</span>
+        </li>
+        <li>
+          İstek Tipi: <span className="font-medium">{mapping.requestType}</span>{' '}
+          <span className="text-slate-400">({mapping.trace.requestType})</span>
+        </li>
+      </ul>
+      <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
+        Eşleme businessProcess <code className="font-mono">metadata.caseCategory</code> /{' '}
+        <code className="font-mono">caseSubCategory</code> /{' '}
+        <code className="font-mono">caseRequestType</code> üzerinden okunur. Mapping yoksa{' '}
+        Akıllı Ticket / Genel / Talep değerleriyle fallback'e düşer ve vaka yine açılır.
+      </p>
+    </div>
+  );
+}
+
+
