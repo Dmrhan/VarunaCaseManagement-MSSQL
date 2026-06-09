@@ -269,6 +269,12 @@ const MOCK_ANALYZE = {
         { text: 'Kullanıcı rolünü kontrol et', rationale: 'Yetki yoksa menü kapanır' },
         { instruction: 'Sayfayı F5 ile yenile' },
         { title: 'Backoffice\'de oturumu kapat-aç' },
+        // PR-2c review fix — KB upstream'i bazen step+rationale JSON
+        // string'i gönderiyor. Parser bunu object gibi normalize etmeli;
+        // raw JSON title'a düşmemeli.
+        '{"step":"Kullanıcının ekranını paylaşmasını iste","rationale":"Sorun adımını canlı gör"}',
+        // Object item'da `step` field'ı da kabul edilmeli.
+        { step: 'Önbelleği temizleyip uygulamayı yeniden başlat', rationale: 'Cache çakışması yaygın' },
         '', // boş, atlanmalı
         null, // null, atlanmalı
       ],
@@ -294,8 +300,10 @@ if (stCase) {
     importResult = await solutionStepRepository.importAiSuggested(
       stCase.id, MOCK_ANALYZE.data, 'smoke-user', ALLOWED,
     );
-    if (importResult.summary.importedCount === 4) {
-      ok('10) importAiSuggested — 4 yeni step (3 string + 3 object - 2 boş)');
+    // 4 önceki + 2 yeni (JSON string + object.step) = 6 step. Boş ve null
+    // atlanır.
+    if (importResult.summary.importedCount === 6) {
+      ok('10) importAiSuggested — 6 yeni step (string + 4 object varyantı, JSON string normalize, boşlar skip)');
     } else {
       bad('10) importAiSuggested count', JSON.stringify(importResult.summary));
     }
@@ -306,8 +314,29 @@ if (stCase) {
 
 if (importResult) {
   const aiSteps = importResult.items.filter((s) => s.source === 'ai_suggested_step');
-  if (aiSteps.length === 4) ok('11) yalnız analysis.suggestedSteps import edildi (4 satır)');
+  if (aiSteps.length === 6) ok('11) yalnız analysis.suggestedSteps import edildi (6 satır)');
   else bad('11) suggestedSteps count', `${aiSteps.length}`);
+
+  // PR-2c review fix — raw JSON braces title'a sızmamalı.
+  const rawJsonLeaked = aiSteps.some((s) => /^\{.*\}$/.test(s.title.trim()));
+  if (!rawJsonLeaked) ok('11b) raw JSON braces title\'a sızmadı (parser JSON object string\'i normalize etti)');
+  else bad('11b) raw JSON leaked', aiSteps.filter((s) => /^\{/.test(s.title.trim())).map((s) => s.title).join(' | '));
+
+  // JSON-string item'ın step+rationale doğru ayrıştırılmış mı?
+  const jsonParsedStep = aiSteps.find((s) => s.title.includes('ekranını paylaşmasını'));
+  if (jsonParsedStep && jsonParsedStep.description?.includes('canlı gör')) {
+    ok('11c) JSON string item: step → title, rationale → description');
+  } else {
+    bad('11c) JSON string parse', JSON.stringify(jsonParsedStep));
+  }
+
+  // Object item'da `step` alanı title'a düşmüş mü?
+  const objStepField = aiSteps.find((s) => s.title.includes('Önbelleği temizleyip uygulamayı'));
+  if (objStepField && objStepField.description?.includes('Cache çakışması')) {
+    ok('11d) Object `step` alanı title\'a, `rationale` description\'a düştü');
+  } else {
+    bad('11d) object step field', JSON.stringify(objStepField));
+  }
 
   // Pure helper extract test — hangi alanların ignore edildiği.
   const extracted = extractAiSuggestedSteps(MOCK_ANALYZE.data);
@@ -342,8 +371,8 @@ if (stCase) {
     const second = await solutionStepRepository.importAiSuggested(
       stCase.id, MOCK_ANALYZE.data, 'smoke-user', ALLOWED,
     );
-    if (second.summary.importedCount === 0 && second.summary.skippedCount === 4) {
-      ok('17) re-run import duplicate yaratmaz (importedCount=0, skipped=4)');
+    if (second.summary.importedCount === 0 && second.summary.skippedCount === 6) {
+      ok('17) re-run import duplicate yaratmaz (importedCount=0, skipped=6)');
     } else {
       bad('17) re-run dedup', JSON.stringify(second.summary));
     }
