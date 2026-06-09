@@ -263,8 +263,91 @@ function trimOptional(value) {
 // Repository
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+// Transfer brief composer
+// ─────────────────────────────────────────────────────────────────
+
+const TRANSFER_STATUS_LABEL = {
+  suggested: 'Önerildi',
+  tried: 'Denendi',
+  worked: 'İşe yaradı',
+  not_worked: 'İşe yaramadı',
+  skipped: 'Uygun değil',
+};
+
+const TRANSFER_SOURCE_LABEL = {
+  ai_suggested_step: 'KB önerisi',
+  manual: 'Manuel',
+  external_kb: 'KB önerisi',
+  similar_case: 'Benzer vaka',
+};
+
+/**
+ * WR-Smart-Ticket Phase T1 — L1 → L2 devir akışı için deterministic
+ * "denenen işlemler özeti" üretir. L2 agent vakayı ilk açtığında L1'in
+ * neyi denediğini, hangisinin işe yaramadığını net görür.
+ *
+ * Davranış:
+ *  - Boş step listesi → null döner (transferContext.composedSummary
+ *    boş kalır, UI fallback metin gösterir).
+ *  - status enum'a göre TR label; source enum'a göre "KB/Manuel" etiketi.
+ *  - Outcome metrikleri (worked/notWorked/skipped/pending) hesaplanır.
+ *  - attemptedStepIds: TÜM step id'leri (transferContext'te referans).
+ *
+ * Server-side compose tek truth source. UI override edebilir
+ * (kullanıcı düzenlemesi); kalıcı edit edilen değer
+ * `transferContext.composedSummary`'ye yazılır.
+ */
+export async function composeTransferBriefFromSteps(caseId) {
+  if (!caseId) {
+    throw new SolutionStepError('caseId gerekli.', { status: 400, code: 'case_required' });
+  }
+  const steps = await prisma.caseSolutionStep.findMany({
+    where: { caseId },
+    orderBy: [{ stepIndex: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      stepIndex: true,
+      source: true,
+      title: true,
+      description: true,
+      status: true,
+      note: true,
+    },
+  });
+
+  const outcomes = { worked: 0, notWorked: 0, skipped: 0, pending: 0, total: steps.length };
+  for (const s of steps) {
+    if (s.status === 'worked') outcomes.worked += 1;
+    else if (s.status === 'not_worked') outcomes.notWorked += 1;
+    else if (s.status === 'skipped') outcomes.skipped += 1;
+    else outcomes.pending += 1;
+  }
+
+  const attemptedStepIds = steps.map((s) => s.id);
+
+  let composedSummary = null;
+  if (steps.length > 0) {
+    const lines = ['Denenen adımlar:'];
+    for (const s of steps) {
+      const statusLabel = TRANSFER_STATUS_LABEL[s.status] ?? s.status;
+      const sourceLabel = TRANSFER_SOURCE_LABEL[s.source] ?? s.source;
+      const noteSuffix = s.note ? ` — Not: ${s.note}` : '';
+      lines.push(`- [${statusLabel}] ${s.title} (${sourceLabel})${noteSuffix}`);
+    }
+    lines.push('');
+    lines.push(
+      `Toplam: ${outcomes.total} · İşe yaradı: ${outcomes.worked} · İşe yaramadı: ${outcomes.notWorked} · Uygun değil: ${outcomes.skipped} · Beklemede: ${outcomes.pending}`,
+    );
+    composedSummary = lines.join('\n');
+  }
+
+  return { composedSummary, attemptedStepIds, stepOutcomesSummary: outcomes };
+}
+
 export const solutionStepRepository = {
   SolutionStepError,
+  composeTransferBriefFromSteps,
 
   /**
    * Public scope helper — route handler'lar Case'in companyId'sini

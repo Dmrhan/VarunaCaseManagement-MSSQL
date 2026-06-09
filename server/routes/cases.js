@@ -432,6 +432,11 @@ router.post(
         aiConfidence: body.aiConfidence,
         transferredBy: req.user.id,
         transferredByName: req.user.fullName,
+        // WR-Smart-Ticket Phase T1 — opsiyonel devir bağlamı (transferNote,
+        // composedSummary, attemptedStepIds, stepOutcomesSummary). PR-T2
+        // Stage 3 UI bunu doldurur; klasik TransferModal göndermez ve
+        // backend ignore eder.
+        smartTicketTransfer: body.smartTicketTransfer,
       },
       req.user.allowedCompanyIds,
     );

@@ -1725,6 +1725,22 @@ export const caseService = {
       aiSuggestedReason?: string;
       aiReasonCode?: string;
       aiConfidence?: number;
+      // WR-Smart-Ticket Phase T1 — opsiyonel devir bağlamı (Stage 3 UI
+      // PR-T2'de bağlanacak; classic TransferModal göndermez).
+      // Yalnız Smart Ticket akışıyla açılmış vakalar için anlamlı; backend
+      // smartTicket opening yoksa 400 döner.
+      smartTicketTransfer?: {
+        transferNote: string;
+        composedSummary?: string;
+        attemptedStepIds?: string[];
+        stepOutcomesSummary?: {
+          worked: number;
+          notWorked: number;
+          skipped: number;
+          pending: number;
+          total: number;
+        };
+      };
     },
   ): Promise<Case | undefined> {
     const result = await apiFetch<Case>(
@@ -2370,7 +2386,43 @@ export const lookupService = {
     );
     return data ?? null;
   },
+
+  /**
+   * WR-Smart-Ticket Phase T1 — POST /api/smart-ticket/transfer-brief
+   *
+   * Stage 3 (PR-T2) UI'sının "Denenen Adımlar Özeti"ni prefill etmek
+   * için deterministic compose döner. AI çağrısı yok; KB persist yok.
+   */
+  async smartTicketTransferBrief(
+    params: { caseId: string },
+  ): Promise<SmartTicketTransferBriefResponse | null> {
+    const data = await apiFetch<SmartTicketTransferBriefResponse>(
+      '/api/smart-ticket/transfer-brief',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+      'Devir özeti alınamadı',
+    );
+    return data ?? null;
+  },
 };
+
+export interface SmartTicketStepOutcomesSummary {
+  worked: number;
+  notWorked: number;
+  skipped: number;
+  pending: number;
+  total: number;
+}
+
+export interface SmartTicketTransferBriefResponse {
+  caseId: string;
+  composedSummary: string | null;
+  attemptedStepIds: string[];
+  stepOutcomesSummary: SmartTicketStepOutcomesSummary;
+}
 
 export interface SuggestClassificationRequest {
   companyId: string;

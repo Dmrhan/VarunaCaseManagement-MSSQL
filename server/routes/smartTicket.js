@@ -32,6 +32,7 @@ import {
   mapClassificationToTaxonomy,
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
+import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -462,6 +463,52 @@ router.post('/suggest-closure', async (req, res) => {
     });
   } catch (err) {
     console.error('[smart-ticket/suggest-closure]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * WR-Smart-Ticket Phase T1 — POST /api/smart-ticket/transfer-brief
+ *
+ * Stage 3 (PR-T2) UI'sının prefill akışı için deterministic özet üretir.
+ * AI çağrısı YOK — yalnız CaseSolutionStep tablosundan compose edilir.
+ *
+ * Body:  { caseId: string }
+ * Yanıt:
+ *   {
+ *     caseId,
+ *     composedSummary: string | null,
+ *     attemptedStepIds: string[],
+ *     stepOutcomesSummary: { worked, notWorked, skipped, pending, total }
+ *   }
+ *
+ * Scope: allowedCompanyIds enforced — case'in companyId'si scope'a girmiyorsa 403.
+ *
+ * Klasik AI brief endpoint'i (/api/cases/:id/transfer-brief, transferAi.js) ile
+ * çakışmaz; ayrı namespace + ayrı amaç (deterministic, KB persist yok).
+ */
+router.post('/transfer-brief', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+    const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    if (!caseId) {
+      return res.status(400).json({ error: 'case_required', message: 'caseId zorunlu.' });
+    }
+    const caseRow = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { id: true, companyId: true },
+    });
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found', message: 'Vaka bulunamadı.' });
+    }
+    if (!allowed.includes(caseRow.companyId)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Bu vakaya erişim yok.' });
+    }
+    const brief = await composeTransferBriefFromSteps(caseId);
+    res.json({ caseId, ...brief });
+  } catch (err) {
+    console.error('[smart-ticket/transfer-brief]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });
