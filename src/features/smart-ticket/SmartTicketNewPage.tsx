@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Sparkles, Users2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CornerUpLeft,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  Users2,
+  Wand2,
+} from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
@@ -10,41 +21,51 @@ import {
   caseService,
   lookupService,
   type SmartTicketTaxonomyItem,
+  type SmartTicketRootCauseGroup,
   type SmartTicketTaxonomyResponse,
   type SuggestClassificationResponse,
   type SuggestClassificationField,
 } from '@/services/caseService';
-import { Wand2 } from 'lucide-react';
 import { accountService, type AccountListItem } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
+import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
 
 /**
- * WR-Smart-Ticket Phase 1c — ayrı "Akıllı Ticket Aç" intake screen.
+ * WR-Smart-Ticket Primary UX — One-Screen 3-Stage L1 Flow.
  *
- * SCOPE GUARD:
- *  - Bu shell mevcut `POST /api/cases` üzerine gerçek bir Case oluşturur.
- *  - Smart Ticket meta verisi `customFields.smartTicket` içine yazılır.
- *  - Quick Case / New Case / Case Detail akışları DOKUNULMADI.
- *  - Schema migration YOK; `customFields` zaten Case modelinde mevcut.
- *  - Smart Ticket alanları → klasik Case alanları eşlemesi BU PR'DA YOK.
- *    Case.category/subCategory/requestType sabit fallback değerlerle
- *    set ediliyor: ("Akıllı Ticket" / "Genel" / "Talep"). Eşleme PR-1d+.
- *  - CaseSolutionStep, External KB, structured closure → KAPSAM DIŞI.
+ * Sol 1/3: opening + classification (sürekli görünür)
+ * Sağ 2/3: stage-based
+ *   - Stage 1 (opening): placeholder + "Sol taraftaki formu doldur" rehberi
+ *   - Stage 2 (solution): CaseSolutionStepsPanel embed + "Kapanışa / L2'ye / Detay" navigation
+ *   - Stage 3 closure: 4 dropdown (rcg/rcd/rt/pp) + resolution note + "Vakayı Kapat"
+ *   - Stage 3 transfer: placeholder + Case Detail escape (gap: full transfer
+ *     integration PR-3 veya ileri PR'da; UI bilinçle placeholder)
  *
- * Form akışı sade — kullanıcıdan minimum bilgi:
- *  - Şirket (zorunlu, varsayılan = ilk erişilebilir şirket)
- *  - Müşteri (zorunlu — picker)
- *  - Proje (opsiyonel, müşteri+şirket bağlamına göre)
- *  - Başlık (zorunlu)
- *  - Açıklama (zorunlu)
- *  - 5 açılış taxonomy seçimi (her biri opsiyonel; lookup endpoint'ten):
- *    platform / businessProcess / operationType / affectedObject / impact
+ * KORUNAN DAVRANIŞ
+ *  - Backend / schema / migration YOK.
+ *  - Mevcut endpoint'ler aynen kullanılır:
+ *      lookupService.suggestSmartTicketClassification (PR-2b)
+ *      caseService.create (mevcut)
+ *      caseService.importAiSuggestedSolutionSteps (PR-2a)
+ *      caseService.transitionStatus + smartTicketClosure (PR-1e)
+ *      lookupService.smartTicketTaxonomies (PR-1a)
+ *  - Quick Case / New Case / Case Detail / SLA / approval guard dokunulmadı.
+ *  - Auto-close YOK. Auto-transfer YOK.
+ *
+ * TEK USER-FACING ANALYZE ACTION
+ *  - Stage 1'de iki sıralı buton var:
+ *      1) "KB ile Analiz Et" → suggestClassification, 5 taxonomy alanını
+ *         BOŞ olanları otomatik doldur.
+ *      2) "Vaka Oluştur ve Çözüm Adımlarına Geç" → caseService.create +
+ *         importAiSuggestedSolutionSteps + stage→solution.
+ *  - Eski iki ayrı user-facing aksiyon (PR-2b classification + PR-2c
+ *    AI step import) BU EKRANDA tekleştirildi. AI önerilen adımlar Case
+ *    create ile birlikte tek tıkta gelir; classification ayrı bir
+ *    "analiz" adımı olarak kullanıcı override edebilsin diye sırada önde.
  */
 
-// Mapping fallback'leri ./mapping modülünden geliyor. Eskiden bu dosyada
-// hard-coded olarak kullanılan sabitler artık `resolveSmartTicketMapping`
-// kararının "fallback" dalında dönüyor (Phase 1d).
+type Stage = 'opening' | 'solution' | 'closure' | 'transfer';
 
 const TAXONOMY_FIELDS: Array<{
   key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact';
@@ -78,6 +99,14 @@ interface SmartTicketFormState {
   impact: string;
 }
 
+interface ClosureFormState {
+  rootCauseGroup: string;
+  rootCauseDetail: string;
+  resolutionType: string;
+  permanentPrevention: string;
+  resolutionNote: string;
+}
+
 const emptyForm = (companyId: string): SmartTicketFormState => ({
   companyId,
   accountId: '',
@@ -93,20 +122,32 @@ const emptyForm = (companyId: string): SmartTicketFormState => ({
   impact: '',
 });
 
+const emptyClosure = (): ClosureFormState => ({
+  rootCauseGroup: '',
+  rootCauseDetail: '',
+  resolutionType: '',
+  permanentPrevention: '',
+  resolutionNote: '',
+});
+
 export function SmartTicketNewPage({
   onCreated,
   onCancel,
 }: {
+  /**
+   * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
+   * yönlendirir. **Birincil akışta otomatik çağrılmaz**: Case create
+   * sonrası kullanıcı Smart Ticket ekranında kalır (Stage 2).
+   */
   onCreated: (caseId: string) => void;
   onCancel: () => void;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
+  const [stage, setStage] = useState<Stage>('opening');
+  const [createdCase, setCreatedCase] = useState<Case | null>(null);
 
-  // WR-A4 / PM-04 — Şirket bazlı proje opt-in / zorunluluk flag'leri.
-  // selectedCompany bootstrap-cached lookup'tan gelir; backend
-  // CompanySettings.projectsEnabled/projectsRequired ile aynı.
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === form.companyId) ?? null,
     [companies, form.companyId],
@@ -121,23 +162,22 @@ export function SmartTicketNewPage({
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [projects, setProjects] = useState<SmartTicketProjectOption[]>([]);
 
-  const [submitting, setSubmitting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Phase 2b — açılış sınıflandırma önerisi (External KB / AI).
+  // Phase 2b — classification suggestion state.
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestClassificationResponse | null>(null);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
-  /**
-   * Hangi alanların öneriden gelen değerle DOLDURULDUĞUNU takip eder.
-   * Kullanıcı sonradan elle değiştirirse bu set'ten düşer — submit
-   * sırasında metadata'da yalnız son halinde "öneriden gelmiş ve hala
-   * değişmemiş" alanları işaretleriz.
-   */
   const [appliedSuggestionFields, setAppliedSuggestionFields] = useState<Set<SuggestClassificationField>>(
     () => new Set(),
   );
+
+  // Stage 3 closure form state.
+  const [closure, setClosure] = useState<ClosureFormState>(emptyClosure());
+  const [closing, setClosing] = useState(false);
+  const [closureError, setClosureError] = useState<string | null>(null);
 
   // Taxonomy lookup — companyId değişince yeniden çek.
   useEffect(() => {
@@ -195,12 +235,10 @@ export function SmartTicketNewPage({
     };
   }, [form.accountId, form.companyId]);
 
-  // Şirket değişince müşteri/proje + Smart Ticket taxonomy seçimlerini
-  // sıfırla. Taxonomy listesi per-tenant; eski şirketin code'ları yeni
-  // şirkette geçersiz olur, üstelik bu PR'da server-side cross-tenant
-  // taxonomy code validation YOK → stale değerleri formda tutmamak için
-  // burada agresif reset (Codex PR-1c review P2-A fix).
+  // Şirket değişince müşteri/proje + Smart Ticket taxonomy seçimlerini sıfırla.
+  // Sadece Stage 1'de geçerli — Case create sonrası şirket değişmez.
   useEffect(() => {
+    if (stage !== 'opening') return;
     setForm((f) => ({
       ...f,
       accountId: '',
@@ -213,11 +251,10 @@ export function SmartTicketNewPage({
       affectedObject: '',
       impact: '',
     }));
-    // Phase 2b — company değişince suggestion + applied set sıfırlanır
-    // (PR-1c P2-A pattern'ı: per-tenant suggestion stale olmasın).
     setSuggestion(null);
     setSuggestionError(null);
     setAppliedSuggestionFields(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.companyId]);
 
   function handleSelectAccount(item: AccountListItem | null) {
@@ -243,28 +280,22 @@ export function SmartTicketNewPage({
     return companies.find((c) => c.id === form.companyId)?.name ?? '';
   }
 
-  // Codex PR-1c review P2-B fix — projectsRequired=true tenant'larda backend
-  // (caseRepository.create) `project_required` ile reddediyor. Submit'i UI'da
-  // gating'le ki kullanıcı formu tamamlayıp ancak POST sonrası hata almasın.
-  // Mevcut NewCaseForm gating mantığıyla eşdeğer (NewCaseForm.tsx#732).
   const projectRequirementSatisfied =
     !projectsEnabled || !projectsRequired || !form.accountId || !!form.accountProjectId;
 
-  const canSubmit =
+  const canCreate =
+    stage === 'opening' &&
     !!form.companyId &&
     !!form.accountId &&
     form.title.trim().length > 0 &&
     form.description.trim().length > 0 &&
     projectRequirementSatisfied &&
-    !submitting;
+    !creating;
 
-  // ── Phase 2b — açılış sınıflandırma önerisi handler'ları ──────────
-  // Button: companyId + min 5 karakter açıklama gerekir. Aksi takdirde
-  // disabled. KB devre dışıysa veya hata olursa kullanıcıya net mesaj
-  // verilir; manuel dropdown'lar her halükarda çalışmaya devam eder.
   const canSuggest =
-    !!form.companyId && form.description.trim().length >= 5 && !suggesting;
+    stage === 'opening' && !!form.companyId && form.description.trim().length >= 5 && !suggesting;
 
+  // ── Phase 2b — sınıflandırma önerisi (yalnız taxonomy auto-fill) ────
   async function handleSuggestClassification() {
     if (!canSuggest) return;
     setSuggesting(true);
@@ -282,8 +313,6 @@ export function SmartTicketNewPage({
         return;
       }
       setSuggestion(res);
-      // YALNIZ BOŞ alanları otomatik doldur. Kullanıcının elle seçtiği
-      // değerler asla sessiz silinmez.
       const applied = new Set<SuggestClassificationField>();
       setForm((f) => {
         const next = { ...f };
@@ -322,11 +351,6 @@ export function SmartTicketNewPage({
     }
   }
 
-  /**
-   * "Önerileri uygula" — kullanıcının bilinçli kararıyla TÜM önerileri
-   * (boş olmayan dahil) override eder. Bu, otomatik prefill'in aksine
-   * kullanıcı bilgisi olan bir mutasyondur.
-   */
   function handleApplyAllSuggestions() {
     if (!suggestion) return;
     const applied = new Set<SuggestClassificationField>();
@@ -350,7 +374,6 @@ export function SmartTicketNewPage({
     setAppliedSuggestionFields(applied);
   }
 
-  // Kullanıcı bir alanı manuel değiştirince applied set'inden düş.
   function handleTaxonomyChange(
     key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact',
     value: string,
@@ -364,14 +387,12 @@ export function SmartTicketNewPage({
     });
   }
 
-  async function handleSubmit() {
-    if (!canSubmit) return;
-    setSubmitting(true);
+  // ── Stage 1 → 2 transition: Case create + AI suggested steps import ─
+  async function handleCreateAndContinue() {
+    if (!canCreate) return;
+    setCreating(true);
     setError(null);
 
-    // Smart Ticket → klasik Case alanları mapping (Phase 1d).
-    // resolveSmartTicketMapping per-tenant taxonomy metadata'sına bakar;
-    // mapping yoksa "fallback" döner ve Case yine sorunsuz açılır.
     const mapping = resolveSmartTicketMapping(taxonomies, {
       platform: form.platform || undefined,
       businessProcess: form.businessProcess || undefined,
@@ -380,12 +401,6 @@ export function SmartTicketNewPage({
       impact: form.impact || undefined,
     });
 
-    // customFields.smartTicket: orijinal code + label + mapping kararı.
-    // - Code'lar her zaman saklanır → klasik alanlara map edilseler bile
-    //   intake context'i kaybolmaz (raporlama / audit / future closure).
-    // - Label'lar bootstrap-cache benzeri downstream raporlar lookup yapmasın
-    //   diye snapshot olarak yazılır.
-    // - appliedMapping: hangi alanın hangi kaynaktan geldiği ve son değerleri.
     const smartTicket: Record<string, unknown> = {};
     for (const f of TAXONOMY_FIELDS) {
       const v = form[f.key];
@@ -403,11 +418,6 @@ export function SmartTicketNewPage({
       trace: mapping.trace,
     };
 
-    // Phase 2b — KB sınıflandırma önerisi metadata'sı (yalnızca
-    // suggestion alındıysa). Per-field matchedBy/confidence appliedFields
-    // setine girer; kullanıcı sonradan değiştirdiyse o alan listeye
-    // girmez. unmatched ham raporlama için saklanır. Raw KB cevabı
-    // PERSIST EDİLMEZ.
     if (suggestion) {
       const perField: Record<string, { matchedBy: string; confidence: number; suggestedCode: string }> = {};
       for (const key of [
@@ -456,33 +466,116 @@ export function SmartTicketNewPage({
               accountProjectName: form.accountProjectName || undefined,
             }
           : {}),
-        // Mapping kararı: businessProcess.metadata varsa map; yoksa fallback.
-        // Case create mapping yokluğunda HİÇBİR ZAMAN patlamaz — mapping.source
-        // 'fallback' olur ve kullanıcıya gözüken Case kategorisi
-        // "Akıllı Ticket / Genel / Talep" şeklinde kalır.
         category: mapping.category,
         subCategory: mapping.subCategory,
         requestType: mapping.requestType,
-        customFields: {
-          smartTicket,
-        },
+        customFields: { smartTicket },
       });
-      toast({
-        type: 'success',
-        message: `Akıllı Ticket "${created.title}" oluşturuldu.`,
-        duration: 2500,
-      });
-      onCreated(created.id);
+      setCreatedCase(created);
+      // Çözüm Adımlarını çağırma asynchronous — başarısız olsa bile
+      // kullanıcı manuel adım ekleyebilir. Hata bilgilendirme toast'unda.
+      try {
+        const importResult = await caseService.importAiSuggestedSolutionSteps(created.id, {
+          freeText: form.description.trim(),
+        });
+        if (importResult && importResult.summary.importedCount > 0) {
+          toast({
+            type: 'success',
+            message: `Vaka açıldı (${created.caseNumber}) · ${importResult.summary.importedCount} AI önerisi eklendi.`,
+            duration: 3000,
+          });
+        } else {
+          toast({
+            type: 'success',
+            message: `Vaka açıldı (${created.caseNumber}).`,
+            duration: 2500,
+          });
+        }
+      } catch (importErr) {
+        toast({
+          type: 'warn',
+          message: `Vaka açıldı (${created.caseNumber}) ama AI önerileri alınamadı: ${(importErr as Error)?.message ?? ''} Manuel adım ekleyebilirsiniz.`,
+          duration: 4500,
+        });
+      }
+      setStage('solution');
     } catch (e) {
       setError((e as Error)?.message ?? 'Vaka oluşturulamadı.');
     } finally {
-      setSubmitting(false);
+      setCreating(false);
     }
   }
 
+  // ── Stage 3 closure: transitionStatus + smartTicketClosure ──────────
+  const closureLists = useMemo(() => {
+    const rcgList: SmartTicketRootCauseGroup[] = taxonomies?.rootCauseGroup ?? [];
+    const rcdList: SmartTicketTaxonomyItem[] =
+      rcgList.find((g) => g.code === closure.rootCauseGroup)?.children ?? [];
+    const rtList: SmartTicketTaxonomyItem[] = taxonomies?.resolutionType ?? [];
+    const ppList: SmartTicketTaxonomyItem[] = taxonomies?.permanentPrevention ?? [];
+    return { rcgList, rcdList, rtList, ppList };
+  }, [taxonomies, closure.rootCauseGroup]);
+
+  // Kök Neden Grubu değişince Detay seçimini sıfırla.
+  useEffect(() => {
+    setClosure((c) => ({ ...c, rootCauseDetail: '' }));
+  }, [closure.rootCauseGroup]);
+
+  async function handleCloseCase() {
+    if (!createdCase || closing) return;
+    if (!closure.resolutionNote.trim()) {
+      setClosureError('Çözüm notu zorunlu.');
+      return;
+    }
+    setClosing(true);
+    setClosureError(null);
+
+    const findLabel = (list: { code: string; label: string }[], code: string) =>
+      list.find((x) => x.code === code)?.label;
+
+    const closurePayload = {
+      rootCauseGroup: closure.rootCauseGroup || undefined,
+      rootCauseGroupLabel: findLabel(closureLists.rcgList, closure.rootCauseGroup),
+      rootCauseDetail: closure.rootCauseDetail || undefined,
+      rootCauseDetailLabel: findLabel(closureLists.rcdList, closure.rootCauseDetail),
+      resolutionType: closure.resolutionType || undefined,
+      resolutionTypeLabel: findLabel(closureLists.rtList, closure.resolutionType),
+      permanentPrevention: closure.permanentPrevention || undefined,
+      permanentPreventionLabel: findLabel(closureLists.ppList, closure.permanentPrevention),
+    };
+
+    try {
+      const updated = await caseService.transitionStatus(createdCase.id, 'Çözüldü', {
+        resolutionNote: closure.resolutionNote.trim(),
+        smartTicketClosure: closurePayload,
+      });
+      if (!updated) {
+        setClosureError('Vaka kapatılamadı.');
+        return;
+      }
+      setCreatedCase(updated);
+      toast({
+        type: 'success',
+        message: `Vaka kapatıldı (${updated.caseNumber}).`,
+        duration: 2500,
+      });
+      // Kapama sonrası kullanıcıyı Case Detail'e götür — Akıllı Ticket akışı bitti.
+      onCreated(updated.id);
+    } catch (e) {
+      setClosureError((e as Error)?.message ?? 'Vaka kapatılamadı.');
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // Render
+  // ───────────────────────────────────────────────────────────────────
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4 px-2 py-4">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-7xl space-y-4 px-4 py-4">
+      {/* Header — geri buton + başlık + Case number badge */}
+      <div className="flex items-start justify-between gap-3">
         <div>
           <button
             type="button"
@@ -492,208 +585,247 @@ export function SmartTicketNewPage({
             <ArrowLeft size={12} />
             <span>Vakalara dön</span>
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Sparkles size={18} className="text-brand-500" />
             <h1 className="text-xl font-semibold text-slate-900 dark:text-ndark-text">
-              Akıllı Ticket Aç
+              Akıllı Ticket
             </h1>
+            {createdCase && (
+              <Badge tint="violet">
+                {createdCase.caseNumber} · {createdCase.status}
+              </Badge>
+            )}
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-ndark-muted">
-            Akıllı Ticket akışı yapılandırılıyor — bu shell mevcut <strong>POST /api/cases</strong>{' '}
-            üzerine gerçek bir vaka açar; Smart Ticket meta verisi vakanın{' '}
-            <code className="font-mono text-[11px]">customFields.smartTicket</code> alanına yazılır.
-            Quick Case ve klasik Yeni Vaka akışları aynen çalışmaya devam eder.
+            L1 akışı: açılış · çözüm denemesi · kapanış (veya L2 devir). Tek ekranda.
           </p>
         </div>
+        <StageIndicator stage={stage} hasCase={!!createdCase} />
       </div>
 
-      <Card>
-        <CardBody className="space-y-5">
-          {/* Şirket / müşteri / proje */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <CompanySelector
-              label="Şirket"
-              value={form.companyId || null}
-              onChange={(id) => setForm((f) => ({ ...f, companyId: id ?? '' }))}
-              required
-            />
-            <Field label="Müşteri" required>
-              <button
-                type="button"
-                onClick={() => setAccountPickerOpen(true)}
-                className="flex w-full items-center justify-between rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm hover:border-slate-400 dark:border-ndark-border dark:bg-ndark-card"
-              >
-                <span className={form.accountName ? 'text-slate-800 dark:text-ndark-text' : 'text-slate-400'}>
-                  {form.accountName || 'Müşteri seçin…'}
-                </span>
-                <Users2 size={14} className="text-slate-400" />
-              </button>
-            </Field>
-            {/* Proje alanı şu üç durumda gösterilir:
-                 - şirkette projectsEnabled=true VE müşteri seçildi (NewCaseForm
-                   pattern'i); projectsRequired=true ise zorunlu rozet.
-                 - flag kapalı tenant'larda müşterinin aktif projesi varsa yine
-                   opsiyonel olarak göster (legacy davranışı koru). */}
-            {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
-              <Field
-                label="Proje"
-                required={projectsEnabled && projectsRequired && !!form.accountId}
-                hint={
-                  projectsEnabled && projectsRequired && !!form.accountId
-                    ? 'Bu şirket için proje zorunlu.'
-                    : 'Opsiyonel — müşterinin aktif projeleri.'
-                }
-              >
-                <Select
-                  value={form.accountProjectId}
-                  onChange={(e) => handleSelectProject(e.target.value)}
+      {/* 2-column staged screen */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Sol 1/3 — opening + classification (sürekli görünür) */}
+        <div className="lg:col-span-1">
+          <Card>
+            <CardBody className="space-y-4">
+              <SectionTitle text="1. Açılış / Sınıflandırma" />
+              <CompanySelector
+                label="Şirket"
+                value={form.companyId || null}
+                onChange={(id) => setForm((f) => ({ ...f, companyId: id ?? '' }))}
+                required
+                disabled={stage !== 'opening'}
+              />
+              <Field label="Müşteri" required>
+                <button
+                  type="button"
+                  onClick={() => setAccountPickerOpen(true)}
+                  disabled={stage !== 'opening'}
+                  className="flex w-full items-center justify-between rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-ndark-border dark:bg-ndark-card"
                 >
-                  <option value="">
-                    {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
-                  </option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            )}
-          </div>
-
-          {/* Başlık / açıklama */}
-          <Field label="Başlık" required>
-            <TextInput
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="ör. Müşteri ürün kartı kaydı sırasında hata alıyor"
-            />
-          </Field>
-
-          <Field label="Açıklama" required>
-            <TextArea
-              rows={5}
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="Problemi kısa ve net anlat. Hangi platform? Hangi işlem? Hangi etki?"
-            />
-          </Field>
-
-          {/* Smart Ticket taxonomy alanları */}
-          <div className="rounded-md border border-brand-100 bg-brand-50/40 p-4 dark:border-brand-900/30 dark:bg-brand-950/20">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles size={14} className="text-brand-500" />
-                <span className="text-sm font-medium text-brand-700 dark:text-brand-200">
-                  Akıllı Tanımlar
-                </span>
-                {taxonomiesLoading && (
-                  <span className="text-xs text-slate-500 dark:text-ndark-muted">yükleniyor…</span>
-                )}
-              </div>
-              {/* WR-Smart-Ticket Phase 2b — KB'den sınıflandırma önerisi */}
-              <Button
-                size="sm"
-                variant="outline"
-                leftIcon={<Wand2 size={12} />}
-                disabled={!canSuggest}
-                onClick={() => void handleSuggestClassification()}
-                title={
-                  !form.companyId
-                    ? 'Önce şirket seçin'
-                    : form.description.trim().length < 5
-                      ? 'En az 5 karakter açıklama girin'
-                      : 'External KB üzerinden 5 sınıflandırma alanı önerilir'
-                }
-              >
-                {suggesting ? 'Öneriliyor…' : 'KB ile Sınıflandır'}
-              </Button>
-            </div>
-            {taxonomyError && (
-              <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                {taxonomyError}
-              </p>
-            )}
-            {suggestionError && (
-              <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-                {suggestionError} Manuel seçim yapabilirsiniz.
-              </p>
-            )}
-            {suggestion && (
-              <div className="mb-3 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/30">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
-                    KB önerisi: {Object.keys(suggestion.suggestions).length} alan eşleşti
-                    {suggestion.unmatched.length > 0 && `, ${suggestion.unmatched.length} eşleşmedi`}
+                  <span className={form.accountName ? 'text-slate-800 dark:text-ndark-text' : 'text-slate-400'}>
+                    {form.accountName || 'Müşteri seçin…'}
                   </span>
-                  {Object.keys(suggestion.suggestions).length > 0 && (
-                    <Button size="sm" variant="ghost" onClick={handleApplyAllSuggestions}>
-                      Önerileri uygula
+                  <Users2 size={14} className="text-slate-400" />
+                </button>
+              </Field>
+              {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
+                <Field
+                  label="Proje"
+                  required={projectsEnabled && projectsRequired && !!form.accountId}
+                  hint={
+                    projectsEnabled && projectsRequired && !!form.accountId
+                      ? 'Bu şirket için proje zorunlu.'
+                      : 'Opsiyonel.'
+                  }
+                >
+                  <Select
+                    value={form.accountProjectId}
+                    onChange={(e) => handleSelectProject(e.target.value)}
+                    disabled={stage !== 'opening'}
+                  >
+                    <option value="">
+                      {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
+                    </option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+              <Field label="Başlık" required>
+                <TextInput
+                  value={form.title}
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                  placeholder="ör. Ürün kartı kaydı sırasında hata"
+                  disabled={stage !== 'opening'}
+                />
+              </Field>
+              <Field label="Açıklama" required>
+                <TextArea
+                  rows={4}
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Problemi kısa ve net anlat. Hangi platform? Hangi işlem? Hangi etki?"
+                  disabled={stage !== 'opening'}
+                />
+              </Field>
+
+              {/* Smart Ticket taxonomy alanları */}
+              <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles size={12} className="text-brand-500" />
+                    <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
+                      Akıllı Tanımlar
+                    </span>
+                    {taxonomiesLoading && (
+                      <span className="text-[11px] text-slate-500 dark:text-ndark-muted">yükleniyor…</span>
+                    )}
+                  </div>
+                  {/* TEK USER-FACING ANALİZ ADIMI — classification */}
+                  {stage === 'opening' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      leftIcon={<Wand2 size={11} />}
+                      disabled={!canSuggest}
+                      onClick={() => void handleSuggestClassification()}
+                      title={
+                        !form.companyId
+                          ? 'Önce şirket seçin'
+                          : form.description.trim().length < 5
+                            ? 'En az 5 karakter açıklama girin'
+                            : 'KB üzerinden 5 sınıflandırma alanı önerilir'
+                      }
+                    >
+                      {suggesting ? 'Analiz…' : 'KB ile Analiz Et'}
                     </Button>
                   )}
                 </div>
-                {suggestion.unmatched.length > 0 && (
-                  <ul className="mt-1 text-[11px] text-violet-700 dark:text-violet-300">
-                    {suggestion.unmatched.map((u, i) => (
-                      <li key={`${u.taxonomyType}-${i}`}>
-                        Eşleşmedi: <span className="font-medium">{u.taxonomyType}</span> —{' '}
-                        <code className="font-mono">{u.rawValue || '(boş)'}</code>
-                      </li>
-                    ))}
-                  </ul>
+                {taxonomyError && (
+                  <p className="mb-2 rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-800">
+                    {taxonomyError}
+                  </p>
                 )}
+                {suggestionError && (
+                  <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                    {suggestionError} Manuel seçim yapabilirsiniz.
+                  </p>
+                )}
+                {suggestion && (
+                  <div className="mb-2 rounded-md border border-violet-200 bg-violet-50/60 px-2 py-1.5 dark:border-violet-900/40 dark:bg-violet-950/30">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-violet-800 dark:text-violet-200">
+                        KB: {Object.keys(suggestion.suggestions).length} eşleşti
+                        {suggestion.unmatched.length > 0 && `, ${suggestion.unmatched.length} eşleşmedi`}
+                      </span>
+                      {stage === 'opening' && Object.keys(suggestion.suggestions).length > 0 && (
+                        <Button size="sm" variant="ghost" onClick={handleApplyAllSuggestions}>
+                          Tümünü uygula
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {TAXONOMY_FIELDS.map((f) => {
+                    const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
+                    const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
+                    const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
+                    return (
+                      <Field
+                        key={f.key}
+                        label={f.label}
+                        hint={
+                          isFromSuggestion && suggested
+                            ? `KB önerisi (${suggested.matchedBy}, %${Math.round(suggested.confidence * 100)})`
+                            : undefined
+                        }
+                      >
+                        <Select
+                          value={form[f.key]}
+                          onChange={(e) => handleTaxonomyChange(f.key, e.target.value)}
+                          disabled={stage !== 'opening' || taxonomiesLoading || items.length === 0}
+                        >
+                          <option value="">— Seçim yok —</option>
+                          {items.map((it) => (
+                            <option key={it.code} value={it.code}>
+                              {it.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    );
+                  })}
+                </div>
               </div>
-            )}
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {TAXONOMY_FIELDS.map((f) => {
-                const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
-                const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
-                const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
-                return (
-                  <Field
-                    key={f.key}
-                    label={f.label}
-                    hint={
-                      isFromSuggestion && suggested
-                        ? `KB önerisi (eşleşme: ${suggested.matchedBy}, güven %${Math.round(suggested.confidence * 100)})`
-                        : f.hint
-                    }
-                  >
-                    <Select
-                      value={form[f.key]}
-                      onChange={(e) => handleTaxonomyChange(f.key, e.target.value)}
-                      disabled={taxonomiesLoading || items.length === 0}
-                    >
-                      <option value="">— Seçim yok —</option>
-                      {items.map((it) => (
-                        <option key={it.code} value={it.code}>
-                          {it.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                );
-              })}
-            </div>
-            <MappingPreview taxonomies={taxonomies} form={form} />
-          </div>
 
-          {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-              {error}
-            </div>
+              {error && (
+                <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  {error}
+                </div>
+              )}
+
+              {stage === 'opening' && (
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
+                  <Button variant="outline" onClick={onCancel} disabled={creating} size="sm">
+                    Vazgeç
+                  </Button>
+                  <Button
+                    onClick={() => void handleCreateAndContinue()}
+                    disabled={!canCreate}
+                    leftIcon={creating ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
+                  >
+                    {creating ? 'Açılıyor…' : 'Vaka Oluştur ve Çözüm Adımlarına Geç'}
+                  </Button>
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* Sağ 2/3 — stage-based */}
+        <div className="space-y-4 lg:col-span-2">
+          {stage === 'opening' && <Stage1Placeholder />}
+
+          {stage === 'solution' && createdCase && (
+            <Stage2Solution
+              createdCase={createdCase}
+              onCaseChanged={(c) => setCreatedCase(c)}
+              onGoToClosure={() => setStage('closure')}
+              onGoToTransfer={() => setStage('transfer')}
+              onGoToCaseDetail={() => onCreated(createdCase.id)}
+            />
           )}
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-ndark-border">
-            <Button variant="outline" onClick={onCancel} disabled={submitting}>
-              Vazgeç
-            </Button>
-            <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-              {submitting ? 'Açılıyor…' : 'Akıllı Ticket Aç'}
-            </Button>
-          </div>
-        </CardBody>
-      </Card>
+          {stage === 'closure' && createdCase && (
+            <Stage3Closure
+              closure={closure}
+              setClosure={setClosure}
+              closureLists={closureLists}
+              closing={closing}
+              closureError={closureError}
+              onClose={() => void handleCloseCase()}
+              onBack={() => {
+                setStage('solution');
+                setClosureError(null);
+              }}
+            />
+          )}
+
+          {stage === 'transfer' && createdCase && (
+            <Stage3TransferPlaceholder
+              caseNumber={createdCase.caseNumber}
+              onBack={() => setStage('solution')}
+              onGoToCaseDetail={() => onCreated(createdCase.id)}
+            />
+          )}
+        </div>
+      </div>
 
       <AccountSearchPicker
         open={accountPickerOpen}
@@ -707,63 +839,328 @@ export function SmartTicketNewPage({
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Mapping preview — kullanıcı submit'ten önce hangi klasik
-// Kategori/Alt Kategori/İstek Tipi alanlarına eşlendiğini görsün.
-// Read-only; UI submit logic'i aynı resolveSmartTicketMapping'i kullanır.
+// Stage indicator
 // ─────────────────────────────────────────────────────────────────
-function MappingPreview({
-  taxonomies,
-  form,
-}: {
-  taxonomies: SmartTicketTaxonomyResponse['taxonomies'] | null;
-  form: SmartTicketFormState;
-}) {
-  const mapping = resolveSmartTicketMapping(taxonomies, {
-    platform: form.platform || undefined,
-    businessProcess: form.businessProcess || undefined,
-    operationType: form.operationType || undefined,
-    affectedObject: form.affectedObject || undefined,
-    impact: form.impact || undefined,
-  });
-  const mapped = mapping.source !== 'fallback';
+
+function StageIndicator({ stage, hasCase }: { stage: Stage; hasCase: boolean }) {
+  const items: Array<{ key: Stage | 'closure-or-transfer'; label: string }> = [
+    { key: 'opening', label: '1 Açılış' },
+    { key: 'solution', label: '2 Çözüm' },
+    { key: 'closure-or-transfer', label: '3 Kapanış / Devir' },
+  ];
+  const active =
+    stage === 'opening'
+      ? 'opening'
+      : stage === 'solution'
+        ? 'solution'
+        : 'closure-or-transfer';
   return (
-    <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-[12px] text-slate-600 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="font-medium text-slate-700 dark:text-ndark-text">
-          Eşleme önizleme (klasik Case alanları)
-        </span>
-        <span
-          className={
-            mapped
-              ? 'rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-              : 'rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted'
-          }
-        >
-          kaynak: {mapping.source}
-        </span>
-      </div>
-      <ul className="space-y-0.5">
-        <li>
-          Kategori: <span className="font-medium">{mapping.category}</span>{' '}
-          <span className="text-slate-400">({mapping.trace.category})</span>
-        </li>
-        <li>
-          Alt Kategori: <span className="font-medium">{mapping.subCategory}</span>{' '}
-          <span className="text-slate-400">({mapping.trace.subCategory})</span>
-        </li>
-        <li>
-          İstek Tipi: <span className="font-medium">{mapping.requestType}</span>{' '}
-          <span className="text-slate-400">({mapping.trace.requestType})</span>
-        </li>
-      </ul>
-      <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
-        Eşleme businessProcess <code className="font-mono">metadata.caseCategory</code> /{' '}
-        <code className="font-mono">caseSubCategory</code> /{' '}
-        <code className="font-mono">caseRequestType</code> üzerinden okunur. Mapping yoksa{' '}
-        Akıllı Ticket / Genel / Talep değerleriyle fallback'e düşer ve vaka yine açılır.
-      </p>
+    <div className="hidden items-center gap-1.5 md:flex">
+      {items.map((it, i) => {
+        const isActive = it.key === active;
+        const isPast =
+          (it.key === 'opening' && hasCase) ||
+          (it.key === 'solution' && (stage === 'closure' || stage === 'transfer'));
+        return (
+          <div key={it.key} className="flex items-center gap-1.5">
+            <span
+              className={
+                isActive
+                  ? 'rounded-full bg-brand-100 px-2.5 py-0.5 text-[11px] font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'
+                  : isPast
+                    ? 'rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                    : 'rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] text-slate-500 dark:bg-ndark-bg dark:text-ndark-muted'
+              }
+            >
+              {it.label}
+            </span>
+            {i < items.length - 1 && <span className="text-slate-300">›</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+function SectionTitle({ text }: { text: string }) {
+  return (
+    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-dim">
+      {text}
+    </h3>
+  );
+}
 
+// ─────────────────────────────────────────────────────────────────
+// Stage 1 placeholder (right column)
+// ─────────────────────────────────────────────────────────────────
+
+function Stage1Placeholder() {
+  return (
+    <Card>
+      <CardBody>
+        <SectionTitle text="2. Çözüm Denemesi" />
+        <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50/60 p-6 text-center dark:border-ndark-border dark:bg-ndark-bg/40">
+          <Sparkles size={20} className="mx-auto mb-2 text-slate-400" />
+          <p className="text-sm text-slate-600 dark:text-ndark-muted">
+            Sol taraftaki formu doldur, isteğe bağlı "KB ile Analiz Et" ile sınıflandırma önerisi al.
+            <br />
+            Sonra <strong>"Vaka Oluştur ve Çözüm Adımlarına Geç"</strong> tıklayınca AI önerilen
+            adımlar burada görünecek.
+          </p>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage 2 — Solution (embed CaseSolutionStepsPanel)
+// ─────────────────────────────────────────────────────────────────
+
+function Stage2Solution({
+  createdCase,
+  onCaseChanged,
+  onGoToClosure,
+  onGoToTransfer,
+  onGoToCaseDetail,
+}: {
+  createdCase: Case;
+  onCaseChanged: (c: Case) => void;
+  onGoToClosure: () => void;
+  onGoToTransfer: () => void;
+  onGoToCaseDetail: () => void;
+}) {
+  // Çözüm Adımları paneli mevcut CaseSolutionStepsPanel — reuse.
+  // Panel kendi yarış kontrolünü (stale guard) item.id üzerinden yapıyor;
+  // burada item her zaman createdCase olduğundan ek bir guard gerekmez.
+  return (
+    <div className="space-y-3">
+      <CaseSolutionStepsPanel
+        item={createdCase}
+        onChange={() => {
+          // Panel local state'ini yönetiyor; biz Case object'i yenileyelim
+          // ki closure'a girerken güncel olsun.
+          void caseService.get(createdCase.id).then((c) => {
+            if (c) onCaseChanged(c);
+          });
+        }}
+      />
+      <Card>
+        <CardBody>
+          <SectionTitle text="3. Kapanış · Devir · Detay" />
+          <p className="mt-2 text-xs text-slate-500 dark:text-ndark-muted">
+            L1 denemeleri tamamlandı mı? Sonraki adımı seç. Vaka otomatik kapatılmaz.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button leftIcon={<Check size={12} />} onClick={onGoToClosure}>
+              Kapanışa Geç
+            </Button>
+            <Button variant="outline" onClick={onGoToTransfer}>
+              L2'ye Devret
+            </Button>
+            <Button variant="ghost" leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
+              Vaka Detayına Git
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage 3 — Closure form
+// ─────────────────────────────────────────────────────────────────
+
+interface ClosureListsRef {
+  rcgList: SmartTicketRootCauseGroup[];
+  rcdList: SmartTicketTaxonomyItem[];
+  rtList: SmartTicketTaxonomyItem[];
+  ppList: SmartTicketTaxonomyItem[];
+}
+
+function Stage3Closure({
+  closure,
+  setClosure,
+  closureLists,
+  closing,
+  closureError,
+  onClose,
+  onBack,
+}: {
+  closure: ClosureFormState;
+  setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
+  closureLists: ClosureListsRef;
+  closing: boolean;
+  closureError: string | null;
+  onClose: () => void;
+  onBack: () => void;
+}) {
+  const canSave = closure.resolutionNote.trim().length > 0 && !closing;
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex items-center justify-between">
+          <SectionTitle text="3. Kapanış" />
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<CornerUpLeft size={11} />}
+            onClick={onBack}
+            disabled={closing}
+          >
+            Çözüm Adımlarına Geri Dön
+          </Button>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-ndark-muted">
+          Vakanın nasıl çözüldüğünü kayıt altına alın. Onay politikası geçerliyse mevcut çözüm onayı
+          akışı çalışır; otomatik bypass yok.
+        </p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Field label="Kök Neden Grubu">
+            <Select
+              value={closure.rootCauseGroup}
+              onChange={(e) => setClosure((c) => ({ ...c, rootCauseGroup: e.target.value }))}
+              disabled={closureLists.rcgList.length === 0}
+            >
+              <option value="">— Seçim yok —</option>
+              {closureLists.rcgList.map((g) => (
+                <option key={g.code} value={g.code}>
+                  {g.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Kök Neden Detayı"
+            hint={
+              closure.rootCauseGroup && closureLists.rcdList.length === 0
+                ? 'Bu grubun detay satırı yok.'
+                : undefined
+            }
+          >
+            <Select
+              value={closure.rootCauseDetail}
+              onChange={(e) => setClosure((c) => ({ ...c, rootCauseDetail: e.target.value }))}
+              disabled={!closure.rootCauseGroup || closureLists.rcdList.length === 0}
+            >
+              <option value="">— Seçim yok —</option>
+              {closureLists.rcdList.map((d) => (
+                <option key={d.code} value={d.code}>
+                  {d.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Çözüm Tipi">
+            <Select
+              value={closure.resolutionType}
+              onChange={(e) => setClosure((c) => ({ ...c, resolutionType: e.target.value }))}
+              disabled={closureLists.rtList.length === 0}
+            >
+              <option value="">— Seçim yok —</option>
+              {closureLists.rtList.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Kalıcı Önlem">
+            <Select
+              value={closure.permanentPrevention}
+              onChange={(e) => setClosure((c) => ({ ...c, permanentPrevention: e.target.value }))}
+              disabled={closureLists.ppList.length === 0}
+            >
+              <option value="">— Seçim yok —</option>
+              {closureLists.ppList.map((p) => (
+                <option key={p.code} value={p.code}>
+                  {p.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Field label="Çözüm Açıklaması" required>
+          <TextArea
+            rows={4}
+            value={closure.resolutionNote}
+            onChange={(e) => setClosure((c) => ({ ...c, resolutionNote: e.target.value }))}
+            placeholder="Sorun nasıl çözüldü? Müşteriye ne anlatıldı?"
+          />
+        </Field>
+        {closureError && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+            {closureError}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
+          <Button variant="outline" onClick={onBack} disabled={closing}>
+            Vazgeç
+          </Button>
+          <Button onClick={onClose} disabled={!canSave} leftIcon={closing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}>
+            {closing ? 'Kapatılıyor…' : 'Vakayı Kapat'}
+          </Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage 3 — L2 transfer placeholder
+// Spec G/F: tam transfer integration çok geniş; bu PR'da placeholder +
+// Case Detail escape ile gap raporlanır. Mevcut transferCase akışı
+// (caseRepository.transferToTeam) Case Detail tarafında zaten çalışıyor.
+// ─────────────────────────────────────────────────────────────────
+
+function Stage3TransferPlaceholder({
+  caseNumber,
+  onBack,
+  onGoToCaseDetail,
+}: {
+  caseNumber: string;
+  onBack: () => void;
+  onGoToCaseDetail: () => void;
+}) {
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex items-center justify-between">
+          <SectionTitle text="3. L2'ye Devir" />
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<CornerUpLeft size={11} />}
+            onClick={onBack}
+          >
+            Çözüm Adımlarına Geri Dön
+          </Button>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          <p className="font-medium">L2 devir formu bu sürümde Smart Ticket ekranında YOK.</p>
+          <p className="mt-1 text-[12px]">
+            Mevcut "Vaka Aktarımı" akışı Case Detail içinde tam fonksiyonel — hedef takım, gerekçe,
+            otomatik özet çalışıyor. Bu PR placeholder sunar; Smart Ticket ekranına gömülü transfer
+            formu sonraki PR'da gelir.
+          </p>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-600 dark:border-ndark-border dark:bg-ndark-bg/40 dark:text-ndark-muted">
+          <p className="font-medium">Şimdi ne yapabilirsin:</p>
+          <ul className="mt-1 list-disc pl-5 space-y-0.5">
+            <li>"Vaka Detayına Git" tıkla → mevcut Devret modal'ı ile L2 aktarımı yap.</li>
+            <li>Veya çözüm adımlarına dön, son bir deneme yap.</li>
+          </ul>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
+          <Button variant="outline" onClick={onBack}>
+            Geri Dön
+          </Button>
+          <Button leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
+            Vaka Detayına Git ({caseNumber})
+          </Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
