@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { solutionStepRepository, SolutionStepError } from '../db/solutionStepRepository.js';
+import { externalKbClient } from '../lib/externalKbClient.js';
+import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { markInProgressForCase } from '../db/actionItemRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
@@ -60,6 +63,9 @@ function asyncRoute(handler) {
       }
       if (err instanceof CaseValidationError) {
         return res.status(err.status ?? 400).json({ error: err.code ?? 'validation_error', message: err.message });
+      }
+      if (err instanceof SolutionStepError) {
+        return res.status(err.status ?? 400).json({ error: err.code ?? 'solution_step_error', message: err.message });
       }
       console.error('[cases]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
@@ -1087,6 +1093,147 @@ router.delete(
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// WR-Smart-Ticket Phase 2a — CaseSolutionStep endpoints
+//
+// Scope: case-bağlı; companyId daima case'ten türetilir, allowedCompanyIds
+// guard her uçta repository tarafında uygulanır.
+//
+// Bu fazda yalnız "AI Önerilen Adımlar" import edilir (External KB
+// `analyze.analysis.suggestedSteps`); root cause / customer reply /
+// engineer handoff / similar / raw response intentionally ignored.
+// ─────────────────────────────────────────────────────────────────
+
+router.get(
+  '/:id/solution-steps',
+  asyncRoute(async (req, res) => {
+    const items = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
+    res.json({ value: items });
+  }),
+);
+
+router.post(
+  '/:id/solution-steps',
+  asyncRoute(async (req, res) => {
+    const item = await solutionStepRepository.createManual(
+      req.params.id,
+      req.body ?? {},
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    res.status(201).json(item);
+  }),
+);
+
+router.patch(
+  '/:id/solution-steps/:stepId',
+  asyncRoute(async (req, res) => {
+    // ID-based: stepId'nin case'i URL'deki :id ile aynı olmalı (cross-case
+    // mutation engellemek için defansif kontrol). Repository step'i fetch
+    // ederken companyId scope'u zaten doğrular; burada caseId tutarlılığını
+    // ek olarak kontrol ediyoruz.
+    const step = await solutionStepRepository.update(
+      req.params.stepId,
+      req.body ?? {},
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    if (step.caseId !== req.params.id) {
+      return res.status(400).json({
+        error: 'case_mismatch',
+        message: 'Bu adım belirtilen vakaya ait değil.',
+      });
+    }
+    res.json(step);
+  }),
+);
+
+router.post(
+  '/:id/solution-steps/:stepId/status',
+  asyncRoute(async (req, res) => {
+    const body = req.body ?? {};
+    if (typeof body.status !== 'string') {
+      return res.status(400).json({ error: 'status_required', message: 'status gerekli.' });
+    }
+    // Cross-case guard — stepId case'i URL'deki :id ile aynı olmalı.
+    const existing = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
+    if (!existing.find((s) => s.id === req.params.stepId)) {
+      return res.status(404).json({
+        error: 'step_not_in_case',
+        message: 'Bu vakada belirtilen adım bulunamadı.',
+      });
+    }
+    const step = await solutionStepRepository.setStatus(
+      req.params.stepId,
+      body.status,
+      { note: body.note },
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    res.json(step);
+  }),
+);
+
+router.post(
+  '/:id/solution-steps/import-ai-suggested',
+  asyncRoute(async (req, res) => {
+    // 1) Case scope + companyId al (repository de aynı kontrolü yapar).
+    const items = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
+    // 2) External KB analyze cevabını al.
+    //    İki yol destekleniyor:
+    //    a) Client zaten analyze çağrıp cevabı body.analyzeResponse ile gönderir.
+    //    b) Server bu istekte kendisi analyze çağırır (body.freeText/bildirimNo).
+    let analyzeResponse = null;
+    const body = req.body ?? {};
+    if (body.analyzeResponse && typeof body.analyzeResponse === 'object') {
+      analyzeResponse = body.analyzeResponse;
+    } else {
+      // Server-side analyze: KB setting + freeText/bildirimNo gerekir.
+      // Hata olursa import başarısız sayılır AMA mevcut adımlar korunur
+      // (repo henüz hiçbir şey yazmadı).
+      const companyId = await solutionStepRepository.getCaseCompanyId(
+        req.params.id,
+        req.user.allowedCompanyIds,
+      );
+      const setting = await externalKbSettingRepo.getByCompany(companyId);
+      if (!setting?.enabled) {
+        return res.status(400).json({
+          error: 'external_kb_disabled',
+          message: 'Bu şirket için External KB devre dışı.',
+        });
+      }
+      const freeText = typeof body.freeText === 'string' ? body.freeText.trim() : '';
+      const bildirimNo = typeof body.bildirimNo === 'string' ? body.bildirimNo.trim() : '';
+      if (!freeText && !bildirimNo) {
+        return res.status(400).json({
+          error: 'invalid_request',
+          message: 'analyzeResponse veya freeText/bildirimNo gerekli.',
+        });
+      }
+      try {
+        const kbResult = await externalKbClient.analyze(setting, {
+          ...(freeText ? { freeText } : {}),
+          ...(bildirimNo ? { bildirimNo } : {}),
+        });
+        // externalKbClient yanıt zarfı: { ok, data, ... }. data = analyze response.
+        analyzeResponse = kbResult?.data ?? kbResult ?? null;
+      } catch (err) {
+        return res.status(502).json({
+          error: 'external_kb_failed',
+          message: err?.message ?? 'External KB çağrısı başarısız.',
+        });
+      }
+    }
+    const result = await solutionStepRepository.importAiSuggested(
+      req.params.id,
+      analyzeResponse ?? {},
+      req.user.id,
+      req.user.allowedCompanyIds,
+    );
+    res.json(result);
   }),
 );
 

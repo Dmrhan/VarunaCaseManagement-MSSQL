@@ -344,6 +344,8 @@ model Company {
   /// Neden Grubu / Detay / Çözüm Tipi / Kalıcı Önlem). Global entries
   /// (companyId=null) yer almıyor bu liste — yalnız per-tenant.
   taxonomies                 TaxonomyDef[]
+  /// WR-Smart-Ticket Phase 2a — tenant-scoped Case çözüm adımları.
+  solutionSteps              CaseSolutionStep[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -883,6 +885,65 @@ model TaxonomyDef {
   @@index([parentId])
 }
 
+/// WR-Smart-Ticket Phase 2a — Case çözüm adımları (L1 agent için).
+///
+/// Her satır bir somut adım: manuel olarak agent eklemiş olabilir veya
+/// External KB / AI `analyze` cevabındaki "AI Önerilen Adımlar"
+/// (`analysis.suggestedSteps`) bölümünden import edilmiş olabilir. **Bu
+/// fazda yalnız suggested steps import edilir**: root cause hypotheses,
+/// customer reply draft, engineer handoff, similar records ve raw response
+/// **bilinçli olarak göz ardı edilir**.
+///
+/// Hayat döngüsü: suggested → tried → worked | not_worked | skipped.
+/// outcomeAt/outcomeByUserId terminal status (worked/not_worked/skipped)
+/// kararı verildiğinde server tarafında stamplenir.
+///
+/// Idempotency: aynı (caseId, source='ai_suggested_step', sourceRef)
+/// kombinasyonu unique → re-run import duplicate yaratmaz. sourceRef
+/// upstream'den gelmiyorsa repository tarafında normalized text üzerinden
+/// deterministic hash ile üretilir.
+model CaseSolutionStep {
+  id              String    @id @default(cuid())
+  caseId          String
+  /// Multi-tenant izolasyon — DAİMA case.companyId'den türetilir; client
+  /// override edemez (route handler scope guard'ı body'deki companyId'i
+  /// görmezden gelir).
+  companyId       String
+  /// 1-based; aynı case içinde benzersiz değil — sadece sıralama için.
+  stepIndex       Int
+  /// "ai_suggested_step" | "manual" | "external_kb" | "similar_case"
+  /// (enum yerine string tutulur: ileride yeni source eklemek için
+  /// migration gerekmesin; route + repo whitelist kontrol eder).
+  source          String
+  /// AI/KB step'in upstream stable id'si veya repo tarafında üretilen
+  /// deterministic hash (text+description SHA-256 ilk 16 karakter).
+  sourceRef       String?
+  sourceTitle     String?
+  title           String
+  description     String?
+  /// "suggested" | "tried" | "worked" | "not_worked" | "skipped"
+  status          String    @default("suggested")
+  note            String?
+  triedAt         DateTime?
+  triedByUserId   String?
+  outcomeAt       DateTime?
+  outcomeByUserId String?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Re-run import idempotency'i — aynı case + AI sourceRef = tek satır.
+  /// source='manual' için sourceRef NULL olduğundan multiple satır izin verilir.
+  @@unique([caseId, source, sourceRef])
+  @@index([caseId, stepIndex])
+  @@index([caseId, status])
+  @@index([companyId])
+  @@index([source, sourceRef])
+}
+
 model Team {
   id                  String       @id @default(cuid())
   name                String
@@ -1230,6 +1291,8 @@ model Case {
   // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
   outgoingLinks          CaseLink[]               @relation("CaseLinkSource")
   incomingLinks          CaseLink[]               @relation("CaseLinkTarget")
+  /// WR-Smart-Ticket Phase 2a — L1 agent çözüm adımları (manual + AI önerisi).
+  solutionSteps          CaseSolutionStep[]
 
   @@index([accountId])
   @@index([accountProjectId])
