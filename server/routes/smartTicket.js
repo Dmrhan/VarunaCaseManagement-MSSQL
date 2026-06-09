@@ -110,26 +110,74 @@ router.post('/suggest-classification', async (req, res) => {
       v2Body.customer_name = body.customerName.trim();
     }
 
+    // Codex P2 (main #447 review) — externalKbClient.proxy() non-2xx HTTP
+    // veya network/timeout için throw atmaz; { ok: false, error, data }
+    // wrapped response döner. Eski impl yalnız catch block'una düşen thrown
+    // error'da fallback yapıyordu → KB v2 deploy edilmemiş tenant'larda
+    // 404 dönen categorize-v2 cevabı "başarılı" sayılıp analyze fallback
+    // tetiklenmiyordu, kullanıcı boş classification görüyordu.
+    //
+    // Tek truth source: kbResponse.ok. False olduğunda fallback'e geç;
+    // her iki uç da ok:false ise 502.
     let kbResponse = null;
     let usedEndpoint = null;
+    const analyzeFallback = async () => {
+      return externalKbClient.analyze(setting, {
+        freeText: description,
+        ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
+          ? { bildirimNo: body.bildirimNo.trim() }
+          : {}),
+        ...(typeof body.project === 'string' && body.project.trim()
+          ? { project: body.project.trim() }
+          : {}),
+      });
+    };
+
     try {
-      kbResponse = await externalKbClient.categorizeV2(setting, v2Body);
-      usedEndpoint = 'categorize-v2';
+      const v2 = await externalKbClient.categorizeV2(setting, v2Body);
+      if (v2 && v2.ok === false) {
+        console.warn(
+          '[smart-ticket/suggest-classification] categorize-v2 returned ok:false, falling back to analyze',
+          v2.error?.code ?? 'unknown',
+          v2.error?.status ?? '',
+        );
+        const a = await analyzeFallback();
+        if (a && a.ok === false) {
+          console.error(
+            '[smart-ticket/suggest-classification] both categorize-v2 and analyze returned ok:false',
+            a.error?.code ?? 'unknown',
+          );
+          return res.status(502).json({
+            error: 'external_kb_failed',
+            message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+          });
+        }
+        kbResponse = a;
+        usedEndpoint = 'analyze';
+      } else {
+        kbResponse = v2;
+        usedEndpoint = 'categorize-v2';
+      }
     } catch (err) {
+      // Defansif: proxy()'nin sözleşmesini kıran bir bug olursa thrown error'u
+      // da yakala ve aynı fallback'i dene.
       console.warn(
-        '[smart-ticket/suggest-classification] categorize-v2 failed, falling back to analyze',
+        '[smart-ticket/suggest-classification] categorize-v2 threw, falling back to analyze',
         err?.message ?? err,
       );
       try {
-        kbResponse = await externalKbClient.analyze(setting, {
-          freeText: description,
-          ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
-            ? { bildirimNo: body.bildirimNo.trim() }
-            : {}),
-          ...(typeof body.project === 'string' && body.project.trim()
-            ? { project: body.project.trim() }
-            : {}),
-        });
+        const a = await analyzeFallback();
+        if (a && a.ok === false) {
+          console.error(
+            '[smart-ticket/suggest-classification] analyze fallback ok:false',
+            a.error?.code ?? 'unknown',
+          );
+          return res.status(502).json({
+            error: 'external_kb_failed',
+            message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+          });
+        }
+        kbResponse = a;
         usedEndpoint = 'analyze';
       } catch (fallbackErr) {
         console.error(
@@ -408,6 +456,22 @@ router.post('/suggest-closure', async (req, res) => {
       kbResponse = await externalKbClient.suggestClose(setting, sgBody);
     } catch (err) {
       console.error('[smart-ticket/suggest-closure] suggest-close failed', err?.message ?? err);
+      return res.status(502).json({
+        error: 'external_kb_failed',
+        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+      });
+    }
+
+    // Codex P2 (main #447 review) — proxy() non-2xx için throw atmaz,
+    // { ok: false, error, data } döner. Eski impl bu durumu "başarılı"
+    // sayıp boş suggestions ile 200 dönüyordu → Stage 3 UI sessiz fail.
+    // Wrapped error'ı network/timeout error'larıyla aynı 502'ye map'le.
+    if (kbResponse && kbResponse.ok === false) {
+      console.error(
+        '[smart-ticket/suggest-closure] suggest-close returned ok:false',
+        kbResponse.error?.code ?? 'unknown',
+        kbResponse.error?.status ?? '',
+      );
       return res.status(502).json({
         error: 'external_kb_failed',
         message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
