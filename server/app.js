@@ -10,6 +10,7 @@ import cronRouter from './routes/cron.js';
 import myRouter from './routes/my.js';
 import accountsRouter from './routes/accounts.js';
 import externalKbRouter from './routes/externalKb.js';
+import smartTicketRouter from './routes/smartTicket.js';
 import importsRouter from './routes/imports.js';
 import approvalsRouter from './routes/approvals.js';
 import actionCenterRouter from './routes/action-center.js';
@@ -70,6 +71,7 @@ app.use('/api/cron', cronRouter);
 app.use('/api/my', myRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/external-kb', externalKbRouter);
+app.use('/api/smart-ticket', smartTicketRouter);
 app.use('/api/approvals', approvalsRouter);
 app.use('/api/action-center', actionCenterRouter);
 
