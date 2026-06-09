@@ -521,10 +521,30 @@ export function SmartTicketNewPage({
     setClosure((c) => ({ ...c, rootCauseDetail: '' }));
   }, [closure.rootCauseGroup]);
 
+  // Codex PR review P1 — checklist gating. StatusTransitionPanel (mevcut
+  // Case Detail close akışı) Cozuldu transition'ı için tamamlanmamış
+  // zorunlu kontrol listesi maddelerini kapanışa engel olarak kullanır.
+  // Backend transitionStatus checklist'i enforce etmiyor (yalnız
+  // ResolutionApprovalPolicy guard'ı var) → bu ekran da aynı UI gating'i
+  // yapmalı, aksi takdirde Smart Ticket akışı checklist atlanabilir.
+  const requiredChecklistPending = useMemo(
+    () =>
+      (createdCase?.checklistItems ?? []).filter(
+        (it) => it.required && !it.checked,
+      ),
+    [createdCase],
+  );
+
   async function handleCloseCase() {
     if (!createdCase || closing) return;
     if (!closure.resolutionNote.trim()) {
       setClosureError('Çözüm notu zorunlu.');
+      return;
+    }
+    if (requiredChecklistPending.length > 0) {
+      setClosureError(
+        `Vaka çözülmeden önce ${requiredChecklistPending.length} zorunlu kontrol maddesi tamamlanmalı. Vaka Detayı → Kontrol Listesi'nden işaretleyin.`,
+      );
       return;
     }
     setClosing(true);
@@ -809,11 +829,13 @@ export function SmartTicketNewPage({
               closureLists={closureLists}
               closing={closing}
               closureError={closureError}
+              requiredChecklistPending={requiredChecklistPending}
               onClose={() => void handleCloseCase()}
               onBack={() => {
                 setStage('solution');
                 setClosureError(null);
               }}
+              onGoToCaseDetail={() => onCreated(createdCase.id)}
             />
           )}
 
@@ -985,18 +1007,29 @@ function Stage3Closure({
   closureLists,
   closing,
   closureError,
+  requiredChecklistPending,
   onClose,
   onBack,
+  onGoToCaseDetail,
 }: {
   closure: ClosureFormState;
   setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
   closureLists: ClosureListsRef;
   closing: boolean;
   closureError: string | null;
+  /**
+   * Codex PR review P1 — StatusTransitionPanel'deki checklist gating
+   * burada da uygulanır. Tamamlanmamış zorunlu kontrol listesi maddeleri
+   * varsa "Vakayı Kapat" disabled olur ve banner görünür.
+   */
+  requiredChecklistPending: { id: string; label: string }[];
   onClose: () => void;
   onBack: () => void;
+  onGoToCaseDetail: () => void;
 }) {
-  const canSave = closure.resolutionNote.trim().length > 0 && !closing;
+  const checklistBlocked = requiredChecklistPending.length > 0;
+  const canSave =
+    closure.resolutionNote.trim().length > 0 && !closing && !checklistBlocked;
   return (
     <Card>
       <CardBody className="space-y-3">
@@ -1016,6 +1049,32 @@ function Stage3Closure({
           Vakanın nasıl çözüldüğünü kayıt altına alın. Onay politikası geçerliyse mevcut çözüm onayı
           akışı çalışır; otomatik bypass yok.
         </p>
+        {checklistBlocked && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+            <div className="mb-1 font-semibold">
+              Vaka çözülmeden önce {requiredChecklistPending.length} zorunlu kontrol maddesi
+              tamamlanmalı:
+            </div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              {requiredChecklistPending.map((it) => (
+                <li key={it.id}>{it.label}</li>
+              ))}
+            </ul>
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-rose-700 dark:text-rose-300">
+              <span>
+                Vaka Detayı → <strong>Kontrol Listesi</strong> bölümünden işaretleyin.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<ExternalLink size={11} />}
+                onClick={onGoToCaseDetail}
+              >
+                Vaka Detayına Git
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Kök Neden Grubu">
             <Select
