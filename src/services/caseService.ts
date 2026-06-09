@@ -2334,6 +2334,29 @@ export const lookupService = {
     );
     return data ?? null;
   },
+
+  /**
+   * WR-KB-v2 doc §7 — Stage 3 closure AI önerisi.
+   * POST /api/smart-ticket/suggest-closure
+   *
+   * 4 alan (rootCauseGroup / rootCauseDetail / resolutionType /
+   * permanentPrevention) önerir + confidence/reason. Manuel dropdown'lar
+   * hata durumunda da kullanılabilir kalır.
+   */
+  async suggestSmartTicketClosure(
+    params: SuggestClosureRequest,
+  ): Promise<SuggestClosureResponse | null> {
+    const data = await apiFetch<SuggestClosureResponse>(
+      '/api/smart-ticket/suggest-closure',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+      'Kapanış önerisi alınamadı',
+    );
+    return data ?? null;
+  },
 };
 
 export interface SuggestClassificationRequest {
@@ -2370,7 +2393,57 @@ export interface SuggestClassificationResponse {
   suggestions: Partial<Record<SuggestClassificationField, SuggestClassificationItem>>;
   unmatched: SuggestClassificationUnmatched[];
   source: 'external_kb';
-  meta?: { fieldsRequested?: SuggestClassificationField[]; extractedRawCount?: number };
+  meta?: {
+    fieldsRequested?: SuggestClassificationField[];
+    extractedRawCount?: number;
+    usedEndpoint?: 'categorize-v2' | 'analyze';
+    confidence?: number;
+    reason?: string;
+    modelUsed?: string;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-KB-v2 doc §7 — Closure suggestion (Stage 3 AI önerisi).
+// ─────────────────────────────────────────────────────────────────
+
+export interface SuggestClosureRequest {
+  companyId: string;
+  description: string;
+  resolution: string;
+  openUrun?: string;
+  openIsSureci?: string;
+  openIslemTipi?: string;
+}
+
+export type SuggestClosureField =
+  | 'rootCauseGroup'
+  | 'rootCauseDetail'
+  | 'resolutionType'
+  | 'permanentPrevention';
+
+export interface SuggestClosureItem {
+  code: string;
+  label: string;
+  matchedBy: 'label';
+}
+
+export interface SuggestClosureUnmatched {
+  taxonomyType: SuggestClosureField;
+  rawValue: string;
+}
+
+export interface SuggestClosureResponse {
+  companyId: string;
+  suggestions: Partial<Record<SuggestClosureField, SuggestClosureItem>>;
+  unmatched: SuggestClosureUnmatched[];
+  source: 'external_kb';
+  meta?: {
+    usedEndpoint?: 'suggest-close';
+    confidence?: number;
+    reason?: string;
+    modelUsed?: string;
+  };
 }
 
 export interface SmartTicketTaxonomyItem {

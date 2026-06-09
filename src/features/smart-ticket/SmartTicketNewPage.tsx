@@ -179,6 +179,11 @@ export function SmartTicketNewPage({
   const [closing, setClosing] = useState(false);
   const [closureError, setClosureError] = useState<string | null>(null);
 
+  // WR-KB-v2 doc §7 — Stage 3 AI önerisi state.
+  const [closureSuggesting, setClosureSuggesting] = useState(false);
+  const [closureSuggestion, setClosureSuggestion] = useState<import('@/services/caseService').SuggestClosureResponse | null>(null);
+  const [closureSuggestionError, setClosureSuggestionError] = useState<string | null>(null);
+
   // Taxonomy lookup — companyId değişince yeniden çek.
   useEffect(() => {
     let alive = true;
@@ -535,6 +540,78 @@ export function SmartTicketNewPage({
     [createdCase],
   );
 
+  // WR-KB-v2 doc §7 — Stage 3 AI önerisi handler.
+  async function handleSuggestClosure() {
+    if (!createdCase || closureSuggesting) return;
+    const description = createdCase.description ?? form.description.trim();
+    const resolution = closure.resolutionNote.trim();
+    if (description.length < 5 || resolution.length < 5) {
+      setClosureSuggestionError(
+        'AI önerisi için açıklama ve çözüm taslağı (en az 5 karakter) gerekli.',
+      );
+      return;
+    }
+    setClosureSuggesting(true);
+    setClosureSuggestionError(null);
+    setClosureSuggestion(null);
+    try {
+      const res = await lookupService.suggestSmartTicketClosure({
+        companyId: createdCase.companyId,
+        description,
+        resolution,
+        openIsSureci: form.businessProcess
+          ? (taxonomies?.businessProcess.find((t) => t.code === form.businessProcess)?.label ?? undefined)
+          : undefined,
+        openIslemTipi: form.operationType
+          ? (taxonomies?.operationType.find((t) => t.code === form.operationType)?.label ?? undefined)
+          : undefined,
+      });
+      if (!res) {
+        setClosureSuggestionError('Kapanış önerisi alınamadı.');
+        return;
+      }
+      setClosureSuggestion(res);
+      // YALNIZ BOŞ alanları otomatik doldur (PR-2b classification pattern).
+      setClosure((c) => {
+        const next = { ...c };
+        const s = res.suggestions;
+        if (s.rootCauseGroup && !next.rootCauseGroup) next.rootCauseGroup = s.rootCauseGroup.code;
+        if (s.rootCauseDetail && !next.rootCauseDetail) next.rootCauseDetail = s.rootCauseDetail.code;
+        if (s.resolutionType && !next.resolutionType) next.resolutionType = s.resolutionType.code;
+        if (s.permanentPrevention && !next.permanentPrevention)
+          next.permanentPrevention = s.permanentPrevention.code;
+        return next;
+      });
+      const total = Object.keys(res.suggestions).length;
+      const unmatched = res.unmatched.length;
+      toast({
+        type: total > 0 ? 'success' : 'info',
+        message:
+          total > 0
+            ? `${total} alan eşleşti; boş alanlar otomatik dolduruldu.${unmatched > 0 ? ` ${unmatched} alan eşleşmedi.` : ''}`
+            : 'KB cevabında eşleşen kapanış alanı yok.',
+        duration: 3500,
+      });
+    } catch (e) {
+      setClosureSuggestionError((e as Error)?.message ?? 'Kapanış önerisi alınamadı.');
+    } finally {
+      setClosureSuggesting(false);
+    }
+  }
+
+  function handleApplyAllClosureSuggestions() {
+    if (!closureSuggestion) return;
+    setClosure((c) => {
+      const next = { ...c };
+      const s = closureSuggestion.suggestions;
+      if (s.rootCauseGroup) next.rootCauseGroup = s.rootCauseGroup.code;
+      if (s.rootCauseDetail) next.rootCauseDetail = s.rootCauseDetail.code;
+      if (s.resolutionType) next.resolutionType = s.resolutionType.code;
+      if (s.permanentPrevention) next.permanentPrevention = s.permanentPrevention.code;
+      return next;
+    });
+  }
+
   async function handleCloseCase() {
     if (!createdCase || closing) return;
     if (!closure.resolutionNote.trim()) {
@@ -830,6 +907,11 @@ export function SmartTicketNewPage({
               closing={closing}
               closureError={closureError}
               requiredChecklistPending={requiredChecklistPending}
+              closureSuggesting={closureSuggesting}
+              closureSuggestion={closureSuggestion}
+              closureSuggestionError={closureSuggestionError}
+              onSuggestClosure={() => void handleSuggestClosure()}
+              onApplyAllClosureSuggestions={handleApplyAllClosureSuggestions}
               onClose={() => void handleCloseCase()}
               onBack={() => {
                 setStage('solution');
@@ -1008,6 +1090,11 @@ function Stage3Closure({
   closing,
   closureError,
   requiredChecklistPending,
+  closureSuggesting,
+  closureSuggestion,
+  closureSuggestionError,
+  onSuggestClosure,
+  onApplyAllClosureSuggestions,
   onClose,
   onBack,
   onGoToCaseDetail,
@@ -1017,12 +1104,12 @@ function Stage3Closure({
   closureLists: ClosureListsRef;
   closing: boolean;
   closureError: string | null;
-  /**
-   * Codex PR review P1 — StatusTransitionPanel'deki checklist gating
-   * burada da uygulanır. Tamamlanmamış zorunlu kontrol listesi maddeleri
-   * varsa "Vakayı Kapat" disabled olur ve banner görünür.
-   */
   requiredChecklistPending: { id: string; label: string }[];
+  closureSuggesting: boolean;
+  closureSuggestion: import('@/services/caseService').SuggestClosureResponse | null;
+  closureSuggestionError: string | null;
+  onSuggestClosure: () => void;
+  onApplyAllClosureSuggestions: () => void;
   onClose: () => void;
   onBack: () => void;
   onGoToCaseDetail: () => void;
@@ -1033,22 +1120,78 @@ function Stage3Closure({
   return (
     <Card>
       <CardBody className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <SectionTitle text="3. Kapanış" />
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<CornerUpLeft size={11} />}
-            onClick={onBack}
-            disabled={closing}
-          >
-            Çözüm Adımlarına Geri Dön
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Wand2 size={11} />}
+              disabled={closureSuggesting || closure.resolutionNote.trim().length < 5}
+              onClick={onSuggestClosure}
+              title={
+                closure.resolutionNote.trim().length < 5
+                  ? 'Önce "Çözüm Açıklaması" alanına en az 5 karakter yaz'
+                  : 'KB üzerinden 4 kapanış alanı önerilir'
+              }
+            >
+              {closureSuggesting ? 'Öneriliyor…' : 'KB ile Öner'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<CornerUpLeft size={11} />}
+              onClick={onBack}
+              disabled={closing}
+            >
+              Çözüm Adımlarına Geri Dön
+            </Button>
+          </div>
         </div>
         <p className="text-xs text-slate-500 dark:text-ndark-muted">
           Vakanın nasıl çözüldüğünü kayıt altına alın. Onay politikası geçerliyse mevcut çözüm onayı
           akışı çalışır; otomatik bypass yok.
         </p>
+        {closureSuggestionError && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+            {closureSuggestionError} Manuel seçim yapabilirsiniz.
+          </p>
+        )}
+        {closureSuggestion && (
+          <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/30">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
+                KB önerisi: {Object.keys(closureSuggestion.suggestions).length} alan eşleşti
+                {closureSuggestion.unmatched.length > 0 && `, ${closureSuggestion.unmatched.length} eşleşmedi`}
+                {closureSuggestion.meta?.confidence != null && (
+                  <span className="ml-1 text-violet-600">
+                    (güven %{Math.round(closureSuggestion.meta.confidence * 100)})
+                  </span>
+                )}
+              </span>
+              {Object.keys(closureSuggestion.suggestions).length > 0 && (
+                <Button size="sm" variant="ghost" onClick={onApplyAllClosureSuggestions}>
+                  Tümünü uygula
+                </Button>
+              )}
+            </div>
+            {closureSuggestion.unmatched.length > 0 && (
+              <ul className="mt-1 text-[11px] text-violet-700 dark:text-violet-300">
+                {closureSuggestion.unmatched.map((u, i) => (
+                  <li key={`${u.taxonomyType}-${i}`}>
+                    Eşleşmedi: <span className="font-medium">{u.taxonomyType}</span> —{' '}
+                    <code className="font-mono">{u.rawValue}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {closureSuggestion.meta?.reason && (
+              <p className="mt-1 text-[11px] italic text-violet-600 dark:text-violet-400">
+                {closureSuggestion.meta.reason}
+              </p>
+            )}
+          </div>
+        )}
         {checklistBlocked && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
             <div className="mb-1 font-semibold">
