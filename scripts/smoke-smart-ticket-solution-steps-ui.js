@@ -95,16 +95,82 @@ else bad('6b) manuel button label eksik');
 if (panelSrc.includes('setSolutionStepStatus(')) ok('7) Outcome → setSolutionStepStatus wrapper');
 else bad('7) setSolutionStepStatus çağrısı yok');
 
-// 8) Smart Ticket gating CaseDetailPage'de.
-if (
-  detailSrc.includes('isSmartTicket') &&
-  detailSrc.includes('customFields') &&
-  detailSrc.includes('smartTicket') &&
-  detailSrc.includes('<CaseSolutionStepsPanel')
-) {
-  ok('8) Smart Ticket gating CaseDetailPage\'de + panel mount');
+// WR-Smart-Ticket UX fix 1 — Solution Steps panel artık kendi Case Detail
+// tab'inde (Detay body'sinde değil). Tab tüm vakalar için görünür (Smart
+// Ticket gate kalktı).
+
+// 8) TabKey'de 'solution-steps' var.
+if (/TabKey\s*=[\s\S]*?'solution-steps'/.test(detailSrc)) {
+  ok('8) TabKey "solution-steps" tanımlı');
 } else {
-  bad('8) Smart Ticket gating veya panel mount eksik');
+  bad('8) TabKey "solution-steps" eksik');
+}
+
+// 8b) Tab label "Çözüm Adımları" tab listinde mevcut + click set 'solution-steps'.
+if (
+  detailSrc.includes('label="Çözüm Adımları"') &&
+  /setTab\(['"]solution-steps['"]\)/.test(detailSrc)
+) {
+  ok('8b) "Çözüm Adımları" TabButton + setTab(\'solution-steps\') wiring');
+} else {
+  bad('8b) tab button veya setTab wiring eksik');
+}
+
+// 8c) Tab content render conditional: `tab === 'solution-steps'` + <CaseSolutionStepsPanel.
+const renderRegion = detailSrc.match(/\{tab === ['"]solution-steps['"][\s\S]{0,400}?CaseSolutionStepsPanel/);
+if (renderRegion) {
+  ok('8c) tab === \'solution-steps\' render bloğunda <CaseSolutionStepsPanel mevcut');
+} else {
+  bad('8c) solution-steps tab render bloğu eksik');
+}
+
+// 8d) Tab sırası — 'solution-steps' diğer ana tab key'lerden SONRA geliyor.
+//     TabKey union sırası: detail, activity, notes, files, callLogs, links,
+//     solution-steps (son). Önceki tab'ler ve setTab call'larının
+//     'solution-steps'ten ÖNCE göründüğünü kontrol et.
+const lastSetTab = detailSrc.lastIndexOf("setTab('solution-steps')");
+const firstSetTabDetail = detailSrc.indexOf("setTab('detail')");
+const firstSetTabLinks = detailSrc.indexOf("setTab('links')");
+if (
+  lastSetTab > 0 &&
+  firstSetTabDetail > 0 &&
+  firstSetTabLinks > 0 &&
+  lastSetTab > firstSetTabDetail &&
+  lastSetTab > firstSetTabLinks
+) {
+  ok('8d) "Çözüm Adımları" tab listede son sırada (detail/links setTab\'larından sonra)');
+} else {
+  bad('8d) tab order kanıtı yetersiz');
+}
+
+// 8e) Smart Ticket gating CaseDetailPage'de YOK — tab tüm vakalara açık.
+//     Hem TabButton hem render bloğu customFields.smartTicket gate'i
+//     içermemeli. Sadece 'solution-steps' bağlamında kontrol et:
+//     mevcut "isSmartTicket && <CaseSolutionStepsPanel" pattern'i kaldırılmış olmalı.
+const stGatePattern = /isSmartTicket\s*&&\s*\(?\s*\n?\s*<CaseSolutionStepsPanel/;
+if (!stGatePattern.test(detailSrc)) {
+  ok('8e) Smart Ticket gate kaldırıldı — tab tüm vakalar için görünür');
+} else {
+  bad('8e) isSmartTicket gate CaseSolutionStepsPanel\'i hala wrap ediyor');
+}
+
+// 8f) Panel artık DetailTab function body'sinde DEĞİL.
+//     DetailTab fonksiyonunun gövdesini bul; içinde <CaseSolutionStepsPanel
+//     JSX'i olmamalı (komment satırı ignore edilir).
+const detailTabMatch = detailSrc.match(/function DetailTab\(\s*\{[\s\S]*?\n\}\s*\n\s*\n\s*function\s+\w+/);
+const detailTabBody = detailTabMatch ? detailTabMatch[0] : '';
+if (detailTabBody && !/<CaseSolutionStepsPanel/.test(detailTabBody)) {
+  ok('8f) DetailTab body\'sinde CaseSolutionStepsPanel YOK (Detay tab artık temiz)');
+} else if (!detailTabBody) {
+  // Pattern eşleşmediyse defensive: en azından mount sayısı 1 olmalı.
+  const mountCount = (detailSrc.match(/<CaseSolutionStepsPanel/g) ?? []).length;
+  if (mountCount === 1) {
+    ok('8f) CaseSolutionStepsPanel CaseDetailPage\'de tek yerde mount (DetailTab regex fallback)');
+  } else {
+    bad('8f) CaseSolutionStepsPanel mount sayısı', `${mountCount} (1 bekleniyordu)`);
+  }
+} else {
+  bad('8f) DetailTab body\'sinde CaseSolutionStepsPanel hala mount');
 }
 
 // 9) L1CaseResolutionConsole dokunulmadı (panel orada YOK).
