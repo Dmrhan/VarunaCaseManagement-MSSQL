@@ -1675,8 +1675,15 @@ function Stage3Transfer({
   onBack: () => void;
   onGoToCaseDetail: () => void;
 }) {
+  // Codex P2 — brief hala yüklenirken submit edilirse attemptedStepIds boş
+  // ve composedSummary fallback metin olarak gönderilir → L1 context kaybı.
+  // Loading bitene kadar submit'i kilitle; success path'te composer ve
+  // metadata dolu olarak gönderilir.
   const canSubmit =
-    transferToTeamId !== '' && transferNote.trim().length > 0 && !transferring;
+    transferToTeamId !== '' &&
+    transferNote.trim().length > 0 &&
+    !transferring &&
+    !transferBriefLoading;
   const noTeamsAtAll = teamOptions.all.length === 0;
 
   return (
@@ -1878,6 +1885,15 @@ function Stage3Transfer({
             <Button
               onClick={onSubmit}
               disabled={!canSubmit}
+              title={
+                transferBriefLoading
+                  ? 'Denenen adımlar özeti yükleniyor; tamamlanmasını bekle.'
+                  : transferToTeamId === ''
+                    ? 'Hedef takım seçin.'
+                    : transferNote.trim().length === 0
+                      ? 'Devir notu zorunlu.'
+                      : undefined
+              }
               leftIcon={
                 transferring ? (
                   <Loader2 size={12} className="animate-spin" />

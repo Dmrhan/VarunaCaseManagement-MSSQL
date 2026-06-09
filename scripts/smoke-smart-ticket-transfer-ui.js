@@ -232,6 +232,15 @@ if (src.includes("L2'ye Devret")) {
   bad('22) Stage 2 transfer entry buton eksik');
 }
 
+// 23) Codex P2 fix — canSubmit transferBriefLoading koşulunu içeriyor olmalı.
+//     Aksi halde brief fetch bitmeden submit edilirse attemptedStepIds boş
+//     ve composedSummary fallback metniyle gönderilir → L1 context kaybı.
+if (/canSubmit\s*=[\s\S]{0,200}?!transferBriefLoading/.test(src)) {
+  ok('23) Codex P2 — canSubmit transferBriefLoading kilidi mevcut');
+} else {
+  bad('23) canSubmit transferBriefLoading guard eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
