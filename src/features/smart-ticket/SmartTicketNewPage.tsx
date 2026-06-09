@@ -11,7 +11,10 @@ import {
   lookupService,
   type SmartTicketTaxonomyItem,
   type SmartTicketTaxonomyResponse,
+  type SuggestClassificationResponse,
+  type SuggestClassificationField,
 } from '@/services/caseService';
+import { Wand2 } from 'lucide-react';
 import { accountService, type AccountListItem } from '@/services/accountService';
 import type { Case } from '@/features/cases/types';
 import { resolveSmartTicketMapping } from './mapping';
@@ -122,6 +125,20 @@ export function SmartTicketNewPage({
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Phase 2b — açılış sınıflandırma önerisi (External KB / AI).
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestion, setSuggestion] = useState<SuggestClassificationResponse | null>(null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  /**
+   * Hangi alanların öneriden gelen değerle DOLDURULDUĞUNU takip eder.
+   * Kullanıcı sonradan elle değiştirirse bu set'ten düşer — submit
+   * sırasında metadata'da yalnız son halinde "öneriden gelmiş ve hala
+   * değişmemiş" alanları işaretleriz.
+   */
+  const [appliedSuggestionFields, setAppliedSuggestionFields] = useState<Set<SuggestClassificationField>>(
+    () => new Set(),
+  );
+
   // Taxonomy lookup — companyId değişince yeniden çek.
   useEffect(() => {
     let alive = true;
@@ -196,6 +213,11 @@ export function SmartTicketNewPage({
       affectedObject: '',
       impact: '',
     }));
+    // Phase 2b — company değişince suggestion + applied set sıfırlanır
+    // (PR-1c P2-A pattern'ı: per-tenant suggestion stale olmasın).
+    setSuggestion(null);
+    setSuggestionError(null);
+    setAppliedSuggestionFields(new Set());
   }, [form.companyId]);
 
   function handleSelectAccount(item: AccountListItem | null) {
@@ -236,6 +258,112 @@ export function SmartTicketNewPage({
     projectRequirementSatisfied &&
     !submitting;
 
+  // ── Phase 2b — açılış sınıflandırma önerisi handler'ları ──────────
+  // Button: companyId + min 5 karakter açıklama gerekir. Aksi takdirde
+  // disabled. KB devre dışıysa veya hata olursa kullanıcıya net mesaj
+  // verilir; manuel dropdown'lar her halükarda çalışmaya devam eder.
+  const canSuggest =
+    !!form.companyId && form.description.trim().length >= 5 && !suggesting;
+
+  async function handleSuggestClassification() {
+    if (!canSuggest) return;
+    setSuggesting(true);
+    setSuggestionError(null);
+    setSuggestion(null);
+    try {
+      const res = await lookupService.suggestSmartTicketClassification({
+        companyId: form.companyId,
+        description: form.description.trim(),
+        accountId: form.accountId || undefined,
+        ...(form.accountProjectId ? { projectId: form.accountProjectId } : {}),
+      });
+      if (!res) {
+        setSuggestionError('Sınıflandırma önerisi alınamadı.');
+        return;
+      }
+      setSuggestion(res);
+      // YALNIZ BOŞ alanları otomatik doldur. Kullanıcının elle seçtiği
+      // değerler asla sessiz silinmez.
+      const applied = new Set<SuggestClassificationField>();
+      setForm((f) => {
+        const next = { ...f };
+        for (const key of [
+          'platform',
+          'businessProcess',
+          'operationType',
+          'affectedObject',
+          'impact',
+        ] as const) {
+          const s = res.suggestions[key];
+          if (s && !next[key]) {
+            next[key] = s.code;
+            applied.add(key);
+          }
+        }
+        return next;
+      });
+      setAppliedSuggestionFields(applied);
+      const total = Object.keys(res.suggestions).length;
+      const unmatchedCount = res.unmatched.length;
+      toast({
+        type: total > 0 ? 'success' : 'info',
+        message:
+          total > 0
+            ? `${total} alan eşleşti; ${applied.size} alan boştu, otomatik dolduruldu.${
+                unmatchedCount > 0 ? ` ${unmatchedCount} alan eşleşmedi.` : ''
+              }`
+            : 'KB cevabında eşleşen sınıflandırma alanı yok.',
+        duration: 3500,
+      });
+    } catch (e) {
+      setSuggestionError((e as Error)?.message ?? 'Sınıflandırma önerisi alınamadı.');
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  /**
+   * "Önerileri uygula" — kullanıcının bilinçli kararıyla TÜM önerileri
+   * (boş olmayan dahil) override eder. Bu, otomatik prefill'in aksine
+   * kullanıcı bilgisi olan bir mutasyondur.
+   */
+  function handleApplyAllSuggestions() {
+    if (!suggestion) return;
+    const applied = new Set<SuggestClassificationField>();
+    setForm((f) => {
+      const next = { ...f };
+      for (const key of [
+        'platform',
+        'businessProcess',
+        'operationType',
+        'affectedObject',
+        'impact',
+      ] as const) {
+        const s = suggestion.suggestions[key];
+        if (s) {
+          next[key] = s.code;
+          applied.add(key);
+        }
+      }
+      return next;
+    });
+    setAppliedSuggestionFields(applied);
+  }
+
+  // Kullanıcı bir alanı manuel değiştirince applied set'inden düş.
+  function handleTaxonomyChange(
+    key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact',
+    value: string,
+  ) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setAppliedSuggestionFields((prev) => {
+      if (!prev.has(key as SuggestClassificationField)) return prev;
+      const next = new Set(prev);
+      next.delete(key as SuggestClassificationField);
+      return next;
+    });
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
@@ -274,6 +402,42 @@ export function SmartTicketNewPage({
       requestType: mapping.requestType,
       trace: mapping.trace,
     };
+
+    // Phase 2b — KB sınıflandırma önerisi metadata'sı (yalnızca
+    // suggestion alındıysa). Per-field matchedBy/confidence appliedFields
+    // setine girer; kullanıcı sonradan değiştirdiyse o alan listeye
+    // girmez. unmatched ham raporlama için saklanır. Raw KB cevabı
+    // PERSIST EDİLMEZ.
+    if (suggestion) {
+      const perField: Record<string, { matchedBy: string; confidence: number; suggestedCode: string }> = {};
+      for (const key of [
+        'platform',
+        'businessProcess',
+        'operationType',
+        'affectedObject',
+        'impact',
+      ] as const) {
+        if (!appliedSuggestionFields.has(key as SuggestClassificationField)) continue;
+        const s = suggestion.suggestions[key as SuggestClassificationField];
+        if (s) {
+          perField[key] = {
+            matchedBy: s.matchedBy,
+            confidence: s.confidence,
+            suggestedCode: s.code,
+          };
+        }
+      }
+      smartTicket.classificationSuggestion = {
+        source: 'external_kb',
+        appliedAt: new Date().toISOString(),
+        appliedFields: Object.keys(perField),
+        perField,
+        unmatched: suggestion.unmatched.map((u) => ({
+          taxonomyType: u.taxonomyType,
+          rawValue: u.rawValue,
+        })),
+      };
+    }
 
     try {
       const created: Case = await caseService.create({
@@ -417,30 +581,87 @@ export function SmartTicketNewPage({
 
           {/* Smart Ticket taxonomy alanları */}
           <div className="rounded-md border border-brand-100 bg-brand-50/40 p-4 dark:border-brand-900/30 dark:bg-brand-950/20">
-            <div className="mb-3 flex items-center gap-2">
-              <Sparkles size={14} className="text-brand-500" />
-              <span className="text-sm font-medium text-brand-700 dark:text-brand-200">
-                Akıllı Tanımlar
-              </span>
-              {taxonomiesLoading && (
-                <span className="text-xs text-slate-500 dark:text-ndark-muted">yükleniyor…</span>
-              )}
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} className="text-brand-500" />
+                <span className="text-sm font-medium text-brand-700 dark:text-brand-200">
+                  Akıllı Tanımlar
+                </span>
+                {taxonomiesLoading && (
+                  <span className="text-xs text-slate-500 dark:text-ndark-muted">yükleniyor…</span>
+                )}
+              </div>
+              {/* WR-Smart-Ticket Phase 2b — KB'den sınıflandırma önerisi */}
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Wand2 size={12} />}
+                disabled={!canSuggest}
+                onClick={() => void handleSuggestClassification()}
+                title={
+                  !form.companyId
+                    ? 'Önce şirket seçin'
+                    : form.description.trim().length < 5
+                      ? 'En az 5 karakter açıklama girin'
+                      : 'External KB üzerinden 5 sınıflandırma alanı önerilir'
+                }
+              >
+                {suggesting ? 'Öneriliyor…' : 'KB ile Sınıflandır'}
+              </Button>
             </div>
             {taxonomyError && (
               <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
                 {taxonomyError}
               </p>
             )}
+            {suggestionError && (
+              <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                {suggestionError} Manuel seçim yapabilirsiniz.
+              </p>
+            )}
+            {suggestion && (
+              <div className="mb-3 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/30">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
+                    KB önerisi: {Object.keys(suggestion.suggestions).length} alan eşleşti
+                    {suggestion.unmatched.length > 0 && `, ${suggestion.unmatched.length} eşleşmedi`}
+                  </span>
+                  {Object.keys(suggestion.suggestions).length > 0 && (
+                    <Button size="sm" variant="ghost" onClick={handleApplyAllSuggestions}>
+                      Önerileri uygula
+                    </Button>
+                  )}
+                </div>
+                {suggestion.unmatched.length > 0 && (
+                  <ul className="mt-1 text-[11px] text-violet-700 dark:text-violet-300">
+                    {suggestion.unmatched.map((u, i) => (
+                      <li key={`${u.taxonomyType}-${i}`}>
+                        Eşleşmedi: <span className="font-medium">{u.taxonomyType}</span> —{' '}
+                        <code className="font-mono">{u.rawValue || '(boş)'}</code>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {TAXONOMY_FIELDS.map((f) => {
                 const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
+                const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
+                const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
                 return (
-                  <Field key={f.key} label={f.label} hint={f.hint}>
+                  <Field
+                    key={f.key}
+                    label={f.label}
+                    hint={
+                      isFromSuggestion && suggested
+                        ? `KB önerisi (eşleşme: ${suggested.matchedBy}, güven %${Math.round(suggested.confidence * 100)})`
+                        : f.hint
+                    }
+                  >
                     <Select
                       value={form[f.key]}
-                      onChange={(e) =>
-                        setForm((s) => ({ ...s, [f.key]: e.target.value }))
-                      }
+                      onChange={(e) => handleTaxonomyChange(f.key, e.target.value)}
                       disabled={taxonomiesLoading || items.length === 0}
                     >
                       <option value="">— Seçim yok —</option>
