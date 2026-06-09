@@ -52,6 +52,7 @@ import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
+import { CaseSolutionStepsPanel } from './CaseSolutionStepsPanel';
 import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
 import { CommunicationDispatchCard } from './components/CommunicationDispatchCard';
 import { TransferModal } from './components/TransferModal';
@@ -2901,10 +2902,27 @@ function DetailTab({
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
 
+  // WR-Smart-Ticket Phase 2c — Çözüm Adımları panel'i yalnız Smart Ticket
+  // vakalarında (customFields.smartTicket varsa) render edilir. Non-ST
+  // vakaların Case Detail görünümü aynen korunur.
+  const isSmartTicket = !!(item.customFields as { smartTicket?: unknown } | undefined)?.smartTicket;
+
   return (
     <div className="space-y-5">
       {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
       <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+
+      {/* WR-Smart-Ticket Phase 2c — L1 çözüm adımları (AI önerileri + manuel). */}
+      {isSmartTicket && (
+        <CaseSolutionStepsPanel
+          item={item}
+          onChange={() => {
+            void caseService.get(item.id).then((c) => {
+              if (c) onTransitionApplied(c);
+            });
+          }}
+        />
+      )}
 
       {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
       <ResolutionApprovalCard
