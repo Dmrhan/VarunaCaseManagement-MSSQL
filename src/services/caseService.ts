@@ -606,6 +606,19 @@ export const caseService = {
         resolutionTypeLabel?: string;
         permanentPrevention?: string;
         permanentPreventionLabel?: string;
+        /** WR-KB-Closure-Auto — Stage 2'de "İşe yaradı" işaretlenen step. */
+        selectedWorkedStepId?: string;
+        /** WR-KB-Closure-Auto — KB suggest-close metadata (raw KB DEĞİL). */
+        closureSuggestion?: {
+          source: 'external_kb';
+          appliedAt: string;
+          appliedFields: string[];
+          perField: Record<string, { matchedBy: string; suggestedCode: string }>;
+          unmatched: { taxonomyType: string; rawValue: string }[];
+          confidence?: number;
+          reason?: string;
+          modelUsed?: string;
+        };
       };
     },
   ): Promise<Case | undefined> {
@@ -1712,6 +1725,22 @@ export const caseService = {
       aiSuggestedReason?: string;
       aiReasonCode?: string;
       aiConfidence?: number;
+      // WR-Smart-Ticket Phase T1 — opsiyonel devir bağlamı (Stage 3 UI
+      // PR-T2'de bağlanacak; classic TransferModal göndermez).
+      // Yalnız Smart Ticket akışıyla açılmış vakalar için anlamlı; backend
+      // smartTicket opening yoksa 400 döner.
+      smartTicketTransfer?: {
+        transferNote: string;
+        composedSummary?: string;
+        attemptedStepIds?: string[];
+        stepOutcomesSummary?: {
+          worked: number;
+          notWorked: number;
+          skipped: number;
+          pending: number;
+          total: number;
+        };
+      };
     },
   ): Promise<Case | undefined> {
     const result = await apiFetch<Case>(
@@ -2334,7 +2363,66 @@ export const lookupService = {
     );
     return data ?? null;
   },
+
+  /**
+   * WR-KB-v2 doc §7 — Stage 3 closure AI önerisi.
+   * POST /api/smart-ticket/suggest-closure
+   *
+   * 4 alan (rootCauseGroup / rootCauseDetail / resolutionType /
+   * permanentPrevention) önerir + confidence/reason. Manuel dropdown'lar
+   * hata durumunda da kullanılabilir kalır.
+   */
+  async suggestSmartTicketClosure(
+    params: SuggestClosureRequest,
+  ): Promise<SuggestClosureResponse | null> {
+    const data = await apiFetch<SuggestClosureResponse>(
+      '/api/smart-ticket/suggest-closure',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+      'Kapanış önerisi alınamadı',
+    );
+    return data ?? null;
+  },
+
+  /**
+   * WR-Smart-Ticket Phase T1 — POST /api/smart-ticket/transfer-brief
+   *
+   * Stage 3 (PR-T2) UI'sının "Denenen Adımlar Özeti"ni prefill etmek
+   * için deterministic compose döner. AI çağrısı yok; KB persist yok.
+   */
+  async smartTicketTransferBrief(
+    params: { caseId: string },
+  ): Promise<SmartTicketTransferBriefResponse | null> {
+    const data = await apiFetch<SmartTicketTransferBriefResponse>(
+      '/api/smart-ticket/transfer-brief',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+      'Devir özeti alınamadı',
+    );
+    return data ?? null;
+  },
 };
+
+export interface SmartTicketStepOutcomesSummary {
+  worked: number;
+  notWorked: number;
+  skipped: number;
+  pending: number;
+  total: number;
+}
+
+export interface SmartTicketTransferBriefResponse {
+  caseId: string;
+  composedSummary: string | null;
+  attemptedStepIds: string[];
+  stepOutcomesSummary: SmartTicketStepOutcomesSummary;
+}
 
 export interface SuggestClassificationRequest {
   companyId: string;
@@ -2370,7 +2458,73 @@ export interface SuggestClassificationResponse {
   suggestions: Partial<Record<SuggestClassificationField, SuggestClassificationItem>>;
   unmatched: SuggestClassificationUnmatched[];
   source: 'external_kb';
-  meta?: { fieldsRequested?: SuggestClassificationField[]; extractedRawCount?: number };
+  meta?: {
+    fieldsRequested?: SuggestClassificationField[];
+    extractedRawCount?: number;
+    usedEndpoint?: 'categorize-v2' | 'analyze';
+    confidence?: number;
+    reason?: string;
+    modelUsed?: string;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-KB-v2 doc §7 — Closure suggestion (Stage 3 AI önerisi).
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * WR-KB-Closure-Auto — POST /api/smart-ticket/suggest-closure
+ *
+ * Tercih edilen yeni body: { caseId, workedStepId? }
+ * Backend Case + tüm CaseSolutionStep'leri kendi fetch eder ve KB'ye
+ * uygun resolution kompoze eder. Eski "companyId + description +
+ * resolution" body de geri uyumlu olarak desteklenir.
+ */
+export interface SuggestClosureRequest {
+  /** Yeni body — caseId ile server-side fetch. */
+  caseId?: string;
+  /** Stage 2'de işe yaradı işaretlenen step'in id'si. Verilmezse backend
+   *  son worked step'i otomatik seçer. */
+  workedStepId?: string;
+  /** Geri uyumlu (deprecated) — eski "manuel buton" akışı için. */
+  companyId?: string;
+  description?: string;
+  resolution?: string;
+  openUrun?: string;
+  openIsSureci?: string;
+  openIslemTipi?: string;
+}
+
+export type SuggestClosureField =
+  | 'rootCauseGroup'
+  | 'rootCauseDetail'
+  | 'resolutionType'
+  | 'permanentPrevention';
+
+export interface SuggestClosureItem {
+  code: string;
+  label: string;
+  matchedBy: 'label';
+}
+
+export interface SuggestClosureUnmatched {
+  taxonomyType: SuggestClosureField;
+  rawValue: string;
+}
+
+export interface SuggestClosureResponse {
+  companyId: string;
+  suggestions: Partial<Record<SuggestClosureField, SuggestClosureItem>>;
+  unmatched: SuggestClosureUnmatched[];
+  source: 'external_kb';
+  meta?: {
+    usedEndpoint?: 'suggest-close';
+    confidence?: number;
+    reason?: string;
+    modelUsed?: string;
+    selectedWorkedStepId?: string;
+    contextStepsCount?: number;
+  };
 }
 
 export interface SmartTicketTaxonomyItem {

@@ -32,6 +32,7 @@ import {
   mapClassificationToTaxonomy,
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
+import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -95,45 +96,419 @@ router.post('/suggest-classification', async (req, res) => {
       });
     }
 
-    // KB analyze çağır (server-side). Hatalar 502 ile sarılır.
-    let kbResponse;
-    try {
-      kbResponse = await externalKbClient.analyze(setting, {
-        freeText: description,
-        ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
-          ? { bildirimNo: body.bildirimNo.trim() }
-          : {}),
-        ...(typeof body.project === 'string' && body.project.trim()
-          ? { project: body.project.trim() }
-          : {}),
-      });
-    } catch (err) {
-      console.error('[smart-ticket/suggest-classification] KB analyze failed', err?.message ?? err);
-      return res.status(502).json({
-        error: 'external_kb_failed',
-        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-      });
+    // WR-KB-v2 — tercih edilen uç: /api/v1/categorize-v2 (~60sn, KB
+    // kullanmaz). Hata olursa eski /api/v1/analyze fallback'i çağrılır.
+    // Backward-compatible: KB v2 deploy edilmediyse kullanıcı yine de
+    // sınıflandırma alabilsin diye iki katmanlı.
+    const v2Body = {
+      description,
+      ...(typeof body.project === 'string' && body.project.trim()
+        ? { project: body.project.trim() }
+        : {}),
+    };
+    if (typeof body.customerName === 'string' && body.customerName.trim()) {
+      v2Body.customer_name = body.customerName.trim();
     }
 
-    // Adapter — yalnız 5 sınıflandırma alanı.
+    let kbResponse = null;
+    let usedEndpoint = null;
+    try {
+      kbResponse = await externalKbClient.categorizeV2(setting, v2Body);
+      usedEndpoint = 'categorize-v2';
+    } catch (err) {
+      console.warn(
+        '[smart-ticket/suggest-classification] categorize-v2 failed, falling back to analyze',
+        err?.message ?? err,
+      );
+      try {
+        kbResponse = await externalKbClient.analyze(setting, {
+          freeText: description,
+          ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
+            ? { bildirimNo: body.bildirimNo.trim() }
+            : {}),
+          ...(typeof body.project === 'string' && body.project.trim()
+            ? { project: body.project.trim() }
+            : {}),
+        });
+        usedEndpoint = 'analyze';
+      } catch (fallbackErr) {
+        console.error(
+          '[smart-ticket/suggest-classification] both categorize-v2 and analyze failed',
+          fallbackErr?.message ?? fallbackErr,
+        );
+        return res.status(502).json({
+          error: 'external_kb_failed',
+          message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+        });
+      }
+    }
+
+    // Adapter — multi-path adapter zaten categorize-v2'nin top-level
+    // snake_case alanlarını (platform, is_sureci, vb.) okuyor; analyze'in
+    // analysis.classification.X path'ini de aynı adapter cover ediyor.
     const raw = extractClassificationFromKb(kbResponse);
     const taxonomies = await loadActiveTaxonomies(companyId);
     const { suggestions, unmatched } = mapClassificationToTaxonomy(raw, taxonomies);
+
+    // categorize-v2 cevabı confidence/reason dönüyor — meta'ya yazarız;
+    // adapter mapping kalitesinden bağımsız olarak observability için.
+    const upstreamMeta = {};
+    if (kbResponse && typeof kbResponse === 'object') {
+      const payload = kbResponse.data && typeof kbResponse.data === 'object' ? kbResponse.data : kbResponse;
+      if (typeof payload.confidence === 'number') upstreamMeta.confidence = payload.confidence;
+      if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
+      if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
+    }
 
     res.json({
       companyId,
       suggestions,
       unmatched,
       source: 'external_kb',
-      // Debug: KB cevabının diğer alanlarını DÖNDÜRMEYİZ; client de
-      // bunları persist etmez. Bu PR'ın özünü garanti altına alıyor.
       meta: {
         fieldsRequested: SMART_TICKET_CLASSIFICATION_FIELDS,
         extractedRawCount: Object.keys(raw).length,
+        usedEndpoint,
+        ...upstreamMeta,
       },
     });
   } catch (err) {
     console.error('[smart-ticket/suggest-classification]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * WR-KB-Closure-Auto — POST /api/smart-ticket/suggest-closure
+ *
+ * Stage 3'e girildiğinde **otomatik** çağrılır. Body:
+ *
+ *   { caseId, workedStepId? }
+ *
+ * Backend Case + CaseSolutionStep + Smart Ticket opening context'ini
+ * server-side toplar; KB upstream `/api/v1/suggest-close` çağrılır;
+ * cevabın 4 alanı (kok_neden_grubu, kok_neden_detayi, cozum_tipi,
+ * kalici_onlem) + confidence/reason döndürülür.
+ *
+ * Kurallar:
+ *  - Case scope: req.user.allowedCompanyIds.includes(case.companyId)
+ *  - workedStepId verilirse o step primary context; yoksa son "worked"
+ *    step otomatik bulunur. Hiç worked step yoksa context yine kurulur
+ *    (KB tüm denenen adımlardan çıkarım yapabilir).
+ *  - Case veya step MUTATE EDİLMEZ; vaka kapatılmaz.
+ *  - Raw KB cevabı dönmez; yalnız normalized suggestions/unmatched/meta.
+ *  - Match sırası: code > metadata.kbAliases > normalized label.
+ *
+ * Geri uyumlu (deprecated) body de halen çalışır: { companyId,
+ * description, resolution, openIsSureci, openIslemTipi } — eski
+ * "KB ile Öner" manuel buton bunu kullanıyordu. v2 body verilirse
+ * yeni akış işler.
+ */
+const TAXONOMY_TYPES_FOR_CLOSURE = ['rootCauseGroup', 'rootCauseDetail', 'resolutionType', 'permanentPrevention'];
+
+async function loadActiveClosureTaxonomies(companyId) {
+  const rows = await prisma.taxonomyDef.findMany({
+    where: {
+      companyId,
+      isActive: true,
+      taxonomyType: { in: TAXONOMY_TYPES_FOR_CLOSURE },
+    },
+    select: { taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
+    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
+  });
+  const out = { rootCauseGroup: [], rootCauseDetail: [], resolutionType: [], permanentPrevention: [] };
+  for (const r of rows) out[r.taxonomyType].push(r);
+  return out;
+}
+
+function normalizeLabel(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .normalize('NFC')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ü/g, 'u')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function matchByLabel(list, rawLabel) {
+  if (!rawLabel) return null;
+  const target = normalizeLabel(rawLabel);
+  if (!target) return null;
+  return list.find((t) => normalizeLabel(t.label) === target) ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Resolution composer — worked step + tüm step outcomes/notes
+// + Smart Ticket opening context'i KB'ye gönderilecek "resolution"
+// metnine çevirir. Spec: worked step birincil, kalan step'ler
+// "diğer denenen adımlar" listesi.
+// ─────────────────────────────────────────────────────────────────
+
+const SOLUTION_STEP_STATUS_LABEL = {
+  suggested: 'Önerildi',
+  tried: 'Denendi',
+  worked: 'İşe yaradı',
+  not_worked: 'İşe yaramadı',
+  skipped: 'Uygun değil',
+};
+
+function composeResolutionFromSteps(workedStep, allSteps) {
+  const lines = [];
+  if (workedStep) {
+    const parts = [`[ÇÖZÜLEN ADIM] ${workedStep.title}`];
+    if (workedStep.description) parts.push(workedStep.description);
+    if (workedStep.note) parts.push(`Not: ${workedStep.note}`);
+    lines.push(parts.join(' — '));
+  }
+  const others = (allSteps || []).filter((s) => !workedStep || s.id !== workedStep.id);
+  if (others.length > 0) {
+    lines.push('');
+    lines.push('Diğer denenen adımlar:');
+    for (const s of others) {
+      const statusLabel = SOLUTION_STEP_STATUS_LABEL[s.status] ?? s.status;
+      const noteSuffix = s.note ? ` (Not: ${s.note})` : '';
+      lines.push(`- ${s.title} — ${statusLabel}${noteSuffix}`);
+    }
+  }
+  if (lines.length === 0) {
+    return 'Çözüm adımları henüz girilmedi; KB önerisi yalnız vaka açıklamasından çıkarılabilir.';
+  }
+  return lines.join('\n');
+}
+
+router.post('/suggest-closure', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+
+    // ── Yeni body shape (v2): { caseId, workedStepId? } ──
+    const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    let companyId = '';
+    let description = '';
+    let resolution = '';
+    let openUrun, openIsSureci, openIslemTipi;
+    let workedStepId = typeof body.workedStepId === 'string' ? body.workedStepId.trim() : '';
+    let selectedWorkedStepId = null;
+    let contextStepsCount = 0;
+
+    if (caseId) {
+      const caseRow = await prisma.case.findUnique({
+        where: { id: caseId },
+        select: { id: true, companyId: true, description: true, customFields: true },
+      });
+      if (!caseRow) {
+        return res.status(404).json({ error: 'case_not_found', message: 'Vaka bulunamadı.' });
+      }
+      if (!allowed.includes(caseRow.companyId)) {
+        return res.status(403).json({ error: 'forbidden', message: 'Bu vakaya erişim yok.' });
+      }
+      companyId = caseRow.companyId;
+      description = (caseRow.description || '').trim();
+
+      // Smart Ticket opening context — customFields.smartTicket'tan label'lar.
+      const stOpening =
+        caseRow.customFields && typeof caseRow.customFields === 'object'
+          ? caseRow.customFields.smartTicket
+          : null;
+      if (stOpening && typeof stOpening === 'object') {
+        // Codex P2 fix — `open_urun` için label kaynağı önceliği:
+        //   1) urunLabel       (forward-compat: ileride bir yazıcı eklenirse)
+        //   2) platformLabel   (UI'ın gerçekten persist ettiği alan)
+        //   3) platform        (label yok, ham code)
+        // SmartTicketNewPage `${field}Label` formatında yazıyor → mevcut
+        // tüm Smart Ticket case'lerinde `urunLabel` YOK; `platformLabel`
+        // dolu. Eski impl yalnız urunLabel okuyordu → open_urun KB'ye
+        // gönderilmiyordu.
+        if (typeof stOpening.urunLabel === 'string' && stOpening.urunLabel.trim()) {
+          openUrun = stOpening.urunLabel.trim();
+        } else if (typeof stOpening.platformLabel === 'string' && stOpening.platformLabel.trim()) {
+          openUrun = stOpening.platformLabel.trim();
+        } else if (typeof stOpening.platform === 'string' && stOpening.platform.trim()) {
+          openUrun = stOpening.platform.trim();
+        }
+        if (typeof stOpening.businessProcessLabel === 'string') openIsSureci = stOpening.businessProcessLabel;
+        if (typeof stOpening.operationTypeLabel === 'string') openIslemTipi = stOpening.operationTypeLabel;
+      }
+
+      // Tüm CaseSolutionStep'leri çek.
+      const steps = await prisma.caseSolutionStep.findMany({
+        where: { caseId },
+        orderBy: { stepIndex: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          status: true,
+          note: true,
+          outcomeAt: true,
+        },
+      });
+      contextStepsCount = steps.length;
+
+      let workedStep = null;
+      if (workedStepId) {
+        workedStep = steps.find((s) => s.id === workedStepId && s.status === 'worked') ?? null;
+      }
+      if (!workedStep) {
+        // En son worked olan step'i otomatik seç.
+        const workedSorted = steps
+          .filter((s) => s.status === 'worked' && s.outcomeAt)
+          .sort((a, b) => new Date(b.outcomeAt).getTime() - new Date(a.outcomeAt).getTime());
+        workedStep = workedSorted[0] ?? steps.find((s) => s.status === 'worked') ?? null;
+      }
+      selectedWorkedStepId = workedStep?.id ?? null;
+      resolution = composeResolutionFromSteps(workedStep, steps);
+    } else {
+      // ── Geri uyumlu body (v1): { companyId, description, resolution, ... } ──
+      companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
+      description = typeof body.description === 'string' ? body.description.trim() : '';
+      resolution = typeof body.resolution === 'string' ? body.resolution.trim() : '';
+      if (typeof body.openUrun === 'string' && body.openUrun.trim()) openUrun = body.openUrun.trim();
+      if (typeof body.openIsSureci === 'string' && body.openIsSureci.trim()) openIsSureci = body.openIsSureci.trim();
+      if (typeof body.openIslemTipi === 'string' && body.openIslemTipi.trim()) openIslemTipi = body.openIslemTipi.trim();
+      if (!companyId) {
+        return res.status(400).json({ error: 'company_required', message: 'companyId veya caseId zorunlu.' });
+      }
+      if (!allowed.includes(companyId)) {
+        return res.status(403).json({ error: 'forbidden', message: 'Bu şirkete erişim yok.' });
+      }
+    }
+
+    if (description.length < 5) {
+      return res.status(400).json({
+        error: 'description_required',
+        message: 'Kapanış önerisi için en az 5 karakterlik açıklama gerekli.',
+      });
+    }
+    if (resolution.length < 5) {
+      return res.status(400).json({
+        error: 'resolution_required',
+        message: 'Kapanış önerisi için en az 5 karakterlik çözüm taslağı gerekli (worked step veya açıklama).',
+      });
+    }
+
+    const setting = await externalKbSettingRepo.getByCompany(companyId);
+    if (!setting?.enabled) {
+      return res.status(400).json({
+        error: 'external_kb_disabled',
+        message: 'Bu şirket için External KB devre dışı; kapanış önerisi alınamıyor.',
+      });
+    }
+
+    const sgBody = { description, resolution };
+    if (openUrun) sgBody.open_urun = openUrun;
+    if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
+    if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
+
+    let kbResponse;
+    try {
+      kbResponse = await externalKbClient.suggestClose(setting, sgBody);
+    } catch (err) {
+      console.error('[smart-ticket/suggest-closure] suggest-close failed', err?.message ?? err);
+      return res.status(502).json({
+        error: 'external_kb_failed',
+        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+      });
+    }
+
+    const payload =
+      kbResponse && typeof kbResponse === 'object'
+        ? (kbResponse.data && typeof kbResponse.data === 'object' ? kbResponse.data : kbResponse)
+        : {};
+
+    const tax = await loadActiveClosureTaxonomies(companyId);
+
+    // Kök Neden Grubu önce — sonra detayı yalnız bu grubun children'ında ara.
+    const rcgMatch = matchByLabel(tax.rootCauseGroup, payload.kok_neden_grubu);
+    const rcdCandidates = rcgMatch
+      ? tax.rootCauseDetail.filter((d) => d.parentId === rcgMatch.id)
+      : tax.rootCauseDetail;
+    const rcdMatch = matchByLabel(rcdCandidates, payload.kok_neden_detayi);
+    const rtMatch = matchByLabel(tax.resolutionType, payload.cozum_tipi);
+    const ppMatch = matchByLabel(tax.permanentPrevention, payload.kalici_onlem);
+
+    const suggestions = {};
+    const unmatched = [];
+    function addOrMiss(key, match, rawValue) {
+      if (match) {
+        suggestions[key] = { code: match.code, label: match.label, matchedBy: 'label' };
+      } else if (rawValue) {
+        unmatched.push({ taxonomyType: key, rawValue });
+      }
+    }
+    addOrMiss('rootCauseGroup', rcgMatch, payload.kok_neden_grubu);
+    addOrMiss('rootCauseDetail', rcdMatch, payload.kok_neden_detayi);
+    addOrMiss('resolutionType', rtMatch, payload.cozum_tipi);
+    addOrMiss('permanentPrevention', ppMatch, payload.kalici_onlem);
+
+    const upstreamMeta = {};
+    if (typeof payload.confidence === 'number') upstreamMeta.confidence = payload.confidence;
+    if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
+    if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
+
+    res.json({
+      companyId,
+      suggestions,
+      unmatched,
+      source: 'external_kb',
+      meta: {
+        usedEndpoint: 'suggest-close',
+        ...upstreamMeta,
+        ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
+        ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
+      },
+    });
+  } catch (err) {
+    console.error('[smart-ticket/suggest-closure]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * WR-Smart-Ticket Phase T1 — POST /api/smart-ticket/transfer-brief
+ *
+ * Stage 3 (PR-T2) UI'sının prefill akışı için deterministic özet üretir.
+ * AI çağrısı YOK — yalnız CaseSolutionStep tablosundan compose edilir.
+ *
+ * Body:  { caseId: string }
+ * Yanıt:
+ *   {
+ *     caseId,
+ *     composedSummary: string | null,
+ *     attemptedStepIds: string[],
+ *     stepOutcomesSummary: { worked, notWorked, skipped, pending, total }
+ *   }
+ *
+ * Scope: allowedCompanyIds enforced — case'in companyId'si scope'a girmiyorsa 403.
+ *
+ * Klasik AI brief endpoint'i (/api/cases/:id/transfer-brief, transferAi.js) ile
+ * çakışmaz; ayrı namespace + ayrı amaç (deterministic, KB persist yok).
+ */
+router.post('/transfer-brief', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+    const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    if (!caseId) {
+      return res.status(400).json({ error: 'case_required', message: 'caseId zorunlu.' });
+    }
+    const caseRow = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { id: true, companyId: true },
+    });
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found', message: 'Vaka bulunamadı.' });
+    }
+    if (!allowed.includes(caseRow.companyId)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Bu vakaya erişim yok.' });
+    }
+    const brief = await composeTransferBriefFromSteps(caseId);
+    res.json({ caseId, ...brief });
+  } catch (err) {
+    console.error('[smart-ticket/transfer-brief]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

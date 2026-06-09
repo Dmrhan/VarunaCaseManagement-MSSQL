@@ -128,6 +128,35 @@ if (ref.businessProcess) {
   ref.businessProcess.metadata = newMeta;
 }
 
+// ─── 0) WR-KB-v2 categorize-v2 top-level path coverage ───────────────────
+//
+// Yeni doc §6 cevap yapısı: top-level snake_case alanlar.
+// Adapter bunları analyze (analysis.classification.X) ile birlikte cover etmeli.
+
+console.log('── 0) WR-KB-v2 categorize-v2 top-level path coverage ──');
+if (ref.platform && ref.businessProcess && ref.operationType && ref.affectedObject && ref.impact) {
+  const v2Response = {
+    // Direkt KB cevabı (proxy zarfı yok): adapter response.data || response
+    // ikisini de cover ediyor.
+    platform: ref.platform.label,
+    is_sureci: ref.businessProcess.label,
+    islem_tipi: ref.operationType.label,
+    etkilenen_nesne: ref.affectedObject.label,
+    etki: ref.impact.label,
+    confidence: 0.85,
+    reason: 'test',
+  };
+  const raw = extractClassificationFromKb(v2Response);
+  const { suggestions } = mapClassificationToTaxonomy(raw, taxonomyMap);
+  const fields = ['platform', 'businessProcess', 'operationType', 'affectedObject', 'impact'];
+  const missing = fields.filter((f) => !suggestions[f]);
+  if (missing.length === 0) {
+    ok('0) categorize-v2 top-level (platform/is_sureci/islem_tipi/etkilenen_nesne/etki) tüm 5 alan eşleşti');
+  } else {
+    bad('0) categorize-v2 path coverage', `eksik: ${missing.join(', ')}`);
+  }
+}
+
 // ─── 1-5) KB response fields → mapping ───────────────────────────────────
 
 console.log('');
