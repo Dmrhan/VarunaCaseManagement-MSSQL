@@ -593,7 +593,7 @@ export function SmartTicketNewPage({
   // ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4 px-4 py-4">
+    <div className="w-full space-y-4 px-4 py-4">
       {/* Header — geri buton + başlık + Case number badge */}
       <div className="flex items-start justify-between gap-3">
         <div>
