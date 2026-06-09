@@ -275,6 +275,12 @@ const MOCK_ANALYZE = {
         '{"step":"Kullanıcının ekranını paylaşmasını iste","rationale":"Sorun adımını canlı gör"}',
         // Object item'da `step` field'ı da kabul edilmeli.
         { step: 'Önbelleği temizleyip uygulamayı yeniden başlat', rationale: 'Cache çakışması yaygın' },
+        // Codex parser P2 — `step` ordinal numarası: title'a "1" düşmemeli;
+        // `text` alanından gerçek metin alınmalı.
+        { step: 1, text: 'Çıkış yapıp tekrar giriş yap', rationale: 'Oturum yenile' },
+        { step: '2', text: 'Önbelleği tarayıcıdan temizle' },
+        // JSON string + numeric step.
+        '{"step":3,"text":"Mobil uygulamayı kapat aç","rationale":"Mobil önbellek"}',
         '', // boş, atlanmalı
         null, // null, atlanmalı
       ],
@@ -300,10 +306,9 @@ if (stCase) {
     importResult = await solutionStepRepository.importAiSuggested(
       stCase.id, MOCK_ANALYZE.data, 'smoke-user', ALLOWED,
     );
-    // 4 önceki + 2 yeni (JSON string + object.step) = 6 step. Boş ve null
-    // atlanır.
-    if (importResult.summary.importedCount === 6) {
-      ok('10) importAiSuggested — 6 yeni step (string + 4 object varyantı, JSON string normalize, boşlar skip)');
+    // 6 önceki + 3 numeric step varyantı = 9 step. Boş ve null atlanır.
+    if (importResult.summary.importedCount === 9) {
+      ok('10) importAiSuggested — 9 yeni step (string + 7 object varyantı, JSON string + numeric step normalize, boşlar skip)');
     } else {
       bad('10) importAiSuggested count', JSON.stringify(importResult.summary));
     }
@@ -314,7 +319,7 @@ if (stCase) {
 
 if (importResult) {
   const aiSteps = importResult.items.filter((s) => s.source === 'ai_suggested_step');
-  if (aiSteps.length === 6) ok('11) yalnız analysis.suggestedSteps import edildi (6 satır)');
+  if (aiSteps.length === 9) ok('11) yalnız analysis.suggestedSteps import edildi (9 satır)');
   else bad('11) suggestedSteps count', `${aiSteps.length}`);
 
   // PR-2c review fix — raw JSON braces title'a sızmamalı.
@@ -330,12 +335,46 @@ if (importResult) {
     bad('11c) JSON string parse', JSON.stringify(jsonParsedStep));
   }
 
-  // Object item'da `step` alanı title'a düşmüş mü?
+  // Object item'da `step` alanı (string, non-numeric) title'a düşmüş mü?
   const objStepField = aiSteps.find((s) => s.title.includes('Önbelleği temizleyip uygulamayı'));
   if (objStepField && objStepField.description?.includes('Cache çakışması')) {
-    ok('11d) Object `step` alanı title\'a, `rationale` description\'a düştü');
+    ok('11d) Object string `step` alanı title\'a, `rationale` description\'a düştü');
   } else {
     bad('11d) object step field', JSON.stringify(objStepField));
+  }
+
+  // Codex parser P2 — `step` numeric ordinal title'a düşmemeli.
+  // Tek-karakterli (örn. "1", "2", "3") title'lar zayıf bir indikatör;
+  // gerçek text alanından gelen anlamlı metin başlık olmalı.
+  const ordinalLeaked = aiSteps.filter((s) => /^\d+[).]?$/.test(s.title.trim()));
+  if (ordinalLeaked.length === 0) {
+    ok('11e) numeric/ordinal `step` title\'a sızmadı');
+  } else {
+    bad('11e) ordinal title leaked', ordinalLeaked.map((s) => s.title).join(' | '));
+  }
+
+  // Senaryo: { step: 1, text: "Çıkış yapıp tekrar giriş yap" } → text title olmalı.
+  const numStepWithText = aiSteps.find((s) => s.title.includes('Çıkış yapıp tekrar giriş yap'));
+  if (numStepWithText && numStepWithText.description?.includes('Oturum yenile')) {
+    ok('11f) Object { step: 1, text: "..." } → text title (numeric step ignore)');
+  } else {
+    bad('11f) numeric step + text', JSON.stringify(numStepWithText));
+  }
+
+  // Senaryo: { step: "2", text: "Önbelleği tarayıcıdan temizle" }.
+  const stringNumStep = aiSteps.find((s) => s.title.includes('Önbelleği tarayıcıdan temizle'));
+  if (stringNumStep) {
+    ok('11g) Object { step: "2", text: "..." } → text title (string-numeric step ignore)');
+  } else {
+    bad('11g) string-numeric step + text', JSON.stringify(stringNumStep));
+  }
+
+  // Senaryo: JSON string '{"step":3,"text":"Mobil uygulamayı kapat aç","rationale":"..."}'.
+  const jsonNumStep = aiSteps.find((s) => s.title.includes('Mobil uygulamayı kapat aç'));
+  if (jsonNumStep && jsonNumStep.description?.includes('Mobil önbellek')) {
+    ok('11h) JSON string + numeric step: text → title, rationale → description');
+  } else {
+    bad('11h) JSON numeric step', JSON.stringify(jsonNumStep));
   }
 
   // Pure helper extract test — hangi alanların ignore edildiği.
@@ -371,8 +410,8 @@ if (stCase) {
     const second = await solutionStepRepository.importAiSuggested(
       stCase.id, MOCK_ANALYZE.data, 'smoke-user', ALLOWED,
     );
-    if (second.summary.importedCount === 0 && second.summary.skippedCount === 6) {
-      ok('17) re-run import duplicate yaratmaz (importedCount=0, skipped=6)');
+    if (second.summary.importedCount === 0 && second.summary.skippedCount === 9) {
+      ok('17) re-run import duplicate yaratmaz (importedCount=0, skipped=9)');
     } else {
       bad('17) re-run dedup', JSON.stringify(second.summary));
     }
