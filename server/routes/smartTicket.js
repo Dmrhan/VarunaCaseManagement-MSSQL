@@ -178,19 +178,30 @@ router.post('/suggest-classification', async (req, res) => {
 });
 
 /**
- * WR-KB-v2 doc §7 — POST /api/smart-ticket/suggest-closure
+ * WR-KB-Closure-Auto — POST /api/smart-ticket/suggest-closure
  *
- * Stage 3 closure'da kullanıcı "AI Önerisi" tıklayınca çağrılır.
- * KB upstream `/api/v1/suggest-close` çağrılır; cevabın 4 alanı
- * (kok_neden_grubu, kok_neden_detayi, cozum_tipi, kalici_onlem) +
- * confidence/reason döndürülür.
+ * Stage 3'e girildiğinde **otomatik** çağrılır. Body:
  *
- * Adapter: kapanış taxonomy'sinde (rootCauseGroup/rootCauseDetail/
- * resolutionType/permanentPrevention) label match yapılır;
- * unmatched alanlar UI'a "eşleşmedi" olarak gösterilir. Auto-create yok.
+ *   { caseId, workedStepId? }
  *
- * Çözüm taslağı (resolution draft) **zorunlu** çünkü doc §7'de body
- * description + resolution alır.
+ * Backend Case + CaseSolutionStep + Smart Ticket opening context'ini
+ * server-side toplar; KB upstream `/api/v1/suggest-close` çağrılır;
+ * cevabın 4 alanı (kok_neden_grubu, kok_neden_detayi, cozum_tipi,
+ * kalici_onlem) + confidence/reason döndürülür.
+ *
+ * Kurallar:
+ *  - Case scope: req.user.allowedCompanyIds.includes(case.companyId)
+ *  - workedStepId verilirse o step primary context; yoksa son "worked"
+ *    step otomatik bulunur. Hiç worked step yoksa context yine kurulur
+ *    (KB tüm denenen adımlardan çıkarım yapabilir).
+ *  - Case veya step MUTATE EDİLMEZ; vaka kapatılmaz.
+ *  - Raw KB cevabı dönmez; yalnız normalized suggestions/unmatched/meta.
+ *  - Match sırası: code > metadata.kbAliases > normalized label.
+ *
+ * Geri uyumlu (deprecated) body de halen çalışır: { companyId,
+ * description, resolution, openIsSureci, openIslemTipi } — eski
+ * "KB ile Öner" manuel buton bunu kullanıyordu. v2 body verilirse
+ * yeni akış işler.
  */
 const TAXONOMY_TYPES_FOR_CLOSURE = ['rootCauseGroup', 'rootCauseDetail', 'resolutionType', 'permanentPrevention'];
 
@@ -228,20 +239,129 @@ function matchByLabel(list, rawLabel) {
   return list.find((t) => normalizeLabel(t.label) === target) ?? null;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Resolution composer — worked step + tüm step outcomes/notes
+// + Smart Ticket opening context'i KB'ye gönderilecek "resolution"
+// metnine çevirir. Spec: worked step birincil, kalan step'ler
+// "diğer denenen adımlar" listesi.
+// ─────────────────────────────────────────────────────────────────
+
+const SOLUTION_STEP_STATUS_LABEL = {
+  suggested: 'Önerildi',
+  tried: 'Denendi',
+  worked: 'İşe yaradı',
+  not_worked: 'İşe yaramadı',
+  skipped: 'Uygun değil',
+};
+
+function composeResolutionFromSteps(workedStep, allSteps) {
+  const lines = [];
+  if (workedStep) {
+    const parts = [`[ÇÖZÜLEN ADIM] ${workedStep.title}`];
+    if (workedStep.description) parts.push(workedStep.description);
+    if (workedStep.note) parts.push(`Not: ${workedStep.note}`);
+    lines.push(parts.join(' — '));
+  }
+  const others = (allSteps || []).filter((s) => !workedStep || s.id !== workedStep.id);
+  if (others.length > 0) {
+    lines.push('');
+    lines.push('Diğer denenen adımlar:');
+    for (const s of others) {
+      const statusLabel = SOLUTION_STEP_STATUS_LABEL[s.status] ?? s.status;
+      const noteSuffix = s.note ? ` (Not: ${s.note})` : '';
+      lines.push(`- ${s.title} — ${statusLabel}${noteSuffix}`);
+    }
+  }
+  if (lines.length === 0) {
+    return 'Çözüm adımları henüz girilmedi; KB önerisi yalnız vaka açıklamasından çıkarılabilir.';
+  }
+  return lines.join('\n');
+}
+
 router.post('/suggest-closure', async (req, res) => {
   try {
     const body = req.body ?? {};
     const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
-    const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
-    if (!companyId) {
-      return res.status(400).json({ error: 'company_required', message: 'companyId zorunlu.' });
-    }
-    if (!allowed.includes(companyId)) {
-      return res.status(403).json({ error: 'forbidden', message: 'Bu şirkete erişim yok.' });
+
+    // ── Yeni body shape (v2): { caseId, workedStepId? } ──
+    const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    let companyId = '';
+    let description = '';
+    let resolution = '';
+    let openUrun, openIsSureci, openIslemTipi;
+    let workedStepId = typeof body.workedStepId === 'string' ? body.workedStepId.trim() : '';
+    let selectedWorkedStepId = null;
+    let contextStepsCount = 0;
+
+    if (caseId) {
+      const caseRow = await prisma.case.findUnique({
+        where: { id: caseId },
+        select: { id: true, companyId: true, description: true, customFields: true },
+      });
+      if (!caseRow) {
+        return res.status(404).json({ error: 'case_not_found', message: 'Vaka bulunamadı.' });
+      }
+      if (!allowed.includes(caseRow.companyId)) {
+        return res.status(403).json({ error: 'forbidden', message: 'Bu vakaya erişim yok.' });
+      }
+      companyId = caseRow.companyId;
+      description = (caseRow.description || '').trim();
+
+      // Smart Ticket opening context — customFields.smartTicket'tan label'lar.
+      const stOpening =
+        caseRow.customFields && typeof caseRow.customFields === 'object'
+          ? caseRow.customFields.smartTicket
+          : null;
+      if (stOpening && typeof stOpening === 'object') {
+        if (typeof stOpening.urunLabel === 'string') openUrun = stOpening.urunLabel;
+        if (typeof stOpening.businessProcessLabel === 'string') openIsSureci = stOpening.businessProcessLabel;
+        if (typeof stOpening.operationTypeLabel === 'string') openIslemTipi = stOpening.operationTypeLabel;
+      }
+
+      // Tüm CaseSolutionStep'leri çek.
+      const steps = await prisma.caseSolutionStep.findMany({
+        where: { caseId },
+        orderBy: { stepIndex: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          status: true,
+          note: true,
+          outcomeAt: true,
+        },
+      });
+      contextStepsCount = steps.length;
+
+      let workedStep = null;
+      if (workedStepId) {
+        workedStep = steps.find((s) => s.id === workedStepId && s.status === 'worked') ?? null;
+      }
+      if (!workedStep) {
+        // En son worked olan step'i otomatik seç.
+        const workedSorted = steps
+          .filter((s) => s.status === 'worked' && s.outcomeAt)
+          .sort((a, b) => new Date(b.outcomeAt).getTime() - new Date(a.outcomeAt).getTime());
+        workedStep = workedSorted[0] ?? steps.find((s) => s.status === 'worked') ?? null;
+      }
+      selectedWorkedStepId = workedStep?.id ?? null;
+      resolution = composeResolutionFromSteps(workedStep, steps);
+    } else {
+      // ── Geri uyumlu body (v1): { companyId, description, resolution, ... } ──
+      companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
+      description = typeof body.description === 'string' ? body.description.trim() : '';
+      resolution = typeof body.resolution === 'string' ? body.resolution.trim() : '';
+      if (typeof body.openUrun === 'string' && body.openUrun.trim()) openUrun = body.openUrun.trim();
+      if (typeof body.openIsSureci === 'string' && body.openIsSureci.trim()) openIsSureci = body.openIsSureci.trim();
+      if (typeof body.openIslemTipi === 'string' && body.openIslemTipi.trim()) openIslemTipi = body.openIslemTipi.trim();
+      if (!companyId) {
+        return res.status(400).json({ error: 'company_required', message: 'companyId veya caseId zorunlu.' });
+      }
+      if (!allowed.includes(companyId)) {
+        return res.status(403).json({ error: 'forbidden', message: 'Bu şirkete erişim yok.' });
+      }
     }
 
-    const description = typeof body.description === 'string' ? body.description.trim() : '';
-    const resolution = typeof body.resolution === 'string' ? body.resolution.trim() : '';
     if (description.length < 5) {
       return res.status(400).json({
         error: 'description_required',
@@ -251,7 +371,7 @@ router.post('/suggest-closure', async (req, res) => {
     if (resolution.length < 5) {
       return res.status(400).json({
         error: 'resolution_required',
-        message: 'Kapanış önerisi için en az 5 karakterlik çözüm taslağı gerekli.',
+        message: 'Kapanış önerisi için en az 5 karakterlik çözüm taslağı gerekli (worked step veya açıklama).',
       });
     }
 
@@ -264,9 +384,9 @@ router.post('/suggest-closure', async (req, res) => {
     }
 
     const sgBody = { description, resolution };
-    if (typeof body.openUrun === 'string' && body.openUrun.trim()) sgBody.open_urun = body.openUrun.trim();
-    if (typeof body.openIsSureci === 'string' && body.openIsSureci.trim()) sgBody.open_is_sureci = body.openIsSureci.trim();
-    if (typeof body.openIslemTipi === 'string' && body.openIslemTipi.trim()) sgBody.open_islem_tipi = body.openIslemTipi.trim();
+    if (openUrun) sgBody.open_urun = openUrun;
+    if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
+    if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
 
     let kbResponse;
     try {
@@ -319,7 +439,12 @@ router.post('/suggest-closure', async (req, res) => {
       suggestions,
       unmatched,
       source: 'external_kb',
-      meta: { usedEndpoint: 'suggest-close', ...upstreamMeta },
+      meta: {
+        usedEndpoint: 'suggest-close',
+        ...upstreamMeta,
+        ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
+        ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
+      },
     });
   } catch (err) {
     console.error('[smart-ticket/suggest-closure]', err);

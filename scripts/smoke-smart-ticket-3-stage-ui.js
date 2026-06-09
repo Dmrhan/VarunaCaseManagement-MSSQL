@@ -225,6 +225,34 @@ if (/requiredChecklistPending\.length\s*>\s*0[\s\S]{0,200}?setClosureError/.test
   bad('21) handleCloseCase checklist guard eksik');
 }
 
+// 22-24) WR-KB-Closure-Auto — Stage 3 auto-fetch + persist meta.
+
+// 22) Stage 3 useEffect ile auto-fetch (stage === 'closure' → handleSuggestClosure).
+if (
+  /useEffect\(\(\)\s*=>\s*\{[\s\S]*?stage\s*!==\s*['"]closure['"][\s\S]*?handleSuggestClosure\(\)/.test(src)
+) {
+  ok('22) Stage 3 auto-fetch useEffect mevcut (stage===closure → handleSuggestClosure)');
+} else {
+  bad('22) Stage 3 auto-fetch effect eksik');
+}
+
+// 23) Service çağrısı caseId tabanlı (yeni body shape).
+if (/suggestSmartTicketClosure\(\s*\{\s*[\s\S]*?caseId:\s*createdCase\.id/.test(src)) {
+  ok('23) suggestSmartTicketClosure caseId tabanlı çağrılıyor');
+} else {
+  bad('23) caseId-based call eksik');
+}
+
+// 24) Closure persist: closurePayload.closureSuggestion + selectedWorkedStepId.
+if (
+  src.includes('closurePayload.closureSuggestion') ||
+  /closureSuggestion:\s*\{[\s\S]*?source:\s*['"]external_kb['"]/.test(src)
+) {
+  ok('24) Closure persist payload\'a closureSuggestion meta eklendi');
+} else {
+  bad('24) closureSuggestion persist eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
