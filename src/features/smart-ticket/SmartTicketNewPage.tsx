@@ -542,10 +542,26 @@ export function SmartTicketNewPage({
     return { rcgList, rcdList, rtList, ppList };
   }, [taxonomies, closure.rootCauseGroup]);
 
-  // Kök Neden Grubu değişince Detay seçimini sıfırla.
+  // Kök Neden Grubu değişince Detay seçimini sıfırla — ama yalnız mevcut
+  // detail yeni grubun children'ında ARTIK GEÇERLİ DEĞİLSE.
+  //
+  // Codex P2 (main #447 review) — KB closure suggestion rootCauseGroup +
+  // rootCauseDetail'i tek setState'te birlikte doldurur
+  // (handleSuggestClosure ve handleApplyAllClosureSuggestions). Eski impl
+  // group değişimini gözleyip koşulsuz detail'i clear ediyordu →
+  // suggestion'ın yazdığı detail yapışmıyordu. Yeni davranış: detail seçili
+  // ve yeni grubun rcdList'inde varsa koru; aksi takdirde temizle. Bu hem
+  // AI suggestion (group + detail aynı render'da) hem manuel group değişimi
+  // (yeni grup içinde eski detail invalid) için doğru çalışır.
   useEffect(() => {
-    setClosure((c) => ({ ...c, rootCauseDetail: '' }));
-  }, [closure.rootCauseGroup]);
+    setClosure((c) => {
+      if (!c.rootCauseDetail) return c;
+      const stillValid = closureLists.rcdList.some((d) => d.code === c.rootCauseDetail);
+      if (stillValid) return c;
+      return { ...c, rootCauseDetail: '' };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closure.rootCauseGroup, closureLists.rcdList]);
 
   // WR-KB-Closure-Auto — Stage 3'e girince KB önerisini OTOMATIK çek.
   // Re-entry durumunda (Stage 2'den geri dönüp tekrar Stage 3'e geçilirse)
