@@ -22,6 +22,7 @@ import {
   FileText,
   History as HistoryIcon,
   Inbox,
+  ListChecks,
   MessageSquare,
   Mic,
   MoreHorizontal,
@@ -100,7 +101,17 @@ import {
   type SupportLevel,
 } from './types';
 
-type TabKey = 'detail' | 'activity' | 'notes' | 'files' | 'callLogs' | 'links';
+type TabKey =
+  | 'detail'
+  | 'activity'
+  | 'notes'
+  | 'files'
+  | 'callLogs'
+  | 'links'
+  // WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" artık Detay body'sinde
+  // değil, kendi tab'inde. TÜM vakalar için görünür (Smart Ticket gate yok);
+  // L2/L3 ve normal vakalar için ikincil troubleshooting yüzeyi.
+  | 'solution-steps';
 
 interface CaseDetailPageProps {
   caseId: string;
@@ -859,6 +870,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 onClick={() => setTab('callLogs')}
               />
             )}
+            {/* WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" sekme,
+                tüm vakalar için görünür. Smart Ticket gate YOK. */}
+            <TabButton
+              active={tab === 'solution-steps'}
+              icon={<ListChecks size={14} />}
+              label="Çözüm Adımları"
+              onClick={() => setTab('solution-steps')}
+            />
           </nav>
 
           <div className="flex-1 overflow-y-auto p-6">
@@ -912,6 +931,19 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <CallLogsTab
                 item={item}
                 onAddCallLog={() => setCallNoteModal({ open: true })}
+              />
+            )}
+            {/* WR-Smart-Ticket UX fix 1 — Çözüm Adımları artık kendi tab'inde.
+                Tüm vakalar için görünür; Smart Ticket gate YOK.
+                Panel implementasyonu CaseSolutionStepsPanel'de aynen reuse. */}
+            {tab === 'solution-steps' && (
+              <CaseSolutionStepsPanel
+                item={item}
+                onChange={() => {
+                  void caseService.get(item.id).then((c) => {
+                    if (c) setItem(c);
+                  });
+                }}
               />
             )}
           </div>
@@ -2902,27 +2934,15 @@ function DetailTab({
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
 
-  // WR-Smart-Ticket Phase 2c — Çözüm Adımları panel'i yalnız Smart Ticket
-  // vakalarında (customFields.smartTicket varsa) render edilir. Non-ST
-  // vakaların Case Detail görünümü aynen korunur.
-  const isSmartTicket = !!(item.customFields as { smartTicket?: unknown } | undefined)?.smartTicket;
+  // WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" panel'i artık Detay body'sinde
+  // değil; kendi tab'inde (Case Detail tab listinin son sırasında, tüm
+  // vakalar için). Bu sayede L2/L3 ekipleri ve non-Smart-Ticket vakalar
+  // için ikincil troubleshooting yüzeyi olarak çalışır.
 
   return (
     <div className="space-y-5">
       {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
       <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
-
-      {/* WR-Smart-Ticket Phase 2c — L1 çözüm adımları (AI önerileri + manuel). */}
-      {isSmartTicket && (
-        <CaseSolutionStepsPanel
-          item={item}
-          onChange={() => {
-            void caseService.get(item.id).then((c) => {
-              if (c) onTransitionApplied(c);
-            });
-          }}
-        />
-      )}
 
       {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
       <ResolutionApprovalCard
