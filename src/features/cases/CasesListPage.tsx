@@ -1252,7 +1252,7 @@ export function CasesListPage({
                       <button
                         type="button"
                         onClick={(e) => handleAccountClick(e, { id: c.accountId, name: c.accountName })}
-                        className="mt-0.5 truncate text-left text-xs text-slate-500 underline-offset-2 hover:text-brand-700 hover:underline dark:text-ndark-muted dark:hover:text-brand-300"
+                        className="mt-0.5 block w-full truncate text-left text-xs text-slate-500 underline-offset-2 hover:text-brand-700 hover:underline dark:text-ndark-muted dark:hover:text-brand-300"
                       >
                         {c.accountName}
                       </button>
