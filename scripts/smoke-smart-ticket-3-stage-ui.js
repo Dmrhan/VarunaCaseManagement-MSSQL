@@ -197,6 +197,34 @@ if (src.includes('Stage3TransferPlaceholder') || src.includes('L2 devir formu bu
   bad('18) L2 placeholder eksik');
 }
 
+// 19) Codex PR-2c P1 fix — checklist gating Stage 3 closure'da uygulanıyor.
+//     StatusTransitionPanel ile aynı koruma: requiredChecklistPending varken
+//     "Vakayı Kapat" disabled olur ve banner gösterilir.
+if (
+  src.includes('requiredChecklistPending') &&
+  /checklistItems\s*\?\?\s*\[\]/.test(src) &&
+  /it\.required\s*&&\s*!it\.checked/.test(src)
+) {
+  ok('19) Checklist gating: requiredChecklistPending hesaplanıyor (StatusTransitionPanel pattern)');
+} else {
+  bad('19) checklist gating compute eksik');
+}
+
+// 20) canSave checklistBlocked kontrolü ile gating.
+if (/checklistBlocked\s*=\s*requiredChecklistPending\.length\s*>\s*0/.test(src) && /!checklistBlocked/.test(src)) {
+  ok('20) canSave checklistBlocked koşulu ile gate\'li (Vakayı Kapat disabled)');
+} else {
+  bad('20) canSave checklist gating eksik');
+}
+
+// 21) handleCloseCase içinde defense-in-depth: requiredChecklistPending > 0
+//     ise erken return (kullanıcı disabled buton'u nasılsa tıklasa bile).
+if (/requiredChecklistPending\.length\s*>\s*0[\s\S]{0,200}?setClosureError/.test(src)) {
+  ok('21) handleCloseCase defense-in-depth: checklist pending varken transitionStatus çağrılmaz');
+} else {
+  bad('21) handleCloseCase checklist guard eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
