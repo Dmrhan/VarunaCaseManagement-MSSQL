@@ -4314,7 +4314,9 @@ function ActivityTab({ item }: { item: Case }) {
                   <span className="font-semibold text-slate-800 dark:text-ndark-text">{h.toValue}</span>
                 </div>
                 {h.note && (
-                  <p className="mt-1 text-xs italic text-blue-800 dark:text-blue-300">{h.note}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-xs italic text-blue-800 dark:text-blue-300">
+                    {h.note}
+                  </p>
                 )}
                 <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-ndark-muted">
                   <Calendar size={11} />
@@ -4351,6 +4353,14 @@ function ActivityTab({ item }: { item: Case }) {
                 <span className="text-xs font-medium text-slate-800">{h.toValue}</span>
               )}
             </div>
+            {/* PR-T3 — generic note render (Smart Ticket açılış suffix dahil).
+                Backend Case create'te 'Vaka oluşturuldu' + note='Smart Ticket
+                akışıyla açıldı' yazıyor; eski UI bu alanı göstermiyordu. */}
+            {h.note && (
+              <p className="mt-0.5 whitespace-pre-wrap text-[11px] italic text-slate-600 dark:text-ndark-muted">
+                {h.note}
+              </p>
+            )}
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
               <Calendar size={11} />
               <span>{formatDateTime(h.at)}</span>

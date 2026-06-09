@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowRightLeft,
   Check,
   Loader2,
   Plus,
   RefreshCw,
   Sparkles,
+  Users2,
   X,
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -17,6 +19,7 @@ import {
   type CaseSolutionStep,
   type CaseSolutionStepStatus,
 } from '@/services/caseService';
+import { formatRelative } from '@/lib/format';
 import type { Case } from './types';
 
 /**
@@ -263,8 +266,10 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
   const showLoader = loading && !hasSteps;
 
   return (
-    <Card>
-      <CardBody>
+    <div className="space-y-3">
+      <L1TransferSummaryCard item={item} />
+      <Card>
+        <CardBody>
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
@@ -388,6 +393,165 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
               />
             ))}
           </ul>
+        )}
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-Smart-Ticket Phase T3 — L1 Devir Özeti kartı.
+//
+// L2 personası vakayı açtığında L1'in neyi denediğini, hangi takıma
+// devrettiğini ve devir notunu tek bakışta görsün. Veri kaynağı
+// PR-T1'de persist edilen customFields.smartTicket.transferContext;
+// ek API çağrısı YOK. Klasik (non-Smart-Ticket veya henüz devredilmemiş)
+// vakalarda render edilmez.
+// ─────────────────────────────────────────────────────────────────
+
+interface TransferContextShape {
+  version?: number;
+  transferredAt?: string;
+  fromTeamId?: string;
+  fromTeamName?: string;
+  toTeamId?: string;
+  toTeamName?: string;
+  toPersonId?: string;
+  toPersonName?: string;
+  transferNote?: string;
+  composedSummary?: string;
+  attemptedStepIds?: string[];
+  openingTaxonomySnapshot?: {
+    platform?: string;
+    platformLabel?: string;
+    businessProcess?: string;
+    businessProcessLabel?: string;
+    operationType?: string;
+    operationTypeLabel?: string;
+    affectedObject?: string;
+    affectedObjectLabel?: string;
+    impact?: string;
+    impactLabel?: string;
+  };
+  stepOutcomesSummary?: {
+    worked?: number;
+    notWorked?: number;
+    skipped?: number;
+    pending?: number;
+    total?: number;
+  };
+}
+
+function readTransferContext(item: Case): TransferContextShape | null {
+  const cf = item.customFields;
+  if (!cf || typeof cf !== 'object') return null;
+  const st = (cf as Record<string, unknown>).smartTicket;
+  if (!st || typeof st !== 'object') return null;
+  const ctx = (st as Record<string, unknown>).transferContext;
+  if (!ctx || typeof ctx !== 'object') return null;
+  return ctx as TransferContextShape;
+}
+
+function L1TransferSummaryCard({ item }: { item: Case }) {
+  const ctx = readTransferContext(item);
+  if (!ctx) return null;
+
+  const snap = ctx.openingTaxonomySnapshot ?? {};
+  const snapChips: Array<{ key: string; label: string; value: string }> = [
+    { key: 'platform', label: 'Platform', value: snap.platformLabel || snap.platform || '' },
+    { key: 'businessProcess', label: 'İş Süreci', value: snap.businessProcessLabel || snap.businessProcess || '' },
+    { key: 'operationType', label: 'İşlem Tipi', value: snap.operationTypeLabel || snap.operationType || '' },
+    { key: 'affectedObject', label: 'Etkilenen Nesne', value: snap.affectedObjectLabel || snap.affectedObject || '' },
+    { key: 'impact', label: 'Etki', value: snap.impactLabel || snap.impact || '' },
+  ].filter((c) => c.value);
+
+  const o = ctx.stepOutcomesSummary;
+  const hasOutcomes = !!o && (o.total ?? 0) > 0;
+
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
+              <ArrowRightLeft size={14} />
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                L1 Devir Özeti
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                Smart Ticket akışıyla L1 → L2 devri.
+                {ctx.transferredAt ? ` ${formatRelative(ctx.transferredAt)}` : ''}
+              </p>
+            </div>
+          </div>
+          {ctx.toTeamName && (
+            <div className="flex flex-wrap items-baseline gap-1.5 text-xs">
+              <span className="text-slate-500 dark:text-ndark-muted">→</span>
+              <span className="font-semibold text-slate-800 dark:text-ndark-text">
+                {ctx.toTeamName}
+              </span>
+              {ctx.toPersonName && (
+                <span className="inline-flex items-center gap-1 text-slate-600 dark:text-ndark-muted">
+                  <Users2 size={11} />
+                  {ctx.toPersonName}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {hasOutcomes && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+              Toplam {o?.total ?? 0} adım:
+            </span>
+            <Badge tint="emerald">İşe yaradı {o?.worked ?? 0}</Badge>
+            <Badge tint="rose">İşe yaramadı {o?.notWorked ?? 0}</Badge>
+            <Badge tint="slate">Uygun değil {o?.skipped ?? 0}</Badge>
+            <Badge tint="amber">Beklemede {o?.pending ?? 0}</Badge>
+          </div>
+        )}
+
+        {ctx.transferNote && (
+          <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/20">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-violet-700 dark:text-violet-300">
+              L1 Notu
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-ndark-text">
+              {ctx.transferNote}
+            </p>
+          </div>
+        )}
+
+        {ctx.composedSummary && (
+          <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+              Denenen Adımlar Özeti
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-xs text-slate-700 dark:text-ndark-muted">
+              {ctx.composedSummary}
+            </p>
+          </div>
+        )}
+
+        {snapChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+              Açılış sınıflandırması:
+            </span>
+            {snapChips.map((c) => (
+              <span
+                key={c.key}
+                className="inline-flex items-baseline gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted"
+              >
+                <span className="text-slate-400">{c.label}:</span>
+                <span className="font-medium">{c.value}</span>
+              </span>
+            ))}
+          </div>
         )}
       </CardBody>
     </Card>
