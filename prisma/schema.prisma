@@ -412,37 +412,46 @@ model CompanySettings {
 /// Per-company admin gate ile yönetilir (assertCompanyAdmin). SystemAdmin
 /// tüm şirketleri görür/düzenler.
 model ExternalKbSetting {
-  id                     String   @id @default(cuid())
-  companyId              String   @unique
-  enabled                Boolean  @default(false)
-  providerName           String?
-  baseUrl                String?
+  id                       String   @id @default(cuid())
+  companyId                String   @unique
+  enabled                  Boolean  @default(false)
+  providerName             String?
+  baseUrl                  String?
   /// WR-KB3 — Yeni endpoint path'leri. ask/search 1. fazda /ask /search default'uyla
   /// shipped olmuştu; gerçek EnRoute KB endpoint'leri /api/v1/... şeklinde. Mevcut
   /// satırlar default'la geliyor; tenant override edebilir.
-  askEndpointPath        String   @default("/api/v1/kb/ask")
-  searchEndpointPath     String   @default("/api/v1/kb/search")
-  healthEndpointPath     String   @default("/api/v1/health")
-  statsEndpointPath      String   @default("/api/v1/stats")
-  categorizeEndpointPath String   @default("/api/v1/categorize")
-  analyzeEndpointPath    String   @default("/api/v1/analyze")
+  askEndpointPath          String   @default("/api/v1/kb/ask")
+  searchEndpointPath       String   @default("/api/v1/kb/search")
+  healthEndpointPath       String   @default("/api/v1/health")
+  statsEndpointPath        String   @default("/api/v1/stats")
+  categorizeEndpointPath   String   @default("/api/v1/categorize")
+  /// WR-KB-v2 — ticket-analiz API v1 doc §6 (YENİ): 6-alan açılış sınıflandırma
+  /// (urun/platform/is_sureci/islem_tipi/etkilenen_nesne/etki). KB kullanmaz,
+  /// ~60sn. Smart Ticket "KB ile Analiz Et" bu uca taşındı; eski analyze
+  /// path fallback olarak korundu.
+  categorizeV2EndpointPath String   @default("/api/v1/categorize-v2")
+  /// WR-KB-v2 — ticket-analiz API v1 doc §7 (YENİ): 4-alan kapanış önerisi
+  /// (kok_neden_grubu/kok_neden_detayi/cozum_tipi/kalici_onlem). Stage 3
+  /// closure'a opsiyonel "AI Önerisi" buton.
+  suggestCloseEndpointPath String   @default("/api/v1/suggest-close")
+  analyzeEndpointPath      String   @default("/api/v1/analyze")
   /// "none" | "apiKey" | "bearerToken" — string union (Prisma enum gerekli değil; UI tarafı validate eder).
-  authType               String   @default("none")
+  authType                 String   @default("none")
   /// Sadece referans adı (env var key). Raw secret asla saklanmaz.
-  apiKeySecretName       String?
-  timeoutMs              Int      @default(30000)
-  defaultTopK            Int      @default(8)
+  apiKeySecretName         String?
+  timeoutMs                Int      @default(30000)
+  defaultTopK              Int      @default(8)
   /// "lenient" | "normal" | "strict" — kb/ask + kb/search için varsayılan.
-  defaultStrictness      String   @default("lenient")
-  defaultRerank          Boolean  @default(true)
-  defaultVerify          Boolean  @default(true)
-  showCitations          Boolean  @default(true)
-  allowAgentUse          Boolean  @default(true)
-  allowSupervisorUse     Boolean  @default(true)
-  allowCsmUse            Boolean  @default(true)
-  notes                  String?  @db.Text
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  defaultStrictness        String   @default("lenient")
+  defaultRerank            Boolean  @default(true)
+  defaultVerify            Boolean  @default(true)
+  showCitations            Boolean  @default(true)
+  allowAgentUse            Boolean  @default(true)
+  allowSupervisorUse       Boolean  @default(true)
+  allowCsmUse              Boolean  @default(true)
+  notes                    String?  @db.Text
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

@@ -33,6 +33,8 @@ const SELECTABLE = {
   healthEndpointPath: true,
   statsEndpointPath: true,
   categorizeEndpointPath: true,
+  categorizeV2EndpointPath: true,
+  suggestCloseEndpointPath: true,
   analyzeEndpointPath: true,
   authType: true,
   apiKeySecretName: true,
@@ -63,6 +65,8 @@ function defaultShape(companyId) {
     healthEndpointPath: '/api/v1/health',
     statsEndpointPath: '/api/v1/stats',
     categorizeEndpointPath: '/api/v1/categorize',
+    categorizeV2EndpointPath: '/api/v1/categorize-v2',
+    suggestCloseEndpointPath: '/api/v1/suggest-close',
     analyzeEndpointPath: '/api/v1/analyze',
     authType: 'none',
     apiKeySecretName: null,
@@ -201,6 +205,8 @@ export const externalKbSettingRepo = {
     if (patch.healthEndpointPath !== undefined) data.healthEndpointPath = String(patch.healthEndpointPath || '/api/v1/health');
     if (patch.statsEndpointPath !== undefined) data.statsEndpointPath = String(patch.statsEndpointPath || '/api/v1/stats');
     if (patch.categorizeEndpointPath !== undefined) data.categorizeEndpointPath = String(patch.categorizeEndpointPath || '/api/v1/categorize');
+    if (patch.categorizeV2EndpointPath !== undefined) data.categorizeV2EndpointPath = String(patch.categorizeV2EndpointPath || '/api/v1/categorize-v2');
+    if (patch.suggestCloseEndpointPath !== undefined) data.suggestCloseEndpointPath = String(patch.suggestCloseEndpointPath || '/api/v1/suggest-close');
     if (patch.analyzeEndpointPath !== undefined) data.analyzeEndpointPath = String(patch.analyzeEndpointPath || '/api/v1/analyze');
     if (patch.authType !== undefined) data.authType = effectiveAuthType;
     if (patch.timeoutMs !== undefined) data.timeoutMs = Number(patch.timeoutMs);

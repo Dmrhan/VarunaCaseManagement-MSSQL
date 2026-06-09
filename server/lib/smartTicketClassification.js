@@ -72,6 +72,8 @@ const FIELD_PATHS = {
     ['analysis', 'operationType'],
     ['analysis', 'islemTipi'],
     ['operation_type'],
+    // WR-KB-v2 doc §6 — categorize-v2 top-level alan.
+    ['islem_tipi'],
   ],
   affectedObject: [
     ['analysis', 'classification', 'affectedObject'],
@@ -81,6 +83,8 @@ const FIELD_PATHS = {
     ['analysis', 'affectedObject'],
     ['analysis', 'etkilenenNesne'],
     ['affected_object'],
+    // WR-KB-v2 doc §6 — categorize-v2 top-level alan.
+    ['etkilenen_nesne'],
   ],
   impact: [
     ['analysis', 'classification', 'impact'],
@@ -88,6 +92,8 @@ const FIELD_PATHS = {
     ['analysis', 'impact'],
     ['analysis', 'etki'],
     ['impact'],
+    // WR-KB-v2 doc §6 — categorize-v2 top-level alan.
+    ['etki'],
   ],
 };
 

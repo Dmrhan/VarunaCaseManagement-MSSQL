@@ -95,45 +95,234 @@ router.post('/suggest-classification', async (req, res) => {
       });
     }
 
-    // KB analyze çağır (server-side). Hatalar 502 ile sarılır.
-    let kbResponse;
-    try {
-      kbResponse = await externalKbClient.analyze(setting, {
-        freeText: description,
-        ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
-          ? { bildirimNo: body.bildirimNo.trim() }
-          : {}),
-        ...(typeof body.project === 'string' && body.project.trim()
-          ? { project: body.project.trim() }
-          : {}),
-      });
-    } catch (err) {
-      console.error('[smart-ticket/suggest-classification] KB analyze failed', err?.message ?? err);
-      return res.status(502).json({
-        error: 'external_kb_failed',
-        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-      });
+    // WR-KB-v2 — tercih edilen uç: /api/v1/categorize-v2 (~60sn, KB
+    // kullanmaz). Hata olursa eski /api/v1/analyze fallback'i çağrılır.
+    // Backward-compatible: KB v2 deploy edilmediyse kullanıcı yine de
+    // sınıflandırma alabilsin diye iki katmanlı.
+    const v2Body = {
+      description,
+      ...(typeof body.project === 'string' && body.project.trim()
+        ? { project: body.project.trim() }
+        : {}),
+    };
+    if (typeof body.customerName === 'string' && body.customerName.trim()) {
+      v2Body.customer_name = body.customerName.trim();
     }
 
-    // Adapter — yalnız 5 sınıflandırma alanı.
+    let kbResponse = null;
+    let usedEndpoint = null;
+    try {
+      kbResponse = await externalKbClient.categorizeV2(setting, v2Body);
+      usedEndpoint = 'categorize-v2';
+    } catch (err) {
+      console.warn(
+        '[smart-ticket/suggest-classification] categorize-v2 failed, falling back to analyze',
+        err?.message ?? err,
+      );
+      try {
+        kbResponse = await externalKbClient.analyze(setting, {
+          freeText: description,
+          ...(typeof body.bildirimNo === 'string' && body.bildirimNo.trim()
+            ? { bildirimNo: body.bildirimNo.trim() }
+            : {}),
+          ...(typeof body.project === 'string' && body.project.trim()
+            ? { project: body.project.trim() }
+            : {}),
+        });
+        usedEndpoint = 'analyze';
+      } catch (fallbackErr) {
+        console.error(
+          '[smart-ticket/suggest-classification] both categorize-v2 and analyze failed',
+          fallbackErr?.message ?? fallbackErr,
+        );
+        return res.status(502).json({
+          error: 'external_kb_failed',
+          message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+        });
+      }
+    }
+
+    // Adapter — multi-path adapter zaten categorize-v2'nin top-level
+    // snake_case alanlarını (platform, is_sureci, vb.) okuyor; analyze'in
+    // analysis.classification.X path'ini de aynı adapter cover ediyor.
     const raw = extractClassificationFromKb(kbResponse);
     const taxonomies = await loadActiveTaxonomies(companyId);
     const { suggestions, unmatched } = mapClassificationToTaxonomy(raw, taxonomies);
+
+    // categorize-v2 cevabı confidence/reason dönüyor — meta'ya yazarız;
+    // adapter mapping kalitesinden bağımsız olarak observability için.
+    const upstreamMeta = {};
+    if (kbResponse && typeof kbResponse === 'object') {
+      const payload = kbResponse.data && typeof kbResponse.data === 'object' ? kbResponse.data : kbResponse;
+      if (typeof payload.confidence === 'number') upstreamMeta.confidence = payload.confidence;
+      if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
+      if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
+    }
 
     res.json({
       companyId,
       suggestions,
       unmatched,
       source: 'external_kb',
-      // Debug: KB cevabının diğer alanlarını DÖNDÜRMEYİZ; client de
-      // bunları persist etmez. Bu PR'ın özünü garanti altına alıyor.
       meta: {
         fieldsRequested: SMART_TICKET_CLASSIFICATION_FIELDS,
         extractedRawCount: Object.keys(raw).length,
+        usedEndpoint,
+        ...upstreamMeta,
       },
     });
   } catch (err) {
     console.error('[smart-ticket/suggest-classification]', err);
+    res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+/**
+ * WR-KB-v2 doc §7 — POST /api/smart-ticket/suggest-closure
+ *
+ * Stage 3 closure'da kullanıcı "AI Önerisi" tıklayınca çağrılır.
+ * KB upstream `/api/v1/suggest-close` çağrılır; cevabın 4 alanı
+ * (kok_neden_grubu, kok_neden_detayi, cozum_tipi, kalici_onlem) +
+ * confidence/reason döndürülür.
+ *
+ * Adapter: kapanış taxonomy'sinde (rootCauseGroup/rootCauseDetail/
+ * resolutionType/permanentPrevention) label match yapılır;
+ * unmatched alanlar UI'a "eşleşmedi" olarak gösterilir. Auto-create yok.
+ *
+ * Çözüm taslağı (resolution draft) **zorunlu** çünkü doc §7'de body
+ * description + resolution alır.
+ */
+const TAXONOMY_TYPES_FOR_CLOSURE = ['rootCauseGroup', 'rootCauseDetail', 'resolutionType', 'permanentPrevention'];
+
+async function loadActiveClosureTaxonomies(companyId) {
+  const rows = await prisma.taxonomyDef.findMany({
+    where: {
+      companyId,
+      isActive: true,
+      taxonomyType: { in: TAXONOMY_TYPES_FOR_CLOSURE },
+    },
+    select: { taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
+    orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
+  });
+  const out = { rootCauseGroup: [], rootCauseDetail: [], resolutionType: [], permanentPrevention: [] };
+  for (const r of rows) out[r.taxonomyType].push(r);
+  return out;
+}
+
+function normalizeLabel(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .normalize('NFC')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ü/g, 'u')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function matchByLabel(list, rawLabel) {
+  if (!rawLabel) return null;
+  const target = normalizeLabel(rawLabel);
+  if (!target) return null;
+  return list.find((t) => normalizeLabel(t.label) === target) ?? null;
+}
+
+router.post('/suggest-closure', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+    const companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
+    if (!companyId) {
+      return res.status(400).json({ error: 'company_required', message: 'companyId zorunlu.' });
+    }
+    if (!allowed.includes(companyId)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Bu şirkete erişim yok.' });
+    }
+
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const resolution = typeof body.resolution === 'string' ? body.resolution.trim() : '';
+    if (description.length < 5) {
+      return res.status(400).json({
+        error: 'description_required',
+        message: 'Kapanış önerisi için en az 5 karakterlik açıklama gerekli.',
+      });
+    }
+    if (resolution.length < 5) {
+      return res.status(400).json({
+        error: 'resolution_required',
+        message: 'Kapanış önerisi için en az 5 karakterlik çözüm taslağı gerekli.',
+      });
+    }
+
+    const setting = await externalKbSettingRepo.getByCompany(companyId);
+    if (!setting?.enabled) {
+      return res.status(400).json({
+        error: 'external_kb_disabled',
+        message: 'Bu şirket için External KB devre dışı; kapanış önerisi alınamıyor.',
+      });
+    }
+
+    const sgBody = { description, resolution };
+    if (typeof body.openUrun === 'string' && body.openUrun.trim()) sgBody.open_urun = body.openUrun.trim();
+    if (typeof body.openIsSureci === 'string' && body.openIsSureci.trim()) sgBody.open_is_sureci = body.openIsSureci.trim();
+    if (typeof body.openIslemTipi === 'string' && body.openIslemTipi.trim()) sgBody.open_islem_tipi = body.openIslemTipi.trim();
+
+    let kbResponse;
+    try {
+      kbResponse = await externalKbClient.suggestClose(setting, sgBody);
+    } catch (err) {
+      console.error('[smart-ticket/suggest-closure] suggest-close failed', err?.message ?? err);
+      return res.status(502).json({
+        error: 'external_kb_failed',
+        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
+      });
+    }
+
+    const payload =
+      kbResponse && typeof kbResponse === 'object'
+        ? (kbResponse.data && typeof kbResponse.data === 'object' ? kbResponse.data : kbResponse)
+        : {};
+
+    const tax = await loadActiveClosureTaxonomies(companyId);
+
+    // Kök Neden Grubu önce — sonra detayı yalnız bu grubun children'ında ara.
+    const rcgMatch = matchByLabel(tax.rootCauseGroup, payload.kok_neden_grubu);
+    const rcdCandidates = rcgMatch
+      ? tax.rootCauseDetail.filter((d) => d.parentId === rcgMatch.id)
+      : tax.rootCauseDetail;
+    const rcdMatch = matchByLabel(rcdCandidates, payload.kok_neden_detayi);
+    const rtMatch = matchByLabel(tax.resolutionType, payload.cozum_tipi);
+    const ppMatch = matchByLabel(tax.permanentPrevention, payload.kalici_onlem);
+
+    const suggestions = {};
+    const unmatched = [];
+    function addOrMiss(key, match, rawValue) {
+      if (match) {
+        suggestions[key] = { code: match.code, label: match.label, matchedBy: 'label' };
+      } else if (rawValue) {
+        unmatched.push({ taxonomyType: key, rawValue });
+      }
+    }
+    addOrMiss('rootCauseGroup', rcgMatch, payload.kok_neden_grubu);
+    addOrMiss('rootCauseDetail', rcdMatch, payload.kok_neden_detayi);
+    addOrMiss('resolutionType', rtMatch, payload.cozum_tipi);
+    addOrMiss('permanentPrevention', ppMatch, payload.kalici_onlem);
+
+    const upstreamMeta = {};
+    if (typeof payload.confidence === 'number') upstreamMeta.confidence = payload.confidence;
+    if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
+    if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
+
+    res.json({
+      companyId,
+      suggestions,
+      unmatched,
+      source: 'external_kb',
+      meta: { usedEndpoint: 'suggest-close', ...upstreamMeta },
+    });
+  } catch (err) {
+    console.error('[smart-ticket/suggest-closure]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });

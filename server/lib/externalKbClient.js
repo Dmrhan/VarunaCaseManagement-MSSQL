@@ -149,6 +149,10 @@ export async function proxy({ setting, endpoint, method, path, body }) {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    // ngrok ücretsiz tier'da reverse-proxy "warning" sayfası dönmesini
+    // engeller. Production KB host'unda harmless: bilinmeyen header
+    // server tarafından ignore edilir.
+    'ngrok-skip-browser-warning': '1',
   };
   const authHeader = buildAuthHeader(setting);
   if (authHeader) Object.assign(headers, authHeader);
@@ -267,6 +271,34 @@ export const externalKbClient = {
       endpoint: 'categorize',
       method: 'POST',
       path: setting.categorizeEndpointPath,
+      body,
+    });
+  },
+  /**
+   * WR-KB-v2 doc §6 — 6-alan açılış sınıflandırma (urun/platform/is_sureci/
+   * islem_tipi/etkilenen_nesne/etki). KB kullanmaz, ~60sn. Smart Ticket
+   * "KB ile Analiz Et" tercih edilen uç.
+   */
+  async categorizeV2(setting, body) {
+    return proxy({
+      setting,
+      endpoint: 'categorize-v2',
+      method: 'POST',
+      path: setting.categorizeV2EndpointPath || '/api/v1/categorize-v2',
+      body,
+    });
+  },
+  /**
+   * WR-KB-v2 doc §7 — 4-alan kapanış önerisi (kok_neden_grubu/
+   * kok_neden_detayi/cozum_tipi/kalici_onlem). Stage 3 closure'da
+   * opsiyonel "AI Önerisi" buton tetikler.
+   */
+  async suggestClose(setting, body) {
+    return proxy({
+      setting,
+      endpoint: 'suggest-close',
+      method: 'POST',
+      path: setting.suggestCloseEndpointPath || '/api/v1/suggest-close',
       body,
     });
   },
