@@ -511,10 +511,15 @@ export function SmartTicketNewPage({
             duration: 3000,
           });
         } else {
+          // importResult var ve importedCount===0 — KB cevap verdi ama
+          // suggestedSteps boş geldi (sessiz fail değil, meşru durum).
+          // L1 kullanıcısı manuel adım eklemesi gerektiğini bilsin diye
+          // info toast — eski "success" mesajı kullanıcıya hiçbir sinyal
+          // vermiyordu, kullanıcı KB önerisini boş yere bekliyordu.
           toast({
-            type: 'success',
-            message: `Vaka açıldı (${created.caseNumber}).`,
-            duration: 2500,
+            type: 'info',
+            message: `Vaka açıldı (${created.caseNumber}). KB cevabında öneri bulunamadı — manuel adım ekleyebilirsiniz.`,
+            duration: 3500,
           });
         }
       } catch (importErr) {

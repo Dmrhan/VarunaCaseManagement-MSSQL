@@ -18,7 +18,11 @@ import { AdminError } from './adminRepository.js';
 const AUTH_TYPES = new Set(['none', 'apiKey', 'bearerToken']);
 const STRICTNESS_VALUES = new Set(['lenient', 'normal', 'strict']);
 const TIMEOUT_MIN = 1000;
-const TIMEOUT_MAX = 120000; // 2dk — external API uzun analiz çağrılarına yer ver
+// WR-KB-v2 doc §3 — analyze ~180sn (KB araması yapar); cap'i KB v2'nin
+// kendi tavsiye ettiği 180sn'ye çekiyoruz. Default 120sn — categorize-v2
+// (~60sn) ve suggest-close (~30sn) için fazlasıyla yeterli, analyze için
+// güvenli bir başlangıç; admin gerekiyorsa tavan'a kadar arttırabilir.
+const TIMEOUT_MAX = 180000;
 const TOPK_MIN = 1;
 const TOPK_MAX = 20;
 
@@ -70,7 +74,12 @@ function defaultShape(companyId) {
     analyzeEndpointPath: '/api/v1/analyze',
     authType: 'none',
     apiKeySecretName: null,
-    timeoutMs: 30000,
+    // WR-KB-v2 doc §3 — analyze ~180sn / categorize-v2 ~60sn. Default 30sn
+    // analyze çağrılarını her zaman timeout'a düşürüp wrapped ok:false ile
+    // sessiz fail yaratıyordu (Smart Ticket AI Önerilen Adımlar görünmüyor
+    // bug'ı). 120sn analyze için güvenli; admin gerekiyorsa tavan'a kadar
+    // arttırabilir.
+    timeoutMs: 120000,
     defaultTopK: 8,
     defaultStrictness: 'lenient',
     defaultRerank: true,
