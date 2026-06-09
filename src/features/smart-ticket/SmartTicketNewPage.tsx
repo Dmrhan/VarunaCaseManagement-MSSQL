@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -553,23 +553,55 @@ export function SmartTicketNewPage({
 
   // WR-KB-Closure-Auto — Stage 3 KB önerisi handler.
   //
-  // Yeni body shape: { caseId, workedStepId? }. Backend Case +
-  // CaseSolutionStep'leri kendi fetch eder; KB resolution metnini
-  // server-side kompoze eder. Front yalnızca caseId + opsiyonel
-  // workedStepId gönderir.
+  // Codex P2 fix — Re-entry sırasında pending request guard:
   //
-  // Sadece BOŞ closure alanları doldurulur. Kullanıcı elle değiştirdiği
-  // alanlar sessizce silinmez ("Önerileri uygula" buton'u override için).
+  // Stage 3'e girince useEffect handleSuggestClosure() çağırıyor; KB
+  // çağrısı birkaç saniye sürebilir. Kullanıcı request pending iken
+  // Stage 2'ye dönüp (worked step değiştirip vs.) tekrar Stage 3'e
+  // gelirse effect tekrar tetiklenir AMA `closureSuggesting=true`
+  // olduğu için eski impl erken return ediyordu → request bittikten
+  // sonra yeni fetch queue'lanmıyor → öneri stale solution-step
+  // outcome set'iyle kalıyordu.
+  //
+  // İki katmanlı koruma (CaseSolutionStepsPanel P2 fix pattern'i ile
+  // simetrik):
+  //  - `closureSuggestReqIdRef`: her çağrı kendi token'ını snapshot
+  //    eder; setState öncesi current ref ile karşılaştırır. Aynı case
+  //    için arka arkaya 2 çağrıda yalnız sonuncu kazanır.
+  //  - `closureSuggestRefreshQueuedRef`: request pending iken yeni
+  //    çağrı isteği gelirse flag set edilir; finally'de current case/
+  //    stage hala geçerliyse yeniden tetiklenir.
+  const closureSuggestReqIdRef = useRef(0);
+  const closureSuggestRefreshQueuedRef = useRef(false);
+  const closureSuggestQueuedWorkedStepIdRef = useRef<string | undefined>(undefined);
+
   async function handleSuggestClosure(workedStepId?: string) {
-    if (!createdCase || closureSuggesting) return;
+    if (!createdCase) return;
+    if (closureSuggesting) {
+      // Pending request var → yeni isteği kuyruğa al; finally tetikler.
+      closureSuggestRefreshQueuedRef.current = true;
+      closureSuggestQueuedWorkedStepIdRef.current = workedStepId;
+      return;
+    }
+    const reqId = ++closureSuggestReqIdRef.current;
+    const targetCaseId = createdCase.id;
     setClosureSuggesting(true);
     setClosureSuggestionError(null);
     setClosureSuggestion(null);
     try {
       const res = await lookupService.suggestSmartTicketClosure({
-        caseId: createdCase.id,
+        caseId: targetCaseId,
         ...(workedStepId ? { workedStepId } : {}),
       });
+      // Stale response guard — yanıt geldiğinde case değiştiyse veya
+      // yeni bir request başlatıldıysa state'i uygulama.
+      if (
+        reqId !== closureSuggestReqIdRef.current ||
+        createdCase.id !== targetCaseId ||
+        stage !== 'closure'
+      ) {
+        return;
+      }
       if (!res) {
         setClosureSuggestionError('Kapanış önerisi alınamadı.');
         return;
@@ -586,9 +618,30 @@ export function SmartTicketNewPage({
         return next;
       });
     } catch (e) {
-      setClosureSuggestionError((e as Error)?.message ?? 'Kapanış önerisi alınamadı.');
+      if (reqId === closureSuggestReqIdRef.current && createdCase.id === targetCaseId) {
+        setClosureSuggestionError((e as Error)?.message ?? 'Kapanış önerisi alınamadı.');
+      }
     } finally {
-      setClosureSuggesting(false);
+      // setLoading clear yalnız bu çağrı current ise (aksi takdirde
+      // başka çağrı zaten ilerlemiş demektir).
+      if (reqId === closureSuggestReqIdRef.current) {
+        setClosureSuggesting(false);
+      }
+      // Queue işle — pending sırasında yeni istek geldiyse şimdi tetikle.
+      // Sadece bu çağrı current ise işle (race koşulu önler) ve case/stage
+      // hala geçerliyse. Infinite loop guard'ı: queue ref tetikleme
+      // öncesi temizlenir.
+      if (
+        reqId === closureSuggestReqIdRef.current &&
+        closureSuggestRefreshQueuedRef.current &&
+        createdCase?.id === targetCaseId &&
+        stage === 'closure'
+      ) {
+        const queuedStepId = closureSuggestQueuedWorkedStepIdRef.current;
+        closureSuggestRefreshQueuedRef.current = false;
+        closureSuggestQueuedWorkedStepIdRef.current = undefined;
+        void handleSuggestClosure(queuedStepId);
+      }
     }
   }
 

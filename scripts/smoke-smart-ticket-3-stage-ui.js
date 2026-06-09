@@ -237,7 +237,8 @@ if (
 }
 
 // 23) Service çağrısı caseId tabanlı (yeni body shape).
-if (/suggestSmartTicketClosure\(\s*\{\s*[\s\S]*?caseId:\s*createdCase\.id/.test(src)) {
+//     Codex P2 fix sonrası targetCaseId snapshot ile çağrılır (stale guard).
+if (/suggestSmartTicketClosure\(\s*\{\s*[\s\S]{0,200}?caseId:\s*(?:createdCase\.id|targetCaseId)/.test(src)) {
   ok('23) suggestSmartTicketClosure caseId tabanlı çağrılıyor');
 } else {
   bad('23) caseId-based call eksik');
@@ -251,6 +252,38 @@ if (
   ok('24) Closure persist payload\'a closureSuggestion meta eklendi');
 } else {
   bad('24) closureSuggestion persist eksik');
+}
+
+// Codex P2 — Re-entry queue + stale response guard invariant'ları.
+
+// 25) Queue ref ve request id ref tanımlı.
+if (
+  src.includes('closureSuggestReqIdRef') &&
+  src.includes('closureSuggestRefreshQueuedRef')
+) {
+  ok('25) Queue + stale-guard ref\'leri tanımlı (reqId + queued)');
+} else {
+  bad('25) queue/stale ref\'leri eksik');
+}
+
+// 26) Pending request varsa queue işaretle; finally\'de queue işle.
+if (
+  /if\s*\(closureSuggesting\)[\s\S]{0,300}?closureSuggestRefreshQueuedRef\.current\s*=\s*true/.test(src) &&
+  /closureSuggestRefreshQueuedRef\.current[\s\S]{0,300}?handleSuggestClosure\(/.test(src)
+) {
+  ok('26) Pending varken queue + finally\'de re-trigger (Codex P2 fix)');
+} else {
+  bad('26) queue/re-trigger pattern eksik');
+}
+
+// 27) Stale response guard: case/stage değiştiyse setState atla.
+if (
+  /reqId\s*!==\s*closureSuggestReqIdRef\.current/.test(src) &&
+  /stage\s*!==\s*['"]closure['"]/.test(src)
+) {
+  ok('27) Stale response guard (reqId + case + stage karşılaştırma)');
+} else {
+  bad('27) stale response guard eksik');
 }
 
 console.log('');

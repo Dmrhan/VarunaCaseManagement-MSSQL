@@ -313,7 +313,21 @@ router.post('/suggest-closure', async (req, res) => {
           ? caseRow.customFields.smartTicket
           : null;
       if (stOpening && typeof stOpening === 'object') {
-        if (typeof stOpening.urunLabel === 'string') openUrun = stOpening.urunLabel;
+        // Codex P2 fix — `open_urun` için label kaynağı önceliği:
+        //   1) urunLabel       (forward-compat: ileride bir yazıcı eklenirse)
+        //   2) platformLabel   (UI'ın gerçekten persist ettiği alan)
+        //   3) platform        (label yok, ham code)
+        // SmartTicketNewPage `${field}Label` formatında yazıyor → mevcut
+        // tüm Smart Ticket case'lerinde `urunLabel` YOK; `platformLabel`
+        // dolu. Eski impl yalnız urunLabel okuyordu → open_urun KB'ye
+        // gönderilmiyordu.
+        if (typeof stOpening.urunLabel === 'string' && stOpening.urunLabel.trim()) {
+          openUrun = stOpening.urunLabel.trim();
+        } else if (typeof stOpening.platformLabel === 'string' && stOpening.platformLabel.trim()) {
+          openUrun = stOpening.platformLabel.trim();
+        } else if (typeof stOpening.platform === 'string' && stOpening.platform.trim()) {
+          openUrun = stOpening.platform.trim();
+        }
         if (typeof stOpening.businessProcessLabel === 'string') openIsSureci = stOpening.businessProcessLabel;
         if (typeof stOpening.operationTypeLabel === 'string') openIslemTipi = stOpening.operationTypeLabel;
       }
