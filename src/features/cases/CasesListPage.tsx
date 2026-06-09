@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkey } from '@/lib/useHotkey';
+import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
   ArrowDown,
@@ -254,8 +255,9 @@ export function CasesListPage({
   const isFrontline = !!user && FRONTLINE_ROLES.includes(user.role);
 
   // App seviyesi pendingQuickPrefill geldiğinde QuickCaseModal'ı aç
+  // (yalnız Quick Case enable iken; flag false ise prefill ignore edilir).
   useEffect(() => {
-    if (pendingQuickPrefill) {
+    if (pendingQuickPrefill && featureFlags.quickCaseEnabled) {
       setQuickPrefillAccount(pendingQuickPrefill);
       setQuickOpen(true);
       onQuickPrefillConsumed?.();
@@ -270,6 +272,7 @@ export function CasesListPage({
   });
   useHotkey('n', () => setNewOpen(true));
   useHotkey('q', () => {
+    if (!featureFlags.quickCaseEnabled) return;
     setQuickPrefillAccount(null);
     setQuickOpen(true);
   });
@@ -631,17 +634,19 @@ export function CasesListPage({
               Müşteri Ara
             </Button>
           )}
-          <Button
-            variant="outline"
-            leftIcon={<Zap size={14} className="text-amber-500" />}
-            onClick={() => {
-              setQuickPrefillAccount(null);
-              setQuickOpen(true);
-            }}
-            title="Hızlı vaka aç (q)"
-          >
-            Hızlı Vaka
-          </Button>
+          {featureFlags.quickCaseEnabled && (
+            <Button
+              variant="outline"
+              leftIcon={<Zap size={14} className="text-amber-500" />}
+              onClick={() => {
+                setQuickPrefillAccount(null);
+                setQuickOpen(true);
+              }}
+              title="Hızlı vaka aç (q)"
+            >
+              Hızlı Vaka
+            </Button>
+          )}
           <Button leftIcon={<Plus size={14} />} onClick={() => setNewOpen(true)}>
             Yeni Vaka
           </Button>
