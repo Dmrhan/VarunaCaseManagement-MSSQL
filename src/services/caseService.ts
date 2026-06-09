@@ -606,6 +606,19 @@ export const caseService = {
         resolutionTypeLabel?: string;
         permanentPrevention?: string;
         permanentPreventionLabel?: string;
+        /** WR-KB-Closure-Auto — Stage 2'de "İşe yaradı" işaretlenen step. */
+        selectedWorkedStepId?: string;
+        /** WR-KB-Closure-Auto — KB suggest-close metadata (raw KB DEĞİL). */
+        closureSuggestion?: {
+          source: 'external_kb';
+          appliedAt: string;
+          appliedFields: string[];
+          perField: Record<string, { matchedBy: string; suggestedCode: string }>;
+          unmatched: { taxonomyType: string; rawValue: string }[];
+          confidence?: number;
+          reason?: string;
+          modelUsed?: string;
+        };
       };
     },
   ): Promise<Case | undefined> {
@@ -2407,10 +2420,24 @@ export interface SuggestClassificationResponse {
 // WR-KB-v2 doc §7 — Closure suggestion (Stage 3 AI önerisi).
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * WR-KB-Closure-Auto — POST /api/smart-ticket/suggest-closure
+ *
+ * Tercih edilen yeni body: { caseId, workedStepId? }
+ * Backend Case + tüm CaseSolutionStep'leri kendi fetch eder ve KB'ye
+ * uygun resolution kompoze eder. Eski "companyId + description +
+ * resolution" body de geri uyumlu olarak desteklenir.
+ */
 export interface SuggestClosureRequest {
-  companyId: string;
-  description: string;
-  resolution: string;
+  /** Yeni body — caseId ile server-side fetch. */
+  caseId?: string;
+  /** Stage 2'de işe yaradı işaretlenen step'in id'si. Verilmezse backend
+   *  son worked step'i otomatik seçer. */
+  workedStepId?: string;
+  /** Geri uyumlu (deprecated) — eski "manuel buton" akışı için. */
+  companyId?: string;
+  description?: string;
+  resolution?: string;
   openUrun?: string;
   openIsSureci?: string;
   openIslemTipi?: string;
@@ -2443,6 +2470,8 @@ export interface SuggestClosureResponse {
     confidence?: number;
     reason?: string;
     modelUsed?: string;
+    selectedWorkedStepId?: string;
+    contextStepsCount?: number;
   };
 }
 

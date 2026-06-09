@@ -180,6 +180,68 @@ if (
   bad('5) unmatched', JSON.stringify(unknownResult));
 }
 
+// ─── 6) Resolution composer — worked step + diğer outcomes ──────────────
+
+console.log('');
+console.log('── 6) Resolution composer ─────────────────────────────');
+
+// Endpoint route'undaki composeResolutionFromSteps pure replica.
+const SOLUTION_STEP_STATUS_LABEL = {
+  suggested: 'Önerildi', tried: 'Denendi', worked: 'İşe yaradı',
+  not_worked: 'İşe yaramadı', skipped: 'Uygun değil',
+};
+function composeResolution(workedStep, allSteps) {
+  const lines = [];
+  if (workedStep) {
+    const parts = [`[ÇÖZÜLEN ADIM] ${workedStep.title}`];
+    if (workedStep.description) parts.push(workedStep.description);
+    if (workedStep.note) parts.push(`Not: ${workedStep.note}`);
+    lines.push(parts.join(' — '));
+  }
+  const others = (allSteps || []).filter((s) => !workedStep || s.id !== workedStep.id);
+  if (others.length > 0) {
+    lines.push('');
+    lines.push('Diğer denenen adımlar:');
+    for (const s of others) {
+      const statusLabel = SOLUTION_STEP_STATUS_LABEL[s.status] ?? s.status;
+      const noteSuffix = s.note ? ` (Not: ${s.note})` : '';
+      lines.push(`- ${s.title} — ${statusLabel}${noteSuffix}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+const worked = { id: 'w', title: 'Cache temizlendi', description: 'Tarayıcı önbelleği', note: 'Müşteri F5 ile çalıştı', status: 'worked' };
+const others = [
+  { id: 'a', title: 'Rol kontrol', status: 'not_worked', note: 'Yetki vardı' },
+  { id: 'b', title: 'F5', status: 'skipped' },
+];
+const composed = composeResolution(worked, [worked, ...others]);
+if (
+  composed.includes('[ÇÖZÜLEN ADIM] Cache temizlendi') &&
+  composed.includes('Tarayıcı önbelleği') &&
+  composed.includes('Not: Müşteri F5 ile çalıştı') &&
+  composed.includes('Diğer denenen adımlar:') &&
+  composed.includes('Rol kontrol — İşe yaramadı (Not: Yetki vardı)') &&
+  composed.includes('F5 — Uygun değil')
+) {
+  ok('6) composeResolution — worked + 2 diğer + Türkçe status label + note');
+} else {
+  bad('6) composer', composed);
+}
+
+// worked yokken: yalnız diğer step'ler listelenir.
+const noneWorked = composeResolution(null, others);
+if (
+  !noneWorked.includes('[ÇÖZÜLEN ADIM]') &&
+  noneWorked.includes('Diğer denenen adımlar:') &&
+  noneWorked.includes('Rol kontrol — İşe yaramadı')
+) {
+  ok('7) composer — worked yokken yalnız "diğer denenen" listesi');
+} else {
+  bad('7) composer no worked', noneWorked);
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}  SKIP=${skip}`);

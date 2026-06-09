@@ -526,6 +526,17 @@ export function SmartTicketNewPage({
     setClosure((c) => ({ ...c, rootCauseDetail: '' }));
   }, [closure.rootCauseGroup]);
 
+  // WR-KB-Closure-Auto — Stage 3'e girince KB önerisini OTOMATIK çek.
+  // Re-entry durumunda (Stage 2'den geri dönüp tekrar Stage 3'e geçilirse)
+  // worked step değişmiş olabilir → yeniden fetch.
+  useEffect(() => {
+    if (stage !== 'closure' || !createdCase) return;
+    void handleSuggestClosure();
+    // handleSuggestClosure stable değil ama effect yalnız stage/case değişiminde
+    // tetiklenmeli — kasıtlı.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, createdCase?.id]);
+
   // Codex PR review P1 — checklist gating. StatusTransitionPanel (mevcut
   // Case Detail close akışı) Cozuldu transition'ı için tamamlanmamış
   // zorunlu kontrol listesi maddelerini kapanışa engel olarak kullanır.
@@ -540,38 +551,30 @@ export function SmartTicketNewPage({
     [createdCase],
   );
 
-  // WR-KB-v2 doc §7 — Stage 3 AI önerisi handler.
-  async function handleSuggestClosure() {
+  // WR-KB-Closure-Auto — Stage 3 KB önerisi handler.
+  //
+  // Yeni body shape: { caseId, workedStepId? }. Backend Case +
+  // CaseSolutionStep'leri kendi fetch eder; KB resolution metnini
+  // server-side kompoze eder. Front yalnızca caseId + opsiyonel
+  // workedStepId gönderir.
+  //
+  // Sadece BOŞ closure alanları doldurulur. Kullanıcı elle değiştirdiği
+  // alanlar sessizce silinmez ("Önerileri uygula" buton'u override için).
+  async function handleSuggestClosure(workedStepId?: string) {
     if (!createdCase || closureSuggesting) return;
-    const description = createdCase.description ?? form.description.trim();
-    const resolution = closure.resolutionNote.trim();
-    if (description.length < 5 || resolution.length < 5) {
-      setClosureSuggestionError(
-        'AI önerisi için açıklama ve çözüm taslağı (en az 5 karakter) gerekli.',
-      );
-      return;
-    }
     setClosureSuggesting(true);
     setClosureSuggestionError(null);
     setClosureSuggestion(null);
     try {
       const res = await lookupService.suggestSmartTicketClosure({
-        companyId: createdCase.companyId,
-        description,
-        resolution,
-        openIsSureci: form.businessProcess
-          ? (taxonomies?.businessProcess.find((t) => t.code === form.businessProcess)?.label ?? undefined)
-          : undefined,
-        openIslemTipi: form.operationType
-          ? (taxonomies?.operationType.find((t) => t.code === form.operationType)?.label ?? undefined)
-          : undefined,
+        caseId: createdCase.id,
+        ...(workedStepId ? { workedStepId } : {}),
       });
       if (!res) {
         setClosureSuggestionError('Kapanış önerisi alınamadı.');
         return;
       }
       setClosureSuggestion(res);
-      // YALNIZ BOŞ alanları otomatik doldur (PR-2b classification pattern).
       setClosure((c) => {
         const next = { ...c };
         const s = res.suggestions;
@@ -581,16 +584,6 @@ export function SmartTicketNewPage({
         if (s.permanentPrevention && !next.permanentPrevention)
           next.permanentPrevention = s.permanentPrevention.code;
         return next;
-      });
-      const total = Object.keys(res.suggestions).length;
-      const unmatched = res.unmatched.length;
-      toast({
-        type: total > 0 ? 'success' : 'info',
-        message:
-          total > 0
-            ? `${total} alan eşleşti; boş alanlar otomatik dolduruldu.${unmatched > 0 ? ` ${unmatched} alan eşleşmedi.` : ''}`
-            : 'KB cevabında eşleşen kapanış alanı yok.',
-        duration: 3500,
       });
     } catch (e) {
       setClosureSuggestionError((e as Error)?.message ?? 'Kapanış önerisi alınamadı.');
@@ -630,7 +623,7 @@ export function SmartTicketNewPage({
     const findLabel = (list: { code: string; label: string }[], code: string) =>
       list.find((x) => x.code === code)?.label;
 
-    const closurePayload = {
+    const closurePayload: Record<string, unknown> = {
       rootCauseGroup: closure.rootCauseGroup || undefined,
       rootCauseGroupLabel: findLabel(closureLists.rcgList, closure.rootCauseGroup),
       rootCauseDetail: closure.rootCauseDetail || undefined,
@@ -640,6 +633,45 @@ export function SmartTicketNewPage({
       permanentPrevention: closure.permanentPrevention || undefined,
       permanentPreventionLabel: findLabel(closureLists.ppList, closure.permanentPrevention),
     };
+
+    // WR-KB-Closure-Auto — backend `selectedWorkedStepId` (varsa) ve
+    // `closureSuggestion` meta'sını customFields.smartTicket.closure
+    // altına persist eder. Raw KB cevabı persist EDİLMEZ.
+    const suggestedWorkedStepId = closureSuggestion?.meta?.selectedWorkedStepId;
+    if (suggestedWorkedStepId) {
+      closurePayload.selectedWorkedStepId = suggestedWorkedStepId;
+    }
+    if (closureSuggestion) {
+      const appliedFields: string[] = [];
+      const perField: Record<string, { matchedBy: string; suggestedCode: string }> = {};
+      for (const key of [
+        'rootCauseGroup',
+        'rootCauseDetail',
+        'resolutionType',
+        'permanentPrevention',
+      ] as const) {
+        const s = closureSuggestion.suggestions[key];
+        if (s && closure[key] === s.code) {
+          appliedFields.push(key);
+          perField[key] = { matchedBy: s.matchedBy, suggestedCode: s.code };
+        }
+      }
+      closurePayload.closureSuggestion = {
+        source: 'external_kb',
+        appliedAt: new Date().toISOString(),
+        appliedFields,
+        perField,
+        unmatched: closureSuggestion.unmatched.map((u) => ({
+          taxonomyType: u.taxonomyType,
+          rawValue: u.rawValue,
+        })),
+        ...(closureSuggestion.meta?.confidence != null
+          ? { confidence: closureSuggestion.meta.confidence }
+          : {}),
+        ...(closureSuggestion.meta?.reason ? { reason: closureSuggestion.meta.reason } : {}),
+        ...(closureSuggestion.meta?.modelUsed ? { modelUsed: closureSuggestion.meta.modelUsed } : {}),
+      };
+    }
 
     try {
       const updated = await caseService.transitionStatus(createdCase.id, 'Çözüldü', {
@@ -1127,15 +1159,11 @@ function Stage3Closure({
               size="sm"
               variant="outline"
               leftIcon={<Wand2 size={11} />}
-              disabled={closureSuggesting || closure.resolutionNote.trim().length < 5}
+              disabled={closureSuggesting}
               onClick={onSuggestClosure}
-              title={
-                closure.resolutionNote.trim().length < 5
-                  ? 'Önce "Çözüm Açıklaması" alanına en az 5 karakter yaz'
-                  : 'KB üzerinden 4 kapanış alanı önerilir'
-              }
+              title="KB üzerinden kapanış önerisini yeniden iste"
             >
-              {closureSuggesting ? 'Öneriliyor…' : 'KB ile Öner'}
+              {closureSuggesting ? 'Öneriliyor…' : 'KB Önerisini Yenile'}
             </Button>
             <Button
               variant="ghost"
@@ -1152,6 +1180,12 @@ function Stage3Closure({
           Vakanın nasıl çözüldüğünü kayıt altına alın. Onay politikası geçerliyse mevcut çözüm onayı
           akışı çalışır; otomatik bypass yok.
         </p>
+        {closureSuggesting && !closureSuggestion && (
+          <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-200">
+            <Loader2 size={12} className="animate-spin" />
+            <span>KB kapanış önerisi alınıyor… (boş alanlar otomatik dolacak)</span>
+          </div>
+        )}
         {closureSuggestionError && (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
             {closureSuggestionError} Manuel seçim yapabilirsiniz.

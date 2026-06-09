@@ -501,9 +501,41 @@ function buildSmartTicketClosureMerge(prev, closureInput) {
     resolutionTypeLabel: pick('resolutionTypeLabel'),
     permanentPrevention: pick('permanentPrevention'),
     permanentPreventionLabel: pick('permanentPreventionLabel'),
+    // WR-KB-Closure-Auto — Smart Ticket Stage 3 auto-fetch metadata.
+    // selectedWorkedStepId: hangi solution-step kullanıcının seçtiği
+    // "İşe yaradı" referansı olarak persist edilir.
+    selectedWorkedStepId: pick('selectedWorkedStepId'),
     version: SMART_TICKET_CLOSURE_VERSION,
     updatedAt: new Date().toISOString(),
   };
+  // closureSuggestion meta opsiyonel object: KB tarafından gelen normalize
+  // edilmiş öneri (source/appliedAt/appliedFields/perField/unmatched).
+  // Sıkı pickle: raw KB cevabı persist EDİLMEZ.
+  if (
+    closureInput.closureSuggestion &&
+    typeof closureInput.closureSuggestion === 'object' &&
+    !Array.isArray(closureInput.closureSuggestion)
+  ) {
+    const cs = closureInput.closureSuggestion;
+    const meta = { source: 'external_kb' };
+    if (typeof cs.appliedAt === 'string') meta.appliedAt = cs.appliedAt;
+    else meta.appliedAt = new Date().toISOString();
+    if (Array.isArray(cs.appliedFields)) {
+      meta.appliedFields = cs.appliedFields.filter((x) => typeof x === 'string');
+    }
+    if (cs.perField && typeof cs.perField === 'object' && !Array.isArray(cs.perField)) {
+      meta.perField = cs.perField;
+    }
+    if (Array.isArray(cs.unmatched)) {
+      meta.unmatched = cs.unmatched.filter(
+        (u) => u && typeof u === 'object' && typeof u.taxonomyType === 'string',
+      );
+    }
+    if (typeof cs.confidence === 'number') meta.confidence = cs.confidence;
+    if (typeof cs.reason === 'string') meta.reason = cs.reason;
+    if (typeof cs.modelUsed === 'string') meta.modelUsed = cs.modelUsed;
+    closure.closureSuggestion = meta;
+  }
   // Undefined alanları temizle (Postgres JSON içinde null tutmaktansa hiç koyma).
   for (const k of Object.keys(closure)) {
     if (closure[k] === undefined) delete closure[k];
