@@ -242,6 +242,49 @@ if (
   bad('7) composer no worked', noneWorked);
 }
 
+// ─── 8) Codex P2 — open_urun platform label fallback ────────────────────
+//
+// Smart Ticket UI customFields.smartTicket'a label'ları
+// `${field}Label` formatında yazıyor (platformLabel/businessProcessLabel
+// vs.). Eski impl yalnız `urunLabel` okuyordu → mevcut tüm Smart Ticket
+// case'leri için open_urun KB'ye gönderilmiyordu. Düzeltme: pure replica
+// ile öncelik sırası test edilir.
+
+console.log('');
+console.log('── 8) open_urun label fallback (Codex P2) ─────────────');
+
+function resolveOpenUrun(stOpening) {
+  if (!stOpening || typeof stOpening !== 'object') return undefined;
+  if (typeof stOpening.urunLabel === 'string' && stOpening.urunLabel.trim()) return stOpening.urunLabel.trim();
+  if (typeof stOpening.platformLabel === 'string' && stOpening.platformLabel.trim()) return stOpening.platformLabel.trim();
+  if (typeof stOpening.platform === 'string' && stOpening.platform.trim()) return stOpening.platform.trim();
+  return undefined;
+}
+
+// Tipik UI persist'i: platform + platformLabel (urunLabel YOK).
+const uiPersist = { platform: 'plat.mobil', platformLabel: 'Mobil' };
+const r1 = resolveOpenUrun(uiPersist);
+if (r1 === 'Mobil') ok('8a) UI persist (platformLabel) → open_urun=platformLabel');
+else bad('8a) platformLabel fallback', String(r1));
+
+// Geri uyumluluk: ileride bir yazıcı urunLabel eklerse onu kullan.
+const futureUrun = { platform: 'plat.mobil', platformLabel: 'Mobil', urunLabel: 'UNIVERA Mobil' };
+const r2 = resolveOpenUrun(futureUrun);
+if (r2 === 'UNIVERA Mobil') ok('8b) urunLabel öncelikli (forward-compat)');
+else bad('8b) urunLabel priority', String(r2));
+
+// Hiçbir label yoksa: ham platform code'a düş.
+const codeOnly = { platform: 'plat.mobil' };
+const r3 = resolveOpenUrun(codeOnly);
+if (r3 === 'plat.mobil') ok('8c) Label yoksa ham platform code\'a düş');
+else bad('8c) raw platform fallback', String(r3));
+
+// Empty/missing opening
+const r4 = resolveOpenUrun({});
+const r5 = resolveOpenUrun(null);
+if (r4 === undefined && r5 === undefined) ok('8d) Boş opening → undefined');
+else bad('8d) empty opening', JSON.stringify({ r4, r5 }));
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}  SKIP=${skip}`);
