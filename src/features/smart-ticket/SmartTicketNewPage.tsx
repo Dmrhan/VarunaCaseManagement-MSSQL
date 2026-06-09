@@ -23,6 +23,7 @@ import {
   type SmartTicketTaxonomyItem,
   type SmartTicketRootCauseGroup,
   type SmartTicketTaxonomyResponse,
+  type SmartTicketStepOutcomesSummary,
   type SuggestClassificationResponse,
   type SuggestClassificationField,
 } from '@/services/caseService';
@@ -183,6 +184,26 @@ export function SmartTicketNewPage({
   const [closureSuggesting, setClosureSuggesting] = useState(false);
   const [closureSuggestion, setClosureSuggestion] = useState<import('@/services/caseService').SuggestClosureResponse | null>(null);
   const [closureSuggestionError, setClosureSuggestionError] = useState<string | null>(null);
+
+  // PR-T2 — Stage 3 transfer form state. PR-T1 backend kontratını kullanır:
+  //   smartTicketTransfer = { transferNote, composedSummary?, attemptedStepIds?,
+  //                            stepOutcomesSummary? }
+  // Hedef takım hard-code edilmez: Team.defaultSupportLevel === 'L2' bazlı
+  // tenant-safe filter; tek L2 ekip varsa preselect, çoklu/sıfır halinde
+  // kullanıcı seçimi zorunlu.
+  const [transferToTeamId, setTransferToTeamId] = useState('');
+  const [transferToPersonId, setTransferToPersonId] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [transferComposedSummary, setTransferComposedSummary] = useState('');
+  const [transferAttemptedStepIds, setTransferAttemptedStepIds] = useState<string[]>([]);
+  const [transferStepOutcomes, setTransferStepOutcomes] = useState<SmartTicketStepOutcomesSummary | null>(null);
+  const [transferBriefLoading, setTransferBriefLoading] = useState(false);
+  const [transferBriefError, setTransferBriefError] = useState<string | null>(null);
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  // Composer'ın kullanıcı tarafından düzenlenip düzenlenmediğini izle.
+  // Auto-fetch user override'ı ezmesin diye flag tutuluyor.
+  const transferSummaryDirtyRef = useRef(false);
 
   // Taxonomy lookup — companyId değişince yeniden çek.
   useEffect(() => {
@@ -645,6 +666,162 @@ export function SmartTicketNewPage({
     }
   }
 
+  // ── PR-T2: Stage 3 transfer — deterministic devir özetini auto-fetch ─
+  //
+  // Pattern closure auto-fetch ile simetrik: pending request guard +
+  // queued re-fetch + stale response guard. Stage 2'de outcome değişip
+  // Stage 3 'transfer'e geri dönülürse özet yenilenir.
+  //
+  // Kullanıcı özeti elle düzenlediyse (transferSummaryDirtyRef.current),
+  // auto-fetch DOLU textarea'yı EZMEZ — fetched data yalnız
+  // attemptedStepIds + stepOutcomesSummary metadata'sı için kullanılır.
+  const transferBriefReqIdRef = useRef(0);
+  const transferBriefQueuedRef = useRef(false);
+
+  async function handleFetchTransferBrief() {
+    if (!createdCase) return;
+    if (transferBriefLoading) {
+      transferBriefQueuedRef.current = true;
+      return;
+    }
+    const reqId = ++transferBriefReqIdRef.current;
+    const targetCaseId = createdCase.id;
+    setTransferBriefLoading(true);
+    setTransferBriefError(null);
+    try {
+      const res = await lookupService.smartTicketTransferBrief({ caseId: targetCaseId });
+      if (
+        reqId !== transferBriefReqIdRef.current ||
+        createdCase.id !== targetCaseId ||
+        stage !== 'transfer'
+      ) {
+        return;
+      }
+      if (!res) {
+        setTransferBriefError('Devir özeti alınamadı.');
+        return;
+      }
+      // Kullanıcı düzenleme yapmadıysa composer'ı doldur; aksi halde
+      // editleyen textarea'yı koruyalım (metadata'yı yine güncelle).
+      if (!transferSummaryDirtyRef.current) {
+        setTransferComposedSummary(
+          res.composedSummary && res.composedSummary.trim()
+            ? res.composedSummary
+            : 'L1 çözüm adımı kaydı yok.',
+        );
+      }
+      setTransferAttemptedStepIds(res.attemptedStepIds ?? []);
+      setTransferStepOutcomes(res.stepOutcomesSummary ?? null);
+    } catch (e) {
+      if (reqId === transferBriefReqIdRef.current && createdCase.id === targetCaseId) {
+        setTransferBriefError((e as Error)?.message ?? 'Devir özeti alınamadı.');
+      }
+    } finally {
+      if (reqId === transferBriefReqIdRef.current) {
+        setTransferBriefLoading(false);
+      }
+      if (
+        reqId === transferBriefReqIdRef.current &&
+        transferBriefQueuedRef.current &&
+        createdCase?.id === targetCaseId &&
+        stage === 'transfer'
+      ) {
+        transferBriefQueuedRef.current = false;
+        void handleFetchTransferBrief();
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (stage !== 'transfer' || !createdCase) return;
+    void handleFetchTransferBrief();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, createdCase?.id]);
+
+  // L2 takım filtreleme — hard-code teamId/name yok; yalnız metadata.
+  const transferTeamOptions = useMemo(() => {
+    if (!createdCase) return { all: [], l2: [], nonL2: [], hasL2: false };
+    const all = lookupService
+      .teams()
+      .filter(
+        (t) =>
+          t.companyId === createdCase.companyId &&
+          t.id !== createdCase.assignedTeamId,
+      );
+    const l2 = all.filter((t) => t.defaultSupportLevel === 'L2');
+    const nonL2 = all.filter((t) => t.defaultSupportLevel !== 'L2');
+    return { all, l2, nonL2, hasL2: l2.length > 0 };
+  }, [createdCase]);
+
+  // Tek L2 ekip varsa preselect. Çoklu L2 → seçim zorunlu (auto-select yok).
+  // Sıfır L2 → calm warning, tüm aktif takımlar gösterilir, seçim zorunlu.
+  useEffect(() => {
+    if (stage !== 'transfer') return;
+    if (transferTeamOptions.l2.length === 1 && !transferToTeamId) {
+      setTransferToTeamId(transferTeamOptions.l2[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, transferTeamOptions.l2.length, createdCase?.id]);
+
+  // Seçili takıma ait persons.
+  const transferPersonOptions = useMemo(() => {
+    if (!transferToTeamId) return [];
+    return lookupService.personsByTeam(transferToTeamId);
+  }, [transferToTeamId]);
+
+  // Takım değişince geçersiz kişi seçimini temizle.
+  useEffect(() => {
+    if (transferToPersonId && !transferPersonOptions.some((p) => p.id === transferToPersonId)) {
+      setTransferToPersonId('');
+    }
+  }, [transferPersonOptions, transferToPersonId]);
+
+  async function handleSubmitTransfer() {
+    if (!createdCase || transferring) return;
+    const trimmedNote = transferNote.trim();
+    if (!trimmedNote) {
+      setTransferError('Devir notu zorunlu.');
+      return;
+    }
+    if (!transferToTeamId) {
+      setTransferError('Hedef takım seçin.');
+      return;
+    }
+    setTransferring(true);
+    setTransferError(null);
+    try {
+      const summary = transferComposedSummary.trim();
+      const updated = await caseService.transferCase(createdCase.id, {
+        toTeamId: transferToTeamId,
+        toPersonId: transferToPersonId || undefined,
+        reason: trimmedNote,
+        reasonCode: 'expertise',
+        smartTicketTransfer: {
+          transferNote: trimmedNote,
+          ...(summary ? { composedSummary: summary } : {}),
+          attemptedStepIds: transferAttemptedStepIds,
+          ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
+        },
+      });
+      if (!updated) {
+        setTransferError('Vaka aktarılamadı.');
+        return;
+      }
+      setCreatedCase(updated);
+      toast({
+        type: 'success',
+        message: `Vaka L2'ye aktarıldı (${updated.caseNumber}).`,
+        duration: 2500,
+      });
+      // Devir tamamlandı — kullanıcıyı Case Detail'e götür.
+      onCreated(updated.id);
+    } catch (e) {
+      setTransferError((e as Error)?.message ?? 'Vaka aktarılamadı.');
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   function handleApplyAllClosureSuggestions() {
     if (!closureSuggestion) return;
     setClosure((c) => {
@@ -1007,9 +1184,38 @@ export function SmartTicketNewPage({
           )}
 
           {stage === 'transfer' && createdCase && (
-            <Stage3TransferPlaceholder
-              caseNumber={createdCase.caseNumber}
-              onBack={() => setStage('solution')}
+            <Stage3Transfer
+              createdCase={createdCase}
+              teamOptions={transferTeamOptions}
+              personOptions={transferPersonOptions}
+              transferToTeamId={transferToTeamId}
+              transferToPersonId={transferToPersonId}
+              transferNote={transferNote}
+              transferComposedSummary={transferComposedSummary}
+              transferStepOutcomes={transferStepOutcomes}
+              transferBriefLoading={transferBriefLoading}
+              transferBriefError={transferBriefError}
+              transferring={transferring}
+              transferError={transferError}
+              onChangeTeam={(id) => setTransferToTeamId(id)}
+              onChangePerson={(id) => setTransferToPersonId(id)}
+              onChangeNote={(v) => {
+                setTransferNote(v);
+                if (transferError) setTransferError(null);
+              }}
+              onChangeSummary={(v) => {
+                transferSummaryDirtyRef.current = true;
+                setTransferComposedSummary(v);
+              }}
+              onRefreshBrief={() => {
+                transferSummaryDirtyRef.current = false;
+                void handleFetchTransferBrief();
+              }}
+              onSubmit={() => void handleSubmitTransfer()}
+              onBack={() => {
+                setStage('solution');
+                setTransferError(null);
+              }}
               onGoToCaseDetail={() => onCreated(createdCase.id)}
             />
           )}
@@ -1397,57 +1603,292 @@ function Stage3Closure({
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Stage 3 — L2 transfer placeholder
-// Spec G/F: tam transfer integration çok geniş; bu PR'da placeholder +
-// Case Detail escape ile gap raporlanır. Mevcut transferCase akışı
-// (caseRepository.transferToTeam) Case Detail tarafında zaten çalışıyor.
+// Stage 3 — L2 (veya başka ekip/kişi) devir formu (PR-T2)
+//
+// Tenant-safe target selection:
+//   - Team.defaultSupportLevel === 'L2' bazlı L2 önerisi (hard-code yok)
+//   - 1 L2 ekip → preselect ama lock yok
+//   - >1 L2 ekip → seçim zorunlu, "Önerilen L2 ekipleri" grubu
+//   - 0 L2 ekip → calm warning + tüm aktif takımlar gösterilir
+//   - Hedef kişi opsiyonel; takım bazlı filter
+//
+// Davranış:
+//   - Devir notu zorunlu (ana state'te enforce)
+//   - Denenen adımlar özeti server-side compose ile prefill, editable
+//   - Submit PR-T1 backend'ini çağırır: caseService.transferCase +
+//     smartTicketTransfer payload
+//   - Vaka YENİDEN oluşturulmaz, SLA/supportLevel değişmez, auto-close yok
 // ─────────────────────────────────────────────────────────────────
 
-function Stage3TransferPlaceholder({
-  caseNumber,
+interface TransferTeamOption {
+  id: string;
+  name: string;
+  defaultSupportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
+}
+
+interface TransferPersonOption {
+  id: string;
+  name: string;
+  teamId: string;
+}
+
+function Stage3Transfer({
+  createdCase,
+  teamOptions,
+  personOptions,
+  transferToTeamId,
+  transferToPersonId,
+  transferNote,
+  transferComposedSummary,
+  transferStepOutcomes,
+  transferBriefLoading,
+  transferBriefError,
+  transferring,
+  transferError,
+  onChangeTeam,
+  onChangePerson,
+  onChangeNote,
+  onChangeSummary,
+  onRefreshBrief,
+  onSubmit,
   onBack,
   onGoToCaseDetail,
 }: {
-  caseNumber: string;
+  createdCase: Case;
+  teamOptions: { all: TransferTeamOption[]; l2: TransferTeamOption[]; nonL2: TransferTeamOption[]; hasL2: boolean };
+  personOptions: TransferPersonOption[];
+  transferToTeamId: string;
+  transferToPersonId: string;
+  transferNote: string;
+  transferComposedSummary: string;
+  transferStepOutcomes: SmartTicketStepOutcomesSummary | null;
+  transferBriefLoading: boolean;
+  transferBriefError: string | null;
+  transferring: boolean;
+  transferError: string | null;
+  onChangeTeam: (id: string) => void;
+  onChangePerson: (id: string) => void;
+  onChangeNote: (v: string) => void;
+  onChangeSummary: (v: string) => void;
+  onRefreshBrief: () => void;
+  onSubmit: () => void;
   onBack: () => void;
   onGoToCaseDetail: () => void;
 }) {
+  const canSubmit =
+    transferToTeamId !== '' && transferNote.trim().length > 0 && !transferring;
+  const noTeamsAtAll = teamOptions.all.length === 0;
+
   return (
     <Card>
       <CardBody className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <SectionTitle text="3. L2'ye Devir" />
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Wand2 size={11} />}
+              disabled={transferBriefLoading}
+              onClick={onRefreshBrief}
+              title="Denenen adımlar özetini yeniden üret"
+            >
+              {transferBriefLoading ? 'Yenileniyor…' : 'Özeti Yenile'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<CornerUpLeft size={11} />}
+              onClick={onBack}
+              disabled={transferring}
+            >
+              Çözüm Adımlarına Geri Dön
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-ndark-muted">
+          L1'de çözemediğin vakayı başka bir ekibe veya kişiye aktar. Vaka <strong>kapatılmaz</strong>,
+          SLA değişmez, yeni vaka oluşturulmaz. L2 vakayı aynı numarayla devralır.
+        </p>
+
+        {/* Empty-state: bu şirketin başka aktif takımı yok */}
+        {noTeamsAtAll && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+            ⚠ Bu vakanın şirketinde ({createdCase.companyName ?? '—'}) aktarılabilecek başka aktif
+            takım bulunmuyor. Yönetim → Takımlar altından yeni takım oluştur veya pasif bir takımı
+            aktif et.
+          </div>
+        )}
+
+        {/* L2 yok uyarı — calm, blocking değil */}
+        {!noTeamsAtAll && !teamOptions.hasL2 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+            <strong>L2 olarak işaretli takım bulunamadı.</strong>{' '}
+            Başka aktif bir takım veya kişi seçerek devredebilirsin. Yönetim → Takımlar altından
+            takımın "Varsayılan Destek Seviyesi" alanını <strong>L2</strong> yapabilirsin.
+          </div>
+        )}
+
+        {/* Hedef takım + kişi */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Field
+            label="Hedef Takım"
+            required
+            hint={
+              teamOptions.l2.length === 1
+                ? 'Tek L2 takım otomatik seçildi; değiştirebilirsin.'
+                : teamOptions.l2.length > 1
+                  ? 'Birden fazla L2 takım var — seçim yap.'
+                  : undefined
+            }
+          >
+            <Select
+              value={transferToTeamId}
+              onChange={(e) => onChangeTeam(e.target.value)}
+              disabled={noTeamsAtAll || transferring}
+            >
+              <option value="">
+                {noTeamsAtAll ? '— Aktif takım yok —' : 'Takım seç…'}
+              </option>
+              {teamOptions.l2.length > 0 && (
+                <optgroup label="Önerilen L2 ekipleri">
+                  {teamOptions.l2.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {teamOptions.nonL2.length > 0 && (
+                <optgroup label={teamOptions.l2.length > 0 ? 'Diğer aktif takımlar' : 'Aktif takımlar'}>
+                  {teamOptions.nonL2.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.defaultSupportLevel ? ` · ${t.defaultSupportLevel}` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </Select>
+          </Field>
+          <Field
+            label="Hedef Kişi"
+            hint={
+              !transferToTeamId
+                ? 'Önce takım seç.'
+                : personOptions.length === 0
+                  ? 'Bu takımın aktif kişi kaydı yok.'
+                  : 'Boş bırakılırsa takıma genel atanır.'
+            }
+          >
+            <Select
+              value={transferToPersonId}
+              onChange={(e) => onChangePerson(e.target.value)}
+              disabled={!transferToTeamId || personOptions.length === 0 || transferring}
+            >
+              <option value="">
+                {transferToTeamId ? '— takıma genel ata —' : 'Önce takım seç'}
+              </option>
+              {personOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        {/* Devir notu — zorunlu */}
+        <Field
+          label="Devir Notu"
+          required
+          hint="L2 vakayı açtığında neyi göreceği. Mevcut adımları ekrana bakmadan anlasın."
+        >
+          <TextArea
+            rows={3}
+            value={transferNote}
+            onChange={(e) => onChangeNote(e.target.value)}
+            placeholder="Örn: KB önerilerini denedim, çözüm yok. API token rotation tarafına bakar mısın?"
+            disabled={transferring}
+          />
+        </Field>
+
+        {/* Denenen adımlar özeti — server-side compose, editable */}
+        <div className="rounded-md border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={12} className="text-violet-500" />
+              <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
+                Denenen Adımlar Özeti
+              </span>
+              {transferBriefLoading && (
+                <Loader2 size={11} className="animate-spin text-violet-500" />
+              )}
+            </div>
+            {transferStepOutcomes && transferStepOutcomes.total > 0 && (
+              <span className="text-[11px] text-violet-700 dark:text-violet-300">
+                Toplam {transferStepOutcomes.total} · İşe yaradı {transferStepOutcomes.worked} ·
+                İşe yaramadı {transferStepOutcomes.notWorked} · Uygun değil {transferStepOutcomes.skipped} ·
+                Beklemede {transferStepOutcomes.pending}
+              </span>
+            )}
+          </div>
+          {transferBriefError && (
+            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+              {transferBriefError} Aşağıdaki kutuda manuel yazabilirsin.
+            </p>
+          )}
+          <TextArea
+            rows={7}
+            value={transferComposedSummary}
+            onChange={(e) => onChangeSummary(e.target.value)}
+            placeholder={
+              transferBriefLoading
+                ? 'Özet üretiliyor…'
+                : 'L1 çözüm adımları için özet — düzenleyebilirsin.'
+            }
+            disabled={transferring}
+          />
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+            Özet düzenlenebilir; gönderdiğin metin L2'nin "Vaka Detayı → Çözüm Adımları" sekmesinde
+            "L1 Devir Özeti" olarak görünür.
+          </p>
+        </div>
+
+        {transferError && (
+          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+            {transferError}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
           <Button
             variant="ghost"
             size="sm"
-            leftIcon={<CornerUpLeft size={11} />}
-            onClick={onBack}
+            leftIcon={<ExternalLink size={12} />}
+            onClick={onGoToCaseDetail}
+            disabled={transferring}
           >
-            Çözüm Adımlarına Geri Dön
+            Vaka Detayına Git
           </Button>
-        </div>
-        <div className="rounded-md border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-          <p className="font-medium">L2 devir formu bu sürümde Smart Ticket ekranında YOK.</p>
-          <p className="mt-1 text-[12px]">
-            Mevcut "Vaka Aktarımı" akışı Case Detail içinde tam fonksiyonel — hedef takım, gerekçe,
-            otomatik özet çalışıyor. Bu PR placeholder sunar; Smart Ticket ekranına gömülü transfer
-            formu sonraki PR'da gelir.
-          </p>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-600 dark:border-ndark-border dark:bg-ndark-bg/40 dark:text-ndark-muted">
-          <p className="font-medium">Şimdi ne yapabilirsin:</p>
-          <ul className="mt-1 list-disc pl-5 space-y-0.5">
-            <li>"Vaka Detayına Git" tıkla → mevcut Devret modal'ı ile L2 aktarımı yap.</li>
-            <li>Veya çözüm adımlarına dön, son bir deneme yap.</li>
-          </ul>
-        </div>
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-ndark-border">
-          <Button variant="outline" onClick={onBack}>
-            Geri Dön
-          </Button>
-          <Button leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
-            Vaka Detayına Git ({caseNumber})
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onBack} disabled={transferring}>
+              Vazgeç
+            </Button>
+            <Button
+              onClick={onSubmit}
+              disabled={!canSubmit}
+              leftIcon={
+                transferring ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <ArrowRight size={12} />
+                )
+              }
+            >
+              {transferring ? 'Aktarılıyor…' : 'Devret ve L2\'ye Gönder'}
+            </Button>
+          </div>
         </div>
       </CardBody>
     </Card>

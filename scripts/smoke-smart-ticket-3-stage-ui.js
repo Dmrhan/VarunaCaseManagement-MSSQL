@@ -190,11 +190,18 @@ if (leaked.length === 0) {
   bad('17) forbidden labels leaked', leaked.join(', '));
 }
 
-// 18) Stage 3 L2 transfer placeholder mevcut (gap raporu).
-if (src.includes('Stage3TransferPlaceholder') || src.includes('L2 devir formu bu sürümde')) {
-  ok('18) Stage 3 L2 transfer placeholder mevcut (PR scope: gap raporlandı)');
+// 18) Stage 3 L2 transfer ARTIK gerçek form (PR-T2). Placeholder kaldırıldı;
+//     yerine Stage3Transfer bileşeni var ve "Devret ve L2'ye Gönder" buton
+//     metni + caseService.transferCase çağrısı mevcut.
+if (
+  src.includes('function Stage3Transfer(') &&
+  src.includes("'Devret ve L2") &&
+  src.includes('caseService.transferCase(') &&
+  !src.includes('Stage3TransferPlaceholder')
+) {
+  ok('18) Stage 3 transfer formu gerçek (PR-T2) — placeholder kaldırıldı, transferCase çağrılıyor');
 } else {
-  bad('18) L2 placeholder eksik');
+  bad('18) Stage 3 transfer form eksik veya placeholder kalmış');
 }
 
 // 19) Codex PR-2c P1 fix — checklist gating Stage 3 closure'da uygulanıyor.
