@@ -158,7 +158,11 @@ export async function proxy({ setting, endpoint, method, path, body }) {
   if (authHeader) Object.assign(headers, authHeader);
 
   const controller = new AbortController();
-  const timeoutMs = Number.isFinite(setting.timeoutMs) ? setting.timeoutMs : 30000;
+  // Default fallback — setting.timeoutMs eksikse 120sn (analyze ~180sn,
+  // categorize-v2 ~60sn). Eski 30sn default analyze çağrılarını
+  // her zaman timeout'a düşürüyordu. Bkz. externalKbSettingRepository
+  // defaults; bu sadece setting null/undefined kaldığında etkili.
+  const timeoutMs = Number.isFinite(setting.timeoutMs) ? setting.timeoutMs : 120000;
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   const proxiedAt = new Date().toISOString();

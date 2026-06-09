@@ -20,7 +20,9 @@ import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const ROUTE = resolve(ROOT, 'server/routes/smartTicket.js');
+const CASES_ROUTE = resolve(ROOT, 'server/routes/cases.js');
 const PAGE = resolve(ROOT, 'src/features/smart-ticket/SmartTicketNewPage.tsx');
+const KB_SETTING = resolve(ROOT, 'server/db/externalKbSettingRepository.js');
 
 let pass = 0;
 let fail = 0;
@@ -28,9 +30,13 @@ function ok(name, detail = '') { pass += 1; console.log(`✓ ${name}${detail ? '
 function bad(name, detail = '') { fail += 1; console.log(`✗ ${name}${detail ? ' — ' + detail : ''}`); }
 
 if (!existsSync(ROUTE)) { bad('server/routes/smartTicket.js YOK'); process.exit(1); }
+if (!existsSync(CASES_ROUTE)) { bad('server/routes/cases.js YOK'); process.exit(1); }
 if (!existsSync(PAGE)) { bad('SmartTicketNewPage.tsx YOK'); process.exit(1); }
+if (!existsSync(KB_SETTING)) { bad('externalKbSettingRepository.js YOK'); process.exit(1); }
 const route = readFileSync(ROUTE, 'utf8');
+const casesRoute = readFileSync(CASES_ROUTE, 'utf8');
 const page = readFileSync(PAGE, 'utf8');
+const kbSetting = readFileSync(KB_SETTING, 'utf8');
 
 // 1) categorize-v2 wrapped ok:false → analyze fallback.
 //    v2.ok === false kontrolü VEYA kbResponse.ok === false kontrolü
@@ -76,6 +82,45 @@ if (!unconditionalClear) {
   ok('4) Koşulsuz rootCauseDetail clear useEffect kaldırıldı');
 } else {
   bad('4) Eski koşulsuz clear hala kaynakta');
+}
+
+// ─── PR-fix: Smart Ticket AI suggested steps silent fail ──────────────
+
+// 5) import-ai-suggested route wrapped ok:false → 502 (Codex P2 pattern).
+const importBlock = casesRoute.match(/'\/:id\/solution-steps\/import-ai-suggested'[\s\S]*?\}\),?\s*\);?/);
+if (
+  importBlock &&
+  /kbResult\.ok\s*===\s*false[\s\S]{0,300}?502/.test(importBlock[0])
+) {
+  ok('5) import-ai-suggested wrapped ok:false → 502 kontrolü var');
+} else {
+  bad('5) import-ai-suggested ok:false kontrolü eksik');
+}
+
+// 6) externalKbSettingRepository default timeoutMs >= 60000 (analyze ~180sn
+//    KB v2 doc'una göre 30s default her zaman timeout'a düşüyordu).
+const defaultMatch = kbSetting.match(/timeoutMs:\s*(\d+)/);
+if (defaultMatch && Number(defaultMatch[1]) >= 60000) {
+  ok(`6) Tenant default timeoutMs >= 60000 (analyze için yeterli) — ${defaultMatch[1]}`);
+} else {
+  bad(`6) timeoutMs default <60000 — ${defaultMatch?.[1] ?? 'yok'}`);
+}
+
+// 7) TIMEOUT_MAX KB v2'nin analyze ~180sn'sini kapsayacak şekilde >=180000.
+const maxMatch = kbSetting.match(/TIMEOUT_MAX\s*=\s*(\d+)/);
+if (maxMatch && Number(maxMatch[1]) >= 180000) {
+  ok(`7) TIMEOUT_MAX KB v2 analyze tavanını destekliyor — ${maxMatch[1]}`);
+} else {
+  bad(`7) TIMEOUT_MAX <180000 — ${maxMatch?.[1] ?? 'yok'}`);
+}
+
+// 8) Frontend handleCreateAndContinue importedCount===0 durumunda info
+//    toast — "Vaka açıldı" sessiz fail yerine "KB cevabında öneri
+//    bulunamadı — manuel adım ekleyebilirsiniz" mesajı.
+if (/type:\s*['"]info['"][\s\S]{0,200}?KB cevab[\s\S]{0,40}?manuel/.test(page)) {
+  ok('8) importedCount===0 toast info\'ya çevrildi (sessiz fail önlendi)');
+} else {
+  bad('8) importedCount===0 info toast eksik');
 }
 
 console.log('');

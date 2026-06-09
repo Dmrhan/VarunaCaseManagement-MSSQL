@@ -1223,7 +1223,28 @@ router.post(
           ...(freeText ? { freeText } : {}),
           ...(bildirimNo ? { bildirimNo } : {}),
         });
-        // externalKbClient yanıt zarfı: { ok, data, ... }. data = analyze response.
+        // externalKbClient.proxy() non-2xx HTTP veya network/timeout için
+        // throw atmaz; { ok: false, error, data } wrapped response döner.
+        // Codex P2 (main #447 review) PR #448'de suggest-classification ve
+        // suggest-closure path'leri için aynı pattern fix edilmişti — bu
+        // route O FIX'TE KAPSAMA DIŞINDA KALDI. Sonuç: KB v2 doc'daki ~180sn
+        // analyze çağrısı default 30s timeoutMs ile abort olunca,
+        // analyzeResponse=null → extractor 0 step → 200 OK + importedCount=0
+        // dönülüyordu (sessiz fail). Frontend toast'u "Vaka açıldı" göstedi,
+        // L1 kullanıcı KB önerisinin neden gelmediğini anlayamadı.
+        if (kbResult && kbResult.ok === false) {
+          console.error(
+            '[cases/import-ai-suggested] analyze returned ok:false',
+            kbResult.error?.code ?? 'unknown',
+            kbResult.error?.status ?? '',
+          );
+          return res.status(502).json({
+            error: 'external_kb_failed',
+            message:
+              kbResult.error?.message ??
+              'External KB çağrısı başarısız. Manuel adım ekleyebilirsiniz.',
+          });
+        }
         analyzeResponse = kbResult?.data ?? kbResult ?? null;
       } catch (err) {
         return res.status(502).json({
