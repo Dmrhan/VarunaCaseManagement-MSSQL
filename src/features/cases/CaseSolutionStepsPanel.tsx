@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Loader2,
@@ -85,36 +85,81 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Codex PR-2c review P2 fix — stale async response guard.
+  //
+  // Kullanıcı case A'dan B'ye geçince listSolutionSteps(A) hala in-flight
+  // olabilir. Önceki implementation A'nın geç yanıtı geldiğinde state'i
+  // overwrite ediyor, A'nın adımları B panelinde görünüyordu. İki katmanlı
+  // korunma:
+  //
+  //   1. `reqIdRef` — her async refresh çağrısı kendi token'ını snapshot
+  //      eder; uygulama anında current ref'ten farklıysa setState atlar.
+  //   2. `caseIdRef` — Case Detail item.id değişimini in-flight token'larını
+  //      ilgisiz kılmak için ref bumple bir tetikleyici olarak kullanır;
+  //      ayrıca handler'ların kapanışta yakaladığı item.id ile aktif ID'yi
+  //      karşılaştırmak için kullanılır.
+  //
+  // Case değişince adımlar/loading/yorum/manuel form state'i hemen
+  // sıfırlanır: önceki case'in row'ları yeni case panelinde görünmez.
+  const reqIdRef = useRef(0);
+  const caseIdRef = useRef(item.id);
+
   async function refresh(silent = false) {
+    const reqId = ++reqIdRef.current;
+    const startCaseId = item.id;
     if (!silent) setLoading(true);
     try {
-      const list = await caseService.listSolutionSteps(item.id);
+      const list = await caseService.listSolutionSteps(startCaseId);
+      // Stale guard — yanıt geldiğinde aktif case veya request değiştiyse
+      // setState atla. Eşit ID'li yarış (aynı case için 2 sıralı çağrı)
+      // ihtimaline karşı token kontrolü tek başına yeterli olur, caseId
+      // farkı ek defense-in-depth katmanıdır.
+      if (reqId !== reqIdRef.current || caseIdRef.current !== startCaseId) return;
       setSteps(list);
       setError(null);
     } catch (e) {
+      if (reqId !== reqIdRef.current || caseIdRef.current !== item.id) return;
       setError((e as Error)?.message ?? 'Çözüm adımları yüklenemedi.');
     } finally {
-      if (!silent) setLoading(false);
+      if (reqId === reqIdRef.current && !silent) setLoading(false);
     }
   }
 
   useEffect(() => {
+    // 1) In-flight token'ları geçersizleştir.
+    reqIdRef.current += 1;
+    caseIdRef.current = item.id;
+    // 2) Önceki case state'ini hemen temizle — overlap riskini sıfırla.
+    setSteps([]);
+    setError(null);
+    setPending(null);
+    setManualOpen(false);
+    setManualTitle('');
+    setManualDesc('');
+    setRowBusy(null);
+    // 3) Yeni case için fetch et.
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
   async function handleImportAi() {
     setImporting(true);
+    const targetCaseId = item.id;
     try {
-      const r = await caseService.importAiSuggestedSolutionSteps(item.id, {
+      const r = await caseService.importAiSuggestedSolutionSteps(targetCaseId, {
         freeText: item.description,
       });
+      // Stale guard — case değiştiyse hiçbir yan etkiyi uygulama.
+      if (caseIdRef.current !== targetCaseId) return;
       if (!r) {
         toast({ type: 'error', message: 'AI önerileri alınamadı.' });
         return;
       }
       // Mevcut görünen adımlar korunur (backend dedup'lar); listeyi yenile.
       await refresh(true);
+      // refresh kendi stale guard'ıyla yeni case'in state'ini bozmaz; toast
+      // mesajını sadece hala aynı case'deyken göster.
+      if (caseIdRef.current !== targetCaseId) return;
       const { importedCount, skippedCount } = r.summary;
       if (importedCount > 0) {
         toast({
@@ -137,20 +182,24 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
       }
       onChange?.();
     } catch (e) {
+      if (caseIdRef.current !== targetCaseId) return;
       toast({ type: 'error', message: (e as Error)?.message ?? 'AI önerileri alınamadı.' });
     } finally {
-      setImporting(false);
+      if (caseIdRef.current === targetCaseId) setImporting(false);
     }
   }
 
   async function handleAddManual() {
     if (!manualTitle.trim()) return;
     setManualSaving(true);
+    const targetCaseId = item.id;
     try {
-      const created = await caseService.createSolutionStep(item.id, {
+      const created = await caseService.createSolutionStep(targetCaseId, {
         title: manualTitle.trim(),
         description: manualDesc.trim() || undefined,
       });
+      // Stale guard — yanıt geldiğinde case değiştiyse state'e uygulama.
+      if (caseIdRef.current !== targetCaseId) return;
       if (!created) {
         toast({ type: 'error', message: 'Adım eklenemedi.' });
         return;
@@ -158,15 +207,17 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
       // Optimistic append + silent refresh ile final state.
       setSteps((arr) => [...arr, created]);
       await refresh(true);
+      if (caseIdRef.current !== targetCaseId) return;
       setManualTitle('');
       setManualDesc('');
       setManualOpen(false);
       toast({ type: 'success', message: 'Manuel adım eklendi.', duration: 1800 });
       onChange?.();
     } catch (e) {
+      if (caseIdRef.current !== targetCaseId) return;
       toast({ type: 'error', message: (e as Error)?.message ?? 'Adım eklenemedi.' });
     } finally {
-      setManualSaving(false);
+      if (caseIdRef.current === targetCaseId) setManualSaving(false);
     }
   }
 
@@ -187,8 +238,11 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
     note: string | undefined,
   ) {
     setRowBusy(stepId);
+    const targetCaseId = item.id;
     try {
-      const updated = await caseService.setSolutionStepStatus(item.id, stepId, status, note);
+      const updated = await caseService.setSolutionStepStatus(targetCaseId, stepId, status, note);
+      // Stale guard — case değiştiyse yanıtı yeni case panelinde işlemeyiz.
+      if (caseIdRef.current !== targetCaseId) return;
       if (!updated) {
         toast({ type: 'error', message: 'Durum güncellenemedi.' });
         return;
@@ -198,9 +252,10 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
       if (pending && pending.stepId === stepId) setPending(null);
       onChange?.();
     } catch (e) {
+      if (caseIdRef.current !== targetCaseId) return;
       toast({ type: 'error', message: (e as Error)?.message ?? 'Durum güncellenemedi.' });
     } finally {
-      setRowBusy(null);
+      if (caseIdRef.current === targetCaseId) setRowBusy(null);
     }
   }
 

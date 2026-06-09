@@ -163,6 +163,50 @@ const okLabels = commentLabels.every((l) => panelSrc.includes(l));
 if (okLabels) ok('14) İnline yorum kutusu label\'ları spec\'le uyumlu');
 else bad('14) comment label eksik', commentLabels.filter((l) => !panelSrc.includes(l)).join(' / '));
 
+// 15-18) Codex PR-2c P2 fix — stale async response guard invariant'ları.
+
+// 15) reqIdRef + caseIdRef useRef'leri mevcut.
+if (panelSrc.includes('reqIdRef') && panelSrc.includes('caseIdRef') && panelSrc.includes('useRef')) {
+  ok('15) Stale guard ref\'leri (reqIdRef, caseIdRef) tanımlı');
+} else {
+  bad('15) stale guard ref\'leri eksik');
+}
+
+// 16) refresh() içinde reqId snapshot + setState öncesi token kontrolü.
+//     Pattern: `const reqId = ++reqIdRef.current;` + `if (reqId !== reqIdRef.current ... ) return;`
+const hasReqSnapshot = /const\s+reqId\s*=\s*\+\+reqIdRef\.current/.test(panelSrc);
+const hasStaleSkip = /reqId\s*!==\s*reqIdRef\.current/.test(panelSrc);
+if (hasReqSnapshot && hasStaleSkip) {
+  ok('16) refresh() reqId snapshot + stale skip pattern mevcut');
+} else {
+  bad('16) refresh stale guard pattern eksik');
+}
+
+// 17) item.id useEffect'i case değişiminde state'i sıfırlıyor + ref bumple.
+//     Aramada: useEffect closure'ında setSteps([]) + reqIdRef.current += 1 + caseIdRef.current = item.id.
+const idEffectRegion = panelSrc.match(/useEffect\(\(\)\s*=>\s*\{[\s\S]*?\},\s*\[item\.id\]\)/g) ?? [];
+const resetRegionOk = idEffectRegion.some(
+  (block) =>
+    block.includes('setSteps([])') &&
+    block.includes('caseIdRef.current = item.id') &&
+    block.includes('reqIdRef.current += 1'),
+);
+if (resetRegionOk) {
+  ok('17) item.id değişiminde steps clear + ref bumple + caseIdRef update');
+} else {
+  bad('17) item.id reset pattern eksik');
+}
+
+// 18) Mutation handler'ları (handleImportAi / handleAddManual / saveOutcome)
+//     targetCaseId snapshot ile caseIdRef.current karşılaştırması yapıyor.
+const handlerCount = (panelSrc.match(/const\s+targetCaseId\s*=\s*item\.id/g) ?? []).length;
+const compareCount = (panelSrc.match(/caseIdRef\.current\s*!==\s*targetCaseId/g) ?? []).length;
+if (handlerCount >= 3 && compareCount >= 3) {
+  ok(`18) Mutation handler'ları stale guard'lı (targetCaseId snapshot=${handlerCount}, compare=${compareCount})`);
+} else {
+  bad('18) handler stale guard eksik', `snapshot=${handlerCount}, compare=${compareCount}`);
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
