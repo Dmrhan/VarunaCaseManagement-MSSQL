@@ -2307,7 +2307,71 @@ export const lookupService = {
       }
     );
   },
+
+  /**
+   * WR-Smart-Ticket Phase 2b — açılış sınıflandırma önerisi.
+   * POST /api/smart-ticket/suggest-classification
+   *
+   * Yalnız 5 sınıflandırma alanı (platform, businessProcess, operationType,
+   * affectedObject, impact) döner. Diğer KB alanları (suggestedSteps,
+   * rootCause, customerReply, handoff, similar, raw) burada çekilmez —
+   * Smart Ticket Step 2 (PR-2a) için ayrı endpoint var.
+   *
+   * Hata durumlarında null döner; manual dropdown'lar her halükarda
+   * çalışmaya devam eder.
+   */
+  async suggestSmartTicketClassification(
+    params: SuggestClassificationRequest,
+  ): Promise<SuggestClassificationResponse | null> {
+    const data = await apiFetch<SuggestClassificationResponse>(
+      '/api/smart-ticket/suggest-classification',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      },
+      'Sınıflandırma önerisi alınamadı',
+    );
+    return data ?? null;
+  },
 };
+
+export interface SuggestClassificationRequest {
+  companyId: string;
+  description: string;
+  accountId?: string;
+  productId?: string;
+  projectId?: string;
+  bildirimNo?: string;
+}
+
+export interface SuggestClassificationItem {
+  code: string;
+  label: string;
+  confidence: number;
+  matchedBy: 'code' | 'kbAlias' | 'label';
+}
+
+export type SuggestClassificationField =
+  | 'platform'
+  | 'businessProcess'
+  | 'operationType'
+  | 'affectedObject'
+  | 'impact';
+
+export interface SuggestClassificationUnmatched {
+  taxonomyType: SuggestClassificationField;
+  rawValue: string;
+  reason: string;
+}
+
+export interface SuggestClassificationResponse {
+  companyId: string;
+  suggestions: Partial<Record<SuggestClassificationField, SuggestClassificationItem>>;
+  unmatched: SuggestClassificationUnmatched[];
+  source: 'external_kb';
+  meta?: { fieldsRequested?: SuggestClassificationField[]; extractedRawCount?: number };
+}
 
 export interface SmartTicketTaxonomyItem {
   code: string;
