@@ -52,4 +52,13 @@ export const featureFlags = {
    * + customFields.smartTicket).
    */
   smartTicketIntakeEnabled: readFlag('VITE_SMART_TICKET_INTAKE_ENABLED', IS_DEV),
+  /**
+   * Cases list'teki "Hızlı Vaka" butonu. Default false — Smart Ticket
+   * ve Yeni Vaka akışları ile çakışıp kafa karıştırıyordu, pratik
+   * kullanım yok. Buton + modal kodu intact bırakıldı; geri açmak için
+   * VITE_QUICK_CASE_ENABLED=true. Akıllı Ticket akışı ile değiştirilen
+   * "müşteri arama → vaka aç" senaryosu için tercih edilen yol artık
+   * Akıllı Ticket butonudur.
+   */
+  quickCaseEnabled: readFlag('VITE_QUICK_CASE_ENABLED', false),
 };
