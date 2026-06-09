@@ -549,6 +549,115 @@ function buildSmartTicketClosureMerge(prev, closureInput) {
   };
 }
 
+// WR-Smart-Ticket Phase T1 — L1 → L2 devir akışında L2 agent'a görünür
+// "devir bağlamı" Case.customFields üzerine deep-merge edilir. Yalnız
+// transferCase içinden çağrılır (Smart Ticket akışıyla açılmış
+// vakalarda).
+//
+// Sözleşme:
+//   - prev.customFields.smartTicket var olmalı (Case Smart Ticket
+//     intake'ten açılmış). Yoksa `smart_ticket_transfer_requires_opening`
+//     400. (Klasik vakaların transfer'i etkilenmez; backend buraya yalnız
+//     payload.smartTicketTransfer geldiyse uğrar.)
+//   - Diğer customFields dalları AYNEN korunur.
+//   - smartTicket içindeki opening + closure alt-objeleri korunur — yalnız
+//     `transferContext` alt-objesi yazılır/üzerine yazılır.
+//   - version + transferredAt server-side stamp.
+const SMART_TICKET_TRANSFER_VERSION = 1;
+function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
+  if (!transferInput || typeof transferInput !== 'object') {
+    throw new CaseValidationError('Geçersiz Smart Ticket transfer payload.', {
+      status: 400,
+      code: 'smart_ticket_transfer_invalid',
+    });
+  }
+  const existing =
+    prev.customFields && typeof prev.customFields === 'object' ? prev.customFields : {};
+  const existingSt =
+    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : null;
+  if (!existingSt) {
+    throw new CaseValidationError(
+      'Smart Ticket devir bağlamı yalnız Smart Ticket akışıyla açılmış vakalara yazılabilir.',
+      { status: 400, code: 'smart_ticket_transfer_requires_opening' },
+    );
+  }
+  const pickStr = (k) => {
+    const v = transferInput[k];
+    return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+  };
+  const transferNote = pickStr('transferNote');
+  if (!transferNote) {
+    throw new CaseValidationError(
+      'Devir notu zorunludur.',
+      { status: 400, code: 'smart_ticket_transfer_note_required' },
+    );
+  }
+  const composedSummary = pickStr('composedSummary');
+  // attemptedStepIds opsiyonel — caller composer'dan alır.
+  const attemptedStepIds = Array.isArray(transferInput.attemptedStepIds)
+    ? transferInput.attemptedStepIds.filter((x) => typeof x === 'string' && x.trim())
+    : undefined;
+
+  // Opening taxonomy snapshot — mevcut smartTicket opening'ten kopyalanır
+  // (server-side); client gönderdiyse kopya ile birleştirilir ama mevcut
+  // opening verisi öncelik kazanır (tamper-safe).
+  const openingSnapshot = {};
+  const OPENING_FIELDS = [
+    'platform', 'platformLabel',
+    'businessProcess', 'businessProcessLabel',
+    'operationType', 'operationTypeLabel',
+    'affectedObject', 'affectedObjectLabel',
+    'impact', 'impactLabel',
+  ];
+  for (const k of OPENING_FIELDS) {
+    if (typeof existingSt[k] === 'string' && existingSt[k].trim()) {
+      openingSnapshot[k] = existingSt[k].trim();
+    }
+  }
+
+  const stepOutcomesSummary =
+    transferInput.stepOutcomesSummary &&
+    typeof transferInput.stepOutcomesSummary === 'object' &&
+    !Array.isArray(transferInput.stepOutcomesSummary)
+      ? {
+          worked: Number(transferInput.stepOutcomesSummary.worked) || 0,
+          notWorked: Number(transferInput.stepOutcomesSummary.notWorked) || 0,
+          skipped: Number(transferInput.stepOutcomesSummary.skipped) || 0,
+          pending: Number(transferInput.stepOutcomesSummary.pending) || 0,
+          total: Number(transferInput.stepOutcomesSummary.total) || 0,
+        }
+      : undefined;
+
+  // contextFields — transferCase'in resolved ekip/kişi bilgileri.
+  const transferContext = {
+    version: SMART_TICKET_TRANSFER_VERSION,
+    transferredAt: new Date().toISOString(),
+    fromTeamId: contextFields?.fromTeamId ?? undefined,
+    fromTeamName: contextFields?.fromTeamName ?? undefined,
+    toTeamId: contextFields?.toTeamId,
+    toTeamName: contextFields?.toTeamName,
+    toPersonId: contextFields?.toPersonId ?? undefined,
+    toPersonName: contextFields?.toPersonName ?? undefined,
+    transferNote,
+    composedSummary,
+    attemptedStepIds,
+    openingTaxonomySnapshot: Object.keys(openingSnapshot).length > 0 ? openingSnapshot : undefined,
+    stepOutcomesSummary,
+  };
+
+  for (const k of Object.keys(transferContext)) {
+    if (transferContext[k] === undefined) delete transferContext[k];
+  }
+
+  return {
+    ...existing,
+    smartTicket: {
+      ...existingSt,
+      transferContext,
+    },
+  };
+}
+
 async function assertCaseInScope(caseId, allowedCompanyIds) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
@@ -909,13 +1018,22 @@ export const caseRepository = {
         aiRejectReason: m.aiRejectReason,
         // Custom Fields (şirket FieldDefinition'larına göre dinamik)
         customFields: m.customFields ?? undefined,
-        // Açılış log'u
+        // Açılış log'u — Smart Ticket akışıyla açıldıysa note alanına suffix
+        // konur. L2 personası Activity tab'da vakanın Smart Ticket'tan
+        // geldiğini ayırt edebilsin.
         history: {
           create: {
             companyId: m.companyId,
             action: 'Vaka oluşturuldu',
             actionType: 'CaseCreated',
             actor: m.createdBy ?? 'Mock User',
+            note:
+              m.customFields &&
+              typeof m.customFields === 'object' &&
+              m.customFields.smartTicket &&
+              typeof m.customFields.smartTicket === 'object'
+                ? 'Smart Ticket akışıyla açıldı'
+                : undefined,
           },
         },
       },
@@ -2297,11 +2415,61 @@ export const caseRepository = {
     // Note alanı: gerekçe etiketi + serbest metin.
     const reasonLabel = input.reasonCode ? TRANSFER_REASON_LABEL[input.reasonCode] : null;
     const trimmedReason = input.reason.trim();
-    const noteText = reasonLabel
+    let noteText = reasonLabel
       ? `Gerekçe: ${reasonLabel} — ${trimmedReason}`
       : `Gerekçe: ${trimmedReason}`;
 
+    // WR-Smart-Ticket Phase T1 — Smart Ticket akışı devir bağlamı varsa
+    // customFields.smartTicket.transferContext merge edilir (atomik, aynı txn);
+    // activity note multi-line genişler. Klasik vakalar etkilenmez (param
+    // opsiyonel ve smartTicket opening şartı helper'da enforce edilir).
+    const stTransfer =
+      input.smartTicketTransfer && typeof input.smartTicketTransfer === 'object'
+        ? input.smartTicketTransfer
+        : null;
+
+    if (stTransfer) {
+      const noteParts = [noteText];
+      const trimmedTransferNote =
+        typeof stTransfer.transferNote === 'string' ? stTransfer.transferNote.trim() : '';
+      if (trimmedTransferNote) {
+        noteParts.push('');
+        noteParts.push('L1 Notu:');
+        noteParts.push(trimmedTransferNote);
+      }
+      const trimmedComposed =
+        typeof stTransfer.composedSummary === 'string' ? stTransfer.composedSummary.trim() : '';
+      if (trimmedComposed) {
+        noteParts.push('');
+        noteParts.push('Denenen Adımlar Özeti:');
+        noteParts.push(trimmedComposed);
+      }
+      noteText = noteParts.join('\n');
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
+      // Smart Ticket transfer context merge — Case fresh read içinde,
+      // taze customFields baz alınır.
+      let nextCustomFields;
+      if (stTransfer) {
+        const fresh = await tx.case.findUnique({
+          where: { id },
+          select: { customFields: true },
+        });
+        nextCustomFields = buildSmartTicketTransferMerge(
+          { customFields: fresh?.customFields },
+          stTransfer,
+          {
+            fromTeamId,
+            fromTeamName: c.assignedTeamName ?? null,
+            toTeamId: input.toTeamId,
+            toTeamName: team.name,
+            toPersonId: person?.id ?? null,
+            toPersonName: person?.name ?? null,
+          },
+        );
+      }
+
       const u = await tx.case.update({
         where: { id },
         data: {
@@ -2310,6 +2478,7 @@ export const caseRepository = {
           assignedPersonId: person?.id ?? null,
           assignedPersonName: person?.name ?? null,
           transferCount: { increment: 1 },
+          ...(nextCustomFields ? { customFields: nextCustomFields } : {}),
         },
         include: CASE_INCLUDE,
       });
