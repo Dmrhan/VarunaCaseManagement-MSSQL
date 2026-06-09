@@ -1958,7 +1958,167 @@ export const caseService = {
     );
     return data?.value ?? [];
   },
+
+  // ─────────────────────────────────────────────────────────────────
+  // WR-Smart-Ticket Phase 2a — CaseSolutionStep service typings.
+  //
+  // **Typing-only** kapsam: ileri PR'da UI eklenecek; bu PR'da yalnız
+  // tipler + thin HTTP wrapper'ları (servis sözleşmesini sabitlemek
+  // ve gelecek UI çalışmasını ucuza yapmak için). Şu an hiçbir
+  // component bu metodları çağırmıyor — bağlama puantajı sıfır.
+  // ─────────────────────────────────────────────────────────────────
+  async listSolutionSteps(caseId: string): Promise<CaseSolutionStep[]> {
+    const data = await apiFetch<{ value: CaseSolutionStep[] }>(
+      `${API_BASE}/${encodeURIComponent(caseId)}/solution-steps`,
+      undefined,
+      'Çözüm adımları yüklenemedi',
+    );
+    return data?.value ?? [];
+  },
+
+  async createSolutionStep(
+    caseId: string,
+    input: ManualSolutionStepInput,
+  ): Promise<CaseSolutionStep | undefined> {
+    const item = await apiFetch<CaseSolutionStep>(
+      `${API_BASE}/${encodeURIComponent(caseId)}/solution-steps`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      'Çözüm adımı eklenemedi',
+    );
+    return item ?? undefined;
+  },
+
+  async updateSolutionStep(
+    caseId: string,
+    stepId: string,
+    patch: SolutionStepPatch,
+  ): Promise<CaseSolutionStep | undefined> {
+    const item = await apiFetch<CaseSolutionStep>(
+      `${API_BASE}/${encodeURIComponent(caseId)}/solution-steps/${encodeURIComponent(stepId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+      'Çözüm adımı güncellenemedi',
+    );
+    return item ?? undefined;
+  },
+
+  async setSolutionStepStatus(
+    caseId: string,
+    stepId: string,
+    status: CaseSolutionStepStatus,
+    note?: string,
+  ): Promise<CaseSolutionStep | undefined> {
+    const item = await apiFetch<CaseSolutionStep>(
+      `${API_BASE}/${encodeURIComponent(caseId)}/solution-steps/${encodeURIComponent(stepId)}/status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, ...(note ? { note } : {}) }),
+      },
+      'Çözüm adımı durumu güncellenemedi',
+    );
+    return item ?? undefined;
+  },
+
+  async importAiSuggestedSolutionSteps(
+    caseId: string,
+    body: ImportAiSuggestedBody,
+  ): Promise<ImportAiSuggestedResult | undefined> {
+    const r = await apiFetch<ImportAiSuggestedResult>(
+      `${API_BASE}/${encodeURIComponent(caseId)}/solution-steps/import-ai-suggested`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'AI önerilen adımlar import edilemedi',
+    );
+    return r ?? undefined;
+  },
 };
+
+// ─────────────────────────────────────────────────────────────────
+// CaseSolutionStep types — Phase 2a.
+// ─────────────────────────────────────────────────────────────────
+
+export const CASE_SOLUTION_STEP_SOURCES = [
+  'ai_suggested_step',
+  'manual',
+  'external_kb',
+  'similar_case',
+] as const;
+export type CaseSolutionStepSource = (typeof CASE_SOLUTION_STEP_SOURCES)[number];
+
+export const CASE_SOLUTION_STEP_STATUSES = [
+  'suggested',
+  'tried',
+  'worked',
+  'not_worked',
+  'skipped',
+] as const;
+export type CaseSolutionStepStatus = (typeof CASE_SOLUTION_STEP_STATUSES)[number];
+
+export interface CaseSolutionStep {
+  id: string;
+  caseId: string;
+  companyId: string;
+  stepIndex: number;
+  source: CaseSolutionStepSource;
+  sourceRef: string | null;
+  sourceTitle: string | null;
+  title: string;
+  description: string | null;
+  status: CaseSolutionStepStatus;
+  note: string | null;
+  triedAt: string | null;
+  triedByUserId: string | null;
+  outcomeAt: string | null;
+  outcomeByUserId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ManualSolutionStepInput {
+  title: string;
+  description?: string;
+  note?: string;
+  sourceTitle?: string;
+}
+
+export interface SolutionStepPatch {
+  title?: string;
+  description?: string | null;
+  note?: string | null;
+  sourceTitle?: string | null;
+}
+
+/**
+ * AI import body — iki kullanım:
+ *  - Client zaten analyze sonucu varsa: `analyzeResponse` gönderir.
+ *  - Yoksa server-side analyze: `freeText` veya `bildirimNo` verilir.
+ */
+export interface ImportAiSuggestedBody {
+  analyzeResponse?: unknown;
+  freeText?: string;
+  bildirimNo?: string;
+}
+
+export interface ImportAiSuggestedResult {
+  items: CaseSolutionStep[];
+  summary: {
+    importedCount: number;
+    skippedCount: number;
+    totalCount: number;
+  };
+}
 
 /**
  * lookupService — sync getter API. Kaynak USE_MOCK'a göre değişir:
