@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
+import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
@@ -1160,7 +1161,22 @@ export function SmartTicketNewPage({
                   disabled={stage !== 'opening'}
                 />
               </Field>
-              <Field label="Açıklama" required>
+              <Field
+                label="Açıklama"
+                required
+                actions={
+                  stage === 'opening' ? (
+                    <VoiceNoteButton
+                      onTranscript={(chunk) =>
+                        setForm((f) => ({
+                          ...f,
+                          description: f.description ? `${f.description} ${chunk}` : chunk,
+                        }))
+                      }
+                    />
+                  ) : undefined
+                }
+              >
                 <TextArea
                   rows={4}
                   value={form.description}
@@ -1773,6 +1789,16 @@ function Stage3Closure({
             </span>
           }
           required
+          actions={
+            <VoiceNoteButton
+              onTranscript={(chunk) =>
+                setClosure((c) => ({
+                  ...c,
+                  resolutionNote: c.resolutionNote ? `${c.resolutionNote} ${chunk}` : chunk,
+                }))
+              }
+            />
+          }
         >
           <TextArea
             rows={4}
