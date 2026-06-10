@@ -584,10 +584,22 @@ export function SmartTicketNewPage({
       setCreatedCase(created);
       // Çözüm Adımlarını çağırma asynchronous — başarısız olsa bile
       // kullanıcı manuel adım ekleyebilir. Hata bilgilendirme toast'unda.
+      //
+      // Codex P2 (main #459 review) — import-ai-suggested route artık
+      // customFields.smartTicket.aiDrafts persist ediyor (Madde 2).
+      // Eski impl `created` snapshot'unu state'te tutuyordu → KbDraftCard
+      // (Stage 3 closure / transfer / Case Detail) stale customFields ile
+      // render ediyordu, KB teknik handoff + müşteri yanıt taslakları hiç
+      // görünmüyordu. Fix: import sonrası caseService.get ile case'i
+      // yenile, başarısız olursa eski create snapshot'unda kal.
       try {
         const importResult = await caseService.importAiSuggestedSolutionSteps(created.id, {
           freeText: form.description.trim(),
         });
+        // aiDrafts persist'i tetiklenmiş olabilir (Madde 2 server-side).
+        // Fresh fetch ile customFields.smartTicket.aiDrafts UI'a yansır.
+        const refreshed = await caseService.get(created.id);
+        if (refreshed) setCreatedCase(refreshed);
         if (importResult && importResult.summary.importedCount > 0) {
           toast({
             type: 'success',
@@ -2347,7 +2359,12 @@ function Stage2DescriptionEditor({
         setExpanded(false);
         return;
       }
-      onUpdated(updated);
+      // Codex P2 (main #459) — import-ai-suggested aiDrafts persist
+      // ediyor. Update'in döndürdüğü `updated` snapshot'unda aiDrafts
+      // henüz yok. Fresh fetch ile customFields.smartTicket.aiDrafts
+      // KbDraftCard'a yansır (Stage 3 closure / transfer).
+      const refreshed = await caseService.get(updated.id);
+      onUpdated(refreshed ?? updated);
       setExpanded(false);
       if (importedCount > 0) {
         toast({

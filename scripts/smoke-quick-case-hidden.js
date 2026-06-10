@@ -68,26 +68,28 @@ if (
 }
 
 // 5) pendingQuickPrefill effect flag kontrolü.
-//    Yeni davranış (Codex P1 fix): flag false iken silent ignore YOK,
-//    NewCaseForm prefill yolu var. Effect içinde quickCaseEnabled koşulu
-//    + else branch'inde setNewPrefillAccountId + setNewOpen aranır.
+//    Codex P1 (#452) + Codex P2 (#459) review fix — flag false iken
+//    silent ignore YOK, NewCaseForm'a TAM initialContext (accountId +
+//    accountCompanyIds + accountName) ile yönlendirilir. State adı
+//    `newPrefill` (önceki sade accountId state'inden geliştirildi).
 if (
-  /featureFlags\.quickCaseEnabled[\s\S]{0,200}?setQuickOpen\(true\)[\s\S]{0,300}?setNewPrefillAccountId[\s\S]{0,100}?setNewOpen\(true\)/.test(cases)
+  /featureFlags\.quickCaseEnabled[\s\S]{0,300}?setQuickOpen\(true\)[\s\S]{0,800}?accountService\.get[\s\S]{0,400}?setNewPrefill[\s\S]{0,200}?setNewOpen\(true\)/.test(cases)
 ) {
-  ok('5) pendingQuickPrefill effect — flag açık → Quick / kapalı → NewCaseForm');
+  ok('5) pendingQuickPrefill effect — flag açık → Quick / kapalı → account fetch + NewCaseForm');
 } else {
   bad('5) pendingQuickPrefill iki yol pattern eksik');
 }
 
-// 5b) Codex P1 (PR #452) — Customer Search "yeni vaka aç" CTA sessizce
-//     yutulmuyor. Flag false durumunda NewCaseForm açılır.
+// 5b) Codex P2 (main #459) — NewCaseForm initialContext TAM shape
+//     (accountCompanyIds + accountName) ile, account-only seed bug'ı
+//     elimine. Eski sade `accountId` patch elimine.
 if (
-  /setNewPrefillAccountId\(pendingQuickPrefill\)/.test(cases) &&
-  /initialContext=\{[\s\S]{0,200}?newPrefillAccountId/.test(cases)
+  /accountCompanyIds:\s*companyIds/.test(cases) &&
+  /initialContext=\{newPrefill\s*\?\?\s*undefined\}/.test(cases)
 ) {
-  ok('5b) Codex P1 fix — NewCaseForm initialContext accountId prefill akışı');
+  ok('5b) Codex P1+P2 fix — NewCaseForm tam initialContext (accountCompanyIds + accountName)');
 } else {
-  bad('5b) Codex P1 fix prefill akışı eksik');
+  bad('5b) Tam initialContext shape eksik');
 }
 
 // 6) QuickCaseModal dosyası SİLİNMEDİ (kod intact, geri açılabilir).
