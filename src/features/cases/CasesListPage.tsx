@@ -627,6 +627,13 @@ export function CasesListPage({
     setClaimingId(null);
     if (updated) {
       toast({ type: 'success', message: `Vaka üstlenildi: ${updated.assignedPersonName ?? 'sen'}` });
+      // Business review Madde 5 — Üstlen başarılı olunca kullanıcıyı
+      // doğrudan Case Detail'e götür. Eski davranış: liste sayfasında
+      // kalıp güncellenmiş row'u gösteriyordu, kullanıcı tekrar tıklayıp
+      // detaya gitmek zorundaydı. Toast + arka plan refresh aynen
+      // korunuyor; load()/refreshStats() arka planda çalışır, ekran
+      // doğrudan Case Detail olarak açılır.
+      onSelectCase(updated.id);
       void load();
       void refreshStats();
     } else {
