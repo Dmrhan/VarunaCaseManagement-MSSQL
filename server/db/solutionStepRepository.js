@@ -192,6 +192,48 @@ function normalizeStepObject(obj) {
   return { title, description };
 }
 
+/**
+ * Madde 2 — KB analyze cevabından "engineering handoff" (teknik devir
+ * notu) ve "customer reply draft" (müşteri yanıt taslağı) string'lerini
+ * çıkarır. Diğer alanları (rootCauseHypotheses, similar, panorama,
+ * citations, kbChunks, hits, answer, raw response) **bilinçle yok sayar**.
+ *
+ * KB upstream tutarsızlığı için multi-format support — extractAiSuggestedSteps
+ * ile simetrik pattern:
+ *   - analysis.engineeringHandoff           (string veya { text } / { content } object)
+ *   - analysis.customerReplyDraft           (string veya { text } / { content } object)
+ *
+ * Persist edilecek shape (saf string, raw KB persist YOK):
+ *   { engineeringHandoff?: string, customerReplyDraft?: string }
+ *
+ * Hiçbir alan dolu değilse {} döner — caller persist'i atlayabilir.
+ */
+function pickDraftString(value) {
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return t || undefined;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const k of ['text', 'content', 'draft', 'body']) {
+      const v = value[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return undefined;
+}
+
+export function extractAiDrafts(analyzeResponse) {
+  if (!analyzeResponse || typeof analyzeResponse !== 'object') return {};
+  const analysis = analyzeResponse.analysis;
+  if (!analysis || typeof analysis !== 'object') return {};
+  const out = {};
+  const engineering = pickDraftString(analysis.engineeringHandoff);
+  if (engineering) out.engineeringHandoff = engineering;
+  const customer = pickDraftString(analysis.customerReplyDraft);
+  if (customer) out.customerReplyDraft = customer;
+  return out;
+}
+
 export function extractAiSuggestedSteps(analyzeResponse) {
   if (!analyzeResponse || typeof analyzeResponse !== 'object') return [];
   const analysis = analyzeResponse.analysis;

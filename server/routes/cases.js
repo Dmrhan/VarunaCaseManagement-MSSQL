@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
-import { solutionStepRepository, SolutionStepError } from '../db/solutionStepRepository.js';
+import {
+  solutionStepRepository,
+  SolutionStepError,
+  extractAiDrafts,
+} from '../db/solutionStepRepository.js';
 import { externalKbClient } from '../lib/externalKbClient.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { markInProgressForCase } from '../db/actionItemRepository.js';
@@ -1257,6 +1261,26 @@ router.post(
         });
       }
     }
+    // Madde 2 — KB analyze cevabından engineeringHandoff + customerReplyDraft
+    // extract et ve Smart Ticket case'leri için customFields.smartTicket.aiDrafts
+    // altına persist et. Helper smartTicket opening yoksa null döner — klasik
+    // vakalar etkilenmez. Hata bu adımda olursa import akışını bozma.
+    try {
+      const drafts = extractAiDrafts(analyzeResponse);
+      if (drafts.engineeringHandoff || drafts.customerReplyDraft) {
+        await caseRepository.persistSmartTicketAiDrafts(
+          req.params.id,
+          drafts,
+          req.user.allowedCompanyIds,
+        );
+      }
+    } catch (draftErr) {
+      console.warn(
+        '[cases/import-ai-suggested] aiDrafts persist failed (non-fatal)',
+        draftErr?.message ?? draftErr,
+      );
+    }
+
     const result = await solutionStepRepository.importAiSuggested(
       req.params.id,
       analyzeResponse ?? {},
