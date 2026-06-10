@@ -71,9 +71,10 @@ if (/async function handleKbSuggest\(\)/.test(src)) {
   bad('4) handleKbSuggest eksik');
 }
 
-// 5) Smart Ticket: suggestSmartTicketClosure caseId tabanlı.
+// 5) Smart Ticket: suggestSmartTicketClosure caseId tabanlı (targetCaseId
+//    snapshot stale guard ile).
 if (
-  /isSmartTicket[\s\S]{0,300}?suggestSmartTicketClosure\(\s*\{\s*caseId:\s*item\.id/.test(src)
+  /isSmartTicket[\s\S]{0,400}?suggestSmartTicketClosure\(\s*\{\s*caseId:\s*(?:item\.id|targetCaseId)/.test(src)
 ) {
   ok('5) Smart Ticket: caseId body (opening context server-side fetch)');
 } else {
@@ -101,8 +102,9 @@ if (
 // 8) Smart Ticket pre-fill yalnız boş dropdown'lar (closureRcg / Rcd /
 //    Rt / Pp).
 if (
-  /s\.rootCauseGroup\s*&&\s*!closureRcg[\s\S]{0,200}?setClosureRcg/.test(src) &&
-  /s\.resolutionType\s*&&\s*!closureRt[\s\S]{0,200}?setClosureRt/.test(src)
+  /s\.rootCauseGroup\s*&&\s*!closureRcg[\s\S]{0,400}?setClosureRcg/.test(src) &&
+  /s\.resolutionType\s*&&\s*!closureRt[\s\S]{0,100}?setClosureRt/.test(src) &&
+  /s\.permanentPrevention\s*&&\s*!closurePp[\s\S]{0,100}?setClosurePp/.test(src)
 ) {
   ok('8) Smart Ticket pre-fill yalnız boş dropdown\'lar (override yok)');
 } else {
@@ -186,6 +188,32 @@ if (
   ok('15) KbClosureSuggestionPanel persist YOK (sadece görüntüleme + onAppend callback)');
 } else {
   bad('15) Panel component persist içeriyor');
+}
+
+// ─── Codex P2 fixes (PR #469 review) ─────────────────────────────
+
+// 16) Codex P2 — rootCauseDetail wipe fix: closureRcdResetSuppressRef
+//     pattern. Pre-fill sırasında group set ediliyor ama detail
+//     useEffect tarafından silinmiyor.
+if (
+  /closureRcdResetSuppressRef\s*=\s*useRef\(false\)/.test(src) &&
+  /closureRcdResetSuppressRef\.current\s*=\s*true/.test(src) &&
+  /closureRcdResetSuppressRef\.current\)\s*\{[\s\S]{0,200}?return/.test(src)
+) {
+  ok('16) Codex P2 — rootCauseDetail wipe fix (suppress ref pre-fill korur)');
+} else {
+  bad('16) suppress ref pattern eksik');
+}
+
+// 17) Codex P2 — KB stale promise guard: kbSuggestReqIdRef snapshot
+//     ve case değişimi kontrolü.
+if (
+  /kbSuggestReqIdRef\s*=\s*useRef\(0\)/.test(src) &&
+  /reqId\s*!==\s*kbSuggestReqIdRef\.current\s*\|\|\s*item\.id\s*!==\s*targetCaseId/.test(src)
+) {
+  ok('17) Codex P2 — KB stale promise guard (reqId + targetCaseId)');
+} else {
+  bad('17) Stale guard pattern eksik');
 }
 
 console.log('');

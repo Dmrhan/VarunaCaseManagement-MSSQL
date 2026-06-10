@@ -99,6 +99,35 @@ if (allReject) {
   bad('4) Bazı executable/script tipleri kabul edildi', accept.map(([m, n]) => n).join(' '));
 }
 
+// 4b) Codex P2 (PR #468 review) — forge önleme: dangerous uzantı +
+//     kabul edilebilir MIME birlikte gelirse REDDETMELI.
+//     Eski impl: mimeOk || extOk → kabul (BUG).
+//     Yeni impl: ikisi de varsa İKİSİ DE listede olmalı.
+const forgeCases = [
+  ['application/pdf', 'malware.exe'],
+  ['image/png', 'shell.sh'],
+  ['text/plain', 'evil.bat'],
+  ['application/json', 'macro.vbs'],
+];
+const allForgeReject = forgeCases.every(([m, n]) => !srvIsAccepted(m, n));
+if (allForgeReject) {
+  ok('4b) Codex P2 (#468) — forge bypass kapalı (allowed MIME + dangerous ext = reject)');
+} else {
+  const accept = forgeCases.filter(([m, n]) => srvIsAccepted(m, n));
+  bad('4b) Forge bypass açık', accept.map(([m, n]) => `${n}/${m}`).join(' '));
+}
+
+// 4c) Tarayıcı tutarsızlığı tolerant: boş MIME + kabul edilebilir uzantı
+//     hala çalışmalı (xlsx Safari'da boş MIME).
+if (
+  srvIsAccepted('', 'data.xlsx') &&
+  srvIsAccepted(undefined, 'report.pdf')
+) {
+  ok('4c) Boş MIME + kabul uzantı tolerant (Safari xlsx vb.)');
+} else {
+  bad('4c) Boş MIME + kabul uzantı reddediliyor (tolerantlık kayboldu)');
+}
+
 // 5) Boş mime + bilinmeyen uzantı reddedilir.
 if (!srvIsAccepted('', 'unknown.xyz') && !srvIsAccepted(undefined, 'noext')) {
   ok('5) Boş/bilinmeyen mime + uzantı reddedilir (deny-by-default)');

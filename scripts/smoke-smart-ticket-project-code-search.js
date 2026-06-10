@@ -62,15 +62,18 @@ if (/const\s*\[projectFilter,\s*setProjectFilter\]\s*=\s*useState\(/.test(page))
   bad('3) projectFilter state eksik');
 }
 
-// 4) filteredProjects useMemo + name + code substring + tr-TR lowercase.
+// 4) filteredProjects useMemo + name (tr-TR) + code (locale-neutral).
+//    Codex P2 (PR #467 review) — code için ASCII toLowerCase; tr-TR
+//    'I' → 'ı' yapardı, "INV-2026" arması "inv" ile bulunmazdı.
 if (
   /filteredProjects\s*=\s*useMemo\(/.test(page) &&
-  /toLocaleLowerCase\(['"]tr-TR['"]\)/.test(page) &&
-  /name\.includes\(q\)\s*\|\|\s*code\.includes\(q\)/.test(page)
+  /qNeutral\s*=\s*raw\.toLowerCase\(\)/.test(page) &&
+  /qTr\s*=\s*raw\.toLocaleLowerCase\(['"]tr-TR['"]\)/.test(page) &&
+  /name\.includes\(qTr\)\s*\|\|\s*code\.includes\(qNeutral\)/.test(page)
 ) {
-  ok('4) filteredProjects useMemo + name/code substring (tr-TR lowercase)');
+  ok('4) filteredProjects: name (tr-TR) + code (locale-neutral) ayrımı');
 } else {
-  bad('4) filter logic eksik');
+  bad('4) filter casing ayrımı eksik');
 }
 
 // 5) Seçili proje filter dışına düşse bile listede tutulur.

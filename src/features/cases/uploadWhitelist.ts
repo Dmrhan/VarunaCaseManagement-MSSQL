@@ -52,14 +52,24 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.zip',
 ] as const;
 
+/**
+ * Codex P2 (PR #468 review) — sıkı kural: MIME ve uzantı ikisi de
+ * varsa İKİSİ DE kabul listesinde olmalı (forge önleme). Davranış
+ * backend `server/lib/uploadWhitelist.js` ile birebir aynı.
+ */
 export function isAcceptedUpload(mimeType: string | undefined, fileName: string | undefined): boolean {
   const mime = typeof mimeType === 'string' ? mimeType.trim().toLowerCase() : '';
   const name = typeof fileName === 'string' ? fileName.toLowerCase() : '';
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
 
-  const mimeOk = mime ? (UPLOAD_ALLOWED_MIME_TYPES as readonly string[]).includes(mime) : false;
-  const extOk = ext ? (UPLOAD_ALLOWED_EXTENSIONS as readonly string[]).includes(ext) : false;
+  const hasMime = mime.length > 0;
+  const hasExt = ext.length > 0;
+  const mimeOk = hasMime && (UPLOAD_ALLOWED_MIME_TYPES as readonly string[]).includes(mime);
+  const extOk = hasExt && (UPLOAD_ALLOWED_EXTENSIONS as readonly string[]).includes(ext);
 
-  return mimeOk || extOk;
+  if (hasMime && hasExt) return mimeOk && extOk;
+  if (hasMime) return mimeOk;
+  if (hasExt) return extOk;
+  return false;
 }

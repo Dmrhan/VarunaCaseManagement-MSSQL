@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -218,8 +218,19 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     };
   }, [isSmartTicket, pending, item.companyId, closureTax]);
 
-  // Kök Neden Grubu değişince Detay seçimini sıfırla.
+  // Kök Neden Grubu değişince Detay seçimini sıfırla — AMA KB pre-fill
+  // sırasında detail'i ezme.
+  //
+  // Codex P2 (PR #469 review) — handleKbSuggest aynı render'da
+  // hem setClosureRcg(group) hem setClosureRcd(detail) çağırıyordu;
+  // bu useEffect group değişimini görüp detail'i hemen siliyordu.
+  // Suppress ref ile pre-fill batched setState'i koruyoruz.
+  const closureRcdResetSuppressRef = useRef(false);
   useEffect(() => {
+    if (closureRcdResetSuppressRef.current) {
+      closureRcdResetSuppressRef.current = false;
+      return;
+    }
     setClosureRcd('');
   }, [closureRcg]);
 
@@ -244,23 +255,36 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
    * Approval / checklist / ResolutionApprovalPolicy guard'ları bypass
    * edilmez — bu yalnız öneri katmanı, kapanış akışına dokunmaz.
    */
+  // Codex P2 (PR #469 review) — Stale promise guard. Panel L1Workbench
+  // gibi yerlerde reuse oluyor; kullanıcı KB önerisi istediği sırada
+  // başka vakaya geçerse eski response yeni case'e pre-fill / display
+  // yapıyordu. reqId + caseId snapshot guard ile geç gelen response'u
+  // atlatıyoruz.
+  const kbSuggestReqIdRef = useRef(0);
+
   async function handleKbSuggest() {
     if (kbSuggesting) return;
     if (resolutionNote.trim().length < 5) {
       setKbSuggestionError('En az 5 karakter çözüm notu yazın.');
       return;
     }
+    const reqId = ++kbSuggestReqIdRef.current;
+    const targetCaseId = item.id;
     setKbSuggesting(true);
     setKbSuggestionError(null);
     setKbSuggestion(null);
     try {
       const res = isSmartTicket
-        ? await lookupService.suggestSmartTicketClosure({ caseId: item.id })
+        ? await lookupService.suggestSmartTicketClosure({ caseId: targetCaseId })
         : await lookupService.suggestSmartTicketClosure({
             companyId: item.companyId,
             description: item.description,
             resolution: resolutionNote.trim(),
           });
+      // Stale response guard — case değişti veya yeni request başlatıldı.
+      if (reqId !== kbSuggestReqIdRef.current || item.id !== targetCaseId) {
+        return;
+      }
       if (!res) {
         setKbSuggestionError('Öneri alınamadı.');
         return;
@@ -270,15 +294,28 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
       // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
       if (isSmartTicket) {
         const s = res.suggestions;
-        if (s.rootCauseGroup && !closureRcg) setClosureRcg(s.rootCauseGroup.code);
+        if (s.rootCauseGroup && !closureRcg) {
+          // Codex P2 (PR #469 review) — RCG değişimi useEffect'te
+          // detail'i sıfırlıyor; pre-fill sırasında detail'i ezmemek
+          // için suppress ref kullanılır. Detail önerisi varsa bayrak
+          // set edilir, useEffect tek seferlik reset'i atlar.
+          if (s.rootCauseDetail) {
+            closureRcdResetSuppressRef.current = true;
+          }
+          setClosureRcg(s.rootCauseGroup.code);
+        }
         if (s.rootCauseDetail && !closureRcd) setClosureRcd(s.rootCauseDetail.code);
         if (s.resolutionType && !closureRt) setClosureRt(s.resolutionType.code);
         if (s.permanentPrevention && !closurePp) setClosurePp(s.permanentPrevention.code);
       }
     } catch (e) {
-      setKbSuggestionError((e as Error)?.message ?? 'Öneri alınamadı.');
+      if (reqId === kbSuggestReqIdRef.current && item.id === targetCaseId) {
+        setKbSuggestionError((e as Error)?.message ?? 'Öneri alınamadı.');
+      }
     } finally {
-      setKbSuggesting(false);
+      if (reqId === kbSuggestReqIdRef.current) {
+        setKbSuggesting(false);
+      }
     }
   }
 
