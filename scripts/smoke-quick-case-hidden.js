@@ -68,12 +68,26 @@ if (
 }
 
 // 5) pendingQuickPrefill effect flag kontrolü.
+//    Yeni davranış (Codex P1 fix): flag false iken silent ignore YOK,
+//    NewCaseForm prefill yolu var. Effect içinde quickCaseEnabled koşulu
+//    + else branch'inde setNewPrefillAccountId + setNewOpen aranır.
 if (
-  /pendingQuickPrefill\s*&&\s*featureFlags\.quickCaseEnabled/.test(cases)
+  /featureFlags\.quickCaseEnabled[\s\S]{0,200}?setQuickOpen\(true\)[\s\S]{0,300}?setNewPrefillAccountId[\s\S]{0,100}?setNewOpen\(true\)/.test(cases)
 ) {
-  ok('5) pendingQuickPrefill effect flag-gated');
+  ok('5) pendingQuickPrefill effect — flag açık → Quick / kapalı → NewCaseForm');
 } else {
-  bad('5) pendingQuickPrefill flag gate eksik');
+  bad('5) pendingQuickPrefill iki yol pattern eksik');
+}
+
+// 5b) Codex P1 (PR #452) — Customer Search "yeni vaka aç" CTA sessizce
+//     yutulmuyor. Flag false durumunda NewCaseForm açılır.
+if (
+  /setNewPrefillAccountId\(pendingQuickPrefill\)/.test(cases) &&
+  /initialContext=\{[\s\S]{0,200}?newPrefillAccountId/.test(cases)
+) {
+  ok('5b) Codex P1 fix — NewCaseForm initialContext accountId prefill akışı');
+} else {
+  bad('5b) Codex P1 fix prefill akışı eksik');
 }
 
 // 6) QuickCaseModal dosyası SİLİNMEDİ (kod intact, geri açılabilir).
@@ -94,6 +108,16 @@ if (/import\s*\{\s*QuickCaseModal\s*\}/.test(cases)) {
   ok('7) QuickCaseModal import korundu (flag açılırsa render eder)');
 } else {
   bad('7) QuickCaseModal import kaldırılmış');
+}
+
+// 8) Akıllı Ticket buton RUNA AI brand gradient (violet → fuchsia).
+if (
+  /Akıllı Ticket akışıyla vaka aç \(RUNA AI\)/.test(cases) &&
+  /from-violet-600\s+to-fuchsia-600/.test(cases)
+) {
+  ok('8) Akıllı Ticket buton RUNA AI violet→fuchsia gradient');
+} else {
+  bad('8) Akıllı Ticket buton renk override eksik');
 }
 
 console.log('');
