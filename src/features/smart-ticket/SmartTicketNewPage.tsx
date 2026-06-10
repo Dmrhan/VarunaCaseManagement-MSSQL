@@ -3,13 +3,21 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Box,
   Check,
   CornerUpLeft,
   ExternalLink,
+  Flame,
+  Layers,
   Loader2,
+  Settings2,
+  Shield,
   Sparkles,
+  Target,
   Users2,
   Wand2,
+  Workflow,
+  Wrench,
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -73,16 +81,20 @@ import { KbDraftCard } from '@/features/cases/KbDraftCard';
 
 type Stage = 'opening' | 'solution' | 'closure' | 'transfer';
 
+// Madde 3 — UI polish. Her taxonomy alanına anlamlı bir lucide ikonu
+// eklendi; Field label'inin yanında küçük rozet olarak render edilir.
+// Renk paleti değişmedi; sadece görsel okunabilirlik.
 const TAXONOMY_FIELDS: Array<{
   key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact';
   label: string;
   hint?: string;
+  Icon: typeof Layers;
 }> = [
-  { key: 'platform',        label: 'Platform' },
-  { key: 'businessProcess', label: 'İş Süreci' },
-  { key: 'operationType',   label: 'İşlem Tipi' },
-  { key: 'affectedObject',  label: 'Etkilenen Nesne' },
-  { key: 'impact',          label: 'Etki' },
+  { key: 'platform',        label: 'Platform',         Icon: Layers },
+  { key: 'businessProcess', label: 'İş Süreci',        Icon: Workflow },
+  { key: 'operationType',   label: 'İşlem Tipi',       Icon: Settings2 },
+  { key: 'affectedObject',  label: 'Etkilenen Nesne',  Icon: Box },
+  { key: 'impact',          label: 'Etki',             Icon: Flame },
 ];
 
 interface SmartTicketProjectOption {
@@ -1207,10 +1219,16 @@ export function SmartTicketNewPage({
                     const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
                     const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
                     const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
+                    const Icon = f.Icon;
                     return (
                       <Field
                         key={f.key}
-                        label={f.label}
+                        label={
+                          <span className="inline-flex items-center gap-1.5">
+                            <Icon size={11} className="text-brand-500" />
+                            {f.label}
+                          </span>
+                        }
                         hint={
                           isFromSuggestion && suggested
                             ? `KB önerisi (${suggested.matchedBy}, %${Math.round(suggested.confidence * 100)})`
@@ -1465,7 +1483,7 @@ function Stage2Solution({
             <Button leftIcon={<Check size={12} />} onClick={onGoToClosure}>
               Kapanışa Geç
             </Button>
-            <Button variant="outline" onClick={onGoToTransfer}>
+            <Button variant="outline" leftIcon={<ArrowRight size={12} />} onClick={onGoToTransfer}>
               L2'ye Devret
             </Button>
             <Button variant="ghost" leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
@@ -1629,7 +1647,14 @@ function Stage3Closure({
           </div>
         )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="Kök Neden Grubu">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Target size={11} className="text-rose-500" />
+                Kök Neden Grubu
+              </span>
+            }
+          >
             <Select
               value={closure.rootCauseGroup}
               onChange={(e) => setClosure((c) => ({ ...c, rootCauseGroup: e.target.value }))}
@@ -1644,7 +1669,12 @@ function Stage3Closure({
             </Select>
           </Field>
           <Field
-            label="Kök Neden Detayı"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Target size={11} className="text-rose-500" />
+                Kök Neden Detayı
+              </span>
+            }
             hint={
               closure.rootCauseGroup && closureLists.rcdList.length === 0
                 ? 'Bu grubun detay satırı yok.'
@@ -1664,7 +1694,14 @@ function Stage3Closure({
               ))}
             </Select>
           </Field>
-          <Field label="Çözüm Tipi">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Wrench size={11} className="text-emerald-500" />
+                Çözüm Tipi
+              </span>
+            }
+          >
             <Select
               value={closure.resolutionType}
               onChange={(e) => setClosure((c) => ({ ...c, resolutionType: e.target.value }))}
@@ -1678,7 +1715,14 @@ function Stage3Closure({
               ))}
             </Select>
           </Field>
-          <Field label="Kalıcı Önlem">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Shield size={11} className="text-amber-500" />
+                Kalıcı Önlem
+              </span>
+            }
+          >
             <Select
               value={closure.permanentPrevention}
               onChange={(e) => setClosure((c) => ({ ...c, permanentPrevention: e.target.value }))}
@@ -1696,7 +1740,15 @@ function Stage3Closure({
         {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
             Sadece customFields.smartTicket.aiDrafts varsa render. */}
         <KbDraftCard item={createdCase} variant="closure" />
-        <Field label="Çözüm Açıklaması" required>
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={11} className="text-emerald-500" />
+              Çözüm Açıklaması
+            </span>
+          }
+          required
+        >
           <TextArea
             rows={4}
             value={closure.resolutionNote}
@@ -1863,7 +1915,12 @@ function Stage3Transfer({
         {/* Hedef takım + kişi */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field
-            label="Hedef Takım"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Users2 size={11} className="text-brand-500" />
+                Hedef Takım
+              </span>
+            }
             required
             hint={
               teamOptions.l2.length === 1
@@ -1903,7 +1960,12 @@ function Stage3Transfer({
             </Select>
           </Field>
           <Field
-            label="Hedef Kişi"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Users2 size={11} className="text-slate-500" />
+                Hedef Kişi
+              </span>
+            }
             hint={
               !transferToTeamId
                 ? 'Önce takım seç.'
