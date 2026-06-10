@@ -438,18 +438,27 @@ export function SmartTicketNewPage({
   }
 
   // PR-6 — Proje filter: name veya code substring (case-insensitive,
-  // Türkçe lowercase). Filter boşsa tüm projeler döner. Seçili
-  // proje filter dışına düşse bile listede tutulur (visual continuity).
+  // Filter boşsa tüm projeler döner. Seçili proje filter dışına düşse
+  // bile listede tutulur (visual continuity).
+  //
+  // Codex P2 (PR #467 review) — Proje kodu (ASCII identifier, örn.
+  // "INV-2026" / "IK-1") için locale-NEUTRAL lowercase. tr-TR
+  // toLocaleLowerCase 'I' → 'ı' (dotless) yapar; kullanıcı 'inv'
+  // yazınca query 'inv' (dotted) kalır ve match etmez. Code için
+  // ASCII toLowerCase; name için Türkçe karakter desteği (ş/ç/ğ/ö/ü/ı)
+  // gerektiği için tr-TR korunur. Query iki yola normalize edilir:
+  // qNeutral (code karşılaştırması) + qTr (name karşılaştırması).
   const filteredProjects = useMemo(() => {
-    const q = projectFilter.trim().toLocaleLowerCase('tr-TR');
-    if (!q) return projects;
+    const raw = projectFilter.trim();
+    if (!raw) return projects;
+    const qNeutral = raw.toLowerCase();
+    const qTr = raw.toLocaleLowerCase('tr-TR');
     return projects.filter((p) => {
-      const name = (p.name || '').toLocaleLowerCase('tr-TR');
-      const code = (p.code || '').toLocaleLowerCase('tr-TR');
-      // Seçili olan da görünür kalsın (kullanıcı filter yazarken seçimi
-      // dropdown'da görmek ister).
+      // Seçili olan görünür kalsın.
       if (form.accountProjectId === p.id) return true;
-      return name.includes(q) || code.includes(q);
+      const name = (p.name || '').toLocaleLowerCase('tr-TR');
+      const code = (p.code || '').toLowerCase();
+      return name.includes(qTr) || code.includes(qNeutral);
     });
   }, [projects, projectFilter, form.accountProjectId]);
 

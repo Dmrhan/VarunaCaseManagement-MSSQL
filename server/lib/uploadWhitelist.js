@@ -73,9 +73,15 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
 ];
 
 /**
- * mimeType veya fileName (uzantı) listede varsa true.
- * mimeType boş/yoksa yalnız uzantı kontrolü; uzantı boş/yoksa yalnız
- * mimeType kontrolü. İkisi de boş ise reject (false).
+ * Codex P2 (PR #468 review) — sıkı kural: MIME ve uzantı ikisi de
+ * varsa İKİSİ DE kabul listesinde olmalı. Aksi halde forge edilebilir
+ * pattern (örn. `malware.exe` + `application/pdf`) bypass yapardı.
+ *
+ *   - Sadece MIME var (uzantı yok) → MIME listede ise kabul
+ *   - Sadece uzantı var (MIME yok/bilinmeyen) → uzantı listede ise kabul
+ *     (tarayıcı tutarsızlığına tolerant; örn. Safari xlsx için boş MIME)
+ *   - İkisi de var → ikisi de listede olmalı
+ *   - İkisi de yok → reject
  */
 export function isAcceptedUpload(mimeType, fileName) {
   const mime = typeof mimeType === 'string' ? mimeType.trim().toLowerCase() : '';
@@ -83,9 +89,16 @@ export function isAcceptedUpload(mimeType, fileName) {
   const dotIdx = name.lastIndexOf('.');
   const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
 
-  const mimeOk = mime ? UPLOAD_ALLOWED_MIME_TYPES.includes(mime) : false;
-  const extOk = ext ? UPLOAD_ALLOWED_EXTENSIONS.includes(ext) : false;
+  const hasMime = mime.length > 0;
+  const hasExt = ext.length > 0;
+  const mimeOk = hasMime && UPLOAD_ALLOWED_MIME_TYPES.includes(mime);
+  const extOk = hasExt && UPLOAD_ALLOWED_EXTENSIONS.includes(ext);
 
-  // En az biri kabul listesinde ise OK (tarayıcı tutarsızlığına karşı).
-  return mimeOk || extOk;
+  if (hasMime && hasExt) {
+    // İkisi de sağlandıysa ikisi de listede olmalı (forge önleme).
+    return mimeOk && extOk;
+  }
+  if (hasMime) return mimeOk;
+  if (hasExt) return extOk;
+  return false;
 }
