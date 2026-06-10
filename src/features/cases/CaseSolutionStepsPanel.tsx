@@ -265,6 +265,17 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
   const hasSteps = steps.length > 0;
   const showLoader = loading && !hasSteps;
 
+  // Madde 3 — Header outcome progress bar. Renkler mevcut step status
+  // tint paleti ile aynı: worked=emerald, not_worked=rose, skipped=slate,
+  // pending=amber. Tek satır oranlı bar, üzerinde sayım rozetleri.
+  const outcomeCounts = {
+    worked: steps.filter((s) => s.status === 'worked').length,
+    not_worked: steps.filter((s) => s.status === 'not_worked').length,
+    skipped: steps.filter((s) => s.status === 'skipped').length,
+    pending: steps.filter((s) => s.status === 'suggested' || s.status === 'tried').length,
+  };
+  const total = steps.length;
+
   return (
     <div className="space-y-3">
       <L1TransferSummaryCard item={item} />
@@ -301,6 +312,64 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
             </Button>
           </div>
         </div>
+
+        {/* Madde 3 — Outcome progress bar (yalnız step varsa). Tek satırda
+            oranlı renkli segment'ler; üzerinde sayım rozetleri. */}
+        {total > 0 && (
+          <div className="mb-3">
+            <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-slate-500 dark:text-ndark-muted">
+                {total} adım
+              </span>
+              {outcomeCounts.worked > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  <Check size={9} /> {outcomeCounts.worked}
+                </span>
+              )}
+              {outcomeCounts.not_worked > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-1.5 py-0 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                  <X size={9} /> {outcomeCounts.not_worked}
+                </span>
+              )}
+              {outcomeCounts.skipped > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0 text-slate-600 dark:bg-ndark-card dark:text-ndark-muted">
+                  ↷ {outcomeCounts.skipped}
+                </span>
+              )}
+              {outcomeCounts.pending > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                  · {outcomeCounts.pending}
+                </span>
+              )}
+            </div>
+            <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-ndark-bg/40">
+              {outcomeCounts.worked > 0 && (
+                <span
+                  className="block bg-emerald-500"
+                  style={{ width: `${(outcomeCounts.worked / total) * 100}%` }}
+                />
+              )}
+              {outcomeCounts.not_worked > 0 && (
+                <span
+                  className="block bg-rose-500"
+                  style={{ width: `${(outcomeCounts.not_worked / total) * 100}%` }}
+                />
+              )}
+              {outcomeCounts.skipped > 0 && (
+                <span
+                  className="block bg-slate-400"
+                  style={{ width: `${(outcomeCounts.skipped / total) * 100}%` }}
+                />
+              )}
+              {outcomeCounts.pending > 0 && (
+                <span
+                  className="block bg-amber-400"
+                  style={{ width: `${(outcomeCounts.pending / total) * 100}%` }}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Manuel adım inline form */}
         {manualOpen && (
