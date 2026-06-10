@@ -437,6 +437,10 @@ router.post(
         // Stage 3 UI bunu doldurur; klasik TransferModal göndermez ve
         // backend ignore eder.
         smartTicketTransfer: body.smartTicketTransfer,
+        // Madde 4 — opsiyonel priority değişimi. Verilirse transferCase
+        // mevcut Case.priority'yi karşılaştırır; değişiyorsa transaction
+        // içinde update + ayrı FieldUpdate activity row.
+        priority: body.priority,
       },
       req.user.allowedCompanyIds,
     );
