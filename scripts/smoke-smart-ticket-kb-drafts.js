@@ -307,6 +307,33 @@ if (/extractAiDrafts\(analyzeResponse\)[\s\S]{0,300}?persistSmartTicketAiDrafts/
   bad('12) Route persist call eksik');
 }
 
+// 13) Codex P2 (main #459) — handleCreateAndContinue import sonrası
+//     caseService.get(created.id) ile createdCase yenileniyor. Aksi
+//     halde KbDraftCard stale customFields ile render eder ve
+//     persistSmartTicketAiDrafts'in yazdığı aiDrafts UI'a yansımaz.
+if (
+  /importAiSuggestedSolutionSteps\([\s\S]{0,400}?caseService\.get\(created\.id\)/.test(pageSrc) &&
+  /if\s*\(refreshed\)\s*setCreatedCase\(refreshed\)/.test(pageSrc)
+) {
+  ok('13) Codex P2 (main #459) — Stage 1→2 import sonrası createdCase fresh fetch');
+} else {
+  bad('13) Stage 1→2 fresh fetch eksik');
+}
+
+// 14) Aynı pattern Stage2DescriptionEditor submit'inde de uygulanmalı —
+//     "Kaydet ve Yeniden Sor" sonrası import aiDrafts persist eder,
+//     parent'a fresh case geçirmek için get çağrısı.
+const editorBlock = pageSrc.match(/function\s+Stage2DescriptionEditor[\s\S]+?\n\}\n/);
+if (
+  editorBlock &&
+  /caseService\.get\(updated\.id\)/.test(editorBlock[0]) &&
+  /onUpdated\(refreshed\s*\?\?\s*updated\)/.test(editorBlock[0])
+) {
+  ok('14) Stage2DescriptionEditor submit\'inde de fresh fetch (refreshed ?? updated)');
+} else {
+  bad('14) Editor submit fresh fetch eksik');
+}
+
 // ─── Cleanup ─────────────────────────────────────────────────────────
 
 if (!KEEP) {

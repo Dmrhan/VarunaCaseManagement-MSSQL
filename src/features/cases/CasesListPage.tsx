@@ -37,6 +37,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Popover } from '@/components/ui/Popover';
 import { cn } from '@/components/ui/cn';
 import { apiFetch, caseService, lookupService } from '@/services/caseService';
+import { accountService } from '@/services/accountService';
 import { analyticsService, type PatternAlert } from '@/services/analyticsService';
 import { useAuth, type UserRole } from '@/services/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -228,7 +229,18 @@ export function CasesListPage({
   // Codex P1 (PR #452 review) — Quick Case kapalıyken Customer Search
   // modal'ından gelen "yeni vaka aç" CTA'sını NewCaseForm'a yönlendir
   // (boş ekranda kalma fix). Quick Case açıkken pattern korunur.
-  const [newPrefillAccountId, setNewPrefillAccountId] = useState<string | null>(null);
+  //
+  // Codex P2 (main #459 review) — sadece accountId geçirmek yetmiyor:
+  // NewCaseForm account-only seed'te ilk company seçildiğinde account'u
+  // temizliyordu (accountCompanyIds yok → reconciliation fail). Account
+  // detayını fetch edip accountCompanyIds + accountName ile tam shape
+  // geçiyoruz.
+  const [newPrefill, setNewPrefill] = useState<{
+    accountId: string;
+    accountName?: string;
+    accountCompanyIds?: string[];
+    accountDirectCompanyId?: string | null;
+  } | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -260,22 +272,48 @@ export function CasesListPage({
 
   // App seviyesi pendingQuickPrefill geldiğinde:
   //   - Quick Case enable iken → QuickCaseModal'ı prefill ile aç (klasik akış)
-  //   - Quick Case disabled iken → NewCaseForm'u prefill ile aç (Codex P1 fix)
+  //   - Quick Case disabled iken → NewCaseForm'u TAM initialContext ile aç
+  //     (Codex P1 #452 + Codex P2 #459 review fix)
   //
-  // Eski impl Quick Case disabled iken prefill'i sessiz ignore ediyordu →
-  // Customer Search'ten gelen "yeni vaka aç" CTA boş ekranda kalıyordu.
-  // Customer Search modal'ındaki CTA'yı kaldırmak yerine alternatif akışa
-  // route ediyoruz — kullanıcı için sürtüşmesiz, kod intact.
+  // Account detayı fetch edilir; accountCompanyIds + accountName seed
+  // edildikten sonra modal açılır. Bu sayede NewCaseForm'un company
+  // seçimi reconciliation logic'i account'u korur (eski impl: yalnız
+  // accountId → ilk company seçiminde account temizleniyordu).
+  // Fetch fail ederse fallback: yalnız accountId ile aç (eski davranış).
   useEffect(() => {
     if (!pendingQuickPrefill) return;
+    const accountId = pendingQuickPrefill;
     if (featureFlags.quickCaseEnabled) {
-      setQuickPrefillAccount(pendingQuickPrefill);
+      setQuickPrefillAccount(accountId);
       setQuickOpen(true);
-    } else {
-      setNewPrefillAccountId(pendingQuickPrefill);
-      setNewOpen(true);
+      onQuickPrefillConsumed?.();
+      return;
     }
-    onQuickPrefillConsumed?.();
+    let alive = true;
+    void accountService.get(accountId).then((acc) => {
+      if (!alive) return;
+      const companyIds = (acc?.companies ?? [])
+        .map((c) => c.companyId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      setNewPrefill({
+        accountId,
+        accountName: acc?.name,
+        accountCompanyIds: companyIds,
+        accountDirectCompanyId: null,
+      });
+      setNewOpen(true);
+      onQuickPrefillConsumed?.();
+    }).catch(() => {
+      if (!alive) return;
+      // Fallback: account fetch fail → en azından accountId seed et,
+      // company seçimi reconciliation modunu tetikleyebilir.
+      setNewPrefill({ accountId });
+      setNewOpen(true);
+      onQuickPrefillConsumed?.();
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuickPrefill]);
 
@@ -1423,11 +1461,11 @@ export function CasesListPage({
         open={newOpen}
         onClose={() => {
           setNewOpen(false);
-          setNewPrefillAccountId(null);
+          setNewPrefill(null);
         }}
         onCreated={(c) => {
           setNewOpen(false);
-          setNewPrefillAccountId(null);
+          setNewPrefill(null);
           void load();
           onSelectCase(c.id);
           toast({
@@ -1438,12 +1476,10 @@ export function CasesListPage({
         }}
         onShowExisting={(id) => {
           setNewOpen(false);
-          setNewPrefillAccountId(null);
+          setNewPrefill(null);
           onSelectCase(id);
         }}
-        initialContext={
-          newPrefillAccountId ? { accountId: newPrefillAccountId } : undefined
-        }
+        initialContext={newPrefill ?? undefined}
       />
 
       <QuickCaseModal
