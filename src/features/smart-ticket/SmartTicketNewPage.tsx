@@ -10,6 +10,7 @@ import {
   Flame,
   Layers,
   Loader2,
+  PenLine,
   Settings2,
   Shield,
   Sparkles,
@@ -1458,12 +1459,24 @@ function Stage2Solution({
   onGoToTransfer: () => void;
   onGoToCaseDetail: () => void;
 }) {
-  // Çözüm Adımları paneli mevcut CaseSolutionStepsPanel — reuse.
-  // Panel kendi yarış kontrolünü (stale guard) item.id üzerinden yapıyor;
-  // burada item her zaman createdCase olduğundan ek bir guard gerekmez.
+  // User feedback (description-rerun): KB Stage 1'de yetersiz cevap
+  // verdiğinde kullanıcı açıklamayı genişletip yeniden sorabilmeli.
+  // Açıklama editor submit sonrası refreshKey artırılır → panel `key`
+  // prop'u ile remount → listSolutionSteps yeniden çağrılır, yeni AI
+  // önerileri (dedup ile) listede görünür.
+  const [refreshKey, setRefreshKey] = useState(0);
+
   return (
     <div className="space-y-3">
+      <Stage2DescriptionEditor
+        createdCase={createdCase}
+        onUpdated={(updated) => {
+          onCaseChanged(updated);
+          setRefreshKey((k) => k + 1);
+        }}
+      />
       <CaseSolutionStepsPanel
+        key={`${createdCase.id}:${refreshKey}`}
         item={createdCase}
         onChange={() => {
           // Panel local state'ini yönetiyor; biz Case object'i yenileyelim
@@ -2238,5 +2251,221 @@ function AccountOpenCasesPanel({
         </p>
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage2DescriptionEditor — KB cevabı yetersiz çıktığında açıklamayı
+// genişletip yeniden sorma akışı.
+//
+// Akış:
+//   1. Stage 2'ye girince collapsed render (açıklamanın özeti + Düzenle link).
+//   2. "Düzenle ve yeniden sor" → textarea expanded, mevcut açıklama prefilled.
+//   3. Submit "Kaydet ve Yeniden Sor":
+//      a) caseService.update(id, { description: newDesc }) — FieldUpdate
+//         activity backend tarafından yazılır.
+//      b) caseService.importAiSuggestedSolutionSteps(id, { freeText }) —
+//         yeni KB analyze, dedup ile yeni adımlar listeye eklenir.
+//      c) onUpdated callback caller'a yeni Case object'i geçirir;
+//         caller refreshKey artırır → CaseSolutionStepsPanel remount eder.
+//   4. Aynı açıklama submit edilirse boşa istek önlenir (info toast).
+//
+// Out of scope: backend taraftaki update + import path'i değişmez;
+// yalnız UI ek bir yol eklendi.
+// ─────────────────────────────────────────────────────────────────
+
+function Stage2DescriptionEditor({
+  createdCase,
+  onUpdated,
+}: {
+  createdCase: Case;
+  onUpdated: (updated: Case) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState(createdCase.description ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // createdCase değişince (örn. parent setCreatedCase) draft'ı senk et —
+  // ama yalnız collapsed iken; expanded iken kullanıcının edit'ini ezme.
+  useEffect(() => {
+    if (!expanded) setDraft(createdCase.description ?? '');
+  }, [createdCase.description, expanded]);
+
+  function handleOpen() {
+    setDraft(createdCase.description ?? '');
+    setError(null);
+    setExpanded(true);
+  }
+
+  function handleCancel() {
+    setExpanded(false);
+    setError(null);
+    setDraft(createdCase.description ?? '');
+  }
+
+  async function handleSubmit() {
+    if (submitting) return;
+    const trimmed = draft.trim();
+    if (trimmed.length < 5) {
+      setError('En az 5 karakter girin.');
+      return;
+    }
+    if (trimmed === (createdCase.description ?? '').trim()) {
+      toast({
+        type: 'info',
+        message: 'Açıklama değişmedi; yeniden sormaya gerek yok.',
+        duration: 2200,
+      });
+      setExpanded(false);
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updated = await caseService.update(createdCase.id, { description: trimmed });
+      if (!updated) {
+        setError('Açıklama güncellenemedi.');
+        return;
+      }
+      let importedCount = 0;
+      try {
+        const r = await caseService.importAiSuggestedSolutionSteps(updated.id, {
+          freeText: trimmed,
+        });
+        importedCount = r?.summary?.importedCount ?? 0;
+      } catch (importErr) {
+        // Açıklama güncellendi ama KB başarısız — kullanıcıya bildir,
+        // adımları manuel veya panel buton'u ile sonradan deneyebilir.
+        toast({
+          type: 'warn',
+          message: `Açıklama güncellendi ama AI önerileri alınamadı: ${(importErr as Error)?.message ?? ''}`,
+          duration: 4500,
+        });
+        onUpdated(updated);
+        setExpanded(false);
+        return;
+      }
+      onUpdated(updated);
+      setExpanded(false);
+      if (importedCount > 0) {
+        toast({
+          type: 'success',
+          message: `Açıklama güncellendi · ${importedCount} yeni AI önerisi eklendi.`,
+          duration: 3000,
+        });
+      } else {
+        toast({
+          type: 'info',
+          message: 'Açıklama güncellendi ama KB ek öneri vermedi. Açıklamayı daha da genişletmeyi dene.',
+          duration: 4000,
+        });
+      }
+    } catch (e) {
+      setError((e as Error)?.message ?? 'İşlem başarısız.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const preview =
+    (createdCase.description ?? '').slice(0, 110) +
+    ((createdCase.description?.length ?? 0) > 110 ? '…' : '');
+  const charCount = draft.trim().length;
+  const charTooShort = charCount > 0 && charCount < 5;
+  const noChange =
+    expanded && draft.trim() === (createdCase.description ?? '').trim();
+
+  return (
+    <Card>
+      <CardBody className="space-y-2">
+        {!expanded ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
+                <PenLine size={11} className="text-brand-500" />
+                Açıklama
+              </div>
+              <p className="mt-0.5 truncate text-xs text-slate-700 dark:text-ndark-text" title={createdCase.description ?? ''}>
+                {preview || '—'}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                AI önerisi yetersiz mi? Açıklamayı genişlet, KB'ye yeniden sor.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Wand2 size={11} />}
+              onClick={handleOpen}
+            >
+              Düzenle ve yeniden sor
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
+              <PenLine size={11} className="text-brand-500" />
+              Açıklamayı düzenle
+            </div>
+            <TextArea
+              autoFocus
+              rows={4}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="Sorunu daha detaylı anlat — KB daha iyi öneri verebilsin."
+              disabled={submitting}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                {charCount} karakter
+                {charTooShort && ' · en az 5'}
+                {noChange && ' · değişiklik yok'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCancel}
+                  disabled={submitting}
+                >
+                  Vazgeç
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void handleSubmit()}
+                  disabled={submitting || charCount < 5}
+                  leftIcon={
+                    submitting ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Wand2 size={11} />
+                    )
+                  }
+                  title={
+                    charCount < 5
+                      ? 'En az 5 karakter girin'
+                      : noChange
+                        ? 'Açıklamayı değiştir veya Vazgeç'
+                        : 'Açıklamayı güncelle ve KB önerisini yenile'
+                  }
+                >
+                  {submitting ? 'Yeniden Soruluyor…' : 'Kaydet ve Yeniden Sor'}
+                </Button>
+              </div>
+            </div>
+            {error && (
+              <p className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+                {error}
+              </p>
+            )}
+          </>
+        )}
+      </CardBody>
+    </Card>
   );
 }
