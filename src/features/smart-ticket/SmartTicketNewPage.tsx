@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Box,
   Check,
   CornerUpLeft,
   ExternalLink,
+  Flame,
+  Layers,
   Loader2,
+  PenLine,
+  Settings2,
+  Shield,
   Sparkles,
+  Target,
   Users2,
   Wand2,
+  Workflow,
+  Wrench,
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -28,9 +38,13 @@ import {
   type SuggestClassificationField,
 } from '@/services/caseService';
 import { accountService, type AccountListItem } from '@/services/accountService';
-import type { Case } from '@/features/cases/types';
+import type { Case, CasePriority } from '@/features/cases/types';
+import { CASE_PRIORITIES, CASE_PRIORITY_LABELS } from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { formatRelative } from '@/lib/format';
+import { KbDraftCard } from '@/features/cases/KbDraftCard';
 
 /**
  * WR-Smart-Ticket Primary UX — One-Screen 3-Stage L1 Flow.
@@ -68,16 +82,20 @@ import { resolveSmartTicketMapping } from './mapping';
 
 type Stage = 'opening' | 'solution' | 'closure' | 'transfer';
 
+// Madde 3 — UI polish. Her taxonomy alanına anlamlı bir lucide ikonu
+// eklendi; Field label'inin yanında küçük rozet olarak render edilir.
+// Renk paleti değişmedi; sadece görsel okunabilirlik.
 const TAXONOMY_FIELDS: Array<{
   key: 'platform' | 'businessProcess' | 'operationType' | 'affectedObject' | 'impact';
   label: string;
   hint?: string;
+  Icon: typeof Layers;
 }> = [
-  { key: 'platform',        label: 'Platform' },
-  { key: 'businessProcess', label: 'İş Süreci' },
-  { key: 'operationType',   label: 'İşlem Tipi' },
-  { key: 'affectedObject',  label: 'Etkilenen Nesne' },
-  { key: 'impact',          label: 'Etki' },
+  { key: 'platform',        label: 'Platform',         Icon: Layers },
+  { key: 'businessProcess', label: 'İş Süreci',        Icon: Workflow },
+  { key: 'operationType',   label: 'İşlem Tipi',       Icon: Settings2 },
+  { key: 'affectedObject',  label: 'Etkilenen Nesne',  Icon: Box },
+  { key: 'impact',          label: 'Etki',             Icon: Flame },
 ];
 
 interface SmartTicketProjectOption {
@@ -134,6 +152,7 @@ const emptyClosure = (): ClosureFormState => ({
 export function SmartTicketNewPage({
   onCreated,
   onCancel,
+  onOpenExistingCase,
 }: {
   /**
    * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
@@ -142,6 +161,13 @@ export function SmartTicketNewPage({
    */
   onCreated: (caseId: string) => void;
   onCancel: () => void;
+  /**
+   * Müşteri açık vakalar paneli — kullanıcı listeden bir vakaya tıklayınca
+   * caller Cases List'e geçirir (mevcut Smart Ticket akışı abandone
+   * edilir; bu kasıtlı: kullanıcı mükerrer açmaktan vazgeçti).
+   * Verilmezse satırlar bilgi amaçlı, tıklatılabilir değil.
+   */
+  onOpenExistingCase?: (caseId: string) => void;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
@@ -162,6 +188,16 @@ export function SmartTicketNewPage({
 
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [projects, setProjects] = useState<SmartTicketProjectOption[]>([]);
+
+  // Madde 1 — Müşteri seçildiğinde o müşterinin açık vakalarını panel
+  // olarak göster. Mükerrer ticket önleme + L1 ajan başkası işliyor mu
+  // görsün. Mevcut endpoint reuse: caseService.findByAccount.
+  // Klasik akışı bozmuyor — yalnız Smart Ticket Stage 1 paneli.
+  const [accountOpenCases, setAccountOpenCases] = useState<Case[]>([]);
+  const [accountOpenCasesLoading, setAccountOpenCasesLoading] = useState(false);
+  const [accountOpenCasesError, setAccountOpenCasesError] = useState<string | null>(null);
+  const accountOpenCasesReqIdRef = useRef(0);
+  const accountOpenCasesAccountIdRef = useRef<string>('');
 
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,6 +237,8 @@ export function SmartTicketNewPage({
   const [transferBriefError, setTransferBriefError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  // Madde 4 — opsiyonel priority değişimi. Default mevcut Case.priority.
+  const [transferPriority, setTransferPriority] = useState<CasePriority>('Medium');
   // Composer'ın kullanıcı tarafından düzenlenip düzenlenmediğini izle.
   // Auto-fetch user override'ı ezmesin diye flag tutuluyor.
   const transferSummaryDirtyRef = useRef(false);
@@ -260,6 +298,52 @@ export function SmartTicketNewPage({
       alive = false;
     };
   }, [form.accountId, form.companyId]);
+
+  // Madde 1 — Müşteri seçilince o müşterinin açık vakalarını çek.
+  // Stale guard: accountId değişince eski response uygulanmaz.
+  // findByAccount tüm vakaları döner; client-side "open" filtresi (Çözüldü
+  // ve İptalEdildi hariç) — CustomerCardModal'daki aynı pattern.
+  useEffect(() => {
+    if (!form.accountId) {
+      accountOpenCasesAccountIdRef.current = '';
+      setAccountOpenCases([]);
+      setAccountOpenCasesError(null);
+      setAccountOpenCasesLoading(false);
+      return;
+    }
+    const reqId = ++accountOpenCasesReqIdRef.current;
+    const targetAccountId = form.accountId;
+    accountOpenCasesAccountIdRef.current = targetAccountId;
+    setAccountOpenCasesLoading(true);
+    setAccountOpenCasesError(null);
+    void caseService
+      .findByAccount(targetAccountId, {
+        statusNotIn: ['Çözüldü', 'İptalEdildi'],
+      })
+      .then((list) => {
+        if (
+          reqId !== accountOpenCasesReqIdRef.current ||
+          accountOpenCasesAccountIdRef.current !== targetAccountId
+        ) {
+          return;
+        }
+        setAccountOpenCases(list ?? []);
+      })
+      .catch((e: unknown) => {
+        if (
+          reqId !== accountOpenCasesReqIdRef.current ||
+          accountOpenCasesAccountIdRef.current !== targetAccountId
+        ) {
+          return;
+        }
+        setAccountOpenCasesError((e as Error)?.message ?? 'Açık vakalar yüklenemedi.');
+      })
+      .finally(() => {
+        if (reqId === accountOpenCasesReqIdRef.current) {
+          setAccountOpenCasesLoading(false);
+        }
+      });
+  }, [form.accountId]);
 
   // Şirket değişince müşteri/proje + Smart Ticket taxonomy seçimlerini sıfırla.
   // Sadece Stage 1'de geçerli — Case create sonrası şirket değişmez.
@@ -756,6 +840,9 @@ export function SmartTicketNewPage({
   useEffect(() => {
     if (stage !== 'transfer' || !createdCase) return;
     void handleFetchTransferBrief();
+    // Madde 4 — Stage 3 transfer'e girince priority select'i mevcut
+    // Case.priority ile sync et (default fallback Medium).
+    setTransferPriority(createdCase.priority ?? 'Medium');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdCase?.id]);
 
@@ -812,6 +899,11 @@ export function SmartTicketNewPage({
     setTransferError(null);
     try {
       const summary = transferComposedSummary.trim();
+      // Madde 4 — mevcut Case.priority ile transferPriority aynıysa
+      // backend zaten no-op yapıyor; yine de payload'a yalnız değişim
+      // varsa ekle (network payload temiz, backend FieldUpdate row'u
+      // duplicate yazmaz).
+      const priorityChanged = transferPriority !== createdCase.priority;
       const updated = await caseService.transferCase(createdCase.id, {
         toTeamId: transferToTeamId,
         toPersonId: transferToPersonId || undefined,
@@ -823,6 +915,7 @@ export function SmartTicketNewPage({
           attemptedStepIds: transferAttemptedStepIds,
           ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
         },
+        ...(priorityChanged ? { priority: transferPriority } : {}),
       });
       if (!updated) {
         setTransferError('Vaka aktarılamadı.');
@@ -1010,6 +1103,17 @@ export function SmartTicketNewPage({
                   <Users2 size={14} className="text-slate-400" />
                 </button>
               </Field>
+
+              {/* Madde 1 — Müşteri açık vakalar paneli (mükerrer önleme).
+                  Yalnız form.accountId set olunca koşullu render. */}
+              {form.accountId && (
+                <AccountOpenCasesPanel
+                  loading={accountOpenCasesLoading}
+                  error={accountOpenCasesError}
+                  cases={accountOpenCases}
+                  onOpenCase={onOpenExistingCase}
+                />
+              )}
               {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
                 <Field
                   label="Proje"
@@ -1116,10 +1220,16 @@ export function SmartTicketNewPage({
                     const items = (taxonomies?.[f.key] ?? []) as SmartTicketTaxonomyItem[];
                     const isFromSuggestion = appliedSuggestionFields.has(f.key as SuggestClassificationField);
                     const suggested = suggestion?.suggestions?.[f.key as SuggestClassificationField];
+                    const Icon = f.Icon;
                     return (
                       <Field
                         key={f.key}
-                        label={f.label}
+                        label={
+                          <span className="inline-flex items-center gap-1.5">
+                            <Icon size={11} className="text-brand-500" />
+                            {f.label}
+                          </span>
+                        }
                         hint={
                           isFromSuggestion && suggested
                             ? `KB önerisi (${suggested.matchedBy}, %${Math.round(suggested.confidence * 100)})`
@@ -1184,6 +1294,7 @@ export function SmartTicketNewPage({
 
           {stage === 'closure' && createdCase && (
             <Stage3Closure
+              createdCase={createdCase}
               closure={closure}
               setClosure={setClosure}
               closureLists={closureLists}
@@ -1218,6 +1329,7 @@ export function SmartTicketNewPage({
               transferBriefError={transferBriefError}
               transferring={transferring}
               transferError={transferError}
+              transferPriority={transferPriority}
               onChangeTeam={(id) => setTransferToTeamId(id)}
               onChangePerson={(id) => setTransferToPersonId(id)}
               onChangeNote={(v) => {
@@ -1228,6 +1340,7 @@ export function SmartTicketNewPage({
                 transferSummaryDirtyRef.current = true;
                 setTransferComposedSummary(v);
               }}
+              onChangePriority={(p) => setTransferPriority(p)}
               onRefreshBrief={() => {
                 transferSummaryDirtyRef.current = false;
                 void handleFetchTransferBrief();
@@ -1346,12 +1459,24 @@ function Stage2Solution({
   onGoToTransfer: () => void;
   onGoToCaseDetail: () => void;
 }) {
-  // Çözüm Adımları paneli mevcut CaseSolutionStepsPanel — reuse.
-  // Panel kendi yarış kontrolünü (stale guard) item.id üzerinden yapıyor;
-  // burada item her zaman createdCase olduğundan ek bir guard gerekmez.
+  // User feedback (description-rerun): KB Stage 1'de yetersiz cevap
+  // verdiğinde kullanıcı açıklamayı genişletip yeniden sorabilmeli.
+  // Açıklama editor submit sonrası refreshKey artırılır → panel `key`
+  // prop'u ile remount → listSolutionSteps yeniden çağrılır, yeni AI
+  // önerileri (dedup ile) listede görünür.
+  const [refreshKey, setRefreshKey] = useState(0);
+
   return (
     <div className="space-y-3">
+      <Stage2DescriptionEditor
+        createdCase={createdCase}
+        onUpdated={(updated) => {
+          onCaseChanged(updated);
+          setRefreshKey((k) => k + 1);
+        }}
+      />
       <CaseSolutionStepsPanel
+        key={`${createdCase.id}:${refreshKey}`}
         item={createdCase}
         onChange={() => {
           // Panel local state'ini yönetiyor; biz Case object'i yenileyelim
@@ -1371,7 +1496,7 @@ function Stage2Solution({
             <Button leftIcon={<Check size={12} />} onClick={onGoToClosure}>
               Kapanışa Geç
             </Button>
-            <Button variant="outline" onClick={onGoToTransfer}>
+            <Button variant="outline" leftIcon={<ArrowRight size={12} />} onClick={onGoToTransfer}>
               L2'ye Devret
             </Button>
             <Button variant="ghost" leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
@@ -1396,6 +1521,7 @@ interface ClosureListsRef {
 }
 
 function Stage3Closure({
+  createdCase,
   closure,
   setClosure,
   closureLists,
@@ -1411,6 +1537,7 @@ function Stage3Closure({
   onBack,
   onGoToCaseDetail,
 }: {
+  createdCase: Case;
   closure: ClosureFormState;
   setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
   closureLists: ClosureListsRef;
@@ -1533,7 +1660,14 @@ function Stage3Closure({
           </div>
         )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="Kök Neden Grubu">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Target size={11} className="text-rose-500" />
+                Kök Neden Grubu
+              </span>
+            }
+          >
             <Select
               value={closure.rootCauseGroup}
               onChange={(e) => setClosure((c) => ({ ...c, rootCauseGroup: e.target.value }))}
@@ -1548,7 +1682,12 @@ function Stage3Closure({
             </Select>
           </Field>
           <Field
-            label="Kök Neden Detayı"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Target size={11} className="text-rose-500" />
+                Kök Neden Detayı
+              </span>
+            }
             hint={
               closure.rootCauseGroup && closureLists.rcdList.length === 0
                 ? 'Bu grubun detay satırı yok.'
@@ -1568,7 +1707,14 @@ function Stage3Closure({
               ))}
             </Select>
           </Field>
-          <Field label="Çözüm Tipi">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Wrench size={11} className="text-emerald-500" />
+                Çözüm Tipi
+              </span>
+            }
+          >
             <Select
               value={closure.resolutionType}
               onChange={(e) => setClosure((c) => ({ ...c, resolutionType: e.target.value }))}
@@ -1582,7 +1728,14 @@ function Stage3Closure({
               ))}
             </Select>
           </Field>
-          <Field label="Kalıcı Önlem">
+          <Field
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Shield size={11} className="text-amber-500" />
+                Kalıcı Önlem
+              </span>
+            }
+          >
             <Select
               value={closure.permanentPrevention}
               onChange={(e) => setClosure((c) => ({ ...c, permanentPrevention: e.target.value }))}
@@ -1597,7 +1750,18 @@ function Stage3Closure({
             </Select>
           </Field>
         </div>
-        <Field label="Çözüm Açıklaması" required>
+        {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
+            Sadece customFields.smartTicket.aiDrafts varsa render. */}
+        <KbDraftCard item={createdCase} variant="closure" />
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={11} className="text-emerald-500" />
+              Çözüm Açıklaması
+            </span>
+          }
+          required
+        >
           <TextArea
             rows={4}
             value={closure.resolutionNote}
@@ -1666,10 +1830,12 @@ function Stage3Transfer({
   transferBriefError,
   transferring,
   transferError,
+  transferPriority,
   onChangeTeam,
   onChangePerson,
   onChangeNote,
   onChangeSummary,
+  onChangePriority,
   onRefreshBrief,
   onSubmit,
   onBack,
@@ -1687,10 +1853,12 @@ function Stage3Transfer({
   transferBriefError: string | null;
   transferring: boolean;
   transferError: string | null;
+  transferPriority: CasePriority;
   onChangeTeam: (id: string) => void;
   onChangePerson: (id: string) => void;
   onChangeNote: (v: string) => void;
   onChangeSummary: (v: string) => void;
+  onChangePriority: (p: CasePriority) => void;
   onRefreshBrief: () => void;
   onSubmit: () => void;
   onBack: () => void;
@@ -1760,7 +1928,12 @@ function Stage3Transfer({
         {/* Hedef takım + kişi */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field
-            label="Hedef Takım"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Users2 size={11} className="text-brand-500" />
+                Hedef Takım
+              </span>
+            }
             required
             hint={
               teamOptions.l2.length === 1
@@ -1800,7 +1973,12 @@ function Stage3Transfer({
             </Select>
           </Field>
           <Field
-            label="Hedef Kişi"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <Users2 size={11} className="text-slate-500" />
+                Hedef Kişi
+              </span>
+            }
             hint={
               !transferToTeamId
                 ? 'Önce takım seç.'
@@ -1825,6 +2003,34 @@ function Stage3Transfer({
             </Select>
           </Field>
         </div>
+
+        {/* Madde 4 — Devir sırasında opsiyonel priority değişimi.
+            Default: mevcut Case.priority. Değişmezse network'e gönderilmez
+            (no-op). SLA değiştirilmez. */}
+        <Field
+          label="Öncelik"
+          hint={
+            transferPriority !== createdCase.priority
+              ? `Mevcut: ${CASE_PRIORITY_LABELS[createdCase.priority]} → Yeni: ${CASE_PRIORITY_LABELS[transferPriority]}`
+              : 'Devir sırasında önceliği değiştirebilirsin. Klasik vakaların SLA\'sı değişmez.'
+          }
+        >
+          <Select
+            value={transferPriority}
+            onChange={(e) => onChangePriority(e.target.value as CasePriority)}
+            disabled={transferring}
+          >
+            {CASE_PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {CASE_PRIORITY_LABELS[p]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {/* Madde 2 — KB Teknik Devir Notu kartı (varsa). Müşteri yanıt
+            taslağı transfer akışında gizli (L1 → L2 devri için anlamsız). */}
+        <KbDraftCard item={createdCase} variant="transfer" />
 
         {/* Devir notu — zorunlu */}
         <Field
@@ -1927,6 +2133,338 @@ function Stage3Transfer({
             </Button>
           </div>
         </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Madde 1 — Müşteri seçildiğinde açık vakalar paneli.
+//
+// Amaç: Mükerrer ticket önleme. L1 ajan müşteri seçince O müşterinin
+// açık vakalarını + kim ilgileniyor + status'unu görür. Listeye
+// tıklanabilirse caller mevcut Smart Ticket akışını abandone edip
+// vakaya geçer (onOpenExistingCase callback verilmişse).
+//
+// Render politikası:
+//   - 0 açık vaka     → yeşil "Bu müşterinin açık vakası yok" bilgi
+//   - 1-5 vaka        → tümü liste
+//   - >5 vaka         → ilk 5 + "Tümü Vakalar'da" linki YOK (bu
+//                       PR'da skip — Cases List filter pre-fill yok;
+//                       caller'a yönlendirme şart)
+//   - SLA breach varsa header'da kırmızı uyarı rozeti
+// ─────────────────────────────────────────────────────────────────
+
+function AccountOpenCasesPanel({
+  loading,
+  error,
+  cases,
+  onOpenCase,
+}: {
+  loading: boolean;
+  error: string | null;
+  cases: Case[];
+  onOpenCase?: (caseId: string) => void;
+}) {
+  const breachCount = cases.filter((c) => c.slaViolation).length;
+  const display = cases.slice(0, 5);
+  const remaining = Math.max(0, cases.length - display.length);
+
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50/40 p-2.5 dark:border-amber-900/30 dark:bg-amber-950/20">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          {cases.length > 0 ? (
+            <AlertTriangle size={12} className="text-amber-600 dark:text-amber-400" />
+          ) : (
+            <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+          )}
+          <span className="text-[11px] font-medium text-slate-700 dark:text-ndark-text">
+            {loading
+              ? 'Açık vakalar kontrol ediliyor…'
+              : cases.length > 0
+                ? `Bu müşterinin ${cases.length} açık vakası var`
+                : 'Bu müşterinin açık vakası yok'}
+          </span>
+        </div>
+        {breachCount > 0 && (
+          <span className="rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+            {breachCount} SLA ihlal
+          </span>
+        )}
+      </div>
+
+      {error && !loading && (
+        <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          {error}
+        </p>
+      )}
+
+      {display.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {display.map((c) => {
+            const clickable = !!onOpenCase;
+            const row = (
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px]">
+                <span className="font-mono font-medium text-slate-700 dark:text-ndark-text">
+                  {c.caseNumber}
+                </span>
+                <StatusPill status={c.status} />
+                <span className="truncate text-slate-700 dark:text-ndark-text" title={c.title}>
+                  {c.title}
+                </span>
+                {c.assignedPersonName && (
+                  <span className="text-slate-500 dark:text-ndark-muted">
+                    · {c.assignedPersonName}
+                  </span>
+                )}
+                <span className="text-slate-400 dark:text-ndark-dim">
+                  · {formatRelative(c.createdAt)}
+                </span>
+              </div>
+            );
+            return (
+              <li key={c.id}>
+                {clickable ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenCase!(c.id)}
+                    className="w-full rounded-md border border-transparent bg-white/70 px-2 py-1 text-left hover:border-amber-300 hover:bg-white dark:bg-ndark-card/40 dark:hover:border-amber-700 dark:hover:bg-ndark-card"
+                    title="Bu vakaya geç (Akıllı Ticket akışı iptal olur)"
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <div className="rounded-md bg-white/70 px-2 py-1 dark:bg-ndark-card/40">
+                    {row}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {remaining > 0 && (
+        <p className="mt-1 text-[10px] text-slate-500 dark:text-ndark-muted">
+          + {remaining} daha · tümünü görmek için Vakalar listesini aç
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage2DescriptionEditor — KB cevabı yetersiz çıktığında açıklamayı
+// genişletip yeniden sorma akışı.
+//
+// Akış:
+//   1. Stage 2'ye girince collapsed render (açıklamanın özeti + Düzenle link).
+//   2. "Düzenle ve yeniden sor" → textarea expanded, mevcut açıklama prefilled.
+//   3. Submit "Kaydet ve Yeniden Sor":
+//      a) caseService.update(id, { description: newDesc }) — FieldUpdate
+//         activity backend tarafından yazılır.
+//      b) caseService.importAiSuggestedSolutionSteps(id, { freeText }) —
+//         yeni KB analyze, dedup ile yeni adımlar listeye eklenir.
+//      c) onUpdated callback caller'a yeni Case object'i geçirir;
+//         caller refreshKey artırır → CaseSolutionStepsPanel remount eder.
+//   4. Aynı açıklama submit edilirse boşa istek önlenir (info toast).
+//
+// Out of scope: backend taraftaki update + import path'i değişmez;
+// yalnız UI ek bir yol eklendi.
+// ─────────────────────────────────────────────────────────────────
+
+function Stage2DescriptionEditor({
+  createdCase,
+  onUpdated,
+}: {
+  createdCase: Case;
+  onUpdated: (updated: Case) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState(createdCase.description ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // createdCase değişince (örn. parent setCreatedCase) draft'ı senk et —
+  // ama yalnız collapsed iken; expanded iken kullanıcının edit'ini ezme.
+  useEffect(() => {
+    if (!expanded) setDraft(createdCase.description ?? '');
+  }, [createdCase.description, expanded]);
+
+  function handleOpen() {
+    setDraft(createdCase.description ?? '');
+    setError(null);
+    setExpanded(true);
+  }
+
+  function handleCancel() {
+    setExpanded(false);
+    setError(null);
+    setDraft(createdCase.description ?? '');
+  }
+
+  async function handleSubmit() {
+    if (submitting) return;
+    const trimmed = draft.trim();
+    if (trimmed.length < 5) {
+      setError('En az 5 karakter girin.');
+      return;
+    }
+    if (trimmed === (createdCase.description ?? '').trim()) {
+      toast({
+        type: 'info',
+        message: 'Açıklama değişmedi; yeniden sormaya gerek yok.',
+        duration: 2200,
+      });
+      setExpanded(false);
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updated = await caseService.update(createdCase.id, { description: trimmed });
+      if (!updated) {
+        setError('Açıklama güncellenemedi.');
+        return;
+      }
+      let importedCount = 0;
+      try {
+        const r = await caseService.importAiSuggestedSolutionSteps(updated.id, {
+          freeText: trimmed,
+        });
+        importedCount = r?.summary?.importedCount ?? 0;
+      } catch (importErr) {
+        // Açıklama güncellendi ama KB başarısız — kullanıcıya bildir,
+        // adımları manuel veya panel buton'u ile sonradan deneyebilir.
+        toast({
+          type: 'warn',
+          message: `Açıklama güncellendi ama AI önerileri alınamadı: ${(importErr as Error)?.message ?? ''}`,
+          duration: 4500,
+        });
+        onUpdated(updated);
+        setExpanded(false);
+        return;
+      }
+      onUpdated(updated);
+      setExpanded(false);
+      if (importedCount > 0) {
+        toast({
+          type: 'success',
+          message: `Açıklama güncellendi · ${importedCount} yeni AI önerisi eklendi.`,
+          duration: 3000,
+        });
+      } else {
+        toast({
+          type: 'info',
+          message: 'Açıklama güncellendi ama KB ek öneri vermedi. Açıklamayı daha da genişletmeyi dene.',
+          duration: 4000,
+        });
+      }
+    } catch (e) {
+      setError((e as Error)?.message ?? 'İşlem başarısız.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const preview =
+    (createdCase.description ?? '').slice(0, 110) +
+    ((createdCase.description?.length ?? 0) > 110 ? '…' : '');
+  const charCount = draft.trim().length;
+  const charTooShort = charCount > 0 && charCount < 5;
+  const noChange =
+    expanded && draft.trim() === (createdCase.description ?? '').trim();
+
+  return (
+    <Card>
+      <CardBody className="space-y-2">
+        {!expanded ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
+                <PenLine size={11} className="text-brand-500" />
+                Açıklama
+              </div>
+              <p className="mt-0.5 truncate text-xs text-slate-700 dark:text-ndark-text" title={createdCase.description ?? ''}>
+                {preview || '—'}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                AI önerisi yetersiz mi? Açıklamayı genişlet, KB'ye yeniden sor.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Wand2 size={11} />}
+              onClick={handleOpen}
+            >
+              Düzenle ve yeniden sor
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
+              <PenLine size={11} className="text-brand-500" />
+              Açıklamayı düzenle
+            </div>
+            <TextArea
+              autoFocus
+              rows={4}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="Sorunu daha detaylı anlat — KB daha iyi öneri verebilsin."
+              disabled={submitting}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                {charCount} karakter
+                {charTooShort && ' · en az 5'}
+                {noChange && ' · değişiklik yok'}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCancel}
+                  disabled={submitting}
+                >
+                  Vazgeç
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void handleSubmit()}
+                  disabled={submitting || charCount < 5}
+                  leftIcon={
+                    submitting ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Wand2 size={11} />
+                    )
+                  }
+                  title={
+                    charCount < 5
+                      ? 'En az 5 karakter girin'
+                      : noChange
+                        ? 'Açıklamayı değiştir veya Vazgeç'
+                        : 'Açıklamayı güncelle ve KB önerisini yenile'
+                  }
+                >
+                  {submitting ? 'Yeniden Soruluyor…' : 'Kaydet ve Yeniden Sor'}
+                </Button>
+              </div>
+            </div>
+            {error && (
+              <p className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+                {error}
+              </p>
+            )}
+          </>
+        )}
       </CardBody>
     </Card>
   );

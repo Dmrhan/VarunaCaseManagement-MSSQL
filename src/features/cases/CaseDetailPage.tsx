@@ -54,6 +54,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import { CaseSolutionStepsPanel } from './CaseSolutionStepsPanel';
+import { KbDraftCard } from './KbDraftCard';
 import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
 import { CommunicationDispatchCard } from './components/CommunicationDispatchCard';
 import { TransferModal } from './components/TransferModal';
@@ -3433,6 +3434,12 @@ function DetailTab({
         </Section>
       )}
 
+      {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı.
+          KbDraftCard customFields.smartTicket.aiDrafts varsa render eder;
+          aksi takdirde null döner (klasik vakalar etkilenmez). */}
+      <KbDraftSection item={item} />
+
+
       {item.cancellationReason && (
         <Section title="İptal Gerekçesi">
           <p className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
@@ -4605,6 +4612,24 @@ function NewCallLogModal({
 // ----------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------
+
+/**
+ * Madde 2 — KbDraftCard'ı Detay sekmesinde Section başlığıyla sarmalar.
+ * Card customFields.smartTicket.aiDrafts yoksa null döner; wrapper de
+ * Section header'ını render etmez. Klasik vakalar etkilenmez.
+ */
+function KbDraftSection({ item }: { item: Case }) {
+  const cf = item.customFields;
+  const st = cf && typeof cf === 'object' ? (cf as Record<string, unknown>).smartTicket : null;
+  const drafts =
+    st && typeof st === 'object' ? (st as Record<string, unknown>).aiDrafts : null;
+  if (!drafts || typeof drafts !== 'object') return null;
+  return (
+    <Section title="KB Önerileri">
+      <KbDraftCard item={item} variant="case-detail" />
+    </Section>
+  );
+}
 
 function Section({
   title,

@@ -658,6 +658,53 @@ function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
   };
 }
 
+// Madde 2 — KB analyze cevabından çıkarılan "engineering handoff" (teknik
+// devir notu) ve "customer reply draft" (müşteri yanıt taslağı) string'leri
+// customFields.smartTicket.aiDrafts altına persist edilir.
+//
+// Sözleşme:
+//   - prev.customFields.smartTicket var olmalı (Smart Ticket akışı). Yoksa
+//     null döner (klasik vakalar etkilenmez; defensive no-op).
+//   - Diğer customFields dalları + smartTicket içindeki opening/closure/
+//     transferContext AYNEN korunur — yalnız `aiDrafts` set edilir.
+//   - version + capturedAt server-side stamp. Raw KB persist EDİLMEZ
+//     (yalnız iki normalized string + meta).
+const SMART_TICKET_AI_DRAFTS_VERSION = 1;
+function buildSmartTicketAiDraftsMerge(prev, drafts) {
+  if (!drafts || typeof drafts !== 'object') return null;
+  const engineering =
+    typeof drafts.engineeringHandoff === 'string' && drafts.engineeringHandoff.trim()
+      ? drafts.engineeringHandoff.trim()
+      : undefined;
+  const customer =
+    typeof drafts.customerReplyDraft === 'string' && drafts.customerReplyDraft.trim()
+      ? drafts.customerReplyDraft.trim()
+      : undefined;
+  if (!engineering && !customer) return null;
+
+  const existing =
+    prev.customFields && typeof prev.customFields === 'object' ? prev.customFields : {};
+  const existingSt =
+    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : null;
+  if (!existingSt) return null; // Smart Ticket opening şartı — sessiz no-op.
+
+  const aiDrafts = {
+    source: 'external_kb',
+    version: SMART_TICKET_AI_DRAFTS_VERSION,
+    capturedAt: new Date().toISOString(),
+  };
+  if (engineering) aiDrafts.engineeringHandoff = engineering;
+  if (customer) aiDrafts.customerReplyDraft = customer;
+
+  return {
+    ...existing,
+    smartTicket: {
+      ...existingSt,
+      aiDrafts,
+    },
+  };
+}
+
 async function assertCaseInScope(caseId, allowedCompanyIds) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
@@ -706,6 +753,34 @@ function notSnoozedClause() {
 }
 
 export const caseRepository = {
+  /**
+   * Madde 2 — Smart Ticket akışında KB analyze cevabından extract edilen
+   * AI draft'larını (engineeringHandoff, customerReplyDraft) Case.customFields
+   * altına persist eder. Sadece Smart Ticket akışıyla açılmış case'lerde
+   * çalışır (buildSmartTicketAiDraftsMerge defensive — smartTicket opening
+   * yoksa null döner, no-op). Tek L1 ajan akışı olduğu için transaction
+   * gerektirmez; mevcut customFields fresh read + merge yeterli.
+   */
+  async persistSmartTicketAiDrafts(id, drafts, allowedCompanyIds) {
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+    const fresh = await prisma.case.findUnique({
+      where: { id },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const merged = buildSmartTicketAiDraftsMerge(
+      { customFields: fresh.customFields },
+      drafts,
+    );
+    if (!merged) return { persisted: false };
+    await prisma.case.update({
+      where: { id },
+      data: { customFields: merged },
+    });
+    return { persisted: true };
+  },
+
   /**
    * Compute role-aware stats for the cases list KPI cards.
    * Mode is selected from `user.role`. companyId scope enforced via
@@ -2428,6 +2503,24 @@ export const caseRepository = {
         ? input.smartTicketTransfer
         : null;
 
+    // Madde 4 — Devir sırasında opsiyonel priority değişimi. L1 ajan L2'ye
+    // devrederken vaka önceliğini de güncelleyebilir. Mevcut Case.priority
+    // ile aynıysa update edilmez (no-op + gereksiz activity row önlenir).
+    // Geçersiz değer → 400. SLA değiştirilmez (Phase 3 ayrı kapsam).
+    const VALID_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
+    let priorityChange = null;
+    if (input.priority !== undefined && input.priority !== null) {
+      if (!VALID_PRIORITIES.includes(input.priority)) {
+        return {
+          error: 'invalid_input',
+          message: `Geçersiz priority. Beklenen: ${VALID_PRIORITIES.join(' | ')}.`,
+        };
+      }
+      if (input.priority !== c.priority) {
+        priorityChange = { from: c.priority, to: input.priority };
+      }
+    }
+
     if (stTransfer) {
       const noteParts = [noteText];
       const trimmedTransferNote =
@@ -2479,6 +2572,7 @@ export const caseRepository = {
           assignedPersonName: person?.name ?? null,
           transferCount: { increment: 1 },
           ...(nextCustomFields ? { customFields: nextCustomFields } : {}),
+          ...(priorityChange ? { priority: priorityChange.to } : {}),
         },
         include: CASE_INCLUDE,
       });
@@ -2514,6 +2608,25 @@ export const caseRepository = {
           actor: input.transferredByName ?? input.transferredBy,
         },
       });
+
+      // Madde 4 — priority değişti ise ayrı FieldUpdate row.
+      // Activity tab'daki filtreleme (fields chip'i + watcher trigger
+      // mantığı) priority değişimini ayrı bir kayıt olarak görebilsin
+      // diye Transfer row'una sığdırılmadı.
+      if (priorityChange) {
+        await tx.caseActivity.create({
+          data: {
+            caseId: id,
+            companyId,
+            action: 'Öncelik güncellendi',
+            actionType: 'FieldUpdate',
+            fieldName: 'priority',
+            fromValue: String(priorityChange.from ?? '—'),
+            toValue: String(priorityChange.to),
+            actor: input.transferredByName ?? input.transferredBy,
+          },
+        });
+      }
 
       return u;
     });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkey } from '@/lib/useHotkey';
+import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
   ArrowDown,
@@ -224,6 +225,10 @@ export function CasesListPage({
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
   const [inboxTab, setInboxTab] = useState<InboxTab>('open');
   const [newOpen, setNewOpen] = useState(false);
+  // Codex P1 (PR #452 review) — Quick Case kapalıyken Customer Search
+  // modal'ından gelen "yeni vaka aç" CTA'sını NewCaseForm'a yönlendir
+  // (boş ekranda kalma fix). Quick Case açıkken pattern korunur.
+  const [newPrefillAccountId, setNewPrefillAccountId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -253,13 +258,24 @@ export function CasesListPage({
 
   const isFrontline = !!user && FRONTLINE_ROLES.includes(user.role);
 
-  // App seviyesi pendingQuickPrefill geldiğinde QuickCaseModal'ı aç
+  // App seviyesi pendingQuickPrefill geldiğinde:
+  //   - Quick Case enable iken → QuickCaseModal'ı prefill ile aç (klasik akış)
+  //   - Quick Case disabled iken → NewCaseForm'u prefill ile aç (Codex P1 fix)
+  //
+  // Eski impl Quick Case disabled iken prefill'i sessiz ignore ediyordu →
+  // Customer Search'ten gelen "yeni vaka aç" CTA boş ekranda kalıyordu.
+  // Customer Search modal'ındaki CTA'yı kaldırmak yerine alternatif akışa
+  // route ediyoruz — kullanıcı için sürtüşmesiz, kod intact.
   useEffect(() => {
-    if (pendingQuickPrefill) {
+    if (!pendingQuickPrefill) return;
+    if (featureFlags.quickCaseEnabled) {
       setQuickPrefillAccount(pendingQuickPrefill);
       setQuickOpen(true);
-      onQuickPrefillConsumed?.();
+    } else {
+      setNewPrefillAccountId(pendingQuickPrefill);
+      setNewOpen(true);
     }
+    onQuickPrefillConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuickPrefill]);
 
@@ -270,6 +286,7 @@ export function CasesListPage({
   });
   useHotkey('n', () => setNewOpen(true));
   useHotkey('q', () => {
+    if (!featureFlags.quickCaseEnabled) return;
     setQuickPrefillAccount(null);
     setQuickOpen(true);
   });
@@ -631,26 +648,33 @@ export function CasesListPage({
               Müşteri Ara
             </Button>
           )}
-          <Button
-            variant="outline"
-            leftIcon={<Zap size={14} className="text-amber-500" />}
-            onClick={() => {
-              setQuickPrefillAccount(null);
-              setQuickOpen(true);
-            }}
-            title="Hızlı vaka aç (q)"
-          >
-            Hızlı Vaka
-          </Button>
+          {featureFlags.quickCaseEnabled && (
+            <Button
+              variant="outline"
+              leftIcon={<Zap size={14} className="text-amber-500" />}
+              onClick={() => {
+                setQuickPrefillAccount(null);
+                setQuickOpen(true);
+              }}
+              title="Hızlı vaka aç (q)"
+            >
+              Hızlı Vaka
+            </Button>
+          )}
           <Button leftIcon={<Plus size={14} />} onClick={() => setNewOpen(true)}>
             Yeni Vaka
           </Button>
           {onOpenSmartTicket && (
             <Button
+              // RUNA AI brand'ı projede her yerde violet — Akıllı Ticket
+              // butonu da AI akışına işaret etsin diye violet→fuchsia
+              // gradient. variant="outline" base ring'ini override etmek
+              // için className kullanılıyor.
               variant="outline"
-              leftIcon={<Sparkles size={14} className="text-brand-500" />}
+              leftIcon={<Sparkles size={14} className="text-white" />}
               onClick={onOpenSmartTicket}
-              title="Akıllı Ticket akışıyla vaka aç"
+              title="Akıllı Ticket akışıyla vaka aç (RUNA AI)"
+              className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white ring-0 hover:from-violet-700 hover:to-fuchsia-700 dark:from-violet-700 dark:to-fuchsia-700 dark:hover:from-violet-600 dark:hover:to-fuchsia-600"
             >
               Akıllı Ticket
             </Button>
@@ -1397,9 +1421,13 @@ export function CasesListPage({
 
       <NewCaseForm
         open={newOpen}
-        onClose={() => setNewOpen(false)}
+        onClose={() => {
+          setNewOpen(false);
+          setNewPrefillAccountId(null);
+        }}
         onCreated={(c) => {
           setNewOpen(false);
+          setNewPrefillAccountId(null);
           void load();
           onSelectCase(c.id);
           toast({
@@ -1410,8 +1438,12 @@ export function CasesListPage({
         }}
         onShowExisting={(id) => {
           setNewOpen(false);
+          setNewPrefillAccountId(null);
           onSelectCase(id);
         }}
+        initialContext={
+          newPrefillAccountId ? { accountId: newPrefillAccountId } : undefined
+        }
       />
 
       <QuickCaseModal

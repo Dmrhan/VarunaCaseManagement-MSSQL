@@ -591,6 +591,129 @@ try {
   bad('15) Empty compose exception', err?.message ?? String(err));
 }
 
+// ─── 16-19) Madde 4 — Transfer + priority change ──────────────────────
+
+console.log('');
+console.log('── 16-19) Transfer priority change ─────────────────────');
+
+let stPriCase = null;
+try {
+  stPriCase = await caseRepository.create({
+    title: `[smoke] ST priority ${Date.now().toString(36)}`,
+    description: 'ST priority change smoke.',
+    caseType: 'GeneralSupport',
+    priority: 'Medium',
+    origin: 'Web',
+    companyId,
+    companyName,
+    category: 'Akıllı Ticket',
+    subCategory: 'Genel',
+    requestType: 'Talep',
+    assignedTeamId: sourceTeam.id,
+    assignedTeamName: sourceTeam.name,
+    customFields: { smartTicket: OPENING },
+    createdBy: 'Smoke User',
+  });
+  created.push(stPriCase.id);
+
+  // 16) Priority değişimi ile transfer.
+  const r = await caseRepository.transferCase(
+    stPriCase.id,
+    {
+      toTeamId: targetTeam.id,
+      reason: 'Eskalasyon — kritik',
+      transferredBy: 'smoke-user-id',
+      transferredByName: 'Smoke User',
+      smartTicketTransfer: {
+        transferNote: 'L2: kritik müşteri etkisi, hızlı bakar mısın?',
+        composedSummary: 'L1 KB önerilerini denedi, çözmedi.',
+      },
+      priority: 'Critical',
+    },
+    [companyId],
+  );
+  const after = await prisma.case.findUnique({
+    where: { id: stPriCase.id },
+    select: { priority: true },
+  });
+  if (r?.case && after?.priority === 'Critical') {
+    ok('16) Transfer priority Critical olarak güncellendi');
+  } else {
+    bad('16) Priority update', `case priority=${after?.priority}`);
+  }
+
+  // 17) Ayrı FieldUpdate activity row mevcut.
+  const priActivity = await prisma.caseActivity.findFirst({
+    where: { caseId: stPriCase.id, actionType: 'FieldUpdate', fieldName: 'priority' },
+    select: { fromValue: true, toValue: true, action: true },
+  });
+  if (priActivity?.toValue === 'Critical' && priActivity?.fromValue === 'Medium') {
+    ok('17) FieldUpdate priority activity row (Medium → Critical)');
+  } else {
+    bad('17) Priority activity row', JSON.stringify(priActivity));
+  }
+
+  // 18) Aynı priority ile çağrı → no-op (ek FieldUpdate yazılmaz).
+  await caseRepository.transferCase(
+    stPriCase.id,
+    {
+      toTeamId: sourceTeam.id, // geri devret
+      reason: 'no-op priority test',
+      transferredBy: 'smoke-user-id',
+      transferredByName: 'Smoke User',
+      smartTicketTransfer: { transferNote: 'no-op pri', composedSummary: '...' },
+      priority: 'Critical', // mevcut ile aynı
+    },
+    [companyId],
+  );
+  const pricount = await prisma.caseActivity.count({
+    where: { caseId: stPriCase.id, actionType: 'FieldUpdate', fieldName: 'priority' },
+  });
+  if (pricount === 1) {
+    ok('18) Aynı priority ile transfer → ek FieldUpdate row yazılmadı (no-op)');
+  } else {
+    bad('18) Duplicate priority row', `count=${pricount}`);
+  }
+
+  // 19) Geçersiz priority → error.
+  const errCase = await caseRepository.create({
+    title: `[smoke] invalid pri ${Date.now().toString(36)}`,
+    description: 'Invalid priority smoke.',
+    caseType: 'GeneralSupport',
+    priority: 'Medium',
+    origin: 'Web',
+    companyId,
+    companyName,
+    category: 'Akıllı Ticket',
+    subCategory: 'Genel',
+    requestType: 'Talep',
+    assignedTeamId: sourceTeam.id,
+    assignedTeamName: sourceTeam.name,
+    customFields: { smartTicket: OPENING },
+    createdBy: 'Smoke User',
+  });
+  created.push(errCase.id);
+  const errR = await caseRepository.transferCase(
+    errCase.id,
+    {
+      toTeamId: targetTeam.id,
+      reason: 'invalid priority test',
+      transferredBy: 'smoke-user-id',
+      transferredByName: 'Smoke User',
+      smartTicketTransfer: { transferNote: 'x', composedSummary: 'x' },
+      priority: 'BOGUS', // geçersiz
+    },
+    [companyId],
+  );
+  if (errR?.error === 'invalid_input' && /Geçersiz priority/.test(errR?.message ?? '')) {
+    ok('19) Geçersiz priority reject edildi (invalid_input)');
+  } else {
+    bad('19) Invalid priority should reject', JSON.stringify(errR));
+  }
+} catch (err) {
+  bad('16-19) Transfer priority exception', err?.message ?? String(err));
+}
+
 // ─── Cleanup ────────────────────────────────────────────────────────────
 
 if (!KEEP) {

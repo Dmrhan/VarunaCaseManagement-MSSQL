@@ -241,6 +241,38 @@ if (/canSubmit\s*=[\s\S]{0,200}?!transferBriefLoading/.test(src)) {
   bad('23) canSubmit transferBriefLoading guard eksik');
 }
 
+// ─── Madde 4 — Priority in transfer ─────────────────────────────
+
+// 24) Transfer form'da priority select var (CASE_PRIORITIES kullanılıyor).
+if (
+  /transferPriority/.test(src) &&
+  /CASE_PRIORITIES\.map/.test(src) &&
+  /label="Öncelik"/.test(src)
+) {
+  ok('24) Priority select Stage 3 transfer formunda (CASE_PRIORITIES reuse)');
+} else {
+  bad('24) Priority select eksik');
+}
+
+// 25) Stage 3'e girince mevcut Case.priority ile sync.
+if (
+  /setTransferPriority\(createdCase\.priority\s*\?\?\s*['"]Medium['"]\)/.test(src)
+) {
+  ok('25) Stage entry transferPriority createdCase.priority ile sync');
+} else {
+  bad('25) Stage entry sync eksik');
+}
+
+// 26) Submit payload priority değişimi varsa ekler (no-op önleme).
+if (
+  /priorityChanged\s*=\s*transferPriority\s*!==\s*createdCase\.priority/.test(src) &&
+  /priorityChanged\s*\?\s*\{\s*priority:\s*transferPriority\s*\}/.test(src)
+) {
+  ok('26) Submit payload: priority yalnız değişimde gönderilir');
+} else {
+  bad('26) Priority payload guard eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
