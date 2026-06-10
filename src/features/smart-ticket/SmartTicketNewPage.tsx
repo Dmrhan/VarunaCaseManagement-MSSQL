@@ -39,8 +39,8 @@ import {
   type SuggestClassificationField,
 } from '@/services/caseService';
 import { accountService, type AccountListItem } from '@/services/accountService';
-import type { Case, CasePriority } from '@/features/cases/types';
-import { CASE_PRIORITIES, CASE_PRIORITY_LABELS } from '@/features/cases/types';
+import type { Case, CasePriority, CaseRequestType } from '@/features/cases/types';
+import { CASE_PRIORITIES, CASE_PRIORITY_LABELS, CASE_REQUEST_TYPES } from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
@@ -117,6 +117,14 @@ interface SmartTicketFormState {
   operationType: string;
   affectedObject: string;
   impact: string;
+  // PR-3 — Business review Madde 3. Manual selection (kullanıcı override
+  // etti mi) flag'leri ile birlikte tutulur; flag false ise payload
+  // mapping derive / fallback yoluna düşer (mevcut davranış korunur).
+  // priority default 'Medium' (Case schema default ile uyumlu). requestType
+  // boş başlar — boş kalırsa mapping derive eder.
+  priority: CasePriority;
+  priorityManual: boolean;
+  requestType: CaseRequestType | '';
 }
 
 interface ClosureFormState {
@@ -140,6 +148,9 @@ const emptyForm = (companyId: string): SmartTicketFormState => ({
   operationType: '',
   affectedObject: '',
   impact: '',
+  priority: 'Medium',
+  priorityManual: false,
+  requestType: '',
 });
 
 const emptyClosure = (): ClosureFormState => ({
@@ -529,6 +540,23 @@ export function SmartTicketNewPage({
       trace: mapping.trace,
     };
 
+    // PR-3 — Business review Madde 3. Final priority/requestType + source.
+    // Kullanıcı override > mapping derive > fallback.
+    //   requestType:
+    //     - form.requestType doluysa → manual (kullanıcı seçti)
+    //     - boşsa → mapping.requestType (taxonomy / fallback)
+    //   priority:
+    //     - form.priorityManual true ise → manual (kullanıcı override etti)
+    //     - değilse → default 'Medium' (mevcut davranış aynen)
+    //   Source field'ları customFields.smartTicket içine yazılır — audit
+    //   ve future analytics için. Backend enum validation'ı bozulmaz.
+    const finalRequestType = form.requestType || mapping.requestType;
+    const requestTypeSource: 'manual' | 'mapping' = form.requestType ? 'manual' : 'mapping';
+    const finalPriority: CasePriority = form.priorityManual ? form.priority : 'Medium';
+    const prioritySource: 'manual' | 'default' = form.priorityManual ? 'manual' : 'default';
+    smartTicket.requestTypeSource = requestTypeSource;
+    smartTicket.prioritySource = prioritySource;
+
     if (suggestion) {
       const perField: Record<string, { matchedBy: string; confidence: number; suggestedCode: string }> = {};
       for (const key of [
@@ -565,7 +593,7 @@ export function SmartTicketNewPage({
         title: form.title.trim(),
         description: form.description.trim(),
         caseType: 'GeneralSupport',
-        priority: 'Medium',
+        priority: finalPriority,
         origin: 'Web',
         companyId: form.companyId,
         companyName: selectedCompanyName(),
@@ -579,7 +607,7 @@ export function SmartTicketNewPage({
           : {}),
         category: mapping.category,
         subCategory: mapping.subCategory,
-        requestType: mapping.requestType,
+        requestType: finalRequestType,
         customFields: { smartTicket },
       });
       setCreatedCase(created);
@@ -1185,6 +1213,64 @@ export function SmartTicketNewPage({
                   disabled={stage !== 'opening'}
                 />
               </Field>
+
+              {/* PR-3 — Business review Madde 3. Talep Türü + Öncelik.
+                  Boş bırakılırsa Talep Türü mapping derive eder; Öncelik
+                  default 'Medium'. Kullanıcı seçim yaparsa override eder
+                  (customFields.smartTicket.requestTypeSource /
+                  prioritySource). Mevcut Case enum validation backend'de
+                  zorunlu — backend sade payload ile uyumlu. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field
+                  label="Talep Türü"
+                  hint={
+                    !form.requestType
+                      ? 'Boş bırakılırsa Akıllı Tanımlar / mapping otomatik seçer.'
+                      : undefined
+                  }
+                >
+                  <Select
+                    value={form.requestType}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, requestType: e.target.value as CaseRequestType | '' }))
+                    }
+                    disabled={stage !== 'opening'}
+                  >
+                    <option value="">— Otomatik —</option>
+                    {CASE_REQUEST_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Öncelik"
+                  hint={
+                    form.priorityManual
+                      ? `Seçildi: ${CASE_PRIORITY_LABELS[form.priority]}`
+                      : 'Default: Orta. Devirde değiştirilebilir.'
+                  }
+                >
+                  <Select
+                    value={form.priority}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        priority: e.target.value as CasePriority,
+                        priorityManual: true,
+                      }))
+                    }
+                    disabled={stage !== 'opening'}
+                  >
+                    {CASE_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {CASE_PRIORITY_LABELS[p]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
 
               {/* Smart Ticket taxonomy alanları */}
               <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
