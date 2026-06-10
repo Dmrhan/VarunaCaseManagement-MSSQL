@@ -31,6 +31,10 @@ import {
   Phone,
   Save,
   ShieldAlert,
+  Box,
+  Flame,
+  Layers,
+  Settings2,
   Sparkles,
   Star,
   Target,
@@ -39,6 +43,7 @@ import {
   User,
   UserPlus,
   Wallet,
+  Workflow,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -2990,6 +2995,13 @@ function DetailTab({
         />
       </Section>
 
+      {/* Business review Madde 4 (PR-4) — Smart Ticket açılış kategorileri
+          chip görünümü. Yalnız customFields.smartTicket varsa render edilir;
+          klasik vakalarda null döner. L1 Devir Özeti kartı (Çözüm Adımları
+          sekmesinde) farklı bir tab'da gösterir; Detay sekmesindeki bu
+          panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
+      <SmartTicketMetaSection item={item} />
+
       <Section title="Müşteri & Sınıflandırma">
         <EditableGrid
           rows={[
@@ -4627,6 +4639,72 @@ function KbDraftSection({ item }: { item: Case }) {
   return (
     <Section title="KB Önerileri">
       <KbDraftCard item={item} variant="case-detail" />
+    </Section>
+  );
+}
+
+/**
+ * Business review Madde 4 (PR-4) — Smart Ticket açılış kategorileri
+ * Case Detail Detay sekmesinde compact chip görünümü.
+ *
+ * Render politikası:
+ *   - customFields.smartTicket varsa render edilir.
+ *   - 5 alan: platform / businessProcess / operationType / affectedObject /
+ *     impact. Her birinin `Label` suffix'i tercih edilir (Smart Ticket
+ *     create akışı `${field}Label` olarak persist eder, PR-T1 öncesi
+ *     opening pattern'i). Sadece code varsa code gösterilir.
+ *   - Hiçbir alan dolu değilse null döner (boş Section header
+ *     görünmesin).
+ *   - Klasik vakalar etkilenmez.
+ *
+ * Duplicate koruması: L1 Devir Özeti kartı (PR-T3) `Çözüm Adımları`
+ * sekmesinde aynı opening taxonomy snapshot'ını gösterir — ama bu
+ * yalnız devir gerçekleşmiş Smart Ticket vakalarında. SmartTicketMetaSection
+ * Detay sekmesinde her zaman görünür; iki tab farklı amaç (devir bağlamı
+ * vs. Detay özet) — duplicate değil, kasıtlı bilgi tekrarı.
+ */
+function SmartTicketMetaSection({ item }: { item: Case }) {
+  const cf = item.customFields;
+  const st = cf && typeof cf === 'object' ? (cf as Record<string, unknown>).smartTicket : null;
+  if (!st || typeof st !== 'object') return null;
+  const s = st as Record<string, unknown>;
+
+  const pick = (codeKey: string, labelKey: string): string | null => {
+    const label = s[labelKey];
+    if (typeof label === 'string' && label.trim()) return label.trim();
+    const code = s[codeKey];
+    if (typeof code === 'string' && code.trim()) return code.trim();
+    return null;
+  };
+
+  const fields: Array<{ key: string; label: string; value: string | null; Icon: typeof Layers }> = [
+    { key: 'platform',        label: 'Platform',         value: pick('platform', 'platformLabel'),                 Icon: Layers },
+    { key: 'businessProcess', label: 'İş Süreci',        value: pick('businessProcess', 'businessProcessLabel'),   Icon: Workflow },
+    { key: 'operationType',   label: 'İşlem Tipi',       value: pick('operationType', 'operationTypeLabel'),       Icon: Settings2 },
+    { key: 'affectedObject',  label: 'Etkilenen Nesne',  value: pick('affectedObject', 'affectedObjectLabel'),     Icon: Box },
+    { key: 'impact',          label: 'Etki',             value: pick('impact', 'impactLabel'),                     Icon: Flame },
+  ];
+
+  const visible = fields.filter((f) => f.value);
+  if (visible.length === 0) return null;
+
+  return (
+    <Section title="Akıllı Ticket Kategorileri" tint="violet">
+      <div className="flex flex-wrap gap-1.5">
+        {visible.map((f) => {
+          const Icon = f.Icon;
+          return (
+            <span
+              key={f.key}
+              className="inline-flex items-baseline gap-1 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 dark:border-violet-900/40 dark:bg-ndark-card dark:text-ndark-muted"
+            >
+              <Icon size={11} className="text-violet-500 self-center" />
+              <span className="text-slate-400">{f.label}:</span>
+              <span className="font-medium">{f.value}</span>
+            </span>
+          );
+        })}
+      </div>
     </Section>
   );
 }

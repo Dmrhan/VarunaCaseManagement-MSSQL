@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -6,11 +6,14 @@ import {
   CheckCircle2,
   ChevronRight,
   Inbox,
+  Loader2,
   Lock,
   PauseCircle,
   RotateCw,
   Search as SearchIcon,
+  Sparkles,
   TrendingUp,
+  Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -24,6 +27,7 @@ import {
   type SmartTicketTaxonomyResponse,
   type SmartTicketRootCauseGroup,
   type SmartTicketTaxonomyItem,
+  type SuggestClosureResponse,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
 import { MentionTextarea } from './components/MentionTextarea';
@@ -153,6 +157,16 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
   const [closureTax, setClosureTax] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
   const [closureTaxLoading, setClosureTaxLoading] = useState(false);
 
+  // PR-8 — Business review Madde 7. Case Detail close akışında KB
+  // kapanış önerisi. Auto-fetch YOK; explicit buton. Klasik vakalarda
+  // info-only kart (persist YOK); Smart Ticket vakalarda dropdown
+  // pre-fill (kullanıcı onayıyla, mevcut Stage 3 closure pattern'i).
+  // Approval / checklist / ResolutionApprovalPolicy guard'ları bypass
+  // edilmez.
+  const [kbSuggesting, setKbSuggesting] = useState(false);
+  const [kbSuggestion, setKbSuggestion] = useState<SuggestClosureResponse | null>(null);
+  const [kbSuggestionError, setKbSuggestionError] = useState<string | null>(null);
+
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
 
   // Vaka değişince akış sıfırlanır.
@@ -173,6 +187,9 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setClosureRt('');
     setClosurePp('');
     setClosureTax(null);
+    setKbSuggesting(false);
+    setKbSuggestion(null);
+    setKbSuggestionError(null);
   }, [item.id]);
 
   // Smart Ticket → Çözüldü kararı seçildiğinde taxonomy listelerini çek.
@@ -201,8 +218,19 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     };
   }, [isSmartTicket, pending, item.companyId, closureTax]);
 
-  // Kök Neden Grubu değişince Detay seçimini sıfırla.
+  // Kök Neden Grubu değişince Detay seçimini sıfırla — AMA KB pre-fill
+  // sırasında detail'i ezme.
+  //
+  // Codex P2 (PR #469 review) — handleKbSuggest aynı render'da
+  // hem setClosureRcg(group) hem setClosureRcd(detail) çağırıyordu;
+  // bu useEffect group değişimini görüp detail'i hemen siliyordu.
+  // Suppress ref ile pre-fill batched setState'i koruyoruz.
+  const closureRcdResetSuppressRef = useRef(false);
   useEffect(() => {
+    if (closureRcdResetSuppressRef.current) {
+      closureRcdResetSuppressRef.current = false;
+      return;
+    }
     setClosureRcd('');
   }, [closureRcg]);
 
@@ -211,6 +239,108 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     closureRcgList.find((g) => g.code === closureRcg)?.children ?? [];
   const closureRtList: SmartTicketTaxonomyItem[] = closureTax?.resolutionType ?? [];
   const closurePpList: SmartTicketTaxonomyItem[] = closureTax?.permanentPrevention ?? [];
+
+  /**
+   * PR-8 — KB ile kapanış önerisi.
+   *
+   * Smart Ticket vakası: caseId tabanlı body → backend opening context'i
+   * okur (customFields.smartTicket). Dönen suggestions 4 closure alanına
+   * pre-fill edilir (yalnız boş alanlar; mevcut Stage 3 pattern'i).
+   *
+   * Klasik vaka: legacy body shape → { companyId, description,
+   * resolution: resolutionNote }. Dönen suggestions UI'da info-only
+   * kart olarak gösterilir; persist YOK. Kullanıcı "Çözüm Notuna Ekle"
+   * buton'u ile resolutionNote'a metin olarak ekleyebilir.
+   *
+   * Approval / checklist / ResolutionApprovalPolicy guard'ları bypass
+   * edilmez — bu yalnız öneri katmanı, kapanış akışına dokunmaz.
+   */
+  // Codex P2 (PR #469 review) — Stale promise guard. Panel L1Workbench
+  // gibi yerlerde reuse oluyor; kullanıcı KB önerisi istediği sırada
+  // başka vakaya geçerse eski response yeni case'e pre-fill / display
+  // yapıyordu. reqId + caseId snapshot guard ile geç gelen response'u
+  // atlatıyoruz.
+  const kbSuggestReqIdRef = useRef(0);
+
+  async function handleKbSuggest() {
+    if (kbSuggesting) return;
+    if (resolutionNote.trim().length < 5) {
+      setKbSuggestionError('En az 5 karakter çözüm notu yazın.');
+      return;
+    }
+    const reqId = ++kbSuggestReqIdRef.current;
+    const targetCaseId = item.id;
+    setKbSuggesting(true);
+    setKbSuggestionError(null);
+    setKbSuggestion(null);
+    try {
+      const res = isSmartTicket
+        ? await lookupService.suggestSmartTicketClosure({ caseId: targetCaseId })
+        : await lookupService.suggestSmartTicketClosure({
+            companyId: item.companyId,
+            description: item.description,
+            resolution: resolutionNote.trim(),
+          });
+      // Stale response guard — case değişti veya yeni request başlatıldı.
+      if (reqId !== kbSuggestReqIdRef.current || item.id !== targetCaseId) {
+        return;
+      }
+      if (!res) {
+        setKbSuggestionError('Öneri alınamadı.');
+        return;
+      }
+      setKbSuggestion(res);
+      // Smart Ticket: dropdown'lara pre-fill (yalnız boş alanlar).
+      // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
+      if (isSmartTicket) {
+        const s = res.suggestions;
+        if (s.rootCauseGroup && !closureRcg) {
+          // Codex P2 (PR #469 review) — RCG değişimi useEffect'te
+          // detail'i sıfırlıyor; pre-fill sırasında detail'i ezmemek
+          // için suppress ref kullanılır. Detail önerisi varsa bayrak
+          // set edilir, useEffect tek seferlik reset'i atlar.
+          if (s.rootCauseDetail) {
+            closureRcdResetSuppressRef.current = true;
+          }
+          setClosureRcg(s.rootCauseGroup.code);
+        }
+        if (s.rootCauseDetail && !closureRcd) setClosureRcd(s.rootCauseDetail.code);
+        if (s.resolutionType && !closureRt) setClosureRt(s.resolutionType.code);
+        if (s.permanentPrevention && !closurePp) setClosurePp(s.permanentPrevention.code);
+      }
+    } catch (e) {
+      if (reqId === kbSuggestReqIdRef.current && item.id === targetCaseId) {
+        setKbSuggestionError((e as Error)?.message ?? 'Öneri alınamadı.');
+      }
+    } finally {
+      if (reqId === kbSuggestReqIdRef.current) {
+        setKbSuggesting(false);
+      }
+    }
+  }
+
+  /**
+   * PR-8 — Klasik vaka için "Çözüm Notuna Ekle". Suggestion'daki 4
+   * label'ı parantezli özet olarak resolutionNote'a append eder. Persist
+   * tetikletmez; kullanıcı sonra normal kapanış akışında submit eder.
+   */
+  function handleAppendSuggestionToNote() {
+    if (!kbSuggestion) return;
+    const s = kbSuggestion.suggestions;
+    const parts: string[] = [];
+    if (s.rootCauseGroup) parts.push(`Kök Neden: ${s.rootCauseGroup.label}`);
+    if (s.rootCauseDetail) parts.push(`Detay: ${s.rootCauseDetail.label}`);
+    if (s.resolutionType) parts.push(`Çözüm Tipi: ${s.resolutionType.label}`);
+    if (s.permanentPrevention) parts.push(`Kalıcı Önlem: ${s.permanentPrevention.label}`);
+    if (parts.length === 0) return;
+    const addendum = '\n\n[KB Önerisi] ' + parts.join(' · ');
+    setResolutionNote((t) => (t ? `${t}${addendum}` : addendum.trimStart()));
+    toast({
+      type: 'success',
+      message: 'KB önerisi çözüm notuna eklendi.',
+      duration: 2000,
+    });
+  }
 
   async function handleDraftResolution() {
     setDrafting(true);
@@ -491,6 +621,20 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                 />
               </Field>
 
+              {/* PR-8 — Business review Madde 7. KB ile kapanış önerisi.
+                  Klasik vakada info-only kart; Smart Ticket vakada
+                  dropdown pre-fill (kullanıcı onayıyla). Approval /
+                  checklist guard'ları bypass edilmez. */}
+              <KbClosureSuggestionPanel
+                isSmartTicket={isSmartTicket}
+                resolutionNote={resolutionNote}
+                kbSuggesting={kbSuggesting}
+                kbSuggestion={kbSuggestion}
+                kbSuggestionError={kbSuggestionError}
+                onSuggest={() => void handleKbSuggest()}
+                onAppendToNote={handleAppendSuggestionToNote}
+              />
+
               {/* WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış alanları.
                   Yalnız Smart Ticket Case'lerinde gösterilir. Hepsi opsiyonel
                   — taxonomy boş olabilir; close bloke olmaz. Submit'te
@@ -705,5 +849,155 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
         </div>
       )}
     </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// KbClosureSuggestionPanel — PR-8 (Business review Madde 7)
+//
+// Çözüm Notu'nun altında yer alır; "Cozuldu" pending iken render edilir.
+// Davranış:
+//   - Buton: "KB ile Kapanış Önerisi Sor". resolutionNote >= 5 char
+//     iken aktif; aksi halde disabled + hint.
+//   - Smart Ticket vakası: suggestion alındıktan sonra parent component
+//     dropdown'lara pre-fill yapar (yalnız boş alanlar). Panel sadece
+//     başarı bildirimi gösterir.
+//   - Klasik vaka: 4 alan label/code info kartı + "Çözüm Notuna Ekle"
+//     buton. Persist YOK; kullanıcı isterse metin olarak resolutionNote'a
+//     ekler.
+// ─────────────────────────────────────────────────────────────────
+
+function KbClosureSuggestionPanel({
+  isSmartTicket,
+  resolutionNote,
+  kbSuggesting,
+  kbSuggestion,
+  kbSuggestionError,
+  onSuggest,
+  onAppendToNote,
+}: {
+  isSmartTicket: boolean;
+  resolutionNote: string;
+  kbSuggesting: boolean;
+  kbSuggestion: SuggestClosureResponse | null;
+  kbSuggestionError: string | null;
+  onSuggest: () => void;
+  onAppendToNote: () => void;
+}) {
+  const noteOk = resolutionNote.trim().length >= 5;
+  const suggestionCount = kbSuggestion ? Object.keys(kbSuggestion.suggestions).length : 0;
+
+  return (
+    <div className="rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/20">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-violet-800 dark:text-violet-200">
+          <Sparkles size={11} />
+          {isSmartTicket
+            ? 'KB önerisi: kapanış alanlarına pre-fill'
+            : 'KB önerisi: kapanış bağlamı (bilgi amaçlı)'}
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={
+            kbSuggesting ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <Wand2 size={11} />
+            )
+          }
+          disabled={kbSuggesting || !noteOk}
+          onClick={onSuggest}
+          title={!noteOk ? 'En az 5 karakter çözüm notu yazın' : 'KB önerisini iste'}
+        >
+          {kbSuggesting ? 'Soruluyor…' : kbSuggestion ? 'Yeniden Sor' : 'KB Önerisi Sor'}
+        </Button>
+      </div>
+      {!noteOk && !kbSuggestion && !kbSuggesting && (
+        <p className="mt-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+          Çözüm notunu yazdıkça KB önerisi daha isabetli olur.
+        </p>
+      )}
+      {kbSuggestionError && (
+        <p className="mt-1.5 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          {kbSuggestionError}
+        </p>
+      )}
+      {kbSuggestion && (
+        <div className="mt-2 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-violet-700 dark:text-violet-300">
+            <span>
+              {suggestionCount > 0
+                ? `${suggestionCount} alan önerisi geldi`
+                : 'KB cevabı boş — eşleşme yok'}
+            </span>
+            {kbSuggestion.unmatched.length > 0 && (
+              <span className="text-amber-700 dark:text-amber-300">
+                · {kbSuggestion.unmatched.length} eşleşmedi
+              </span>
+            )}
+            {kbSuggestion.meta?.confidence != null && (
+              <span>· güven %{Math.round(kbSuggestion.meta.confidence * 100)}</span>
+            )}
+          </div>
+          {suggestionCount > 0 && (
+            <ul className="space-y-0.5 text-[11px]">
+              {kbSuggestion.suggestions.rootCauseGroup && (
+                <li>
+                  <span className="text-slate-500 dark:text-ndark-muted">Kök Neden:</span>{' '}
+                  <span className="font-medium text-slate-800 dark:text-ndark-text">
+                    {kbSuggestion.suggestions.rootCauseGroup.label}
+                  </span>
+                </li>
+              )}
+              {kbSuggestion.suggestions.rootCauseDetail && (
+                <li>
+                  <span className="text-slate-500 dark:text-ndark-muted">Detay:</span>{' '}
+                  <span className="font-medium text-slate-800 dark:text-ndark-text">
+                    {kbSuggestion.suggestions.rootCauseDetail.label}
+                  </span>
+                </li>
+              )}
+              {kbSuggestion.suggestions.resolutionType && (
+                <li>
+                  <span className="text-slate-500 dark:text-ndark-muted">Çözüm Tipi:</span>{' '}
+                  <span className="font-medium text-slate-800 dark:text-ndark-text">
+                    {kbSuggestion.suggestions.resolutionType.label}
+                  </span>
+                </li>
+              )}
+              {kbSuggestion.suggestions.permanentPrevention && (
+                <li>
+                  <span className="text-slate-500 dark:text-ndark-muted">Kalıcı Önlem:</span>{' '}
+                  <span className="font-medium text-slate-800 dark:text-ndark-text">
+                    {kbSuggestion.suggestions.permanentPrevention.label}
+                  </span>
+                </li>
+              )}
+            </ul>
+          )}
+          {/* Smart Ticket'ta dropdown'lar zaten pre-fill edildi; bu
+              not aşağıda zaten görünür. Klasik vakada kullanıcı isterse
+              çözüm notuna ekleyebilir (persist YOK). */}
+          {!isSmartTicket && suggestionCount > 0 && (
+            <div className="pt-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onAppendToNote}
+                title="KB öneri özetini çözüm notuna metin olarak ekle"
+              >
+                Çözüm Notuna Ekle
+              </Button>
+            </div>
+          )}
+          {isSmartTicket && suggestionCount > 0 && (
+            <p className="text-[10px] text-violet-600 dark:text-violet-400">
+              Aşağıdaki Akıllı Ticket Kapanış Bilgileri alanları boşsa öneri otomatik dolduruldu — gözden geçirip değiştirebilirsiniz.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

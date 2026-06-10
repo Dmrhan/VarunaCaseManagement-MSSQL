@@ -10,6 +10,7 @@ import {
   Flame,
   Layers,
   Loader2,
+  Paperclip,
   PenLine,
   Settings2,
   Shield,
@@ -19,6 +20,7 @@ import {
   Wand2,
   Workflow,
   Wrench,
+  X as XIcon,
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +28,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
+import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
@@ -38,13 +41,20 @@ import {
   type SuggestClassificationField,
 } from '@/services/caseService';
 import { accountService, type AccountListItem } from '@/services/accountService';
-import type { Case, CasePriority } from '@/features/cases/types';
-import { CASE_PRIORITIES, CASE_PRIORITY_LABELS } from '@/features/cases/types';
+import type { Case, CasePriority, CaseRequestType } from '@/features/cases/types';
+import {
+  CASE_FILE_MAX_COUNT,
+  CASE_FILE_MAX_SIZE,
+  CASE_PRIORITIES,
+  CASE_PRIORITY_LABELS,
+  CASE_REQUEST_TYPES,
+} from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { formatRelative } from '@/lib/format';
 import { KbDraftCard } from '@/features/cases/KbDraftCard';
+import { isAcceptedUpload } from '@/features/cases/uploadWhitelist';
 
 /**
  * WR-Smart-Ticket Primary UX — One-Screen 3-Stage L1 Flow.
@@ -101,6 +111,21 @@ const TAXONOMY_FIELDS: Array<{
 interface SmartTicketProjectOption {
   id: string;
   name: string;
+  /** PR-6 — Proje kodu (örn. "ROTA-2026"). AccountProject schema'da
+   *  zaten zorunlu alan; accountService.get response'unda dönüyor.
+   *  Stage 1'de name + code substring filter için kullanılır. */
+  code?: string;
+}
+
+// PR-5 — QuickCaseModal pendingFiles tipi ile birebir aynı. Kullanıcı
+// dosya seçtiğinde queued olarak girer; submit'te uploading → done /
+// error transition'ı yapılır.
+interface PendingFile {
+  file: File;
+  id: string;
+  status: 'queued' | 'uploading' | 'done' | 'error';
+  percent: number;
+  errorMessage?: string;
 }
 
 interface SmartTicketFormState {
@@ -116,6 +141,14 @@ interface SmartTicketFormState {
   operationType: string;
   affectedObject: string;
   impact: string;
+  // PR-3 — Business review Madde 3. Manual selection (kullanıcı override
+  // etti mi) flag'leri ile birlikte tutulur; flag false ise payload
+  // mapping derive / fallback yoluna düşer (mevcut davranış korunur).
+  // priority default 'Medium' (Case schema default ile uyumlu). requestType
+  // boş başlar — boş kalırsa mapping derive eder.
+  priority: CasePriority;
+  priorityManual: boolean;
+  requestType: CaseRequestType | '';
 }
 
 interface ClosureFormState {
@@ -139,6 +172,9 @@ const emptyForm = (companyId: string): SmartTicketFormState => ({
   operationType: '',
   affectedObject: '',
   impact: '',
+  priority: 'Medium',
+  priorityManual: false,
+  requestType: '',
 });
 
 const emptyClosure = (): ClosureFormState => ({
@@ -202,6 +238,21 @@ export function SmartTicketNewPage({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // PR-5 — Business review Madde 2. Stage 1'de dosya attach.
+  // QuickCaseModal pendingFiles pattern'i birebir reuse: queued/uploading/
+  // done/error state machine. Case create öncesi FE state'inde tutulur;
+  // create başarılı olunca sıralı upload (caseService.addFile). Upload
+  // fail olursa Case AÇIK KALIR; kullanıcıya Vaka Detayı → Dosyalar'dan
+  // tekrar yükleme yönlendirmesi yapılır.
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+
+  // PR-6 — Business review Madde 4. Proje kodu ile arama. Müşteri
+  // seçildiğinde gelen mevcut proje listesinde FE-side substring filter.
+  // Yeni endpoint YOK; backend yetkilendirme aynı (account scope).
+  // Seçili proje varken filter yine tüm listede çalışır — kullanıcı
+  // başka projeye geçebilir.
+  const [projectFilter, setProjectFilter] = useState('');
 
   // Phase 2b — classification suggestion state.
   const [suggesting, setSuggesting] = useState(false);
@@ -286,7 +337,7 @@ export function SmartTicketNewPage({
       const company = detail.companies.find((c) => c.companyId === form.companyId);
       const list: SmartTicketProjectOption[] = (company?.projects ?? [])
         .filter((p) => p.isActive && p.status === 'Active')
-        .map((p) => ({ id: p.id, name: p.name }));
+        .map((p) => ({ id: p.id, name: p.name, code: p.code }));
       setProjects(list);
       setForm((f) =>
         f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
@@ -384,6 +435,90 @@ export function SmartTicketNewPage({
       accountProjectId: id,
       accountProjectName: project?.name ?? '',
     }));
+  }
+
+  // PR-6 — Proje filter: name veya code substring (case-insensitive,
+  // Filter boşsa tüm projeler döner. Seçili proje filter dışına düşse
+  // bile listede tutulur (visual continuity).
+  //
+  // Codex P2 (PR #467 review) — Proje kodu (ASCII identifier, örn.
+  // "INV-2026" / "IK-1") için locale-NEUTRAL lowercase. tr-TR
+  // toLocaleLowerCase 'I' → 'ı' (dotless) yapar; kullanıcı 'inv'
+  // yazınca query 'inv' (dotted) kalır ve match etmez. Code için
+  // ASCII toLowerCase; name için Türkçe karakter desteği (ş/ç/ğ/ö/ü/ı)
+  // gerektiği için tr-TR korunur. Query iki yola normalize edilir:
+  // qNeutral (code karşılaştırması) + qTr (name karşılaştırması).
+  const filteredProjects = useMemo(() => {
+    const raw = projectFilter.trim();
+    if (!raw) return projects;
+    const qNeutral = raw.toLowerCase();
+    const qTr = raw.toLocaleLowerCase('tr-TR');
+    return projects.filter((p) => {
+      // Seçili olan görünür kalsın.
+      if (form.accountProjectId === p.id) return true;
+      const name = (p.name || '').toLocaleLowerCase('tr-TR');
+      const code = (p.code || '').toLowerCase();
+      return name.includes(qTr) || code.includes(qNeutral);
+    });
+  }, [projects, projectFilter, form.accountProjectId]);
+
+  // Müşteri / şirket / projeler değişince filter'ı temizle.
+  useEffect(() => {
+    setProjectFilter('');
+  }, [form.accountId, form.companyId]);
+
+  // PR-5 — Pending files handlers. QuickCaseModal pattern'i birebir
+  // (count + size validation + queue update). Mevcut helper'ları
+  // duplicate etmek yerine inline kalıyor çünkü Smart Ticket'a özel
+  // basit lifecycle yeterli.
+  function handlePickFiles(filesList: FileList | File[]) {
+    const list = Array.from(filesList);
+    if (list.length === 0) return;
+    const remaining = CASE_FILE_MAX_COUNT - pendingFiles.length;
+    if (list.length > remaining) {
+      toast({
+        type: 'warn',
+        message: `En fazla ${remaining} dosya daha eklenebilir (toplam limit ${CASE_FILE_MAX_COUNT}).`,
+      });
+      return;
+    }
+    const oversized = list.filter((f) => f.size > CASE_FILE_MAX_SIZE);
+    if (oversized.length > 0) {
+      const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
+      toast({
+        type: 'error',
+        message: `${oversized.length} dosya ${maxMb} MB sınırını aşıyor.`,
+      });
+      return;
+    }
+    // PR-7 — MIME + uzantı whitelist pre-validation. Backend yine
+    // kesin koruma sağlar; bu pre-validation UX iyileştirmesi (kullanıcı
+    // upload başlamadan önce reddedilenleri görsün).
+    const rejected = list.filter((f) => !isAcceptedUpload(f.type, f.name));
+    if (rejected.length > 0) {
+      toast({
+        type: 'error',
+        message:
+          rejected.length === 1
+            ? `"${rejected[0].name}" dosya türü kabul edilmiyor.`
+            : `${rejected.length} dosya türü kabul edilmiyor (PDF, Office, görsel, TXT/CSV/JSON/XML, ZIP).`,
+        duration: 4500,
+      });
+      return;
+    }
+    setPendingFiles((q) => [
+      ...q,
+      ...list.map((f, i) => ({
+        file: f,
+        id: `${Date.now()}-${i}-${f.name}`,
+        status: 'queued' as const,
+        percent: 0,
+      })),
+    ]);
+  }
+
+  function handleRemovePendingFile(id: string) {
+    setPendingFiles((q) => q.filter((p) => p.id !== id));
   }
 
   function selectedCompanyName(): string {
@@ -528,6 +663,23 @@ export function SmartTicketNewPage({
       trace: mapping.trace,
     };
 
+    // PR-3 — Business review Madde 3. Final priority/requestType + source.
+    // Kullanıcı override > mapping derive > fallback.
+    //   requestType:
+    //     - form.requestType doluysa → manual (kullanıcı seçti)
+    //     - boşsa → mapping.requestType (taxonomy / fallback)
+    //   priority:
+    //     - form.priorityManual true ise → manual (kullanıcı override etti)
+    //     - değilse → default 'Medium' (mevcut davranış aynen)
+    //   Source field'ları customFields.smartTicket içine yazılır — audit
+    //   ve future analytics için. Backend enum validation'ı bozulmaz.
+    const finalRequestType = form.requestType || mapping.requestType;
+    const requestTypeSource: 'manual' | 'mapping' = form.requestType ? 'manual' : 'mapping';
+    const finalPriority: CasePriority = form.priorityManual ? form.priority : 'Medium';
+    const prioritySource: 'manual' | 'default' = form.priorityManual ? 'manual' : 'default';
+    smartTicket.requestTypeSource = requestTypeSource;
+    smartTicket.prioritySource = prioritySource;
+
     if (suggestion) {
       const perField: Record<string, { matchedBy: string; confidence: number; suggestedCode: string }> = {};
       for (const key of [
@@ -564,7 +716,7 @@ export function SmartTicketNewPage({
         title: form.title.trim(),
         description: form.description.trim(),
         caseType: 'GeneralSupport',
-        priority: 'Medium',
+        priority: finalPriority,
         origin: 'Web',
         companyId: form.companyId,
         companyName: selectedCompanyName(),
@@ -578,10 +730,62 @@ export function SmartTicketNewPage({
           : {}),
         category: mapping.category,
         subCategory: mapping.subCategory,
-        requestType: mapping.requestType,
+        requestType: finalRequestType,
         customFields: { smartTicket },
       });
       setCreatedCase(created);
+
+      // PR-5 — Pending files'i sırayla upload et (Case create başarılı
+      // olduktan sonra, KB import'tan ÖNCE). Hata olursa Case AÇIK KALIR;
+      // kullanıcıya warn toast ile "Vaka Detayı → Dosyalar'dan tekrar
+      // yükleyebilirsin" yönlendirmesi yapılır. QuickCaseModal pattern'i
+      // ile simetrik (sequential, hata durumunda devam).
+      let uploadedCase: Case = created;
+      let filesOk = 0;
+      let filesFail = 0;
+      if (pendingFiles.length > 0) {
+        for (const pf of pendingFiles) {
+          setPendingFiles((q) =>
+            q.map((p) => (p.id === pf.id ? { ...p, status: 'uploading', percent: 0 } : p)),
+          );
+          const result = await caseService.addFile(uploadedCase.id, pf.file, (percent) => {
+            setPendingFiles((q) =>
+              q.map((p) => (p.id === pf.id ? { ...p, percent } : p)),
+            );
+          });
+          if (!result || 'error' in result) {
+            filesFail += 1;
+            setPendingFiles((q) =>
+              q.map((p) =>
+                p.id === pf.id
+                  ? {
+                      ...p,
+                      status: 'error',
+                      percent: 100,
+                      errorMessage:
+                        result && 'error' in result ? result.error : 'Yükleme başarısız',
+                    }
+                  : p,
+              ),
+            );
+          } else {
+            filesOk += 1;
+            uploadedCase = result.caseUpdated;
+            setPendingFiles((q) =>
+              q.map((p) => (p.id === pf.id ? { ...p, status: 'done', percent: 100 } : p)),
+            );
+          }
+        }
+        setCreatedCase(uploadedCase);
+        if (filesFail > 0) {
+          toast({
+            type: 'warn',
+            message: `${filesOk}/${pendingFiles.length} dosya yüklendi · ${filesFail} hata. Vaka Detayı → Dosyalar'dan tekrar yükleyebilirsiniz.`,
+            duration: 4500,
+          });
+        }
+      }
+
       // Çözüm Adımlarını çağırma asynchronous — başarısız olsa bile
       // kullanıcı manuel adım ekleyebilir. Hata bilgilendirme toast'unda.
       //
@@ -1132,24 +1336,41 @@ export function SmartTicketNewPage({
                   required={projectsEnabled && projectsRequired && !!form.accountId}
                   hint={
                     projectsEnabled && projectsRequired && !!form.accountId
-                      ? 'Bu şirket için proje zorunlu.'
-                      : 'Opsiyonel.'
+                      ? 'Bu şirket için proje zorunlu. Kod veya ad ile arayabilirsiniz.'
+                      : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
                   }
                 >
-                  <Select
-                    value={form.accountProjectId}
-                    onChange={(e) => handleSelectProject(e.target.value)}
-                    disabled={stage !== 'opening'}
-                  >
-                    <option value="">
-                      {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
-                    </option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
+                  <div className="space-y-1.5">
+                    {/* PR-6 — Search input: name veya code substring filter.
+                        Yalnız 3+ proje varsa göster (1-2 projede gereksiz). */}
+                    {projects.length >= 3 && (
+                      <TextInput
+                        value={projectFilter}
+                        onChange={(e) => setProjectFilter(e.target.value)}
+                        placeholder="Proje kodu veya adı ile ara…"
+                        disabled={stage !== 'opening'}
+                      />
+                    )}
+                    <Select
+                      value={form.accountProjectId}
+                      onChange={(e) => handleSelectProject(e.target.value)}
+                      disabled={stage !== 'opening'}
+                    >
+                      <option value="">
+                        {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
                       </option>
-                    ))}
-                  </Select>
+                      {filteredProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.code ? `${p.code} — ${p.name}` : p.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {projectFilter.trim() && filteredProjects.length === 0 && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        "{projectFilter}" için proje bulunamadı.
+                      </p>
+                    )}
+                  </div>
                 </Field>
               )}
               <Field label="Başlık" required>
@@ -1160,7 +1381,22 @@ export function SmartTicketNewPage({
                   disabled={stage !== 'opening'}
                 />
               </Field>
-              <Field label="Açıklama" required>
+              <Field
+                label="Açıklama"
+                required
+                actions={
+                  stage === 'opening' ? (
+                    <VoiceNoteButton
+                      onTranscript={(chunk) =>
+                        setForm((f) => ({
+                          ...f,
+                          description: f.description ? `${f.description} ${chunk}` : chunk,
+                        }))
+                      }
+                    />
+                  ) : undefined
+                }
+              >
                 <TextArea
                   rows={4}
                   value={form.description}
@@ -1169,6 +1405,78 @@ export function SmartTicketNewPage({
                   disabled={stage !== 'opening'}
                 />
               </Field>
+
+              {/* PR-5 — Business review Madde 2. Stage 1'de dosya attach.
+                  Yalnız stage === 'opening' iken aktif; Case create
+                  başarılı olunca sıralı upload edilir. Hata olursa Case
+                  açık kalır, kullanıcı Vaka Detayı → Dosyalar'dan tekrar
+                  yükleyebilir. */}
+              {stage === 'opening' && (
+                <Stage1FileAttach
+                  pendingFiles={pendingFiles}
+                  onPick={handlePickFiles}
+                  onRemove={handleRemovePendingFile}
+                  disabled={creating}
+                />
+              )}
+
+              {/* PR-3 — Business review Madde 3. Talep Türü + Öncelik.
+                  Boş bırakılırsa Talep Türü mapping derive eder; Öncelik
+                  default 'Medium'. Kullanıcı seçim yaparsa override eder
+                  (customFields.smartTicket.requestTypeSource /
+                  prioritySource). Mevcut Case enum validation backend'de
+                  zorunlu — backend sade payload ile uyumlu. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field
+                  label="Talep Türü"
+                  hint={
+                    !form.requestType
+                      ? 'Boş bırakılırsa Akıllı Tanımlar / mapping otomatik seçer.'
+                      : undefined
+                  }
+                >
+                  <Select
+                    value={form.requestType}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, requestType: e.target.value as CaseRequestType | '' }))
+                    }
+                    disabled={stage !== 'opening'}
+                  >
+                    <option value="">— Otomatik —</option>
+                    {CASE_REQUEST_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Öncelik"
+                  hint={
+                    form.priorityManual
+                      ? `Seçildi: ${CASE_PRIORITY_LABELS[form.priority]}`
+                      : 'Default: Orta. Devirde değiştirilebilir.'
+                  }
+                >
+                  <Select
+                    value={form.priority}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        priority: e.target.value as CasePriority,
+                        priorityManual: true,
+                      }))
+                    }
+                    disabled={stage !== 'opening'}
+                  >
+                    {CASE_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {CASE_PRIORITY_LABELS[p]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
 
               {/* Smart Ticket taxonomy alanları */}
               <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
@@ -1773,6 +2081,16 @@ function Stage3Closure({
             </span>
           }
           required
+          actions={
+            <VoiceNoteButton
+              onTranscript={(chunk) =>
+                setClosure((c) => ({
+                  ...c,
+                  resolutionNote: c.resolutionNote ? `${c.resolutionNote} ${chunk}` : chunk,
+                }))
+              }
+            />
+          }
         >
           <TextArea
             rows={4}
@@ -2484,5 +2802,146 @@ function Stage2DescriptionEditor({
         )}
       </CardBody>
     </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage1FileAttach — PR-5 (Business review Madde 2)
+//
+// Stage 1 sol kolonda dosya seçme + queue render. QuickCaseModal
+// "Kanıt / Dosyalar" pattern'i ile simetrik ama compact (Smart Ticket
+// akışı 1 ekran amaçlı). Status renkleri:
+//   - queued / done   → slate (default)
+//   - uploading       → brand (progress bar)
+//   - error           → rose (uyarı)
+//
+// Görsel preview bu PR'da YOK (scope sınırı); sadece filename + size.
+// Preview ileride opsiyonel olarak eklenebilir.
+// ─────────────────────────────────────────────────────────────────
+
+function Stage1FileAttach({
+  pendingFiles,
+  onPick,
+  onRemove,
+  disabled,
+}: {
+  pendingFiles: PendingFile[];
+  onPick: (files: FileList | File[]) => void;
+  onRemove: (id: string) => void;
+  disabled: boolean;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const remaining = CASE_FILE_MAX_COUNT - pendingFiles.length;
+  const limitReached = remaining <= 0;
+  const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3 dark:border-ndark-border dark:bg-ndark-bg/40">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
+          <Paperclip size={11} className="text-brand-500" />
+          Dosyalar (opsiyonel)
+          <span className="text-slate-400">
+            · {pendingFiles.length}/{CASE_FILE_MAX_COUNT}
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          leftIcon={<Paperclip size={11} />}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || limitReached}
+          title={limitReached ? `Limit dolu (${CASE_FILE_MAX_COUNT} dosya)` : `Maks ${maxMb} MB / dosya`}
+        >
+          Dosya Ekle
+        </Button>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) onPick(e.target.files);
+          // Aynı dosyayı tekrar seçebilmek için input'u reset et.
+          e.target.value = '';
+        }}
+      />
+      {pendingFiles.length === 0 ? (
+        <p className="text-[11px] text-slate-500 dark:text-ndark-muted">
+          Ekran görüntüsü, log, XML — vaka açıldıktan sonra otomatik yüklenir. Maks {maxMb} MB / dosya, en fazla {CASE_FILE_MAX_COUNT} dosya.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {pendingFiles.map((pf) => {
+            const isError = pf.status === 'error';
+            const isUploading = pf.status === 'uploading';
+            const isDone = pf.status === 'done';
+            return (
+              <li
+                key={pf.id}
+                className={
+                  'flex items-center gap-2 rounded-md border px-2 py-1 ' +
+                  (isError
+                    ? 'border-rose-200 bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30'
+                    : isDone
+                      ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30'
+                      : 'border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card')
+                }
+              >
+                <Paperclip size={11} className="shrink-0 text-slate-400" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[11px] font-medium text-slate-800 dark:text-ndark-text" title={pf.file.name}>
+                    {pf.file.name}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-ndark-muted">
+                    <span>{formatSize(pf.file.size)}</span>
+                    {isUploading && (
+                      <>
+                        <span>·</span>
+                        <span>%{pf.percent}</span>
+                      </>
+                    )}
+                    {isDone && (
+                      <>
+                        <span>·</span>
+                        <Check size={9} className="text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-300">Yüklendi</span>
+                      </>
+                    )}
+                    {isError && (
+                      <>
+                        <span>·</span>
+                        <span className="text-rose-700 dark:text-rose-300">
+                          {pf.errorMessage ?? 'Hata'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {!isUploading && !isDone && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(pf.id)}
+                    disabled={disabled}
+                    className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-ndark-bg/60"
+                    title="Sırada bekleyenden çıkar"
+                    aria-label="Dosyayı kaldır"
+                  >
+                    <XIcon size={11} />
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
