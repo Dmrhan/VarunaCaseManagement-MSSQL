@@ -29,7 +29,8 @@ import {
   type SuggestClassificationField,
 } from '@/services/caseService';
 import { accountService, type AccountListItem } from '@/services/accountService';
-import type { Case } from '@/features/cases/types';
+import type { Case, CasePriority } from '@/features/cases/types';
+import { CASE_PRIORITIES, CASE_PRIORITY_LABELS } from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
@@ -222,6 +223,8 @@ export function SmartTicketNewPage({
   const [transferBriefError, setTransferBriefError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
+  // Madde 4 — opsiyonel priority değişimi. Default mevcut Case.priority.
+  const [transferPriority, setTransferPriority] = useState<CasePriority>('Medium');
   // Composer'ın kullanıcı tarafından düzenlenip düzenlenmediğini izle.
   // Auto-fetch user override'ı ezmesin diye flag tutuluyor.
   const transferSummaryDirtyRef = useRef(false);
@@ -823,6 +826,9 @@ export function SmartTicketNewPage({
   useEffect(() => {
     if (stage !== 'transfer' || !createdCase) return;
     void handleFetchTransferBrief();
+    // Madde 4 — Stage 3 transfer'e girince priority select'i mevcut
+    // Case.priority ile sync et (default fallback Medium).
+    setTransferPriority(createdCase.priority ?? 'Medium');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdCase?.id]);
 
@@ -879,6 +885,11 @@ export function SmartTicketNewPage({
     setTransferError(null);
     try {
       const summary = transferComposedSummary.trim();
+      // Madde 4 — mevcut Case.priority ile transferPriority aynıysa
+      // backend zaten no-op yapıyor; yine de payload'a yalnız değişim
+      // varsa ekle (network payload temiz, backend FieldUpdate row'u
+      // duplicate yazmaz).
+      const priorityChanged = transferPriority !== createdCase.priority;
       const updated = await caseService.transferCase(createdCase.id, {
         toTeamId: transferToTeamId,
         toPersonId: transferToPersonId || undefined,
@@ -890,6 +901,7 @@ export function SmartTicketNewPage({
           attemptedStepIds: transferAttemptedStepIds,
           ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
         },
+        ...(priorityChanged ? { priority: transferPriority } : {}),
       });
       if (!updated) {
         setTransferError('Vaka aktarılamadı.');
@@ -1296,6 +1308,7 @@ export function SmartTicketNewPage({
               transferBriefError={transferBriefError}
               transferring={transferring}
               transferError={transferError}
+              transferPriority={transferPriority}
               onChangeTeam={(id) => setTransferToTeamId(id)}
               onChangePerson={(id) => setTransferToPersonId(id)}
               onChangeNote={(v) => {
@@ -1306,6 +1319,7 @@ export function SmartTicketNewPage({
                 transferSummaryDirtyRef.current = true;
                 setTransferComposedSummary(v);
               }}
+              onChangePriority={(p) => setTransferPriority(p)}
               onRefreshBrief={() => {
                 transferSummaryDirtyRef.current = false;
                 void handleFetchTransferBrief();
@@ -1744,10 +1758,12 @@ function Stage3Transfer({
   transferBriefError,
   transferring,
   transferError,
+  transferPriority,
   onChangeTeam,
   onChangePerson,
   onChangeNote,
   onChangeSummary,
+  onChangePriority,
   onRefreshBrief,
   onSubmit,
   onBack,
@@ -1765,10 +1781,12 @@ function Stage3Transfer({
   transferBriefError: string | null;
   transferring: boolean;
   transferError: string | null;
+  transferPriority: CasePriority;
   onChangeTeam: (id: string) => void;
   onChangePerson: (id: string) => void;
   onChangeNote: (v: string) => void;
   onChangeSummary: (v: string) => void;
+  onChangePriority: (p: CasePriority) => void;
   onRefreshBrief: () => void;
   onSubmit: () => void;
   onBack: () => void;
@@ -1903,6 +1921,30 @@ function Stage3Transfer({
             </Select>
           </Field>
         </div>
+
+        {/* Madde 4 — Devir sırasında opsiyonel priority değişimi.
+            Default: mevcut Case.priority. Değişmezse network'e gönderilmez
+            (no-op). SLA değiştirilmez. */}
+        <Field
+          label="Öncelik"
+          hint={
+            transferPriority !== createdCase.priority
+              ? `Mevcut: ${CASE_PRIORITY_LABELS[createdCase.priority]} → Yeni: ${CASE_PRIORITY_LABELS[transferPriority]}`
+              : 'Devir sırasında önceliği değiştirebilirsin. Klasik vakaların SLA\'sı değişmez.'
+          }
+        >
+          <Select
+            value={transferPriority}
+            onChange={(e) => onChangePriority(e.target.value as CasePriority)}
+            disabled={transferring}
+          >
+            {CASE_PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {CASE_PRIORITY_LABELS[p]}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
         {/* Devir notu — zorunlu */}
         <Field

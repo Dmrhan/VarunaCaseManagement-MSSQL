@@ -1741,6 +1741,10 @@ export const caseService = {
           total: number;
         };
       };
+      // Madde 4 — opsiyonel priority değişimi. Verilirse transferCase
+      // mevcut Case.priority ile karşılaştırır; değişiyorsa update +
+      // ayrı FieldUpdate activity row. SLA değişmez.
+      priority?: CasePriority;
     },
   ): Promise<Case | undefined> {
     const result = await apiFetch<Case>(

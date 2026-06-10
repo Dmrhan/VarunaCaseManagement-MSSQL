@@ -2428,6 +2428,24 @@ export const caseRepository = {
         ? input.smartTicketTransfer
         : null;
 
+    // Madde 4 — Devir sırasında opsiyonel priority değişimi. L1 ajan L2'ye
+    // devrederken vaka önceliğini de güncelleyebilir. Mevcut Case.priority
+    // ile aynıysa update edilmez (no-op + gereksiz activity row önlenir).
+    // Geçersiz değer → 400. SLA değiştirilmez (Phase 3 ayrı kapsam).
+    const VALID_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
+    let priorityChange = null;
+    if (input.priority !== undefined && input.priority !== null) {
+      if (!VALID_PRIORITIES.includes(input.priority)) {
+        return {
+          error: 'invalid_input',
+          message: `Geçersiz priority. Beklenen: ${VALID_PRIORITIES.join(' | ')}.`,
+        };
+      }
+      if (input.priority !== c.priority) {
+        priorityChange = { from: c.priority, to: input.priority };
+      }
+    }
+
     if (stTransfer) {
       const noteParts = [noteText];
       const trimmedTransferNote =
@@ -2479,6 +2497,7 @@ export const caseRepository = {
           assignedPersonName: person?.name ?? null,
           transferCount: { increment: 1 },
           ...(nextCustomFields ? { customFields: nextCustomFields } : {}),
+          ...(priorityChange ? { priority: priorityChange.to } : {}),
         },
         include: CASE_INCLUDE,
       });
@@ -2514,6 +2533,25 @@ export const caseRepository = {
           actor: input.transferredByName ?? input.transferredBy,
         },
       });
+
+      // Madde 4 — priority değişti ise ayrı FieldUpdate row.
+      // Activity tab'daki filtreleme (fields chip'i + watcher trigger
+      // mantığı) priority değişimini ayrı bir kayıt olarak görebilsin
+      // diye Transfer row'una sığdırılmadı.
+      if (priorityChange) {
+        await tx.caseActivity.create({
+          data: {
+            caseId: id,
+            companyId,
+            action: 'Öncelik güncellendi',
+            actionType: 'FieldUpdate',
+            fieldName: 'priority',
+            fromValue: String(priorityChange.from ?? '—'),
+            toValue: String(priorityChange.to),
+            actor: input.transferredByName ?? input.transferredBy,
+          },
+        });
+      }
 
       return u;
     });
