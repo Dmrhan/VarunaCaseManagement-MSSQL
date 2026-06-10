@@ -682,6 +682,7 @@ export default function App() {
             <SmartTicketNewPage
               onCancel={() => setView('cases')}
               onCreated={(caseId) => openCase(caseId)}
+              onOpenExistingCase={(caseId) => openCase(caseId)}
             />
           )}
         </main>

@@ -160,7 +160,9 @@ if (src.includes('suggestSmartTicketClassification(')) {
 //     SmartTicketNewPage'den direkt çağrılmıyor (panel kendi yapıyor),
 //     ama transitionStatus 'Çözüldü' kullanıcı confirm olmadan çağrılmaz.
 //     handleCloseCase'in dışında 'Çözüldü' transitionStatus çağrısı YOK.
-const closeCalls = (src.match(/transitionStatus[\s\S]*?'Çözüldü'/g) ?? []).length;
+//     Daraltılmış regex: yalnız ACTUAL caseService.transitionStatus(...)
+//     çağrılarını eşler — yorum satırlarındaki bahsetmeleri yutar.
+const closeCalls = (src.match(/caseService\.transitionStatus\([\s\S]*?'Çözüldü'/g) ?? []).length;
 if (closeCalls === 1) {
   ok('15) Auto-close YOK — transitionStatus(\'Çözüldü\') yalnız handleCloseCase\'de (kullanıcı tıklamadıkça)');
 } else {
