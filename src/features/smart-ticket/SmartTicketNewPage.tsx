@@ -35,6 +35,7 @@ import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel'
 import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { formatRelative } from '@/lib/format';
+import { KbDraftCard } from '@/features/cases/KbDraftCard';
 
 /**
  * WR-Smart-Ticket Primary UX — One-Screen 3-Stage L1 Flow.
@@ -1274,6 +1275,7 @@ export function SmartTicketNewPage({
 
           {stage === 'closure' && createdCase && (
             <Stage3Closure
+              createdCase={createdCase}
               closure={closure}
               setClosure={setClosure}
               closureLists={closureLists}
@@ -1488,6 +1490,7 @@ interface ClosureListsRef {
 }
 
 function Stage3Closure({
+  createdCase,
   closure,
   setClosure,
   closureLists,
@@ -1503,6 +1506,7 @@ function Stage3Closure({
   onBack,
   onGoToCaseDetail,
 }: {
+  createdCase: Case;
   closure: ClosureFormState;
   setClosure: (fn: (c: ClosureFormState) => ClosureFormState) => void;
   closureLists: ClosureListsRef;
@@ -1689,6 +1693,9 @@ function Stage3Closure({
             </Select>
           </Field>
         </div>
+        {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
+            Sadece customFields.smartTicket.aiDrafts varsa render. */}
+        <KbDraftCard item={createdCase} variant="closure" />
         <Field label="Çözüm Açıklaması" required>
           <TextArea
             rows={4}
@@ -1945,6 +1952,10 @@ function Stage3Transfer({
             ))}
           </Select>
         </Field>
+
+        {/* Madde 2 — KB Teknik Devir Notu kartı (varsa). Müşteri yanıt
+            taslağı transfer akışında gizli (L1 → L2 devri için anlamsız). */}
+        <KbDraftCard item={createdCase} variant="transfer" />
 
         {/* Devir notu — zorunlu */}
         <Field
