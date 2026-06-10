@@ -1,6 +1,7 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
+import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
 import {
@@ -2052,6 +2053,17 @@ export const caseRepository = {
       return { error: `Dosya boyutu üst sınırı ${Math.round(FILE_MAX_SIZE / (1024 * 1024))} MB.` };
     }
 
+    // PR-7 — Business review Madde 6. MIME + uzantı whitelist (deny-by-
+    // default). XML explicit kabul listesinde; executable/script tipleri
+    // reddedilir. Eski yüklenmiş dosyalar etkilenmez — yalnız yeni
+    // upload check edilir. İçerik (magic bytes) doğrulama YOK; backend
+    // dosyaları parse etmez, XXE/SSRF riski sıfır.
+    if (!isAcceptedUpload(input.mimeType, input.fileName)) {
+      return {
+        error: 'Bu dosya türü kabul edilmiyor. PDF, Office belgeleri, görseller (PNG/JPG/GIF/WebP), metin (TXT/CSV/JSON/XML) ve ZIP yüklenebilir.',
+      };
+    }
+
     // Önceden id üret — Storage path'i bunu kullanır (henüz DB'de yok).
     const attachmentId = `cmsa_${crypto.randomBytes(12).toString('hex')}`;
     const { signedUrl, path } = await createUploadUrl(id, attachmentId, input.fileName);
@@ -2065,6 +2077,15 @@ export const caseRepository = {
   async finalizeUpload(id, input, allowedCompanyIds) {
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
+    // PR-7 — Defense-in-depth: requestUpload signed URL aldıktan sonra
+    // finalize'a farklı MIME ile gelirse reddet. Aynı whitelist'i
+    // tekrar kontrol et. Eski upload'lar (signed URL akışı dışında)
+    // bu code path'ten geçmez.
+    if (!isAcceptedUpload(input.mimeType, input.fileName)) {
+      return {
+        error: 'Bu dosya türü kabul edilmiyor. PDF, Office belgeleri, görseller (PNG/JPG/GIF/WebP), metin (TXT/CSV/JSON/XML) ve ZIP yüklenebilir.',
+      };
+    }
     const actor = input.uploadedBy ?? 'Mock User';
     const file = await prisma.caseAttachment.create({
       data: {

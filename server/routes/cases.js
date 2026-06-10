@@ -1076,6 +1076,8 @@ router.post(
       req.user.allowedCompanyIds,
     );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // PR-7 — finalize whitelist defense-in-depth: MIME mismatch 400.
+    if ('error' in result) return res.status(400).json(result);
     res.status(201).json(result);
   }),
 );

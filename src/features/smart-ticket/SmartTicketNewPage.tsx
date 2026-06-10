@@ -54,6 +54,7 @@ import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { formatRelative } from '@/lib/format';
 import { KbDraftCard } from '@/features/cases/KbDraftCard';
+import { isAcceptedUpload } from '@/features/cases/uploadWhitelist';
 
 /**
  * WR-Smart-Ticket Primary UX — One-Screen 3-Stage L1 Flow.
@@ -478,6 +479,21 @@ export function SmartTicketNewPage({
       toast({
         type: 'error',
         message: `${oversized.length} dosya ${maxMb} MB sınırını aşıyor.`,
+      });
+      return;
+    }
+    // PR-7 — MIME + uzantı whitelist pre-validation. Backend yine
+    // kesin koruma sağlar; bu pre-validation UX iyileştirmesi (kullanıcı
+    // upload başlamadan önce reddedilenleri görsün).
+    const rejected = list.filter((f) => !isAcceptedUpload(f.type, f.name));
+    if (rejected.length > 0) {
+      toast({
+        type: 'error',
+        message:
+          rejected.length === 1
+            ? `"${rejected[0].name}" dosya türü kabul edilmiyor.`
+            : `${rejected.length} dosya türü kabul edilmiyor (PDF, Office, görsel, TXT/CSV/JSON/XML, ZIP).`,
+        duration: 4500,
       });
       return;
     }
