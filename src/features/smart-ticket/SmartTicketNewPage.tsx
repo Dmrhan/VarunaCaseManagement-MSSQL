@@ -110,6 +110,10 @@ const TAXONOMY_FIELDS: Array<{
 interface SmartTicketProjectOption {
   id: string;
   name: string;
+  /** PR-6 — Proje kodu (örn. "ROTA-2026"). AccountProject schema'da
+   *  zaten zorunlu alan; accountService.get response'unda dönüyor.
+   *  Stage 1'de name + code substring filter için kullanılır. */
+  code?: string;
 }
 
 // PR-5 — QuickCaseModal pendingFiles tipi ile birebir aynı. Kullanıcı
@@ -242,6 +246,13 @@ export function SmartTicketNewPage({
   // tekrar yükleme yönlendirmesi yapılır.
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
 
+  // PR-6 — Business review Madde 4. Proje kodu ile arama. Müşteri
+  // seçildiğinde gelen mevcut proje listesinde FE-side substring filter.
+  // Yeni endpoint YOK; backend yetkilendirme aynı (account scope).
+  // Seçili proje varken filter yine tüm listede çalışır — kullanıcı
+  // başka projeye geçebilir.
+  const [projectFilter, setProjectFilter] = useState('');
+
   // Phase 2b — classification suggestion state.
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestClassificationResponse | null>(null);
@@ -325,7 +336,7 @@ export function SmartTicketNewPage({
       const company = detail.companies.find((c) => c.companyId === form.companyId);
       const list: SmartTicketProjectOption[] = (company?.projects ?? [])
         .filter((p) => p.isActive && p.status === 'Active')
-        .map((p) => ({ id: p.id, name: p.name }));
+        .map((p) => ({ id: p.id, name: p.name, code: p.code }));
       setProjects(list);
       setForm((f) =>
         f.accountProjectId && !list.some((p) => p.id === f.accountProjectId)
@@ -424,6 +435,27 @@ export function SmartTicketNewPage({
       accountProjectName: project?.name ?? '',
     }));
   }
+
+  // PR-6 — Proje filter: name veya code substring (case-insensitive,
+  // Türkçe lowercase). Filter boşsa tüm projeler döner. Seçili
+  // proje filter dışına düşse bile listede tutulur (visual continuity).
+  const filteredProjects = useMemo(() => {
+    const q = projectFilter.trim().toLocaleLowerCase('tr-TR');
+    if (!q) return projects;
+    return projects.filter((p) => {
+      const name = (p.name || '').toLocaleLowerCase('tr-TR');
+      const code = (p.code || '').toLocaleLowerCase('tr-TR');
+      // Seçili olan da görünür kalsın (kullanıcı filter yazarken seçimi
+      // dropdown'da görmek ister).
+      if (form.accountProjectId === p.id) return true;
+      return name.includes(q) || code.includes(q);
+    });
+  }, [projects, projectFilter, form.accountProjectId]);
+
+  // Müşteri / şirket / projeler değişince filter'ı temizle.
+  useEffect(() => {
+    setProjectFilter('');
+  }, [form.accountId, form.companyId]);
 
   // PR-5 — Pending files handlers. QuickCaseModal pattern'i birebir
   // (count + size validation + queue update). Mevcut helper'ları
@@ -1279,24 +1311,41 @@ export function SmartTicketNewPage({
                   required={projectsEnabled && projectsRequired && !!form.accountId}
                   hint={
                     projectsEnabled && projectsRequired && !!form.accountId
-                      ? 'Bu şirket için proje zorunlu.'
-                      : 'Opsiyonel.'
+                      ? 'Bu şirket için proje zorunlu. Kod veya ad ile arayabilirsiniz.'
+                      : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
                   }
                 >
-                  <Select
-                    value={form.accountProjectId}
-                    onChange={(e) => handleSelectProject(e.target.value)}
-                    disabled={stage !== 'opening'}
-                  >
-                    <option value="">
-                      {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
-                    </option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
+                  <div className="space-y-1.5">
+                    {/* PR-6 — Search input: name veya code substring filter.
+                        Yalnız 3+ proje varsa göster (1-2 projede gereksiz). */}
+                    {projects.length >= 3 && (
+                      <TextInput
+                        value={projectFilter}
+                        onChange={(e) => setProjectFilter(e.target.value)}
+                        placeholder="Proje kodu veya adı ile ara…"
+                        disabled={stage !== 'opening'}
+                      />
+                    )}
+                    <Select
+                      value={form.accountProjectId}
+                      onChange={(e) => handleSelectProject(e.target.value)}
+                      disabled={stage !== 'opening'}
+                    >
+                      <option value="">
+                        {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
                       </option>
-                    ))}
-                  </Select>
+                      {filteredProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.code ? `${p.code} — ${p.name}` : p.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {projectFilter.trim() && filteredProjects.length === 0 && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        "{projectFilter}" için proje bulunamadı.
+                      </p>
+                    )}
+                  </div>
                 </Field>
               )}
               <Field label="Başlık" required>
