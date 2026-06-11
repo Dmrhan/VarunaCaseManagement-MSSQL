@@ -261,6 +261,25 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
 
 ### Faz 5 — On-prem hosting ve temizlik
 
+**Durum: TAMAMLANDI (2026-06-11).** Notlar:
+
+- Express artık `dist/`'i servis ediyor (static + SPA fallback; `/api/*` 404'ü
+  JSON kalır). dist yoksa salt-API modunda çalışır (dev'de Vite sunar).
+- `server/cronScheduler.js` (node-cron, Europe/Istanbul): snooze 5dk,
+  pattern 15dk, qa 02:00, cleanup 03:00, archive 03:30. `CRON_SCHEDULER_ENABLED=false`
+  ile kapatılabilir; HTTP cron endpoint'leri manuel tetik için duruyor.
+- `@supabase/supabase-js` kaldırıldı; `api/`, `vercel.json`, `.vercelignore` silindi.
+  Scriptlerdeki `VERCEL` kontrolleri üretim-koruma guard'ı olarak BIRAKILDI
+  (on-prem'de zararsız, güvenlik katmanı).
+- 23 API smoke'unun Supabase token akışı local login'e çevrildi
+  (`convert-smokes-local-auth.mjs`); örneklem doğrulaması: account-projects 25/25,
+  case-stats 29/29, customer-type 12/12, tckn-search 7/7 — canlı sunucuya karşı.
+- CORS `CORS_ORIGIN` env'ine bağlandı (aynı-origin default'unda kapalı).
+- `seed-univera-smart-ticket-taxonomies.js` hardcoded Google Drive yolu →
+  zorunlu `--xlsx` argümanı / `TAXONOMY_XLSX_PATH` env.
+- `npm start` eklendi; kurulum dokümanı: **docs/ONPREM_INSTALL.md**
+  (NSSM Windows Service, statik SQL portu, yedekleme, güncelleme, sorun giderme).
+
 - Express `dist/` static serving + SPA fallback (`server/app.js`).
 - `server/cronScheduler.js` (node-cron): 5dk snooze-wakeup, 15dk pattern-detect,
   gece 02:00 qa-score-batch, günlük cleanup/archive; HTTP cron endpoint'leri
