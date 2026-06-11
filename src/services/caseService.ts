@@ -12,7 +12,7 @@ import {
   MOCK_THIRD_PARTIES,
 } from '@/mocks/caseMockData';
 import { getBootstrap } from '@/services/lookupBootstrap';
-import { getAccessToken } from '@/services/supabase';
+import { getAccessToken } from '@/services/authClient';
 import { notify } from '@/components/ui/Toast';
 
 // History entry'leri için insan-okur değer formatlayıcı

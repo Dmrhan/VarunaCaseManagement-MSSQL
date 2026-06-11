@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, Send, AlertTriangle, Sparkles } from 'lucide-react';
+import { Mail, UserPlus, AlertTriangle, Sparkles, KeyRound, User } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/Field';
@@ -11,11 +11,11 @@ import type { AdminUser, CompanyRole } from '@/services/adminService';
 interface InviteUserModalProps {
   open: boolean;
   onClose: () => void;
-  /** Davet başarılı olduğunda parent listeyi yenilesin. */
+  /** Oluşturma başarılı olduğunda parent listeyi yenilesin. */
   onInvited: () => void;
 }
 
-// Phase 5C ürün kararı: 5 sistem rolü gösterilir; SystemAdmin invite kabul edilmez.
+// 5 sistem rolü gösterilir; SystemAdmin oluşturma kabul edilmez.
 const SYSTEM_ROLES: Array<{ value: AdminUser['role']; label: string; description: string }> = [
   { value: 'Agent',      label: 'Agent',       description: 'Vaka çözen frontline kullanıcı' },
   { value: 'Backoffice', label: 'Backoffice',  description: 'Operasyonel arka ofis' },
@@ -30,29 +30,43 @@ const COMPANY_ROLES: Array<{ value: CompanyRole; label: string }> = [
   { value: 'Admin',      label: 'Admin' },
 ];
 
+/** Basit geçici şifre üretici — admin isterse kendi yazabilir. */
+function generatePassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const all = upper + lower + digits;
+  const pick = (s: string) => s[Math.floor(Math.random() * s.length)];
+  let pw = pick(upper) + pick(lower) + pick(digits) + pick('!@#$%');
+  for (let i = 0; i < 8; i++) pw += pick(all);
+  return pw;
+}
+
 /**
- * Admin'den e-posta ile kullanıcı davet modalı (Phase 5C).
+ * Admin'den kullanıcı oluşturma modalı (Faz 3 — local auth).
  *
- * Davet edilen kullanıcıya Supabase Auth üzerinden magic-link davet maili gider;
- * DB'de placeholder User satırı (`fullName=email`) ve UserCompany ataması yaratılır.
- * Kullanıcı linke tıklayıp Supabase'de hesap kurar, ilk login'inde verifyJwt
- * DB User'i bulur (auto-provision tetiklenmez). Davet bekleyen kullanıcı admin
- * sayfasında "Davet bekliyor" rozetiyle görünür.
+ * E-posta GÖNDERİLMEZ: admin başlangıç şifresi belirler (veya üretir) ve
+ * kullanıcıya kendisi iletir. Kullanıcı ilk girişte şifresini değiştirmek
+ * zorunda kalır (mustChangePassword bayrağı).
  */
 export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalProps) {
   const { toast } = useToast();
   const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<AdminUser['role']>('Agent');
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companyRole, setCompanyRole] = useState<CompanyRole>('Agent');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setEmail('');
+    setFullName('');
     setRole('Agent');
     setCompanyId(null);
     setCompanyRole('Agent');
+    setPassword('');
     setError(null);
     setSubmitting(false);
   }
@@ -74,22 +88,25 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
       setError('Şirket seçimi zorunlu.');
       return;
     }
+    if (password.length < 8) {
+      setError('Başlangıç şifresi en az 8 karakter olmalı.');
+      return;
+    }
     setSubmitting(true);
-    const result = await adminService.users.invite({
+    const result = await adminService.users.createUser({
       email: trimmedEmail,
+      fullName: fullName.trim() || undefined,
       role,
       companyId,
       companyRole,
+      password,
     });
     setSubmitting(false);
     if (result.ok) {
-      const orphanNote = result.item.orphanRecovered
-        ? ' (Supabase Auth\'ta zaten kayıtlıydı; mevcut hesap bağlandı.)'
-        : '';
       toast({
         type: 'success',
-        title: 'Davet gönderildi',
-        message: `${result.item.email} adresine davet maili gönderildi.${orphanNote}`,
+        title: 'Kullanıcı oluşturuldu',
+        message: `${result.item.email} hesabı açıldı. Başlangıç şifresini kullanıcıya iletin.`,
       });
       onInvited();
       reset();
@@ -107,7 +124,7 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
       title={(
         <span className="inline-flex items-center gap-2">
           <Sparkles size={14} className="text-violet-500" />
-          Yeni Kullanıcı Davet Et
+          Yeni Kullanıcı Oluştur
         </span>
       )}
       footer={(
@@ -117,12 +134,12 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
             {submitting ? (
               <>
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                Gönderiliyor…
+                Oluşturuluyor…
               </>
             ) : (
               <>
-                <Send size={12} />
-                Davet Gönder
+                <UserPlus size={12} />
+                Kullanıcı Oluştur
               </>
             )}
           </Button>
@@ -152,6 +169,19 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
           </div>
         </Field>
 
+        <Field label="Ad Soyad" hint="Boş bırakılırsa e-postanın @ öncesi kullanılır.">
+          <div className="relative">
+            <User size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <TextInput
+              placeholder="Ad Soyad"
+              value={fullName}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFullName(e.target.value)}
+              disabled={submitting}
+              className="pl-7"
+            />
+          </div>
+        </Field>
+
         <Field label="Sistem Rolü" required hint="Kullanıcının uygulama içindeki ana rolü.">
           <select
             value={role}
@@ -167,7 +197,7 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
           </select>
         </Field>
 
-        <Field label="Şirket" required hint="Davet edilen kullanıcı hangi şirkete bağlansın?">
+        <Field label="Şirket" required hint="Kullanıcı hangi şirkete bağlansın?">
           <CompanySelector
             value={companyId}
             onChange={(id) => setCompanyId(id)}
@@ -189,11 +219,30 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
           </select>
         </Field>
 
+        <Field label="Başlangıç Şifresi" required hint="Kullanıcı ilk girişte değiştirmek zorunda kalır.">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <KeyRound size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <TextInput
+                type="text"
+                placeholder="En az 8 karakter"
+                value={password}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                disabled={submitting}
+                className="pl-7 font-mono"
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setPassword(generatePassword())} disabled={submitting}>
+              Üret
+            </Button>
+          </div>
+        </Field>
+
         <div className="rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:bg-ndark-bg/40 dark:text-ndark-muted">
           <strong>Ne olacak?</strong>
-          {' '}Bu e-posta adresine Supabase üzerinden bir davet maili gider.
-          Kullanıcı linke tıklayıp şifresini belirleyince uygulamaya girebilir.
-          Davet bekleyen kullanıcı listede "Davet bekliyor" rozetiyle görünür.
+          {' '}E-posta gönderilmez. Hesap hemen açılır; başlangıç şifresini
+          kullanıcıya siz iletirsiniz. Kullanıcı ilk girişinde yeni şifresini
+          belirlemeden uygulamaya giremez.
         </div>
       </div>
     </Modal>

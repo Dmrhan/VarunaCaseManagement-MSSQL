@@ -20,7 +20,7 @@ import {
   userRepo,
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
-import { verifyJwt, requireRole, getSupabaseAdminClient } from '../db/auth.js';
+import { verifyJwt, requireRole } from '../db/auth.js';
 
 const router = Router();
 
@@ -366,70 +366,37 @@ router.put('/users/:id/companies', asyncRoute(async (req, res) => {
 }));
 
 /**
- * POST /api/admin/users/invite — Phase 5C: Admin'den davet akisi.
- * Body: { email, role, companyId, companyRole }
+ * POST /api/admin/users — Faz 3: Admin'den kullanıcı oluşturma (local auth).
+ * Body: { email, fullName?, role, companyId, companyRole, password }
  *  - role           — Sistem rolu (User.role): Agent | Backoffice | Supervisor | CSM | Admin
  *  - companyRole    — UserCompany.role: Agent | Supervisor | Admin
- *  - companyId      — Davet edilen sirket; Admin yalnizca kendi sirketlerine, SystemAdmin tum sirketlere
+ *  - companyId      — Hedef sirket; Admin yalnizca kendi sirketlerine, SystemAdmin tum sirketlere
+ *  - password       — Baslangic sifresi (min 8); kullanici ilk giriste degistirmek zorunda
  *
- * Akis: Supabase Auth `inviteUserByEmail` ile e-posta gonderilir; Donen
- * supabase user id ile placeholder DB User + UserCompany yaratilir. DB hata
- * verirse Supabase user geri alinir (best-effort compensation).
+ * E-posta gonderimi YOK (on-prem). Admin sifreyi kullaniciya kendisi iletir.
  */
-router.post('/users/invite', asyncRoute(async (req, res) => {
-  const { email, role, companyId, companyRole } = req.body ?? {};
+router.post('/users', asyncRoute(async (req, res) => {
+  const { email, fullName, role, companyId, companyRole, password } = req.body ?? {};
   assertCompanyAdmin(req, companyId);
   const allowedScope = req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds;
-  const supabaseAdmin = getSupabaseAdminClient();
-  // Redirect URL: kullanici davet e-postasindaki linke tikladiginda nereye
-  // gidecek. Varsayilan: SUPABASE_INVITE_REDIRECT_URL env, fallback APP_URL,
-  // son fallback localhost.
-  const redirectTo =
-    process.env.SUPABASE_INVITE_REDIRECT_URL ||
-    process.env.APP_URL ||
-    'http://localhost:5273';
-  const result = await userRepo.invite(
-    { email, role, companyId, companyRole },
-    { supabaseAdmin, redirectTo },
+  const result = await userRepo.createUser(
+    { email, fullName, role, companyId, companyRole, password },
     allowedScope,
   );
   res.status(201).json(result);
 }));
 
 /**
- * In-memory per-target rate limit: ayni kullaniciya 60 saniye icinde 1 resend.
- * Admin'in yanlislikla 2-3 kez tikladigi durumda Supabase email rate-limit'ine
- * vurmadan once UI'da rejekte ederiz. Multi-instance deploy'da bu garanti
- * "best-effort"; gercek koruma Supabase tarafinda zaten var.
- */
-const _resendBuckets = new Map(); // userId -> lastTs
-const RESEND_COOLDOWN_MS = 60_000;
-function checkResendCooldown(userId) {
-  const now = Date.now();
-  const last = _resendBuckets.get(userId);
-  if (last && now - last < RESEND_COOLDOWN_MS) {
-    const wait = Math.ceil((RESEND_COOLDOWN_MS - (now - last)) / 1000);
-    throw new AdminError(`Çok sık yeniden gönderme. ${wait} saniye bekle.`, 429);
-  }
-  _resendBuckets.set(userId, now);
-}
-
-/**
- * POST /api/admin/users/:id/resend-invite — Phase 5C-resend: davet mailini
- * yeniden gonder. Supabase Auth user yeniden yaratilmaz; resetPasswordForEmail
- * kullanilarak prod redirect URL'iyle taze magic-link gonderilir.
- *
- * Eligibility (repo katmaninda): User var + isActive=true + fullName===email.
- * Aksi halde 400/404 mesajlari.
+ * POST /api/admin/users/:id/reset-password — Faz 3: admin'den gecici sifre atama
+ * ("sifremi unuttum"un on-prem karsiligi; e-posta yok).
+ * Body: { password }
  *
  * Yetki:
  *  - Auth: Admin + SystemAdmin (router-level requireRole)
  *  - Admin sadece kendi allowedCompanyIds icindeki kullaniciya
  *  - SystemAdmin tum kullanicilara
- *  - Per-user 60s cooldown spam korumasi
  */
-router.post('/users/:id/resend-invite', asyncRoute(async (req, res) => {
-  checkResendCooldown(req.params.id);
+router.post('/users/:id/reset-password', asyncRoute(async (req, res) => {
   const target = await userRepo.list(
     req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,
   );
@@ -444,19 +411,10 @@ router.post('/users/:id/resend-invite', asyncRoute(async (req, res) => {
       ),
     );
     if (!hasCompanyAdminRight) {
-      throw new AdminError('Bu kullanıcıya davet gönderme yetkin yok.', 403);
+      throw new AdminError('Bu kullanıcının şifresini sıfırlama yetkin yok.', 403);
     }
   }
-  const supabaseAdmin = getSupabaseAdminClient();
-  const redirectTo =
-    process.env.SUPABASE_INVITE_REDIRECT_URL ||
-    process.env.APP_URL ||
-    'http://localhost:5273';
-  const result = await userRepo.resendInvite(
-    req.params.id,
-    { supabaseAdmin, redirectTo },
-    req.user,
-  );
+  const result = await userRepo.resetPassword(req.params.id, req.body?.password, req.user);
   res.json(result);
 }));
 
@@ -499,8 +457,8 @@ router.patch('/users/:id/reactivate', asyncRoute(async (req, res) => {
  *  - SystemAdmin kullaniciyi yalnizca SystemAdmin pasiflestirebilir
  *  - Hedef en az bir companyId'sinde caller Admin/SystemAdmin olmali
  *
- * DB User.isActive=false (idempotent) + Supabase global signOut (best-effort).
- * Supabase Auth user'i SILINMEZ — yeniden aktive edilebilsin.
+ * DB User.isActive=false (idempotent). verifyJwt'nin isActive bariyeri,
+ * kullanicinin elindeki token'lari pratikte gecersiz kilar.
  */
 router.delete('/users/:id/deactivate', asyncRoute(async (req, res) => {
   // Yetki kontrolu: hedef user'in en az bir companyId'sinde caller Admin olmali
@@ -522,8 +480,7 @@ router.delete('/users/:id/deactivate', asyncRoute(async (req, res) => {
       throw new AdminError('Bu kullanıcıyı pasifleştirme yetkin yok.', 403);
     }
   }
-  const supabaseAdmin = getSupabaseAdminClient();
-  const result = await userRepo.deactivate(req.params.id, { supabaseAdmin }, req.user);
+  const result = await userRepo.deactivate(req.params.id, {}, req.user);
   res.json(result);
 }));
 

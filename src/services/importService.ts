@@ -7,7 +7,7 @@
  */
 
 import { apiFetch } from './caseService';
-import { getAccessToken } from '@/services/supabase';
+import { getAccessToken } from '@/services/authClient';
 
 const BASE = '/api/admin/imports';
 

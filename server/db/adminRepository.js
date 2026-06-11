@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import { prisma } from './client.js';
 import { fromDb, toDb } from './enumMap.js';
 
@@ -791,84 +792,28 @@ export const userRepo = {
     return { id: userId, fullName: target.fullName, assignments };
   },
 
-  /**
-   * Supabase Auth'da e-posta ile kullanici ara. SDK v2'de listUsers'da
-   * filter yok; paginated taranir. Performans icin per-page=200 +
-   * en fazla 5 sayfa (1000 kullanici) — Faz 5 olcek ihtiyaci dogarsa
-   * Supabase'in ileride email filter eklemesi beklenir.
-   *
-   * @returns Supabase user objesi veya null
-   */
-  async _findSupabaseUserByEmail(supabaseAdmin, email) {
-    const PER_PAGE = 200;
-    const MAX_PAGES = 5;
-    const normalized = email.toLowerCase();
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PER_PAGE });
-      if (error) {
-        console.warn(`[invite] listUsers page=${page} hata:`, error.message);
-        return null;
-      }
-      const users = data?.users ?? [];
-      const match = users.find((u) => (u.email || '').toLowerCase() === normalized);
-      if (match) return match;
-      if (users.length < PER_PAGE) return null; // son sayfa
-    }
-    return null; // 1000+ kullanici icinde bulunamadi
-  },
+  // Faz 3 (on-prem): Supabase Auth kaldırıldı. _findSupabaseUserByEmail ve
+  // invite/resendInvite akışları yerine createUser/resetPassword geldi —
+  // admin kullanıcıyı başlangıç şifresiyle açar, e-posta gönderimi yok.
 
   /**
-   * Admin'den davet akisi (Phase 5C-v3, inviteUserByEmail).
+   * Admin'den kullanıcı oluşturma (Faz 3 — on-prem local auth).
    *
-   * V2 createUser+resetPasswordForEmail kombinasyonu KAPALI:
-   *  - createUser({ email_confirm: true }) → magic-link bypass, sifresiz oturum (bug 1)
-   *  - createUser({ email_confirm: false }) → resetPasswordForEmail unconfirmed
-   *    user'a sessizce mail GONDERMIYOR (Supabase security feature) → davet
-   *    mailleri hic gelmiyor
-   *
-   * V3 (geri donus): `auth.admin.inviteUserByEmail(email, { redirectTo })`
-   *  Supabase'in resmi invite akisi:
-   *   - Kullaniciyi yaratir (email_confirmed_at: null)
-   *   - Invite template ile mail gonderir
-   *   - Kullanici link'e tikladiginda email otomatik confirmed olur
-   *   - Sifre belirleme akisi tetiklenir (magic-link bypass YOK)
-   *   - Sifre belirledikten sonra oturum baslar
-   *
-   * Onkosul: Supabase Dashboard → URL Configuration → Redirect URLs:
-   *  - https://varuna-case-management.vercel.app/**
-   *  - http://localhost:5273/**
-   *  (Whitelist'te olmayan adres icin Supabase redirectTo'yu STRIP eder ve
-   *   mail linksiz gider — bilinen tuzak.)
-   *
-   * Akis:
-   *  1) Validate + DB e-posta cakismasi (varsa 409)
-   *  2) inviteUserByEmail(email, { redirectTo })
-   *     - Basarili → supabase user.id kullanilir
-   *     - 422 "already in Auth" → orphan kurtarma: listUsers ile user.id'yi bul,
-   *       sadece DB record yarat (mail tekrar gonderilmez; admin "Yeniden gonder"
-   *       ile manuel tetikler)
-   *     - Diger hata → 502
-   *  3) DB User + UserCompany — TEK transaction (compensation aynen)
-   *
-   * Auto-provision compatibility (server/db/auth.js:60-102):
-   *  - verifyJwt User.findUnique({ id: supabase_user.id }) ile arar
-   *  - Davet sirasinda yarattigimiz User satiri da ayni id'yi kullanir
-   *  - Davet edilen kullanici ilk login'inde verifyJwt User'i bulur, auto-provision tetiklenmez
-   *  - fullName placeholder=email; kullanici ilk login sonrasi profil duzenleyebilir
-   *
-   * Compensation:
-   *  - DB yazma asamasi basarisiz olursa Supabase user'i geri al (deleteUser)
-   *  - Orphan kurtarma yolunda Supabase user'i biz yaratmadik → silmeyiz
+   * Supabase davet akışının yerini aldı: e-posta GÖNDERİLMEZ. Admin,
+   * kullanıcıyı başlangıç şifresiyle açar ve şifreyi kendisi iletir.
+   * mustChangePassword=true → kullanıcı ilk girişte şifresini değiştirmek
+   * zorunda kalır (route /api/auth/change-password).
    *
    * @param {object} input
    * @param {string} input.email
-   * @param {string} input.role             — sistem rolu (User.role)
+   * @param {string} [input.fullName]      — boşsa email-local-part kullanılır
+   * @param {string} input.role            — sistem rolü (User.role)
    * @param {string} input.companyId
-   * @param {string} input.companyRole      — UserCompany.role
-   * @param {object} deps                   — DI: { supabaseAdmin, redirectTo }
-   * @param {string[]} allowedCompanyIds    — caller'in yetki sinirlari (null=SystemAdmin)
+   * @param {string} input.companyRole     — UserCompany.role
+   * @param {string} input.password        — başlangıç şifresi (min 8)
+   * @param {string[]} allowedCompanyIds   — caller'ın yetki sınırları (undefined=SystemAdmin)
    */
-  async invite(input, deps, allowedCompanyIds) {
+  async createUser(input, allowedCompanyIds) {
     const email = String(input.email ?? '').trim().toLowerCase();
     if (!email || !EMAIL_RX.test(email)) {
       throw new AdminError('Geçerli bir e-posta adresi gerekli.', 400);
@@ -880,121 +825,105 @@ export const userRepo = {
     const companyId = String(input.companyId ?? '');
     if (!companyId) throw new AdminError('companyId zorunlu.', 400);
     if (allowedCompanyIds && !allowedCompanyIds.includes(companyId)) {
-      throw new AdminError('Bu şirkete davet etme yetkin yok.', 403);
+      throw new AdminError('Bu şirkete kullanıcı ekleme yetkin yok.', 403);
     }
     const companyRole = String(input.companyRole ?? '');
     if (!VALID_COMPANY_ROLES.has(companyRole) || companyRole === 'SystemAdmin') {
       throw new AdminError('Şirket rolü Agent / Supervisor / Admin olmalı.', 400);
     }
+    const password = String(input.password ?? '');
+    if (password.length < 8) {
+      throw new AdminError('Başlangıç şifresi en az 8 karakter olmalı.', 400);
+    }
 
-    // E-posta DB'de zaten varsa → 409 (idempotent davet desteklemiyoruz).
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new AdminError('Bu e-posta zaten kayıtlı.', 409);
     }
 
-    const { supabaseAdmin, redirectTo } = deps ?? {};
-    if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
+    const fullName = String(input.fullName ?? '').trim() || email.split('@')[0];
+    const passwordHash = await bcrypt.hash(password, 12);
 
-    // 1) Supabase Auth invite — kullaniciyi yaratir + invite mail gonderir.
-    //    Mail linki tiklandiginda Supabase email'i onaylar + sifre belirleme akisi.
-    let supabaseUserId = null;
-    let createdByUs = false; // compensation rollback flag
-    let emailSent = true;
-    const { data: invited, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-      email,
-      redirectTo ? { redirectTo } : undefined,
-    );
-
-    if (!inviteErr && invited?.user?.id) {
-      supabaseUserId = invited.user.id;
-      createdByUs = true;
-    } else if (inviteErr?.status === 422) {
-      // Orphan: Supabase'de zaten var ama DB'de yok. user.id'yi bul, DB record
-      // yarat. Mail TEKRAR GONDERILMEZ; admin "Yeniden gonder" ile tetikler.
-      const orphan = await this._findSupabaseUserByEmail(supabaseAdmin, email);
-      if (!orphan) {
-        throw new AdminError(
-          'Supabase Auth\'ta orphan kayit var ama listUsers ile bulunamadi (1000+ kullanici?). Manuel mudahale gerekli.',
-          409,
-        );
-      }
-      supabaseUserId = orphan.id;
-      emailSent = false; // orphan'da mail otomatik gitmez
-      // createdByUs = false → compensation'da silmeyiz
-    } else {
-      throw new AdminError(
-        `Supabase davet hatası: ${inviteErr?.message ?? 'bilinmeyen'}`,
-        502,
-      );
-    }
-
-    // 3) DB User + 4) UserCompany — TEK transaction.
-    try {
-      const created = await prisma.$transaction(async (tx) => {
-        const user = await tx.user.create({
-          data: {
-            id: supabaseUserId, // !!! Supabase Auth user.id == DB User.id
-            email,
-            fullName: email, // placeholder; UI "Davet bekliyor" badge bunu gorur
-            role,
-            isActive: true,
-          },
-        });
-        await tx.userCompany.create({
-          data: { userId: user.id, companyId, role: companyRole, isActive: true },
-        });
-        return user;
+    const created = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          fullName,
+          role,
+          isActive: true,
+          passwordHash,
+          mustChangePassword: true,
+          passwordUpdatedAt: new Date(),
+        },
       });
-      const message = emailSent
-        ? `Davet maili gönderildi: ${email}`
-        : `Mevcut Supabase Auth kullanıcısı DB'ye bağlandı: ${email}. Admin panelinden "Yeniden gönder" ile davet maili tekrar tetiklenebilir.`;
-      return {
-        success: true,
-        message,
-        userId: created.id,
-        email: created.email,
-        orphanRecovered: !createdByUs,
-        emailSent,
-      };
-    } catch (dbErr) {
-      // Compensation: Sadece biz yarattıysak Supabase user'i geri al.
-      // Orphan kurtarma yolunda Supabase user'i biz yaratmadik → dokunmayiz.
-      if (createdByUs) {
-        try {
-          await supabaseAdmin.auth.admin.deleteUser(supabaseUserId);
-          console.warn(`[invite] DB hata sonrasi Supabase user temizlendi: ${email}`);
-        } catch (cleanupErr) {
-          console.error(
-            `[invite] CRITICAL: Supabase user ${supabaseUserId} temizlenemedi:`,
-            cleanupErr?.message,
-          );
-        }
-      }
-      throw new AdminError(`Kullanıcı DB'ye yazılamadı: ${dbErr?.message ?? 'unknown'}`, 500);
-    }
+      await tx.userCompany.create({
+        data: { userId: user.id, companyId, role: companyRole, isActive: true },
+      });
+      return user;
+    });
+
+    return {
+      success: true,
+      message: `Kullanıcı oluşturuldu: ${email}. Başlangıç şifresini kullanıcıya iletin; ilk girişte değiştirmesi istenecek.`,
+      userId: created.id,
+      email: created.email,
+    };
   },
 
   /**
+   * Admin'den şifre sıfırlama (Faz 3 — "şifremi unuttum"un on-prem karşılığı).
+   *
+   * Admin hedef kullanıcıya yeni geçici şifre atar; mustChangePassword=true
+   * olur, kullanıcı ilk girişte değiştirir. E-posta gönderimi yok.
+   *
+   * Guards: SystemAdmin'in şifresini yalnız SystemAdmin sıfırlar; pasif
+   * kullanıcıya atanmaz; kendi şifreni buradan değil /auth/change-password'dan.
+   */
+  async resetPassword(userId, newPassword, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    if (userId === requestingUser?.id) {
+      throw new AdminError('Kendi şifreni ayarlar ekranından değiştir.', 400);
+    }
+    const password = String(newPassword ?? '');
+    if (password.length < 8) {
+      throw new AdminError('Yeni şifre en az 8 karakter olmalı.', 400);
+    }
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('SystemAdmin şifresini yalnızca SystemAdmin sıfırlayabilir.', 403);
+    }
+    if (!target.isActive) {
+      throw new AdminError('Pasif kullanıcıya şifre atanamaz. Önce yeniden aktifleştirin.', 400);
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: true, passwordUpdatedAt: new Date() },
+    });
+
+    return {
+      success: true,
+      message: `Geçici şifre atandı: ${target.email}. Kullanıcı ilk girişte değiştirecek.`,
+      userId: target.id,
+      email: target.email,
+    };
+  },
+
+
+  /**
    * Pasiflestir: User.isActive=false. Bu DB flag verifyJwt middleware'inde
-   * (server/db/auth.js:104-109) **enforced barrier**: pasif user'in
-   * Authorization header'iyla yapılan tum API cagrilari 403 'inactive' doner.
+   * **enforced barrier**: pasif user'in Authorization header'iyla yapılan
+   * tum API cagrilari 403 'inactive' doner.
    *
-   * Supabase Auth user SILINMEZ — tekrar aktive edilebilsin + audit izi korunsun.
+   * Local JWT stateless oldugu icin aktif token iptali yapilmaz; her istekte
+   * verifyJwt'nin DB isActive kontrolu cached token'i pratikte gecersiz kilar.
+   * Frontend `app:unauthenticated` event'i ile oturumu yerel olarak kapatir.
    * UserCompany kayitlarinda dokunma yapmaz (kasitli — yetki cascaded fakat veri korunur).
-   *
-   * Supabase session invalidation:
-   *  SDK v2.105.1'in `auth.admin.signOut(jwt, scope)` metodu user.id KABUL ETMEZ;
-   *  yalnizca aktif bir JWT (access token) string'i kabul eder. Bizim elimizde
-   *  user.id var, JWT yok. Bu nedenle:
-   *   - Aktif session invalidation YAPILMIYOR
-   *   - Pasif user'in cached JWT'si Supabase'ce halen gecerli sayilir
-   *   - **ANCAK** her API cagrisinda verifyJwt → DB User.isActive=false kontrolu
-   *     → 403. Yani client'in elindeki JWT pratikte ise yaramaz hale gelir.
-   *   - Frontend `app:unauthenticated` event'i ile oturumu yerel olarak kapatir.
-   *
-   * Bu PR'da `ban_duration` ile updateUserById gibi workaround YAPILMADI —
-   * spec aciktan "do not invent a workaround" dedi. DB barrier yeterli.
    *
    * Guards:
    *  - Kendini pasiflestiremezsin
@@ -1047,68 +976,6 @@ export const userRepo = {
    *  - Frontend `app:unauthenticated` event'i tetiklenmesi gerekmez — kullanici
    *    yeni bir session acmak zorunda degil; eski JWT verifyJwt'de 200 doner.
    */
-  /**
-   * Davet maili yeniden gonder (Phase 5C-resend).
-   *
-   * Akis (inviteUserByEmail KULLANMAYIZ — Supabase Auth user zaten var):
-   *  - Supabase `auth.resetPasswordForEmail(email, { redirectTo })` cagrisi
-   *  - Kullaniciya magic-link gibi calisan "sifre belirleme" maili gider
-   *  - redirectTo zorunlu `SUPABASE_INVITE_REDIRECT_URL` (prod URL); env yoksa
-   *    APP_URL fallback. Eski daveti localhost olarak gonderilmis kullanicilar
-   *    icin yeni mail dogru prod link ile gider.
-   *
-   * Eligibility:
-   *  - User mevcut olmali (yoksa 404)
-   *  - User.isActive === true olmali (pasif user'a davet anlamsiz; 400)
-   *  - fullName === email "pending invite" heuristic; aksi halde 400
-   *    "Bu kullanıcı davet beklemiyor."
-   *
-   * Supabase Auth user'i SILMEZ, yeni user yaratmaz. resetPasswordForEmail
-   * sadece email tetikler. Email bulunmazsa Supabase typically yine 200 doner
-   * (security: email enumeration koruma) — bu durumda da success gostermek
-   * gerekir cunku elimizdeki DB User'a kesinlikle invite gondermistik.
-   */
-  async resendInvite(userId, deps, requestingUser) {
-    if (!userId) throw new AdminError('userId gerekli.', 400);
-    const target = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, fullName: true, role: true, isActive: true },
-    });
-    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
-    if (target.role === 'SystemAdmin' && requestingUser?.role !== 'SystemAdmin') {
-      throw new AdminError('SystemAdmin kullanıcıya yeniden davet sadece SystemAdmin tarafından gönderilebilir.', 403);
-    }
-    if (!target.isActive) {
-      throw new AdminError('Pasif kullanıcıya davet gönderilemez. Önce yeniden aktiflestirin.', 400);
-    }
-    // "Pending invite" heuristic — Phase 5C urun karari (kullanici onayli)
-    if (target.fullName !== target.email) {
-      throw new AdminError('Bu kullanıcı davet beklemiyor (zaten profilini doldurmuş).', 400);
-    }
-
-    const { supabaseAdmin, redirectTo } = deps ?? {};
-    if (!supabaseAdmin) throw new AdminError('Supabase admin istemcisi yok.', 500);
-
-    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(target.email, {
-      redirectTo: redirectTo || undefined,
-    });
-    if (error) {
-      // Rate limit / SMTP / config hatasi vs. — safe message
-      const status = error.status === 429 ? 429 : 502;
-      const msg =
-        error.status === 429
-          ? 'Supabase email rate limit. Birkaç dakika sonra tekrar dene.'
-          : `Davet maili gönderilemedi: ${error.message ?? 'bilinmeyen Supabase hatası'}`;
-      throw new AdminError(msg, status);
-    }
-    return {
-      success: true,
-      message: `Davet maili yeniden gönderildi: ${target.email}`,
-      userId: target.id,
-      email: target.email,
-    };
-  },
-
   async reactivate(userId, _deps, requestingUser) {
     if (!userId) throw new AdminError('userId gerekli.', 400);
     const target = await prisma.user.findUnique({

@@ -105,8 +105,8 @@ sonraki şema değişiklikleri Prisma migrate ile yönetilir.
 - `yazdes` named instance dinamik portta (50404) — Prisma instance adı çözemez,
   porta bağlanıyor. Statik port sabitlenmeli (kurulum dokümanına girecek).
 - `prisma/seed.ts` 4 noktada JSON.stringify'a çevrildi ve MSSQL'de yeşil
-  (150 vaka dahil). `seedScenarios.ts` demo kullanıcılara bağımlı → Faz 3'te
-  seedAuth local auth'a geçince çalışacak. `smoke-mssql-schema.js` (8 kontrol) yeşil.
+  (150 vaka dahil). `seedScenarios.ts` Faz 3'te seedAuth local auth'a geçince
+  çalıştı (demo senaryo verisi yüklendi). `smoke-mssql-schema.js` (8 kontrol) yeşil.
 - `npm run build` yeşil.
 
 En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yok.
@@ -181,6 +181,34 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
   ve ilgili smoke scriptleri lokal MSSQL'de yeşil.
 
 ### Faz 3 — Auth değişimi
+
+**Durum: TAMAMLANDI (2026-06-11).** Notlar:
+
+- Backend: `server/lib/authTokens.js` (HS256 access 30m + refresh 7d, ayrı
+  secret'lar), `server/routes/auth.js` yeniden yazıldı (login/refresh/logout/
+  change-password/me; login IP rate-limit; generic 401 — enumeration koruması).
+  `verifyJwt` lokal imza doğrulamasına geçti; `req.user` shape'i ve
+  allowedCompanyIds/companyRoles/isActive bariyeri aynen korundu;
+  OAuth auto-provision kaldırıldı. passwordHash req.user'a sızdırılmaz.
+- User şeması: `passwordHash` (bcrypt-12), `mustChangePassword`,
+  `passwordUpdatedAt`; id artık `cuid()` (migration 00000000000002).
+- Admin akışları: davet → `createUser` (başlangıç şifresi + mustChangePassword,
+  e-posta YOK), resend-invite → `reset-password` (admin geçici şifre atar).
+  Endpoint'ler: POST /api/admin/users, POST /api/admin/users/:id/reset-password.
+- Frontend: `src/services/authClient.ts` (token localStorage, proaktif sessiz
+  refresh — exp'e 30sn kala, tek uçuş); AuthContext/LoginPage Supabase'siz;
+  Google OAuth kaldırıldı; "şifremi unuttum" → yönetici yönlendirme mesajı.
+  SetPasswordPage zorunlu/gönüllü şifre değişimine dönüştü (AuthGate
+  mustChangePassword'u gate'ler; App header'da Şifre Değiştir modalı).
+  InviteUserModal → şifreli kullanıcı oluşturma (şifre üretici dahil);
+  AdminUsersPage "Yeniden gönder" → "Şifre Sıfırla" mini modalı.
+- `seedAuth.ts` bcrypt'e geçti (Supabase'siz); `seedScenarios` artık çalışıyor.
+- Doğrulama: `scripts/smoke-local-auth.js` — sunucuyu spawn edip 20 E2E kontrol
+  (login/refresh/me/tenant zinciri/admin create-reset-deactivate bariyeri/rol
+  guard'ı) — ALL GREEN. Demo persona bağımlı smoke'lar (analytics/calendar/
+  demo-personas) artık yeşil.
+- Kalan Supabase yüzeyi: yalnız `server/db/storage.js` + `caseService.ts` upload
+  akışı (Faz 4'te değişecek) ve `@supabase/supabase-js` paketi (Faz 5 temizliği).
 
 - `User` modeline `passwordHash`, `mustChangePassword`, `passwordUpdatedAt` eklenir;
   `User.id` artık `cuid()` (Supabase UUID bağı kopar).

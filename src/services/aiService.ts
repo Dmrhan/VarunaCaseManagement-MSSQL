@@ -36,7 +36,7 @@ async function postJson<T>(
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   console.log(`[ai] → POST ${API_BASE}${path}`);
   try {
-    const { getAccessToken } = await import('./supabase');
+    const { getAccessToken } = await import('./authClient');
     const token = await getAccessToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -333,7 +333,7 @@ export const aiService = {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-      const { getAccessToken } = await import('./supabase');
+      const { getAccessToken } = await import('./authClient');
       const token = await getAccessToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers.Authorization = `Bearer ${token}`;

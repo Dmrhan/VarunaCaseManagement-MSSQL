@@ -1,46 +1,19 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { useAuth } from '@/services/AuthContext';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { SetPasswordPage } from '@/features/auth/SetPasswordPage';
-
-/** sessionStorage'daki pending-password-setup flag'ini gozler. */
-function readPendingFlag(): boolean {
-  try {
-    return sessionStorage.getItem('varuna.pendingPasswordSetup') === '1';
-  } catch {
-    return false;
-  }
-}
 
 /**
  * AuthGate — children'ı render etmeden önce oturum kontrolü yapar.
  *  - loading → spinner
  *  - unauthenticated → LoginPage
- *  - authenticated + invite/recovery link tıklandı → SetPasswordPage
+ *  - authenticated + mustChangePassword (admin'in atadığı geçici şifre) → SetPasswordPage
  *  - authenticated → children
  *
  * LookupGate'in DIŞINDA olmalı: lookup'lar sadece login olmuş kullanıcı için çekilir.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { status, error } = useAuth();
-  // Davet/recovery link'inden gelen oturum mu? main.tsx flag'ini set etmis olur.
-  // Re-render'larda sessionStorage'i tekrar oku — SetPasswordPage flag'i temizledigi
-  // anda buradan da gozetlenir.
-  const [pendingPasswordSetup, setPendingPasswordSetup] = useState(readPendingFlag);
-  useEffect(() => {
-    const tick = () => setPendingPasswordSetup(readPendingFlag());
-    // 1) Diger sekmelerdeki storage event'lerini dinle
-    window.addEventListener('storage', tick);
-    // 2) Sayfa focus oldugunda tekrar oku (sekme degisimi sonrasi)
-    window.addEventListener('focus', tick);
-    // 3) SetPasswordPage flag'i temizledikten sonra dispatch eder
-    window.addEventListener('varuna:password-setup-complete', tick);
-    return () => {
-      window.removeEventListener('storage', tick);
-      window.removeEventListener('focus', tick);
-      window.removeEventListener('varuna:password-setup-complete', tick);
-    };
-  }, []);
+  const { status, user, error } = useAuth();
 
   if (status === 'loading') {
     return (
@@ -57,8 +30,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <LoginPage />;
   }
 
-  // Authenticated AMA invite/recovery link tıklandı → şifre belirleme zorunlu
-  if (status === 'authenticated' && pendingPasswordSetup) {
+  // Authenticated AMA geçici şifreyle girdi → şifre değişimi zorunlu
+  if (status === 'authenticated' && user?.mustChangePassword) {
     return <SetPasswordPage />;
   }
 

@@ -67,16 +67,22 @@ datasource db {
 // ============================================================
 
 // Spec §13 — Auth + RBAC.
-// id = Supabase Auth user UUID (sync). email Supabase ile sync.
+// Faz 3 (on-prem): Supabase Auth kaldırıldı — local e-posta/şifre + JWT.
+// id artık cuid (eski Supabase UUID bağı yok). passwordHash bcrypt.
 // Person ile ayrı: Person operasyonel kayıt (vaka atama hedefi),
 // User auth kimliği. personId opsiyonel FK ile bağlanabilir.
 model User {
-  id        String   @id @db.NVarChar(450) // Supabase Auth UUID
-  email     String   @unique @db.NVarChar(255)
-  fullName  String @db.NVarChar(Max)
-  role      String @default("Agent") @db.NVarChar(50) // enum:UserRole
-  isActive  Boolean  @default(true)
-  personId  String?  @unique @db.NVarChar(450)
+  id                 String    @id @default(cuid()) @db.NVarChar(450)
+  email              String    @unique @db.NVarChar(255)
+  fullName           String @db.NVarChar(Max)
+  role               String @default("Agent") @db.NVarChar(50) // enum:UserRole
+  isActive           Boolean   @default(true)
+  personId           String?   @unique @db.NVarChar(450)
+  /// bcrypt hash; NULL = henüz şifre atanmamış (login reddedilir)
+  passwordHash       String?   @db.NVarChar(255)
+  /// Admin'in atadığı geçici şifreyle ilk girişte zorunlu değişim bayrağı
+  mustChangePassword Boolean   @default(false)
+  passwordUpdatedAt  DateTime?
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
