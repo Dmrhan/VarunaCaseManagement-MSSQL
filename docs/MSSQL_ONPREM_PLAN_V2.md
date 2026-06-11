@@ -292,6 +292,34 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
 - Kabul: temiz Windows Server'da dokümana göre kurulum yapılabilir; uygulama
   Supabase/Vercel'siz, tek serviste (UI + API + cron) çalışır.
 
+### Faz KB — ticket-analiz KB/RAG entegrasyonu (plan sonrası ek kapsam)
+
+**Durum: TAMAMLANDI (2026-06-11).** Kullanıcı talebi: C:\apps\ticket-analiz'deki
+KB/RAG sistemi CSM içine gömülsün, iki uygulama ayrı çalışmak zorunda kalmasın.
+
+- **Mimari:** ticket-analiz'in framework-bağımsız KB çekirdeği (src/lib: hibrit
+  BM25+sqlite-vec arama, RRF füzyon, Xenova multilingual-e5-base lokal embedding,
+  Claude generation + sitasyon + doğrulama, kategorizasyon/analiz pipeline'ları)
+  esbuild ile tek dosyaya bundle edildi: `server/kb/kbCore.js`
+  (`scripts/build-kb-core.mjs` ile yeniden üretilir; kaynak ticket-analiz'de).
+- **API:** `server/routes/kbV1.js` aynı v1 sözleşmesini in-process sunar
+  (/api/v1: health, stats, kb/ask, kb/search, categorize, categorize-v2,
+  suggest-close, analyze; Bearer API_KEYS auth). CSM'in externalKbClient/
+  ExternalKbSetting katmanı HİÇ değişmedi — baseUrl http://127.0.0.1:3101.
+- **Veri:** `data/embeddings.sqlite` (280MB; 5.684 doküman, 18.053 chunk, %100
+  embedding) + taksonomi/panorama JSON'ları kopyalandı. **Yeniden embed
+  GEREKMEDİ** — lokal e5-base modeli ve vektörler aynen taşındı (Gemini anahtarı
+  ileride model değişimi istenirse .env'de hazır). data/ gitignore'da —
+  yeni kurulumda bu dosyalar elle taşınmalı (ONPREM_INSTALL'a not düşüldü).
+- **Bağımlılıklar:** better-sqlite3, sqlite-vec, @xenova/transformers, zod,
+  @anthropic-ai/sdk, mssql (analiz pipeline'ı VeriOkumaDonusum'a bağlanır),
+  @modelcontextprotocol/sdk (NotebookLM kapalı: NOTEBOOKLM_ENABLED=false).
+- **Doğrulama:** `scripts/smoke-kb-integration.js` 10/10 — in-process health/
+  stats, JWT→BFF proxy→v1 zinciri, hibrit retrieval, gerçek RAG ask (dürüst
+  refusal korumalı), smart-ticket categorize-v2. Üretimde (pm2) doğrulandı.
+- **Not:** suggest-classification önerileri şu an "unmatched" dönüyor çünkü
+  CSM TaxonomyDef tablosu boş — taksonomi xlsx'i yüklenince eşleşecek.
+
 ### Faz 6 — Uçtan uca doğrulama
 
 - Senaryo: login → account arama → case create/update → Smart Ticket create/close/transfer →

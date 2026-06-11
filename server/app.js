@@ -14,6 +14,7 @@ import smartTicketRouter from './routes/smartTicket.js';
 import importsRouter from './routes/imports.js';
 import approvalsRouter from './routes/approvals.js';
 import actionCenterRouter from './routes/action-center.js';
+import kbV1Router from './routes/kbV1.js';
 import { prisma } from './db/client.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -91,6 +92,9 @@ app.use('/api/external-kb', externalKbRouter);
 app.use('/api/smart-ticket', smartTicketRouter);
 app.use('/api/approvals', approvalsRouter);
 app.use('/api/action-center', actionCenterRouter);
+// Faz KB — ticket-analiz'in KB/RAG çekirdeği in-process (Bearer API key auth;
+// ExternalKbSetting.baseUrl bu sürecin kendisine işaret eder).
+app.use('/api/v1', kbV1Router);
 
 // API 404 — bilinmeyen /api/* yolları JSON döner (SPA fallback'ine düşmesin).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

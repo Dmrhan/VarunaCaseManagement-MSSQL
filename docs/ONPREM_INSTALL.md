@@ -124,14 +124,37 @@ Sürece gömülüdür (`server/cronScheduler.js`, Europe/Istanbul):
 Tümü idempotent; servis restart'ı sorun çıkarmaz. Manuel tetik:
 `POST /api/cron/<job>` + `Authorization: Bearer ${CRON_SECRET}`.
 
-## 5. Yedekleme
+## 5. Bilgi Bankası (KB/RAG)
+
+KB/RAG çekirdeği (eski ticket-analiz) uygulamaya gömülüdür (`server/kb/kbCore.js`
++ `/api/v1/*` endpoint'leri). Çalışması için:
+
+1. `data/embeddings.sqlite` (+ `panorama-docs/`, `cc-*.json`, `solutions/`,
+   `known-issues/`) dosyaları repo'ya DAHİL DEĞİLDİR (gitignore) — yeni kuruluma
+   mevcut sunucudan kopyalanmalı.
+2. .env: `ANTHROPIC_API_KEY` (RAG cevapları), `API_KEYS` (v1 Bearer auth),
+   `EXTERNAL_KB_API_KEY` (CSM'in kendi v1'ine bağlanma anahtarı — API_KEYS
+   listesindeki ilk anahtarla aynı), `TICKET_MSSQL_*` (analiz pipeline'ının
+   okuduğu VeriOkumaDonusum DB'si), `CC_SESSION_SECRET`.
+3. Embedding lokal modeldir (Xenova multilingual-e5-base) — ilk sorguda
+   ~110MB model indirilir ve cache'lenir; sonrası tamamen offline.
+4. `ExternalKbSetting` her şirket için `baseUrl=http://127.0.0.1:<PORT>`,
+   `authType=bearerToken`, `apiKeySecretName=EXTERNAL_KB_API_KEY` olmalı
+   (Admin → External KB ekranından da düzenlenebilir).
+5. KB içeriği güncelleme (yeni PDF/doküman ingest) şimdilik ticket-analiz
+   repo'sundaki scriptlerle yapılır; üretilen `data/embeddings.sqlite` buraya
+   kopyalanır (kbCore yeniden build gerekmez).
+
+## 6. Yedekleme
 
 1. **MSSQL**: standart SQL Server backup planı (full + log).
 2. **`STORAGE_ROOT`**: dosya ekleri DB'de değil diskte — dizini yedeğe dahil et.
-3. **`.env`**: secret'lar (JWT_SECRET, TCKN_HASH_PEPPER) kaybolursa oturumlar
-   ve TCKN aramaları kırılır — güvenli kasada sakla.
+3. **`data/` dizini**: KB vektör deposu (`embeddings.sqlite`) ve taksonomi/
+   panorama dosyaları — yedeğe dahil et (yeniden üretimi saatler sürer).
+4. **`.env`**: secret'lar (JWT_SECRET, TCKN_HASH_PEPPER, ANTHROPIC_API_KEY,
+   API_KEYS) kaybolursa oturumlar/TCKN aramaları/KB kırılır — güvenli kasada sakla.
 
-## 6. Güncelleme
+## 7. Güncelleme
 
 ```powershell
 nssm stop VarunaCM
@@ -142,7 +165,7 @@ npm run build
 nssm start VarunaCM
 ```
 
-## 7. Sağlık kontrolü / sorun giderme
+## 8. Sağlık kontrolü / sorun giderme
 
 - `GET /api/health` — süreç ayakta mı
 - `GET /api/health/deep` — DB erişilebilir mi (+ gecikme)
@@ -150,7 +173,7 @@ nssm start VarunaCM
 - `P1001 Can't reach database` → MSSQL portu değişmiş olabilir (bkz. §1.3)
 - Dosya upload 500 → `STORAGE_ROOT` dizinine servis hesabının yazma izni var mı
 
-## 8. Bilinen sınırlamalar
+## 9. Bilinen sınırlamalar
 
 - E-posta gönderimi yok: kullanıcı oluşturma/şifre sıfırlama admin panelinden,
   şifre kullanıcıya elden iletilir (tasarım kararı — bkz. MSSQL_ONPREM_PLAN_V2.md).
