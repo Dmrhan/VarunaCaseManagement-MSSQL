@@ -30,7 +30,7 @@ export const thirdPartyRepo = {
   },
   async create(input) {
     const exists = await prisma.thirdParty.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: { name: { equals: input.name.trim() } },
     });
     if (exists) throw new AdminError('Aynı isimde 3. parti zaten mevcut.');
     return prisma.thirdParty.create({
@@ -44,7 +44,7 @@ export const thirdPartyRepo = {
   async update(id, patch) {
     if (patch.name) {
       const dup = await prisma.thirdParty.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim(), mode: 'insensitive' } },
+        where: { id: { not: id }, name: { equals: patch.name.trim() } },
       });
       if (dup) throw new AdminError('Aynı isimde başka 3. parti var.');
     }
@@ -77,7 +77,7 @@ export const documentTypeRepo = {
   },
   async create(input) {
     const exists = await prisma.documentType.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: { name: { equals: input.name.trim() } },
     });
     if (exists) throw new AdminError('Aynı isimde belge türü zaten mevcut.');
     return prisma.documentType.create({
@@ -91,7 +91,7 @@ export const documentTypeRepo = {
   async update(id, patch) {
     if (patch.name) {
       const dup = await prisma.documentType.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim(), mode: 'insensitive' } },
+        where: { id: { not: id }, name: { equals: patch.name.trim() } },
       });
       if (dup) throw new AdminError('Aynı isimde başka belge türü var.');
     }
@@ -139,7 +139,7 @@ export const teamRepo = {
     const exists = await prisma.team.findFirst({
       where: {
         companyId: input.companyId,
-        name: { equals: input.name.trim(), mode: 'insensitive' },
+        name: { equals: input.name.trim() },
       },
     });
     if (exists) throw new AdminError('Bu şirkette aynı isimde takım zaten mevcut.');
@@ -169,7 +169,7 @@ export const teamRepo = {
         where: {
           id: { not: id },
           companyId: target.companyId,
-          name: { equals: patch.name.trim(), mode: 'insensitive' },
+          name: { equals: patch.name.trim() },
         },
       });
       if (dup) throw new AdminError('Bu şirkette aynı isimde başka takım var.');
@@ -262,7 +262,7 @@ export const personRepo = {
   async create(input) {
     if (input.email) {
       const dup = await prisma.person.findFirst({
-        where: { email: { equals: input.email.trim(), mode: 'insensitive' } },
+        where: { email: { equals: input.email.trim() } },
       });
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
@@ -289,7 +289,7 @@ export const personRepo = {
   async update(id, patch) {
     if (patch.email) {
       const dup = await prisma.person.findFirst({
-        where: { id: { not: id }, email: { equals: patch.email.trim(), mode: 'insensitive' } },
+        where: { id: { not: id }, email: { equals: patch.email.trim() } },
       });
       if (dup) throw new AdminError('Bu e-posta adresiyle başka kullanıcı var.');
     }
@@ -384,7 +384,7 @@ export const categoryRepo = {
       where: {
         parentId: null,
         companyId: input.companyId ?? null,
-        name: { equals: input.name.trim(), mode: 'insensitive' },
+        name: { equals: input.name.trim() },
       },
     });
     if (exists) throw new AdminError('Aynı isimde kategori zaten mevcut.');
@@ -399,7 +399,7 @@ export const categoryRepo = {
   },
   async createSub(parentId, input) {
     const exists = await prisma.categoryDef.findFirst({
-      where: { parentId, name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: { parentId, name: { equals: input.name.trim() } },
     });
     if (exists) throw new AdminError('Bu kategoride aynı isimde alt kategori zaten var.');
     const parent = await prisma.categoryDef.findUnique({ where: { id: parentId } });
@@ -420,7 +420,7 @@ export const categoryRepo = {
         where: {
           id: { not: id },
           parentId: target.parentId,
-          name: { equals: patch.name.trim(), mode: 'insensitive' },
+          name: { equals: patch.name.trim() },
         },
       });
       if (dup) throw new AdminError('Aynı isimde başka kategori var.');
@@ -556,7 +556,7 @@ export const offeredSolutionRepo = {
   },
   async create(input) {
     const exists = await prisma.offeredSolutionDef.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: { name: { equals: input.name.trim() } },
     });
     if (exists) throw new AdminError('Aynı isimde teklif zaten mevcut.');
     return prisma.offeredSolutionDef.create({
@@ -570,7 +570,7 @@ export const offeredSolutionRepo = {
   async update(id, patch) {
     if (patch.name) {
       const dup = await prisma.offeredSolutionDef.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim(), mode: 'insensitive' } },
+        where: { id: { not: id }, name: { equals: patch.name.trim() } },
       });
       if (dup) throw new AdminError('Aynı isimde başka teklif var.');
     }
@@ -1175,7 +1175,7 @@ export const companyRepo = {
   async create(input) {
     if (!input.name?.trim()) throw new AdminError('Şirket adı gerekli.');
     const dup = await prisma.company.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: { name: { equals: input.name.trim() } },
     });
     if (dup) throw new AdminError('Bu isimde şirket zaten var.');
 
@@ -1213,7 +1213,7 @@ export const companyRepo = {
       const trimmed = patch.name.trim();
       if (!trimmed) throw new AdminError('Şirket adı boş olamaz.');
       const dup = await prisma.company.findFirst({
-        where: { id: { not: id }, name: { equals: trimmed, mode: 'insensitive' } },
+        where: { id: { not: id }, name: { equals: trimmed } },
       });
       if (dup) throw new AdminError('Bu isimde başka şirket var.');
     }

@@ -269,8 +269,8 @@ export async function listAccounts({
     // contact email) tüm TR varyantlarını OR ile dene. Telefon/VKN/
     // externalCustomerCode sayısal/kod olduğu için orijinal q ile gider.
     const nameVariants = generateTurkishSearchVariants(q);
-    const nameOR = nameVariants.map((v) => ({ name: { contains: v, mode: 'insensitive' } }));
-    const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v, mode: 'insensitive' } }));
+    const nameOR = nameVariants.map((v) => ({ name: { contains: v } }));
+    const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v } }));
 
     whereAnd.push({
       OR: [
@@ -279,14 +279,14 @@ export async function listAccounts({
         ...(tcknHashBranch ? [tcknHashBranch] : []),
         // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
         // phone1E164 mevcut, phone2E164 + phone3E164 eklendi.
-        { phoneE164: { contains: q, mode: 'insensitive' } },
-        { phone2E164: { contains: q, mode: 'insensitive' } },
-        { phone3E164: { contains: q, mode: 'insensitive' } },
+        { phoneE164: { contains: q } },
+        { phone2E164: { contains: q } },
+        { phone3E164: { contains: q } },
         {
           companies: {
             some: {
               companyId: externalCodeAcScope,
-              externalCustomerCode: { contains: q, mode: 'insensitive' },
+              externalCustomerCode: { contains: q },
             },
           },
         },
@@ -294,7 +294,7 @@ export async function listAccounts({
           contacts: {
             some: {
               OR: [
-                { phone: { contains: q, mode: 'insensitive' } },
+                { phone: { contains: q } },
                 ...contactEmailOR,
               ],
             },

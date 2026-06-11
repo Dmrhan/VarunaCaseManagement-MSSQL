@@ -126,6 +126,31 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
 
 ### Faz 2 — Runtime uyumu
 
+**Durum: TAMAMLANDI (2026-06-11).** Notlar:
+
+- `operationsAggregator.js` 8 raw sorgu MSSQL'e çevrildi: `FILTER(WHERE)` →
+  `COUNT(CASE WHEN)`, `ANY($n::text[])` → parametre başına `@Pn` ile `IN (...)`,
+  `EXTRACT(EPOCH)` → `DATEDIFF(SECOND)`, `generate_series` → recursive CTE,
+  `AT TIME ZONE 'Europe/Istanbul'` → `'Turkey Standard Time'`, `LIMIT` → `TOP`.
+  Eski koddaki TR-değer status mapping'i kaldırıldı (DB artık ASCII saklıyor;
+  Prisma client zaten hep ASCII döndürüyordu — JS tarafı değişmedi).
+  Doğrulama: `scripts/smoke-operations-aggregator-mssql.js` (15 kontrol, seed verisiyle).
+- **Json köprüsü:** `server/db/client.js`'e Prisma client extension eklendi
+  (`mssql-json-bridge`): yazarken objeleri stringify (nested write'lar dahil),
+  okurken parse (include'larda da). Harita: `server/db/jsonFieldMap.js`
+  (OTOMATİK — `node scripts/generate-json-field-map.mjs` ile şemadan üretilir;
+  şemaya json alan eklenince yeniden çalıştırılmalı). Repository kodu değişmedi.
+  Doğrulama: `scripts/smoke-json-bridge-mssql.js`.
+- **`mode: 'insensitive'` sqlserver'da desteklenmiyor** (çalışma anında
+  ValidationError) — 26 kullanım kaldırıldı (admin/account/case repository).
+  Turkish_100_CI_AS_SC_UTF8 collation sayesinde `contains`/`equals` zaten
+  case-insensitive ve Türkçe kurallı (i↔İ, ı↔I doğrulandı:
+  `scripts/smoke-turkish-search-mssql.js`). `turkishSearch.js` varyantları
+  diakritik-fold için korunuyor (collation AS = accent-sensitive).
+- `scripts/smoke-data-contracts.js` hardcoded macOS path'leri repo-göreli yapıldı.
+- API/Supabase gerektiren smoke'lar (29 adet) Faz 3 sonrasına bırakıldı;
+  DB-direct smoke'lar toplu koşuldu (sonuç: scripts/smoke-batch-results.txt).
+
 - `operationsAggregator.js` 6 raw sorgunun MSSQL'e çevrimi; analytics ekranı doğrulanır.
 - Json alanı kullanan tüm akışların (Case, ImportJob, NotificationRule, ActionItem,
   TaxonomyDef, FieldDefinition...) okuma/yazma smoke'ları.

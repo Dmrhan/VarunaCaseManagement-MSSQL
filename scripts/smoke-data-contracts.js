@@ -552,7 +552,10 @@ defineGroup('Customer Picker Contract', async () => {
   // Doğrudan FS regex check yapmıyoruz; bunun yerine source dosyalarında bir
   // marker arıyoruz (route-layer changes regression olursa).
   const fs = await import('node:fs/promises');
-  const accountsRouteSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/routes/accounts.js', 'utf8');
+  const { fileURLToPath } = await import('node:url');
+  const path = await import('node:path');
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const accountsRouteSrc = await fs.readFile(path.join(repoRoot, 'server/routes/accounts.js'), 'utf8');
   const hasListRoles = /LIST_ROLES\s*=\s*\[[^\]]*'Agent'[^\]]*\]/.test(accountsRouteSrc);
   const hasDetailReadRoles = /DETAIL_READ_ROLES\s*=\s*\[[^\]]*'Supervisor'[^\]]*\]/.test(accountsRouteSrc);
   const detailExcludesAgent = !/DETAIL_READ_ROLES\s*=\s*\[[^\]]*'Agent'[^\]]*\]/.test(accountsRouteSrc);
@@ -568,7 +571,7 @@ defineGroup('Customer Picker Contract', async () => {
   ));
 
   // 5.6) Picker case-count scope rule — server/db/accountRepository.js listAccounts allowedCompanyIds case filtre
-  const repoSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/db/accountRepository.js', 'utf8');
+  const repoSrc = await fs.readFile(path.join(repoRoot, 'server/db/accountRepository.js'), 'utf8');
   const caseCountScoped = /accountId:\s*{[^}]*in:[^}]*accountIds[^}]*}[^]*companyId:\s*{[^}]*in:[^}]*allowed/m.test(repoSrc)
     || /companyId:\s*{\s*in:\s*allowed\s*}/.test(repoSrc);
   out.push(check(
@@ -764,6 +767,9 @@ defineGroup('Customer Match Suggestions Contract', async () => {
   // Repository import — read-only kullanım, mutasyon yok.
   const { suggestCustomerMatches } = await import('../server/db/customerMatchRepository.js');
   const fs = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const path = await import('node:path');
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
   const allActiveCompanies = await prisma.company.findMany({ where: { isActive: true }, select: { id: true } });
   const activeIds = allActiveCompanies.map((c) => c.id);
@@ -851,7 +857,7 @@ defineGroup('Customer Match Suggestions Contract', async () => {
 
   // 7.6) Route role config — Agent should not reach suggestions endpoint.
   //      Source kontrolü: requireRole listesinde Agent yok.
-  const routeSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/routes/cases.js', 'utf8');
+  const routeSrc = await fs.readFile(path.join(repoRoot, 'server/routes/cases.js'), 'utf8');
   const suggestionsRoute = routeSrc.match(/customer-match-suggestions[^]*?requireRole\(([^)]*)\)/);
   const rolesStr = suggestionsRoute?.[1] ?? '';
   const allowsAgent = /['"]Agent['"]/.test(rolesStr);
@@ -863,7 +869,7 @@ defineGroup('Customer Match Suggestions Contract', async () => {
 
   // 7.7) AI/OpenAI çağrısı yok — gerçek kullanım imzaları (import/require/yeni client)
   //      taranır, yalnız yorum içindeki "OpenAI" kelimesi false-positive üretmez.
-  const repoSrc = await fs.readFile('/Users/demirhan.isbakan/VarunaCaseManagement/server/db/customerMatchRepository.js', 'utf8');
+  const repoSrc = await fs.readFile(path.join(repoRoot, 'server/db/customerMatchRepository.js'), 'utf8');
   const aiHit =
     /\b(from\s+['"]openai['"]|require\(['"]openai['"]|new\s+OpenAI|aiClient\b|chat\.completions|gpt-\d)/i.test(repoSrc);
   out.push(check('Suggestions helper contains no AI/OpenAI references', aiHit ? 'FAIL' : 'PASS'));

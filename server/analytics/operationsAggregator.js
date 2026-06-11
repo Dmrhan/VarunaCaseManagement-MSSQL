@@ -49,22 +49,10 @@ const TOP_AT_RISK_LIMIT = 10;
 
 const SLA_RISK_HOURS = 4; // SLA dolmadan once "risk" sayilir (yaklasan ihlal)
 
-const STATUS_TO_DB = Object.freeze({
-  Acik: 'Açık',
-  Incelemede: 'İncelemede',
-  ThirdPartyWaiting: '3rdPartyBekleniyor',
-  Eskalasyon: 'Eskalasyon',
-  Cozuldu: 'Çözüldü',
-  YenidenAcildi: 'YenidenAcildi',
-  IptalEdildi: 'İptalEdildi',
-});
-
-const STATUS_FROM_DB = Object.freeze(
-  Object.fromEntries(Object.entries(STATUS_TO_DB).map(([app, db]) => [db, app])),
-);
-
-const OPEN_STATUS_DB_VALUES = Object.freeze(OPEN_STATUSES.map((status) => STATUS_TO_DB[status] ?? status));
-const RETENTION_SUCCESS_DB_VALUE = 'Başarılı';
+// MSSQL: DB artık enum'ların ASCII identifier'larını saklar (Postgres'teki
+// Türkçe @map değerleri yok) — app değerleri = DB değerleri, mapping gerekmez.
+const OPEN_STATUS_DB_VALUES = OPEN_STATUSES;
+const RETENTION_SUCCESS_DB_VALUE = 'Basarili';
 const RETENTION_PENDING_DB_VALUE = 'DevamEdiyor';
 
 /**
@@ -268,56 +256,40 @@ function withDelta(value, previous, key) {
   };
 }
 
-// ---------- SQL queries (raw, parameterized) ----------
+// ---------- SQL queries (raw, parameterized — MSSQL / @Pn placeholder) ----------
 
 /**
- * baseWhere: `companyId = ANY($1)` + opsiyonel team/productGroup filtreleri.
- * Returns { sql: "AND ...", params: [...] } — append edilebilir clause.
+ * baseWhere: `[companyId] IN (...)` + opsiyonel team/productGroup filtreleri.
+ * Returns { sql: "...", params: [...] } — append edilebilir clause.
+ * MSSQL'de array parametresi yok: IN listesi eleman basina @Pn ile genisletilir.
  * NOT: scope.personIds (self) icin ayrica eklenir.
  */
 function buildWhereSql(scope, filters) {
   const params = [];
   const clauses = [];
 
+  const addIn = (col, values) => {
+    const placeholders = values.map((v) => {
+      params.push(v);
+      return `@P${params.length}`;
+    });
+    clauses.push(`${col} IN (${placeholders.join(', ')})`);
+  };
+
   // companyId — her zaman zorunlu
   if (scope.companyIds.length === 0) {
     // Empty scope -> sorgu sonuc dondurmesin
-    params.push([]);
-    clauses.push(`"companyId" = ANY($${params.length}::text[])`);
+    clauses.push('1 = 0');
   } else {
-    params.push(scope.companyIds);
-    clauses.push(`"companyId" = ANY($${params.length}::text[])`);
+    addIn('[companyId]', scope.companyIds);
   }
 
-  // teamIds
-  if (scope.teamIds && scope.teamIds.length > 0) {
-    params.push(scope.teamIds);
-    clauses.push(`"assignedTeamId" = ANY($${params.length}::text[])`);
-  }
-
-  // personIds (self scope)
-  if (scope.personIds && scope.personIds.length > 0) {
-    params.push(scope.personIds);
-    clauses.push(`"assignedPersonId" = ANY($${params.length}::text[])`);
-  }
-
-  // productGroups (filter)
-  if (filters.productGroups && filters.productGroups.length > 0) {
-    params.push(filters.productGroups);
-    clauses.push(`"productGroup" = ANY($${params.length}::text[])`);
-  }
-
-  // caseTypes (filter) — Prisma enum identifier
-  if (filters.caseTypes && filters.caseTypes.length > 0) {
-    params.push(filters.caseTypes);
-    clauses.push(`"caseType"::text = ANY($${params.length}::text[])`);
-  }
-
-  // statuses (filter) — raw SQL'de PostgreSQL enum label'lari kullanilir.
-  if (filters.statuses && filters.statuses.length > 0) {
-    params.push(filters.statuses.map((status) => STATUS_TO_DB[status] ?? status));
-    clauses.push(`"status"::text = ANY($${params.length}::text[])`);
-  }
+  if (scope.teamIds && scope.teamIds.length > 0) addIn('[assignedTeamId]', scope.teamIds);
+  if (scope.personIds && scope.personIds.length > 0) addIn('[assignedPersonId]', scope.personIds);
+  if (filters.productGroups && filters.productGroups.length > 0) addIn('[productGroup]', filters.productGroups);
+  if (filters.caseTypes && filters.caseTypes.length > 0) addIn('[caseType]', filters.caseTypes);
+  // statuses — DB ASCII identifier saklar, app degerleri dogrudan kullanilir
+  if (filters.statuses && filters.statuses.length > 0) addIn('[status]', filters.statuses);
 
   return { sql: clauses.join(' AND '), params };
 }
@@ -325,6 +297,16 @@ function buildWhereSql(scope, filters) {
 function withParam(baseWhere, value) {
   const next = [...baseWhere.params, value];
   return { sql: baseWhere.sql, params: next, idx: next.length };
+}
+
+/** Array degerini IN listesine genisletir; `list` = "@P5, @P6, ..." */
+function withArrayParam(prev, values) {
+  const params = [...prev.params];
+  const placeholders = values.map((v) => {
+    params.push(v);
+    return `@P${params.length}`;
+  });
+  return { sql: prev.sql, params, list: placeholders.join(', ') };
 }
 
 /**
@@ -335,20 +317,19 @@ async function queryOpenSnapshot(scope, filters, baseWhere) {
 
   const slaRiskDeadline = new Date(Date.now() + SLA_RISK_HOURS * 3600 * 1000);
   const p1 = withParam(baseWhere, slaRiskDeadline);
-  const p2 = withParam(p1, OPEN_STATUS_DB_VALUES);
+  const p2 = withArrayParam(p1, OPEN_STATUS_DB_VALUES);
 
   const sql = `
     SELECT
-      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p2.idx}::text[])) AS open_count,
-      COUNT(*) FILTER (
-        WHERE "status"::text = ANY ($${p2.idx}::text[])
-        AND "slaResolutionDueAt" IS NOT NULL
-        AND "slaResolutionDueAt" > NOW()
-        AND "slaResolutionDueAt" <= $${p1.idx}::timestamp
-        AND "slaViolation" = false
-        AND "slaPausedAt" IS NULL
-      ) AS sla_risk_count
-    FROM "Case"
+      COUNT(CASE WHEN [status] IN (${p2.list}) THEN 1 END) AS open_count,
+      COUNT(CASE WHEN [status] IN (${p2.list})
+        AND [slaResolutionDueAt] IS NOT NULL
+        AND [slaResolutionDueAt] > SYSUTCDATETIME()
+        AND [slaResolutionDueAt] <= @P${p1.idx}
+        AND [slaViolation] = 0
+        AND [slaPausedAt] IS NULL
+      THEN 1 END) AS sla_risk_count
+    FROM [Case]
     WHERE ${baseWhere.sql}
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
@@ -382,40 +363,33 @@ async function queryPeriodMetrics(scope, filters, from, to, baseWhere) {
 
   const sql = `
     SELECT
-      COUNT(*) FILTER (WHERE "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp) AS total_created,
-      COUNT(*) FILTER (WHERE "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp) AS total_resolved,
-      COUNT(*) FILTER (
-        WHERE "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-        AND "slaViolation" = true
-      ) AS sla_resolved_count,
-      COALESCE(SUM(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt"))) FILTER (
-        WHERE "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-        AND "resolvedAt" > "createdAt"
-      ), 0) AS total_resolution_seconds,
-      COUNT(*) FILTER (
-        WHERE "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-        AND "escalationLevel"::text <> 'Yok'
-      ) AS escalated_count,
-      COUNT(*) FILTER (
-        WHERE "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-        AND "transferCount" > 0
-      ) AS transferred_count,
-      COUNT(*) FILTER (
-        WHERE "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-        AND "status"::text = 'YenidenAcildi'
-      ) AS reopened_count,
-      COUNT(*) FILTER (
-        WHERE "caseType"::text = 'Churn'
-        AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-        AND "retentionStatus"::text IS NOT NULL
-        AND "retentionStatus"::text <> '${RETENTION_PENDING_DB_VALUE}'
-      ) AS retention_decided_count,
-      COUNT(*) FILTER (
-        WHERE "caseType"::text = 'Churn'
-        AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-        AND "retentionStatus"::text = '${RETENTION_SUCCESS_DB_VALUE}'
-      ) AS retention_success_count
-    FROM "Case"
+      COUNT(CASE WHEN [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx} THEN 1 END) AS total_created,
+      COUNT(CASE WHEN [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx} THEN 1 END) AS total_resolved,
+      COUNT(CASE WHEN [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [slaViolation] = 1
+      THEN 1 END) AS sla_resolved_count,
+      COALESCE(SUM(CASE WHEN [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [resolvedAt] > [createdAt]
+      THEN CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS bigint) END), 0) AS total_resolution_seconds,
+      COUNT(CASE WHEN [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+        AND [escalationLevel] <> 'Yok'
+      THEN 1 END) AS escalated_count,
+      COUNT(CASE WHEN [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+        AND [transferCount] > 0
+      THEN 1 END) AS transferred_count,
+      COUNT(CASE WHEN [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [status] = 'YenidenAcildi'
+      THEN 1 END) AS reopened_count,
+      COUNT(CASE WHEN [caseType] = 'Churn'
+        AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+        AND [retentionStatus] IS NOT NULL
+        AND [retentionStatus] <> '${RETENTION_PENDING_DB_VALUE}'
+      THEN 1 END) AS retention_decided_count,
+      COUNT(CASE WHEN [caseType] = 'Churn'
+        AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+        AND [retentionStatus] = '${RETENTION_SUCCESS_DB_VALUE}'
+      THEN 1 END) AS retention_success_count
+    FROM [Case]
     WHERE ${baseWhere.sql}
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
@@ -441,39 +415,41 @@ async function queryTimeSeries(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
 
-  // DATE_TRUNC AT TIME ZONE Europe/Istanbul (§2.6.4)
+  // Gun bucket'i Europe/Istanbul'a gore (§2.6.4). Kolonlar UTC datetime2;
+  // 'Turkey Standard Time' (UTC+3, DST yok) Windows/Linux SQL Server'da tanimli.
+  // Postgres generate_series yerine recursive CTE ile gun spine'i uretilir.
+  const localDay = (col) => `CAST((${col} AT TIME ZONE 'UTC') AT TIME ZONE 'Turkey Standard Time' AS date)`;
   const sql = `
     WITH days AS (
-      SELECT generate_series(
-        DATE_TRUNC('day', $${p1.idx}::timestamptz AT TIME ZONE 'Europe/Istanbul')::date,
-        DATE_TRUNC('day', $${p2.idx}::timestamptz AT TIME ZONE 'Europe/Istanbul')::date,
-        '1 day'::interval
-      )::date AS bucket
+      SELECT ${localDay(`@P${p1.idx}`)} AS bucket
+      UNION ALL
+      SELECT DATEADD(day, 1, bucket) FROM days
+      WHERE bucket < ${localDay(`@P${p2.idx}`)}
     ),
     created_agg AS (
-      SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'Europe/Istanbul')::date AS bucket, COUNT(*) AS cnt
-      FROM "Case"
+      SELECT ${localDay('[createdAt]')} AS bucket, COUNT(*) AS cnt
+      FROM [Case]
       WHERE ${baseWhere.sql}
-        AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-      GROUP BY 1
+        AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      GROUP BY ${localDay('[createdAt]')}
     ),
     resolved_agg AS (
-      SELECT DATE_TRUNC('day', "resolvedAt" AT TIME ZONE 'Europe/Istanbul')::date AS bucket, COUNT(*) AS cnt
-      FROM "Case"
+      SELECT ${localDay('[resolvedAt]')} AS bucket, COUNT(*) AS cnt
+      FROM [Case]
       WHERE ${baseWhere.sql}
-        AND "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-      GROUP BY 1
+        AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+      GROUP BY ${localDay('[resolvedAt]')}
     ),
     sla_agg AS (
-      SELECT DATE_TRUNC('day', "resolvedAt" AT TIME ZONE 'Europe/Istanbul')::date AS bucket, COUNT(*) AS cnt
-      FROM "Case"
+      SELECT ${localDay('[resolvedAt]')} AS bucket, COUNT(*) AS cnt
+      FROM [Case]
       WHERE ${baseWhere.sql}
-        AND "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-        AND "slaViolation" = true
-      GROUP BY 1
+        AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [slaViolation] = 1
+      GROUP BY ${localDay('[resolvedAt]')}
     )
     SELECT
-      to_char(d.bucket, 'YYYY-MM-DD') AS bucket,
+      CONVERT(varchar(10), d.bucket, 23) AS bucket,
       COALESCE(c.cnt, 0) AS created,
       COALESCE(r.cnt, 0) AS resolved,
       COALESCE(s.cnt, 0) AS sla_breached
@@ -481,7 +457,8 @@ async function queryTimeSeries(scope, filters, from, to, baseWhere) {
     LEFT JOIN created_agg  c ON c.bucket = d.bucket
     LEFT JOIN resolved_agg r ON r.bucket = d.bucket
     LEFT JOIN sla_agg      s ON s.bucket = d.bucket
-    ORDER BY d.bucket;
+    ORDER BY d.bucket
+    OPTION (MAXRECURSION 1000);
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
   return rows.map((row) => ({
@@ -497,15 +474,15 @@ async function queryByStatus(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
   const sql = `
-    SELECT "status"::text AS key, COUNT(*) AS cnt
-    FROM "Case"
+    SELECT [status] AS [key], COUNT(*) AS cnt
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-    GROUP BY "status"
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+    GROUP BY [status]
     ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
-  return rows.map((r) => ({ key: STATUS_FROM_DB[r.key] ?? r.key, count: Number(r.cnt) }));
+  return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
 }
 
 async function queryByPriority(scope, filters, from, to, baseWhere) {
@@ -513,11 +490,11 @@ async function queryByPriority(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
   const sql = `
-    SELECT "priority"::text AS key, COUNT(*) AS cnt
-    FROM "Case"
+    SELECT [priority] AS [key], COUNT(*) AS cnt
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-    GROUP BY "priority"
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+    GROUP BY [priority]
     ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
@@ -529,11 +506,11 @@ async function queryByCaseType(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
   const sql = `
-    SELECT "caseType"::text AS key, COUNT(*) AS cnt
-    FROM "Case"
+    SELECT [caseType] AS [key], COUNT(*) AS cnt
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-    GROUP BY "caseType"
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+    GROUP BY [caseType]
     ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
@@ -545,11 +522,11 @@ async function queryByCompany(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
   const sql = `
-    SELECT "companyId" AS id, "companyName" AS name, COUNT(*) AS cnt
-    FROM "Case"
+    SELECT [companyId] AS id, [companyName] AS name, COUNT(*) AS cnt
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-    GROUP BY "companyId", "companyName"
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+    GROUP BY [companyId], [companyName]
     ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
@@ -561,19 +538,18 @@ async function queryByTeam(scope, filters, from, to, baseWhere) {
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
   const sql = `
-    SELECT
-      "assignedTeamId" AS id,
-      "assignedTeamName" AS name,
+    SELECT TOP (${TOP_TEAM_LIMIT})
+      [assignedTeamId] AS id,
+      [assignedTeamName] AS name,
       COUNT(*) AS cnt,
-      COALESCE(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) / 3600.0)
-        FILTER (WHERE "resolvedAt" IS NOT NULL AND "resolvedAt" > "createdAt"), NULL) AS avg_ttr_hours
-    FROM "Case"
+      AVG(CASE WHEN [resolvedAt] IS NOT NULL AND [resolvedAt] > [createdAt]
+        THEN CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0 END) AS avg_ttr_hours
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-      AND "assignedTeamId" IS NOT NULL
-    GROUP BY "assignedTeamId", "assignedTeamName"
-    ORDER BY cnt DESC
-    LIMIT ${TOP_TEAM_LIMIT};
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      AND [assignedTeamId] IS NOT NULL
+    GROUP BY [assignedTeamId], [assignedTeamName]
+    ORDER BY cnt DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
   return rows.map((r) => ({
@@ -588,25 +564,23 @@ async function queryByCategory(scope, filters, from, to, baseWhere) {
   if (scope.companyIds.length === 0) return [];
   const p1 = withParam(baseWhere, from);
   const p2 = withParam(p1, to);
-  const p3 = withParam(p2, OPEN_STATUS_DB_VALUES);
+  const p3 = withArrayParam(p2, OPEN_STATUS_DB_VALUES);
   const sql = `
-    SELECT
-      "category"    AS category,
-      "subCategory" AS sub_category,
+    SELECT TOP (${TOP_CATEGORY_LIMIT})
+      [category]    AS category,
+      [subCategory] AS sub_category,
       COUNT(*)      AS total,
-      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p3.idx}::text[])) AS open_count,
-      COALESCE(AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "createdAt")) / 3600.0)
-        FILTER (WHERE "resolvedAt" IS NOT NULL AND "resolvedAt" > "createdAt"), NULL) AS avg_ttr_hours,
-      COUNT(*) FILTER (
-        WHERE "resolvedAt" >= $${p1.idx}::timestamp AND "resolvedAt" < $${p2.idx}::timestamp
-        AND "slaViolation" = true
-      ) AS sla_breach_count
-    FROM "Case"
+      COUNT(CASE WHEN [status] IN (${p3.list}) THEN 1 END) AS open_count,
+      AVG(CASE WHEN [resolvedAt] IS NOT NULL AND [resolvedAt] > [createdAt]
+        THEN CAST(DATEDIFF(SECOND, [createdAt], [resolvedAt]) AS float) / 3600.0 END) AS avg_ttr_hours,
+      COUNT(CASE WHEN [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+        AND [slaViolation] = 1
+      THEN 1 END) AS sla_breach_count
+    FROM [Case]
     WHERE ${baseWhere.sql}
-      AND "createdAt" >= $${p1.idx}::timestamp AND "createdAt" < $${p2.idx}::timestamp
-    GROUP BY "category", "subCategory"
-    ORDER BY total DESC
-    LIMIT ${TOP_CATEGORY_LIMIT};
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+    GROUP BY [category], [subCategory]
+    ORDER BY total DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p3.params);
   return rows.map((r) => ({
@@ -627,26 +601,25 @@ async function queryByCategory(scope, filters, from, to, baseWhere) {
  */
 async function queryTopAtRiskAccounts(scope, filters, baseWhere) {
   if (scope.companyIds.length === 0) return [];
-  const p1 = withParam(baseWhere, OPEN_STATUS_DB_VALUES);
+  const p1 = withArrayParam(baseWhere, OPEN_STATUS_DB_VALUES);
 
   const sql = `
-    SELECT
-      "accountId"   AS account_id,
-      "accountName" AS account_name,
-      "companyId"   AS company_id,
-      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[])) AS open_count,
-      COUNT(*) FILTER (WHERE "slaViolation" = true) AS sla_breach_count,
-      COUNT(*) FILTER (WHERE "escalationLevel"::text <> 'Yok') AS escalated_count
-    FROM "Case"
+    SELECT TOP (${TOP_AT_RISK_LIMIT})
+      [accountId]   AS account_id,
+      [accountName] AS account_name,
+      [companyId]   AS company_id,
+      COUNT(CASE WHEN [status] IN (${p1.list}) THEN 1 END) AS open_count,
+      COUNT(CASE WHEN [slaViolation] = 1 THEN 1 END) AS sla_breach_count,
+      COUNT(CASE WHEN [escalationLevel] <> 'Yok' THEN 1 END) AS escalated_count
+    FROM [Case]
     WHERE ${baseWhere.sql}
-    GROUP BY "accountId", "accountName", "companyId"
+    GROUP BY [accountId], [accountName], [companyId]
     HAVING
-      COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[])) > 0
-      OR COUNT(*) FILTER (WHERE "slaViolation" = true) > 0
+      COUNT(CASE WHEN [status] IN (${p1.list}) THEN 1 END) > 0
+      OR COUNT(CASE WHEN [slaViolation] = 1 THEN 1 END) > 0
     ORDER BY
-      (COUNT(*) FILTER (WHERE "slaViolation" = true)) DESC,
-      (COUNT(*) FILTER (WHERE "status"::text = ANY ($${p1.idx}::text[]))) DESC
-    LIMIT ${TOP_AT_RISK_LIMIT};
+      COUNT(CASE WHEN [slaViolation] = 1 THEN 1 END) DESC,
+      COUNT(CASE WHEN [status] IN (${p1.list}) THEN 1 END) DESC;
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p1.params);
   return rows.map((r) => ({

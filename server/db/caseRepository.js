@@ -3863,9 +3863,9 @@ function buildWhere(f, allowedCompanyIds) {
     if (q) {
       andClauses.push({
         OR: [
-          { title: { contains: q, mode: 'insensitive' } },
-          { caseNumber: { contains: q, mode: 'insensitive' } },
-          { accountName: { contains: q, mode: 'insensitive' } },
+          { title: { contains: q } },
+          { caseNumber: { contains: q } },
+          { accountName: { contains: q } },
         ],
       });
     }
