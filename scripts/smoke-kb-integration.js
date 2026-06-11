@@ -76,6 +76,8 @@ try {
         baseUrl: `http://127.0.0.1:${process.env.PORT ?? 3101}`,
         authType: 'bearerToken',
         apiKeySecretName: 'EXTERNAL_KB_API_KEY',
+        // analyze ~60-180s sürer; kolon default'u 30s proxy'yi erken kestiriyor
+        timeoutMs: 180000,
       },
       create: {
         companyId: c.id,
@@ -84,6 +86,7 @@ try {
         baseUrl: `http://127.0.0.1:${process.env.PORT ?? 3101}`,
         authType: 'bearerToken',
         apiKeySecretName: 'EXTERNAL_KB_API_KEY',
+        timeoutMs: 180000,
       },
     });
   }

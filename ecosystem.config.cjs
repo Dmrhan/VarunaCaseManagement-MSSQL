@@ -21,7 +21,10 @@ module.exports = {
         NODE_ENV: 'production',
       },
       autorestart: true,
-      max_memory_restart: '600M',
+      // KB/RAG gömülü: lokal embedding modeli (Xenova e5-base + onnxruntime)
+      // analyze sırasında ~1.6GB RSS'e çıkar. 600M limiti süreci request
+      // ORTASINDA öldürüyordu (client_network_error). Makine 32GB — 4G güvenli.
+      max_memory_restart: '4G',
       out_file: 'logs/pm2-out.log',
       error_file: 'logs/pm2-err.log',
       merge_logs: true,
