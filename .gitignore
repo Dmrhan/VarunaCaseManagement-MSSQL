@@ -13,3 +13,4 @@ dist-ssr
 
 # Faz 4 - local disk storage (vaka ekleri)
 data/
+logs/

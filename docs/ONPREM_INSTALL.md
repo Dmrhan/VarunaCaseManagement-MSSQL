@@ -65,9 +65,34 @@ kullanıcıları oluştur, demo kullanıcıları pasifleştir/şifrelerini deği
 | `CORS_ORIGIN` | Yalnız frontend ayrı origin'den sunuluyorsa |
 | `CRON_SCHEDULER_ENABLED` | `false` → gömülü zamanlayıcı kapanır (harici zamanlayıcı kullanılacaksa) |
 
-## 3. Windows Service olarak çalıştırma
+## 3. Kalıcı çalıştırma
 
-Önerilen: [NSSM](https://nssm.cc) (the Non-Sucking Service Manager).
+### Seçenek A — PM2 (bu makinede kullanılan)
+
+```powershell
+npm install -g pm2 pm2-windows-startup
+cd C:\apps\VarunaCaseManagement
+pm2 start ecosystem.config.cjs   # repo kökündeki tanım (fork mode, log rotate path'leri)
+pm2 save                         # süreç listesini dump'a yaz
+pm2-startup install              # kullanıcı login'inde otomatik resurrect
+```
+
+Günlük komutlar: `pm2 status` · `pm2 logs varuna-cm` · `pm2 restart varuna-cm`.
+
+> **Bilinen sorun — `connect EPERM \\.\pipe\rpc.sock`:** PM2, Windows'ta
+> statik global pipe adı kullanır (`pm2/paths.js` içinde `\\.\pipe\rpc.sock`).
+> Makinede pm2 gömülü BAŞKA bir yazılım varsa (bu sunucuda vardı) pipe çakışır
+> ve pm2 hiç açılmaz. Çözüm: `%APPDATA%\npm\node_modules\pm2\paths.js`
+> dosyasındaki win32 bloğunda pipe adlarını PM2_HOME'dan türet (bkz. uygulanan
+> yama — pipe adına `C--Users-...-.pm2-` öneki). **pm2 sürüm yükseltmesi bu
+> yamayı siler; yükseltme sonrası yeniden uygulanmalı.**
+>
+> Not: `pm2-startup` kullanıcı LOGIN'inde başlatır (registry Run). Sunucu
+> login'siz reboot ediliyorsa NSSM seçeneğini kullanın.
+
+### Seçenek B — NSSM (login gerektirmeyen gerçek Windows Service)
+
+[NSSM](https://nssm.cc) (the Non-Sucking Service Manager).
 
 ```powershell
 nssm install VarunaCM "C:\Program Files\nodejs\node.exe" "--env-file=.env server\index.js"
