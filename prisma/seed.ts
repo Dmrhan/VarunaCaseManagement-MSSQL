@@ -274,7 +274,8 @@ async function main() {
         productGroup: t.productGroup,
         categoryName: t.categoryName,
         description: t.description,
-        items: t.items as Prisma.InputJsonValue,
+        // MSSQL: Json kolonlar String (nvarchar(max)) — uygulama katmanı stringify eder
+        items: JSON.stringify(t.items),
         isActive: t.isActive,
       },
       create: {
@@ -285,7 +286,7 @@ async function main() {
         productGroup: t.productGroup,
         categoryName: t.categoryName,
         description: t.description,
-        items: t.items as Prisma.InputJsonValue,
+        items: JSON.stringify(t.items),
         isActive: t.isActive,
       },
     });
@@ -333,7 +334,7 @@ async function main() {
         responseLevel: map(M_RESPONSE_LEVEL, c.responseLevel),
         // Churn
         cancellationRequest: c.cancellationRequest,
-        offeredSolutions: (c.offeredSolutions ?? null) as Prisma.InputJsonValue,
+        offeredSolutions: c.offeredSolutions == null ? null : JSON.stringify(c.offeredSolutions),
         offerExpiryDate: toDate(c.offerExpiryDate),
         offerOutcome: c.offerOutcome,
         offerRejectionReason: c.offerRejectionReason,
@@ -363,7 +364,7 @@ async function main() {
         aiFollowupRecommendation: c.aiFollowupRecommendation,
         aiRetentionOfferSuggestion: c.aiRetentionOfferSuggestion,
         // Checklist
-        checklistItems: (c.checklistItems ?? null) as Prisma.InputJsonValue,
+        checklistItems: c.checklistItems == null ? null : JSON.stringify(c.checklistItems),
         // Tarih
         createdAt: new Date(c.createdAt),
         updatedAt: new Date(c.updatedAt),
