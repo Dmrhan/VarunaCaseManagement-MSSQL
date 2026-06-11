@@ -96,7 +96,7 @@ model UserCompany {
   isActive  Boolean     @default(true)
   createdAt DateTime    @default(dbgenerated("sysutcdatetime()"))
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([userId, companyId])
@@ -253,7 +253,7 @@ model ExternalKbSetting {
   createdAt                DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([companyId, enabled])
 }
@@ -374,8 +374,8 @@ model AccountCompany {
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
-  account  Account          @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  company  Company          @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   package  Package?         @relation(fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   products AccountProduct[]
   /// WR-A4 — AccountCompany-scoped projeler.
@@ -417,7 +417,7 @@ model AccountProject {
   createdAt        DateTime      @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime      @updatedAt
 
-  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   cases          Case[]
 
   @@unique([accountCompanyId, code])
@@ -446,8 +446,10 @@ model AccountProduct {
   createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime  @updatedAt
 
-  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  /// onDelete: SetNull — Product silinirse AccountProduct snapshot (productName/Code) korunur.
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// MSSQL: Company→Product ve Company→AccountCompany→AccountProduct çift path
+  /// nedeniyle SetNull olamaz (multiple cascade paths). Product silinirken
+  /// productId uygulama katmanında null'lanmalı (admin product delete akışı).
   product        Product?       @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([accountCompanyId, productCode])
@@ -487,7 +489,7 @@ model AccountContact {
   createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime @updatedAt
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([accountId])
   @@index([phoneE164])
@@ -526,7 +528,7 @@ model Address {
   createdAt        DateTime    @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime    @updatedAt
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([accountId])
@@ -554,7 +556,7 @@ model ProductGroup {
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   products Product[]
 
   @@unique([companyId, code])
@@ -579,7 +581,7 @@ model Product {
   createdAt      DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt      DateTime     @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   productGroup    ProductGroup     @relation(fields: [productGroupId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7 — Reverse relation for PackageItem assignment.
   packageItems    PackageItem[]
@@ -614,7 +616,7 @@ model Package {
   createdAt    DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime     @updatedAt
 
-  company          Company          @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   items            PackageItem[]
   /// WR-A7b — Reverse relation: bu paketi referanslayan AccountCompany'ler.
   accountCompanies AccountCompany[]
@@ -635,7 +637,7 @@ model PackageItem {
   sortOrder Int      @default(0)
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  package Package @relation(fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   product Product @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([packageId, productId])
@@ -685,7 +687,7 @@ model TaxonomyDef {
   createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime @updatedAt
 
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   parent   TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   children TaxonomyDef[] @relation("TaxonomyHierarchy")
 
@@ -741,7 +743,7 @@ model CaseSolutionStep {
   createdAt       DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime  @updatedAt
 
-  case    Case    @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   /// Re-run import idempotency'i — aynı case + AI sourceRef = tek satır.
@@ -1149,8 +1151,8 @@ model CaseReminder {
   sentAt    DateTime?
   createdAt DateTime  @default(dbgenerated("sysutcdatetime()"))
 
-  case Case? @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  user User  @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId, remindAt])
   @@index([caseId])
@@ -1173,7 +1175,7 @@ model CaseActivity {
   actor      String @db.NVarChar(Max)
   at         DateTime               @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1194,7 +1196,9 @@ model CaseNote {
   replyCount   Int            @default(0)
   createdAt    DateTime       @default(dbgenerated("sysutcdatetime()"))
 
-  case      Case               @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // MSSQL: self-relation SetNull olamaz — parent note silinirken parentNoteId
+  // uygulama katmanında null'lanmalı (caseRepository note delete akışı).
   parent    CaseNote?          @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   replies   CaseNote[]         @relation("NoteReplies")
   reactions CaseNoteReaction[]
@@ -1218,7 +1222,7 @@ model CaseNoteReaction {
   emoji     String @db.NVarChar(50)
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  note CaseNote @relation(fields: [noteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  note CaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([noteId, userId, emoji])
   @@index([noteId])
@@ -1260,7 +1264,7 @@ model CaseAttachment {
   uploadedBy String @db.NVarChar(Max)
   uploadedAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1280,7 +1284,7 @@ model CaseCallLog {
   nextFollowupDate    DateTime?
   lastInteractionDate DateTime?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1300,7 +1304,7 @@ model CaseOfferedSolution {
   expiryDate      DateTime?
   rejectionReason String? @db.NVarChar(Max)
 
-  case     Case               @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([caseId])
@@ -1320,7 +1324,7 @@ model CaseApproval {
   decidedAt      DateTime?
   decisionReason String? @db.NVarChar(Max) // Onay/red gerekçesi (red için zorunlu)
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1399,7 +1403,7 @@ model CaseResolutionApproval {
   createdAt                DateTime      @default(dbgenerated("sysutcdatetime()"))
   updatedAt                DateTime      @updatedAt
 
-  case             Case                      @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case             Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   policy           ResolutionApprovalPolicy? @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   expectedApprover Person?                   @relation("CaseResolutionApprovalApprover", fields: [expectedApproverPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1421,7 +1425,7 @@ model CaseNotification {
   sentAt    DateTime            @default(dbgenerated("sysutcdatetime()"))
   readAt    DateTime?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1529,7 +1533,7 @@ model CaseMention {
   seenAt          DateTime? // null = henüz görülmedi → header bell badge
   createdAt       DateTime  @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([mentionedUserId])
@@ -1548,7 +1552,7 @@ model AISuggestion {
   rejectReason    String? @db.NVarChar(Max)
   createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1582,7 +1586,7 @@ model CaseTransfer {
   aiReasonCode      String? @db.NVarChar(255)
   aiConfidence      Float?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1603,7 +1607,7 @@ model CaseWatcher {
   addedBy   String @db.NVarChar(Max)
   addedAt   DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([caseId, userId])
   @@index([userId])
@@ -1632,7 +1636,9 @@ model CaseLink {
   createdBy    String @db.NVarChar(Max)
   createdAt    DateTime     @default(dbgenerated("sysutcdatetime()"))
 
-  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // MSSQL: Case'e iki FK (kaynak+hedef) çift cascade path yaratır — hedef taraf
+  // NoAction; hedef case silinirken CaseLink satırları uygulama katmanında silinmeli.
   linkedCase Case @relation("CaseLinkTarget", fields: [linkedCaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([caseId, linkedCaseId, linkType])
@@ -1692,7 +1698,7 @@ model ImportJob {
   leaseAt             DateTime?
   heartbeatAt         DateTime?
 
-  company Company        @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   rows    ImportJobRow[]
 
   @@index([companyId])
@@ -1740,7 +1746,7 @@ model ImportJobRow {
   createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime @updatedAt
 
-  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([importJobId])
   @@index([importJobId, status])
@@ -1925,7 +1931,7 @@ model NotificationDispatch {
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
-  case     Case                  @relation(fields: [caseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case     Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   company  Company               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   rule     NotificationRule?     @relation(fields: [ruleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   template NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)

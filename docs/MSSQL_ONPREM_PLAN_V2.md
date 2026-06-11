@@ -149,7 +149,28 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
   diakritik-fold için korunuyor (collation AS = accent-sensitive).
 - `scripts/smoke-data-contracts.js` hardcoded macOS path'leri repo-göreli yapıldı.
 - API/Supabase gerektiren smoke'lar (29 adet) Faz 3 sonrasına bırakıldı;
-  DB-direct smoke'lar toplu koşuldu (sonuç: scripts/smoke-batch-results.txt).
+  DB-direct smoke'lar toplu koşuldu (runner: scripts/run-smoke-batch.mjs,
+  sonuç: scripts/smoke-batch-results.txt). **Nihai: 55/67 PASS.**
+- Smoke triage'ında yapılan ek düzeltmeler:
+  - **Cascade restorasyonu:** orijinal 36 onDelete (Cascade/SetNull) geri geldi
+    (migration `00000000000001_restore_referential_actions`). MSSQL'in izin
+    vermediği 3 istisna NoAction: `AccountProduct.product`, `CaseNote.parent`
+    (self-relation), `CaseLink.linkedCase` (çift FK) — silme akışları bu üçü
+    için uygulama katmanında ele alınmalı (şemada yorumlu).
+  - **P2002 helper:** `server/db/uniqueViolation.js` — MSSQL'de meta.target
+    index adı (2601) ya da yalnız `dbo.Tablo` (2627) döner; accountRepository
+    duplicate tespitleri bu helper'a bağlandı.
+  - **commitEngine bug fix:** ImportJobRow durumları bellekte güncellenmiyordu →
+    pendingRowsRemaining bir tick geride kalıyor, fazladan no-op tick oluşuyordu
+    (DB-bağımsız gerçek hata; 250 satır artık 4 değil 3 tick'te biter).
+  - Turkish-I: `information_schema` küçük harf → Türkçe collation'da
+    INFORMATION_SCHEMA ile eşleşmez; raw SQL'de katalog adları BÜYÜK yazılmalı.
+  - sqlcmd ile filtered index/şema işlemi yaparken `-I` (QUOTED_IDENTIFIER ON) şart.
+- Kalan 12 kırmızı sınıflandırması: 9'u veri bağımlılığı (demo persona →
+  seedAuth/Faz 3; TaxonomyDef seed'i → Google Drive xlsx; AIUsageLog → gerçek AI
+  kullanımı), 3'ü main'de de kırık bayat smoke (phase-a/c2: 14 haneli VKN
+  gönderiyor — WR-A2 checksum'dan eski; kb-drafts check 14 — main'de 15/17,
+  bu branch'te 20/21).
 
 - `operationsAggregator.js` 6 raw sorgunun MSSQL'e çevrimi; analytics ekranı doğrulanır.
 - Json alanı kullanan tüm akışların (Case, ImportJob, NotificationRule, ActionItem,

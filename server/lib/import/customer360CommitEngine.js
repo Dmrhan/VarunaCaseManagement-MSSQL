@@ -1217,6 +1217,10 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
     await runWithConcurrency(writeable, async (row) => {
       if (row.action === 'skip') {
         await prisma.importJobRow.update({ where: { id: row.id }, data: { status: 'skipped', updatedAt: new Date() } });
+        // In-memory status da güncellenir; tick sonundaki pendingTotal sayımı
+        // bu objeler üzerinden yapılıyor (güncellenmezse hasMore bir tick geç
+        // false olur ve fazladan no-op tick oluşur).
+        row.status = 'skipped';
         eStats.skipped += 1;
         return;
       }
@@ -1229,6 +1233,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, accountId: r.recordId, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          row.status = r.kind;
           rememberAccount(normalized, r.recordId);
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
           return;
@@ -1248,6 +1253,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
               updatedAt: new Date(),
             },
           });
+          row.status = 'error';
           eStats.error += 1;
           return;
         }
@@ -1259,6 +1265,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          row.status = r.kind;
           if (normalized.accountKey && normalized.companyCode) {
             accountCompanyIdByKey.set(`${normalized.accountKey}|${normalized.companyCode}`, r.recordId);
           }
@@ -1273,6 +1280,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          row.status = r.kind;
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
           return;
         }
@@ -1284,6 +1292,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          row.status = r.kind;
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
           return;
         }
@@ -1315,6 +1324,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
                   updatedAt: new Date(),
                 },
               });
+              row.status = 'error';
               eStats.error += 1;
               return;
             }
@@ -1327,6 +1337,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          row.status = r.kind;
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
           return;
         }
@@ -1343,6 +1354,7 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             updatedAt: new Date(),
           },
         });
+        row.status = 'error';
         eStats.error += 1;
       }
     });

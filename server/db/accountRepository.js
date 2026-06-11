@@ -11,6 +11,7 @@ import {
 } from '../utils/accountValidation.js';
 import { generateUniqueAccountId } from '../utils/accountId.js';
 import { generateTurkishSearchVariants } from '../utils/turkishSearch.js';
+import { uniqueTargetHas } from './uniqueViolation.js';
 
 /**
  * Phase A — Account 360 repository.
@@ -976,22 +977,21 @@ export async function createAccount({ data, user }) {
     return getAccount(created.id, { allowedCompanyIds: allowed });
   } catch (err) {
     // Yarış koşulunda unique constraint Prisma error tarafından yakalanır.
+    // MSSQL'de meta.target index adı / tablo adı döner — uniqueTargetHas üçünü de tanır.
     if (err?.code === 'P2002') {
-      const target = err.meta?.target ?? [];
-      const targets = Array.isArray(target) ? target : [target];
-      if (targets.includes('vkn')) {
+      if (uniqueTargetHas(err, 'vkn')) {
         throw new AccountValidationError('Bu VKN ile kayıtlı müşteri var.', {
           status: 409,
           code: 'duplicate_vkn',
         });
       }
-      if (targets.includes('tcknHash')) {
+      if (uniqueTargetHas(err, 'tcknHash')) {
         throw new AccountValidationError('Bu TCKN ile kayıtlı müşteri var.', {
           status: 409,
           code: 'duplicate_tckn',
         });
       }
-      if (targets.includes('externalCustomerCode') || targets.includes('companyId')) {
+      if (uniqueTargetHas(err, 'externalCustomerCode', 'companyId', 'dbo.AccountCompany')) {
         throw new AccountValidationError(
           'Bu şirkette aynı müşteri kodu zaten kullanılıyor.',
           { status: 409, code: 'duplicate_external_code' },
@@ -1218,8 +1218,7 @@ export async function updateAccount({ accountId, data, user }) {
     await prisma.account.update({ where: { id: accountId }, data: patch });
   } catch (err) {
     if (err?.code === 'P2002') {
-      const targets = Array.isArray(err.meta?.target) ? err.meta.target : [err.meta?.target];
-      if (targets.includes('tcknHash')) {
+      if (uniqueTargetHas(err, 'tcknHash')) {
         throw new AccountValidationError('Bu TCKN ile kayıtlı müşteri var.', {
           status: 409,
           code: 'duplicate_tckn',
@@ -1391,19 +1390,22 @@ export async function addCompanyRelation({ accountId, data, user }) {
     });
   } catch (err) {
     if (err?.code === 'P2002') {
-      const target = err.meta?.target ?? [];
-      const targets = Array.isArray(target) ? target : [target];
-      if (targets.includes('accountId') && targets.includes('companyId')) {
-        throw new AccountValidationError('Bu müşteri zaten bu şirkete bağlı.', {
-          status: 409,
-          code: 'duplicate_relation',
-        });
-      }
-      if (targets.includes('externalCustomerCode')) {
+      if (uniqueTargetHas(err, 'externalCustomerCode')) {
         throw new AccountValidationError(
           'Bu şirkette aynı müşteri kodu zaten kullanılıyor.',
           { status: 409, code: 'duplicate_external_code' },
         );
+      }
+      // MSSQL 2627: plain unique constraint için target='dbo.AccountCompany'
+      // (kolon bilgisi yok) — bu tabloda kalan tek plain unique relation'dır.
+      if (
+        (uniqueTargetHas(err, 'accountId') && uniqueTargetHas(err, 'companyId')) ||
+        uniqueTargetHas(err, 'dbo.AccountCompany')
+      ) {
+        throw new AccountValidationError('Bu müşteri zaten bu şirkete bağlı.', {
+          status: 409,
+          code: 'duplicate_relation',
+        });
       }
     }
     throw err;

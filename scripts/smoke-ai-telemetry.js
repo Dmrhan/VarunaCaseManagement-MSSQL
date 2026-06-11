@@ -32,11 +32,14 @@ function record(name, ok, detail = '') {
 
 console.log('\n── A) AIUsageLog schema/contract ──');
 
+// MSSQL + Turkish collation: katalog adı BÜYÜK harfle yazılmalı (Türkçe
+// kuralında i≠I olduğundan 'information_schema' INFORMATION_SCHEMA ile
+// eşleşmez) ve dönen kolon adları alias'lanmalı.
 const aiCols = await prisma.$queryRawUnsafe(
-  `SELECT column_name, is_nullable, data_type
-   FROM information_schema.columns
-   WHERE table_name = 'AIUsageLog'
-   ORDER BY ordinal_position`,
+  `SELECT COLUMN_NAME AS column_name, IS_NULLABLE AS is_nullable, DATA_TYPE AS data_type
+   FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_NAME = 'AIUsageLog'
+   ORDER BY ORDINAL_POSITION`,
 );
 const colMap = Object.fromEntries(aiCols.map((c) => [c.column_name, c]));
 

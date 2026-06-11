@@ -34,8 +34,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(new URL('.', import.meta.url).pathname, '..');
+// fileURLToPath: URL.pathname Windows'ta '/C:/...' döndürür ve path.resolve
+// 'C:\C:\...' üretirdi — cross-platform doğru çözüm bu.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = [];
 const record = (label, ok, detail = '') => {
   results.push({ ok, label, detail });

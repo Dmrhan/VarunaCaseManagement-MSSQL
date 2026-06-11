@@ -50,19 +50,26 @@ record(
   /model ImportJob[\s\S]+?heartbeatAt\s+DateTime\?[\s\S]+?\}/.test(schemaSrc),
 );
 
-const migrationDir = 'prisma/migrations/20260606140000_import_job_lease';
-const migrationSql = fs.existsSync(`${migrationDir}/migration.sql`)
-  ? fs.readFileSync(`${migrationDir}/migration.sql`, 'utf8')
-  : '';
+// MSSQL geçişinde Postgres migration geçmişi tek baseline'a indirildi
+// (00000000000000_init) — lease kolonları artık baseline içinde. Eski
+// Postgres migration'ı (20260606140000_import_job_lease) varsa onu, yoksa
+// baseline'ı kontrol et.
+const legacyDir = 'prisma/migrations/20260606140000_import_job_lease';
+const baselineDir = 'prisma/migrations/00000000000000_init';
+const migrationSql = fs.existsSync(`${legacyDir}/migration.sql`)
+  ? fs.readFileSync(`${legacyDir}/migration.sql`, 'utf8')
+  : fs.existsSync(`${baselineDir}/migration.sql`)
+    ? fs.readFileSync(`${baselineDir}/migration.sql`, 'utf8')
+    : '';
 record(
-  'migration file present (20260606140000_import_job_lease)',
+  'migration file present (import_job_lease veya MSSQL baseline)',
   !!migrationSql,
 );
 record(
   'migration adds three nullable columns',
-  /ADD COLUMN "leaseTickId" TEXT/.test(migrationSql) &&
-    /ADD COLUMN "leaseAt" TIMESTAMP/.test(migrationSql) &&
-    /ADD COLUMN "heartbeatAt" TIMESTAMP/.test(migrationSql),
+  /(ADD COLUMN "leaseTickId" TEXT|\[leaseTickId\] NVARCHAR)/.test(migrationSql) &&
+    /(ADD COLUMN "leaseAt" TIMESTAMP|\[leaseAt\] DATETIME2)/.test(migrationSql) &&
+    /(ADD COLUMN "heartbeatAt" TIMESTAMP|\[heartbeatAt\] DATETIME2)/.test(migrationSql),
 );
 
 const engine = fs.readFileSync('server/lib/import/customer360CommitEngine.js', 'utf8');
