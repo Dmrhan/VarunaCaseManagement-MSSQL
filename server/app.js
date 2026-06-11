@@ -29,7 +29,16 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(cors({ origin: 'http://localhost:5273' }));
 }
 
-app.use(express.json({ limit: '2mb' }));
+// Faz 4 — dosya upload endpoint'i raw body bekler; global json parser
+// .json dosya yüklemelerini (Content-Type: application/json) yutmasın diye
+// bu path atlanır (route kendi express.raw parser'ını kullanır).
+const jsonParser = express.json({ limit: '2mb' });
+app.use((req, res, next) => {
+  if (req.method === 'PUT' && /^\/api\/cases\/[^/]+\/files\/upload$/.test(req.path)) {
+    return next();
+  }
+  return jsonParser(req, res, next);
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({

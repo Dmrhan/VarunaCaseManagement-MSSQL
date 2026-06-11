@@ -1,57 +1,67 @@
-import { createClient } from '@supabase/supabase-js';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 /**
- * Supabase Storage helper — vaka eklerini bucket'a koyar.
+ * Local disk storage helper (Faz 4) — Supabase Storage'ın yerini aldı.
  *
- * Mimari:
- *  - Frontend dosyayı doğrudan Supabase'e yükler (Vercel 4.5MB body limitini bypass)
- *  - BFF sadece signed upload URL üretir (kısa ömürlü, single-use)
- *  - Download da signed URL ile (private bucket — direkt link yok)
+ * Mimari (eski signed-URL akışının disk karşılığı):
+ *  - requestUpload yine bir "signed URL" döner; artık bu, kısa ömürlü HMAC
+ *    token'lı bir BFF endpoint'idir: PUT /api/cases/:id/files/upload?token=...
+ *    Token path+caseId+exp taşır — client path'i KURCALAYAMAZ (traversal yok).
+ *  - Download da aynı desenle: GET .../raw?token=... (tarayıcı <a> tıklaması
+ *    Authorization header taşıyamadığı için token query'dedir).
+ *  - Dosyalar STORAGE_ROOT altında `cases/{caseId}/{attachmentId}-{safeName}`
+ *    yapısında saklanır. CaseAttachment.fileUrl bu göreli path'i tutar
+ *    (storage-agnostik string — eski tasarım korunur).
  *
- * MSSQL geçişinde bu modül opsiyonel: file storage için MinIO, S3, Azure Blob,
- * ya da disk veri tabanı sütunu seçilebilir. CaseAttachment.fileUrl alanı
- * zaten storage-agnostik string.
+ * Env:
+ *  - STORAGE_ROOT: mutlak ya da repo-göreli dizin (default: ./data/attachments)
+ *  - Token imzası JWT_SECRET ile atılır (ayrı secret gerekmez).
  */
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const BUCKET = 'case-attachments';
+const STORAGE_ROOT = path.resolve(
+  process.env.STORAGE_ROOT || path.join(process.cwd(), 'data', 'attachments'),
+);
 
-let _client = null;
-let _bucketEnsured = false;
+const UPLOAD_TOKEN_TTL_SEC = 15 * 60; // büyük dosya + yavaş ağ payı
+const DOWNLOAD_TOKEN_TTL_SEC = 300;   // eski Supabase signed URL ile aynı (5 dk)
 
-function getClient() {
-  if (_client) return _client;
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new StorageError(
-      'Supabase Storage yapılandırılmamış (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY .env\'de yok).',
-      503,
-    );
-  }
-  _client = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  });
-  return _client;
+function secret() {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new StorageError('JWT_SECRET tanımlı değil — storage token imzalanamıyor.', 503);
+  return s;
 }
 
-/** Bucket var mı? Yoksa private olarak oluştur. Idempotent. */
-async function ensureBucket() {
-  if (_bucketEnsured) return;
-  const sb = getClient();
-  const { data: list, error: listErr } = await sb.storage.listBuckets();
-  if (listErr) throw new StorageError(`Bucket listesi okunamadı: ${listErr.message}`);
-  const exists = list?.some((b) => b.name === BUCKET);
-  if (!exists) {
-    const { error: createErr } = await sb.storage.createBucket(BUCKET, {
-      public: false,
-      fileSizeLimit: 25 * 1024 * 1024, // 25 MB
-    });
-    if (createErr && !/already exists/i.test(createErr.message)) {
-      throw new StorageError(`Bucket oluşturulamadı: ${createErr.message}`);
-    }
-    console.log(`[storage] '${BUCKET}' bucket'ı oluşturuldu (private, 25MB).`);
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+
+function sign(payloadStr) {
+  return crypto.createHmac('sha256', secret()).update(payloadStr).digest('base64url');
+}
+
+/** { ...payload, exp } → "base64url(json).sig" */
+export function signStorageToken(payload, ttlSec) {
+  const body = b64url(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + ttlSec }));
+  return `${body}.${sign(body)}`;
+}
+
+/** Geçerliyse payload, değilse null (süre/imza/format hatası). */
+export function verifyStorageToken(token) {
+  if (typeof token !== 'string') return null;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const expected = sign(body);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload.exp !== 'number' || payload.exp * 1000 < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
   }
-  _bucketEnsured = true;
 }
 
 /** Vaka için path: cases/{caseId}/{attachmentId}-{safeName} */
@@ -61,34 +71,71 @@ function buildPath(caseId, attachmentId, fileName) {
   return `cases/${caseId}/${attachmentId}-${safe}`;
 }
 
-/** 60 saniye geçerli signed upload URL — frontend buna PUT eder. */
+/** Göreli storage path'ini STORAGE_ROOT altına çözer; dışarı kaçışı reddeder. */
+function resolveSafe(relPath) {
+  const abs = path.resolve(STORAGE_ROOT, relPath);
+  if (abs !== STORAGE_ROOT && !abs.startsWith(STORAGE_ROOT + path.sep)) {
+    throw new StorageError('Geçersiz dosya yolu.', 400);
+  }
+  return abs;
+}
+
+/**
+ * Upload "signed URL" üret — frontend buna PUT eder (raw body).
+ * Dönen shape eski Supabase sürümüyle aynı: { signedUrl, path, token }.
+ */
 export async function createUploadUrl(caseId, attachmentId, fileName) {
-  await ensureBucket();
-  const sb = getClient();
-  const path = buildPath(caseId, attachmentId, fileName);
-  const { data, error } = await sb.storage.from(BUCKET).createSignedUploadUrl(path);
-  if (error) throw new StorageError(`Upload URL oluşturulamadı: ${error.message}`);
-  return { signedUrl: data.signedUrl, path, token: data.token };
+  const relPath = buildPath(caseId, attachmentId, fileName);
+  const token = signStorageToken({ typ: 'upload', caseId, path: relPath }, UPLOAD_TOKEN_TTL_SEC);
+  return {
+    signedUrl: `/api/cases/${encodeURIComponent(caseId)}/files/upload?token=${encodeURIComponent(token)}`,
+    path: relPath,
+    token,
+  };
 }
 
-/** İndirme için 5 dakika geçerli signed URL. */
-export async function createDownloadUrl(path, expiresInSec = 300) {
-  await ensureBucket();
-  const sb = getClient();
-  const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, expiresInSec);
-  if (error) throw new StorageError(`İndirme URL'si oluşturulamadı: ${error.message}`);
-  return data.signedUrl;
+/** İndirme için kısa ömürlü token'lı URL. */
+export function createDownloadUrl(caseId, fileId, relPath, fileName, expiresInSec = DOWNLOAD_TOKEN_TTL_SEC) {
+  const token = signStorageToken(
+    { typ: 'download', caseId, fileId, path: relPath, fileName },
+    expiresInSec,
+  );
+  return `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(fileId)}/raw?token=${encodeURIComponent(token)}`;
 }
 
-/** Dosya silindiğinde Storage'dan da temizle. */
-export async function removeObject(path) {
-  if (!path) return;
-  await ensureBucket();
-  const sb = getClient();
-  const { error } = await sb.storage.from(BUCKET).remove([path]);
-  if (error) {
-    // Silinemezse log + devam — orphan dosya kalsa kabul edilebilir, vaka silinsin
-    console.warn(`[storage] Dosya silinemedi (${path}):`, error.message);
+/** Upload token'ı doğrulanmış raw body'yi diske yaz. */
+export async function saveObject(relPath, buffer) {
+  const abs = resolveSafe(relPath);
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  await fsp.writeFile(abs, buffer);
+}
+
+/** Var mı + boyut (download endpoint'i Content-Length için). */
+export async function statObject(relPath) {
+  try {
+    const abs = resolveSafe(relPath);
+    const st = await fsp.stat(abs);
+    return st.isFile() ? { size: st.size } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Streaming okuma — download endpoint'i pipe eder. */
+export function createObjectStream(relPath) {
+  return fs.createReadStream(resolveSafe(relPath));
+}
+
+/** Dosya silindiğinde diskten de temizle. */
+export async function removeObject(relPath) {
+  if (!relPath) return;
+  try {
+    await fsp.unlink(resolveSafe(relPath));
+  } catch (err) {
+    if (err?.code !== 'ENOENT') {
+      // Silinemezse log + devam — orphan dosya kalsa kabul edilebilir, vaka silinsin
+      console.warn(`[storage] Dosya silinemedi (${relPath}):`, err?.message ?? err);
+    }
   }
 }
 
@@ -99,4 +146,4 @@ export class StorageError extends Error {
   }
 }
 
-export const STORAGE_BUCKET = BUCKET;
+export const STORAGE_ROOT_DIR = STORAGE_ROOT;

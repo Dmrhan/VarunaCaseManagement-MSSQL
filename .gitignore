@@ -10,3 +10,6 @@ dist-ssr
 .idea
 *.log
 *.tsbuildinfo
+
+# Faz 4 - local disk storage (vaka ekleri)
+data/

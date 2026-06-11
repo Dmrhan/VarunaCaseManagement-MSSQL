@@ -229,6 +229,26 @@ En riskli iş önce: şema MSSQL'de ayağa kalkmadan diğer fazların anlamı yo
 
 ### Faz 4 — Storage değişimi (local disk)
 
+**Durum: TAMAMLANDI (2026-06-11).** Notlar:
+
+- `server/db/storage.js` local disk'e geçti: dosyalar `STORAGE_ROOT` altında
+  `cases/{caseId}/{attachmentId}-{safeName}` yapısında; path traversal koruması var.
+- Eski signed-URL akış ŞEKLİ korundu: requestUpload yine `{uploadUrl, path,
+  attachmentId}` döner — uploadUrl artık kısa ömürlü HMAC token'lı BFF endpoint'i
+  (`PUT /api/cases/:id/files/upload?token=...`, 15dk TTL, path token içinde —
+  tamper-proof). Download: `GET .../raw?token=...` (5dk TTL) stream eder;
+  tarayıcı `<a>` tıklaması header taşıyamadığı için token query'de.
+  Bu iki endpoint verifyJwt'den önce mount edilir (token tek yetki kaynağı).
+- Frontend `caseService.addFile/downloadFile` DEĞİŞMEDİ (URL'ler göreli) —
+  sadece yorumlar güncellendi. `CaseAttachment.fileUrl` göreli path tutar.
+- app.js: global json parser upload path'ini atlar (`.json` dosya yüklemesi
+  yutulmasın diye); route kendi `express.raw` (25MB) parser'ını kullanır.
+- Doğrulama: `scripts/smoke-local-storage.js` — sunucu spawn + 15 E2E kontrol
+  (upload-url → raw PUT → finalize → disk doğrulama → token'sız raw indirme +
+  byte eşitliği + TR dosya adı Content-Disposition → bozuk token 401'leri →
+  silmede DB+disk temizliği) — ALL GREEN.
+- `data/` .gitignore'a eklendi; STORAGE_ROOT yedeklemeye dahil edilmeli.
+
 - `server/db/storage.js` yeniden yazılır: `STORAGE_ROOT` (örn. `D:\varuna-data\attachments`)
   altında `cases/{caseId}/{attachmentId}-{safeName}`.
 - Upload: `POST /api/cases/:id/files/upload` (multer, 25MB limit, whitelist korunur) —

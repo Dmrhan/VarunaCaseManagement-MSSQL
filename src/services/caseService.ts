@@ -92,7 +92,7 @@ import {
 } from '@/features/cases/types';
 import { CASE_FILE_MAX_COUNT, CASE_FILE_MAX_SIZE } from '@/features/cases/types';
 
-// FAZ 2 — Supabase Postgres üzerinden gerçek BFF entegrasyonu aktif.
+// Gerçek BFF entegrasyonu aktif (on-prem MSSQL).
 // Mock dalı dev-only fallback olarak kodda kalıyor (test/storybook için).
 export const USE_MOCK = false;
 
@@ -163,7 +163,7 @@ export async function apiFetch<T = unknown>(
   init?: RequestInit,
   errorContext = 'İşlem',
 ): Promise<T | undefined> {
-  // Auth: aktif Supabase oturumundan access token'ı çek, Authorization header'a ekle
+  // Auth: aktif local oturumdan access token'ı çek, Authorization header'a ekle
   const token = await getAccessToken();
   const headers = new Headers(init?.headers);
   if (token && !headers.has('Authorization')) {
@@ -1273,7 +1273,7 @@ export const caseService = {
   /**
    * Vakaya dosya ekler. 3 adımlı orchestration:
    *  1. BFF'den signed upload URL al
-   *  2. Doğrudan Supabase Storage'a PUT (Vercel 4.5MB body limitini bypass)
+   *  2. Token'lı BFF storage endpoint'ine PUT (Faz 4 — local disk)
    *  3. BFF'ye finalize çağrısı → DB satırı + history log
    *
    * onProgress callback (opsiyonel) — XHR ile yükleme yüzdesi raporlar.
@@ -1335,7 +1335,7 @@ export const caseService = {
       return { caseUpdated: clone(updated), file: clone(file) };
     }
 
-    // FAZ 2: BFF + Supabase Storage 3-step orchestration
+    // FAZ 4: BFF + local disk storage 3-step orchestration (token'lı upload URL)
     if (!(fileOrInput instanceof File)) {
       return { error: 'Dosya yüklemek için File nesnesi gerekli.' };
     }
@@ -1361,7 +1361,7 @@ export const caseService = {
     if (!upload) return undefined;
     if ('error' in upload) return upload;
 
-    // Adım 2 — doğrudan Supabase Storage'a PUT (XHR ile progress takibi)
+    // Adım 2 — token'lı BFF storage endpoint'ine PUT (XHR ile progress takibi)
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
