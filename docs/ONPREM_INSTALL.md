@@ -108,6 +108,7 @@ Alternatif: `pm2` + `pm2-windows-startup`.
 
 HTTPS için önerilen: IIS (ARR reverse proxy) veya nginx ile 443 → 3101
 yönlendirmesi + sertifika sonlandırma. Uygulama kendisi HTTP dinler.
+IIS'e taşıma adım adım: [IIS_DEPLOY.md](IIS_DEPLOY.md).
 
 ## 4. Zamanlanmış job'lar
 

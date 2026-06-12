@@ -14,3 +14,6 @@ dist-ssr
 # Faz 4 - local disk storage (vaka ekleri)
 data/
 logs/
+
+# IIS tasima paketi - binary repoya girmesin (bkz. docs/IIS_DEPLOY.md)
+deploy/nssm/

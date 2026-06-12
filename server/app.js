@@ -28,6 +28,11 @@ import { fileURLToPath } from 'node:url';
  */
 const app = express();
 
+// Reverse proxy (IIS ARR / nginx) loopback'ten bağlanır; X-Forwarded-For'u
+// yalnız o durumda dikkate al ki req.ip (auth/ai rate limiting) gerçek
+// istemci IP'si olsun. Doğrudan erişimde davranış değişmez.
+app.set('trust proxy', 'loopback');
+
 // CORS: dev'de Vite (5273) ↔ BFF (3101) ayrı origin'de — gerekli.
 // On-prem production'da dist/ aynı süreçten servis edildiği için normalde
 // gereksiz; frontend ayrı bir origin'den sunulacaksa CORS_ORIGIN set edilir.
