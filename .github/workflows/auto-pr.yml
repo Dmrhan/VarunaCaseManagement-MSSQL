@@ -1,0 +1,18 @@
+# feat/** ve fix/** branch'lerine push'ta main'e otomatik PR açar.
+# PR zaten açıksa dokunmaz (gh pr create hata verir, adım yutar).
+name: Auto PR
+on:
+  push:
+    branches: ['feat/**', 'fix/**']
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: PR ac (yoksa)
+        run: gh pr create --base main --head "$GITHUB_REF_NAME" --fill || echo "PR zaten acik veya acilamadi"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
