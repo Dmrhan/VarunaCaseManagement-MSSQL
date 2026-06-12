@@ -1,0 +1,33 @@
+# main'e merge/push olunca uretim sunucusundaki self-hosted runner uzerinden
+# deploy eder (bkz. docs/IIS_DEPLOY.md §6 — ayni adimlarin otomasyonu).
+# Runner kurulumu: Repo Settings → Actions → Runners → New self-hosted runner
+# (Windows). Runner servisi nssm'i durdurup baslatabilmek icin yonetici
+# yetkili bir hesapla calismali.
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Uygulamayi guncelle ve yeniden baslat
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location C:\apps\VarunaCaseManagement
+          C:\tools\nssm\nssm.exe stop VarunaCM
+          git fetch origin
+          git checkout -f -B main origin/main
+          npm ci
+          npx prisma migrate deploy
+          npm run build
+          C:\tools\nssm\nssm.exe start VarunaCM
+          Start-Sleep -Seconds 5
+          $h = Invoke-RestMethod http://127.0.0.1:3101/api/health/deep
+          if ($h.status -ne 'ok') { throw "Health check basarisiz: $($h | ConvertTo-Json -Compress)" }
+          "Deploy tamam — health: $($h.status), db: $($h.db)"
