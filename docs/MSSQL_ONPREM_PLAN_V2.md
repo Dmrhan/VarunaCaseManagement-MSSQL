@@ -327,6 +327,34 @@ KB/RAG sistemi CSM içine gömülsün, iki uygulama ayrı çalışmak zorunda ka
 - `npm run build` + kritik smoke suite yeşil.
 - Bilinen sınırlamalar ve işletim notları dokümante edilir.
 
+### Faz 7 — Üretim verisi taşıma (Supabase → MSSQL)
+
+**Durum: TAMAMLANDI (2026-06-12).**
+
+- **İki adımlı aktarım** (kurumsal ağda Postgres portları kapalı, dış ağda MSSQL
+  erişilemez olduğundan): `scripts/export-supabase.mjs` (dış ağda; 54 tablo →
+  JSON, auth.users bcrypt hash'leri, storage dosyaları → STORAGE_ROOT) +
+  `scripts/import-supabase-export.mjs` (kurumsal ağda; dry-run → --execute --wipe).
+- **Taşınan:** 62.306 satır (445 vaka, 4.964 müşteri, 727 not, 859 çözüm adımı,
+  34.073 import satırı, 375 üretim taksonomisi…), 26 kullanıcı **bcrypt şifre
+  hash'leriyle** (Supabase $2a hash'leri local bcryptjs ile doğrulandı —
+  kullanıcılar eski şifreleriyle giriyor), 40 dosya eki (20MB; fileUrl
+  path'leri değişmeden local disk'ten servis ediliyor).
+- **Dönüşümler:** enum TR→ASCII (orijinal Postgres şeması parse edilerek),
+  Json kolonları köprü üzerinden, self-FK'lar iki geçişte (120 düzeltme),
+  ID'ler aynen korunarak. Demo veri --wipe ile silindi.
+- **Yaşanan/çözülen:** (1) FK sırası Team→Person→User olmalıydı; (2) orijinal
+  şema dosyası PowerShell `>` ile UTF-16 kaydedilince enum haritası sessizce
+  boş kaldı ve TR değerler CHECK'e takıldı — dosya UTF-8 yapıldı + script'e
+  parse-guard eklendi; (3) yeni `sb_secret_` anahtarları storage API'de
+  `apikey` header'ı ister.
+- **Doğrulama:** taşınan hash ile login ✓, üretim vaka listesi ✓, taşınan ek
+  dosya indirme ✓ (236KB jpg), KB sağlıklı ✓, smart-ticket sınıflandırma
+  üretim taksonomileriyle 4/5 eşleşme ✓.
+- **Not:** Eski Vercel uygulaması artık durdurulabilir; demo personalar
+  (sysadmin@varuna.dev vb. Test1234!) üretim verisinde de mevcut — şifreleri
+  değiştirilmeli/pasifleştirilmeli.
+
 ## Hedef Environment
 
 ```txt

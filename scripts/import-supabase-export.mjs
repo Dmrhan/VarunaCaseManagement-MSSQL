@@ -67,11 +67,24 @@ const columnEnum = {};
   }
 }
 
+// Guard: şema parse edilemediyse (örn. yanlış encoding) SAKIN sessizce
+// dönüşümsüz devam etme — TR enum değerleri CHECK constraint'lere takılır.
+{
+  const enumCount = Object.keys(enumValueMap).length;
+  const colCount = Object.values(columnEnum).reduce((a, m) => a + Object.keys(m).length, 0);
+  if (enumCount < 30 || colCount < 30) {
+    console.error(`Şema parse hatası: enum=${enumCount}, enum-kolonu=${colCount} (beklenen ≥30).`);
+    console.error('scripts/schema-postgres-original.prisma UTF-8 mi kontrol edin.');
+    process.exit(1);
+  }
+}
+
 // ─── Aktarım sırası (FK bağımlılıklarına göre) ────────────────────────────
 
 const TABLE_ORDER = [
   'Company', 'CompanySettings', 'ExternalKbSetting',
-  'User', 'Person', 'Team', 'UserCompany',
+  // FK zinciri: Person.teamId → Team; User.personId → Person
+  'Team', 'Person', 'User', 'UserCompany',
   'ThirdParty', 'DocumentType', 'CategoryDef', 'OfferedSolutionDef',
   'ProductGroup', 'Product', 'Package', 'PackageItem',
   'SLAPolicy', 'ChecklistTemplate', 'FieldDefinition', 'TaxonomyDef',
