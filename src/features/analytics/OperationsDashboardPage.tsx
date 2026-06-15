@@ -101,7 +101,7 @@ const STATUS_ORDER = [
 ];
 
 const PRIORITY_LABEL: Record<string, string> = {
-  Critical: 'Critical',
+  Critical: 'Kritik',
   High:     'Yüksek',
   Medium:   'Orta',
   Low:      'Düşük',

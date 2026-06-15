@@ -797,7 +797,7 @@ export const CASE_PRIORITY_LABELS: Record<CasePriority, string> = {
   Low:      'Düşük',
   Medium:   'Orta',
   High:     'Yüksek',
-  Critical: 'Critical',
+  Critical: 'Kritik',
 };
 
 export const CASE_ORIGINS: CaseOrigin[] = ['Telefon', 'E-posta', 'Web', 'Chatbot', 'Diğer'];

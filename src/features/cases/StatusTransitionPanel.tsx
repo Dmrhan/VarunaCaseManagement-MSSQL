@@ -807,7 +807,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
               <span>
-                Çözüldü geçişi <strong>Supervisor onayı</strong> gerektiriyor (Critical / SLA ihlali /
+                Çözüldü geçişi <strong>Supervisor onayı</strong> gerektiriyor (Kritik / SLA ihlali /
                 yüksek eskalasyon). FAZ 0'da onay simülasyonludur — geçiş yine de uygulanır.
               </span>
             </div>

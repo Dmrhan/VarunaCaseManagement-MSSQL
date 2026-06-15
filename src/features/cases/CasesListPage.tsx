@@ -846,7 +846,7 @@ export function CasesListPage({
                 setInboxTab('open');
                 setQuickFilter(null);
               }),
-              tile('ops.critical', 'Critical', s.critical, 'red', <Flag size={16} />, () => {
+              tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
                 setFilters({ ...initialFilters, priorities: ['Critical'] });
                 setInboxTab('open');
                 setQuickFilter(null);

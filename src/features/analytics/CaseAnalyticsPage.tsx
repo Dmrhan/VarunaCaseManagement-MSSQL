@@ -263,7 +263,7 @@ export function CaseAnalyticsPage() {
           tone={stats.reopenRate > 8 ? 'warn' : 'neutral'}
         />
         <MetricTile
-          label="Critical Açık"
+          label="Kritik Açık"
           value={stats.criticalOpen}
           hint={`Toplam: ${stats.byPriority.find((p) => p.key === 'Critical')?.value ?? 0}`}
           icon={<AlertTriangle size={12} />}

@@ -715,7 +715,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const PRIORITY_LABEL: Record<string, string> = {
-  Critical: 'Critical',
+  Critical: 'Kritik',
   High: 'Yüksek',
   Medium: 'Orta',
   Low: 'Düşük',

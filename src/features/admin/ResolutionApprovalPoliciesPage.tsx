@@ -461,10 +461,10 @@ function PolicyEditor({
           <Field label="Öncelik">
             <Select value={priority} onChange={(e) => setPriority(e.target.value)}>
               <option value="">Tümü</option>
-              <option value="Critical">Critical</option>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
+              <option value="Critical">Kritik</option>
+              <option value="High">Yüksek</option>
+              <option value="Medium">Orta</option>
+              <option value="Low">Düşük</option>
             </Select>
           </Field>
           <Field label="Destek seviyesi">
