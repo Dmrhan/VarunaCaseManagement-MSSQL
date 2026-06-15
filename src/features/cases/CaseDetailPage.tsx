@@ -68,6 +68,7 @@ import { MentionTextarea, type MentionTextareaHandle } from './components/Mentio
 import { NoteAvatar, NotesTab } from './components/CaseNotes';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
+import { CaseTitleEditable } from './components/CaseTitleEditable';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -597,7 +598,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
-            <h1 className="mt-0.5 truncate text-lg font-semibold text-slate-900 dark:text-ndark-text">{item.title}</h1>
+            <CaseTitleEditable item={item} onUpdated={setItem} />
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               {onShowCustomer && (
                 <button

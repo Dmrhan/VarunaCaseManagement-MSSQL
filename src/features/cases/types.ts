@@ -261,7 +261,7 @@ export interface CaseHistoryEntry {
 // CaseHistoryEntry.fieldName için Türkçe karşılıklar (Aktivite timeline gösterimi)
 export const CASE_FIELD_LABELS: Record<string, string> = {
   // Temel
-  title:                'Konu',
+  title:                'Vaka Adı',
   description:          'Açıklama',
   status:               'Statü',
   priority:             'Öncelik',
