@@ -1,5 +1,7 @@
 # Supabase Setup — FAZ 2 BFF + DB
 
+> **LEGACY / tarihsel doküman.** Bu repo MSSQL On-Prem Edition'dır ve canlı kurulumda Supabase kullanılmaz. Güncel kurulum için [ONPREM_INSTALL.md](ONPREM_INSTALL.md), IIS/Windows deploy için [IIS_DEPLOY.md](IIS_DEPLOY.md), geçiş geçmişi için [MSSQL_ONPREM_PLAN_V2.md](MSSQL_ONPREM_PLAN_V2.md) okunmalıdır. Bu dosya eski Supabase/Vercel hattının tarihsel referansı olarak tutulur.
+
 Bu doküman tek seferlik kurulum içindir. Senden 5 dakika sürecek 4 adım var.
 
 ---
