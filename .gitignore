@@ -15,5 +15,7 @@ dist-ssr
 data/
 logs/
 
-# IIS tasima paketi - binary repoya girmesin (bkz. docs/IIS_DEPLOY.md)
+# IIS tasima paketi - binary'ler repoya girmesin (bkz. docs/IIS_DEPLOY.md)
 deploy/nssm/
+deploy/git/
+reports/
