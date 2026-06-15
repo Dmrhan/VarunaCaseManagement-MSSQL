@@ -1506,7 +1506,7 @@ export function SmartTicketNewPage({
                             : 'KB üzerinden 5 sınıflandırma alanı önerilir'
                       }
                     >
-                      {suggesting ? 'Analiz…' : 'KB ile Analiz Et'}
+                      {suggesting ? 'Analiz…' : 'Bilgi Bankası ile Analiz Et'}
                     </Button>
                   )}
                 </div>
@@ -1890,7 +1890,7 @@ function Stage3Closure({
               onClick={onSuggestClosure}
               title="KB üzerinden kapanış önerisini yeniden iste"
             >
-              {closureSuggesting ? 'Öneriliyor…' : 'KB Önerisini Yenile'}
+              {closureSuggesting ? 'Öneriliyor…' : 'Bilgi Bankası Önerisini Yenile'}
             </Button>
             <Button
               variant="ghost"

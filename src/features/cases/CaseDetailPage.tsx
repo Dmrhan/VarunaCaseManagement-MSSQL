@@ -4638,7 +4638,7 @@ function KbDraftSection({ item }: { item: Case }) {
     st && typeof st === 'object' ? (st as Record<string, unknown>).aiDrafts : null;
   if (!drafts || typeof drafts !== 'object') return null;
   return (
-    <Section title="KB Önerileri">
+    <Section title="Bilgi Bankası Önerileri">
       <KbDraftCard item={item} variant="case-detail" />
     </Section>
   );
