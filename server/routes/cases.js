@@ -360,6 +360,7 @@ router.patch(
       req.user.fullName,
       req.user.allowedCompanyIds,
       req.user.role,
+      req.user.personId ?? null,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
