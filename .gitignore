@@ -19,3 +19,4 @@ logs/
 deploy/nssm/
 deploy/git/
 reports/
+deploy/deploy.bat
