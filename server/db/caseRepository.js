@@ -1118,7 +1118,7 @@ export const caseRepository = {
     return shape(created);
   },
 
-  async update(id, patch, actor = 'Mock User', allowedCompanyIds, actorRole) {
+  async update(id, patch, actor = 'Mock User', allowedCompanyIds, actorRole, actorPersonId = null) {
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
     if ('supportLevel' in patch && actorRole) {
@@ -1158,6 +1158,51 @@ export const caseRepository = {
     // Otomatik alan değişim log'u: değişen her alan için CaseActivity entry'si
     const before = await prisma.case.findUnique({ where: { id } });
     if (!before) return null;
+
+    // Vaka adı (title) edit guard'ı — yetki + statü + length.
+    //   Yetki: assignedPersonId === actorPersonId  OR  role ∈ Supervisor/Admin/SystemAdmin
+    //   Statü: sadece açık vakalarda (Cozuldu/IptalEdildi'de yasak)
+    //   Length: trim + boş yasak + max 200
+    if ('title' in patch) {
+      const rawTitle = patch.title;
+      if (typeof rawTitle !== 'string') {
+        throw new CaseValidationError(
+          'Vaka adı geçerli bir metin olmalı.',
+          { status: 400, code: 'title_invalid' },
+        );
+      }
+      const trimmed = rawTitle.trim();
+      if (trimmed.length === 0) {
+        throw new CaseValidationError(
+          'Vaka adı boş olamaz.',
+          { status: 400, code: 'title_empty' },
+        );
+      }
+      if (trimmed.length > 200) {
+        throw new CaseValidationError(
+          'Vaka adı en fazla 200 karakter olabilir.',
+          { status: 400, code: 'title_too_long' },
+        );
+      }
+      const CLOSED_STATUSES = new Set(['Cozuldu', 'IptalEdildi']);
+      if (CLOSED_STATUSES.has(before.status)) {
+        throw new CaseValidationError(
+          'Kapanmış vakanın adı değiştirilemez.',
+          { status: 403, code: 'title_case_closed' },
+        );
+      }
+      const TITLE_EDIT_ROLES = new Set(['Supervisor', 'Admin', 'SystemAdmin']);
+      const hasRolePermission = actorRole && TITLE_EDIT_ROLES.has(actorRole);
+      const hasOwnership =
+        actorPersonId && before.assignedPersonId && before.assignedPersonId === actorPersonId;
+      if (!hasRolePermission && !hasOwnership) {
+        throw new CaseValidationError(
+          'Vaka adını değiştirme yetkin yok.',
+          { status: 403, code: 'title_forbidden' },
+        );
+      }
+      patch.title = trimmed;
+    }
 
     // Frontend TR string'leri → ASCII identifier
     const dbPatch = toDb(patch);
