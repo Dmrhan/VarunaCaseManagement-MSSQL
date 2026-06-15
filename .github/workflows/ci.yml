@@ -24,8 +24,10 @@ jobs:
     env:
       # Prisma validate ve client generate placeholder DATABASE_URL ile çalışır.
       # Gerçek DB'ye bağlanmaz — sadece schema parse + type üretimi için.
-      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
-      DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      # MSSQL geçişi (provider = "sqlserver") sonrası placeholder de sqlserver
+      # formatında olmalı; aksi halde `prisma validate` "provider sqlserver ama
+      # URL postgresql" diyerek CI'yı kırar. directUrl artık şemada yok.
+      DATABASE_URL: sqlserver://placeholder:1433;database=placeholder;user=sa;password=placeholder;encrypt=false;trustServerCertificate=true
 
     steps:
       - name: Checkout

@@ -1,12 +1,17 @@
-# main'e merge/push olunca uretim sunucusundaki self-hosted runner uzerinden
-# deploy eder (bkz. docs/IIS_DEPLOY.md §6 — ayni adimlarin otomasyonu).
+# Uretim sunucusundaki self-hosted runner uzerinden deploy eder
+# (bkz. docs/IIS_DEPLOY.md §6 — ayni adimlarin otomasyonu).
 # Runner kurulumu: Repo Settings → Actions → Runners → New self-hosted runner
 # (Windows). Runner servisi nssm'i durdurup baslatabilmek icin yonetici
 # yetkili bir hesapla calismali.
+#
+# NOT: Otomatik `push` tetigi GECICI OLARAK KAPALI — self-hosted runner henuz
+# kurulu degil; her main push'unda "runner yok" hatasi vermesin diye yalniz
+# manuel (workflow_dispatch) calisiyor. Su an deploy ELLE deploy.bat ile
+# yapiliyor. Runner kurulunca asagidaki `push:` blogunu geri ekleyin:
+#   push:
+#     branches: [main]
 name: Deploy
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 concurrency:
   group: production-deploy
