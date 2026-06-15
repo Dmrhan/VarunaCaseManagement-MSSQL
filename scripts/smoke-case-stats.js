@@ -17,11 +17,8 @@
 
 import { prisma } from '../server/db/client.js';
 import { caseRepository } from '../server/db/caseRepository.js';
-import { createClient } from '@supabase/supabase-js';
 
 const BFF = 'http://localhost:3101';
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 
 const results = [];
 function record(name, ok, detail = '') {
@@ -30,14 +27,15 @@ function record(name, ok, detail = '') {
 }
 
 async function getToken(email) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+  // Faz 5 — local auth: BFF /api/auth/login (Supabase token akışı kaldırıldı)
+  const authBase = process.env.BFF_URL || process.env.BASE_URL || 'http://localhost:3101';
+  const r = await fetch(`${authBase}/api/auth/login`, {
     method: 'POST',
-    headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: 'Test1234!' }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email, password: process.env.TEST_USER_PASSWORD || 'Test1234!' }),
   });
-  const j = await r.json();
-  return j.access_token || null;
+  const j = await r.json().catch(() => ({}));
+  return j.accessToken || null;
 }
 
 async function api(token, path) {

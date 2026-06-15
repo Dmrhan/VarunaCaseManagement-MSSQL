@@ -7,30 +7,9 @@ import { AuthGate } from './components/AuthGate';
 import { AuthProvider } from './services/AuthContext';
 import './index.css';
 
-/**
- * Davet / şifre kurtarma link'i tespiti.
- *
- * Supabase invite/recovery mail link'i tıklandığında URL hash şu formatta gelir:
- *   #access_token=...&refresh_token=...&type=invite&expires_at=...
- *   #access_token=...&refresh_token=...&type=recovery&expires_at=...
- *
- * Supabase JS SDK (`detectSessionInUrl: true` — default) bu hash'i okuyup
- * session başlatır ve hash'i URL'den TEMİZLER. Bu yüzden React render olunca
- * artık hash boş — `type=invite` bilgisini kaybederiz.
- *
- * Çözüm: SDK işlemeden ÖNCE hash'i okuyup sessionStorage'a flag yaz. AuthGate
- * bu flag'i okuyup şifre belirleme sayfasını render eder.
- */
-(function detectInviteOrRecoveryLink() {
-  try {
-    const hash = window.location.hash || '';
-    if (hash.includes('type=invite') || hash.includes('type=recovery')) {
-      sessionStorage.setItem('varuna.pendingPasswordSetup', '1');
-    }
-  } catch {
-    // sessionStorage erişim engeli (private mode, vs.) — sessizce yut
-  }
-})();
+// Faz 3 (local auth): Supabase invite/recovery hash tespiti kaldırıldı.
+// Zorunlu şifre değişimi artık /api/auth/me'nin mustChangePassword alanıyla
+// AuthGate'te yönetiliyor.
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

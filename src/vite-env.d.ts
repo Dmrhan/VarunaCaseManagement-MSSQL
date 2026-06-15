@@ -1,10 +1,4 @@
 /// <reference types="vite/client" />
 
-interface ImportMetaEnv {
-  readonly VITE_SUPABASE_URL: string;
-  readonly VITE_SUPABASE_ANON_KEY: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}
+// Faz 5 (on-prem): Supabase env tipleri kaldırıldı. VITE_* feature flag'leri
+// src/config/featureFlags.ts üzerinden okunur (string union'a gerek yok).

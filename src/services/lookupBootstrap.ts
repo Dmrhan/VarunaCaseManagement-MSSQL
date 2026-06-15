@@ -22,7 +22,7 @@ import type {
 } from '@/features/cases/types';
 import type { CaseAccount } from '@/mocks/caseMockData';
 import type { FieldDefinition } from '@/services/adminService';
-import { getAccessToken } from './supabase';
+import { getAccessToken } from './authClient';
 
 interface CategoryShape {
   id: string;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Mail, Pencil, PowerOff, RefreshCw, Send, Shield, ShieldCheck, Users } from 'lucide-react';
+import { KeyRound, Mail, Pencil, PowerOff, RefreshCw, Shield, ShieldCheck, Users } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -25,9 +25,8 @@ import { USERS_HELP } from './helpContents';
  * Admin: yalnızca atandığı şirketlerde assignment'ı olan kullanıcıları görür;
  * yalnızca kendi şirketlerine atama yapabilir.
  *
- * Phase 5C: Admin'den davet, pasifleştir, yeniden aktiflestir akışları eklendi.
- * "Davet bekliyor" rozet `fullName === email` heuristic'i ile tespit edilir
- * (kullanıcı ilk login sonrası fullName'i Supabase'den günceller).
+ * Faz 3 (local auth): davet maili yerine admin başlangıç şifresiyle kullanıcı
+ * oluşturur; "Şifre Sıfırla" admin'in geçici şifre atamasıdır (e-posta yok).
  */
 
 const ASSIGNABLE_ROLES: CompanyRole[] = ['Agent', 'Supervisor', 'Admin'];
@@ -57,19 +56,39 @@ export function AdminUsersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{ user: AdminUser; action: 'deactivate' | 'reactivate' } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
-  /** Resend yalnız tek bir satırın spinning'i için — global modal yok */
-  const [resendingId, setResendingId] = useState<string | null>(null);
+  /** Şifre sıfırlama mini modal hedefi (Faz 3 — admin geçici şifre atar). */
+  const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
 
-  async function handleResend(user: AdminUser) {
-    setResendingId(user.id);
-    const result = await adminService.users.resendInvite(user.id);
-    setResendingId(null);
+  function generateTempPassword(): string {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghjkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const all = upper + lower + digits;
+    const pick = (s: string) => s[Math.floor(Math.random() * s.length)];
+    let pw = pick(upper) + pick(lower) + pick(digits) + pick('!@#$%');
+    for (let i = 0; i < 8; i++) pw += pick(all);
+    return pw;
+  }
+
+  async function handleResetPassword() {
+    if (!resetTarget) return;
+    if (resetPassword.length < 8) {
+      toast({ type: 'error', message: 'Geçici şifre en az 8 karakter olmalı.' });
+      return;
+    }
+    setResetBusy(true);
+    const result = await adminService.users.resetPassword(resetTarget.id, resetPassword);
+    setResetBusy(false);
     if (result.ok) {
       toast({
         type: 'success',
-        title: 'Davet maili yeniden gönderildi',
-        message: `${result.item.email} adresine yeni link gönderildi.`,
+        title: 'Geçici şifre atandı',
+        message: `${result.item.email} için geçici şifre atandı. Şifreyi kullanıcıya iletin; ilk girişte değiştirecek.`,
       });
+      setResetTarget(null);
+      setResetPassword('');
     } else {
       toast({ type: 'error', message: result.error });
     }
@@ -159,8 +178,9 @@ export function AdminUsersPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">
                 {filtered.map((u) => {
                   const isReadOnly = u.role === 'SystemAdmin';
-                  // "Davet bekliyor" heuristic: fullName === email → kullanıcı ilk login
-                  // sonrası Supabase metadata'sıyla fullName'i güncelleyene kadar placeholder kalır.
+                  // Eski davet akışından kalan placeholder kullanıcılar (fullName === email).
+                  // Local auth'ta createUser fullName'i her zaman doldurur; rozet yalnız
+                  // legacy kayıtlarda görünür.
                   const inviteePending = u.fullName === u.email;
                   const isSelf = u.id === currentUser?.id;
                   return (
@@ -232,25 +252,20 @@ export function AdminUsersPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-1.5">
-                          {/* "Yeniden gönder" — yalnız davet bekleyen aktif kullanıcılar için.
-                              Eski davet mailindeki link localhost olabilir (yanlış env ile gönderildiyse);
-                              yeni mail SUPABASE_INVITE_REDIRECT_URL ile gider. */}
-                          {inviteePending && u.isActive && !isReadOnly && (
+                          {/* "Şifre Sıfırla" — admin geçici şifre atar (e-posta yok);
+                              kullanıcı ilk girişte şifresini değiştirmek zorunda. */}
+                          {u.isActive && !isReadOnly && !isSelf && (
                             <Button
                               size="sm"
                               variant="outline"
-                              leftIcon={
-                                resendingId === u.id ? (
-                                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-                                ) : (
-                                  <Send size={12} />
-                                )
-                              }
-                              onClick={() => handleResend(u)}
-                              disabled={resendingId !== null}
-                              title="Davet mailini yeniden gönder (prod link)"
+                              leftIcon={<KeyRound size={12} />}
+                              onClick={() => {
+                                setResetTarget(u);
+                                setResetPassword(generateTempPassword());
+                              }}
+                              title="Geçici şifre ata (kullanıcı ilk girişte değiştirir)"
                             >
-                              {resendingId === u.id ? 'Gönderiliyor…' : 'Yeniden gönder'}
+                              Şifre Sıfırla
                             </Button>
                           )}
                           <Button
@@ -326,6 +341,50 @@ export function AdminUsersPage() {
         onInvited={refresh}
       />
 
+      {resetTarget && (
+        <Modal
+          open
+          onClose={() => (resetBusy ? null : (setResetTarget(null), setResetPassword('')))}
+          size="sm"
+          title="Geçici şifre ata"
+          footer={(
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setResetTarget(null); setResetPassword(''); }}
+                disabled={resetBusy}
+              >
+                Vazgeç
+              </Button>
+              <Button size="sm" variant="primary" onClick={handleResetPassword} disabled={resetBusy}>
+                {resetBusy ? 'Atanıyor…' : 'Şifreyi Ata'}
+              </Button>
+            </div>
+          )}
+        >
+          <div className="space-y-3 text-sm text-slate-700 dark:text-ndark-text">
+            <p>
+              <strong>{resetTarget.email}</strong> için geçici şifre belirle. E-posta
+              gönderilmez — şifreyi kullanıcıya sen iletirsin; ilk girişte değiştirmesi istenir.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+                placeholder="En az 8 karakter"
+                disabled={resetBusy}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+              />
+              <Button size="sm" variant="outline" onClick={() => setResetPassword(generateTempPassword())} disabled={resetBusy}>
+                Üret
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {confirmTarget && (
         <Modal
           open
@@ -386,8 +445,7 @@ export function AdminUsersPage() {
             {confirmTarget.action === 'deactivate' ? (
               <p className="text-xs text-slate-500 dark:text-ndark-muted">
                 Kullanıcı sonraki API çağrısında 403 alır ve uygulamadan çıkmış olur. Şirket
-                atamaları silinmez — yeniden aktive ederek geri açabilirsin. Supabase Auth hesabı
-                silinmez (audit izi korunur).
+                atamaları silinmez — yeniden aktive ederek geri açabilirsin (hesap ve audit izi korunur).
               </p>
             ) : (
               <p className="text-xs text-slate-500 dark:text-ndark-muted">

@@ -1,54 +1,20 @@
 /**
- * Admin invite/deactivate BFF smoke. Supabase'e GERCEKTEN cagri yapmaz —
- * mock client kullanir; sadece userRepo input/output kontratini ve hata
- * yollarini gozler.
+ * Admin kullanıcı yönetimi BFF smoke (Faz 3 — local auth).
+ *
+ * Eski Supabase-mock'lu invite smoke'unun yerini aldı: userRepo.createUser /
+ * resetPassword / deactivate / reactivate kontratlarını ve hata yollarını gözler.
  *
  * Calistir: `node --env-file=.env scripts/smoke-admin-invite.js`
  *
  * Mutate: Test sonunda yarattigi DB user'i + UserCompany kaydini siler.
  */
 
+import bcrypt from 'bcryptjs';
 import { prisma } from '../server/db/client.js';
 import { userRepo } from '../server/db/adminRepository.js';
 
-const TEST_EMAIL = `invite-smoke-${Date.now()}@varuna.dev`;
-const TEST_SUPABASE_ID = `smoke-${Date.now()}`;
-
-function mockSupabase({
-  shouldFailInvite = false,
-  alreadyExists = false,
-  orphanInListUsers = null, // { id, email } eger listUsers'da bulunmali ise
-  resetPasswordError = null, // { status, message } veya null — resend icin
-} = {}) {
-  return {
-    auth: {
-      admin: {
-        async inviteUserByEmail(email, opts) {
-          if (alreadyExists) {
-            return { data: { user: null }, error: { status: 422, message: 'A user with this email address has already been registered' } };
-          }
-          if (shouldFailInvite) {
-            return { data: null, error: { status: 500, message: 'mock invite fail' } };
-          }
-          return { data: { user: { id: TEST_SUPABASE_ID, email } }, error: null };
-        },
-        async listUsers({ page, perPage } = {}) {
-          if (orphanInListUsers && page === 1) {
-            return { data: { users: [orphanInListUsers] }, error: null };
-          }
-          return { data: { users: [] }, error: null };
-        },
-        async deleteUser(id) {
-          return { data: null, error: null };
-        },
-      },
-      async resetPasswordForEmail(email, opts) {
-        if (resetPasswordError) return { data: null, error: resetPasswordError };
-        return { data: {}, error: null };
-      },
-    },
-  };
-}
+const TEST_EMAIL = `create-smoke-${Date.now()}@varuna.dev`;
+const TEST_PASSWORD = 'GeciciSifre1!';
 
 async function pickCompanyId() {
   const c = await prisma.company.findFirst({ where: { isActive: true }, select: { id: true } });
@@ -57,8 +23,11 @@ async function pickCompanyId() {
 }
 
 async function cleanup() {
-  await prisma.userCompany.deleteMany({ where: { userId: TEST_SUPABASE_ID } }).catch(() => {});
-  await prisma.user.delete({ where: { id: TEST_SUPABASE_ID } }).catch(() => {});
+  const u = await prisma.user.findUnique({ where: { email: TEST_EMAIL }, select: { id: true } }).catch(() => null);
+  if (u) {
+    await prisma.userCompany.deleteMany({ where: { userId: u.id } }).catch(() => {});
+    await prisma.user.delete({ where: { id: u.id } }).catch(() => {});
+  }
 }
 
 let pass = 0;
@@ -75,18 +44,17 @@ async function expect(label, fn) {
 }
 
 async function main() {
-  console.log('=== admin invite/deactivate smoke ===\n');
+  console.log('=== admin createUser/resetPassword/deactivate smoke ===\n');
   await cleanup(); // pre-clean
   const companyId = await pickCompanyId();
   console.log(`Test company: ${companyId}`);
 
   // --- Validation errors ---
   console.log('\n--- Validation errors ---');
-  await expect('bad email', async () => {
+  await expect('bad email (400)', async () => {
     try {
-      await userRepo.invite(
-        { email: 'not-an-email', role: 'Agent', companyId, companyRole: 'Agent' },
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+      await userRepo.createUser(
+        { email: 'not-an-email', role: 'Agent', companyId, companyRole: 'Agent', password: TEST_PASSWORD },
         null,
       );
       throw new Error('beklenen 400 atmadi');
@@ -95,11 +63,10 @@ async function main() {
     }
   });
 
-  await expect('invalid system role (SystemAdmin)', async () => {
+  await expect('invalid system role SystemAdmin (400)', async () => {
     try {
-      await userRepo.invite(
-        { email: TEST_EMAIL, role: 'SystemAdmin', companyId, companyRole: 'Agent' },
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+      await userRepo.createUser(
+        { email: TEST_EMAIL, role: 'SystemAdmin', companyId, companyRole: 'Agent', password: TEST_PASSWORD },
         null,
       );
       throw new Error('beklenen 400 atmadi');
@@ -108,11 +75,10 @@ async function main() {
     }
   });
 
-  await expect('invalid company role', async () => {
+  await expect('invalid company role (400)', async () => {
     try {
-      await userRepo.invite(
-        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'NotARole' },
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+      await userRepo.createUser(
+        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'NotARole', password: TEST_PASSWORD },
         null,
       );
       throw new Error('beklenen 400 atmadi');
@@ -121,11 +87,22 @@ async function main() {
     }
   });
 
-  await expect('out-of-scope companyId (Admin yetkisiz)', async () => {
+  await expect('kisa sifre (400)', async () => {
     try {
-      await userRepo.invite(
-        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+      await userRepo.createUser(
+        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent', password: 'kisa' },
+        null,
+      );
+      throw new Error('beklenen 400 atmadi');
+    } catch (e) {
+      if (e.status !== 400) throw e;
+    }
+  });
+
+  await expect('out-of-scope companyId (403)', async () => {
+    try {
+      await userRepo.createUser(
+        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent', password: TEST_PASSWORD },
         ['some-other-company'],
       );
       throw new Error('beklenen 403 atmadi');
@@ -135,20 +112,22 @@ async function main() {
   });
 
   // --- Happy path ---
-  console.log('\n--- Happy path (mock Supabase) ---');
+  console.log('\n--- Happy path ---');
   let createdUserId;
-  await expect('invite happy path', async () => {
-    const r = await userRepo.invite(
-      { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
-      { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+  await expect('createUser happy path', async () => {
+    const r = await userRepo.createUser(
+      { email: TEST_EMAIL, fullName: 'Smoke Kullanıcı', role: 'Agent', companyId, companyRole: 'Agent', password: TEST_PASSWORD },
       null, // SystemAdmin = unlimited scope
     );
     if (!r.success || r.email !== TEST_EMAIL) throw new Error(`shape mismatch: ${JSON.stringify(r)}`);
     createdUserId = r.userId;
-    // DB'de gercekten yaratildi mi?
     const dbUser = await prisma.user.findUnique({ where: { id: createdUserId } });
-    if (!dbUser) throw new Error('User DB\'ye yazilmadi');
-    if (dbUser.fullName !== TEST_EMAIL) throw new Error(`fullName placeholder degil: ${dbUser.fullName}`);
+    if (!dbUser) throw new Error("User DB'ye yazilmadi");
+    if (dbUser.fullName !== 'Smoke Kullanıcı') throw new Error(`fullName yanlis: ${dbUser.fullName}`);
+    if (!dbUser.mustChangePassword) throw new Error('mustChangePassword=true degil');
+    if (!dbUser.passwordHash) throw new Error('passwordHash yazilmadi');
+    const matches = await bcrypt.compare(TEST_PASSWORD, dbUser.passwordHash);
+    if (!matches) throw new Error('passwordHash baslangic sifresiyle eslesmiyor');
     const uc = await prisma.userCompany.findUnique({
       where: { userId_companyId: { userId: createdUserId, companyId } },
     });
@@ -159,9 +138,8 @@ async function main() {
   console.log('\n--- Duplicate rejection ---');
   await expect('e-posta zaten kayitli (409)', async () => {
     try {
-      await userRepo.invite(
-        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
+      await userRepo.createUser(
+        { email: TEST_EMAIL, role: 'Agent', companyId, companyRole: 'Agent', password: TEST_PASSWORD },
         null,
       );
       throw new Error('beklenen 409 atmadi');
@@ -170,46 +148,45 @@ async function main() {
     }
   });
 
-  // --- Orphan recovery (Supabase var, DB yok) ---
-  console.log('\n--- Orphan kurtarma (Supabase Auth\'ta var, DB\'de yok) ---');
-  const ORPHAN_EMAIL = `orphan-${Date.now()}@varuna.dev`;
-  const ORPHAN_ID = `orphan-id-${Date.now()}`;
-  await expect('orphan tespit edilip DB\'ye baglandi', async () => {
-    const r = await userRepo.invite(
-      { email: ORPHAN_EMAIL, role: 'Agent', companyId, companyRole: 'Agent' },
-      {
-        supabaseAdmin: mockSupabase({
-          alreadyExists: true,
-          orphanInListUsers: { id: ORPHAN_ID, email: ORPHAN_EMAIL },
-        }),
-        redirectTo: 'http://x',
-      },
-      null,
-    );
-    if (!r.success) throw new Error('orphan kurtarma success=false');
-    if (!r.orphanRecovered) throw new Error('orphanRecovered flag eksik');
-    if (r.userId !== ORPHAN_ID) throw new Error('Supabase user.id kullanilmadi');
-    const dbUser = await prisma.user.findUnique({ where: { id: ORPHAN_ID } });
-    if (!dbUser) throw new Error('Orphan DB\'ye baglanmadi');
-  });
-  // Cleanup orphan test
-  await prisma.userCompany.deleteMany({ where: { userId: ORPHAN_ID } });
-  await prisma.user.delete({ where: { id: ORPHAN_ID } }).catch(() => {});
-
-  // --- Orphan not found in listUsers (1000+ scenario) ---
-  await expect('orphan Auth\'ta ama listUsers bulamadi (409)', async () => {
+  // --- resetPassword ---
+  console.log('\n--- resetPassword ---');
+  await expect('kendi sifreni resetleyemezsin (400)', async () => {
     try {
-      await userRepo.invite(
-        { email: `notfound-${Date.now()}@varuna.dev`, role: 'Agent', companyId, companyRole: 'Agent' },
-        {
-          supabaseAdmin: mockSupabase({ alreadyExists: true, orphanInListUsers: null }),
-          redirectTo: 'http://x',
-        },
-        null,
-      );
-      throw new Error('beklenen 409 atmadi');
+      await userRepo.resetPassword(createdUserId, 'YeniSifre2@', { id: createdUserId, role: 'SystemAdmin' });
+      throw new Error('beklenen 400 atmadi');
     } catch (e) {
-      if (e.status !== 409) throw e;
+      if (e.status !== 400) throw e;
+    }
+  });
+
+  await expect('kisa sifre reset (400)', async () => {
+    try {
+      await userRepo.resetPassword(createdUserId, 'kisa', { id: 'other', role: 'SystemAdmin' });
+      throw new Error('beklenen 400 atmadi');
+    } catch (e) {
+      if (e.status !== 400) throw e;
+    }
+  });
+
+  await expect('reset happy path (hash degisir, mustChange=true)', async () => {
+    // once mustChangePassword'u temizle ki resetin geri actigini gorelim
+    await prisma.user.update({ where: { id: createdUserId }, data: { mustChangePassword: false } });
+    const before = await prisma.user.findUnique({ where: { id: createdUserId }, select: { passwordHash: true } });
+    const r = await userRepo.resetPassword(createdUserId, 'ResetSifre3#', { id: 'other', role: 'SystemAdmin' });
+    if (!r.success) throw new Error('success=false');
+    const after = await prisma.user.findUnique({ where: { id: createdUserId } });
+    if (after.passwordHash === before.passwordHash) throw new Error('hash degismedi');
+    if (!after.mustChangePassword) throw new Error('mustChangePassword=true olmadi');
+    const matches = await bcrypt.compare('ResetSifre3#', after.passwordHash);
+    if (!matches) throw new Error('yeni hash gecici sifreyle eslesmiyor');
+  });
+
+  await expect('reset user not found (404)', async () => {
+    try {
+      await userRepo.resetPassword('non-existent-id', 'ResetSifre3#', { id: 'x', role: 'SystemAdmin' });
+      throw new Error('beklenen 404 atmadi');
+    } catch (e) {
+      if (e.status !== 404) throw e;
     }
   });
 
@@ -217,7 +194,7 @@ async function main() {
   console.log('\n--- Deactivate ---');
   await expect('self-deactivation engellendi', async () => {
     try {
-      await userRepo.deactivate(createdUserId, { supabaseAdmin: mockSupabase() }, { id: createdUserId, role: 'Agent' });
+      await userRepo.deactivate(createdUserId, {}, { id: createdUserId, role: 'Agent' });
       throw new Error('beklenen 400 atmadi');
     } catch (e) {
       if (e.status !== 400) throw e;
@@ -225,43 +202,36 @@ async function main() {
   });
 
   await expect('deactivate happy path', async () => {
-    const r = await userRepo.deactivate(
-      createdUserId,
-      { supabaseAdmin: mockSupabase() },
-      { id: 'other-user', role: 'SystemAdmin' },
-    );
+    const r = await userRepo.deactivate(createdUserId, {}, { id: 'other-user', role: 'SystemAdmin' });
     if (!r.success) throw new Error('success=false');
     const dbUser = await prisma.user.findUnique({ where: { id: createdUserId } });
     if (dbUser?.isActive !== false) throw new Error('isActive false olmadi');
   });
 
   await expect('deactivate idempotent', async () => {
-    const r = await userRepo.deactivate(
-      createdUserId,
-      { supabaseAdmin: mockSupabase() },
-      { id: 'other-user', role: 'SystemAdmin' },
-    );
+    const r = await userRepo.deactivate(createdUserId, {}, { id: 'other-user', role: 'SystemAdmin' });
     if (!r.success) throw new Error('idempotent call basarisiz');
+  });
+
+  await expect('pasif kullaniciya reset (400)', async () => {
+    try {
+      await userRepo.resetPassword(createdUserId, 'ResetSifre3#', { id: 'other', role: 'SystemAdmin' });
+      throw new Error('beklenen 400 atmadi');
+    } catch (e) {
+      if (e.status !== 400) throw e;
+    }
   });
 
   // --- Reactivate ---
   console.log('\n--- Reactivate ---');
   await expect('reactivate happy path', async () => {
-    const r = await userRepo.reactivate(
-      createdUserId,
-      {},
-      { id: 'other-user', role: 'SystemAdmin' },
-    );
+    const r = await userRepo.reactivate(createdUserId, {}, { id: 'other-user', role: 'SystemAdmin' });
     if (!r.success) throw new Error('success=false');
     const dbUser = await prisma.user.findUnique({ where: { id: createdUserId } });
     if (dbUser?.isActive !== true) throw new Error('isActive true olmadi');
   });
   await expect('reactivate idempotent (zaten aktif)', async () => {
-    const r = await userRepo.reactivate(
-      createdUserId,
-      {},
-      { id: 'other-user', role: 'SystemAdmin' },
-    );
+    const r = await userRepo.reactivate(createdUserId, {}, { id: 'other-user', role: 'SystemAdmin' });
     if (!r.success) throw new Error('idempotent call basarisiz');
   });
   await expect('reactivate user not found (404)', async () => {
@@ -270,81 +240,6 @@ async function main() {
       throw new Error('beklenen 404 atmadi');
     } catch (e) {
       if (e.status !== 404) throw e;
-    }
-  });
-
-  // --- Resend invite ---
-  console.log('\n--- Resend invite ---');
-  // Tekrar deaktive et ki "inactive" testini calistirabilelim
-  await prisma.user.update({ where: { id: createdUserId }, data: { isActive: false } });
-  await expect('resend inaktif user (400)', async () => {
-    try {
-      await userRepo.resendInvite(
-        createdUserId,
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
-        { id: 'other', role: 'SystemAdmin' },
-      );
-      throw new Error('beklenen 400 atmadi');
-    } catch (e) {
-      if (e.status !== 400) throw e;
-    }
-  });
-  // Aktife geri al
-  await prisma.user.update({ where: { id: createdUserId }, data: { isActive: true } });
-
-  await expect('resend happy path (pending invite)', async () => {
-    const r = await userRepo.resendInvite(
-      createdUserId,
-      { supabaseAdmin: mockSupabase(), redirectTo: 'https://varuna-case-management.vercel.app' },
-      { id: 'other', role: 'SystemAdmin' },
-    );
-    if (!r.success) throw new Error('success=false');
-    if (!r.message.includes(TEST_EMAIL)) throw new Error('message email icermiyor');
-  });
-
-  // fullName != email yap → "davet beklemiyor" testi
-  await prisma.user.update({ where: { id: createdUserId }, data: { fullName: 'Ali Veli' } });
-  await expect('resend davet beklemeyen user (400)', async () => {
-    try {
-      await userRepo.resendInvite(
-        createdUserId,
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
-        { id: 'other', role: 'SystemAdmin' },
-      );
-      throw new Error('beklenen 400 atmadi');
-    } catch (e) {
-      if (e.status !== 400) throw e;
-    }
-  });
-  // Geri al pending'e
-  await prisma.user.update({ where: { id: createdUserId }, data: { fullName: TEST_EMAIL } });
-
-  await expect('resend user not found (404)', async () => {
-    try {
-      await userRepo.resendInvite(
-        'non-existent-id',
-        { supabaseAdmin: mockSupabase(), redirectTo: 'http://x' },
-        { id: 'x', role: 'SystemAdmin' },
-      );
-      throw new Error('beklenen 404 atmadi');
-    } catch (e) {
-      if (e.status !== 404) throw e;
-    }
-  });
-
-  await expect('resend Supabase 429 rate-limit (429)', async () => {
-    try {
-      await userRepo.resendInvite(
-        createdUserId,
-        {
-          supabaseAdmin: mockSupabase({ resetPasswordError: { status: 429, message: 'rate limited' } }),
-          redirectTo: 'http://x',
-        },
-        { id: 'other', role: 'SystemAdmin' },
-      );
-      throw new Error('beklenen 429 atmadi');
-    } catch (e) {
-      if (e.status !== 429) throw e;
     }
   });
 

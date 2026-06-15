@@ -261,7 +261,10 @@ async function loadActiveClosureTaxonomies(companyId) {
       isActive: true,
       taxonomyType: { in: TAXONOMY_TYPES_FOR_CLOSURE },
     },
-    select: { taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
+    // id ZORUNLU: rootCauseDetail eşleştirmesi rcgMatch.id ile parentId
+    // filtresine dayanır (aşağıda). id seçilmezse rcgMatch.id=undefined olur,
+    // aday liste boş kalır ve Kök Neden Detayı asla eşleşmez.
+    select: { id: true, taxonomyType: true, code: true, label: true, parentId: true, metadata: true },
     orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
   });
   const out = { rootCauseGroup: [], rootCauseDetail: [], resolutionType: [], permanentPrevention: [] };

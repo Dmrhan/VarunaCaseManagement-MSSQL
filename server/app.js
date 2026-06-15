@@ -14,22 +14,45 @@ import smartTicketRouter from './routes/smartTicket.js';
 import importsRouter from './routes/imports.js';
 import approvalsRouter from './routes/approvals.js';
 import actionCenterRouter from './routes/action-center.js';
+import kbV1Router from './routes/kbV1.js';
 import { prisma } from './db/client.js';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
- * Express app factory — listen yok.
- * Hem local dev (server/index.js) hem Vercel serverless (api/[...slug].js)
- * tarafından kullanılır.
+ * Express app factory — listen yok (server/index.js çağırır).
+ *
+ * Faz 5 (on-prem): aynı Express süreci hem /api'yi hem build edilmiş
+ * frontend'i (dist/) servis eder — tek servis, tek port.
  */
 const app = express();
 
-// CORS yalnızca local dev'de gerekli (frontend port 5273, BFF port 3101).
-// Vercel production'da frontend ve API aynı origin'de — CORS gereksiz.
-if (process.env.NODE_ENV !== 'production') {
-  app.use(cors({ origin: 'http://localhost:5273' }));
+// Reverse proxy (IIS ARR / nginx) loopback'ten bağlanır; X-Forwarded-For'u
+// yalnız o durumda dikkate al ki req.ip (auth/ai rate limiting) gerçek
+// istemci IP'si olsun. Doğrudan erişimde davranış değişmez.
+app.set('trust proxy', 'loopback');
+
+// CORS: dev'de Vite (5273) ↔ BFF (3101) ayrı origin'de — gerekli.
+// On-prem production'da dist/ aynı süreçten servis edildiği için normalde
+// gereksiz; frontend ayrı bir origin'den sunulacaksa CORS_ORIGIN set edilir.
+const corsOrigin =
+  process.env.CORS_ORIGIN ||
+  (process.env.NODE_ENV !== 'production' ? 'http://localhost:5273' : null);
+if (corsOrigin) {
+  app.use(cors({ origin: corsOrigin }));
 }
 
-app.use(express.json({ limit: '2mb' }));
+// Faz 4 — dosya upload endpoint'i raw body bekler; global json parser
+// .json dosya yüklemelerini (Content-Type: application/json) yutmasın diye
+// bu path atlanır (route kendi express.raw parser'ını kullanır).
+const jsonParser = express.json({ limit: '2mb' });
+app.use((req, res, next) => {
+  if (req.method === 'PUT' && /^\/api\/cases\/[^/]+\/files\/upload$/.test(req.path)) {
+    return next();
+  }
+  return jsonParser(req, res, next);
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -74,8 +97,28 @@ app.use('/api/external-kb', externalKbRouter);
 app.use('/api/smart-ticket', smartTicketRouter);
 app.use('/api/approvals', approvalsRouter);
 app.use('/api/action-center', actionCenterRouter);
+// Faz KB — ticket-analiz'in KB/RAG çekirdeği in-process (Bearer API key auth;
+// ExternalKbSetting.baseUrl bu sürecin kendisine işaret eder).
+app.use('/api/v1', kbV1Router);
 
-app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+// API 404 — bilinmeyen /api/* yolları JSON döner (SPA fallback'ine düşmesin).
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+
+// ─────────────────────────────────────────────────────────────────
+// Faz 5 — Static frontend (dist/) + SPA fallback.
+// `npm run build` çıktısı varsa servis edilir; yoksa (salt-API dev modu,
+// vite dev server frontend'i ayrıca sunar) sessizce atlanır.
+// ─────────────────────────────────────────────────────────────────
+const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir, { index: 'index.html', maxAge: '1h' }));
+  // SPA fallback: bilinmeyen GET yolları index.html'e düşer (client routing).
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+} else {
+  app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+}
 
 // Body-parser 413 → structured JSON. express.json yukarıda body'yi parse
 // ederken size limit aşılırsa next(err) ile error-handling middleware'e

@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
   solutionStepRepository,
   SolutionStepError,
@@ -45,6 +46,75 @@ router.post('/cron/snooze-wakeup', async (req, res) => {
   } catch (err) {
     console.error('[cron:snooze-wakeup]', err);
     res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Storage endpoints (Faz 4 — local disk) — verifyJwt'den ÖNCE mount edilir.
+// Auth'ları kısa ömürlü HMAC token'dır (requestUpload/getDownloadUrl üretir):
+//  - PUT raw upload: XHR Authorization header taşıyabilirdi ama eski Supabase
+//    signed-URL simetrisi korunur (token tek yetki kaynağı, path tamper-proof).
+//  - GET raw download: tarayıcı <a> tıklaması header taşıyamaz — token şart.
+// ─────────────────────────────────────────────────────────────────
+
+/** Adım 2 — PUT /api/cases/:id/files/upload?token=... (raw body, max 25MB) */
+router.put(
+  '/:id/files/upload',
+  express.raw({ type: () => true, limit: '25mb' }),
+  async (req, res) => {
+    try {
+      const payload = verifyStorageToken(String(req.query.token ?? ''));
+      if (!payload || payload.typ !== 'upload' || payload.caseId !== req.params.id) {
+        return res.status(401).json({ error: 'invalid_token', message: 'Yükleme izni geçersiz veya süresi dolmuş.' });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'empty_body', message: 'Dosya içeriği boş.' });
+      }
+      await saveObject(payload.path, req.body);
+      res.json({ success: true, path: payload.path });
+    } catch (err) {
+      const status = err?.status ?? 500;
+      console.error('[storage] upload', err?.message ?? err);
+      res.status(status).json({ error: 'storage_error', message: err?.message ?? 'Dosya kaydedilemedi.' });
+    }
+  },
+);
+
+/** GET /api/cases/:id/files/:fileId/raw?token=... — dosyayı stream eder */
+router.get('/:id/files/:fileId/raw', async (req, res) => {
+  try {
+    const payload = verifyStorageToken(String(req.query.token ?? ''));
+    if (
+      !payload ||
+      payload.typ !== 'download' ||
+      payload.caseId !== req.params.id ||
+      payload.fileId !== req.params.fileId
+    ) {
+      return res.status(401).json({ error: 'invalid_token', message: 'İndirme izni geçersiz veya süresi dolmuş.' });
+    }
+    const st = await statObject(payload.path);
+    if (!st) return res.status(404).json({ error: 'not_found', message: 'Dosya bulunamadı.' });
+
+    const fileName = payload.fileName ?? 'dosya';
+    // RFC 5987 — Türkçe karakterli dosya adları için filename* kullan.
+    const asciiName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+    res.setHeader('Content-Length', st.size);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    createObjectStream(payload.path)
+      .on('error', (err) => {
+        console.error('[storage] stream', err?.message ?? err);
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy();
+      })
+      .pipe(res);
+  } catch (err) {
+    const status = err?.status ?? 500;
+    console.error('[storage] download', err?.message ?? err);
+    res.status(status).json({ error: 'storage_error', message: err?.message ?? 'Dosya indirilemedi.' });
   }
 });
 

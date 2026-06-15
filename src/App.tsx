@@ -9,6 +9,7 @@ import {
   Home,
   Inbox,
   Keyboard,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -46,6 +47,7 @@ import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
 import { useAuth } from './services/AuthContext';
+import { ChangePasswordModal } from './features/auth/SetPasswordPage';
 
 import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
@@ -93,6 +95,7 @@ export default function App() {
   // Örüntü alarmından "Vakaları Gör" tıklamasında gelen filter (caseId listesi).
   const [patternCasesFilter, setPatternCasesFilter] = useState<{ caseIds: string[]; label: string } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -331,6 +334,14 @@ export default function App() {
               </div>
               <button
                 type="button"
+                onClick={() => setChangePasswordOpen(true)}
+                title="Şifre Değiştir"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+              >
+                <KeyRound size={16} />
+              </button>
+              <button
+                type="button"
                 onClick={() => void signOut()}
                 title="Çıkış Yap"
                 className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:text-ndark-muted dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
@@ -342,6 +353,7 @@ export default function App() {
         </div>
       </header>
 
+      {changePasswordOpen && <ChangePasswordModal onClose={() => setChangePasswordOpen(false)} />}
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>

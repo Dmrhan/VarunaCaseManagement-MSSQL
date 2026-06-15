@@ -1,16 +1,16 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { supabase } from './supabase';
+import { getAccessToken, logout as authLogout } from './authClient';
 // WR-H2 — Logout sırasında client cache temizlenir (cross-user PII leak önlenir).
 import { clearClientCache } from './clientCache';
 
 /**
- * AuthContext — Supabase session + DB kullanıcı bilgisi (rol dahil).
+ * AuthContext — local JWT oturumu + DB kullanıcı bilgisi (rol dahil). (Faz 3)
  *
  * Akış:
- *  1. App boot → supabase.auth.getSession() → mevcut oturumu öğren
- *  2. Oturum varsa /api/auth/me ile DB User satırını çek (rol bilgisi burada)
- *  3. supabase.auth.onAuthStateChange ile login/logout dinle
- *  4. 401 dispatchEvent'inde session'ı sıfırla
+ *  1. App boot → authClient.getAccessToken() (gerekirse sessiz refresh)
+ *  2. Token varsa /api/auth/me ile DB User satırını çek (rol bilgisi burada)
+ *  3. 'varuna:auth-changed' (login/logout/şifre değişimi) ile state tazele
+ *  4. 'app:unauthenticated' (apiFetch 401) → oturumu sıfırla
  */
 
 export type UserRole = 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin' | 'SystemAdmin';
@@ -23,6 +23,8 @@ export interface AppUser {
   isActive: boolean;
   /** Person bağlantısı — Agent KPI'ları (Bana Atanan vb.) için frontline kullanıcılarda dolu, SystemAdmin'de null. */
   personId: string | null;
+  /** Admin'in atadığı geçici şifreyle girişte true — AuthGate şifre değişimi zorlar. */
+  mustChangePassword: boolean;
 }
 
 interface AuthState {
@@ -73,26 +75,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   async function loadFromSession() {
-    const { data, error } = await supabase.auth.getSession();
-    if (error) {
-      // WR-H2 — Hata durumunda da PII cache'te kalmamalı.
-      clearClientCache();
-      setState({ status: 'error', user: null, error: error.message });
-      return;
-    }
-    const session = data.session;
-    if (!session) {
+    const token = await getAccessToken();
+    if (!token) {
       // WR-H2 — Session yoksa (sign-out sonrası, expired) cache temizlenir.
       clearClientCache();
       setState({ status: 'unauthenticated', user: null, error: null });
       return;
     }
-    const me = await fetchMe(session.access_token);
+    const me = await fetchMe(token);
     if ('error' in me) {
-      // Auth user var ama DB'de User yok ya da pasif → logout
+      // Token var ama DB'de User yok ya da pasif → logout
       // WR-H2 (review fix) — bu sign-out yolu da cache temizler.
       clearClientCache();
-      await supabase.auth.signOut();
+      await authLogout();
       setState({ status: 'unauthenticated', user: null, error: me.error });
       return;
     }
@@ -102,26 +97,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     // WR-H2 — Logout client cache'i temizle; sonraki kullanıcı önceki PII'ye dokunmasın.
     clearClientCache();
-    await supabase.auth.signOut();
+    await authLogout();
     setState({ status: 'unauthenticated', user: null, error: null });
   }
 
   useEffect(() => {
     void loadFromSession();
 
-    // Login/logout event'lerinde state'i tazele.
-    // WR-H2 (review fix) — SIGNED_OUT / USER_DELETED gibi event'lerde cache
-    // temizliği loadFromSession() içinde "session yoksa clearClientCache()"
-    // dalı tarafından idempotent şekilde garantilenir.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      // SIGNED_OUT veya session null gelirse cache'i hemen temizle —
-      // loadFromSession bekleyemez; sonraki render'da fetch tetiklenirse
-      // cache hit eski oturumdan PII verebilir.
-      if (event === 'SIGNED_OUT' || !session) {
-        clearClientCache();
-      }
+    // Login/logout/şifre değişimi event'lerinde state'i tazele.
+    const onAuthChanged = () => {
       void loadFromSession();
-    });
+    };
+    window.addEventListener('varuna:auth-changed', onAuthChanged);
 
     // 401 → otomatik logout
     const onUnauth = () => {
@@ -130,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener('app:unauthenticated', onUnauth);
 
     return () => {
-      sub.subscription.unsubscribe();
+      window.removeEventListener('varuna:auth-changed', onAuthChanged);
       window.removeEventListener('app:unauthenticated', onUnauth);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

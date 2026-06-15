@@ -1,14 +1,15 @@
 /**
  * Turkish-aware search variants.
  *
- * Postgres ILIKE (Prisma `mode: 'insensitive'`) does NOT case-fold the
- * Turkish dotted İ (U+0130) to ASCII "i". Default Unicode lowercase of
- * "İ" produces "i" + combining dot above (U+0307), so ILIKE '%ilhami%'
- * fails to match a stored "İlhami Ferahoğlu LTD.".
+ * MSSQL notu: veritabanı Turkish_100_CI_AS_SC_UTF8 collation ile kurulu —
+ * `contains`/`equals` zaten case-insensitive ve Türkçe kurallarına uygun
+ * (i↔İ, ı↔I dahil; smoke-turkish-search-mssql.js ile doğrulandı). Prisma'nın
+ * `mode: 'insensitive'` argümanı sqlserver'da DESTEKLENMEZ ve kaldırıldı.
  *
- * Bu helper, kullanıcı girdisinden Türkçe-bilinçli birkaç varyant üretir.
- * Caller bu varyantları OR ile sorguya ekler; ILIKE her varyantı tek tek
- * dener. Şema değişikliği yok, ekstra extension yok.
+ * Bu helper yine de değerli: ASCII-fold varyantları sayesinde kullanıcı
+ * "Ilhami" yazınca diakritikli "İlhami" kayıtlarının bulunmasını sağlar
+ * (collation diakritik-duyarlıdır: AS). Caller bu varyantları OR ile
+ * sorguya ekler. Şema değişikliği yok, ekstra extension yok.
  *
  * Variants:
  *   - original

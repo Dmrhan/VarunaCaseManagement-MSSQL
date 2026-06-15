@@ -104,7 +104,7 @@ if (dryRun) {
 // ─── PART B — source-grep guardrails ──────────────────────────────────────
 
 const dryRunSrc = fs.readFileSync('server/lib/import/customer360DryRun.js', 'utf8');
-record('B1: dryRun emits `rowsForCommit` field', /\browsForCommit\b/.test(dryRunSrc) && /rowsForCommit,\n/.test(dryRunSrc));
+record('B1: dryRun emits `rowsForCommit` field', /\browsForCommit\b/.test(dryRunSrc) && /rowsForCommit,\r?\n/.test(dryRunSrc));
 record('B2: preview still slice(0, 100)', /preview\[ek\] = fullMapped\.slice\(0, 100\)/.test(dryRunSrc));
 record('B3: preview marked UI-ONLY in comment', /UI-ONLY|UI display/.test(dryRunSrc));
 

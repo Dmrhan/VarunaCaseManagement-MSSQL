@@ -1,0 +1,247 @@
+{
+  "CaseType": [
+    "GeneralSupport",
+    "ProactiveTracking",
+    "Churn"
+  ],
+  "CaseStatus": [
+    "Acik",
+    "Incelemede",
+    "ThirdPartyWaiting",
+    "Eskalasyon",
+    "Cozuldu",
+    "YenidenAcildi",
+    "IptalEdildi"
+  ],
+  "CasePriority": [
+    "Low",
+    "Medium",
+    "High",
+    "Critical"
+  ],
+  "CaseOrigin": [
+    "Telefon",
+    "Eposta",
+    "Web",
+    "Chatbot",
+    "Diger"
+  ],
+  "CaseRequestType": [
+    "Bilgi",
+    "Oneri",
+    "Talep",
+    "Sikayet",
+    "Hata"
+  ],
+  "EscalationLevel": [
+    "Yok",
+    "TakimLideri",
+    "Direktor",
+    "UstYonetim"
+  ],
+  "CustomerType": [
+    "Individual",
+    "Corporate",
+    "Government",
+    "NonProfit"
+  ],
+  "ProjectStatus": [
+    "Active",
+    "Passive",
+    "Completed",
+    "Cancelled"
+  ],
+  "AddressType": [
+    "Billing",
+    "Shipping",
+    "Visit",
+    "Headquarters",
+    "Branch"
+  ],
+  "SupportLevel": [
+    "L1",
+    "L2",
+    "L3",
+    "Expert"
+  ],
+  "NoteVisibility": [
+    "Internal",
+    "Customer"
+  ],
+  "FinancialStatus": [
+    "Dusuk",
+    "Orta",
+    "Yuksek",
+    "Kritik"
+  ],
+  "ProductUsage": [
+    "Yuksek",
+    "Orta",
+    "Dusuk",
+    "Yok"
+  ],
+  "UsageChangeAlert": [
+    "Artis",
+    "Azalma",
+    "Sabit"
+  ],
+  "ResponseLevel": [
+    "YuksekOncelik",
+    "OrtaOncelik",
+    "DusukOncelik"
+  ],
+  "CallDisposition": [
+    "Cevapladi",
+    "Cevaplamadi",
+    "NumaraHatali",
+    "GorusmekIstemedi",
+    "TekrarAranacak"
+  ],
+  "CallOutcome": [
+    "Memnun",
+    "MemnunDegil",
+    "Tarafsiz",
+    "Ulasilamadi"
+  ],
+  "OfferOutcome": [
+    "KabulEdildi",
+    "Reddedildi",
+    "Beklemede"
+  ],
+  "ChurnResult": [
+    "IptalEdildi",
+    "DevamEdiyor",
+    "TeklifKabulEdildi"
+  ],
+  "RetentionStatus": [
+    "Basarili",
+    "Basarisiz",
+    "DevamEdiyor"
+  ],
+  "CaseHistoryActionType": [
+    "Transfer",
+    "StatusChange",
+    "FieldUpdate",
+    "ChecklistToggle",
+    "NoteAdded",
+    "NoteReplyAdded",
+    "CallLogAdded",
+    "FileUploaded",
+    "FileRemoved",
+    "CaseCreated",
+    "SLAApplied"
+  ],
+  "ApprovalDecision": [
+    "Bekliyor",
+    "Onaylandi",
+    "Reddedildi"
+  ],
+  "NotificationChannel": [
+    "InApp",
+    "Email",
+    "SMS"
+  ],
+  "UserRole": [
+    "Agent",
+    "Backoffice",
+    "Supervisor",
+    "CSM",
+    "Admin",
+    "SystemAdmin"
+  ],
+  "CompanyRole": [
+    "Agent",
+    "Supervisor",
+    "Admin",
+    "SystemAdmin"
+  ],
+  "FieldType": [
+    "Text",
+    "Number",
+    "Date",
+    "Select",
+    "Boolean",
+    "Textarea"
+  ],
+  "SnoozeReason": [
+    "CustomerWillCall",
+    "WaitingThirdParty",
+    "Reminder"
+  ],
+  "PatternAlertStatus": [
+    "active",
+    "dismissed"
+  ],
+  "CaseLinkType": [
+    "Related",
+    "Duplicate",
+    "Parent"
+  ],
+  "KnowledgeSourceType": [
+    "PastCases",
+    "ProductDocs",
+    "SLARules",
+    "Checklists",
+    "ManualEntry"
+  ],
+  "ApprovalState": [
+    "Pending",
+    "Approved",
+    "Rejected",
+    "Cancelled"
+  ],
+  "ApproverType": [
+    "TeamLead",
+    "AssignedTeamLead",
+    "Supervisor",
+    "Admin",
+    "SystemAdmin",
+    "SpecificPerson"
+  ],
+  "RejectionBehavior": [
+    "ReturnToAssignee",
+    "ReturnToTeam",
+    "Escalate"
+  ],
+  "DispatchChannel": [
+    "InApp",
+    "Email",
+    "ManualTask",
+    "Webhook"
+  ],
+  "DispatchMode": [
+    "LogOnly",
+    "Manual",
+    "Active"
+  ],
+  "DispatchState": [
+    "Pending",
+    "Sent",
+    "Failed",
+    "Suppressed"
+  ],
+  "ActionItemKind": [
+    "approval_pending",
+    "approval_decided",
+    "case_returned_to_assignee",
+    "case_assigned",
+    "case_transferred",
+    "case_sla_at_risk",
+    "case_sla_breach",
+    "mention",
+    "watcher_event",
+    "dispatch_manual_confirm",
+    "dispatch_review_needed",
+    "pattern_alert",
+    "manual_task",
+    "system_alert"
+  ],
+  "ActionItemState": [
+    "Pending",
+    "InProgress",
+    "Snoozed",
+    "Done",
+    "Dismissed",
+    "Expired"
+  ]
+}

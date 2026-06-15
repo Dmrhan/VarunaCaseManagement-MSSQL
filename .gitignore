@@ -10,3 +10,12 @@ dist-ssr
 .idea
 *.log
 *.tsbuildinfo
+
+# Faz 4 - local disk storage (vaka ekleri)
+data/
+logs/
+
+# IIS tasima paketi - binary'ler repoya girmesin (bkz. docs/IIS_DEPLOY.md)
+deploy/nssm/
+deploy/git/
+reports/

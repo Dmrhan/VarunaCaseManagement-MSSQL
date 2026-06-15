@@ -42,10 +42,13 @@ const val = (n, def = null) => {
   return def;
 };
 
-const XLSX_PATH = val(
-  'xlsx',
-  '/Users/demirhan.isbakan/Library/CloudStorage/GoogleDrive-demirhan.isbakan@univera.com.tr/Shared drives/VARUNA WORKBOOK/Case Management/UNIVERA DATALAR/İş Süreçleri Kategorisi - 20260604.xlsx',
-);
+// On-prem: xlsx yolu zorunlu argüman/env (eski hardcoded Google Drive yolu kaldırıldı).
+//   node scripts/seed-univera-smart-ticket-taxonomies.js --xlsx "C:\path\to\kategoriler.xlsx"
+const XLSX_PATH = val('xlsx', process.env.TAXONOMY_XLSX_PATH ?? null);
+if (!XLSX_PATH) {
+  console.error('❌ --xlsx <dosya yolu> argümanı (veya TAXONOMY_XLSX_PATH env) zorunlu.');
+  process.exit(1);
+}
 const COMPANY = val('company', 'UNIVERA');
 const EXECUTE = flag('execute');
 

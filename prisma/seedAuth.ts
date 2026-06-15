@@ -1,35 +1,19 @@
 /**
- * Demo kullanıcı seed — 5 rol × 1 user.
+ * Demo kullanıcı seed — 6 rol × 1 user (Faz 3: local auth, Supabase yok).
  *
  * Çalıştırma: `npm run db:seed:auth`
  *
- * Akış:
- *  1. Supabase Admin API ile auth.users tablosunda kullanıcı yarat (idempotent)
- *  2. Aynı UUID ile prisma.user satırı yarat (upsert)
- *
+ * Akış: bcrypt hash ile doğrudan prisma.user upsert (e-posta unique anahtar).
  * Demo şifre: Test1234! — production'da MUTLAKA değiştir.
  *
- * Şifre yenilemek istersen: Supabase Dashboard → Authentication → Users →
- * kullanıcı seç → "Send password recovery" ya da admin panelinden direkt yeni
- * şifre at.
+ * Şifre yenilemek istersen: admin panelinden "şifre sıfırla" ya da bu seed'i
+ * tekrar çalıştır (şifreyi DEMO_PASSWORD'e geri çeker).
  */
 
 import { PrismaClient } from '@prisma/client';
-import { createClient } from '@supabase/supabase-js';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ SUPABASE_URL veya SUPABASE_SERVICE_ROLE_KEY .env\'de yok.');
-  process.exit(1);
-}
-
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-});
 
 const DEMO_PASSWORD = 'Test1234!';
 
@@ -75,35 +59,14 @@ const DEMO_USERS = [
   },
 ];
 
-async function findOrCreateAuthUser(email: string, fullName: string): Promise<string> {
-  // Mevcut auth user'ı email ile bul (admin API list + filter)
-  const { data: list, error: listErr } = await sb.auth.admin.listUsers({ perPage: 1000 });
-  if (listErr) throw new Error(`auth list: ${listErr.message}`);
-  const existing = list.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-  if (existing) {
-    console.log(`  ↻ Mevcut auth user: ${email} (${existing.id})`);
-    return existing.id;
-  }
-
-  const { data, error } = await sb.auth.admin.createUser({
-    email,
-    password: DEMO_PASSWORD,
-    email_confirm: true, // Demo: doğrulama maili gönderme
-    user_metadata: { fullName },
-  });
-  if (error) throw new Error(`auth create ${email}: ${error.message}`);
-  if (!data.user) throw new Error(`auth create ${email}: kullanıcı oluşmadı`);
-  console.log(`  ✓ Yeni auth user: ${email} (${data.user.id})`);
-  return data.user.id;
-}
-
 async function main() {
-  console.log('🔐 Demo kullanıcı seed başlıyor...\n');
+  console.log('🔐 Demo kullanıcı seed başlıyor (local auth)...\n');
   console.log(`Şifre (hepsi için): ${DEMO_PASSWORD}\n`);
+
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   for (const u of DEMO_USERS) {
     console.log(`→ ${u.email} (${u.role})`);
-    const authId = await findOrCreateAuthUser(u.email, u.fullName);
 
     // Person guard: tanımlı personId Person tablosunda var mı? Yoksa null bırak
     // (yine de demo personlar seed.ts'ten gelir; eksikse uyarı düş).
@@ -115,22 +78,26 @@ async function main() {
     }
     const personId = personExists ? u.personId : null;
 
-    await prisma.user.upsert({
-      where: { id: authId },
+    const user = await prisma.user.upsert({
+      where: { email: u.email },
       update: {
-        email: u.email,
         fullName: u.fullName,
         role: u.role,
         isActive: true,
         personId,
+        passwordHash,
+        mustChangePassword: false, // demo: zorunlu değişim kapalı
+        passwordUpdatedAt: new Date(),
       },
       create: {
-        id: authId,
         email: u.email,
         fullName: u.fullName,
         role: u.role,
         isActive: true,
         personId,
+        passwordHash,
+        mustChangePassword: false,
+        passwordUpdatedAt: new Date(),
       },
     });
     console.log(`  ✓ User kaydı senkronize edildi${personId ? ` → Person ${personId}` : ''}.`);
@@ -145,9 +112,9 @@ async function main() {
 
     for (const a of companyAssignments) {
       await prisma.userCompany.upsert({
-        where: { userId_companyId: { userId: authId, companyId: a.companyId } },
+        where: { userId_companyId: { userId: user.id, companyId: a.companyId } },
         update: { role: a.role, isActive: true },
-        create: { userId: authId, companyId: a.companyId, role: a.role, isActive: true },
+        create: { userId: user.id, companyId: a.companyId, role: a.role, isActive: true },
       });
     }
     console.log(`  ✓ Şirket atamaları: ${companyAssignments.map((a) => `${a.companyId}/${a.role}`).join(', ')}`);

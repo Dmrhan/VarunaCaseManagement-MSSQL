@@ -1,0 +1,133 @@
+PASS      smoke-account-360-hotfix.js
+PASS      smoke-account-360-p1p2-hotfix.js
+PASS      smoke-account-id-standardization.js
+PASS      smoke-account-new-case-prefill.js
+FAIL(1)   smoke-account-phase-a.js
+PASS      smoke-account-phase-c1.js
+FAIL(1)   smoke-account-phase-c2.js
+PASS      smoke-account-phone-slots-import.js
+FAIL(1)   smoke-admin-invite.js
+PASS      smoke-ai-drilldown-assist.js
+PASS      smoke-ai-lens-tone.js
+PASS      smoke-ai-operations.js
+FAIL(1)   smoke-ai-telemetry.js
+PASS      smoke-analytics-drilldown.js
+PASS      smoke-analytics-overview.js
+PASS      smoke-c360-commit-phase-c-light.js
+PASS      smoke-c360-commit-tick.js
+PASS      smoke-c360-commit-uses-full-rows.js
+PASS      smoke-c360-dryrun-strip-rowsForCommit.js
+PASS      smoke-c360-vkn-soft-address-skip.js
+PASS      smoke-c360-xlsx-mapping-preservation.js
+PASS      smoke-calendar-closed-case-filter.js
+PASS      smoke-case-detail-kb-closure-suggestion.js
+PASS      smoke-case-detail-smart-ticket-meta.js
+PASS      smoke-case-note-safety.js
+PASS      smoke-cases-list-claim-navigate.js
+PASS      smoke-customer-match-suggestions.js
+PASS      smoke-customer-response-channel.js
+PASS      smoke-customer360-relkeys-and-customer-code.js
+PASS      smoke-customerless-case-flow.js
+PASS      smoke-demo-personas.js
+FAIL(1)   smoke-full-demo-readiness.js
+PASS      smoke-help-content.js
+PASS      smoke-import-integrity-phone-tax.js
+PASS      smoke-json-bridge-mssql.js
+PASS      smoke-knowledge-sources.js
+PASS      smoke-mention-inbox-flow.js
+PASS      smoke-mention-inline-reply-flow.js
+PASS      smoke-mssql-schema.js
+PASS      smoke-notification-flow.js
+PASS      smoke-operations-aggregator-mssql.js
+PASS      smoke-pr5-static-guards.js
+PASS      smoke-qa-score-batch-telemetry.js
+PASS      smoke-quick-case-hidden.js
+PASS      smoke-resolution-approval-flow.js
+PASS      smoke-smart-ticket-3-stage-ui.js
+PASS      smoke-smart-ticket-account-open-cases.js
+PASS      smoke-smart-ticket-classification-suggest.js
+PASS      smoke-smart-ticket-closure-suggest.js
+FAIL(1)   smoke-smart-ticket-closure.js
+PASS      smoke-smart-ticket-description-rerun.js
+PASS      smoke-smart-ticket-file-attach.js
+FAIL(1)   smoke-smart-ticket-intake.js
+FAIL(1)   smoke-smart-ticket-kb-drafts.js
+PASS      smoke-smart-ticket-kb-wrapped-error.js
+PASS      smoke-smart-ticket-project-code-search.js
+PASS      smoke-smart-ticket-request-type-priority.js
+PASS      smoke-smart-ticket-solution-steps-ui.js
+PASS      smoke-smart-ticket-solution-steps.js
+PASS      smoke-smart-ticket-taxonomy-admin.js
+PASS      smoke-smart-ticket-transfer-ui.js
+PASS      smoke-smart-ticket-transfer-visibility-ui.js
+PASS      smoke-smart-ticket-transfer.js
+PASS      smoke-smart-ticket-voice-input.js
+PASS      smoke-turkish-customer-search.js
+PASS      smoke-turkish-search-mssql.js
+PASS      smoke-upload-whitelist.js
+---
+PASS: 59 / 67
+
+===== smoke-account-phase-a.js (FAIL(1)) =====
+[smoke] FATAL: AccountValidationError: VKN 10 haneli rakam olmalı.
+    at Object.createAccount (file:///C:/apps/VarunaCaseManagement-MSSQL/server/db/accountRepository.js:808:13)
+    at run (file:///C:/apps/VarunaCaseManagement-MSSQL/scripts/smoke-account-phase-a.js:206:48) {
+  status: 400,
+  code: 'invalid_vkn'
+}
+
+===== smoke-account-phase-c2.js (FAIL(1)) =====
+[smoke] FATAL: AccountValidationError: VKN 10 haneli rakam olmalı.
+    at Object.createAccount (file:///C:/apps/VarunaCaseManagement-MSSQL/server/db/accountRepository.js:808:13)
+    at run (file:///C:/apps/VarunaCaseManagement-MSSQL/scripts/smoke-account-phase-c2.js:115:41) {
+  status: 400,
+  code: 'invalid_vkn'
+}
+
+===== smoke-admin-invite.js (FAIL(1)) =====
+    at ei.handleAndLogRequestError (C:\apps\VarunaCaseManagement-MSSQL\node_modules\@prisma\client\runtime\library.js:121:6593)
+    at ei.request (C:\apps\VarunaCaseManagement-MSSQL\node_modules\@prisma\client\runtime\library.js:121:6300)
+    at async a (C:\apps\VarunaCaseManagement-MSSQL\node_modules\@prisma\client\runtime\library.js:130:9551)
+    at async main (file:///C:/apps/VarunaCaseManagement-MSSQL/scripts/smoke-admin-invite.js:279:3) {
+  clientVersion: '6.19.3'
+}
+
+===== smoke-ai-telemetry.js (FAIL(1)) =====
+[smoke] 33/37 passed
+[smoke] FAILED:
+  - B.critical("suggest-category") has rows count=0
+  - B.critical("draft-resolution") has rows count=0
+  - B.critical("customer-pulse-summary") has rows count=0
+  - B.critical("qa-score-batch") has rows count=0
+
+===== smoke-full-demo-readiness.js (FAIL(1)) =====
+  - 13. ≥1 snoozed-until-future case (Calendar snooze chip data) count=0
+  - 15a. notification eventType mention exists []
+  - 15b. notification eventType watcher_update exists 
+  - 15c. notification eventType transfer exists 
+  - 15d. notification eventType note_reaction exists 
+  - 12. Suggestion engine produces phone-match for a pending case no pending case with phone
+
+===== smoke-smart-ticket-closure.js (FAIL(1)) =====
+✓ 12) panel reuse: item.id değişimi closureTax + closure seçimleri sıfırlar
+
+🧹 cleanup: 3 test Case silindi
+
+── Summary ─────────────────────────────────────────────
+PASS=10  FAIL=3  SKIP=2
+
+===== smoke-smart-ticket-intake.js (FAIL(1)) =====
+⊘ 12) unmapped fallback — ikinci bp yok — SKIP
+
+🧹 cleanup: 1 test Case silindi
+
+── Summary ──────────────────────────────────────────────
+PASS=7  FAIL=5  SKIP=2
+
+===== smoke-smart-ticket-kb-drafts.js (FAIL(1)) =====
+✗ 14) Editor submit fresh fetch eksik
+
+── Cleanup ────────────────────────────────────────────
+   2 case temizlendi
+
+PASS=20  FAIL=1  SKIP=0

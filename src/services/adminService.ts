@@ -646,25 +646,26 @@ export const adminService = {
       return { ok: true, item };
     },
     /**
-     * Phase 5C — Admin'den e-posta ile kullanıcı davet.
-     * Supabase Auth `inviteUserByEmail` → DB placeholder User + UserCompany.
+     * Faz 3 — Admin'den kullanıcı oluşturma (local auth, e-posta gönderimi yok).
+     * Admin başlangıç şifresi belirler; kullanıcı ilk girişte değiştirmek zorunda.
      */
-    async invite(input: {
+    async createUser(input: {
       email: string;
+      fullName?: string;
       role: AdminUser['role'];
       companyId: string;
       companyRole: CompanyRole;
-    }): Promise<AdminResult<{ userId: string; email: string; message: string; orphanRecovered: boolean }>> {
+      password: string;
+    }): Promise<AdminResult<{ userId: string; email: string; message: string }>> {
       const item = await apiFetch<{
         success: boolean;
         userId: string;
         email: string;
         message: string;
-        orphanRecovered: boolean;
       }>(
-        `${ADMIN_BASE}/users/invite`,
+        `${ADMIN_BASE}/users`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
-        'Davet gönderilemedi',
+        'Kullanıcı oluşturulamadı',
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       return {
@@ -673,7 +674,6 @@ export const adminService = {
           userId: item.userId,
           email: item.email,
           message: item.message,
-          orphanRecovered: item.orphanRecovered,
         },
       };
     },
@@ -690,15 +690,17 @@ export const adminService = {
       return { ok: true, item: { message: item.message } };
     },
     /**
-     * Phase 5C-resend — Davet bekleyen (fullName === email) aktif kullanıcıya
-     * yeni magic-link mail göndermek için. Supabase `resetPasswordForEmail`
-     * çağrısı yapılır; redirectTo backend env'inden gelir (prod URL).
+     * Faz 3 — Admin'den geçici şifre atama ("şifremi unuttum"un on-prem karşılığı).
+     * Kullanıcı yeni geçici şifreyle girer; ilk girişte değiştirmek zorunda.
      */
-    async resendInvite(userId: string): Promise<AdminResult<{ message: string; email: string }>> {
+    async resetPassword(
+      userId: string,
+      password: string,
+    ): Promise<AdminResult<{ message: string; email: string }>> {
       const item = await apiFetch<{ success: boolean; message: string; email: string }>(
-        `${ADMIN_BASE}/users/${userId}/resend-invite`,
-        { method: 'POST' },
-        'Davet yeniden gönderilemedi',
+        `${ADMIN_BASE}/users/${userId}/reset-password`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) },
+        'Şifre sıfırlanamadı',
       );
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true, item: { message: item.message, email: item.email } };

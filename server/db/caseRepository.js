@@ -2119,12 +2119,12 @@ export const caseRepository = {
     return { caseUpdated: shape(caseUpdated), file };
   },
 
-  /** Download için kısa ömürlü signed URL üret. */
+  /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
   async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
     if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
-    const url = await createDownloadUrl(target.fileUrl);
+    const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName);
     return { url, fileName: target.fileName };
   },
 
@@ -3863,9 +3863,9 @@ function buildWhere(f, allowedCompanyIds) {
     if (q) {
       andClauses.push({
         OR: [
-          { title: { contains: q, mode: 'insensitive' } },
-          { caseNumber: { contains: q, mode: 'insensitive' } },
-          { accountName: { contains: q, mode: 'insensitive' } },
+          { title: { contains: q } },
+          { caseNumber: { contains: q } },
+          { accountName: { contains: q } },
         ],
       });
     }

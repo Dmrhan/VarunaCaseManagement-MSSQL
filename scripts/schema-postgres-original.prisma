@@ -1,0 +1,2272 @@
+// Varuna Case Management — Veri Modeli (PRODUCT_SPEC §15)
+//
+// Mimari karar: schema MSSQL'e taşınabilir kalmalı. Bu yüzden:
+// - String ID + cuid() (autoincrement değil)
+// - Json tipi (Postgres'te jsonb, MSSQL'de nvarchar(max))
+// - Postgres-spesifik tip yok (TSVECTOR, ARRAY, vb.)
+// - Enum'lar Prisma enum (her iki DB'de desteklenir)
+//
+// MSSQL geçişinde sadece `provider = "sqlserver"` ve DATABASE_URL değişir.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase'in connection pooler'ı (port 6543) DDL desteklemez.
+  // Migration için direct connection (port 5432) gerekli.
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// Enum'lar — types.ts ile birebir
+// ============================================================
+
+enum CaseType {
+  GeneralSupport
+  ProactiveTracking
+  Churn
+}
+
+enum CaseStatus {
+  Acik              @map("Açık")
+  Incelemede        @map("İncelemede")
+  ThirdPartyWaiting @map("3rdPartyBekleniyor")
+  Eskalasyon
+  Cozuldu           @map("Çözüldü")
+  YenidenAcildi
+  IptalEdildi       @map("İptalEdildi")
+}
+
+enum CasePriority {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum CaseOrigin {
+  Telefon
+  Eposta  @map("E-posta")
+  Web
+  Chatbot
+  Diger   @map("Diğer")
+}
+
+enum CaseRequestType {
+  Bilgi
+  Oneri   @map("Öneri")
+  Talep
+  Sikayet @map("Şikayet")
+  Hata
+}
+
+enum EscalationLevel {
+  Yok
+  TakimLideri @map("TakımLideri")
+  Direktor    @map("Direktör")
+  UstYonetim  @map("ÜstYönetim")
+}
+
+/// Müşteri tipi — WR-A1 / PM-01. Bireysel/Kurumsal/Kamu/Vakıf-STK.
+/// TCKN bu enuma rağmen Account'a EKLENMEZ (A2'de privacy design sonrası).
+enum CustomerType {
+  Individual @map("Bireysel")
+  Corporate  @map("Kurumsal")
+  Government @map("Kamu")
+  NonProfit  @map("Vakıf-STK")
+}
+
+/// Proje statüsü — WR-A4 / PM-04 (AccountProject lifecycle).
+enum ProjectStatus {
+  Active
+  Passive
+  Completed
+  Cancelled
+}
+
+/// Adres tipi — WR-A3 / PM-02 (country-agnostic; type-bağlı default uniqueness app-layer).
+enum AddressType {
+  Billing
+  Shipping
+  Visit
+  Headquarters
+  Branch
+}
+
+/// Destek seviyesi — WR-A5 / PM-03 (Phase 1 foundation; SLA/routing entegrasyonu Phase 2).
+/// L1/L2 mevcut kullanım; L3/Expert future-proof.
+enum SupportLevel {
+  L1
+  L2
+  L3
+  Expert
+}
+
+enum NoteVisibility {
+  Internal
+  Customer
+}
+
+enum FinancialStatus {
+  Dusuk  @map("Düşük")
+  Orta
+  Yuksek @map("Yüksek")
+  Kritik
+}
+
+enum ProductUsage {
+  Yuksek @map("Yüksek")
+  Orta
+  Dusuk  @map("Düşük")
+  Yok
+}
+
+enum UsageChangeAlert {
+  Artis  @map("Artış")
+  Azalma
+  Sabit
+}
+
+enum ResponseLevel {
+  YuksekOncelik @map("Yüksek Öncelik")
+  OrtaOncelik   @map("Orta Öncelik")
+  DusukOncelik  @map("Düşük Öncelik")
+}
+
+enum CallDisposition {
+  Cevapladi        @map("Cevapladı")
+  Cevaplamadi      @map("Cevaplamadı")
+  NumaraHatali     @map("NumaraHatalı")
+  GorusmekIstemedi @map("GörüşmekIstemedi")
+  TekrarAranacak
+}
+
+enum CallOutcome {
+  Memnun
+  MemnunDegil @map("MemnunDeğil")
+  Tarafsiz    @map("Tarafsız")
+  Ulasilamadi @map("Ulaşılamadı")
+}
+
+enum OfferOutcome {
+  KabulEdildi
+  Reddedildi
+  Beklemede
+}
+
+enum ChurnResult {
+  IptalEdildi       @map("İptalEdildi")
+  DevamEdiyor
+  TeklifKabulEdildi
+}
+
+enum RetentionStatus {
+  Basarili    @map("Başarılı")
+  Basarisiz   @map("Başarısız")
+  DevamEdiyor
+}
+
+enum CaseHistoryActionType {
+  Transfer
+  StatusChange
+  FieldUpdate
+  ChecklistToggle
+  NoteAdded
+  NoteReplyAdded
+  CallLogAdded
+  FileUploaded
+  FileRemoved
+  CaseCreated
+  SLAApplied
+}
+
+enum ApprovalDecision {
+  Bekliyor
+  Onaylandi  @map("Onaylandı")
+  Reddedildi
+}
+
+enum NotificationChannel {
+  InApp
+  Email
+  SMS
+}
+
+// Spec §13 + Custom Fields/CompanySettings yetkisi için 6. rol.
+// SystemAdmin: platform-seviyesi yapılandırma (FieldDefinitions,
+// CompanySettings, admin tanım ekranları). Admin: tek-tenant operasyon.
+enum UserRole {
+  Agent
+  Backoffice
+  Supervisor
+  CSM
+  Admin
+  SystemAdmin
+}
+
+// Per-company role — UserCompany join table'da kullanılır. UserRole'dan
+// ayrı tutuldu: User.role sistem-seviyesi default rol (legacy + login akışı),
+// UserCompany.role o şirket içindeki yetkiyi belirler. SystemAdmin sistem
+// rolü olarak kalır; UserCompany'de görünmesi tüm şirketlere erişim demek
+// değil — verifyJwt'de User.role==='SystemAdmin' ise allowedCompanyIds
+// tüm şirketlerle dolduruluyor.
+enum CompanyRole {
+  Agent
+  Supervisor
+  Admin
+  SystemAdmin
+}
+
+enum FieldType {
+  Text
+  Number
+  Date
+  Select
+  Boolean
+  Textarea
+}
+
+// Vakanın neden ertelendiği — Inbox Later sekmesinde sebep ipucu için.
+enum SnoozeReason {
+  CustomerWillCall  @map("customer_will_call")
+  WaitingThirdParty @map("waiting_3rd_party")
+  Reminder          @map("reminder")
+}
+
+// PatternAlert durumu — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+enum PatternAlertStatus {
+  active
+  dismissed
+}
+
+// CaseLink türü — FAZ 2 Collab. Vakalar arası bağlantı tipi.
+//   - Related:   genel ilişkili (yumuşak referans, symmetric değil)
+//   - Duplicate: aynı sorun (BFF symmetric davranış — A↔B her iki yön yazılır)
+//   - Parent:    bu vaka, hedef vakanın parçası (A → B = A is child of B)
+enum CaseLinkType {
+  Related
+  Duplicate
+  Parent
+}
+
+// KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
+// AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
+enum KnowledgeSourceType {
+  PastCases // Geçmiş vakalar (Case tablosu)
+  ProductDocs // Ürün/kategori dokümanları (CategoryDef + manuel doc)
+  SLARules // SLA kuralları (SLAPolicy)
+  Checklists // Kontrol listeleri (ChecklistTemplate)
+  ManualEntry // Admin'in elle eklediği özel kayıtlar
+}
+
+// ============================================================
+// Lookup / referans tabloları
+// ============================================================
+
+// Spec §13 — Auth + RBAC.
+// id = Supabase Auth user UUID (sync). email Supabase ile sync.
+// Person ile ayrı: Person operasyonel kayıt (vaka atama hedefi),
+// User auth kimliği. personId opsiyonel FK ile bağlanabilir.
+model User {
+  id        String   @id // Supabase Auth UUID
+  email     String   @unique
+  fullName  String
+  role      UserRole @default(Agent)
+  isActive  Boolean  @default(true)
+  personId  String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companies UserCompany[]
+  reminders CaseReminder[]
+}
+
+// User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
+// (holding modeli — supervisor/admin'in PARAM + UNIVERA + FINROTA görmesi).
+// Liste sorguları req.user.allowedCompanyIds üzerinden filtrelenir;
+// SystemAdmin tüm şirketlere otomatik erişir (UserCompany kaydı gerekmez).
+model UserCompany {
+  id        String      @id @default(cuid())
+  userId    String
+  companyId String
+  role      CompanyRole @default(Agent)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@index([companyId])
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts                   Account[]
+  accountCompanies           AccountCompany[]
+  /// WR-A3 — Account adresleri tenant scope için Company'ye bağlı.
+  addresses                  Address[]
+  teams                      Team[]
+  cases                      Case[]
+  slaPolicies                SLAPolicy[]
+  categories                 CategoryDef[]
+  checklists                 ChecklistTemplate[]
+  fieldDefinitions           FieldDefinition[]
+  settings                   CompanySettings?
+  userCompanies              UserCompany[]
+  /// WR-A6 / PM-05 — tenant-scoped product catalog.
+  productGroups              ProductGroup[]
+  products                   Product[]
+  /// WR-A7 / PM-05 — tenant-scoped package (contract bundle) catalog.
+  packages                   Package[]
+  /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımları (yalnız config; API
+  /// çağrısı sonraki fazda). Her şirket için tek satır.
+  externalKbSetting          ExternalKbSetting?
+  /// WR-A8 — Data Integration Studio: import job geçmişi.
+  importJobs                 ImportJob[]
+  /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
+  resolutionApprovalPolicies ResolutionApprovalPolicy[]
+  /// WR-D4 Phase 2 — tenant-scoped notification rules + templates + dispatch log.
+  notificationRules          NotificationRule[]
+  notificationTemplates      NotificationTemplate[]
+  notificationDispatches     NotificationDispatch[]
+  /// WR-Smart-Ticket Phase 1a — tenant-scoped generic taxonomy
+  /// (Platform / İş Süreci / İşlem Tipi / Etkilenen Nesne / Etki / Kök
+  /// Neden Grubu / Detay / Çözüm Tipi / Kalıcı Önlem). Global entries
+  /// (companyId=null) yer almıyor bu liste — yalnız per-tenant.
+  taxonomies                 TaxonomyDef[]
+  /// WR-Smart-Ticket Phase 2a — tenant-scoped Case çözüm adımları.
+  solutionSteps              CaseSolutionStep[]
+}
+
+// Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
+// Vaka kaydı sırasında bu tanımlara göre form alanları çıkar; değerler
+// Case.customFields JSON'una `{ fieldKey: value }` olarak yazılır.
+model FieldDefinition {
+  id           String    @id @default(cuid())
+  companyId    String
+  label        String
+  fieldKey     String // benzersiz tanımlayıcı (örn. "customer_segment")
+  fieldType    FieldType
+  caseType     CaseType? // null = tüm vaka tipleri
+  isRequired   Boolean   @default(false)
+  displayOrder Int       @default(0)
+  /// Select için { value, label }[] dizisi; diğer tipler için null
+  options      Json?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, fieldKey])
+  @@index([companyId, caseType, isActive])
+}
+
+// Şirket başına UI/marka yapılandırması — multi-tenant beyaz etiket için.
+model CompanySettings {
+  companyId                   String   @id
+  logoUrl                     String?
+  primaryColor                String? // hex (#7C3AED gibi)
+  appName                     String?
+  supportEmail                String?
+  /// Phase D: true ise vaka açarken müşteri seçimi zorunlu; false (default)
+  /// ise Agent "Müşterisiz devam et" ile vaka açabilir ve Case.customerMatchPending
+  /// = true set edilir (Supervisor/Admin için eşleştirme kuyruğu).
+  requireCustomerOnCaseCreate Boolean  @default(false)
+  /// WR-A4 / PM-04 — true ise UI'da AccountProject menüsü + Case create
+  /// project combobox açılır. Default false → mevcut davranış değişmez.
+  projectsEnabled             Boolean  @default(false)
+  /// WR-A4 / PM-04 — true ise (projectsEnabled=true gerektirir) Case create
+  /// sırasında accountId varsa accountProjectId zorunlu. Default false →
+  /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
+  /// operasyonu ile flip edilir.
+  projectsRequired            Boolean  @default(false)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+}
+
+/// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımı (tenant-scoped).
+///
+/// SADECE configuration. Hiçbir alan API çağrısı tetiklemez; API entegrasyonu
+/// sonraki fazda eklenir. Raw API key / secret BURADA TUTULMAZ — yalnız
+/// `apiKeySecretName` referans adı (ör. `EXTERNAL_KB_API_KEY`) saklanır;
+/// gerçek değer environment secret olarak deploy ortamında yer alır.
+///
+/// authType:
+///   - "none"        — kimlik doğrulama yok
+///   - "apiKey"      — API key header (X-Api-Key veya benzeri)
+///   - "bearerToken" — Authorization: Bearer
+///
+/// Per-company admin gate ile yönetilir (assertCompanyAdmin). SystemAdmin
+/// tüm şirketleri görür/düzenler.
+model ExternalKbSetting {
+  id                       String   @id @default(cuid())
+  companyId                String   @unique
+  enabled                  Boolean  @default(false)
+  providerName             String?
+  baseUrl                  String?
+  /// WR-KB3 — Yeni endpoint path'leri. ask/search 1. fazda /ask /search default'uyla
+  /// shipped olmuştu; gerçek EnRoute KB endpoint'leri /api/v1/... şeklinde. Mevcut
+  /// satırlar default'la geliyor; tenant override edebilir.
+  askEndpointPath          String   @default("/api/v1/kb/ask")
+  searchEndpointPath       String   @default("/api/v1/kb/search")
+  healthEndpointPath       String   @default("/api/v1/health")
+  statsEndpointPath        String   @default("/api/v1/stats")
+  categorizeEndpointPath   String   @default("/api/v1/categorize")
+  /// WR-KB-v2 — ticket-analiz API v1 doc §6 (YENİ): 6-alan açılış sınıflandırma
+  /// (urun/platform/is_sureci/islem_tipi/etkilenen_nesne/etki). KB kullanmaz,
+  /// ~60sn. Smart Ticket "KB ile Analiz Et" bu uca taşındı; eski analyze
+  /// path fallback olarak korundu.
+  categorizeV2EndpointPath String   @default("/api/v1/categorize-v2")
+  /// WR-KB-v2 — ticket-analiz API v1 doc §7 (YENİ): 4-alan kapanış önerisi
+  /// (kok_neden_grubu/kok_neden_detayi/cozum_tipi/kalici_onlem). Stage 3
+  /// closure'a opsiyonel "AI Önerisi" buton.
+  suggestCloseEndpointPath String   @default("/api/v1/suggest-close")
+  analyzeEndpointPath      String   @default("/api/v1/analyze")
+  /// "none" | "apiKey" | "bearerToken" — string union (Prisma enum gerekli değil; UI tarafı validate eder).
+  authType                 String   @default("none")
+  /// Sadece referans adı (env var key). Raw secret asla saklanmaz.
+  apiKeySecretName         String?
+  timeoutMs                Int      @default(30000)
+  defaultTopK              Int      @default(8)
+  /// "lenient" | "normal" | "strict" — kb/ask + kb/search için varsayılan.
+  defaultStrictness        String   @default("lenient")
+  defaultRerank            Boolean  @default(true)
+  defaultVerify            Boolean  @default(true)
+  showCitations            Boolean  @default(true)
+  allowAgentUse            Boolean  @default(true)
+  allowSupervisorUse       Boolean  @default(true)
+  allowCsmUse              Boolean  @default(true)
+  notes                    String?  @db.Text
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, enabled])
+}
+
+// CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
+// Phase A: Account global kimlik. Şirkete özel alanlar (Univera kodu, paket,
+// kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
+// ve mevcut Case scope sorguları için geri uyumlu kalır.
+model Account {
+  id               String       @id @default(cuid())
+  name             String
+  /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
+  /// WR-A2: format + checksum validation app-layer'da (server/utils/accountValidation.js).
+  vkn              String?      @unique
+  companyId        String?
+  email            String?
+  /// Display amaçlı orijinal telefon (kullanıcı girdiği format). WR-A2'de phoneE164 ayrı tutulur.
+  phone            String?
+  /// WR-A2 — E.164 normalize (örn. "+905325551234"). Search/index için.
+  /// **DB unique constraint YOK** — paylaşılan call center numarası iki Account'ta görünebilir.
+  phoneE164        String?
+  /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
+  /// 'switchboard' | 'whatsapp' | 'other'. Storage'daki canonical değer
+  /// E.164 phoneE164 alanı; phoneType yalnız operasyonel sinyal.
+  phoneType        String?
+  /// Phase 2 phone metadata — dahili numara (santral arkası). E.164
+  /// phoneE164'a APPEND edilmez; ayrı kolonda tutulur. 1-10 char.
+  phoneExtension   String?
+  /// Phase 3 — Account başına 3 telefon slot. Slot 1 yukarıdaki phone*
+  /// alanları; slot 2/3 ek paralel kolonlardır. Generic PhoneNumber
+  /// tablosu eklenmedi — sabit max=3 ürün kuralı.
+  phone2           String?
+  phone2E164       String?
+  phone2Type       String?
+  phone2Extension  String?
+  phone3           String?
+  phone3E164       String?
+  phone3Type       String?
+  phone3Extension  String?
+  /// Phase 3 — Hangi slot Account için "birincil telefon" (1/2/3).
+  /// Null ise UI ilk dolu slotu birincil kabul eder. Backend her create/
+  /// update'te boş olmayan ilk slota normalize eder; boş slotu işaret
+  /// edemez.
+  primaryPhoneSlot Int?
+  isActive         Boolean      @default(true)
+  /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
+  customerType     CustomerType @default(Corporate)
+  /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
+  legalName        String?
+  /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
+  registrationNo   String?
+  /// Vergi Dairesi — kurumsal müşteri ana kartında VKN'den önce gösterilir.
+  /// Bireysel müşterilerde tipik olarak NULL. Yalnız descriptive metadata;
+  /// matching/import key DEĞİL, search index'i yok.
+  taxOffice        String?
+  /// WR-A2 / Decision Sprint #1 — TCKN HMAC-SHA256(plain, TCKN_HASH_PEPPER), 64-char hex.
+  /// **Plain TCKN ASLA saklanmaz.** Global unique → duplicate Bireysel müşteri önleme.
+  /// Pepper env yoksa write path 400 fail; read path (search) sessizce skip.
+  tcknHash         String?      @unique
+  /// WR-A2 — Display için son 4 hane (örn "1234"). UI'da "*******1234" maskeli gösterilir.
+  tcknLast4        String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  company   Company?         @relation(fields: [companyId], references: [id])
+  cases     Case[]
+  companies AccountCompany[]
+  contacts  AccountContact[]
+  /// WR-A3 / PM-02 — country-agnostic address book. Account silindiğinde cascade.
+  addresses Address[]
+
+  @@index([companyId])
+  @@index([name])
+  @@index([customerType])
+  @@index([phoneE164])
+  @@index([phone2E164])
+  @@index([phone3E164])
+}
+
+// AccountCompany — Account ile Company arasında per-tenant ilişki.
+// Aynı müşteri (Account) birden çok şirkete (PARAM/UNIVERA/FINROTA) bağlı
+// olabilir; şirkete özel kod, paket, kontrat ve segment burada tutulur.
+model AccountCompany {
+  id                   String    @id @default(cuid())
+  accountId            String
+  companyId            String
+  /// Univera 5 haneli müşteri kodu — şirket içinde unique.
+  externalCustomerCode String?
+  /// WR-A7b — Legacy free-text paket adı. packageId set olsa bile snapshot olarak korunur;
+  /// packageId clear edilse de packageName silinmez (D-A7BI.1).
+  packageName          String?
+  /// WR-A7b — Tenant-scoped Package referansı. Package.companyId === AccountCompany.companyId
+  /// invariantı app-layer'da enforce edilir (DI.1).
+  packageId            String?
+  contractStartAt      DateTime?
+  contractEndAt        DateTime?
+  segment              String?
+  status               String    @default("active") // active | churn | prospect | inactive
+  notes                String?   @db.Text
+
+  // WR-D4/D3 Phase 3 — Customer Response Channel preferences (per
+  // tenant-customer link). Used by NotificationDispatch audience
+  // resolution to decide where customer-facing messages should land.
+  //
+  // - preferredResponseChannel: 'email' | 'phone' | 'manual' (free string
+  //   so 'portal' or other future channels can be plugged in without a
+  //   migration).
+  // - responseEmail / responsePhone: explicit override addresses. When
+  //   set, they win over AccountContact.email/phone (fallback chain
+  //   documented in §10.3 of the planning card).
+  // - allowCustomerNotifications: opt-out gate. When false, all customer-
+  //   facing dispatches are written as Suppressed/customer_opted_out.
+  preferredResponseChannel   String?
+  responseEmail              String?
+  responsePhone              String?
+  allowCustomerNotifications Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  package  Package?         @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  products AccountProduct[]
+  /// WR-A4 — AccountCompany-scoped projeler.
+  projects AccountProject[]
+
+  @@unique([accountId, companyId])
+  @@unique([companyId, externalCustomerCode])
+  @@index([companyId])
+  @@index([accountId])
+  @@index([externalCustomerCode])
+  @@index([packageId])
+}
+
+/// AccountProject — WR-A4 / PM-04. UNIVERA gibi proje bazlı müşterilerin
+/// projelerini AccountCompany altında tutar. Case.accountProjectId üzerinden
+/// vakalara bağlanır.
+///
+/// Tasarım kuralı (Decision Sprint §④, Modeling Guardrail #2):
+///   Account → AccountCompany → AccountProject → Case
+///   Project ASLA doğrudan Account'a bağlanmaz.
+///
+/// CompanySettings.projectsEnabled flag'i (default false) tenant başına opt-in;
+/// projectsRequired (default false) Case create'te projectId'yi zorunlu yapar.
+model AccountProject {
+  id               String        @id @default(cuid())
+  accountCompanyId String
+  /// Tenant-içi unique kod (AccountCompany scope'unda). Örn "ROTA-2026".
+  code             String
+  name             String
+  status           ProjectStatus @default(Active)
+  startDate        DateTime?
+  endDate          DateTime?
+  description      String?       @db.Text
+  isActive         Boolean       @default(true)
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountCompanyId, sourceExternalId) to
+  /// update the same Project row instead of creating a duplicate.
+  sourceExternalId String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+  cases          Case[]
+
+  @@unique([accountCompanyId, code])
+  @@index([accountCompanyId])
+  @@index([accountCompanyId, isActive])
+  @@index([accountCompanyId, sourceExternalId])
+}
+
+// AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.
+// Vaka açma akışında müşteri context'ini zenginleştirir; vaka için zorunlu değil.
+model AccountProduct {
+  id               String    @id @default(cuid())
+  accountCompanyId String
+  /// WR-A6/A8 — Tenant-scoped Product Catalog'a opsiyonel FK. Tanım:
+  ///  - Set ise: Product.companyId === AccountCompany.companyId invariantı
+  ///    app-layer'da enforce edilir (cross-tenant reddedilir, code=product_company_mismatch).
+  ///  - Null ise: legacy free-text (productName/productCode) modu korunur.
+  ///  Snapshot pattern (A7b): catalog set olsa bile productName/productCode
+  ///  alanları snapshot olarak yazılır → Product silinince/rename olunca display kırılmaz.
+  productId        String?
+  productName      String
+  productCode      String?
+  isActive         Boolean   @default(true)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+  /// onDelete: SetNull — Product silinirse AccountProduct snapshot (productName/Code) korunur.
+  product        Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([accountCompanyId, productCode])
+  @@index([accountCompanyId])
+  @@index([productId])
+}
+
+// AccountContact — Account altında kişi kayıtları (karar verici, teknik lider vb.).
+// Global tutulur; ileride per-company role linkleri eklenebilir.
+model AccountContact {
+  id               String   @id @default(cuid())
+  accountId        String
+  fullName         String
+  title            String?
+  email            String?
+  phone            String?
+  /// WR-A2 — E.164 normalize. Account.phoneE164 ile aynı kural; DB unique yok.
+  phoneE164        String?
+  /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
+  /// 'switchboard' | 'whatsapp' | 'other'.
+  phoneType        String?
+  /// Phase 2 phone metadata — dahili numara. phoneE164'a append edilmez.
+  phoneExtension   String?
+  /// Account içinde "birincil iletişim" işaretçisi. Bu PR'da telefon
+  /// "Birincil Telefon" semantiği de buraya yığılır — başka contact
+  /// "isPrimary=true" yapıldığında commit engine bu alanı otomatik
+  /// demote eder (server/lib/import/customer360CommitEngine.js).
+  isPrimary        Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.
+  preferredChannel String?
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountId, sourceExternalId) to update
+  /// the same Contact row instead of creating a duplicate. App-layer
+  /// uniqueness only — no DB unique to keep imports race-tolerant.
+  sourceExternalId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([phoneE164])
+  @@index([accountId, sourceExternalId])
+}
+
+/// WR-A3 / PM-02 — Account address book. Country-agnostic; TR default.
+/// Parent: Account (cascade). Tenant scope: companyId denormalized — must match
+/// an AccountCompany.companyId for this account (write-time validation in BFF).
+/// `isDefault` uniqueness per (accountId, companyId, type) enforced at app layer
+/// inside Prisma transactions (no DB unique to avoid soft-delete race windows).
+model Address {
+  id               String      @id @default(cuid())
+  accountId        String
+  /// Denormalized tenant scope. Must equal an AccountCompany.companyId where
+  /// AccountCompany.accountId = this.accountId (BFF-enforced).
+  companyId        String
+  type             AddressType
+  /// Optional human label (e.g. "İstanbul merkez ofis", "Adana şube").
+  label            String?
+  line1            String
+  line2            String?
+  district         String?
+  /// Nullable: country-agnostic — some countries / address formats omit a city.
+  city             String?
+  state            String?
+  postalCode       String?
+  /// ISO 3166-1 alpha-2 (uppercase). App-layer format validation `^[A-Z]{2}$`.
+  country          String      @default("TR")
+  isDefault        Boolean     @default(false)
+  isActive         Boolean     @default(true)
+  /// Persistent source-of-truth id from the external ERP/CRM. Optional.
+  /// Customer 360 re-imports use (accountId, sourceExternalId) to update
+  /// the same Address row instead of creating a duplicate.
+  sourceExternalId String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([accountId])
+  @@index([companyId])
+  @@index([accountId, type])
+  @@index([accountId, isDefault])
+  @@index([accountId, sourceExternalId])
+}
+
+/// WR-A6 / PM-05 — Tenant-scoped product catalog (foundation only).
+/// ProductGroup gruplandırma (örn. UNIVERA "Saha", PARAM "POS"); altında
+/// Product (Enroute, ParamPOS vb.).  `code` immutable after create —
+/// A7 Package paket-ürün referansları stabil olsun diye.
+/// Bu PR'da `supportLevel` field'ı yok (A5 SupportLevel enum shipped olunca
+/// ek migration ile gelir).  Mevcut `Case.productGroup` string kolonu ve
+/// `AccountProduct` tablosu dokunulmaz — geri uyumluluk.
+model ProductGroup {
+  id          String   @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, isActive])
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  companyId      String
+  productGroupId String
+  code           String
+  name           String
+  description    String?
+  /// WR-A6 follow-up — Varsayılan destek seviyesi. A5 SupportLevel enum
+  /// shipped olduktan sonra additive eklendi. Mevcut tüm ürünler default L1.
+  /// Phase 2 Case create cascade'inde Product → Person → Team → L1 zincirinin
+  /// ilk hint sinyali (A7b sonrası).
+  supportLevel   SupportLevel @default(L1)
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productGroup    ProductGroup     @relation(fields: [productGroupId], references: [id])
+  /// WR-A7 — Reverse relation for PackageItem assignment.
+  packageItems    PackageItem[]
+  /// WR-A7b — Reverse relation: bu ürünü referanslayan vakalar.
+  cases           Case[]           @relation("CaseProduct")
+  /// WR-A8 — Reverse relation: bu ürünü referanslayan müşteri ürün satırları.
+  accountProducts AccountProduct[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, productGroupId, isActive])
+  @@index([companyId, supportLevel])
+}
+
+/// WR-A7 / PM-05 — Tenant-scoped package (contract bundle / subscription plan).
+/// Distinct from Product: Product = supported app/module/service; Package =
+/// contractual bundle. Examples: UNIVERA WhitePackage/RedPackage,
+/// PARAM "POS Başlangıç", FINROTA "Tahsilat Plus".
+///
+/// IMPORTANT cross-table invariant: every PackageItem.product.companyId
+/// MUST equal Package.companyId. Prisma cannot enforce this at DB level;
+/// enforced in repository + smoke + data-contract.
+model Package {
+  id           String       @id @default(cuid())
+  companyId    String
+  code         String
+  name         String
+  description  String?
+  supportLevel SupportLevel @default(L1)
+  sortOrder    Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  items            PackageItem[]
+  /// WR-A7b — Reverse relation: bu paketi referanslayan AccountCompany'ler.
+  accountCompanies AccountCompany[]
+  /// WR-A7b — Reverse relation: bu paketi referanslayan vakalar.
+  cases            Case[]           @relation("CasePackage")
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@index([companyId, supportLevel])
+}
+
+/// WR-A7 — Package ↔ Product join. Composite PK prevents duplicate rows.
+/// Product RESTRICT: paketteki ürün hard-delete edilemez (önce paketten
+/// çıkar). Package CASCADE: paket silinince üyelikler kalkar.
+model PackageItem {
+  packageId String
+  productId String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@id([packageId, productId])
+  @@index([productId])
+}
+
+/// WR-Smart-Ticket Phase 1a — generic, per-tenant taxonomy table for
+/// Smart Ticket intake/closure dropdowns. NOT a replacement for
+/// CategoryDef / requestType / Product / etc.; this is an additive
+/// vocabulary surface so admins can configure UNIVERA-specific (and
+/// other tenants') opening/closure metadata without code changes.
+///
+/// taxonomyType (string; CHECK opsiyonel ileride) seçilen değerler:
+///   "platform"            — Açılış: Backoffice / Mobil
+///   "businessProcess"     — Açılış: İş Süreci (UNIVERA: 36 değer)
+///   "operationType"       — Açılış: İşlem Tipi (UNIVERA: 25 değer)
+///   "affectedObject"      — Açılış: Etkilenen Nesne (UNIVERA: 218 değer)
+///   "impact"              — Açılış: Etki (UNIVERA: 6 değer)
+///   "rootCauseGroup"      — Kapanış: Kök Neden Grubu (parent rows)
+///   "rootCauseDetail"     — Kapanış: Kök Neden Detayı (children of rootCauseGroup;
+///                                                       UNIVERA: 73 toplam parent+detay)
+///   "resolutionType"      — Kapanış: Çözüm Tipi (UNIVERA: 12 değer)
+///   "permanentPrevention" — Kapanış: Kalıcı Önlem (UNIVERA: 8 değer)
+///
+/// Hierarchy: yalnız rootCauseDetail rows parent (rootCauseGroup row id)
+/// taşır. Diğer tip rows parentId=null.
+///
+/// Scope: tüm rows tenant-scoped (companyId NOT NULL bu fazda). Global
+/// (companyId=null) ileride opsiyonel; şimdilik her tenant kendi seedini
+/// taşır. UNIVERA seed script ile XLSX'ten import edilir.
+///
+/// Constraints:
+///   - (companyId, taxonomyType, code) unique → idempotent re-seed
+///   - parent + child farklı taxonomyType taşır (rootCauseGroup → rootCauseDetail)
+///   - active/sortOrder UI ordering için; metadata JSON ileri kullanım
+model TaxonomyDef {
+  id           String   @id @default(cuid())
+  companyId    String
+  taxonomyType String
+  code         String
+  label        String
+  parentId     String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  /// Forward-compat: { kbAliases?: string[]; description?: string; … }
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children TaxonomyDef[] @relation("TaxonomyHierarchy")
+
+  @@unique([companyId, taxonomyType, code])
+  @@index([companyId, taxonomyType, isActive, sortOrder])
+  @@index([parentId])
+}
+
+/// WR-Smart-Ticket Phase 2a — Case çözüm adımları (L1 agent için).
+///
+/// Her satır bir somut adım: manuel olarak agent eklemiş olabilir veya
+/// External KB / AI `analyze` cevabındaki "AI Önerilen Adımlar"
+/// (`analysis.suggestedSteps`) bölümünden import edilmiş olabilir. **Bu
+/// fazda yalnız suggested steps import edilir**: root cause hypotheses,
+/// customer reply draft, engineer handoff, similar records ve raw response
+/// **bilinçli olarak göz ardı edilir**.
+///
+/// Hayat döngüsü: suggested → tried → worked | not_worked | skipped.
+/// outcomeAt/outcomeByUserId terminal status (worked/not_worked/skipped)
+/// kararı verildiğinde server tarafında stamplenir.
+///
+/// Idempotency: aynı (caseId, source='ai_suggested_step', sourceRef)
+/// kombinasyonu unique → re-run import duplicate yaratmaz. sourceRef
+/// upstream'den gelmiyorsa repository tarafında normalized text üzerinden
+/// deterministic hash ile üretilir.
+model CaseSolutionStep {
+  id              String    @id @default(cuid())
+  caseId          String
+  /// Multi-tenant izolasyon — DAİMA case.companyId'den türetilir; client
+  /// override edemez (route handler scope guard'ı body'deki companyId'i
+  /// görmezden gelir).
+  companyId       String
+  /// 1-based; aynı case içinde benzersiz değil — sadece sıralama için.
+  stepIndex       Int
+  /// "ai_suggested_step" | "manual" | "external_kb" | "similar_case"
+  /// (enum yerine string tutulur: ileride yeni source eklemek için
+  /// migration gerekmesin; route + repo whitelist kontrol eder).
+  source          String
+  /// AI/KB step'in upstream stable id'si veya repo tarafında üretilen
+  /// deterministic hash (text+description SHA-256 ilk 16 karakter).
+  sourceRef       String?
+  sourceTitle     String?
+  title           String
+  description     String?
+  /// "suggested" | "tried" | "worked" | "not_worked" | "skipped"
+  status          String    @default("suggested")
+  note            String?
+  triedAt         DateTime?
+  triedByUserId   String?
+  outcomeAt       DateTime?
+  outcomeByUserId String?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Re-run import idempotency'i — aynı case + AI sourceRef = tek satır.
+  /// source='manual' için sourceRef NULL olduğundan multiple satır izin verilir.
+  @@unique([caseId, source, sourceRef])
+  @@index([caseId, stepIndex])
+  @@index([caseId, status])
+  @@index([companyId])
+  @@index([source, sourceRef])
+}
+
+model Team {
+  id                  String       @id @default(cuid())
+  name                String
+  description         String?
+  // Multi-tenant izolasyon: her takım tek bir şirkete bağlı (holding modeli).
+  // listQueries: WHERE companyId IN req.user.allowedCompanyIds.
+  companyId           String
+  isActive            Boolean      @default(true)
+  /// WR-A5 / PM-03 — Takımın varsayılan destek seviyesi. Case create cascade'inde
+  /// (assignedPersonId yokken) kullanılır. Mevcut takımlar default L1.
+  defaultSupportLevel SupportLevel @default(L1)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  company Company  @relation(fields: [companyId], references: [id])
+  members Person[]
+  cases   Case[]
+
+  @@index([companyId])
+}
+
+model Person {
+  id           String       @id @default(cuid())
+  name         String
+  email        String?
+  teamId       String?
+  isActive     Boolean      @default(true)
+  /// WR-B1 / PM-03 — Takım lideri bayrağı. Phase 2'de escalation hedef seçiminde
+  /// hint sinyali; bu PR'da yalnız Admin toggle + smoke invariant.
+  isTeamLead   Boolean      @default(false)
+  /// WR-A5 / PM-03 — Kişinin destek seviyesi. Case create cascade kaynağı.
+  /// Default L1; rol-bazlı seed dağılımı (Agent L1, team lead L2, Admin Expert).
+  supportLevel SupportLevel @default(L1)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  team                          Team?                      @relation(fields: [teamId], references: [id])
+  cases                         Case[]                     @relation("CaseAssignedPerson")
+  /// WR-D4 Phase 1 — Policies whose approver is this specific person.
+  resolutionApprovalPolicies    ResolutionApprovalPolicy[] @relation("ResolutionApprovalPolicyApprover")
+  /// WR-D4 Phase 1 — Approval cycles where this person is the resolved approver.
+  resolutionApprovalsAsApprover CaseResolutionApproval[]   @relation("CaseResolutionApprovalApprover")
+}
+
+model ThirdParty {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cases Case[]
+}
+
+model DocumentType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// CategoryDef — kategori + alt kategori (self-relation ile parent/child)
+model CategoryDef {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  parentId    String?
+  companyId   String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children CategoryDef[] @relation("CategoryHierarchy")
+  company  Company?      @relation(fields: [companyId], references: [id])
+
+  @@index([parentId])
+  @@index([companyId])
+}
+
+model OfferedSolutionDef {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  caseOffers CaseOfferedSolution[]
+}
+
+// SLAPolicy — 5-tuple eşleşme: company + productGroup + category + subCategory + requestType
+model SLAPolicy {
+  id              String          @id @default(cuid())
+  companyId       String
+  companyName     String
+  productGroup    String
+  categoryName    String
+  subCategoryName String
+  requestType     CaseRequestType
+  responseHours   Int
+  resolutionHours Int
+  description     String?
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, productGroup, categoryName, subCategoryName, requestType])
+}
+
+// ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
+model ChecklistTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  companyId    String
+  companyName  String
+  productGroup String
+  categoryName String
+  description  String?
+  /// CaseChecklistItem[] — { id, label, required, isActive }
+  items        Json
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, productGroup, categoryName])
+}
+
+// ============================================================
+// Vaka çekirdek tabloları
+// ============================================================
+
+model Case {
+  id         String @id @default(cuid())
+  caseNumber String @unique
+
+  title       String
+  description String
+
+  caseType          CaseType
+  status            CaseStatus   @default(Acik)
+  priority          CasePriority
+  origin            CaseOrigin
+  originDescription String?
+
+  // Şirket / Müşteri (denormalized — ad alanları arşiv için)
+  companyId   String
+  companyName String
+  // Phase C2: accountId nullable — Agent müşteriyi tanıyamadığında vaka
+  // "müşterisiz" açılabilir; Supervisor/Admin sonra eşleştirir.
+  accountId   String?
+  accountName String?
+
+  // WR-A4 / PM-04 — Proje bazlı vaka takip (UNIVERA core).
+  // AccountCompany üzerinden bağlı; Account-level değil. Mevcut tüm vakalarda
+  // null kalır. CompanySettings.projectsRequired=true tenant'larda Case create
+  // sırasında accountId varsa accountProjectId zorunlu olur (app-layer check).
+  accountProjectId   String?
+  accountProjectName String?
+
+  // Sınıflandırma (denormalized — kategori adları)
+  category     String
+  subCategory  String
+  requestType  CaseRequestType
+  /// Legacy free-text productGroup. WR-A7b sonrası yeni vakalarda productId/productName tercih edilir;
+  /// mevcut vakalar korunur, otomatik backfill yok.
+  productGroup String?
+
+  // WR-A7b / PM-05 — Catalog entegrasyonu. productId/packageId opsiyonel referans;
+  // productName/packageName snapshot (arşiv için, catalog silinse de korunur).
+  // Cross-table invariants DI.1-DI.6 app-layer'da enforce edilir.
+  productId   String?
+  productName String?
+  packageId   String?
+  packageName String?
+
+  // Atama (FK + denormalized name)
+  assignedTeamId     String?
+  assignedTeamName   String?
+  assignedPersonId   String?
+  assignedPersonName String?
+
+  // Eskalasyon
+  escalationLevel EscalationLevel @default(Yok)
+
+  // WR-A5 / PM-03 — Vakanın destek seviyesi (L1/L2/L3/Expert). Create cascade:
+  //   assignedPersonId → Person.supportLevel
+  //   else assignedTeamId → Team.defaultSupportLevel
+  //   else default L1
+  // Phase 1 foundation: SLA/escalation tier-aware rewrite Phase 2'de.
+  supportLevel SupportLevel @default(L1)
+
+  // 3rd party
+  thirdPartyId   String?
+  thirdPartyName String?
+
+  // ProactiveTracking alanları
+  financialStatus  FinancialStatus?
+  productUsage     ProductUsage?
+  usageChangeAlert UsageChangeAlert?
+  responseLevel    ResponseLevel?
+
+  // Churn alanları
+  cancellationRequest  Boolean?
+  /// String[] — OfferedSolutionDef.id listesi
+  offeredSolutions     Json?
+  offerExpiryDate      DateTime?
+  offerOutcome         OfferOutcome?
+  offerRejectionReason String?
+  actionTaken          String?
+  churnResult          ChurnResult?
+  retentionStatus      RetentionStatus?
+  followUpDate         DateTime?
+
+  // Çözüm / iptal
+  resolutionNote     String?
+  cancellationReason String?
+
+  // WR-D4 Phase 1 — Resolution approval overlay. Source of truth is
+  // CaseResolutionApproval (audit table); this denormalized field is
+  // updated whenever an approval row is inserted or decided so listings
+  // and CaseDetail can render the current state without joining.
+  // null = no approval cycle has ever started on this case.
+  approvalState ApprovalState?
+
+  // WR-D4 Phase 2 — communication overlay. Tracks whether external/manual
+  // communication has fired for this case after a close/approval event.
+  // Phase 2 values: 'Pending' (rule matched, awaiting operator confirm),
+  // 'Manual' (operator confirmed), 'Dispatched' (Phase 4 active send), or
+  // 'NotRequired' (no rule matched). Free-string for forward compat.
+  communicationState String?
+
+  // WR-D4/D3 Phase 3 — per-case channel override. Operator can decide that
+  // for THIS case the customer should be reached on email even though
+  // AccountCompany prefers phone (or vice versa). Override is the channel
+  // preference only; the actual identifier still comes from the fallback
+  // chain (responseEmail → AccountContact.email → Account.email).
+  // Values mirror AccountCompany.preferredResponseChannel; free-string for
+  // forward compat with channels added later.
+  communicationChannelOverride String?
+
+  // SLA
+  slaResponseDueAt     DateTime?
+  slaResolutionDueAt   DateTime?
+  slaViolation         Boolean   @default(false)
+  slaPausedAt          DateTime?
+  slaPausedDurationMin Int       @default(0)
+  slaThirdPartyWaitMin Int       @default(0)
+
+  // Phase D — Müşteri Eşleştirme: accountId NULL ile açılan vakalar bu flag
+  // ile işaretlenir. Supervisor/Admin "Müşteri Eşleştirilmemiş" kuyruğunda
+  // görür ve PATCH /api/cases/:id/link-account ile bağlar. accountId set
+  // edilen vakalarda her zaman false.
+  customerMatchPending Boolean @default(false)
+
+  // Phase D Step 2 — müşterisiz vaka açılırken Agent'ın aldığı başvuran
+  // bilgileri (opsiyonel). Eşleştirme öneri motoru bu alanları yüksek-öncelik
+  // sinyal olarak kullanır. Analytics/AI payload'lara DAHIL EDİLMEZ.
+  customerContactName  String?
+  customerContactPhone String?
+  customerContactEmail String?
+  customerCompanyName  String?
+
+  // AI alanları
+  aiSummary                  String?
+  aiCategoryPrediction       String?
+  aiPriorityPrediction       CasePriority?
+  aiDuplicateScore           Float?
+  aiConfidenceScore          Float?
+  aiGeneratedFlag            Boolean       @default(false)
+  aiRejectReason             String?
+  aiCallBrief                String?
+  aiFollowupRecommendation   String?
+  aiRetentionOfferSuggestion String?
+
+  // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
+  /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
+  checklistItems Json?
+
+  // Custom Fields — şirket FieldDefinition'larına göre dinamik alanlar.
+  /// { [fieldKey: string]: any } — değer tipi FieldType'a bağlı
+  customFields Json?
+
+  // Snooze — vaka geçici olarak Inbox'tan kaldırılıp Later sekmesine taşınır.
+  // snoozePreviousStatus: erteleme öncesi statü; unsnooze/cron-wakeup'ta buna
+  // dönülür (3rdPartyBekleniyor gibi statüler korunsun diye). Yoksa Acik fallback.
+  snoozeUntil          DateTime?
+  snoozeReason         SnoozeReason?
+  snoozePreviousStatus CaseStatus?
+
+  // QA Skor — Faz 1.5 Madde 4 (Smart QA Lite). Kapatılmış vakalarda AI 3 kriter
+  // üzerinden 1-5 puan üretir + kısa feedback. null = henüz skorlanmadı (cron
+  // sıraya girmemiş veya Cozuldu değil).
+  qaEmpathyScore Int?
+  qaClarityScore Int?
+  qaSpeedScore   Int?
+  qaFeedback     String?
+  qaScoredAt     DateTime?
+
+  // Aktarım sayacı (FAZ 2 §20.2 — Vaka Aktarımı). Her başarılı transfer
+  // sonrası +1; >=2 olduğunda supervisor uyarısı + AI kök neden analizi
+  // tetiklenir. CaseTransfer kayıtları tam audit izi tutar.
+  transferCount Int @default(0)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  // Relations
+  company        Company         @relation(fields: [companyId], references: [id])
+  account        Account?        @relation(fields: [accountId], references: [id])
+  accountProject AccountProject? @relation(fields: [accountProjectId], references: [id])
+  assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id])
+  assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
+  thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id])
+  /// WR-A7b — Catalog Product referansı (opsiyonel).
+  product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: Restrict)
+  /// WR-A7b — Catalog Package referansı (opsiyonel).
+  package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: Restrict)
+
+  notes                  CaseNote[]
+  attachments            CaseAttachment[]
+  history                CaseActivity[]
+  callLogs               CaseCallLog[]
+  caseOffers             CaseOfferedSolution[]
+  approvals              CaseApproval[]
+  /// WR-D4 Phase 1 — Per-case resolution approval cycles (immutable history).
+  resolutionApprovals    CaseResolutionApproval[]
+  /// WR-D4 Phase 2 — Per-case notification dispatch log (rule engine output).
+  notificationDispatches NotificationDispatch[]
+  notifications          CaseNotification[]
+  aiSuggestions          AISuggestion[]
+  mentions               CaseMention[]
+  reminders              CaseReminder[]
+  transfers              CaseTransfer[]
+  watchers               CaseWatcher[]
+  // Case A → linkedCaseId: A "outgoing" links (CaseLinkSource).
+  // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
+  outgoingLinks          CaseLink[]               @relation("CaseLinkSource")
+  incomingLinks          CaseLink[]               @relation("CaseLinkTarget")
+  /// WR-Smart-Ticket Phase 2a — L1 agent çözüm adımları (manual + AI önerisi).
+  solutionSteps          CaseSolutionStep[]
+
+  @@index([accountId])
+  @@index([accountProjectId])
+  @@index([companyId])
+  @@index([assignedPersonId])
+  @@index([assignedTeamId])
+  @@index([status])
+  @@index([caseType])
+  @@index([createdAt])
+  @@index([slaResolutionDueAt])
+  @@index([slaResponseDueAt])
+  @@index([snoozeUntil])
+  // Analytics dashboard composite indexler (Operations Intelligence Phase 1):
+  // companyId + tarih aralığı + statü/team/category hot path'leri için.
+  // Mevcut tek-sütun index'lere ek; downtime'sız additive.
+  @@index([companyId, createdAt])
+  @@index([companyId, status])
+  @@index([companyId, assignedTeamId])
+  @@index([companyId, category, subCategory])
+  @@index([companyId, resolvedAt])
+  // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
+  @@index([companyId, supportLevel])
+  // WR-A7b — Catalog filter / report path'leri için.
+  @@index([companyId, productId])
+  @@index([companyId, packageId])
+}
+
+// CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
+// gelecekte hatırlamak istediğinde bu kayıt oluşur. Cron veya kullanıcı oturumu
+// tarafından remindAt anında bildirim üretilir; sentAt sıfırlanma anına işaret eder.
+//
+// caseId opsiyonel — vakaya bağlı değil de kişisel bir notu hatırlatmak için
+// boş bırakılabilir (örn. "Aylık raporları gözden geçir").
+//
+// companyId NOT NULL — Case'den denormalize ya da vakasız reminder'da
+// kullanıcının ilk allowedCompanyId'sinden dolar. Multi-tenant scope filter
+// JOIN'siz çalışabilsin diye (Faz 1.5 child denorm pattern'i).
+model CaseReminder {
+  id        String    @id @default(cuid())
+  caseId    String?
+  userId    String
+  companyId String
+  remindAt  DateTime
+  message   String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, remindAt])
+  @@index([caseId])
+  @@index([companyId])
+}
+
+// CaseActivity — her değişiklik kaydı (audit trail)
+// companyId Case'den denormalize — top-level audit/raporlama sorgularında
+// JOIN gerektirmesin, multi-tenant scope filter doğrudan uygulansın.
+model CaseActivity {
+  id         String                 @id @default(cuid())
+  caseId     String
+  companyId  String
+  action     String // human-readable
+  actionType CaseHistoryActionType?
+  fieldName  String?
+  fromValue  String?
+  toValue    String?
+  note       String?
+  actor      String
+  at         DateTime               @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([at])
+}
+
+model CaseNote {
+  id           String         @id @default(cuid())
+  caseId       String
+  companyId    String
+  authorName   String
+  // authorId — User.id; reaksiyon/yanıt bildirimleri için gerekir.
+  // Nullable: eski notlarda boş, yeni eklenenlerde dolu.
+  authorId     String?
+  content      String
+  visibility   NoteVisibility @default(Internal)
+  parentNoteId String?
+  replyCount   Int            @default(0)
+  createdAt    DateTime       @default(now())
+
+  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  parent    CaseNote?          @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: SetNull)
+  replies   CaseNote[]         @relation("NoteReplies")
+  reactions CaseNoteReaction[]
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([parentNoteId])
+}
+
+// CaseNoteReaction — bir nota (top-level veya reply) emoji reaksiyonu.
+// Sabit whitelist (UI seviyesinde + BFF seviyesinde dogrulanir):
+// "thumbs_up" | "eyes" | "check" | "important" | "thanks"
+// Unique (noteId, userId, emoji) — bir kullanici ayni emoji'yi iki kez veremez;
+// ikinci tiklamada toggle remove yapilir.
+// onDelete Cascade — note silinirse reaksiyonlar da gider.
+model CaseNoteReaction {
+  id        String   @id @default(cuid())
+  noteId    String
+  userId    String
+  companyId String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  note CaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, userId, emoji])
+  @@index([noteId])
+  @@index([userId])
+  @@index([companyId])
+}
+
+// MetricQueryAudit — Operations Intelligence Dashboard Phase 1.
+// Her analytics overview/drilldown/export çağrısı bir audit satırı bırakır.
+// HR/audit talepleri için 1 yıl+ retention (cleanup cron Phase 5+).
+// docs/OPERATIONS_DASHBOARD_DESIGN.md §2.6.6'da detay.
+model MetricQueryAudit {
+  id                String   @id @default(cuid())
+  userId            String
+  userRole          String // snapshot — rol o anki haliyle saklanır
+  endpoint          String // 'overview' | 'drilldown' | 'export' | 'ai-insights' vs.
+  scopeFingerprint  String // hash(scope.companyIds + teamIds + personIds)
+  scopeKind         String // 'self' | 'team' | 'company' | 'cross-company'
+  filterFingerprint String // hash(appliedFilters)
+  formulaVersion    String // metric definition versiyonu (v1 sabit)
+  generatedAt       DateTime @default(now())
+  durationMs        Int
+  recordsScanned    Int? // approximate; Phase 1 için opsiyonel
+  responseHash      String? // opsiyonel — sonraki replay/diff için
+
+  @@index([userId, generatedAt])
+  @@index([endpoint, generatedAt])
+  @@index([scopeFingerprint])
+}
+
+model CaseAttachment {
+  id         String   @id @default(cuid())
+  caseId     String
+  companyId  String
+  fileName   String
+  fileSize   Int
+  mimeType   String
+  fileUrl    String? // Supabase Storage URL (mock'ta dataUrl)
+  uploadedBy String
+  uploadedAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+}
+
+model CaseCallLog {
+  id                  String          @id @default(cuid())
+  caseId              String
+  companyId           String
+  callDate            DateTime
+  durationMin         Int
+  callDisposition     CallDisposition
+  callOutcome         CallOutcome
+  description         String?
+  callerId            String
+  callerName          String
+  nextFollowupDate    DateTime?
+  lastInteractionDate DateTime?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([callDate])
+  @@index([nextFollowupDate])
+}
+
+// CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)
+model CaseOfferedSolution {
+  id              String       @id @default(cuid())
+  caseId          String
+  companyId       String
+  solutionDefId   String
+  offeredAt       DateTime     @default(now())
+  offeredBy       String
+  outcome         OfferOutcome @default(Beklemede)
+  expiryDate      DateTime?
+  rejectionReason String?
+
+  case     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id])
+
+  @@index([caseId])
+  @@index([companyId])
+}
+
+// CaseApproval — Supervisor onay akışı
+model CaseApproval {
+  id             String           @id @default(cuid())
+  caseId         String
+  companyId      String
+  approvalType   String // "ResolveCritical", "EscalateDirector", vb.
+  requestedBy    String
+  requestedAt    DateTime         @default(now())
+  decision       ApprovalDecision @default(Bekliyor)
+  decidedBy      String?
+  decidedAt      DateTime?
+  decisionReason String? // Onay/red gerekçesi (red için zorunlu)
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([decision])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WR-D4 Phase 1 — Resolution Approval Foundation
+// Internal approval governance before a case can be closed when a
+// matching ResolutionApprovalPolicy exists. No customer communication
+// in Phase 1 — that lives in Phase 2+ (NotificationRule/Template/
+// Dispatch). See docs/planning_cards/WR-D4-D3-...md §16 Phase 1.
+// ═══════════════════════════════════════════════════════════════════
+
+enum ApprovalState {
+  Pending
+  Approved
+  Rejected
+  Cancelled
+}
+
+enum ApproverType {
+  TeamLead // Resolved as Person where teamId=case.assignedTeamId AND isTeamLead=true
+  AssignedTeamLead // Alias for TeamLead — clearer semantics in admin UI
+  Supervisor // Any active Supervisor in case.companyId
+  Admin // Any active Admin in case.companyId
+  SystemAdmin // Global override (no companyId scope check)
+  SpecificPerson // Use ResolutionApprovalPolicy.approverPersonId
+}
+
+enum RejectionBehavior {
+  ReturnToAssignee // Case stays with current assignee; note prepended
+  ReturnToTeam // assignedPersonId cleared; assignedTeamId kept
+  Escalate // status → Eskalasyon; escalationReason = rejection
+}
+
+/// WR-D4 — Per-tenant policy: when does a case require approval before
+/// closing, and who approves it. Phase 1 supports companyId scope +
+/// optional matchScope JSON filters (category/subCategory/priority/
+/// supportLevel/teamId). Soft-disable via isActive=false; hard delete
+/// not supported (audit trail).
+model ResolutionApprovalPolicy {
+  id                String            @id @default(cuid())
+  companyId         String
+  name              String
+  description       String?
+  isActive          Boolean           @default(true)
+  /// Lower number wins on match. Default 100.
+  sortOrder         Int               @default(100)
+  /// { category?, subCategory?, priority?, supportLevel?, teamId? }
+  /// All null = match-all. App-layer JSON filtering (MSSQL portable).
+  matchScope        Json
+  approverType      ApproverType
+  /// Required when approverType=SpecificPerson; else null.
+  approverPersonId  String?
+  /// Default false. When false, the submitter cannot also be the
+  /// resolved approver (submit returns 400 self_approval_blocked).
+  allowSelfApprove  Boolean           @default(false)
+  rejectionBehavior RejectionBehavior @default(ReturnToAssignee)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  createdByUserId   String?
+
+  company        Company @relation(fields: [companyId], references: [id])
+  approverPerson Person? @relation("ResolutionApprovalPolicyApprover", fields: [approverPersonId], references: [id])
+
+  approvals CaseResolutionApproval[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, sortOrder])
+}
+
+/// WR-D4 — A single approval cycle for a case. Immutable history: a
+/// rejected approval stays; reopen creates a new row. Snapshot fields
+/// (policyNameSnapshot) preserve audit even when the policy is later
+/// edited or deactivated.
+model CaseResolutionApproval {
+  id                       String        @id @default(cuid())
+  caseId                   String
+  companyId                String
+  policyId                 String?
+  policyNameSnapshot       String
+  state                    ApprovalState @default(Pending)
+  submittedByUserId        String
+  submittedAt              DateTime      @default(now())
+  /// Agent's resolution summary text. Becomes audit at submit time.
+  resolutionSummary        String
+  /// Optional draft message intended for the customer. Phase 1: not
+  /// sent anywhere; surfaces in approver's preview only.
+  customerMessageDraft     String?
+  /// Snapshot of the resolved approver at submit time. Used to filter
+  /// approver inboxes and to verify authority on approve/reject.
+  expectedApproverPersonId String?
+  decidedByUserId          String?
+  decidedAt                DateTime?
+  /// Required when state=Rejected. Free-text reason shown to submitter.
+  rejectionReason          String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  case             Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  policy           ResolutionApprovalPolicy? @relation(fields: [policyId], references: [id])
+  expectedApprover Person?                   @relation("CaseResolutionApprovalApprover", fields: [expectedApproverPersonId], references: [id])
+
+  @@index([caseId])
+  @@index([companyId, state])
+  @@index([expectedApproverPersonId, state])
+  @@index([caseId, state])
+}
+
+// CaseNotification — bildirim logları
+model CaseNotification {
+  id        String              @id @default(cuid())
+  caseId    String
+  companyId String
+  eventType String // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
+  channel   NotificationChannel
+  recipient String // Person.id veya email
+  payload   Json? // Bildirim içeriği snapshot
+  sentAt    DateTime            @default(now())
+  readAt    DateTime?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([recipient, readAt])
+}
+
+// KnowledgeSource — Faz 1.5 Madde 6.
+// "AI neye bakıyor?" sorusunu şeffaf hale getiren admin kayıt defteri.
+// Ne otomatik ingestion ne embedding — sadece bilgi kaynağı kataloğu.
+// `contentCount` admin'in rapor ettiği veya seed sırasında ilgili tablodan
+// (Case, SLAPolicy, ChecklistTemplate, CategoryDef) sayılan değer.
+model KnowledgeSource {
+  id           String              @id @default(cuid())
+  companyId    String
+  name         String
+  sourceType   KnowledgeSourceType
+  contentCount Int                 @default(0)
+  description  String?
+  isActive     Boolean             @default(true)
+  lastUpdated  DateTime            @default(now())
+  createdAt    DateTime            @default(now())
+
+  @@index([companyId])
+}
+
+// QAScoreLog — Faz 1.5 Madde 4 (Smart QA Lite).
+// Her kapatılmış vakaya bir kez AI 3 kriter (empati/netlik/hız) puanlar.
+// Case tablosunda da snapshot tutulur (qaXxxScore alanları); bu tablo ek
+// audit + per-agent rapor için. caseId @unique → tek vaka tek log.
+model QAScoreLog {
+  id        String   @id @default(cuid())
+  caseId    String   @unique
+  companyId String
+  scoredAt  DateTime @default(now())
+  empathy   Int
+  clarity   Int
+  speed     Int
+  feedback  String?
+
+  @@index([companyId])
+  @@index([companyId, scoredAt])
+}
+
+// PatternAlert — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
+// Cron her 15 dk son 60 dk'daki vakaları (companyId, category) ile gruplar;
+// 5+ vaka varsa active alarm yarat. Yönetici dismiss eder. Read-only mode:
+// otomatik parent vaka açma yok — sadece sinyal.
+model PatternAlert {
+  id            String             @id @default(cuid())
+  companyId     String
+  category      String
+  caseCount     Int
+  windowMinutes Int                @default(60)
+  detectedAt    DateTime           @default(now())
+  caseIds       Json // string[] — tetikleyici vaka id'leri
+  status        PatternAlertStatus @default(active)
+  dismissedBy   String? // User.id
+  dismissedAt   DateTime?
+
+  @@index([companyId])
+  @@index([companyId, detectedAt])
+  @@index([status])
+}
+
+// AIUsageLog — Faz 1.5 Madde 7.
+// Her AI endpoint çağrısı için bir log satırı: kabul/red, yanıt süresi,
+// token sayısı, kullanıcı + vaka referansı. ROI panosu (Analitik → AI Kullanımı)
+// bu logdan agrege istatistik üretir. companyId zorunlu — multi-tenant scope.
+//
+// caseId/userId nullable (örn. dashboard önizlemesi gibi vaka-bağımsız çağrılar
+// için), accepted nullable (kullanıcı henüz uygula/yoksay tıklamadı), tokenCount
+// nullable (provider yanıtında token sayısı dönmeyebilir).
+model AIUsageLog {
+  id             String   @id @default(cuid())
+  companyId      String
+  endpoint       String // 'suggest-category' | 'draft-resolution' | 'churn-conversion' | 'qa-score' | 'other'
+  caseId         String?
+  userId         String?
+  accepted       Boolean? // null = kullanıcı kararı bekliyor (uygula/yoksay)
+  responseTimeMs Int?
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([endpoint])
+}
+
+// CaseMention — Faz 1.5 Madde 3.
+// Notlarda @mention edilen kullanıcılar için audit + bildirim kaydı.
+// noteId CaseNote.id; not silinirse mention satırı kalır (raporlama/audit).
+// companyId zorunlu — multi-tenant scope filter (top-level "kullanıcının
+// PARAM mentionları" sorgusu için JOIN gerektirmez).
+//
+// Spec §4'teki `sourceType` (note | comment_reply) bu fazda atlanıyor:
+// yalnızca CaseNote desteği. comment-reply geldiğinde tablo yapısı
+// `sourceType + sourceId` olarak yeniden modellenir (migration ile).
+model CaseMention {
+  id              String    @id @default(cuid())
+  caseId          String
+  noteId          String
+  companyId       String
+  mentionedUserId String // User.id — auth identity (UserCompany erişim sahibi)
+  mentionedBy     String // User.id — etiketleyen kullanıcı
+  seenAt          DateTime? // null = henüz görülmedi → header bell badge
+  createdAt       DateTime  @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([mentionedUserId])
+  @@index([companyId])
+}
+
+// AISuggestion — AI önerilerinin audit kaydı
+model AISuggestion {
+  id              String   @id @default(cuid())
+  caseId          String
+  companyId       String
+  suggestionType  String // "category", "priority", "resolution", vb.
+  suggestedValue  String
+  confidenceScore Float?
+  accepted        Boolean? // null=henüz değerlendirilmedi, true=uygula, false=yoksay
+  rejectReason    String?
+  createdAt       DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+}
+
+// CaseTransfer — FAZ 2 §20.2 (Vaka Aktarımı).
+// Bir vaka takım → takım veya kişi → kişi devredildiğinde tam audit izi
+// tutulur. AI önerisi varsa (suggestedTeam + reasonCode + confidence)
+// kabul edildi/edilmedi telemetrisi için snapshot alınır.
+//
+// transferCount Case üzerinde @default(0); her satır ekleme +1 ile birlikte
+// gider. 2+ olduğunda supervisor notification + kök neden analizi tetikler.
+model CaseTransfer {
+  id        String @id @default(cuid())
+  caseId    String
+  companyId String
+
+  fromTeamId   String?
+  toTeamId     String
+  fromPersonId String?
+  toPersonId   String?
+
+  reason        String
+  reasonCode    String?
+  transferredBy String
+  transferredAt DateTime @default(now())
+
+  // AI önerisi snapshot (uygulandı/yok sayıldı analizi için)
+  aiSuggestedTeamId String?
+  aiSuggestedReason String?
+  aiReasonCode      String?
+  aiConfidence      Float?
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([companyId])
+  @@index([companyId, transferredAt])
+}
+
+// CaseWatcher — FAZ 2 Collab. Vaka takipçileri; vakada değişiklik olunca
+// (status, atama, not vs.) CaseNotification yazılır → bell badge + watcher
+// inbox (ileri faz). Bir kullanıcı bir vakaya bir kez watcher olabilir;
+// addedBy = self-join veya başkası (Supervisor) tarafından eklendiyse User.id.
+// companyId zorunlu — multi-tenant scope (top-level "benim watcher'larım"
+// sorgusu için JOIN gerektirmez).
+model CaseWatcher {
+  id        String   @id @default(cuid())
+  caseId    String
+  userId    String
+  companyId String
+  addedBy   String
+  addedAt   DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, userId])
+  @@index([userId])
+  @@index([companyId])
+  @@index([caseId])
+}
+
+// CaseLink — FAZ 2 Collab. Vakalar arası bağlantı (3 tip):
+//   - Related:   genel ilişkili (yumuşak referans)
+//   - Duplicate: aynı sorun (symmetric — A↔B her iki yön de yazılır)
+//   - Parent:    bu vaka, hedef vakanın parçası (asymmetric — A → B = A is child)
+//
+// Symmetric davranış Duplicate için route layer'ında ele alınır
+// (her iki yönde de satır yazılır). Schema'da @@unique([caseId,
+// linkedCaseId, linkType]) ile dublike koruma; aynı yönde aynı tip iki
+// kez eklenemez.
+//
+// companyId zorunlu — multi-tenant scope. Cross-tenant link route layer'ında
+// reddedilir (kaynak ve hedef vakanın companyId'leri eşit olmalı).
+model CaseLink {
+  id           String       @id @default(cuid())
+  caseId       String
+  linkedCaseId String
+  linkType     CaseLinkType
+  companyId    String
+  createdBy    String
+  createdAt    DateTime     @default(now())
+
+  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: Cascade)
+  linkedCase Case @relation("CaseLinkTarget", fields: [linkedCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, linkedCaseId, linkType])
+  @@index([caseId])
+  @@index([linkedCaseId])
+  @@index([companyId])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WR-A8 — Data Integration Studio (Account import audit)
+// ─────────────────────────────────────────────────────────────────
+//
+// ImportJob + ImportJobRow ham satır, normalize edilmiş satır, eski/yeni alan
+// snapshot'larını saklar. Rollback yetkisi için yeterli denetim verisi taşır.
+// Şirket bazlı izole; Admin yalnızca kendi şirketinin job'larını görür/işler.
+
+model ImportJob {
+  id                  String    @id @default(cuid())
+  companyId           String
+  /// Phase 1: "account". İleride "case", "product" vb. eklenebilir.
+  targetType          String    @default("account")
+  /// "file" | "api"
+  sourceType          String
+  /// API kaynağı için kullanıcı tanımlı isim ya da dosya adı.
+  sourceName          String?
+  /// API kaynağı için (sadece host + path, secret'sız). Audit/debug için.
+  sourceUrlMasked     String?
+  fileName            String?
+  dataPath            String?
+  /// Hedef şema versiyonu (commit zamanı doğrulanır).
+  targetSchemaVersion String
+  /// "draft" | "validated" | "running" | "partial" | "completed" | "failed" | "rolled_back" | "rollback_partial"
+  status              String    @default("draft")
+  totalRows           Int       @default(0)
+  createCount         Int       @default(0)
+  updateCount         Int       @default(0)
+  skippedCount        Int       @default(0)
+  errorCount          Int       @default(0)
+  warningCount        Int       @default(0)
+  /// Auto-map önerileri, mapping snapshot, dry-run özeti vb.
+  summaryJson         Json?
+  /// WR-A8 Phase 2b — Customer 360 per-entity create/update/skip/error
+  /// breakdown. account targetType için null kalır (Phase 1 scalar count'lar
+  /// yeterli). Customer 360 için: { account: {...}, accountCompany: {...}, ... }.
+  entityCountsJson    Json?
+  createdByUserId     String?
+  createdAt           DateTime  @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+  rolledBackAt        DateTime?
+  rolledBackByUserId  String?
+  /// Phase D-tick — concurrent-tick lease. Bir tick acquire ettiğinde
+  /// leaseTickId set olur; release veya stale TTL (2dk) sonra null'a
+  /// döner. Sadece customer360 tick path'i yazar; Phase 1 import'ta hep
+  /// null. Additive + nullable: mevcut tüm satırlar dokunulmaz.
+  leaseTickId         String?
+  leaseAt             DateTime?
+  heartbeatAt         DateTime?
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rows    ImportJobRow[]
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([status])
+}
+
+model ImportJobRow {
+  id              String   @id @default(cuid())
+  importJobId     String
+  rowNumber       Int
+  /// "create" | "update" | "skip" | "error"
+  action          String   @default("skip")
+  /// "pending" | "processing" | "created" | "updated" | "skipped" | "error" | "rolled_back" | "rollback_error"
+  status          String   @default("pending")
+  /// WR-A8 Phase 2b — Customer 360 satırı hangi entity'ye ait:
+  /// "account" | "accountCompany" | "accountContact" | "accountAddress" | "accountProject".
+  /// Phase 1 satırları için null (legacy account-only); Phase 2b satırları için zorunlu.
+  entityType      String?
+  /// Parent satırın rowNumber'ı (child entity'ler için audit/UI navigation).
+  /// Yalnız Customer 360 child row'larında doludur (account null bırakır).
+  parentRowNumber Int?
+  /// Relationship resolve için kullanılan key snapshot'ı ("vkn:1234567890",
+  /// "companyCode:COMP-UNIVERA" vb.).
+  relationshipKey String?
+  /// Hangi Account'a denk geldi (update yolu) ya da yeni oluşturulan Account ID.
+  /// Phase 1 ile geriye uyumluluk: account row'ları için doludur.
+  accountId       String?
+  /// WR-A8 Phase 2b — polymorphic kayıt ID'si. accountId zaten account satırları
+  /// için doluyor; non-account entity'ler (Contact/Address/Project/AC) için
+  /// recordId Prisma kaydının id'sini taşır.
+  recordId        String?
+  /// Match key kullanıldı mı (VKN). Audit için.
+  matchKey        String?
+  errorsJson      Json?
+  warningsJson    Json?
+  /// Ham satır (kaynak alan adlarıyla).
+  rawJson         Json?
+  /// Normalize edilmiş satır (target field key'lerle).
+  normalizedJson  Json?
+  /// Update öncesi entity snapshot (rollback için).
+  beforeJson      Json?
+  /// Update/create sonrası entity snapshot.
+  afterJson       Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+  @@index([importJobId, status])
+  @@index([importJobId, entityType])
+  @@index([accountId])
+  @@index([recordId])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WR-D4/D3 Phase 2 — Notification Rule Engine
+// ═══════════════════════════════════════════════════════════════════
+//
+// Three new models added to model rule-based notifications without
+// any active external sending:
+//
+//   - NotificationRule:     event → audience + template + channel + mode
+//   - NotificationTemplate: subject/body with {{mustache}} variables
+//   - NotificationDispatch: immutable audit row per rule fire (snapshot)
+//
+// Active delivery (Phase 4) is intentionally out of scope here. The
+// `Active` value exists in DispatchMode for forward compatibility, but
+// the API blocks creating rules with `mode='Active'` until Phase 4.
+//
+// MSSQL portability: enums are Prisma-managed (string + check constraint
+// in MSSQL provider). Json fields = NVARCHAR(MAX). No PG-specific
+// features. App-layer JSON filtering only (no JSON_VALUE queries).
+//
+// See docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md
+// §5, §9, §11, §16.3 (Phase 2).
+
+enum DispatchChannel {
+  InApp // Operator notification (CaseNotification reused at app layer)
+  Email // Rendered email body; Phase 2 = manual confirm; Phase 4 = active send
+  ManualTask // Operator task panel — "phone this customer / send SMS manually"
+  Webhook // Phase 4+
+}
+
+enum DispatchMode {
+  LogOnly // Default Phase 2 — dispatch row created, no operator action expected
+  Manual // Operator manually confirms (copy/mailto/handled-externally)
+  Active // Phase 4 — actual send via provider; blocked at API layer in Phase 2
+}
+
+enum DispatchState {
+  Pending // Manual mode: awaiting operator confirm. Active mode: queued.
+  Sent // Manual confirm succeeded OR provider delivery confirmed (Phase 4).
+  Failed // Phase 4 provider error.
+  Suppressed // Idempotency dedup / rate-limit / customer opt-out.
+}
+
+/// WR-D4 Phase 2 — A rule maps an event + matching conditions to an
+/// audience + template + channel. Tenant-scoped. Soft-disable via
+/// isActive=false (hard delete breaks dispatch audit references).
+model NotificationRule {
+  id          String  @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(100)
+
+  /// Event identifier. Free-string for forward compat. Phase 2 values:
+  /// 'resolution_submitted', 'resolution_approved', 'resolution_rejected',
+  /// 'case_closed', 'case_reopened'.
+  event String
+
+  /// Optional JSON filter applied at scan time. Whitelist: category,
+  /// subCategory, priority, supportLevel, teamId. Empty {} = no filter,
+  /// only valid when isMatchAll=true (admin must explicitly opt in).
+  conditions Json
+
+  /// Safety guard: when conditions={} the admin must check "Match every
+  /// case" explicitly. Prevents accidental broadcast rules.
+  isMatchAll Boolean @default(false)
+
+  /// Audience definition (1-N rows in same rule). Each item:
+  /// `{ type: 'assignee'|'team_lead'|'supervisor'|'admin'|'customer_primary_contact'|'static_email', targetValue?: string }`
+  audience Json
+
+  /// FK to NotificationTemplate. Required — every rule renders a message.
+  templateId String
+
+  channel DispatchChannel
+  mode    DispatchMode    @default(LogOnly)
+
+  /// Idempotency window in minutes. Same (event, caseId, audienceIdentifier,
+  /// templateId) within this window → suppressed dispatch.
+  suppressDuplicateWithinMinutes Int?
+
+  /// Per-rule per-hour cap. App-layer SQL count check at dispatch time.
+  rateLimitPerHour Int?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUserId String?
+
+  company    Company                @relation(fields: [companyId], references: [id])
+  template   NotificationTemplate   @relation(fields: [templateId], references: [id])
+  dispatches NotificationDispatch[]
+
+  @@index([companyId, event, isActive])
+  @@index([companyId, sortOrder])
+  @@index([templateId])
+}
+
+/// WR-D4 Phase 2 — Reusable message templates. Subject + body with
+/// {{mustache}} variables resolved at dispatch time. Snapshot of the
+/// rendered content is stored on NotificationDispatch so template
+/// edits never rewrite history.
+model NotificationTemplate {
+  id          String  @id @default(cuid())
+  companyId   String
+  /// Stable key (e.g. 'approval_pending_to_lead'). Unique per tenant.
+  key         String
+  name        String
+  description String?
+
+  /// Phase 2 = always 'tr'. Phase 6 (i18n) introduces multi-language.
+  language String @default("tr")
+
+  subjectTemplate String
+  bodyTemplate    String
+
+  /// 'plain' or 'html'. Phase 2 default 'plain' (operator copies to
+  /// their mail client; HTML preview is for visual reference).
+  format String @default("plain")
+
+  /// UI badge — when true, rule using this template is flagged as
+  /// "customer-facing" so the admin double-checks audience.
+  isCustomerFacing Boolean @default(false)
+
+  /// Declared variables (e.g. ['case.number','account.name']). Preview
+  /// flags when subject/body references something NOT in this list.
+  requiredVariables Json
+
+  /// Bumped on every save. Stamped on dispatch as templateVersionSnapshot.
+  version Int @default(1)
+
+  isActive Boolean @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUserId String?
+
+  company    Company                @relation(fields: [companyId], references: [id])
+  rules      NotificationRule[]
+  dispatches NotificationDispatch[]
+
+  @@unique([companyId, key])
+  @@index([companyId, isActive])
+}
+
+/// WR-D4 Phase 2 — Immutable audit row per rule fire. Snapshot fields
+/// freeze the rendered content so template/rule edits never rewrite
+/// history. Manual confirmation stamps `confirmedByUserId`/`confirmedAt`
+/// + free-text `deliveryNote` (required at API layer).
+model NotificationDispatch {
+  id        String @id @default(cuid())
+  caseId    String
+  companyId String
+
+  event                   String
+  ruleId                  String?
+  ruleNameSnapshot        String
+  templateId              String?
+  templateKeySnapshot     String
+  templateVersionSnapshot Int
+
+  /// Resolved audience identity. `audienceType` is the rule audience kind
+  /// ('assignee', 'customer_primary_contact', etc.); `audienceIdentifier`
+  /// is the resolved value (personId, email, or 'unresolved').
+  audienceType       String
+  audienceIdentifier String
+
+  channel DispatchChannel
+  mode    DispatchMode
+  state   DispatchState   @default(Pending)
+
+  /// Rendered final subject + body — written at dispatch creation.
+  snapshotSubject String
+  snapshotBody    String
+
+  /// When state=Suppressed: 'duplicate_within_window' / 'rate_limited' /
+  /// 'no_channel' / 'customer_opted_out' / 'audience_unresolvable'.
+  suppressionReason String?
+
+  /// Idempotency key for the dedup partial unique index. Format:
+  /// `${companyId}:${event}:${caseId}:${audienceIdentifier}:${templateId}:${windowBucket}`
+  idempotencyKey String?
+
+  /// Manual confirmation fields (mode=Manual).
+  confirmedByUserId String?
+  confirmedAt       DateTime?
+  /// Required at API layer when transitioning to mode=Manual / state=Sent.
+  deliveryNote      String?
+
+  /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
+  dispatchedAt  DateTime?
+  failureReason String?
+  attempts      Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  case     Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  company  Company               @relation(fields: [companyId], references: [id])
+  rule     NotificationRule?     @relation(fields: [ruleId], references: [id])
+  template NotificationTemplate? @relation(fields: [templateId], references: [id])
+
+  @@unique([idempotencyKey], map: "NotificationDispatch_idempotencyKey_unique")
+  @@index([caseId, createdAt(sort: Desc)])
+  @@index([companyId, event, createdAt(sort: Desc)])
+  @@index([companyId, state])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WR-ACTION-CENTER Phase 1 — Approval Visibility MVP
+// ═══════════════════════════════════════════════════════════════════
+//
+// Single table covering Phase 1's three approval-related kinds:
+//   - approval_pending           (resolved approver receives)
+//   - approval_decided           (original submitter FYI)
+//   - case_returned_to_assignee  (rejected → assignee revise)
+//
+// Polymorphic via objectType/objectId — no FK to CaseResolutionApproval
+// or Case so cascades stay simple and Phase 2+ kinds can use the same
+// table without touching schema. See
+// docs/planning_cards/WR-ACTION-CENTER-PHASE1-APPROVAL-VISIBILITY.md §4.
+
+enum ActionItemKind {
+  approval_pending
+  approval_decided
+  case_returned_to_assignee
+  // Forward-compat enum values reserved for future phases — NOT emitted
+  // in Phase 1:
+  case_assigned
+  case_transferred
+  case_sla_at_risk
+  case_sla_breach
+  mention
+  watcher_event
+  dispatch_manual_confirm
+  dispatch_review_needed
+  pattern_alert
+  manual_task
+  system_alert
+}
+
+enum ActionItemState {
+  Pending
+  InProgress
+  Snoozed
+  Done
+  Dismissed
+  Expired
+}
+
+model ActionItem {
+  id             String          @id @default(cuid())
+  companyId      String // tenant scope
+  userId         String // target user
+  personId       String? // optional Person snapshot (TeamLead routing)
+  kind           ActionItemKind
+  state          ActionItemState @default(Pending)
+  actionRequired Boolean         @default(true)
+
+  // Polymorphic reference (no FK so cascade behavior stays simple)
+  objectType String?
+  objectId   String?
+
+  // Denormalized snapshots for inbox rendering (avoid JOIN on list)
+  caseId     String?
+  caseNumber String?
+  caseTitle  String?
+
+  // Routing + dedup
+  generatedBy String? // 'policy:<id>' | 'system' | 'user:<id>'
+  groupKey    String?
+  dedupKey    String?
+  priority    Int     @default(50)
+
+  // Explainability — required, never empty
+  reasonLabel String
+
+  // Lifecycle timestamps
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  firstSeenAt  DateTime?
+  snoozedUntil DateTime?
+  doneAt       DateTime?
+  doneByUserId String?
+  doneOutcome  String? // 'approved' | 'rejected' | 'acknowledged'
+  closeNote    String?
+
+  // OD-073 — soft archive. Set by `actionItemArchive` cron 30 days
+  // after terminal state transition; never hard-deleted. Active inbox
+  // queries filter `archivedAt: null`.
+  archivedAt DateTime?
+
+  @@unique([dedupKey])
+  @@index([userId, state, createdAt(sort: Desc)])
+  @@index([userId, state, actionRequired])
+  @@index([companyId, kind, state])
+  @@index([objectType, objectId])
+  @@index([state, snoozedUntil])
+  @@index([state, updatedAt]) // archive cron scan
+}

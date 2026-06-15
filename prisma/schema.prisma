@@ -1,211 +1,47 @@
-// Varuna Case Management — Veri Modeli (PRODUCT_SPEC §15)
+// Varuna Case Management — Veri Modeli (MSSQL / on-prem)
 //
-// Mimari karar: schema MSSQL'e taşınabilir kalmalı. Bu yüzden:
-// - String ID + cuid() (autoincrement değil)
-// - Json tipi (Postgres'te jsonb, MSSQL'de nvarchar(max))
-// - Postgres-spesifik tip yok (TSVECTOR, ARRAY, vb.)
-// - Enum'lar Prisma enum (her iki DB'de desteklenir)
-//
-// MSSQL geçişinde sadece `provider = "sqlserver"` ve DATABASE_URL değişir.
+// Bu schema Postgres'ten SQL Server'a dönüştürülmüştür (Faz 1,
+// docs/MSSQL_ONPREM_PLAN_V2.md). Prisma'nın sqlserver connector'ı enum ve
+// Json tiplerini desteklemediği için:
+// - Eski Prisma enum alanları String'dir; geçerli ASCII değer setleri
+//   `// enum:<AdI>` yorumuyla işaretlidir, tek doğruluk kaynağı
+//   server/db/enumMap.js + prisma/enum-values.json'dur. DB tarafında
+//   kritik alanlar CHECK constraint ile korunur (baseline migration).
+// - Eski Json alanları String @db.NVarChar(Max)'tır; `// json` yorumuyla
+//   işaretlidir, okuma/yazma uygulama katmanında JSON.parse/stringify ister.
+// - Nullable kolon içeren unique'ler DB'de filtered index'tir
+//   (WHERE ... IS NOT NULL) — Postgres'in çoklu-NULL davranışı korunur.
+//   Bu index'ler baseline migration SQL'inde elle tanımlıdır; `migrate dev`
+//   bunları drift sanabilir, yeni migration'larda --create-only ile gözden geçir.
+// - Tüm FK'ler onDelete/onUpdate NoAction'dır (MSSQL multiple cascade path
+//   kısıtı); silme zincirleri uygulama/transaction katmanında yönetilir.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  // Supabase'in connection pooler'ı (port 6543) DDL desteklemez.
-  // Migration için direct connection (port 5432) gerekli.
-  directUrl = env("DIRECT_URL")
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================
-// Enum'lar — types.ts ile birebir
+// Enum'lar String'e dönüştü — değer setleri: prisma/enum-values.json
 // ============================================================
-
-enum CaseType {
-  GeneralSupport
-  ProactiveTracking
-  Churn
-}
-
-enum CaseStatus {
-  Acik              @map("Açık")
-  Incelemede        @map("İncelemede")
-  ThirdPartyWaiting @map("3rdPartyBekleniyor")
-  Eskalasyon
-  Cozuldu           @map("Çözüldü")
-  YenidenAcildi
-  IptalEdildi       @map("İptalEdildi")
-}
-
-enum CasePriority {
-  Low
-  Medium
-  High
-  Critical
-}
-
-enum CaseOrigin {
-  Telefon
-  Eposta  @map("E-posta")
-  Web
-  Chatbot
-  Diger   @map("Diğer")
-}
-
-enum CaseRequestType {
-  Bilgi
-  Oneri   @map("Öneri")
-  Talep
-  Sikayet @map("Şikayet")
-  Hata
-}
-
-enum EscalationLevel {
-  Yok
-  TakimLideri @map("TakımLideri")
-  Direktor    @map("Direktör")
-  UstYonetim  @map("ÜstYönetim")
-}
 
 /// Müşteri tipi — WR-A1 / PM-01. Bireysel/Kurumsal/Kamu/Vakıf-STK.
 /// TCKN bu enuma rağmen Account'a EKLENMEZ (A2'de privacy design sonrası).
-enum CustomerType {
-  Individual @map("Bireysel")
-  Corporate  @map("Kurumsal")
-  Government @map("Kamu")
-  NonProfit  @map("Vakıf-STK")
-}
 
 /// Proje statüsü — WR-A4 / PM-04 (AccountProject lifecycle).
-enum ProjectStatus {
-  Active
-  Passive
-  Completed
-  Cancelled
-}
 
 /// Adres tipi — WR-A3 / PM-02 (country-agnostic; type-bağlı default uniqueness app-layer).
-enum AddressType {
-  Billing
-  Shipping
-  Visit
-  Headquarters
-  Branch
-}
 
 /// Destek seviyesi — WR-A5 / PM-03 (Phase 1 foundation; SLA/routing entegrasyonu Phase 2).
 /// L1/L2 mevcut kullanım; L3/Expert future-proof.
-enum SupportLevel {
-  L1
-  L2
-  L3
-  Expert
-}
-
-enum NoteVisibility {
-  Internal
-  Customer
-}
-
-enum FinancialStatus {
-  Dusuk  @map("Düşük")
-  Orta
-  Yuksek @map("Yüksek")
-  Kritik
-}
-
-enum ProductUsage {
-  Yuksek @map("Yüksek")
-  Orta
-  Dusuk  @map("Düşük")
-  Yok
-}
-
-enum UsageChangeAlert {
-  Artis  @map("Artış")
-  Azalma
-  Sabit
-}
-
-enum ResponseLevel {
-  YuksekOncelik @map("Yüksek Öncelik")
-  OrtaOncelik   @map("Orta Öncelik")
-  DusukOncelik  @map("Düşük Öncelik")
-}
-
-enum CallDisposition {
-  Cevapladi        @map("Cevapladı")
-  Cevaplamadi      @map("Cevaplamadı")
-  NumaraHatali     @map("NumaraHatalı")
-  GorusmekIstemedi @map("GörüşmekIstemedi")
-  TekrarAranacak
-}
-
-enum CallOutcome {
-  Memnun
-  MemnunDegil @map("MemnunDeğil")
-  Tarafsiz    @map("Tarafsız")
-  Ulasilamadi @map("Ulaşılamadı")
-}
-
-enum OfferOutcome {
-  KabulEdildi
-  Reddedildi
-  Beklemede
-}
-
-enum ChurnResult {
-  IptalEdildi       @map("İptalEdildi")
-  DevamEdiyor
-  TeklifKabulEdildi
-}
-
-enum RetentionStatus {
-  Basarili    @map("Başarılı")
-  Basarisiz   @map("Başarısız")
-  DevamEdiyor
-}
-
-enum CaseHistoryActionType {
-  Transfer
-  StatusChange
-  FieldUpdate
-  ChecklistToggle
-  NoteAdded
-  NoteReplyAdded
-  CallLogAdded
-  FileUploaded
-  FileRemoved
-  CaseCreated
-  SLAApplied
-}
-
-enum ApprovalDecision {
-  Bekliyor
-  Onaylandi  @map("Onaylandı")
-  Reddedildi
-}
-
-enum NotificationChannel {
-  InApp
-  Email
-  SMS
-}
 
 // Spec §13 + Custom Fields/CompanySettings yetkisi için 6. rol.
 // SystemAdmin: platform-seviyesi yapılandırma (FieldDefinitions,
 // CompanySettings, admin tanım ekranları). Admin: tek-tenant operasyon.
-enum UserRole {
-  Agent
-  Backoffice
-  Supervisor
-  CSM
-  Admin
-  SystemAdmin
-}
 
 // Per-company role — UserCompany join table'da kullanılır. UserRole'dan
 // ayrı tutuldu: User.role sistem-seviyesi default rol (legacy + login akışı),
@@ -213,71 +49,41 @@ enum UserRole {
 // rolü olarak kalır; UserCompany'de görünmesi tüm şirketlere erişim demek
 // değil — verifyJwt'de User.role==='SystemAdmin' ise allowedCompanyIds
 // tüm şirketlerle dolduruluyor.
-enum CompanyRole {
-  Agent
-  Supervisor
-  Admin
-  SystemAdmin
-}
-
-enum FieldType {
-  Text
-  Number
-  Date
-  Select
-  Boolean
-  Textarea
-}
 
 // Vakanın neden ertelendiği — Inbox Later sekmesinde sebep ipucu için.
-enum SnoozeReason {
-  CustomerWillCall  @map("customer_will_call")
-  WaitingThirdParty @map("waiting_3rd_party")
-  Reminder          @map("reminder")
-}
 
 // PatternAlert durumu — Faz 1.5 Madde 5 (Bekçi rolü §5.5 örüntü tespiti).
-enum PatternAlertStatus {
-  active
-  dismissed
-}
 
 // CaseLink türü — FAZ 2 Collab. Vakalar arası bağlantı tipi.
 //   - Related:   genel ilişkili (yumuşak referans, symmetric değil)
 //   - Duplicate: aynı sorun (BFF symmetric davranış — A↔B her iki yön yazılır)
 //   - Parent:    bu vaka, hedef vakanın parçası (A → B = A is child of B)
-enum CaseLinkType {
-  Related
-  Duplicate
-  Parent
-}
 
 // KnowledgeSource türü — Faz 1.5 Madde 6 (Bilgi Kaynakları Kayıt Defteri).
 // AI'ın hangi veriden beslendiğini admin'e şeffaf gösteren kategoriler.
-enum KnowledgeSourceType {
-  PastCases // Geçmiş vakalar (Case tablosu)
-  ProductDocs // Ürün/kategori dokümanları (CategoryDef + manuel doc)
-  SLARules // SLA kuralları (SLAPolicy)
-  Checklists // Kontrol listeleri (ChecklistTemplate)
-  ManualEntry // Admin'in elle eklediği özel kayıtlar
-}
 
 // ============================================================
 // Lookup / referans tabloları
 // ============================================================
 
 // Spec §13 — Auth + RBAC.
-// id = Supabase Auth user UUID (sync). email Supabase ile sync.
+// Faz 3 (on-prem): Supabase Auth kaldırıldı — local e-posta/şifre + JWT.
+// id artık cuid (eski Supabase UUID bağı yok). passwordHash bcrypt.
 // Person ile ayrı: Person operasyonel kayıt (vaka atama hedefi),
 // User auth kimliği. personId opsiyonel FK ile bağlanabilir.
 model User {
-  id        String   @id // Supabase Auth UUID
-  email     String   @unique
-  fullName  String
-  role      UserRole @default(Agent)
-  isActive  Boolean  @default(true)
-  personId  String?  @unique
-  createdAt DateTime @default(now())
+  id                 String    @id @default(cuid()) @db.NVarChar(450)
+  email              String    @unique @db.NVarChar(255)
+  fullName           String @db.NVarChar(Max)
+  role               String @default("Agent") @db.NVarChar(50) // enum:UserRole
+  isActive           Boolean   @default(true)
+  personId           String?   @unique @db.NVarChar(450)
+  /// bcrypt hash; NULL = henüz şifre atanmamış (login reddedilir)
+  passwordHash       String?   @db.NVarChar(255)
+  /// Admin'in atadığı geçici şifreyle ilk girişte zorunlu değişim bayrağı
+  mustChangePassword Boolean   @default(false)
+  passwordUpdatedAt  DateTime?
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
   companies UserCompany[]
@@ -289,15 +95,15 @@ model User {
 // Liste sorguları req.user.allowedCompanyIds üzerinden filtrelenir;
 // SystemAdmin tüm şirketlere otomatik erişir (UserCompany kaydı gerekmez).
 model UserCompany {
-  id        String      @id @default(cuid())
-  userId    String
-  companyId String
-  role      CompanyRole @default(Agent)
+  id        String      @id @default(cuid()) @db.NVarChar(450)
+  userId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+  role      String @default("Agent") @db.NVarChar(50) // enum:CompanyRole
   isActive  Boolean     @default(true)
-  createdAt DateTime    @default(now())
+  createdAt DateTime    @default(dbgenerated("sysutcdatetime()"))
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([userId, companyId])
   @@index([userId])
@@ -305,10 +111,10 @@ model UserCompany {
 }
 
 model Company {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id        String   @id @default(cuid()) @db.NVarChar(450)
+  name      String   @unique @db.NVarChar(200)
   isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
   accounts                   Account[]
@@ -352,21 +158,21 @@ model Company {
 // Vaka kaydı sırasında bu tanımlara göre form alanları çıkar; değerler
 // Case.customFields JSON'una `{ fieldKey: value }` olarak yazılır.
 model FieldDefinition {
-  id           String    @id @default(cuid())
-  companyId    String
-  label        String
-  fieldKey     String // benzersiz tanımlayıcı (örn. "customer_segment")
-  fieldType    FieldType
-  caseType     CaseType? // null = tüm vaka tipleri
+  id           String    @id @default(cuid()) @db.NVarChar(450)
+  companyId    String @db.NVarChar(450)
+  label        String @db.NVarChar(Max)
+  fieldKey     String @db.NVarChar(100) // benzersiz tanımlayıcı (örn. "customer_segment")
+  fieldType    String @db.NVarChar(50) // enum:FieldType
+  caseType     String? @db.NVarChar(50) // null = tüm vaka tipleri // enum:CaseType
   isRequired   Boolean   @default(false)
   displayOrder Int       @default(0)
   /// Select için { value, label }[] dizisi; diğer tipler için null
-  options      Json?
+  options      String? @db.NVarChar(Max) // json
   isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime  @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([companyId, fieldKey])
   @@index([companyId, caseType, isActive])
@@ -374,11 +180,11 @@ model FieldDefinition {
 
 // Şirket başına UI/marka yapılandırması — multi-tenant beyaz etiket için.
 model CompanySettings {
-  companyId                   String   @id
-  logoUrl                     String?
-  primaryColor                String? // hex (#7C3AED gibi)
-  appName                     String?
-  supportEmail                String?
+  companyId                   String   @id @db.NVarChar(450)
+  logoUrl                     String? @db.NVarChar(Max)
+  primaryColor                String? @db.NVarChar(Max) // hex (#7C3AED gibi)
+  appName                     String? @db.NVarChar(Max)
+  supportEmail                String? @db.NVarChar(Max)
   /// Phase D: true ise vaka açarken müşteri seçimi zorunlu; false (default)
   /// ise Agent "Müşterisiz devam et" ile vaka açabilir ve Case.customerMatchPending
   /// = true set edilir (Supervisor/Admin için eşleştirme kuyruğu).
@@ -391,10 +197,10 @@ model CompanySettings {
   /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
   /// operasyonu ile flip edilir.
   projectsRequired            Boolean  @default(false)
-  createdAt                   DateTime @default(now())
+  createdAt                   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                   DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımı (tenant-scoped).
@@ -412,48 +218,48 @@ model CompanySettings {
 /// Per-company admin gate ile yönetilir (assertCompanyAdmin). SystemAdmin
 /// tüm şirketleri görür/düzenler.
 model ExternalKbSetting {
-  id                       String   @id @default(cuid())
-  companyId                String   @unique
+  id                       String   @id @default(cuid()) @db.NVarChar(450)
+  companyId                String   @unique @db.NVarChar(450)
   enabled                  Boolean  @default(false)
-  providerName             String?
-  baseUrl                  String?
+  providerName             String? @db.NVarChar(Max)
+  baseUrl                  String? @db.NVarChar(Max)
   /// WR-KB3 — Yeni endpoint path'leri. ask/search 1. fazda /ask /search default'uyla
   /// shipped olmuştu; gerçek EnRoute KB endpoint'leri /api/v1/... şeklinde. Mevcut
   /// satırlar default'la geliyor; tenant override edebilir.
-  askEndpointPath          String   @default("/api/v1/kb/ask")
-  searchEndpointPath       String   @default("/api/v1/kb/search")
-  healthEndpointPath       String   @default("/api/v1/health")
-  statsEndpointPath        String   @default("/api/v1/stats")
-  categorizeEndpointPath   String   @default("/api/v1/categorize")
+  askEndpointPath          String   @default("/api/v1/kb/ask") @db.NVarChar(Max)
+  searchEndpointPath       String   @default("/api/v1/kb/search") @db.NVarChar(Max)
+  healthEndpointPath       String   @default("/api/v1/health") @db.NVarChar(Max)
+  statsEndpointPath        String   @default("/api/v1/stats") @db.NVarChar(Max)
+  categorizeEndpointPath   String   @default("/api/v1/categorize") @db.NVarChar(Max)
   /// WR-KB-v2 — ticket-analiz API v1 doc §6 (YENİ): 6-alan açılış sınıflandırma
   /// (urun/platform/is_sureci/islem_tipi/etkilenen_nesne/etki). KB kullanmaz,
   /// ~60sn. Smart Ticket "KB ile Analiz Et" bu uca taşındı; eski analyze
   /// path fallback olarak korundu.
-  categorizeV2EndpointPath String   @default("/api/v1/categorize-v2")
+  categorizeV2EndpointPath String   @default("/api/v1/categorize-v2") @db.NVarChar(Max)
   /// WR-KB-v2 — ticket-analiz API v1 doc §7 (YENİ): 4-alan kapanış önerisi
   /// (kok_neden_grubu/kok_neden_detayi/cozum_tipi/kalici_onlem). Stage 3
   /// closure'a opsiyonel "AI Önerisi" buton.
-  suggestCloseEndpointPath String   @default("/api/v1/suggest-close")
-  analyzeEndpointPath      String   @default("/api/v1/analyze")
+  suggestCloseEndpointPath String   @default("/api/v1/suggest-close") @db.NVarChar(Max)
+  analyzeEndpointPath      String   @default("/api/v1/analyze") @db.NVarChar(Max)
   /// "none" | "apiKey" | "bearerToken" — string union (Prisma enum gerekli değil; UI tarafı validate eder).
-  authType                 String   @default("none")
+  authType                 String   @default("none") @db.NVarChar(255)
   /// Sadece referans adı (env var key). Raw secret asla saklanmaz.
-  apiKeySecretName         String?
+  apiKeySecretName         String? @db.NVarChar(Max)
   timeoutMs                Int      @default(30000)
   defaultTopK              Int      @default(8)
   /// "lenient" | "normal" | "strict" — kb/ask + kb/search için varsayılan.
-  defaultStrictness        String   @default("lenient")
+  defaultStrictness        String   @default("lenient") @db.NVarChar(Max)
   defaultRerank            Boolean  @default(true)
   defaultVerify            Boolean  @default(true)
   showCitations            Boolean  @default(true)
   allowAgentUse            Boolean  @default(true)
   allowSupervisorUse       Boolean  @default(true)
   allowCsmUse              Boolean  @default(true)
-  notes                    String?  @db.Text
-  createdAt                DateTime @default(now())
+  notes                    String?  @db.NVarChar(Max)
+  createdAt                DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([companyId, enabled])
 }
@@ -463,36 +269,36 @@ model ExternalKbSetting {
 // kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
 // ve mevcut Case scope sorguları için geri uyumlu kalır.
 model Account {
-  id               String       @id @default(cuid())
-  name             String
+  id               String       @id @default(cuid()) @db.NVarChar(450)
+  name             String @db.NVarChar(200)
   /// Vergi numarası — global unique. Phase A: plain saklanır, response'ta maskeli döner.
   /// WR-A2: format + checksum validation app-layer'da (server/utils/accountValidation.js).
-  vkn              String?      @unique
-  companyId        String?
-  email            String?
+  vkn              String?      @unique @db.NVarChar(20)
+  companyId        String? @db.NVarChar(450)
+  email            String? @db.NVarChar(255)
   /// Display amaçlı orijinal telefon (kullanıcı girdiği format). WR-A2'de phoneE164 ayrı tutulur.
-  phone            String?
+  phone            String? @db.NVarChar(Max)
   /// WR-A2 — E.164 normalize (örn. "+905325551234"). Search/index için.
   /// **DB unique constraint YOK** — paylaşılan call center numarası iki Account'ta görünebilir.
-  phoneE164        String?
+  phoneE164        String? @db.NVarChar(20)
   /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
   /// 'switchboard' | 'whatsapp' | 'other'. Storage'daki canonical değer
   /// E.164 phoneE164 alanı; phoneType yalnız operasyonel sinyal.
-  phoneType        String?
+  phoneType        String? @db.NVarChar(255)
   /// Phase 2 phone metadata — dahili numara (santral arkası). E.164
   /// phoneE164'a APPEND edilmez; ayrı kolonda tutulur. 1-10 char.
-  phoneExtension   String?
+  phoneExtension   String? @db.NVarChar(Max)
   /// Phase 3 — Account başına 3 telefon slot. Slot 1 yukarıdaki phone*
   /// alanları; slot 2/3 ek paralel kolonlardır. Generic PhoneNumber
   /// tablosu eklenmedi — sabit max=3 ürün kuralı.
-  phone2           String?
-  phone2E164       String?
-  phone2Type       String?
-  phone2Extension  String?
-  phone3           String?
-  phone3E164       String?
-  phone3Type       String?
-  phone3Extension  String?
+  phone2           String? @db.NVarChar(Max)
+  phone2E164       String? @db.NVarChar(20)
+  phone2Type       String? @db.NVarChar(255)
+  phone2Extension  String? @db.NVarChar(Max)
+  phone3           String? @db.NVarChar(Max)
+  phone3E164       String? @db.NVarChar(20)
+  phone3Type       String? @db.NVarChar(255)
+  phone3Extension  String? @db.NVarChar(Max)
   /// Phase 3 — Hangi slot Account için "birincil telefon" (1/2/3).
   /// Null ise UI ilk dolu slotu birincil kabul eder. Backend her create/
   /// update'te boş olmayan ilk slota normalize eder; boş slotu işaret
@@ -500,25 +306,25 @@ model Account {
   primaryPhoneSlot Int?
   isActive         Boolean      @default(true)
   /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
-  customerType     CustomerType @default(Corporate)
+  customerType     String @default("Corporate") @db.NVarChar(50) // enum:CustomerType
   /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
-  legalName        String?
+  legalName        String? @db.NVarChar(Max)
   /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
-  registrationNo   String?
+  registrationNo   String? @db.NVarChar(Max)
   /// Vergi Dairesi — kurumsal müşteri ana kartında VKN'den önce gösterilir.
   /// Bireysel müşterilerde tipik olarak NULL. Yalnız descriptive metadata;
   /// matching/import key DEĞİL, search index'i yok.
-  taxOffice        String?
+  taxOffice        String? @db.NVarChar(Max)
   /// WR-A2 / Decision Sprint #1 — TCKN HMAC-SHA256(plain, TCKN_HASH_PEPPER), 64-char hex.
   /// **Plain TCKN ASLA saklanmaz.** Global unique → duplicate Bireysel müşteri önleme.
   /// Pepper env yoksa write path 400 fail; read path (search) sessizce skip.
-  tcknHash         String?      @unique
+  tcknHash         String?      @unique @db.NVarChar(64)
   /// WR-A2 — Display için son 4 hane (örn "1234"). UI'da "*******1234" maskeli gösterilir.
-  tcknLast4        String?
-  createdAt        DateTime     @default(now())
+  tcknLast4        String? @db.NVarChar(Max)
+  createdAt        DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime     @updatedAt
 
-  company   Company?         @relation(fields: [companyId], references: [id])
+  company   Company?         @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cases     Case[]
   companies AccountCompany[]
   contacts  AccountContact[]
@@ -537,22 +343,22 @@ model Account {
 // Aynı müşteri (Account) birden çok şirkete (PARAM/UNIVERA/FINROTA) bağlı
 // olabilir; şirkete özel kod, paket, kontrat ve segment burada tutulur.
 model AccountCompany {
-  id                   String    @id @default(cuid())
-  accountId            String
-  companyId            String
+  id                   String    @id @default(cuid()) @db.NVarChar(450)
+  accountId            String @db.NVarChar(450)
+  companyId            String @db.NVarChar(450)
   /// Univera 5 haneli müşteri kodu — şirket içinde unique.
-  externalCustomerCode String?
+  externalCustomerCode String? @db.NVarChar(255)
   /// WR-A7b — Legacy free-text paket adı. packageId set olsa bile snapshot olarak korunur;
   /// packageId clear edilse de packageName silinmez (D-A7BI.1).
-  packageName          String?
+  packageName          String? @db.NVarChar(Max)
   /// WR-A7b — Tenant-scoped Package referansı. Package.companyId === AccountCompany.companyId
   /// invariantı app-layer'da enforce edilir (DI.1).
-  packageId            String?
+  packageId            String? @db.NVarChar(450)
   contractStartAt      DateTime?
   contractEndAt        DateTime?
-  segment              String?
-  status               String    @default("active") // active | churn | prospect | inactive
-  notes                String?   @db.Text
+  segment              String? @db.NVarChar(Max)
+  status               String    @default("active") @db.NVarChar(255) // active | churn | prospect | inactive
+  notes                String?   @db.NVarChar(Max)
 
   // WR-D4/D3 Phase 3 — Customer Response Channel preferences (per
   // tenant-customer link). Used by NotificationDispatch audience
@@ -566,17 +372,17 @@ model AccountCompany {
   //   documented in §10.3 of the planning card).
   // - allowCustomerNotifications: opt-out gate. When false, all customer-
   //   facing dispatches are written as Suppressed/customer_opted_out.
-  preferredResponseChannel   String?
-  responseEmail              String?
-  responsePhone              String?
+  preferredResponseChannel   String? @db.NVarChar(255)
+  responseEmail              String? @db.NVarChar(Max)
+  responsePhone              String? @db.NVarChar(Max)
   allowCustomerNotifications Boolean @default(true)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
-  account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  package  Package?         @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  account  Account          @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  package  Package?         @relation(fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   products AccountProduct[]
   /// WR-A4 — AccountCompany-scoped projeler.
   projects AccountProject[]
@@ -600,24 +406,24 @@ model AccountCompany {
 /// CompanySettings.projectsEnabled flag'i (default false) tenant başına opt-in;
 /// projectsRequired (default false) Case create'te projectId'yi zorunlu yapar.
 model AccountProject {
-  id               String        @id @default(cuid())
-  accountCompanyId String
+  id               String        @id @default(cuid()) @db.NVarChar(450)
+  accountCompanyId String @db.NVarChar(450)
   /// Tenant-içi unique kod (AccountCompany scope'unda). Örn "ROTA-2026".
-  code             String
-  name             String
-  status           ProjectStatus @default(Active)
+  code             String @db.NVarChar(255)
+  name             String @db.NVarChar(Max)
+  status           String @default("Active") @db.NVarChar(50) // enum:ProjectStatus
   startDate        DateTime?
   endDate          DateTime?
-  description      String?       @db.Text
+  description      String?       @db.NVarChar(Max)
   isActive         Boolean       @default(true)
   /// Persistent source-of-truth id from the external ERP/CRM. Optional.
   /// Customer 360 re-imports use (accountCompanyId, sourceExternalId) to
   /// update the same Project row instead of creating a duplicate.
-  sourceExternalId String?
-  createdAt        DateTime      @default(now())
+  sourceExternalId String? @db.NVarChar(450)
+  createdAt        DateTime      @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime      @updatedAt
 
-  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   cases          Case[]
 
   @@unique([accountCompanyId, code])
@@ -629,26 +435,28 @@ model AccountProject {
 // AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.
 // Vaka açma akışında müşteri context'ini zenginleştirir; vaka için zorunlu değil.
 model AccountProduct {
-  id               String    @id @default(cuid())
-  accountCompanyId String
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  accountCompanyId String @db.NVarChar(450)
   /// WR-A6/A8 — Tenant-scoped Product Catalog'a opsiyonel FK. Tanım:
   ///  - Set ise: Product.companyId === AccountCompany.companyId invariantı
   ///    app-layer'da enforce edilir (cross-tenant reddedilir, code=product_company_mismatch).
   ///  - Null ise: legacy free-text (productName/productCode) modu korunur.
   ///  Snapshot pattern (A7b): catalog set olsa bile productName/productCode
   ///  alanları snapshot olarak yazılır → Product silinince/rename olunca display kırılmaz.
-  productId        String?
-  productName      String
-  productCode      String?
+  productId        String? @db.NVarChar(450)
+  productName      String @db.NVarChar(Max)
+  productCode      String? @db.NVarChar(255)
   isActive         Boolean   @default(true)
   startedAt        DateTime?
   endedAt          DateTime?
-  createdAt        DateTime  @default(now())
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime  @updatedAt
 
-  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade)
-  /// onDelete: SetNull — Product silinirse AccountProduct snapshot (productName/Code) korunur.
-  product        Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// MSSQL: Company→Product ve Company→AccountCompany→AccountProduct çift path
+  /// nedeniyle SetNull olamaz (multiple cascade paths). Product silinirken
+  /// productId uygulama katmanında null'lanmalı (admin product delete akışı).
+  product        Product?       @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([accountCompanyId, productCode])
   @@index([accountCompanyId])
@@ -658,19 +466,19 @@ model AccountProduct {
 // AccountContact — Account altında kişi kayıtları (karar verici, teknik lider vb.).
 // Global tutulur; ileride per-company role linkleri eklenebilir.
 model AccountContact {
-  id               String   @id @default(cuid())
-  accountId        String
-  fullName         String
-  title            String?
-  email            String?
-  phone            String?
+  id               String   @id @default(cuid()) @db.NVarChar(450)
+  accountId        String @db.NVarChar(450)
+  fullName         String @db.NVarChar(Max)
+  title            String? @db.NVarChar(Max)
+  email            String? @db.NVarChar(Max)
+  phone            String? @db.NVarChar(Max)
   /// WR-A2 — E.164 normalize. Account.phoneE164 ile aynı kural; DB unique yok.
-  phoneE164        String?
+  phoneE164        String? @db.NVarChar(20)
   /// Phase 2 phone metadata — telefon tipi: 'mobile' | 'work' |
   /// 'switchboard' | 'whatsapp' | 'other'.
-  phoneType        String?
+  phoneType        String? @db.NVarChar(255)
   /// Phase 2 phone metadata — dahili numara. phoneE164'a append edilmez.
-  phoneExtension   String?
+  phoneExtension   String? @db.NVarChar(Max)
   /// Account içinde "birincil iletişim" işaretçisi. Bu PR'da telefon
   /// "Birincil Telefon" semantiği de buraya yığılır — başka contact
   /// "isPrimary=true" yapıldığında commit engine bu alanı otomatik
@@ -678,16 +486,16 @@ model AccountContact {
   isPrimary        Boolean  @default(false)
   isActive         Boolean  @default(true)
   /// Tercih edilen iletişim kanalı — 'email' | 'phone' | 'whatsapp' vs.
-  preferredChannel String?
+  preferredChannel String? @db.NVarChar(255)
   /// Persistent source-of-truth id from the external ERP/CRM. Optional.
   /// Customer 360 re-imports use (accountId, sourceExternalId) to update
   /// the same Contact row instead of creating a duplicate. App-layer
   /// uniqueness only — no DB unique to keep imports race-tolerant.
-  sourceExternalId String?
-  createdAt        DateTime @default(now())
+  sourceExternalId String? @db.NVarChar(450)
+  createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime @updatedAt
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([accountId])
   @@index([phoneE164])
@@ -700,34 +508,34 @@ model AccountContact {
 /// `isDefault` uniqueness per (accountId, companyId, type) enforced at app layer
 /// inside Prisma transactions (no DB unique to avoid soft-delete race windows).
 model Address {
-  id               String      @id @default(cuid())
-  accountId        String
+  id               String      @id @default(cuid()) @db.NVarChar(450)
+  accountId        String @db.NVarChar(450)
   /// Denormalized tenant scope. Must equal an AccountCompany.companyId where
   /// AccountCompany.accountId = this.accountId (BFF-enforced).
-  companyId        String
-  type             AddressType
+  companyId        String @db.NVarChar(450)
+  type             String @db.NVarChar(50) // enum:AddressType
   /// Optional human label (e.g. "İstanbul merkez ofis", "Adana şube").
-  label            String?
-  line1            String
-  line2            String?
-  district         String?
+  label            String? @db.NVarChar(Max)
+  line1            String @db.NVarChar(Max)
+  line2            String? @db.NVarChar(Max)
+  district         String? @db.NVarChar(Max)
   /// Nullable: country-agnostic — some countries / address formats omit a city.
-  city             String?
-  state            String?
-  postalCode       String?
+  city             String? @db.NVarChar(Max)
+  state            String? @db.NVarChar(255)
+  postalCode       String? @db.NVarChar(255)
   /// ISO 3166-1 alpha-2 (uppercase). App-layer format validation `^[A-Z]{2}$`.
-  country          String      @default("TR")
+  country          String      @default("TR") @db.NVarChar(Max)
   isDefault        Boolean     @default(false)
   isActive         Boolean     @default(true)
   /// Persistent source-of-truth id from the external ERP/CRM. Optional.
   /// Customer 360 re-imports use (accountId, sourceExternalId) to update
   /// the same Address row instead of creating a duplicate.
-  sourceExternalId String?
-  createdAt        DateTime    @default(now())
+  sourceExternalId String? @db.NVarChar(450)
+  createdAt        DateTime    @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime    @updatedAt
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  company Company @relation(fields: [companyId], references: [id])
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([accountId])
   @@index([companyId])
@@ -744,17 +552,17 @@ model Address {
 /// ek migration ile gelir).  Mevcut `Case.productGroup` string kolonu ve
 /// `AccountProduct` tablosu dokunulmaz — geri uyumluluk.
 model ProductGroup {
-  id          String   @id @default(cuid())
-  companyId   String
-  code        String
-  name        String
-  description String?
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  companyId   String @db.NVarChar(450)
+  code        String @db.NVarChar(255)
+  name        String @db.NVarChar(Max)
+  description String? @db.NVarChar(Max)
   sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   products Product[]
 
   @@unique([companyId, code])
@@ -763,24 +571,24 @@ model ProductGroup {
 }
 
 model Product {
-  id             String       @id @default(cuid())
-  companyId      String
-  productGroupId String
-  code           String
-  name           String
-  description    String?
+  id             String       @id @default(cuid()) @db.NVarChar(450)
+  companyId      String @db.NVarChar(450)
+  productGroupId String @db.NVarChar(450)
+  code           String @db.NVarChar(255)
+  name           String @db.NVarChar(Max)
+  description    String? @db.NVarChar(Max)
   /// WR-A6 follow-up — Varsayılan destek seviyesi. A5 SupportLevel enum
   /// shipped olduktan sonra additive eklendi. Mevcut tüm ürünler default L1.
   /// Phase 2 Case create cascade'inde Product → Person → Team → L1 zincirinin
   /// ilk hint sinyali (A7b sonrası).
-  supportLevel   SupportLevel @default(L1)
+  supportLevel   String @default("L1") @db.NVarChar(50) // enum:SupportLevel
   sortOrder      Int          @default(0)
   isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt      DateTime     @updatedAt
 
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  productGroup    ProductGroup     @relation(fields: [productGroupId], references: [id])
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  productGroup    ProductGroup     @relation(fields: [productGroupId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7 — Reverse relation for PackageItem assignment.
   packageItems    PackageItem[]
   /// WR-A7b — Reverse relation: bu ürünü referanslayan vakalar.
@@ -803,18 +611,18 @@ model Product {
 /// MUST equal Package.companyId. Prisma cannot enforce this at DB level;
 /// enforced in repository + smoke + data-contract.
 model Package {
-  id           String       @id @default(cuid())
-  companyId    String
-  code         String
-  name         String
-  description  String?
-  supportLevel SupportLevel @default(L1)
+  id           String       @id @default(cuid()) @db.NVarChar(450)
+  companyId    String @db.NVarChar(450)
+  code         String @db.NVarChar(255)
+  name         String @db.NVarChar(Max)
+  description  String? @db.NVarChar(Max)
+  supportLevel String @default("L1") @db.NVarChar(50) // enum:SupportLevel
   sortOrder    Int          @default(0)
   isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
+  createdAt    DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime     @updatedAt
 
-  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company          Company          @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   items            PackageItem[]
   /// WR-A7b — Reverse relation: bu paketi referanslayan AccountCompany'ler.
   accountCompanies AccountCompany[]
@@ -830,13 +638,13 @@ model Package {
 /// Product RESTRICT: paketteki ürün hard-delete edilemez (önce paketten
 /// çıkar). Package CASCADE: paket silinince üyelikler kalkar.
 model PackageItem {
-  packageId String
-  productId String
+  packageId String @db.NVarChar(450)
+  productId String @db.NVarChar(450)
   sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product Product @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([packageId, productId])
   @@index([productId])
@@ -872,20 +680,20 @@ model PackageItem {
 ///   - parent + child farklı taxonomyType taşır (rootCauseGroup → rootCauseDetail)
 ///   - active/sortOrder UI ordering için; metadata JSON ileri kullanım
 model TaxonomyDef {
-  id           String   @id @default(cuid())
-  companyId    String
-  taxonomyType String
-  code         String
-  label        String
-  parentId     String?
+  id           String   @id @default(cuid()) @db.NVarChar(450)
+  companyId    String @db.NVarChar(450)
+  taxonomyType String @db.NVarChar(255)
+  code         String @db.NVarChar(255)
+  label        String @db.NVarChar(Max)
+  parentId     String? @db.NVarChar(450)
   isActive     Boolean  @default(true)
   sortOrder    Int      @default(0)
   /// Forward-compat: { kbAliases?: string[]; description?: string; … }
-  metadata     Json?
-  createdAt    DateTime @default(now())
+  metadata     String? @db.NVarChar(Max) // json
+  createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime @updatedAt
 
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   parent   TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   children TaxonomyDef[] @relation("TaxonomyHierarchy")
 
@@ -912,36 +720,36 @@ model TaxonomyDef {
 /// upstream'den gelmiyorsa repository tarafında normalized text üzerinden
 /// deterministic hash ile üretilir.
 model CaseSolutionStep {
-  id              String    @id @default(cuid())
-  caseId          String
+  id              String    @id @default(cuid()) @db.NVarChar(450)
+  caseId          String @db.NVarChar(450)
   /// Multi-tenant izolasyon — DAİMA case.companyId'den türetilir; client
   /// override edemez (route handler scope guard'ı body'deki companyId'i
   /// görmezden gelir).
-  companyId       String
+  companyId       String @db.NVarChar(450)
   /// 1-based; aynı case içinde benzersiz değil — sadece sıralama için.
   stepIndex       Int
   /// "ai_suggested_step" | "manual" | "external_kb" | "similar_case"
   /// (enum yerine string tutulur: ileride yeni source eklemek için
   /// migration gerekmesin; route + repo whitelist kontrol eder).
-  source          String
+  source          String @db.NVarChar(255)
   /// AI/KB step'in upstream stable id'si veya repo tarafında üretilen
   /// deterministic hash (text+description SHA-256 ilk 16 karakter).
-  sourceRef       String?
-  sourceTitle     String?
-  title           String
-  description     String?
+  sourceRef       String? @db.NVarChar(255)
+  sourceTitle     String? @db.NVarChar(Max)
+  title           String @db.NVarChar(Max)
+  description     String? @db.NVarChar(Max)
   /// "suggested" | "tried" | "worked" | "not_worked" | "skipped"
-  status          String    @default("suggested")
-  note            String?
+  status          String    @default("suggested") @db.NVarChar(255)
+  note            String? @db.NVarChar(Max)
   triedAt         DateTime?
-  triedByUserId   String?
+  triedByUserId   String? @db.NVarChar(450)
   outcomeAt       DateTime?
-  outcomeByUserId String?
-  createdByUserId String?
-  createdAt       DateTime  @default(now())
+  outcomeByUserId String? @db.NVarChar(450)
+  createdByUserId String? @db.NVarChar(450)
+  createdAt       DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime  @updatedAt
 
-  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case    Case    @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   /// Re-run import idempotency'i — aynı case + AI sourceRef = tek satır.
@@ -954,20 +762,20 @@ model CaseSolutionStep {
 }
 
 model Team {
-  id                  String       @id @default(cuid())
-  name                String
-  description         String?
+  id                  String       @id @default(cuid()) @db.NVarChar(450)
+  name                String @db.NVarChar(Max)
+  description         String? @db.NVarChar(Max)
   // Multi-tenant izolasyon: her takım tek bir şirkete bağlı (holding modeli).
   // listQueries: WHERE companyId IN req.user.allowedCompanyIds.
-  companyId           String
+  companyId           String @db.NVarChar(450)
   isActive            Boolean      @default(true)
   /// WR-A5 / PM-03 — Takımın varsayılan destek seviyesi. Case create cascade'inde
   /// (assignedPersonId yokken) kullanılır. Mevcut takımlar default L1.
-  defaultSupportLevel SupportLevel @default(L1)
-  createdAt           DateTime     @default(now())
+  defaultSupportLevel String @default("L1") @db.NVarChar(50) // enum:SupportLevel
+  createdAt           DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt           DateTime     @updatedAt
 
-  company Company  @relation(fields: [companyId], references: [id])
+  company Company  @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   members Person[]
   cases   Case[]
 
@@ -975,21 +783,21 @@ model Team {
 }
 
 model Person {
-  id           String       @id @default(cuid())
-  name         String
-  email        String?
-  teamId       String?
+  id           String       @id @default(cuid()) @db.NVarChar(450)
+  name         String @db.NVarChar(Max)
+  email        String? @db.NVarChar(Max)
+  teamId       String? @db.NVarChar(450)
   isActive     Boolean      @default(true)
   /// WR-B1 / PM-03 — Takım lideri bayrağı. Phase 2'de escalation hedef seçiminde
   /// hint sinyali; bu PR'da yalnız Admin toggle + smoke invariant.
   isTeamLead   Boolean      @default(false)
   /// WR-A5 / PM-03 — Kişinin destek seviyesi. Case create cascade kaynağı.
   /// Default L1; rol-bazlı seed dağılımı (Agent L1, team lead L2, Admin Expert).
-  supportLevel SupportLevel @default(L1)
-  createdAt    DateTime     @default(now())
+  supportLevel String @default("L1") @db.NVarChar(50) // enum:SupportLevel
+  createdAt    DateTime     @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime     @updatedAt
 
-  team                          Team?                      @relation(fields: [teamId], references: [id])
+  team                          Team?                      @relation(fields: [teamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cases                         Case[]                     @relation("CaseAssignedPerson")
   /// WR-D4 Phase 1 — Policies whose approver is this specific person.
   resolutionApprovalPolicies    ResolutionApprovalPolicy[] @relation("ResolutionApprovalPolicyApprover")
@@ -998,50 +806,50 @@ model Person {
 }
 
 model ThirdParty {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  description String?
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  name        String   @unique @db.NVarChar(200)
+  description String? @db.NVarChar(Max)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
   cases Case[]
 }
 
 model DocumentType {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  description String?
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  name        String   @unique @db.NVarChar(200)
+  description String? @db.NVarChar(Max)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 }
 
 // CategoryDef — kategori + alt kategori (self-relation ile parent/child)
 model CategoryDef {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  parentId    String?
-  companyId   String?
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  name        String @db.NVarChar(Max)
+  description String? @db.NVarChar(Max)
+  parentId    String? @db.NVarChar(450)
+  companyId   String? @db.NVarChar(450)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
-  parent   CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  parent   CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   children CategoryDef[] @relation("CategoryHierarchy")
-  company  Company?      @relation(fields: [companyId], references: [id])
+  company  Company?      @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([parentId])
   @@index([companyId])
 }
 
 model OfferedSolutionDef {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  name        String @db.NVarChar(Max)
+  description String? @db.NVarChar(Max)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
   caseOffers CaseOfferedSolution[]
@@ -1049,41 +857,41 @@ model OfferedSolutionDef {
 
 // SLAPolicy — 5-tuple eşleşme: company + productGroup + category + subCategory + requestType
 model SLAPolicy {
-  id              String          @id @default(cuid())
-  companyId       String
-  companyName     String
-  productGroup    String
-  categoryName    String
-  subCategoryName String
-  requestType     CaseRequestType
+  id              String          @id @default(cuid()) @db.NVarChar(450)
+  companyId       String @db.NVarChar(450)
+  companyName     String @db.NVarChar(Max)
+  productGroup    String @db.NVarChar(200)
+  categoryName    String @db.NVarChar(255)
+  subCategoryName String @db.NVarChar(255)
+  requestType     String @db.NVarChar(50) // enum:CaseRequestType
   responseHours   Int
   resolutionHours Int
-  description     String?
+  description     String? @db.NVarChar(Max)
   isActive        Boolean         @default(true)
-  createdAt       DateTime        @default(now())
+  createdAt       DateTime        @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime        @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId, productGroup, categoryName, subCategoryName, requestType])
 }
 
 // ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
 model ChecklistTemplate {
-  id           String   @id @default(cuid())
-  name         String
-  companyId    String
-  companyName  String
-  productGroup String
-  categoryName String
-  description  String?
+  id           String   @id @default(cuid()) @db.NVarChar(450)
+  name         String @db.NVarChar(Max)
+  companyId    String @db.NVarChar(450)
+  companyName  String @db.NVarChar(Max)
+  productGroup String @db.NVarChar(200)
+  categoryName String @db.NVarChar(255)
+  description  String? @db.NVarChar(Max)
   /// CaseChecklistItem[] — { id, label, required, isActive }
-  items        Json
+  items        String @db.NVarChar(Max) // json
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId, productGroup, categoryName])
 }
@@ -1093,104 +901,104 @@ model ChecklistTemplate {
 // ============================================================
 
 model Case {
-  id         String @id @default(cuid())
-  caseNumber String @unique
+  id         String @id @default(cuid()) @db.NVarChar(450)
+  caseNumber String @unique @db.NVarChar(50)
 
-  title       String
-  description String
+  title       String @db.NVarChar(Max)
+  description String @db.NVarChar(Max)
 
-  caseType          CaseType
-  status            CaseStatus   @default(Acik)
-  priority          CasePriority
-  origin            CaseOrigin
-  originDescription String?
+  caseType          String @db.NVarChar(50) // enum:CaseType
+  status            String   @default("Acik") @db.NVarChar(50) // enum:CaseStatus
+  priority          String @db.NVarChar(50) // enum:CasePriority
+  origin            String @db.NVarChar(50) // enum:CaseOrigin
+  originDescription String? @db.NVarChar(255)
 
   // Şirket / Müşteri (denormalized — ad alanları arşiv için)
-  companyId   String
-  companyName String
+  companyId   String @db.NVarChar(450)
+  companyName String @db.NVarChar(Max)
   // Phase C2: accountId nullable — Agent müşteriyi tanıyamadığında vaka
   // "müşterisiz" açılabilir; Supervisor/Admin sonra eşleştirir.
-  accountId   String?
-  accountName String?
+  accountId   String? @db.NVarChar(450)
+  accountName String? @db.NVarChar(Max)
 
   // WR-A4 / PM-04 — Proje bazlı vaka takip (UNIVERA core).
   // AccountCompany üzerinden bağlı; Account-level değil. Mevcut tüm vakalarda
   // null kalır. CompanySettings.projectsRequired=true tenant'larda Case create
   // sırasında accountId varsa accountProjectId zorunlu olur (app-layer check).
-  accountProjectId   String?
-  accountProjectName String?
+  accountProjectId   String? @db.NVarChar(450)
+  accountProjectName String? @db.NVarChar(Max)
 
   // Sınıflandırma (denormalized — kategori adları)
-  category     String
-  subCategory  String
-  requestType  CaseRequestType
+  category     String @db.NVarChar(255)
+  subCategory  String @db.NVarChar(255)
+  requestType  String @db.NVarChar(50) // enum:CaseRequestType
   /// Legacy free-text productGroup. WR-A7b sonrası yeni vakalarda productId/productName tercih edilir;
   /// mevcut vakalar korunur, otomatik backfill yok.
-  productGroup String?
+  productGroup String? @db.NVarChar(Max)
 
   // WR-A7b / PM-05 — Catalog entegrasyonu. productId/packageId opsiyonel referans;
   // productName/packageName snapshot (arşiv için, catalog silinse de korunur).
   // Cross-table invariants DI.1-DI.6 app-layer'da enforce edilir.
-  productId   String?
-  productName String?
-  packageId   String?
-  packageName String?
+  productId   String? @db.NVarChar(450)
+  productName String? @db.NVarChar(Max)
+  packageId   String? @db.NVarChar(450)
+  packageName String? @db.NVarChar(Max)
 
   // Atama (FK + denormalized name)
-  assignedTeamId     String?
-  assignedTeamName   String?
-  assignedPersonId   String?
-  assignedPersonName String?
+  assignedTeamId     String? @db.NVarChar(450)
+  assignedTeamName   String? @db.NVarChar(Max)
+  assignedPersonId   String? @db.NVarChar(450)
+  assignedPersonName String? @db.NVarChar(Max)
 
   // Eskalasyon
-  escalationLevel EscalationLevel @default(Yok)
+  escalationLevel String @default("Yok") @db.NVarChar(50) // enum:EscalationLevel
 
   // WR-A5 / PM-03 — Vakanın destek seviyesi (L1/L2/L3/Expert). Create cascade:
   //   assignedPersonId → Person.supportLevel
   //   else assignedTeamId → Team.defaultSupportLevel
   //   else default L1
   // Phase 1 foundation: SLA/escalation tier-aware rewrite Phase 2'de.
-  supportLevel SupportLevel @default(L1)
+  supportLevel String @default("L1") @db.NVarChar(50) // enum:SupportLevel
 
   // 3rd party
-  thirdPartyId   String?
-  thirdPartyName String?
+  thirdPartyId   String? @db.NVarChar(450)
+  thirdPartyName String? @db.NVarChar(Max)
 
   // ProactiveTracking alanları
-  financialStatus  FinancialStatus?
-  productUsage     ProductUsage?
-  usageChangeAlert UsageChangeAlert?
-  responseLevel    ResponseLevel?
+  financialStatus  String? @db.NVarChar(50) // enum:FinancialStatus
+  productUsage     String? @db.NVarChar(50) // enum:ProductUsage
+  usageChangeAlert String? @db.NVarChar(50) // enum:UsageChangeAlert
+  responseLevel    String? @db.NVarChar(50) // enum:ResponseLevel
 
   // Churn alanları
   cancellationRequest  Boolean?
   /// String[] — OfferedSolutionDef.id listesi
-  offeredSolutions     Json?
+  offeredSolutions     String? @db.NVarChar(Max) // json
   offerExpiryDate      DateTime?
-  offerOutcome         OfferOutcome?
-  offerRejectionReason String?
-  actionTaken          String?
-  churnResult          ChurnResult?
-  retentionStatus      RetentionStatus?
+  offerOutcome         String? @db.NVarChar(50) // enum:OfferOutcome
+  offerRejectionReason String? @db.NVarChar(Max)
+  actionTaken          String? @db.NVarChar(Max)
+  churnResult          String? @db.NVarChar(50) // enum:ChurnResult
+  retentionStatus      String? @db.NVarChar(50) // enum:RetentionStatus
   followUpDate         DateTime?
 
   // Çözüm / iptal
-  resolutionNote     String?
-  cancellationReason String?
+  resolutionNote     String? @db.NVarChar(Max)
+  cancellationReason String? @db.NVarChar(Max)
 
   // WR-D4 Phase 1 — Resolution approval overlay. Source of truth is
   // CaseResolutionApproval (audit table); this denormalized field is
   // updated whenever an approval row is inserted or decided so listings
   // and CaseDetail can render the current state without joining.
   // null = no approval cycle has ever started on this case.
-  approvalState ApprovalState?
+  approvalState String? @db.NVarChar(50) // enum:ApprovalState
 
   // WR-D4 Phase 2 — communication overlay. Tracks whether external/manual
   // communication has fired for this case after a close/approval event.
   // Phase 2 values: 'Pending' (rule matched, awaiting operator confirm),
   // 'Manual' (operator confirmed), 'Dispatched' (Phase 4 active send), or
   // 'NotRequired' (no rule matched). Free-string for forward compat.
-  communicationState String?
+  communicationState String? @db.NVarChar(255)
 
   // WR-D4/D3 Phase 3 — per-case channel override. Operator can decide that
   // for THIS case the customer should be reached on email even though
@@ -1199,7 +1007,7 @@ model Case {
   // chain (responseEmail → AccountContact.email → Account.email).
   // Values mirror AccountCompany.preferredResponseChannel; free-string for
   // forward compat with channels added later.
-  communicationChannelOverride String?
+  communicationChannelOverride String? @db.NVarChar(255)
 
   // SLA
   slaResponseDueAt     DateTime?
@@ -1218,37 +1026,37 @@ model Case {
   // Phase D Step 2 — müşterisiz vaka açılırken Agent'ın aldığı başvuran
   // bilgileri (opsiyonel). Eşleştirme öneri motoru bu alanları yüksek-öncelik
   // sinyal olarak kullanır. Analytics/AI payload'lara DAHIL EDİLMEZ.
-  customerContactName  String?
-  customerContactPhone String?
-  customerContactEmail String?
-  customerCompanyName  String?
+  customerContactName  String? @db.NVarChar(Max)
+  customerContactPhone String? @db.NVarChar(Max)
+  customerContactEmail String? @db.NVarChar(Max)
+  customerCompanyName  String? @db.NVarChar(Max)
 
   // AI alanları
-  aiSummary                  String?
-  aiCategoryPrediction       String?
-  aiPriorityPrediction       CasePriority?
+  aiSummary                  String? @db.NVarChar(Max)
+  aiCategoryPrediction       String? @db.NVarChar(Max)
+  aiPriorityPrediction       String? @db.NVarChar(50) // enum:CasePriority
   aiDuplicateScore           Float?
   aiConfidenceScore          Float?
   aiGeneratedFlag            Boolean       @default(false)
-  aiRejectReason             String?
-  aiCallBrief                String?
-  aiFollowupRecommendation   String?
-  aiRetentionOfferSuggestion String?
+  aiRejectReason             String? @db.NVarChar(Max)
+  aiCallBrief                String? @db.NVarChar(Max)
+  aiFollowupRecommendation   String? @db.NVarChar(Max)
+  aiRetentionOfferSuggestion String? @db.NVarChar(Max)
 
   // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
   /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
-  checklistItems Json?
+  checklistItems String? @db.NVarChar(Max) // json
 
   // Custom Fields — şirket FieldDefinition'larına göre dinamik alanlar.
   /// { [fieldKey: string]: any } — değer tipi FieldType'a bağlı
-  customFields Json?
+  customFields String? @db.NVarChar(Max) // json
 
   // Snooze — vaka geçici olarak Inbox'tan kaldırılıp Later sekmesine taşınır.
   // snoozePreviousStatus: erteleme öncesi statü; unsnooze/cron-wakeup'ta buna
   // dönülür (3rdPartyBekleniyor gibi statüler korunsun diye). Yoksa Acik fallback.
   snoozeUntil          DateTime?
-  snoozeReason         SnoozeReason?
-  snoozePreviousStatus CaseStatus?
+  snoozeReason         String? @db.NVarChar(50) // enum:SnoozeReason
+  snoozePreviousStatus String? @db.NVarChar(50) // enum:CaseStatus
 
   // QA Skor — Faz 1.5 Madde 4 (Smart QA Lite). Kapatılmış vakalarda AI 3 kriter
   // üzerinden 1-5 puan üretir + kısa feedback. null = henüz skorlanmadı (cron
@@ -1256,7 +1064,7 @@ model Case {
   qaEmpathyScore Int?
   qaClarityScore Int?
   qaSpeedScore   Int?
-  qaFeedback     String?
+  qaFeedback     String? @db.NVarChar(Max)
   qaScoredAt     DateTime?
 
   // Aktarım sayacı (FAZ 2 §20.2 — Vaka Aktarımı). Her başarılı transfer
@@ -1264,21 +1072,21 @@ model Case {
   // tetiklenir. CaseTransfer kayıtları tam audit izi tutar.
   transferCount Int @default(0)
 
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
 
   // Relations
-  company        Company         @relation(fields: [companyId], references: [id])
-  account        Account?        @relation(fields: [accountId], references: [id])
-  accountProject AccountProject? @relation(fields: [accountProjectId], references: [id])
-  assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id])
-  assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id])
-  thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id])
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account        Account?        @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  accountProject AccountProject? @relation(fields: [accountProjectId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Product referansı (opsiyonel).
-  product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: Restrict)
+  product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Package referansı (opsiyonel).
-  package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: Restrict)
+  package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   notes                  CaseNote[]
   attachments            CaseAttachment[]
@@ -1340,17 +1148,17 @@ model Case {
 // kullanıcının ilk allowedCompanyId'sinden dolar. Multi-tenant scope filter
 // JOIN'siz çalışabilsin diye (Faz 1.5 child denorm pattern'i).
 model CaseReminder {
-  id        String    @id @default(cuid())
-  caseId    String?
-  userId    String
-  companyId String
+  id        String    @id @default(cuid()) @db.NVarChar(450)
+  caseId    String? @db.NVarChar(450)
+  userId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
   remindAt  DateTime
-  message   String?
+  message   String? @db.NVarChar(Max)
   sentAt    DateTime?
-  createdAt DateTime  @default(now())
+  createdAt DateTime  @default(dbgenerated("sysutcdatetime()"))
 
-  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId, remindAt])
   @@index([caseId])
@@ -1361,19 +1169,19 @@ model CaseReminder {
 // companyId Case'den denormalize — top-level audit/raporlama sorgularında
 // JOIN gerektirmesin, multi-tenant scope filter doğrudan uygulansın.
 model CaseActivity {
-  id         String                 @id @default(cuid())
-  caseId     String
-  companyId  String
-  action     String // human-readable
-  actionType CaseHistoryActionType?
-  fieldName  String?
-  fromValue  String?
-  toValue    String?
-  note       String?
-  actor      String
-  at         DateTime               @default(now())
+  id         String                 @id @default(cuid()) @db.NVarChar(450)
+  caseId     String @db.NVarChar(450)
+  companyId  String @db.NVarChar(450)
+  action     String @db.NVarChar(Max) // human-readable
+  actionType String? @db.NVarChar(50) // enum:CaseHistoryActionType
+  fieldName  String? @db.NVarChar(Max)
+  fromValue  String? @db.NVarChar(Max)
+  toValue    String? @db.NVarChar(Max)
+  note       String? @db.NVarChar(Max)
+  actor      String @db.NVarChar(Max)
+  at         DateTime               @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1381,21 +1189,23 @@ model CaseActivity {
 }
 
 model CaseNote {
-  id           String         @id @default(cuid())
-  caseId       String
-  companyId    String
-  authorName   String
+  id           String         @id @default(cuid()) @db.NVarChar(450)
+  caseId       String @db.NVarChar(450)
+  companyId    String @db.NVarChar(450)
+  authorName   String @db.NVarChar(Max)
   // authorId — User.id; reaksiyon/yanıt bildirimleri için gerekir.
   // Nullable: eski notlarda boş, yeni eklenenlerde dolu.
-  authorId     String?
-  content      String
-  visibility   NoteVisibility @default(Internal)
-  parentNoteId String?
+  authorId     String? @db.NVarChar(450)
+  content      String @db.NVarChar(Max)
+  visibility   String @default("Internal") @db.NVarChar(50) // enum:NoteVisibility
+  parentNoteId String? @db.NVarChar(450)
   replyCount   Int            @default(0)
-  createdAt    DateTime       @default(now())
+  createdAt    DateTime       @default(dbgenerated("sysutcdatetime()"))
 
-  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  parent    CaseNote?          @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: SetNull)
+  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // MSSQL: self-relation SetNull olamaz — parent note silinirken parentNoteId
+  // uygulama katmanında null'lanmalı (caseRepository note delete akışı).
+  parent    CaseNote?          @relation("NoteReplies", fields: [parentNoteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   replies   CaseNote[]         @relation("NoteReplies")
   reactions CaseNoteReaction[]
 
@@ -1411,14 +1221,14 @@ model CaseNote {
 // ikinci tiklamada toggle remove yapilir.
 // onDelete Cascade — note silinirse reaksiyonlar da gider.
 model CaseNoteReaction {
-  id        String   @id @default(cuid())
-  noteId    String
-  userId    String
-  companyId String
-  emoji     String
-  createdAt DateTime @default(now())
+  id        String   @id @default(cuid()) @db.NVarChar(450)
+  noteId    String @db.NVarChar(450)
+  userId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+  emoji     String @db.NVarChar(50)
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  note CaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  note CaseNote @relation(fields: [noteId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([noteId, userId, emoji])
   @@index([noteId])
@@ -1431,18 +1241,18 @@ model CaseNoteReaction {
 // HR/audit talepleri için 1 yıl+ retention (cleanup cron Phase 5+).
 // docs/OPERATIONS_DASHBOARD_DESIGN.md §2.6.6'da detay.
 model MetricQueryAudit {
-  id                String   @id @default(cuid())
-  userId            String
-  userRole          String // snapshot — rol o anki haliyle saklanır
-  endpoint          String // 'overview' | 'drilldown' | 'export' | 'ai-insights' vs.
-  scopeFingerprint  String // hash(scope.companyIds + teamIds + personIds)
-  scopeKind         String // 'self' | 'team' | 'company' | 'cross-company'
-  filterFingerprint String // hash(appliedFilters)
-  formulaVersion    String // metric definition versiyonu (v1 sabit)
-  generatedAt       DateTime @default(now())
+  id                String   @id @default(cuid()) @db.NVarChar(450)
+  userId            String @db.NVarChar(450)
+  userRole          String @db.NVarChar(255) // snapshot — rol o anki haliyle saklanır
+  endpoint          String @db.NVarChar(255) // 'overview' | 'drilldown' | 'export' | 'ai-insights' vs.
+  scopeFingerprint  String @db.NVarChar(255) // hash(scope.companyIds + teamIds + personIds)
+  scopeKind         String @db.NVarChar(255) // 'self' | 'team' | 'company' | 'cross-company'
+  filterFingerprint String @db.NVarChar(Max) // hash(appliedFilters)
+  formulaVersion    String @db.NVarChar(Max) // metric definition versiyonu (v1 sabit)
+  generatedAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   durationMs        Int
   recordsScanned    Int? // approximate; Phase 1 için opsiyonel
-  responseHash      String? // opsiyonel — sonraki replay/diff için
+  responseHash      String? @db.NVarChar(Max) // opsiyonel — sonraki replay/diff için
 
   @@index([userId, generatedAt])
   @@index([endpoint, generatedAt])
@@ -1450,37 +1260,37 @@ model MetricQueryAudit {
 }
 
 model CaseAttachment {
-  id         String   @id @default(cuid())
-  caseId     String
-  companyId  String
-  fileName   String
+  id         String   @id @default(cuid()) @db.NVarChar(450)
+  caseId     String @db.NVarChar(450)
+  companyId  String @db.NVarChar(450)
+  fileName   String @db.NVarChar(Max)
   fileSize   Int
-  mimeType   String
-  fileUrl    String? // Supabase Storage URL (mock'ta dataUrl)
-  uploadedBy String
-  uploadedAt DateTime @default(now())
+  mimeType   String @db.NVarChar(255)
+  fileUrl    String? @db.NVarChar(Max) // Supabase Storage URL (mock'ta dataUrl)
+  uploadedBy String @db.NVarChar(Max)
+  uploadedAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
 }
 
 model CaseCallLog {
-  id                  String          @id @default(cuid())
-  caseId              String
-  companyId           String
+  id                  String          @id @default(cuid()) @db.NVarChar(450)
+  caseId              String @db.NVarChar(450)
+  companyId           String @db.NVarChar(450)
   callDate            DateTime
   durationMin         Int
-  callDisposition     CallDisposition
-  callOutcome         CallOutcome
-  description         String?
-  callerId            String
-  callerName          String
+  callDisposition     String @db.NVarChar(50) // enum:CallDisposition
+  callOutcome         String @db.NVarChar(50) // enum:CallOutcome
+  description         String? @db.NVarChar(Max)
+  callerId            String @db.NVarChar(450)
+  callerName          String @db.NVarChar(Max)
   nextFollowupDate    DateTime?
   lastInteractionDate DateTime?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1490,18 +1300,18 @@ model CaseCallLog {
 
 // CaseOfferedSolution — Churn vakaları için teklif geçmişi (audit)
 model CaseOfferedSolution {
-  id              String       @id @default(cuid())
-  caseId          String
-  companyId       String
-  solutionDefId   String
-  offeredAt       DateTime     @default(now())
-  offeredBy       String
-  outcome         OfferOutcome @default(Beklemede)
+  id              String       @id @default(cuid()) @db.NVarChar(450)
+  caseId          String @db.NVarChar(450)
+  companyId       String @db.NVarChar(450)
+  solutionDefId   String @db.NVarChar(450)
+  offeredAt       DateTime     @default(dbgenerated("sysutcdatetime()"))
+  offeredBy       String @db.NVarChar(Max)
+  outcome         String @default("Beklemede") @db.NVarChar(50) // enum:OfferOutcome
   expiryDate      DateTime?
-  rejectionReason String?
+  rejectionReason String? @db.NVarChar(Max)
 
-  case     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id])
+  case     Case               @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  solution OfferedSolutionDef @relation(fields: [solutionDefId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1509,18 +1319,18 @@ model CaseOfferedSolution {
 
 // CaseApproval — Supervisor onay akışı
 model CaseApproval {
-  id             String           @id @default(cuid())
-  caseId         String
-  companyId      String
-  approvalType   String // "ResolveCritical", "EscalateDirector", vb.
-  requestedBy    String
-  requestedAt    DateTime         @default(now())
-  decision       ApprovalDecision @default(Bekliyor)
-  decidedBy      String?
+  id             String           @id @default(cuid()) @db.NVarChar(450)
+  caseId         String @db.NVarChar(450)
+  companyId      String @db.NVarChar(450)
+  approvalType   String @db.NVarChar(255) // "ResolveCritical", "EscalateDirector", vb.
+  requestedBy    String @db.NVarChar(Max)
+  requestedAt    DateTime         @default(dbgenerated("sysutcdatetime()"))
+  decision       String @default("Bekliyor") @db.NVarChar(50) // enum:ApprovalDecision
+  decidedBy      String? @db.NVarChar(Max)
   decidedAt      DateTime?
-  decisionReason String? // Onay/red gerekçesi (red için zorunlu)
+  decisionReason String? @db.NVarChar(Max) // Onay/red gerekçesi (red için zorunlu)
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1535,57 +1345,35 @@ model CaseApproval {
 // Dispatch). See docs/planning_cards/WR-D4-D3-...md §16 Phase 1.
 // ═══════════════════════════════════════════════════════════════════
 
-enum ApprovalState {
-  Pending
-  Approved
-  Rejected
-  Cancelled
-}
-
-enum ApproverType {
-  TeamLead // Resolved as Person where teamId=case.assignedTeamId AND isTeamLead=true
-  AssignedTeamLead // Alias for TeamLead — clearer semantics in admin UI
-  Supervisor // Any active Supervisor in case.companyId
-  Admin // Any active Admin in case.companyId
-  SystemAdmin // Global override (no companyId scope check)
-  SpecificPerson // Use ResolutionApprovalPolicy.approverPersonId
-}
-
-enum RejectionBehavior {
-  ReturnToAssignee // Case stays with current assignee; note prepended
-  ReturnToTeam // assignedPersonId cleared; assignedTeamId kept
-  Escalate // status → Eskalasyon; escalationReason = rejection
-}
-
 /// WR-D4 — Per-tenant policy: when does a case require approval before
 /// closing, and who approves it. Phase 1 supports companyId scope +
 /// optional matchScope JSON filters (category/subCategory/priority/
 /// supportLevel/teamId). Soft-disable via isActive=false; hard delete
 /// not supported (audit trail).
 model ResolutionApprovalPolicy {
-  id                String            @id @default(cuid())
-  companyId         String
-  name              String
-  description       String?
+  id                String            @id @default(cuid()) @db.NVarChar(450)
+  companyId         String @db.NVarChar(450)
+  name              String @db.NVarChar(Max)
+  description       String? @db.NVarChar(Max)
   isActive          Boolean           @default(true)
   /// Lower number wins on match. Default 100.
   sortOrder         Int               @default(100)
   /// { category?, subCategory?, priority?, supportLevel?, teamId? }
   /// All null = match-all. App-layer JSON filtering (MSSQL portable).
-  matchScope        Json
-  approverType      ApproverType
+  matchScope        String @db.NVarChar(Max) // json
+  approverType      String @db.NVarChar(50) // enum:ApproverType
   /// Required when approverType=SpecificPerson; else null.
-  approverPersonId  String?
+  approverPersonId  String? @db.NVarChar(450)
   /// Default false. When false, the submitter cannot also be the
   /// resolved approver (submit returns 400 self_approval_blocked).
   allowSelfApprove  Boolean           @default(false)
-  rejectionBehavior RejectionBehavior @default(ReturnToAssignee)
-  createdAt         DateTime          @default(now())
+  rejectionBehavior String @default("ReturnToAssignee") @db.NVarChar(50) // enum:RejectionBehavior
+  createdAt         DateTime          @default(dbgenerated("sysutcdatetime()"))
   updatedAt         DateTime          @updatedAt
-  createdByUserId   String?
+  createdByUserId   String? @db.NVarChar(450)
 
-  company        Company @relation(fields: [companyId], references: [id])
-  approverPerson Person? @relation("ResolutionApprovalPolicyApprover", fields: [approverPersonId], references: [id])
+  company        Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  approverPerson Person? @relation("ResolutionApprovalPolicyApprover", fields: [approverPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   approvals CaseResolutionApproval[]
 
@@ -1598,32 +1386,32 @@ model ResolutionApprovalPolicy {
 /// (policyNameSnapshot) preserve audit even when the policy is later
 /// edited or deactivated.
 model CaseResolutionApproval {
-  id                       String        @id @default(cuid())
-  caseId                   String
-  companyId                String
-  policyId                 String?
-  policyNameSnapshot       String
-  state                    ApprovalState @default(Pending)
-  submittedByUserId        String
-  submittedAt              DateTime      @default(now())
+  id                       String        @id @default(cuid()) @db.NVarChar(450)
+  caseId                   String @db.NVarChar(450)
+  companyId                String @db.NVarChar(450)
+  policyId                 String? @db.NVarChar(450)
+  policyNameSnapshot       String @db.NVarChar(Max)
+  state                    String @default("Pending") @db.NVarChar(50) // enum:ApprovalState
+  submittedByUserId        String @db.NVarChar(450)
+  submittedAt              DateTime      @default(dbgenerated("sysutcdatetime()"))
   /// Agent's resolution summary text. Becomes audit at submit time.
-  resolutionSummary        String
+  resolutionSummary        String @db.NVarChar(Max)
   /// Optional draft message intended for the customer. Phase 1: not
   /// sent anywhere; surfaces in approver's preview only.
-  customerMessageDraft     String?
+  customerMessageDraft     String? @db.NVarChar(Max)
   /// Snapshot of the resolved approver at submit time. Used to filter
   /// approver inboxes and to verify authority on approve/reject.
-  expectedApproverPersonId String?
-  decidedByUserId          String?
+  expectedApproverPersonId String? @db.NVarChar(450)
+  decidedByUserId          String? @db.NVarChar(450)
   decidedAt                DateTime?
   /// Required when state=Rejected. Free-text reason shown to submitter.
-  rejectionReason          String?
-  createdAt                DateTime      @default(now())
+  rejectionReason          String? @db.NVarChar(Max)
+  createdAt                DateTime      @default(dbgenerated("sysutcdatetime()"))
   updatedAt                DateTime      @updatedAt
 
-  case             Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  policy           ResolutionApprovalPolicy? @relation(fields: [policyId], references: [id])
-  expectedApprover Person?                   @relation("CaseResolutionApprovalApprover", fields: [expectedApproverPersonId], references: [id])
+  case             Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  policy           ResolutionApprovalPolicy? @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  expectedApprover Person?                   @relation("CaseResolutionApprovalApprover", fields: [expectedApproverPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId, state])
@@ -1633,17 +1421,17 @@ model CaseResolutionApproval {
 
 // CaseNotification — bildirim logları
 model CaseNotification {
-  id        String              @id @default(cuid())
-  caseId    String
-  companyId String
-  eventType String // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
-  channel   NotificationChannel
-  recipient String // Person.id veya email
-  payload   Json? // Bildirim içeriği snapshot
-  sentAt    DateTime            @default(now())
+  id        String              @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+  eventType String @db.NVarChar(255) // "CaseAssigned", "SLAWarning", "SLAViolation", vb.
+  channel   String @db.NVarChar(50) // enum:NotificationChannel
+  recipient String @db.NVarChar(255) // Person.id veya email
+  payload   String? @db.NVarChar(Max) // Bildirim içeriği snapshot // json
+  sentAt    DateTime            @default(dbgenerated("sysutcdatetime()"))
   readAt    DateTime?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1656,15 +1444,15 @@ model CaseNotification {
 // `contentCount` admin'in rapor ettiği veya seed sırasında ilgili tablodan
 // (Case, SLAPolicy, ChecklistTemplate, CategoryDef) sayılan değer.
 model KnowledgeSource {
-  id           String              @id @default(cuid())
-  companyId    String
-  name         String
-  sourceType   KnowledgeSourceType
+  id           String              @id @default(cuid()) @db.NVarChar(450)
+  companyId    String @db.NVarChar(450)
+  name         String @db.NVarChar(Max)
+  sourceType   String @db.NVarChar(50) // enum:KnowledgeSourceType
   contentCount Int                 @default(0)
-  description  String?
+  description  String? @db.NVarChar(Max)
   isActive     Boolean             @default(true)
-  lastUpdated  DateTime            @default(now())
-  createdAt    DateTime            @default(now())
+  lastUpdated  DateTime            @default(dbgenerated("sysutcdatetime()"))
+  createdAt    DateTime            @default(dbgenerated("sysutcdatetime()"))
 
   @@index([companyId])
 }
@@ -1674,14 +1462,14 @@ model KnowledgeSource {
 // Case tablosunda da snapshot tutulur (qaXxxScore alanları); bu tablo ek
 // audit + per-agent rapor için. caseId @unique → tek vaka tek log.
 model QAScoreLog {
-  id        String   @id @default(cuid())
-  caseId    String   @unique
-  companyId String
-  scoredAt  DateTime @default(now())
+  id        String   @id @default(cuid()) @db.NVarChar(450)
+  caseId    String   @unique @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+  scoredAt  DateTime @default(dbgenerated("sysutcdatetime()"))
   empathy   Int
   clarity   Int
   speed     Int
-  feedback  String?
+  feedback  String? @db.NVarChar(Max)
 
   @@index([companyId])
   @@index([companyId, scoredAt])
@@ -1692,15 +1480,15 @@ model QAScoreLog {
 // 5+ vaka varsa active alarm yarat. Yönetici dismiss eder. Read-only mode:
 // otomatik parent vaka açma yok — sadece sinyal.
 model PatternAlert {
-  id            String             @id @default(cuid())
-  companyId     String
-  category      String
+  id            String             @id @default(cuid()) @db.NVarChar(450)
+  companyId     String @db.NVarChar(450)
+  category      String @db.NVarChar(Max)
   caseCount     Int
   windowMinutes Int                @default(60)
-  detectedAt    DateTime           @default(now())
-  caseIds       Json // string[] — tetikleyici vaka id'leri
-  status        PatternAlertStatus @default(active)
-  dismissedBy   String? // User.id
+  detectedAt    DateTime           @default(dbgenerated("sysutcdatetime()"))
+  caseIds       String @db.NVarChar(Max) // string[] — tetikleyici vaka id'leri // json
+  status        String @default("active") @db.NVarChar(50) // enum:PatternAlertStatus
+  dismissedBy   String? @db.NVarChar(Max) // User.id
   dismissedAt   DateTime?
 
   @@index([companyId])
@@ -1717,15 +1505,15 @@ model PatternAlert {
 // için), accepted nullable (kullanıcı henüz uygula/yoksay tıklamadı), tokenCount
 // nullable (provider yanıtında token sayısı dönmeyebilir).
 model AIUsageLog {
-  id             String   @id @default(cuid())
-  companyId      String
-  endpoint       String // 'suggest-category' | 'draft-resolution' | 'churn-conversion' | 'qa-score' | 'other'
-  caseId         String?
-  userId         String?
+  id             String   @id @default(cuid()) @db.NVarChar(450)
+  companyId      String @db.NVarChar(450)
+  endpoint       String @db.NVarChar(255) // 'suggest-category' | 'draft-resolution' | 'churn-conversion' | 'qa-score' | 'other'
+  caseId         String? @db.NVarChar(450)
+  userId         String? @db.NVarChar(450)
   accepted       Boolean? // null = kullanıcı kararı bekliyor (uygula/yoksay)
   responseTimeMs Int?
   tokenCount     Int?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime @default(dbgenerated("sysutcdatetime()"))
 
   @@index([companyId])
   @@index([companyId, createdAt])
@@ -1742,16 +1530,16 @@ model AIUsageLog {
 // yalnızca CaseNote desteği. comment-reply geldiğinde tablo yapısı
 // `sourceType + sourceId` olarak yeniden modellenir (migration ile).
 model CaseMention {
-  id              String    @id @default(cuid())
-  caseId          String
-  noteId          String
-  companyId       String
-  mentionedUserId String // User.id — auth identity (UserCompany erişim sahibi)
-  mentionedBy     String // User.id — etiketleyen kullanıcı
+  id              String    @id @default(cuid()) @db.NVarChar(450)
+  caseId          String @db.NVarChar(450)
+  noteId          String @db.NVarChar(450)
+  companyId       String @db.NVarChar(450)
+  mentionedUserId String @db.NVarChar(450) // User.id — auth identity (UserCompany erişim sahibi)
+  mentionedBy     String @db.NVarChar(Max) // User.id — etiketleyen kullanıcı
   seenAt          DateTime? // null = henüz görülmedi → header bell badge
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime  @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([mentionedUserId])
@@ -1760,17 +1548,17 @@ model CaseMention {
 
 // AISuggestion — AI önerilerinin audit kaydı
 model AISuggestion {
-  id              String   @id @default(cuid())
-  caseId          String
-  companyId       String
-  suggestionType  String // "category", "priority", "resolution", vb.
-  suggestedValue  String
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  caseId          String @db.NVarChar(450)
+  companyId       String @db.NVarChar(450)
+  suggestionType  String @db.NVarChar(255) // "category", "priority", "resolution", vb.
+  suggestedValue  String @db.NVarChar(Max)
   confidenceScore Float?
   accepted        Boolean? // null=henüz değerlendirilmedi, true=uygula, false=yoksay
-  rejectReason    String?
-  createdAt       DateTime @default(now())
+  rejectReason    String? @db.NVarChar(Max)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1784,27 +1572,27 @@ model AISuggestion {
 // transferCount Case üzerinde @default(0); her satır ekleme +1 ile birlikte
 // gider. 2+ olduğunda supervisor notification + kök neden analizi tetikler.
 model CaseTransfer {
-  id        String @id @default(cuid())
-  caseId    String
-  companyId String
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
 
-  fromTeamId   String?
-  toTeamId     String
-  fromPersonId String?
-  toPersonId   String?
+  fromTeamId   String? @db.NVarChar(450)
+  toTeamId     String @db.NVarChar(450)
+  fromPersonId String? @db.NVarChar(450)
+  toPersonId   String? @db.NVarChar(450)
 
-  reason        String
-  reasonCode    String?
-  transferredBy String
-  transferredAt DateTime @default(now())
+  reason        String @db.NVarChar(Max)
+  reasonCode    String? @db.NVarChar(255)
+  transferredBy String @db.NVarChar(Max)
+  transferredAt DateTime @default(dbgenerated("sysutcdatetime()"))
 
   // AI önerisi snapshot (uygulandı/yok sayıldı analizi için)
-  aiSuggestedTeamId String?
-  aiSuggestedReason String?
-  aiReasonCode      String?
+  aiSuggestedTeamId String? @db.NVarChar(450)
+  aiSuggestedReason String? @db.NVarChar(Max)
+  aiReasonCode      String? @db.NVarChar(255)
   aiConfidence      Float?
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
@@ -1818,14 +1606,14 @@ model CaseTransfer {
 // companyId zorunlu — multi-tenant scope (top-level "benim watcher'larım"
 // sorgusu için JOIN gerektirmez).
 model CaseWatcher {
-  id        String   @id @default(cuid())
-  caseId    String
-  userId    String
-  companyId String
-  addedBy   String
-  addedAt   DateTime @default(now())
+  id        String   @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @db.NVarChar(450)
+  userId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+  addedBy   String @db.NVarChar(Max)
+  addedAt   DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([caseId, userId])
   @@index([userId])
@@ -1846,16 +1634,18 @@ model CaseWatcher {
 // companyId zorunlu — multi-tenant scope. Cross-tenant link route layer'ında
 // reddedilir (kaynak ve hedef vakanın companyId'leri eşit olmalı).
 model CaseLink {
-  id           String       @id @default(cuid())
-  caseId       String
-  linkedCaseId String
-  linkType     CaseLinkType
-  companyId    String
-  createdBy    String
-  createdAt    DateTime     @default(now())
+  id           String       @id @default(cuid()) @db.NVarChar(450)
+  caseId       String @db.NVarChar(450)
+  linkedCaseId String @db.NVarChar(450)
+  linkType     String @db.NVarChar(50) // enum:CaseLinkType
+  companyId    String @db.NVarChar(450)
+  createdBy    String @db.NVarChar(Max)
+  createdAt    DateTime     @default(dbgenerated("sysutcdatetime()"))
 
-  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: Cascade)
-  linkedCase Case @relation("CaseLinkTarget", fields: [linkedCaseId], references: [id], onDelete: Cascade)
+  case       Case @relation("CaseLinkSource", fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  // MSSQL: Case'e iki FK (kaynak+hedef) çift cascade path yaratır — hedef taraf
+  // NoAction; hedef case silinirken CaseLink satırları uygulama katmanında silinmeli.
+  linkedCase Case @relation("CaseLinkTarget", fields: [linkedCaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([caseId, linkedCaseId, linkType])
   @@index([caseId])
@@ -1872,22 +1662,22 @@ model CaseLink {
 // Şirket bazlı izole; Admin yalnızca kendi şirketinin job'larını görür/işler.
 
 model ImportJob {
-  id                  String    @id @default(cuid())
-  companyId           String
+  id                  String    @id @default(cuid()) @db.NVarChar(450)
+  companyId           String @db.NVarChar(450)
   /// Phase 1: "account". İleride "case", "product" vb. eklenebilir.
-  targetType          String    @default("account")
+  targetType          String    @default("account") @db.NVarChar(255)
   /// "file" | "api"
-  sourceType          String
+  sourceType          String @db.NVarChar(255)
   /// API kaynağı için kullanıcı tanımlı isim ya da dosya adı.
-  sourceName          String?
+  sourceName          String? @db.NVarChar(Max)
   /// API kaynağı için (sadece host + path, secret'sız). Audit/debug için.
-  sourceUrlMasked     String?
-  fileName            String?
-  dataPath            String?
+  sourceUrlMasked     String? @db.NVarChar(Max)
+  fileName            String? @db.NVarChar(Max)
+  dataPath            String? @db.NVarChar(Max)
   /// Hedef şema versiyonu (commit zamanı doğrulanır).
-  targetSchemaVersion String
+  targetSchemaVersion String @db.NVarChar(Max)
   /// "draft" | "validated" | "running" | "partial" | "completed" | "failed" | "rolled_back" | "rollback_partial"
-  status              String    @default("draft")
+  status              String    @default("draft") @db.NVarChar(255)
   totalRows           Int       @default(0)
   createCount         Int       @default(0)
   updateCount         Int       @default(0)
@@ -1895,26 +1685,26 @@ model ImportJob {
   errorCount          Int       @default(0)
   warningCount        Int       @default(0)
   /// Auto-map önerileri, mapping snapshot, dry-run özeti vb.
-  summaryJson         Json?
+  summaryJson         String? @db.NVarChar(Max) // json
   /// WR-A8 Phase 2b — Customer 360 per-entity create/update/skip/error
   /// breakdown. account targetType için null kalır (Phase 1 scalar count'lar
   /// yeterli). Customer 360 için: { account: {...}, accountCompany: {...}, ... }.
-  entityCountsJson    Json?
-  createdByUserId     String?
-  createdAt           DateTime  @default(now())
+  entityCountsJson    String? @db.NVarChar(Max) // json
+  createdByUserId     String? @db.NVarChar(450)
+  createdAt           DateTime  @default(dbgenerated("sysutcdatetime()"))
   startedAt           DateTime?
   completedAt         DateTime?
   rolledBackAt        DateTime?
-  rolledBackByUserId  String?
+  rolledBackByUserId  String? @db.NVarChar(450)
   /// Phase D-tick — concurrent-tick lease. Bir tick acquire ettiğinde
   /// leaseTickId set olur; release veya stale TTL (2dk) sonra null'a
   /// döner. Sadece customer360 tick path'i yazar; Phase 1 import'ta hep
   /// null. Additive + nullable: mevcut tüm satırlar dokunulmaz.
-  leaseTickId         String?
+  leaseTickId         String? @db.NVarChar(450)
   leaseAt             DateTime?
   heartbeatAt         DateTime?
 
-  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   rows    ImportJobRow[]
 
   @@index([companyId])
@@ -1923,46 +1713,46 @@ model ImportJob {
 }
 
 model ImportJobRow {
-  id              String   @id @default(cuid())
-  importJobId     String
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  importJobId     String @db.NVarChar(450)
   rowNumber       Int
   /// "create" | "update" | "skip" | "error"
-  action          String   @default("skip")
+  action          String   @default("skip") @db.NVarChar(Max)
   /// "pending" | "processing" | "created" | "updated" | "skipped" | "error" | "rolled_back" | "rollback_error"
-  status          String   @default("pending")
+  status          String   @default("pending") @db.NVarChar(255)
   /// WR-A8 Phase 2b — Customer 360 satırı hangi entity'ye ait:
   /// "account" | "accountCompany" | "accountContact" | "accountAddress" | "accountProject".
   /// Phase 1 satırları için null (legacy account-only); Phase 2b satırları için zorunlu.
-  entityType      String?
+  entityType      String? @db.NVarChar(255)
   /// Parent satırın rowNumber'ı (child entity'ler için audit/UI navigation).
   /// Yalnız Customer 360 child row'larında doludur (account null bırakır).
   parentRowNumber Int?
   /// Relationship resolve için kullanılan key snapshot'ı ("vkn:1234567890",
   /// "companyCode:COMP-UNIVERA" vb.).
-  relationshipKey String?
+  relationshipKey String? @db.NVarChar(Max)
   /// Hangi Account'a denk geldi (update yolu) ya da yeni oluşturulan Account ID.
   /// Phase 1 ile geriye uyumluluk: account row'ları için doludur.
-  accountId       String?
+  accountId       String? @db.NVarChar(450)
   /// WR-A8 Phase 2b — polymorphic kayıt ID'si. accountId zaten account satırları
   /// için doluyor; non-account entity'ler (Contact/Address/Project/AC) için
   /// recordId Prisma kaydının id'sini taşır.
-  recordId        String?
+  recordId        String? @db.NVarChar(450)
   /// Match key kullanıldı mı (VKN). Audit için.
-  matchKey        String?
-  errorsJson      Json?
-  warningsJson    Json?
+  matchKey        String? @db.NVarChar(Max)
+  errorsJson      String? @db.NVarChar(Max) // json
+  warningsJson    String? @db.NVarChar(Max) // json
   /// Ham satır (kaynak alan adlarıyla).
-  rawJson         Json?
+  rawJson         String? @db.NVarChar(Max) // json
   /// Normalize edilmiş satır (target field key'lerle).
-  normalizedJson  Json?
+  normalizedJson  String? @db.NVarChar(Max) // json
   /// Update öncesi entity snapshot (rollback için).
-  beforeJson      Json?
+  beforeJson      String? @db.NVarChar(Max) // json
   /// Update/create sonrası entity snapshot.
-  afterJson       Json?
-  createdAt       DateTime @default(now())
+  afterJson       String? @db.NVarChar(Max) // json
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime @updatedAt
 
-  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([importJobId])
   @@index([importJobId, status])
@@ -1993,46 +1783,26 @@ model ImportJobRow {
 // See docs/planning_cards/WR-D4-D3-RESOLUTION-APPROVAL-NOTIFICATION-RULES.md
 // §5, §9, §11, §16.3 (Phase 2).
 
-enum DispatchChannel {
-  InApp // Operator notification (CaseNotification reused at app layer)
-  Email // Rendered email body; Phase 2 = manual confirm; Phase 4 = active send
-  ManualTask // Operator task panel — "phone this customer / send SMS manually"
-  Webhook // Phase 4+
-}
-
-enum DispatchMode {
-  LogOnly // Default Phase 2 — dispatch row created, no operator action expected
-  Manual // Operator manually confirms (copy/mailto/handled-externally)
-  Active // Phase 4 — actual send via provider; blocked at API layer in Phase 2
-}
-
-enum DispatchState {
-  Pending // Manual mode: awaiting operator confirm. Active mode: queued.
-  Sent // Manual confirm succeeded OR provider delivery confirmed (Phase 4).
-  Failed // Phase 4 provider error.
-  Suppressed // Idempotency dedup / rate-limit / customer opt-out.
-}
-
 /// WR-D4 Phase 2 — A rule maps an event + matching conditions to an
 /// audience + template + channel. Tenant-scoped. Soft-disable via
 /// isActive=false (hard delete breaks dispatch audit references).
 model NotificationRule {
-  id          String  @id @default(cuid())
-  companyId   String
-  name        String
-  description String?
+  id          String  @id @default(cuid()) @db.NVarChar(450)
+  companyId   String @db.NVarChar(450)
+  name        String @db.NVarChar(Max)
+  description String? @db.NVarChar(Max)
   isActive    Boolean @default(true)
   sortOrder   Int     @default(100)
 
   /// Event identifier. Free-string for forward compat. Phase 2 values:
   /// 'resolution_submitted', 'resolution_approved', 'resolution_rejected',
   /// 'case_closed', 'case_reopened'.
-  event String
+  event String @db.NVarChar(100)
 
   /// Optional JSON filter applied at scan time. Whitelist: category,
   /// subCategory, priority, supportLevel, teamId. Empty {} = no filter,
   /// only valid when isMatchAll=true (admin must explicitly opt in).
-  conditions Json
+  conditions String @db.NVarChar(Max) // json
 
   /// Safety guard: when conditions={} the admin must check "Match every
   /// case" explicitly. Prevents accidental broadcast rules.
@@ -2040,13 +1810,13 @@ model NotificationRule {
 
   /// Audience definition (1-N rows in same rule). Each item:
   /// `{ type: 'assignee'|'team_lead'|'supervisor'|'admin'|'customer_primary_contact'|'static_email', targetValue?: string }`
-  audience Json
+  audience String @db.NVarChar(Max) // json
 
   /// FK to NotificationTemplate. Required — every rule renders a message.
-  templateId String
+  templateId String @db.NVarChar(450)
 
-  channel DispatchChannel
-  mode    DispatchMode    @default(LogOnly)
+  channel String @db.NVarChar(50) // enum:DispatchChannel
+  mode    String    @default("LogOnly") @db.NVarChar(50) // enum:DispatchMode
 
   /// Idempotency window in minutes. Same (event, caseId, audienceIdentifier,
   /// templateId) within this window → suppressed dispatch.
@@ -2055,12 +1825,12 @@ model NotificationRule {
   /// Per-rule per-hour cap. App-layer SQL count check at dispatch time.
   rateLimitPerHour Int?
 
-  createdAt       DateTime @default(now())
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime @updatedAt
-  createdByUserId String?
+  createdByUserId String? @db.NVarChar(450)
 
-  company    Company                @relation(fields: [companyId], references: [id])
-  template   NotificationTemplate   @relation(fields: [templateId], references: [id])
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  template   NotificationTemplate   @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   dispatches NotificationDispatch[]
 
   @@index([companyId, event, isActive])
@@ -2073,22 +1843,22 @@ model NotificationRule {
 /// rendered content is stored on NotificationDispatch so template
 /// edits never rewrite history.
 model NotificationTemplate {
-  id          String  @id @default(cuid())
-  companyId   String
+  id          String  @id @default(cuid()) @db.NVarChar(450)
+  companyId   String @db.NVarChar(450)
   /// Stable key (e.g. 'approval_pending_to_lead'). Unique per tenant.
-  key         String
-  name        String
-  description String?
+  key         String @db.NVarChar(100)
+  name        String @db.NVarChar(Max)
+  description String? @db.NVarChar(Max)
 
   /// Phase 2 = always 'tr'. Phase 6 (i18n) introduces multi-language.
-  language String @default("tr")
+  language String @default("tr") @db.NVarChar(Max)
 
-  subjectTemplate String
-  bodyTemplate    String
+  subjectTemplate String @db.NVarChar(Max)
+  bodyTemplate    String @db.NVarChar(Max)
 
   /// 'plain' or 'html'. Phase 2 default 'plain' (operator copies to
   /// their mail client; HTML preview is for visual reference).
-  format String @default("plain")
+  format String @default("plain") @db.NVarChar(Max)
 
   /// UI badge — when true, rule using this template is flagged as
   /// "customer-facing" so the admin double-checks audience.
@@ -2096,18 +1866,18 @@ model NotificationTemplate {
 
   /// Declared variables (e.g. ['case.number','account.name']). Preview
   /// flags when subject/body references something NOT in this list.
-  requiredVariables Json
+  requiredVariables String @db.NVarChar(Max) // json
 
   /// Bumped on every save. Stamped on dispatch as templateVersionSnapshot.
   version Int @default(1)
 
   isActive Boolean @default(true)
 
-  createdAt       DateTime @default(now())
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime @updatedAt
-  createdByUserId String?
+  createdByUserId String? @db.NVarChar(450)
 
-  company    Company                @relation(fields: [companyId], references: [id])
+  company    Company                @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   rules      NotificationRule[]
   dispatches NotificationDispatch[]
 
@@ -2120,57 +1890,57 @@ model NotificationTemplate {
 /// history. Manual confirmation stamps `confirmedByUserId`/`confirmedAt`
 /// + free-text `deliveryNote` (required at API layer).
 model NotificationDispatch {
-  id        String @id @default(cuid())
-  caseId    String
-  companyId String
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
 
-  event                   String
-  ruleId                  String?
-  ruleNameSnapshot        String
-  templateId              String?
-  templateKeySnapshot     String
+  event                   String @db.NVarChar(100)
+  ruleId                  String? @db.NVarChar(450)
+  ruleNameSnapshot        String @db.NVarChar(Max)
+  templateId              String? @db.NVarChar(450)
+  templateKeySnapshot     String @db.NVarChar(Max)
   templateVersionSnapshot Int
 
   /// Resolved audience identity. `audienceType` is the rule audience kind
   /// ('assignee', 'customer_primary_contact', etc.); `audienceIdentifier`
   /// is the resolved value (personId, email, or 'unresolved').
-  audienceType       String
-  audienceIdentifier String
+  audienceType       String @db.NVarChar(255)
+  audienceIdentifier String @db.NVarChar(Max)
 
-  channel DispatchChannel
-  mode    DispatchMode
-  state   DispatchState   @default(Pending)
+  channel String @db.NVarChar(50) // enum:DispatchChannel
+  mode    String @db.NVarChar(50) // enum:DispatchMode
+  state   String   @default("Pending") @db.NVarChar(50) // enum:DispatchState
 
   /// Rendered final subject + body — written at dispatch creation.
-  snapshotSubject String
-  snapshotBody    String
+  snapshotSubject String @db.NVarChar(Max)
+  snapshotBody    String @db.NVarChar(Max)
 
   /// When state=Suppressed: 'duplicate_within_window' / 'rate_limited' /
   /// 'no_channel' / 'customer_opted_out' / 'audience_unresolvable'.
-  suppressionReason String?
+  suppressionReason String? @db.NVarChar(Max)
 
   /// Idempotency key for the dedup partial unique index. Format:
   /// `${companyId}:${event}:${caseId}:${audienceIdentifier}:${templateId}:${windowBucket}`
-  idempotencyKey String?
+  idempotencyKey String? @db.NVarChar(255)
 
   /// Manual confirmation fields (mode=Manual).
-  confirmedByUserId String?
+  confirmedByUserId String? @db.NVarChar(450)
   confirmedAt       DateTime?
   /// Required at API layer when transitioning to mode=Manual / state=Sent.
-  deliveryNote      String?
+  deliveryNote      String? @db.NVarChar(Max)
 
   /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
   dispatchedAt  DateTime?
-  failureReason String?
+  failureReason String? @db.NVarChar(Max)
   attempts      Int       @default(0)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
-  case     Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  company  Company               @relation(fields: [companyId], references: [id])
-  rule     NotificationRule?     @relation(fields: [ruleId], references: [id])
-  template NotificationTemplate? @relation(fields: [templateId], references: [id])
+  case     Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company  Company               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rule     NotificationRule?     @relation(fields: [ruleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  template NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([idempotencyKey], map: "NotificationDispatch_idempotencyKey_unique")
   @@index([caseId, createdAt(sort: Desc)])
@@ -2192,70 +1962,42 @@ model NotificationDispatch {
 // table without touching schema. See
 // docs/planning_cards/WR-ACTION-CENTER-PHASE1-APPROVAL-VISIBILITY.md §4.
 
-enum ActionItemKind {
-  approval_pending
-  approval_decided
-  case_returned_to_assignee
-  // Forward-compat enum values reserved for future phases — NOT emitted
-  // in Phase 1:
-  case_assigned
-  case_transferred
-  case_sla_at_risk
-  case_sla_breach
-  mention
-  watcher_event
-  dispatch_manual_confirm
-  dispatch_review_needed
-  pattern_alert
-  manual_task
-  system_alert
-}
-
-enum ActionItemState {
-  Pending
-  InProgress
-  Snoozed
-  Done
-  Dismissed
-  Expired
-}
-
 model ActionItem {
-  id             String          @id @default(cuid())
-  companyId      String // tenant scope
-  userId         String // target user
-  personId       String? // optional Person snapshot (TeamLead routing)
-  kind           ActionItemKind
-  state          ActionItemState @default(Pending)
+  id             String          @id @default(cuid()) @db.NVarChar(450)
+  companyId      String @db.NVarChar(450) // tenant scope
+  userId         String @db.NVarChar(450) // target user
+  personId       String? @db.NVarChar(450) // optional Person snapshot (TeamLead routing)
+  kind           String @db.NVarChar(50) // enum:ActionItemKind
+  state          String @default("Pending") @db.NVarChar(50) // enum:ActionItemState
   actionRequired Boolean         @default(true)
 
   // Polymorphic reference (no FK so cascade behavior stays simple)
-  objectType String?
-  objectId   String?
+  objectType String? @db.NVarChar(255)
+  objectId   String? @db.NVarChar(450)
 
   // Denormalized snapshots for inbox rendering (avoid JOIN on list)
-  caseId     String?
-  caseNumber String?
-  caseTitle  String?
+  caseId     String? @db.NVarChar(450)
+  caseNumber String? @db.NVarChar(Max)
+  caseTitle  String? @db.NVarChar(Max)
 
   // Routing + dedup
-  generatedBy String? // 'policy:<id>' | 'system' | 'user:<id>'
-  groupKey    String?
-  dedupKey    String?
+  generatedBy String? @db.NVarChar(Max) // 'policy:<id>' | 'system' | 'user:<id>'
+  groupKey    String? @db.NVarChar(Max)
+  dedupKey    String? @db.NVarChar(255)
   priority    Int     @default(50)
 
   // Explainability — required, never empty
-  reasonLabel String
+  reasonLabel String @db.NVarChar(Max)
 
   // Lifecycle timestamps
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime  @updatedAt
   firstSeenAt  DateTime?
   snoozedUntil DateTime?
   doneAt       DateTime?
-  doneByUserId String?
-  doneOutcome  String? // 'approved' | 'rejected' | 'acknowledged'
-  closeNote    String?
+  doneByUserId String? @db.NVarChar(450)
+  doneOutcome  String? @db.NVarChar(Max) // 'approved' | 'rejected' | 'acknowledged'
+  closeNote    String? @db.NVarChar(Max)
 
   // OD-073 — soft archive. Set by `actionItemArchive` cron 30 days
   // after terminal state transition; never hard-deleted. Active inbox
