@@ -49,6 +49,7 @@ export const REPORT_COLUMN_CATEGORIES = {
   smart_ticket_closure: 'Smart Ticket — Kapanış',
   smart_ticket_drafts: 'Smart Ticket — KB Taslakları',
   smart_ticket_solution_steps: 'Smart Ticket — Çözüm Adımları',
+  performance_flow: 'Performans / Akış',
 };
 
 /** @type {ReportColumnDef[]} */
@@ -124,6 +125,21 @@ export const REPORT_COLUMNS = [
   { id: 'solutionSteps.lastTriedTitle',   label: 'Son Denenen Çözüm Adımı',  category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'lastTriedTitle', excelWidth: 40 },
   { id: 'solutionSteps.workedSource',     label: 'Başarılı Adım Kaynağı',    category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'workedSource', format: 'solutionStepSource' },
   { id: 'solutionSteps.outcomeSummary',   label: 'Çözüm Adımı Özeti',       category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'outcomeSummary', excelWidth: 50 },
+
+  // ── Performans / Akış (Phase 2B.1 — CaseActivity + CaseNote aggregate) ──
+  // CaseActivity (history) ve CaseNote satırlarının her vaka için
+  // ön-aggregate edilmiş özetleri. Smart Ticket / klasik vaka ayrımı YOK.
+  // Hiç aktivite/not olmayan vakalarda 0 ve '' (formatter) — rapor kırılmaz.
+  { id: 'activity.firstActor',      label: 'İlk Aksiyon Yapan',     category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseActivity', aggregateField: 'firstActor' },
+  { id: 'activity.lastActor',       label: 'Son Aksiyon Yapan',     category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseActivity', aggregateField: 'lastActor' },
+  { id: 'activity.lastActivityAt',  label: 'Son Aktivite Zamanı',   category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseActivity', aggregateField: 'lastActivityAt', format: 'datetimeTr', excelWidth: 18 },
+  { id: 'activity.activityCount',   label: 'Aktivite Sayısı',       category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseActivity', aggregateField: 'activityCount' },
+  { id: 'activity.lastStatusChange', label: 'Son Statü Değişikliği', category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseActivity', aggregateField: 'lastStatusChange', excelWidth: 32 },
+  { id: 'note.noteCount',           label: 'Not Sayısı',            category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'noteCount' },
+  { id: 'note.lastNoteAt',          label: 'Son Not Tarihi',         category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'lastNoteAt', format: 'datetimeTr', excelWidth: 18 },
+  { id: 'note.lastNoteAuthor',      label: 'Son Not Yazarı',         category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'lastNoteAuthor' },
+  { id: 'note.internalNoteCount',   label: 'İç Not Sayısı',         category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'internalNoteCount' },
+  { id: 'note.externalNoteCount',   label: 'Dış Not Sayısı',        category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'externalNoteCount' },
 ];
 
 const COLUMN_BY_ID = new Map(REPORT_COLUMNS.map((c) => [c.id, c]));
@@ -194,6 +210,22 @@ export function buildPrismaSelect(columns) {
 export function needsSolutionStepAggregates(columns) {
   for (const col of columns) {
     if (col.source === 'aggregate' && col.aggregateKey === 'solutionSteps') return true;
+  }
+  return false;
+}
+
+/** Phase 2B.1: en az bir CaseActivity aggregate kolonu seçili mi? */
+export function needsCaseActivityAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'caseActivity') return true;
+  }
+  return false;
+}
+
+/** Phase 2B.1: en az bir CaseNote aggregate kolonu seçili mi? */
+export function needsCaseNoteAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'caseNote') return true;
   }
   return false;
 }

@@ -28,7 +28,8 @@ export type ReportColumnCategory =
   | 'smart_ticket_opening'
   | 'smart_ticket_closure'
   | 'smart_ticket_drafts'
-  | 'smart_ticket_solution_steps';
+  | 'smart_ticket_solution_steps'
+  | 'performance_flow';
 
 export interface ReportColumnDef {
   id: string;

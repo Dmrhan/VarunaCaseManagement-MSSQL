@@ -162,5 +162,180 @@ export async function loadSolutionStepAggregates(prisma, caseIds) {
   return map;
 }
 
-/** Test/debug için saf summarize ihraç edilir (smoke + unit). */
-export const __internal = { summarize, buildEmptyPayload };
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2B.1 — CaseActivity aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme:
+//   - Tek `prisma.caseActivity.findMany({ where: { caseId: { in } } })`
+//   - in-memory groupBy + summarize per case
+//   - Smart Ticket ayrımı YOK — tüm Case'lerde çalışır
+//   - Empty case → tüm sayaçlar 0, string alanlar ''
+//
+// Alanlar:
+//   - activityCount       : tüm aktivitelerin sayısı
+//   - firstActor          : at ASC ilk aktivitenin actor'u
+//   - lastActor           : at DESC son aktivitenin actor'u
+//   - lastActivityAt      : Date | null (formatter datetimeTr uygular)
+//   - lastStatusChange    : actionType='StatusChange' olan en son aktivitenin
+//                            toValue'su + datetime stringi (compact).
+//                            "<toValue> · <DD.MM.YYYY HH:mm>" — hem hangi
+//                            statüye geçti hem ne zaman. Empty ise ''.
+//
+// Status değişikliği tespiti:
+//   actionType === 'StatusChange' (caseRepository.update'in atatığı value).
+//   Eski/legacy formatlar olabilir; bu durumda gözden kaçar (sessiz).
+
+function buildEmptyActivityPayload() {
+  return {
+    activityCount: 0,
+    firstActor: '',
+    lastActor: '',
+    lastActivityAt: null, // Date | null — formatter datetime
+    lastStatusChange: '', // compact string
+  };
+}
+
+// Intl.DateTimeFormat reuse — aynı tek instance hem aggregate satırlarda
+// hem solutionSteps-format'ında çakışmaz; bu modül kendi instance'ı.
+const ACTIVITY_TR_DT = new Intl.DateTimeFormat('tr-TR', {
+  timeZone: 'Europe/Istanbul',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit',
+});
+
+function toDateOrNull(v) {
+  if (!v) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function summarizeActivities(rows) {
+  const p = buildEmptyActivityPayload();
+  if (!Array.isArray(rows) || rows.length === 0) return p;
+  let first = null;
+  let last = null;
+  let lastStatusChange = null;
+  for (const r of rows) {
+    p.activityCount += 1;
+    const t = toDateOrNull(r.at);
+    if (!first || (t && toDateOrNull(first.at)?.getTime() > t.getTime())) first = r;
+    if (!last || (t && (!toDateOrNull(last.at) || toDateOrNull(last.at).getTime() < t.getTime()))) last = r;
+    if (r.actionType === 'StatusChange') {
+      if (!lastStatusChange) lastStatusChange = r;
+      else {
+        const cur = toDateOrNull(lastStatusChange.at)?.getTime() ?? 0;
+        const inc = t?.getTime() ?? 0;
+        if (inc > cur) lastStatusChange = r;
+      }
+    }
+  }
+  if (first) p.firstActor = first.actor ?? '';
+  if (last) {
+    p.lastActor = last.actor ?? '';
+    p.lastActivityAt = toDateOrNull(last.at);
+  }
+  if (lastStatusChange) {
+    const to = lastStatusChange.toValue ?? '';
+    const d = toDateOrNull(lastStatusChange.at);
+    const dStr = d ? ACTIVITY_TR_DT.format(d) : '';
+    p.lastStatusChange = to && dStr ? `${to} · ${dStr}` : (to || dStr);
+  }
+  return p;
+}
+
+export async function loadCaseActivityAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+  const rows = await prisma.caseActivity.findMany({
+    where: { caseId: { in: caseIds } },
+    select: { caseId: true, actor: true, at: true, actionType: true, toValue: true },
+  });
+  const byCase = new Map();
+  for (const row of rows) {
+    let bucket = byCase.get(row.caseId);
+    if (!bucket) { bucket = []; byCase.set(row.caseId, bucket); }
+    bucket.push(row);
+  }
+  for (const id of caseIds) map.set(id, summarizeActivities(byCase.get(id) ?? []));
+  return map;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2B.1 — CaseNote aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme:
+//   - Tek `prisma.caseNote.findMany({ where: { caseId: { in } } })`
+//   - in-memory groupBy + summarize per case
+//   - visibility değerleri DB'de 'Internal' | 'Customer' (NoteVisibility enum).
+//     - internalNoteCount = visibility === 'Internal'
+//     - externalNoteCount = visibility === 'Customer' (müşteriye görünür)
+//     - Bilinmeyen değerler iki sayaçtan da hariç (defansif).
+//   - Reply not'ları (parentNoteId != null) hâlâ noteCount'a dahil — tüm
+//     CaseNote satırları sayılır.
+//
+// Alanlar:
+//   - noteCount         : satır sayısı
+//   - lastNoteAt        : Date | null — formatter datetimeTr
+//   - lastNoteAuthor    : authorName (createdAt DESC)
+//   - internalNoteCount : visibility='Internal'
+//   - externalNoteCount : visibility='Customer'
+
+function buildEmptyNotePayload() {
+  return {
+    noteCount: 0,
+    lastNoteAt: null,
+    lastNoteAuthor: '',
+    internalNoteCount: 0,
+    externalNoteCount: 0,
+  };
+}
+
+function summarizeNotes(rows) {
+  const p = buildEmptyNotePayload();
+  if (!Array.isArray(rows) || rows.length === 0) return p;
+  let last = null;
+  for (const r of rows) {
+    p.noteCount += 1;
+    if (r.visibility === 'Internal') p.internalNoteCount += 1;
+    else if (r.visibility === 'Customer') p.externalNoteCount += 1;
+    const t = toDateOrNull(r.createdAt);
+    if (!last || (t && (!toDateOrNull(last.createdAt) || toDateOrNull(last.createdAt).getTime() < t.getTime()))) {
+      last = r;
+    }
+  }
+  if (last) {
+    p.lastNoteAt = toDateOrNull(last.createdAt);
+    p.lastNoteAuthor = last.authorName ?? '';
+  }
+  return p;
+}
+
+export async function loadCaseNoteAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+  const rows = await prisma.caseNote.findMany({
+    where: { caseId: { in: caseIds } },
+    select: { caseId: true, authorName: true, visibility: true, createdAt: true },
+  });
+  const byCase = new Map();
+  for (const row of rows) {
+    let bucket = byCase.get(row.caseId);
+    if (!bucket) { bucket = []; byCase.set(row.caseId, bucket); }
+    bucket.push(row);
+  }
+  for (const id of caseIds) map.set(id, summarizeNotes(byCase.get(id) ?? []));
+  return map;
+}
+
+/** Test/debug için saf summarize'lar ihraç edilir (smoke + unit). */
+export const __internal = {
+  summarize,
+  buildEmptyPayload,
+  summarizeActivities,
+  buildEmptyActivityPayload,
+  summarizeNotes,
+  buildEmptyNotePayload,
+};
