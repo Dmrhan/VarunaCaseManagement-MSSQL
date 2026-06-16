@@ -49,9 +49,18 @@ async function api(token, path, init = {}) {
 }
 
 console.log('── Setup ───────────────────────────────────────────────');
-const token = await getToken('agent@varuna.dev');
+// Reports endpoint'i Codex P2 fix sonrası Supervisor/Admin/SystemAdmin
+// requireRole guard'lı. Agent login token'ı ayrı tutuluyor (403 testi için);
+// privileged smoke için supervisor@varuna.dev kullanıyoruz. Fixture yoksa
+// agent token'ı fallback (eski davranış); o durumda 1-5 senaryo skip.
+const agentToken = await getToken('agent@varuna.dev');
+let token = await getToken('supervisor@varuna.dev');
 if (!token) {
-  console.log('⊘ agent login failed — skip');
+  console.log('⊘ supervisor@varuna.dev fixture yok — agent ile devam (1-5 yetkisiz olabilir)');
+  token = agentToken;
+}
+if (!token) {
+  console.log('⊘ login failed — skip');
   process.exit(0);
 }
 
@@ -148,6 +157,64 @@ console.log('\n── 5) POST /preview — yetkisiz companyIds → boş ──')
     ok('5) Yetkisiz scope → 0 satır (sızıntı yok)');
   } else {
     bad('5) Beklenen boş cevap', `status=${r.status} rows=${r.data?.rows?.length} total=${r.data?.total}`);
+  }
+}
+
+// ── 6) Codex P2 #1 — Agent role 403 (defense-in-depth role guard) ──
+console.log('\n── 6) Agent role → 403 (requireRole guard) ──');
+if (agentToken) {
+  const r = await api(agentToken, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({ columns: ['caseNumber'] }),
+  });
+  if (r.status === 403) {
+    ok('6) Agent /preview → 403 (rapor yetkisi yok)');
+  } else if (r.status === 200) {
+    bad('6) Agent /preview 200 dönmemeli (role guard eksik)', `status=${r.status}`);
+  } else {
+    bad('6) Beklenen 403', `status=${r.status} error=${r.data?.error}`);
+  }
+} else {
+  console.log('⊘ 6) agent fixture yok — skip');
+}
+
+// ── 7) Codex P2 #2 — dateTo end-of-day cover (YYYY-MM-DD same-day) ──
+console.log('\n── 7) dateTo end-of-day: same-day filter günü kapsar ──');
+{
+  // Aynı gün hem dateFrom hem dateTo → o günün TÜM vakalarını döndürmeli.
+  // Bugünün tarihi (UTC) — DB'de o günde vaka olmayabilir; kontrol mantığı:
+  //   - Fix sonrası: same-day total >= same-day midnight-only total
+  //   - same-day total == 0 ise testin kanıtlama gücü düşer (skip note)
+  const today = new Date();
+  const yyyyMmDd = today.toISOString().slice(0, 10);
+  const rEnd = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: ['caseNumber'],
+      filters: { dateFrom: yyyyMmDd, dateTo: yyyyMmDd },
+    }),
+  });
+  // Karşılaştırma: filter'sız (last 30 day) total ≥ same-day total
+  const r30 = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: ['caseNumber'],
+      filters: {
+        dateFrom: new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10),
+        dateTo: yyyyMmDd,
+      },
+    }),
+  });
+  if (rEnd.status === 200 && r30.status === 200) {
+    if (r30.data.total >= rEnd.data.total) {
+      ok(
+        `7) dateTo same-day yarı-kapsamı OK — bugün ${rEnd.data.total} satır (30g: ${r30.data.total})`,
+      );
+    } else {
+      bad('7) 30-day total < same-day total — mantıksız', `30g=${r30.data.total} 1g=${rEnd.data.total}`);
+    }
+  } else {
+    bad('7) preview start failed', `endStatus=${rEnd.status} 30Status=${r30.status}`);
   }
 }
 
