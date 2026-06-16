@@ -1,0 +1,367 @@
+/*
+ * Yeni iki-fazlı sınıflandırma taksonomisi (v2).
+ *
+ * Kaynak: Univera kategori ağacı HTML'i (kategori-agaci.html).
+ *
+ * AÇILIŞ — müşteri dili, ticket açılırken 5 alan seçilir:
+ *   urun, is_sureci, islem_tipi, etkilenen_nesne, etki
+ *
+ * KAPANIŞ — destek dili, ticket kapatılırken 3 alan doldurulur:
+ *   kok_neden (Grup + Detay), cozum_tipi, kalici_onlem (opsiyonel)
+ *
+ * Yüklenme: cc-taxonomy-v2.json bir kez okunur, in-memory cache.
+ * Tüm değerler stringdir; LLM çıktısı strict eşleşmeyle doğrulanır.
+ */
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+export type OpenField =
+  | "urun"
+  | "platform"
+  | "is_sureci"
+  | "islem_tipi"
+  | "etkilenen_nesne"
+  | "etki";
+
+export const OPEN_FIELD_ORDER: OpenField[] = [
+  "urun",
+  "platform",
+  "is_sureci",
+  "islem_tipi",
+  "etkilenen_nesne",
+  "etki",
+];
+
+export type CloseField = "kok_neden" | "cozum_tipi" | "kalici_onlem";
+
+type OpenSpec = {
+  label: string;
+  description: string;
+  values: string[];
+};
+
+type CloseRootCauseGroup = {
+  group: string;
+  details: string[];
+};
+
+type CloseSpec = {
+  kok_neden: {
+    label: string;
+    description: string;
+    groups: CloseRootCauseGroup[];
+  };
+  cozum_tipi: OpenSpec;
+  kalici_onlem: OpenSpec;
+};
+
+type TaxonomyV2 = {
+  version: string;
+  source: string;
+  description: string;
+  open: Record<OpenField, OpenSpec>;
+  close: CloseSpec;
+};
+
+let cache: TaxonomyV2 | null = null;
+
+export function loadTaxonomyV2(): TaxonomyV2 {
+  if (cache) return cache;
+  const p = path.resolve(process.cwd(), "data/cc-taxonomy-v2.json");
+  cache = JSON.parse(readFileSync(p, "utf8")) as TaxonomyV2;
+  return cache;
+}
+
+// ─── Domain Hints (Panorama özelinde deterministik kategorize kuralları) ──
+
+export type CategorizationHints = {
+  version: string;
+  source: string;
+  description: string;
+  principles: string[];
+  platform_hints: {
+    mobil_kesin: { etkilenen_nesne: string[]; islem_tipi: string[] };
+    backoffice_kesin: { etkilenen_nesne: string[]; islem_tipi: string[] };
+    belirsiz_ipucu_yok: { etkilenen_nesne: string[]; islem_tipi: string[] };
+  };
+  text_keyword_hints?: {
+    keywords: Array<{
+      keyword: string;
+      platform?: string | null;
+      urun?: string | null;
+      reason: string;
+    }>;
+  };
+};
+
+let hintsCache: CategorizationHints | null = null;
+
+export function loadHints(): CategorizationHints {
+  if (hintsCache) return hintsCache;
+  const p = path.resolve(process.cwd(), "data/cc-taxonomy-hints.json");
+  hintsCache = JSON.parse(readFileSync(p, "utf8")) as CategorizationHints;
+  return hintsCache;
+}
+
+/**
+ * LLM prompt'una eklenmek üzere hint kurallarını metin olarak format'la.
+ * Açık ve tartışmasız kuralları liste halinde sunar; LLM'in unutmaması için
+ * her bölüm açıkça etiketlenir.
+ */
+export function formatHintsForPrompt(): string {
+  const h = loadHints();
+  const ph = h.platform_hints;
+  const lines: string[] = [];
+
+  lines.push("## DOMAIN İPUÇLARI — PANORAMA ÖZELİNDE KESIN KURALLAR");
+  lines.push("");
+  lines.push("### Temel Prensipler:");
+  for (const p of h.principles) lines.push(`  • ${p}`);
+  lines.push("");
+
+  lines.push("### Platform = 'Mobil' OLMASI ZORUNLU (aşağıdaki terimlerden biri etkilenen_nesne veya islem_tipi olursa):");
+  for (const v of ph.mobil_kesin.etkilenen_nesne) {
+    lines.push(`  • etkilenen_nesne = "${v}"`);
+  }
+  for (const v of ph.mobil_kesin.islem_tipi) {
+    lines.push(`  • islem_tipi = "${v}"`);
+  }
+  lines.push("");
+
+  lines.push("### Platform = 'Backoffice' OLMASI ZORUNLU (aşağıdaki terimlerden biri etkilenen_nesne veya islem_tipi olursa):");
+  for (const v of ph.backoffice_kesin.etkilenen_nesne) {
+    lines.push(`  • etkilenen_nesne = "${v}"`);
+  }
+  for (const v of ph.backoffice_kesin.islem_tipi) {
+    lines.push(`  • islem_tipi = "${v}"`);
+  }
+  lines.push("");
+
+  lines.push("### Platform BELİRSİZ (bu terimler tek başına platform belirtmez, açıklamadaki bağlama bak):");
+  for (const v of ph.belirsiz_ipucu_yok.etkilenen_nesne) {
+    lines.push(`  • etkilenen_nesne = "${v}"`);
+  }
+  for (const v of ph.belirsiz_ipucu_yok.islem_tipi) {
+    lines.push(`  • islem_tipi = "${v}"`);
+  }
+
+  if (h.text_keyword_hints?.keywords?.length) {
+    lines.push("");
+    lines.push("### AÇIKLAMA METNİNDE KEYWORD → PLATFORM/ÜRÜN ZORLAMA:");
+    for (const k of h.text_keyword_hints.keywords) {
+      const parts: string[] = [];
+      if (k.platform) parts.push(`platform = "${k.platform}"`);
+      if (k.urun) parts.push(`urun = "${k.urun}"`);
+      lines.push(
+        `  • "${k.keyword}" geçerse → ${parts.join(", ")} (${k.reason})`,
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Açıklama metnindeki keyword'lere göre platform/ürün ipuçlarını çıkar.
+ * Türkçe karakter → ASCII normalize, kelime sınırı (\b) match.
+ * Birden çok keyword eşleşirse hepsinin önerisi döner.
+ */
+export function detectTextKeywordHints(
+  description: string,
+): Array<{ keyword: string; platform: string | null; urun: string | null; reason: string }> {
+  if (!description) return [];
+  const h = loadHints();
+  const keywords = h.text_keyword_hints?.keywords ?? [];
+  if (keywords.length === 0) return [];
+
+  const norm = description
+    .replaceAll("İ", "I").replaceAll("ı", "i")
+    .replaceAll("Ğ", "G").replaceAll("ğ", "g")
+    .replaceAll("Ü", "U").replaceAll("ü", "u")
+    .replaceAll("Ş", "S").replaceAll("ş", "s")
+    .replaceAll("Ö", "O").replaceAll("ö", "o")
+    .replaceAll("Ç", "C").replaceAll("ç", "c")
+    .toLowerCase();
+
+  const matched: Array<{ keyword: string; platform: string | null; urun: string | null; reason: string }> = [];
+  for (const k of keywords) {
+    const kw = k.keyword
+      .replaceAll("İ", "I").replaceAll("ı", "i")
+      .replaceAll("Ğ", "G").replaceAll("ğ", "g")
+      .replaceAll("Ü", "U").replaceAll("ü", "u")
+      .replaceAll("Ş", "S").replaceAll("ş", "s")
+      .replaceAll("Ö", "O").replaceAll("ö", "o")
+      .replaceAll("Ç", "C").replaceAll("ç", "c")
+      .toLowerCase();
+    // Türkçe çekim eklerini yakalamak için PREFIX MATCH:
+    // başında kelime sınırı, sonu serbest — "panorama" → "panoramada", "panoramamda" da eşleşir.
+    // Bu pragmatik bir trade-off; tek-yön sınır false positive riskini minimumda tutar
+    // (keyword'lerin kendisi benzersiz: panorama, quest, calldesk, stokbar, enroute).
+    const re = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    if (re.test(norm)) {
+      matched.push({
+        keyword: k.keyword,
+        platform: k.platform ?? null,
+        urun: k.urun ?? null,
+        reason: k.reason,
+      });
+    }
+  }
+  return matched;
+}
+
+/**
+ * detectTextKeywordHints sonucunu LLM çıktısının platform/urun alanlarına uygula.
+ * Birden çok keyword çakışırsa ilk eşleşmenin değeri kullanılır (öncelikli).
+ */
+export function applyKeywordHints(
+  description: string,
+  currentPlatform: string | null,
+  currentUrun: string | null,
+): {
+  platform: string | null;
+  urun: string | null;
+  appliedReasons: string[];
+} {
+  const hits = detectTextKeywordHints(description);
+  if (hits.length === 0) {
+    return { platform: currentPlatform, urun: currentUrun, appliedReasons: [] };
+  }
+  let platform = currentPlatform;
+  let urun = currentUrun;
+  const reasons: string[] = [];
+  for (const h of hits) {
+    if (h.platform && platform !== h.platform) {
+      platform = h.platform;
+      reasons.push(`'${h.keyword}' → platform=${h.platform} (${h.reason})`);
+    }
+    if (h.urun && urun !== h.urun) {
+      urun = h.urun;
+      reasons.push(`'${h.keyword}' → urun=${h.urun} (${h.reason})`);
+    }
+  }
+  return { platform, urun, appliedReasons: reasons };
+}
+
+/**
+ * Bir etkilenen_nesne/islem_tipi seçimine göre platform'u kesin olarak ZORLA.
+ * Hint'lerde kesin kural varsa kullanılır; yoksa input platform aynen döner.
+ * Deterministik post-processing — LLM çıktısı hint'e uymuyorsa override eder.
+ */
+export function enforcePlatformFromHints(
+  current: string | null,
+  etkilenenNesne: string | null,
+  islemTipi: string | null,
+): { platform: string | null; overridden: boolean; reason: string | null } {
+  const h = loadHints();
+  const ph = h.platform_hints;
+  const checkSet = (
+    arrEN: string[],
+    arrIT: string[],
+  ): boolean => {
+    if (etkilenenNesne && arrEN.includes(etkilenenNesne)) return true;
+    if (islemTipi && arrIT.includes(islemTipi)) return true;
+    return false;
+  };
+  if (checkSet(ph.mobil_kesin.etkilenen_nesne, ph.mobil_kesin.islem_tipi)) {
+    if (current !== "Mobil") {
+      return {
+        platform: "Mobil",
+        overridden: true,
+        reason: `Hint kuralı: "${etkilenenNesne ?? islemTipi}" mobil platforma kesin işaret eder.`,
+      };
+    }
+    return { platform: "Mobil", overridden: false, reason: null };
+  }
+  if (checkSet(ph.backoffice_kesin.etkilenen_nesne, ph.backoffice_kesin.islem_tipi)) {
+    if (current !== "Backoffice") {
+      return {
+        platform: "Backoffice",
+        overridden: true,
+        reason: `Hint kuralı: "${etkilenenNesne ?? islemTipi}" backoffice platforma kesin işaret eder.`,
+      };
+    }
+    return { platform: "Backoffice", overridden: false, reason: null };
+  }
+  return { platform: current, overridden: false, reason: null };
+}
+
+// ─── Açılış alanları ─────────────────────────────────────────────────────
+
+export function getOpenField(field: OpenField): OpenSpec {
+  return loadTaxonomyV2().open[field];
+}
+
+export function isValidOpenValue(field: OpenField, value: string | null): boolean {
+  if (value == null) return true;
+  return getOpenField(field).values.includes(value);
+}
+
+// ─── Kapanış alanları ───────────────────────────────────────────────────
+
+export function getKokNedenGroups(): CloseRootCauseGroup[] {
+  return loadTaxonomyV2().close.kok_neden.groups;
+}
+
+export function getCozumTipi(): OpenSpec {
+  return loadTaxonomyV2().close.cozum_tipi;
+}
+
+export function getKaliciOnlem(): OpenSpec {
+  return loadTaxonomyV2().close.kalici_onlem;
+}
+
+// Decouple — kök neden grubu ve detayı BAĞIMSIZ doğrulanır. Detay artık seçilen
+// gruba bağlı değil; tüm grupların detay birleşiminden herhangi biri geçerlidir.
+export function isValidKokNedenGrubu(group: string | null): boolean {
+  if (group == null) return true;
+  return getKokNedenGroups().some((g) => g.group === group);
+}
+
+export function isValidKokNedenDetay(detail: string | null): boolean {
+  if (detail == null) return true;
+  return getKokNedenGroups().some((g) => g.details.includes(detail));
+}
+
+export function isValidCozumTipi(value: string | null): boolean {
+  if (value == null) return true;
+  return getCozumTipi().values.includes(value);
+}
+
+export function isValidKaliciOnlem(value: string | null): boolean {
+  if (value == null) return true;
+  return getKaliciOnlem().values.includes(value);
+}
+
+// ─── LLM Prompt formatters ───────────────────────────────────────────────
+
+export function formatOpenForPrompt(): string {
+  const t = loadTaxonomyV2();
+  return OPEN_FIELD_ORDER.map((f) => {
+    const spec = t.open[f];
+    return [
+      `## ${spec.label} (${f})`,
+      spec.description,
+      ...spec.values.map((v) => `  • ${v}`),
+    ].join("\n");
+  }).join("\n\n");
+}
+
+// ─── Düz görüntüleme için (UI dropdown vb.) ──────────────────────────────
+
+export type OpenFieldsResult = {
+  urun: string | null;
+  platform: string | null;
+  is_sureci: string | null;
+  islem_tipi: string | null;
+  etkilenen_nesne: string | null;
+  etki: string | null;
+};
+
+export type CloseFieldsResult = {
+  kok_neden_grubu: string | null;
+  kok_neden_detayi: string | null;
+  cozum_tipi: string | null;
+  kalici_onlem: string | null;
+};

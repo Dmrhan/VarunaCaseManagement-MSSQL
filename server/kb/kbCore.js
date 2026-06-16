@@ -1,4 +1,4 @@
-// OTOMATİK ÜRETİLDİ — elle düzenleme. Kaynak: C:/apps/ticket-analiz/src/lib
+// OTOMATİK ÜRETİLDİ — elle düzenlemeyin. Kaynak: server/kb/src/lib (repo-içi)
 // Yeniden üretmek için: node scripts/build-kb-core.mjs
 import { createRequire as __createRequire } from 'node:module';
 const require = __createRequire(import.meta.url);
@@ -18,7 +18,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// ../ticket-analiz/src/lib/env.ts
+// server/kb/src/lib/env.ts
 import { z } from "zod";
 function env() {
   if (cached) return cached;
@@ -38,7 +38,7 @@ ${lines.join("\n")}
 }
 var Schema, cached;
 var init_env = __esm({
-  "../ticket-analiz/src/lib/env.ts"() {
+  "server/kb/src/lib/env.ts"() {
     "use strict";
     Schema = z.object({
       TICKET_MSSQL_SERVER: z.string().min(1),
@@ -115,7 +115,7 @@ var init_env = __esm({
   }
 });
 
-// ../ticket-analiz/src/lib/gemini.ts
+// server/kb/src/lib/gemini.ts
 var gemini_exports = {};
 __export(gemini_exports, {
   embed: () => embed,
@@ -288,7 +288,7 @@ async function generate(systemInstruction, userPrompt, options = {}) {
 }
 var anthropicClient, embedderPromise, DIM, CLAUDE_PRICING;
 var init_gemini = __esm({
-  "../ticket-analiz/src/lib/gemini.ts"() {
+  "server/kb/src/lib/gemini.ts"() {
     "use strict";
     init_env();
     anthropicClient = null;
@@ -309,11 +309,11 @@ var init_gemini = __esm({
   }
 });
 
-// ../ticket-analiz/src/lib/kb/ask.ts
+// server/kb/src/lib/kb/ask.ts
 init_gemini();
 import { z as z2 } from "zod";
 
-// ../ticket-analiz/src/lib/kb/db.ts
+// server/kb/src/lib/kb/db.ts
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { mkdirSync } from "node:fs";
@@ -559,7 +559,7 @@ function kbStats() {
   };
 }
 
-// ../ticket-analiz/src/lib/kb/embedder.ts
+// server/kb/src/lib/kb/embedder.ts
 init_gemini();
 init_env();
 async function embedPendingChunks(opts = {}) {
@@ -648,7 +648,7 @@ async function embedQuery(text) {
   return embed2(text);
 }
 
-// ../ticket-analiz/src/lib/kb/retrieve.ts
+// server/kb/src/lib/kb/retrieve.ts
 init_env();
 init_gemini();
 var DEFAULTS = {
@@ -903,7 +903,7 @@ ${c.content.slice(0, 600)}`
   }).sort((a, b) => (b.rerankScore ?? 0) - (a.rerankScore ?? 0)).slice(0, topK);
 }
 
-// ../ticket-analiz/src/lib/kb/ask.ts
+// server/kb/src/lib/kb/ask.ts
 var MIN_RRF_SCORE = 5e-3;
 var MIN_HIGH_CONFIDENCE_CHUNKS = 1;
 var AskOutputSchema = z2.object({
@@ -1191,11 +1191,11 @@ async function ask(query, opts = {}) {
   };
 }
 
-// ../ticket-analiz/src/lib/cc/categorizer.ts
+// server/kb/src/lib/cc/categorizer.ts
 init_gemini();
 import { z as z3 } from "zod";
 
-// ../ticket-analiz/src/lib/cc/taxonomy.ts
+// server/kb/src/lib/cc/taxonomy.ts
 import { readFileSync } from "node:fs";
 import path2 from "node:path";
 var cachedCategories = null;
@@ -1245,7 +1245,7 @@ function isValidRootCause(id, sub) {
   return rc.subs.includes(sub);
 }
 
-// ../ticket-analiz/src/lib/cc/categorizer.ts
+// server/kb/src/lib/cc/categorizer.ts
 var SYSTEM2 = `
 Sen bir \xE7a\u011Fr\u0131 merkezi ticket s\u0131n\u0131fland\u0131r\u0131c\u0131s\u0131n. G\xF6revin: gelen sorun metnini
 verilen taksonomi i\xE7inden TEK B\u0130R ana kategori + alt + TEK B\u0130R k\xF6k neden + alt
@@ -1340,11 +1340,11 @@ function fallback(reason) {
   };
 }
 
-// ../ticket-analiz/src/lib/cc/categorizer-v2.ts
+// server/kb/src/lib/cc/categorizer-v2.ts
 init_gemini();
 import { z as z4 } from "zod";
 
-// ../ticket-analiz/src/lib/cc/taxonomy-v2.ts
+// server/kb/src/lib/cc/taxonomy-v2.ts
 import { readFileSync as readFileSync2 } from "node:fs";
 import path3 from "node:path";
 var OPEN_FIELD_ORDER = [
@@ -1502,12 +1502,13 @@ function getCozumTipi() {
 function getKaliciOnlem() {
   return loadTaxonomyV2().close.kalici_onlem;
 }
-function isValidKokNeden(group, detail) {
+function isValidKokNedenGrubu(group) {
   if (group == null) return true;
-  const g = getKokNedenGroups().find((x) => x.group === group);
-  if (!g) return false;
+  return getKokNedenGroups().some((g) => g.group === group);
+}
+function isValidKokNedenDetay(detail) {
   if (detail == null) return true;
-  return g.details.includes(detail);
+  return getKokNedenGroups().some((g) => g.details.includes(detail));
 }
 function isValidCozumTipi(value) {
   if (value == null) return true;
@@ -1528,14 +1529,8 @@ function formatOpenForPrompt() {
     ].join("\n");
   }).join("\n\n");
 }
-function formatKokNedenForPrompt() {
-  return getKokNedenGroups().map(
-    (g) => `## ${g.group}
-` + g.details.map((d) => `  \u2022 ${d}`).join("\n")
-  ).join("\n\n");
-}
 
-// ../ticket-analiz/src/lib/cc/categorizer-v2.ts
+// server/kb/src/lib/cc/categorizer-v2.ts
 var SYSTEM3 = `
 Sen bir \xE7a\u011Fr\u0131 merkezi a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131r\u0131c\u0131s\u0131s\u0131n. G\xF6revin: gelen sorun metnini
 verilen 5 alanl\u0131 taksonomi i\xE7inden se\xE7imlerle etiketlemektir.
@@ -1665,7 +1660,7 @@ ticket i\xE7in destek dilinde 4 kapan\u0131\u015F alan\u0131n\u0131 se\xE7mek.
 
 Kurallar (mutlak):
 - ASLA yeni de\u011Fer uydurma; SADECE verilen taksonomide ge\xE7en string'leri kullan.
-- "kok_neden_detayi" YALNIZ se\xE7ti\u011Fin "kok_neden_grubu" alt\u0131ndakilerden se\xE7ilebilir.
+- "kok_neden_grubu" ve "kok_neden_detayi" BA\u011EIMSIZ se\xE7ilir; detay herhangi bir gruba ait olabilir \u2014 t\xFCm detay listesinden uygun olan\u0131 se\xE7.
 - Uygun de\u011Fer yoksa null b\u0131rak (bo\u015F string de\u011Fil).
 - kalici_onlem opsiyonel \u2014 emin de\u011Filsen veya gereksizse null b\u0131rak.
 - Confidence 0-1 \u2014 karars\u0131zsan d\xFC\u015F\xFCr.
@@ -1686,8 +1681,11 @@ async function suggestClose(input) {
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
   const userPrompt = [
-    "TAKSONOM\u0130 \u2014 K\xD6K NEDEN GRUBU \u2192 DETAYI:",
-    formatKokNedenForPrompt(),
+    "K\xD6K NEDEN GRUBU (biri):",
+    getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
+    "",
+    "K\xD6K NEDEN DETAYI (biri, gruptan ba\u011F\u0131ms\u0131z):",
+    [...new Set(getKokNedenGroups().flatMap((g) => g.details))].map((d) => `  \u2022 ${d}`).join("\n"),
     "",
     "TAKSONOM\u0130 \u2014 \xC7\xD6Z\xDCM T\u0130P\u0130:",
     getCozumTipi().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
@@ -1705,7 +1703,7 @@ async function suggestClose(input) {
     `\xC7\u0131kt\u0131 JSON \u015Femas\u0131 (sadece JSON):`,
     `{`,
     `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
-    `  "kok_neden_detayi": string | null,  // se\xE7ilen grubun alt detaylar\u0131ndan biri`,
+    `  "kok_neden_detayi": string | null,  // t\xFCm detay listesinden biri (gruptan ba\u011F\u0131ms\u0131z)`,
     `  "cozum_tipi": string | null,        // 12 \xE7\xF6z\xFCm tipinden biri`,
     `  "kalici_onlem": string | null,      // 8 kal\u0131c\u0131 \xF6nlemden biri, opsiyonel`,
     `  "confidence": number,`,
@@ -1729,9 +1727,8 @@ async function suggestClose(input) {
     return emptyCloseResult(res, "LLM \xE7\u0131kt\u0131s\u0131 \u015Femaya uymad\u0131");
   }
   const out = v.data;
-  const validKn = isValidKokNeden(out.kok_neden_grubu, out.kok_neden_detayi);
-  const kok_neden_grubu = validKn ? out.kok_neden_grubu : null;
-  const kok_neden_detayi = validKn ? out.kok_neden_detayi : null;
+  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
+  const kok_neden_detayi = isValidKokNedenDetay(out.kok_neden_detayi) ? out.kok_neden_detayi : null;
   const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
   return {
@@ -1762,10 +1759,10 @@ function emptyCloseResult(res, reason) {
   };
 }
 
-// ../ticket-analiz/src/lib/ticket/index.ts
+// server/kb/src/lib/ticket/index.ts
 import { z as z6 } from "zod";
 
-// ../ticket-analiz/src/lib/db.ts
+// server/kb/src/lib/db.ts
 init_env();
 import sql from "mssql";
 var FORBIDDEN_PATTERNS = [
@@ -1856,7 +1853,7 @@ async function runReadOnly(query, params = [], opts = {}) {
   };
 }
 
-// ../ticket-analiz/src/lib/ticket/source.ts
+// server/kb/src/lib/ticket/source.ts
 var TICKET_VIEW = {
   schema: "dbo",
   name: "VIEW_BILDIRIM_AI_ANALIZ_DATA"
@@ -1913,7 +1910,7 @@ var DEFAULT_SELECT = [
   "bugGroup"
 ];
 
-// ../ticket-analiz/src/lib/ticket/identifiers.ts
+// server/kb/src/lib/ticket/identifiers.ts
 var SAFE_IDENT = /^[A-Za-z_][A-Za-z0-9_.]{0,63}$/;
 function assertSafeIdentifier(ident) {
   if (!SAFE_IDENT.test(ident)) {
@@ -1931,7 +1928,7 @@ function qualifyTable(schema, name) {
   return `${quoteIdent(schema)}.${quoteIdent(name)}`;
 }
 
-// ../ticket-analiz/src/lib/ticket/query-builder.ts
+// server/kb/src/lib/ticket/query-builder.ts
 function selectList(cols) {
   return cols.map((key) => {
     const raw = COL[key];
@@ -1954,7 +1951,7 @@ function getByIdQuery(bildirimNo, cols = DEFAULT_SELECT) {
   };
 }
 
-// ../ticket-analiz/src/lib/ticket/resolver.ts
+// server/kb/src/lib/ticket/resolver.ts
 init_env();
 async function getById(bildirimNo) {
   if (!Number.isInteger(bildirimNo) || bildirimNo <= 0) {
@@ -1965,7 +1962,7 @@ async function getById(bildirimNo) {
   return res.rows[0] ?? null;
 }
 
-// ../ticket-analiz/src/lib/ticket/local-store.ts
+// server/kb/src/lib/ticket/local-store.ts
 import Database2 from "better-sqlite3";
 import { mkdirSync as mkdirSync2 } from "node:fs";
 import path4 from "node:path";
@@ -2082,7 +2079,7 @@ function loadAllVectors(model) {
   }));
 }
 
-// ../ticket-analiz/src/lib/ticket/similarity.ts
+// server/kb/src/lib/ticket/similarity.ts
 init_env();
 init_gemini();
 var vectorCache = null;
@@ -2149,7 +2146,7 @@ async function searchSimilarByText(queryText, filter = {}, topK) {
   return hits.slice(0, k);
 }
 
-// ../ticket-analiz/src/lib/ticket/taxonomy.ts
+// server/kb/src/lib/ticket/taxonomy.ts
 function distinctValues(column, limit = 100) {
   const sql2 = `
     SELECT ${column} AS v, COUNT(*) AS n
@@ -2176,11 +2173,11 @@ function loadTaxonomy(force = false) {
   return cached2;
 }
 
-// ../ticket-analiz/src/lib/ticket/analyst.ts
+// server/kb/src/lib/ticket/analyst.ts
 init_gemini();
 import { z as z5 } from "zod";
 
-// ../ticket-analiz/src/lib/ticket/prompts.ts
+// server/kb/src/lib/ticket/prompts.ts
 var SYSTEM_INSTRUCTION = `
 Sen EnRoute ERP/CRM \xFCr\xFCn\xFCn\xFCn destek hatt\u0131nda \xE7al\u0131\u015Fan k\u0131demli bir destek
 analistisin. G\xF6revin: gelen bir bildirim (ticket) i\xE7in k\xF6k neden hipotezleri
@@ -2425,7 +2422,7 @@ function buildUserPrompt(inputs) {
   return sections.join("\n");
 }
 
-// ../ticket-analiz/src/lib/ticket/analyst.ts
+// server/kb/src/lib/ticket/analyst.ts
 var HypothesisSchema = z5.object({
   text: z5.string(),
   confidence: z5.number().min(0).max(1)
@@ -2504,7 +2501,7 @@ ${response.text.slice(0, 800)}`
   };
 }
 
-// ../ticket-analiz/src/lib/ticket/panorama-docs.ts
+// server/kb/src/lib/ticket/panorama-docs.ts
 import { existsSync, readFileSync as readFileSync3 } from "node:fs";
 import path5 from "node:path";
 var ROOT = () => path5.resolve(process.cwd(), "data", "panorama-docs");
@@ -2600,7 +2597,7 @@ function detectMentionedScreens(text) {
   return found.map((f) => f.screen);
 }
 
-// ../ticket-analiz/src/lib/ticket/menu-validator.ts
+// server/kb/src/lib/ticket/menu-validator.ts
 var MENU_PATH_REGEX = /([A-ZÇĞİÖŞÜ][\p{L}\p{N} .'/\-]*(?:\s*→\s*[A-ZÇĞİÖŞÜ][\p{L}\p{N} .'/\-]*){1,5})/gu;
 function stripTrailingVerb(path9) {
   const segments = path9.split("\u2192").map((s) => s.trim());
@@ -2745,7 +2742,7 @@ function ensureMentionedScreenFirst(steps, description) {
   };
 }
 
-// ../ticket-analiz/src/lib/ticket/redactor.ts
+// server/kb/src/lib/ticket/redactor.ts
 var PATTERNS = [
   { kind: "email", re: /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, mask: "<EMAIL>" },
   { kind: "iban", re: /\bTR\d{2}[\s-]?(?:\d{4}[\s-]?){5}\d{2}\b/gi, mask: "<IBAN>" },
@@ -2773,7 +2770,7 @@ function redact(input) {
   return { text, redactions };
 }
 
-// ../ticket-analiz/src/lib/ticket/anonymizer.ts
+// server/kb/src/lib/ticket/anonymizer.ts
 import { readFileSync as readFileSync4, existsSync as existsSync2 } from "node:fs";
 import path6 from "node:path";
 var cache2 = null;
@@ -2853,7 +2850,7 @@ function assertNoCustomerName(text) {
   if (d.hit) throw new CustomerSearchBlockedError(d.matches);
 }
 
-// ../ticket-analiz/src/lib/ticket/storage.ts
+// server/kb/src/lib/ticket/storage.ts
 import { mkdirSync as mkdirSync3, readdirSync, readFileSync as readFileSync5, writeFileSync, appendFileSync, existsSync as existsSync3 } from "node:fs";
 import path7 from "node:path";
 import { createHash, randomBytes } from "node:crypto";
@@ -2882,7 +2879,7 @@ function saveAnalysis(rec) {
   return rec.meta.analysisId;
 }
 
-// ../ticket-analiz/src/lib/ticket/recategorizer.ts
+// server/kb/src/lib/ticket/recategorizer.ts
 import {
   existsSync as existsSync4,
   readFileSync as readFileSync6
@@ -2906,10 +2903,10 @@ function loadBundle() {
   }
 }
 
-// ../ticket-analiz/src/lib/ticket/notebooklm.ts
+// server/kb/src/lib/ticket/notebooklm.ts
 init_env();
 
-// ../ticket-analiz/src/lib/notebooklm/client.ts
+// server/kb/src/lib/notebooklm/client.ts
 init_env();
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -3022,7 +3019,7 @@ function extractTextPayload(result) {
   }
 }
 
-// ../ticket-analiz/src/lib/ticket/notebooklm.ts
+// server/kb/src/lib/ticket/notebooklm.ts
 var NotebookLmDisabledError = class extends Error {
   constructor() {
     super(
@@ -3174,7 +3171,7 @@ ${aciklama.slice(0, 1500)}`);
   });
 }
 
-// ../ticket-analiz/src/lib/ticket/index.ts
+// server/kb/src/lib/ticket/index.ts
 init_env();
 var AnalyzeBodySchema = z6.object({
   bildirimNo: z6.number().int().positive().optional(),
@@ -3396,7 +3393,7 @@ async function runAnalysis(body) {
   };
 }
 
-// ../ticket-analiz/kb-bundle-entry.ts
+// server/kb/kb-bundle-entry.ts
 init_env();
 export {
   AnalyzeBodySchema,
