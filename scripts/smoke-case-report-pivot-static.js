@@ -155,6 +155,87 @@ console.log('\n── 5) min / max — totals fn aware (Codex P2 #2) ───�
   expect('5.19 sum grandTotal = 30', pSum.grandTotal, 30);
 }
 
+// ── 5c) Codex P2 #3 — Sparse min/max + empty bucket null ─────
+console.log('\n── 5c) Sparse min/max — empty bucket null (Codex P2 #3) ──');
+{
+  // Codex'in spesifik örneği: Row A, Col X=10 (1 case), Col Y boş.
+  // Eski impl: matrix.A.Y = aggregate('min', []) = 0 →
+  //            rowTotals.A = min(10, 0) = 0 (YANLIŞ)
+  // Fix: matrix.A.Y = null → totals null'ı skip → rowTotals.A = 10
+  const pMin = computePivot({
+    rowValues: ['A'],       // sadece 1 case: A × X
+    colValues: ['X'],
+    measureValues: [10],
+    measureFn: 'min',
+  });
+  // 1×1 grid — A,Y bucket'ı zaten yok; colLabels yalnız [X]. Test güvenli.
+  expect('5c.1 dense 1×1 min cell = 10', pMin.matrix['A']['X'], 10);
+  expect('5c.2 dense 1×1 min rowTotal = 10', pMin.rowTotals['A'], 10);
+
+  // Gerçek sparse: 2 row × 2 col, bazı bucket'lar boş.
+  // Layout: A×X=10, A×Y=BOŞ, B×X=BOŞ, B×Y=20
+  const pMin2 = computePivot({
+    rowValues: ['A', 'B'],
+    colValues: ['X', 'Y'],
+    measureValues: [10, 20],
+    measureFn: 'min',
+  });
+  expect('5c.3 sparse A×X cell = 10',  pMin2.matrix['A']['X'], 10);
+  expect('5c.4 sparse A×Y empty cell = null', pMin2.matrix['A']['Y'], null);
+  expect('5c.5 sparse B×X empty cell = null', pMin2.matrix['B']['X'], null);
+  expect('5c.6 sparse B×Y cell = 20',  pMin2.matrix['B']['Y'], 20);
+  // Codex bug: rowTotals.A eski impl'de min(10, 0) = 0 olurdu. Fix: 10.
+  expect('5c.7 sparse rowTotals.A = 10 (NOT 0)', pMin2.rowTotals['A'], 10);
+  expect('5c.8 sparse rowTotals.B = 20 (NOT 0)', pMin2.rowTotals['B'], 20);
+  expect('5c.9 sparse colTotals.X = 10', pMin2.colTotals['X'], 10);
+  expect('5c.10 sparse colTotals.Y = 20', pMin2.colTotals['Y'], 20);
+  expect('5c.11 sparse grandTotal = min(10, 20) = 10', pMin2.grandTotal, 10);
+
+  // Negative max — Codex'in ikinci endişesi: tümü negatif iken 0 inflation.
+  // Row A: X=-5 (1 case), Y empty. Eski impl max(-5, 0) = 0. Fix: -5.
+  const pMaxNeg = computePivot({
+    rowValues: ['A', 'A'],
+    colValues: ['X', 'X'],
+    measureValues: [-5, -10],
+    measureFn: 'max',
+  });
+  expect('5c.12 negative max A×X = -5 (NOT 0)', pMaxNeg.matrix['A']['X'], -5);
+  expect('5c.13 negative max rowTotal.A = -5 (NOT 0)', pMaxNeg.rowTotals['A'], -5);
+
+  // Sparse + negative kombine:
+  // A×X=-5, A×Y empty, B×X=-100, B×Y=-2
+  const pMixNeg = computePivot({
+    rowValues: ['A', 'B', 'B'],
+    colValues: ['X', 'X', 'Y'],
+    measureValues: [-5, -100, -2],
+    measureFn: 'max',
+  });
+  expect('5c.14 mixed neg A×Y null', pMixNeg.matrix['A']['Y'], null);
+  expect('5c.15 mixed neg rowTotal.A = -5', pMixNeg.rowTotals['A'], -5);
+  expect('5c.16 mixed neg rowTotal.B = max(-100, -2) = -2', pMixNeg.rowTotals['B'], -2);
+  expect('5c.17 mixed neg grandTotal = max(-5, -100, -2) = -2', pMixNeg.grandTotal, -2);
+
+  // Tamamen boş row/col (hiç bucket yok) — bu durum normalde oluşmaz çünkü
+  // rowLabel sadece veri varsa Set'e eklenir. Defansif kontrol: tek case ile
+  // 1 row × 1 col, sonra empty cell senaryosu yukarıda zaten.
+
+  // count + sum + avg regression: empty bucket cell hâlâ 0 (semantik)
+  const pCount = computePivot({
+    rowValues: ['A', 'B'], colValues: ['X', 'Y'],
+    measureValues: [10, 20], measureFn: 'count',
+  });
+  expect('5c.18 count A×Y empty = 0 (semantik regression)', pCount.matrix['A']['Y'], 0);
+  expect('5c.19 count rowTotal.A = 1 (only A×X)', pCount.rowTotals['A'], 1);
+  expect('5c.20 count grandTotal = 2', pCount.grandTotal, 2);
+
+  const pSum = computePivot({
+    rowValues: ['A', 'B'], colValues: ['X', 'Y'],
+    measureValues: [10, 20], measureFn: 'sum',
+  });
+  expect('5c.21 sum A×Y empty = 0 (semantik regression)', pSum.matrix['A']['Y'], 0);
+  expect('5c.22 sum rowTotal.A = 10 (sum of 10 + 0)', pSum.rowTotals['A'], 10);
+}
+
 // ── 5b) Codex P2 #1 — extractRawValue helper ───────────────
 console.log('\n── 5b) extractRawValue — formatted display bypass (Codex P2 #1) ──');
 {
