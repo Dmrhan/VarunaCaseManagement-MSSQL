@@ -370,6 +370,13 @@ console.log('\n── 8) Pivotable kolon helper\'ları ────────�
   const workedSourceCol = REPORT_COLUMNS.find((c) => c.id === 'solutionSteps.workedSource');
   expect('8.4b solutionSteps.workedSource aggregate string → dim (Phase 3.2)',
     isPivotableDimension(workedSourceCol), true);
+  // Phase 2D.2 — composite_join pivot dim
+  const cityCol = REPORT_COLUMNS.find((c) => c.id === 'address.city');
+  const segmentCol = REPORT_COLUMNS.find((c) => c.id === 'accountCompany.segment');
+  expect('8.4c address.city composite_join → dim (Phase 2D.2)',
+    isPivotableDimension(cityCol), true);
+  expect('8.4d accountCompany.segment composite_join → dim (Phase 2D.2)',
+    isPivotableDimension(segmentCol), true);
 
   // Measure helpers
   expect('8.5 count: status (string) OK',  isPivotableMeasure(statusCol, 'count'), true);
