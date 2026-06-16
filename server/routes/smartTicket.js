@@ -345,8 +345,24 @@ router.post('/suggest-closure', async (req, res) => {
     // resolution-first akışı: kategorizasyon Çözüm Açıklaması'nın current
     // metnine göre üretilsin). Workflow geri uyumlu: gönderilmezse eski
     // davranış (worked step + step özetlerinden compose).
+    //
+    // Codex P2 #2 fix — Empty string override explicit-reject: caller field'ı
+    // gerçekten gönderdiyse (typeof === 'string') ama trim sonrası boş kaldıysa
+    // bu "kullanıcı textarea'yı temizledi" sinyali. Eski fallback'e (worked
+    // step compose) düşmek stale step text'i current resolution gibi sunardı —
+    // misleading drafts/categorization. Bu durumu sessizce omit etmek yerine
+    // 400 dönüyoruz; frontend dirty+empty durumunda zaten KB call atmıyor,
+    // bu defansif ikinci katman.
+    const resolutionOverrideRaw = body.resolutionOverride;
+    if (typeof resolutionOverrideRaw === 'string' && resolutionOverrideRaw.trim().length === 0) {
+      return res.status(400).json({
+        error: 'resolution_override_empty',
+        message:
+          'Çözüm Açıklaması boş gönderildi; lütfen önce çözümü yazın, sonra KB önerisini isteyin.',
+      });
+    }
     const resolutionOverride =
-      typeof body.resolutionOverride === 'string' ? body.resolutionOverride.trim() : '';
+      typeof resolutionOverrideRaw === 'string' ? resolutionOverrideRaw.trim() : '';
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -468,18 +484,36 @@ router.post('/suggest-closure', async (req, res) => {
 
     // Stage 3 resolution-first — kategorizasyon (suggestClose) ile aynı anda
     // analyze çağrısı yap → engineeringHandoff + customerReplyDraft draft'larını
-    // current resolution metnine göre yeniden üret. Paralel: wall-clock
-    // tek bir KB çağrısına düşer. analyze fail olursa drafts undefined kalır;
-    // categorization yine de döner — kullanıcı en azından dropdown'ları görür.
+    // current resolution metnine göre yeniden üret. Paralel + analyze bounded:
+    // wall-clock max(suggestClose, min(analyze, ANALYZE_DRAFTS_TIMEOUT_MS)).
+    //
+    // Codex P2 #1 fix — Bounded analyze: KB v2 analyze endpoint'i tipik
+    // ~180sn'ye kadar sürebiliyor (suggestClose çoğunlukla saniyeler içinde).
+    // Eski impl Promise.allSettled iki çağrıyı da bekliyordu → analyze yavaş
+    // olduğunda Stage 3 KB spinner kategoriler hazır olsa bile dakikalarca
+    // kalıyordu (draft'lar optional, categorization core). Çözüm: analyze'a
+    // race-timeout. Timeout kazanırsa drafts undefined → kullanıcı dropdown'ları
+    // hemen alır, draft'ları sonra "Yenile" ile bekleyebilir.
+    //
     // freeText = description + resolution composition: KB analyze case context
     // + son çözümü birlikte ister. Eski (Stage 2 opening) aiDrafts persist
     // davranışı bu route'ta tetiklenmez — yalnız in-memory response döner.
     const analyzeFreeText = description
       ? `${description}\n\nÇözüm: ${resolution}`
       : resolution;
+    const ANALYZE_DRAFTS_TIMEOUT_MS = 8000;
+    const ANALYZE_TIMEOUT_SENTINEL = { ok: false, timedOut: true };
+    const analyzePromise = externalKbClient
+      .analyze(setting, { freeText: analyzeFreeText })
+      .catch((err) => ({ ok: false, thrown: true, error: { message: err?.message } }));
+    const analyzeBounded = Promise.race([
+      analyzePromise,
+      new Promise((resolve) => setTimeout(() => resolve(ANALYZE_TIMEOUT_SENTINEL), ANALYZE_DRAFTS_TIMEOUT_MS)),
+    ]);
+
     const [closeSettled, analyzeSettled] = await Promise.allSettled([
       externalKbClient.suggestClose(setting, sgBody),
-      externalKbClient.analyze(setting, { freeText: analyzeFreeText }),
+      analyzeBounded,
     ]);
 
     let kbResponse;
@@ -552,10 +586,14 @@ router.post('/suggest-closure', async (req, res) => {
     let drafts;
     if (analyzeSettled.status === 'fulfilled') {
       const analyzeRaw = analyzeSettled.value;
-      if (analyzeRaw && analyzeRaw.ok === false) {
+      if (analyzeRaw && analyzeRaw.timedOut) {
+        console.warn(
+          `[smart-ticket/suggest-closure] analyze bounded timeout ${ANALYZE_DRAFTS_TIMEOUT_MS}ms (drafts skipped)`,
+        );
+      } else if (analyzeRaw && analyzeRaw.ok === false) {
         console.warn(
           '[smart-ticket/suggest-closure] analyze returned ok:false (drafts skipped)',
-          analyzeRaw.error?.code ?? 'unknown',
+          analyzeRaw.error?.code ?? analyzeRaw.error?.message ?? 'unknown',
         );
       } else {
         const analyzeData = analyzeRaw && analyzeRaw.data ? analyzeRaw.data : analyzeRaw;

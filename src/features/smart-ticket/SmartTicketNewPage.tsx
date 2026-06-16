@@ -954,6 +954,14 @@ export function SmartTicketNewPage({
   // İlk girişte useEffect'in suggestClosure çağrısıyla zaten önerek geldi —
   // bu effect yalnız dirty=true olunca anlamlı, prefill'in tetiklediği
   // değişimde no-op (dirty ref'i prefill set etmiyor).
+  //
+  // Codex P2 #2 fix — Empty resolution guard: user textarea'yı temizlerse
+  // (dirty + trimmed === '') KB çağrısı ATMA. Eski impl resolutionOverride'ı
+  // omit ederek fetch atıyordu → backend compose-from-steps fallback'ı
+  // tetikliyordu (stale step text üzerinden categorize/drafts üretiliyordu).
+  // Onun yerine pending state'leri temizliyoruz: closureSuggestion null,
+  // closureSuggestionError null. Backend defansif olarak resolution_override_empty
+  // 400 dönse de buraya hiç gitmeden frontend kısa devre yapsın.
   useEffect(() => {
     if (stage !== 'closure' || !createdCase) return;
     if (!resolutionNoteDirtyRef.current) return;
@@ -961,11 +969,17 @@ export function SmartTicketNewPage({
       window.clearTimeout(resolutionDebounceRef.current);
     }
     const trimmed = closure.resolutionNote.trim();
+    if (trimmed.length === 0) {
+      // Empty resolution + dirty → stale suggestion'ı clear et, refetch atma.
+      // closureRefreshedOnceRef true kalır → KbDraftCard override mode'da
+      // boş object alır → drafts gizli (misleading drafts göstermeme garantisi).
+      setClosureSuggestion(null);
+      setClosureSuggestionError(null);
+      return;
+    }
     resolutionDebounceRef.current = window.setTimeout(() => {
       resolutionDebounceRef.current = null;
-      void handleSuggestClosure({
-        resolutionOverride: trimmed.length > 0 ? closure.resolutionNote : undefined,
-      });
+      void handleSuggestClosure({ resolutionOverride: closure.resolutionNote });
     }, 1000);
     return () => {
       if (resolutionDebounceRef.current != null) {
@@ -1742,12 +1756,19 @@ export function SmartTicketNewPage({
               onSuggestClosure={() => {
                 // Manuel "KB Önerisini Yenile" — debounce iptal et + current
                 // "Çözüm Açıklaması" değerini override olarak gönder.
+                // Codex P2 #2 fix — Empty resolution: refresh atma, mevcut
+                // stale suggestion'ı clear et (backend zaten 400 dönerdi).
                 if (resolutionDebounceRef.current != null) {
                   window.clearTimeout(resolutionDebounceRef.current);
                   resolutionDebounceRef.current = null;
                 }
                 const r = closure.resolutionNote.trim();
-                void handleSuggestClosure({ resolutionOverride: r.length > 0 ? closure.resolutionNote : undefined });
+                if (r.length === 0) {
+                  setClosureSuggestion(null);
+                  setClosureSuggestionError(null);
+                  return;
+                }
+                void handleSuggestClosure({ resolutionOverride: closure.resolutionNote });
               }}
               onApplyAllClosureSuggestions={handleApplyAllClosureSuggestions}
               onClose={() => void handleCloseCase()}
