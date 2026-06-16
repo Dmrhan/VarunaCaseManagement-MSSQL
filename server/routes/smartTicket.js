@@ -337,6 +337,13 @@ router.post('/suggest-closure', async (req, res) => {
 
     // ── Yeni body shape (v2): { caseId, workedStepId? } ──
     const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    // Stage 3 "Çözüm Açıklaması" textarea'sının current değeri override olarak
+    // geçebilir; verildiyse compose-from-steps yerine bu kullanılır (Stage 3
+    // resolution-first akışı: kategorizasyon Çözüm Açıklaması'nın current
+    // metnine göre üretilsin). Workflow geri uyumlu: gönderilmezse eski
+    // davranış (worked step + step özetlerinden compose).
+    const resolutionOverride =
+      typeof body.resolutionOverride === 'string' ? body.resolutionOverride.trim() : '';
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -411,7 +418,9 @@ router.post('/suggest-closure', async (req, res) => {
         workedStep = workedSorted[0] ?? steps.find((s) => s.status === 'worked') ?? null;
       }
       selectedWorkedStepId = workedStep?.id ?? null;
-      resolution = composeResolutionFromSteps(workedStep, steps);
+      resolution = resolutionOverride.length > 0
+        ? resolutionOverride
+        : composeResolutionFromSteps(workedStep, steps);
     } else {
       // ── Geri uyumlu body (v1): { companyId, description, resolution, ... } ──
       companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';

@@ -33,6 +33,7 @@ import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
   lookupService,
+  type CaseSolutionStep,
   type SmartTicketTaxonomyItem,
   type SmartTicketRootCauseGroup,
   type SmartTicketTaxonomyResponse,
@@ -271,6 +272,14 @@ export function SmartTicketNewPage({
   const [closureSuggesting, setClosureSuggesting] = useState(false);
   const [closureSuggestion, setClosureSuggestion] = useState<import('@/services/caseService').SuggestClosureResponse | null>(null);
   const [closureSuggestionError, setClosureSuggestionError] = useState<string | null>(null);
+
+  // Stage 3 resolution-first: "Çözüm Açıklaması" textarea'sını kullanıcı bilerek
+  // edit ettiğinde flag set edilir; prefill (Stage 2 worked step → resolution
+  // note) bir daha çalışmaz — kullanıcının yazısı korunur. Voice input da
+  // explicit edit sayılır. resolutionDebounceRef: 1000 ms inactivity sonrası
+  // KB önerisinin current textarea değerinden yeniden istemek için timer.
+  const resolutionNoteDirtyRef = useRef(false);
+  const resolutionDebounceRef = useRef<number | null>(null);
 
   // PR-T2 — Stage 3 transfer form state. PR-T1 backend kontratını kullanır:
   //   smartTicketTransfer = { transferNote, composedSummary?, attemptedStepIds?,
@@ -868,16 +877,98 @@ export function SmartTicketNewPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closure.rootCauseGroup, closureLists.rcdList]);
 
-  // WR-KB-Closure-Auto — Stage 3'e girince KB önerisini OTOMATIK çek.
-  // Re-entry durumunda (Stage 2'den geri dönüp tekrar Stage 3'e geçilirse)
-  // worked step değişmiş olabilir → yeniden fetch.
+  // Stage 3 resolution-first: Stage 2'deki step listesinden "Çözüm Açıklaması"
+  // textarea'sı için prefill text üret. En son worked step'lerin title (+ varsa
+  // note) bilgisini compose eder. Hiç worked step yoksa en son manual step'i
+  // yedek olarak kullanır. Hiçbiri yoksa boş döner — kullanıcı boş textarea
+  // görür (spec).
+  function buildResolutionPrefillFromSteps(steps: CaseSolutionStep[]): string {
+    const worked = steps
+      .filter((s) => s.status === 'worked')
+      .sort((a, b) => a.stepIndex - b.stepIndex);
+    const source = worked.length > 0
+      ? worked
+      : steps.filter((s) => s.source === 'manual').slice(-1);
+    return source
+      .map((s) => {
+        const title = (s.title ?? '').trim();
+        const note = (s.note ?? '').trim();
+        if (title && note) return `${title} — ${note}`;
+        return title || note;
+      })
+      .filter((line) => line.length > 0)
+      .join('\n');
+  }
+
+  // Stage 3 resolution-first: Stage 3'e girince
+  //   1. Stage 2'nin step listesini çek.
+  //   2. resolutionNote BOŞ ve kullanıcı henüz textarea'ya dokunmadıysa
+  //      worked step'ten compose edilen text'i prefill et.
+  //   3. KB önerisini current resolution note ile iste (override geçer).
+  // Re-entry (Stage 2 ↔ Stage 3 gidip gelme) durumunda dirty flag korunduğu
+  // için kullanıcının yazısı bir daha ezilmez.
   useEffect(() => {
     if (stage !== 'closure' || !createdCase) return;
-    void handleSuggestClosure();
-    // handleSuggestClosure stable değil ama effect yalnız stage/case değişiminde
-    // tetiklenmeli — kasıtlı.
+    let cancelled = false;
+    const targetCaseId = createdCase.id;
+    void (async () => {
+      let prefillText = '';
+      try {
+        const steps = await caseService.listSolutionSteps(targetCaseId);
+        if (cancelled) return;
+        prefillText = buildResolutionPrefillFromSteps(steps);
+      } catch {
+        // Step fetch başarısızsa prefill atla — kullanıcı boş textarea'ya yazar.
+      }
+      if (cancelled) return;
+      let effectiveResolution = '';
+      setClosure((c) => {
+        if (resolutionNoteDirtyRef.current || c.resolutionNote.trim().length > 0) {
+          effectiveResolution = c.resolutionNote;
+          return c;
+        }
+        effectiveResolution = prefillText;
+        return prefillText ? { ...c, resolutionNote: prefillText } : c;
+      });
+      if (cancelled) return;
+      void handleSuggestClosure({
+        resolutionOverride: effectiveResolution.trim().length > 0 ? effectiveResolution : undefined,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdCase?.id]);
+
+  // Stage 3 resolution-first: "Çözüm Açıklaması" textarea değişikliği →
+  // 1000 ms inactivity sonrası KB önerisini current değerle yenile. Kullanıcı
+  // yazmayı sürdürdükçe önceki timer iptal edilir; aşırı API çağrısı önlenir.
+  // İlk girişte useEffect'in suggestClosure çağrısıyla zaten önerek geldi —
+  // bu effect yalnız dirty=true olunca anlamlı, prefill'in tetiklediği
+  // değişimde no-op (dirty ref'i prefill set etmiyor).
+  useEffect(() => {
+    if (stage !== 'closure' || !createdCase) return;
+    if (!resolutionNoteDirtyRef.current) return;
+    if (resolutionDebounceRef.current != null) {
+      window.clearTimeout(resolutionDebounceRef.current);
+    }
+    const trimmed = closure.resolutionNote.trim();
+    resolutionDebounceRef.current = window.setTimeout(() => {
+      resolutionDebounceRef.current = null;
+      void handleSuggestClosure({
+        resolutionOverride: trimmed.length > 0 ? closure.resolutionNote : undefined,
+      });
+    }, 1000);
+    return () => {
+      if (resolutionDebounceRef.current != null) {
+        window.clearTimeout(resolutionDebounceRef.current);
+        resolutionDebounceRef.current = null;
+      }
+    };
+    // handleSuggestClosure stable değil; effect resolutionNote'a göre tetiklenmeli.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closure.resolutionNote, stage, createdCase?.id]);
 
   // Codex PR review P1 — checklist gating. StatusTransitionPanel (mevcut
   // Case Detail close akışı) Cozuldu transition'ı için tamamlanmamış
@@ -915,14 +1006,20 @@ export function SmartTicketNewPage({
   //    stage hala geçerliyse yeniden tetiklenir.
   const closureSuggestReqIdRef = useRef(0);
   const closureSuggestRefreshQueuedRef = useRef(false);
-  const closureSuggestQueuedWorkedStepIdRef = useRef<string | undefined>(undefined);
+  const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string }>({});
 
-  async function handleSuggestClosure(workedStepId?: string) {
+  // Stage 3 resolution-first: imzaya `resolutionOverride` eklendi. Verildiyse
+  // backend compose-from-steps yerine bu değeri KB'ye gönderir; kategorizasyon
+  // current "Çözüm Açıklaması" metnine göre üretilir. Önceki workedStepId-only
+  // çağrı şekli geri uyumlu — eski caller'lar etkilenmez.
+  async function handleSuggestClosure(opts?: { workedStepId?: string; resolutionOverride?: string }) {
     if (!createdCase) return;
+    const workedStepId = opts?.workedStepId;
+    const resolutionOverride = opts?.resolutionOverride;
     if (closureSuggesting) {
       // Pending request var → yeni isteği kuyruğa al; finally tetikler.
       closureSuggestRefreshQueuedRef.current = true;
-      closureSuggestQueuedWorkedStepIdRef.current = workedStepId;
+      closureSuggestQueuedOptsRef.current = { workedStepId, resolutionOverride };
       return;
     }
     const reqId = ++closureSuggestReqIdRef.current;
@@ -934,6 +1031,9 @@ export function SmartTicketNewPage({
       const res = await lookupService.suggestSmartTicketClosure({
         caseId: targetCaseId,
         ...(workedStepId ? { workedStepId } : {}),
+        ...(resolutionOverride && resolutionOverride.trim().length > 0
+          ? { resolutionOverride: resolutionOverride.trim() }
+          : {}),
       });
       // Stale response guard — yanıt geldiğinde case değiştiyse veya
       // yeni bir request başlatıldıysa state'i uygulama.
@@ -979,10 +1079,10 @@ export function SmartTicketNewPage({
         createdCase?.id === targetCaseId &&
         stage === 'closure'
       ) {
-        const queuedStepId = closureSuggestQueuedWorkedStepIdRef.current;
+        const queuedOpts = closureSuggestQueuedOptsRef.current;
         closureSuggestRefreshQueuedRef.current = false;
-        closureSuggestQueuedWorkedStepIdRef.current = undefined;
-        void handleSuggestClosure(queuedStepId);
+        closureSuggestQueuedOptsRef.current = {};
+        void handleSuggestClosure(queuedOpts);
       }
     }
   }
@@ -1624,7 +1724,16 @@ export function SmartTicketNewPage({
               closureSuggesting={closureSuggesting}
               closureSuggestion={closureSuggestion}
               closureSuggestionError={closureSuggestionError}
-              onSuggestClosure={() => void handleSuggestClosure()}
+              onSuggestClosure={() => {
+                // Manuel "KB Önerisini Yenile" — debounce iptal et + current
+                // "Çözüm Açıklaması" değerini override olarak gönder.
+                if (resolutionDebounceRef.current != null) {
+                  window.clearTimeout(resolutionDebounceRef.current);
+                  resolutionDebounceRef.current = null;
+                }
+                const r = closure.resolutionNote.trim();
+                void handleSuggestClosure({ resolutionOverride: r.length > 0 ? closure.resolutionNote : undefined });
+              }}
               onApplyAllClosureSuggestions={handleApplyAllClosureSuggestions}
               onClose={() => void handleCloseCase()}
               onBack={() => {
@@ -1632,6 +1741,10 @@ export function SmartTicketNewPage({
                 setClosureError(null);
               }}
               onGoToCaseDetail={() => onCreated(createdCase.id)}
+              onChangeResolutionNote={(text) => {
+                resolutionNoteDirtyRef.current = true;
+                setClosure((c) => ({ ...c, resolutionNote: text }));
+              }}
             />
           )}
 
@@ -1856,6 +1969,7 @@ function Stage3Closure({
   onClose,
   onBack,
   onGoToCaseDetail,
+  onChangeResolutionNote,
 }: {
   createdCase: Case;
   closure: ClosureFormState;
@@ -1872,6 +1986,11 @@ function Stage3Closure({
   onClose: () => void;
   onBack: () => void;
   onGoToCaseDetail: () => void;
+  /** Stage 3 resolution-first: textarea + voice input için tek değişiklik
+   *  noktası. Parent kullanıcı edit'ini dirty flag ile işaretler + debounced
+   *  KB refetch'i tetikler. setClosure'dan ayrı tutuluyor çünkü 4 dropdown'un
+   *  user değişiklikleri "Çözüm Açıklaması" dirty sayılmamalı. */
+  onChangeResolutionNote: (text: string) => void;
 }) {
   const checklistBlocked = requiredChecklistPending.length > 0;
   const canSave =
@@ -1904,9 +2023,39 @@ function Stage3Closure({
           </div>
         </div>
         <p className="text-xs text-slate-500 dark:text-ndark-muted">
-          Vakanın nasıl çözüldüğünü kayıt altına alın. Onay politikası geçerliyse mevcut çözüm onayı
-          akışı çalışır; otomatik bypass yok.
+          Vakanın nasıl çözüldüğünü önce yazın. Sınıflandırma ve KB önerisi bu metne göre güncellenir.
+          Onay politikası geçerliyse mevcut çözüm onayı akışı çalışır; otomatik bypass yok.
         </p>
+        {/* Stage 3 resolution-first — "Çözüm Açıklaması" textarea KB önerisi
+            block'unun üstüne taşındı. Stage 2 worked step'ten prefill edilir;
+            user edit ettiğinde dirty flag set olur ve bir daha ezilmez.
+            Voice input append davranışı korunur (her ikisi de
+            onChangeResolutionNote'tan geçer → dirty + debounced refetch). */}
+        <Field
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Check size={11} className="text-emerald-500" />
+              Çözüm Açıklaması
+            </span>
+          }
+          required
+          actions={
+            <VoiceNoteButton
+              onTranscript={(chunk) =>
+                onChangeResolutionNote(
+                  closure.resolutionNote ? `${closure.resolutionNote} ${chunk}` : chunk,
+                )
+              }
+            />
+          }
+        >
+          <TextArea
+            rows={4}
+            value={closure.resolutionNote}
+            onChange={(e) => onChangeResolutionNote(e.target.value)}
+            placeholder="Sorun nasıl çözüldü? Müşteriye ne anlatıldı?"
+          />
+        </Field>
         {closureSuggesting && !closureSuggestion && (
           <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-200">
             <Loader2 size={12} className="animate-spin" />
@@ -2073,32 +2222,6 @@ function Stage3Closure({
         {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
             Sadece customFields.smartTicket.aiDrafts varsa render. */}
         <KbDraftCard item={createdCase} variant="closure" />
-        <Field
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              <Check size={11} className="text-emerald-500" />
-              Çözüm Açıklaması
-            </span>
-          }
-          required
-          actions={
-            <VoiceNoteButton
-              onTranscript={(chunk) =>
-                setClosure((c) => ({
-                  ...c,
-                  resolutionNote: c.resolutionNote ? `${c.resolutionNote} ${chunk}` : chunk,
-                }))
-              }
-            />
-          }
-        >
-          <TextArea
-            rows={4}
-            value={closure.resolutionNote}
-            onChange={(e) => setClosure((c) => ({ ...c, resolutionNote: e.target.value }))}
-            placeholder="Sorun nasıl çözüldü? Müşteriye ne anlatıldı?"
-          />
-        </Field>
         {closureError && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
             {closureError}

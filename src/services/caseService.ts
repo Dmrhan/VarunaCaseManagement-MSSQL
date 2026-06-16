@@ -2490,6 +2490,11 @@ export interface SuggestClosureRequest {
   /** Stage 2'de işe yaradı işaretlenen step'in id'si. Verilmezse backend
    *  son worked step'i otomatik seçer. */
   workedStepId?: string;
+  /** Stage 3 "Çözüm Açıklaması" textarea'sının current değeri. Verildiyse
+   *  backend compose-from-steps yerine bunu KB'ye gönderir; kategorizasyon
+   *  current resolution metnine göre üretilir. Boş gönderilebilir veya
+   *  field hiç verilmeyebilir → eski compose-from-steps davranışı kalır. */
+  resolutionOverride?: string;
   /** Geri uyumlu (deprecated) — eski "manuel buton" akışı için. */
   companyId?: string;
   description?: string;
