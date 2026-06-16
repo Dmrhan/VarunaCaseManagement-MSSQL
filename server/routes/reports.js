@@ -31,7 +31,7 @@ import {
   filterColumnsByRole,
 } from '../lib/caseReport/columnRegistry.js';
 import { buildReportWhere } from '../lib/caseReport/buildWhere.js';
-import { buildReportRows } from '../lib/caseReport/buildRows.js';
+import { buildReportRows, extractRawValue, parseCustomFields } from '../lib/caseReport/buildRows.js';
 import {
   loadSolutionStepAggregates,
   loadCaseActivityAggregates,
@@ -408,20 +408,21 @@ router.post('/cases/pivot', async (req, res) => {
       select,
       take: PIVOT_MAX_ROWS,
     });
-    // Aggregate column'lar Phase 3.1'de pivot dim/measure olarak izinli değil;
-    // yine de buildReportRows'tan değer geçirelim ki ileride genişletmek kolay.
     const aggregates = await loadAggregatesIfNeeded(resolvedAll, items);
     const rows = buildReportRows(items, resolvedAll, aggregates);
-    // Pivot input'ları topla — buildReportRows formatlanmış string döndürür.
-    // Row/col dim için label olarak formatted string kullanılır (TR display).
-    // Measure için: count → ignore; diğerleri için raw numeric Number(string).
+    // Row/col dim için: formatted string (TR display). UI burada görür.
     const rowValues = rows.map((r) => r[rowColumnId]);
     const colValues = rows.map((r) => r[colColumnId]);
+    // Codex P2 #1 fix — Measure için: buildReportRows'un formatlanmış string
+    // çıktısı (örn. confidence '%85') parse edilemez. Bunun yerine raw değeri
+    // extractRawValue ile DB row + parsed customFields + aggregates'ten al.
+    // customFields per-case TEK kez parse — N+1 değil.
     let measureValues = [];
-    if (measureColumnId) {
-      measureValues = rows.map((r) => {
-        const v = r[measureColumnId];
-        const n = typeof v === 'number' ? v : Number(v);
+    if (measureColumnId && measureCol) {
+      measureValues = items.map((item) => {
+        const cf = parseCustomFields(item.customFields);
+        const raw = extractRawValue(measureCol, item, cf, aggregates);
+        const n = typeof raw === 'number' ? raw : Number(raw);
         return Number.isFinite(n) ? n : null;
       });
     }
