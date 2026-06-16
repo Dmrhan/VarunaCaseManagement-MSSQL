@@ -162,6 +162,48 @@ export function formatHintsForPrompt(): string {
   return lines.join("\n");
 }
 
+// ─── Gold (insan-doğrulanmış) few-shot örnekleri ─────────────────────────
+// data/cc-gold-examples.json: uzman tarafından doğru etiketlenmiş vakalar.
+// LLM prompt'una "böyle etiketle" örneği olarak eklenir (her kök neden
+// grubundan en çok 2 temsili örnek — token kontrolü).
+let goldCache: Array<Record<string, string>> | null = null;
+export function loadGoldExamples(): Array<Record<string, string>> {
+  if (goldCache) return goldCache;
+  try {
+    const p = path.resolve(process.cwd(), "data/cc-gold-examples.json");
+    goldCache = JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    goldCache = [];
+  }
+  return goldCache;
+}
+
+export function formatGoldForPrompt(mode: "open" | "close"): string {
+  const gold = loadGoldExamples();
+  if (!gold.length) return "";
+  const byGroup: Record<string, number> = {};
+  const picked: Array<Record<string, string>> = [];
+  for (const g of gold) {
+    const k = g.kokNedenGrubu || "?";
+    byGroup[k] = (byGroup[k] || 0) + 1;
+    if (byGroup[k] <= 2) picked.push(g);
+  }
+  if (mode === "open") {
+    return picked
+      .map(
+        (g) =>
+          `- "${(g.sorun || "").slice(0, 110)}" => platform=${g.platform}; is_sureci=${g.isSureci}; islem_tipi=${g.islemTipi}; etkilenen_nesne=${g.etkilenenNesne}; etki=${g.etki}`,
+      )
+      .join("\n");
+  }
+  return picked
+    .map(
+      (g) =>
+        `- Sorun: "${(g.sorun || "").slice(0, 90)}" Çözüm: "${(g.cozum || "").slice(0, 90)}" => kok_neden_grubu=${g.kokNedenGrubu}; kok_neden_detayi=${g.kokNedenDetayi}; cozum_tipi=${g.cozumTipi}; kalici_onlem=${g.kaliciOnlem}`,
+    )
+    .join("\n");
+}
+
 /**
  * Açıklama metnindeki keyword'lere göre platform/ürün ipuçlarını çıkar.
  * Türkçe karakter → ASCII normalize, kelime sınırı (\b) match.
