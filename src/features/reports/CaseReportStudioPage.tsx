@@ -47,7 +47,9 @@ import {
   type ReportPreviewResponse,
   type PivotResponse,
   type PivotMeasureFn,
+  type PivotDrillResponse,
 } from '@/services/reportService';
+import { Modal } from '@/components/ui/Modal';
 import { CASE_STATUSES, CASE_PRIORITIES } from '@/features/cases/types';
 
 const PAGE_SIZE = 50;
@@ -182,6 +184,11 @@ export function CaseReportStudioPage() {
   const [pivotData, setPivotData] = useState<PivotResponse | null>(null);
   const [pivotLoading, setPivotLoading] = useState(false);
   const [pivotError, setPivotError] = useState<string | null>(null);
+  const [pivotExporting, setPivotExporting] = useState(false);
+  // Phase 3.2 — Drill-down
+  const [drillData, setDrillData] = useState<PivotDrillResponse | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillContext, setDrillContext] = useState<{ rowLabel: string; colLabel: string } | null>(null);
 
   const companies = useMemo(() => {
     try {
@@ -307,10 +314,47 @@ export function CaseReportStudioPage() {
     setPivotData(res);
   }
 
-  // Pivotable dimension'lar: scalar + json_path + join. Aggregate ileri faz.
+  // Phase 3.2 — Drill-down: cell tıklanınca arkaya yatan case'leri çek
+  async function runDrill(rowLabel: string, colLabel: string) {
+    if (!pivotData) return;
+    setDrillContext({ rowLabel, colLabel });
+    setDrillData(null);
+    setDrillLoading(true);
+    const res = await reportService.pivotDrill({
+      rowColumnId: pivotData.row.id,
+      colColumnId: pivotData.col.id,
+      rowValue: rowLabel,
+      colValue: colLabel,
+      filters,
+    });
+    setDrillLoading(false);
+    if (!res) return; // toast service tarafından
+    setDrillData(res);
+  }
+
+  async function runPivotExport() {
+    if (!pivotRowId || !pivotColId) return;
+    if (pivotMeasureFn !== 'count' && !pivotMeasureColId) return;
+    setPivotExporting(true);
+    try {
+      await reportService.pivotExportXlsx({
+        rowColumnId: pivotRowId,
+        colColumnId: pivotColId,
+        measure: {
+          fn: pivotMeasureFn,
+          ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
+        },
+        filters,
+      });
+    } finally {
+      setPivotExporting(false);
+    }
+  }
+
+  // Phase 3.2 — Pivotable dimension'lar: 4 source türü (aggregate dahil)
   const dimensionCandidates = useMemo(() => {
     if (!columnsData) return [] as ReportColumnDef[];
-    return columnsData.columns.filter((c) => c.source !== 'aggregate');
+    return columnsData.columns; // tüm kolonlar dim olarak izinli (aggregate dahil)
   }, [columnsData]);
 
   // Measure column candidates: type='number'. count fn için her şey OK.
@@ -391,15 +435,25 @@ export function CaseReportStudioPage() {
             </>
           )}
           {mode === 'pivot' && (
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={pivotLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              onClick={runPivot}
-              disabled={pivotLoading}
-            >
-              Pivot Hesapla
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={pivotLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                onClick={runPivot}
+                disabled={pivotLoading}
+              >
+                Pivot Hesapla
+              </Button>
+              <Button
+                size="sm"
+                leftIcon={pivotExporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                onClick={runPivotExport}
+                disabled={pivotExporting || !pivotData || pivotData.rowLabels.length === 0}
+              >
+                Excel'e Aktar
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -758,11 +812,27 @@ export function CaseReportStudioPage() {
                           <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-2 py-1 font-medium text-slate-700 dark:bg-ndark-surface dark:text-ndark-text">
                             {r}
                           </td>
-                          {pivotData.colLabels.map((c) => (
-                            <td key={c} className="px-2 py-1 text-right text-slate-700 dark:text-ndark-text">
-                              {formatPivotCell(pivotData.matrix[r]?.[c], pivotData.measure.fn)}
-                            </td>
-                          ))}
+                          {pivotData.colLabels.map((c) => {
+                            const v = pivotData.matrix[r]?.[c];
+                            const display = formatPivotCell(v, pivotData.measure.fn);
+                            const clickable = v != null && display !== '—' && display !== '0';
+                            return (
+                              <td key={c} className="px-2 py-1 text-right text-slate-700 dark:text-ndark-text">
+                                {clickable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void runDrill(r, c)}
+                                    className="text-brand-700 hover:underline dark:text-brand-300"
+                                    title="Bu hücreye katkı veren vakaları gör"
+                                  >
+                                    {display}
+                                  </button>
+                                ) : (
+                                  display
+                                )}
+                              </td>
+                            );
+                          })}
                           <td className="px-2 py-1 text-right font-semibold text-slate-700 dark:text-ndark-text">
                             {formatPivotCell(pivotData.rowTotals[r], pivotData.measure.fn)}
                           </td>
@@ -787,6 +857,62 @@ export function CaseReportStudioPage() {
               )}
             </CardBody>
           </Card>
+
+          {/* Phase 3.2 — Drill-down modal */}
+          <Modal
+            open={drillContext != null}
+            onClose={() => { setDrillContext(null); setDrillData(null); }}
+            size="3xl"
+            title={
+              drillContext ? (
+                <span className="text-sm">
+                  Hücre detayı: <strong>{drillContext.rowLabel}</strong> × <strong>{drillContext.colLabel}</strong>
+                  {drillData && <span className="ml-2 text-xs font-normal text-slate-500">— {drillData.total} vaka</span>}
+                </span>
+              ) : null
+            }
+          >
+            <div className="p-3">
+              {drillLoading && (
+                <p className="text-xs text-slate-500">
+                  <Loader2 size={11} className="inline animate-spin" /> Vakalar yükleniyor…
+                </p>
+              )}
+              {drillData && drillData.rows.length === 0 && !drillLoading && (
+                <p className="text-xs text-slate-500">Bu hücreye katkı veren vaka yok.</p>
+              )}
+              {drillData && drillData.rows.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+                        {drillData.columns.map((c) => (
+                          <th key={c.id} className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-slate-700 dark:text-ndark-text">
+                            {c.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drillData.rows.map((row, i) => (
+                        <tr key={i} className="border-b border-slate-100 hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-card">
+                          {drillData.columns.map((c) => (
+                            <td
+                              key={c.id}
+                              className="max-w-[260px] truncate px-2 py-1 text-slate-700 dark:text-ndark-text"
+                              title={String(row[c.id] ?? '')}
+                            >
+                              {formatCellValue(row[c.id], c.type)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Modal>
         </>
       )}
     </div>

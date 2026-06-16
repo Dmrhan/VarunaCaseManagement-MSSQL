@@ -196,13 +196,21 @@ export function computePivot(input) {
 /**
  * @param {object} col ColumnDef
  * @returns {boolean} bu kolon row/col dimension olarak kullanılabilir mi?
- *   Phase 3.1: scalar + json_path (string/text/number/datetime kategorisinde).
- *   Aggregate kolonlar nested aggregate'le Phase 3.2.
+ *
+ * Phase 3.2: Aggregate kolonlar DA dim olabilir (örn. `workedSource` veya
+ * `lastCallResult` aggregate → kategorik dim). Aggregate kolon dim olarak
+ * kullanılırsa backend loadAggregatesIfNeeded zaten otomatik tetikler ve
+ * extractRawValue ile raw değerlerini çekeriz.
+ *
+ * Type kısıtı: 'text' kolonları display sırasında çok geniş cell yapar; dim
+ * olarak yine de izin veriliyor (kullanıcı seçer; UI compactness onun
+ * tercihi). Kısıt yalnız "kolon olmalı + label/value sayılabilir" — registry
+ * giriş kolonu yeter.
  */
 export function isPivotableDimension(col) {
   if (!col) return false;
-  if (col.source === 'aggregate') return false;
-  return col.source === 'scalar' || col.source === 'json_path' || col.source === 'join';
+  // 4 source türünün hepsi: scalar / json_path / join / aggregate
+  return ['scalar', 'json_path', 'join', 'aggregate'].includes(col.source);
 }
 
 /**
@@ -210,8 +218,8 @@ export function isPivotableDimension(col) {
  * @param {string} fn measure fonksiyonu
  * @returns {boolean} measure olarak kullanılabilir mi?
  *   - count: her kolon (sayım her zaman çalışır)
- *   - sum/avg/min/max: type='number' olan kolonlar
- *   - aggregate kolonlar: number tipindeyse OK (already pre-computed)
+ *   - sum/avg/min/max: type='number' olan kolonlar (aggregate dahil — Phase
+ *     3.1'de zaten izinliydi; semantik korundu)
  */
 export function isPivotableMeasure(col, fn) {
   if (!col || !PIVOT_MEASURE_FNS.includes(fn)) return false;
