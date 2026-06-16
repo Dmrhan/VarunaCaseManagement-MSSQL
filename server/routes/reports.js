@@ -22,10 +22,16 @@ import {
   resolveColumns,
   buildPrismaSelect,
   needsSolutionStepAggregates,
+  needsCaseActivityAggregates,
+  needsCaseNoteAggregates,
 } from '../lib/caseReport/columnRegistry.js';
 import { buildReportWhere } from '../lib/caseReport/buildWhere.js';
 import { buildReportRows } from '../lib/caseReport/buildRows.js';
-import { loadSolutionStepAggregates } from '../lib/caseReport/aggregates.js';
+import {
+  loadSolutionStepAggregates,
+  loadCaseActivityAggregates,
+  loadCaseNoteAggregates,
+} from '../lib/caseReport/aggregates.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -40,6 +46,29 @@ const REPORT_ROLES = requireRole('Supervisor', 'Admin', 'SystemAdmin');
 router.use(REPORT_ROLES);
 
 const PREVIEW_DEFAULT_PAGE_SIZE = 50;
+
+/**
+ * Phase 2B.1 — Aggregate batch fetch'lerini seçili kolonlara göre paralel
+ * koşturur. Hiç aggregate seçilmediyse hiç DB sorgusu atılmaz (perf).
+ * N+1 garantisi: her aggregate türü için TEK findMany; Promise.all paralel.
+ */
+async function loadAggregatesIfNeeded(columns, items) {
+  const aggregates = {};
+  if (items.length === 0) return aggregates;
+  const caseIds = items.map((i) => i.id);
+  const jobs = [];
+  if (needsSolutionStepAggregates(columns)) {
+    jobs.push(loadSolutionStepAggregates(prisma, caseIds).then((m) => { aggregates.solutionSteps = m; }));
+  }
+  if (needsCaseActivityAggregates(columns)) {
+    jobs.push(loadCaseActivityAggregates(prisma, caseIds).then((m) => { aggregates.caseActivity = m; }));
+  }
+  if (needsCaseNoteAggregates(columns)) {
+    jobs.push(loadCaseNoteAggregates(prisma, caseIds).then((m) => { aggregates.caseNote = m; }));
+  }
+  if (jobs.length > 0) await Promise.all(jobs);
+  return aggregates;
+}
 const PREVIEW_MAX_PAGE_SIZE = 200;
 const EXPORT_MAX_ROWS = 5000;
 
@@ -124,16 +153,9 @@ router.post('/cases/preview', async (req, res) => {
       }),
       prisma.case.count({ where }),
     ]);
-    // Phase 2A: aggregate column varsa, sayfa içindeki case'lerin
-    // CaseSolutionStep'lerini TEK batch ile çek. Aggregate seçilmediyse
-    // fetch SKIP — perf.
-    const aggregates = {};
-    if (needsSolutionStepAggregates(columns) && items.length > 0) {
-      aggregates.solutionSteps = await loadSolutionStepAggregates(
-        prisma,
-        items.map((i) => i.id),
-      );
-    }
+    // Phase 2A + 2B.1: aggregate column'ları paralel batch fetch. Selektif —
+    // hiç aggregate seçilmediyse hiçbir aggregate sorgusu atılmaz.
+    const aggregates = await loadAggregatesIfNeeded(columns, items);
     const rows = buildReportRows(items, columns, aggregates);
     return res.json({
       rows,
@@ -197,14 +219,8 @@ router.post('/cases/export', async (req, res) => {
       orderBy: { createdAt: 'desc' },
       take: EXPORT_MAX_ROWS,
     });
-    // Phase 2A: export'ta aynı aggregate akışı — preview ile bire bir paylaşılır.
-    const aggregates = {};
-    if (needsSolutionStepAggregates(columns) && items.length > 0) {
-      aggregates.solutionSteps = await loadSolutionStepAggregates(
-        prisma,
-        items.map((i) => i.id),
-      );
-    }
+    // Phase 2A + 2B.1: aggregate akışı preview ile bire bir paylaşılır.
+    const aggregates = await loadAggregatesIfNeeded(columns, items);
     const rows = buildReportRows(items, columns, aggregates);
     return sendXlsx(res, columns, rows, { filters: body.filters, count });
   } catch (err) {
