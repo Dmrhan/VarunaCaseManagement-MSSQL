@@ -116,34 +116,60 @@ export function computePivot(input) {
   const rowLabels = sortLabels(Array.from(rowLabelSet));
   const colLabels = sortLabels(Array.from(colLabelSet));
 
-  // Matrix + totals
+  // Matrix
   const matrix = {};
-  const rowTotals = {};
-  const colTotals = {};
-  for (const c of colLabels) colTotals[c] = 0;
-  let grandTotal = 0;
-
   for (const r of rowLabels) {
     matrix[r] = {};
-    rowTotals[r] = 0;
     const rb = buckets.get(r);
     for (const c of colLabels) {
       const vals = (rb && rb.get(c)) ?? [];
-      const cellValue = aggregate(measureFn, vals);
-      matrix[r][c] = cellValue;
-      rowTotals[r] += cellValue;
-      colTotals[c] += cellValue;
-      grandTotal += cellValue;
+      matrix[r][c] = aggregate(measureFn, vals);
     }
   }
 
-  // avg measure için row/col/grand totals "ortalamaların ortalaması" olur
-  // → semantically yanlış. avg modunda total'ları SKIP et ('' marker yerine
-  // null döner; frontend bu durumda "—" render eder).
+  // Codex P2 #2 fix — Total semantics measure fn'e bağlı:
+  //   count, sum: additive (row total = sum of cells, vs.)
+  //   avg:        null (ortalamaların ortalaması yanlış olur — frontend "—")
+  //   min, max:   non-additive (row total = min/max of row cells).
+  //               Toplama yapılsa 10+20=30 gibi "imkansız" totals çıkar.
+  //
+  // Strateji: avg/min/max için aynı aggregate fn'i row/col toplamlarına
+  // tekrar uygula (cell değerlerini bucket olarak). avg için ek olarak null
+  // garantisi — UI "—" çizer.
+  let rowTotals = {};
+  let colTotals = {};
+  let grandTotal = 0;
+
   if (measureFn === 'avg') {
-    for (const k of Object.keys(rowTotals)) rowTotals[k] = null;
-    for (const k of Object.keys(colTotals)) colTotals[k] = null;
+    for (const r of rowLabels) rowTotals[r] = null;
+    for (const c of colLabels) colTotals[c] = null;
     grandTotal = null;
+  } else if (measureFn === 'min' || measureFn === 'max') {
+    // Cell değerlerini measureFn ile yeniden agrege et
+    for (const r of rowLabels) {
+      const cells = colLabels.map((c) => matrix[r][c]);
+      rowTotals[r] = aggregate(measureFn, cells);
+    }
+    for (const c of colLabels) {
+      const cells = rowLabels.map((r) => matrix[r][c]);
+      colTotals[c] = aggregate(measureFn, cells);
+    }
+    // grandTotal: tüm cell'lerin min veya max'i
+    const allCells = [];
+    for (const r of rowLabels) for (const c of colLabels) allCells.push(matrix[r][c]);
+    grandTotal = aggregate(measureFn, allCells);
+  } else {
+    // count, sum: additive
+    for (const c of colLabels) colTotals[c] = 0;
+    for (const r of rowLabels) {
+      rowTotals[r] = 0;
+      for (const c of colLabels) {
+        const v = matrix[r][c];
+        rowTotals[r] += v;
+        colTotals[c] += v;
+        grandTotal += v;
+      }
+    }
   }
 
   return { rowLabels, colLabels, matrix, rowTotals, colTotals, grandTotal };
