@@ -48,34 +48,69 @@ function readJsonPath(obj, path) {
  * Case.account.<joinPath>[] içinden col.picker mantığına göre tek satır seçer
  * ve col.joinField değerini döner. Boş/null collection → undefined.
  *
- * Pickers:
- *   - 'defaultThenFirst' : isDefault=true olan ilk; yoksa array[0]
- *                          (Address için: müşterinin işaret ettiği birincil
- *                          adres; yoksa ilk eklenen)
- *   - 'matchCaseCompanyId': companyId === dbRow.companyId olan; yoksa array[0]
- *                          (AccountCompany için: vaka hangi tenant'tan
- *                          açıldıysa, o tenant'taki müşteri ilişki kaydı —
- *                          segment/paket/status semantik olarak bu kaydın)
+ * Pickers (Codex P1 + P2 fix — tenant scope + deterministic order):
+ *   - 'defaultThenFirst' : Address picker.
+ *       1) companyId === dbRow.companyId filter (TENANT SCOPE — Account
+ *          multi-tenant olduğunda farklı şirketin adresini sızdırma).
+ *       2) Kalan adayları deterministik sırala: isActive desc, isDefault
+ *          desc, type asc, createdAt asc (bağ kırıcı sıra).
+ *       3) İlk satırı seç. Aday yok → undefined.
+ *   - 'matchCaseCompanyId': AccountCompany picker.
+ *       companyId === dbRow.companyId olan tek kayıt (schema'da
+ *       @@unique([accountId, companyId]) — multiple match olamaz).
+ *       Match yok → undefined (CROSS-TENANT FALLBACK YOK).
  *
- * Defansif: relation null (örn. accountId yok), array boş, picker uyumsuz →
- * undefined → applyFormat boş string.
+ * Defansif: relation null (örn. accountId yok), array boş, picker uyumsuz,
+ * tenant match yok → undefined → applyFormat boş string.
  */
 function pickCompositeJoinValue(col, dbRow) {
   const related = dbRow[col.joinTable];
   if (!related) return undefined;
   const arr = related[col.joinPath];
   if (!Array.isArray(arr) || arr.length === 0) return undefined;
+  const caseCompanyId = dbRow.companyId;
   let pick = null;
   if (col.picker === 'defaultThenFirst') {
-    pick = arr.find((x) => x && x.isDefault === true) || arr[0];
+    // 1) Tenant filter — yabancı tenant adresini ele
+    const candidates = arr.filter((x) => x && x.companyId === caseCompanyId);
+    if (candidates.length === 0) return undefined;
+    // 2) Deterministik sıralama (in-place mutasyon yok — copy)
+    const sorted = [...candidates].sort(compareAddressForPicker);
+    pick = sorted[0];
   } else if (col.picker === 'matchCaseCompanyId') {
-    const caseCompanyId = dbRow.companyId;
-    pick = arr.find((x) => x && x.companyId === caseCompanyId) || arr[0];
+    // Unique constraint → max 1 match. Cross-tenant fallback yok.
+    pick = arr.find((x) => x && x.companyId === caseCompanyId) || null;
   } else {
-    // Picker tanımsız → ilk satır (defansif)
+    // Picker tanımsız → ilk satır (defansif, eski davranış)
     pick = arr[0];
   }
   return pick ? pick[col.joinField] : undefined;
+}
+
+/**
+ * Address picker tie-break comparator. Önce daha aktif/işaretli olanı, sonra
+ * tip kararlı sırası, en son yaratılma anı — kayıt order'ı SQL/Prisma'dan
+ * gelmediği için JS-side stable order garantisi.
+ *
+ * Sıralama anahtarları:
+ *   1. isActive: true önce  (pasifleştirilmişler dipte)
+ *   2. isDefault: true önce (kullanıcının "birincil" işareti)
+ *   3. type: alfabetik asc  (Address tipi kayıt eşitliği için stable)
+ *   4. createdAt: eski önce (en eski/bilinen adres tercih)
+ */
+function compareAddressForPicker(a, b) {
+  const aActive = a.isActive === true ? 1 : 0;
+  const bActive = b.isActive === true ? 1 : 0;
+  if (aActive !== bActive) return bActive - aActive;
+  const aDefault = a.isDefault === true ? 1 : 0;
+  const bDefault = b.isDefault === true ? 1 : 0;
+  if (aDefault !== bDefault) return bDefault - aDefault;
+  const aType = typeof a.type === 'string' ? a.type : '';
+  const bType = typeof b.type === 'string' ? b.type : '';
+  if (aType !== bType) return aType.localeCompare(bType);
+  const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  return aCreated - bCreated;
 }
 
 // Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.
