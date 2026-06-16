@@ -67,6 +67,32 @@ export interface ReportColumnsResponse {
   columns: ReportColumnDef[];
 }
 
+// Phase 3.1 — Pivot
+export type PivotMeasureFn = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+export interface PivotRequest {
+  rowColumnId: string;
+  colColumnId: string;
+  measure: {
+    fn: PivotMeasureFn;
+    columnId?: string; // count fn için ignore
+  };
+  filters?: ReportFilters;
+}
+
+export interface PivotResponse {
+  row: { id: string; label: string };
+  col: { id: string; label: string };
+  measure: { fn: PivotMeasureFn; columnId?: string; columnLabel?: string };
+  rowLabels: string[];
+  colLabels: string[];
+  matrix: Record<string, Record<string, number | null>>;
+  rowTotals: Record<string, number | null>;
+  colTotals: Record<string, number | null>;
+  grandTotal: number | null;
+  total: number;
+}
+
 export const reportService = {
   async listColumns(): Promise<ReportColumnsResponse | undefined> {
     return apiFetch<ReportColumnsResponse>(`${BASE}/columns`, undefined, 'Rapor kolonları');
@@ -86,6 +112,18 @@ export const reportService = {
         body: JSON.stringify({ columns, filters, page, pageSize }),
       },
       'Rapor önizlemesi',
+    );
+  },
+
+  async pivot(req: PivotRequest): Promise<PivotResponse | undefined> {
+    return apiFetch<PivotResponse>(
+      `${BASE}/pivot`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      },
+      'Pivot raporu',
     );
   },
 

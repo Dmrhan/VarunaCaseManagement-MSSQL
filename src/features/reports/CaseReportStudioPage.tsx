@@ -45,6 +45,8 @@ import {
   type ReportColumnsResponse,
   type ReportFilters,
   type ReportPreviewResponse,
+  type PivotResponse,
+  type PivotMeasureFn,
 } from '@/services/reportService';
 import { CASE_STATUSES, CASE_PRIORITIES } from '@/features/cases/types';
 
@@ -171,6 +173,16 @@ export function CaseReportStudioPage() {
 
   const [exporting, setExporting] = useState(false);
 
+  // Phase 3.1 — Pivot state
+  const [mode, setMode] = useState<'list' | 'pivot'>('list');
+  const [pivotRowId, setPivotRowId] = useState('status');
+  const [pivotColId, setPivotColId] = useState('caseType');
+  const [pivotMeasureFn, setPivotMeasureFn] = useState<PivotMeasureFn>('count');
+  const [pivotMeasureColId, setPivotMeasureColId] = useState('');
+  const [pivotData, setPivotData] = useState<PivotResponse | null>(null);
+  const [pivotLoading, setPivotLoading] = useState(false);
+  const [pivotError, setPivotError] = useState<string | null>(null);
+
   const companies = useMemo(() => {
     try {
       return lookupService.companies();
@@ -266,6 +278,47 @@ export function CaseReportStudioPage() {
     }
   }
 
+  // Phase 3.1 — Pivot fetch
+  async function runPivot() {
+    if (!pivotRowId || !pivotColId) {
+      setPivotError('Satır ve kolon boyutu seçin.');
+      return;
+    }
+    if (pivotMeasureFn !== 'count' && !pivotMeasureColId) {
+      setPivotError(`'${pivotMeasureFn}' için sayısal bir ölçü kolonu seçin.`);
+      return;
+    }
+    setPivotLoading(true);
+    setPivotError(null);
+    const res = await reportService.pivot({
+      rowColumnId: pivotRowId,
+      colColumnId: pivotColId,
+      measure: {
+        fn: pivotMeasureFn,
+        ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
+      },
+      filters,
+    });
+    setPivotLoading(false);
+    if (!res) {
+      setPivotError('Pivot raporu alınamadı.');
+      return;
+    }
+    setPivotData(res);
+  }
+
+  // Pivotable dimension'lar: scalar + json_path + join. Aggregate ileri faz.
+  const dimensionCandidates = useMemo(() => {
+    if (!columnsData) return [] as ReportColumnDef[];
+    return columnsData.columns.filter((c) => c.source !== 'aggregate');
+  }, [columnsData]);
+
+  // Measure column candidates: type='number'. count fn için her şey OK.
+  const measureCandidates = useMemo(() => {
+    if (!columnsData) return [] as ReportColumnDef[];
+    return columnsData.columns.filter((c) => c.type === 'number');
+  }, [columnsData]);
+
   const categoryEntries = useMemo(() => {
     if (!columnsData) return [] as { key: string; label: string; columns: ReportColumnDef[] }[];
     const groups = new Map<string, ReportColumnDef[]>();
@@ -293,27 +346,61 @@ export function CaseReportStudioPage() {
   return (
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-ndark-text">
-          Vaka Rapor Stüdyosu
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-ndark-text">
+            Vaka Rapor Stüdyosu
+          </h1>
+          {/* Phase 3.1 — Mod toggle */}
+          <div className="inline-flex overflow-hidden rounded-md border border-slate-200 text-xs dark:border-ndark-border">
+            <button
+              type="button"
+              onClick={() => setMode('list')}
+              className={`px-3 py-1 ${mode === 'list' ? 'bg-brand-500 text-white' : 'bg-white text-slate-600 dark:bg-ndark-card dark:text-ndark-muted'}`}
+            >
+              Liste
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('pivot')}
+              className={`px-3 py-1 ${mode === 'pivot' ? 'bg-brand-500 text-white' : 'bg-white text-slate-600 dark:bg-ndark-card dark:text-ndark-muted'}`}
+            >
+              Pivot
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={previewLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            onClick={runPreview}
-            disabled={previewLoading || selectedColumnIds.length === 0}
-          >
-            Önizlemeyi Yenile
-          </Button>
-          <Button
-            size="sm"
-            leftIcon={exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            onClick={runExport}
-            disabled={exporting || selectedColumnIds.length === 0}
-          >
-            Excel'e Aktar
-          </Button>
+          {mode === 'list' && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={previewLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                onClick={runPreview}
+                disabled={previewLoading || selectedColumnIds.length === 0}
+              >
+                Önizlemeyi Yenile
+              </Button>
+              <Button
+                size="sm"
+                leftIcon={exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                onClick={runExport}
+                disabled={exporting || selectedColumnIds.length === 0}
+              >
+                Excel'e Aktar
+              </Button>
+            </>
+          )}
+          {mode === 'pivot' && (
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={pivotLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              onClick={runPivot}
+              disabled={pivotLoading}
+            >
+              Pivot Hesapla
+            </Button>
+          )}
         </div>
       </div>
 
@@ -392,6 +479,7 @@ export function CaseReportStudioPage() {
         </CardBody>
       </Card>
 
+      {mode === 'list' && (
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr]">
         {/* Sol: column picker */}
         <Card>
@@ -490,8 +578,10 @@ export function CaseReportStudioPage() {
           </CardBody>
         </Card>
       </div>
+      )}
 
-      {/* Önizleme tablosu */}
+      {mode === 'list' && (
+      /* Önizleme tablosu */
       <Card>
         <CardBody className="space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -558,6 +648,156 @@ export function CaseReportStudioPage() {
           )}
         </CardBody>
       </Card>
+      )}
+
+      {/* Phase 3.1 — Pivot Mode */}
+      {mode === 'pivot' && (
+        <>
+          <Card>
+            <CardBody className="space-y-2">
+              <SectionTitle text="Pivot Yapılandırma" />
+              <p className="text-xs text-slate-500 dark:text-ndark-muted">
+                Satır × Kolon × Ölçü. Aggregate kolonları Phase 3.2'de eklenecek; şimdilik
+                Case alanları (Smart Ticket dahil) seçilebilir.
+              </p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <Field label="Satır Boyutu">
+                  <Select value={pivotRowId} onChange={(e) => setPivotRowId(e.target.value)}>
+                    <option value="">— Seç —</option>
+                    {dimensionCandidates.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Kolon Boyutu">
+                  <Select value={pivotColId} onChange={(e) => setPivotColId(e.target.value)}>
+                    <option value="">— Seç —</option>
+                    {dimensionCandidates.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Ölçü Fonksiyonu">
+                  <Select
+                    value={pivotMeasureFn}
+                    onChange={(e) => setPivotMeasureFn(e.target.value as PivotMeasureFn)}
+                  >
+                    <option value="count">Sayım (count)</option>
+                    <option value="sum">Toplam (sum)</option>
+                    <option value="avg">Ortalama (avg)</option>
+                    <option value="min">En küçük (min)</option>
+                    <option value="max">En büyük (max)</option>
+                  </Select>
+                </Field>
+                <Field
+                  label="Ölçü Kolonu"
+                  hint={pivotMeasureFn === 'count' ? 'count fonksiyonunda gerek yok' : 'Sayısal kolon'}
+                >
+                  <Select
+                    value={pivotMeasureColId}
+                    onChange={(e) => setPivotMeasureColId(e.target.value)}
+                    disabled={pivotMeasureFn === 'count'}
+                  >
+                    <option value="">— Seç —</option>
+                    {measureCandidates.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardBody className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <SectionTitle text="Pivot Tablosu" />
+                {pivotData && (
+                  <span className="text-xs text-slate-500 dark:text-ndark-muted">
+                    {pivotData.total} satır pivotlandı · {pivotData.rowLabels.length} × {pivotData.colLabels.length}
+                  </span>
+                )}
+              </div>
+              {pivotError && (
+                <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+                  {pivotError}
+                </p>
+              )}
+              {!pivotData && !pivotLoading && !pivotError && (
+                <p className="text-xs text-slate-500">"Pivot Hesapla" ile sorgu çalıştırın.</p>
+              )}
+              {pivotLoading && (
+                <p className="text-xs text-slate-500">
+                  <Loader2 size={11} className="inline animate-spin" /> Pivot hesaplanıyor…
+                </p>
+              )}
+              {pivotData && pivotData.rowLabels.length === 0 && !pivotLoading && (
+                <p className="text-xs text-slate-500">Filtrelere göre sonuç yok.</p>
+              )}
+              {pivotData && pivotData.rowLabels.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+                        <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-2 py-1.5 text-left font-medium text-slate-700 dark:bg-ndark-card dark:text-ndark-text">
+                          {pivotData.row.label} ↓ / {pivotData.col.label} →
+                        </th>
+                        {pivotData.colLabels.map((c) => (
+                          <th key={c} className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-slate-700 dark:text-ndark-text">
+                            {c}
+                          </th>
+                        ))}
+                        <th className="whitespace-nowrap px-2 py-1.5 text-right font-semibold text-slate-700 dark:text-ndark-text">
+                          Toplam
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pivotData.rowLabels.map((r) => (
+                        <tr key={r} className="border-b border-slate-100 hover:bg-slate-50 dark:border-ndark-border dark:hover:bg-ndark-card">
+                          <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-2 py-1 font-medium text-slate-700 dark:bg-ndark-surface dark:text-ndark-text">
+                            {r}
+                          </td>
+                          {pivotData.colLabels.map((c) => (
+                            <td key={c} className="px-2 py-1 text-right text-slate-700 dark:text-ndark-text">
+                              {formatPivotCell(pivotData.matrix[r]?.[c], pivotData.measure.fn)}
+                            </td>
+                          ))}
+                          <td className="px-2 py-1 text-right font-semibold text-slate-700 dark:text-ndark-text">
+                            {formatPivotCell(pivotData.rowTotals[r], pivotData.measure.fn)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-slate-300 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-2 py-1 font-semibold text-slate-700 dark:bg-ndark-card dark:text-ndark-text">
+                          Toplam
+                        </td>
+                        {pivotData.colLabels.map((c) => (
+                          <td key={c} className="px-2 py-1 text-right font-semibold text-slate-700 dark:text-ndark-text">
+                            {formatPivotCell(pivotData.colTotals[c], pivotData.measure.fn)}
+                          </td>
+                        ))}
+                        <td className="px-2 py-1 text-right font-bold text-slate-900 dark:text-ndark-text">
+                          {formatPivotCell(pivotData.grandTotal, pivotData.measure.fn)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        </>
+      )}
     </div>
   );
+}
+
+function formatPivotCell(value: number | null | undefined, fn: PivotMeasureFn): string {
+  if (value == null) return '—';
+  if (!Number.isFinite(value)) return '—';
+  if (fn === 'avg') return value.toFixed(2);
+  // count/sum/min/max → integer veya float ise 0-2 ondalık
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(2);
 }
