@@ -40,6 +40,12 @@ import {
   loadCaseCallAggregates,
   loadCaseTransferAggregates,
 } from '../lib/caseReport/aggregates.js';
+import {
+  computePivot,
+  isPivotableDimension,
+  isPivotableMeasure,
+  PIVOT_MEASURE_FNS,
+} from '../lib/caseReport/pivot.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -272,6 +278,167 @@ router.post('/cases/export', async (req, res) => {
     return sendXlsx(res, columns, rows, { filters: body.filters, count });
   } catch (err) {
     console.error('[reports/cases/export]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 3.1 — Pivot endpoint
+// ──────────────────────────────────────────────────────────────────────
+//
+// POST /api/reports/cases/pivot
+// Body:
+//   {
+//     rowColumnId: string,        // pivotable column id (row dimension)
+//     colColumnId: string,        // pivotable column id (col dimension)
+//     measure: {
+//       columnId?: string,        // count fn için ignore
+//       fn: 'count'|'sum'|'avg'|'min'|'max'
+//     },
+//     filters: ReportFilters
+//   }
+//
+// Response: {
+//   row: { id, label },
+//   col: { id, label },
+//   measure: { fn, columnId? },
+//   rowLabels, colLabels, matrix, rowTotals, colTotals, grandTotal,
+//   total: number  // pivot'a giren case sayısı
+// }
+//
+// Tenant scope, role gate, EXPORT_MAX_ROWS sınırı preview/export ile
+// aynı şekilde uygulanır. Pivot fetch'i in-memory yapıldığı için satır
+// sınırı önemli — Phase 3.1 max 5000 case ile sınırlı (preview pageSize
+// 200 değil; pivot için ayrı PIVOT_MAX_ROWS sabiti).
+
+const PIVOT_MAX_ROWS = 5000;
+
+router.post('/cases/pivot', async (req, res) => {
+  const body = req.body ?? {};
+  const rowColumnId = typeof body.rowColumnId === 'string' ? body.rowColumnId : '';
+  const colColumnId = typeof body.colColumnId === 'string' ? body.colColumnId : '';
+  const measure = body.measure ?? {};
+  const measureFn = typeof measure.fn === 'string' ? measure.fn : '';
+  const measureColumnId = typeof measure.columnId === 'string' ? measure.columnId : '';
+
+  if (!rowColumnId || !colColumnId) {
+    return res.status(400).json({
+      error: 'pivot_dimensions_required',
+      message: 'Pivot için satır ve kolon boyutu zorunlu.',
+    });
+  }
+  if (!PIVOT_MEASURE_FNS.includes(measureFn)) {
+    return res.status(400).json({
+      error: 'pivot_measure_fn_invalid',
+      message: `Geçersiz pivot fonksiyonu. Beklenen: ${PIVOT_MEASURE_FNS.join('/')}.`,
+    });
+  }
+  if (measureFn !== 'count' && !measureColumnId) {
+    return res.status(400).json({
+      error: 'pivot_measure_column_required',
+      message: `'${measureFn}' fonksiyonu için bir sayısal kolon seçmelisin.`,
+    });
+  }
+
+  // Kolon id'lerini topla → role + valid + pivotable kontrol
+  const ids = [rowColumnId, colColumnId];
+  if (measureColumnId) ids.push(measureColumnId);
+  const { columns: resolvedAll, invalidIds } = resolveColumns(ids);
+  if (invalidIds.length > 0) {
+    return res.status(400).json({
+      error: 'columns_invalid',
+      message: `Geçersiz kolon id(leri): ${invalidIds.join(', ')}`,
+      invalidIds,
+    });
+  }
+  const rowCol = resolvedAll.find((c) => c.id === rowColumnId);
+  const colCol = resolvedAll.find((c) => c.id === colColumnId);
+  const measureCol = measureColumnId ? resolvedAll.find((c) => c.id === measureColumnId) : null;
+
+  if (!isPivotableDimension(rowCol)) {
+    return res.status(400).json({ error: 'pivot_row_not_pivotable', message: 'Bu kolon satır boyutu olarak kullanılamıyor.' });
+  }
+  if (!isPivotableDimension(colCol)) {
+    return res.status(400).json({ error: 'pivot_col_not_pivotable', message: 'Bu kolon kolon boyutu olarak kullanılamıyor.' });
+  }
+  if (measureFn !== 'count' && !isPivotableMeasure(measureCol, measureFn)) {
+    return res.status(400).json({
+      error: 'pivot_measure_not_numeric',
+      message: `'${measureFn}' fonksiyonu sayısal (type=number) bir kolon gerektirir.`,
+    });
+  }
+
+  // Role gate — pivot da PII kolonu içeriyorsa engelle
+  const roleCheck = filterColumnsByRole(resolvedAll, req.user?.role ?? null);
+  if (roleCheck.forbidden.length > 0) {
+    return res.status(403).json({
+      error: 'columns_forbidden',
+      message: `Bu kolon(lar)a erişim yetkin yok: ${roleCheck.forbidden.join(', ')}`,
+      forbiddenIds: roleCheck.forbidden,
+    });
+  }
+
+  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const { where, scopeValid } = buildReportWhere(body.filters, allowed);
+  if (!scopeValid) {
+    return res.json({
+      row: { id: rowCol.id, label: rowCol.label },
+      col: { id: colCol.id, label: colCol.label },
+      measure: { fn: measureFn, ...(measureColumnId ? { columnId: measureColumnId, columnLabel: measureCol?.label } : {}) },
+      rowLabels: [], colLabels: [], matrix: {}, rowTotals: {}, colTotals: {}, grandTotal: 0, total: 0,
+    });
+  }
+
+  try {
+    // Phase 3.1: pivot fetch sınırı 5000 satır. Aşılırsa 400 + uyarı.
+    const count = await prisma.case.count({ where });
+    if (count > PIVOT_MAX_ROWS) {
+      return res.status(400).json({
+        error: 'pivot_limit_exceeded',
+        message: `Bu sorguda ${count} satır var. Pivot sınırı ${PIVOT_MAX_ROWS}. Filtreyi daralt.`,
+        limit: PIVOT_MAX_ROWS,
+        count,
+      });
+    }
+    // resolvedAll içindeki tüm kolonların select'ini topla — buildPrismaSelect
+    // hem scalar hem json_path (customFields) hem join'i doğru yönetir.
+    const select = buildPrismaSelect(resolvedAll);
+    const items = await prisma.case.findMany({
+      where,
+      select,
+      take: PIVOT_MAX_ROWS,
+    });
+    // Aggregate column'lar Phase 3.1'de pivot dim/measure olarak izinli değil;
+    // yine de buildReportRows'tan değer geçirelim ki ileride genişletmek kolay.
+    const aggregates = await loadAggregatesIfNeeded(resolvedAll, items);
+    const rows = buildReportRows(items, resolvedAll, aggregates);
+    // Pivot input'ları topla — buildReportRows formatlanmış string döndürür.
+    // Row/col dim için label olarak formatted string kullanılır (TR display).
+    // Measure için: count → ignore; diğerleri için raw numeric Number(string).
+    const rowValues = rows.map((r) => r[rowColumnId]);
+    const colValues = rows.map((r) => r[colColumnId]);
+    let measureValues = [];
+    if (measureColumnId) {
+      measureValues = rows.map((r) => {
+        const v = r[measureColumnId];
+        const n = typeof v === 'number' ? v : Number(v);
+        return Number.isFinite(n) ? n : null;
+      });
+    }
+    const piv = computePivot({ rowValues, colValues, measureValues, measureFn });
+
+    return res.json({
+      row: { id: rowCol.id, label: rowCol.label },
+      col: { id: colCol.id, label: colCol.label },
+      measure: {
+        fn: measureFn,
+        ...(measureColumnId ? { columnId: measureColumnId, columnLabel: measureCol?.label } : {}),
+      },
+      ...piv,
+      total: items.length,
+    });
+  } catch (err) {
+    console.error('[reports/cases/pivot]', err);
     return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
   }
 });
