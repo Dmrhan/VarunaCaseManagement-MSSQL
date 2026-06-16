@@ -270,9 +270,21 @@ export function buildPrismaSelect(columns) {
         joinSelects[col.joinTable][col.joinPath] = pathBlock;
       }
       pathBlock.select[col.joinField] = true;
-      // Picker meta — extractRawValue'nın pick edebilmesi için ek alanlar:
+      // Picker meta — extractRawValue'nın pick edebilmesi için ek alanlar.
+      //
+      // Codex P1 (tenant scope) + P2 (deterministic order) — Phase 2D.2 fix:
+      // - defaultThenFirst (Address): companyId TENANT FILTER için zorunlu
+      //   (Account multi-tenant olduğunda yabancı şirket adresini sızdırma)
+      //   + isActive/type/createdAt deterministik sıralama için.
+      // - matchCaseCompanyId (AccountCompany): companyId zaten filter için.
+      //   AccountCompany @@unique([accountId, companyId]) olduğundan tek
+      //   match; tie-break sıralama gerekmiyor.
       if (col.picker === 'defaultThenFirst') {
         pathBlock.select.isDefault = true;
+        pathBlock.select.companyId = true;
+        pathBlock.select.isActive = true;
+        pathBlock.select.type = true;
+        pathBlock.select.createdAt = true;
       } else if (col.picker === 'matchCaseCompanyId') {
         pathBlock.select.companyId = true;
       }
