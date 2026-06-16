@@ -1,0 +1,101 @@
+/**
+ * Case Report Studio — filter input → Prisma where clause.
+ *
+ * Multi-tenant guard:
+ *   - companyId scope HER ZAMAN req.user.allowedCompanyIds ile intersect edilir.
+ *   - Caller (route handler) allowedCompanyIds'i parametre olarak verir;
+ *     buildReportWhere onsuz çağrılamaz.
+ *   - Kullanıcı filters.companyIds gönderirse o set allowedCompanyIds ile
+ *     intersect edilir; sonuç boşsa where 'imkansız bir koşul' (id: -1)
+ *     ile döndürülür → hiç satır dönmez (sızıntı yerine boş cevap).
+ *
+ * Phase 1 desteklenen filtreler (TASK kapsamı):
+ *   - dateFrom / dateTo  → Case.createdAt aralığı
+ *   - companyIds         → CSV veya string[]
+ *   - statuses           → CSV veya string[]
+ *   - priorities         → CSV veya string[]
+ *   - assignedTeamId     → tek değer
+ *   - assignedPersonId   → tek değer
+ *   - search             → caseNumber / title / accountName OR (contains)
+ *
+ * Bilinmeyen filter key'leri sessizce yok sayılır — UI ve backend birbirinden
+ * bağımsız evrilebilir.
+ */
+
+function toArray(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return v.filter((s) => typeof s === 'string' && s.trim().length > 0);
+  if (typeof v === 'string') {
+    return v
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return null;
+}
+
+function parseDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v !== 'string') return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function intersectCompanyScope(filtersCompanyIds, allowedCompanyIds) {
+  const allowed = Array.isArray(allowedCompanyIds) ? allowedCompanyIds : [];
+  const req = toArray(filtersCompanyIds);
+  if (!req || req.length === 0) {
+    return { ids: allowed, valid: allowed.length > 0 };
+  }
+  const inter = req.filter((c) => allowed.includes(c));
+  return { ids: inter, valid: inter.length > 0 };
+}
+
+/**
+ * @param {object} filters
+ * @param {string[]} allowedCompanyIds
+ * @returns {{ where: object, scopeValid: boolean }}
+ */
+export function buildReportWhere(filters, allowedCompanyIds) {
+  const f = filters && typeof filters === 'object' ? filters : {};
+  const scope = intersectCompanyScope(f.companyIds, allowedCompanyIds);
+  if (!scope.valid) {
+    // Boş scope → imkansız koşul. id NEVER === '__impossible__' guarantees
+    // 0 row. Daha temiz bir "where false" ifadesi Prisma sözleşmesinde yok.
+    return { where: { id: '__impossible_company_scope__' }, scopeValid: false };
+  }
+  const where = { companyId: { in: scope.ids } };
+
+  const statuses = toArray(f.statuses);
+  if (statuses && statuses.length > 0) where.status = { in: statuses };
+
+  const priorities = toArray(f.priorities);
+  if (priorities && priorities.length > 0) where.priority = { in: priorities };
+
+  if (typeof f.assignedTeamId === 'string' && f.assignedTeamId.trim()) {
+    where.assignedTeamId = f.assignedTeamId.trim();
+  }
+  if (typeof f.assignedPersonId === 'string' && f.assignedPersonId.trim()) {
+    where.assignedPersonId = f.assignedPersonId.trim();
+  }
+
+  const dateFrom = parseDate(f.dateFrom);
+  const dateTo = parseDate(f.dateTo);
+  if (dateFrom || dateTo) {
+    where.createdAt = {};
+    if (dateFrom) where.createdAt.gte = dateFrom;
+    if (dateTo) where.createdAt.lte = dateTo;
+  }
+
+  if (typeof f.search === 'string' && f.search.trim().length > 0) {
+    const q = f.search.trim();
+    where.OR = [
+      { caseNumber: { contains: q } },
+      { title: { contains: q } },
+      { accountName: { contains: q } },
+    ];
+  }
+
+  return { where, scopeValid: true };
+}

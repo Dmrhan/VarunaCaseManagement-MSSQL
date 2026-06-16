@@ -18,5 +18,5 @@ logs/
 # IIS tasima paketi - binary'ler repoya girmesin (bkz. docs/IIS_DEPLOY.md)
 deploy/nssm/
 deploy/git/
-reports/
+/reports/
 deploy/deploy.bat
