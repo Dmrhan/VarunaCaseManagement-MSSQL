@@ -193,6 +193,25 @@ console.log('\n── 5) summarizeTransfers ────────────
   expect('5.5 teamNamesById null → raw id', p2.lastTransferTargetTeam, 'X');
 }
 
+// ── 4b) Codex P2 fix — call.lastCallResult callOutcome formatter ──
+console.log('\n── 4b) call.lastCallResult — DB ASCII → TR (Codex P2) ──');
+{
+  const { applyFormat } = await import('../server/lib/caseReport/formatters.js');
+  const col = { type: 'string', format: 'callOutcome' };
+  expect('4b.1 DB "MemnunDegil" → "Memnun Değil"', applyFormat(col, 'MemnunDegil'), 'Memnun Değil');
+  expect('4b.2 DB "Tarafsiz" → "Tarafsız"',         applyFormat(col, 'Tarafsiz'),    'Tarafsız');
+  expect('4b.3 DB "Ulasilamadi" → "Ulaşılamadı"',   applyFormat(col, 'Ulasilamadi'), 'Ulaşılamadı');
+  expect('4b.4 DB "Memnun" → "Memnun" (no change)', applyFormat(col, 'Memnun'),      'Memnun');
+  expect('4b.5 TR varyant "MemnunDeğil" → "Memnun Değil" (defansif)', applyFormat(col, 'MemnunDeğil'), 'Memnun Değil');
+  expect('4b.6 null → ""',                          applyFormat(col, null),          '');
+  // buildReportRows ile: callOutcome formatter aggregate kolonunda devreye girer
+  const { columns } = resolveColumns(['caseNumber', 'call.lastCallResult']);
+  const fakeCase = { id: 'C9', caseNumber: 'CASE-009' };
+  const callMap = new Map([['C9', { callCount: 3, lastCallResult: 'MemnunDegil', lastCallAt: null }]]);
+  const rows = buildReportRows([fakeCase], columns, { caseCall: callMap });
+  expect('4b.7 aggregate routing + formatter zinciri = "Memnun Değil"', rows[0]['call.lastCallResult'], 'Memnun Değil');
+}
+
 // ── 6) buildReportRows — 6 aggregate eş zamanlı routing ──────
 console.log('\n── 6) buildReportRows tüm aggregate türleri ────────────');
 {

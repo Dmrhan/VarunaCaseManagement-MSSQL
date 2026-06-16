@@ -57,10 +57,35 @@ const SOLUTION_STEP_SOURCE_LABELS = {
   similar_case: 'Benzer Vaka',
 };
 
-// Phase 2D — Account/PII labels
+// Phase 2D — Account/PII labels. Codex P2 (PR #27) sonrası genişletildi:
+// DB ASCII identifier'lar (Individual/Corporate/Government/NonProfit) +
+// TR varyantlar (Bireysel/Kurumsal/Kamu/Vakıf-STK) — defansif.
 const CUSTOMER_TYPE_LABELS = {
-  Corporate: 'Kurumsal',
-  Individual: 'Bireysel',
+  Corporate:    'Kurumsal',
+  Individual:   'Bireysel',
+  Government:   'Kamu',
+  NonProfit:    'Vakıf-STK',
+};
+
+// CaseRequestType: DB'de toDb ile ASCII normalize edilmiş (Oneri/Sikayet)
+// — frontend'in TR'sine geri çevir. Hem ASCII hem TR varyantı map'liyoruz
+// (defansif: ileride farklı yoldan gelirse de doğru çalışır).
+const REQUEST_TYPE_LABELS = {
+  Bilgi:    'Bilgi',
+  Oneri:    'Öneri',  Öneri:   'Öneri',
+  Talep:    'Talep',
+  Sikayet:  'Şikayet', Şikayet: 'Şikayet',
+  Hata:     'Hata',
+};
+
+// CallOutcome: DB'de toDb ile ASCII normalize (MemnunDegil/Tarafsiz/
+// Ulasilamadi) — Codex P2 fix. Phase 2B.2 call.lastCallResult kolonu
+// raw değer döndürüyordu; bu map ile preview/export TR label gösterir.
+const CALL_OUTCOME_LABELS = {
+  Memnun:        'Memnun',
+  MemnunDegil:   'Memnun Değil',   MemnunDeğil:  'Memnun Değil',
+  Tarafsiz:      'Tarafsız',        Tarafsız:    'Tarafsız',
+  Ulasilamadi:   'Ulaşılamadı',     Ulaşılamadı: 'Ulaşılamadı',
 };
 
 const ENUM_MAPS = {
@@ -70,6 +95,8 @@ const ENUM_MAPS = {
   escalationLevel: ESCALATION_LABELS,
   solutionStepSource: SOLUTION_STEP_SOURCE_LABELS,
   customerType: CUSTOMER_TYPE_LABELS,
+  caseRequestType: REQUEST_TYPE_LABELS,
+  callOutcome: CALL_OUTCOME_LABELS,
 };
 
 // Intl.DateTimeFormat instance reuse — her satırda yeni instance oluşturmak
@@ -170,6 +197,8 @@ export function applyFormat(col, raw) {
       case 'escalationLevel':
       case 'solutionStepSource':
       case 'customerType':
+      case 'caseRequestType':
+      case 'callOutcome':
         return formatEnum(raw, fmt);
       case 'datetimeTr':
         return formatDateTr(raw);

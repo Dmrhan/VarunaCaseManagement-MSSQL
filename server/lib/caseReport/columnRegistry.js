@@ -69,7 +69,7 @@ export const REPORT_COLUMNS = [
   // ── Sınıflandırma ────────────────────────────────────────────────
   { id: 'category',     label: 'Kategori',     category: 'classification', type: 'string', source: 'scalar', prismaField: 'category' },
   { id: 'subCategory',  label: 'Alt Kategori', category: 'classification', type: 'string', source: 'scalar', prismaField: 'subCategory' },
-  { id: 'requestType',  label: 'Talep Türü',   category: 'classification', type: 'string', source: 'scalar', prismaField: 'requestType' },
+  { id: 'requestType',  label: 'Talep Türü',   category: 'classification', type: 'string', source: 'scalar', prismaField: 'requestType', format: 'caseRequestType' },
   { id: 'productName',  label: 'Ürün',         category: 'classification', type: 'string', source: 'scalar', prismaField: 'productName' },
   { id: 'packageName',  label: 'Paket',        category: 'classification', type: 'string', source: 'scalar', prismaField: 'packageName' },
 
@@ -148,7 +148,7 @@ export const REPORT_COLUMNS = [
   { id: 'file.fileCount',                label: 'Dosya Sayısı',              category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseFile',     aggregateField: 'fileCount' },
   { id: 'file.totalSizeMb',              label: 'Toplam Dosya Boyutu (MB)',  category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseFile',     aggregateField: 'totalSizeMb' },
   { id: 'call.callCount',                label: 'Çağrı Sayısı',              category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'callCount' },
-  { id: 'call.lastCallResult',           label: 'Son Çağrı Sonucu',          category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'lastCallResult' },
+  { id: 'call.lastCallResult',           label: 'Son Çağrı Sonucu',          category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'lastCallResult', format: 'callOutcome' },
   { id: 'call.lastCallAt',               label: 'Son Çağrı Tarihi',           category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'lastCallAt', format: 'datetimeTr', excelWidth: 18 },
   { id: 'transfer.transferCount',        label: 'Transfer Sayısı',           category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'transferCount' },
   { id: 'transfer.lastTransferTargetTeam', label: 'Son Transfer Hedef Takım', category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'lastTransferTargetTeam', excelWidth: 24 },
