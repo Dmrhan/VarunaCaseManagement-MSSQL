@@ -637,7 +637,7 @@ export default function App() {
 
         </aside>
 
-        <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'flex-1 px-6 py-6'}>
+        <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'min-w-0 flex-1 px-6 py-6'}>
           {view === 'my-home' && (
             <MyHomePage
               onSelectCase={openCase}
