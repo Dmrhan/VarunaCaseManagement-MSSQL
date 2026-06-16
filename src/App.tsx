@@ -11,6 +11,7 @@ import {
   Keyboard,
   KeyRound,
   LayoutDashboard,
+  FileSpreadsheet,
   LogOut,
   Moon,
   Settings2,
@@ -24,6 +25,7 @@ import { MentionBellBadge } from './features/cases/components/MentionBellBadge';
 import { ActionCenterBell } from './features/action-center/ActionCenterBell';
 import { featureFlags } from './config/featureFlags';
 import { OperationsDashboardPage } from './features/analytics/OperationsDashboardPage';
+import { CaseReportStudioPage } from './features/reports/CaseReportStudioPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
 import { QAScoresPage } from './features/analytics/QAScoresPage';
@@ -66,7 +68,7 @@ import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -598,6 +600,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Vaka Rapor Stüdyosu — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('case-report-studio')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'case-report-studio'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Vaka Rapor Stüdyosu"
+              >
+                <FileSpreadsheet size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Rapor Stüdyosu</span>}
+              </button>
+            )}
+
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
             {user?.role === 'SystemAdmin' && (
               <button
@@ -653,6 +674,7 @@ export default function App() {
             />
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
+          {view === 'case-report-studio' && <CaseReportStudioPage />}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
           {view === 'kb-viewer' && <KnowledgeBasePage />}
