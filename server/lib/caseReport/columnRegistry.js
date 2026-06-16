@@ -285,6 +285,11 @@ export function buildPrismaSelect(columns) {
         pathBlock.select.isActive = true;
         pathBlock.select.type = true;
         pathBlock.select.createdAt = true;
+        // Codex P2 (Phase 2D.2 follow-up) — Final stable tie-breaker.
+        // isActive/isDefault/type/createdAt eşit kalan satırlar için (örn.
+        // aynı timestamp tick'inde import edilen bulk address'ler) id asc
+        // ile kesin sıra. select.id zaten Prisma cuid scalar.
+        pathBlock.select.id = true;
       } else if (col.picker === 'matchCaseCompanyId') {
         pathBlock.select.companyId = true;
       }
