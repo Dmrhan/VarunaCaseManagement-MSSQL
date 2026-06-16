@@ -24,6 +24,11 @@ import {
   needsSolutionStepAggregates,
   needsCaseActivityAggregates,
   needsCaseNoteAggregates,
+  needsCaseFileAggregates,
+  needsCaseCallAggregates,
+  needsCaseTransferAggregates,
+  isColumnAllowedForRole,
+  filterColumnsByRole,
 } from '../lib/caseReport/columnRegistry.js';
 import { buildReportWhere } from '../lib/caseReport/buildWhere.js';
 import { buildReportRows } from '../lib/caseReport/buildRows.js';
@@ -31,6 +36,9 @@ import {
   loadSolutionStepAggregates,
   loadCaseActivityAggregates,
   loadCaseNoteAggregates,
+  loadCaseFileAggregates,
+  loadCaseCallAggregates,
+  loadCaseTransferAggregates,
 } from '../lib/caseReport/aggregates.js';
 
 const router = Router();
@@ -66,6 +74,16 @@ async function loadAggregatesIfNeeded(columns, items) {
   if (needsCaseNoteAggregates(columns)) {
     jobs.push(loadCaseNoteAggregates(prisma, caseIds).then((m) => { aggregates.caseNote = m; }));
   }
+  // Phase 2B.2
+  if (needsCaseFileAggregates(columns)) {
+    jobs.push(loadCaseFileAggregates(prisma, caseIds).then((m) => { aggregates.caseFile = m; }));
+  }
+  if (needsCaseCallAggregates(columns)) {
+    jobs.push(loadCaseCallAggregates(prisma, caseIds).then((m) => { aggregates.caseCall = m; }));
+  }
+  if (needsCaseTransferAggregates(columns)) {
+    jobs.push(loadCaseTransferAggregates(prisma, caseIds).then((m) => { aggregates.caseTransfer = m; }));
+  }
   if (jobs.length > 0) await Promise.all(jobs);
   return aggregates;
 }
@@ -79,14 +97,21 @@ const EXPORT_MAX_ROWS = 5000;
  * KVKK güvenli alt küme (customerContact* ve Account VKN/TCKN/phone hariç).
  */
 router.get('/cases/columns', (req, res) => {
+  // Phase 2D — PII kolonları rol yetkisi olmayan kullanıcıya HİÇ
+  // listelenmez (UI'da görünmez). Tenant scope zaten allowedCompanyIds ile
+  // garanti edildi; bu ek katman rapor üreten kişinin "bilmek gereği" ile
+  // sınırlanmasını sağlar.
+  const role = req.user?.role ?? null;
+  const visible = REPORT_COLUMNS.filter((c) => isColumnAllowedForRole(c, role));
   res.json({
     categories: REPORT_COLUMN_CATEGORIES,
-    columns: REPORT_COLUMNS.map((c) => ({
+    columns: visible.map((c) => ({
       id: c.id,
       label: c.label,
       category: c.category,
       type: c.type,
       source: c.source,
+      ...(c.privacyTag ? { privacyTag: c.privacyTag } : {}),
     })),
   });
 });
@@ -119,6 +144,18 @@ router.post('/cases/preview', async (req, res) => {
     return res.status(400).json({
       error: 'columns_unknown',
       message: 'Hiçbir geçerli kolon seçilmedi.',
+    });
+  }
+
+  // Phase 2D — PII kolonları için defansif role gate. /columns UI'da
+  // göstermez ama elle id atılırsa burada reddederiz. Tenant scope ile
+  // birlikte iki katmanlı koruma.
+  const roleCheck = filterColumnsByRole(columns, req.user?.role ?? null);
+  if (roleCheck.forbidden.length > 0) {
+    return res.status(403).json({
+      error: 'columns_forbidden',
+      message: `Bu kolon(lar)a erişim yetkin yok: ${roleCheck.forbidden.join(', ')}`,
+      forbiddenIds: roleCheck.forbidden,
     });
   }
 
@@ -192,6 +229,16 @@ router.post('/cases/export', async (req, res) => {
   }
   if (columns.length === 0) {
     return res.status(400).json({ error: 'columns_unknown', message: 'Hiçbir geçerli kolon seçilmedi.' });
+  }
+
+  // Phase 2D — defansif role gate (export)
+  const roleCheck = filterColumnsByRole(columns, req.user?.role ?? null);
+  if (roleCheck.forbidden.length > 0) {
+    return res.status(403).json({
+      error: 'columns_forbidden',
+      message: `Bu kolon(lar)a erişim yetkin yok: ${roleCheck.forbidden.join(', ')}`,
+      forbiddenIds: roleCheck.forbidden,
+    });
   }
 
   const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];

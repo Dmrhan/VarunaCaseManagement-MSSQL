@@ -59,6 +59,9 @@ export function buildReportRows(dbRows, columns, aggregates) {
   const stepAggs = aggregates?.solutionSteps;
   const activityAggs = aggregates?.caseActivity;
   const noteAggs = aggregates?.caseNote;
+  const fileAggs = aggregates?.caseFile;
+  const callAggs = aggregates?.caseCall;
+  const transferAggs = aggregates?.caseTransfer;
   const out = new Array(dbRows.length);
   for (let i = 0; i < dbRows.length; i++) {
     const db = dbRows[i];
@@ -71,6 +74,14 @@ export function buildReportRows(dbRows, columns, aggregates) {
       } else if (col.source === 'json_path' && Array.isArray(col.jsonPath)) {
         if (cf === undefined) cf = parseCustomFields(db.customFields);
         raw = cf ? readJsonPath(cf, col.jsonPath) : undefined;
+      } else if (col.source === 'join' && col.joinTable && col.joinField) {
+        // Phase 2D — Case'in include edilmiş related kayıtlarından okuma.
+        // findMany select'i buildPrismaSelect tarafından oluşturuldu:
+        //   { account: { select: { vkn: true, ... } } }
+        // null relation (örn. accountId=null, Phase D müşterisiz vaka) →
+        // raw undefined → formatter '' döner.
+        const related = db[col.joinTable];
+        raw = related ? related[col.joinField] : undefined;
       } else if (col.source === 'aggregate') {
         // Phase 2A: solutionSteps; Phase 2B.1: caseActivity + caseNote.
         // Aggregate map (Map<caseId, payload>) yoksa raw undefined → formatter
@@ -79,6 +90,9 @@ export function buildReportRows(dbRows, columns, aggregates) {
           col.aggregateKey === 'solutionSteps' ? stepAggs
           : col.aggregateKey === 'caseActivity' ? activityAggs
           : col.aggregateKey === 'caseNote'     ? noteAggs
+          : col.aggregateKey === 'caseFile'     ? fileAggs
+          : col.aggregateKey === 'caseCall'     ? callAggs
+          : col.aggregateKey === 'caseTransfer' ? transferAggs
           : null;
         if (aggMap) {
           const payload = aggMap.get(db.id);
