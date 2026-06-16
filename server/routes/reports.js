@@ -21,9 +21,11 @@ import {
   REPORT_COLUMN_CATEGORIES,
   resolveColumns,
   buildPrismaSelect,
+  needsSolutionStepAggregates,
 } from '../lib/caseReport/columnRegistry.js';
 import { buildReportWhere } from '../lib/caseReport/buildWhere.js';
 import { buildReportRows } from '../lib/caseReport/buildRows.js';
+import { loadSolutionStepAggregates } from '../lib/caseReport/aggregates.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -122,7 +124,17 @@ router.post('/cases/preview', async (req, res) => {
       }),
       prisma.case.count({ where }),
     ]);
-    const rows = buildReportRows(items, columns);
+    // Phase 2A: aggregate column varsa, sayfa içindeki case'lerin
+    // CaseSolutionStep'lerini TEK batch ile çek. Aggregate seçilmediyse
+    // fetch SKIP — perf.
+    const aggregates = {};
+    if (needsSolutionStepAggregates(columns) && items.length > 0) {
+      aggregates.solutionSteps = await loadSolutionStepAggregates(
+        prisma,
+        items.map((i) => i.id),
+      );
+    }
+    const rows = buildReportRows(items, columns, aggregates);
     return res.json({
       rows,
       total,
@@ -185,7 +197,15 @@ router.post('/cases/export', async (req, res) => {
       orderBy: { createdAt: 'desc' },
       take: EXPORT_MAX_ROWS,
     });
-    const rows = buildReportRows(items, columns);
+    // Phase 2A: export'ta aynı aggregate akışı — preview ile bire bir paylaşılır.
+    const aggregates = {};
+    if (needsSolutionStepAggregates(columns) && items.length > 0) {
+      aggregates.solutionSteps = await loadSolutionStepAggregates(
+        prisma,
+        items.map((i) => i.id),
+      );
+    }
+    const rows = buildReportRows(items, columns, aggregates);
     return sendXlsx(res, columns, rows, { filters: body.filters, count });
   } catch (err) {
     console.error('[reports/cases/export]', err);

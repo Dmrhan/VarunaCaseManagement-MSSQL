@@ -45,12 +45,18 @@ function readJsonPath(obj, path) {
 // Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.
 
 /**
- * @param {object[]} dbRows Prisma findMany sonucu (select edilmiş)
+ * @param {object[]} dbRows Prisma findMany sonucu (select edilmiş; her satır
+ *   `id` içerir — aggregate lookup için key)
  * @param {object[]} columns ColumnDef[] (resolveColumns'tan sonuçlu sıra)
+ * @param {object} [aggregates] Opsiyonel — Phase 2A aggregate batch sonucu.
+ *   `aggregates.solutionSteps` → `Map<caseId, SolutionStepPayload>`. Hiç
+ *   aggregate kolon seçilmediyse caller bunu vermez; aggregate kolon var
+ *   ama Map satıra ait giriş yoksa boş payload (0/'') gibi davranır.
  * @returns {object[]} her case için { [columnId]: value } sıralı obje
  */
-export function buildReportRows(dbRows, columns) {
+export function buildReportRows(dbRows, columns, aggregates) {
   if (!Array.isArray(dbRows) || !Array.isArray(columns)) return [];
+  const stepAggs = aggregates?.solutionSteps;
   const out = new Array(dbRows.length);
   for (let i = 0; i < dbRows.length; i++) {
     const db = dbRows[i];
@@ -63,6 +69,12 @@ export function buildReportRows(dbRows, columns) {
       } else if (col.source === 'json_path' && Array.isArray(col.jsonPath)) {
         if (cf === undefined) cf = parseCustomFields(db.customFields);
         raw = cf ? readJsonPath(cf, col.jsonPath) : undefined;
+      } else if (col.source === 'aggregate') {
+        if (col.aggregateKey === 'solutionSteps' && stepAggs) {
+          const payload = stepAggs.get(db.id);
+          raw = payload ? payload[col.aggregateField] : undefined;
+        }
+        // Bilinmeyen aggregateKey → raw undefined → formatter '' veya 0
       }
       row[col.id] = applyFormat(col, raw);
     }
