@@ -50,6 +50,7 @@ export const REPORT_COLUMN_CATEGORIES = {
   smart_ticket_drafts: 'Smart Ticket — KB Taslakları',
   smart_ticket_solution_steps: 'Smart Ticket — Çözüm Adımları',
   performance_flow: 'Performans / Akış',
+  account_pii: 'Müşteri (PII)',
 };
 
 /** @type {ReportColumnDef[]} */
@@ -152,6 +153,27 @@ export const REPORT_COLUMNS = [
   { id: 'transfer.transferCount',        label: 'Transfer Sayısı',           category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'transferCount' },
   { id: 'transfer.lastTransferTargetTeam', label: 'Son Transfer Hedef Takım', category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'lastTransferTargetTeam', excelWidth: 24 },
   { id: 'transfer.lastTransferAt',       label: 'Son Transfer Tarihi',       category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'lastTransferAt', format: 'datetimeTr', excelWidth: 18 },
+
+  // ── Müşteri (PII) — Phase 2D ─────────────────────────────────────
+  //
+  // KVKK guard: privacyTag='pii' + roles=['Admin','SystemAdmin'].
+  // - GET /columns → role yetkisi yoksa bu kolonlar HİÇ listelenmez
+  //   (UI'da görünmez).
+  // - POST /preview ve /export → role yetkisi yoksa kolon id'leri 403
+  //   columns_forbidden ile reddedilir (defansif).
+  //
+  // Source: 'join' yeni — Case.account include ile fetched. buildPrismaSelect
+  // include: { account: { select: { ... } } } üretir.
+  //
+  // Şehir (AccountAddress.city) ve Segment (AccountCompany.segment) bu PR
+  // KAPSAMI DIŞINDA — composite/multi-row join karmaşıklığı; Phase 2D.2.
+  { id: 'account.customerType', label: 'Müşteri Tipi',  category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'customerType', format: 'customerType', privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
+  { id: 'account.legalName',    label: 'Ticari Unvan',   category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'legalName',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 32 },
+  { id: 'account.vkn',          label: 'VKN',           category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'vkn', format: 'vknMasked',           privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
+  { id: 'account.tcknLast4',    label: 'TCKN Son 4',    category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'tcknLast4', format: 'tcknLast4Masked', privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
+  { id: 'account.taxOffice',    label: 'Vergi Dairesi', category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'taxOffice',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 24 },
+  { id: 'account.email',        label: 'E-posta',       category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'email',         privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 28 },
+  { id: 'account.phoneE164',    label: 'Telefon',       category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'phoneE164',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
 ];
 
 const COLUMN_BY_ID = new Map(REPORT_COLUMNS.map((c) => [c.id, c]));
@@ -201,15 +223,24 @@ export function resolveColumns(ids) {
 export function buildPrismaSelect(columns) {
   const select = { id: true, companyId: true };
   let needsCustomFields = false;
+  // Phase 2D — join source'lar için per-relation select sub-object'i
+  const joinSelects = {}; // { account: { vkn: true, ... }, ... }
   for (const col of columns) {
     if (col.source === 'scalar' && col.prismaField) {
       select[col.prismaField] = true;
     } else if (col.source === 'json_path') {
       needsCustomFields = true;
+    } else if (col.source === 'join' && col.joinTable && col.joinField) {
+      if (!joinSelects[col.joinTable]) joinSelects[col.joinTable] = {};
+      joinSelects[col.joinTable][col.joinField] = true;
     }
     // aggregate → ek select gerekmiyor
   }
   if (needsCustomFields) select.customFields = true;
+  // Account include: { account: { select: { vkn: true, ... } } }
+  for (const [relation, fields] of Object.entries(joinSelects)) {
+    select[relation] = { select: fields };
+  }
   return select;
 }
 
@@ -264,4 +295,39 @@ export function needsCaseTransferAggregates(columns) {
     if (col.source === 'aggregate' && col.aggregateKey === 'caseTransfer') return true;
   }
   return false;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2D — Role gate for PII columns
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * ColumnDef rolleri user'ın role'una uyuyor mu?
+ * - col.roles tanımlı değilse herkese açık (Phase 1+2A+2B kolonları gibi).
+ * - col.roles bir array ise role içinde olmalı.
+ */
+export function isColumnAllowedForRole(col, role) {
+  if (!Array.isArray(col.roles) || col.roles.length === 0) return true;
+  if (typeof role !== 'string') return false;
+  return col.roles.includes(role);
+}
+
+/**
+ * Verilen kolon listesini role'a göre filtrele.
+ * Dönen `{ allowed, forbidden }`:
+ *   - allowed: role'un görmesine izin verilen ColumnDef[]
+ *   - forbidden: yetkisiz olduğu için drop edilen id'ler
+ *
+ * Route handler'lar bu helper'ı kullanır:
+ *   - GET /columns: yalnız allowed listele (UI yetkisize göstermez)
+ *   - POST /preview, /export: forbidden boş değilse 403 columns_forbidden
+ */
+export function filterColumnsByRole(columns, role) {
+  const allowed = [];
+  const forbidden = [];
+  for (const col of columns) {
+    if (isColumnAllowedForRole(col, role)) allowed.push(col);
+    else forbidden.push(col.id);
+  }
+  return { allowed, forbidden };
 }

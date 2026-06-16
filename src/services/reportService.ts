@@ -29,15 +29,18 @@ export type ReportColumnCategory =
   | 'smart_ticket_closure'
   | 'smart_ticket_drafts'
   | 'smart_ticket_solution_steps'
-  | 'performance_flow';
+  | 'performance_flow'
+  | 'account_pii';
 
 export interface ReportColumnDef {
   id: string;
   label: string;
   category: ReportColumnCategory;
   type: ReportColumnType;
-  /** Phase 2A: 'aggregate' source — backend tek batch fetch ile hesaplar. */
-  source: 'scalar' | 'json_path' | 'aggregate';
+  /** Phase 2A: 'aggregate' / Phase 2D: 'join' — backend ek fetch yapar. */
+  source: 'scalar' | 'json_path' | 'aggregate' | 'join';
+  /** Phase 2D: PII kolonu işaretlemesi. UI badge/uyarı için kullanılabilir. */
+  privacyTag?: 'pii';
 }
 
 export interface ReportFilters {

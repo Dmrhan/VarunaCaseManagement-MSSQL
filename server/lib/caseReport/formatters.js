@@ -57,12 +57,19 @@ const SOLUTION_STEP_SOURCE_LABELS = {
   similar_case: 'Benzer Vaka',
 };
 
+// Phase 2D — Account/PII labels
+const CUSTOMER_TYPE_LABELS = {
+  Corporate: 'Kurumsal',
+  Individual: 'Bireysel',
+};
+
 const ENUM_MAPS = {
   caseStatus: STATUS_LABELS,
   casePriority: PRIORITY_LABELS,
   caseType: CASE_TYPE_LABELS,
   escalationLevel: ESCALATION_LABELS,
   solutionStepSource: SOLUTION_STEP_SOURCE_LABELS,
+  customerType: CUSTOMER_TYPE_LABELS,
 };
 
 // Intl.DateTimeFormat instance reuse — her satırda yeni instance oluşturmak
@@ -99,6 +106,36 @@ function formatBoolean(value) {
   return value ? 'Evet' : 'Hayır';
 }
 
+/**
+ * Phase 2D — VKN masking. 10 hane vergi numarası: ilk 2 + son 2 görünür,
+ * ortası 6 yıldız. Hatalı uzunluk → raw string yine maskelenir (defansif):
+ *   - len < 4 → tamamı yıldız
+ *   - len >= 4 → ilk 2 + (uzunluk-4 yıldız) + son 2
+ *   - boş / null → ''
+ */
+function formatVknMasked(value) {
+  if (value == null || value === '') return '';
+  const s = String(value).trim();
+  if (s.length === 0) return '';
+  if (s.length < 4) return '*'.repeat(s.length);
+  const stars = '*'.repeat(Math.max(s.length - 4, 1));
+  return `${s.slice(0, 2)}${stars}${s.slice(-2)}`;
+}
+
+/**
+ * Phase 2D — TCKN last4 masking. DB'de zaten yalnız son 4 hane saklanır
+ * (`tcknLast4`); biz "*******1234" olarak göstereyim. Plain TCKN ASLA
+ * görünmez (zaten elimizde yok).
+ */
+function formatTcknLast4Masked(value) {
+  if (value == null || value === '') return '';
+  const s = String(value).trim();
+  if (s.length === 0) return '';
+  // 4 haneden farklı gelse de yine "*******<last4>" yap; defansif.
+  const last4 = s.length >= 4 ? s.slice(-4) : s;
+  return `*******${last4}`;
+}
+
 function formatConfidencePercent(value) {
   if (value == null || value === '') return '';
   const n = typeof value === 'number' ? value : Number(value);
@@ -107,6 +144,13 @@ function formatConfidencePercent(value) {
   const pct = n <= 1 ? Math.round(n * 100) : Math.round(n);
   return `%${pct}`;
 }
+
+/** Phase 2D — test/__internal export'u için saf format helper'ları. */
+export const __formatInternal = {
+  formatVknMasked,
+  formatTcknLast4Masked,
+  formatEnum,
+};
 
 /**
  * Formatter dispatcher. ColumnDef.format alanına göre uygun helper'ı çağırır.
@@ -125,6 +169,7 @@ export function applyFormat(col, raw) {
       case 'caseType':
       case 'escalationLevel':
       case 'solutionStepSource':
+      case 'customerType':
         return formatEnum(raw, fmt);
       case 'datetimeTr':
         return formatDateTr(raw);
@@ -132,6 +177,10 @@ export function applyFormat(col, raw) {
         return formatBoolean(raw);
       case 'confidencePercent':
         return formatConfidencePercent(raw);
+      case 'vknMasked':
+        return formatVknMasked(raw);
+      case 'tcknLast4Masked':
+        return formatTcknLast4Masked(raw);
       default:
         // bilinmeyen format string → raw string
         return String(raw);
