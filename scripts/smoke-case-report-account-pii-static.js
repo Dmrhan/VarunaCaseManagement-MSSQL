@@ -105,12 +105,23 @@ console.log('\n── 2) VKN/TCKN/customerType formatters ───────�
   expect('2.7 TCKN null → ""',                    formatTcknLast4Masked(null), '');
   expect('2.8 TCKN "12" → "*******12"',           formatTcknLast4Masked('12'), '*******12');
 
-  // customerType TR map via applyFormat dispatcher
+  // customerType TR map via applyFormat dispatcher (Codex P2 fix sonrası
+  // 4 değer: Corporate/Individual/Government/NonProfit)
   const ctCol = { type: 'string', format: 'customerType' };
-  expect('2.9 Corporate → "Kurumsal"',  applyFormat(ctCol, 'Corporate'), 'Kurumsal');
-  expect('2.10 Individual → "Bireysel"', applyFormat(ctCol, 'Individual'), 'Bireysel');
-  expect('2.11 unknown → raw fallback', applyFormat(ctCol, 'Other'), 'Other');
-  expect('2.12 null → ""',              applyFormat(ctCol, null), '');
+  expect('2.9 Corporate → "Kurumsal"',     applyFormat(ctCol, 'Corporate'),  'Kurumsal');
+  expect('2.10 Individual → "Bireysel"',    applyFormat(ctCol, 'Individual'), 'Bireysel');
+  expect('2.11a Government → "Kamu"',       applyFormat(ctCol, 'Government'), 'Kamu');
+  expect('2.11b NonProfit → "Vakıf-STK"',   applyFormat(ctCol, 'NonProfit'),  'Vakıf-STK');
+  expect('2.11 unknown → raw fallback',     applyFormat(ctCol, 'Other'),      'Other');
+  expect('2.12 null → ""',                  applyFormat(ctCol, null),         '');
+
+  // Codex P2 fix — caseRequestType DB ASCII → TR
+  const rtCol = { type: 'string', format: 'caseRequestType' };
+  expect('2.15a Bilgi → "Bilgi"',           applyFormat(rtCol, 'Bilgi'),    'Bilgi');
+  expect('2.15b DB "Oneri" → "Öneri"',      applyFormat(rtCol, 'Oneri'),    'Öneri');
+  expect('2.15c TR "Öneri" → "Öneri"',      applyFormat(rtCol, 'Öneri'),    'Öneri');
+  expect('2.15d DB "Sikayet" → "Şikayet"',  applyFormat(rtCol, 'Sikayet'),  'Şikayet');
+  expect('2.15e Talep / Hata pass-through', applyFormat(rtCol, 'Hata'),     'Hata');
 
   // VKN format via dispatcher
   const vknCol = { type: 'string', format: 'vknMasked' };
