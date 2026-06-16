@@ -32,7 +32,10 @@ import {
   mapClassificationToTaxonomy,
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
-import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
+import {
+  composeTransferBriefFromSteps,
+  extractAiDrafts,
+} from '../db/solutionStepRepository.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -463,16 +466,34 @@ router.post('/suggest-closure', async (req, res) => {
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
 
+    // Stage 3 resolution-first — kategorizasyon (suggestClose) ile aynı anda
+    // analyze çağrısı yap → engineeringHandoff + customerReplyDraft draft'larını
+    // current resolution metnine göre yeniden üret. Paralel: wall-clock
+    // tek bir KB çağrısına düşer. analyze fail olursa drafts undefined kalır;
+    // categorization yine de döner — kullanıcı en azından dropdown'ları görür.
+    // freeText = description + resolution composition: KB analyze case context
+    // + son çözümü birlikte ister. Eski (Stage 2 opening) aiDrafts persist
+    // davranışı bu route'ta tetiklenmez — yalnız in-memory response döner.
+    const analyzeFreeText = description
+      ? `${description}\n\nÇözüm: ${resolution}`
+      : resolution;
+    const [closeSettled, analyzeSettled] = await Promise.allSettled([
+      externalKbClient.suggestClose(setting, sgBody),
+      externalKbClient.analyze(setting, { freeText: analyzeFreeText }),
+    ]);
+
     let kbResponse;
-    try {
-      kbResponse = await externalKbClient.suggestClose(setting, sgBody);
-    } catch (err) {
-      console.error('[smart-ticket/suggest-closure] suggest-close failed', err?.message ?? err);
+    if (closeSettled.status === 'rejected') {
+      console.error(
+        '[smart-ticket/suggest-closure] suggest-close failed',
+        closeSettled.reason?.message ?? closeSettled.reason,
+      );
       return res.status(502).json({
         error: 'external_kb_failed',
         message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
       });
     }
+    kbResponse = closeSettled.value;
 
     // Codex P2 (main #447 review) — proxy() non-2xx için throw atmaz,
     // { ok: false, error, data } döner. Eski impl bu durumu "başarılı"
@@ -525,16 +546,43 @@ router.post('/suggest-closure', async (req, res) => {
     if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
     if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
 
+    // Stage 3 resolution-first — paralel analyze cevabından drafts'ı çıkar.
+    // analyze rejected veya { ok: false } ise drafts boş kalır; suggestion'lar
+    // yine de döner (kullanıcı kategorileri görür).
+    let drafts;
+    if (analyzeSettled.status === 'fulfilled') {
+      const analyzeRaw = analyzeSettled.value;
+      if (analyzeRaw && analyzeRaw.ok === false) {
+        console.warn(
+          '[smart-ticket/suggest-closure] analyze returned ok:false (drafts skipped)',
+          analyzeRaw.error?.code ?? 'unknown',
+        );
+      } else {
+        const analyzeData = analyzeRaw && analyzeRaw.data ? analyzeRaw.data : analyzeRaw;
+        const extracted = extractAiDrafts(analyzeData);
+        if (extracted.engineeringHandoff || extracted.customerReplyDraft) {
+          drafts = extracted;
+        }
+      }
+    } else {
+      console.warn(
+        '[smart-ticket/suggest-closure] analyze rejected (drafts skipped)',
+        analyzeSettled.reason?.message ?? analyzeSettled.reason,
+      );
+    }
+
     res.json({
       companyId,
       suggestions,
       unmatched,
       source: 'external_kb',
+      ...(drafts ? { drafts } : {}),
       meta: {
         usedEndpoint: 'suggest-close',
         ...upstreamMeta,
         ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
         ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
+        ...(drafts ? { draftsSource: 'analyze' } : {}),
       },
     });
   } catch (err) {

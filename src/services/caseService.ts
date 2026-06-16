@@ -2526,6 +2526,14 @@ export interface SuggestClosureResponse {
   suggestions: Partial<Record<SuggestClosureField, SuggestClosureItem>>;
   unmatched: SuggestClosureUnmatched[];
   source: 'external_kb';
+  /** Stage 3 resolution-first — paralel analyze cevabından çıkarılan KB
+   *  draft string'leri. Hem alanlar opsiyonel: analyze fail olduğunda ya da
+   *  KB string boş döndüğünde drafts hiç gönderilmez (frontend persisted
+   *  aiDrafts'a fallback yapar). */
+  drafts?: {
+    engineeringHandoff?: string;
+    customerReplyDraft?: string;
+  };
   meta?: {
     usedEndpoint?: 'suggest-close';
     confidence?: number;
@@ -2533,6 +2541,9 @@ export interface SuggestClosureResponse {
     modelUsed?: string;
     selectedWorkedStepId?: string;
     contextStepsCount?: number;
+    /** 'analyze' = drafts paralel analyze çağrısından geldi. Yoksa drafts
+     *  yok demektir (eski persisted aiDrafts render edilir). */
+    draftsSource?: 'analyze';
   };
 }
 

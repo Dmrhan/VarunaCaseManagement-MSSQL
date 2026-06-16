@@ -280,6 +280,13 @@ export function SmartTicketNewPage({
   // KB önerisinin current textarea değerinden yeniden istemek için timer.
   const resolutionNoteDirtyRef = useRef(false);
   const resolutionDebounceRef = useRef<number | null>(null);
+  // Stage 3 resolution-first KB drafts override gate: bir kez başarılı
+  // suggest-closure cevabı geldiğinde true olur. KbDraftCard'da "ilk refresh'ten
+  // sonra persisted Stage 2 aiDrafts'a fallback YAPMA" garantisi için bu flag
+  // override (boş object) geçirmeyi tetikler — null closureSuggestion (re-fetch
+  // sırasında) bile stale persisted'i göstermez.
+  const closureRefreshedOnceRef = useRef(false);
+  const [closureRefreshedTick, setClosureRefreshedTick] = useState(0);
 
   // PR-T2 — Stage 3 transfer form state. PR-T1 backend kontratını kullanır:
   //   smartTicketTransfer = { transferNote, composedSummary?, attemptedStepIds?,
@@ -1049,6 +1056,13 @@ export function SmartTicketNewPage({
         return;
       }
       setClosureSuggestion(res);
+      // Stage 3 resolution-first — bir kez başarılı refresh = persisted
+      // aiDrafts fallback'i kapanır; bundan sonra KbDraftCard yalnız current
+      // KB cevabından (drafts varsa) render eder.
+      if (!closureRefreshedOnceRef.current) {
+        closureRefreshedOnceRef.current = true;
+        setClosureRefreshedTick((t) => t + 1);
+      }
       setClosure((c) => {
         const next = { ...c };
         const s = res.suggestions;
@@ -1724,6 +1738,7 @@ export function SmartTicketNewPage({
               closureSuggesting={closureSuggesting}
               closureSuggestion={closureSuggestion}
               closureSuggestionError={closureSuggestionError}
+              closureRefreshedOnce={closureRefreshedOnceRef.current && closureRefreshedTick > 0}
               onSuggestClosure={() => {
                 // Manuel "KB Önerisini Yenile" — debounce iptal et + current
                 // "Çözüm Açıklaması" değerini override olarak gönder.
@@ -1964,6 +1979,7 @@ function Stage3Closure({
   closureSuggesting,
   closureSuggestion,
   closureSuggestionError,
+  closureRefreshedOnce,
   onSuggestClosure,
   onApplyAllClosureSuggestions,
   onClose,
@@ -1981,6 +1997,10 @@ function Stage3Closure({
   closureSuggesting: boolean;
   closureSuggestion: import('@/services/caseService').SuggestClosureResponse | null;
   closureSuggestionError: string | null;
+  /** Stage 3 resolution-first: ilk başarılı suggest-closure tamamlandı mı?
+   *  true → KbDraftCard'ı override mode'da kullan (current KB drafts veya
+   *  render yok); false → persisted aiDrafts fallback'i göster. */
+  closureRefreshedOnce: boolean;
   onSuggestClosure: () => void;
   onApplyAllClosureSuggestions: () => void;
   onClose: () => void;
@@ -2219,9 +2239,24 @@ function Stage3Closure({
             </Select>
           </Field>
         </div>
-        {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı kartları.
-            Sadece customFields.smartTicket.aiDrafts varsa render. */}
-        <KbDraftCard item={createdCase} variant="closure" />
+        {/* Stage 3 resolution-first — KB Teknik Devir Notu + Müşteri Yanıt
+            Taslağı kartları. Override gate:
+              - closureRefreshedOnce=false (ilk refresh tamamlanmadı) → override
+                undefined → eski persisted aiDrafts (Stage 2 opening'den) render.
+              - closureRefreshedOnce=true → override = current KB cevabının
+                drafts'ı (varsa). Boş object override → render YOK; stale Stage 2
+                drafts current KB output gibi sunulmaz.
+              - Re-fetch sırasında suggestion null'a düşse de bayrak true kalır;
+                kullanıcı bir an stale persisted görmez. */}
+        <KbDraftCard
+          item={createdCase}
+          variant="closure"
+          override={
+            closureRefreshedOnce
+              ? closureSuggestion?.drafts ?? {}
+              : undefined
+          }
+        />
         {closureError && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
             {closureError}
