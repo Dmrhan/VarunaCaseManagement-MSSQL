@@ -102,16 +102,90 @@ console.log('\n── 4) avg fn — totals null (semantik) ───────
   expect('4.5 grandTotal = null', p.grandTotal, null);
 }
 
-// ── 5) min / max ─────────────────────────────────────────────
-console.log('\n── 5) min / max ─────────────────────────────────────────');
+// ── 5) min / max — Codex P2 #2 fix: totals fn aware ──────────
+console.log('\n── 5) min / max — totals fn aware (Codex P2 #2) ─────────');
 {
-  const rowValues = ['A', 'A', 'A'];
-  const colValues = ['X', 'X', 'X'];
-  const measureValues = [5, 2, 9];
-  const pMin = computePivot({ rowValues, colValues, measureValues, measureFn: 'min' });
-  const pMax = computePivot({ rowValues, colValues, measureValues, measureFn: 'max' });
-  expect('5.1 min A×X = 2', pMin.matrix['A']['X'], 2);
-  expect('5.2 max A×X = 9', pMax.matrix['A']['X'], 9);
+  // Single-cell
+  const pMin = computePivot({
+    rowValues: ['A', 'A', 'A'], colValues: ['X', 'X', 'X'],
+    measureValues: [5, 2, 9], measureFn: 'min',
+  });
+  const pMax = computePivot({
+    rowValues: ['A', 'A', 'A'], colValues: ['X', 'X', 'X'],
+    measureValues: [5, 2, 9], measureFn: 'max',
+  });
+  expect('5.1 min A×X cell = 2', pMin.matrix['A']['X'], 2);
+  expect('5.2 max A×X cell = 9', pMax.matrix['A']['X'], 9);
+  // 1×1 grid → totals = same cell
+  expect('5.3 min rowTotals.A = 2 (same single cell)', pMin.rowTotals['A'], 2);
+  expect('5.4 max rowTotals.A = 9 (same single cell)', pMax.rowTotals['A'], 9);
+
+  // Multi-cell — Codex P2 #2 ana senaryo: 2 kolon, max = max(10, 20) = 20, NOT 30
+  const pMax2 = computePivot({
+    rowValues: ['A', 'A'], colValues: ['X', 'Y'],
+    measureValues: [10, 20], measureFn: 'max',
+  });
+  expect('5.5 max A×X = 10', pMax2.matrix['A']['X'], 10);
+  expect('5.6 max A×Y = 20', pMax2.matrix['A']['Y'], 20);
+  // Codex bug: 10+20=30 totals göstereyordu. Fix sonrası max(10,20)=20.
+  expect('5.7 max rowTotals.A = 20 (max of cells, NOT 30)', pMax2.rowTotals['A'], 20);
+  expect('5.8 max colTotals.X = 10', pMax2.colTotals['X'], 10);
+  expect('5.9 max colTotals.Y = 20', pMax2.colTotals['Y'], 20);
+  expect('5.10 max grandTotal = 20 (max of all cells, NOT 30)', pMax2.grandTotal, 20);
+
+  // min benzeri
+  const pMin2 = computePivot({
+    rowValues: ['A', 'A', 'B', 'B'], colValues: ['X', 'Y', 'X', 'Y'],
+    measureValues: [10, 5, 3, 8], measureFn: 'min',
+  });
+  expect('5.11 min A×X = 10', pMin2.matrix['A']['X'], 10);
+  expect('5.12 min A×Y = 5', pMin2.matrix['A']['Y'], 5);
+  expect('5.13 min B×X = 3', pMin2.matrix['B']['X'], 3);
+  expect('5.14 min rowTotals.A = 5 (min of 10, 5)', pMin2.rowTotals['A'], 5);
+  expect('5.15 min rowTotals.B = 3 (min of 3, 8)', pMin2.rowTotals['B'], 3);
+  expect('5.16 min colTotals.X = 3 (min of 10, 3)', pMin2.colTotals['X'], 3);
+  expect('5.17 min grandTotal = 3 (min of all)', pMin2.grandTotal, 3);
+
+  // count + sum hâlâ additive — regression
+  const pSum = computePivot({
+    rowValues: ['A', 'A'], colValues: ['X', 'Y'],
+    measureValues: [10, 20], measureFn: 'sum',
+  });
+  expect('5.18 sum rowTotals.A = 30 (additive, regression)', pSum.rowTotals['A'], 30);
+  expect('5.19 sum grandTotal = 30', pSum.grandTotal, 30);
+}
+
+// ── 5b) Codex P2 #1 — extractRawValue helper ───────────────
+console.log('\n── 5b) extractRawValue — formatted display bypass (Codex P2 #1) ──');
+{
+  const { extractRawValue, parseCustomFields } = await import('../server/lib/caseReport/buildRows.js');
+
+  // Scalar source
+  const scalarCol = { source: 'scalar', prismaField: 'transferCount' };
+  expect('5b.1 scalar raw int', extractRawValue(scalarCol, { transferCount: 5 }, null, undefined), 5);
+
+  // JSON path — confidence float 0-1 (formatlanmış '%85' DEĞİL raw 0.85)
+  const cfRaw = JSON.stringify({ smartTicket: { closure: { closureSuggestion: { confidence: 0.85 } } } });
+  const cf = parseCustomFields(cfRaw);
+  const jsonCol = {
+    source: 'json_path',
+    jsonPath: ['smartTicket', 'closure', 'closureSuggestion', 'confidence'],
+  };
+  expect('5b.2 json_path raw 0.85 (formatter bypass)', extractRawValue(jsonCol, { id: 'C1' }, cf, undefined), 0.85);
+
+  // Join source
+  const joinCol = { source: 'join', joinTable: 'account', joinField: 'vkn' };
+  expect('5b.3 join raw "1234567890"', extractRawValue(joinCol, { account: { vkn: '1234567890' } }, null, undefined), '1234567890');
+
+  // Aggregate source
+  const aggCol = { source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'workedCount' };
+  const aggs = { solutionSteps: new Map([['C1', { workedCount: 3 }]]) };
+  expect('5b.4 aggregate raw 3', extractRawValue(aggCol, { id: 'C1' }, null, aggs), 3);
+
+  // Missing relation/null safety
+  expect('5b.5 join null account → undefined', extractRawValue(joinCol, { account: null }, null, undefined), undefined);
+  expect('5b.6 aggregate map missing → undefined', extractRawValue(aggCol, { id: 'CX' }, null, aggs), undefined);
+  expect('5b.7 json_path no cf → undefined', extractRawValue(jsonCol, { id: 'C1' }, null, undefined), undefined);
 }
 
 // ── 6) BLANK_LABEL ───────────────────────────────────────────

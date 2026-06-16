@@ -45,6 +45,48 @@ function readJsonPath(obj, path) {
 // Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.
 
 /**
+ * Phase 3.1 Codex P2 #1 fix — Bir kolon için DB row + parsed customFields +
+ * aggregates Map'lerinden RAW değeri çıkar (formatter UYGULANMAZ).
+ *
+ * Pivot measure'lar formatlanmış string'leri parse edemez (örn.
+ * confidencePercent '%85' → Number('%85')=NaN). Bu helper raw numeric/
+ * string değeri verir; caller (pivot endpoint) Number() parse + isFinite
+ * filter yapar.
+ *
+ * buildReportRows içinde de bu helper kullanılabilir ama mevcut akış zaten
+ * inline okuyor — değiştirmiyoruz (regression riski).
+ */
+export function extractRawValue(col, dbRow, parsedCf, aggregates) {
+  if (!col || !dbRow) return undefined;
+  if (col.source === 'scalar' && col.prismaField) {
+    return dbRow[col.prismaField];
+  }
+  if (col.source === 'json_path' && Array.isArray(col.jsonPath)) {
+    if (!parsedCf) return undefined;
+    let cur = parsedCf;
+    for (const seg of col.jsonPath) {
+      if (cur == null || typeof cur !== 'object') return undefined;
+      cur = cur[seg];
+    }
+    return cur;
+  }
+  if (col.source === 'join' && col.joinTable && col.joinField) {
+    const related = dbRow[col.joinTable];
+    return related ? related[col.joinField] : undefined;
+  }
+  if (col.source === 'aggregate' && col.aggregateKey && col.aggregateField && aggregates) {
+    const map = aggregates[col.aggregateKey];
+    if (!map) return undefined;
+    const payload = map.get(dbRow.id);
+    return payload ? payload[col.aggregateField] : undefined;
+  }
+  return undefined;
+}
+
+// parseCustomFields'i de export et — pivot endpoint per-row tek kez parse etmek için.
+export { parseCustomFields };
+
+/**
  * @param {object[]} dbRows Prisma findMany sonucu (select edilmiş; her satır
  *   `id` içerir — aggregate lookup için key)
  * @param {object[]} columns ColumnDef[] (resolveColumns'tan sonuçlu sıra)
