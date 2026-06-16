@@ -24,6 +24,9 @@ import {
   needsSolutionStepAggregates,
   needsCaseActivityAggregates,
   needsCaseNoteAggregates,
+  needsCaseFileAggregates,
+  needsCaseCallAggregates,
+  needsCaseTransferAggregates,
 } from '../lib/caseReport/columnRegistry.js';
 import { buildReportWhere } from '../lib/caseReport/buildWhere.js';
 import { buildReportRows } from '../lib/caseReport/buildRows.js';
@@ -31,6 +34,9 @@ import {
   loadSolutionStepAggregates,
   loadCaseActivityAggregates,
   loadCaseNoteAggregates,
+  loadCaseFileAggregates,
+  loadCaseCallAggregates,
+  loadCaseTransferAggregates,
 } from '../lib/caseReport/aggregates.js';
 
 const router = Router();
@@ -65,6 +71,16 @@ async function loadAggregatesIfNeeded(columns, items) {
   }
   if (needsCaseNoteAggregates(columns)) {
     jobs.push(loadCaseNoteAggregates(prisma, caseIds).then((m) => { aggregates.caseNote = m; }));
+  }
+  // Phase 2B.2
+  if (needsCaseFileAggregates(columns)) {
+    jobs.push(loadCaseFileAggregates(prisma, caseIds).then((m) => { aggregates.caseFile = m; }));
+  }
+  if (needsCaseCallAggregates(columns)) {
+    jobs.push(loadCaseCallAggregates(prisma, caseIds).then((m) => { aggregates.caseCall = m; }));
+  }
+  if (needsCaseTransferAggregates(columns)) {
+    jobs.push(loadCaseTransferAggregates(prisma, caseIds).then((m) => { aggregates.caseTransfer = m; }));
   }
   if (jobs.length > 0) await Promise.all(jobs);
   return aggregates;

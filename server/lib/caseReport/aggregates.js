@@ -330,6 +330,187 @@ export async function loadCaseNoteAggregates(prisma, caseIds) {
   return map;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2B.2 — CaseAttachment (Dosya) aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme:
+//   - Tek `prisma.caseAttachment.findMany({ where: { caseId: { in } } })`
+//   - in-memory groupBy + summarize per case
+//
+// Alanlar:
+//   - fileCount   : satır sayısı
+//   - totalSizeMb : tüm dosyaların byte toplamı → MB (1 ondalık, "X.Y" string).
+//                    Excel'de okunabilir ondalık format. 0 dosya → 0 değil ''.
+
+function buildEmptyFilePayload() {
+  return {
+    fileCount: 0,
+    totalSizeMb: '', // 0 dosya → blank; rapor kırılmaz
+  };
+}
+
+function bytesToMb(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  const mb = bytes / (1024 * 1024);
+  // 0.1 MB'tan küçük → 2 ondalık; >= 0.1 → 1 ondalık. Excel için string.
+  return mb < 0.1 ? mb.toFixed(2) : mb.toFixed(1);
+}
+
+function summarizeFiles(rows) {
+  const p = buildEmptyFilePayload();
+  if (!Array.isArray(rows) || rows.length === 0) return p;
+  let total = 0;
+  for (const r of rows) {
+    p.fileCount += 1;
+    if (Number.isFinite(r.fileSize) && r.fileSize > 0) total += r.fileSize;
+  }
+  if (total > 0) p.totalSizeMb = bytesToMb(total);
+  else if (p.fileCount > 0) p.totalSizeMb = '0.0'; // dosya var ama hepsi 0 byte
+  return p;
+}
+
+export async function loadCaseFileAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+  const rows = await prisma.caseAttachment.findMany({
+    where: { caseId: { in: caseIds } },
+    select: { caseId: true, fileSize: true },
+  });
+  const byCase = new Map();
+  for (const row of rows) {
+    let bucket = byCase.get(row.caseId);
+    if (!bucket) { bucket = []; byCase.set(row.caseId, bucket); }
+    bucket.push(row);
+  }
+  for (const id of caseIds) map.set(id, summarizeFiles(byCase.get(id) ?? []));
+  return map;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2B.2 — CaseCallLog (Çağrı) aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Alanlar:
+//   - callCount       : satır sayısı
+//   - lastCallResult  : en son callDate'in callOutcome'u
+//                       ('Memnun' / 'MemnunDeğil' / 'Tarafsız' / 'Ulaşılamadı')
+//   - lastCallAt      : Date | null — formatter datetimeTr
+
+function buildEmptyCallPayload() {
+  return {
+    callCount: 0,
+    lastCallResult: '',
+    lastCallAt: null,
+  };
+}
+
+function summarizeCalls(rows) {
+  const p = buildEmptyCallPayload();
+  if (!Array.isArray(rows) || rows.length === 0) return p;
+  let last = null;
+  for (const r of rows) {
+    p.callCount += 1;
+    const t = toDateOrNull(r.callDate);
+    if (!last || (t && (!toDateOrNull(last.callDate) || toDateOrNull(last.callDate).getTime() < t.getTime()))) {
+      last = r;
+    }
+  }
+  if (last) {
+    p.lastCallAt = toDateOrNull(last.callDate);
+    p.lastCallResult = last.callOutcome ?? '';
+  }
+  return p;
+}
+
+export async function loadCaseCallAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+  const rows = await prisma.caseCallLog.findMany({
+    where: { caseId: { in: caseIds } },
+    select: { caseId: true, callDate: true, callOutcome: true },
+  });
+  const byCase = new Map();
+  for (const row of rows) {
+    let bucket = byCase.get(row.caseId);
+    if (!bucket) { bucket = []; byCase.set(row.caseId, bucket); }
+    bucket.push(row);
+  }
+  for (const id of caseIds) map.set(id, summarizeCalls(byCase.get(id) ?? []));
+  return map;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 2B.2 — CaseTransfer (Transfer) aggregate
+// ──────────────────────────────────────────────────────────────────────
+//
+// Sözleşme:
+//   - Tek `prisma.caseTransfer.findMany({ where: { caseId: { in } } })`
+//   - lastTransferTargetTeam için Team isim eşlemesi: tek extra
+//     `prisma.team.findMany({ where: { id: { in: distinctToTeamIds } } })`.
+//     Toplam 2 fixed query (N+1 değil — case sayısından bağımsız).
+//
+// Alanlar:
+//   - transferCount          : satır sayısı (CaseTransfer rows; Case.transferCount
+//                              denormalize alanından bağımsız — bağımsız truth)
+//   - lastTransferTargetTeam : en son transferredAt'in toTeamId'sine karşılık
+//                              Team.name (yoksa raw id)
+//   - lastTransferAt         : Date | null — formatter datetimeTr
+
+function buildEmptyTransferPayload() {
+  return {
+    transferCount: 0,
+    lastTransferTargetTeam: '',
+    lastTransferAt: null,
+  };
+}
+
+function summarizeTransfers(rows, teamNamesById) {
+  const p = buildEmptyTransferPayload();
+  if (!Array.isArray(rows) || rows.length === 0) return p;
+  let last = null;
+  for (const r of rows) {
+    p.transferCount += 1;
+    const t = toDateOrNull(r.transferredAt);
+    if (!last || (t && (!toDateOrNull(last.transferredAt) || toDateOrNull(last.transferredAt).getTime() < t.getTime()))) {
+      last = r;
+    }
+  }
+  if (last) {
+    p.lastTransferAt = toDateOrNull(last.transferredAt);
+    const toId = last.toTeamId ?? '';
+    p.lastTransferTargetTeam = (teamNamesById && teamNamesById.get(toId)) || toId;
+  }
+  return p;
+}
+
+export async function loadCaseTransferAggregates(prisma, caseIds) {
+  const map = new Map();
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return map;
+  const rows = await prisma.caseTransfer.findMany({
+    where: { caseId: { in: caseIds } },
+    select: { caseId: true, toTeamId: true, transferredAt: true },
+  });
+  // Team isimleri için tek ek query (N+1 değil — distinct toTeamId set'i)
+  const teamIds = Array.from(new Set(rows.map((r) => r.toTeamId).filter(Boolean)));
+  let teamNamesById = new Map();
+  if (teamIds.length > 0) {
+    const teams = await prisma.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { id: true, name: true },
+    });
+    teamNamesById = new Map(teams.map((t) => [t.id, t.name]));
+  }
+  const byCase = new Map();
+  for (const row of rows) {
+    let bucket = byCase.get(row.caseId);
+    if (!bucket) { bucket = []; byCase.set(row.caseId, bucket); }
+    bucket.push(row);
+  }
+  for (const id of caseIds) map.set(id, summarizeTransfers(byCase.get(id) ?? [], teamNamesById));
+  return map;
+}
+
 /** Test/debug için saf summarize'lar ihraç edilir (smoke + unit). */
 export const __internal = {
   summarize,
@@ -338,4 +519,12 @@ export const __internal = {
   buildEmptyActivityPayload,
   summarizeNotes,
   buildEmptyNotePayload,
+  // Phase 2B.2
+  summarizeFiles,
+  buildEmptyFilePayload,
+  bytesToMb,
+  summarizeCalls,
+  buildEmptyCallPayload,
+  summarizeTransfers,
+  buildEmptyTransferPayload,
 };

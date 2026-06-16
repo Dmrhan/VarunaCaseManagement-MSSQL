@@ -59,6 +59,9 @@ export function buildReportRows(dbRows, columns, aggregates) {
   const stepAggs = aggregates?.solutionSteps;
   const activityAggs = aggregates?.caseActivity;
   const noteAggs = aggregates?.caseNote;
+  const fileAggs = aggregates?.caseFile;
+  const callAggs = aggregates?.caseCall;
+  const transferAggs = aggregates?.caseTransfer;
   const out = new Array(dbRows.length);
   for (let i = 0; i < dbRows.length; i++) {
     const db = dbRows[i];
@@ -79,6 +82,9 @@ export function buildReportRows(dbRows, columns, aggregates) {
           col.aggregateKey === 'solutionSteps' ? stepAggs
           : col.aggregateKey === 'caseActivity' ? activityAggs
           : col.aggregateKey === 'caseNote'     ? noteAggs
+          : col.aggregateKey === 'caseFile'     ? fileAggs
+          : col.aggregateKey === 'caseCall'     ? callAggs
+          : col.aggregateKey === 'caseTransfer' ? transferAggs
           : null;
         if (aggMap) {
           const payload = aggMap.get(db.id);
