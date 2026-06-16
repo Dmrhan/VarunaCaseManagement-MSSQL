@@ -17,7 +17,24 @@
  * intersect eder.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, Filter as FilterIcon, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, Filter as FilterIcon, GripVertical, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/Button';
 import { Field, Select, TextInput } from '@/components/ui/Field';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -37,22 +54,94 @@ function SectionTitle({ text }: { text: string }) {
   return <h3 className="text-sm font-semibold text-slate-700 dark:text-ndark-text">{text}</h3>;
 }
 
+/**
+ * Phase 1.5: Seçili kolon satırı — @dnd-kit/sortable ile sürükle-bırak.
+ * Yukarı/aşağı ok butonları erişilebilirlik + klavyesiz kullanıcı için
+ * korunuyor (spec gereği fallback). Sürükle tutamacı (GripVertical) yalnız
+ * pointer drag için listener'lı; klavye sortableKeyboardCoordinates sayesinde
+ * Tab+Space ile çalışır.
+ */
+function SortableSelectedRow({
+  id,
+  index,
+  label,
+  total,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  label: string;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-card"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="cursor-grab touch-none rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 active:cursor-grabbing dark:hover:bg-ndark-surface"
+        aria-label="Sürükle"
+        title="Sürükleyerek sırala"
+      >
+        <GripVertical size={11} />
+      </button>
+      <span className="w-6 text-[11px] text-slate-400">{index + 1}.</span>
+      <span className="flex-1 truncate text-slate-700 dark:text-ndark-text">{label}</span>
+      <button
+        type="button"
+        onClick={onMoveUp}
+        disabled={index === 0}
+        className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-30 dark:hover:bg-ndark-surface"
+        aria-label="Yukarı"
+        title="Yukarı"
+      >
+        <ArrowUp size={11} />
+      </button>
+      <button
+        type="button"
+        onClick={onMoveDown}
+        disabled={index === total - 1}
+        className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-30 dark:hover:bg-ndark-surface"
+        aria-label="Aşağı"
+        title="Aşağı"
+      >
+        <ArrowDown size={11} />
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+        aria-label="Çıkar"
+        title="Çıkar"
+      >
+        <X size={11} />
+      </button>
+    </li>
+  );
+}
+
+// Phase 1.5: backend buildReportRows artık TR-formatlanmış string'leri
+// döndürüyor (formatters.applyFormat); frontend yalnız ekran genişliği için
+// uzun text'i truncate ediyor. Preview ve export aynı format kaynağını
+// (server/lib/caseReport/formatters.js) kullanır → tek truth source.
 function formatCellValue(value: unknown, type: ReportColumnDef['type']): string {
   if (value == null || value === '') return '';
-  if (type === 'datetime') {
-    if (typeof value !== 'string') return String(value);
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return value;
-    return d.toLocaleString('tr-TR', {
-      timeZone: 'Europe/Istanbul',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
-  }
-  if (type === 'boolean') return value ? 'Evet' : 'Hayır';
-  if (type === 'number') return String(value);
-  const s = String(value);
-  // text türünde tablo göstermek için ilk 200 char (UI compactness)
+  const s = typeof value === 'string' ? value : String(value);
   if (type === 'text' && s.length > 200) return s.slice(0, 200) + '…';
   return s;
 }
@@ -129,6 +218,24 @@ export function CaseReportStudioPage() {
       const next = prev.slice();
       [next[i], next[j]] = [next[j], next[i]];
       return next;
+    });
+  }
+
+  // Phase 1.5 — @dnd-kit/sortable sensors. PointerSensor mouse/touch için,
+  // KeyboardSensor erişilebilirlik için (Tab + Space + ok tuşları).
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setSelectedColumnIds((prev) => {
+      const oldIndex = prev.indexOf(String(active.id));
+      const newIndex = prev.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
     });
   }
 
@@ -351,56 +458,34 @@ export function CaseReportStudioPage() {
             <div className="flex items-center justify-between gap-2">
               <SectionTitle text="Seçili Kolonlar" />
               <span className="text-xs text-slate-500 dark:text-ndark-muted">
-                Yukarı/aşağı oklarla sırayı değiştirin
+                Sürükleyerek veya oklarla sıralayın
               </span>
             </div>
             {selectedColumnIds.length === 0 ? (
               <p className="text-xs text-slate-500">Henüz kolon seçilmedi.</p>
             ) : (
-              <ul className="space-y-1">
-                {selectedColumnIds.map((id, idx) => {
-                  const col = columnById.get(id);
-                  if (!col) return null;
-                  return (
-                    <li
-                      key={id}
-                      className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50/60 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-card"
-                    >
-                      <span className="w-6 text-[11px] text-slate-400">{idx + 1}.</span>
-                      <span className="flex-1 truncate text-slate-700 dark:text-ndark-text">{col.label}</span>
-                      <button
-                        type="button"
-                        onClick={() => moveColumn(id, -1)}
-                        disabled={idx === 0}
-                        className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-30 dark:hover:bg-ndark-surface"
-                        aria-label="Yukarı"
-                        title="Yukarı"
-                      >
-                        <ArrowUp size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveColumn(id, 1)}
-                        disabled={idx === selectedColumnIds.length - 1}
-                        className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:opacity-30 dark:hover:bg-ndark-surface"
-                        aria-label="Aşağı"
-                        title="Aşağı"
-                      >
-                        <ArrowDown size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleColumn(id)}
-                        className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
-                        aria-label="Çıkar"
-                        title="Çıkar"
-                      >
-                        <X size={11} />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={selectedColumnIds} strategy={verticalListSortingStrategy}>
+                  <ul className="space-y-1">
+                    {selectedColumnIds.map((id, idx) => {
+                      const col = columnById.get(id);
+                      if (!col) return null;
+                      return (
+                        <SortableSelectedRow
+                          key={id}
+                          id={id}
+                          index={idx}
+                          label={col.label}
+                          total={selectedColumnIds.length}
+                          onMoveUp={() => moveColumn(id, -1)}
+                          onMoveDown={() => moveColumn(id, 1)}
+                          onRemove={() => toggleColumn(id)}
+                        />
+                      );
+                    })}
+                  </ul>
+                </SortableContext>
+              </DndContext>
             )}
           </CardBody>
         </Card>

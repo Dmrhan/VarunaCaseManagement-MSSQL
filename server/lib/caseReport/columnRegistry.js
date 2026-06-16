@@ -56,9 +56,9 @@ export const REPORT_COLUMNS = [
   { id: 'caseNumber',     label: 'Vaka No',     category: 'core', type: 'string', source: 'scalar', prismaField: 'caseNumber', excelWidth: 16 },
   { id: 'title',          label: 'Başlık',      category: 'core', type: 'string', source: 'scalar', prismaField: 'title',      excelWidth: 50 },
   { id: 'description',    label: 'Açıklama',    category: 'core', type: 'text',   source: 'scalar', prismaField: 'description', excelWidth: 60 },
-  { id: 'caseType',       label: 'Vaka Tipi',   category: 'core', type: 'string', source: 'scalar', prismaField: 'caseType' },
-  { id: 'status',         label: 'Statü',       category: 'core', type: 'string', source: 'scalar', prismaField: 'status' },
-  { id: 'priority',       label: 'Öncelik',     category: 'core', type: 'string', source: 'scalar', prismaField: 'priority' },
+  { id: 'caseType',       label: 'Vaka Tipi',   category: 'core', type: 'string', source: 'scalar', prismaField: 'caseType', format: 'caseType' },
+  { id: 'status',         label: 'Statü',       category: 'core', type: 'string', source: 'scalar', prismaField: 'status', format: 'caseStatus' },
+  { id: 'priority',       label: 'Öncelik',     category: 'core', type: 'string', source: 'scalar', prismaField: 'priority', format: 'casePriority' },
   { id: 'companyName',    label: 'Şirket',      category: 'core', type: 'string', source: 'scalar', prismaField: 'companyName', excelWidth: 20 },
   { id: 'accountName',    label: 'Müşteri',     category: 'core', type: 'string', source: 'scalar', prismaField: 'accountName', excelWidth: 24 },
   { id: 'accountProjectName', label: 'Proje',   category: 'core', type: 'string', source: 'scalar', prismaField: 'accountProjectName', excelWidth: 20 },
@@ -74,17 +74,17 @@ export const REPORT_COLUMNS = [
   { id: 'assignedTeamName',   label: 'Atanan Takım', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'assignedTeamName' },
   { id: 'assignedPersonName', label: 'Atanan Kişi',  category: 'assignment', type: 'string', source: 'scalar', prismaField: 'assignedPersonName' },
   { id: 'supportLevel',       label: 'Destek Seviyesi', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'supportLevel' },
-  { id: 'escalationLevel',    label: 'Eskalasyon Seviyesi', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'escalationLevel' },
+  { id: 'escalationLevel',    label: 'Eskalasyon Seviyesi', category: 'assignment', type: 'string', source: 'scalar', prismaField: 'escalationLevel', format: 'escalationLevel' },
 
   // ── SLA ──────────────────────────────────────────────────────────
-  { id: 'slaResponseDueAt',   label: 'SLA Yanıt Bitiş',      category: 'sla', type: 'datetime', source: 'scalar', prismaField: 'slaResponseDueAt',   excelWidth: 18 },
-  { id: 'slaResolutionDueAt', label: 'SLA Çözüm Bitiş',      category: 'sla', type: 'datetime', source: 'scalar', prismaField: 'slaResolutionDueAt', excelWidth: 18 },
-  { id: 'slaViolation',       label: 'SLA İhlal',            category: 'sla', type: 'boolean', source: 'scalar', prismaField: 'slaViolation' },
+  { id: 'slaResponseDueAt',   label: 'SLA Yanıt Bitiş',      category: 'sla', type: 'datetime', source: 'scalar', prismaField: 'slaResponseDueAt',   format: 'datetimeTr', excelWidth: 18 },
+  { id: 'slaResolutionDueAt', label: 'SLA Çözüm Bitiş',      category: 'sla', type: 'datetime', source: 'scalar', prismaField: 'slaResolutionDueAt', format: 'datetimeTr', excelWidth: 18 },
+  { id: 'slaViolation',       label: 'SLA İhlal',            category: 'sla', type: 'boolean', source: 'scalar', prismaField: 'slaViolation',         format: 'boolean' },
 
   // ── Zaman / Akış ─────────────────────────────────────────────────
-  { id: 'createdAt',     label: 'Açılış Zamanı',  category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'createdAt',  excelWidth: 18 },
-  { id: 'updatedAt',     label: 'Son Güncelleme', category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'updatedAt',  excelWidth: 18 },
-  { id: 'resolvedAt',    label: 'Çözüm Zamanı',   category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'resolvedAt', excelWidth: 18 },
+  { id: 'createdAt',     label: 'Açılış Zamanı',  category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'createdAt',  format: 'datetimeTr', excelWidth: 18 },
+  { id: 'updatedAt',     label: 'Son Güncelleme', category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'updatedAt',  format: 'datetimeTr', excelWidth: 18 },
+  { id: 'resolvedAt',    label: 'Çözüm Zamanı',   category: 'timeline', type: 'datetime', source: 'scalar', prismaField: 'resolvedAt', format: 'datetimeTr', excelWidth: 18 },
   { id: 'transferCount', label: 'Transfer Sayısı', category: 'timeline', type: 'number',  source: 'scalar', prismaField: 'transferCount' },
 
   // ── Çözüm / İptal ────────────────────────────────────────────────
@@ -103,7 +103,7 @@ export const REPORT_COLUMNS = [
   { id: 'st.closure.rootCauseDetailLabel',    label: 'Kök Neden Detayı',  category: 'smart_ticket_closure', type: 'string', source: 'json_path', jsonPath: ['smartTicket', 'closure', 'rootCauseDetailLabel'] },
   { id: 'st.closure.resolutionTypeLabel',     label: 'Çözüm Tipi',        category: 'smart_ticket_closure', type: 'string', source: 'json_path', jsonPath: ['smartTicket', 'closure', 'resolutionTypeLabel'] },
   { id: 'st.closure.permanentPreventionLabel', label: 'Kalıcı Önlem',     category: 'smart_ticket_closure', type: 'string', source: 'json_path', jsonPath: ['smartTicket', 'closure', 'permanentPreventionLabel'] },
-  { id: 'st.closure.closureSuggestion.confidence', label: 'KB Güven Skoru', category: 'smart_ticket_closure', type: 'number', source: 'json_path', jsonPath: ['smartTicket', 'closure', 'closureSuggestion', 'confidence'] },
+  { id: 'st.closure.closureSuggestion.confidence', label: 'KB Güven Skoru', category: 'smart_ticket_closure', type: 'number', source: 'json_path', jsonPath: ['smartTicket', 'closure', 'closureSuggestion', 'confidence'], format: 'confidencePercent' },
 
   // ── Smart Ticket — KB Taslakları ─────────────────────────────────
   { id: 'st.aiDrafts.engineeringHandoff',  label: 'Teknik Devir Notu (KB)',     category: 'smart_ticket_drafts', type: 'text', source: 'json_path', jsonPath: ['smartTicket', 'aiDrafts', 'engineeringHandoff'],  excelWidth: 60 },
@@ -117,19 +117,30 @@ export function getColumnById(id) {
 }
 
 /**
- * Verilen column id listesini doğrular. Bilinmeyen id'leri filtreler ve
- * geriye yalnız geçerli ColumnDef[] döner. Sıralama caller'ın istediğine
- * uyar (UI'daki seçim sırası korunur).
+ * Verilen column id listesini doğrular. Sıralama caller'ın istediğine uyar
+ * (UI'daki seçim sırası korunur).
+ *
+ * Phase 1.5: bilinmeyen id'ler artık SESSİZ DROP edilmiyor — caller'ın 400
+ * dönmesi için ayrı bir `invalidIds` listesi de döner. Eski sessiz davranış
+ * Codex review benzeri "yanlış UI ↔ backend kontrat" sızıntılarını maskeliyordu.
+ *
+ * @param {unknown[]} ids
+ * @returns {{ columns: ReportColumnDef[], invalidIds: unknown[] }}
  */
 export function resolveColumns(ids) {
-  if (!Array.isArray(ids)) return [];
-  const out = [];
+  if (!Array.isArray(ids)) return { columns: [], invalidIds: [] };
+  const columns = [];
+  const invalidIds = [];
   for (const id of ids) {
-    if (typeof id !== 'string') continue;
+    if (typeof id !== 'string') {
+      invalidIds.push(id);
+      continue;
+    }
     const col = COLUMN_BY_ID.get(id);
-    if (col) out.push(col);
+    if (col) columns.push(col);
+    else invalidIds.push(id);
   }
-  return out;
+  return { columns, invalidIds };
 }
 
 /**
