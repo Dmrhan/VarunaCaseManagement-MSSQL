@@ -69,7 +69,13 @@ function buildEmptyPayload() {
 
 function summarize(steps) {
   const p = buildEmptyPayload();
-  if (!Array.isArray(steps) || steps.length === 0) return p;
+  // Static smoke contract'ı: 0 step durumunda da template üretilir
+  // ("Toplam 0 · Denenen 0 · Başarılı 0 · Başarısız 0"). Excel filtresi ve
+  // UI tutarlılığı için boş string yerine kanonik özet tercih edildi.
+  if (!Array.isArray(steps) || steps.length === 0) {
+    p.outcomeSummary = 'Toplam 0 · Denenen 0 · Başarılı 0 · Başarısız 0';
+    return p;
+  }
   let firstWorked = null;
   let lastTried = null;
   for (const s of steps) {
