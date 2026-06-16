@@ -32,7 +32,10 @@ import {
   mapClassificationToTaxonomy,
   SMART_TICKET_CLASSIFICATION_FIELDS,
 } from '../lib/smartTicketClassification.js';
-import { composeTransferBriefFromSteps } from '../db/solutionStepRepository.js';
+import {
+  composeTransferBriefFromSteps,
+  extractAiDrafts,
+} from '../db/solutionStepRepository.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -337,6 +340,29 @@ router.post('/suggest-closure', async (req, res) => {
 
     // ── Yeni body shape (v2): { caseId, workedStepId? } ──
     const caseId = typeof body.caseId === 'string' ? body.caseId.trim() : '';
+    // Stage 3 "Çözüm Açıklaması" textarea'sının current değeri override olarak
+    // geçebilir; verildiyse compose-from-steps yerine bu kullanılır (Stage 3
+    // resolution-first akışı: kategorizasyon Çözüm Açıklaması'nın current
+    // metnine göre üretilsin). Workflow geri uyumlu: gönderilmezse eski
+    // davranış (worked step + step özetlerinden compose).
+    //
+    // Codex P2 #2 fix — Empty string override explicit-reject: caller field'ı
+    // gerçekten gönderdiyse (typeof === 'string') ama trim sonrası boş kaldıysa
+    // bu "kullanıcı textarea'yı temizledi" sinyali. Eski fallback'e (worked
+    // step compose) düşmek stale step text'i current resolution gibi sunardı —
+    // misleading drafts/categorization. Bu durumu sessizce omit etmek yerine
+    // 400 dönüyoruz; frontend dirty+empty durumunda zaten KB call atmıyor,
+    // bu defansif ikinci katman.
+    const resolutionOverrideRaw = body.resolutionOverride;
+    if (typeof resolutionOverrideRaw === 'string' && resolutionOverrideRaw.trim().length === 0) {
+      return res.status(400).json({
+        error: 'resolution_override_empty',
+        message:
+          'Çözüm Açıklaması boş gönderildi; lütfen önce çözümü yazın, sonra KB önerisini isteyin.',
+      });
+    }
+    const resolutionOverride =
+      typeof resolutionOverrideRaw === 'string' ? resolutionOverrideRaw.trim() : '';
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -411,7 +437,9 @@ router.post('/suggest-closure', async (req, res) => {
         workedStep = workedSorted[0] ?? steps.find((s) => s.status === 'worked') ?? null;
       }
       selectedWorkedStepId = workedStep?.id ?? null;
-      resolution = composeResolutionFromSteps(workedStep, steps);
+      resolution = resolutionOverride.length > 0
+        ? resolutionOverride
+        : composeResolutionFromSteps(workedStep, steps);
     } else {
       // ── Geri uyumlu body (v1): { companyId, description, resolution, ... } ──
       companyId = typeof body.companyId === 'string' ? body.companyId.trim() : '';
@@ -454,16 +482,52 @@ router.post('/suggest-closure', async (req, res) => {
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
 
+    // Stage 3 resolution-first — kategorizasyon (suggestClose) ile aynı anda
+    // analyze çağrısı yap → engineeringHandoff + customerReplyDraft draft'larını
+    // current resolution metnine göre yeniden üret. Paralel + analyze bounded:
+    // wall-clock max(suggestClose, min(analyze, ANALYZE_DRAFTS_TIMEOUT_MS)).
+    //
+    // Codex P2 #1 fix — Bounded analyze: KB v2 analyze endpoint'i tipik
+    // ~180sn'ye kadar sürebiliyor (suggestClose çoğunlukla saniyeler içinde).
+    // Eski impl Promise.allSettled iki çağrıyı da bekliyordu → analyze yavaş
+    // olduğunda Stage 3 KB spinner kategoriler hazır olsa bile dakikalarca
+    // kalıyordu (draft'lar optional, categorization core). Çözüm: analyze'a
+    // race-timeout. Timeout kazanırsa drafts undefined → kullanıcı dropdown'ları
+    // hemen alır, draft'ları sonra "Yenile" ile bekleyebilir.
+    //
+    // freeText = description + resolution composition: KB analyze case context
+    // + son çözümü birlikte ister. Eski (Stage 2 opening) aiDrafts persist
+    // davranışı bu route'ta tetiklenmez — yalnız in-memory response döner.
+    const analyzeFreeText = description
+      ? `${description}\n\nÇözüm: ${resolution}`
+      : resolution;
+    const ANALYZE_DRAFTS_TIMEOUT_MS = 8000;
+    const ANALYZE_TIMEOUT_SENTINEL = { ok: false, timedOut: true };
+    const analyzePromise = externalKbClient
+      .analyze(setting, { freeText: analyzeFreeText })
+      .catch((err) => ({ ok: false, thrown: true, error: { message: err?.message } }));
+    const analyzeBounded = Promise.race([
+      analyzePromise,
+      new Promise((resolve) => setTimeout(() => resolve(ANALYZE_TIMEOUT_SENTINEL), ANALYZE_DRAFTS_TIMEOUT_MS)),
+    ]);
+
+    const [closeSettled, analyzeSettled] = await Promise.allSettled([
+      externalKbClient.suggestClose(setting, sgBody),
+      analyzeBounded,
+    ]);
+
     let kbResponse;
-    try {
-      kbResponse = await externalKbClient.suggestClose(setting, sgBody);
-    } catch (err) {
-      console.error('[smart-ticket/suggest-closure] suggest-close failed', err?.message ?? err);
+    if (closeSettled.status === 'rejected') {
+      console.error(
+        '[smart-ticket/suggest-closure] suggest-close failed',
+        closeSettled.reason?.message ?? closeSettled.reason,
+      );
       return res.status(502).json({
         error: 'external_kb_failed',
         message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
       });
     }
+    kbResponse = closeSettled.value;
 
     // Codex P2 (main #447 review) — proxy() non-2xx için throw atmaz,
     // { ok: false, error, data } döner. Eski impl bu durumu "başarılı"
@@ -516,16 +580,47 @@ router.post('/suggest-closure', async (req, res) => {
     if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
     if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
 
+    // Stage 3 resolution-first — paralel analyze cevabından drafts'ı çıkar.
+    // analyze rejected veya { ok: false } ise drafts boş kalır; suggestion'lar
+    // yine de döner (kullanıcı kategorileri görür).
+    let drafts;
+    if (analyzeSettled.status === 'fulfilled') {
+      const analyzeRaw = analyzeSettled.value;
+      if (analyzeRaw && analyzeRaw.timedOut) {
+        console.warn(
+          `[smart-ticket/suggest-closure] analyze bounded timeout ${ANALYZE_DRAFTS_TIMEOUT_MS}ms (drafts skipped)`,
+        );
+      } else if (analyzeRaw && analyzeRaw.ok === false) {
+        console.warn(
+          '[smart-ticket/suggest-closure] analyze returned ok:false (drafts skipped)',
+          analyzeRaw.error?.code ?? analyzeRaw.error?.message ?? 'unknown',
+        );
+      } else {
+        const analyzeData = analyzeRaw && analyzeRaw.data ? analyzeRaw.data : analyzeRaw;
+        const extracted = extractAiDrafts(analyzeData);
+        if (extracted.engineeringHandoff || extracted.customerReplyDraft) {
+          drafts = extracted;
+        }
+      }
+    } else {
+      console.warn(
+        '[smart-ticket/suggest-closure] analyze rejected (drafts skipped)',
+        analyzeSettled.reason?.message ?? analyzeSettled.reason,
+      );
+    }
+
     res.json({
       companyId,
       suggestions,
       unmatched,
       source: 'external_kb',
+      ...(drafts ? { drafts } : {}),
       meta: {
         usedEndpoint: 'suggest-close',
         ...upstreamMeta,
         ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
         ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
+        ...(drafts ? { draftsSource: 'analyze' } : {}),
       },
     });
   } catch (err) {

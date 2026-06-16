@@ -47,11 +47,29 @@ function readAiDrafts(item: Case): KbDraftsShape | null {
 export function KbDraftCard({
   item,
   variant,
+  override,
 }: {
   item: Case;
   variant: 'closure' | 'transfer' | 'case-detail';
+  /** Stage 3 resolution-first — current KB suggest-closure cevabından gelen
+   *  taze drafts. Verilirse persisted item.customFields.smartTicket.aiDrafts
+   *  yerine bu render edilir; KB drafts current "Çözüm Açıklaması" metnine
+   *  göre üretilmiş demektir. Verilmezse (closure öncesi, transfer veya case
+   *  detail variant'ında) eski persisted davranış. */
+  override?: { engineeringHandoff?: string; customerReplyDraft?: string };
 }) {
-  const drafts = readAiDrafts(item);
+  // Override verildiyse en az bir alan dolu olduğu sürece persisted'i ezer.
+  // Boş override (engineeringHandoff = customerReplyDraft = undefined) →
+  // KB çağrısı drafts dönmedi anlamına gelir; bu durumda persisted aiDrafts'a
+  // fallback olmak istemiyoruz çünkü stale Stage 2 değerleri olabilir.
+  // "Empty resolution explanation does not produce misleading drafts" (spec).
+  const hasOverrideContent =
+    !!override && (!!override.engineeringHandoff || !!override.customerReplyDraft);
+  const drafts: KbDraftsShape | null = hasOverrideContent
+    ? { ...override, source: 'external_kb' }
+    : override
+      ? null
+      : readAiDrafts(item);
   if (!drafts) return null;
 
   const showEngineering = !!drafts.engineeringHandoff;
