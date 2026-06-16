@@ -1416,28 +1416,39 @@ export const caseService = {
   },
 
   /** Dosya indirme için kısa ömürlü signed URL al + tarayıcıda aç. */
-  async downloadFile(caseId: string, fileId: string): Promise<void> {
+  /**
+   * Vakanın bir dosyası için signed download URL'i + dosya adı döner.
+   * Image preview gibi "URL'i kullan ama download tetikleme" akışları için
+   * mevcut downloadFile()'den ayrılan helper. Backend endpoint'i aynı:
+   * GET /api/cases/:id/files/:fileId/download.
+   * USE_MOCK pattern: mock dataUrl varsa fileName ile birlikte döner.
+   */
+  async getFileDownloadUrl(
+    caseId: string,
+    fileId: string,
+  ): Promise<{ url: string; fileName: string } | null> {
     if (USE_MOCK) {
-      // Mock: dataUrl zaten dosyada
       const c = store.find((x) => x.id === caseId);
       const f = c?.files.find((x) => x.id === fileId);
       if (f?.dataUrl) {
-        const a = document.createElement('a');
-        a.href = f.dataUrl;
-        a.download = f.fileName;
-        a.click();
+        return { url: f.dataUrl, fileName: f.fileName };
       }
-      return;
+      return null;
     }
     const result = await apiFetch<{ url: string; fileName: string }>(
       `${API_BASE}/${caseId}/files/${fileId}/download`,
       undefined,
       'Dosya indirilemedi',
     );
-    if (!result) return;
+    return result ?? null;
+  },
+
+  async downloadFile(caseId: string, fileId: string): Promise<void> {
+    const meta = await this.getFileDownloadUrl(caseId, fileId);
+    if (!meta) return;
     const a = document.createElement('a');
-    a.href = result.url;
-    a.download = result.fileName;
+    a.href = meta.url;
+    a.download = meta.fileName;
     a.target = '_blank';
     a.rel = 'noopener';
     a.click();
