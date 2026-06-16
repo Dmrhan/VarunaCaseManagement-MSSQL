@@ -29,10 +29,9 @@ import { TAXONOMY_DEFS_HELP } from './helpContents';
  * Soft delete: Sil yok, "Pasifleştir" (isActive=false). UI bu durumu
  * "Aktif/Pasif" badge'i ile gösterir.
  *
- * Hiyerarşi:
- *   - rootCauseDetail: parent (rootCauseGroup) zorunlu
- *   - rootCauseGroup: parent yasak
- *   - Diğer 7 tip flat (parent alanı UI'da gizli)
+ * Kapanış decouple — tüm taksonomi tipleri (kapanış dahil) BAĞIMSIZ düz
+ * listelerdir; rootCauseDetail artık rootCauseGroup'a parent ile bağlanmaz.
+ * parentId şemada forward-compat için durur ama bu ekranda yazılmaz.
  */
 export function AdminTaxonomyDefsPage() {
   const companies = useMemo(() => lookupService.companies(), []);
@@ -41,7 +40,6 @@ export function AdminTaxonomyDefsPage() {
   const [taxonomyType, setTaxonomyType] = useState<SmartTicketTaxonomyType>('businessProcess');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [items, setItems] = useState<TaxonomyDef[]>([]);
-  const [parents, setParents] = useState<TaxonomyDef[]>([]);
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,17 +57,6 @@ export function AdminTaxonomyDefsPage() {
         isActive: includeInactive ? undefined : true,
       });
       setItems(list);
-      if (taxonomyType === 'rootCauseDetail') {
-        // Parent dropdown için rootCauseGroup listesi (aktif olanlar).
-        const groups = await adminService.taxonomyDefs.list({
-          companyId,
-          taxonomyType: 'rootCauseGroup',
-          isActive: true,
-        });
-        setParents(groups);
-      } else {
-        setParents([]);
-      }
     } catch (e) {
       setError((e as Error).message ?? 'Bilinmeyen hata');
     } finally {
@@ -81,12 +68,6 @@ export function AdminTaxonomyDefsPage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, taxonomyType, includeInactive]);
-
-  const parentLabelById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of parents) m.set(p.id, p.label);
-    return m;
-  }, [parents]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -207,7 +188,6 @@ export function AdminTaxonomyDefsPage() {
                 <tr>
                   <Th>Etiket</Th>
                   <Th>Kod</Th>
-                  {taxonomyType === 'rootCauseDetail' && <Th>Üst Kök Neden</Th>}
                   <Th align="right">Sıra</Th>
                   <Th>Durum</Th>
                   <Th align="right">Aksiyon</Th>
@@ -223,17 +203,6 @@ export function AdminTaxonomyDefsPage() {
                     <Td>
                       <span className="font-mono text-xs text-slate-600">{row.code}</span>
                     </Td>
-                    {taxonomyType === 'rootCauseDetail' && (
-                      <Td className="text-slate-600">
-                        {row.parentId ? (
-                          parentLabelById.get(row.parentId) ?? (
-                            <span className="font-mono text-xs text-slate-400">{row.parentId}</span>
-                          )
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </Td>
-                    )}
                     <Td align="right" className="text-slate-600">{row.sortOrder}</Td>
                     <Td>
                       {row.isActive ? (
@@ -280,7 +249,6 @@ export function AdminTaxonomyDefsPage() {
         editingId={editor?.mode === 'edit' ? editor.id : null}
         companyId={companyId}
         taxonomyType={taxonomyType}
-        parents={parents}
         onClose={() => setEditor(null)}
         onSaved={() => {
           void refresh();
@@ -300,7 +268,6 @@ function TaxonomyEditModal({
   editingId,
   companyId,
   taxonomyType,
-  parents,
   onClose,
   onSaved,
 }: {
@@ -309,7 +276,6 @@ function TaxonomyEditModal({
   editingId: string | null;
   companyId: string;
   taxonomyType: SmartTicketTaxonomyType;
-  parents: TaxonomyDef[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -370,7 +336,8 @@ function TaxonomyEditModal({
       taxonomyType: form.taxonomyType,
       code: form.code.trim(),
       label: form.label.trim(),
-      parentId: form.taxonomyType === 'rootCauseDetail' ? (form.parentId || null) : null,
+      // Kapanış decouple — taksonomiler bağımsız; parentId artık yazılmaz.
+      parentId: null,
       isActive: form.isActive ?? true,
       sortOrder: Number.isFinite(form.sortOrder) ? Number(form.sortOrder) : 0,
     };
@@ -404,11 +371,9 @@ function TaxonomyEditModal({
     });
   }
 
-  const isRcDetail = form.taxonomyType === 'rootCauseDetail';
   const canSubmit =
     form.code.trim().length > 0 &&
     form.label.trim().length > 0 &&
-    (!isRcDetail || !!form.parentId) &&
     !submitting;
 
   return (
@@ -457,26 +422,6 @@ function TaxonomyEditModal({
             onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
           />
         </Field>
-
-        {isRcDetail && (
-          <Field
-            label="Üst Kök Neden Grubu"
-            required
-            hint="Kök neden detayları bir gruba bağlanmak zorundadır."
-          >
-            <Select
-              value={form.parentId ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, parentId: e.target.value || null }))}
-            >
-              <option value="">— Seçin —</option>
-              {parents.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
 
         <Field label="Sıralama" hint="Küçük değer önce gelir.">
           <TextInput

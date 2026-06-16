@@ -9,7 +9,7 @@
  * kapanış metadata'sını doğrular. Senaryolar:
  *
  *   1.  UNIVERA company resolve
- *   2.  Closure taxonomy tipleri (rootCauseGroup with children +
+ *   2.  Closure taxonomy tipleri (rootCauseGroup + rootCauseDetail (flat) +
  *       resolutionType + permanentPrevention) lookup-shape döner
  *   3.  Smart Ticket Case open et (customFields.smartTicket = opening)
  *   4.  transitionStatus Cozuldu + smartTicketClosure payload ile çağır
@@ -23,8 +23,8 @@
  *       mevcut akış aynen çalışır (regression)
  *   10. Non-Smart-Ticket Case'e smartTicketClosure verilirse backend
  *       'smart_ticket_closure_requires_opening' ile reddeder (defense in depth)
- *   11. rootCauseGroup filter sorgusu nested children döndü (PR-1a fix
- *       regression guard)
+ *   11. Kapanış decouple — rootCauseDetail flat liste (gruba bağlı değil),
+ *       tüm kapanış satırları parentId null
  *
  * Cleanup: yaratılan Case'leri siler (`--keep` ile koruyabilirsin).
  */
@@ -87,15 +87,14 @@ const rcgList = await prisma.taxonomyDef.findMany({
 if (rcgList.length === 0) bad('2) rootCauseGroup', 'liste boş');
 else ok('2) rootCauseGroup aktif satırlar mevcut', `${rcgList.length} adet`);
 
-const rcdList = rcgList.length > 0
-  ? await prisma.taxonomyDef.findMany({
-      where: { companyId, taxonomyType: 'rootCauseDetail', isActive: true, parentId: rcgList[0].id },
-      select: { code: true, label: true },
-      orderBy: { sortOrder: 'asc' },
-    })
-  : [];
-if (rcdList.length === 0) note('2) rootCauseDetail children', 'ilk grubun child yok');
-else ok('2) rootCauseDetail children mevcut', `${rcdList.length} adet`);
+// Kapanış decouple — rootCauseDetail gruba bağlı değil; düz liste çekilir.
+const rcdList = await prisma.taxonomyDef.findMany({
+  where: { companyId, taxonomyType: 'rootCauseDetail', isActive: true },
+  select: { code: true, label: true },
+  orderBy: { sortOrder: 'asc' },
+});
+if (rcdList.length === 0) note('2) rootCauseDetail', 'detay satırı yok');
+else ok('2) rootCauseDetail flat liste mevcut', `${rcdList.length} adet`);
 
 const rtList = await prisma.taxonomyDef.findMany({
   where: { companyId, taxonomyType: 'resolutionType', isActive: true },
@@ -337,29 +336,24 @@ if (plainCase) {
   }
 }
 
-// ─── 11) Closure taxonomy filter (PR-1a regression) ──────────────────────
+// ─── 11) Kapanış decouple — flat liste invariant ─────────────────────────
 
 console.log('');
-console.log('── 11) Closure taxonomy filter (PR-1a regression) ─────');
+console.log('── 11) Kapanış decouple — flat liste ──────────────────');
 
-const filteredRows = await prisma.taxonomyDef.findMany({
+// rootCauseDetail bağımsız düz liste: hepsi parentId null, gruba bağlı değil.
+const closureRows = await prisma.taxonomyDef.findMany({
   where: {
     companyId,
     isActive: true,
     taxonomyType: { in: ['rootCauseGroup', 'rootCauseDetail'] },
   },
-  select: { id: true, taxonomyType: true, parentId: true },
+  select: { taxonomyType: true, parentId: true },
 });
-const childMap = new Map();
-for (const r of filteredRows) {
-  if (r.taxonomyType === 'rootCauseDetail' && r.parentId) {
-    childMap.set(r.parentId, (childMap.get(r.parentId) ?? 0) + 1);
-  }
-}
-const groupsWithKids = filteredRows.filter((r) => r.taxonomyType === 'rootCauseGroup')
-  .filter((g) => (childMap.get(g.id) ?? 0) > 0).length;
-if (groupsWithKids > 0) ok(`11) rootCauseGroup filter children döndü (${groupsWithKids} grup)`);
-else bad('11) closure taxonomy filter', 'gruplar children\'sız');
+const linked = closureRows.filter((r) => r.parentId != null).length;
+const detailCount = closureRows.filter((r) => r.taxonomyType === 'rootCauseDetail').length;
+if (linked === 0) ok(`11) kapanış flat — ${detailCount} detay, hepsi parentId null (decouple)`);
+else bad('11) kapanış flat değil', `${linked} satır hâlâ parentId taşıyor`);
 
 // ─── 12) UI panel reuse regression (Codex PR-1e P2) ─────────────────────
 //

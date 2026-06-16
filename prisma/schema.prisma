@@ -662,14 +662,17 @@ model PackageItem {
 ///   "operationType"       — Açılış: İşlem Tipi (UNIVERA: 25 değer)
 ///   "affectedObject"      — Açılış: Etkilenen Nesne (UNIVERA: 218 değer)
 ///   "impact"              — Açılış: Etki (UNIVERA: 6 değer)
-///   "rootCauseGroup"      — Kapanış: Kök Neden Grubu (parent rows)
-///   "rootCauseDetail"     — Kapanış: Kök Neden Detayı (children of rootCauseGroup;
-///                                                       UNIVERA: 73 toplam parent+detay)
+///   "rootCauseGroup"      — Kapanış: Kök Neden Grubu (bağımsız düz liste)
+///   "rootCauseDetail"     — Kapanış: Kök Neden Detayı (BAĞIMSIZ düz liste;
+///                                                       gruba bağlı DEĞİL)
 ///   "resolutionType"      — Kapanış: Çözüm Tipi (UNIVERA: 12 değer)
 ///   "permanentPrevention" — Kapanış: Kalıcı Önlem (UNIVERA: 8 değer)
 ///
-/// Hierarchy: yalnız rootCauseDetail rows parent (rootCauseGroup row id)
-/// taşır. Diğer tip rows parentId=null.
+/// Kapanış decouple (feature/closure-taxonomy-decouple) — kapanış kategorileri
+/// BAĞIMSIZ düz listelerdir; rootCauseDetail artık rootCauseGroup'a bağlanmaz
+/// (tüm detaylar her grupta seçilebilir — ürün kararı). parentId kolonu +
+/// self-relation şemada forward-compat için durur ama bu akışta yazılmaz/
+/// okunmaz; kapanış rows parentId=null.
 ///
 /// Scope: tüm rows tenant-scoped (companyId NOT NULL bu fazda). Global
 /// (companyId=null) ileride opsiyonel; şimdilik her tenant kendi seedini
@@ -677,7 +680,7 @@ model PackageItem {
 ///
 /// Constraints:
 ///   - (companyId, taxonomyType, code) unique → idempotent re-seed
-///   - parent + child farklı taxonomyType taşır (rootCauseGroup → rootCauseDetail)
+///   - parentId kullanılmaz (decouple) — kapanış kayıtlarında null
 ///   - active/sortOrder UI ordering için; metadata JSON ileri kullanım
 model TaxonomyDef {
   id           String   @id @default(cuid()) @db.NVarChar(450)

@@ -552,12 +552,11 @@ router.post('/suggest-closure', async (req, res) => {
 
     const tax = await loadActiveClosureTaxonomies(companyId);
 
-    // Kök Neden Grubu önce — sonra detayı yalnız bu grubun children'ında ara.
+    // Kapanış kategorileri bağımsız — detay artık gruba bağlı değil; tüm
+    // rootCauseDetail listesine karşı eşleştirilir (ürün kararı: kapanış
+    // kategorileri birbirine bağlı olmamalı, parentId ile daraltma yok).
     const rcgMatch = matchByLabel(tax.rootCauseGroup, payload.kok_neden_grubu);
-    const rcdCandidates = rcgMatch
-      ? tax.rootCauseDetail.filter((d) => d.parentId === rcgMatch.id)
-      : tax.rootCauseDetail;
-    const rcdMatch = matchByLabel(rcdCandidates, payload.kok_neden_detayi);
+    const rcdMatch = matchByLabel(tax.rootCauseDetail, payload.kok_neden_detayi);
     const rtMatch = matchByLabel(tax.resolutionType, payload.cozum_tipi);
     const ppMatch = matchByLabel(tax.permanentPrevention, payload.kalici_onlem);
 

@@ -110,16 +110,18 @@ router.get('/catalog', async (req, res) => {
  *       platform: [{ code, label, sortOrder, metadata? }, ...],
  *       businessProcess: [...],
  *       ...
- *       rootCauseGroup: [{ code, label, sortOrder,
- *                          children: [{ code, label, sortOrder }, ...] }, ...]
+ *       rootCauseGroup:  [{ code, label, sortOrder }, ...],
+ *       rootCauseDetail: [{ code, label, sortOrder }, ...]
  *     }
  *   }
  *
  * Notes:
- *   - rootCauseDetail değerleri parent'larının `children` dizisinde gömülü
- *     gelir; ayrıca ayrı bir `rootCauseDetail` listesi DÖNMEZ — UI parent
- *     seçimi sonrası child listesi parent'tan okur. (Flat ihtiyacı çıkarsa
- *     `?taxonomyType=rootCauseDetail` ile alınır.)
+ *   - Kapanış taksonomileri (rootCauseGroup / rootCauseDetail /
+ *     resolutionType / permanentPrevention) BAĞIMSIZ düz listelerdir.
+ *     rootCauseDetail artık rootCauseGroup'a bağlı DEĞİL — tüm detaylar
+ *     seçilen gruptan bağımsız olarak seçilebilir (ürün kararı: kapanış
+ *     kategorileri birbirine bağlı olmamalı). TaxonomyDef.parentId şemada
+ *     forward-compat için durur ama bu akışta okunmaz/yazılmaz.
  *   - Smart Ticket businessProcess/etc. mevcut Case.category/subCategory/
  *     requestType ALANLARININ YERİNE GEÇMEZ — bu PR'da Case akışı dokunulmaz.
  */
@@ -159,29 +161,15 @@ router.get('/taxonomies', async (req, res) => {
 
   try {
     const where = { companyId };
-    if (taxonomyTypeRaw === 'rootCauseGroup') {
-      // Endpoint sözleşmesi rootCauseDetail rows'u parent rootCauseGroup
-      // öğelerinin `children` dizisine gömüyor. Filter sadece
-      // rootCauseGroup'a daraltırsa detay satırları çekilmez → her grup
-      // children: [] döner ve closure dropdown'unda detay seçenekleri
-      // kaybolur. Bu sebeple filter='rootCauseGroup' geldiğinde detail
-      // satırlarını da çekip nesting'i kuruyoruz (detail flat listede
-      // görünmez — byType'da rootCauseDetail listesi olmadığı için
-      // aşağıdaki döngü `if (!list) continue` ile düşer).
-      where.taxonomyType = { in: ['rootCauseGroup', 'rootCauseDetail'] };
-    } else if (taxonomyTypeRaw) {
-      where.taxonomyType = taxonomyTypeRaw;
-    }
+    if (taxonomyTypeRaw) where.taxonomyType = taxonomyTypeRaw;
     if (!includeInactive) where.isActive = true;
 
     const rows = await prisma.taxonomyDef.findMany({
       where,
       select: {
-        id: true,
         taxonomyType: true,
         code: true,
         label: true,
-        parentId: true,
         sortOrder: true,
         isActive: includeInactive,
         metadata: true,
@@ -194,35 +182,19 @@ router.get('/taxonomies', async (req, res) => {
       if (!taxonomyTypeRaw || type === taxonomyTypeRaw) byType[type] = [];
     }
 
-    const groupChildrenByParentId = new Map();
-    for (const r of rows) {
-      if (r.taxonomyType === 'rootCauseDetail' && r.parentId) {
-        if (!groupChildrenByParentId.has(r.parentId)) groupChildrenByParentId.set(r.parentId, []);
-        groupChildrenByParentId.get(r.parentId).push({
-          code: r.code,
-          label: r.label,
-          sortOrder: r.sortOrder,
-          ...(r.metadata != null ? { metadata: r.metadata } : {}),
-          ...(includeInactive ? { isActive: r.isActive } : {}),
-        });
-      }
-    }
-
+    // Kapanış kategorileri bağımsız düz listeler — rootCauseDetail artık
+    // rootCauseGroup.children altına gömülmez; her tip kendi düz listesinde
+    // döner (parentId okunmaz).
     for (const r of rows) {
       const list = byType[r.taxonomyType];
       if (!list) continue; // type filter excluded
-      if (r.taxonomyType === 'rootCauseDetail' && !taxonomyTypeRaw) continue; // nested under parent
-      const item = {
+      list.push({
         code: r.code,
         label: r.label,
         sortOrder: r.sortOrder,
         ...(r.metadata != null ? { metadata: r.metadata } : {}),
         ...(includeInactive ? { isActive: r.isActive } : {}),
-      };
-      if (r.taxonomyType === 'rootCauseGroup') {
-        item.children = groupChildrenByParentId.get(r.id) ?? [];
-      }
-      list.push(item);
+      });
     }
 
     res.json({ companyId, taxonomies: byType });

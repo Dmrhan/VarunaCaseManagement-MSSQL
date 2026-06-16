@@ -861,34 +861,18 @@ export function SmartTicketNewPage({
 
   // ── Stage 3 closure: transitionStatus + smartTicketClosure ──────────
   const closureLists = useMemo(() => {
-    const rcgList: SmartTicketRootCauseGroup[] = taxonomies?.rootCauseGroup ?? [];
-    const rcdList: SmartTicketTaxonomyItem[] =
-      rcgList.find((g) => g.code === closure.rootCauseGroup)?.children ?? [];
+    // Kapanış kategorileri bağımsız — detay listesi gruba göre filtrelenmez;
+    // tüm rootCauseDetail değerleri seçilen gruptan bağımsız seçilebilir.
+    const rcgList: SmartTicketTaxonomyItem[] = taxonomies?.rootCauseGroup ?? [];
+    const rcdList: SmartTicketTaxonomyItem[] = taxonomies?.rootCauseDetail ?? [];
     const rtList: SmartTicketTaxonomyItem[] = taxonomies?.resolutionType ?? [];
     const ppList: SmartTicketTaxonomyItem[] = taxonomies?.permanentPrevention ?? [];
     return { rcgList, rcdList, rtList, ppList };
-  }, [taxonomies, closure.rootCauseGroup]);
+  }, [taxonomies]);
 
-  // Kök Neden Grubu değişince Detay seçimini sıfırla — ama yalnız mevcut
-  // detail yeni grubun children'ında ARTIK GEÇERLİ DEĞİLSE.
-  //
-  // Codex P2 (main #447 review) — KB closure suggestion rootCauseGroup +
-  // rootCauseDetail'i tek setState'te birlikte doldurur
-  // (handleSuggestClosure ve handleApplyAllClosureSuggestions). Eski impl
-  // group değişimini gözleyip koşulsuz detail'i clear ediyordu →
-  // suggestion'ın yazdığı detail yapışmıyordu. Yeni davranış: detail seçili
-  // ve yeni grubun rcdList'inde varsa koru; aksi takdirde temizle. Bu hem
-  // AI suggestion (group + detail aynı render'da) hem manuel group değişimi
-  // (yeni grup içinde eski detail invalid) için doğru çalışır.
-  useEffect(() => {
-    setClosure((c) => {
-      if (!c.rootCauseDetail) return c;
-      const stillValid = closureLists.rcdList.some((d) => d.code === c.rootCauseDetail);
-      if (stillValid) return c;
-      return { ...c, rootCauseDetail: '' };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closure.rootCauseGroup, closureLists.rcdList]);
+  // Kapanış decouple — rootCauseDetail, rootCauseGroup'tan bağımsız olduğu
+  // için grup değişiminde detayı sıfırlamaya gerek yok (tüm detaylar her
+  // zaman geçerli). Eski "grup değişince detayı temizle" effect'i kaldırıldı.
 
   // Stage 3 resolution-first: Stage 2'deki step listesinden "Çözüm Açıklaması"
   // textarea'sı için prefill text üret. En son worked step'lerin title (+ varsa
@@ -2223,16 +2207,11 @@ function Stage3Closure({
                 Kök Neden Detayı
               </span>
             }
-            hint={
-              closure.rootCauseGroup && closureLists.rcdList.length === 0
-                ? 'Bu grubun detay satırı yok.'
-                : undefined
-            }
           >
             <Select
               value={closure.rootCauseDetail}
               onChange={(e) => setClosure((c) => ({ ...c, rootCauseDetail: e.target.value }))}
-              disabled={!closure.rootCauseGroup || closureLists.rcdList.length === 0}
+              disabled={closureLists.rcdList.length === 0}
             >
               <option value="">— Seçim yok —</option>
               {closureLists.rcdList.map((d) => (
