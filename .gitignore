@@ -12,7 +12,11 @@ dist-ssr
 *.tsbuildinfo
 
 # Faz 4 - local disk storage (vaka ekleri)
-data/
+data/*
+# KB runtime config'leri (buyuk data degil) deploy ile gitmeli:
+!data/cc-taxonomy-v2.json
+!data/cc-taxonomy-hints.json
+!data/cc-gold-examples.json
 logs/
 
 # IIS tasima paketi - binary'ler repoya girmesin (bkz. docs/IIS_DEPLOY.md)

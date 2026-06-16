@@ -1,0 +1,156 @@
+{
+  "version": "v3.2",
+  "source": "Kullanıcı ile interaktif gözden geçirme — Panorama domain bilgisi (v3.2: 'Bilgi Alma/Gönderme' = mobil senkron işlemi, bilgilendirme talebi değil)",
+  "description": "cc-taxonomy-v2.json üzerinde deterministik kategorize ipuçları. LLM'in prompt'una eklenir; belirli terimler/ekranlar görülünce platform tahminini sabitler.",
+
+  "principles": [
+    "Ürün ile Platform AYRI kavramlardır. Her ürünün (EnRoute, Quest, Stokbar, Calldesk) hem backoffice hem mobil tarafı vardır.",
+    "Stokbar bir ÜRÜNDÜR; Backoffice bir PLATFORMDUR. Eşit kavramlar değildirler — birinin diğerini ima etmediğinden emin ol.",
+    "Tahsilatlar (Kredi Kartı, HavaleEFT, Nakit, Senet) hem backoffice hem mobil olabilir; metnin bağlamına bak.",
+    "Bulunurluk hem Quest mobil hem EnRoute mobil tarafında olabilir; ürün ipucu vermez.",
+    "El Terminali tüm ürünlerde geçebilir — tek ürüne bağlama.",
+    "Ürün tahmini için: açıklamada doğrudan ürün adı geçmiyorsa ipucu YOKTUR; LLM serbest karar verir.",
+    "İŞLEM TİPİ — 'Bilgi Alma' ve 'Bilgi Gönderme' Panorama MOBİL saha senkronizasyon işlemleridir: 'Bilgi Alma' = saha satış temsilcisinin (genelde sabah) backoffice'ten mobil cihazına güncel veriyi ÇEKMESİ/senkronlaması; 'Bilgi Gönderme' = mobil cihazdaki verilerin backoffice'e GÖNDERİLMESİ/senkronlanması. Bunlar bir bilgilendirme ya da agent'tan/destekten bilgi isteme TALEBİ DEĞİLDİR; her ikisinde de platform = Mobil'dir.",
+    "İŞLEM TİPİ ayrımı — Kullanıcı 'şunu nasıl yaparım', 'bilgi rica ederim', 'paylaşır mısınız', 'öğrenmek istiyorum', 'link/şifre talebi' gibi bir BİLGİ/DESTEK talebinde bulunuyorsa işlem tipi 'Bilgi talebi'dir; 'Bilgi Alma' DEĞİLDİR. 'Bilgi Alma' / 'Bilgi Gönderme' YALNIZCA mobil senkron bağlamında seçilir (örn. 'bilgi alamıyorum', 'bilgi gönderemiyorum', 'senkron olmuyor', 'veri gelmiyor/gitmiyor')."
+  ],
+
+  "platform_hints": {
+    "mobil_kesin": {
+      "_aciklama": "Bu etkilenen_nesne veya islem_tipi değerleri görüldüğünde platform = 'Mobil' ZORLANIR.",
+      "etkilenen_nesne": [
+        "Bilgi Gönderme",
+        "Bilgi Alma",
+        "Online Güncellemeler",
+        "Bağlantı Bilgileri",
+        "Mobil Versiyon Güncelleme"
+      ],
+      "islem_tipi": [
+        "Senkron olmuyor (veri gelmiyor)",
+        "Senkron olmuyor (veri gitmiyor)",
+        "Bilgi gönderemiyorum",
+        "Bilgi Alamıyorum"
+      ]
+    },
+    "backoffice_kesin": {
+      "_aciklama": "Bu etkilenen_nesne veya islem_tipi değerleri görüldüğünde platform = 'Backoffice' ZORLANIR.",
+      "etkilenen_nesne": [
+        "Fatura Basım",
+        "Toplu Fatura Basim",
+        "Toplu Irsaliye Basim",
+        "Belge Basim Düzeltme",
+        "Belge Dizaynı",
+        "E-Belge Dizaynı",
+        "Panorama Dizayn",
+        "Tahsilat Dizaynı",
+        "Matbu No",
+        "Rapor Tanımlama",
+        "Rapor Bilgilendirme Tanim",
+        "Rapor Bilgilendirme Tanım",
+        "Rapor Bilgilendirme Sonuç İzleme",
+        "Qlik Raporlama",
+        "Kullanıcı Yetki",
+        "Kullanıcı Grup Haklari",
+        "Kullanıcı Kolon Yetki",
+        "Kullanıcı Haklari",
+        "Yetki ve Parametre Sablon",
+        "Yetki ve Parametre Şablon",
+        "Lisans Izleme",
+        "Belge Dönüşüm Kriter",
+        "Planlanmış Görev",
+        "Planlanmış Görev Sonuç",
+        "Ticari Pakete Aktarim",
+        "Bütçe",
+        "Distribütör Nokta Devri",
+        "Nokta Devri",
+        "Road Net Bilgi Gönder",
+        "Road Net Bilgi Al",
+        "Rut Tanım Bilgileri Alma",
+        "Bilgi Hazırlama İşleme Log İzleme",
+        "Irsaliye Is Bildirimi",
+        "İrsaliye İş Bildirimi"
+      ],
+      "islem_tipi": [
+        "Yazdıramıyorum",
+        "Basamıyorum",
+        "Aktaramıyorum (muhasebeye / ticari pakete)",
+        "Aktarım Hatası alıyorum (Web servis)",
+        "Rapor alamıyorum",
+        "Rapor yanlış geliyor",
+        "Hesaplama yanlış",
+        "Tutar yanlış"
+      ]
+    },
+    "belirsiz_ipucu_yok": {
+      "_aciklama": "Bu terimler hem mobil hem backoffice'te geçerli olabilir — platform tahmini metnin bağlamına bırakılır, ipucu YOK.",
+      "islem_tipi": [
+        "Giremiyorum",
+        "Bağlanamıyorum",
+        "Dosya indiremiyorum",
+        "Yavaş çalışıyor",
+        "Hata mesajı alıyorum",
+        "Kaydedemiyorum",
+        "Oluşturamıyorum",
+        "Güncelleyemiyorum",
+        "Düzeltemiyorum",
+        "Onaya düşmüyor",
+        "Onaylayamıyorum",
+        "E-Belge gönderemiyorum",
+        "Bilgi alabilir miyim"
+      ],
+      "etkilenen_nesne": [
+        "El Terminali Dosyasi Indirme",
+        "Stok İşlemleri",
+        "Senet",
+        "Anket",
+        "Bulunurluk",
+        "Kredi Karti",
+        "HavaleEFT",
+        "Nakit"
+      ]
+    }
+  },
+
+  "text_keyword_hints": {
+    "_aciklama": "Açıklama metninde geçen bu keyword'ler (Türkçe karakter normalize edilmiş, kelime-bazlı match) platform ve/veya ürünü ZORLAR. Birden çok eşleşme varsa hepsi uygulanır; çakışma yoksa LLM tahmini korunur. ÖNEMLİ: 'el terminali', 'tablet', 'mobil cihaz' gibi cihaz terimleri TEK BAŞINA bir ürün belirtmez — devamındaki bağlama bakılır.",
+    "_match_rules": "Case-insensitive, Türkçe→ASCII normalize, kelime sınırı (\\b). Yarı-eşleşme yok (örn. 'enroute' tam kelime, 'enroute2' tetiklemez).",
+    "_temel_kural": "EnRoute = Panorama (aynı ürünün adı). EnRoute hem mobil hem backoffice'tir. 'panorama' geçince ürün = EnRoute, ama platform AÇIKLAMADAN ÇIKARILMALI.",
+    "keywords": [
+      {
+        "keyword": "panorama",
+        "platform": null,
+        "urun": "EnRoute",
+        "reason": "Panorama, EnRoute ürününün adıdır. Hem mobil hem backoffice olabilir."
+      },
+      {
+        "keyword": "enroute",
+        "platform": null,
+        "urun": "EnRoute",
+        "reason": "EnRoute ürün adı doğrudan geçti."
+      },
+      {
+        "keyword": "quest",
+        "platform": null,
+        "urun": "Quest",
+        "reason": "Quest ürün adı doğrudan geçti. Hem mobil hem backoffice olabilir."
+      },
+      {
+        "keyword": "stokbar",
+        "platform": null,
+        "urun": "Stokbar",
+        "reason": "Stokbar ürün adı doğrudan geçti."
+      },
+      {
+        "keyword": "calldesk",
+        "platform": null,
+        "urun": "Calldesk",
+        "reason": "Calldesk ürün adı doğrudan geçti."
+      },
+      {
+        "keyword": "saha temsilci",
+        "platform": "Mobil",
+        "urun": "EnRoute",
+        "reason": "Saha temsilcisi her zaman EnRoute mobil kullanıcısıdır."
+      }
+    ]
+  }
+}
