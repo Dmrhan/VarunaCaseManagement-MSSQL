@@ -14,7 +14,7 @@
  */
 import { Router } from 'express';
 import * as XLSX from 'xlsx';
-import { verifyJwt } from '../db/auth.js';
+import { verifyJwt, requireRole } from '../db/auth.js';
 import { prisma } from '../db/client.js';
 import {
   REPORT_COLUMNS,
@@ -27,6 +27,15 @@ import { buildReportRows } from '../lib/caseReport/buildRows.js';
 
 const router = Router();
 router.use(verifyJwt);
+
+// Codex P2 #1 fix — Defense-in-depth: Frontend sidebar yalnız Supervisor/
+// Admin/SystemAdmin'e Rapor Stüdyosu entry'sini gösterse de, JWT'si geçerli
+// herhangi bir Agent/Backoffice/CSM URL'i bilse fetch yapabiliyordu. Tenant
+// scope (allowedCompanyIds) zaten cross-tenant sızıntıyı önlüyor; ama bu
+// guard rapor üretme yetkisini rolü açıkça tanımlananlarla sınırlıyor.
+// 403 forbidden — UI hiding'e güvenmiyoruz.
+const REPORT_ROLES = requireRole('Supervisor', 'Admin', 'SystemAdmin');
+router.use(REPORT_ROLES);
 
 const PREVIEW_DEFAULT_PAGE_SIZE = 50;
 const PREVIEW_MAX_PAGE_SIZE = 200;

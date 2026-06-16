@@ -34,12 +34,34 @@ function toArray(v) {
   return null;
 }
 
-function parseDate(v) {
+/**
+ * Codex P2 #2 fix — `dateTo` end-of-day normalize:
+ *
+ * UI date input'u 'YYYY-MM-DD' formatında gönderir. `new Date('YYYY-MM-DD')`
+ * UTC midnight üretir; `lte: midnight` kullanılırsa o günkü (kullanıcının
+ * "kapsasın" dediği gün) tüm vakalar drop edilir.
+ *
+ * Çözüm: `endOfDay=true` ile çağrı geldiğinde:
+ *   - Sadece tarih (YYYY-MM-DD) ise: aynı günün 23:59:59.999 UTC noktasına çek
+ *   - Saat içeren ISO ise (kullanıcı zaten saati seçmişse): dokunma
+ *
+ * `dateFrom` için inclusive midnight start zaten doğru (gte) — onu bozmuyoruz.
+ */
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(v, { endOfDay = false } = {}) {
   if (!v) return null;
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
   if (typeof v !== 'string') return null;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return null;
+  const isDateOnly = DATE_ONLY_RE.test(trimmed);
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  if (endOfDay && isDateOnly) {
+    d.setUTCHours(23, 59, 59, 999);
+  }
+  return d;
 }
 
 function intersectCompanyScope(filtersCompanyIds, allowedCompanyIds) {
@@ -81,7 +103,7 @@ export function buildReportWhere(filters, allowedCompanyIds) {
   }
 
   const dateFrom = parseDate(f.dateFrom);
-  const dateTo = parseDate(f.dateTo);
+  const dateTo = parseDate(f.dateTo, { endOfDay: true });
   if (dateFrom || dateTo) {
     where.createdAt = {};
     if (dateFrom) where.createdAt.gte = dateFrom;
