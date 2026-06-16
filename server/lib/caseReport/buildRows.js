@@ -57,6 +57,8 @@ function readJsonPath(obj, path) {
 export function buildReportRows(dbRows, columns, aggregates) {
   if (!Array.isArray(dbRows) || !Array.isArray(columns)) return [];
   const stepAggs = aggregates?.solutionSteps;
+  const activityAggs = aggregates?.caseActivity;
+  const noteAggs = aggregates?.caseNote;
   const out = new Array(dbRows.length);
   for (let i = 0; i < dbRows.length; i++) {
     const db = dbRows[i];
@@ -70,11 +72,18 @@ export function buildReportRows(dbRows, columns, aggregates) {
         if (cf === undefined) cf = parseCustomFields(db.customFields);
         raw = cf ? readJsonPath(cf, col.jsonPath) : undefined;
       } else if (col.source === 'aggregate') {
-        if (col.aggregateKey === 'solutionSteps' && stepAggs) {
-          const payload = stepAggs.get(db.id);
+        // Phase 2A: solutionSteps; Phase 2B.1: caseActivity + caseNote.
+        // Aggregate map (Map<caseId, payload>) yoksa raw undefined → formatter
+        // '' veya 0 üretir. Map var ama bu caseId yoksa aynı şekilde blank.
+        const aggMap =
+          col.aggregateKey === 'solutionSteps' ? stepAggs
+          : col.aggregateKey === 'caseActivity' ? activityAggs
+          : col.aggregateKey === 'caseNote'     ? noteAggs
+          : null;
+        if (aggMap) {
+          const payload = aggMap.get(db.id);
           raw = payload ? payload[col.aggregateField] : undefined;
         }
-        // Bilinmeyen aggregateKey → raw undefined → formatter '' veya 0
       }
       row[col.id] = applyFormat(col, raw);
     }
