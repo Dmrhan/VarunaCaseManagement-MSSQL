@@ -74,7 +74,16 @@ router.post('/cases/preview', async (req, res) => {
       message: 'En az bir kolon seçilmeli.',
     });
   }
-  const columns = resolveColumns(requestedIds);
+  const { columns, invalidIds } = resolveColumns(requestedIds);
+  // Phase 1.5: bilinmeyen id varsa 400 — sessiz drop ile UI/backend kontrat
+  // tutarsızlığı maskelenmesin.
+  if (invalidIds.length > 0) {
+    return res.status(400).json({
+      error: 'columns_invalid',
+      message: `Geçersiz kolon id(leri): ${invalidIds.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ')}`,
+      invalidIds,
+    });
+  }
   if (columns.length === 0) {
     return res.status(400).json({
       error: 'columns_unknown',
@@ -139,7 +148,14 @@ router.post('/cases/export', async (req, res) => {
   if (requestedIds.length === 0) {
     return res.status(400).json({ error: 'columns_required', message: 'En az bir kolon seçilmeli.' });
   }
-  const columns = resolveColumns(requestedIds);
+  const { columns, invalidIds } = resolveColumns(requestedIds);
+  if (invalidIds.length > 0) {
+    return res.status(400).json({
+      error: 'columns_invalid',
+      message: `Geçersiz kolon id(leri): ${invalidIds.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ')}`,
+      invalidIds,
+    });
+  }
   if (columns.length === 0) {
     return res.status(400).json({ error: 'columns_unknown', message: 'Hiçbir geçerli kolon seçilmedi.' });
   }
@@ -178,13 +194,32 @@ router.post('/cases/export', async (req, res) => {
 });
 
 function sendXlsx(res, columns, rows, meta = {}) {
-  // Excel sheet: ilk satır TR header, sonra rows. xlsx aoa_to_sheet
-  // hücre-bazlı kontrol verir (boolean/number/datetime tipleri korunur).
+  // Phase 1.5: Excel sheet — backend buildReportRows zaten TR-formatlanmış
+  // string'leri döndürdü; sendXlsx yalnız aoa shape'i kuruyor. Uzun text
+  // kolonları (type === 'text') için 'wch' büyük + her hücreye wrap text
+  // stili. xlsx kütüphanesi alignment.wrapText'i destekliyor (s.alignment).
   const headerRow = columns.map((c) => c.label);
   const dataRows = rows.map((r) => columns.map((c) => r[c.id]));
   const aoa = [headerRow, ...dataRows];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = columns.map((c) => ({ wch: c.excelWidth ?? Math.max(c.label.length + 2, 14) }));
+
+  ws['!cols'] = columns.map((c) => ({
+    wch: c.excelWidth ?? Math.max(c.label.length + 2, c.type === 'text' ? 60 : 14),
+  }));
+
+  // Uzun text kolonlarında her hücreye wrap text stilini ekle. xlsx.write
+  // bookType:'xlsx' bunu strict olarak korur. cellStyles option not set on
+  // write — XLSX_CALC flag yok; alignment yine de sheet XML'ine yazılır.
+  for (let ci = 0; ci < columns.length; ci++) {
+    if (columns[ci].type !== 'text') continue;
+    for (let ri = 1; ri <= rows.length; ri++) {
+      const cellRef = XLSX.utils.encode_cell({ r: ri, c: ci });
+      const cell = ws[cellRef];
+      if (cell) {
+        cell.s = { ...(cell.s ?? {}), alignment: { wrapText: true, vertical: 'top' } };
+      }
+    }
+  }
   // Autofilter — header range
   if (rows.length > 0) {
     ws['!autofilter'] = {

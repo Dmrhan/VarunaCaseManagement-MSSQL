@@ -218,6 +218,114 @@ console.log('\n── 7) dateTo end-of-day: same-day filter günü kapsar ──
   }
 }
 
+// ── 8) Phase 1.5 — invalid column id → 400 ─────────────
+console.log('\n── 8) /preview invalid column id → 400 columns_invalid ──');
+{
+  const r = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({ columns: ['caseNumber', '__nonexistent__'] }),
+  });
+  if (r.status === 400 && r.data?.error === 'columns_invalid' && Array.isArray(r.data.invalidIds)) {
+    ok('8) 400 columns_invalid + invalidIds payload', `invalid=${r.data.invalidIds.join(',')}`);
+  } else {
+    bad('8) Beklenen 400 columns_invalid', `status=${r.status} error=${r.data?.error}`);
+  }
+}
+
+// 8b) export aynı 400 sözleşmesi
+console.log('\n── 8b) /export invalid column id → 400 ──');
+{
+  const r = await api(token, '/api/reports/cases/export', {
+    method: 'POST',
+    body: JSON.stringify({ columns: ['caseNumber', 'totally_unknown'] }),
+  });
+  if (r.status === 400 && r.data?.error === 'columns_invalid') {
+    ok('8b) export 400 columns_invalid');
+  } else {
+    bad('8b) Beklenen 400', `status=${r.status} error=${r.data?.error}`);
+  }
+}
+
+// ── 9) Phase 1.5 — empty KB JSON → blank, crash YOK ────
+console.log('\n── 9) KB JSON path kolonu — smartTicket yok ise blank ──');
+{
+  // Smart Ticket kolonlarını seç ve 50 vaka preview'la. Smart Ticket
+  // intake'inden açılmamış vakalar customFields={} veya null olur; jsonPath
+  // okuma sessizce undefined → applyFormat → '' (boş string). Crash yoksa OK.
+  const r = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: [
+        'caseNumber',
+        'st.platformLabel',
+        'st.closure.rootCauseGroupLabel',
+        'st.aiDrafts.engineeringHandoff',
+      ],
+      pageSize: 50,
+    }),
+  });
+  if (r.status === 200 && Array.isArray(r.data?.rows)) {
+    const blanks = r.data.rows.filter((row) =>
+      ['st.platformLabel', 'st.closure.rootCauseGroupLabel', 'st.aiDrafts.engineeringHandoff'].some(
+        (id) => row[id] === '',
+      ),
+    ).length;
+    ok(
+      `9) 200 + JSON path eksikleri blank — toplam ${r.data.rows.length} satır, blank içeren ${blanks}`,
+    );
+  } else {
+    bad('9) preview başarısız (KB JSON crash?)', `status=${r.status}`);
+  }
+}
+
+// ── 10) Phase 1.5 — display formatting (status/priority/datetime/bool) ──
+console.log('\n── 10) Format polish — TR label / Evet|Hayır / DD.MM.YYYY ──');
+{
+  const r = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: ['status', 'priority', 'caseType', 'slaViolation', 'createdAt'],
+      pageSize: 5,
+    }),
+  });
+  if (r.status === 200 && Array.isArray(r.data?.rows) && r.data.rows.length > 0) {
+    const sample = r.data.rows[0];
+    const checks = [];
+    // status TR (DB'de Acik/Cozuldu/... → Açık/Çözüldü/...)
+    const trStatusSet = new Set([
+      'Açık', 'İncelemede', '3. Parti Bekleniyor', 'Eskalasyon', 'Çözüldü', 'Yeniden Açıldı', 'İptal Edildi',
+    ]);
+    checks.push({ name: 'status TR', pass: trStatusSet.has(sample.status), val: sample.status });
+    // priority TR
+    const trPrioritySet = new Set(['Düşük', 'Orta', 'Yüksek', 'Kritik']);
+    checks.push({ name: 'priority TR', pass: trPrioritySet.has(sample.priority), val: sample.priority });
+    // caseType TR
+    const trCaseTypeSet = new Set(['Genel Destek', 'Proaktif Takip', 'Churn (İptal)']);
+    checks.push({ name: 'caseType TR', pass: trCaseTypeSet.has(sample.caseType), val: sample.caseType });
+    // boolean Evet/Hayır
+    checks.push({
+      name: 'slaViolation boolean string',
+      pass: sample.slaViolation === 'Evet' || sample.slaViolation === 'Hayır',
+      val: sample.slaViolation,
+    });
+    // datetime DD.MM.YYYY HH:MM
+    checks.push({
+      name: 'createdAt DD.MM.YYYY HH:mm',
+      pass: typeof sample.createdAt === 'string' && /^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/.test(sample.createdAt),
+      val: sample.createdAt,
+    });
+    const allPass = checks.every((c) => c.pass);
+    if (allPass) {
+      ok('10) Format polish hepsi OK', checks.map((c) => `${c.name}="${c.val}"`).join(' | '));
+    } else {
+      const failing = checks.filter((c) => !c.pass).map((c) => `${c.name}="${c.val}"`).join(' | ');
+      bad('10) Format polish fail', failing);
+    }
+  } else {
+    bad('10) preview başarısız', `status=${r.status}`);
+  }
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

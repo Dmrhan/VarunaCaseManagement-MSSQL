@@ -1,21 +1,23 @@
 /**
  * Case Report Studio — DB row → report row shaping.
  *
- * Sözleşme:
+ * Sözleşme (Phase 1.5):
  *   - Her case satırı kullanıcı tarafından seçilen kolon sırasında bir
  *     { [columnId]: value } objesi olarak döner.
- *   - JSON path kolonları için Case.customFields her satırda TEK kez
- *     parse edilir; çoklu json_path için aynı parsed obje yeniden
- *     kullanılır. N x M parse maliyeti yok.
- *   - Tip dönüşümleri:
- *       'datetime' → ISO string ('' eğer null)
- *       'boolean'  → boolean (varsayılan false)
- *       'number'   → number | '' (null/undefined → '')
- *       'string' / 'text' → string ('' eğer null/undefined)
+ *   - **Aynı shaping path hem preview JSON cevabı hem Excel export için
+ *     kullanılır** — display formatlama backend'de tek noktada (formatters.js).
+ *     Frontend ham veri yerine TR-okunabilir string'leri direkt gösterir.
+ *   - JSON path kolonları için Case.customFields her satırda TEK kez parse
+ *     edilir; çoklu json_path için aynı parsed obje yeniden kullanılır.
+ *   - Stored data MUTASYON YAPILMAZ; sadece okunup formatlanır.
  *
- * Excel export sırasında aynı shaping kullanılır; Excel writer yalnız
- * `Object.values()` ile satır yazar.
+ * Format dispatcher: server/lib/caseReport/formatters.js applyFormat().
+ *   ColumnDef.format alanı belirleyici (caseStatus / casePriority / caseType /
+ *   escalationLevel / datetimeTr / boolean / confidencePercent). Format yoksa
+ *   ColumnDef.type'a göre geri-uyumlu default.
  */
+
+import { applyFormat } from './formatters.js';
 
 function parseCustomFields(raw) {
   if (raw == null) return null;
@@ -40,31 +42,7 @@ function readJsonPath(obj, path) {
   return cur;
 }
 
-function formatValue(col, raw) {
-  if (raw == null) {
-    return col.type === 'boolean' ? false : '';
-  }
-  switch (col.type) {
-    case 'datetime': {
-      if (raw instanceof Date) return raw.toISOString();
-      if (typeof raw === 'string') {
-        const d = new Date(raw);
-        return Number.isNaN(d.getTime()) ? raw : d.toISOString();
-      }
-      return '';
-    }
-    case 'boolean':
-      return !!raw;
-    case 'number': {
-      const n = typeof raw === 'number' ? raw : Number(raw);
-      return Number.isFinite(n) ? n : '';
-    }
-    case 'text':
-    case 'string':
-    default:
-      return typeof raw === 'string' ? raw : String(raw);
-  }
-}
+// Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.
 
 /**
  * @param {object[]} dbRows Prisma findMany sonucu (select edilmiş)
@@ -86,7 +64,7 @@ export function buildReportRows(dbRows, columns) {
         if (cf === undefined) cf = parseCustomFields(db.customFields);
         raw = cf ? readJsonPath(cf, col.jsonPath) : undefined;
       }
-      row[col.id] = formatValue(col, raw);
+      row[col.id] = applyFormat(col, raw);
     }
     out[i] = row;
   }
