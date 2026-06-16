@@ -1,0 +1,502 @@
+{
+  "version": "v3",
+  "source": "İş Süreçleri Kategorisi - 20260604.xlsx",
+  "description": "İki-fazlı sınıflandırma: açılış (müşteri dili, 6 alan: ürün, platform, iş süreci, işlem tipi, etkilenen nesne, etki) + kapanış (destek dili, 3 alan + alt-level)",
+  "open": {
+    "urun": {
+      "label": "Ürün",
+      "description": "Hangi ürünün arayüzünde sorun yaşanıyor",
+      "values": [
+        "EnRoute",
+        "Quest",
+        "Stokbar",
+        "Calldesk"
+      ]
+    },
+    "platform": {
+      "label": "Platform",
+      "description": "Sorunun yaşandığı platform (backoffice veya mobil)",
+      "values": [
+        "Backoffice",
+        "Mobil"
+      ]
+    },
+    "is_sureci": {
+      "label": "İş Süreci",
+      "description": "Sorunun ait olduğu iş süreci",
+      "values": [
+        "Müşteri / Cari Kartı ve Gruplama İşlemleri",
+        "Müşteri İşlemleri (Nokta Devri/Dist Nokta devri vb.)",
+        "CRM işlemleri",
+        "Ürün Kartı ve Grup İşlemleri",
+        "Ürün İşlemleri (Yasaklı/Satılabilir/ Tercihli vb.)",
+        "Satış İşlemleri",
+        "İade İşlemleri",
+        "Alış İşlemleri",
+        "Belge Dönüşüm İşlemleri",
+        "E-Belge (e-fatura / e-arşiv)",
+        "Web Servis Entegrasyon / Aktarım",
+        "Kullanıcı / Yetki / Giriş",
+        "Satış Ekibi / Rut ve Ziyaret işlemleri",
+        "Dinamik Rapor İşlemleri",
+        "Sabit Rapor ve Dashboard İşlemleri",
+        "Finans  Ödeme İşlemleri",
+        "Finans  Tahsilat İşlemleri",
+        "Stok İşlemleri",
+        "Depo / Araç İşlemleri",
+        "Dağıtım Kanalı İşlemleri",
+        "Sevkiyat / Dağıtım Araç Yükleme İşlemleri",
+        "Belge Dizaynı / Matbu",
+        "Bulunurluk ve Anket İşlemleri",
+        "Belge Basım İşlemleri",
+        "İskonto  ve  Promosyon",
+        "Smart Connect İşlemleri",
+        "Hedef ve Prim Yönetimi İşlemleri",
+        "Sözleşme ve Kontrat İşlemleri",
+        "Fon Ve Bütçe yönetimi İşlemleri",
+        "Veri Alma Aktarım işlemleri",
+        "Planlanmış Görev işlemleri",
+        "Fiyat işlemleri",
+        "İş Akış İşlemleri",
+        "Demirbaş İşlemleri",
+        "Yetki Parametre ve Çalışma parametreleri İşlemleri",
+        "Satış Koçu İşlemleri"
+      ]
+    },
+    "islem_tipi": {
+      "label": "İşlem Tipi",
+      "description": "Kullanıcının yapmaya çalıştığı/yapamadığı işlem — belirti dili",
+      "values": [
+        "Giriş yapma",
+        "Bağlantı kurma",
+        "Veri Gelme",
+        "Veri Gitme",
+        "Bilgi gönderme",
+        "Bilgi Alma",
+        "E-Belge gönderme",
+        "Aktarım yapma (muhasebeye / ticari pakete)",
+        "Aktarım Sorunu (Web servis)",
+        "Kayıt etme",
+        "Oluşturma",
+        "Yazdırma",
+        "Basım yapma",
+        "Güncelleme",
+        "Düzeltme",
+        "Onaya düşme",
+        "Onaylama",
+        "Hesaplama",
+        "Tutar",
+        "Rapor alma",
+        "Rapor Hesap",
+        "Dosya İndirme",
+        "Yavaş çalışma",
+        "Bilgi talebi",
+        "Hata mesajı",
+        "Görünüm problemi",
+        "İptal etme"
+      ]
+    },
+    "etkilenen_nesne": {
+      "label": "Etkilenen Nesne",
+      "description": "Sorundan etkilenen iş nesnesi veya ekran",
+      "values": [
+        "Bilgi Gönderme",
+        "Bilgi Alma",
+        "Fatura Basım",
+        "Stok İşlemleri",
+        "Online Güncellemeler",
+        "Bağlantı Bilgileri",
+        "Ek İşlemler",
+        "İşlem Menü",
+        "Müşteri / Cari Kartı",
+        "Kişi (CRM)",
+        "Ürün / Stok Kartı",
+        "Web Servis / Aktarım",
+        "E-Belge Gönderim",
+        "Fatura",
+        "Ticari Pakete Aktarim",
+        "Kullanıcı",
+        "Satış Temsilcisi",
+        "Müşteri Durum Değiştirme",
+        "Siparişten Araç Yükleme",
+        "Sipariş",
+        "El Terminali Dosyasi Indirme",
+        "Belge Dizaynı",
+        "Veri Alma Excelden",
+        "Matbu No",
+        "İskonto Promosyon",
+        "Kredi Karti",
+        "İade Faturası",
+        "Fatura Gecikme Günü Tanımları",
+        "E-Belge Dizaynı",
+        "Saticiya İade Faturası",
+        "Fatura Baslik Düzeltme",
+        "Yetki ve Parametre Sablon",
+        "Irsaliye",
+        "Toplu Fatura Basim",
+        "Rut Tanım",
+        "Depolar Arası Transfer",
+        "Nakit",
+        "Fiyat Tanımlama",
+        "Toplu Müşteri Degerleri Değiştirme",
+        "Irsaliye Is Bildirimi",
+        "Planlanmış Görev",
+        "E-Belge Ayarları",
+        "Distribütör",
+        "Depo Giriş",
+        "Lisans Izleme",
+        "Sikça Sorulan Sorular",
+        "Fatura Gecikme Günü Hesaplama",
+        "Siparişten Belge Olusturma",
+        "Tanımlamalar",
+        "İade Faturası (Bozuk)",
+        "Yasakli Ürün",
+        "Satış Temsilcisi Parametreler",
+        "Satış Yapilamayan Ürünler",
+        "Kiymetli Evrak Takibi",
+        "Rapor Bilgilendirme Tanim",
+        "İade Faturası (Saglam)",
+        "Alınan Sipariş",
+        "Müşteri Dinamik Grup",
+        "Kullanıcı Haklari",
+        "Ticari Paket",
+        "Depo",
+        "Satış Irs. Fat. Olusturma",
+        "HavaleEFT",
+        "Rapor Bilgilendirme Sonuç İzleme",
+        "Depo Yükleme",
+        "Irsaliyeden Fatura Olusturma",
+        "Müşteri Ek Saha",
+        "Verilen Hizmet Faturası",
+        "Nokta Devri",
+        "Road Net Bilgi Gönder",
+        "Müşteri Düzenleme Tanım",
+        "Müşteriden İade Faturası (Bozuk)",
+        "Qlik Raporlama",
+        "Belge Basim Düzeltme",
+        "İade Siparişi",
+        "Depo Çıkış",
+        "Kullanıcı Yetki",
+        "Müşteriden İade Faturası (Saglam)",
+        "Hesap Kapatma",
+        "Hareket Tip",
+        "Rapor Tanımlama",
+        "Alınan Hizmet Faturası",
+        "Aktivite İskonto",
+        "Bilgi Hazırlama İşleme Log İzleme",
+        "Taşıma İrsaliyesi",
+        "Toplu Irsaliye Basim",
+        "Sipariş Baslik Düzeltme",
+        "Mesaj",
+        "Anket",
+        "Servis Talep Yönetimi",
+        "Planlanmış Görev Sonuç",
+        "Senet",
+        "İade İrsaliyesi",
+        "Parametreler",
+        "Demirbaş Özellik Tanımlama",
+        "Rut Tanım Bilgileri Alma",
+        "İşlemler",
+        "CaddeSokak",
+        "Mobil Versiyon Güncelleme",
+        "Panorama Dizayn",
+        "Kullanıcı Grup Haklari",
+        "Fatura Kapatma",
+        "Kontrat Tanımlama",
+        "Prim",
+        "Bakiye Dengeleme Borç",
+        "Satış Irs. S.İade Fatura Olusturma",
+        "Saticiya İade Siparişi",
+        "Road Net Bilgi Al",
+        "ST Yönetim Hiyerarşi",
+        "Saticiya İade İrsaliyesi",
+        "Teknik Kampanya Tanım",
+        "Müşteri No",
+        "İskonto Promosyon Onaylama",
+        "Irsaliye Baslik Düzeltme",
+        "Ürün Birim – GIB Ölçü Birim Eşleştirme",
+        "Rut Optimizasyonu",
+        "Tahsilat Dizaynı",
+        "Kullanıcı Kolon Yetki",
+        "StokCari Sifirlama İşlemleri",
+        "Konsinye İrsaliyesi",
+        "Belge Dönüşüm Kriter",
+        "Personel",
+        "Araç",
+        "Distribütör Nokta Devri",
+        "Alış İrsaliyesi Onaylama",
+        "Satış Faturası Düzenleme",
+        "Bulunurluk",
+        "Anlık İskonto Talebi",
+        "Yönetim Hiyerarşisi 1",
+        "Bütçe",
+        "Ek E-Irsaliye Gönderim",
+        "Verilen Sipariş",
+        "Satilabilir Ürün",
+        "Bakiye Dengeleme Alacak",
+        "Kullanıcı Grup",
+        "Belge Aktarim Düzeltme",
+        "Ay Kapanis Parametreleri Yetkilendirme",
+        "Kullanıcı Kolon Yetki (MSD)",
+        "Soft Pos (NFC)",
+        "Sanal Pos",
+        "Ürün Ek Saha",
+        "Alış Faturası Is Bildirimi",
+        "Toplu Sipariş Basim",
+        "Aktivite Talep Girişi",
+        "Toplu Aktarim",
+        "Dagitici",
+        "İskonto Grubu",
+        "Müşteri İş Emri Nedeni",
+        "Rapor Export",
+        "Yil Sonu İşlemleri",
+        "Fiyat Onaylama",
+        "Satış Irsaliyeleri SAP Entegrasyonu",
+        "Rapor Bilgilendirme Izleme",
+        "Kota(Müşteri)",
+        "Demirbaş Durum",
+        "Panorama Çalışma Parametreleri",
+        "Web API Ayarları",
+        "Müşteri Grubu",
+        "İş Akış",
+        "Saha Izleme",
+        "Satış İrsaliyesi Onaylama",
+        "Tahsilat Aktarim Onay",
+        "Dinamik Raporlar",
+        "Prim Tanım Alma",
+        "Müşteri Düzenleme",
+        "Satış Grup Yöneticisi",
+        "Mobil Satış Dagitim",
+        "Pratik Fiyat Tanımlama",
+        "Demirbaş Seri Güncelleme",
+        "Müşteri Ek Grubu",
+        "Ziyaret Izleme",
+        "Iskonto Promosyon Yetkileri",
+        "Depo Sayım",
+        "Öneri Sipariş",
+        "Ürün Müsteri Degisimi",
+        "Stand Takma \\ Sökme",
+        "Bayi Risk Limit",
+        "Vergi Dairesi",
+        "Müşteri İptal",
+        "Ürün Dinamik Grup",
+        "E-FaturaE-Irsaliye Alim",
+        "Siparişten Belge Olusturma (Bozuk)",
+        "İade İrsaliyesi (Bozuk)",
+        "Irsaliye Birleştirme ve Fatura Olusturma",
+        "Kullanıcı Bilgilendirme",
+        "Çek",
+        "Demirbaş Talep Giriş",
+        "Servis Talep Bitirme Onay",
+        "Anlık İskonto Onaylama",
+        "Prim Faturalarinin SAP'ye Aktarimi",
+        "Depo Yeri",
+        "Fatura İptal Nedeni",
+        "Ek Vade",
+        "Araç Envanteri",
+        "Depo Hareket Dizaynı",
+        "Müşteri Özellikleri Değiştirme",
+        "KontratSözleşme Tanım",
+        "Ürün Katalog Aktarim",
+        "Demirbaş Durum Güncelleme",
+        "Irsaliye Birleştirme ve Saticiya İade Faturası Olusturma",
+        "Xslt Dizayn",
+        "Limit",
+        "Rut İşlemleri",
+        "ESY ST Depo Tanım",
+        "Araç Bosaltma",
+        "Sözleşme",
+        "İade Nedeni",
+        "Sayim Izleme",
+        "Sipariş İade",
+        "Toplu Sipariş İptali",
+        "Müşteriden İade Sipariş",
+        "Rapor"
+      ]
+    },
+    "etki": {
+      "label": "Etki",
+      "description": "İşin durma seviyesi / kaç kullanıcı etkilendi",
+      "values": [
+        "İş tamamen durdu",
+        "Bazı işlemler etkileniyor",
+        "Tek kullanıcı etkileniyor",
+        "Tüm kullanıcılar / distribütör etkileniyor",
+        "Geçici çözüm var",
+        "Geçici çözüm yok"
+      ]
+    }
+  },
+  "close": {
+    "kok_neden": {
+      "label": "Kök Neden",
+      "description": "Kapanışta destek dili — iki seviyeli (Grup → Detay)",
+      "groups": [
+        {
+          "group": "Yetki / Rol",
+          "details": [
+            "Menü yetkisi eksik",
+            "İşlem yetkisi eksik",
+            "Distribütör / şube yetkisi eksik",
+            "Onay yetkisi yok",
+            "Lisans limiti dolu",
+            "Rol / kullanıcı tanımsız"
+          ]
+        },
+        {
+          "group": "Parametre / Konfigürasyon",
+          "details": [
+            "E-Belge ayarı / entegratör şifresi",
+            "Aktarım (SmartConnect) parametresi",
+            "Matbu / basım parametresi",
+            "ST parametresi eksik",
+            "Yanlış parametre",
+            "Eksik parametre"
+          ]
+        },
+        {
+          "group": "Ana Veri / Kart Tanımı",
+          "details": [
+            "Müşteri kartı eksik / hatalı",
+            "Ürün / stok kartı eksik",
+            "Fiyat / KDV tanımı hatalı",
+            "Satış temsilcisi tanımı hatalı",
+            "Eksik kart ilişkisi (depo / sevk / seri)"
+          ]
+        },
+        {
+          "group": "E-Belge / Entegratör (3. parti)",
+          "details": [
+            "Entegratör servis / şifre / kontör",
+            "Mükellefiyet / sertifika",
+            "XSLT şablon eksik",
+            "GİB / Schematron hatası",
+            "Entegratör kuyruk gecikmesi",
+            "Ödeme/Sanal POS Altyapısı",
+            "ERP (Logo, SAP vb.)",
+            "Unidox V1 / V2 geçişi"
+          ]
+        },
+        {
+          "group": "Entegrasyon / Aktarım",
+          "details": [
+            "Eşleştirme eksik",
+            "Web servis / view hatası",
+            "Servis timeout",
+            "Alan eşleşmesi hatalı"
+          ]
+        },
+        {
+          "group": "Cihaz / Mobil Ortam",
+          "details": [
+            "APK versiyon uyumsuz",
+            "Cihaz bağlantısı / eşleştirme",
+            "Dosya indirilemiyor",
+            "Cihaz tarih / saat"
+          ]
+        },
+        {
+          "group": "Yazılım Hatası",
+          "details": [
+            "Görev çalışmıyor (object reference)",
+            "Versiyon uyumsuzluğu (Fix-DLL)",
+            "Validasyon hatası",
+            "Kod hatası"
+          ]
+        },
+        {
+          "group": "Dizayn / Matbu / Baskı",
+          "details": [
+            "Belge dizaynı eksik / hatalı",
+            "Matbu no / sıra",
+            "Yazıcı / logo basım ayarı"
+          ]
+        },
+        {
+          "group": "Hesaplama / İş Kuralı",
+          "details": [
+            "İskonto / promosyon",
+            "Fiyat",
+            "KDV / muafiyet",
+            "Gecikme / kredi limiti"
+          ]
+        },
+        {
+          "group": "Sunucu / Altyapı / Performans",
+          "details": [
+            "Yavaşlık / timeout (internet)",
+            "Disk / temp yetersizliği",
+            "RAM / kaynak tüketimi",
+            "Replikasyon durması",
+            "Giriş / sunucu hatası",
+            "Sql Server DB sorunu"
+          ]
+        },
+        {
+          "group": "Kullanım / Eğitim",
+          "details": [
+            "Kullanıcı işlem adımı hatası",
+            "Yasal süreç (8 gün / ay kapanışı)",
+            "Operatörlük / merkez onayı gereken işlem",
+            "Bilgi / nasıl yapılır"
+          ]
+        },
+        {
+          "group": "Veri Tutarsızlığı",
+          "details": [
+            "Bozuk kayıt (stok tipi / belge detayı)",
+            "Mükerrer kayıt",
+            "Eksik ilişki",
+            "Elle müdahale / geçmiş veri"
+          ]
+        },
+        {
+          "group": "Veri / Veritabanı Hatası",
+          "details": [
+            "Update ve insert işlemi",
+            "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)"
+          ]
+        },
+        {
+          "group": "Kurulum",
+          "details": [
+            "Kurulum"
+          ]
+        }
+      ]
+    },
+    "cozum_tipi": {
+      "label": "Çözüm Tipi",
+      "description": "Uygulanan çözüm türü",
+      "values": [
+        "Bilgilendirme",
+        "Parametre düzeltme",
+        "Yetki düzenleme",
+        "Veri / kart düzeltme",
+        "Script çalıştırma (DbUpdate)",
+        "Entegratör / servis müdahalesi",
+        "Dizayn düzeltme",
+        "DLL Geçişi",
+        "Versiyon geçişi",
+        "Eğitim",
+        "Doküman / SSS",
+        "Ürün geliştirme"
+      ]
+    },
+    "kalici_onlem": {
+      "label": "Kalıcı Önlem",
+      "description": "Aynı sorunun tekrar etmemesi için planlanan kalıcı aksiyon (opsiyonel)",
+      "values": [
+        "Hata mesajı iyileştirilecek",
+        "Kontrol / validasyon eklenecek",
+        "Parametre sihirbazı yapılacak",
+        "Self-servis ekran yapılacak",
+        "Log / izleme geliştirilecek (aktarım / e-belge)",
+        "Test senaryosu eklenecek",
+        "Bilgi bankası yazısı hazırlanacak",
+        "Eğitim içeriği hazırlanacak"
+      ]
+    }
+  },
+  "syncedFromDbAt": "2026-06-12T09:03:55.876Z"
+}

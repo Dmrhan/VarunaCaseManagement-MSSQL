@@ -1415,6 +1415,36 @@ function formatHintsForPrompt() {
   }
   return lines.join("\n");
 }
+var goldCache = null;
+function loadGoldExamples() {
+  if (goldCache) return goldCache;
+  try {
+    const p = path3.resolve(process.cwd(), "data/cc-gold-examples.json");
+    goldCache = JSON.parse(readFileSync2(p, "utf8"));
+  } catch {
+    goldCache = [];
+  }
+  return goldCache;
+}
+function formatGoldForPrompt(mode) {
+  const gold = loadGoldExamples();
+  if (!gold.length) return "";
+  const byGroup = {};
+  const picked = [];
+  for (const g of gold) {
+    const k = g.kokNedenGrubu || "?";
+    byGroup[k] = (byGroup[k] || 0) + 1;
+    if (byGroup[k] <= 2) picked.push(g);
+  }
+  if (mode === "open") {
+    return picked.map(
+      (g) => `- "${(g.sorun || "").slice(0, 110)}" => platform=${g.platform}; is_sureci=${g.isSureci}; islem_tipi=${g.islemTipi}; etkilenen_nesne=${g.etkilenenNesne}; etki=${g.etki}`
+    ).join("\n");
+  }
+  return picked.map(
+    (g) => `- Sorun: "${(g.sorun || "").slice(0, 90)}" \xC7\xF6z\xFCm: "${(g.cozum || "").slice(0, 90)}" => kok_neden_grubu=${g.kokNedenGrubu}; kok_neden_detayi=${g.kokNedenDetayi}; cozum_tipi=${g.cozumTipi}; kalici_onlem=${g.kaliciOnlem}`
+  ).join("\n");
+}
 function detectTextKeywordHints(description) {
   if (!description) return [];
   const h = loadHints();
@@ -1570,6 +1600,9 @@ async function categorizeV2(input) {
     "",
     formatHintsForPrompt(),
     "",
+    "GER\xC7EK ET\u0130KETLENM\u0130\u015E \xD6RNEKLER (insan uzman do\u011Frulad\u0131 \u2014 ayn\u0131 mant\u0131kla etiketle):",
+    formatGoldForPrompt("open"),
+    "",
     "SORUN B\u0130LG\u0130S\u0130:",
     input.project ? `Proje: ${input.project}` : null,
     input.customerName ? `M\xFC\u015Fteri: ${input.customerName}` : null,
@@ -1692,6 +1725,9 @@ async function suggestClose(input) {
     "",
     "TAKSONOM\u0130 \u2014 KALICI \xD6NLEM (opsiyonel):",
     getKaliciOnlem().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
+    "",
+    "GER\xC7EK ET\u0130KETLENM\u0130\u015E \xD6RNEKLER (insan uzman do\u011Frulad\u0131 \u2014 ayn\u0131 mant\u0131kla kapan\u0131\u015F se\xE7):",
+    formatGoldForPrompt("close"),
     "",
     "TICKET BA\u011ELAMI:",
     ctxLines.join("\n") || "(a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131rmas\u0131 yok)",
