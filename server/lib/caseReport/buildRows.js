@@ -97,6 +97,9 @@ function pickCompositeJoinValue(col, dbRow) {
  *   2. isDefault: true önce (kullanıcının "birincil" işareti)
  *   3. type: alfabetik asc  (Address tipi kayıt eşitliği için stable)
  *   4. createdAt: eski önce (en eski/bilinen adres tercih)
+ *   5. id: alfabetik asc    (FINAL tie-breaker — bulk/import aynı timestamp
+ *                            tick'inde olabilir; id cuid scalar, unique).
+ *                            Bu olmadan Prisma row order kalanı belirlerdi.
  */
 function compareAddressForPicker(a, b) {
   const aActive = a.isActive === true ? 1 : 0;
@@ -110,7 +113,12 @@ function compareAddressForPicker(a, b) {
   if (aType !== bType) return aType.localeCompare(bType);
   const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
   const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-  return aCreated - bCreated;
+  if (aCreated !== bCreated) return aCreated - bCreated;
+  // Codex P2 — final stable tie-breaker. Address.id unique olduğu için
+  // bu adım eşitlik dönmez; her iki satır identik olsa bile sıra kararlı.
+  const aId = typeof a.id === 'string' ? a.id : '';
+  const bId = typeof b.id === 'string' ? b.id : '';
+  return aId.localeCompare(bId);
 }
 
 // Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.

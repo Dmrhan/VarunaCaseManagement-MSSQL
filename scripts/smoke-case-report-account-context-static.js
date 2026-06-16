@@ -91,6 +91,8 @@ console.log('\n── 2) buildPrismaSelect: nested addresses/companies ───
   expect('2.8 addresses.select.isActive (sort)',     addrSel.select.isActive, true);
   expect('2.9 addresses.select.type (sort)',         addrSel.select.type, true);
   expect('2.10 addresses.select.createdAt (sort)',   addrSel.select.createdAt, true);
+  // Codex P2 follow-up — final stable tie-breaker
+  expect('2.10b addresses.select.id (final tie-break)', addrSel.select.id, true);
 
   const compSel = select.account.select.companies;
   expect('2.11 companies block var', typeof compSel, 'object');
@@ -187,6 +189,37 @@ console.log('\n── 4) extractRawValue: defaultThenFirst (Address) ───�
     account: { addresses: [{ city: 'Adana', isDefault: false, isActive: true, type: 'home', createdAt: '2026-01-01', companyId: 'CO1' }] },
   };
   expect('4.5 tek address', extractRawValue(cityCol, dbRow5), 'Adana');
+
+  // 4.6 — Codex P2 follow-up: aynı isActive/isDefault/type/createdAt → id asc
+  // Bulk import senaryosu: 3 address aynı tick'te oluşturulmuş, tüm sort
+  // anahtarları eşit. id alfabetik olarak en küçük olan seçilmeli.
+  const dbRow6 = {
+    id: 'C6',
+    companyId: 'CO1',
+    account: {
+      addresses: [
+        { id: 'addr_c', city: 'CCC', isDefault: false, isActive: true, type: 'billing', createdAt: '2026-01-01', companyId: 'CO1' },
+        { id: 'addr_a', city: 'AAA', isDefault: false, isActive: true, type: 'billing', createdAt: '2026-01-01', companyId: 'CO1' },
+        { id: 'addr_b', city: 'BBB', isDefault: false, isActive: true, type: 'billing', createdAt: '2026-01-01', companyId: 'CO1' },
+      ],
+    },
+  };
+  expect('4.6 identical sort keys → id asc (addr_a → AAA)',
+    extractRawValue(cityCol, dbRow6), 'AAA');
+
+  // 4.7 — Sort key eşit DEĞİL (createdAt farklı) → id kullanılmamalı
+  const dbRow7 = {
+    id: 'C7',
+    companyId: 'CO1',
+    account: {
+      addresses: [
+        { id: 'addr_a', city: 'YeniA', isDefault: false, isActive: true, type: 'billing', createdAt: '2026-05-01', companyId: 'CO1' },
+        { id: 'addr_z', city: 'EskiZ', isDefault: false, isActive: true, type: 'billing', createdAt: '2026-01-01', companyId: 'CO1' },
+      ],
+    },
+  };
+  expect('4.7 createdAt belirleyici, id bypass → EskiZ',
+    extractRawValue(cityCol, dbRow7), 'EskiZ');
 }
 
 // ── 4b) Codex P1: cross-tenant leak engellendi ───────────────
