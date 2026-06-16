@@ -214,8 +214,10 @@ export function computePivot(input) {
  */
 export function isPivotableDimension(col) {
   if (!col) return false;
-  // 4 source türünün hepsi: scalar / json_path / join / aggregate
-  return ['scalar', 'json_path', 'join', 'aggregate'].includes(col.source);
+  // Phase 2D.2: 5 source türü: scalar / json_path / join / aggregate /
+  // composite_join. composite_join (Şehir, Segment vb.) müşteri 360 boyutu
+  // olarak pivot dim için birinci dereceden değer.
+  return ['scalar', 'json_path', 'join', 'aggregate', 'composite_join'].includes(col.source);
 }
 
 /**

@@ -51,6 +51,7 @@ export const REPORT_COLUMN_CATEGORIES = {
   smart_ticket_solution_steps: 'Smart Ticket — Çözüm Adımları',
   performance_flow: 'Performans / Akış',
   account_pii: 'Müşteri (PII)',
+  account_context: 'Müşteri Bağlamı',
 };
 
 /** @type {ReportColumnDef[]} */
@@ -165,8 +166,8 @@ export const REPORT_COLUMNS = [
   // Source: 'join' yeni — Case.account include ile fetched. buildPrismaSelect
   // include: { account: { select: { ... } } } üretir.
   //
-  // Şehir (AccountAddress.city) ve Segment (AccountCompany.segment) bu PR
-  // KAPSAMI DIŞINDA — composite/multi-row join karmaşıklığı; Phase 2D.2.
+  // Şehir (Address.city) ve Segment (AccountCompany.segment) Phase 2D.2'de
+  // composite_join source ile aşağıdaki "Müşteri Bağlamı" bloğunda eklendi.
   { id: 'account.customerType', label: 'Müşteri Tipi',  category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'customerType', format: 'customerType', privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
   { id: 'account.legalName',    label: 'Ticari Unvan',   category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'legalName',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 32 },
   { id: 'account.vkn',          label: 'VKN',           category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'vkn', format: 'vknMasked',           privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
@@ -174,6 +175,31 @@ export const REPORT_COLUMNS = [
   { id: 'account.taxOffice',    label: 'Vergi Dairesi', category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'taxOffice',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 24 },
   { id: 'account.email',        label: 'E-posta',       category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'email',         privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'], excelWidth: 28 },
   { id: 'account.phoneE164',    label: 'Telefon',       category: 'account_pii', type: 'string', source: 'join', joinTable: 'account', joinField: 'phoneE164',     privacyTag: 'pii', roles: ['Admin', 'SystemAdmin'] },
+
+  // ── Müşteri Bağlamı — Phase 2D.2 ─────────────────────────────────
+  //
+  // Şehir (Address.city) ve Segment (AccountCompany.segment) müşteri 360
+  // boyutu. Pivot dim olarak ana değer: "İstanbul'daki vakalar", "Premium
+  // segmentin durumu" gibi.
+  //
+  // Source: 'composite_join' yeni — 1:N picker mantığı:
+  //   - addresses: defaultThenFirst (isDefault=true ilk; yoksa ilk satır)
+  //   - companies: matchCaseCompanyId (Case.companyId === AccountCompany
+  //                .companyId; yoksa ilk satır — defansif fallback)
+  //
+  // Privacy: BU KOLONLAR PII DEĞİL. Şehir/segment Agent UI'daki Account
+  // detay sayfasında zaten erişilebilir; rapor stüdyosunda da herkese
+  // açık. KVKK guard yalnız VKN/TCKN/email/phone gibi tanımlayıcılarda.
+  //
+  // buildPrismaSelect ve extractRawValue'da composite_join branch'leri.
+  { id: 'address.city',     label: 'Şehir',  category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'addresses', joinField: 'city',     picker: 'defaultThenFirst', excelWidth: 18 },
+  { id: 'address.district', label: 'İlçe',   category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'addresses', joinField: 'district', picker: 'defaultThenFirst', excelWidth: 18 },
+  { id: 'address.country',  label: 'Ülke',   category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'addresses', joinField: 'country',  picker: 'defaultThenFirst', excelWidth: 10 },
+
+  { id: 'accountCompany.segment',              label: 'Müşteri Segmenti',  category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'companies', joinField: 'segment',              picker: 'matchCaseCompanyId', excelWidth: 20 },
+  { id: 'accountCompany.status',               label: 'Müşteri Durumu',    category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'companies', joinField: 'status',               picker: 'matchCaseCompanyId', excelWidth: 14 },
+  { id: 'accountCompany.packageName',          label: 'Müşteri Paketi',    category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'companies', joinField: 'packageName',          picker: 'matchCaseCompanyId', excelWidth: 24 },
+  { id: 'accountCompany.externalCustomerCode', label: 'Müşteri Kodu',      category: 'account_context', type: 'string', source: 'composite_join', joinTable: 'account', joinPath: 'companies', joinField: 'externalCustomerCode', picker: 'matchCaseCompanyId', excelWidth: 14 },
 ];
 
 const COLUMN_BY_ID = new Map(REPORT_COLUMNS.map((c) => [c.id, c]));
@@ -225,6 +251,9 @@ export function buildPrismaSelect(columns) {
   let needsCustomFields = false;
   // Phase 2D — join source'lar için per-relation select sub-object'i
   const joinSelects = {}; // { account: { vkn: true, ... }, ... }
+  // Phase 2D.2 — composite_join: 1:N nested select altında picker meta'sı
+  // gerektiren ek alanlar. joinSelects[relation][joinPath] yapısı:
+  //   { account: { addresses: { select: { city: true, isDefault: true, ... } } } }
   for (const col of columns) {
     if (col.source === 'scalar' && col.prismaField) {
       select[col.prismaField] = true;
@@ -233,11 +262,25 @@ export function buildPrismaSelect(columns) {
     } else if (col.source === 'join' && col.joinTable && col.joinField) {
       if (!joinSelects[col.joinTable]) joinSelects[col.joinTable] = {};
       joinSelects[col.joinTable][col.joinField] = true;
+    } else if (col.source === 'composite_join' && col.joinTable && col.joinPath && col.joinField) {
+      if (!joinSelects[col.joinTable]) joinSelects[col.joinTable] = {};
+      let pathBlock = joinSelects[col.joinTable][col.joinPath];
+      if (!pathBlock || typeof pathBlock !== 'object' || pathBlock === true) {
+        pathBlock = { select: {} };
+        joinSelects[col.joinTable][col.joinPath] = pathBlock;
+      }
+      pathBlock.select[col.joinField] = true;
+      // Picker meta — extractRawValue'nın pick edebilmesi için ek alanlar:
+      if (col.picker === 'defaultThenFirst') {
+        pathBlock.select.isDefault = true;
+      } else if (col.picker === 'matchCaseCompanyId') {
+        pathBlock.select.companyId = true;
+      }
     }
     // aggregate → ek select gerekmiyor
   }
   if (needsCustomFields) select.customFields = true;
-  // Account include: { account: { select: { vkn: true, ... } } }
+  // Account include: { account: { select: { vkn: true, addresses: {...} } } }
   for (const [relation, fields] of Object.entries(joinSelects)) {
     select[relation] = { select: fields };
   }

@@ -42,6 +42,42 @@ function readJsonPath(obj, path) {
   return cur;
 }
 
+/**
+ * Phase 2D.2 — Composite join picker.
+ *
+ * Case.account.<joinPath>[] içinden col.picker mantığına göre tek satır seçer
+ * ve col.joinField değerini döner. Boş/null collection → undefined.
+ *
+ * Pickers:
+ *   - 'defaultThenFirst' : isDefault=true olan ilk; yoksa array[0]
+ *                          (Address için: müşterinin işaret ettiği birincil
+ *                          adres; yoksa ilk eklenen)
+ *   - 'matchCaseCompanyId': companyId === dbRow.companyId olan; yoksa array[0]
+ *                          (AccountCompany için: vaka hangi tenant'tan
+ *                          açıldıysa, o tenant'taki müşteri ilişki kaydı —
+ *                          segment/paket/status semantik olarak bu kaydın)
+ *
+ * Defansif: relation null (örn. accountId yok), array boş, picker uyumsuz →
+ * undefined → applyFormat boş string.
+ */
+function pickCompositeJoinValue(col, dbRow) {
+  const related = dbRow[col.joinTable];
+  if (!related) return undefined;
+  const arr = related[col.joinPath];
+  if (!Array.isArray(arr) || arr.length === 0) return undefined;
+  let pick = null;
+  if (col.picker === 'defaultThenFirst') {
+    pick = arr.find((x) => x && x.isDefault === true) || arr[0];
+  } else if (col.picker === 'matchCaseCompanyId') {
+    const caseCompanyId = dbRow.companyId;
+    pick = arr.find((x) => x && x.companyId === caseCompanyId) || arr[0];
+  } else {
+    // Picker tanımsız → ilk satır (defansif)
+    pick = arr[0];
+  }
+  return pick ? pick[col.joinField] : undefined;
+}
+
 // Phase 1.5: tüm tip/format logic'i formatters.applyFormat'a taşındı.
 
 /**
@@ -73,6 +109,9 @@ export function extractRawValue(col, dbRow, parsedCf, aggregates) {
   if (col.source === 'join' && col.joinTable && col.joinField) {
     const related = dbRow[col.joinTable];
     return related ? related[col.joinField] : undefined;
+  }
+  if (col.source === 'composite_join' && col.joinTable && col.joinPath && col.joinField) {
+    return pickCompositeJoinValue(col, dbRow);
   }
   if (col.source === 'aggregate' && col.aggregateKey && col.aggregateField && aggregates) {
     const map = aggregates[col.aggregateKey];
@@ -124,6 +163,9 @@ export function buildReportRows(dbRows, columns, aggregates) {
         // raw undefined → formatter '' döner.
         const related = db[col.joinTable];
         raw = related ? related[col.joinField] : undefined;
+      } else if (col.source === 'composite_join' && col.joinTable && col.joinPath && col.joinField) {
+        // Phase 2D.2 — 1:N collection'dan picker mantığıyla tek satır seç.
+        raw = pickCompositeJoinValue(col, db);
       } else if (col.source === 'aggregate') {
         // Phase 2A: solutionSteps; Phase 2B.1: caseActivity + caseNote.
         // Aggregate map (Map<caseId, payload>) yoksa raw undefined → formatter
