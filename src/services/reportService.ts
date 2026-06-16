@@ -30,15 +30,25 @@ export type ReportColumnCategory =
   | 'smart_ticket_drafts'
   | 'smart_ticket_solution_steps'
   | 'performance_flow'
-  | 'account_pii';
+  | 'account_pii'
+  | 'account_context';
 
 export interface ReportColumnDef {
   id: string;
   label: string;
   category: ReportColumnCategory;
   type: ReportColumnType;
-  /** Phase 2A: 'aggregate' / Phase 2D: 'join' — backend ek fetch yapar. */
-  source: 'scalar' | 'json_path' | 'aggregate' | 'join';
+  /**
+   * Backend tarafından şekillendirilen kaynak — frontend mantığı için
+   * transparent (UI listColumns'tan gelir, picker UI'da kategoriye göre
+   * gruplar).
+   * - 'scalar': Case scalar field
+   * - 'json_path': Case.customFields JSON nested path
+   * - 'join': 1:1 relation (Phase 2D — Account PII)
+   * - 'aggregate': child-collection batch loader (Phase 2A/2B)
+   * - 'composite_join': 1:N relation + picker (Phase 2D.2 — Address, AccountCompany)
+   */
+  source: 'scalar' | 'json_path' | 'aggregate' | 'join' | 'composite_join';
   /** Phase 2D: PII kolonu işaretlemesi. UI badge/uyarı için kullanılabilir. */
   privacyTag?: 'pii';
 }
