@@ -2311,17 +2311,19 @@ export const lookupService = {
    * WR-Smart-Ticket Phase 1c — per-tenant taxonomy fetch.
    * GET /api/lookups/taxonomies?companyId=...
    *
-   * Response shape (PR-1a sözleşmesi):
+   * Response shape:
    *   {
    *     companyId,
    *     taxonomies: {
    *       platform:        [{ code, label, sortOrder, metadata? }, ...],
    *       businessProcess: [...],
    *       ...
-   *       rootCauseGroup:  [{ code, label, sortOrder,
-   *                           children: [{ code, label, sortOrder }, ...] }, ...]
+   *       rootCauseGroup:  [{ code, label, sortOrder }, ...],
+   *       rootCauseDetail: [{ code, label, sortOrder }, ...]
    *     }
    *   }
+   *   Kapanış kategorileri bağımsız düz listeler — rootCauseDetail artık
+   *   rootCauseGroup'a bağlı değildir (tüm detaylar her grupta seçilebilir).
    *
    * NOT: bootstrap'a dahil edilmedi — Smart Ticket intake'i flag-arkası
    * şu an. Flag açıldığında intake screen on-demand çağırır; mevcut
@@ -2345,6 +2347,7 @@ export const lookupService = {
           affectedObject: [],
           impact: [],
           rootCauseGroup: [],
+          rootCauseDetail: [],
           resolutionType: [],
           permanentPrevention: [],
         },
@@ -2564,9 +2567,13 @@ export interface SmartTicketTaxonomyItem {
   sortOrder: number;
   metadata?: unknown;
 }
-export interface SmartTicketRootCauseGroup extends SmartTicketTaxonomyItem {
-  children: SmartTicketTaxonomyItem[];
-}
+/**
+ * @deprecated Kapanış decouple (feature/closure-taxonomy-decouple) sonrası
+ * rootCauseGroup düz bir taksonomidir — artık `children` taşımaz ve
+ * rootCauseDetail bağımsız bir liste olarak döner. SmartTicketTaxonomyItem
+ * ile özdeş; eski importlar kırılmasın diye alias korunur.
+ */
+export type SmartTicketRootCauseGroup = SmartTicketTaxonomyItem;
 export interface SmartTicketTaxonomyResponse {
   companyId: string;
   taxonomies: {
@@ -2575,7 +2582,8 @@ export interface SmartTicketTaxonomyResponse {
     operationType: SmartTicketTaxonomyItem[];
     affectedObject: SmartTicketTaxonomyItem[];
     impact: SmartTicketTaxonomyItem[];
-    rootCauseGroup: SmartTicketRootCauseGroup[];
+    rootCauseGroup: SmartTicketTaxonomyItem[];
+    rootCauseDetail: SmartTicketTaxonomyItem[];
     resolutionType: SmartTicketTaxonomyItem[];
     permanentPrevention: SmartTicketTaxonomyItem[];
   };

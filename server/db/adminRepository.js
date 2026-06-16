@@ -1834,35 +1834,12 @@ const TAXONOMY_DEF_SELECT = {
   updatedAt: true,
 };
 
-async function assertParentValid({
-  taxonomyType,
-  parentId,
-  companyId,
-  excludeId = null,
-}) {
-  if (taxonomyType === 'rootCauseDetail') {
-    if (!parentId) {
-      throw new AdminError('rootCauseDetail için parent (Kök Neden Grubu) zorunlu.', 400);
-    }
-    const parent = await prisma.taxonomyDef.findUnique({
-      where: { id: parentId },
-      select: { id: true, companyId: true, taxonomyType: true },
-    });
-    if (!parent) throw new AdminError('Parent satır bulunamadı.', 400);
-    if (parent.companyId !== companyId) {
-      throw new AdminError('Parent farklı şirkete ait — cross-tenant referans reddedildi.', 400);
-    }
-    if (parent.taxonomyType !== 'rootCauseGroup') {
-      throw new AdminError("rootCauseDetail parent'ı rootCauseGroup tipinde olmalı.", 400);
-    }
-    if (excludeId && parent.id === excludeId) {
-      throw new AdminError('Bir satır kendi parent\'ı olamaz.', 400);
-    }
-    return parentId;
-  }
-  if (parentId) {
-    throw new AdminError(`${taxonomyType} tipi için parent kullanılmaz.`, 400);
-  }
+// Kapanış + açılış taksonomileri BAĞIMSIZ düz listelerdir (ürün kararı:
+// kapanış kategorileri birbirine bağlı olmamalı). rootCauseDetail artık
+// rootCauseGroup'a parent ile bağlanmaz; parentId bu akışta hiçbir tip için
+// yazılmaz — her zaman null döner. TaxonomyDef.parentId kolonu şemada
+// forward-compat için durur ama kullanılmaz.
+async function assertParentValid() {
   return null;
 }
 
@@ -2012,9 +1989,8 @@ export const taxonomyDefRepo = {
 
   async remove(id, allowedCompanyIds) {
     // SOFT DELETE — spec gereği hard delete yasak. isActive=false yapılır.
-    // rootCauseGroup pasifleştirilirse children kalır (Smart Ticket UI ileri
-    // PR'da `includeInactive=false` ile listeleyecek; child'lar parent'siz
-    // gözükmez çünkü filter where parent.isActive=true ile birleşir orada).
+    // Kapanış decouple — taksonomiler bağımsız; parent/child ilişkisi yok,
+    // pasifleştirme yalnız ilgili satırı etkiler.
     const target = await prisma.taxonomyDef.findUnique({
       where: { id },
       select: { id: true, companyId: true, isActive: true },

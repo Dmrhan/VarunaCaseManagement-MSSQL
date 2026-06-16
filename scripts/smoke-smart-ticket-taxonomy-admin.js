@@ -17,12 +17,12 @@
  *   5.  Duplicate code (aynı company + type) → 409 reddedilir
  *   6.  Cross-tenant create reddedilir (allowedCompanyIds = []
  *       → "Bu şirkete taxonomy erişim yetkin yok.")
- *   7.  Create rootCauseGroup → parentId default null
- *   8.  Create rootCauseDetail parentId yokken → 400 reddedilir
- *   9.  Create rootCauseDetail parent başka company → 400 reddedilir
- *   10. Create rootCauseDetail parent taxonomyType ≠ rootCauseGroup → 400
- *   11. Create rootCauseDetail parent doğru → OK
- *   12. rootCauseGroup için parentId set etmeye çalışmak → 400 reddedilir
+ *   7.  Create rootCauseGroup → parentId null
+ *   8.  Kapanış decouple — rootCauseDetail parent'sız oluşturulur → OK (parentId null)
+ *   9.  Kapanış decouple — parentId verilse bile null kaydedilir (yok sayılır)
+ *   10. (decouple — eski "yanlış tip parent → 400" kuralı kaldırıldı, SKIP)
+ *   11. (decouple — eski "parent zorunlu → OK" kuralı kaldırıldı, SKIP)
+ *   12. Kapanış decouple — rootCauseGroup update parentId → yok sayılır (null)
  *   13. Update taxonomyType değiştirme denemesi → 400 reddedilir
  *   14. Update companyId değiştirme denemesi → 400 reddedilir
  */
@@ -235,104 +235,70 @@ try {
   bad('7) create rootCauseGroup', err?.message ?? String(err));
 }
 
-// ─── Senaryo 8: rootCauseDetail parent yok → 400 ──────────────────────────
+// ─── Senaryo 8: Kapanış decouple — rootCauseDetail parent'sız → OK ────────
+//
+// Eski kural "rootCauseDetail parent zorunlu → 400" KALDIRILDI. Kapanış
+// kategorileri bağımsız; detay parent'sız oluşturulur (parentId null).
 
-await expectThrows('8) rootCauseDetail parent yok → 400', 400, async () => {
-  await taxonomyDefRepo.create(
+let rcd;
+try {
+  rcd = await taxonomyDefRepo.create(
     {
       companyId,
       taxonomyType: 'rootCauseDetail',
       code: `${PREFIX}.rcd.noparent`,
-      label: 'orphan',
+      label: 'Smoke RCD (flat)',
+      sortOrder: 998,
     },
     ALLOWED,
   );
-});
-
-// ─── Senaryo 9: rootCauseDetail parent başka company → 400 ────────────────
-
-if (otherCompanyId) {
-  // Önce diğer company'de bir rootCauseGroup yarat (allowedCompanyIds dolu)
-  let foreignParent = null;
-  try {
-    foreignParent = await taxonomyDefRepo.create(
-      {
-        companyId: otherCompanyId,
-        taxonomyType: 'rootCauseGroup',
-        code: `${PREFIX}.rcg.foreign`,
-        label: 'Foreign',
-      },
-      [otherCompanyId],
-    );
-    created.push(foreignParent.id);
-  } catch (err) {
-    note('9) cross-tenant parent setup', err?.message ?? String(err));
+  created.push(rcd.id);
+  if (rcd.parentId === null && rcd.taxonomyType === 'rootCauseDetail') {
+    ok('8) rootCauseDetail parent\'sız oluşturuldu → OK (parentId null)');
+  } else {
+    bad('8) rootCauseDetail flat create', JSON.stringify(rcd));
   }
-
-  if (foreignParent) {
-    await expectThrows('9) rootCauseDetail parent cross-tenant → 400', 400, async () => {
-      await taxonomyDefRepo.create(
-        {
-          companyId,
-          taxonomyType: 'rootCauseDetail',
-          code: `${PREFIX}.rcd.foreign`,
-          label: 'foreign-parent',
-          parentId: foreignParent.id,
-        },
-        ALLOWED,
-      );
-    });
-  }
-} else {
-  note('9) cross-tenant parent test', 'DB\'de ikinci şirket yok, SKIP');
+} catch (err) {
+  bad('8) rootCauseDetail flat create', err?.message ?? String(err));
 }
 
-// ─── Senaryo 10: parent taxonomyType yanlış → 400 ─────────────────────────
+// ─── Senaryo 9: Decouple — parentId verilse bile null kaydedilir ──────────
 
-if (bp) {
-  await expectThrows('10) rootCauseDetail parent yanlış tip → 400', 400, async () => {
-    await taxonomyDefRepo.create(
-      {
-        companyId,
-        taxonomyType: 'rootCauseDetail',
-        code: `${PREFIX}.rcd.badparent`,
-        label: 'bad type',
-        parentId: bp.id, // businessProcess; rootCauseGroup değil
-      },
-      ALLOWED,
-    );
-  });
-}
-
-// ─── Senaryo 11: rootCauseDetail parent doğru → OK ────────────────────────
-
-let rcd;
 if (rcg) {
   try {
-    rcd = await taxonomyDefRepo.create(
+    const rcd2 = await taxonomyDefRepo.create(
       {
         companyId,
         taxonomyType: 'rootCauseDetail',
-        code: `${PREFIX}.rcd.ok`,
-        label: 'Smoke RCD',
-        parentId: rcg.id,
+        code: `${PREFIX}.rcd.ignoredparent`,
+        label: 'parentId ignored',
+        parentId: rcg.id, // decouple — yok sayılmalı, null kaydedilmeli
       },
       ALLOWED,
     );
-    created.push(rcd.id);
-    if (rcd.parentId === rcg.id) ok('11) rootCauseDetail parent doğru → OK');
-    else bad('11) rootCauseDetail parent doğru', JSON.stringify(rcd));
+    created.push(rcd2.id);
+    if (rcd2.parentId === null) ok('9) parentId verildi ama null kaydedildi (decouple)');
+    else bad('9) parentId ignore edilmedi', JSON.stringify(rcd2));
   } catch (err) {
-    bad('11) rootCauseDetail parent doğru', err?.message ?? String(err));
+    bad('9) parentId ignore', err?.message ?? String(err));
   }
 }
 
-// ─── Senaryo 12: rootCauseGroup'a parentId set etmek → 400 ────────────────
+// ─── Senaryo 10-11: Eski parent doğrulama kuralları kaldırıldı ────────────
+
+note('10) parent tip/tenant doğrulaması', 'decouple — kural kaldırıldı, SKIP');
+note('11) rootCauseDetail parent zorunlu', 'decouple — kaldırıldı (bkz. 8), SKIP');
+
+// ─── Senaryo 12: Decouple — rootCauseGroup update parentId → null ─────────
 
 if (rcg && rcd) {
-  await expectThrows('12) rootCauseGroup için parentId set → 400', 400, async () => {
-    await taxonomyDefRepo.update(rcg.id, { parentId: rcd.id }, ALLOWED);
-  });
+  try {
+    const updated = await taxonomyDefRepo.update(rcg.id, { parentId: rcd.id }, ALLOWED);
+    if (updated.parentId === null) ok('12) rootCauseGroup update: parentId yok sayıldı (null)');
+    else bad('12) rootCauseGroup parentId', JSON.stringify(updated));
+  } catch (err) {
+    bad('12) rootCauseGroup update parentId', err?.message ?? String(err));
+  }
 }
 
 // ─── Senaryo 13: Update taxonomyType denemesi → 400 ───────────────────────

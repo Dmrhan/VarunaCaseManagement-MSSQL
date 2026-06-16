@@ -25,7 +25,6 @@ import {
   caseService,
   lookupService,
   type SmartTicketTaxonomyResponse,
-  type SmartTicketRootCauseGroup,
   type SmartTicketTaxonomyItem,
   type SuggestClosureResponse,
 } from '@/services/caseService';
@@ -218,25 +217,11 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     };
   }, [isSmartTicket, pending, item.companyId, closureTax]);
 
-  // Kök Neden Grubu değişince Detay seçimini sıfırla — AMA KB pre-fill
-  // sırasında detail'i ezme.
-  //
-  // Codex P2 (PR #469 review) — handleKbSuggest aynı render'da
-  // hem setClosureRcg(group) hem setClosureRcd(detail) çağırıyordu;
-  // bu useEffect group değişimini görüp detail'i hemen siliyordu.
-  // Suppress ref ile pre-fill batched setState'i koruyoruz.
-  const closureRcdResetSuppressRef = useRef(false);
-  useEffect(() => {
-    if (closureRcdResetSuppressRef.current) {
-      closureRcdResetSuppressRef.current = false;
-      return;
-    }
-    setClosureRcd('');
-  }, [closureRcg]);
-
-  const closureRcgList: SmartTicketRootCauseGroup[] = closureTax?.rootCauseGroup ?? [];
-  const closureRcdList: SmartTicketTaxonomyItem[] =
-    closureRcgList.find((g) => g.code === closureRcg)?.children ?? [];
+  // Kapanış decouple — rootCauseDetail rootCauseGroup'tan bağımsızdır; grup
+  // değişiminde detayı sıfırlamaya gerek yok (tüm detaylar her zaman geçerli).
+  // Eski "grup değişince detayı temizle" effect'i + suppress ref kaldırıldı.
+  const closureRcgList: SmartTicketTaxonomyItem[] = closureTax?.rootCauseGroup ?? [];
+  const closureRcdList: SmartTicketTaxonomyItem[] = closureTax?.rootCauseDetail ?? [];
   const closureRtList: SmartTicketTaxonomyItem[] = closureTax?.resolutionType ?? [];
   const closurePpList: SmartTicketTaxonomyItem[] = closureTax?.permanentPrevention ?? [];
 
@@ -295,13 +280,6 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
       if (isSmartTicket) {
         const s = res.suggestions;
         if (s.rootCauseGroup && !closureRcg) {
-          // Codex P2 (PR #469 review) — RCG değişimi useEffect'te
-          // detail'i sıfırlıyor; pre-fill sırasında detail'i ezmemek
-          // için suppress ref kullanılır. Detail önerisi varsa bayrak
-          // set edilir, useEffect tek seferlik reset'i atlar.
-          if (s.rootCauseDetail) {
-            closureRcdResetSuppressRef.current = true;
-          }
           setClosureRcg(s.rootCauseGroup.code);
         }
         if (s.rootCauseDetail && !closureRcd) setClosureRcd(s.rootCauseDetail.code);
@@ -665,20 +643,11 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
                         ))}
                       </Select>
                     </Field>
-                    <Field
-                      label="Kök Neden Detayı"
-                      hint={
-                        closureRcg && closureRcdList.length === 0
-                          ? 'Bu grubun detay satırı yok.'
-                          : undefined
-                      }
-                    >
+                    <Field label="Kök Neden Detayı">
                       <Select
                         value={closureRcd}
                         onChange={(e) => setClosureRcd(e.target.value)}
-                        disabled={
-                          closureTaxLoading || !closureRcg || closureRcdList.length === 0
-                        }
+                        disabled={closureTaxLoading || closureRcdList.length === 0}
                       >
                         <option value="">— Seçim yok —</option>
                         {closureRcdList.map((d) => (

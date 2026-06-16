@@ -16,13 +16,15 @@
  * DB invariants (DATABASE_URL erişilebilir + company var + taxonomy seed
  * uygulanmışsa; aksi takdirde graceful SKIP):
  *   3. TaxonomyDef row count per taxonomyType ≥ minimum eşik.
- *   4. Her rootCauseDetail satırı parentId NOT NULL ve parent satır
- *      taxonomyType='rootCauseGroup' olmalı (hierarchy invariant).
- *   5. rootCauseGroup satırları parentId IS NULL (kendi başına root).
+ *   4. Kapanış decouple — TÜM kapanış satırları (rootCauseGroup /
+ *      rootCauseDetail / resolutionType / permanentPrevention) parentId
+ *      IS NULL; rootCauseDetail artık gruba bağlı DEĞİL (flat invariant).
+ *   5. (4 ile birleşti — tüm kapanış tipleri flat.)
  *   6. composite unique (companyId, taxonomyType, code) çakışma yok
  *      (DB constraint zaten engelliyor; verify by groupBy duplicates).
- *   7. Lookup repository-mantığı (route içindekiyle aynı sorgu) hierarchy
- *      structure doğru: rootCauseGroup elemanları children ile geliyor.
+ *   7. Lookup repository-mantığı (route içindekiyle aynı sorgu): kapanış
+ *      tipleri düz listeler döner; rootCauseDetail kendi düz listesinde,
+ *      rootCauseGroup.children YOK.
  *
  * Smart Ticket Case akışı bu PR'da DOKUNULMADI — Case.category/subCategory/
  * requestType alanları aynen mevcut; bu smoke onları okuyup değişmedi mi
@@ -185,34 +187,18 @@ if (!companyId) {
     if (allTypesOk) ok('per-type counts ≥ minimum eşik');
     else bad('per-type counts < eşik');
 
-    // 4. Every rootCauseDetail has non-null parentId AND parent is rootCauseGroup.
-    const orphans = await prisma.taxonomyDef.count({
-      where: { companyId, taxonomyType: 'rootCauseDetail', parentId: null },
+    // 4. Kapanış decouple — tüm kapanış tipleri parentId IS NULL (flat).
+    //    rootCauseDetail artık gruba bağlı değil; eski hiyerarşi kaldırıldı.
+    //    (5. invariant buraya birleşti — rootCauseGroup da dahil tüm tipler.)
+    const linkedClosure = await prisma.taxonomyDef.count({
+      where: {
+        companyId,
+        taxonomyType: { in: ['rootCauseGroup', 'rootCauseDetail', 'resolutionType', 'permanentPrevention'] },
+        parentId: { not: null },
+      },
     });
-    if (orphans === 0) ok('rootCauseDetail parentId NOT NULL invariant');
-    else bad('rootCauseDetail orphans', `${orphans} satır parentId NULL`);
-
-    const detailWithParent = await prisma.taxonomyDef.findMany({
-      where: { companyId, taxonomyType: 'rootCauseDetail' },
-      select: { id: true, parent: { select: { taxonomyType: true, companyId: true } } },
-    });
-    const wrongParentType = detailWithParent.filter(
-      (d) => d.parent && d.parent.taxonomyType !== 'rootCauseGroup',
-    ).length;
-    const crossTenant = detailWithParent.filter(
-      (d) => d.parent && d.parent.companyId !== companyId,
-    ).length;
-    if (wrongParentType === 0) ok('rootCauseDetail.parent.taxonomyType = rootCauseGroup');
-    else bad('parent.taxonomyType mismatch', `${wrongParentType} child wrong parent type`);
-    if (crossTenant === 0) ok('rootCauseDetail.parent.companyId = same tenant');
-    else bad('cross-tenant parent', `${crossTenant} child farklı tenant'ı parent gösteriyor`);
-
-    // 5. rootCauseGroup rows have NULL parentId.
-    const groupWithParent = await prisma.taxonomyDef.count({
-      where: { companyId, taxonomyType: 'rootCauseGroup', parentId: { not: null } },
-    });
-    if (groupWithParent === 0) ok('rootCauseGroup parentId IS NULL');
-    else bad('rootCauseGroup parentId set', `${groupWithParent} root düğümü parent'a bağlanmış`);
+    if (linkedClosure === 0) ok('kapanış taksonomileri flat — parentId IS NULL (decouple)');
+    else bad('kapanış parentId set', `${linkedClosure} satır hâlâ parentId taşıyor (backfill gerekli)`);
 
     // 6. composite unique → groupBy returning >1 for any (type, code) means dup.
     const dupCheck = await prisma.taxonomyDef.groupBy({
@@ -224,56 +210,32 @@ if (!companyId) {
     if (dupCheck.length === 0) ok('composite unique (companyId, taxonomyType, code)');
     else bad('duplicate codes', `${dupCheck.length} duplicate (type,code) pair`);
 
-    // 7. Lookup-shape: rootCauseGroup nested children present + ordered.
-    const allRows = await prisma.taxonomyDef.findMany({
-      where: { companyId, isActive: true, taxonomyType: { in: ['rootCauseGroup', 'rootCauseDetail'] } },
-      select: { id: true, taxonomyType: true, code: true, label: true, parentId: true, sortOrder: true },
-      orderBy: [{ taxonomyType: 'asc' }, { sortOrder: 'asc' }],
+    // 7. Lookup-shape: kapanış decouple — rootCauseDetail kendi düz listesinde
+    //    döner (rootCauseGroup.children YOK) ve hepsi flat (parentId null).
+    const rcdRows = await prisma.taxonomyDef.findMany({
+      where: { companyId, isActive: true, taxonomyType: 'rootCauseDetail' },
+      select: { id: true, parentId: true },
     });
-    const childrenByParent = new Map();
-    for (const r of allRows) {
-      if (r.taxonomyType === 'rootCauseDetail' && r.parentId) {
-        if (!childrenByParent.has(r.parentId)) childrenByParent.set(r.parentId, []);
-        childrenByParent.get(r.parentId).push(r);
-      }
-    }
-    const groupsWithoutChildren = allRows
-      .filter((r) => r.taxonomyType === 'rootCauseGroup')
-      .filter((g) => (childrenByParent.get(g.id) ?? []).length === 0);
-    if (groupsWithoutChildren.length === 0) ok('her rootCauseGroup ≥1 child detail içerir');
-    else {
-      // Bu bir bad değil, warning. Bazı rootCauseGroup'ların hiç child'ı olmayabilir.
-      note(
-        'rootCauseGroup children eksik',
-        `${groupsWithoutChildren.length} grup child'sız (örn. ${groupsWithoutChildren.slice(0, 3).map((g) => g.code).join(', ')})`,
-      );
+    if (rcdRows.length === 0) {
+      note('rootCauseDetail flat list', 'hiç detay yok, SKIP');
+    } else if (rcdRows.every((r) => r.parentId == null)) {
+      ok(`rootCauseDetail düz liste — ${rcdRows.length} satır, hepsi parentId null`);
+    } else {
+      bad('rootCauseDetail flat değil', `${rcdRows.filter((r) => r.parentId != null).length} satır parentId taşıyor`);
     }
 
-    // 8. Endpoint simülasyonu: ?taxonomyType=rootCauseGroup filter'ı verilirse
-    //    where rootCauseGroup'a daraltılmamalı — detail satırları da çekilmeli
-    //    ki nested children dolu dönsün (Codex P2 regression guard).
-    const filteredRows = await prisma.taxonomyDef.findMany({
-      where: {
-        companyId,
-        isActive: true,
-        taxonomyType: { in: ['rootCauseGroup', 'rootCauseDetail'] },
-      },
-      select: { id: true, taxonomyType: true, parentId: true },
+    // 8. Endpoint simülasyonu: kapanış decouple — ?taxonomyType=rootCauseGroup
+    //    YALNIZ rootCauseGroup satırlarını çeker (detay sızmaz). Route artık
+    //    where'i tek tipe daraltıyor; eski "children'ı doldur" özel-durumu yok.
+    const groupOnlyRows = await prisma.taxonomyDef.findMany({
+      where: { companyId, isActive: true, taxonomyType: 'rootCauseGroup' },
+      select: { id: true, taxonomyType: true },
     });
-    const childMapSim = new Map();
-    for (const r of filteredRows) {
-      if (r.taxonomyType === 'rootCauseDetail' && r.parentId) {
-        if (!childMapSim.has(r.parentId)) childMapSim.set(r.parentId, 0);
-        childMapSim.set(r.parentId, childMapSim.get(r.parentId) + 1);
-      }
-    }
-    const groupsWithChildrenSim = filteredRows
-      .filter((r) => r.taxonomyType === 'rootCauseGroup')
-      .filter((g) => (childMapSim.get(g.id) ?? 0) > 0).length;
-    if (groupsWithChildrenSim > 0) {
-      ok(`?taxonomyType=rootCauseGroup nested children dolu (${groupsWithChildrenSim} grup)`);
+    const leaked = groupOnlyRows.filter((r) => r.taxonomyType !== 'rootCauseGroup').length;
+    if (leaked === 0) {
+      ok(`?taxonomyType=rootCauseGroup yalnız grup döner (${groupOnlyRows.length} satır, detay sızmadı)`);
     } else {
-      bad('?taxonomyType=rootCauseGroup nested children boş', 'detail rows çekilmemiş olabilir');
+      bad('?taxonomyType=rootCauseGroup detay sızdı', `${leaked} non-group satır`);
     }
   }
 }
