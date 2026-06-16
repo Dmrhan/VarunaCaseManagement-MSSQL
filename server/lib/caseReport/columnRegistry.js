@@ -140,6 +140,18 @@ export const REPORT_COLUMNS = [
   { id: 'note.lastNoteAuthor',      label: 'Son Not Yazarı',         category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'lastNoteAuthor' },
   { id: 'note.internalNoteCount',   label: 'İç Not Sayısı',         category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'internalNoteCount' },
   { id: 'note.externalNoteCount',   label: 'Dış Not Sayısı',        category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseNote', aggregateField: 'externalNoteCount' },
+
+  // ── Performans / Akış (Phase 2B.2 — File + Call + Transfer aggregate) ──
+  // Aynı kategorinin devamı. Smart Ticket / klasik vaka ayrımı YOK.
+  // Hiç dosya/çağrı/transfer olmayan vakalarda 0 / '' (formatter) — rapor kırılmaz.
+  { id: 'file.fileCount',                label: 'Dosya Sayısı',              category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseFile',     aggregateField: 'fileCount' },
+  { id: 'file.totalSizeMb',              label: 'Toplam Dosya Boyutu (MB)',  category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseFile',     aggregateField: 'totalSizeMb' },
+  { id: 'call.callCount',                label: 'Çağrı Sayısı',              category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'callCount' },
+  { id: 'call.lastCallResult',           label: 'Son Çağrı Sonucu',          category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'lastCallResult' },
+  { id: 'call.lastCallAt',               label: 'Son Çağrı Tarihi',           category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseCall',     aggregateField: 'lastCallAt', format: 'datetimeTr', excelWidth: 18 },
+  { id: 'transfer.transferCount',        label: 'Transfer Sayısı',           category: 'performance_flow', type: 'number',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'transferCount' },
+  { id: 'transfer.lastTransferTargetTeam', label: 'Son Transfer Hedef Takım', category: 'performance_flow', type: 'string',   source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'lastTransferTargetTeam', excelWidth: 24 },
+  { id: 'transfer.lastTransferAt',       label: 'Son Transfer Tarihi',       category: 'performance_flow', type: 'datetime', source: 'aggregate', aggregateKey: 'caseTransfer', aggregateField: 'lastTransferAt', format: 'datetimeTr', excelWidth: 18 },
 ];
 
 const COLUMN_BY_ID = new Map(REPORT_COLUMNS.map((c) => [c.id, c]));
@@ -226,6 +238,30 @@ export function needsCaseActivityAggregates(columns) {
 export function needsCaseNoteAggregates(columns) {
   for (const col of columns) {
     if (col.source === 'aggregate' && col.aggregateKey === 'caseNote') return true;
+  }
+  return false;
+}
+
+/** Phase 2B.2: en az bir CaseAttachment (Dosya) aggregate kolonu seçili mi? */
+export function needsCaseFileAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'caseFile') return true;
+  }
+  return false;
+}
+
+/** Phase 2B.2: en az bir CaseCallLog (Çağrı) aggregate kolonu seçili mi? */
+export function needsCaseCallAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'caseCall') return true;
+  }
+  return false;
+}
+
+/** Phase 2B.2: en az bir CaseTransfer (Transfer) aggregate kolonu seçili mi? */
+export function needsCaseTransferAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'caseTransfer') return true;
   }
   return false;
 }
