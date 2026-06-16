@@ -50,11 +50,19 @@ const ESCALATION_LABELS = {
   ÜstYönetim: 'Üst Yönetim',
 };
 
+const SOLUTION_STEP_SOURCE_LABELS = {
+  ai_suggested_step: 'AI Önerisi',
+  external_kb: 'Bilgi Bankası',
+  manual: 'Manuel',
+  similar_case: 'Benzer Vaka',
+};
+
 const ENUM_MAPS = {
   caseStatus: STATUS_LABELS,
   casePriority: PRIORITY_LABELS,
   caseType: CASE_TYPE_LABELS,
   escalationLevel: ESCALATION_LABELS,
+  solutionStepSource: SOLUTION_STEP_SOURCE_LABELS,
 };
 
 // Intl.DateTimeFormat instance reuse — her satırda yeni instance oluşturmak
@@ -116,6 +124,7 @@ export function applyFormat(col, raw) {
       case 'casePriority':
       case 'caseType':
       case 'escalationLevel':
+      case 'solutionStepSource':
         return formatEnum(raw, fmt);
       case 'datetimeTr':
         return formatDateTr(raw);

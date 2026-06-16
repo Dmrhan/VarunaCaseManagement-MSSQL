@@ -27,14 +27,16 @@ export type ReportColumnCategory =
   | 'resolution'
   | 'smart_ticket_opening'
   | 'smart_ticket_closure'
-  | 'smart_ticket_drafts';
+  | 'smart_ticket_drafts'
+  | 'smart_ticket_solution_steps';
 
 export interface ReportColumnDef {
   id: string;
   label: string;
   category: ReportColumnCategory;
   type: ReportColumnType;
-  source: 'scalar' | 'json_path';
+  /** Phase 2A: 'aggregate' source — backend tek batch fetch ile hesaplar. */
+  source: 'scalar' | 'json_path' | 'aggregate';
 }
 
 export interface ReportFilters {
