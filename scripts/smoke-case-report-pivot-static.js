@@ -219,7 +219,7 @@ console.log('\n── 5c) Sparse min/max — empty bucket null (Codex P2 #3) ─
   // rowLabel sadece veri varsa Set'e eklenir. Defansif kontrol: tek case ile
   // 1 row × 1 col, sonra empty cell senaryosu yukarıda zaten.
 
-  // count + sum + avg regression: empty bucket cell hâlâ 0 (semantik)
+  // count regression: empty bucket cell hâlâ 0 (additive, "0 case" = 0 count)
   const pCount = computePivot({
     rowValues: ['A', 'B'], colValues: ['X', 'Y'],
     measureValues: [10, 20], measureFn: 'count',
@@ -227,13 +227,70 @@ console.log('\n── 5c) Sparse min/max — empty bucket null (Codex P2 #3) ─
   expect('5c.18 count A×Y empty = 0 (semantik regression)', pCount.matrix['A']['Y'], 0);
   expect('5c.19 count rowTotal.A = 1 (only A×X)', pCount.rowTotals['A'], 1);
   expect('5c.20 count grandTotal = 2', pCount.grandTotal, 2);
+}
 
+// ── 5d) Codex P2 #4-5 (Phase 3.2) — sum/avg empty bucket null ─
+console.log('\n── 5d) Phase 3.2: sum/avg empty bucket null ─────────────');
+{
+  // Codex P2 #4: avg empty bucket eski impl'de 0 dönüyordu →
+  //   formatPivotCell(0,'avg') = "0.00" → clickable=true → drill modal
+  //   altında case yok. Fix: empty bucket → null (count hariç tüm fn'ler).
+  // Codex P2 #5: sum=0 meşru veri (transferCount=0 case'ler), ama eski
+  //   empty bucket de 0 dönüyordu — frontend ayırt edemiyordu. Fix:
+  //   empty=null, meşru 0 string olarak render edilir ve clickable kalır.
+
+  // --- avg sparse: A×X dolu, A×Y empty ---
+  const pAvg = computePivot({
+    rowValues: ['A', 'B'], colValues: ['X', 'Y'],
+    measureValues: [10, 20], measureFn: 'avg',
+  });
+  expect('5d.1 avg A×X cell = 10', pAvg.matrix['A']['X'], 10);
+  expect('5d.2 avg A×Y empty = null (NOT 0)', pAvg.matrix['A']['Y'], null);
+  expect('5d.3 avg B×X empty = null (NOT 0)', pAvg.matrix['B']['X'], null);
+  expect('5d.4 avg B×Y cell = 20', pAvg.matrix['B']['Y'], 20);
+  // avg totals her durumda null (semantik) — değişmedi
+  expect('5d.5 avg rowTotal.A = null', pAvg.rowTotals['A'], null);
+  expect('5d.6 avg grandTotal = null', pAvg.grandTotal, null);
+
+  // --- sum sparse: A×X=10, A×Y empty ---
   const pSum = computePivot({
     rowValues: ['A', 'B'], colValues: ['X', 'Y'],
     measureValues: [10, 20], measureFn: 'sum',
   });
-  expect('5c.21 sum A×Y empty = 0 (semantik regression)', pSum.matrix['A']['Y'], 0);
-  expect('5c.22 sum rowTotal.A = 10 (sum of 10 + 0)', pSum.rowTotals['A'], 10);
+  expect('5d.7 sum A×X cell = 10', pSum.matrix['A']['X'], 10);
+  expect('5d.8 sum A×Y empty = null (NOT 0, Phase 3.2)', pSum.matrix['A']['Y'], null);
+  expect('5d.9 sum B×X empty = null (NOT 0, Phase 3.2)', pSum.matrix['B']['X'], null);
+  expect('5d.10 sum B×Y cell = 20', pSum.matrix['B']['Y'], 20);
+  // sum totals null-filter pattern (min/max ile uyumlu)
+  expect('5d.11 sum rowTotal.A = 10 (only A×X non-null)', pSum.rowTotals['A'], 10);
+  expect('5d.12 sum rowTotal.B = 20 (only B×Y non-null)', pSum.rowTotals['B'], 20);
+  expect('5d.13 sum colTotal.X = 10', pSum.colTotals['X'], 10);
+  expect('5d.14 sum colTotal.Y = 20', pSum.colTotals['Y'], 20);
+  expect('5d.15 sum grandTotal = 30', pSum.grandTotal, 30);
+
+  // --- Meşru sum=0 (drill semantiği: 0 ≠ empty) ---
+  // Tüm case'lerde transferCount=0 → bucket dolu ama sum=0
+  const pSumZero = computePivot({
+    rowValues: ['A', 'A'], colValues: ['X', 'X'],
+    measureValues: [0, 0], measureFn: 'sum',
+  });
+  expect('5d.16 sum legit 0 cell (not null)', pSumZero.matrix['A']['X'], 0);
+  // Frontend clickable predicate: v != null → tıklanabilir (drill açılır)
+  expect('5d.17 sum legit 0 is non-null (drill clickable contract)',
+    pSumZero.matrix['A']['X'] !== null, true);
+
+  // --- Meşru avg=0 ---
+  const pAvgZero = computePivot({
+    rowValues: ['A', 'A'], colValues: ['X', 'X'],
+    measureValues: [0, 0], measureFn: 'avg',
+  });
+  expect('5d.18 avg legit 0 cell (not null)', pAvgZero.matrix['A']['X'], 0);
+
+  // --- Tamamen boş row için sum totals null ---
+  // 1 row × 2 col, sadece bir bucket dolu (ama bu test için tamamen boş
+  // row durumu pratikte oluşmaz; rowLabel set sadece veri varsa eklenir.)
+  // Onun yerine: sum'da tüm cell'leri null olan row → total null.
+  // Bunu compute etmek için fixture artificial; defansif testten geçiyoruz.
 }
 
 // ── 5b) Codex P2 #1 — extractRawValue helper ───────────────

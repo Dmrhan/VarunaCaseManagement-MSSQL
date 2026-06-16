@@ -182,6 +182,12 @@ export function CaseReportStudioPage() {
   const [pivotMeasureFn, setPivotMeasureFn] = useState<PivotMeasureFn>('count');
   const [pivotMeasureColId, setPivotMeasureColId] = useState('');
   const [pivotData, setPivotData] = useState<PivotResponse | null>(null);
+  // Codex P2 (Phase 3.2 fix) — pivot hesaplandığı andaki filter snapshot'ı.
+  // Drill-down request'i bu snapshot'ı kullanmalı; aksi halde kullanıcı
+  // filter formunu değiştirip "Pivot Hesapla" basmazsa, görünen tablo eski
+  // veri olur ama drill yeni filter'larla farklı vakalar getirir — kullanıcı
+  // tıkladığı hücrenin altındaki vakaları görmez.
+  const [pivotFilters, setPivotFilters] = useState<ReportFilters | null>(null);
   const [pivotLoading, setPivotLoading] = useState(false);
   const [pivotError, setPivotError] = useState<string | null>(null);
   const [pivotExporting, setPivotExporting] = useState(false);
@@ -297,6 +303,9 @@ export function CaseReportStudioPage() {
     }
     setPivotLoading(true);
     setPivotError(null);
+    // Snapshot: filter formundan o anki değerleri shallow-clone et. Sonraki
+    // input değişiklikleri snapshot'ı bozmasın (drill ile tutarlı kalsın).
+    const snapshot: ReportFilters = { ...filters };
     const res = await reportService.pivot({
       rowColumnId: pivotRowId,
       colColumnId: pivotColId,
@@ -304,7 +313,7 @@ export function CaseReportStudioPage() {
         fn: pivotMeasureFn,
         ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
       },
-      filters,
+      filters: snapshot,
     });
     setPivotLoading(false);
     if (!res) {
@@ -312,11 +321,16 @@ export function CaseReportStudioPage() {
       return;
     }
     setPivotData(res);
+    setPivotFilters(snapshot);
   }
 
-  // Phase 3.2 — Drill-down: cell tıklanınca arkaya yatan case'leri çek
+  // Phase 3.2 — Drill-down: cell tıklanınca arkaya yatan case'leri çek.
+  // Codex P2 fix: drill, pivot hesaplandığı andaki filter snapshot'ı
+  // (`pivotFilters`) ile çağrılır — güncel `filters` state'i değil. Bu sayede
+  // kullanıcı form değiştirip "Pivot Hesapla" basmazsa, drill yine görünen
+  // tabloya uygun vakaları getirir.
   async function runDrill(rowLabel: string, colLabel: string) {
-    if (!pivotData) return;
+    if (!pivotData || !pivotFilters) return;
     setDrillContext({ rowLabel, colLabel });
     setDrillData(null);
     setDrillLoading(true);
@@ -325,7 +339,7 @@ export function CaseReportStudioPage() {
       colColumnId: pivotData.col.id,
       rowValue: rowLabel,
       colValue: colLabel,
-      filters,
+      filters: pivotFilters,
     });
     setDrillLoading(false);
     if (!res) return; // toast service tarafından
@@ -337,6 +351,9 @@ export function CaseReportStudioPage() {
     if (pivotMeasureFn !== 'count' && !pivotMeasureColId) return;
     setPivotExporting(true);
     try {
+      // Export de güncel filter formu yerine snapshot kullanmalı — ekranda
+      // gözüken tabloyu Excel'e yazmak için. Snapshot yoksa (henüz pivot
+      // hesaplanmamış — buton zaten disabled) güncel filter'a fallback.
       await reportService.pivotExportXlsx({
         rowColumnId: pivotRowId,
         colColumnId: pivotColId,
@@ -344,7 +361,7 @@ export function CaseReportStudioPage() {
           fn: pivotMeasureFn,
           ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
         },
-        filters,
+        filters: pivotFilters ?? filters,
       });
     } finally {
       setPivotExporting(false);
@@ -815,7 +832,15 @@ export function CaseReportStudioPage() {
                           {pivotData.colLabels.map((c) => {
                             const v = pivotData.matrix[r]?.[c];
                             const display = formatPivotCell(v, pivotData.measure.fn);
-                            const clickable = v != null && display !== '—' && display !== '0';
+                            // Codex P2 (Phase 3.2 fix) — Drill-down predicate:
+                            //   v == null  ⇒ empty bucket (backend null
+                            //                  sinyali sum/avg/min/max için)
+                            //   count fn   ⇒ ek olarak v > 0 (0 case = boş)
+                            // Önceki "display !== '0'" filtresi meşru 0
+                            // sum/min/max hücrelerini de engelliyordu.
+                            const clickable =
+                              v != null &&
+                              (pivotData.measure.fn === 'count' ? v > 0 : true);
                             return (
                               <td key={c} className="px-2 py-1 text-right text-slate-700 dark:text-ndark-text">
                                 {clickable ? (
