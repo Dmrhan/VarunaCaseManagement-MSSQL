@@ -17,7 +17,7 @@
  * old CaseDetailPage used them.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, Paperclip, Trash2, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -41,15 +41,25 @@ interface UploadProgress {
 export function FilesTab({
   item,
   onItemUpdated,
+  onUploadingChange,
 }: {
   item: Case;
   onItemUpdated: (c: Case) => void;
+  /** Opsiyonel — parent active upload state'i izlemek isterse. Smart Ticket
+   *  Stage 3 closure files section'da "Vakayı Kapat" butonu upload sırasında
+   *  disable edilir. Verilmezse default davranış (Case Detail Files tab'ı)
+   *  hiçbir değişiklik görmez. */
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
+
+  useEffect(() => {
+    onUploadingChange?.(uploading);
+  }, [uploading, onUploadingChange]);
 
   const remainingSlots = CASE_FILE_MAX_COUNT - item.files.length;
   const maxMb = Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024));
