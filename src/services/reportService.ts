@@ -93,6 +93,22 @@ export interface PivotResponse {
   total: number;
 }
 
+// Phase 3.2 — Drill-down
+export interface PivotDrillRequest {
+  rowColumnId: string;
+  colColumnId: string;
+  rowValue: string;
+  colValue: string;
+  filters?: ReportFilters;
+  columns?: string[];
+}
+
+export interface PivotDrillResponse {
+  rows: Record<string, unknown>[];
+  total: number;
+  columns: { id: string; label: string; type: ReportColumnType }[];
+}
+
 export const reportService = {
   async listColumns(): Promise<ReportColumnsResponse | undefined> {
     return apiFetch<ReportColumnsResponse>(`${BASE}/columns`, undefined, 'Rapor kolonları');
@@ -125,6 +141,50 @@ export const reportService = {
       },
       'Pivot raporu',
     );
+  },
+
+  async pivotDrill(req: PivotDrillRequest): Promise<PivotDrillResponse | undefined> {
+    return apiFetch<PivotDrillResponse>(
+      `${BASE}/pivot/drill`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      },
+      'Pivot detayı',
+    );
+  },
+
+  async pivotExportXlsx(req: PivotRequest): Promise<void> {
+    const token = await getAccessToken();
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    });
+    let r: Response;
+    try {
+      r = await fetch(`${BASE}/pivot/export`, {
+        method: 'POST', headers, body: JSON.stringify(req),
+      });
+    } catch (err) {
+      notify({ type: 'error', title: 'Pivot Excel export başarısız', message: 'Sunucuya ulaşılamadı.', duration: 5000 });
+      console.error('[reportService.pivotExportXlsx] network', err);
+      return;
+    }
+    if (!r.ok) {
+      let serverMessage = '';
+      try { const body = await r.json(); serverMessage = body?.message ?? body?.error ?? ''; }
+      catch { try { serverMessage = await r.text(); } catch {} }
+      notify({ type: 'error', title: `Pivot export başarısız (${r.status})`, message: serverMessage || 'Sunucu hatası.', duration: 6000 });
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `vaka-pivot-${stamp}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 
   /**
