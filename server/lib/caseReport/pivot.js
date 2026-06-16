@@ -118,20 +118,27 @@ export function computePivot(input) {
 
   // Matrix
   //
-  // Codex P2 #3 fix — Sparse pivot empty bucket için min/max cell'i NULL
-  // olarak işaretle. aggregate('min', []) = 0 dönüyordu; sparse veride
-  // "case yok" sinyali "min = 0" gibi yanlış sayıya çevriliyordu. Negatif
-  // measure değerlerde de inflate edici (gerçek max=-5 iken total=0).
+  // Codex P2 #3 (Phase 3.1) + Codex P2 #4-5 (Phase 3.2) — empty bucket
+  // sinyali NULL'a genişletildi:
   //
-  // Diğer fn'ler (count/sum/avg) için empty bucket cell hâlâ 0 — bu
-  // semantik doğru: 0 case → 0 count, 0 sum, 0 avg (avg totals zaten null).
+  //   count : empty bucket → 0     ("0 case" anlamlı, additive)
+  //   sum   : empty bucket → null  (meşru 0'ları "boş bucket"tan ayır;
+  //                                 0 = "transferCount=0 case'leri var")
+  //   avg   : empty bucket → null  (boş avg drill-down meşru görünüyordu)
+  //   min   : empty bucket → null  (Phase 3.1)
+  //   max   : empty bucket → null  (Phase 3.1)
+  //
+  // Bu null sinyali frontend drill clickable predicate'i için tek hakikat
+  // kaynağıdır: `v == null` ⇒ bucket boş, "0" string'i değil. Önceki
+  // semantik ("display !== '0'") meşru 0'ları engelleyip boş avg'leri
+  // tıklanabilir yapıyordu.
   const matrix = {};
   for (const r of rowLabels) {
     matrix[r] = {};
     const rb = buckets.get(r);
     for (const c of colLabels) {
       const vals = (rb && rb.get(c)) ?? [];
-      if (vals.length === 0 && (measureFn === 'min' || measureFn === 'max')) {
+      if (vals.length === 0 && measureFn !== 'count') {
         matrix[r][c] = null;
       } else {
         matrix[r][c] = aggregate(measureFn, vals);
@@ -139,15 +146,14 @@ export function computePivot(input) {
     }
   }
 
-  // Codex P2 #2 fix — Total semantics measure fn'e bağlı:
-  //   count, sum: additive (row total = sum of cells, vs.)
-  //   avg:        null (ortalamaların ortalaması yanlış olur — frontend "—")
-  //   min, max:   non-additive (row total = min/max of row cells).
-  //               Toplama yapılsa 10+20=30 gibi "imkansız" totals çıkar.
-  //
-  // Strateji: avg/min/max için aynı aggregate fn'i row/col toplamlarına
-  // tekrar uygula (cell değerlerini bucket olarak). avg için ek olarak null
-  // garantisi — UI "—" çizer.
+  // Codex P2 #2 fix + Phase 3.2 update — Total semantics measure fn'e bağlı:
+  //   count:    additive (row total = sum of cell counts)
+  //   sum:      additive ama null cell'ler filtrelenir (Phase 3.2 — empty
+  //             bucket null oldu; null + sayı = NaN olmasın). Tamamen
+  //             null row/col → total null.
+  //   avg:      null (ortalamaların ortalaması yanlış olur — UI "—")
+  //   min, max: non-additive — cell değerlerine aynı fn (null cell skip).
+  //             Toplama yapılsa 10+20=30 gibi "imkansız" totals çıkar.
   let rowTotals = {};
   let colTotals = {};
   let grandTotal = 0;
@@ -156,7 +162,7 @@ export function computePivot(input) {
     for (const r of rowLabels) rowTotals[r] = null;
     for (const c of colLabels) colTotals[c] = null;
     grandTotal = null;
-  } else if (measureFn === 'min' || measureFn === 'max') {
+  } else if (measureFn === 'sum' || measureFn === 'min' || measureFn === 'max') {
     // Cell değerlerini measureFn ile yeniden agrege et — null cell'leri
     // (boş bucket) skip et. Tamamen boş row/col → totals null. Frontend
     // formatPivotCell null'a "—" çizer.
@@ -169,7 +175,6 @@ export function computePivot(input) {
       const cells = filterReal(rowLabels.map((r) => matrix[r][c]));
       colTotals[c] = cells.length === 0 ? null : aggregate(measureFn, cells);
     }
-    // grandTotal: tüm dolu cell'lerin min veya max'i
     const allCells = [];
     for (const r of rowLabels) for (const c of colLabels) {
       const v = matrix[r][c];
@@ -177,7 +182,7 @@ export function computePivot(input) {
     }
     grandTotal = allCells.length === 0 ? null : aggregate(measureFn, allCells);
   } else {
-    // count, sum: additive
+    // count: additive (cell'ler asla null değil)
     for (const c of colLabels) colTotals[c] = 0;
     for (const r of rowLabels) {
       rowTotals[r] = 0;
