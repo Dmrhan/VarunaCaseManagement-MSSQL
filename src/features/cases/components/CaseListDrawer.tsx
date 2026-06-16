@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, AlertCircle, ExternalLink, Loader2, MessageCircle,
+  X, AlertCircle, Eye, ExternalLink, Loader2, MessageCircle,
   Paperclip, Mail, Phone, Trash2, Download, Upload, User as UserIcon,
   Sparkles, RefreshCw, ClipboardCopy,
 } from 'lucide-react';
+import {
+  AttachmentImagePreviewDialog,
+  isImageAttachment,
+} from '@/features/cases/components/AttachmentImagePreviewDialog';
 import { cn } from '@/components/ui/cn';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -425,6 +429,13 @@ function QuickEditPanel({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Image preview (drawer file list — Eye icon → modal)
+  const [previewFile, setPreviewFile] = useState<{
+    id: string;
+    fileName: string;
+    fileSize: number;
+    mimeType?: string;
+  } | null>(null);
 
   // AI çözüm önerisi (Notlar tab) — manual trigger, cost-aware
   const [aiDraft, setAiDraft] = useState<string | null>(null);
@@ -791,37 +802,57 @@ function QuickEditPanel({
                 </p>
               ) : (
                 <ul className="space-y-1">
-                  {files.map((f) => (
-                    <li
-                      key={f.id}
-                      className="flex items-center justify-between gap-2 rounded-md border border-slate-100 bg-slate-50/40 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-surface/40"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-slate-800 dark:text-ndark-text">
-                          {f.fileName}
-                        </div>
-                        <div className="text-[10px] text-slate-500 dark:text-ndark-muted">
-                          {formatBytes(f.fileSize ?? 0)} · {formatShortDate(f.uploadedAt)}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleFileDownload(f.id)}
-                        className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-ndark-surface"
-                        aria-label="İndir"
+                  {files.map((f) => {
+                    const previewable = isImageAttachment(f);
+                    return (
+                      <li
+                        key={f.id}
+                        className="flex items-center justify-between gap-2 rounded-md border border-slate-100 bg-slate-50/40 px-2 py-1 text-xs dark:border-ndark-border dark:bg-ndark-surface/40"
                       >
-                        <Download size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFileRemove(f.id)}
-                        className="rounded p-1 text-slate-500 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-900/30"
-                        aria-label="Sil"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </li>
-                  ))}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium text-slate-800 dark:text-ndark-text">
+                            {f.fileName}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-ndark-muted">
+                            {formatBytes(f.fileSize ?? 0)} · {formatShortDate(f.uploadedAt)}
+                          </div>
+                        </div>
+                        {previewable && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewFile({
+                                id: f.id,
+                                fileName: f.fileName,
+                                fileSize: f.fileSize ?? 0,
+                                mimeType: f.mimeType,
+                              })
+                            }
+                            className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-ndark-surface"
+                            aria-label="Önizle"
+                          >
+                            <Eye size={12} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleFileDownload(f.id)}
+                          className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-ndark-surface"
+                          aria-label="İndir"
+                        >
+                          <Download size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleFileRemove(f.id)}
+                          className="rounded p-1 text-slate-500 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-900/30"
+                          aria-label="Sil"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -1008,6 +1039,12 @@ function QuickEditPanel({
           </div>
         </div>
       )}
+      <AttachmentImagePreviewDialog
+        open={previewFile != null}
+        caseId={caseItem.id}
+        file={previewFile}
+        onClose={() => setPreviewFile(null)}
+      />
     </div>
   );
 }

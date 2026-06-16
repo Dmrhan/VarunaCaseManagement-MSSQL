@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Download, Paperclip, Trash2, UploadCloud } from 'lucide-react';
+import { Download, Eye, Paperclip, Trash2, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { caseService } from '@/services/caseService';
@@ -29,6 +29,10 @@ import {
   type Case,
   type CaseFile,
 } from '../types';
+import {
+  AttachmentImagePreviewDialog,
+  isImageAttachment,
+} from './AttachmentImagePreviewDialog';
 
 interface UploadProgress {
   fileName: string;
@@ -56,6 +60,7 @@ export function FilesTab({
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
+  const [previewFile, setPreviewFile] = useState<CaseFile | null>(null);
 
   useEffect(() => {
     onUploadingChange?.(uploading);
@@ -168,6 +173,7 @@ export function FilesTab({
   }
 
   return (
+    <>
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
@@ -288,38 +294,59 @@ export function FilesTab({
         </p>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-md ring-1 ring-slate-200">
-          {item.files.map((f) => (
-            <li key={f.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <Paperclip size={14} className="text-slate-400" />
-              <span className="flex-1 truncate text-slate-800" title={f.fileName}>
-                {f.fileName}
-              </span>
-              <span className="hidden text-xs text-slate-500 sm:inline">
-                {formatBytes(f.fileSize)}
-              </span>
-              <span className="hidden text-xs text-slate-500 md:inline">
-                {formatDateTime(f.uploadedAt)}
-              </span>
-              <button
-                type="button"
-                onClick={() => void caseService.downloadFile(item.id, f.id)}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
-                title="İndir"
-              >
-                <Download size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRemove(f)}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
-                title="Sil"
-              >
-                <Trash2 size={12} />
-              </button>
-            </li>
-          ))}
+          {item.files.map((f) => {
+            const previewable = isImageAttachment(f);
+            return (
+              <li key={f.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <Paperclip size={14} className="text-slate-400" />
+                <span className="flex-1 truncate text-slate-800" title={f.fileName}>
+                  {f.fileName}
+                </span>
+                <span className="hidden text-xs text-slate-500 sm:inline">
+                  {formatBytes(f.fileSize)}
+                </span>
+                <span className="hidden text-xs text-slate-500 md:inline">
+                  {formatDateTime(f.uploadedAt)}
+                </span>
+                {previewable && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewFile(f)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                    title="Önizle"
+                    aria-label="Önizle"
+                  >
+                    <Eye size={12} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void caseService.downloadFile(item.id, f.id)}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                  title="İndir"
+                >
+                  <Download size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemove(f)}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
+                  title="Sil"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
+    <AttachmentImagePreviewDialog
+      open={previewFile != null}
+      caseId={item.id}
+      file={previewFile}
+      onClose={() => setPreviewFile(null)}
+    />
+    </>
   );
 }
