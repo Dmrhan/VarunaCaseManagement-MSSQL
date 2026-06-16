@@ -192,17 +192,16 @@ if (
 
 // ─── Codex P2 fixes (PR #469 review) ─────────────────────────────
 
-// 16) Codex P2 — rootCauseDetail wipe fix: closureRcdResetSuppressRef
-//     pattern. Pre-fill sırasında group set ediliyor ama detail
-//     useEffect tarafından silinmiyor.
+// 16) Kapanış decouple — rootCauseDetail artık grup değişiminde sıfırlanmaz.
+//     Eski reset useEffect + closureRcdResetSuppressRef KALDIRILDI ve detay
+//     listesi flat (closureTax.rootCauseDetail) okunur.
 if (
-  /closureRcdResetSuppressRef\s*=\s*useRef\(false\)/.test(src) &&
-  /closureRcdResetSuppressRef\.current\s*=\s*true/.test(src) &&
-  /closureRcdResetSuppressRef\.current\)\s*\{[\s\S]{0,200}?return/.test(src)
+  !/closureRcdResetSuppressRef/.test(src) &&
+  /closureRcdList[^\n]*=\s*closureTax\?\.rootCauseDetail/.test(src)
 ) {
-  ok('16) Codex P2 — rootCauseDetail wipe fix (suppress ref pre-fill korur)');
+  ok('16) Kapanış decouple — rcd flat + reset suppress ref kaldırıldı');
 } else {
-  bad('16) suppress ref pattern eksik');
+  bad('16) decouple — suppress ref hâlâ var ya da rcd flat değil');
 }
 
 // 17) Codex P2 — KB stale promise guard: kbSuggestReqIdRef snapshot

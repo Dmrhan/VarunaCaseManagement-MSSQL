@@ -6,12 +6,13 @@
  *
  * Endpoint mantığının pure replica'sı (route içinde inline matchByLabel):
  * KB suggest-close cevabındaki 4 alanı UNIVERA closure taxonomy'sine label
- * match ile bağlar. rcd, eşleşen rcg'nin children'ı içinde aranır.
+ * match ile bağlar. Kapanış decouple — rcd artık gruba bağlı değil; tüm
+ * rootCauseDetail listesine karşı eşleşir (parentId ile daraltma yok).
  *
  * Senaryolar:
  *   1. Setup — UNIVERA closure taxonomy yüklendi
  *   2. KB cevabı 4 alanlı → 4 eşleşme
- *   3. rcd parent (rcg) ile uyumlu satıra eşler — başka grubun child'ı seçilmez
+ *   3. rcd bağımsız — grup seçiminden bağımsız her detay eşleşir (parent filtresi yok)
  *   4. Türkçe label normalize (büyük/küçük + boşluk) eşleşir
  *   5. Bilinmeyen alanlar unmatched listesine düşer
  */
@@ -78,11 +79,9 @@ function matchByLabel(list, rawLabel) {
 }
 
 function mapClosure(payload) {
+  // Kapanış decouple — detay gruba bağlı değil; tüm rootCauseDetail'e eşleşir.
   const rcgMatch = matchByLabel(tax.rootCauseGroup, payload.kok_neden_grubu);
-  const rcdCandidates = rcgMatch
-    ? tax.rootCauseDetail.filter((d) => d.parentId === rcgMatch.id)
-    : tax.rootCauseDetail;
-  const rcdMatch = matchByLabel(rcdCandidates, payload.kok_neden_detayi);
+  const rcdMatch = matchByLabel(tax.rootCauseDetail, payload.kok_neden_detayi);
   const rtMatch = matchByLabel(tax.resolutionType, payload.cozum_tipi);
   const ppMatch = matchByLabel(tax.permanentPrevention, payload.kalici_onlem);
   const suggestions = {};
@@ -108,7 +107,7 @@ const rcgRef = tax.rootCauseGroup.find((g) => /yetki|cihaz|parametre/i.test(g.la
 if (!rcgRef) {
   note('2) rcgRef bulunamadı', 'closure smoke skip');
 } else {
-  const rcdRef = tax.rootCauseDetail.find((d) => d.parentId === rcgRef.id);
+  const rcdRef = tax.rootCauseDetail[0]; // decouple — herhangi bir detay
   const rtRef = tax.resolutionType[0];
   const ppRef = tax.permanentPrevention[0];
   const result = mapClosure({
@@ -125,31 +124,31 @@ if (!rcgRef) {
   }
 }
 
-// ─── 3) rcd parent-aware: yanlış grubun child'ı seçilmez ─────────────────
+// ─── 3) rcd bağımsız: grup seçiminden bağımsız her detay eşleşir ──────────
 
 const rcg1 = tax.rootCauseGroup[0];
-const rcg2 = tax.rootCauseGroup[1];
-if (rcg1 && rcg2) {
-  const rcdInRcg2 = tax.rootCauseDetail.find((d) => d.parentId === rcg2.id);
-  if (rcdInRcg2) {
-    // KB rcg=rcg1, rcd label rcg2'nin child'ı → adapter bunu rcg1'in
-    // children listesinde bulamayıp unmatched listesine düşürmeli.
-    const result = mapClosure({
-      kok_neden_grubu: rcg1.label,
-      kok_neden_detayi: rcdInRcg2.label,
-    });
-    if (
-      result.suggestions.rootCauseGroup?.code === rcg1.code &&
-      !result.suggestions.rootCauseDetail &&
-      result.unmatched.some((u) => u.taxonomyType === 'rootCauseDetail')
-    ) {
-      ok('3) rcd parent-aware — yanlış grubun child\'ı unmatched\'e düşer');
-    } else {
-      bad('3) parent-aware rcd', JSON.stringify(result));
-    }
+if (rcg1 && tax.rootCauseDetail.length > 0) {
+  // Decouple — detay bağımsız. Eski hiyerarşide rcg1'den "farklı gruba ait"
+  // bir detay seçilse bile artık eşleşmeli (parentId hâlâ doluysa farklı
+  // birini seç; backfill sonrası hepsi null olduğundan ilki de olur).
+  const detail =
+    tax.rootCauseDetail.find((d) => d.parentId && d.parentId !== rcg1.id) ??
+    tax.rootCauseDetail[0];
+  const result = mapClosure({
+    kok_neden_grubu: rcg1.label,
+    kok_neden_detayi: detail.label,
+  });
+  if (
+    result.suggestions.rootCauseGroup?.code === rcg1.code &&
+    result.suggestions.rootCauseDetail?.code === detail.code &&
+    !result.unmatched.some((u) => u.taxonomyType === 'rootCauseDetail')
+  ) {
+    ok('3) rcd bağımsız — grup seçiminden bağımsız her detay eşleşir');
   } else {
-    note('3) parent-aware rcd', 'rcg2\'nin child\'ı yok, SKIP');
+    bad('3) decoupled rcd', JSON.stringify(result));
   }
+} else {
+  note('3) decoupled rcd', 'rcg1 veya rcd yok, SKIP');
 }
 
 // ─── 4) Türkçe normalize (büyük harf + boşluk) ───────────────────────────

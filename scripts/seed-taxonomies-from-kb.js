@@ -13,7 +13,7 @@
  *   open.etkilenen_nesne → affectedObject
  *   open.etki            → impact
  *   open.urun            → SKIP (Product catalog'un işi; eski xlsx seed'iyle aynı karar)
- *   close.kok_neden      → rootCauseGroup (grup) + rootCauseDetail (parentId'li detay)
+ *   close.kok_neden      → rootCauseGroup + rootCauseDetail (BAĞIMSIZ düz; parentId yazılmaz)
  *   close.cozum_tipi     → resolutionType
  *   close.kalici_onlem   → permanentPrevention
  *
@@ -90,9 +90,11 @@ for (const [srcKey, taxonomyType] of Object.entries(OPEN_MAP)) {
   for (const label of taxonomy.open?.[srcKey]?.values ?? []) emit(taxonomyType, label);
 }
 
+// Kapanış decouple — kök neden grup/detay BAĞIMSIZ düz listelerdir; detaylar
+// parentCode'suz emit edilir (parentId yazılmaz, gruba bağlanmaz).
 for (const g of taxonomy.close?.kok_neden?.groups ?? []) {
-  const parentCode = emit('rootCauseGroup', g.group);
-  for (const d of g.details ?? []) emit('rootCauseDetail', d, parentCode);
+  emit('rootCauseGroup', g.group);
+  for (const d of g.details ?? []) emit('rootCauseDetail', d);
 }
 for (const label of taxonomy.close?.cozum_tipi?.values ?? []) emit('resolutionType', label);
 for (const label of taxonomy.close?.kalici_onlem?.values ?? []) emit('permanentPrevention', label);
@@ -118,28 +120,14 @@ if (companies.length === 0) {
 }
 
 for (const company of companies) {
-  // Pass 1 — parent'lar + hiyerarşisizler
+  // Kapanış decouple — taksonomiler bağımsız düz listeler; tek geçiş,
+  // parentId her zaman null (re-seed eski hiyerarşik kayıtları da düzler).
   let n = 0;
-  for (const p of plan.filter((x) => !x.parentCode)) {
+  for (const p of plan) {
     await prisma.taxonomyDef.upsert({
       where: { companyId_taxonomyType_code: { companyId: company.id, taxonomyType: p.taxonomyType, code: p.code } },
-      update: { label: p.label, isActive: true, sortOrder: p.sortOrder },
-      create: { companyId: company.id, taxonomyType: p.taxonomyType, code: p.code, label: p.label, sortOrder: p.sortOrder },
-    });
-    n++;
-  }
-  // Pass 2 — rootCauseDetail (parentId bağlamak için grup id'leri çek)
-  const groups = await prisma.taxonomyDef.findMany({
-    where: { companyId: company.id, taxonomyType: 'rootCauseGroup' },
-    select: { id: true, code: true },
-  });
-  const parentIdByCode = new Map(groups.map((g) => [g.code, g.id]));
-  for (const p of plan.filter((x) => x.parentCode)) {
-    const parentId = parentIdByCode.get(p.parentCode) ?? null;
-    await prisma.taxonomyDef.upsert({
-      where: { companyId_taxonomyType_code: { companyId: company.id, taxonomyType: p.taxonomyType, code: p.code } },
-      update: { label: p.label, isActive: true, sortOrder: p.sortOrder, parentId },
-      create: { companyId: company.id, taxonomyType: p.taxonomyType, code: p.code, label: p.label, sortOrder: p.sortOrder, parentId },
+      update: { label: p.label, isActive: true, sortOrder: p.sortOrder, parentId: null },
+      create: { companyId: company.id, taxonomyType: p.taxonomyType, code: p.code, label: p.label, sortOrder: p.sortOrder, parentId: null },
     });
     n++;
   }
