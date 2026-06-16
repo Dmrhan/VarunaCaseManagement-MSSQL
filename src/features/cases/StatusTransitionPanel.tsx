@@ -910,7 +910,7 @@ function KbClosureSuggestionPanel({
           onClick={onSuggest}
           title={!noteOk ? 'En az 5 karakter çözüm notu yazın' : 'KB önerisini iste'}
         >
-          {kbSuggesting ? 'Soruluyor…' : kbSuggestion ? 'Yeniden Sor' : 'KB Önerisi Sor'}
+          {kbSuggesting ? 'Soruluyor…' : kbSuggestion ? 'Yeniden Sor' : 'Bilgi Bankası Önerisi Sor'}
         </Button>
       </div>
       {!noteOk && !kbSuggestion && !kbSuggesting && (
