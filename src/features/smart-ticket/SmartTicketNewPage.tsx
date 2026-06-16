@@ -55,6 +55,7 @@ import { resolveSmartTicketMapping } from './mapping';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { formatRelative } from '@/lib/format';
 import { KbDraftCard } from '@/features/cases/KbDraftCard';
+import { FilesTab } from '@/features/cases/components/CaseFiles';
 import { isAcceptedUpload } from '@/features/cases/uploadWhitelist';
 
 /**
@@ -287,6 +288,11 @@ export function SmartTicketNewPage({
   // sırasında) bile stale persisted'i göstermez.
   const closureRefreshedOnceRef = useRef(false);
   const [closureRefreshedTick, setClosureRefreshedTick] = useState(0);
+  // Stage 3 "Kapanış Dosyaları" — FilesTab'ın aktif upload state'i. "Vakayı
+  // Kapat" yalnız aktif upload sırasında bloklanır; opsiyonel dosya eklemek
+  // close akışını başka şekilde engellemez (spec: closing should not be
+  // blocked unless file upload is actively in progress).
+  const [closureFilesUploading, setClosureFilesUploading] = useState(false);
 
   // PR-T2 — Stage 3 transfer form state. PR-T1 backend kontratını kullanır:
   //   smartTicketTransfer = { transferNote, composedSummary?, attemptedStepIds?,
@@ -1753,6 +1759,9 @@ export function SmartTicketNewPage({
               closureSuggestion={closureSuggestion}
               closureSuggestionError={closureSuggestionError}
               closureRefreshedOnce={closureRefreshedOnceRef.current && closureRefreshedTick > 0}
+              closureFilesUploading={closureFilesUploading}
+              onClosureFilesUploadingChange={setClosureFilesUploading}
+              onItemUpdated={setCreatedCase}
               onSuggestClosure={() => {
                 // Manuel "KB Önerisini Yenile" — debounce iptal et + current
                 // "Çözüm Açıklaması" değerini override olarak gönder.
@@ -2001,12 +2010,15 @@ function Stage3Closure({
   closureSuggestion,
   closureSuggestionError,
   closureRefreshedOnce,
+  closureFilesUploading,
   onSuggestClosure,
   onApplyAllClosureSuggestions,
   onClose,
   onBack,
   onGoToCaseDetail,
   onChangeResolutionNote,
+  onClosureFilesUploadingChange,
+  onItemUpdated,
 }: {
   createdCase: Case;
   closure: ClosureFormState;
@@ -2022,6 +2034,9 @@ function Stage3Closure({
    *  true → KbDraftCard'ı override mode'da kullan (current KB drafts veya
    *  render yok); false → persisted aiDrafts fallback'i göster. */
   closureRefreshedOnce: boolean;
+  /** Stage 3 "Kapanış Dosyaları" — FilesTab aktif upload halinde mi? true ise
+   *  "Vakayı Kapat" disable edilir; parent flag'ı tutar. */
+  closureFilesUploading: boolean;
   onSuggestClosure: () => void;
   onApplyAllClosureSuggestions: () => void;
   onClose: () => void;
@@ -2032,10 +2047,20 @@ function Stage3Closure({
    *  KB refetch'i tetikler. setClosure'dan ayrı tutuluyor çünkü 4 dropdown'un
    *  user değişiklikleri "Çözüm Açıklaması" dirty sayılmamalı. */
   onChangeResolutionNote: (text: string) => void;
+  /** Stage 3 "Kapanış Dosyaları" — FilesTab uploading state değişimi parent'a
+   *  duyurulur (canSave hesaplaması + opsiyonel UI feedback). */
+  onClosureFilesUploadingChange: (uploading: boolean) => void;
+  /** Stage 3 "Kapanış Dosyaları" — FilesTab add/remove sonrası Case object
+   *  yenilenir; parent createdCase'i tazeler ki Files Tab limit hesabı ve
+   *  Case Detail görünümü güncel kalsın. */
+  onItemUpdated: (c: Case) => void;
 }) {
   const checklistBlocked = requiredChecklistPending.length > 0;
   const canSave =
-    closure.resolutionNote.trim().length > 0 && !closing && !checklistBlocked;
+    closure.resolutionNote.trim().length > 0 &&
+    !closing &&
+    !checklistBlocked &&
+    !closureFilesUploading;
   return (
     <Card>
       <CardBody className="space-y-3">
@@ -2278,6 +2303,29 @@ function Stage3Closure({
               : undefined
           }
         />
+        {/* Kapanış Dosyaları — Step 3'ün son bölümü. Mevcut CaseAttachment akışı
+            (caseService.addFile/removeFile/downloadFile + FilesTab component'i)
+            aynen yeniden kullanılır. Yüklenen dosyalar normal vaka ek'i olur ve
+            Case Detail > Dosyalar sekmesinde de görünür. Schema değişikliği YOK,
+            per-step gruplama YOK. Aktif upload sırasında "Vakayı Kapat" disable
+            edilir; kullanıcı dosya yüklemese de close akışı bloklanmaz. */}
+        <div className="border-t border-slate-200 pt-3 dark:border-ndark-border">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <SectionTitle text="Kapanış Dosyaları" />
+            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+              Opsiyonel — kanıt/ekran görüntüsü
+            </span>
+          </div>
+          <p className="mb-2 text-xs text-slate-500 dark:text-ndark-muted">
+            Dosyalar vakaya eklenecek ve Vaka Detayı'ndaki <strong>Dosyalar</strong> sekmesinde
+            görünecek. Aynı sınırlar geçerli (maks. 25 MB/dosya, 20 dosya/vaka).
+          </p>
+          <FilesTab
+            item={createdCase}
+            onItemUpdated={onItemUpdated}
+            onUploadingChange={onClosureFilesUploadingChange}
+          />
+        </div>
         {closureError && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
             {closureError}
