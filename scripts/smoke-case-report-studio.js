@@ -73,10 +73,17 @@ console.log('\n── 1) GET /api/reports/cases/columns ──');
     const coreOk = ids.has('caseNumber') && ids.has('title') && ids.has('status');
     const stOk = ids.has('st.platformLabel') && ids.has('st.closure.rootCauseGroupLabel');
     const draftOk = ids.has('st.aiDrafts.engineeringHandoff');
-    if (coreOk && stOk && draftOk) {
-      ok('1) columns Core + Smart Ticket + KB drafts içerir', `${r.data.columns.length} kolon`);
+    // Phase 2A: solution step aggregate kategorisi + kolonlar
+    const aggCatOk = r.data.categories?.smart_ticket_solution_steps === 'Smart Ticket — Çözüm Adımları';
+    const aggIdsOk =
+      ids.has('solutionSteps.total') &&
+      ids.has('solutionSteps.workedCount') &&
+      ids.has('solutionSteps.firstWorkedTitle') &&
+      ids.has('solutionSteps.outcomeSummary');
+    if (coreOk && stOk && draftOk && aggCatOk && aggIdsOk) {
+      ok('1) columns Core + Smart Ticket + KB + Phase 2A aggregate', `${r.data.columns.length} kolon`);
     } else {
-      bad('1) Beklenen id eksik', `coreOk=${coreOk} stOk=${stOk} draftOk=${draftOk}`);
+      bad('1) Beklenen id eksik', `coreOk=${coreOk} stOk=${stOk} draftOk=${draftOk} aggCat=${aggCatOk} aggIds=${aggIdsOk}`);
     }
   } else {
     bad('1) columns endpoint başarısız', `status=${r.status}`);
@@ -323,6 +330,112 @@ console.log('\n── 10) Format polish — TR label / Evet|Hayır / DD.MM.YYYY 
     }
   } else {
     bad('10) preview başarısız', `status=${r.status}`);
+  }
+}
+
+// ── 11) Phase 2A — preview with aggregate columns ──────
+console.log('\n── 11) /preview — caseNumber + solutionSteps.total + outcomeSummary ──');
+{
+  const r = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: ['caseNumber', 'solutionSteps.total', 'solutionSteps.outcomeSummary'],
+      pageSize: 50,
+    }),
+  });
+  if (r.status === 200 && Array.isArray(r.data?.rows) && r.data.columns?.length === 3) {
+    // Tüm satırlarda aggregate alanları geçerli (string veya '' — crash YOK)
+    let crashRow = null;
+    for (const row of r.data.rows) {
+      if (
+        typeof row['solutionSteps.total'] !== 'string' ||
+        typeof row['solutionSteps.outcomeSummary'] !== 'string'
+      ) {
+        crashRow = row;
+        break;
+      }
+    }
+    const hasAnyTotal = r.data.rows.some((row) => row['solutionSteps.total'] !== '' && row['solutionSteps.total'] !== '0');
+    if (!crashRow) {
+      ok(
+        `11) preview aggregate kolon OK — ${r.data.rows.length} satır`,
+        hasAnyTotal ? 'En az 1 vakada total > 0' : '0 step vakaları blank/0',
+      );
+    } else {
+      bad('11) aggregate kolon shape bozuk', JSON.stringify(crashRow).slice(0, 120));
+    }
+  } else {
+    bad('11) preview aggregate başarısız', `status=${r.status}`);
+  }
+}
+
+// ── 12) Phase 2A — export with aggregate column ────────
+console.log('\n── 12) /export — at least one aggregate column ──');
+{
+  const r = await fetch(`${BFF}/api/reports/cases/export`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      columns: ['caseNumber', 'solutionSteps.outcomeSummary', 'solutionSteps.workedSource'],
+    }),
+  });
+  const ct = r.headers.get('content-type') || '';
+  if (r.status === 200 && ct.includes('spreadsheetml.sheet')) {
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf[0] === 0x50 && buf[1] === 0x4b) {
+      ok('12) aggregate export xlsx PK magic OK', `${buf.length} bytes`);
+    } else {
+      bad('12) xlsx magic eksik', `first2=${buf[0].toString(16)},${buf[1].toString(16)}`);
+    }
+  } else {
+    bad('12) aggregate export başarısız', `status=${r.status} ct=${ct}`);
+  }
+}
+
+// ── 13) Phase 2A — empty aggregate safety (case with 0 steps) ──
+console.log('\n── 13) Aggregate blank/zero-safe — step\'siz vakalar ──');
+{
+  // Tüm aggregate kolonları seç — 50 satır içinde mutlaka step\'i olmayan
+  // klasik vakalar var (Phase D müşterisiz / Smart Ticket dışı vakalar).
+  // Beklenti: hiçbir alanda undefined/null/null exception YOK.
+  const r = await api(token, '/api/reports/cases/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      columns: [
+        'caseNumber',
+        'solutionSteps.total',
+        'solutionSteps.suggestedCount',
+        'solutionSteps.triedCount',
+        'solutionSteps.workedCount',
+        'solutionSteps.notWorkedCount',
+        'solutionSteps.skippedCount',
+        'solutionSteps.firstWorkedTitle',
+        'solutionSteps.lastTriedTitle',
+        'solutionSteps.workedSource',
+        'solutionSteps.outcomeSummary',
+      ],
+      pageSize: 100,
+    }),
+  });
+  if (r.status === 200 && Array.isArray(r.data?.rows)) {
+    let nullSeen = 0;
+    let typeViolation = null;
+    for (const row of r.data.rows) {
+      for (const key of Object.keys(row)) {
+        const v = row[key];
+        if (v === null || v === undefined) {
+          nullSeen += 1;
+          typeViolation = { key, v };
+        }
+      }
+    }
+    if (nullSeen === 0) {
+      ok(`13) ${r.data.rows.length} satır × 10 aggregate alan — hiç null/undefined yok`);
+    } else {
+      bad('13) Aggregate null/undefined sızdı', `count=${nullSeen} sample=${JSON.stringify(typeViolation)}`);
+    }
+  } else {
+    bad('13) preview başarısız', `status=${r.status}`);
   }
 }
 

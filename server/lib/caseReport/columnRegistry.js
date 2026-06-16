@@ -48,6 +48,7 @@ export const REPORT_COLUMN_CATEGORIES = {
   smart_ticket_opening: 'Smart Ticket — Açılış',
   smart_ticket_closure: 'Smart Ticket — Kapanış',
   smart_ticket_drafts: 'Smart Ticket — KB Taslakları',
+  smart_ticket_solution_steps: 'Smart Ticket — Çözüm Adımları',
 };
 
 /** @type {ReportColumnDef[]} */
@@ -108,6 +109,21 @@ export const REPORT_COLUMNS = [
   // ── Smart Ticket — KB Taslakları ─────────────────────────────────
   { id: 'st.aiDrafts.engineeringHandoff',  label: 'Teknik Devir Notu (KB)',     category: 'smart_ticket_drafts', type: 'text', source: 'json_path', jsonPath: ['smartTicket', 'aiDrafts', 'engineeringHandoff'],  excelWidth: 60 },
   { id: 'st.aiDrafts.customerReplyDraft',  label: 'Müşteri Yanıt Taslağı (KB)', category: 'smart_ticket_drafts', type: 'text', source: 'json_path', jsonPath: ['smartTicket', 'aiDrafts', 'customerReplyDraft'], excelWidth: 60 },
+
+  // ── Smart Ticket — Çözüm Adımları (Phase 2A aggregate) ───────────
+  // Bu kategori CaseSolutionStep aggregate'leri. Tek bir batch fetch'le
+  // tüm caseId'ler için hesaplanır (server/lib/caseReport/aggregates.js).
+  // Hiç aggregate kolon seçilmediğinde fetch ATLANIR — perf garantisi.
+  { id: 'solutionSteps.total',           label: 'Çözüm Adımı Sayısı',     category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'total' },
+  { id: 'solutionSteps.suggestedCount',  label: 'Önerilen Adım Sayısı',   category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'suggestedCount' },
+  { id: 'solutionSteps.triedCount',      label: 'Denenen Adım Sayısı',    category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'triedCount' },
+  { id: 'solutionSteps.workedCount',     label: 'İşe Yarayan Adım Sayısı', category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'workedCount' },
+  { id: 'solutionSteps.notWorkedCount',  label: 'İşe Yaramayan Adım Sayısı', category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'notWorkedCount' },
+  { id: 'solutionSteps.skippedCount',    label: 'Atlanan Adım Sayısı',    category: 'smart_ticket_solution_steps', type: 'number', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'skippedCount' },
+  { id: 'solutionSteps.firstWorkedTitle', label: 'İlk Başarılı Çözüm Adımı', category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'firstWorkedTitle', excelWidth: 40 },
+  { id: 'solutionSteps.lastTriedTitle',   label: 'Son Denenen Çözüm Adımı',  category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'lastTriedTitle', excelWidth: 40 },
+  { id: 'solutionSteps.workedSource',     label: 'Başarılı Adım Kaynağı',    category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'workedSource', format: 'solutionStepSource' },
+  { id: 'solutionSteps.outcomeSummary',   label: 'Çözüm Adımı Özeti',       category: 'smart_ticket_solution_steps', type: 'string', source: 'aggregate', aggregateKey: 'solutionSteps', aggregateField: 'outcomeSummary', excelWidth: 50 },
 ];
 
 const COLUMN_BY_ID = new Map(REPORT_COLUMNS.map((c) => [c.id, c]));
@@ -149,6 +165,9 @@ export function resolveColumns(ids) {
  * source'lu column'lar için customFields tek seferde select'e eklenir
  * (her json_path ayrı parse değil — buildRows.js'te tek parse).
  *
+ * Aggregate source'lar (Phase 2A) select'e yeni alan EKLEMEZ; ayrı bir
+ * batch fetch ile çalışırlar (server/lib/caseReport/aggregates.js).
+ *
  * Her zaman { id, companyId } eklenir (multi-tenant guard + tablo key).
  */
 export function buildPrismaSelect(columns) {
@@ -160,7 +179,21 @@ export function buildPrismaSelect(columns) {
     } else if (col.source === 'json_path') {
       needsCustomFields = true;
     }
+    // aggregate → ek select gerekmiyor
   }
   if (needsCustomFields) select.customFields = true;
   return select;
+}
+
+/**
+ * Phase 2A: Seçili kolonlardan en az biri aggregate ve aggregateKey ===
+ * 'solutionSteps' ise true. reports.js bu sinyalle ek bir
+ * `loadSolutionStepAggregates(prisma, caseIds)` batch fetch'i tetikler.
+ * Hiç aggregate kolon yoksa fetch ATLANIR (perf).
+ */
+export function needsSolutionStepAggregates(columns) {
+  for (const col of columns) {
+    if (col.source === 'aggregate' && col.aggregateKey === 'solutionSteps') return true;
+  }
+  return false;
 }
