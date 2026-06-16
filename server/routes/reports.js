@@ -444,6 +444,262 @@ router.post('/cases/pivot', async (req, res) => {
   }
 });
 
+// ──────────────────────────────────────────────────────────────────────
+// Phase 3.2 — Pivot drill-down: underlying cases for a single cell
+// ──────────────────────────────────────────────────────────────────────
+//
+// POST /api/reports/cases/pivot/drill
+// Body:
+//   {
+//     rowColumnId, colColumnId,
+//     rowValue,    // pivot matrix etiketi (BLANK_LABEL = '(boş)' geçilebilir)
+//     colValue,
+//     filters,
+//     columns?: string[]  // dönecek preview kolonları (varsayılan: özet set)
+//   }
+//
+// Response: { rows: ReportRow[], total, columns: ColumnDef[] }
+//
+// Akış:
+//   1. resolveColumns + role/scope guard
+//   2. buildReportWhere + same fetch as pivot endpoint (limit PIVOT_MAX_ROWS)
+//   3. buildReportRows formatlanmış row'lar
+//   4. Filter: row[rowColumnId] === rowValue && row[colColumnId] === colValue
+//      (BLANK_LABEL karşılaştırması özel: client'tan gelen '(boş)' için
+//       row değeri '' ile eşleşir.)
+//   5. Caller belirttiği columns subset'ini döndür (yoksa default)
+
+const DRILL_DEFAULT_COLUMNS = [
+  'caseNumber',
+  'title',
+  'companyName',
+  'accountName',
+  'status',
+  'priority',
+  'assignedPersonName',
+  'createdAt',
+  'resolvedAt',
+];
+
+router.post('/cases/pivot/drill', async (req, res) => {
+  const body = req.body ?? {};
+  const rowColumnId = typeof body.rowColumnId === 'string' ? body.rowColumnId : '';
+  const colColumnId = typeof body.colColumnId === 'string' ? body.colColumnId : '';
+  const rowValue = typeof body.rowValue === 'string' ? body.rowValue : '';
+  const colValue = typeof body.colValue === 'string' ? body.colValue : '';
+  if (!rowColumnId || !colColumnId) {
+    return res.status(400).json({ error: 'pivot_dimensions_required', message: 'rowColumnId/colColumnId zorunlu.' });
+  }
+
+  // Drill kolonları: caller'ın istediği subset + her zaman row/col dim ekle
+  const requestedColIds = Array.isArray(body.columns) && body.columns.length > 0
+    ? body.columns
+    : DRILL_DEFAULT_COLUMNS;
+  // row/col dim'i de fetch et — filter için lazım (formatted display)
+  const allIds = Array.from(new Set([...requestedColIds, rowColumnId, colColumnId]));
+  const { columns: allCols, invalidIds } = resolveColumns(allIds);
+  if (invalidIds.length > 0) {
+    return res.status(400).json({ error: 'columns_invalid', message: `Geçersiz kolon: ${invalidIds.join(', ')}`, invalidIds });
+  }
+
+  // Role guard — drill PII kolonu içeriyorsa Admin/SystemAdmin
+  const roleCheck = filterColumnsByRole(allCols, req.user?.role ?? null);
+  if (roleCheck.forbidden.length > 0) {
+    return res.status(403).json({
+      error: 'columns_forbidden',
+      message: `Bu kolon(lar)a erişim yetkin yok: ${roleCheck.forbidden.join(', ')}`,
+      forbiddenIds: roleCheck.forbidden,
+    });
+  }
+
+  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const { where, scopeValid } = buildReportWhere(body.filters, allowed);
+  if (!scopeValid) {
+    return res.json({
+      rows: [], total: 0,
+      columns: allCols.filter((c) => requestedColIds.includes(c.id)).map((c) => ({ id: c.id, label: c.label, type: c.type })),
+    });
+  }
+
+  try {
+    const count = await prisma.case.count({ where });
+    if (count > PIVOT_MAX_ROWS) {
+      return res.status(400).json({
+        error: 'pivot_limit_exceeded',
+        message: `Bu sorguda ${count} satır var. Drill sınırı ${PIVOT_MAX_ROWS}.`,
+        limit: PIVOT_MAX_ROWS, count,
+      });
+    }
+    const select = buildPrismaSelect(allCols);
+    const items = await prisma.case.findMany({ where, select, take: PIVOT_MAX_ROWS, orderBy: { createdAt: 'desc' } });
+    const aggregates = await loadAggregatesIfNeeded(allCols, items);
+    const rows = buildReportRows(items, allCols, aggregates);
+    // BLANK_LABEL ('(boş)') gelen değerler için '' karşılaştırması
+    const matchRow = (v) => (rowValue === '(boş)' ? !v || String(v).trim() === '' : String(v) === rowValue);
+    const matchCol = (v) => (colValue === '(boş)' ? !v || String(v).trim() === '' : String(v) === colValue);
+    const filtered = rows.filter((r) => matchRow(r[rowColumnId]) && matchCol(r[colColumnId]));
+    // Caller'ın istediği kolon subset'i ve sırası
+    const responseCols = requestedColIds
+      .map((id) => allCols.find((c) => c.id === id))
+      .filter(Boolean);
+    return res.json({
+      rows: filtered.map((r) => {
+        const out = {};
+        for (const c of responseCols) out[c.id] = r[c.id];
+        return out;
+      }),
+      total: filtered.length,
+      columns: responseCols.map((c) => ({ id: c.id, label: c.label, type: c.type })),
+    });
+  } catch (err) {
+    console.error('[reports/cases/pivot/drill]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 3.2 — Pivot xlsx export
+// ──────────────────────────────────────────────────────────────────────
+//
+// POST /api/reports/cases/pivot/export
+// Body: aynı pivot config (rowColumnId, colColumnId, measure, filters)
+// Response: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+//
+// Sheet "Pivot Tablo": row × col matrix + sağ Toplam kolonu + alt Toplam
+// satırı. Sheet "Bilgi": timestamp + pivot config + filtre özeti.
+
+router.post('/cases/pivot/export', async (req, res) => {
+  // pivot endpoint'iyle aynı validation; daha sade dupe etmek yerine bir
+  // alt-route helper'ı çıkarmadık (Phase 3.2 minimal; ileride refactor edilebilir).
+  const body = req.body ?? {};
+  const rowColumnId = typeof body.rowColumnId === 'string' ? body.rowColumnId : '';
+  const colColumnId = typeof body.colColumnId === 'string' ? body.colColumnId : '';
+  const measure = body.measure ?? {};
+  const measureFn = typeof measure.fn === 'string' ? measure.fn : '';
+  const measureColumnId = typeof measure.columnId === 'string' ? measure.columnId : '';
+
+  if (!rowColumnId || !colColumnId) {
+    return res.status(400).json({ error: 'pivot_dimensions_required', message: 'rowColumnId/colColumnId zorunlu.' });
+  }
+  if (!PIVOT_MEASURE_FNS.includes(measureFn)) {
+    return res.status(400).json({ error: 'pivot_measure_fn_invalid', message: 'Geçersiz pivot fonksiyonu.' });
+  }
+  if (measureFn !== 'count' && !measureColumnId) {
+    return res.status(400).json({ error: 'pivot_measure_column_required', message: `'${measureFn}' için sayısal kolon seçin.` });
+  }
+  const ids = [rowColumnId, colColumnId];
+  if (measureColumnId) ids.push(measureColumnId);
+  const { columns: resolvedAll, invalidIds } = resolveColumns(ids);
+  if (invalidIds.length > 0) {
+    return res.status(400).json({ error: 'columns_invalid', message: `Geçersiz kolon: ${invalidIds.join(', ')}`, invalidIds });
+  }
+  const rowCol = resolvedAll.find((c) => c.id === rowColumnId);
+  const colCol = resolvedAll.find((c) => c.id === colColumnId);
+  const measureCol = measureColumnId ? resolvedAll.find((c) => c.id === measureColumnId) : null;
+  if (!isPivotableDimension(rowCol)) return res.status(400).json({ error: 'pivot_row_not_pivotable' });
+  if (!isPivotableDimension(colCol)) return res.status(400).json({ error: 'pivot_col_not_pivotable' });
+  if (measureFn !== 'count' && !isPivotableMeasure(measureCol, measureFn)) {
+    return res.status(400).json({ error: 'pivot_measure_not_numeric' });
+  }
+  const roleCheck = filterColumnsByRole(resolvedAll, req.user?.role ?? null);
+  if (roleCheck.forbidden.length > 0) {
+    return res.status(403).json({
+      error: 'columns_forbidden',
+      message: `Bu kolon(lar)a erişim yetkin yok: ${roleCheck.forbidden.join(', ')}`,
+      forbiddenIds: roleCheck.forbidden,
+    });
+  }
+  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const { where, scopeValid } = buildReportWhere(body.filters, allowed);
+  if (!scopeValid) {
+    return sendPivotXlsx(res, { row: rowCol, col: colCol, measure: { fn: measureFn, columnLabel: measureCol?.label }, piv: { rowLabels: [], colLabels: [], matrix: {}, rowTotals: {}, colTotals: {}, grandTotal: 0 } }, body.filters);
+  }
+  try {
+    const count = await prisma.case.count({ where });
+    if (count > PIVOT_MAX_ROWS) {
+      return res.status(400).json({ error: 'pivot_limit_exceeded', limit: PIVOT_MAX_ROWS, count });
+    }
+    const select = buildPrismaSelect(resolvedAll);
+    const items = await prisma.case.findMany({ where, select, take: PIVOT_MAX_ROWS });
+    const aggregates = await loadAggregatesIfNeeded(resolvedAll, items);
+    const rows = buildReportRows(items, resolvedAll, aggregates);
+    const rowValues = rows.map((r) => r[rowColumnId]);
+    const colValues = rows.map((r) => r[colColumnId]);
+    let measureValues = [];
+    if (measureColumnId && measureCol) {
+      measureValues = items.map((item) => {
+        const cf = parseCustomFields(item.customFields);
+        const raw = extractRawValue(measureCol, item, cf, aggregates);
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        return Number.isFinite(n) ? n : null;
+      });
+    }
+    const piv = computePivot({ rowValues, colValues, measureValues, measureFn });
+    return sendPivotXlsx(res, {
+      row: rowCol, col: colCol,
+      measure: { fn: measureFn, columnLabel: measureCol?.label },
+      piv,
+    }, body.filters);
+  } catch (err) {
+    console.error('[reports/cases/pivot/export]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
+});
+
+function fmtPivotCellForXlsx(value, fn) {
+  if (value == null) return '';
+  if (!Number.isFinite(value)) return '';
+  // Aynı UI formatPivotCell pattern'i: avg 2 ondalık; integer plain; float 2 ondalık
+  if (fn === 'avg') return Math.round(value * 100) / 100;
+  if (Number.isInteger(value)) return value;
+  return Math.round(value * 100) / 100;
+}
+
+function sendPivotXlsx(res, ctx, filters) {
+  const { row, col, measure, piv } = ctx;
+  // Header satırı: dim label + col labels + Toplam
+  const header = [`${row.label} ↓ / ${col.label} →`, ...piv.colLabels, 'Toplam'];
+  // Data rows
+  const dataRows = piv.rowLabels.map((r) => {
+    const cells = piv.colLabels.map((c) => fmtPivotCellForXlsx(piv.matrix[r][c], measure.fn));
+    return [r, ...cells, fmtPivotCellForXlsx(piv.rowTotals[r], measure.fn)];
+  });
+  // Toplam satırı
+  const totalsRow = ['Toplam', ...piv.colLabels.map((c) => fmtPivotCellForXlsx(piv.colTotals[c], measure.fn)), fmtPivotCellForXlsx(piv.grandTotal, measure.fn)];
+  const aoa = [header, ...dataRows, totalsRow];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 32 }, ...piv.colLabels.map(() => ({ wch: 14 })), { wch: 14 }];
+  // Autofilter — sadece data range (totals satırı dahil değil, header dahil)
+  if (piv.rowLabels.length > 0) {
+    ws['!autofilter'] = {
+      ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: piv.rowLabels.length, c: header.length - 1 } }),
+    };
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Pivot Tablo');
+
+  // Bilgi sayfası
+  const info = [
+    ['Üretim Zamanı', new Date().toISOString()],
+    ['Satır Boyutu', `${row.label} (${row.id})`],
+    ['Kolon Boyutu', `${col.label} (${col.id})`],
+    ['Ölçü Fonksiyonu', measure.fn],
+    ...(measure.columnLabel ? [['Ölçü Kolonu', measure.columnLabel]] : []),
+    ['Toplam Satır', piv.rowLabels.length],
+    ['Toplam Kolon', piv.colLabels.length],
+    ...(filters && typeof filters === 'object' ? [['Filtreler', JSON.stringify(filters)]] : []),
+  ];
+  const infoWs = XLSX.utils.aoa_to_sheet(info);
+  infoWs['!cols'] = [{ wch: 18 }, { wch: 80 }];
+  XLSX.utils.book_append_sheet(wb, infoWs, 'Bilgi');
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="vaka-pivot-${stamp}.xlsx"`);
+  return res.send(buf);
+}
+
 function sendXlsx(res, columns, rows, meta = {}) {
   // Phase 1.5: Excel sheet — backend buildReportRows zaten TR-formatlanmış
   // string'leri döndürdü; sendXlsx yalnız aoa shape'i kuruyor. Uzun text
