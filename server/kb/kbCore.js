@@ -1502,12 +1502,13 @@ function getCozumTipi() {
 function getKaliciOnlem() {
   return loadTaxonomyV2().close.kalici_onlem;
 }
-function isValidKokNeden(group, detail) {
+function isValidKokNedenGrubu(group) {
   if (group == null) return true;
-  const g = getKokNedenGroups().find((x) => x.group === group);
-  if (!g) return false;
+  return getKokNedenGroups().some((g) => g.group === group);
+}
+function isValidKokNedenDetay(detail) {
   if (detail == null) return true;
-  return g.details.includes(detail);
+  return getKokNedenGroups().some((g) => g.details.includes(detail));
 }
 function isValidCozumTipi(value) {
   if (value == null) return true;
@@ -1527,12 +1528,6 @@ function formatOpenForPrompt() {
       ...spec.values.map((v) => `  \u2022 ${v}`)
     ].join("\n");
   }).join("\n\n");
-}
-function formatKokNedenForPrompt() {
-  return getKokNedenGroups().map(
-    (g) => `## ${g.group}
-` + g.details.map((d) => `  \u2022 ${d}`).join("\n")
-  ).join("\n\n");
 }
 
 // ../ticket-analiz/src/lib/cc/categorizer-v2.ts
@@ -1665,7 +1660,7 @@ ticket i\xE7in destek dilinde 4 kapan\u0131\u015F alan\u0131n\u0131 se\xE7mek.
 
 Kurallar (mutlak):
 - ASLA yeni de\u011Fer uydurma; SADECE verilen taksonomide ge\xE7en string'leri kullan.
-- "kok_neden_detayi" YALNIZ se\xE7ti\u011Fin "kok_neden_grubu" alt\u0131ndakilerden se\xE7ilebilir.
+- "kok_neden_grubu" ve "kok_neden_detayi" BA\u011EIMSIZ se\xE7ilir; detay herhangi bir gruba ait olabilir \u2014 t\xFCm detay listesinden uygun olan\u0131 se\xE7.
 - Uygun de\u011Fer yoksa null b\u0131rak (bo\u015F string de\u011Fil).
 - kalici_onlem opsiyonel \u2014 emin de\u011Filsen veya gereksizse null b\u0131rak.
 - Confidence 0-1 \u2014 karars\u0131zsan d\xFC\u015F\xFCr.
@@ -1686,8 +1681,11 @@ async function suggestClose(input) {
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
   const userPrompt = [
-    "TAKSONOM\u0130 \u2014 K\xD6K NEDEN GRUBU \u2192 DETAYI:",
-    formatKokNedenForPrompt(),
+    "K\xD6K NEDEN GRUBU (biri):",
+    getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
+    "",
+    "K\xD6K NEDEN DETAYI (biri, gruptan ba\u011F\u0131ms\u0131z):",
+    [...new Set(getKokNedenGroups().flatMap((g) => g.details))].map((d) => `  \u2022 ${d}`).join("\n"),
     "",
     "TAKSONOM\u0130 \u2014 \xC7\xD6Z\xDCM T\u0130P\u0130:",
     getCozumTipi().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
@@ -1705,7 +1703,7 @@ async function suggestClose(input) {
     `\xC7\u0131kt\u0131 JSON \u015Femas\u0131 (sadece JSON):`,
     `{`,
     `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
-    `  "kok_neden_detayi": string | null,  // se\xE7ilen grubun alt detaylar\u0131ndan biri`,
+    `  "kok_neden_detayi": string | null,  // t\xFCm detay listesinden biri (gruptan ba\u011F\u0131ms\u0131z)`,
     `  "cozum_tipi": string | null,        // 12 \xE7\xF6z\xFCm tipinden biri`,
     `  "kalici_onlem": string | null,      // 8 kal\u0131c\u0131 \xF6nlemden biri, opsiyonel`,
     `  "confidence": number,`,
@@ -1729,9 +1727,8 @@ async function suggestClose(input) {
     return emptyCloseResult(res, "LLM \xE7\u0131kt\u0131s\u0131 \u015Femaya uymad\u0131");
   }
   const out = v.data;
-  const validKn = isValidKokNeden(out.kok_neden_grubu, out.kok_neden_detayi);
-  const kok_neden_grubu = validKn ? out.kok_neden_grubu : null;
-  const kok_neden_detayi = validKn ? out.kok_neden_detayi : null;
+  const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
+  const kok_neden_detayi = isValidKokNedenDetay(out.kok_neden_detayi) ? out.kok_neden_detayi : null;
   const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
   return {
