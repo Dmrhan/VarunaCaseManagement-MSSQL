@@ -1,0 +1,47 @@
+name: PR base check
+
+# Workflow politikası gardiyanı:
+#   - feature/* veya fix/* → PR base=dev olmalı
+#   - dev → main yalnız release PR için izinli
+#   - Diğer base'ler (örn. branch'ler arası) serbest
+#
+# Branch protection ruleset'inde bu check'i "Require status checks to pass"
+# olarak işaretle (job adı: "base-check") → yanlış base ile açılan PR'lar
+# merge edilemez.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  base-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate base/head pair
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "PR head=$HEAD  base=$BASE"
+
+          # 1) base=dev → daima izinli (normal feature/fix akışı)
+          if [ "$BASE" = "dev" ]; then
+            echo "OK: base is dev (normal feature/fix flow)"
+            exit 0
+          fi
+
+          # 2) base=main + head=dev → release PR, izinli
+          if [ "$BASE" = "main" ] && [ "$HEAD" = "dev" ]; then
+            echo "OK: release PR (dev -> main)"
+            exit 0
+          fi
+
+          # 3) base=main + head != dev → POLİTİKA İHLALİ
+          if [ "$BASE" = "main" ]; then
+            echo "::error::PR base 'main' is reserved for release PRs (head must be 'dev'). For feature/fix branches, change base to 'dev' from the PR edit menu."
+            exit 1
+          fi
+
+          # 4) Başka base'ler (örn. başka feature branch) — politika dışı, serbest
+          echo "OK: non-policy base ($BASE)"
+          exit 0
