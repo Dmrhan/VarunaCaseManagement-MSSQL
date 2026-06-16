@@ -117,13 +117,25 @@ export function computePivot(input) {
   const colLabels = sortLabels(Array.from(colLabelSet));
 
   // Matrix
+  //
+  // Codex P2 #3 fix — Sparse pivot empty bucket için min/max cell'i NULL
+  // olarak işaretle. aggregate('min', []) = 0 dönüyordu; sparse veride
+  // "case yok" sinyali "min = 0" gibi yanlış sayıya çevriliyordu. Negatif
+  // measure değerlerde de inflate edici (gerçek max=-5 iken total=0).
+  //
+  // Diğer fn'ler (count/sum/avg) için empty bucket cell hâlâ 0 — bu
+  // semantik doğru: 0 case → 0 count, 0 sum, 0 avg (avg totals zaten null).
   const matrix = {};
   for (const r of rowLabels) {
     matrix[r] = {};
     const rb = buckets.get(r);
     for (const c of colLabels) {
       const vals = (rb && rb.get(c)) ?? [];
-      matrix[r][c] = aggregate(measureFn, vals);
+      if (vals.length === 0 && (measureFn === 'min' || measureFn === 'max')) {
+        matrix[r][c] = null;
+      } else {
+        matrix[r][c] = aggregate(measureFn, vals);
+      }
     }
   }
 
@@ -145,19 +157,25 @@ export function computePivot(input) {
     for (const c of colLabels) colTotals[c] = null;
     grandTotal = null;
   } else if (measureFn === 'min' || measureFn === 'max') {
-    // Cell değerlerini measureFn ile yeniden agrege et
+    // Cell değerlerini measureFn ile yeniden agrege et — null cell'leri
+    // (boş bucket) skip et. Tamamen boş row/col → totals null. Frontend
+    // formatPivotCell null'a "—" çizer.
+    const filterReal = (arr) => arr.filter((v) => v != null);
     for (const r of rowLabels) {
-      const cells = colLabels.map((c) => matrix[r][c]);
-      rowTotals[r] = aggregate(measureFn, cells);
+      const cells = filterReal(colLabels.map((c) => matrix[r][c]));
+      rowTotals[r] = cells.length === 0 ? null : aggregate(measureFn, cells);
     }
     for (const c of colLabels) {
-      const cells = rowLabels.map((r) => matrix[r][c]);
-      colTotals[c] = aggregate(measureFn, cells);
+      const cells = filterReal(rowLabels.map((r) => matrix[r][c]));
+      colTotals[c] = cells.length === 0 ? null : aggregate(measureFn, cells);
     }
-    // grandTotal: tüm cell'lerin min veya max'i
+    // grandTotal: tüm dolu cell'lerin min veya max'i
     const allCells = [];
-    for (const r of rowLabels) for (const c of colLabels) allCells.push(matrix[r][c]);
-    grandTotal = aggregate(measureFn, allCells);
+    for (const r of rowLabels) for (const c of colLabels) {
+      const v = matrix[r][c];
+      if (v != null) allCells.push(v);
+    }
+    grandTotal = allCells.length === 0 ? null : aggregate(measureFn, allCells);
   } else {
     // count, sum: additive
     for (const c of colLabels) colTotals[c] = 0;
