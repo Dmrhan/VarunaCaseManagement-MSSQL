@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from './client.js';
 import { fromDb, toDb } from './enumMap.js';
+import { assertActorObject } from '../lib/actor.js';
 
 /**
  * Admin tanım ekranlarının CRUD repository'si.
@@ -131,7 +132,9 @@ export const teamRepo = {
     }
     return prisma.team.findMany({ where, orderBy: [{ companyId: 'asc' }, { name: 'asc' }] });
   },
-  async create(input, allowedCompanyIds) {
+  async create(input, allowedCompanyIds, actor) {
+    // PR-3 — admin audit attribution: req.user.id createdBy/updatedBy.
+    assertActorObject(actor, 'teamRepo.create');
     if (!input.companyId) throw new AdminError('companyId gerekli.');
     if (allowedCompanyIds && !allowedCompanyIds.includes(input.companyId)) {
       throw new AdminError('Bu şirkete takım eklemeye yetkin yok.');
@@ -152,10 +155,13 @@ export const teamRepo = {
         companyId: input.companyId,
         isActive: input.isActive ?? true,
         ...(defaultSupportLevel !== undefined && { defaultSupportLevel }),
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async update(id, patch, allowedCompanyIds) {
+  async update(id, patch, allowedCompanyIds, actor) {
+    assertActorObject(actor, 'teamRepo.update');
     // Önce target team'in companyId'sini al, scope check
     const target = await prisma.team.findUnique({
       where: { id },
@@ -183,6 +189,7 @@ export const teamRepo = {
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
         ...(defaultSupportLevel !== undefined && { defaultSupportLevel }),
+        updatedByUserId: actor.userId,
       },
     });
   },
@@ -378,7 +385,9 @@ export const categoryRepo = {
         })),
       }));
   },
-  async createParent(input) {
+  async createParent(input, actor) {
+    // PR-3 — admin audit attribution.
+    assertActorObject(actor, 'categoryRepo.createParent');
     // Aynı şirket × parent yok scope'unda isim duplication kontrol edilir.
     // Farklı şirketlerin aynı isimde kategorisi olması serbest.
     const exists = await prisma.categoryDef.findFirst({
@@ -395,10 +404,13 @@ export const categoryRepo = {
         description: input.description?.trim() || null,
         companyId: input.companyId ?? null,
         isActive: input.isActive ?? true,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async createSub(parentId, input) {
+  async createSub(parentId, input, actor) {
+    assertActorObject(actor, 'categoryRepo.createSub');
     const exists = await prisma.categoryDef.findFirst({
       where: { parentId, name: { equals: input.name.trim() } },
     });
@@ -410,10 +422,13 @@ export const categoryRepo = {
         name: input.name.trim(),
         parentId,
         isActive: input.isActive ?? true,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async update(id, patch) {
+  async update(id, patch, actor) {
+    assertActorObject(actor, 'categoryRepo.update');
     if (patch.name) {
       const target = await prisma.categoryDef.findUnique({ where: { id } });
       if (!target) throw new AdminError('Kategori bulunamadı.');
@@ -432,6 +447,7 @@ export const categoryRepo = {
         ...(patch.name !== undefined && { name: patch.name.trim() }),
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        updatedByUserId: actor.userId,
       },
     });
   },
@@ -455,7 +471,9 @@ export const slaPolicyRepo = {
     const all = await prisma.sLAPolicy.findMany({ orderBy: { companyName: 'asc' } });
     return all.map(fromDb);
   },
-  async create(input) {
+  async create(input, actor) {
+    // PR-3 — admin audit attribution.
+    assertActorObject(actor, 'slaPolicyRepo.create');
     const dup = await prisma.sLAPolicy.findFirst({
       where: {
         companyId: input.companyId,
@@ -470,11 +488,14 @@ export const slaPolicyRepo = {
       data: {
         ...input,
         requestType: toDb({ requestType: input.requestType }).requestType,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
     return fromDb(created);
   },
-  async update(id, patch) {
+  async update(id, patch, actor) {
+    assertActorObject(actor, 'slaPolicyRepo.update');
     const dbPatch = toDb(patch);
     // 5-tuple değişiyorsa duplicate kontrolü
     if (
@@ -493,7 +514,10 @@ export const slaPolicyRepo = {
       const dup = await prisma.sLAPolicy.findFirst({ where: { id: { not: id }, ...tuple } });
       if (dup) throw new AdminError('Aynı 5-tuple eşleşmesinde başka kural var.');
     }
-    const updated = await prisma.sLAPolicy.update({ where: { id }, data: dbPatch });
+    const updated = await prisma.sLAPolicy.update({
+      where: { id },
+      data: { ...dbPatch, updatedByUserId: actor.userId },
+    });
     return fromDb(updated);
   },
   async remove(id) {
@@ -509,7 +533,9 @@ export const checklistRepo = {
   async list() {
     return prisma.checklistTemplate.findMany({ orderBy: { name: 'asc' } });
   },
-  async create(input) {
+  async create(input, actor) {
+    // PR-3 — admin audit attribution.
+    assertActorObject(actor, 'checklistRepo.create');
     const dup = await prisma.checklistTemplate.findFirst({
       where: {
         companyId: input.companyId,
@@ -528,10 +554,13 @@ export const checklistRepo = {
         description: input.description?.trim() || null,
         items: input.items ?? [],
         isActive: input.isActive ?? true,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async update(id, patch) {
+  async update(id, patch, actor) {
+    assertActorObject(actor, 'checklistRepo.update');
     return prisma.checklistTemplate.update({
       where: { id },
       data: {
@@ -539,6 +568,7 @@ export const checklistRepo = {
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.items !== undefined && { items: patch.items }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        updatedByUserId: actor.userId,
       },
     });
   },
@@ -605,7 +635,9 @@ export const fieldDefinitionRepo = {
       orderBy: [{ companyId: 'asc' }, { displayOrder: 'asc' }, { label: 'asc' }],
     });
   },
-  async create(input) {
+  async create(input, actor) {
+    // PR-3 — admin audit attribution.
+    assertActorObject(actor, 'fieldDefinitionRepo.create');
     if (!input.companyId) throw new AdminError('companyId gerekli.');
     if (!input.label?.trim()) throw new AdminError('label gerekli.');
     if (!input.fieldKey?.trim()) throw new AdminError('fieldKey gerekli.');
@@ -624,10 +656,13 @@ export const fieldDefinitionRepo = {
         displayOrder: input.displayOrder ?? 0,
         options: input.options ?? null,
         isActive: input.isActive ?? true,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async update(id, patch) {
+  async update(id, patch, actor) {
+    assertActorObject(actor, 'fieldDefinitionRepo.update');
     if (patch.fieldKey) {
       const cur = await prisma.fieldDefinition.findUnique({ where: { id } });
       if (!cur) throw new AdminError('Tanım bulunamadı.');
@@ -651,14 +686,17 @@ export const fieldDefinitionRepo = {
         ...(patch.displayOrder !== undefined && { displayOrder: patch.displayOrder }),
         ...(patch.options !== undefined && { options: patch.options }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        updatedByUserId: actor.userId,
       },
     });
   },
-  async remove(id) {
+  async remove(id, actor) {
+    // PR-3 — soft delete de updatedByUserId stamp atar.
+    assertActorObject(actor, 'fieldDefinitionRepo.remove');
     // Vakaların customFields'ında kullanılıyor olabilir — pasifleştir, hard delete yok
     return prisma.fieldDefinition.update({
       where: { id },
-      data: { isActive: false },
+      data: { isActive: false, updatedByUserId: actor.userId },
     });
   },
 };
@@ -1874,7 +1912,9 @@ export const taxonomyDefRepo = {
     });
   },
 
-  async create(input, allowedCompanyIds) {
+  async create(input, allowedCompanyIds, actor) {
+    // PR-3 — admin audit attribution.
+    assertActorObject(actor, 'taxonomyDefRepo.create');
     const companyId = trimRequired(input?.companyId, 'companyId');
     assertTaxonomyAllowed(companyId, allowedCompanyIds);
     const taxonomyType = trimRequired(input?.taxonomyType, 'taxonomyType');
@@ -1909,12 +1949,15 @@ export const taxonomyDefRepo = {
         parentId,
         isActive: input?.isActive ?? true,
         sortOrder: Number.isFinite(input?.sortOrder) ? Number(input.sortOrder) : 0,
+        createdByUserId: actor.userId,
+        updatedByUserId: actor.userId,
       },
       select: TAXONOMY_DEF_SELECT,
     });
   },
 
-  async update(id, patch, allowedCompanyIds) {
+  async update(id, patch, allowedCompanyIds, actor) {
+    assertActorObject(actor, 'taxonomyDefRepo.update');
     const target = await prisma.taxonomyDef.findUnique({
       where: { id },
       select: {
@@ -1973,7 +2016,7 @@ export const taxonomyDefRepo = {
       });
     }
 
-    const data = { code: nextCode, parentId: nextParentId };
+    const data = { code: nextCode, parentId: nextParentId, updatedByUserId: actor.userId };
     if (patch?.label !== undefined) data.label = trimRequired(patch.label, 'label');
     if (patch?.isActive !== undefined) data.isActive = Boolean(patch.isActive);
     if (patch?.sortOrder !== undefined && Number.isFinite(Number(patch.sortOrder))) {
@@ -1987,7 +2030,9 @@ export const taxonomyDefRepo = {
     });
   },
 
-  async remove(id, allowedCompanyIds) {
+  async remove(id, allowedCompanyIds, actor) {
+    // PR-3 — soft delete updatedByUserId stamp atar.
+    assertActorObject(actor, 'taxonomyDefRepo.remove');
     // SOFT DELETE — spec gereği hard delete yasak. isActive=false yapılır.
     // Kapanış decouple — taksonomiler bağımsız; parent/child ilişkisi yok,
     // pasifleştirme yalnız ilgili satırı etkiler.
@@ -1998,7 +2043,10 @@ export const taxonomyDefRepo = {
     if (!target) throw new AdminError('Taxonomy satırı bulunamadı.', 404);
     assertTaxonomyAllowed(target.companyId, allowedCompanyIds);
     if (!target.isActive) return { id, deactivated: true, alreadyInactive: true };
-    await prisma.taxonomyDef.update({ where: { id }, data: { isActive: false } });
+    await prisma.taxonomyDef.update({
+      where: { id },
+      data: { isActive: false, updatedByUserId: actor.userId },
+    });
     return { id, deactivated: true };
   },
 };

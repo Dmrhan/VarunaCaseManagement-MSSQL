@@ -21,6 +21,7 @@ import {
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { requireActor } from '../lib/actor.js';
 
 const router = Router();
 
@@ -115,11 +116,13 @@ router.get('/teams', asyncRoute(async (req, res) => {
 router.post('/teams', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   assertCompanyAdmin(req, body.companyId); // body.companyId zorunlu + scope
-  const item = await teamRepo.create(body, req.user.allowedCompanyIds);
+  const actor = requireActor(req);
+  const item = await teamRepo.create(body, req.user.allowedCompanyIds, actor);
   res.status(201).json(item);
 }));
 router.patch('/teams/:id', asyncRoute(async (req, res) => {
-  const item = await teamRepo.update(req.params.id, req.body ?? {}, req.user.allowedCompanyIds);
+  const actor = requireActor(req);
+  const item = await teamRepo.update(req.params.id, req.body ?? {}, req.user.allowedCompanyIds, actor);
   res.json(item);
 }));
 router.delete('/teams/:id', asyncRoute(async (req, res) => {
@@ -144,7 +147,8 @@ router.get('/sla-policies', asyncRoute(async (req, res) => {
 router.post('/sla-policies', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   assertCompanyAdmin(req, body.companyId);
-  const item = await slaPolicyRepo.create(body);
+  const actor = requireActor(req);
+  const item = await slaPolicyRepo.create(body, actor);
   res.status(201).json(item);
 }));
 router.patch('/sla-policies/:id', asyncRoute(async (req, res) => {
@@ -154,7 +158,8 @@ router.patch('/sla-policies/:id', asyncRoute(async (req, res) => {
   if (cur) assertCompanyAdmin(req, cur.companyId);
   const body = req.body ?? {};
   if (body.companyId) assertCompanyAdmin(req, body.companyId); // şirket değişikliği
-  const item = await slaPolicyRepo.update(req.params.id, body);
+  const actor = requireActor(req);
+  const item = await slaPolicyRepo.update(req.params.id, body, actor);
   res.json(item);
 }));
 router.delete('/sla-policies/:id', asyncRoute(async (req, res) => {
@@ -174,7 +179,8 @@ router.get('/checklists', asyncRoute(async (req, res) => {
 router.post('/checklists', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   assertCompanyAdmin(req, body.companyId);
-  const item = await checklistRepo.create(body);
+  const actor = requireActor(req);
+  const item = await checklistRepo.create(body, actor);
   res.status(201).json(item);
 }));
 router.patch('/checklists/:id', asyncRoute(async (req, res) => {
@@ -183,7 +189,8 @@ router.patch('/checklists/:id', asyncRoute(async (req, res) => {
   if (cur) assertCompanyAdmin(req, cur.companyId);
   const body = req.body ?? {};
   if (body.companyId) assertCompanyAdmin(req, body.companyId);
-  const item = await checklistRepo.update(req.params.id, body);
+  const actor = requireActor(req);
+  const item = await checklistRepo.update(req.params.id, body, actor);
   res.json(item);
 }));
 router.delete('/checklists/:id', asyncRoute(async (req, res) => {
@@ -209,7 +216,8 @@ router.get('/field-definitions', asyncRoute(async (req, res) => {
 router.post('/field-definitions', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   assertCompanyAdmin(req, body.companyId);
-  const item = await fieldDefinitionRepo.create(body);
+  const actor = requireActor(req);
+  const item = await fieldDefinitionRepo.create(body, actor);
   res.status(201).json(item);
 }));
 router.patch('/field-definitions/:id', asyncRoute(async (req, res) => {
@@ -219,14 +227,16 @@ router.patch('/field-definitions/:id', asyncRoute(async (req, res) => {
   if (cur) assertCompanyAdmin(req, cur.companyId);
   const body = req.body ?? {};
   if (body.companyId) assertCompanyAdmin(req, body.companyId);
-  const item = await fieldDefinitionRepo.update(req.params.id, body);
+  const actor = requireActor(req);
+  const item = await fieldDefinitionRepo.update(req.params.id, body, actor);
   res.json(item);
 }));
 router.delete('/field-definitions/:id', asyncRoute(async (req, res) => {
   const all = await fieldDefinitionRepo.list();
   const cur = all.find((f) => f.id === req.params.id);
   if (cur) assertCompanyAdmin(req, cur.companyId);
-  const item = await fieldDefinitionRepo.remove(req.params.id);
+  const actor = requireActor(req);
+  const item = await fieldDefinitionRepo.remove(req.params.id, actor);
   res.json(item);
 }));
 
@@ -266,7 +276,8 @@ router.post('/categories', asyncRoute(async (req, res) => {
     // null companyId = sistem geneli kategori → yalnızca SystemAdmin
     requireSystemAdminOnly(req);
   }
-  const item = await categoryRepo.createParent(body);
+  const actor = requireActor(req);
+  const item = await categoryRepo.createParent(body, actor);
   res.status(201).json(item);
 }));
 router.post('/categories/:parentId/sub', asyncRoute(async (req, res) => {
@@ -277,7 +288,8 @@ router.post('/categories/:parentId/sub', asyncRoute(async (req, res) => {
     if (parent.companyId) assertCompanyAdmin(req, parent.companyId);
     else requireSystemAdminOnly(req);
   }
-  const item = await categoryRepo.createSub(req.params.parentId, req.body ?? {});
+  const actor = requireActor(req);
+  const item = await categoryRepo.createSub(req.params.parentId, req.body ?? {}, actor);
   res.status(201).json(item);
 }));
 router.patch('/categories/:id', asyncRoute(async (req, res) => {
@@ -287,7 +299,8 @@ router.patch('/categories/:id', asyncRoute(async (req, res) => {
     if (cur.companyId) assertCompanyAdmin(req, cur.companyId);
     else requireSystemAdminOnly(req);
   }
-  const item = await categoryRepo.update(req.params.id, req.body ?? {});
+  const actor = requireActor(req);
+  const item = await categoryRepo.update(req.params.id, req.body ?? {}, actor);
   res.json(item);
 }));
 router.delete('/categories/:id', asyncRoute(async (req, res) => {
@@ -706,7 +719,8 @@ router.get('/taxonomy-defs', asyncRoute(async (req, res) => {
 router.post('/taxonomy-defs', asyncRoute(async (req, res) => {
   const body = req.body ?? {};
   assertCompanyAdmin(req, body.companyId);
-  const item = await taxonomyDefRepo.create(body, req.user.allowedCompanyIds);
+  const actor = requireActor(req);
+  const item = await taxonomyDefRepo.create(body, req.user.allowedCompanyIds, actor);
   res.status(201).json(item);
 }));
 
@@ -725,17 +739,20 @@ async function assertTaxonomyDefCompanyAdmin(req, id) {
 
 router.patch('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
   await assertTaxonomyDefCompanyAdmin(req, req.params.id);
+  const actor = requireActor(req);
   const item = await taxonomyDefRepo.update(
     req.params.id,
     req.body ?? {},
     req.user.allowedCompanyIds,
+    actor,
   );
   res.json(item);
 }));
 
 router.delete('/taxonomy-defs/:id', asyncRoute(async (req, res) => {
   await assertTaxonomyDefCompanyAdmin(req, req.params.id);
-  const result = await taxonomyDefRepo.remove(req.params.id, req.user.allowedCompanyIds);
+  const actor = requireActor(req);
+  const result = await taxonomyDefRepo.remove(req.params.id, req.user.allowedCompanyIds, actor);
   res.json(result);
 }));
 

@@ -86,10 +86,23 @@ model User {
   createdAt          DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt          DateTime  @updatedAt
 
-  companies   UserCompany[]
-  reminders   CaseReminder[]
+  companies                 UserCompany[]
+  reminders                 CaseReminder[]
   /// Phase 4 — kullanıcının kaydettiği rapor görünümleri (private/shared).
-  reportViews ReportView[]
+  reportViews               ReportView[]
+  /// PR-3 — admin audit attribution (6 model × 2 = 12 reverse relation).
+  teamsCreated              Team[]              @relation("TeamCreatedBy")
+  teamsUpdated              Team[]              @relation("TeamUpdatedBy")
+  categoriesCreated         CategoryDef[]       @relation("CategoryDefCreatedBy")
+  categoriesUpdated         CategoryDef[]       @relation("CategoryDefUpdatedBy")
+  slaPoliciesCreated        SLAPolicy[]         @relation("SLAPolicyCreatedBy")
+  slaPoliciesUpdated        SLAPolicy[]         @relation("SLAPolicyUpdatedBy")
+  fieldDefinitionsCreated   FieldDefinition[]   @relation("FieldDefinitionCreatedBy")
+  fieldDefinitionsUpdated   FieldDefinition[]   @relation("FieldDefinitionUpdatedBy")
+  taxonomyDefsCreated       TaxonomyDef[]       @relation("TaxonomyDefCreatedBy")
+  taxonomyDefsUpdated       TaxonomyDef[]       @relation("TaxonomyDefUpdatedBy")
+  checklistTemplatesCreated ChecklistTemplate[] @relation("ChecklistTemplateCreatedBy")
+  checklistTemplatesUpdated ChecklistTemplate[] @relation("ChecklistTemplateUpdatedBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -162,21 +175,26 @@ model Company {
 // Vaka kaydı sırasında bu tanımlara göre form alanları çıkar; değerler
 // Case.customFields JSON'una `{ fieldKey: value }` olarak yazılır.
 model FieldDefinition {
-  id           String   @id @default(cuid()) @db.NVarChar(450)
-  companyId    String   @db.NVarChar(450)
-  label        String   @db.NVarChar(Max)
-  fieldKey     String   @db.NVarChar(100) // benzersiz tanımlayıcı (örn. "customer_segment")
-  fieldType    String   @db.NVarChar(50) // enum:FieldType
-  caseType     String?  @db.NVarChar(50) // null = tüm vaka tipleri // enum:CaseType
-  isRequired   Boolean  @default(false)
-  displayOrder Int      @default(0)
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  companyId       String   @db.NVarChar(450)
+  label           String   @db.NVarChar(Max)
+  fieldKey        String   @db.NVarChar(100) // benzersiz tanımlayıcı (örn. "customer_segment")
+  fieldType       String   @db.NVarChar(50) // enum:FieldType
+  caseType        String?  @db.NVarChar(50) // null = tüm vaka tipleri // enum:CaseType
+  isRequired      Boolean  @default(false)
+  displayOrder    Int      @default(0)
   /// Select için { value, label }[] dizisi; diğer tipler için null
-  options      String?  @db.NVarChar(Max) // json
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt    DateTime @updatedAt
+  options         String?  @db.NVarChar(Max) // json
+  isActive        Boolean  @default(true)
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy User?   @relation("FieldDefinitionCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?   @relation("FieldDefinitionUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([companyId, fieldKey])
   @@index([companyId, caseType, isActive])
@@ -687,22 +705,27 @@ model PackageItem {
 ///   - parentId kullanılmaz (decouple) — kapanış kayıtlarında null
 ///   - active/sortOrder UI ordering için; metadata JSON ileri kullanım
 model TaxonomyDef {
-  id           String   @id @default(cuid()) @db.NVarChar(450)
-  companyId    String   @db.NVarChar(450)
-  taxonomyType String   @db.NVarChar(255)
-  code         String   @db.NVarChar(255)
-  label        String   @db.NVarChar(Max)
-  parentId     String?  @db.NVarChar(450)
-  isActive     Boolean  @default(true)
-  sortOrder    Int      @default(0)
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  companyId       String   @db.NVarChar(450)
+  taxonomyType    String   @db.NVarChar(255)
+  code            String   @db.NVarChar(255)
+  label           String   @db.NVarChar(Max)
+  parentId        String?  @db.NVarChar(450)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
   /// Forward-compat: { kbAliases?: string[]; description?: string; … }
-  metadata     String?  @db.NVarChar(Max) // json
-  createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt    DateTime @updatedAt
+  metadata        String?  @db.NVarChar(Max) // json
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
 
-  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  parent   TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children TaxonomyDef[] @relation("TaxonomyHierarchy")
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  parent    TaxonomyDef?  @relation("TaxonomyHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children  TaxonomyDef[] @relation("TaxonomyHierarchy")
+  createdBy User?         @relation("TaxonomyDefCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?         @relation("TaxonomyDefUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([companyId, taxonomyType, code])
   @@index([companyId, taxonomyType, isActive, sortOrder])
@@ -779,12 +802,17 @@ model Team {
   /// WR-A5 / PM-03 — Takımın varsayılan destek seviyesi. Case create cascade'inde
   /// (assignedPersonId yokken) kullanılır. Mevcut takımlar default L1.
   defaultSupportLevel String   @default("L1") @db.NVarChar(50) // enum:SupportLevel
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId     String?  @db.NVarChar(450)
+  updatedByUserId     String?  @db.NVarChar(450)
   createdAt           DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt           DateTime @updatedAt
 
-  company Company  @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  members Person[]
-  cases   Case[]
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  members   Person[]
+  cases     Case[]
+  createdBy User?    @relation("TeamCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?    @relation("TeamUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId])
 }
@@ -834,18 +862,23 @@ model DocumentType {
 
 // CategoryDef — kategori + alt kategori (self-relation ile parent/child)
 model CategoryDef {
-  id          String   @id @default(cuid()) @db.NVarChar(450)
-  name        String   @db.NVarChar(Max)
-  description String?  @db.NVarChar(Max)
-  parentId    String?  @db.NVarChar(450)
-  companyId   String?  @db.NVarChar(450)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  name            String   @db.NVarChar(Max)
+  description     String?  @db.NVarChar(Max)
+  parentId        String?  @db.NVarChar(450)
+  companyId       String?  @db.NVarChar(450)
+  isActive        Boolean  @default(true)
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
 
-  parent   CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children CategoryDef[] @relation("CategoryHierarchy")
-  company  Company?      @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  parent    CategoryDef?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children  CategoryDef[] @relation("CategoryHierarchy")
+  company   Company?      @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy User?         @relation("CategoryDefCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?         @relation("CategoryDefUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([parentId])
   @@index([companyId])
@@ -875,30 +908,40 @@ model SLAPolicy {
   resolutionHours Int
   description     String?  @db.NVarChar(Max)
   isActive        Boolean  @default(true)
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
   createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt       DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy User?   @relation("SLAPolicyCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?   @relation("SLAPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId, productGroup, categoryName, subCategoryName, requestType])
 }
 
 // ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
 model ChecklistTemplate {
-  id           String   @id @default(cuid()) @db.NVarChar(450)
-  name         String   @db.NVarChar(Max)
-  companyId    String   @db.NVarChar(450)
-  companyName  String   @db.NVarChar(Max)
-  productGroup String   @db.NVarChar(200)
-  categoryName String   @db.NVarChar(255)
-  description  String?  @db.NVarChar(Max)
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  name            String   @db.NVarChar(Max)
+  companyId       String   @db.NVarChar(450)
+  companyName     String   @db.NVarChar(Max)
+  productGroup    String   @db.NVarChar(200)
+  categoryName    String   @db.NVarChar(255)
+  description     String?  @db.NVarChar(Max)
   /// CaseChecklistItem[] — { id, label, required, isActive }
-  items        String   @db.NVarChar(Max) // json
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt    DateTime @updatedAt
+  items           String   @db.NVarChar(Max) // json
+  isActive        Boolean  @default(true)
+  /// PR-3 — admin audit attribution (nullable; eski satırlar NULL)
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy User?   @relation("ChecklistTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?   @relation("ChecklistTemplateUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([companyId, productGroup, categoryName])
 }
