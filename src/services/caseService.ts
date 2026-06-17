@@ -1363,12 +1363,17 @@ export const caseService = {
     if (!upload) return undefined;
     if ('error' in upload) return upload;
 
-    // Adım 2 — token'lı BFF storage endpoint'ine PUT (XHR ile progress takibi)
+    // Adım 2 — token'lı BFF storage endpoint'ine PUT (XHR ile progress takibi).
+    // PR-4 follow-up (Codex P2) — Authorization header zorunlu. Backend
+    // PUT'ı artık verifyJwt ile koruyor; token.userId === req.user.id match
+    // kontrol ediliyor (User A token'ı User B'ye sızsa bile PUT 403 reddedilir).
+    const jwt = await getAccessToken();
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', upload.uploadUrl);
         xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        if (jwt) xhr.setRequestHeader('Authorization', `Bearer ${jwt}`);
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable && onProgress) {
             onProgress(Math.round((e.loaded / e.total) * 100));
