@@ -1344,8 +1344,10 @@ export const caseService = {
       return { error: `Dosya boyutu üst sınırı ${Math.round(CASE_FILE_MAX_SIZE / (1024 * 1024))} MB.` };
     }
 
-    // Adım 1 — signed upload URL al
-    const upload = await apiFetch<{ uploadUrl: string; path: string; attachmentId: string } | { error: string }>(
+    // Adım 1 — signed upload URL al (PR-4: token user binding için)
+    const upload = await apiFetch<
+      { uploadUrl: string; path: string; attachmentId: string; token: string } | { error: string }
+    >(
       `${API_BASE}/${id}/files/upload-url`,
       {
         method: 'POST',
@@ -1395,7 +1397,8 @@ export const caseService = {
       return undefined;
     }
 
-    // Adım 3 — finalize: DB satırı + history
+    // Adım 3 — finalize: DB satırı + history.
+    // PR-4 — token user binding: backend token.userId === req.user.id check.
     const result = await apiFetch<{ caseUpdated: Case; file: CaseFile }>(
       `${API_BASE}/${id}/files/finalize`,
       {
@@ -1407,6 +1410,7 @@ export const caseService = {
           fileName: file.name,
           fileSize: file.size,
           mimeType: file.type || 'application/octet-stream',
+          token: upload.token,
         }),
       },
       'Dosya kaydedilemedi',
