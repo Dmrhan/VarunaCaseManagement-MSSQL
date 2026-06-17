@@ -8,7 +8,7 @@
 - **Product Planning Matrix ID:** PM-_ (e.g. `PM-01`) — see `docs/PRODUCT_PLANNING_MATRIX.md`
 - **Planning Card:** `docs/planning_cards/WR-_.md` — link, or `skipped — trivial change`
 - **Performance & Architecture Gate verdict:** Pass / Needs mitigation (list) / Blocked / N/A — see `docs/AGENTIC_PLANNING_PROTOCOL.md §2③`
-- **Intended PR base:** `dev` (default) — `main` only for release / approved hotfix
+- **Intended PR base:** `dev` (default) — `main` only for release (head=`dev`) or approved hotfix (head=`hotfix/*`)
 
 Required gates by change type: see `docs/QUALITY_GATES.md`.
 
