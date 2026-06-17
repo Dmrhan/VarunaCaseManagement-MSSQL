@@ -58,8 +58,10 @@ async function resolveActorFromSeed() {
     ],
   });
   if (!user) {
+    // Codex P2 fix — `db:seed` Case'leri seed eder (prisma/seed.ts), User
+    // YARATMAZ. Demo user'lar için `db:seed:auth` (prisma/seedAuth.ts).
     throw new Error(
-      '_actor-fixture: seed\'li User bulunamadı. Smoke öncesi `npm run db:seed` veya benzeri seed komutu çalıştırın.',
+      '_actor-fixture: seed\'li User bulunamadı. Smoke öncesi `npm run db:seed:auth` ile demo user\'ları seed edin.',
     );
   }
   // displayName = fullName veya email veya id (asla sentinel)
