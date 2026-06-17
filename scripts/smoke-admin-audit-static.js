@@ -251,6 +251,30 @@ console.log('\n── 7) PR-5 follow-up: actorObject signature + route ───
     /historyEntries\.push\(\{[\s\S]{0,500}actorUserId:\s+actorUserIdOf\(actorObject\),\s+\/\/\s+PR-5 follow-up/.test(repo), true);
 }
 
+// ── 7b) Codex P2 follow-up: fixture DB-resolved real user ────
+console.log('\n── 7b) Fixture resolves real user (no FK violation) ──────');
+{
+  const fixture = readFile('scripts/_actor-fixture.js');
+  // 7b.1 — prisma import edildi (DB resolve için)
+  expect('7b.1 fixture prisma import',
+    fixture.includes("import { prisma } from '../server/db/client.js'"), true);
+  // 7b.2 — resolveActorFromSeed async helper tanımlı
+  expect('7b.2 resolveActorFromSeed async helper',
+    fixture.includes('async function resolveActorFromSeed()'), true);
+  // 7b.3 — prisma.user.findFirst kullanılıyor
+  expect('7b.3 prisma.user.findFirst seeded user',
+    fixture.includes('prisma.user.findFirst'), true);
+  // 7b.4 — top-level await resolveActorFromSeed
+  expect('7b.4 TEST_ACTOR top-level await resolve',
+    fixture.includes('export const TEST_ACTOR = await resolveActorFromSeed()'), true);
+  // 7b.5 — eski sentinel TEST_ACTOR object'inde DEĞİL (yorum referansı OK)
+  expect('7b.5 userId: \'smoke-test-actor\' static literal yok',
+    /userId:\s+['"]smoke-test-actor['"]/.test(fixture), false);
+  // 7b.6 — fixture seed olmadığında açık throw (Error message)
+  expect('7b.6 user yoksa açık throw (Error message)',
+    fixture.includes("throw new Error"), true);
+}
+
 // ── 8) smoke-local-storage.js auth header ────────────────────
 console.log('\n── 8) smoke-local-storage.js Authorization header ────────');
 {
