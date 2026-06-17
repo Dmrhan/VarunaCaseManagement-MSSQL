@@ -1180,7 +1180,10 @@ export const caseRepository = {
     return shape(created);
   },
 
-  async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null) {
+  async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null, actorObject = null) {
+    // PR-5 follow-up (Codex P2) — actorObject opsiyonel; varsa actorUserId
+    // stamp atılır (post-migration audit FK doldurulur). Caller pass
+    // etmezse NULL kalır (legacy davranış — backwards-compat).
     assertActor(actor, 'caseRepository.update');
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
@@ -1284,9 +1287,7 @@ export const caseRepository = {
         fromValue: oldVal == null ? null : String(oldVal),
         toValue: newVal == null ? null : String(newVal),
         actor,
-        // PR-5 — update() string actor; userId scope'ta yok (signature genişletilirse
-        // follow-up'ta eklenir). Display chain string actor'a düşer.
-        actorUserId: null,
+        actorUserId: actorUserIdOf(actorObject), // PR-5 follow-up
       });
     }
 
@@ -2334,7 +2335,8 @@ export const caseRepository = {
    * geçiş SLA'yı duraklatmaz; kullanıcı SLA pause istiyorsa tek vaka
    * üzerinden statü geçişi yapsın. Bilinçli sadelik.
    */
-  async bulkUpdate({ caseIds, updates }, actor, allowedCompanyIds) {
+  async bulkUpdate({ caseIds, updates }, actor, allowedCompanyIds, actorObject = null) {
+    // PR-5 follow-up — actorObject opsiyonel; varsa actorUserId stamp.
     assertActor(actor, 'caseRepository.bulkUpdate');
     if (!Array.isArray(caseIds) || caseIds.length === 0) {
       return { error: 'caseIds dizisi gerekli (boş olamaz).' };
@@ -2439,7 +2441,7 @@ export const caseRepository = {
             fieldName: field,
             toValue: valueLabel,
             actor,
-            actorUserId: null, // PR-5 — bulkUpdate string actor (signature legacy)
+            actorUserId: actorUserIdOf(actorObject), // PR-5 follow-up
           });
         }
         await prisma.case.update({
@@ -2471,7 +2473,8 @@ export const caseRepository = {
    * Spec §6: 3rdPartyBekleniyor'a girilince slaPausedAt set edilir; çıkılınca
    * geçen süre slaPausedDurationMin'e eklenip slaResolutionDueAt ileri kaydırılır.
    */
-  async transitionStatus(id, nextStatus, payload = {}, actor, allowedCompanyIds) {
+  async transitionStatus(id, nextStatus, payload = {}, actor, allowedCompanyIds, actorObject = null) {
+    // PR-5 follow-up — actorObject opsiyonel; varsa actorUserId stamp.
     assertActor(actor, 'caseRepository.transitionStatus');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
@@ -2535,8 +2538,8 @@ export const caseRepository = {
       ? toDb({ escalationLevel: payload.escalationLevel }).escalationLevel ?? prev.escalationLevel
       : prev.escalationLevel;
 
-    // PR-5 — transitionStatus string actor (signature legacy); 3 history
-    // satırının hepsinde actorUserId NULL kalır. Display chain string'e düşer.
+    // PR-5 follow-up — actorObject pass'lendiyse actorUserId stamp, yoksa NULL.
+    const stampUid = actorUserIdOf(actorObject);
     const historyEntries = [
       {
         companyId,
@@ -2545,7 +2548,7 @@ export const caseRepository = {
         fromValue: prevStatusTr,
         toValue: nextStatus,
         actor,
-        actorUserId: null,
+        actorUserId: stampUid,
       },
     ];
 
@@ -2560,7 +2563,7 @@ export const caseRepository = {
           fromValue: prevLevelTr,
           toValue: payload.escalationLevel,
           actor,
-          actorUserId: null,
+          actorUserId: stampUid,
         });
       }
     }
@@ -2570,7 +2573,7 @@ export const caseRepository = {
         action: 'Eskalasyon gerekçesi',
         toValue: payload.escalationReason,
         actor,
-        actorUserId: null,
+        actorUserId: stampUid,
       });
     }
 
