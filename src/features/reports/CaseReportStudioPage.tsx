@@ -48,9 +48,13 @@ import {
   type PivotResponse,
   type PivotMeasureFn,
   type PivotDrillResponse,
+  type ReportView,
 } from '@/services/reportService';
 import { Modal } from '@/components/ui/Modal';
 import { CASE_STATUSES, CASE_PRIORITIES } from '@/features/cases/types';
+import { useAuth } from '@/services/AuthContext';
+import { notify } from '@/components/ui/Toast';
+import { Save, Trash2 } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 
@@ -196,6 +200,17 @@ export function CaseReportStudioPage() {
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillContext, setDrillContext] = useState<{ rowLabel: string; colLabel: string } | null>(null);
 
+  // Phase 4 — Saved Views
+  const auth = useAuth();
+  const [savedViews, setSavedViews] = useState<ReportView[]>([]);
+  const [savedViewsLoading, setSavedViewsLoading] = useState(false);
+  const [activeViewId, setActiveViewId] = useState<string>('');
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveForm, setSaveForm] = useState<{ name: string; description: string; isShared: boolean; companyId: string }>(
+    { name: '', description: '', isShared: false, companyId: '' },
+  );
+  const [saving, setSaving] = useState(false);
+
   const companies = useMemo(() => {
     try {
       return lookupService.companies();
@@ -221,6 +236,96 @@ export function CaseReportStudioPage() {
       cancelled = true;
     };
   }, []);
+
+  // Phase 4 — Saved Views fetch (initial + post-mutation refresh)
+  async function reloadSavedViews() {
+    setSavedViewsLoading(true);
+    const res = await reportService.listViews();
+    setSavedViewsLoading(false);
+    if (res) setSavedViews(res.views);
+  }
+  useEffect(() => {
+    void reloadSavedViews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Phase 4 — Görünüm seçilince state'i restore et
+  function handleLoadView(viewId: string) {
+    setActiveViewId(viewId);
+    if (!viewId) return; // boş seçim — "yeni"
+    const v = savedViews.find((x) => x.id === viewId);
+    if (!v) return;
+    setSelectedColumnIds(v.columns);
+    setFilters(v.filters ?? {});
+    setMode(v.mode);
+    if (v.mode === 'pivot' && v.pivotConfig) {
+      setPivotRowId(v.pivotConfig.rowColumnId);
+      setPivotColId(v.pivotConfig.colColumnId);
+      setPivotMeasureFn(v.pivotConfig.measure.fn);
+      setPivotMeasureColId(v.pivotConfig.measure.columnId ?? '');
+    }
+    setPivotData(null);
+    setPivotFilters(null);
+    setPreviewData(null);
+    notify({ type: 'success', title: `"${v.name}" yüklendi`, message: '', duration: 2500 });
+  }
+
+  function openSaveModal() {
+    const defaultCompany = companies[0]?.id ?? '';
+    setSaveForm({ name: '', description: '', isShared: false, companyId: defaultCompany });
+    setSaveModalOpen(true);
+  }
+
+  async function handleSaveView() {
+    if (!saveForm.name.trim()) {
+      notify({ type: 'error', title: 'İsim boş olamaz', message: 'Görünüme bir isim verin.', duration: 3000 });
+      return;
+    }
+    if (!saveForm.companyId) {
+      notify({ type: 'error', title: 'Şirket seçilmedi', message: 'Görünüm hangi şirkete kaydedilecek?', duration: 3000 });
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      name: saveForm.name.trim(),
+      description: saveForm.description.trim() || null,
+      mode,
+      companyId: saveForm.companyId,
+      columns: selectedColumnIds,
+      filters,
+      pivotConfig: mode === 'pivot'
+        ? {
+            rowColumnId: pivotRowId,
+            colColumnId: pivotColId,
+            measure: {
+              fn: pivotMeasureFn,
+              ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
+            },
+          }
+        : null,
+      isShared: saveForm.isShared,
+    };
+    const res = await reportService.createView(payload);
+    setSaving(false);
+    if (res) {
+      notify({ type: 'success', title: `"${res.view.name}" kaydedildi`, message: '', duration: 2500 });
+      setSaveModalOpen(false);
+      await reloadSavedViews();
+      setActiveViewId(res.view.id);
+    }
+  }
+
+  async function handleDeleteView(viewId: string) {
+    const v = savedViews.find((x) => x.id === viewId);
+    if (!v) return;
+    if (!confirm(`"${v.name}" görünümünü silmek istediğinize emin misiniz?`)) return;
+    const res = await reportService.deleteView(viewId);
+    if (res) {
+      notify({ type: 'success', title: 'Görünüm silindi', message: '', duration: 2500 });
+      if (activeViewId === viewId) setActiveViewId('');
+      await reloadSavedViews();
+    }
+  }
 
   const columnById = useMemo(() => {
     const m = new Map<string, ReportColumnDef>();
@@ -407,7 +512,7 @@ export function CaseReportStudioPage() {
   return (
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-lg font-semibold text-slate-900 dark:text-ndark-text">
             Vaka Rapor Stüdyosu
           </h1>
@@ -427,6 +532,43 @@ export function CaseReportStudioPage() {
             >
               Pivot
             </button>
+          </div>
+          {/* Phase 4 — Saved Views: picker + save */}
+          <div className="flex items-center gap-2 border-l border-slate-200 pl-3 dark:border-ndark-border">
+            <select
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+              value={activeViewId}
+              onChange={(e) => handleLoadView(e.target.value)}
+              disabled={savedViewsLoading}
+              title="Kayıtlı görünüm yükle"
+            >
+              <option value="">— Görünüm seç —</option>
+              {savedViews.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}{v.isShared ? ' · paylaşımlı' : ''}{v.ownerId === auth.user?.id ? '' : ' · başkası'}
+                </option>
+              ))}
+            </select>
+            {activeViewId && savedViews.find((v) => v.id === activeViewId)?.ownerId === auth.user?.id && (
+              <button
+                type="button"
+                onClick={() => handleDeleteView(activeViewId)}
+                className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+                title="Bu görünümü sil"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Save size={12} />}
+              onClick={openSaveModal}
+              disabled={selectedColumnIds.length === 0}
+              title="Mevcut yapılandırmayı görünüm olarak kaydet"
+            >
+              Kaydet
+            </Button>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -940,6 +1082,67 @@ export function CaseReportStudioPage() {
           </Modal>
         </>
       )}
+
+      {/* Phase 4 — Save view modal */}
+      <Modal
+        open={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        size="md"
+        title="Görünüm Kaydet"
+      >
+        <div className="space-y-3 p-4 text-sm">
+          <Field label="İsim *">
+            <TextInput
+              value={saveForm.name}
+              onChange={(e) => setSaveForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="örn. GM Haftalık Özet"
+              maxLength={200}
+            />
+          </Field>
+          <Field label="Açıklama (opsiyonel)">
+            <TextInput
+              value={saveForm.description}
+              onChange={(e) => setSaveForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="Bu görünüm ne için kullanılıyor?"
+              maxLength={3000}
+            />
+          </Field>
+          {companies.length > 1 && (
+            <Field label="Şirket *">
+              <Select
+                value={saveForm.companyId}
+                onChange={(e) => setSaveForm((f) => ({ ...f, companyId: e.target.value }))}
+              >
+                <option value="">Seçin…</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={saveForm.isShared}
+              onChange={(e) => setSaveForm((f) => ({ ...f, isShared: e.target.checked }))}
+            />
+            <span>Paylaşımlı — aynı şirketteki Supervisor+ rolündeki herkes görür (yalnız siz düzenleyebilirsiniz)</span>
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setSaveModalOpen(false)} disabled={saving}>
+              İptal
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveView}
+              disabled={saving || !saveForm.name.trim() || !saveForm.companyId}
+              leftIcon={saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            >
+              Kaydet
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
