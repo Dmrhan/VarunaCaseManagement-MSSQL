@@ -40,7 +40,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../server/db/client.js';
-import { caseRepository, CaseAccessError } from '../server/db/caseRepository.js';
+import { caseRepository, CaseAccessError } from './_actor-fixture.js';
 
 const stamp = Date.now();
 const PREFIX = `cns_${stamp}`;

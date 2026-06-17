@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

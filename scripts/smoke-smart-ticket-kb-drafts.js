@@ -20,7 +20,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { prisma } from '../server/db/client.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 import { extractAiDrafts } from '../server/db/solutionStepRepository.js';
 
 const ROOT = resolve(import.meta.dirname, '..');

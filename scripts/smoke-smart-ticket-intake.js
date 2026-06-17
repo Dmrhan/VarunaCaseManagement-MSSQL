@@ -26,7 +26,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);

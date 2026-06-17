@@ -67,7 +67,7 @@ import {
   rejectApproval,
   submitApproval,
 } from '../server/db/approvalRepository.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 
 // ── Production guard ────────────────────────────────────────────────
 // Refuse to run against a production-like DB unless the operator has
