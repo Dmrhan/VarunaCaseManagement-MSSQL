@@ -119,6 +119,52 @@ export interface PivotDrillResponse {
   columns: { id: string; label: string; type: ReportColumnType }[];
 }
 
+// Phase 4 — Saved Views
+export type ReportViewMode = 'list' | 'pivot';
+
+export interface ReportViewPivotConfig {
+  rowColumnId: string;
+  colColumnId: string;
+  measure: { fn: PivotMeasureFn; columnId?: string };
+}
+
+export interface ReportView {
+  id: string;
+  companyId: string;
+  ownerId: string;
+  name: string;
+  description: string | null;
+  mode: ReportViewMode;
+  columns: string[];
+  filters: ReportFilters;
+  pivotConfig: ReportViewPivotConfig | null;
+  isShared: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportViewListResponse {
+  views: ReportView[];
+}
+
+export interface ReportViewSingleResponse {
+  view: ReportView;
+}
+
+/** Create/update payload — sunucu validation'a tabi. */
+export interface ReportViewPayload {
+  name: string;
+  description?: string | null;
+  mode: ReportViewMode;
+  companyId: string;
+  columns: string[];
+  filters: ReportFilters;
+  pivotConfig?: ReportViewPivotConfig | null;
+  isShared?: boolean;
+}
+
+const VIEWS_BASE = '/api/reports/views';
+
 export const reportService = {
   async listColumns(): Promise<ReportColumnsResponse | undefined> {
     return apiFetch<ReportColumnsResponse>(`${BASE}/columns`, undefined, 'Rapor kolonları');
@@ -256,5 +302,46 @@ export const reportService = {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+
+  // ── Phase 4 — Saved Views ──────────────────────────────────────────
+  async listViews(): Promise<ReportViewListResponse | undefined> {
+    return apiFetch<ReportViewListResponse>(VIEWS_BASE, undefined, 'Kayıtlı görünümler');
+  },
+
+  async createView(payload: ReportViewPayload): Promise<ReportViewSingleResponse | undefined> {
+    return apiFetch<ReportViewSingleResponse>(
+      VIEWS_BASE,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'Görünüm kaydet',
+    );
+  },
+
+  async getView(id: string): Promise<ReportViewSingleResponse | undefined> {
+    return apiFetch<ReportViewSingleResponse>(`${VIEWS_BASE}/${encodeURIComponent(id)}`, undefined, 'Görünüm yükle');
+  },
+
+  async updateView(id: string, payload: Partial<ReportViewPayload>): Promise<ReportViewSingleResponse | undefined> {
+    return apiFetch<ReportViewSingleResponse>(
+      `${VIEWS_BASE}/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'Görünüm güncelle',
+    );
+  },
+
+  async deleteView(id: string): Promise<{ ok: true } | undefined> {
+    return apiFetch<{ ok: true }>(
+      `${VIEWS_BASE}/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+      'Görünüm sil',
+    );
   },
 };
