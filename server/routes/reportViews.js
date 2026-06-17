@@ -25,6 +25,7 @@ import {
   validateReportViewPayload,
   serializeForDb,
   parseFromDb,
+  filterViewForRole,
 } from '../lib/caseReport/reportViewSchema.js';
 
 const router = Router();
@@ -35,7 +36,7 @@ router.use(REPORT_ROLES);
 function userScope(req) {
   return {
     userId: req.user?.id,
-    role: req.user?.role,
+    role: req.user?.role ?? null,
     allowedCompanyIds: Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [],
   };
 }
@@ -56,7 +57,7 @@ function badRequest(res, message, extra) {
  * Order: name asc (UI tutarlı sıralama).
  */
 router.get('/', async (req, res) => {
-  const { userId, allowedCompanyIds } = userScope(req);
+  const { userId, role, allowedCompanyIds } = userScope(req);
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
   if (allowedCompanyIds.length === 0) return res.json({ views: [] });
 
@@ -72,7 +73,12 @@ router.get('/', async (req, res) => {
       orderBy: [{ name: 'asc' }],
       take: 500, // makul cap; ileride ihtiyaç olursa pagination
     });
-    const views = rows.map(parseFromDb).filter(Boolean);
+    // Codex P2 — Role gate bypass fix: paylaşımlı view'larda kolon rol kısıtı
+    // honour edilir. Owner kendi view'unu tam görür.
+    const views = rows
+      .map(parseFromDb)
+      .filter(Boolean)
+      .map((v) => filterViewForRole(v, role, userId));
     return res.json({ views });
   } catch (err) {
     console.error('[reportViews][list]', err);
@@ -130,7 +136,7 @@ router.post('/', async (req, res) => {
  * tenant). Tenant scope DAİMA enforce; bulunamazsa 404 (existence sızdırma).
  */
 router.get('/:id', async (req, res) => {
-  const { userId, allowedCompanyIds } = userScope(req);
+  const { userId, role, allowedCompanyIds } = userScope(req);
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
   try {
@@ -142,7 +148,9 @@ router.get('/:id', async (req, res) => {
       },
     });
     if (!row) return res.status(404).json({ error: 'not_found' });
-    return res.json({ view: parseFromDb(row) });
+    // Codex P2 — Role gate bypass fix (list endpoint ile aynı semantik).
+    const view = filterViewForRole(parseFromDb(row), role, userId);
+    return res.json({ view });
   } catch (err) {
     console.error('[reportViews][get]', err);
     return res.status(500).json({ error: 'get_failed' });
@@ -162,30 +170,32 @@ router.patch('/:id', async (req, res) => {
   const { userId, allowedCompanyIds } = userScope(req);
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
-  // Önce var olduğunu ve owner olduğunu doğrula
-  const existing = await prisma.reportView.findFirst({
-    where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
-  });
-  if (!existing) return res.status(404).json({ error: 'not_found' });
-
-  // Payload merge: gönderilen alanlar override, gönderilmeyenler korunur.
-  // Validation için MERGE edilmiş payload'ı oluştur (full validation).
-  const existingParsed = parseFromDb(existing);
-  const mergedBody = {
-    name: req.body?.name ?? existingParsed.name,
-    description: req.body?.description !== undefined ? req.body.description : existingParsed.description,
-    mode: req.body?.mode ?? existingParsed.mode,
-    companyId: existingParsed.companyId, // değiştirilemez (tenant move yok)
-    columns: req.body?.columns ?? existingParsed.columns,
-    filters: req.body?.filters ?? existingParsed.filters,
-    pivotConfig: req.body?.pivotConfig !== undefined ? req.body.pivotConfig : existingParsed.pivotConfig,
-    isShared: req.body?.isShared !== undefined ? req.body.isShared : existingParsed.isShared,
-  };
-
-  const v = validateReportViewPayload(mergedBody);
-  if (!v.ok) return badRequest(res, 'invalid payload', { details: v.errors });
-
   try {
+    // Codex P2 fix — ownership lookup'ı try içine al. Express 4'te try
+    // dışındaki await reject olursa otomatik 500'e dönüşmüyor; PATCH hang
+    // veya unhandled rejection olarak yüzeye çıkıyordu (DB pool down vb.).
+    const existing = await prisma.reportView.findFirst({
+      where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
+    // Payload merge: gönderilen alanlar override, gönderilmeyenler korunur.
+    // Validation için MERGE edilmiş payload'ı oluştur (full validation).
+    const existingParsed = parseFromDb(existing);
+    const mergedBody = {
+      name: req.body?.name ?? existingParsed.name,
+      description: req.body?.description !== undefined ? req.body.description : existingParsed.description,
+      mode: req.body?.mode ?? existingParsed.mode,
+      companyId: existingParsed.companyId, // değiştirilemez (tenant move yok)
+      columns: req.body?.columns ?? existingParsed.columns,
+      filters: req.body?.filters ?? existingParsed.filters,
+      pivotConfig: req.body?.pivotConfig !== undefined ? req.body.pivotConfig : existingParsed.pivotConfig,
+      isShared: req.body?.isShared !== undefined ? req.body.isShared : existingParsed.isShared,
+    };
+
+    const v = validateReportViewPayload(mergedBody);
+    if (!v.ok) return badRequest(res, 'invalid payload', { details: v.errors });
+
     const updated = await prisma.reportView.update({
       where: { id: req.params.id },
       data: serializeForDb(v.view),
@@ -212,12 +222,13 @@ router.delete('/:id', async (req, res) => {
   const { userId, allowedCompanyIds } = userScope(req);
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
-  const existing = await prisma.reportView.findFirst({
-    where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
-  });
-  if (!existing) return res.status(404).json({ error: 'not_found' });
-
   try {
+    // Codex P2 fix — ownership lookup'ı try içine al (PATCH ile aynı pattern).
+    const existing = await prisma.reportView.findFirst({
+      where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
     await prisma.reportView.delete({ where: { id: req.params.id } });
     return res.json({ ok: true });
   } catch (err) {
