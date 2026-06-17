@@ -31,15 +31,54 @@ import {
   CaseValidationError,
 } from '../server/db/caseRepository.js';
 import { taxonomyDefRepo as _taxonomyDefRepo } from '../server/db/adminRepository.js';
+import { prisma } from '../server/db/client.js';
 
-export const TEST_ACTOR = Object.freeze({
-  userId: 'smoke-test-actor',
-  personId: null,
-  fullName: 'Smoke Test Actor',
-  email: 'smoke@test.local',
-  role: 'SystemAdmin',
-  displayName: 'Smoke Test Actor',
-});
+/**
+ * PR-3/5 follow-up (Codex P2) — Fixture artık seed'li DB'den GERÇEK user'ı
+ * resolve eder. Eski sentinel 'smoke-test-actor' userId, PR-3'te eklenen
+ * createdByUserId/updatedByUserId FK ve PR-5'te eklenen actorUserId/
+ * uploadedByUserId FK constraint'lerini ihlal ediyordu — FK violation,
+ * smoke ilk write'da patlardı.
+ *
+ * Resolved actor: ilk aktif SystemAdmin (yoksa Admin yoksa herhangi
+ * isActive user). Hiç user yoksa açık hata fırlatır — smoke koşturmadan
+ * önce seed çalıştırılmalı.
+ *
+ * Top-level await: package.json "type": "module" + Node 14.8+ destekli.
+ * Smoke import edince DB'ye 1 query gider; static smoke'lar bu fixture'ı
+ * import etmediği için etkilenmez.
+ */
+async function resolveActorFromSeed() {
+  const user = await prisma.user.findFirst({
+    where: { isActive: true },
+    orderBy: [
+      // Tercih: SystemAdmin > Admin > diğer roller
+      { role: 'asc' },
+      { createdAt: 'asc' },
+    ],
+  });
+  if (!user) {
+    throw new Error(
+      '_actor-fixture: seed\'li User bulunamadı. Smoke öncesi `npm run db:seed` veya benzeri seed komutu çalıştırın.',
+    );
+  }
+  // displayName = fullName veya email veya id (asla sentinel)
+  const displayName =
+    (typeof user.fullName === 'string' && user.fullName.trim()) ||
+    (typeof user.email === 'string' && user.email.trim()) ||
+    user.id;
+  return Object.freeze({
+    userId: user.id,
+    personId: user.personId ?? null,
+    fullName: user.fullName ?? null,
+    email: user.email ?? null,
+    role: user.role ?? null,
+    displayName,
+  });
+}
+
+// Top-level await — fixture import edildiği anda gerçek user resolve edilir.
+export const TEST_ACTOR = await resolveActorFromSeed();
 
 // wrapped caseRepository — PR-1 + PR-2 + PR-4 default actor inject.
 // PR-1: create, addCallLog, addActivity, finalizeUpload
