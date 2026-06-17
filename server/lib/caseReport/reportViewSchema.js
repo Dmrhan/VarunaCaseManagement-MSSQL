@@ -224,6 +224,7 @@ export function filterViewForRole(view, role, requesterId) {
     : [];
 
   let pivotConfig = view.pivotConfig;
+  let mode = view.mode;
   if (pivotConfig && typeof pivotConfig === 'object') {
     const refs = [pivotConfig.rowColumnId, pivotConfig.colColumnId];
     if (pivotConfig.measure?.columnId) refs.push(pivotConfig.measure.columnId);
@@ -233,8 +234,12 @@ export function filterViewForRole(view, role, requesterId) {
     });
     if (anyBlocked) pivotConfig = null;
   }
+  // Codex P2 follow-up — Pivot view config strip edildiyse mode da
+  // 'list'e düşmeli. Frontend handleLoadView setMode(v.mode) çağırıp
+  // pivotConfig olmadan pivot moduna kalıyordu (boş/stale state).
+  if (mode === 'pivot' && pivotConfig == null) mode = 'list';
 
-  return { ...view, columns: filteredColumns, pivotConfig };
+  return { ...view, columns: filteredColumns, pivotConfig, mode };
 }
 
 export const __internal = {
