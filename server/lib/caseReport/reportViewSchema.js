@@ -17,7 +17,7 @@
  *   - pivotConfig : { rowColumnId, colColumnId, measure: {fn, columnId?} } | null
  */
 
-import { REPORT_COLUMNS } from './columnRegistry.js';
+import { REPORT_COLUMNS, getColumnById, isColumnAllowedForRole } from './columnRegistry.js';
 import { PIVOT_MEASURE_FNS } from './pivot.js';
 
 const NAME_MAX = 200;
@@ -188,6 +188,53 @@ export function parseFromDb(row) {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Codex P2 fix (Phase 4.1) — Role gate bypass on shared views.
+ *
+ * Sahip Admin paylaşımlı bir view'a `account.email`/`account.vkn` gibi PII
+ * kolon koyabilir. Diğer Supervisor'a list/get'te raw kolon ID listesini
+ * iletmek `filterColumnsByRole` kontratını bypass eder — UI yanıltıcı
+ * gözükür, sonra preview/export 403 columns_forbidden döner.
+ *
+ * Fix: list/get response'unda her view'ın `columns`'ını isteyenin rolüne
+ * göre filtrele. Erişimi yoksa kolon ID drop edilir. Pivot config'in
+ * referansları (rowColumnId / colColumnId / measure.columnId) rol kısıtlı
+ * ise pivotConfig komple null'a düşer — UI o görünüm için pivot mode'a
+ * geçemez, list mode olarak çalışır.
+ *
+ * Owner kendi view'unu DAİMA tam görür (filter atlanır) — kendi
+ * kaydettiği yapılandırmayı geri yükleyebilmeli.
+ *
+ * @param {object} view  parseFromDb() çıktısı veya benzer şekil
+ * @param {string} role  requester role
+ * @param {string} requesterId  requester user id (owner ise filter atla)
+ */
+export function filterViewForRole(view, role, requesterId) {
+  if (!view) return null;
+  // Owner kendi view'unu filter'sız görür
+  if (view.ownerId && requesterId && view.ownerId === requesterId) return view;
+
+  const filteredColumns = Array.isArray(view.columns)
+    ? view.columns.filter((id) => {
+        const col = getColumnById(id);
+        return col && isColumnAllowedForRole(col, role);
+      })
+    : [];
+
+  let pivotConfig = view.pivotConfig;
+  if (pivotConfig && typeof pivotConfig === 'object') {
+    const refs = [pivotConfig.rowColumnId, pivotConfig.colColumnId];
+    if (pivotConfig.measure?.columnId) refs.push(pivotConfig.measure.columnId);
+    const anyBlocked = refs.some((id) => {
+      const col = getColumnById(id);
+      return !col || !isColumnAllowedForRole(col, role);
+    });
+    if (anyBlocked) pivotConfig = null;
+  }
+
+  return { ...view, columns: filteredColumns, pivotConfig };
 }
 
 export const __internal = {

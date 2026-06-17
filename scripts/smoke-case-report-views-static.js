@@ -23,6 +23,7 @@ import {
   validateReportViewPayload,
   serializeForDb,
   parseFromDb,
+  filterViewForRole,
   __internal,
 } from '../server/lib/caseReport/reportViewSchema.js';
 
@@ -261,6 +262,103 @@ console.log('\n── 10) Limit kontrolleri ────────────
 
   expect('10.3 NAME_MAX = 200', __internal.NAME_MAX, 200);
   expect('10.4 MODES', __internal.MODES, ['list', 'pivot']);
+}
+
+// ── 11) Codex P2 — Role gate bypass fix ──────────────────────
+console.log('\n── 11) filterViewForRole: role gate bypass fix ───────────');
+{
+  // Admin paylaşımlı view'a PII kolon koymuş; Supervisor okurken
+  // bu kolonlar düşmeli.
+  const sharedView = {
+    id: 'view_shared',
+    companyId: 'CO1',
+    ownerId: 'admin_1',
+    name: 'PII Dashboard',
+    description: null,
+    mode: 'list',
+    columns: ['caseNumber', 'account.email', 'account.vkn', 'status'],
+    filters: {},
+    pivotConfig: null,
+    isShared: true,
+    createdAt: '2026-06-17',
+    updatedAt: '2026-06-17',
+  };
+
+  // 11.1 — Supervisor: PII kolonlar düşer
+  const forSup = filterViewForRole(sharedView, 'Supervisor', 'supervisor_99');
+  expect('11.1 Supervisor: PII kolonlar düşer',
+    forSup.columns, ['caseNumber', 'status']);
+
+  // 11.2 — Admin (başkası): PII kolonlar görünür
+  const forAdmin = filterViewForRole(sharedView, 'Admin', 'admin_other');
+  expect('11.2 Admin (başkası): PII kolonlar görünür',
+    forAdmin.columns, ['caseNumber', 'account.email', 'account.vkn', 'status']);
+
+  // 11.3 — Owner kendi view'unu DAİMA tam görür (rol Supervisor olsa bile,
+  // örn. kayıt sonrası rol kısıtlanmış senaryosu)
+  const forOwner = filterViewForRole({ ...sharedView, ownerId: 'admin_1' }, 'Supervisor', 'admin_1');
+  expect('11.3 Owner: filter bypass, tam columns',
+    forOwner.columns, ['caseNumber', 'account.email', 'account.vkn', 'status']);
+
+  // 11.4 — Pivot config: dim'lerden biri PII ise pivotConfig null'a düşer
+  const pivotView = {
+    ...sharedView,
+    mode: 'pivot',
+    columns: ['caseNumber', 'account.email', 'status'],
+    pivotConfig: {
+      rowColumnId: 'account.email',
+      colColumnId: 'status',
+      measure: { fn: 'count' },
+    },
+  };
+  const forSupPivot = filterViewForRole(pivotView, 'Supervisor', 'supervisor_99');
+  expect('11.4 Supervisor: pivot row kısıtlıysa pivotConfig null',
+    forSupPivot.pivotConfig, null);
+  expect('11.5 columns filter pivot ile birlikte',
+    forSupPivot.columns, ['caseNumber', 'status']);
+
+  // 11.6 — Pivot measure columnId kısıtlı: pivotConfig null'a düşer
+  const pivotMeasureRestricted = {
+    ...sharedView,
+    mode: 'pivot',
+    columns: ['status', 'account.vkn'],
+    pivotConfig: {
+      rowColumnId: 'status',
+      colColumnId: 'status',
+      measure: { fn: 'sum', columnId: 'account.vkn' },
+    },
+  };
+  const forSupMR = filterViewForRole(pivotMeasureRestricted, 'Supervisor', 'sup_x');
+  expect('11.6 Supervisor: measure columnId kısıtlı → pivotConfig null',
+    forSupMR.pivotConfig, null);
+
+  // 11.7 — Owner pivot config'i da tam görür
+  const forOwnerPivot = filterViewForRole({ ...pivotView, ownerId: 'admin_1' }, 'Supervisor', 'admin_1');
+  expect('11.7 Owner: pivot config korunur',
+    forOwnerPivot.pivotConfig?.rowColumnId, 'account.email');
+
+  // 11.8 — Pivot tamamen normal kolonlar: korunur
+  const pivotNormal = {
+    ...sharedView,
+    mode: 'pivot',
+    columns: ['status', 'caseType', 'transferCount'],
+    pivotConfig: {
+      rowColumnId: 'status',
+      colColumnId: 'caseType',
+      measure: { fn: 'sum', columnId: 'transferCount' },
+    },
+  };
+  const forSupNormal = filterViewForRole(pivotNormal, 'Supervisor', 'sup_y');
+  expect('11.8 Supervisor: PII\'siz pivot tam korunur',
+    forSupNormal.pivotConfig.measure.columnId, 'transferCount');
+
+  // 11.9 — null/undefined defensive
+  expect('11.9 null view → null', filterViewForRole(null, 'Admin', 'u1'), null);
+
+  // 11.10 — Bilinmeyen kolon ID (yeniden adlandırılmış registry) → drop
+  const staleView = { ...sharedView, columns: ['__deleted__', 'status'] };
+  const cleaned = filterViewForRole(staleView, 'Supervisor', 'sup_x');
+  expect('11.10 unknown column id → drop', cleaned.columns, ['status']);
 }
 
 console.log('');
