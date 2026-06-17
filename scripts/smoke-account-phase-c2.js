@@ -25,7 +25,7 @@ import {
   AccountAccessError,
   AccountValidationError,
 } from '../server/db/accountRepository.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 import { requireRole } from '../server/db/auth.js';
 
 const stamp = Date.now();

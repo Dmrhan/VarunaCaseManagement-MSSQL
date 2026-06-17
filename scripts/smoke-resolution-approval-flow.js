@@ -37,7 +37,7 @@ import {
   resolveApprover,
   submitApproval,
 } from '../server/db/approvalRepository.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 
 const stamp = Date.now();
 const PREFIX = `rasf-${stamp}`;

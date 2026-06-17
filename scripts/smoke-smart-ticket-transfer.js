@@ -40,7 +40,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 import { composeTransferBriefFromSteps } from '../server/db/solutionStepRepository.js';
 
 const args = process.argv.slice(2);
