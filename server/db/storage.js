@@ -9,9 +9,14 @@ import crypto from 'node:crypto';
  * Mimari (eski signed-URL akışının disk karşılığı):
  *  - requestUpload yine bir "signed URL" döner; artık bu, kısa ömürlü HMAC
  *    token'lı bir BFF endpoint'idir: PUT /api/cases/:id/files/upload?token=...
- *    Token path+caseId+exp taşır — client path'i KURCALAYAMAZ (traversal yok).
- *  - Download da aynı desenle: GET .../raw?token=... (tarayıcı <a> tıklaması
- *    Authorization header taşıyamadığı için token query'dedir).
+ *    Token path+caseId+exp+userId taşır — client path'i KURCALAYAMAZ.
+ *  - PR-4 follow-up (Codex P2): PUT endpoint'i ARTIK JWT auth zorunlu
+ *    kılıyor (Authorization: Bearer ...). Token.userId === req.user.id
+ *    match'i kontrol edilir; User A'nın token'ı User B'ye sızsa bile PUT
+ *    reddedilir. XHR frontend Authorization header'ı taşır.
+ *  - Download da HMAC token ile: GET .../raw?token=... (tarayıcı <a>
+ *    tıklaması Authorization header taşıyamadığı için JWT zorunlu DEĞİL,
+ *    token'a güvenilir — kasıtlı tasarım).
  *  - Dosyalar STORAGE_ROOT altında `cases/{caseId}/{attachmentId}-{safeName}`
  *    yapısında saklanır. CaseAttachment.fileUrl bu göreli path'i tutar
  *    (storage-agnostik string — eski tasarım korunur).

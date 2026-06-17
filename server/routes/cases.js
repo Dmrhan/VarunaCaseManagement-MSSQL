@@ -51,22 +51,37 @@ router.post('/cron/snooze-wakeup', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// Storage endpoints (Faz 4 — local disk) — verifyJwt'den ÖNCE mount edilir.
-// Auth'ları kısa ömürlü HMAC token'dır (requestUpload/getDownloadUrl üretir):
-//  - PUT raw upload: XHR Authorization header taşıyabilirdi ama eski Supabase
-//    signed-URL simetrisi korunur (token tek yetki kaynağı, path tamper-proof).
-//  - GET raw download: tarayıcı <a> tıklaması header taşıyamaz — token şart.
+// Storage endpoints (Faz 4 — local disk).
+//  - PUT raw upload: PR-4 follow-up (Codex P2) — artık verifyJwt zorunlu.
+//    Token + req.user.id binding: User A token'ını User B alsa bile
+//    PUT atamaz (token.userId !== req.user.id → 403).
+//  - GET raw download: tarayıcı <a> tıklaması header taşıyamaz — verifyJwt
+//    BYPASS edilir; sadece HMAC token doğrulanır. Bu kasıtlı.
 // ─────────────────────────────────────────────────────────────────
 
-/** Adım 2 — PUT /api/cases/:id/files/upload?token=... (raw body, max 25MB) */
+/**
+ * Adım 2 — PUT /api/cases/:id/files/upload?token=... (raw body, max 25MB)
+ *
+ * PR-4 follow-up (Codex P2): JWT auth zorunlu kılındı. Token'daki userId
+ * ile req.user.id eşleşmek zorunda. PUT verifyJwt'den ÖNCE mount ediliyor
+ * (line 124) — bu route için verifyJwt inline middleware olarak çağrılır.
+ */
 router.put(
   '/:id/files/upload',
+  verifyJwt, // ← inline: PUT için JWT auth zorunlu (Codex P2 fix)
   express.raw({ type: () => true, limit: '25mb' }),
   async (req, res) => {
     try {
       const payload = verifyStorageToken(String(req.query.token ?? ''));
       if (!payload || payload.typ !== 'upload' || payload.caseId !== req.params.id) {
         return res.status(401).json({ error: 'invalid_token', message: 'Yükleme izni geçersiz veya süresi dolmuş.' });
+      }
+      // PR-4 follow-up (Codex P2) — User binding enforcement: token'ı
+      // çalan/paylaşan kullanıcı PUT atamasın. Asıl request sahibi sadece
+      // kendi token'ıyla PUT yapabilir; finalize zaten userId match yapıyor
+      // ama bu BYTES yazımını da bağlar (audit trail bütünlüğü).
+      if (payload.userId !== req.user?.id) {
+        return res.status(403).json({ error: 'user_mismatch', message: 'Yükleme token\'ı farklı bir kullanıcıya ait.' });
       }
       if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
         return res.status(400).json({ error: 'empty_body', message: 'Dosya içeriği boş.' });

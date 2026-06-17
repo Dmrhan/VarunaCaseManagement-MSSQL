@@ -355,6 +355,30 @@ console.log('\n── 9) PR-4: storage token userId + finalize match ───�
   // 9.12 — Frontend upload-url response tipi token: string içeriyor
   expect('9.12 frontend upload response token: string',
     frontSrc.includes('attachmentId: string; token: string'), true);
+
+  // ── 9.13+ — Codex P2 follow-up: PUT user binding enforcement ──
+  // 9.13 — PUT route'unda inline verifyJwt middleware
+  const putRoute = routeSrc.indexOf("router.put(\n  '/:id/files/upload'");
+  const putBlock = putRoute >= 0 ? routeSrc.slice(putRoute, putRoute + 1500) : '';
+  expect('9.13 PUT route inline verifyJwt middleware',
+    /router\.put\(\s*['"]\/?:id\/files\/upload['"]\s*,\s*verifyJwt/.test(putBlock), true);
+
+  // 9.14 — PUT handler payload.userId !== req.user?.id check
+  expect('9.14 PUT handler userId mismatch reddedilir',
+    putBlock.includes('payload.userId !== req.user?.id'), true);
+
+  // 9.15 — PUT 403 user_mismatch
+  expect('9.15 PUT 403 user_mismatch response',
+    putBlock.includes("'user_mismatch'"), true);
+
+  // 9.16 — Frontend XHR PUT Authorization header
+  expect('9.16 frontend XHR PUT Authorization Bearer',
+    frontSrc.includes("xhr.setRequestHeader('Authorization', `Bearer ${jwt}`)"), true);
+
+  // 9.17 — Frontend getAccessToken çağrısı PUT'tan önce
+  const xhrIdx = frontSrc.indexOf("xhr.open('PUT'");
+  expect('9.17 frontend jwt PUT öncesi alınır',
+    xhrIdx >= 0 && frontSrc.slice(0, xhrIdx).includes('const jwt = await getAccessToken()'), true);
 }
 
 console.log('');
