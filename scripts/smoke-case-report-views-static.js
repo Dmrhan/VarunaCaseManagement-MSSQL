@@ -316,6 +316,9 @@ console.log('\n── 11) filterViewForRole: role gate bypass fix ────�
     forSupPivot.pivotConfig, null);
   expect('11.5 columns filter pivot ile birlikte',
     forSupPivot.columns, ['caseNumber', 'status']);
+  // Codex P2 follow-up — mode 'list'e normalize
+  expect('11.5b mode pivot → list normalize (pivotConfig drop)',
+    forSupPivot.mode, 'list');
 
   // 11.6 — Pivot measure columnId kısıtlı: pivotConfig null'a düşer
   const pivotMeasureRestricted = {
@@ -331,11 +334,15 @@ console.log('\n── 11) filterViewForRole: role gate bypass fix ────�
   const forSupMR = filterViewForRole(pivotMeasureRestricted, 'Supervisor', 'sup_x');
   expect('11.6 Supervisor: measure columnId kısıtlı → pivotConfig null',
     forSupMR.pivotConfig, null);
+  expect('11.6b Supervisor: measure kısıtlı → mode list',
+    forSupMR.mode, 'list');
 
   // 11.7 — Owner pivot config'i da tam görür
   const forOwnerPivot = filterViewForRole({ ...pivotView, ownerId: 'admin_1' }, 'Supervisor', 'admin_1');
   expect('11.7 Owner: pivot config korunur',
     forOwnerPivot.pivotConfig?.rowColumnId, 'account.email');
+  expect('11.7b Owner: mode pivot korunur',
+    forOwnerPivot.mode, 'pivot');
 
   // 11.8 — Pivot tamamen normal kolonlar: korunur
   const pivotNormal = {
@@ -351,6 +358,8 @@ console.log('\n── 11) filterViewForRole: role gate bypass fix ────�
   const forSupNormal = filterViewForRole(pivotNormal, 'Supervisor', 'sup_y');
   expect('11.8 Supervisor: PII\'siz pivot tam korunur',
     forSupNormal.pivotConfig.measure.columnId, 'transferCount');
+  expect('11.8b Supervisor: PII\'siz pivot mode korunur',
+    forSupNormal.mode, 'pivot');
 
   // 11.9 — null/undefined defensive
   expect('11.9 null view → null', filterViewForRole(null, 'Admin', 'u1'), null);
