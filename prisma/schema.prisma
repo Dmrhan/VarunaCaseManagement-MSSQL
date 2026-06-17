@@ -103,6 +103,9 @@ model User {
   taxonomyDefsUpdated       TaxonomyDef[]       @relation("TaxonomyDefUpdatedBy")
   checklistTemplatesCreated ChecklistTemplate[] @relation("ChecklistTemplateCreatedBy")
   checklistTemplatesUpdated ChecklistTemplate[] @relation("ChecklistTemplateUpdatedBy")
+  /// PR-5 — Case actor FK back-relations
+  caseActivities            CaseActivity[]      @relation("CaseActivityActor")
+  caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -1219,23 +1222,28 @@ model CaseReminder {
 // companyId Case'den denormalize — top-level audit/raporlama sorgularında
 // JOIN gerektirmesin, multi-tenant scope filter doğrudan uygulansın.
 model CaseActivity {
-  id         String   @id @default(cuid()) @db.NVarChar(450)
-  caseId     String   @db.NVarChar(450)
-  companyId  String   @db.NVarChar(450)
-  action     String   @db.NVarChar(Max) // human-readable
-  actionType String?  @db.NVarChar(50) // enum:CaseHistoryActionType
-  fieldName  String?  @db.NVarChar(Max)
-  fromValue  String?  @db.NVarChar(Max)
-  toValue    String?  @db.NVarChar(Max)
-  note       String?  @db.NVarChar(Max)
-  actor      String   @db.NVarChar(Max)
-  at         DateTime @default(dbgenerated("sysutcdatetime()"))
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  caseId      String   @db.NVarChar(450)
+  companyId   String   @db.NVarChar(450)
+  action      String   @db.NVarChar(Max) // human-readable
+  actionType  String?  @db.NVarChar(50) // enum:CaseHistoryActionType
+  fieldName   String?  @db.NVarChar(Max)
+  fromValue   String?  @db.NVarChar(Max)
+  toValue     String?  @db.NVarChar(Max)
+  note        String?  @db.NVarChar(Max)
+  actor       String   @db.NVarChar(Max)
+  /// PR-5 — Optional FK to User (audit drift fix). Eski satırlar NULL kalır;
+  /// display chain: actorUserId varsa canlı User.fullName, yoksa actor string.
+  actorUserId String?  @db.NVarChar(450)
+  at          DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  case      Case  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  actorUser User? @relation("CaseActivityActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
   @@index([at])
+  @@index([actorUserId])
 }
 
 model CaseNote {
@@ -1310,20 +1318,25 @@ model MetricQueryAudit {
 }
 
 model CaseAttachment {
-  id         String   @id @default(cuid()) @db.NVarChar(450)
-  caseId     String   @db.NVarChar(450)
-  companyId  String   @db.NVarChar(450)
-  fileName   String   @db.NVarChar(Max)
-  fileSize   Int
-  mimeType   String   @db.NVarChar(255)
-  fileUrl    String?  @db.NVarChar(Max) // Supabase Storage URL (mock'ta dataUrl)
-  uploadedBy String   @db.NVarChar(Max)
-  uploadedAt DateTime @default(dbgenerated("sysutcdatetime()"))
+  id               String   @id @default(cuid()) @db.NVarChar(450)
+  caseId           String   @db.NVarChar(450)
+  companyId        String   @db.NVarChar(450)
+  fileName         String   @db.NVarChar(Max)
+  fileSize         Int
+  mimeType         String   @db.NVarChar(255)
+  fileUrl          String?  @db.NVarChar(Max) // Supabase Storage URL (mock'ta dataUrl)
+  uploadedBy       String   @db.NVarChar(Max)
+  /// PR-5 — Optional FK to User (audit drift fix). Eski satırlar NULL kalır;
+  /// display chain: uploadedByUserId varsa canlı User.fullName, yoksa uploadedBy string.
+  uploadedByUserId String?  @db.NVarChar(450)
+  uploadedAt       DateTime @default(dbgenerated("sysutcdatetime()"))
 
-  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  case           Case  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  uploadedByUser User? @relation("CaseAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([caseId])
   @@index([companyId])
+  @@index([uploadedByUserId])
 }
 
 model CaseCallLog {
