@@ -38,7 +38,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../server/db/client.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 import {
   buildMentionDedupKey,
   listForUser,

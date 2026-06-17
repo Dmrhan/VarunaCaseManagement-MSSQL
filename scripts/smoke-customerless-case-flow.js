@@ -24,7 +24,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { caseRepository, CaseValidationError } from '../server/db/caseRepository.js';
+import { caseRepository, CaseValidationError } from './_actor-fixture.js';
 import { suggestCustomerMatches } from '../server/db/customerMatchRepository.js';
 
 const stamp = Date.now();

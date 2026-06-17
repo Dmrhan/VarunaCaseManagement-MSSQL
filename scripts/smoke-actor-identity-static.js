@@ -203,6 +203,62 @@ console.log('\n── 6) ActorRequiredError ────────────
   expect('6.4 custom message', err2.message, 'custom');
 }
 
+// ── 7) Codex P1 follow-up: defansif throw + fixture re-export ──
+console.log('\n── 7) Defansif throw + smoke fixture (Codex P1) ──────────');
+{
+  // 7.1-7.5 — caseRepository.js: assertActor helper'ı 4 method'da çağrılıyor
+  const repoSrc = readFile('server/db/caseRepository.js');
+  expect('7.1 ActorRequiredError import',
+    repoSrc.includes("import { ActorRequiredError } from '../lib/actor.js'"), true);
+  expect('7.2 assertActor helper tanımlı',
+    repoSrc.includes('function assertActor('), true);
+  expect('7.3 create() assertActor çağrısı',
+    repoSrc.includes("assertActor(actor, 'caseRepository.create')"), true);
+  expect('7.4 addCallLog() assertActor + userId check',
+    repoSrc.includes("assertActor(actor, 'caseRepository.addCallLog')") &&
+      repoSrc.includes('actor.userId required'), true);
+  expect('7.5 addActivity() + finalizeUpload() assertActor',
+    repoSrc.includes("assertActor(actor, 'caseRepository.addActivity')") &&
+      repoSrc.includes("assertActor(actor, 'caseRepository.finalizeUpload')"), true);
+
+  // 7.6-7.8 — smoke fixture file mevcut + doğru shape
+  const fixtureSrc = readFile('scripts/_actor-fixture.js');
+  expect('7.6 TEST_ACTOR export',
+    fixtureSrc.includes('export const TEST_ACTOR'), true);
+  expect('7.7 wrapped caseRepository export',
+    fixtureSrc.includes('export const caseRepository'), true);
+  expect('7.8 4 method wrapped',
+    fixtureSrc.includes('create: (input, actor = TEST_ACTOR)') &&
+      fixtureSrc.includes('addCallLog:') &&
+      fixtureSrc.includes('addActivity:') &&
+      fixtureSrc.includes('finalizeUpload:'), true);
+
+  // 7.9 — 16 smoke direct caller fixture'a yönlendirildi
+  const smokeFiles = [
+    'smoke-account-phase-c2.js', 'smoke-account-new-case-prefill.js',
+    'smoke-action-center-phase1.js', 'smoke-case-note-safety.js',
+    'smoke-customer-response-channel.js', 'smoke-customerless-case-flow.js',
+    'smoke-generic-notification-flow.js', 'smoke-mention-inline-reply-flow.js',
+    'smoke-mention-inbox-flow.js', 'smoke-notification-flow.js',
+    'smoke-smart-ticket-closure.js', 'smoke-resolution-approval-flow.js',
+    'smoke-smart-ticket-kb-drafts.js', 'smoke-smart-ticket-intake.js',
+    'smoke-smart-ticket-solution-steps.js', 'smoke-smart-ticket-transfer.js',
+  ];
+  let migrated = 0;
+  let oldPathLeft = 0;
+  for (const f of smokeFiles) {
+    const s = readFile(`scripts/${f}`);
+    if (s.includes("from './_actor-fixture.js'")) migrated += 1;
+    if (s.includes("from '../server/db/caseRepository.js'")) oldPathLeft += 1;
+  }
+  expect('7.9 16/16 smoke fixture\'a yönlendirildi', migrated, 16);
+  expect('7.10 eski caseRepository import kalmamış',  oldPathLeft, 0);
+
+  // 7.11 — Direct repository call (helpers'sız) actor=null ile throw atmalı
+  // (functional behavior assertion — fixture wrapper'ı bypass ederek)
+  // Bu test repo modülü dinamik import etmeyi gerektirir.
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

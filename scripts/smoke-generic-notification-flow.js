@@ -119,7 +119,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../server/db/client.js';
-import { caseRepository, watcherRepo, reactionRepo } from '../server/db/caseRepository.js';
+import { caseRepository, watcherRepo, reactionRepo } from './_actor-fixture.js';
 import {
   buildLegacyTransferDedupKey,
   buildNotificationDedupKey,

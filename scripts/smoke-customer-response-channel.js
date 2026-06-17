@@ -48,7 +48,7 @@ import {
   getAccount,
   updateCompanyRelation,
 } from '../server/db/accountRepository.js';
-import { caseRepository } from '../server/db/caseRepository.js';
+import { caseRepository } from './_actor-fixture.js';
 
 const stamp = Date.now();
 const PREFIX = `crc_${stamp}`;

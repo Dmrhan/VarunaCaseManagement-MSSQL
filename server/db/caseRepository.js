@@ -8,7 +8,30 @@ import {
   emitMentionsForNote,
   emitGenericNotification,
 } from './actionItemRepository.js';
+import { ActorRequiredError } from '../lib/actor.js';
 import crypto from 'node:crypto';
+
+/**
+ * PR-1 follow-up (Codex P1) — defansif throw helper.
+ *
+ * Eski "?? 'Mock User'" silent fallback kaldırıldıktan sonra direct
+ * caller'lar (smoke scripts, future cron, future job) actor pass etmezse
+ * eski davranış sessiz TypeError'a düşerdi. Bunun yerine net hata fırlat
+ * — caller migrasyon eksiği derhal yüzeye çıkar. Mock User fallback'ı
+ * geri DÖNMEZ; throw, kabul edilebilir tek davranış.
+ */
+function assertActor(actor, where) {
+  if (
+    !actor ||
+    typeof actor !== 'object' ||
+    typeof actor.displayName !== 'string' ||
+    actor.displayName.length === 0
+  ) {
+    throw new ActorRequiredError(
+      `${where}: actor context required (see server/lib/actor.js requireActor)`,
+    );
+  }
+}
 
 // Snooze sebebi → CaseActivity log'unda görünen TR etiket.
 const SNOOZE_REASON_LABEL = {
@@ -917,8 +940,9 @@ export const caseRepository = {
   async create(input, actor) {
     // input: NewCaseInput shape (caseService.ts §142)
     // actor: ActorContext (server/lib/actor.js); route layer requireActor(req)
-    //        ile üretip pass eder. Hardcoded fallback yok — eksikse
-    //        route layer 401 verir (PR-1 Server-authoritative actor).
+    //        ile üretip pass eder. Eksikse defansif throw (Mock User
+    //        fallback'ı geri dönmez — caller migrasyonu zorunlu).
+    assertActor(actor, 'caseRepository.create');
     const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
     // TR string enum'larını ASCII identifier'a çevir
     const m = toDb(input);
@@ -1984,6 +2008,10 @@ export const caseRepository = {
     // çağrıyı kaydeden gerçek kullanıcı. callerName (input metadata) hâlâ
     // body'den alınabilir — bu çağrılan müşteriyi/3rd party'yi etiketleyen
     // serbest metindir, actor'la karıştırılmamalı.
+    assertActor(actor, 'caseRepository.addCallLog');
+    if (typeof actor.userId !== 'string' || actor.userId.length === 0) {
+      throw new ActorRequiredError('caseRepository.addCallLog: actor.userId required');
+    }
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const m = toDb(input);
@@ -2031,6 +2059,7 @@ export const caseRepository = {
   async addActivity(caseId, input, allowedCompanyIds, actor) {
     // PR-1 — server-authoritative: body.actor YUTULUR. Manuel activity
     // entry'sini ekleyen gerçek kullanıcı her zaman audit trail'de görünür.
+    assertActor(actor, 'caseRepository.addActivity');
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
     await prisma.caseActivity.create({
@@ -2135,6 +2164,7 @@ export const caseRepository = {
     // PR-1 — server-authoritative: body.uploadedBy YUTULUR. Audit trail'de
     // dosyayı yükleyen gerçek kullanıcı görünür. (PR-4 ileride upload-url ↔
     // finalize aynı user binding'ini token'a koyacak.)
+    assertActor(actor, 'caseRepository.finalizeUpload');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     // PR-7 — Defense-in-depth: requestUpload signed URL aldıktan sonra
