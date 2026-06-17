@@ -1,6 +1,6 @@
 import { prisma } from './client.js';
 import { fromDb, toDb, toDbFilters } from './enumMap.js';
-import { createUploadUrl, createDownloadUrl, removeObject } from './storage.js';
+import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken } from './storage.js';
 import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
 import { emitEvent as emitNotificationEvent } from './notificationRepository.js';
@@ -12,20 +12,37 @@ import { ActorRequiredError } from '../lib/actor.js';
 import crypto from 'node:crypto';
 
 /**
- * PR-1 follow-up (Codex P1) — defansif throw helper.
+ * PR-1 (Codex P1) + PR-2 — defansif throw helper.
  *
- * Eski "?? 'Mock User'" silent fallback kaldırıldıktan sonra direct
- * caller'lar (smoke scripts, future cron, future job) actor pass etmezse
- * eski davranış sessiz TypeError'a düşerdi. Bunun yerine net hata fırlat
- * — caller migrasyon eksiği derhal yüzeye çıkar. Mock User fallback'ı
- * geri DÖNMEZ; throw, kabul edilebilir tek davranış.
+ * Hem string hem ActorContext object kabul eder (hybrid). Mock User
+ * sentinel'leri (literal 'Mock User'/'mock-user') REDDEDİLİR — caller
+ * silent fallback yazmak isterse derhal görünür hata alır.
+ *
+ * - String actor    → backwards-compat (eski signature'lar; route layer
+ *                     req.user.fullName geçer). Boş veya sentinel reddedilir.
+ * - Object actor    → PR-1 ActorContext (displayName + userId). PR-1'in
+ *                     4 method'u bunu kullanır.
+ * - undefined/null  → ActorRequiredError (Mock User fallback YOK).
+ *
+ * Cron/system paths: 'system' veya 'user:${id}' string'leri normal kabul.
  */
+const MOCK_USER_SENTINELS = new Set(['Mock User', 'mock-user', 'mock_user', '']);
+
 function assertActor(actor, where) {
+  if (typeof actor === 'string') {
+    if (MOCK_USER_SENTINELS.has(actor)) {
+      throw new ActorRequiredError(
+        `${where}: actor required (got sentinel: "${actor}"; route must pass req.user)`,
+      );
+    }
+    return;
+  }
   if (
     !actor ||
     typeof actor !== 'object' ||
     typeof actor.displayName !== 'string' ||
-    actor.displayName.length === 0
+    actor.displayName.length === 0 ||
+    MOCK_USER_SENTINELS.has(actor.displayName)
   ) {
     throw new ActorRequiredError(
       `${where}: actor context required (see server/lib/actor.js requireActor)`,
@@ -1147,7 +1164,8 @@ export const caseRepository = {
     return shape(created);
   },
 
-  async update(id, patch, actor = 'Mock User', allowedCompanyIds, actorRole, actorPersonId = null) {
+  async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null) {
+    assertActor(actor, 'caseRepository.update');
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
     if ('supportLevel' in patch && actorRole) {
@@ -2083,7 +2101,8 @@ export const caseRepository = {
     return shape(updated);
   },
 
-  async toggleChecklistItem(caseId, itemId, checked, actor = 'Mock User', allowedCompanyIds) {
+  async toggleChecklistItem(caseId, itemId, checked, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.toggleChecklistItem');
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
     const c = await prisma.case.findUnique({ where: { id: caseId } });
@@ -2122,7 +2141,13 @@ export const caseRepository = {
    * Frontend bu URL'e doğrudan PUT eder (Vercel 4.5MB body limiti bypass).
    * DB satırı henüz yazılmaz; finalize() ile yazılır.
    */
-  async requestUpload(id, input, allowedCompanyIds) {
+  async requestUpload(id, input, allowedCompanyIds, actor) {
+    // PR-4 — Upload two-step user binding: token'a actor.userId gömülür,
+    // PUT ve finalize endpoint'leri user mismatch'i reddeder.
+    assertActor(actor, 'caseRepository.requestUpload');
+    if (typeof actor !== 'object' || typeof actor.userId !== 'string' || actor.userId.length === 0) {
+      throw new ActorRequiredError('caseRepository.requestUpload: actor.userId required for token binding');
+    }
     if (!(await assertCaseInScope(id, allowedCompanyIds))) return null;
     const FILE_MAX_SIZE = 25 * 1024 * 1024;
     const FILE_MAX_COUNT = 20;
@@ -2152,8 +2177,8 @@ export const caseRepository = {
 
     // Önceden id üret — Storage path'i bunu kullanır (henüz DB'de yok).
     const attachmentId = `cmsa_${crypto.randomBytes(12).toString('hex')}`;
-    const { signedUrl, path } = await createUploadUrl(id, attachmentId, input.fileName);
-    return { uploadUrl: signedUrl, path, attachmentId };
+    const { signedUrl, path, token } = await createUploadUrl(id, attachmentId, input.fileName, actor.userId);
+    return { uploadUrl: signedUrl, path, attachmentId, token };
   },
 
   /**
@@ -2161,10 +2186,24 @@ export const caseRepository = {
    * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
    */
   async finalizeUpload(id, input, allowedCompanyIds, actor) {
-    // PR-1 — server-authoritative: body.uploadedBy YUTULUR. Audit trail'de
-    // dosyayı yükleyen gerçek kullanıcı görünür. (PR-4 ileride upload-url ↔
-    // finalize aynı user binding'ini token'a koyacak.)
+    // PR-1 — server-authoritative: body.uploadedBy YUTULUR.
+    // PR-4 — Upload two-step user binding: token verify + userId match.
+    //   User A upload-url ister, User B finalize ederse 403 verir.
+    //   Eksik token (upload-url'siz finalize) reddedilir.
     assertActor(actor, 'caseRepository.finalizeUpload');
+    if (typeof actor !== 'object' || typeof actor.userId !== 'string') {
+      throw new ActorRequiredError('caseRepository.finalizeUpload: actor.userId required for binding check');
+    }
+    const tokenPayload = verifyStorageToken(input.token);
+    if (!tokenPayload || tokenPayload.typ !== 'upload') {
+      return { error: 'Geçersiz veya süresi dolmuş yükleme token\'ı.' };
+    }
+    if (tokenPayload.userId !== actor.userId) {
+      return { error: 'Yükleme token\'ı farklı bir kullanıcıya ait. Yeniden yüklemeyi başlatın.' };
+    }
+    if (tokenPayload.caseId !== id || tokenPayload.path !== input.path) {
+      return { error: 'Yükleme token\'ı bu vaka/path ile uyumsuz.' };
+    }
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     // PR-7 — Defense-in-depth: requestUpload signed URL aldıktan sonra
@@ -2218,7 +2257,8 @@ export const caseRepository = {
     return { url, fileName: target.fileName };
   },
 
-  async removeFile(id, fileId, actor = 'Mock User', allowedCompanyIds) {
+  async removeFile(id, fileId, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.removeFile');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
@@ -2267,7 +2307,8 @@ export const caseRepository = {
    * geçiş SLA'yı duraklatmaz; kullanıcı SLA pause istiyorsa tek vaka
    * üzerinden statü geçişi yapsın. Bilinçli sadelik.
    */
-  async bulkUpdate({ caseIds, updates }, actor = 'Mock User', allowedCompanyIds) {
+  async bulkUpdate({ caseIds, updates }, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.bulkUpdate');
     if (!Array.isArray(caseIds) || caseIds.length === 0) {
       return { error: 'caseIds dizisi gerekli (boş olamaz).' };
     }
@@ -2402,7 +2443,8 @@ export const caseRepository = {
    * Spec §6: 3rdPartyBekleniyor'a girilince slaPausedAt set edilir; çıkılınca
    * geçen süre slaPausedDurationMin'e eklenip slaResolutionDueAt ileri kaydırılır.
    */
-  async transitionStatus(id, nextStatus, payload = {}, actor = 'Mock User', allowedCompanyIds) {
+  async transitionStatus(id, nextStatus, payload = {}, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.transitionStatus');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const prev = await prisma.case.findUnique({ where: { id } });
@@ -2829,7 +2871,8 @@ export const caseRepository = {
    * Vakayı ertele — snoozeUntil + snoozeReason + snoozePreviousStatus set,
    * status değişmez. unsnooze/cron-wakeup snoozePreviousStatus'a geri döner.
    */
-  async snoozeCase(id, { snoozeUntil, snoozeReason }, actor = 'Mock User', allowedCompanyIds) {
+  async snoozeCase(id, { snoozeUntil, snoozeReason }, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.snoozeCase');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const target = new Date(snoozeUntil);
@@ -2872,7 +2915,8 @@ export const caseRepository = {
    * Erteleme kaldır — snooze alanlarını temizle, snoozePreviousStatus'a dön.
    * Yoksa Acik fallback (yalnızca Cozuldu/IptalEdildi değilse).
    */
-  async unsnoozeCase(id, actor = 'Mock User', allowedCompanyIds) {
+  async unsnoozeCase(id, actor, allowedCompanyIds) {
+    assertActor(actor, 'caseRepository.unsnoozeCase');
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const exists = await prisma.case.findUnique({ where: { id } });
@@ -3439,7 +3483,8 @@ export const watcherRepo = {
    *
    * Duplicate guard: aynı (caseId, userId) ikinci kez eklenirse 'already' döner.
    */
-  async add({ caseId, userId, addedBy, allowedCompanyIds, actor = 'Mock User' }) {
+  async add({ caseId, userId, addedBy, allowedCompanyIds, actor }) {
+    assertActor(actor, 'watcherRepo.add');
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
@@ -3540,7 +3585,8 @@ export const watcherRepo = {
    *  - Self-removal: always allowed
    *  - Remove others: Supervisor+
    */
-  async remove({ caseId, userId, allowedCompanyIds, actor = 'Mock User' }) {
+  async remove({ caseId, userId, allowedCompanyIds, actor }) {
+    assertActor(actor, 'watcherRepo.remove');
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
@@ -3663,7 +3709,8 @@ export const linkRepo = {
     }));
   },
 
-  async add({ caseId, linkedCaseId, linkType, createdBy, allowedCompanyIds, actor = 'Mock User' }) {
+  async add({ caseId, linkedCaseId, linkType, createdBy, allowedCompanyIds, actor }) {
+    assertActor(actor, 'linkRepo.add');
     if (caseId === linkedCaseId) {
       return { error: 'self_link', message: 'Vaka kendisine bağlanamaz.' };
     }
@@ -3764,7 +3811,8 @@ export const linkRepo = {
    *
    * Symmetric Duplicate: hem ileri hem geri yön silinir.
    */
-  async remove({ caseId, linkId, allowedCompanyIds, actor = 'Mock User' }) {
+  async remove({ caseId, linkId, allowedCompanyIds, actor }) {
+    assertActor(actor, 'linkRepo.remove');
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
