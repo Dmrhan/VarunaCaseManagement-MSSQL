@@ -441,6 +441,26 @@ router.post('/users/:id/reset-password', asyncRoute(async (req, res) => {
  * Idempotent: zaten aktifse 200 doner. UserCompany kayitlarinda dokunma yok
  * — onceki atamalar korunuyor.
  */
+/**
+ * PATCH /api/admin/users/:id/system-role — Sistem rolünü değiştir.
+ * Body: { role: 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin' }
+ *
+ * Guards (route + repo):
+ *  - Yalnız SystemAdmin (Admin yetkili değil — repo guard)
+ *  - Kendi rolünü değiştiremez (repo guard)
+ *  - Hedef SystemAdmin ise değiştirme yasak (repo guard)
+ *  - Geçersiz rol 400
+ *  - Hedef bulunamazsa 404
+ *
+ * UserCompany.role'e dokunulmaz — yalnız User.role değişir. Üst bar ve
+ * global menü davranışı kullanıcı yeniden login/refresh sonrası güncellenir.
+ */
+router.patch('/users/:id/system-role', asyncRoute(async (req, res) => {
+  const role = req.body?.role;
+  const result = await userRepo.updateSystemRole(req.params.id, role, req.user);
+  res.json(result);
+}));
+
 router.patch('/users/:id/reactivate', asyncRoute(async (req, res) => {
   const target = await userRepo.list(
     req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,

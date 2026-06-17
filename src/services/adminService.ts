@@ -718,6 +718,37 @@ export const adminService = {
       if (!item) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true, item: { message: item.message } };
     },
+    /**
+     * Sistem rolünü değiştir (yalnız SystemAdmin yetkili).
+     * UserCompany.role'e dokunulmaz. Üst bar / global menü davranışı
+     * kullanıcının yeniden login/refresh'inden sonra güncellenir.
+     */
+    async updateSystemRole(
+      userId: string,
+      role: AdminUser['role'],
+    ): Promise<AdminResult<{ userId: string; email: string; previousRole: string; role: string }>> {
+      const item = await apiFetch<{
+        success: boolean;
+        userId: string;
+        email: string;
+        previousRole: string;
+        role: string;
+      }>(
+        `${ADMIN_BASE}/users/${userId}/system-role`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) },
+        'Sistem rolü güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return {
+        ok: true,
+        item: {
+          userId: item.userId,
+          email: item.email,
+          previousRole: item.previousRole,
+          role: item.role,
+        },
+      };
+    },
   },
 
   // Phase 5A — Companies CRUD. Backend list endpoint'i kullanıcının
