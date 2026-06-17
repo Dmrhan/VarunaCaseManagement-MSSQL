@@ -12,6 +12,7 @@ import { markInProgressForCase } from '../db/actionItemRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
+import { requireActor } from '../lib/actor.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
 import { generateActionSummary } from '../lib/actionSummaryAi.js';
@@ -345,7 +346,10 @@ router.post(
     if (body.companyId && !req.user.allowedCompanyIds.includes(body.companyId)) {
       return res.status(403).json({ error: 'forbidden', message: 'Bu şirkette vaka oluşturma yetkin yok.' });
     }
-    const created = await caseRepository.create(body);
+    // PR-1 — Server-authoritative actor: body.createdBy YUTULUR.
+    // requireActor 401 fırlatır (eksik auth → asyncRoute JSON'a çevirir).
+    const actor = requireActor(req);
+    const created = await caseRepository.create(body, actor);
     res.status(201).json(created);
   }),
 );
@@ -1037,10 +1041,13 @@ router.post(
 router.post(
   '/:id/call-logs',
   asyncRoute(async (req, res) => {
+    // PR-1 — body.callerId YUTULUR; actor.userId callerId olarak yazılır.
+    const actor = requireActor(req);
     const result = await caseRepository.addCallLog(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
+      actor,
     );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.status(201).json(result);
@@ -1051,10 +1058,13 @@ router.post(
 router.post(
   '/:id/activity',
   asyncRoute(async (req, res) => {
+    // PR-1 — body.actor YUTULUR; activity actor'u req.user'dan.
+    const actor = requireActor(req);
     const updated = await caseRepository.addActivity(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
+      actor,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
@@ -1141,10 +1151,13 @@ router.post(
 router.post(
   '/:id/files/finalize',
   asyncRoute(async (req, res) => {
+    // PR-1 — body.uploadedBy YUTULUR; uploadedBy actor.displayName ile yazılır.
+    const actor = requireActor(req);
     const result = await caseRepository.finalizeUpload(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
+      actor,
     );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     // PR-7 — finalize whitelist defense-in-depth: MIME mismatch 400.

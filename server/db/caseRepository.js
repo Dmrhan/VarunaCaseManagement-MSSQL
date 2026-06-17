@@ -914,8 +914,11 @@ export const caseRepository = {
     return shape(c);
   },
 
-  async create(input) {
+  async create(input, actor) {
     // input: NewCaseInput shape (caseService.ts §142)
+    // actor: ActorContext (server/lib/actor.js); route layer requireActor(req)
+    //        ile üretip pass eder. Hardcoded fallback yok — eksikse
+    //        route layer 401 verir (PR-1 Server-authoritative actor).
     const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
     // TR string enum'larını ASCII identifier'a çevir
     const m = toDb(input);
@@ -1102,7 +1105,9 @@ export const caseRepository = {
             companyId: m.companyId,
             action: 'Vaka oluşturuldu',
             actionType: 'CaseCreated',
-            actor: m.createdBy ?? 'Mock User',
+            // PR-1 — server-authoritative: body.createdBy YUTULUR; actor
+            // route'tan req.user ile geliyor (caller asla null bırakmaz).
+            actor: actor.displayName,
             note:
               m.customFields &&
               typeof m.customFields === 'object' &&
@@ -1973,7 +1978,12 @@ export const caseRepository = {
     });
   },
 
-  async addCallLog(id, input, allowedCompanyIds) {
+  async addCallLog(id, input, allowedCompanyIds, actor) {
+    // PR-1 — server-authoritative actor: body.callerId YUTULUR; callerId
+    // daima caller'ın userId'si (req.user.id) ile yazılır. Audit trail'de
+    // çağrıyı kaydeden gerçek kullanıcı. callerName (input metadata) hâlâ
+    // body'den alınabilir — bu çağrılan müşteriyi/3rd party'yi etiketleyen
+    // serbest metindir, actor'la karıştırılmamalı.
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     const m = toDb(input);
@@ -1986,7 +1996,7 @@ export const caseRepository = {
         callDisposition: m.callDisposition,
         callOutcome: m.callOutcome,
         description: m.description,
-        callerId: m.callerId ?? 'mock-user',
+        callerId: actor.userId,
         callerName: m.callerName,
         nextFollowupDate: m.nextFollowupDate ? new Date(m.nextFollowupDate) : null,
         lastInteractionDate: new Date(),
@@ -2006,7 +2016,7 @@ export const caseRepository = {
         action: 'Çağrı kaydı eklendi',
         actionType: 'CallLogAdded',
         note: noteText,
-        actor: input.callerName ?? 'Mock User',
+        actor: actor.displayName,
       },
     });
 
@@ -2018,7 +2028,9 @@ export const caseRepository = {
     return { caseUpdated: shape(caseUpdated), callLog: fromDb(log) };
   },
 
-  async addActivity(caseId, input, allowedCompanyIds) {
+  async addActivity(caseId, input, allowedCompanyIds, actor) {
+    // PR-1 — server-authoritative: body.actor YUTULUR. Manuel activity
+    // entry'sini ekleyen gerçek kullanıcı her zaman audit trail'de görünür.
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
     await prisma.caseActivity.create({
@@ -2031,7 +2043,7 @@ export const caseRepository = {
         fromValue: input.oldValue,
         toValue: input.newValue,
         note: input.note,
-        actor: input.actor ?? 'Mock User',
+        actor: actor.displayName,
       },
     });
     const updated = await prisma.case.update({
@@ -2119,7 +2131,10 @@ export const caseRepository = {
    * Adım 2 — Finalize: storage upload başarılı → DB satırını yaz + history log.
    * Frontend, requestUpload'tan dönen attachmentId/path'i geri gönderir.
    */
-  async finalizeUpload(id, input, allowedCompanyIds) {
+  async finalizeUpload(id, input, allowedCompanyIds, actor) {
+    // PR-1 — server-authoritative: body.uploadedBy YUTULUR. Audit trail'de
+    // dosyayı yükleyen gerçek kullanıcı görünür. (PR-4 ileride upload-url ↔
+    // finalize aynı user binding'ini token'a koyacak.)
     const companyId = await assertCaseInScope(id, allowedCompanyIds);
     if (!companyId) return null;
     // PR-7 — Defense-in-depth: requestUpload signed URL aldıktan sonra
@@ -2131,7 +2146,7 @@ export const caseRepository = {
         error: 'Bu dosya türü kabul edilmiyor. PDF, Office belgeleri, görseller (PNG/JPG/GIF/WebP), metin (TXT/CSV/JSON/XML) ve ZIP yüklenebilir.',
       };
     }
-    const actor = input.uploadedBy ?? 'Mock User';
+    const actorName = actor.displayName;
     const file = await prisma.caseAttachment.create({
       data: {
         id: input.attachmentId,
@@ -2141,7 +2156,7 @@ export const caseRepository = {
         fileSize: input.fileSize,
         mimeType: input.mimeType,
         fileUrl: input.path, // Storage path — download'da signed URL'e dönüşür
-        uploadedBy: actor,
+        uploadedBy: actorName,
       },
     });
     const caseUpdated = await prisma.case.update({
@@ -2155,7 +2170,7 @@ export const caseRepository = {
             actionType: 'FileUploaded',
             fieldName: 'files',
             toValue: file.fileName,
-            actor,
+            actor: actorName,
           },
         },
       },
