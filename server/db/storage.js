@@ -83,10 +83,20 @@ function resolveSafe(relPath) {
 /**
  * Upload "signed URL" üret — frontend buna PUT eder (raw body).
  * Dönen shape eski Supabase sürümüyle aynı: { signedUrl, path, token }.
+ *
+ * PR-4 — Upload two-step user binding: token payload'ına userId gömülür.
+ * PUT endpoint'i ve finalize endpoint'i bu userId'nin req.user.id ile
+ * match'ini doğrular. User A request → User B PUT/finalize attack engellenir.
  */
-export async function createUploadUrl(caseId, attachmentId, fileName) {
+export async function createUploadUrl(caseId, attachmentId, fileName, userId) {
+  if (typeof userId !== 'string' || userId.length === 0) {
+    throw new StorageError('createUploadUrl: userId required for token binding', 500);
+  }
   const relPath = buildPath(caseId, attachmentId, fileName);
-  const token = signStorageToken({ typ: 'upload', caseId, path: relPath }, UPLOAD_TOKEN_TTL_SEC);
+  const token = signStorageToken(
+    { typ: 'upload', caseId, path: relPath, userId },
+    UPLOAD_TOKEN_TTL_SEC,
+  );
   return {
     signedUrl: `/api/cases/${encodeURIComponent(caseId)}/files/upload?token=${encodeURIComponent(token)}`,
     path: relPath,

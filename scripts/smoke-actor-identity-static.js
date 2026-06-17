@@ -259,6 +259,104 @@ console.log('\n── 7) Defansif throw + smoke fixture (Codex P1) ────�
   // Bu test repo modülü dinamik import etmeyi gerektirir.
 }
 
+// ── 8) PR-2 — kalan 11 method'da default 'Mock User' kaldırıldı ─
+console.log('\n── 8) PR-2: caseRepository.js 11 method default temizlendi ──');
+{
+  const repoSrc = readFile('server/db/caseRepository.js');
+  // 8.1 — Tüm dosyada SADECE 2 yerde 'Mock User' string'i kalmalı:
+  //   1) MOCK_USER_SENTINELS Set tanımında (reddetme listesi)
+  //   2) Yorum açıklamasında
+  // Hiçbir actor= default param'ında olmamalı.
+  const defaultParamMatches = repoSrc.match(/actor\s*=\s*'Mock User'/g);
+  expect('8.1 actor=\'Mock User\' default param sayısı 0',
+    defaultParamMatches === null ? 0 : defaultParamMatches.length, 0);
+  const defaultMockUser = repoSrc.match(/actor\s*=\s*'mock-user'/g);
+  expect('8.2 actor=\'mock-user\' default param sayısı 0',
+    defaultMockUser === null ? 0 : defaultMockUser.length, 0);
+
+  // 8.3-8.13 — 11 method assertActor çağrısı
+  const methods = [
+    'caseRepository.update',
+    'caseRepository.toggleChecklistItem',
+    'caseRepository.removeFile',
+    'caseRepository.bulkUpdate',
+    'caseRepository.transitionStatus',
+    'caseRepository.snoozeCase',
+    'caseRepository.unsnoozeCase',
+    'watcherRepo.add',
+    'watcherRepo.remove',
+    'linkRepo.add',
+    'linkRepo.remove',
+  ];
+  let i = 3;
+  for (const m of methods) {
+    expect(`8.${i} ${m} assertActor çağrısı`,
+      repoSrc.includes(`assertActor(actor, '${m}')`), true);
+    i += 1;
+  }
+
+  // 8.14 — MOCK_USER_SENTINELS Set'i tanımlı
+  expect('8.14 MOCK_USER_SENTINELS tanımlı',
+    repoSrc.includes("const MOCK_USER_SENTINELS = new Set(['Mock User'"), true);
+
+  // 8.15 — assertActor hybrid (string + object kabul)
+  expect('8.15 assertActor hybrid string check',
+    repoSrc.includes("if (typeof actor === 'string')"), true);
+}
+
+// ── 9) PR-4 — Upload two-step user binding ─────────────────
+console.log('\n── 9) PR-4: storage token userId + finalize match ───────');
+{
+  const storageSrc = readFile('server/db/storage.js');
+  const repoSrc = readFile('server/db/caseRepository.js');
+  const routeSrc = readFile('server/routes/cases.js');
+  const frontSrc = readFile('src/services/caseService.ts');
+
+  // 9.1 — storage.createUploadUrl signature'a userId eklendi
+  expect('9.1 createUploadUrl(caseId, attachmentId, fileName, userId)',
+    storageSrc.includes('export async function createUploadUrl(caseId, attachmentId, fileName, userId)'), true);
+
+  // 9.2 — token payload'ında userId
+  expect('9.2 token payload userId field',
+    storageSrc.includes("{ typ: 'upload', caseId, path: relPath, userId }"), true);
+
+  // 9.3 — createUploadUrl userId varlık kontrolü
+  expect('9.3 userId zorunlu (StorageError)',
+    storageSrc.includes('createUploadUrl: userId required'), true);
+
+  // 9.4-9.5 — caseRepository.requestUpload actor zorunlu + actor.userId ile binding
+  expect('9.4 requestUpload(id, input, allowedCompanyIds, actor)',
+    repoSrc.includes('async requestUpload(id, input, allowedCompanyIds, actor)'), true);
+  expect('9.5 createUploadUrl(... , actor.userId) çağrısı',
+    repoSrc.includes('createUploadUrl(id, attachmentId, input.fileName, actor.userId)'), true);
+
+  // 9.6-9.8 — finalizeUpload token verify + userId match
+  expect('9.6 verifyStorageToken import',
+    repoSrc.includes("verifyStorageToken } from './storage.js'"), true);
+  expect('9.7 finalize token verify',
+    repoSrc.includes('const tokenPayload = verifyStorageToken(input.token)'), true);
+  expect('9.8 finalize userId mismatch reddedilir',
+    repoSrc.includes('tokenPayload.userId !== actor.userId'), true);
+
+  // 9.9 — route /upload-url actor pass ediyor
+  const uploadUrlRoute = routeSrc.indexOf("'/:id/files/upload-url'");
+  const uploadUrlBlock = routeSrc.slice(uploadUrlRoute, uploadUrlRoute + 600);
+  expect('9.9 /upload-url route actor pass ediyor',
+    uploadUrlBlock.includes('requireActor(req)') && uploadUrlBlock.includes('actor,'), true);
+
+  // 9.10 — requestUpload return shape token içeriyor
+  expect('9.10 requestUpload response token içeriyor',
+    repoSrc.includes("return { uploadUrl: signedUrl, path, attachmentId, token }"), true);
+
+  // 9.11 — Frontend finalize body'sine token ekledi
+  expect('9.11 frontend finalize body token: upload.token',
+    frontSrc.includes('token: upload.token'), true);
+
+  // 9.12 — Frontend upload-url response tipi token: string içeriyor
+  expect('9.12 frontend upload response token: string',
+    frontSrc.includes('attachmentId: string; token: string'), true);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

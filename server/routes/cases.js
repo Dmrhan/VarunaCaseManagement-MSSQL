@@ -1133,10 +1133,14 @@ router.patch(
 router.post(
   '/:id/files/upload-url',
   asyncRoute(async (req, res) => {
+    // PR-4 — Upload two-step user binding: token'a actor.userId gömülür,
+    // finalize endpoint'i mismatch'i 400 ile reddeder.
+    const actor = requireActor(req);
     const result = await caseRepository.requestUpload(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
+      actor,
     );
     if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
     if ('error' in result) return res.status(400).json(result);
