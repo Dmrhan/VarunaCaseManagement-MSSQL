@@ -1038,6 +1038,70 @@ export const userRepo = {
    *  - Frontend `app:unauthenticated` event'i tetiklenmesi gerekmez — kullanici
    *    yeni bir session acmak zorunda degil; eski JWT verifyJwt'de 200 doner.
    */
+  /**
+   * Sistem rolünü değiştir — yalnız SystemAdmin yetkili.
+   *
+   * Guardrails:
+   *  - requestingUser.role !== 'SystemAdmin' → 403
+   *  - userId === requestingUser.id → 400 (kendi rolünü kilitleme önle)
+   *  - target SystemAdmin → 403 (SystemAdmin promote/demote bu PR scope dışı)
+   *  - target not found → 404
+   *  - role geçersizse 400
+   *
+   * UserCompany.role'e dokunulmaz; sadece User.role güncellenir.
+   */
+  async updateSystemRole(userId, role, requestingUser) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    if (requestingUser?.role !== 'SystemAdmin') {
+      throw new AdminError('Sistem rolünü yalnızca SystemAdmin değiştirebilir.', 403);
+    }
+    if (userId === requestingUser?.id) {
+      throw new AdminError('Kendi sistem rolünü değiştiremezsin.', 400);
+    }
+    const ALLOWED_ROLES = ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin'];
+    if (typeof role !== 'string' || !ALLOWED_ROLES.includes(role)) {
+      throw new AdminError(
+        `Geçersiz rol. Kabul edilenler: ${ALLOWED_ROLES.join(', ')}.`,
+        400,
+      );
+    }
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, fullName: true, role: true, isActive: true },
+    });
+    if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (target.role === 'SystemAdmin') {
+      throw new AdminError(
+        'SystemAdmin kullanıcıların sistem rolü bu yoldan değiştirilemez (seed/bootstrap).',
+        403,
+      );
+    }
+    if (target.role === role) {
+      // Idempotent — yeniden aynı rolü atama hata değildir
+      return {
+        success: true,
+        userId: target.id,
+        email: target.email,
+        fullName: target.fullName,
+        previousRole: target.role,
+        role,
+        unchanged: true,
+      };
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role },
+    });
+    return {
+      success: true,
+      userId: target.id,
+      email: target.email,
+      fullName: target.fullName,
+      previousRole: target.role,
+      role,
+    };
+  },
+
   async reactivate(userId, _deps, requestingUser) {
     if (!userId) throw new AdminError('userId gerekli.', 400);
     const target = await prisma.user.findUnique({
