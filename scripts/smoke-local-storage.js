@@ -89,21 +89,27 @@ try {
   }, accessToken));
   check('upload-url döner (token\'lı BFF yolu)', typeof up.uploadUrl === 'string' && up.uploadUrl.includes('/files/upload?token='), up.uploadUrl?.slice(0, 60));
 
-  // 2) raw PUT (auth header YOK — token yeterli, eski signed-URL simetrisi)
+  // 2) raw PUT — PR-4 follow-up sonrası JWT auth zorunlu (Codex P2 fix).
+  // Authorization header taşımak frontend XHR ile aynı sözleşme.
   const putR = await fetch(`http://localhost:${PORT}${up.uploadUrl}`, {
     method: 'PUT',
-    headers: { 'content-type': 'text/plain' },
+    headers: {
+      'content-type': 'text/plain',
+      authorization: `Bearer ${accessToken}`,
+    },
     body: fileBytes,
   });
   check('raw PUT 200', putR.status === 200, `status=${putR.status}`);
 
-  // tampered token reddedilir
+  // tampered token reddedilir (JWT auth ile)
   const badPut = await fetch(`http://localhost:${PORT}${up.uploadUrl}x`, {
-    method: 'PUT', headers: { 'content-type': 'text/plain' }, body: fileBytes,
+    method: 'PUT',
+    headers: { 'content-type': 'text/plain', authorization: `Bearer ${accessToken}` },
+    body: fileBytes,
   });
   check('bozuk token PUT 401', badPut.status === 401, `status=${badPut.status}`);
 
-  // 3) finalize
+  // 3) finalize — PR-4 follow-up sonrası token zorunlu (backend match yapar).
   const fin = await j(await api(`/cases/${caseId}/files/finalize`, {
     method: 'POST',
     body: JSON.stringify({
@@ -112,6 +118,7 @@ try {
       fileName: 'rapor özeti.txt',
       fileSize: fileBytes.length,
       mimeType: 'text/plain',
+      token: up.token,
     }),
   }, accessToken));
   check('finalize DB satırı', fin?.file?.id === up.attachmentId, JSON.stringify(fin?.file ?? {}).slice(0, 100));

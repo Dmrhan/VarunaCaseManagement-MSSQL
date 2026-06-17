@@ -310,10 +310,12 @@ router.post(
   '/bulk-update',
   asyncRoute(async (req, res) => {
     const body = req.body ?? {};
+    const actorObj = requireActor(req); // PR-5 follow-up
     const result = await caseRepository.bulkUpdate(
       { caseIds: body.caseIds, updates: body.updates ?? {} },
       req.user.fullName,
       req.user.allowedCompanyIds,
+      actorObj,
     );
     if (result?.error) return res.status(400).json(result);
     res.json(result);
@@ -373,6 +375,9 @@ router.post(
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
+    // PR-5 follow-up — actor object pass'lensin ki historyEntries actorUserId
+    // stamp atılsın (post-migration audit FK doldurulur).
+    const actorObj = requireActor(req);
     const updated = await caseRepository.update(
       req.params.id,
       req.body ?? {},
@@ -380,6 +385,7 @@ router.patch(
       req.user.allowedCompanyIds,
       req.user.role,
       req.user.personId ?? null,
+      actorObj,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
@@ -485,12 +491,14 @@ router.post(
   asyncRoute(async (req, res) => {
     const { nextStatus, ...payload } = req.body ?? {};
     if (!nextStatus) return res.status(400).json({ error: 'nextStatus gerekli' });
+    const actorObj = requireActor(req); // PR-5 follow-up
     const updated = await caseRepository.transitionStatus(
       req.params.id,
       nextStatus,
       payload,
       req.user.fullName,
       req.user.allowedCompanyIds,
+      actorObj,
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);

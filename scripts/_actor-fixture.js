@@ -30,6 +30,7 @@ import {
   CaseAccessError,
   CaseValidationError,
 } from '../server/db/caseRepository.js';
+import { taxonomyDefRepo as _taxonomyDefRepo } from '../server/db/adminRepository.js';
 
 export const TEST_ACTOR = Object.freeze({
   userId: 'smoke-test-actor',
@@ -91,6 +92,18 @@ export const linkRepo = {
     _linkRepo.add({ caseId, linkedCaseId, linkType, createdBy, allowedCompanyIds, actor }),
   remove: ({ caseId, linkId, allowedCompanyIds, actor = TEST_ACTOR.displayName }) =>
     _linkRepo.remove({ caseId, linkId, allowedCompanyIds, actor }),
+};
+
+// PR-3 wrapped taxonomyDefRepo — smoke fixture default TEST_ACTOR.
+// adminRepository.taxonomyDefRepo.create/update/remove actor object zorunlu.
+export const taxonomyDefRepo = {
+  ..._taxonomyDefRepo,
+  create: (input, allowedCompanyIds, actor = TEST_ACTOR) =>
+    _taxonomyDefRepo.create(input, allowedCompanyIds, actor),
+  update: (id, patch, allowedCompanyIds, actor = TEST_ACTOR) =>
+    _taxonomyDefRepo.update(id, patch, allowedCompanyIds, actor),
+  remove: (id, allowedCompanyIds, actor = TEST_ACTOR) =>
+    _taxonomyDefRepo.remove(id, allowedCompanyIds, actor),
 };
 
 export {

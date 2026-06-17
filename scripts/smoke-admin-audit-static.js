@@ -180,6 +180,89 @@ console.log('\n── 5) assertActorObject helper davranışı ─────�
     actorInternals.MOCK_USER_SENTINELS.has('Mock User'), true);
 }
 
+// ── 6) Codex P2 follow-up: stripAuditFields + smoke fixture ──
+console.log('\n── 6) Codex P2 follow-up: audit strip + smoke fixture ────');
+{
+  const repo = readFile('server/db/adminRepository.js');
+  // 6.1 — stripAuditFields helper tanımlı
+  expect('6.1 stripAuditFields helper',
+    repo.includes('function stripAuditFields(obj)'), true);
+
+  // 6.2 — SLA update'te stripAuditFields uygulanıyor
+  expect('6.2 sLAPolicy update stripAuditFields',
+    repo.includes('const dbPatch = stripAuditFields(toDb(patch))'), true);
+
+  // 6.3 — SLA create'te de strip (safeInput pattern)
+  expect('6.3 sLAPolicy create safeInput',
+    repo.includes('const safeInput = stripAuditFields(input)'), true);
+
+  // 6.4 — Smoke fixture taxonomyDefRepo wrapped
+  const fixture = readFile('scripts/_actor-fixture.js');
+  expect('6.4 fixture taxonomyDefRepo export',
+    fixture.includes('export const taxonomyDefRepo'), true);
+  expect('6.5 fixture taxonomyDefRepo create wrap',
+    fixture.includes('create: (input, allowedCompanyIds, actor = TEST_ACTOR)'), true);
+
+  // 6.6 — Taxonomy smoke fixture'a yönlendirildi
+  const taxSmoke = readFile('scripts/smoke-smart-ticket-taxonomy-admin.js');
+  expect('6.6 taxonomy smoke import _actor-fixture',
+    taxSmoke.includes("import { taxonomyDefRepo } from './_actor-fixture.js'"), true);
+  expect('6.7 eski adminRepository import kaldırıldı',
+    taxSmoke.includes("from '../server/db/adminRepository.js'"), false);
+}
+
+// ── 7) PR-5 follow-up: update/transition/bulkUpdate actorObject ──
+console.log('\n── 7) PR-5 follow-up: actorObject signature + route ─────');
+{
+  const repo = readFile('server/db/caseRepository.js');
+  const route = readFile('server/routes/cases.js');
+
+  // 7.1-3 — Repository signature'larında actorObject parametresi
+  expect('7.1 update() actorObject parametresi',
+    repo.includes('async update(id, patch, actor, allowedCompanyIds, actorRole, actorPersonId = null, actorObject = null)'), true);
+  expect('7.2 transitionStatus() actorObject parametresi',
+    repo.includes('async transitionStatus(id, nextStatus, payload = {}, actor, allowedCompanyIds, actorObject = null)'), true);
+  expect('7.3 bulkUpdate() actorObject parametresi',
+    repo.includes('async bulkUpdate({ caseIds, updates }, actor, allowedCompanyIds, actorObject = null)'), true);
+
+  // 7.4-6 — Routes actorObject pass ediyor
+  // PATCH /:id, transition, bulk-update — her birinde requireActor + actorObj pass
+  const patchIdx = route.indexOf('PATCH /api/cases/:id');
+  const patchBlock = route.slice(patchIdx, patchIdx + 600);
+  expect('7.4 PATCH /:id requireActor + actorObj',
+    patchBlock.includes('requireActor(req)') && patchBlock.includes('actorObj'), true);
+
+  const bulkIdx = route.indexOf("'/bulk-update'");
+  const bulkBlock = route.slice(bulkIdx, bulkIdx + 600);
+  expect('7.5 POST /bulk-update requireActor + actorObj',
+    bulkBlock.includes('requireActor(req)') && bulkBlock.includes('actorObj'), true);
+
+  const transIdx = route.indexOf("'/:id/transition'");
+  const transBlock = route.slice(transIdx, transIdx + 700);
+  expect('7.6 POST /:id/transition requireActor + actorObj',
+    transBlock.includes('requireActor(req)') && transBlock.includes('actorObj'), true);
+
+  // 7.7-9 — Repository historyEntries actorUserId stamp
+  expect('7.7 update historyEntries actorUserId stamp',
+    repo.includes('actorUserId: actorUserIdOf(actorObject), // PR-5 follow-up'), true);
+  expect('7.8 transitionStatus stampUid',
+    repo.includes('const stampUid = actorUserIdOf(actorObject)'), true);
+  expect('7.9 bulkUpdate actorUserId stamp',
+    /historyEntries\.push\(\{[\s\S]{0,500}actorUserId:\s+actorUserIdOf\(actorObject\),\s+\/\/\s+PR-5 follow-up/.test(repo), true);
+}
+
+// ── 8) smoke-local-storage.js auth header ────────────────────
+console.log('\n── 8) smoke-local-storage.js Authorization header ────────');
+{
+  const storage = readFile('scripts/smoke-local-storage.js');
+  // 8.1 — raw PUT'ta Authorization Bearer
+  expect('8.1 PUT Authorization Bearer accessToken',
+    /method: 'PUT'[\s\S]{0,300}authorization: `Bearer \$\{accessToken\}`/.test(storage), true);
+  // 8.2 — finalize body'sine token eklendi
+  expect('8.2 finalize body token: up.token',
+    storage.includes('token: up.token'), true);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

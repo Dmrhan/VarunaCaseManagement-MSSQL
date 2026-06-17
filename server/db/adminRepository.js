@@ -4,6 +4,27 @@ import { fromDb, toDb } from './enumMap.js';
 import { assertActorObject } from '../lib/actor.js';
 
 /**
+ * PR-3 follow-up (Codex P2) — Audit field corruption guard.
+ *
+ * Admin route'ları req.body'yi passthrough yapıyor; toDb() bilinmeyen
+ * field'ları korur. Eğer client body'de createdByUserId/updatedByUserId
+ * gönderirse, repository'deki `data: { ...patch, updatedByUserId: actor.userId }`
+ * spread'i yalnız updatedByUserId'yi override eder — createdByUserId
+ * client'in attacker değerine kayar. Server-authoritative audit
+ * korumasını kıran kritik bug.
+ *
+ * Fix: tüm update/create input'larından audit field'larını strip et.
+ * Server her zaman actor.userId'den yazar.
+ */
+function stripAuditFields(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+  delete out.createdByUserId;
+  delete out.updatedByUserId;
+  return out;
+}
+
+/**
  * Admin tanım ekranlarının CRUD repository'si.
  *
  * Convention: tüm metotlar `{ ok: true, item } | { ok: false, error: string }`
@@ -474,20 +495,22 @@ export const slaPolicyRepo = {
   async create(input, actor) {
     // PR-3 — admin audit attribution.
     assertActorObject(actor, 'slaPolicyRepo.create');
+    // Codex P2 — client body audit field strip
+    const safeInput = stripAuditFields(input);
     const dup = await prisma.sLAPolicy.findFirst({
       where: {
-        companyId: input.companyId,
-        productGroup: input.productGroup,
-        categoryName: input.categoryName,
-        subCategoryName: input.subCategoryName,
-        requestType: toDb({ requestType: input.requestType }).requestType,
+        companyId: safeInput.companyId,
+        productGroup: safeInput.productGroup,
+        categoryName: safeInput.categoryName,
+        subCategoryName: safeInput.subCategoryName,
+        requestType: toDb({ requestType: safeInput.requestType }).requestType,
       },
     });
     if (dup) throw new AdminError('Aynı 5-tuple eşleşmesinde başka kural zaten var.');
     const created = await prisma.sLAPolicy.create({
       data: {
-        ...input,
-        requestType: toDb({ requestType: input.requestType }).requestType,
+        ...safeInput,
+        requestType: toDb({ requestType: safeInput.requestType }).requestType,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       },
@@ -496,7 +519,8 @@ export const slaPolicyRepo = {
   },
   async update(id, patch, actor) {
     assertActorObject(actor, 'slaPolicyRepo.update');
-    const dbPatch = toDb(patch);
+    // Codex P2 — client body'sinde createdByUserId/updatedByUserId varsa strip
+    const dbPatch = stripAuditFields(toDb(patch));
     // 5-tuple değişiyorsa duplicate kontrolü
     if (
       patch.companyId || patch.productGroup || patch.categoryName ||

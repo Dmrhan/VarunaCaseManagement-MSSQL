@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '../server/db/client.js';
-import { taxonomyDefRepo } from '../server/db/adminRepository.js';
+import { taxonomyDefRepo } from './_actor-fixture.js';
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
