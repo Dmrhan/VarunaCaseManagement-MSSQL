@@ -60,6 +60,10 @@ export function AdminUsersPage() {
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
+  /** Sistem rolü değişikliği (yalnız SystemAdmin yetkili). */
+  const [systemRoleTarget, setSystemRoleTarget] = useState<AdminUser | null>(null);
+  const [newSystemRole, setNewSystemRole] = useState<AdminUser['role']>('Agent');
+  const [systemRoleBusy, setSystemRoleBusy] = useState(false);
 
   function generateTempPassword(): string {
     const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -268,6 +272,22 @@ export function AdminUsersPage() {
                               Şifre Sıfırla
                             </Button>
                           )}
+                          {/* Sistem rolünü değiştir — yalnız SystemAdmin yetkili.
+                              Hedef SystemAdmin'se veya kendi satırı ise gizli. */}
+                          {isSystemAdmin && !isReadOnly && !isSelf && u.isActive && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={<Shield size={12} />}
+                              onClick={() => {
+                                setSystemRoleTarget(u);
+                                setNewSystemRole(u.role);
+                              }}
+                              title="Sistem rolünü değiştir (uygulama genelinde menü/yetki)"
+                            >
+                              Sistem Rolü
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -456,6 +476,77 @@ export function AdminUsersPage() {
           </div>
         </Modal>
       )}
+
+      {systemRoleTarget && (
+        <Modal
+          open
+          onClose={() => (systemRoleBusy ? null : setSystemRoleTarget(null))}
+          size="sm"
+          title="Sistem Rolünü Değiştir"
+          footer={(
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSystemRoleTarget(null)}
+                disabled={systemRoleBusy}
+              >
+                Vazgeç
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  if (!systemRoleTarget) return;
+                  setSystemRoleBusy(true);
+                  const result = await adminService.users.updateSystemRole(
+                    systemRoleTarget.id,
+                    newSystemRole,
+                  );
+                  setSystemRoleBusy(false);
+                  if (result.ok) {
+                    toast({
+                      type: 'success',
+                      message: `${systemRoleTarget.email}: ${result.item.previousRole} → ${result.item.role}`,
+                    });
+                    setSystemRoleTarget(null);
+                    await refresh();
+                  } else {
+                    toast({ type: 'error', message: result.error ?? 'Güncellenemedi' });
+                  }
+                }}
+                disabled={systemRoleBusy || newSystemRole === systemRoleTarget.role}
+              >
+                {systemRoleBusy ? 'Kaydediliyor…' : 'Kaydet'}
+              </Button>
+            </div>
+          )}
+        >
+          <div className="space-y-3 px-5 py-4 text-sm">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted">
+              <div><strong>Kullanıcı:</strong> {systemRoleTarget.fullName || systemRoleTarget.email}</div>
+              <div><strong>E-posta:</strong> {systemRoleTarget.email}</div>
+              <div><strong>Mevcut sistem rolü:</strong> {systemRoleTarget.role}</div>
+            </div>
+            <Field label="Yeni sistem rolü">
+              <Select
+                value={newSystemRole}
+                onChange={(e) => setNewSystemRole(e.target.value as AdminUser['role'])}
+              >
+                <option value="Agent">Agent</option>
+                <option value="Backoffice">Backoffice</option>
+                <option value="Supervisor">Supervisor</option>
+                <option value="CSM">CSM</option>
+                <option value="Admin">Admin</option>
+              </Select>
+            </Field>
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              Sistem rolü, kullanıcının uygulama genelindeki menü ve yetki davranışını etkiler.
+              Şirket içi roller ayrıca yönetilir (Düzenle butonu).
+              Değişiklik kullanıcının üst barına yeniden login/refresh sonrası yansır.
+            </p>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
@@ -541,7 +632,12 @@ function UserAssignmentEditor({
       <div className="space-y-4 px-5 py-4">
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted">
           <div><strong>E-posta:</strong> {user.email}</div>
-          <div><strong>Sistem rolü:</strong> {user.role}</div>
+          <div>
+            <strong>Sistem rolü:</strong> {user.role}
+            <span className="ml-2 text-[11px] italic text-slate-500 dark:text-ndark-muted">
+              Sistem rolü kullanıcı listesi aksiyonlarından (Sistem Rolü) değiştirilir.
+            </span>
+          </div>
         </div>
 
         <Field label="Şirket Erişimi" hint="Kullanıcının erişebileceği şirketler ve her birindeki rolü.">
