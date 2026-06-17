@@ -182,7 +182,7 @@ The rules below replace the strict rule with a dual-path discipline:
 Every post-merge task summary must include this metadata block — no
 exceptions:
 
-- **Intended PR base:** `dev` (or `main` only for release / approved hotfix)
+- **Intended PR base:** `dev` (or `main` only for release with head=`dev`, or approved hotfix with head=`hotfix/*` — enforced by `.github/workflows/pr-base-check.yml`)
 - **Observed merge path:** `Path A` (landed on dev) or `Path B` (landed on main)
 - **Action taken:** `release PR dev → main` (Path A) or `fast-forward dev to main` (Path B)
 - **Feature branch deleted after merge:** Yes / No / Pending

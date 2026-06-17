@@ -50,12 +50,25 @@ jobs:
             exit 1
           fi
 
-          # 4) base=main + head != dev → POLİTİKA İHLALİ
+          # 4) base=main + head=hotfix/* + AYNI REPO → onaylı hotfix yolu (Codex P2)
+          # AI_WORKFLOW.md ve pull_request_template.md "main only for release /
+          # approved hotfix" diyor. Branch ismi hotfix/* niyeti açık etiketler;
+          # "onaylı" kısmı manuel PR review aşamasında — check'in işi değil.
+          case "$HEAD" in
+            hotfix/*)
+              if [ "$SAME_REPO" = "1" ] && [ "$BASE" = "main" ]; then
+                echo "OK: approved hotfix PR (canonical hotfix/* -> main)"
+                exit 0
+              fi
+              ;;
+          esac
+
+          # 5) base=main + head != dev/hotfix → POLİTİKA İHLALİ
           if [ "$BASE" = "main" ]; then
-            echo "::error::PR base 'main' is reserved for release PRs (head must be 'dev'). For feature/fix branches, change base to 'dev' from the PR edit menu."
+            echo "::error::PR base 'main' is reserved for release (head=dev) or approved hotfix (head=hotfix/*) PRs. For feature/fix branches, change base to 'dev' from the PR edit menu."
             exit 1
           fi
 
-          # 5) Başka base'ler (örn. branch'ler arası) — politika dışı, serbest
+          # 6) Başka base'ler (örn. branch'ler arası) — politika dışı, serbest
           echo "OK: non-policy base ($BASE)"
           exit 0
