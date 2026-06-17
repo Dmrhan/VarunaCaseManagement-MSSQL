@@ -28,6 +28,20 @@ import crypto from 'node:crypto';
  */
 const MOCK_USER_SENTINELS = new Set(['Mock User', 'mock-user', 'mock_user', '']);
 
+/**
+ * PR-5 — Optional FK actorUserId stamp helper.
+ *
+ * Actor object ise userId döner; string actor (cron/legacy) ise null.
+ * Forward writes display string'i KORURKEN FK alanını da doldurur.
+ * UI display chain: actorUserId varsa canlı User.fullName, yoksa actor string.
+ */
+function actorUserIdOf(actor) {
+  if (actor && typeof actor === 'object' && typeof actor.userId === 'string' && actor.userId.length > 0) {
+    return actor.userId;
+  }
+  return null;
+}
+
 function assertActor(actor, where) {
   if (typeof actor === 'string') {
     if (MOCK_USER_SENTINELS.has(actor)) {
@@ -244,6 +258,7 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
       actionType: 'NoteAdded',
       note: cleanedPreview,
       actor: note.authorName,
+      actorUserId: mentionedBy ?? null, // PR-5
     },
   });
 
@@ -1149,6 +1164,7 @@ export const caseRepository = {
             // PR-1 — server-authoritative: body.createdBy YUTULUR; actor
             // route'tan req.user ile geliyor (caller asla null bırakmaz).
             actor: actor.displayName,
+            actorUserId: actorUserIdOf(actor), // PR-5
             note:
               m.customFields &&
               typeof m.customFields === 'object' &&
@@ -1268,6 +1284,9 @@ export const caseRepository = {
         fromValue: oldVal == null ? null : String(oldVal),
         toValue: newVal == null ? null : String(newVal),
         actor,
+        // PR-5 — update() string actor; userId scope'ta yok (signature genişletilirse
+        // follow-up'ta eklenir). Display chain string actor'a düşer.
+        actorUserId: null,
       });
     }
 
@@ -1530,6 +1549,7 @@ export const caseRepository = {
         fromValue: null,
         toValue: user.personId,
         actor: user.fullName ?? assignedPersonName,
+        actorUserId: typeof user?.id === 'string' ? user.id : null, // PR-5
       },
     });
 
@@ -1858,6 +1878,7 @@ export const caseRepository = {
         actionType: 'NoteReplyAdded',
         note: cleanedPreview,
         actor: reply.authorName,
+        actorUserId: mentionedBy ?? null, // PR-5
       },
     });
 
@@ -1972,6 +1993,7 @@ export const caseRepository = {
         action: note.parentNoteId ? 'Not yanıtı silindi' : 'Not silindi',
         note: preview,
         actor: note.authorName,
+        actorUserId: typeof currentUserId === 'string' ? currentUserId : null, // PR-5
       },
     });
 
@@ -2063,6 +2085,7 @@ export const caseRepository = {
         actionType: 'CallLogAdded',
         note: noteText,
         actor: actor.displayName,
+        actorUserId: actorUserIdOf(actor), // PR-5
       },
     });
 
@@ -2091,6 +2114,7 @@ export const caseRepository = {
         toValue: input.newValue,
         note: input.note,
         actor: actor.displayName,
+        actorUserId: actorUserIdOf(actor), // PR-5
       },
     });
     const updated = await prisma.case.update({
@@ -2216,6 +2240,7 @@ export const caseRepository = {
       };
     }
     const actorName = actor.displayName;
+    const actorUid = actorUserIdOf(actor); // PR-5
     const file = await prisma.caseAttachment.create({
       data: {
         id: input.attachmentId,
@@ -2226,6 +2251,7 @@ export const caseRepository = {
         mimeType: input.mimeType,
         fileUrl: input.path, // Storage path — download'da signed URL'e dönüşür
         uploadedBy: actorName,
+        uploadedByUserId: actorUid, // PR-5
       },
     });
     const caseUpdated = await prisma.case.update({
@@ -2240,6 +2266,7 @@ export const caseRepository = {
             fieldName: 'files',
             toValue: file.fileName,
             actor: actorName,
+            actorUserId: actorUid, // PR-5
           },
         },
       },
@@ -2412,6 +2439,7 @@ export const caseRepository = {
             fieldName: field,
             toValue: valueLabel,
             actor,
+            actorUserId: null, // PR-5 — bulkUpdate string actor (signature legacy)
           });
         }
         await prisma.case.update({
@@ -2507,6 +2535,8 @@ export const caseRepository = {
       ? toDb({ escalationLevel: payload.escalationLevel }).escalationLevel ?? prev.escalationLevel
       : prev.escalationLevel;
 
+    // PR-5 — transitionStatus string actor (signature legacy); 3 history
+    // satırının hepsinde actorUserId NULL kalır. Display chain string'e düşer.
     const historyEntries = [
       {
         companyId,
@@ -2515,6 +2545,7 @@ export const caseRepository = {
         fromValue: prevStatusTr,
         toValue: nextStatus,
         actor,
+        actorUserId: null,
       },
     ];
 
@@ -2529,6 +2560,7 @@ export const caseRepository = {
           fromValue: prevLevelTr,
           toValue: payload.escalationLevel,
           actor,
+          actorUserId: null,
         });
       }
     }
@@ -2538,6 +2570,7 @@ export const caseRepository = {
         action: 'Eskalasyon gerekçesi',
         toValue: payload.escalationReason,
         actor,
+        actorUserId: null,
       });
     }
 
@@ -3528,6 +3561,8 @@ export const watcherRepo = {
         fieldName: 'watchers',
         toValue: valid.fullName,
         actor,
+        // PR-5 — watcherRepo string actor; addedBy = actor's user.id (route'tan)
+        actorUserId: typeof addedBy === 'string' ? addedBy : null,
       },
     });
 
@@ -3611,6 +3646,9 @@ export const watcherRepo = {
         fieldName: 'watchers',
         fromValue: user?.fullName ?? userId,
         actor,
+        // PR-5 — watcherRepo.remove string actor; userId scope'ta yok (legacy),
+        // null kalır. Display chain string actor'a düşer.
+        actorUserId: null,
       },
     });
 
@@ -3799,6 +3837,8 @@ export const linkRepo = {
         fieldName: 'links',
         toValue: `${LINK_TYPE_TR[linkType]} → ${target.caseNumber}`,
         actor,
+        // PR-5 — linkRepo.add: createdBy = link creator user.id (route'tan)
+        actorUserId: typeof createdBy === 'string' ? createdBy : null,
       },
     });
 
@@ -3854,6 +3894,8 @@ export const linkRepo = {
         fieldName: 'links',
         fromValue: `${LINK_TYPE_TR[existing.linkType]} → ${existing.linkedCase?.caseNumber ?? '?'}`,
         actor,
+        // PR-5 — linkRepo.remove string actor; userId scope'ta yok (legacy), null kalır.
+        actorUserId: null,
       },
     });
 
