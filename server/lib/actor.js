@@ -105,7 +105,33 @@ export function buildActorContext(user) {
   };
 }
 
+/**
+ * PR-3 — Repository write path'leri için shared defansif throw helper.
+ *
+ * caseRepository içindeki assertActor ile aynı semantik — paylaşımlı export.
+ * Object actor (ActorContext) bekler; userId zorunlu. Mock User sentinel'leri
+ * displayName'de reddedilir.
+ */
+const MOCK_USER_SENTINELS = new Set(['Mock User', 'mock-user', 'mock_user', '']);
+
+export function assertActorObject(actor, where) {
+  if (
+    !actor ||
+    typeof actor !== 'object' ||
+    typeof actor.userId !== 'string' ||
+    actor.userId.length === 0 ||
+    typeof actor.displayName !== 'string' ||
+    actor.displayName.length === 0 ||
+    MOCK_USER_SENTINELS.has(actor.displayName)
+  ) {
+    throw new ActorRequiredError(
+      `${where}: actor context required (userId + displayName); see server/lib/actor.js requireActor`,
+    );
+  }
+}
+
 // __internal: smoke test için string constant'ları paylaş
 export const __internal = {
   ActorRequiredError,
+  MOCK_USER_SENTINELS,
 };
