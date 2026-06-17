@@ -1,9 +1,14 @@
-# feat/** ve fix/** branch'lerine push'ta main'e otomatik PR açar.
+# feat/**, feature/** ve fix/** branch'lerine push'ta dev'e otomatik PR açar.
 # PR zaten açıksa dokunmaz (gh pr create hata verir, adım yutar).
+#
+# Workflow politikası (2026-05-31): main yalnız release branch. Feature/fix
+# PR'ları dev'e gider; dev → main release PR'ı manuel. Bu workflow daha önce
+# --base main kullanıyordu — Codex P2 (PR-base-validator çakışması) ile
+# politikayla hizalandı.
 name: Auto PR
 on:
   push:
-    branches: ['feat/**', 'fix/**']
+    branches: ['feat/**', 'feature/**', 'fix/**']
 jobs:
   open-pr:
     runs-on: ubuntu-latest
@@ -13,6 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: PR ac (yoksa)
-        run: gh pr create --base main --head "$GITHUB_REF_NAME" --fill || echo "PR zaten acik veya acilamadi"
+        run: gh pr create --base dev --head "$GITHUB_REF_NAME" --fill || echo "PR zaten acik veya acilamadi"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

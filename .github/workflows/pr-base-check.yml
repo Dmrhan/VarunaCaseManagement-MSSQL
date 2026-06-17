@@ -21,27 +21,41 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.ref }}
           HEAD: ${{ github.event.pull_request.head.ref }}
+          # Codex P2 — fork bypass guard: dev/main yalnız aynı repo branch'i olmalı.
+          # Fork'tan açılan PR'da head.repo.full_name farklı; "fork:dev" adıyla
+          # base=main bypass etme riskini engelle.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
         run: |
-          echo "PR head=$HEAD  base=$BASE"
+          echo "PR head=$HEAD  base=$BASE  head_repo=$HEAD_REPO  this_repo=$THIS_REPO"
 
-          # 1) base=dev → daima izinli (normal feature/fix akışı)
+          SAME_REPO=0
+          if [ "$HEAD_REPO" = "$THIS_REPO" ]; then SAME_REPO=1; fi
+
+          # 1) base=dev → daima izinli (normal feature/fix akışı; fork dahil)
           if [ "$BASE" = "dev" ]; then
             echo "OK: base is dev (normal feature/fix flow)"
             exit 0
           fi
 
-          # 2) base=main + head=dev → release PR, izinli
-          if [ "$BASE" = "main" ] && [ "$HEAD" = "dev" ]; then
-            echo "OK: release PR (dev -> main)"
+          # 2) base=main + head=dev + AYNI REPO → release PR, izinli
+          if [ "$BASE" = "main" ] && [ "$HEAD" = "dev" ] && [ "$SAME_REPO" = "1" ]; then
+            echo "OK: release PR (canonical dev -> main)"
             exit 0
           fi
 
-          # 3) base=main + head != dev → POLİTİKA İHLALİ
+          # 3) base=main + head=dev + FORK → reddedilir (Codex P2 fork bypass)
+          if [ "$BASE" = "main" ] && [ "$HEAD" = "dev" ]; then
+            echo "::error::Release PR (dev -> main) must come from the canonical repository, not a fork ($HEAD_REPO)."
+            exit 1
+          fi
+
+          # 4) base=main + head != dev → POLİTİKA İHLALİ
           if [ "$BASE" = "main" ]; then
             echo "::error::PR base 'main' is reserved for release PRs (head must be 'dev'). For feature/fix branches, change base to 'dev' from the PR edit menu."
             exit 1
           fi
 
-          # 4) Başka base'ler (örn. başka feature branch) — politika dışı, serbest
+          # 5) Başka base'ler (örn. branch'ler arası) — politika dışı, serbest
           echo "OK: non-policy base ($BASE)"
           exit 0
