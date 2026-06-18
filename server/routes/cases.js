@@ -341,6 +341,28 @@ router.get(
   }),
 );
 
+/** GET /api/cases/by-account/count?accountId=...&statusIn=...
+ * Lightweight badge counter. Smart Ticket banner için: tam by-account
+ * include set'i (notes/attachments/history/callLogs) yüklemeden
+ * sadece sayıyı döner. Çok aktif müşterilerde de düşük maliyet. */
+router.get(
+  '/by-account/count',
+  asyncRoute(async (req, res) => {
+    const { accountId, excludeId, statusIn, statusNotIn } = req.query;
+    if (!accountId) return res.status(400).json({ error: 'accountId gerekli' });
+    const count = await caseRepository.countByAccount(
+      accountId,
+      {
+        excludeId,
+        statusIn: statusIn ? statusIn.split(',') : undefined,
+        statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
+      },
+      req.user.allowedCompanyIds,
+    );
+    res.json({ count });
+  }),
+);
+
 /** GET /api/cases/:id */
 router.get(
   '/:id',

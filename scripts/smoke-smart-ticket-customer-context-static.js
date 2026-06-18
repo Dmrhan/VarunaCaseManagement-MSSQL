@@ -141,8 +141,8 @@ console.log('\n── 7) Closed fetch ──────────────
   const page = read('src/features/smart-ticket/SmartTicketNewPage.tsx');
   expect('7.1 Drawer findByAccount({ statusIn: ["Çözüldü"] })',
     /caseService\s*\.findByAccount\(accountId,\s*\{ statusIn: \['Çözüldü'\] \}\)/.test(drawer), true);
-  expect('7.2 SmartTicketNewPage resolvedCount fetch (banner-side)',
-    /findByAccount\(targetAccountId,\s*\{ statusIn: \['Çözüldü'\] \}\)/.test(page), true);
+  expect('7.2 SmartTicketNewPage resolvedCount fetch (count-only, Codex P2-2)',
+    /countByAccount\(targetAccountId,\s*\{ statusIn: \['Çözüldü'\] \}\)/.test(page), true);
 }
 
 // ─────────────────────────────────────────────────────────────────

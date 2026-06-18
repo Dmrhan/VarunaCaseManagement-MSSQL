@@ -2012,6 +2012,36 @@ export const caseService = {
     return data?.value ?? [];
   },
 
+  /**
+   * Lightweight by-account counter. findByAccount tam CASE_INCLUDE
+   * (notes / attachments / history / callLogs) çekiyor — banner rozeti için
+   * bu maliyet gereksiz. countByAccount sadece count'u döner.
+   */
+  async countByAccount(
+    accountId: string,
+    options?: { excludeId?: string; statusIn?: CaseStatus[]; statusNotIn?: CaseStatus[] },
+  ): Promise<number> {
+    if (USE_MOCK) {
+      await delay(20);
+      let out = store.filter((c) => c.accountId === accountId);
+      if (options?.excludeId)    out = out.filter((c) => c.id !== options.excludeId);
+      if (options?.statusIn)     out = out.filter((c) => options.statusIn!.includes(c.status));
+      if (options?.statusNotIn)  out = out.filter((c) => !options.statusNotIn!.includes(c.status));
+      return out.length;
+    }
+    const params = new URLSearchParams();
+    params.set('accountId', accountId);
+    if (options?.excludeId) params.set('excludeId', options.excludeId);
+    if (options?.statusIn) params.set('statusIn', options.statusIn.join(','));
+    if (options?.statusNotIn) params.set('statusNotIn', options.statusNotIn.join(','));
+    const data = await apiFetch<{ count: number }>(
+      `${API_BASE}/by-account/count?${params.toString()}`,
+      undefined,
+      'Vaka sayısı alınamadı',
+    );
+    return data?.count ?? 0;
+  },
+
   // ─────────────────────────────────────────────────────────────────
   // WR-Smart-Ticket Phase 2a — CaseSolutionStep service typings.
   //
