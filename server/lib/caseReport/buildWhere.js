@@ -12,15 +12,21 @@
  * Phase 1 desteklenen filtreler (TASK kapsamı):
  *   - dateFrom / dateTo  → Case.createdAt aralığı
  *   - companyIds         → CSV veya string[]
- *   - statuses           → CSV veya string[]
- *   - priorities         → CSV veya string[]
+ *   - statuses           → CSV veya string[] (TR enum → DB ASCII conversion)
+ *   - priorities         → CSV veya string[] (zaten ASCII; conversion yok)
  *   - assignedTeamId     → tek değer
  *   - assignedPersonId   → tek değer
  *   - search             → caseNumber / title / accountName OR (contains)
  *
  * Bilinmeyen filter key'leri sessizce yok sayılır — UI ve backend birbirinden
  * bağımsız evrilebilir.
+ *
+ * 2026-06-18 bug fix — Frontend CASE_STATUSES TR ('Açık', 'Çözüldü', vb.)
+ * gönderiyor ama DB ASCII identifier'larda saklıyor ('Acik', 'Cozuldu').
+ * Phase 1'den beri sessiz bug: status filter verildiğinde rapor BOŞ
+ * dönüyordu (match yok). toDb({ status }) ile çevriliyor.
  */
+import { toDb } from '../../db/enumMap.js';
 
 function toArray(v) {
   if (v == null) return null;
@@ -90,7 +96,15 @@ export function buildReportWhere(filters, allowedCompanyIds) {
   const where = { companyId: { in: scope.ids } };
 
   const statuses = toArray(f.statuses);
-  if (statuses && statuses.length > 0) where.status = { in: statuses };
+  if (statuses && statuses.length > 0) {
+    // Bug fix 2026-06-18 — TR enum → DB ASCII (örn. 'Açık' → 'Acik').
+    // Bilinmeyen değer toDb tarafından olduğu gibi geri döner; defansif
+    // olarak null/undefined filtrele (eşleşmeyen kayıt zaten dönmez).
+    const dbStatuses = statuses
+      .map((s) => toDb({ status: s }).status)
+      .filter((s) => typeof s === 'string' && s.length > 0);
+    if (dbStatuses.length > 0) where.status = { in: dbStatuses };
+  }
 
   const priorities = toArray(f.priorities);
   if (priorities && priorities.length > 0) where.priority = { in: priorities };
