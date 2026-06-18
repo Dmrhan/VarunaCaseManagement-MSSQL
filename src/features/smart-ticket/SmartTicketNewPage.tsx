@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Box,
@@ -52,8 +51,9 @@ import {
 } from '@/features/cases/types';
 import { CaseSolutionStepsPanel } from '@/features/cases/CaseSolutionStepsPanel';
 import { resolveSmartTicketMapping } from './mapping';
-import { StatusPill } from '@/components/ui/StatusPill';
-import { formatRelative } from '@/lib/format';
+import { CustomerContextBanner } from './CustomerContextBanner';
+import { CustomerContextDrawer } from './CustomerContextDrawer';
+import { computeBannerRiskState } from './customerHistory';
 import { KbDraftCard } from '@/features/cases/KbDraftCard';
 import { FilesTab } from '@/features/cases/components/CaseFiles';
 import { isAcceptedUpload } from '@/features/cases/uploadWhitelist';
@@ -227,15 +227,24 @@ export function SmartTicketNewPage({
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [projects, setProjects] = useState<SmartTicketProjectOption[]>([]);
 
-  // Madde 1 — Müşteri seçildiğinde o müşterinin açık vakalarını panel
-  // olarak göster. Mükerrer ticket önleme + L1 ajan başkası işliyor mu
-  // görsün. Mevcut endpoint reuse: caseService.findByAccount.
-  // Klasik akışı bozmuyor — yalnız Smart Ticket Stage 1 paneli.
+  // Madde 1 — Müşteri seçildiğinde o müşterinin açık vakalarını fetch et.
+  // Sol panelde artık compact CustomerContextBanner (banner+drawer pattern);
+  // açıklama textarea aşağı itilmesin diye AccountOpenCasesPanel kaldırıldı.
+  // Open cases verisi banner state'ini hesaplar + drawer'a props ile geçer.
   const [accountOpenCases, setAccountOpenCases] = useState<Case[]>([]);
   const [accountOpenCasesLoading, setAccountOpenCasesLoading] = useState(false);
   const [accountOpenCasesError, setAccountOpenCasesError] = useState<string | null>(null);
   const accountOpenCasesReqIdRef = useRef(0);
   const accountOpenCasesAccountIdRef = useRef<string>('');
+
+  // Customer Context — Faz 1 (closed history first).
+  // Banner mount sırasında resolvedCount için lightweight fetch; drawer kendi
+  // detaylı resolved fetch'ini açılınca yapar. Semantic duplicate (Faz 2),
+  // worked solution steps, recent transfer aggregate, KB history context
+  // explicit scope dışı — banner state şu an open+SLA üzerinden hesaplanır.
+  const [resolvedCount, setResolvedCount] = useState<number>(0);
+  const [customerCtxDrawerOpen, setCustomerCtxDrawerOpen] = useState(false);
+  const resolvedCountReqIdRef = useRef(0);
 
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -415,6 +424,28 @@ export function SmartTicketNewPage({
         if (reqId === accountOpenCasesReqIdRef.current) {
           setAccountOpenCasesLoading(false);
         }
+      });
+  }, [form.accountId]);
+
+  // Customer Context — resolvedCount banner fetch (light-touch).
+  // Drawer ResolvedTab kendi tam fetch'ini açılınca yapar; bu sadece banner
+  // rozet sayısı için "kaç tane geçmiş çözüm var" lookup'ı.
+  useEffect(() => {
+    if (!form.accountId) {
+      setResolvedCount(0);
+      return;
+    }
+    const reqId = ++resolvedCountReqIdRef.current;
+    const targetAccountId = form.accountId;
+    void caseService
+      .findByAccount(targetAccountId, { statusIn: ['Çözüldü'] })
+      .then((list) => {
+        if (reqId !== resolvedCountReqIdRef.current) return;
+        setResolvedCount(Array.isArray(list) ? list.length : 0);
+      })
+      .catch(() => {
+        if (reqId !== resolvedCountReqIdRef.current) return;
+        setResolvedCount(0);
       });
   }, [form.accountId]);
 
@@ -1438,14 +1469,23 @@ export function SmartTicketNewPage({
                 </button>
               </Field>
 
-              {/* Madde 1 — Müşteri açık vakalar paneli (mükerrer önleme).
-                  Yalnız form.accountId set olunca koşullu render. */}
+              {/* Customer Context Banner — Faz 1.
+                  AccountOpenCasesPanel'in sol paneldeki yerini aldı. Detay
+                  (açık vakalar listesi + geçmiş çözümler + sinyaller) drawer'da
+                  reuse edilir. Açıklama textarea aşağı itilmesin diye 50-60px
+                  tutar. Yalnız form.accountId set olunca render. */}
               {form.accountId && (
-                <AccountOpenCasesPanel
+                <CustomerContextBanner
+                  openCount={accountOpenCases.length}
+                  resolvedCount={resolvedCount}
+                  riskState={computeBannerRiskState({
+                    openCount: accountOpenCases.length,
+                    slaBreachCount: accountOpenCases.filter((c) => c.slaViolation).length,
+                    hasDuplicate: false,
+                  })}
+                  hasDuplicate={false}
                   loading={accountOpenCasesLoading}
-                  error={accountOpenCasesError}
-                  cases={accountOpenCases}
-                  onOpenCase={onOpenExistingCase}
+                  onOpenDrawer={() => setCustomerCtxDrawerOpen(true)}
                 />
               )}
               {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
@@ -1825,6 +1865,23 @@ export function SmartTicketNewPage({
         onClose={() => setAccountPickerOpen(false)}
         onSelect={handleSelectAccount}
       />
+
+      {/* Customer Context Drawer — Faz 1 (closed-history first).
+          3 tab: Geçmiş Çözümler (default) · Açık Vakalar · Sinyaller.
+          Açık Vakalar tab AccountOpenCasesPanel pattern'ini reuse eder. */}
+      {form.accountId && (
+        <CustomerContextDrawer
+          open={customerCtxDrawerOpen}
+          onClose={() => setCustomerCtxDrawerOpen(false)}
+          accountId={form.accountId}
+          accountName={form.accountName}
+          companyId={form.companyId}
+          onOpenCase={onOpenExistingCase}
+          openCases={accountOpenCases}
+          openCasesLoading={accountOpenCasesLoading}
+          openCasesError={accountOpenCasesError}
+        />
+      )}
     </div>
   );
 }
@@ -2671,122 +2728,6 @@ function Stage3Transfer({
         </div>
       </CardBody>
     </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Madde 1 — Müşteri seçildiğinde açık vakalar paneli.
-//
-// Amaç: Mükerrer ticket önleme. L1 ajan müşteri seçince O müşterinin
-// açık vakalarını + kim ilgileniyor + status'unu görür. Listeye
-// tıklanabilirse caller mevcut Smart Ticket akışını abandone edip
-// vakaya geçer (onOpenExistingCase callback verilmişse).
-//
-// Render politikası:
-//   - 0 açık vaka     → yeşil "Bu müşterinin açık vakası yok" bilgi
-//   - 1-5 vaka        → tümü liste
-//   - >5 vaka         → ilk 5 + "Tümü Vakalar'da" linki YOK (bu
-//                       PR'da skip — Cases List filter pre-fill yok;
-//                       caller'a yönlendirme şart)
-//   - SLA breach varsa header'da kırmızı uyarı rozeti
-// ─────────────────────────────────────────────────────────────────
-
-function AccountOpenCasesPanel({
-  loading,
-  error,
-  cases,
-  onOpenCase,
-}: {
-  loading: boolean;
-  error: string | null;
-  cases: Case[];
-  onOpenCase?: (caseId: string) => void;
-}) {
-  const breachCount = cases.filter((c) => c.slaViolation).length;
-  const display = cases.slice(0, 5);
-  const remaining = Math.max(0, cases.length - display.length);
-
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/40 p-2.5 dark:border-amber-900/30 dark:bg-amber-950/20">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          {cases.length > 0 ? (
-            <AlertTriangle size={12} className="text-amber-600 dark:text-amber-400" />
-          ) : (
-            <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
-          )}
-          <span className="text-[11px] font-medium text-slate-700 dark:text-ndark-text">
-            {loading
-              ? 'Açık vakalar kontrol ediliyor…'
-              : cases.length > 0
-                ? `Bu müşterinin ${cases.length} açık vakası var`
-                : 'Bu müşterinin açık vakası yok'}
-          </span>
-        </div>
-        {breachCount > 0 && (
-          <span className="rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-            {breachCount} SLA ihlal
-          </span>
-        )}
-      </div>
-
-      {error && !loading && (
-        <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-          {error}
-        </p>
-      )}
-
-      {display.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {display.map((c) => {
-            const clickable = !!onOpenCase;
-            const row = (
-              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px]">
-                <span className="font-mono font-medium text-slate-700 dark:text-ndark-text">
-                  {c.caseNumber}
-                </span>
-                <StatusPill status={c.status} />
-                <span className="truncate text-slate-700 dark:text-ndark-text" title={c.title}>
-                  {c.title}
-                </span>
-                {c.assignedPersonName && (
-                  <span className="text-slate-500 dark:text-ndark-muted">
-                    · {c.assignedPersonName}
-                  </span>
-                )}
-                <span className="text-slate-400 dark:text-ndark-dim">
-                  · {formatRelative(c.createdAt)}
-                </span>
-              </div>
-            );
-            return (
-              <li key={c.id}>
-                {clickable ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenCase!(c.id)}
-                    className="w-full rounded-md border border-transparent bg-white/70 px-2 py-1 text-left hover:border-amber-300 hover:bg-white dark:bg-ndark-card/40 dark:hover:border-amber-700 dark:hover:bg-ndark-card"
-                    title="Bu vakaya geç (Akıllı Ticket akışı iptal olur)"
-                  >
-                    {row}
-                  </button>
-                ) : (
-                  <div className="rounded-md bg-white/70 px-2 py-1 dark:bg-ndark-card/40">
-                    {row}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {remaining > 0 && (
-        <p className="mt-1 text-[10px] text-slate-500 dark:text-ndark-muted">
-          + {remaining} daha · tümünü görmek için Vakalar listesini aç
-        </p>
-      )}
-    </div>
   );
 }
 
