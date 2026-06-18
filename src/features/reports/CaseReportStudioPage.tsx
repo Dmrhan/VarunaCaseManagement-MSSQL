@@ -210,6 +210,10 @@ export function CaseReportStudioPage() {
     { name: '', description: '', isShared: false, companyId: '' },
   );
   const [saving, setSaving] = useState(false);
+  // Phase 4.2 follow-up (Codex P2) — Copy modunda kaynak görünüm snapshot'ı.
+  // Save modal'ı kopya akışıyla açıldıysa bu null değil; handleSaveView
+  // payload'ı page state yerine snapshot'tan kurar.
+  const [copySource, setCopySource] = useState<ReportView | null>(null);
   // Phase 4.2 — Edit modal (rename + isShared + description)
   const [editViewTarget, setEditViewTarget] = useState<ReportView | null>(null);
   const [editForm, setEditForm] = useState<{ name: string; description: string; isShared: boolean }>(
@@ -294,8 +298,14 @@ export function CaseReportStudioPage() {
 
   function openSaveModal() {
     const defaultCompany = companies[0]?.id ?? '';
+    setCopySource(null); // Normal save — page state'ten payload
     setSaveForm({ name: '', description: '', isShared: false, companyId: defaultCompany });
     setSaveModalOpen(true);
+  }
+
+  function closeSaveModal() {
+    setSaveModalOpen(false);
+    setCopySource(null);
   }
 
   async function handleSaveView() {
@@ -308,30 +318,36 @@ export function CaseReportStudioPage() {
       return;
     }
     setSaving(true);
+    // Phase 4.2 follow-up (Codex P2) — Kopya modunda payload page state
+    // yerine source snapshot'tan kurulur. Kullanıcı kaynak view'u yükledikten
+    // sonra filter/kolon/mode değiştirmiş olsa bile kopya kaynağı yansıtır.
+    const src = copySource;
     const payload = {
       name: saveForm.name.trim(),
       description: saveForm.description.trim() || null,
-      mode,
+      mode: src ? src.mode : mode,
       companyId: saveForm.companyId,
-      columns: selectedColumnIds,
-      filters,
-      pivotConfig: mode === 'pivot'
-        ? {
-            rowColumnId: pivotRowId,
-            colColumnId: pivotColId,
-            measure: {
-              fn: pivotMeasureFn,
-              ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
-            },
-          }
-        : null,
+      columns: src ? src.columns : selectedColumnIds,
+      filters: src ? src.filters : filters,
+      pivotConfig: src
+        ? src.pivotConfig
+        : (mode === 'pivot'
+          ? {
+              rowColumnId: pivotRowId,
+              colColumnId: pivotColId,
+              measure: {
+                fn: pivotMeasureFn,
+                ...(pivotMeasureFn !== 'count' && pivotMeasureColId ? { columnId: pivotMeasureColId } : {}),
+              },
+            }
+          : null),
       isShared: saveForm.isShared,
     };
     const res = await reportService.createView(payload);
     setSaving(false);
     if (res) {
       notify({ type: 'success', title: `"${res.view.name}" kaydedildi`, message: '', duration: 2500 });
-      setSaveModalOpen(false);
+      closeSaveModal();
       await reloadSavedViews();
       setActiveViewId(res.view.id);
     }
@@ -374,7 +390,9 @@ export function CaseReportStudioPage() {
       notify({ type: 'error', title: 'Şirket bulunamadı', message: 'Kopyalanacak görünüm için şirket gerekli.', duration: 3000 });
       return;
     }
-    // Save modal'ı önceden doldurulmuş halde aç — kullanıcı yeni adı + isShared'ı seçer
+    // Phase 4.2 follow-up (Codex P2) — Kaynak snapshot'ını set et; handleSaveView
+    // payload'ı kullanıcının "kirli" page state'i yerine source'tan kurar.
+    setCopySource(source);
     setSaveForm({
       name: `${source.name} (kopya)`,
       description: source.description ?? '',
@@ -1214,14 +1232,20 @@ export function CaseReportStudioPage() {
         </>
       )}
 
-      {/* Phase 4 — Save view modal */}
+      {/* Phase 4 — Save view modal (copy + new save shared) */}
       <Modal
         open={saveModalOpen}
-        onClose={() => setSaveModalOpen(false)}
+        onClose={closeSaveModal}
         size="md"
-        title="Görünüm Kaydet"
+        title={copySource ? `Görünüm Kopyala: ${copySource.name}` : 'Görünüm Kaydet'}
       >
         <div className="space-y-3 p-4 text-sm">
+          {copySource && (
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+              Bu kopya kaynak görünümün (<strong>{copySource.name}</strong>) tam yapılandırmasını
+              alır — sayfada açtığınız filtre/kolon/mod değişiklikleri kopyaya yansımaz.
+            </p>
+          )}
           <Field label="İsim *">
             <TextInput
               value={saveForm.name}
@@ -1260,7 +1284,7 @@ export function CaseReportStudioPage() {
             <span>Paylaşımlı — aynı şirketteki Supervisor+ rolündeki herkes görür (yalnız siz düzenleyebilirsiniz)</span>
           </label>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setSaveModalOpen(false)} disabled={saving}>
+            <Button variant="outline" size="sm" onClick={closeSaveModal} disabled={saving}>
               İptal
             </Button>
             <Button
