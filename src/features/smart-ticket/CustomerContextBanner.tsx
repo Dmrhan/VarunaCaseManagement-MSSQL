@@ -24,6 +24,12 @@ interface CustomerContextBannerProps {
   hasDuplicate: boolean;
   /** Loading sırasında pulse animasyonu için (resolvedCount fetch in-flight) */
   loading?: boolean;
+  /**
+   * Açık vaka veya geçmiş çözüm fetch'i hata aldı mı. True ise banner
+   * "0 açık vaka · Temiz" değil "Bilgi alınamadı" gösterir — L1 ajan
+   * yanlış güvenmesin. Codex review (PR #88 #1) için eklendi.
+   */
+  fetchError?: boolean;
   /** "Bağlamı Aç" tıklaması — drawer toggle */
   onOpenDrawer: () => void;
 }
@@ -61,16 +67,25 @@ export function CustomerContextBanner({
   riskState,
   hasDuplicate,
   loading = false,
+  fetchError = false,
   onOpenDrawer,
 }: CustomerContextBannerProps) {
-  const meta = STATE_META[riskState];
+  // Hata durumunda L1 ajan "0 açık vaka · Temiz" mesajına güvenmesin.
+  // riskState'i watch'a çek + count'ları "—" göster + label "Bilgi alınamadı".
+  const effectiveState: CustomerContextRiskState = fetchError ? 'watch' : riskState;
+  const meta = STATE_META[effectiveState];
 
   // Özet parça: "3 açık · 5 geçmiş çözüm · İzlemede"
-  // Loading ise count'ları gizle/skeleton
+  // Loading: skeleton tarzı; error: count yerine "—".
   const parts: string[] = [];
-  parts.push(loading ? 'Açık vakalar yükleniyor…' : `${openCount} açık vaka`);
-  if (!loading) parts.push(`${resolvedCount} geçmiş çözüm`);
-  parts.push(meta.label);
+  if (loading) {
+    parts.push('Açık vakalar yükleniyor…');
+  } else if (fetchError) {
+    parts.push('— açık vaka', '— geçmiş çözüm', 'Bilgi alınamadı');
+  } else {
+    parts.push(`${openCount} açık vaka`, `${resolvedCount} geçmiş çözüm`, meta.label);
+  }
+  if (loading) parts.push(meta.label);
 
   return (
     <button
@@ -88,7 +103,7 @@ export function CustomerContextBanner({
         <span className={`text-[11px] font-medium ${meta.text}`}>
           {parts.join(' · ')}
         </span>
-        {hasDuplicate && !loading && (
+        {hasDuplicate && !loading && !fetchError && (
           <span className="ml-1 rounded-full bg-rose-100 px-1.5 py-0 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
             Mükerrer riski
           </span>

@@ -86,11 +86,11 @@ if (
   bad('6) Stale guard kontrol pattern\'i eksik');
 }
 
-// 7) Banner mount sırasında resolvedCount fetch (Faz 1 closed-history).
-if (/findByAccount\(targetAccountId,\s*\{ statusIn: \['Çözüldü'\] \}\)/.test(page)) {
-  ok('7) Banner resolvedCount fetch (statusIn=Çözüldü)');
+// 7) Banner mount sırasında count-only resolvedCount fetch (Codex P2-2).
+if (/countByAccount\(targetAccountId,\s*\{ statusIn: \['Çözüldü'\] \}\)/.test(page)) {
+  ok('7) Banner resolvedCount count-only fetch (statusIn=Çözüldü, Codex P2-2)');
 } else {
-  bad('7) ResolvedCount fetch eksik');
+  bad('7) ResolvedCount count fetch eksik');
 }
 
 // 8) Drawer root'ta render edilmiş.
