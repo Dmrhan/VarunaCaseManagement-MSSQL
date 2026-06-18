@@ -365,7 +365,7 @@
           ]
         },
         {
-          "group": "E-Belge / Entegratör (3. parti)",
+          "group": "Entegratör (3.parti)",
           "details": [
             "Entegratör servis / şifre / kontör",
             "Mükellefiyet / sertifika",
@@ -387,7 +387,7 @@
           ]
         },
         {
-          "group": "Cihaz / Mobil Ortam",
+          "group": "Donanım/Cihaz",
           "details": [
             "APK versiyon uyumsuz",
             "Cihaz bağlantısı / eşleştirme",
@@ -396,7 +396,7 @@
           ]
         },
         {
-          "group": "Yazılım Hatası",
+          "group": "Uygulama Hatası",
           "details": [
             "Görev çalışmıyor (object reference)",
             "Versiyon uyumsuzluğu (Fix-DLL)",
@@ -462,6 +462,10 @@
           "details": [
             "Kurulum"
           ]
+        },
+        {
+          "group": "E-belge (Gönderim)",
+          "details": []
         }
       ]
     },
@@ -478,9 +482,9 @@
         "Dizayn düzeltme",
         "DLL Geçişi",
         "Versiyon geçişi",
-        "Eğitim",
+        "Kullanıcı Eğitim",
         "Doküman / SSS",
-        "Ürün geliştirme"
+        "Geliştirme / değişiklik talebi"
       ]
     },
     "kalici_onlem": {
