@@ -238,11 +238,11 @@ export function SmartTicketNewPage({
   const accountOpenCasesAccountIdRef = useRef<string>('');
 
   // Customer Context — Faz 1 (closed history first).
-  // Banner mount sırasında resolvedCount için lightweight fetch; drawer kendi
-  // detaylı resolved fetch'ini açılınca yapar. Semantic duplicate (Faz 2),
-  // worked solution steps, recent transfer aggregate, KB history context
-  // explicit scope dışı — banner state şu an open+SLA üzerinden hesaplanır.
+  // Banner mount sırasında resolvedCount için count-only endpoint kullanılır
+  // (Codex review P2-2): findByAccount tam CASE_INCLUDE çekiyor; rozet için
+  // gereksiz maliyet. Drawer açılınca tam fetch'ini yapar.
   const [resolvedCount, setResolvedCount] = useState<number>(0);
+  const [resolvedCountError, setResolvedCountError] = useState<boolean>(false);
   const [customerCtxDrawerOpen, setCustomerCtxDrawerOpen] = useState(false);
   const resolvedCountReqIdRef = useRef(0);
 
@@ -427,25 +427,29 @@ export function SmartTicketNewPage({
       });
   }, [form.accountId]);
 
-  // Customer Context — resolvedCount banner fetch (light-touch).
+  // Customer Context — resolvedCount banner fetch (count-only).
   // Drawer ResolvedTab kendi tam fetch'ini açılınca yapar; bu sadece banner
-  // rozet sayısı için "kaç tane geçmiş çözüm var" lookup'ı.
+  // rozet sayısı için lightweight count endpoint. Codex P2-2: findByAccount
+  // tam CASE_INCLUDE çekiyor; count yeterli.
   useEffect(() => {
     if (!form.accountId) {
       setResolvedCount(0);
+      setResolvedCountError(false);
       return;
     }
     const reqId = ++resolvedCountReqIdRef.current;
     const targetAccountId = form.accountId;
+    setResolvedCountError(false);
     void caseService
-      .findByAccount(targetAccountId, { statusIn: ['Çözüldü'] })
-      .then((list) => {
+      .countByAccount(targetAccountId, { statusIn: ['Çözüldü'] })
+      .then((n) => {
         if (reqId !== resolvedCountReqIdRef.current) return;
-        setResolvedCount(Array.isArray(list) ? list.length : 0);
+        setResolvedCount(typeof n === 'number' ? n : 0);
       })
       .catch(() => {
         if (reqId !== resolvedCountReqIdRef.current) return;
         setResolvedCount(0);
+        setResolvedCountError(true);
       });
   }, [form.accountId]);
 
@@ -1485,6 +1489,7 @@ export function SmartTicketNewPage({
                   })}
                   hasDuplicate={false}
                   loading={accountOpenCasesLoading}
+                  fetchError={!!accountOpenCasesError || resolvedCountError}
                   onOpenDrawer={() => setCustomerCtxDrawerOpen(true)}
                 />
               )}

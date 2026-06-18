@@ -3080,6 +3080,26 @@ export const caseRepository = {
   },
 
   /**
+   * Lightweight by-account counter. SmartTicketNewPage banner'da geçmiş çözüm
+   * sayısı için kullanılır — findByAccount tam CASE_INCLUDE (notes,
+   * attachments, history, callLogs) çekiyor; rozet için bu maliyet gereksiz.
+   * Bu yardımcı sadece prisma.case.count ile sayıyı döner.
+   *
+   * Aynı filtre semantiği: excludeId, statusIn, statusNotIn.
+   */
+  async countByAccount(accountId, options = {}, allowedCompanyIds) {
+    const where = { accountId };
+    if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
+    if (options.excludeId) where.NOT = { id: options.excludeId };
+    const mapStatuses = (arr) => arr.map((s) => toDb({ status: s }).status);
+    if (options.statusIn) where.status = { in: mapStatuses(options.statusIn) };
+    if (options.statusNotIn) {
+      where.status = { ...(where.status ?? {}), notIn: mapStatuses(options.statusNotIn) };
+    }
+    return prisma.case.count({ where });
+  },
+
+  /**
    * Customer Pulse — vakanın müşterisinin geniş durumunu deterministic
    * metriklerle hesaplar. AI gerekmez, AI servisi olmasa da çalışır.
    * Roadmap §"Customer Context Intelligence".
