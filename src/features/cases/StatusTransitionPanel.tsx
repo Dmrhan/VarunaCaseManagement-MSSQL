@@ -432,24 +432,23 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
       // Mention mirror — reason/note metni @[Name](userId) içeriyorsa BE'nin
       // CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
       // (transitionStatus endpoint'i mention parse etmiyor; addNote ediyor.)
+      // Actor identity hardening: authorName backend req.user üzerinden yazılır;
+      // FE'den göndermiyoruz.
       if (pending === 'Eskalasyon' && MENTION_RE.test(escalationReason)) {
         const levelLabel = escalationLevel ? ` (${escalationLevel})` : '';
         await caseService.addNote(item.id, {
           content: `Eskalasyon başlatıldı${levelLabel}. Gerekçe: ${escalationReason.trim()}`,
           visibility: 'Internal',
-          authorName: 'Mock User',
         });
       } else if (pending === 'Çözüldü' && MENTION_RE.test(resolutionNote)) {
         await caseService.addNote(item.id, {
           content: `Vaka çözüldü. Çözüm notu: ${resolutionNote.trim()}`,
           visibility: 'Internal',
-          authorName: 'Mock User',
         });
       } else if (pending === 'İptalEdildi' && MENTION_RE.test(cancelReason)) {
         await caseService.addNote(item.id, {
           content: `Vaka iptal edildi. Gerekçe: ${cancelReason.trim()}`,
           visibility: 'Internal',
-          authorName: 'Mock User',
         });
       }
 
