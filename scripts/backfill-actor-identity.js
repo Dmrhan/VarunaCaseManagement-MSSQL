@@ -65,6 +65,10 @@ const CALLLOG_UNKNOWN_VALUE = 'unknown-user';
 
 const SAMPLE_LIMIT = 10;
 const BATCH_SIZE = 200;
+// MSSQL parametre limiti 2100 (Codex review P2 — PR #98). User.findMany'i
+// id: { in: [...] } ile çağırırken büyük tenantlarda fail etmesin diye
+// USER_LOOKUP_BATCH < 2100 tutulur; BATCH_SIZE değerinden bağımsız.
+const USER_LOOKUP_BATCH = 1500;
 
 function header(title) {
   console.log('\n' + '─'.repeat(60));
@@ -74,6 +78,25 @@ function header(title) {
 
 function sub(title) {
   console.log('\n  ' + title);
+}
+
+/**
+ * Codex P2 (PR #98) — MSSQL 2100 parametre limiti.
+ * Büyük tenantlarda findMany({ where: { id: { in: [...]  } } }) patlamasın
+ * diye userIds USER_LOOKUP_BATCH'a bölünür; her batch ayrı sorgu.
+ */
+async function findUsersByIdsBatched(userIds) {
+  if (userIds.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < userIds.length; i += USER_LOOKUP_BATCH) {
+    const slice = userIds.slice(i, i + USER_LOOKUP_BATCH);
+    const found = await prisma.user.findMany({
+      where: { id: { in: slice } },
+      select: { id: true, fullName: true, email: true },
+    });
+    out.push(...found);
+  }
+  return out;
 }
 
 /**
@@ -96,12 +119,9 @@ async function collectRows(model, displayField, fkField) {
     select: { id: true, [displayField]: true, [fkField]: true },
   });
   const userIds = [...new Set(fkRows.map((r) => r[fkField]).filter(Boolean))];
-  const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, fullName: true, email: true },
-      })
-    : [];
+  // Codex review P2 (PR #98): MSSQL 2100 parametre limiti — büyük tenantlarda
+  // unchunked findMany patlamasın diye USER_LOOKUP_BATCH'lı sorgu.
+  const users = await findUsersByIdsBatched(userIds);
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   const fkOk = [];

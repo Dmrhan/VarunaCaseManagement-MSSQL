@@ -158,6 +158,25 @@ console.log('\n── 9) Schema migration YOK ───────────�
     /prisma migrate|migrateDeploy/.test(src), false);
 }
 
+console.log('\n── 9b) Codex P2 — MSSQL 2100 param limit batched user lookup ──');
+{
+  expect('9b.1 USER_LOOKUP_BATCH sabiti tanımlı',
+    /const USER_LOOKUP_BATCH = \d+;/.test(src), true);
+  // USER_LOOKUP_BATCH MSSQL limiti 2100'ün altında olmalı
+  const m = src.match(/const USER_LOOKUP_BATCH = (\d+);/);
+  expect('9b.2 USER_LOOKUP_BATCH < 2100 (MSSQL parametre limiti)',
+    m ? parseInt(m[1], 10) < 2100 : false, true);
+  expect('9b.3 findUsersByIdsBatched helper tanımlı',
+    /async function findUsersByIdsBatched\(userIds\)/.test(src), true);
+  expect('9b.4 collectRows findUsersByIdsBatched kullanıyor (unchunked findMany YOK)',
+    src.includes('await findUsersByIdsBatched(userIds)'), true);
+  // collectRows içinde doğrudan prisma.user.findMany çağrısı KALMADI
+  // (yalnız batched helper'ın içinde olabilir)
+  const directUserFindMany = (src.match(/prisma\.user\.findMany/g) || []).length;
+  expect('9b.5 prisma.user.findMany çağrısı yalnız helper içinde (1 yer)',
+    directUserFindMany, 1);
+}
+
 console.log('\n── 10) Post-execute sentinel count (idempotency kanıtı) ──');
 {
   expect('10.1 postExecuteSentinelCount helper tanımlı',
