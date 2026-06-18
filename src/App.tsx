@@ -94,6 +94,8 @@ export default function App() {
   const [view, setView] = useState<View>('cases');
   const [initialRedirectDone, setInitialRedirectDone] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
+  const [caseDetailOrigin, setCaseDetailOrigin] = useState<View>('cases');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
@@ -211,21 +213,22 @@ export default function App() {
     if (view !== 'case-detail') return;
     window.history.pushState({ varunaCaseDetail: selectedCaseId }, '');
     function onPop() {
-      setView('cases');
+      setView(caseDetailOrigin);
       setSelectedCaseId(null);
     }
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
+  }, [view, caseDetailOrigin]);
 
   function openCase(id: string) {
+    setCaseDetailOrigin(view);
     setSelectedCaseId(id);
     setView('case-detail');
   }
 
   function backToList() {
-    setView('cases');
+    setView(caseDetailOrigin);
     setSelectedCaseId(null);
   }
 
@@ -715,24 +718,30 @@ export default function App() {
               onShowPatterns={() => setView('analytics-patterns')}
             />
           )}
-          {view === 'cases' && (
-            <CasesListPage
-              onSelectCase={openCase}
-              onShowCustomer={(id) => setCustomerCardId(id)}
-              onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
-              pendingQuickPrefill={pendingQuickPrefill}
-              onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
-              patternCasesFilter={patternCasesFilter}
-              onClearPatternFilter={() => setPatternCasesFilter(null)}
-              onShowPatterns={() => setView('analytics-patterns')}
-              onOpenSmartTicket={
-                featureFlags.smartTicketIntakeEnabled
-                  ? () => setView('smart-ticket-new')
-                  : undefined
-              }
-            />
+          {(view === 'cases' || (isDetail && caseDetailOrigin === 'cases')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <CasesListPage
+                onSelectCase={openCase}
+                onShowCustomer={(id) => setCustomerCardId(id)}
+                onOpenCustomerSearch={() => setCustomerSearchOpen(true)}
+                pendingQuickPrefill={pendingQuickPrefill}
+                onQuickPrefillConsumed={() => setPendingQuickPrefill(null)}
+                patternCasesFilter={patternCasesFilter}
+                onClearPatternFilter={() => setPatternCasesFilter(null)}
+                onShowPatterns={() => setView('analytics-patterns')}
+                onOpenSmartTicket={
+                  featureFlags.smartTicketIntakeEnabled
+                    ? () => setView('smart-ticket-new')
+                    : undefined
+                }
+              />
+            </div>
           )}
-          {view === 'dashboard' && <OperationsDashboardPage onSelectCase={openCase} />}
+          {(view === 'dashboard' || (isDetail && caseDetailOrigin === 'dashboard')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <OperationsDashboardPage onSelectCase={openCase} />
+            </div>
+          )}
           {view === 'analytics-ai-usage' && <AIUsagePage />}
           {view === 'analytics-patterns' && (
             <PatternsPage
@@ -744,8 +753,10 @@ export default function App() {
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
           {view === 'case-report-studio' && <CaseReportStudioPage />}
-          {view === 'root-cause-report' && (
-            <RootCauseReportPage onSelectCase={openCase} />
+          {(view === 'root-cause-report' || (isDetail && caseDetailOrigin === 'root-cause-report')) && (
+            <div className={isDetail ? 'hidden' : 'contents'}>
+              <RootCauseReportPage onSelectCase={openCase} />
+            </div>
           )}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
