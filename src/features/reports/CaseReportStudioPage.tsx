@@ -276,11 +276,14 @@ export function CaseReportStudioPage() {
   }, []);
 
   // Phase 4 — Görünüm seçilince state'i restore et
-  function handleLoadView(viewId: string) {
-    setActiveViewId(viewId);
-    if (!viewId) return; // boş seçim — "yeni"
-    const v = savedViews.find((x) => x.id === viewId);
-    if (!v) return;
+  /**
+   * Sayfa state'ini bir ReportView'a göre restore et (pure — savedViews
+   * lookup veya activeViewId değiştirmez). handleLoadView (manuel seçim)
+   * ve handleSaveView copy-success path'i de paylaşır — Codex P2
+   * (Phase 4.2 follow-up) gereği copy sonrası page state'in kullanıcının
+   * kirli seçimlerinde kalmaması için.
+   */
+  function applyViewToState(v: ReportView) {
     setSelectedColumnIds(v.columns);
     setFilters(v.filters ?? {});
     setMode(v.mode);
@@ -293,6 +296,14 @@ export function CaseReportStudioPage() {
     setPivotData(null);
     setPivotFilters(null);
     setPreviewData(null);
+  }
+
+  function handleLoadView(viewId: string) {
+    setActiveViewId(viewId);
+    if (!viewId) return; // boş seçim — "yeni"
+    const v = savedViews.find((x) => x.id === viewId);
+    if (!v) return;
+    applyViewToState(v);
     notify({ type: 'success', title: `"${v.name}" yüklendi`, message: '', duration: 2500 });
   }
 
@@ -347,9 +358,15 @@ export function CaseReportStudioPage() {
     setSaving(false);
     if (res) {
       notify({ type: 'success', title: `"${res.view.name}" kaydedildi`, message: '', duration: 2500 });
+      const wasCopy = src != null;
       closeSaveModal();
       await reloadSavedViews();
       setActiveViewId(res.view.id);
+      // Phase 4.2 follow-up #2 (Codex P2) — Copy modunda page state'i
+      // de kopyanın gerçek yapılandırmasına restore et. Aksi halde
+      // kopya aktif seçili ama sayfada kullanıcının kirli filter/columns'i
+      // kalır; subsequent preview/export kopyayla uyumsuz çalışır.
+      if (wasCopy) applyViewToState(res.view);
     }
   }
 
