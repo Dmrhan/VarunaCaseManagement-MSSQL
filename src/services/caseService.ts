@@ -2039,7 +2039,14 @@ export const caseService = {
       undefined,
       'Vaka sayısı alınamadı',
     );
-    return data?.count ?? 0;
+    // apiFetch 4xx/5xx veya network fail'de undefined döner (toast da gösterir).
+    // Codex review (PR #91): `?? 0` swallow ediyordu → caller .catch tetiklenmiyor
+    // → banner error state aktif olmuyordu. Burada explicit throw ile failure
+    // sinyali yukarı verilir, SmartTicketNewPage resolvedCountError'u set eder.
+    if (!data || typeof data.count !== 'number') {
+      throw new Error('countByAccount: invalid response');
+    }
+    return data.count;
   },
 
   // ─────────────────────────────────────────────────────────────────

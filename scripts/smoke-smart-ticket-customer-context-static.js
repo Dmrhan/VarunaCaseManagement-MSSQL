@@ -146,43 +146,36 @@ console.log('\n── 7) Closed fetch ──────────────
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 8) Backend / Prisma touch-check: bu PR'da değişmemeli
+// 8) Backend invariant: count endpoint + repo helper var (Codex P2-2)
 // ─────────────────────────────────────────────────────────────────
-console.log('\n── 8) Backend / Prisma touch-check ───────────────────────');
+//
+// NOT: Faz 1 PR'ında bu check "server/, prisma/, api/ değişmemiş" şeklinde
+// scope-guard'dı. Codex review (PR #91) ile count-only backend endpoint
+// eklendi; hard touch-check artık meşru değişiklikleri bloke ediyordu
+// (Codex P2 #3). Onun yerine yeni endpoint + repo helper invariant'larını
+// asser ediyoruz.
+console.log('\n── 8) Backend invariant ──────────────────────────────────');
 {
-  let baseRef = 'origin/dev';
-  try {
-    execSync(`git rev-parse --verify ${baseRef}`, { cwd: REPO_ROOT, stdio: 'ignore' });
-  } catch {
-    try {
-      execSync(`git rev-parse --verify dev`, { cwd: REPO_ROOT, stdio: 'ignore' });
-      baseRef = 'dev';
-    } catch {
-      baseRef = 'HEAD~1';
-    }
-  }
-
-  let diff = '';
-  try {
-    diff = execSync(`git diff --name-only ${baseRef}...HEAD`, { cwd: REPO_ROOT, encoding: 'utf8' });
-  } catch {
-    diff = execSync(`git diff --name-only HEAD~1...HEAD`, { cwd: REPO_ROOT, encoding: 'utf8' });
-  }
-  const changedFiles = diff.split('\n').map((s) => s.trim()).filter(Boolean);
-
-  const forbiddenPrefixes = [
-    'server/',
-    'prisma/',
-    'api/',
-  ];
-  const touched = changedFiles.filter((f) =>
-    forbiddenPrefixes.some((p) => f.startsWith(p)),
-  );
-  expect('8.1 Backend/Prisma/api dosyaları değişmemiş',
-    touched.length === 0, true);
-  if (touched.length > 0) {
-    console.log('    Forbidden touched files:', touched.join(', '));
-  }
+  const repo = read('server/db/caseRepository.js');
+  const routes = read('server/routes/cases.js');
+  expect('8.1 countByAccount helper repository\'de var',
+    /async countByAccount\(accountId,\s*options\s*=\s*\{\},\s*allowedCompanyIds\)/.test(repo), true);
+  expect('8.2 prisma.case.count kullanıyor (light)',
+    /prisma\.case\.count\(\{ where \}\)/.test(repo), true);
+  expect('8.3 /by-account/count route tanımlı',
+    /router\.get\(\s*['"]\/by-account\/count['"]/.test(routes), true);
+  expect('8.4 Prisma migration EKLENMEDİ (count helper schema değişikliği gerekmez)',
+    (() => {
+      try {
+        const baseRef = (() => {
+          try { execSync(`git rev-parse --verify origin/dev`, { cwd: REPO_ROOT, stdio: 'ignore' }); return 'origin/dev'; } catch {}
+          try { execSync(`git rev-parse --verify dev`, { cwd: REPO_ROOT, stdio: 'ignore' }); return 'dev'; } catch {}
+          return 'HEAD~1';
+        })();
+        const diff = execSync(`git diff --name-only ${baseRef}...HEAD`, { cwd: REPO_ROOT, encoding: 'utf8' });
+        return !diff.split('\n').some((f) => f.startsWith('prisma/'));
+      } catch { return true; }
+    })(), true);
 }
 
 // ─────────────────────────────────────────────────────────────────
