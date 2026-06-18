@@ -4678,7 +4678,20 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
     return null;
   };
 
-  const fields: Array<{ key: string; label: string; value: string | null; Icon: typeof Layers }> = [
+  // Kapanış alanları smartTicket.closure alt-objesinde — root'ta değil.
+  const cl = s.closure && typeof s.closure === 'object'
+    ? (s.closure as Record<string, unknown>)
+    : null;
+  const pickClosure = (codeKey: string, labelKey: string): string | null => {
+    if (!cl) return null;
+    const label = cl[labelKey];
+    if (typeof label === 'string' && label.trim()) return label.trim();
+    const code = cl[codeKey];
+    if (typeof code === 'string' && code.trim()) return code.trim();
+    return null;
+  };
+
+  const openingFields: Array<{ key: string; label: string; value: string | null; Icon: typeof Layers }> = [
     { key: 'platform',        label: 'Platform',         value: pick('platform', 'platformLabel'),                 Icon: Layers },
     { key: 'businessProcess', label: 'İş Süreci',        value: pick('businessProcess', 'businessProcessLabel'),   Icon: Workflow },
     { key: 'operationType',   label: 'İşlem Tipi',       value: pick('operationType', 'operationTypeLabel'),       Icon: Settings2 },
@@ -4686,26 +4699,65 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
     { key: 'impact',          label: 'Etki',             value: pick('impact', 'impactLabel'),                     Icon: Flame },
   ];
 
-  const visible = fields.filter((f) => f.value);
-  if (visible.length === 0) return null;
+  const closureFields: Array<{ key: string; label: string; value: string | null; Icon: typeof Layers }> = [
+    { key: 'rootCauseGroup',      label: 'Kök Neden Grubu',  value: pickClosure('rootCauseGroup', 'rootCauseGroupLabel'),           Icon: AlertTriangle },
+    { key: 'rootCauseDetail',     label: 'Kök Neden Detayı', value: pickClosure('rootCauseDetail', 'rootCauseDetailLabel'),         Icon: Search },
+    { key: 'resolutionType',      label: 'Çözüm Tipi',       value: pickClosure('resolutionType', 'resolutionTypeLabel'),           Icon: CheckCircle2 },
+    { key: 'permanentPrevention', label: 'Kalıcı Önlem',     value: pickClosure('permanentPrevention', 'permanentPreventionLabel'), Icon: ShieldAlert },
+  ];
+
+  const visibleOpening = openingFields.filter((f) => f.value);
+  const visibleClosure = closureFields.filter((f) => f.value);
+  if (visibleOpening.length === 0 && visibleClosure.length === 0) return null;
+
+  const renderChips = (
+    fields: typeof openingFields,
+    chipClass: string,
+    iconClass: string,
+  ) =>
+    fields.map((f) => {
+      const Icon = f.Icon;
+      return (
+        <span
+          key={f.key}
+          className={`inline-flex items-baseline gap-1 rounded-full border px-2 py-0.5 text-[11px] text-slate-700 dark:text-ndark-muted ${chipClass}`}
+        >
+          <Icon size={11} className={`self-center ${iconClass}`} />
+          <span className="text-slate-400">{f.label}:</span>
+          <span className="font-medium">{f.value}</span>
+        </span>
+      );
+    });
 
   return (
     <Section title="Akıllı Ticket Kategorileri" tint="violet">
-      <div className="flex flex-wrap gap-1.5">
-        {visible.map((f) => {
-          const Icon = f.Icon;
-          return (
-            <span
-              key={f.key}
-              className="inline-flex items-baseline gap-1 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 dark:border-violet-900/40 dark:bg-ndark-card dark:text-ndark-muted"
-            >
-              <Icon size={11} className="text-violet-500 self-center" />
-              <span className="text-slate-400">{f.label}:</span>
-              <span className="font-medium">{f.value}</span>
-            </span>
-          );
-        })}
-      </div>
+      {visibleOpening.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {renderChips(
+            visibleOpening,
+            'border-violet-200 bg-white dark:border-violet-900/40 dark:bg-ndark-card',
+            'text-violet-500',
+          )}
+        </div>
+      )}
+      {visibleOpening.length > 0 && visibleClosure.length > 0 && (
+        <div className="my-2 flex items-center gap-2">
+          <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
+          <span className="text-[10px] font-medium uppercase tracking-wide text-violet-400 dark:text-violet-600">
+            Kapanış
+          </span>
+          <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
+        </div>
+      )}
+      {visibleClosure.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {renderChips(
+            visibleClosure,
+            'border-emerald-200 bg-white dark:border-emerald-900/40 dark:bg-ndark-card',
+            'text-emerald-600',
+          )}
+        </div>
+      )}
     </Section>
   );
 }
