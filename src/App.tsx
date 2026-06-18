@@ -8,6 +8,7 @@ import {
   Eye,
   Home,
   Inbox,
+  ChevronDown,
   Keyboard,
   KeyRound,
   LayoutDashboard,
@@ -46,6 +47,7 @@ import { AdminChecklistPage } from './features/admin/AdminChecklistPage';
 import { AdminOfferedSolutionsPage } from './features/admin/AdminOfferedSolutionsPage';
 import { AdminProductCatalogPage } from './features/admin/AdminProductCatalogPage';
 import { KeyboardShortcutsModal } from './components/ui/KeyboardShortcutsModal';
+import { Popover } from './components/ui/Popover';
 import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
 import { useAuth } from './services/AuthContext';
@@ -321,35 +323,74 @@ export default function App() {
           {user && (
             <>
               <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-ndark-border" />
-              <div className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-                  {user.fullName.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="hidden text-right md:block">
-                  <div className="text-xs font-medium leading-tight text-slate-800 dark:text-ndark-text">
-                    {user.fullName}
-                  </div>
-                  <div className="text-[10px] leading-tight text-slate-500 dark:text-ndark-muted">
-                    {user.role}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setChangePasswordOpen(true)}
-                title="Şifre Değiştir"
-                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-card dark:hover:text-ndark-text"
+              {/* User menu — avatar/isim dropdown trigger.
+                  Click-outside + Escape kapatma Popover'a built-in. */}
+              <Popover
+                align="end"
+                width={260}
+                trigger={({ open, toggle }) => (
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    title="Kullanıcı menüsü"
+                    className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-400 dark:hover:bg-ndark-card"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                      {user.fullName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="hidden text-right md:block">
+                      <div className="text-xs font-medium leading-tight text-slate-800 dark:text-ndark-text">
+                        {user.fullName}
+                      </div>
+                      <div className="text-[10px] leading-tight text-slate-500 dark:text-ndark-muted">
+                        {user.role}
+                      </div>
+                    </div>
+                    <ChevronDown
+                      size={14}
+                      className={`text-slate-400 transition-transform dark:text-ndark-muted ${open ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                )}
               >
-                <KeyRound size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                title="Çıkış Yap"
-                className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700 dark:text-ndark-muted dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
-              >
-                <LogOut size={16} />
-              </button>
+                {({ close }) => (
+                  <div className="-m-3 flex flex-col">
+                    {/* Kimlik özeti */}
+                    <div className="border-b border-slate-100 px-4 py-3 dark:border-ndark-border">
+                      <div className="text-sm font-semibold text-slate-800 dark:text-ndark-text">
+                        {user.fullName}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-ndark-muted">
+                        {user.email}
+                      </div>
+                      <div className="mt-1 inline-flex items-center rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
+                        {user.role}
+                      </div>
+                    </div>
+                    {/* Şifre Değiştir */}
+                    <button
+                      type="button"
+                      onClick={() => { close(); setChangePasswordOpen(true); }}
+                      className="flex items-center gap-2 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-ndark-text dark:hover:bg-ndark-card"
+                    >
+                      <KeyRound size={14} className="text-slate-500 dark:text-ndark-muted" />
+                      Şifre Değiştir
+                    </button>
+                    <div className="border-t border-slate-100 dark:border-ndark-border" />
+                    {/* Çıkış Yap */}
+                    <button
+                      type="button"
+                      onClick={() => { close(); void signOut(); }}
+                      className="flex items-center gap-2 px-4 py-2 text-left text-sm text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-900/30"
+                    >
+                      <LogOut size={14} />
+                      Çıkış Yap
+                    </button>
+                  </div>
+                )}
+              </Popover>
             </>
           )}
         </div>
