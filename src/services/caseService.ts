@@ -995,7 +995,12 @@ export const caseService = {
     return result;
   },
 
-  async addNote(id: string, note: { content: string; visibility: NoteVisibility; authorName: string }): Promise<CaseNote | undefined> {
+  async addNote(
+    id: string,
+    note: { content: string; visibility: NoteVisibility; authorName?: string },
+  ): Promise<CaseNote | undefined> {
+    // Actor identity hardening: authorName backend req.user üzerinden yazılır,
+    // FE göndermez. USE_MOCK store için placeholder kullanılır (test-only).
     if (USE_MOCK) {
       await delay(80);
       const idx = store.findIndex((c) => c.id === id);
@@ -1003,7 +1008,7 @@ export const caseService = {
       const newNote: CaseNote = {
         id: uid('NOTE'),
         caseId: id,
-        authorName: note.authorName,
+        authorName: note.authorName ?? 'Mock User',
         content: note.content,
         visibility: note.visibility,
         createdAt: nowIso(),
@@ -1054,7 +1059,7 @@ export const caseService = {
   async addReply(
     caseId: string,
     noteId: string,
-    reply: { content: string; visibility: NoteVisibility; authorName: string },
+    reply: { content: string; visibility: NoteVisibility; authorName?: string },
   ): Promise<CaseNote | undefined> {
     if (USE_MOCK) {
       await delay(80);
@@ -1063,7 +1068,7 @@ export const caseService = {
       const newReply: CaseNote = {
         id: uid('NOTE'),
         caseId,
-        authorName: reply.authorName,
+        authorName: reply.authorName ?? 'Mock User',
         content: reply.content,
         visibility: reply.visibility,
         parentNoteId: noteId,
@@ -1107,7 +1112,7 @@ export const caseService = {
   async tryAddReply(
     caseId: string,
     noteId: string,
-    reply: { content: string; visibility: NoteVisibility; authorName: string },
+    reply: { content: string; visibility: NoteVisibility; authorName?: string },
   ): Promise<
     | { ok: true; note: CaseNote }
     | { ok: false; reason: 'max_depth' | 'not_found' | 'forbidden' | 'empty' | 'unknown'; status?: number }

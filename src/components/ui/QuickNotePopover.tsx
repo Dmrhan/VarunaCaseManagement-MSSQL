@@ -59,10 +59,11 @@ function QuickNoteForm({
   async function handleSave() {
     if (!text.trim() || submitting) return;
     setSubmitting(true);
+    // Actor identity hardening: authorName backend req.user üzerinden yazılır;
+    // FE'den göndermiyoruz (backend ignore eder, '?? Mock User' fallback yok).
     const created = await caseService.addNote(caseId, {
       content: text.trim(),
       visibility,
-      authorName: 'Mock User',
     });
     setSubmitting(false);
     if (created) {

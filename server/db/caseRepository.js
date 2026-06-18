@@ -181,7 +181,16 @@ function coalesceNoteCreate(key, factory) {
  *  5. Watcher notification
  *  6. case.updatedAt bump
  */
-async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
+async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy, actor }) {
+  // Actor identity hardening (2026-06-18): actor varsa authorName + authorId
+  // server-side belirlenir; body.authorName / body.authorId sessizce yok
+  // sayılır. Smoke caller'ları actor pass etmediği için legacy path
+  // (note.authorName, mentionedBy) korunur — test ortamı dummy isim
+  // yazabiliyor. Production route handler her zaman actor pass eder.
+  const effectiveAuthorName = actor?.displayName ?? note.authorName;
+  const effectiveAuthorUserId = actor?.userId ?? mentionedBy ?? null;
+  const effectiveMentionedBy = actor?.userId ?? mentionedBy;
+
   const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
   const matches = [...(note.content ?? '').matchAll(mentionRegex)];
   const mentionedUserIds = [...new Set(matches.map((m) => m[2]))];
@@ -212,21 +221,21 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
     data: {
       caseId: id,
       companyId,
-      authorName: note.authorName,
-      authorId: mentionedBy ?? null,
+      authorName: effectiveAuthorName,
+      authorId: effectiveAuthorUserId,
       content: note.content,
       visibility: note.visibility,
     },
   });
 
-  if (mentionedUserIds.length > 0 && mentionedBy) {
+  if (mentionedUserIds.length > 0 && effectiveMentionedBy) {
     await prisma.caseMention.createMany({
       data: mentionedUserIds.map((uid) => ({
         caseId: id,
         noteId: created.id,
         companyId,
         mentionedUserId: uid,
-        mentionedBy,
+        mentionedBy: effectiveMentionedBy,
       })),
     });
 
@@ -239,8 +248,8 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
       companyId,
       noteId: created.id,
       mentionedUserIds,
-      actorUserId: mentionedBy,
-      actorDisplay: note.authorName,
+      actorUserId: effectiveMentionedBy,
+      actorDisplay: effectiveAuthorName,
       caseNumber: caseSnapshot?.caseNumber,
       caseTitle: caseSnapshot?.title,
       noteContent: note.content,
@@ -257,8 +266,8 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy }) {
       action: note.visibility === 'Customer' ? 'Müşteri notu eklendi' : 'İç not eklendi',
       actionType: 'NoteAdded',
       note: cleanedPreview,
-      actor: note.authorName,
-      actorUserId: mentionedBy ?? null, // PR-5
+      actor: effectiveAuthorName,
+      actorUserId: effectiveAuthorUserId,
     },
   });
 
@@ -1663,25 +1672,28 @@ export const caseRepository = {
    * mentionedBy req.user.id (route'tan geçer); aktor'un User.id'si yoksa
    * (cron, test) mention skip — note yine kaydedilir.
    */
-  async addNote(id, note, allowedCompanyIds, mentionedBy) {
+  async addNote(id, note, allowedCompanyIds, mentionedBy, actor) {
+    // Actor identity hardening: actor varsa author kimliği server-side; aksi
+    // halde legacy davranış (mentionedBy + note.authorName) — smoke caller'ları.
+    const effectiveAuthorUserId = actor?.userId ?? mentionedBy ?? null;
+
     // Two-layer duplicate guard (note safety task §C):
     //   Layer 1 — in-flight coalescing: concurrent identical creates
     //     (HTTP/2 multiplexed double-click) share the same promise.
     //   Layer 2 — DB short-window: sequential identical create within
     //     5s of completion returns the existing row.
-    // Both layers gate only on authenticated calls (mentionedBy set);
-    // cron/mock paths (mentionedBy=null) skip because identity is
-    // ambiguous.
+    // Both layers gate only on authenticated calls (effective author set);
+    // cron/mock paths skip because identity is ambiguous.
     const _impl = async () => {
       const companyId = await assertCaseInScope(id, allowedCompanyIds);
       if (!companyId) return null;
 
-      if (mentionedBy && note.content) {
+      if (effectiveAuthorUserId && note.content) {
         const dupeWindow = new Date(Date.now() - 5000);
         const existing = await prisma.caseNote.findFirst({
           where: {
             caseId: id,
-            authorId: mentionedBy,
+            authorId: effectiveAuthorUserId,
             content: note.content,
             visibility: note.visibility,
             parentNoteId: null,
@@ -1692,11 +1704,11 @@ export const caseRepository = {
         if (existing) return existing;
       }
 
-      return _addNoteWriteAndEmit({ id, note, companyId, mentionedBy });
+      return _addNoteWriteAndEmit({ id, note, companyId, mentionedBy, actor });
     };
 
-    if (mentionedBy && note.content) {
-      const key = `note|${id}|${mentionedBy}|${note.visibility}|${note.content}`;
+    if (effectiveAuthorUserId && note.content) {
+      const key = `note|${id}|${effectiveAuthorUserId}|${note.visibility}|${note.content}`;
       return coalesceNoteCreate(key, _impl);
     }
     return _impl();
@@ -1736,7 +1748,13 @@ export const caseRepository = {
    *  - CaseActivity: NoteReplyAdded.
    *  - Watcher bildirimleri tetiklenir.
    */
-  async addReply(caseId, noteId, reply, allowedCompanyIds, mentionedBy) {
+  async addReply(caseId, noteId, reply, allowedCompanyIds, mentionedBy, actor) {
+    // Actor identity hardening: actor varsa author kimliği server-side; aksi
+    // halde legacy davranış (mentionedBy + reply.authorName) — smoke caller'ları.
+    const effectiveAuthorName = actor?.displayName ?? reply.authorName;
+    const effectiveAuthorUserId = actor?.userId ?? mentionedBy ?? null;
+    const effectiveMentionedBy = actor?.userId ?? mentionedBy;
+
     // Trim content here so the in-flight key + dup guard use the canonical
     // form. Empty/max_depth/scope errors come back via the inner _impl
     // and short-circuit before any in-flight registration would matter.
@@ -1764,13 +1782,13 @@ export const caseRepository = {
     // within 5 seconds collapse to the first row; parent.replyCount
     // is NOT double-incremented and the activity log / watcher notify
     // do NOT fire twice.
-    if (mentionedBy) {
+    if (effectiveAuthorUserId) {
       const dupeWindow = new Date(Date.now() - 5000);
       const existing = await prisma.caseNote.findFirst({
         where: {
           caseId,
           parentNoteId: noteId,
-          authorId: mentionedBy,
+          authorId: effectiveAuthorUserId,
           content,
           visibility: reply.visibility,
           createdAt: { gte: dupeWindow },
@@ -1814,8 +1832,8 @@ export const caseRepository = {
         data: {
           caseId,
           companyId,
-          authorName: reply.authorName,
-          authorId: mentionedBy ?? null,
+          authorName: effectiveAuthorName,
+          authorId: effectiveAuthorUserId,
           content,
           visibility: reply.visibility,
           parentNoteId: noteId,
@@ -1829,14 +1847,14 @@ export const caseRepository = {
     });
 
     // Mention satırları
-    if (mentionedUserIds.length > 0 && mentionedBy) {
+    if (mentionedUserIds.length > 0 && effectiveMentionedBy) {
       await prisma.caseMention.createMany({
         data: mentionedUserIds.map((uid) => ({
           caseId,
           noteId: created.id,
           companyId,
           mentionedUserId: uid,
-          mentionedBy,
+          mentionedBy: effectiveMentionedBy,
         })),
       });
 
@@ -1860,8 +1878,8 @@ export const caseRepository = {
         noteId: created.id,
         parentNoteId: noteId,
         mentionedUserIds,
-        actorUserId: mentionedBy,
-        actorDisplay: reply.authorName,
+        actorUserId: effectiveMentionedBy,
+        actorDisplay: effectiveAuthorName,
         caseNumber: caseSnapshot?.caseNumber,
         caseTitle: caseSnapshot?.title,
         noteContent: content,
@@ -1878,8 +1896,8 @@ export const caseRepository = {
         action: 'Nota yanıt eklendi',
         actionType: 'NoteReplyAdded',
         note: cleanedPreview,
-        actor: reply.authorName,
-        actorUserId: mentionedBy ?? null, // PR-5
+        actor: effectiveAuthorName,
+        actorUserId: effectiveAuthorUserId,
       },
     });
 
@@ -1898,8 +1916,8 @@ export const caseRepository = {
       return created;
     };
 
-    if (mentionedBy && contentTrimmedKey) {
-      const key = `reply|${caseId}|${noteId}|${mentionedBy}|${reply.visibility}|${contentTrimmedKey}`;
+    if (effectiveAuthorUserId && contentTrimmedKey) {
+      const key = `reply|${caseId}|${noteId}|${effectiveAuthorUserId}|${reply.visibility}|${contentTrimmedKey}`;
       return coalesceNoteCreate(key, _impl);
     }
     return _impl();

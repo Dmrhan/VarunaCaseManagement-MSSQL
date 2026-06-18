@@ -888,11 +888,16 @@ router.post(
 router.post(
   '/:id/notes',
   asyncRoute(async (req, res) => {
+    // Actor identity hardening (audit 2026-06-18): note authorship'i tamamen
+    // server-side req.user üzerinden yazılır; body.authorName / body.authorId
+    // sessizce yok sayılır (client spoof attempt).
+    const actor = requireActor(req);
     const note = await caseRepository.addNote(
       req.params.id,
       req.body ?? {},
       req.user.allowedCompanyIds,
       req.user.id,
+      actor,
     );
     if (!note) return res.status(404).json({ error: 'Vaka bulunamadı' });
     if (note.error) return res.status(400).json(note);
@@ -924,12 +929,17 @@ router.get(
 router.post(
   '/:id/notes/:noteId/reply',
   asyncRoute(async (req, res) => {
+    // Actor identity hardening (audit 2026-06-18): reply authorship'i tamamen
+    // server-side req.user üzerinden yazılır; body.authorName / body.authorId
+    // sessizce yok sayılır.
+    const actor = requireActor(req);
     const reply = await caseRepository.addReply(
       req.params.id,
       req.params.noteId,
       req.body ?? {},
       req.user.allowedCompanyIds,
       req.user.id,
+      actor,
     );
     if (!reply) return res.status(404).json({ error: 'Vaka veya not bulunamadı' });
     if (reply.error) return res.status(400).json(reply);

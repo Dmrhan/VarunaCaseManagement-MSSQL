@@ -4502,10 +4502,10 @@ function NewCallLogModal({
     // CaseMention parse'ı yan-bir Internal not aracılığıyla tetiklenir.
     // (addCallLog endpoint'i mention parse etmiyor; addNote ediyor.)
     if (trimmedDescription && /@\[[^\]]+\]\([^)]+\)/.test(trimmedDescription)) {
+      // Actor identity hardening: authorName backend req.user üzerinden yazılır.
       await caseService.addNote(item.id, {
         content: `Çağrı kaydı (${callerName.trim()}): ${trimmedDescription}`,
         visibility: 'Internal',
-        authorName: 'Mock User',
       });
     }
     onCreated(r.caseUpdated);

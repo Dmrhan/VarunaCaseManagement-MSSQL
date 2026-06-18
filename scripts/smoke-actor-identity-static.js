@@ -381,6 +381,82 @@ console.log('\n── 9) PR-4: storage token userId + finalize match ───�
     xhrIdx >= 0 && frontSrc.slice(0, xhrIdx).includes('const jwt = await getAccessToken()'), true);
 }
 
+// ── 10) PR-6 — addNote + addReply server-authoritative ─────
+console.log('\n── 10) PR-6: notes + reply path server-authoritative ──────');
+{
+  const routeSrc = readFile('server/routes/cases.js');
+  const repoSrc  = readFile('server/db/caseRepository.js');
+  const svcSrc   = readFile('src/services/caseService.ts');
+
+  // 10.1 — POST /:id/notes route requireActor + actor pass
+  const notesRouteIdx = routeSrc.indexOf("'/:id/notes',");
+  const notesRouteBlock = notesRouteIdx >= 0 ? routeSrc.slice(notesRouteIdx, notesRouteIdx + 1000) : '';
+  expect('10.1 POST /:id/notes requireActor(req)',
+    notesRouteBlock.includes('requireActor(req)'), true);
+  expect('10.2 POST /:id/notes actor pass (5. arg)',
+    /caseRepository\.addNote\(\s*req\.params\.id,[\s\S]{0,200}actor,/.test(notesRouteBlock), true);
+
+  // 10.3 — POST /:id/notes/:noteId/reply route requireActor + actor pass
+  const replyRouteIdx = routeSrc.indexOf("'/:id/notes/:noteId/reply'");
+  const replyRouteBlock = replyRouteIdx >= 0 ? routeSrc.slice(replyRouteIdx, replyRouteIdx + 1200) : '';
+  expect('10.3 POST /:id/notes/:noteId/reply requireActor(req)',
+    replyRouteBlock.includes('requireActor(req)'), true);
+  expect('10.4 POST /reply actor pass (6. arg)',
+    /caseRepository\.addReply\([\s\S]{0,300}actor,/.test(replyRouteBlock), true);
+
+  // 10.5 — caseRepository.addNote signature: actor opsiyonel param
+  expect('10.5 addNote(id, note, allowedCompanyIds, mentionedBy, actor)',
+    /async\s+addNote\s*\(id,\s*note,\s*allowedCompanyIds,\s*mentionedBy,\s*actor\)/.test(repoSrc), true);
+
+  // 10.6 — caseRepository.addReply signature: actor opsiyonel param
+  expect('10.6 addReply(caseId, noteId, reply, allowedCompanyIds, mentionedBy, actor)',
+    /async\s+addReply\s*\(caseId,\s*noteId,\s*reply,\s*allowedCompanyIds,\s*mentionedBy,\s*actor\)/.test(repoSrc), true);
+
+  // 10.7-10.9 — _addNoteWriteAndEmit body server-side actor override
+  expect('10.7 _addNoteWriteAndEmit actor param alıyor',
+    /async\s+function\s+_addNoteWriteAndEmit\s*\(\{[\s\S]{0,200}actor\s*\}\)/.test(repoSrc), true);
+  expect('10.8 _addNoteWriteAndEmit effectiveAuthorName = actor?.displayName',
+    repoSrc.includes('const effectiveAuthorName = actor?.displayName ?? note.authorName'), true);
+  expect('10.9 _addNoteWriteAndEmit effectiveAuthorUserId = actor?.userId',
+    repoSrc.includes('const effectiveAuthorUserId = actor?.userId ?? mentionedBy ?? null'), true);
+
+  // 10.10 — addReply body server-side override pattern
+  expect('10.10 addReply effectiveAuthorName = actor?.displayName',
+    repoSrc.includes('const effectiveAuthorName = actor?.displayName ?? reply.authorName'), true);
+
+  // 10.11 — Service tip: addNote / addReply authorName opsiyonel
+  expect('10.11 caseService.addNote authorName opsiyonel',
+    /addNote\([\s\S]{0,200}authorName\?:\s*string/.test(svcSrc), true);
+  expect('10.12 caseService.addReply authorName opsiyonel',
+    /addReply\([\s\S]{0,400}authorName\?:\s*string/.test(svcSrc), true);
+
+  // 10.13 — FE runtime dosyalarında 'Mock User' literal yok (whitelist hariç)
+  const runtimeFEFiles = [
+    'src/components/ui/QuickNotePopover.tsx',
+    'src/features/cases/StatusTransitionPanel.tsx',
+    'src/features/cases/CaseDetailPage.tsx',
+  ];
+  for (const f of runtimeFEFiles) {
+    const src = readFile(f);
+    const hits = src.match(/'Mock User'/g);
+    expect(`10.13 ${f}: 'Mock User' literal yok`,
+      hits === null ? 0 : hits.length, 0);
+  }
+
+  // 10.14 — caseService USE_MOCK fallback acceptable (TEST-ONLY whitelist)
+  // Production fetch path'inde body.authorName göndermek yasak değil; backend
+  // ignore eder (Fix #2 _addNoteWriteAndEmit override). FE literal 'Mock User'
+  // assertion'ı 10.13'te yapıldı.
+
+  // 10.15 — Backend runtime'da "?? 'Mock User'" pattern YOK (audit guard)
+  const repoMockFallback = repoSrc.match(/\?\?\s*'Mock User'/g);
+  expect('10.15 caseRepository.js içinde "?? \'Mock User\'" fallback yok',
+    repoMockFallback === null ? 0 : repoMockFallback.length, 0);
+  const routeMockFallback = routeSrc.match(/\?\?\s*'Mock User'/g);
+  expect('10.16 routes/cases.js içinde "?? \'Mock User\'" fallback yok',
+    routeMockFallback === null ? 0 : routeMockFallback.length, 0);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);
