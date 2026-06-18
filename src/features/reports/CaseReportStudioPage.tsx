@@ -54,7 +54,7 @@ import { Modal } from '@/components/ui/Modal';
 import { CASE_STATUSES, CASE_PRIORITIES } from '@/features/cases/types';
 import { useAuth } from '@/services/AuthContext';
 import { notify } from '@/components/ui/Toast';
-import { Save, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Save, Trash2 } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 
@@ -210,6 +210,28 @@ export function CaseReportStudioPage() {
     { name: '', description: '', isShared: false, companyId: '' },
   );
   const [saving, setSaving] = useState(false);
+  // Phase 4.2 — Edit modal (rename + isShared + description)
+  const [editViewTarget, setEditViewTarget] = useState<ReportView | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; description: string; isShared: boolean }>(
+    { name: '', description: '', isShared: false },
+  );
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Phase 4.2 — Aktif görünüm (seçili), sahiplik bilgisi
+  const activeView = activeViewId
+    ? savedViews.find((v) => v.id === activeViewId) ?? null
+    : null;
+  const isOwnerOfActive = activeView?.ownerId === auth.user?.id;
+
+  // Phase 4.2 — Dropdown'u sınıflandır: kendi vs paylaşımlı (başkasının)
+  const ownViews = useMemo(
+    () => savedViews.filter((v) => v.ownerId === auth.user?.id),
+    [savedViews, auth.user?.id],
+  );
+  const sharedNotOwnViews = useMemo(
+    () => savedViews.filter((v) => v.ownerId !== auth.user?.id && v.isShared),
+    [savedViews, auth.user?.id],
+  );
 
   const companies = useMemo(() => {
     try {
@@ -313,6 +335,53 @@ export function CaseReportStudioPage() {
       await reloadSavedViews();
       setActiveViewId(res.view.id);
     }
+  }
+
+  // Phase 4.2 — Edit modal aç (mevcut görünümü düzenle)
+  function openEditModal(view: ReportView) {
+    setEditViewTarget(view);
+    setEditForm({
+      name: view.name,
+      description: view.description ?? '',
+      isShared: view.isShared,
+    });
+  }
+
+  async function handleEditSave() {
+    if (!editViewTarget) return;
+    if (!editForm.name.trim()) {
+      notify({ type: 'error', title: 'İsim boş olamaz', message: 'Görünüme bir isim verin.', duration: 3000 });
+      return;
+    }
+    setEditSaving(true);
+    const res = await reportService.updateView(editViewTarget.id, {
+      name: editForm.name.trim(),
+      description: editForm.description.trim() || null,
+      isShared: editForm.isShared,
+    });
+    setEditSaving(false);
+    if (res) {
+      notify({ type: 'success', title: `"${res.view.name}" güncellendi`, message: '', duration: 2500 });
+      setEditViewTarget(null);
+      await reloadSavedViews();
+    }
+  }
+
+  // Phase 4.2 — Başkasının paylaşımlı görünümünü kendi private kopya olarak al
+  async function handleCopyView(source: ReportView) {
+    const defaultCompany = source.companyId || companies[0]?.id || '';
+    if (!defaultCompany) {
+      notify({ type: 'error', title: 'Şirket bulunamadı', message: 'Kopyalanacak görünüm için şirket gerekli.', duration: 3000 });
+      return;
+    }
+    // Save modal'ı önceden doldurulmuş halde aç — kullanıcı yeni adı + isShared'ı seçer
+    setSaveForm({
+      name: `${source.name} (kopya)`,
+      description: source.description ?? '',
+      isShared: false,
+      companyId: defaultCompany,
+    });
+    setSaveModalOpen(true);
   }
 
   async function handleDeleteView(viewId: string) {
@@ -533,44 +602,106 @@ export function CaseReportStudioPage() {
               Pivot
             </button>
           </div>
-          {/* Phase 4 — Saved Views: picker + save */}
-          <div className="flex items-center gap-2 border-l border-slate-200 pl-3 dark:border-ndark-border">
-            <select
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
-              value={activeViewId}
-              onChange={(e) => handleLoadView(e.target.value)}
-              disabled={savedViewsLoading}
-              title="Kayıtlı görünüm yükle"
-            >
-              <option value="">— Görünüm seç —</option>
-              {savedViews.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}{v.isShared ? ' · paylaşımlı' : ''}{v.ownerId === auth.user?.id ? '' : ' · başkası'}
-                </option>
-              ))}
-            </select>
-            {activeViewId && savedViews.find((v) => v.id === activeViewId)?.ownerId === auth.user?.id && (
-              <button
-                type="button"
-                onClick={() => handleDeleteView(activeViewId)}
-                className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
-                title="Bu görünümü sil"
+          {/* Phase 4 — Saved Views: picker + save (Phase 4.2 polish) */}
+          <div className="flex flex-col gap-0.5 border-l border-slate-200 pl-3 dark:border-ndark-border">
+            <div className="flex items-center gap-2">
+              <select
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                value={activeViewId}
+                onChange={(e) => handleLoadView(e.target.value)}
+                disabled={savedViewsLoading}
+                title="Kayıtlı görünüm yükle"
               >
-                <Trash2 size={13} />
-              </button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Save size={12} />}
-              onClick={openSaveModal}
-              disabled={selectedColumnIds.length === 0}
-              title="Mevcut yapılandırmayı görünüm olarak kaydet"
-            >
+                <option value="">— Görünüm seç —</option>
+                {/* Phase 4.2 — Optgroup ile sınıflandır */}
+                {ownViews.length > 0 && (
+                  <optgroup label="Kendi Görünümlerim">
+                    {ownViews.map((v) => (
+                      <option key={v.id} value={v.id} title={v.description ?? ''}>
+                        {v.name}{v.isShared ? ' 👥' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {sharedNotOwnViews.length > 0 && (
+                  <optgroup label="Paylaşımlı Görünümler (Başkalarından)">
+                    {sharedNotOwnViews.map((v) => (
+                      <option key={v.id} value={v.id} title={v.description ?? ''}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {/* Phase 4.2 — Owner badge (aktif görünüm için) */}
+              {activeView && (
+                <span
+                  className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                    isOwnerOfActive
+                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
+                      : 'bg-slate-100 text-slate-600 dark:bg-ndark-card dark:text-ndark-muted'
+                  }`}
+                  title={isOwnerOfActive ? 'Bu görünümün sahibisin' : 'Başkasının paylaşımlı görünümü'}
+                >
+                  {isOwnerOfActive ? 'Kendin' : 'Paylaşımlı'}
+                  {activeView.isShared && isOwnerOfActive && ' · Paylaşımda'}
+                </span>
+              )}
+              {/* Edit (sadece owner) */}
+              {activeView && isOwnerOfActive && (
+                <button
+                  type="button"
+                  onClick={() => openEditModal(activeView)}
+                  className="rounded p-1 text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card"
+                  title="Bu görünümü düzenle (isim, açıklama, paylaşım)"
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
+              {/* Kopyala (sadece başkasının paylaşımlısı için) */}
+              {activeView && !isOwnerOfActive && (
+                <button
+                  type="button"
+                  onClick={() => handleCopyView(activeView)}
+                  className="rounded p-1 text-slate-600 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card"
+                  title="Bu görünümü kendi private kopyana al"
+                >
+                  <Copy size={13} />
+                </button>
+              )}
+              {/* Sil (sadece owner) */}
+              {activeView && isOwnerOfActive && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteView(activeViewId)}
+                  className="rounded p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30"
+                  title="Bu görünümü sil"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Save size={12} />}
+                onClick={openSaveModal}
+                disabled={selectedColumnIds.length === 0}
+                title="Mevcut yapılandırmayı görünüm olarak kaydet"
+              >
               Kaydet
             </Button>
           </div>
+          {/* Phase 4.2 — Aktif görünümün açıklaması (varsa) italic preview */}
+          {activeView?.description && (
+            <p
+              className="max-w-md truncate pl-1 text-[11px] italic text-slate-500 dark:text-ndark-muted"
+              title={activeView.description}
+            >
+              {activeView.description}
+            </p>
+          )}
         </div>
+        </div>{/* sol grup close (h1 + mode toggle + Phase 4.2 picker) */}
         <div className="flex items-center gap-2">
           {mode === 'list' && (
             <>
@@ -1143,6 +1274,60 @@ export function CaseReportStudioPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Phase 4.2 — Edit view modal (rename + isShared + description) */}
+      {editViewTarget && (
+        <Modal
+          open
+          onClose={() => (editSaving ? null : setEditViewTarget(null))}
+          size="md"
+          title={`Görünümü Düzenle: ${editViewTarget.name}`}
+        >
+          <div className="space-y-3 p-4 text-sm">
+            <Field label="İsim *">
+              <TextInput
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                maxLength={200}
+              />
+            </Field>
+            <Field label="Açıklama (opsiyonel)">
+              <TextInput
+                value={editForm.description}
+                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Bu görünüm ne için kullanılıyor?"
+                maxLength={3000}
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={editForm.isShared}
+                onChange={(e) => setEditForm((f) => ({ ...f, isShared: e.target.checked }))}
+              />
+              <span>Paylaşımlı — aynı şirketteki Supervisor+ rolündeki herkes görür (yalnız siz düzenleyebilirsiniz)</span>
+            </label>
+            <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted">
+              Bu modal yalnız metadata günceller (isim, açıklama, paylaşım). Görünümün kolonlarını veya
+              filtrelerini değiştirmek için sayfanın üzerindeki seçimleri yapıp "Kaydet" ile yeni bir
+              versiyon oluşturmanız gerekir.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setEditViewTarget(null)} disabled={editSaving}>
+                İptal
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleEditSave}
+                disabled={editSaving || !editForm.name.trim()}
+                leftIcon={editSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              >
+                Güncelle
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
