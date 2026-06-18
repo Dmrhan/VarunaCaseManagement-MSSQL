@@ -1805,14 +1805,15 @@ function DrilldownRow({
 }) {
   return (
     <tr className={`hover:bg-slate-50 dark:hover:bg-ndark-bg/40 ${highlighted ? 'bg-violet-50/60 ring-1 ring-inset ring-violet-200 dark:bg-violet-900/20 dark:ring-violet-700/40' : ''}`}>
-      <td className="max-w-xs px-4 py-3">
+      <td className="px-4 py-3 align-top">
         <button
           type="button"
           onClick={() => {
             onSelectCase?.(row.id);
             onClose();
           }}
-          className="group block text-left focus:outline-none"
+          className="group block w-[280px] max-w-full text-left focus:outline-none"
+          title={row.title}
         >
           <span className="flex items-center gap-1.5 font-mono text-xs text-brand-700 group-hover:underline dark:text-brand-300">
             {row.caseNumber}
@@ -1822,9 +1823,9 @@ function DrilldownRow({
           <span className="mt-0.5 block text-[11px] text-slate-400">{formatDateTime(row.createdAt)}</span>
         </button>
       </td>
-      <td className="px-4 py-3 text-slate-700 dark:text-ndark-text">
-        <div className="max-w-[180px] truncate">{row.accountName}</div>
-        <div className="text-[11px] text-slate-400">{row.companyName}</div>
+      <td className="px-4 py-3 align-top text-slate-700 dark:text-ndark-text">
+        <div className="block w-[200px] max-w-full truncate" title={row.accountName ?? undefined}>{row.accountName}</div>
+        <div className="block w-[200px] max-w-full truncate text-[11px] text-slate-400" title={row.companyName ?? undefined}>{row.companyName}</div>
       </td>
       <td className="px-4 py-3">
         <Badge tint={statusTint(row.status)}>{STATUS_LABEL[row.status] ?? row.status}</Badge>
