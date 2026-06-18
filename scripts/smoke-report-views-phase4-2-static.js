@@ -119,6 +119,44 @@ console.log('\n── 7) Sil button sadece owner için (regression) ────
     /activeView && isOwnerOfActive && \([\s\S]{0,400}<Trash2/.test(src), true);
 }
 
+// ── 8) Codex P2 follow-up: copySource snapshot ───────────────
+console.log('\n── 8) Copy uses source state (Codex P2 fix) ──────────────');
+{
+  // 8.1 — copySource state tanımlı
+  expect('8.1 copySource state',
+    /\[copySource,\s*setCopySource\]\s*=\s*useState<ReportView \| null>/.test(src), true);
+
+  // 8.2 — handleCopyView setCopySource(source) çağırıyor
+  expect('8.2 handleCopyView setCopySource(source)',
+    /handleCopyView[\s\S]{0,500}setCopySource\(source\)/.test(src), true);
+
+  // 8.3 — openSaveModal copySource'u null'a sıfırlıyor (normal save)
+  expect('8.3 openSaveModal setCopySource(null)',
+    /openSaveModal\(\)\s*\{[\s\S]{0,200}setCopySource\(null\)/.test(src), true);
+
+  // 8.4 — closeSaveModal copySource'u temizliyor
+  expect('8.4 closeSaveModal setCopySource(null)',
+    /closeSaveModal\(\)\s*\{[\s\S]{0,200}setCopySource\(null\)/.test(src), true);
+
+  // 8.5 — handleSaveView payload kaynaktan okur (copySource varsa)
+  expect('8.5 handleSaveView columns: src ? src.columns : selectedColumnIds',
+    /columns:\s*src\s*\?\s*src\.columns\s*:\s*selectedColumnIds/.test(src), true);
+  expect('8.6 handleSaveView filters: src ? src.filters : filters',
+    /filters:\s*src\s*\?\s*src\.filters\s*:\s*filters/.test(src), true);
+  expect('8.7 handleSaveView mode: src ? src.mode : mode',
+    /mode:\s*src\s*\?\s*src\.mode\s*:\s*mode/.test(src), true);
+  expect('8.8 handleSaveView pivotConfig: src ? src.pivotConfig : ...',
+    /pivotConfig:\s*src\s*\?\s*src\.pivotConfig/.test(src), true);
+
+  // 8.9 — Modal title'da copy modunda kaynak adı
+  expect('8.9 Modal title copy modunda kaynak görünür',
+    src.includes('copySource ? `Görünüm Kopyala:'), true);
+
+  // 8.10 — Info banner copy modunda
+  expect('8.10 Info banner: "kaynak görünümün ... tam yapılandırmasını"',
+    src.includes('tam yapılandırmasını'), true);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);
