@@ -16,6 +16,8 @@ import {
   LogOut,
   Network,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings2,
   Star,
   Sun,
@@ -105,8 +107,17 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
-  // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler.
+  // Pin (sabitleme) açıkken hover'dan bağımsız genişler — ayrı state, türetilmiş `sidebarExpanded`.
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
+    try {
+      return window.localStorage.getItem('sidebarPinned') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const sidebarExpanded = sidebarHovered || sidebarPinned;
   // Aktif örüntü alarm sayısı — sidebar badge için 60s polling.
   const [activePatternCount, setActivePatternCount] = useState(0);
   // Bugün için takvim olay sayısı — sidebar Takvimim badge'i.
@@ -230,6 +241,20 @@ export default function App() {
   function backToList() {
     setView(caseDetailOrigin);
     setSelectedCaseId(null);
+  }
+
+  // Sidebar pin durumunu değiştirir, tercihi localStorage'a yazar.
+  // localStorage kullanılamıyorsa (gizli mod, kota vb.) özellik bu oturumda çalışmaya devam eder.
+  function toggleSidebarPinned() {
+    setSidebarPinned((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('sidebarPinned', String(next));
+      } catch {
+        // localStorage yok/erişilemiyor — sessizce sadece oturum içinde çalışır.
+      }
+      return next;
+    });
   }
 
   // Sidebar nav item'ı tıklanınca herhangi bir alt-state'i temizle
@@ -406,12 +431,32 @@ export default function App() {
 
       <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>
         <aside
-          onMouseEnter={() => setSidebarExpanded(true)}
-          onMouseLeave={() => setSidebarExpanded(false)}
-          className={`flex shrink-0 flex-col border-r border-slate-200 bg-white py-3 transition-all duration-200 dark:border-ndark-border dark:bg-ndark-card ${
+          onMouseEnter={() => setSidebarHovered(true)}
+          onMouseLeave={() => setSidebarHovered(false)}
+          className={`relative flex shrink-0 flex-col border-r border-slate-200 bg-white py-3 transition-all duration-200 dark:border-ndark-border dark:bg-ndark-card ${
             sidebarExpanded ? 'w-64 px-3' : 'w-16 px-2'
           }`}
         >
+          {sidebarExpanded && (
+            <button
+              type="button"
+              onClick={toggleSidebarPinned}
+              title={sidebarPinned ? 'Sabitlemeyi kaldır' : 'Sidebar\'ı sabitle'}
+              aria-label={sidebarPinned ? 'Sabitlemeyi kaldır' : 'Sidebar\'ı sabitle'}
+              aria-pressed={sidebarPinned}
+              className="
+                absolute -right-3 top-3 z-20
+                flex h-6 w-6 items-center justify-center
+                rounded-full border border-slate-200
+                bg-white text-slate-400 shadow-sm
+                transition-colors
+                hover:text-brand-600
+                dark:border-ndark-border dark:bg-ndark-card
+              "
+            >
+              {sidebarPinned ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}
+            </button>
+          )}
           <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {/*
               Anasayfa — Agent/Supervisor/Backoffice/CSM için kişisel landing.
