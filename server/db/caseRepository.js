@@ -1081,16 +1081,24 @@ export const caseRepository = {
         select: {
           supportLevel: true,
           teamId: true,
-          team: { select: { name: true } },
+          team: { select: { name: true, companyId: true } },
         },
       });
     }
 
     // assignedTeamId/Name cascade — caller team göndermediyse Person.teamId
-    // resolve edilir (mevcut claim flow ile aynı kural).
-    const finalAssignedTeamId = m.assignedTeamId ?? personInfo?.teamId ?? null;
+    // resolve edilir, ama yalnız Person'un takımı vakanın şirketi ile aynı
+    // şirkette ise (Codex P2 PR #105 review). Multi-company kullanıcı başka
+    // şirkette Smart Ticket açtığında Person.team başka şirketin takımı
+    // olabilir → cross-company assignedTeamId yazarsak supervisor KPI/queue
+    // o vakayı görmez. Şirket eşleşmiyorsa team NULL kalır; dispatcher
+    // manuel atar.
+    const personTeamMatchesCompany =
+      !!personInfo?.teamId && personInfo?.team?.companyId === m.companyId;
+    const finalAssignedTeamId =
+      m.assignedTeamId ?? (personTeamMatchesCompany ? personInfo.teamId : null);
     const finalAssignedTeamName =
-      m.assignedTeamName ?? (personInfo?.teamId ? personInfo?.team?.name ?? null : null);
+      m.assignedTeamName ?? (personTeamMatchesCompany ? personInfo.team?.name ?? null : null);
 
     // WR-A5 / PM-03 + WR-A7b D-A7BI.7 — supportLevel cascade.
     //   1. patch'te explicit set edildiyse onu kullan (D-A5.2)

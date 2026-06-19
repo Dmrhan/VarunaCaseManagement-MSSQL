@@ -62,17 +62,20 @@ console.log('\n── Codex P2: backend create resolves Person.teamId ───�
 {
   const repoSrc = readFileSync(path.join(REPO_ROOT, 'server/db/caseRepository.js'), 'utf8');
 
-  // 6.1 — Person lookup teamId + team.name içeriyor (supportLevel cascade
-  // ile aynı sorguda)
-  expect('6.1 Person lookup teamId + team.name select',
-    /prisma\.person\.findUnique\([\s\S]{0,500}teamId:\s*true,[\s\S]{0,200}team:\s*\{\s*select:\s*\{\s*name:\s*true/.test(repoSrc), true);
+  // 6.1 — Person lookup teamId + team.name + team.companyId (Codex P2 #2)
+  expect('6.1 Person lookup teamId + team.name + team.companyId select',
+    /prisma\.person\.findUnique\([\s\S]{0,600}teamId:\s*true,[\s\S]{0,200}team:\s*\{\s*select:\s*\{\s*name:\s*true,\s*companyId:\s*true/.test(repoSrc), true);
 
-  // 6.2 — finalAssignedTeamId cascade: m.assignedTeamId ?? personInfo.teamId
-  expect('6.2 finalAssignedTeamId cascade pattern',
-    /const finalAssignedTeamId = m\.assignedTeamId \?\? personInfo\?\.teamId \?\? null/.test(repoSrc), true);
-  // 6.3 — finalAssignedTeamName cascade
-  expect('6.3 finalAssignedTeamName cascade pattern',
-    /const finalAssignedTeamName =\s*m\.assignedTeamName \?\?/.test(repoSrc), true);
+  // 6.2 — personTeamMatchesCompany guard (Codex P2 #2 cross-company scope)
+  expect('6.2 personTeamMatchesCompany cross-company guard',
+    /const personTeamMatchesCompany =\s*!!personInfo\?\.teamId && personInfo\?\.team\?\.companyId === m\.companyId/.test(repoSrc), true);
+
+  // 6.3 — finalAssignedTeamId cascade SADECE matchesCompany ise
+  expect('6.3 finalAssignedTeamId cascade scoped by matchesCompany',
+    /const finalAssignedTeamId =\s*m\.assignedTeamId \?\? \(personTeamMatchesCompany \? personInfo\.teamId : null\)/.test(repoSrc), true);
+  // 6.3b — finalAssignedTeamName aynı scope
+  expect('6.3b finalAssignedTeamName cascade scoped by matchesCompany',
+    /const finalAssignedTeamName =\s*m\.assignedTeamName \?\? \(personTeamMatchesCompany \?/.test(repoSrc), true);
 
   // 6.4 — prisma.case.create assigned* alanlarında final*Team* kullanılıyor
   // (m.assignedTeamId/Name direkt yazılmıyor)
