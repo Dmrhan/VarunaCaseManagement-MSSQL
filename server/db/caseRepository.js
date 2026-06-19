@@ -1068,26 +1068,46 @@ export const caseRepository = {
       productId: finalProductId,
     });
 
+    // Person lookup — Codex P2 (PR #104): assignedPersonId verildiğinde
+    // hem supportLevel cascade'i hem team cascade'i için tek sefer çekilir.
+    // Smart Ticket auto-assign creator (PR #104) sadece personId/Name
+    // gönderiyor; takım resolution backend'de yapılır (claim flow ile
+    // simetrik). Aksi halde vaka kişiye atanır ama supervisor team
+    // KPI/queue'larında görünmez.
+    let personInfo = null;
+    if (m.assignedPersonId) {
+      personInfo = await prisma.person.findUnique({
+        where: { id: m.assignedPersonId },
+        select: {
+          supportLevel: true,
+          teamId: true,
+          team: { select: { name: true } },
+        },
+      });
+    }
+
+    // assignedTeamId/Name cascade — caller team göndermediyse Person.teamId
+    // resolve edilir (mevcut claim flow ile aynı kural).
+    const finalAssignedTeamId = m.assignedTeamId ?? personInfo?.teamId ?? null;
+    const finalAssignedTeamName =
+      m.assignedTeamName ?? (personInfo?.teamId ? personInfo?.team?.name ?? null : null);
+
     // WR-A5 / PM-03 + WR-A7b D-A7BI.7 — supportLevel cascade.
     //   1. patch'te explicit set edildiyse onu kullan (D-A5.2)
     //   2. WR-A7b: productId varsa Product.supportLevel (catalog hint en güvenilir)
     //   3. assignedPersonId varsa Person.supportLevel
-    //   4. else assignedTeamId varsa Team.defaultSupportLevel
+    //   4. else finalAssignedTeamId varsa Team.defaultSupportLevel
     //   5. else 'L1'
     let resolvedSupportLevel = m.supportLevel;
     if (!resolvedSupportLevel && productInfo?.supportLevel) {
       resolvedSupportLevel = productInfo.supportLevel;
     }
-    if (!resolvedSupportLevel && m.assignedPersonId) {
-      const p = await prisma.person.findUnique({
-        where: { id: m.assignedPersonId },
-        select: { supportLevel: true },
-      });
-      if (p?.supportLevel) resolvedSupportLevel = p.supportLevel;
+    if (!resolvedSupportLevel && personInfo?.supportLevel) {
+      resolvedSupportLevel = personInfo.supportLevel;
     }
-    if (!resolvedSupportLevel && m.assignedTeamId) {
+    if (!resolvedSupportLevel && finalAssignedTeamId) {
       const t = await prisma.team.findUnique({
-        where: { id: m.assignedTeamId },
+        where: { id: finalAssignedTeamId },
         select: { defaultSupportLevel: true },
       });
       if (t?.defaultSupportLevel) resolvedSupportLevel = t.defaultSupportLevel;
@@ -1135,8 +1155,8 @@ export const caseRepository = {
         productName: finalProductName,
         packageId: finalPackageId,
         packageName: finalPackageName,
-        assignedTeamId: m.assignedTeamId,
-        assignedTeamName: m.assignedTeamName,
+        assignedTeamId: finalAssignedTeamId,
+        assignedTeamName: finalAssignedTeamName,
         assignedPersonId: m.assignedPersonId,
         assignedPersonName: m.assignedPersonName,
         // WR-A5 / PM-03 — Cascade person → team → L1.
