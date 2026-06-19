@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -57,6 +57,23 @@ function extractClosure(c: Case): ClosureFields {
     rootCauseDetail: label('rootCauseDetail') ?? UNSPECIFIED,
     resolutionType: label('resolutionType') ?? UNSPECIFIED,
     permanentPrevention: label('permanentPrevention') ?? UNSPECIFIED,
+  };
+}
+
+interface OpeningFields {
+  businessProcess: string | null;
+  operationType: string | null;
+  affectedObject: string | null;
+}
+
+function extractOpening(c: Case): OpeningFields {
+  const st = (c.customFields?.smartTicket) as Record<string, unknown> | undefined;
+  const label = (k: string): string | null =>
+    ((st?.[`${k}Label`] ?? st?.[k] ?? null) as string | null) || null;
+  return {
+    businessProcess: label('businessProcess'),
+    operationType: label('operationType'),
+    affectedObject: label('affectedObject'),
   };
 }
 
@@ -177,6 +194,120 @@ function buildTree(cases: Case[]): ReportTree {
   return { total, groups };
 }
 
+// ─── İçgörü Haritası — problem kümeleri ───────────────────────────
+
+interface NameCount {
+  name: string;
+  count: number;
+}
+
+interface InsightCluster {
+  key: string;
+  name: string;
+  openingKind: 'businessProcess' | 'operationType';
+  openingLabel: string;
+  rootCauseGroup: string;
+  affectedObject: string | null;
+  count: number;
+  pctOfClassified: number;
+  pctOfAllCases: number;
+  caseIds: string[];
+  topRootCauseDetail: string;
+  topPreventions: NameCount[];
+  detailBreakdown: NameCount[];
+  resolutionBreakdown: NameCount[];
+  preventionBreakdown: NameCount[];
+}
+
+interface InsightMap {
+  clusters: InsightCluster[];
+  classifiedTotal: number;
+  unclassifiedCount: number;
+}
+
+function buildInsightMap(cases: Case[]): InsightMap {
+  interface Bucket {
+    openingKind: 'businessProcess' | 'operationType';
+    openingLabel: string;
+    rootCauseGroup: string;
+    affectedObject: string | null;
+    cases: Case[];
+  }
+
+  const buckets = new Map<string, Bucket>();
+  let unclassifiedCount = 0;
+
+  for (const c of cases) {
+    const op = extractOpening(c);
+    const cl = extractClosure(c);
+    const hasBp = !!op.businessProcess;
+    const hasOt = !!op.operationType;
+    const hasRcg = !!cl.rootCauseGroup;
+
+    // Spec madde — üçü de boşsa kümeye dahil etme.
+    if (!hasBp && !hasOt && !hasRcg) {
+      unclassifiedCount++;
+      continue;
+    }
+
+    const openingKind: 'businessProcess' | 'operationType' = hasBp ? 'businessProcess' : 'operationType';
+    const openingLabel = hasBp ? op.businessProcess! : hasOt ? op.operationType! : UNSPECIFIED;
+    const rootCauseGroup = cl.rootCauseGroup ?? UNSPECIFIED;
+    const affectedObject = op.affectedObject;
+    const key = `${openingKind}::${openingLabel}::${rootCauseGroup}::${affectedObject ?? ''}`;
+
+    if (!buckets.has(key)) {
+      buckets.set(key, { openingKind, openingLabel, rootCauseGroup, affectedObject, cases: [] });
+    }
+    buckets.get(key)!.cases.push(c);
+  }
+
+  const classifiedTotal = cases.length - unclassifiedCount;
+  const allCasesTotal = cases.length;
+
+  const clusters: InsightCluster[] = [...buckets.entries()]
+    .map(([key, b]) => {
+      // Set ile aynı vakanın bir kümede tekrar etmemesi garanti edilir.
+      const caseIds = [...new Set(b.cases.map(c => c.id))];
+      const count = caseIds.length;
+
+      const detailMap = groupByKey(b.cases, c => extractClosure(c).rootCauseDetail);
+      const resMap = groupByKey(b.cases, c => extractClosure(c).resolutionType);
+      const prevMap = groupByKey(b.cases, c => extractClosure(c).permanentPrevention);
+
+      const detailBreakdown = sortedEntries(detailMap).map(([name, arr]) => ({ name, count: arr.length }));
+      const resolutionBreakdown = sortedEntries(resMap).map(([name, arr]) => ({ name, count: arr.length }));
+      const preventionBreakdown = sortedEntries(prevMap).map(([name, arr]) => ({ name, count: arr.length }));
+
+      const topRootCauseDetail = detailBreakdown[0]?.name ?? UNSPECIFIED;
+      const topPreventions = preventionBreakdown.filter(p => p.name !== UNSPECIFIED).slice(0, 3);
+
+      const objectSuffix = b.affectedObject ? ` (${b.affectedObject})` : '';
+      const name = `${b.openingLabel} – ${b.rootCauseGroup}${objectSuffix}`;
+
+      return {
+        key,
+        name,
+        openingKind: b.openingKind,
+        openingLabel: b.openingLabel,
+        rootCauseGroup: b.rootCauseGroup,
+        affectedObject: b.affectedObject,
+        count,
+        pctOfClassified: classifiedTotal === 0 ? 0 : round1(count / classifiedTotal * 100),
+        pctOfAllCases: allCasesTotal === 0 ? 0 : round1(count / allCasesTotal * 100),
+        caseIds,
+        topRootCauseDetail,
+        topPreventions,
+        detailBreakdown,
+        resolutionBreakdown,
+        preventionBreakdown,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  return { clusters, classifiedTotal, unclassifiedCount };
+}
+
 // ─── Progress bar bileşeni ────────────────────────────────────────
 
 function PctBar({
@@ -262,6 +393,25 @@ function CaseListPanel({ title, caseIds, caseMap, onSelectCase, onClose }: CaseP
           {caseIds.length} vaka
         </p>
       </div>
+    </div>
+  );
+}
+
+// ─── İçgörü Haritası — küme detay dağılımı ────────────────────────
+
+function BreakdownList({ title, items }: { title: string; items: NameCount[] }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-dim">
+        {title}
+      </p>
+      <ul className="space-y-0.5">
+        {items.map(item => (
+          <li key={item.name} className="truncate text-xs text-slate-600 dark:text-ndark-muted">
+            {item.name} <span className="text-slate-400 dark:text-ndark-dim">· {item.count}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -367,6 +517,63 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
     [fetchedCases],
   );
 
+  // İçgörü Haritası — veri değişince yeniden hesapla
+  const insightMap = useMemo<InsightMap | null>(
+    () => (fetchedCases ? buildInsightMap(fetchedCases) : null),
+    [fetchedCases],
+  );
+
+  // Sekme: ağaç görünümü ya da içgörü haritası
+  const [viewMode, setViewMode] = useState<'tree' | 'insights'>('tree');
+
+  // İçgörü Haritası — eşik altındaki kümeleri gizle
+  const [minClusterSize, setMinClusterSize] = useState(1);
+  const thresholdClusters = useMemo(
+    () => (insightMap ? insightMap.clusters.filter(cl => cl.count >= minClusterSize) : []),
+    [insightMap, minClusterSize],
+  );
+  const hiddenClusterCount = insightMap ? insightMap.clusters.length - thresholdClusters.length : 0;
+  const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
+
+  // İçgörü Haritası — kök neden grubu ve iş süreci filtreleri (eşik filtreli liste üzerinden)
+  const [selectedRootCauseGroup, setSelectedRootCauseGroup] = useState<string | null>(null);
+  const [selectedBusinessProcess, setSelectedBusinessProcess] = useState<string | null>(null);
+
+  const rootCauseGroups = useMemo(() => {
+    const groups = new Set<string>();
+    thresholdClusters.forEach(cluster => {
+      if (cluster.rootCauseGroup && cluster.rootCauseGroup !== UNSPECIFIED) {
+        groups.add(cluster.rootCauseGroup);
+      }
+    });
+    return Array.from(groups).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [thresholdClusters]);
+
+  const businessProcesses = useMemo(() => {
+    const procs = new Set<string>();
+    thresholdClusters.forEach(cluster => {
+      if (cluster.openingKind === 'businessProcess' && cluster.openingLabel !== UNSPECIFIED) {
+        procs.add(cluster.openingLabel);
+      }
+    });
+    return Array.from(procs).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [thresholdClusters]);
+
+  const visibleClusters = useMemo(
+    () =>
+      thresholdClusters.filter(cluster => {
+        if (selectedRootCauseGroup !== null && cluster.rootCauseGroup !== selectedRootCauseGroup) return false;
+        if (
+          selectedBusinessProcess !== null &&
+          !(cluster.openingKind === 'businessProcess' && cluster.openingLabel === selectedBusinessProcess)
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [thresholdClusters, selectedRootCauseGroup, selectedBusinessProcess],
+  );
+
   // Accordion open state'leri
   const [openGroups, setOpenGroups]     = useState<Set<string>>(new Set());
   const [openDetails, setOpenDetails]   = useState<Set<string>>(new Set());
@@ -387,6 +594,7 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
     setOpenGroups(new Set());
     setOpenDetails(new Set());
     setOpenRes(new Set());
+    setOpenClusters(new Set());
 
     const PAGE_SIZE = 200;
     const accumulated: Case[] = [];
@@ -439,6 +647,42 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
       return next;
     });
   }
+  function toggleCluster(key: string) {
+    setOpenClusters(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function handleRootCauseGroupChange(value: string) {
+    setSelectedRootCauseGroup(value || null);
+    setOpenClusters(new Set());
+    setPanel(null);
+  }
+
+  function handleBusinessProcessChange(value: string) {
+    setSelectedBusinessProcess(value || null);
+    setOpenClusters(new Set());
+    setPanel(null);
+  }
+
+  // Tarih/eşik değişimi seçili filtreyi geçersiz kılarsa "Tümü"ye dön ve açık satır/paneli temizle.
+  useEffect(() => {
+    if (selectedRootCauseGroup && !rootCauseGroups.includes(selectedRootCauseGroup)) {
+      setSelectedRootCauseGroup(null);
+      setOpenClusters(new Set());
+      setPanel(null);
+    }
+  }, [rootCauseGroups, selectedRootCauseGroup]);
+
+  useEffect(() => {
+    if (selectedBusinessProcess && !businessProcesses.includes(selectedBusinessProcess)) {
+      setSelectedBusinessProcess(null);
+      setOpenClusters(new Set());
+      setPanel(null);
+    }
+  }, [businessProcesses, selectedBusinessProcess]);
 
   const hasFetched = fetchedCases !== null;
 
@@ -546,8 +790,36 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
             </Card>
           )}
 
-          {/* Ağaç */}
+          {/* Sekmeler */}
           {hasFetched && !loading && tree && (
+            <div className="mb-3 flex items-center gap-1 border-b border-slate-200 dark:border-ndark-border">
+              <button
+                type="button"
+                onClick={() => setViewMode('tree')}
+                className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  viewMode === 'tree'
+                    ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-ndark-muted'
+                }`}
+              >
+                Kök Neden Dağılımı
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('insights')}
+                className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  viewMode === 'insights'
+                    ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-ndark-muted'
+                }`}
+              >
+                İçgörü Haritası
+              </button>
+            </div>
+          )}
+
+          {/* Ağaç */}
+          {hasFetched && !loading && tree && viewMode === 'tree' && (
             <Card>
               <CardBody>
                 {/* Özet başlık */}
@@ -698,6 +970,204 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
               </CardBody>
             </Card>
           )}
+
+          {/* İçgörü Haritası */}
+          {hasFetched && !loading && insightMap && viewMode === 'insights' && (
+            <Card>
+              <CardBody>
+                {/* Özet başlık */}
+                <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-slate-100 pb-3 dark:border-ndark-border">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-ndark-text">
+                    Sınıflandırılan Toplam:
+                  </span>
+                  <Badge tint="slate">{insightMap.classifiedTotal} vaka</Badge>
+                  <Badge tint="emerald">{visibleClusters.length} problem kümesi</Badge>
+
+                  <div className="ml-auto flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-ndark-muted">Min. küme büyüklüğü</span>
+                    <select
+                      value={minClusterSize}
+                      onChange={e => setMinClusterSize(Number(e.target.value))}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                    >
+                      {[1, 3, 5, 10].map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Kök neden grubu ve iş süreci filtre alanları */}
+                <div className="mb-3 flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-ndark-muted">İş Süreci</span>
+                    <select
+                      value={selectedBusinessProcess ?? ''}
+                      onChange={e => handleBusinessProcessChange(e.target.value)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                    >
+                      <option value="">Tümü · {thresholdClusters.length}</option>
+                      {businessProcesses.map(proc => {
+                        const count = thresholdClusters.filter(
+                          c => c.openingKind === 'businessProcess' && c.openingLabel === proc,
+                        ).length;
+                        return (
+                          <option key={proc} value={proc}>
+                            {proc} · {count}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-ndark-muted">Kök Neden Grubu</span>
+                    <select
+                      value={selectedRootCauseGroup ?? ''}
+                      onChange={e => handleRootCauseGroupChange(e.target.value)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                    >
+                      <option value="">Tümü · {thresholdClusters.length}</option>
+                      {rootCauseGroups.map(group => {
+                        const count = thresholdClusters.filter(c => c.rootCauseGroup === group).length;
+                        return (
+                          <option key={group} value={group}>
+                            {group} · {count}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Seçim özeti */}
+                {(selectedRootCauseGroup !== null || selectedBusinessProcess !== null) && (
+                  <p className="mb-3 text-xs text-slate-400 dark:text-ndark-dim">
+                    {[selectedRootCauseGroup, selectedBusinessProcess].filter(Boolean).join(' · ')} · {visibleClusters.length} küme
+                  </p>
+                )}
+
+                {visibleClusters.length === 0 && (
+                  <p className="py-6 text-center text-sm text-slate-400 dark:text-ndark-dim">
+                    {selectedRootCauseGroup === null && selectedBusinessProcess === null
+                      ? 'Seçili eşikte gösterilecek problem kümesi bulunamadı.'
+                      : 'Bu filtreye ait küme bulunamadı.'}
+                  </p>
+                )}
+
+                {/* Sütun başlıkları */}
+                {visibleClusters.length > 0 && (
+                  <div className="mb-1 grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,1.2fr)] gap-3 px-2 text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-dim">
+                    <span>Problem Kümesi</span>
+                    <span>Veri Yorumu</span>
+                    <span>Ürün Aksiyonu</span>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  {visibleClusters.map(cluster => {
+                    const isOpen = openClusters.has(cluster.key);
+                    return (
+                      <div
+                        key={cluster.key}
+                        className="rounded-md border border-slate-100 dark:border-ndark-border"
+                      >
+                        <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,1.2fr)] gap-3 px-2 py-2">
+                          {/* Sütun 1 — Problem Kümesi */}
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              className="flex items-center gap-1.5 text-left text-sm font-medium text-slate-800 dark:text-ndark-text"
+                              onClick={() => toggleCluster(cluster.key)}
+                            >
+                              {isOpen ? (
+                                <ChevronDown size={13} className="shrink-0 text-slate-400" />
+                              ) : (
+                                <ChevronRight size={13} className="shrink-0 text-slate-400" />
+                              )}
+                              <span className="truncate">{cluster.name}</span>
+                            </button>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              <Badge tint="slate">{cluster.count} vaka</Badge>
+                              <Badge tint="sky">
+                                {cluster.openingKind === 'businessProcess' ? 'İş Süreci' : 'İşlem Tipi'}: {cluster.openingLabel}
+                              </Badge>
+                              <Badge tint="amber">Kök Neden: {cluster.rootCauseGroup}</Badge>
+                            </div>
+                          </div>
+
+                          {/* Sütun 2 — Veri Yorumu */}
+                          <div className="space-y-0.5 text-xs leading-relaxed text-slate-600 dark:text-ndark-muted">
+                            <p>
+                              {cluster.count} vaka, analiz edilen vakaların %{cluster.pctOfClassified}'sini oluşturuyor.
+                            </p>
+                            <p>Tüm vakaların %{cluster.pctOfAllCases}'ini oluşturuyor.</p>
+                            {cluster.topRootCauseDetail !== UNSPECIFIED && (
+                              <p>En sık kök neden detayı: {cluster.topRootCauseDetail}.</p>
+                            )}
+                          </div>
+
+                          {/* Sütun 3 — Ürün Aksiyonu */}
+                          <div>
+                            <p className="text-[10px] text-slate-400 dark:text-ndark-dim">
+                              Mevcut kalıcı önlem etiketlerinden türetilmiştir.
+                            </p>
+                            {cluster.topPreventions.length === 0 ? (
+                              <p className="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">
+                                Kalıcı önlem önerisi gerekli
+                              </p>
+                            ) : (
+                              <ul className="mt-1 space-y-0.5">
+                                {cluster.topPreventions.map(p => (
+                                  <li
+                                    key={p.name}
+                                    className="truncate text-xs text-slate-700 dark:text-ndark-text"
+                                  >
+                                    {p.name} · {p.count} vaka
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            <div className="mt-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                leftIcon={<ExternalLink size={11} />}
+                                onClick={() => setPanel({ title: cluster.name, caseIds: cluster.caseIds })}
+                              >
+                                Vakaları Gör
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Genişletildiğinde — detay dağılımı */}
+                        {isOpen && (
+                          <div className="grid grid-cols-3 gap-3 border-t border-slate-100 px-3 py-2 dark:border-ndark-border">
+                            <BreakdownList title="Kök Neden Detayı" items={cluster.detailBreakdown} />
+                            <BreakdownList title="Çözüm Tipi" items={cluster.resolutionBreakdown} />
+                            <BreakdownList title="Kalıcı Önlem" items={cluster.preventionBreakdown} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {hiddenClusterCount > 0 && (
+                  <p className="mt-3 text-xs text-slate-400 dark:text-ndark-dim">
+                    {hiddenClusterCount} küme eşik altında gizlendi.
+                  </p>
+                )}
+                {insightMap.unclassifiedCount > 0 && (
+                  <p className="mt-1 text-xs text-slate-400 dark:text-ndark-dim">
+                    {insightMap.unclassifiedCount} vaka etiket eksikliği nedeniyle sınıflandırılamadı.
+                  </p>
+                )}
+              </CardBody>
+            </Card>
+          )}
+
         </div>
 
         {/* ── Vaka paneli ── */}
