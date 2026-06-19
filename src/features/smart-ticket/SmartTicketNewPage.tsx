@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/services/AuthContext';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
@@ -209,6 +210,7 @@ export function SmartTicketNewPage({
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
+  const { user } = useAuth();
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
   const [stage, setStage] = useState<Stage>('opening');
   const [createdCase, setCreatedCase] = useState<Case | null>(null);
@@ -783,6 +785,15 @@ export function SmartTicketNewPage({
           ? {
               accountProjectId: form.accountProjectId,
               accountProjectName: form.accountProjectName || undefined,
+            }
+          : {}),
+        // Smart Ticket'ı açan kullanıcı otomatik sahip olur.
+        // user.personId yoksa (SystemAdmin/Backoffice) atama yapılmaz; vaka
+        // "Atanmamış" kalır ve dispatcher manuel atar.
+        ...(user?.personId
+          ? {
+              assignedPersonId: user.personId,
+              assignedPersonName: user.fullName,
             }
           : {}),
         category: mapping.category,
