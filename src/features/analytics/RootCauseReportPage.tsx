@@ -540,23 +540,25 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
   const [selectedBusinessProcess, setSelectedBusinessProcess] = useState<string | null>(null);
 
   const rootCauseGroups = useMemo(() => {
-    const groups = new Set<string>();
+    const counts = new Map<string, number>();
     thresholdClusters.forEach(cluster => {
       if (cluster.rootCauseGroup && cluster.rootCauseGroup !== UNSPECIFIED) {
-        groups.add(cluster.rootCauseGroup);
+        counts.set(cluster.rootCauseGroup, (counts.get(cluster.rootCauseGroup) ?? 0) + cluster.count);
       }
     });
-    return Array.from(groups).sort((a, b) => a.localeCompare(b, 'tr'));
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'tr'));
   }, [thresholdClusters]);
 
   const businessProcesses = useMemo(() => {
-    const procs = new Set<string>();
+    const counts = new Map<string, number>();
     thresholdClusters.forEach(cluster => {
       if (cluster.openingKind === 'businessProcess' && cluster.openingLabel !== UNSPECIFIED) {
-        procs.add(cluster.openingLabel);
+        counts.set(cluster.openingLabel, (counts.get(cluster.openingLabel) ?? 0) + cluster.count);
       }
     });
-    return Array.from(procs).sort((a, b) => a.localeCompare(b, 'tr'));
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'tr'));
   }, [thresholdClusters]);
 
   const visibleClusters = useMemo(
@@ -669,7 +671,7 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
 
   // Tarih/eşik değişimi seçili filtreyi geçersiz kılarsa "Tümü"ye dön ve açık satır/paneli temizle.
   useEffect(() => {
-    if (selectedRootCauseGroup && !rootCauseGroups.includes(selectedRootCauseGroup)) {
+    if (selectedRootCauseGroup && !rootCauseGroups.some(g => g.name === selectedRootCauseGroup)) {
       setSelectedRootCauseGroup(null);
       setOpenClusters(new Set());
       setPanel(null);
@@ -677,7 +679,7 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
   }, [rootCauseGroups, selectedRootCauseGroup]);
 
   useEffect(() => {
-    if (selectedBusinessProcess && !businessProcesses.includes(selectedBusinessProcess)) {
+    if (selectedBusinessProcess && !businessProcesses.some(p => p.name === selectedBusinessProcess)) {
       setSelectedBusinessProcess(null);
       setOpenClusters(new Set());
       setPanel(null);
@@ -1007,16 +1009,11 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
                       className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
                     >
                       <option value="">Tümü · {thresholdClusters.length}</option>
-                      {businessProcesses.map(proc => {
-                        const count = thresholdClusters.filter(
-                          c => c.openingKind === 'businessProcess' && c.openingLabel === proc,
-                        ).length;
-                        return (
-                          <option key={proc} value={proc}>
-                            {proc} · {count}
-                          </option>
-                        );
-                      })}
+                      {businessProcesses.map(proc => (
+                        <option key={proc.name} value={proc.name}>
+                          {proc.name} · {proc.count}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1028,14 +1025,11 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
                       className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
                     >
                       <option value="">Tümü · {thresholdClusters.length}</option>
-                      {rootCauseGroups.map(group => {
-                        const count = thresholdClusters.filter(c => c.rootCauseGroup === group).length;
-                        return (
-                          <option key={group} value={group}>
-                            {group} · {count}
-                          </option>
-                        );
-                      })}
+                      {rootCauseGroups.map(group => (
+                        <option key={group.name} value={group.name}>
+                          {group.name} · {group.count}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
