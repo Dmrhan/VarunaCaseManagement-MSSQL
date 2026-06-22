@@ -13,6 +13,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, TextArea, TextInput } from '@/components/ui/Field';
+import { cn } from '@/components/ui/cn';
 import { useToast } from '@/components/ui/Toast';
 import {
   caseService,
@@ -663,6 +664,9 @@ function SolutionStepRow({
   const isTerminal =
     step.status === 'worked' || step.status === 'not_worked' || step.status === 'skipped';
 
+  const [expanded, setExpanded] = useState(false);
+  const isLong = (step.description?.length ?? 0) > 120;
+
   return (
     <li className="rounded-md border border-slate-200 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
       <div className="flex items-start gap-2">
@@ -678,9 +682,27 @@ function SolutionStepRow({
             <Badge tint={STATUS_TINT[step.status]}>{STATUS_LABEL[step.status]}</Badge>
           </div>
           {step.description && (
-            <p className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-ndark-muted">
-              {step.description}
-            </p>
+            <div>
+              <p
+                className={cn(
+                  'mt-1 break-words text-xs text-slate-600 dark:text-ndark-muted',
+                  !expanded && isLong && 'line-clamp-2',
+                )}
+              >
+                {step.description}
+              </p>
+
+              {isLong && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((current) => !current)}
+                  aria-expanded={expanded}
+                  className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-400"
+                >
+                  {expanded ? 'Daralt' : 'Devamını oku'}
+                </button>
+              )}
+            </div>
           )}
           {step.note && (
             <p className="mt-1 rounded bg-slate-50 px-2 py-1 text-[11px] italic text-slate-600 dark:bg-ndark-bg/40 dark:text-ndark-muted">
