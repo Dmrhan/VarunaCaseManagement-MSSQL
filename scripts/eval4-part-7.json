@@ -1,4 +1,0 @@
-[
-  {"no":"VK-MQHYWEQ2","acilis":{"platform":"Backoffice","isSureci":"Smart Connect İşlemleri","islemTipi":"Bağlantı kurma","etkilenenNesne":"Ticari Pakete Aktarim","etki":"Tek kullanıcı etkileniyor"},"kapanis":{"kokNedenGrubu":"Kullanım / Eğitim","kokNedenDetayi":"Bilgi / nasıl yapılır","cozumTipi":"Bilgilendirme","kaliciOnlem":"Bilgi bankası yazısı hazırlanacak"}},
-  {"no":"VK-MQHYKRGC","acilis":{"platform":"Backoffice","isSureci":"Satış İşlemleri","islemTipi":"Düzeltme","etkilenenNesne":"Satış Faturası Düzenleme","etki":"Tek kullanıcı etkileniyor"},"kapanis":{"kokNedenGrubu":"Parametre / Konfigürasyon","kokNedenDetayi":"Eksik parametre","cozumTipi":"Parametre düzeltme","kaliciOnlem":"Parametre sihirbazı yapılacak"}}
-]
