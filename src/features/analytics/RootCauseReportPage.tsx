@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -791,12 +791,53 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
 
   // İçgörü Haritası — eşik altındaki kümeleri gizle
   const [minClusterSize, setMinClusterSize] = useState(1);
-  const visibleClusters = useMemo(
+  const thresholdClusters = useMemo(
     () => (insightMap ? insightMap.clusters.filter(cl => cl.count >= minClusterSize) : []),
     [insightMap, minClusterSize],
   );
-  const hiddenClusterCount = insightMap ? insightMap.clusters.length - visibleClusters.length : 0;
+  const hiddenClusterCount = insightMap ? insightMap.clusters.length - thresholdClusters.length : 0;
   const [openClusters, setOpenClusters] = useState<Set<string>>(new Set());
+
+  // İçgörü Haritası — kök neden grubu ve iş süreci filtreleri (eşik filtreli liste üzerinden)
+  const [selectedRootCauseGroup, setSelectedRootCauseGroup] = useState<string | null>(null);
+  const [selectedBusinessProcess, setSelectedBusinessProcess] = useState<string | null>(null);
+
+  const rootCauseGroups = useMemo(() => {
+    const counts = new Map<string, number>();
+    thresholdClusters.forEach(cluster => {
+      if (cluster.rootCauseGroup && cluster.rootCauseGroup !== UNSPECIFIED) {
+        counts.set(cluster.rootCauseGroup, (counts.get(cluster.rootCauseGroup) ?? 0) + cluster.count);
+      }
+    });
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'tr'));
+  }, [thresholdClusters]);
+
+  const businessProcesses = useMemo(() => {
+    const counts = new Map<string, number>();
+    thresholdClusters.forEach(cluster => {
+      if (cluster.openingKind === 'businessProcess' && cluster.openingLabel !== UNSPECIFIED) {
+        counts.set(cluster.openingLabel, (counts.get(cluster.openingLabel) ?? 0) + cluster.count);
+      }
+    });
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'tr'));
+  }, [thresholdClusters]);
+
+  const visibleClusters = useMemo(
+    () =>
+      thresholdClusters.filter(cluster => {
+        if (selectedRootCauseGroup !== null && cluster.rootCauseGroup !== selectedRootCauseGroup) return false;
+        if (
+          selectedBusinessProcess !== null &&
+          !(cluster.openingKind === 'businessProcess' && cluster.openingLabel === selectedBusinessProcess)
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [thresholdClusters, selectedRootCauseGroup, selectedBusinessProcess],
+  );
 
   // Accordion open state'leri
   const [openGroups, setOpenGroups]     = useState<Set<string>>(new Set());
@@ -878,6 +919,35 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
       return next;
     });
   }
+
+  function handleRootCauseGroupChange(value: string) {
+    setSelectedRootCauseGroup(value || null);
+    setOpenClusters(new Set());
+    setPanel(null);
+  }
+
+  function handleBusinessProcessChange(value: string) {
+    setSelectedBusinessProcess(value || null);
+    setOpenClusters(new Set());
+    setPanel(null);
+  }
+
+  // Tarih/eşik değişimi seçili filtreyi geçersiz kılarsa "Tümü"ye dön ve açık satır/paneli temizle.
+  useEffect(() => {
+    if (selectedRootCauseGroup && !rootCauseGroups.some(g => g.name === selectedRootCauseGroup)) {
+      setSelectedRootCauseGroup(null);
+      setOpenClusters(new Set());
+      setPanel(null);
+    }
+  }, [rootCauseGroups, selectedRootCauseGroup]);
+
+  useEffect(() => {
+    if (selectedBusinessProcess && !businessProcesses.some(p => p.name === selectedBusinessProcess)) {
+      setSelectedBusinessProcess(null);
+      setOpenClusters(new Set());
+      setPanel(null);
+    }
+  }, [businessProcesses, selectedBusinessProcess]);
 
   const hasFetched = fetchedCases !== null;
 
@@ -1203,9 +1273,53 @@ export function RootCauseReportPage({ onSelectCase }: RootCauseReportPageProps) 
                   </div>
                 </div>
 
+                {/* Kök neden grubu ve iş süreci filtre alanları */}
+                <div className="mb-3 flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-ndark-muted">İş Süreci</span>
+                    <select
+                      value={selectedBusinessProcess ?? ''}
+                      onChange={e => handleBusinessProcessChange(e.target.value)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                    >
+                      <option value="">Tümü · {thresholdClusters.length}</option>
+                      {businessProcesses.map(proc => (
+                        <option key={proc.name} value={proc.name}>
+                          {proc.name} · {proc.count}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-ndark-muted">Kök Neden Grubu</span>
+                    <select
+                      value={selectedRootCauseGroup ?? ''}
+                      onChange={e => handleRootCauseGroupChange(e.target.value)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+                    >
+                      <option value="">Tümü · {thresholdClusters.length}</option>
+                      {rootCauseGroups.map(group => (
+                        <option key={group.name} value={group.name}>
+                          {group.name} · {group.count}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Seçim özeti */}
+                {(selectedRootCauseGroup !== null || selectedBusinessProcess !== null) && (
+                  <p className="mb-3 text-xs text-slate-400 dark:text-ndark-dim">
+                    {[selectedRootCauseGroup, selectedBusinessProcess].filter(Boolean).join(' · ')} · {visibleClusters.length} küme
+                  </p>
+                )}
+
                 {visibleClusters.length === 0 && (
                   <p className="py-6 text-center text-sm text-slate-400 dark:text-ndark-dim">
-                    Seçili eşikte gösterilecek problem kümesi bulunamadı.
+                    {selectedRootCauseGroup === null && selectedBusinessProcess === null
+                      ? 'Seçili eşikte gösterilecek problem kümesi bulunamadı.'
+                      : 'Bu filtreye ait küme bulunamadı.'}
                   </p>
                 )}
 
