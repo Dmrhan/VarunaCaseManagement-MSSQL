@@ -602,40 +602,55 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
             <CaseTitleEditable item={item} onUpdated={setItem} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+
+            {/* Header — 3 bölge:
+                  [Kimlik] müşteri butonu (uzun isim truncate + title)
+                  [Statü]  CompactStatusStepper — kendi bölgesinde, separator ile ayrılmış
+                  [Metadata] PriorityBadge / CaseTypeBadge / SLA badge'leri / Watcher
+                Dar ekranda flex-wrap ile alt satıra düşer; bölge ayrımı korunur. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+              {/* [Kimlik] */}
               {onShowCustomer && (
                 <button
                   type="button"
                   onClick={() => onShowCustomer(item.accountId)}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
+                  title={item.accountName}
+                  className="inline-flex max-w-[240px] items-center gap-1 truncate rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
                 >
-                  <Building2 size={11} />
-                  {item.accountName}
+                  <Building2 size={11} className="shrink-0" />
+                  <span className="truncate">{item.accountName}</span>
                 </button>
               )}
 
-              {/* Vaka Detay sticky header — 3 fazlı renk-kodlu çizgi + alt-durum
-                  rozeti + aksiyon satırı. Eski geniş StatusTransitionPanel
-                  görünümü kaldırıldı; reason zorunlu geçişler aynı paneli modal
-                  içinde reuse eder (initialPending preselect). */}
+              {/* dikey ayraç — kimlik / statü */}
+              <span aria-hidden="true" className="hidden h-5 border-l border-slate-200 sm:inline-block dark:border-ndark-border" />
+
+              {/* [Statü] CompactStatusStepper — kendi bölgesinde.
+                  Reason zorunlu geçişler modal'da panel reuse (compactMode). */}
               <CompactStatusStepper item={item} onApplied={setItem} />
 
-              {/* FAZ 2 Collab — kullanıcı bu vakada watcher mı? */}
-              <WatcherHeaderBadge caseId={item.id} />
+              {/* dikey ayraç — statü / metadata */}
+              <span aria-hidden="true" className="hidden h-5 border-l border-slate-200 sm:inline-block dark:border-ndark-border" />
 
-              <PriorityBadge priority={item.priority} />
-              {item.slaViolation && (
-                <Badge tint="rose" icon={<ShieldAlert size={12} />}>
-                  SLA İhlali
-                </Badge>
-              )}
-              {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
-              {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-                <Badge tint="slate" icon={<Clock size={12} />}>
-                  Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-                </Badge>
-              )}
-              <CaseTypeBadge type={item.caseType} />
+              {/* [Metadata] — öncelik / tip / SLA / watcher. Nötr stilde;
+                  statü renk diline KARIŞMAZ (PriorityBadge ve CaseTypeBadge
+                  zaten slate/outline). */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <PriorityBadge priority={item.priority} />
+                <CaseTypeBadge type={item.caseType} />
+                {item.slaViolation && (
+                  <Badge tint="rose" icon={<ShieldAlert size={12} />}>
+                    SLA İhlali
+                  </Badge>
+                )}
+                {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
+                {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
+                  <Badge tint="slate" icon={<Clock size={12} />}>
+                    Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
+                  </Badge>
+                )}
+                <WatcherHeaderBadge caseId={item.id} />
+              </div>
             </div>
           </div>
 

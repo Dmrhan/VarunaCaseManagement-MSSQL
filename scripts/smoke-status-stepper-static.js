@@ -112,6 +112,45 @@ console.log('\n── 4) CaseDetailPage — sticky header wiring ─────
     /\{\/\* StatusPill artık görsel\/display-only/.test(src), false);
 }
 
+console.log('\n── 4b) Sticky header 3-bölge layout ──────────────────────');
+{
+  const src = read('src/features/cases/CaseDetailPage.tsx');
+  // 4b.1 — Header'da en az 1 dikey separator (kimlik/statü/metadata ayrımı)
+  expect('4b.1 sticky header dikey separator (border-l) eklendi',
+    /border-l border-slate-200/.test(src), true);
+  // 4b.2 — Müşteri butonu truncate + title (uzun isim için)
+  expect('4b.2 müşteri butonu truncate + title',
+    /onShowCustomer\(item\.accountId\)[\s\S]{0,400}title=\{item\.accountName\}[\s\S]{0,400}truncate/.test(src), true);
+  // 4b.3 — Metadata pill'leri (PriorityBadge + CaseTypeBadge + SLA) ayrı grup div'inde
+  expect('4b.3 metadata grubu ayrı div (PriorityBadge + CaseTypeBadge yan yana)',
+    /<div className="flex flex-wrap items-center gap-1\.5">[\s\S]{0,800}<PriorityBadge[\s\S]{0,200}<CaseTypeBadge/.test(src), true);
+  // 4b.4 — flex-wrap responsive (dar ekranda alt satıra düşer, bölge ayrımı korunur)
+  expect('4b.4 ana satır flex-wrap items-center gap-x-3 (responsive)',
+    /mt-1\.5 flex flex-wrap items-center gap-x-3 gap-y-2/.test(src), true);
+}
+
+console.log('\n── 4c) Modal akışı — 7 kart grid kaldırıldı (compactMode) ──');
+{
+  const panel = read('src/features/cases/StatusTransitionPanel.tsx');
+  // 4c.1 — compactMode prop interface'de tanımlı
+  expect('4c.1 compactMode?: boolean prop',
+    /compactMode\?:\s*boolean/.test(panel), true);
+  // 4c.2 — function arg'da default false
+  expect('4c.2 compactMode = false default arg',
+    /compactMode = false/.test(panel), true);
+  // 4c.3 — !compactMode header (Statü Geçişi başlığı + "Şu an" badge) guard'lı
+  expect('4c.3 !compactMode header conditional render',
+    /\{!compactMode && \([\s\S]{0,200}Statü Geçişi/.test(panel), true);
+  // 4c.4 — !compactMode 7 kart grid'i conditional render
+  expect('4c.4 !compactMode 7 kart grid conditional render',
+    /\{!compactMode && \(\s*\n\s*<div className="grid grid-cols-2/.test(panel), true);
+
+  // 4c.5 — Stepper Modal'da compactMode pass ediyor
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+  expect('4c.5 CompactStatusStepper Modal compactMode pass ediyor',
+    /<StatusTransitionPanel[\s\S]{0,300}compactMode[\s\S]{0,100}initialPending=\{reasonTarget\}|<StatusTransitionPanel[\s\S]{0,200}initialPending=\{reasonTarget\}[\s\S]{0,100}compactMode/.test(stepper), true);
+}
+
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
 {
   // Bu task tamamen FE görsel katmanı; backend dosyaları değişmemeli.

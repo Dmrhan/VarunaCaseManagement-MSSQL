@@ -386,6 +386,7 @@ export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperPr
           <StatusTransitionPanel
             item={item}
             initialPending={reasonTarget}
+            compactMode
             onApplied={(updated) => {
               setReasonTarget(null);
               onApplied(updated);

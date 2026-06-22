@@ -53,6 +53,13 @@ interface StatusTransitionPanelProps {
    * panel ve aynı reason/closure mantığı ile devam eder.
    */
   initialPending?: CaseStatus | null;
+  /**
+   * Modal içinde reuse edilirken: panel header'ı ("Statü Geçişi" başlığı +
+   * "Şu an" badge) ve 7 kartlık geçiş grid'i gizlenir. Hedef zaten Compact
+   * Status Stepper'da seçilmiş; modal sadece zorunlu alanlar + Uygula/Vazgeç
+   * gösterir. Reason/closure/KB/checklist logic'i AYNI dosyada, parçalanmaz.
+   */
+  compactMode?: boolean;
 }
 
 // Spec 11.1 renk paletiyle uyumlu kart tonları
@@ -137,7 +144,7 @@ const STATUS_LABELS: Record<CaseStatus, string> = {
   'İptalEdildi':         'İptal Edildi',
 };
 
-export function StatusTransitionPanel({ item, onApplied, initialPending }: StatusTransitionPanelProps) {
+export function StatusTransitionPanel({ item, onApplied, initialPending, compactMode = false }: StatusTransitionPanelProps) {
   const allowedTransitions = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
 
   const [pending, setPending] = useState<CaseStatus | null>(initialPending ?? null);
@@ -470,20 +477,24 @@ export function StatusTransitionPanel({ item, onApplied, initialPending }: Statu
   }
 
   return (
-    <section className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">Statü Geçişi</h3>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            Mevcut statüden geçilebilen kartlar aktif. Diğerleri pasiftir.
-          </p>
+    <section className={compactMode ? '' : 'rounded-xl bg-white p-4 ring-1 ring-slate-200'}>
+      {/* Header + grid: compactMode'da gizli — hedef zaten Compact Status Stepper'da seçildi. */}
+      {!compactMode && (
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Statü Geçişi</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Mevcut statüden geçilebilen kartlar aktif. Diğerleri pasiftir.
+            </p>
+          </div>
+          <Badge tint="slate">
+            Şu an: <strong className="ml-1">{STATUS_LABELS[item.status]}</strong>
+          </Badge>
         </div>
-        <Badge tint="slate">
-          Şu an: <strong className="ml-1">{STATUS_LABELS[item.status]}</strong>
-        </Badge>
-      </div>
+      )}
 
-      {/* Status kart grid */}
+      {/* Status kart grid — compactMode'da render edilmez */}
+      {!compactMode && (
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
         {CASE_STATUSES.map((status) => {
           const meta = STATUS_META[status];
@@ -543,6 +554,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending }: Statu
           );
         })}
       </div>
+      )}
 
       {/* Koşullu alanlar */}
       {pending && (
