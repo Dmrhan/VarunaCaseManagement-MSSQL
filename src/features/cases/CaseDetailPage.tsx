@@ -617,29 +617,29 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                   kendi içinde durum (pill) + işlem (köşeli buton) ayrımı var. */}
               <CompactStatusStepper item={item} onApplied={setItem} />
 
-              {/* Sağa it — metadata bloğunu net ayır */}
-              <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-ndark-muted">
-                {/* Öncelik — sönük metadata (renkli pill değil). */}
-                <span>
-                  <span className="text-slate-400">Öncelik:</span>{' '}
-                  <span className="font-medium text-slate-700 dark:text-ndark-text">
-                    {CASE_PRIORITY_LABELS[item.priority]}
-                  </span>
+              {/* Sağa it — metadata sönük tek satır + SLA tek renkli sinyal */}
+              <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
+                {/* Öncelik · Tip — sönük düz metin (pill değil); statü renk
+                    diliyle yarışmaz. */}
+                <span title={`Öncelik: ${CASE_PRIORITY_LABELS[item.priority]} · Tip: ${CASE_TYPE_LABELS[item.caseType]}`}>
+                  {CASE_PRIORITY_LABELS[item.priority]} · {CASE_TYPE_LABELS[item.caseType]}
                 </span>
-                {/* Tip — sönük metadata. */}
-                <span>
-                  <span className="text-slate-400">Tip:</span>{' '}
-                  <span className="font-medium text-slate-700 dark:text-ndark-text">
-                    {CASE_TYPE_LABELS[item.caseType]}
-                  </span>
-                </span>
-                {/* SLA — gerçek uyarı; metadata bölgesinde, statü grubundan ayrı. */}
+                {/* SLA İhlali — tek renkli sinyal (sayfadaki tek dikkat çeken renk) */}
                 {item.slaViolation && (
-                  <Badge tint="rose" icon={<ShieldAlert size={12} />}>
-                    SLA İhlali
-                  </Badge>
+                  <span
+                    className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400"
+                    title="SLA süresi aşıldı"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
+                    SLA aşıldı
+                  </span>
                 )}
-                {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
+                {item.slaPausedAt && (
+                  <span className="inline-flex items-center gap-1 text-slate-500">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                    SLA durdu
+                  </span>
+                )}
                 {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
                   <span className="inline-flex items-center gap-1 text-slate-500">
                     <Clock size={11} />

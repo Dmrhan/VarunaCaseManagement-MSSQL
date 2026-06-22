@@ -90,9 +90,12 @@ console.log('\n── 3) CompactStatusStepper.tsx — yeni component ───�
   // 3.6 — Reason/closure logic CompactStatusStepper'da YENİDEN YAZILMADI
   expect('3.6 reason/closure logic stepper\'da yeniden yazılmadı (no resolutionNote handling)',
     /resolutionNote\s*=|closureRcg|kbSuggestion/.test(src), false);
-  // 3.7 — Tek "Durumu değiştir ▾" buton (inline aksiyon pill'leri kaldırıldı)
-  expect('3.7 "Durumu değiştir" tek köşeli buton (rounded-md border)',
-    /rounded-md border[\s\S]{0,400}Durumu değiştir/.test(src), true);
+  // 3.7 — Tek "Durumu değiştir ▾" ghost link (border yok; ghost text-slate-600)
+  expect('3.7 "Durumu değiştir" ghost link (border yok)',
+    /text-slate-600 hover:text-slate-900[\s\S]{0,400}Durumu değiştir/.test(src), true);
+  // 3.7b — border-md/rounded-md/border class'ları "Durumu değiştir" çevresinde YOK
+  expect('3.7b ghost — Durumu değiştir butonunda border-md/rounded-md class yok',
+    /rounded-md border[\s\S]{0,200}Durumu değiştir/.test(src), false);
   // 3.8 — Popover import + role="menu"
   expect('3.8 Popover import + role="menu"',
     src.includes("import { Popover }") && src.includes('role="menu"'), true);
@@ -102,6 +105,35 @@ console.log('\n── 3) CompactStatusStepper.tsx — yeni component ───�
   // 3.10 — Menüde STATUS_VERB_LABELS kullanılıyor (durum adı değil)
   expect('3.10 menü içinde STATUS_VERB_LABELS[target] render ediliyor',
     /STATUS_VERB_LABELS\[target\]/.test(src), true);
+  // 3.11 — STATUS_VISUAL dotColor field'ı + 5 farklı dot rengi (ek kriter 1)
+  expect('3.11 STATUS_VISUAL dotColor: bg-amber-500 (İncelemede)',
+    /'İncelemede':[\s\S]{0,200}dotColor:\s*'bg-amber-500'/.test(src), true);
+  expect('3.12 STATUS_VISUAL dotColor: bg-slate-400 (3rdPartyBekleniyor)',
+    /'3rdPartyBekleniyor':[\s\S]{0,200}dotColor:\s*'bg-slate-400'/.test(src), true);
+  expect('3.13 STATUS_VISUAL dotColor: bg-rose-500 (Eskalasyon)',
+    /'Eskalasyon':[\s\S]{0,200}dotColor:\s*'bg-rose-500'/.test(src), true);
+  expect('3.14 STATUS_VISUAL dotColor: bg-violet-500 (YenidenAcildi)',
+    /'YenidenAcildi':[\s\S]{0,200}dotColor:\s*'bg-violet-500'/.test(src), true);
+  // 3.15 — Aktif faz dot rengi activeVisual.dotColor'dan gelir (sabit amber DEĞİL)
+  expect('3.15 aktif faz dot rengi activeVisual.dotColor',
+    /isCurrent\s*\?\s*activeVisual\.dotColor/.test(src), true);
+  // 3.16 — subStatusNote (alt-durum metni) field'ı tanımlı + render
+  expect('3.16 subStatusNote: "3. parti · SLA durdu"',
+    src.includes("subStatusNote: '3. parti · SLA durdu'"), true);
+  expect('3.17 subStatusNote: "Eskale edildi"',
+    src.includes("subStatusNote: 'Eskale edildi'"), true);
+  expect('3.18 alt-durum notu render — activeVisual.subStatusNote',
+    /const subStatusNote = activeVisual\.subStatusNote/.test(src), true);
+  // 3.19 — Tamamlanan etiket sönük (text-slate-400) — rötuş
+  expect('3.19 tamamlanan etiket sönük (rötuş — text-slate-400 fallthrough)',
+    /isCurrent[\s\S]{0,200}font-medium text-slate-900[\s\S]{0,200}'text-slate-400/.test(src), true);
+  // 3.20 — Menü seçimi → reason modal akışı (ek kriter 2)
+  // handleClick: STATUS_REQUIRES_REASON true ise setReasonTarget(target) çağrılır;
+  // panel reasonTarget initialPending={reasonTarget} compactMode prop'larıyla mount edilir.
+  expect('3.20 handleClick setReasonTarget(target) for reason-required',
+    /if \(STATUS_REQUIRES_REASON\[target\]\)\s*\{[\s\S]{0,200}setReasonTarget\(target\)/.test(src), true);
+  expect('3.21 Modal panel initialPending={reasonTarget} + compactMode',
+    /<StatusTransitionPanel[\s\S]{0,300}initialPending=\{reasonTarget\}[\s\S]{0,100}compactMode/.test(src), true);
 }
 
 console.log('\n── 4) CaseDetailPage — sticky header wiring ──────────────');
@@ -125,12 +157,12 @@ console.log('\n── 4b) Header sade — müşteri pill kaldırıldı + metadat
   // 4b.1 — Header'daki müşteri butonu kaldırıldı (breadcrumb + sol panelde zaten var)
   expect('4b.1 header onShowCustomer ile müşteri butonu render edilmiyor',
     /onShowCustomer && \(\s*\n\s*<button[\s\S]{0,200}onShowCustomer\(item\.accountId\)/.test(src), false);
-  // 4b.2 — Öncelik metadata sade etiket (renkli pill değil)
-  expect('4b.2 Öncelik: + CASE_PRIORITY_LABELS sade text',
-    /<span className="text-slate-400">Öncelik:<\/span>[\s\S]{0,200}CASE_PRIORITY_LABELS\[item\.priority\]/.test(src), true);
-  // 4b.3 — Tip metadata sade etiket
-  expect('4b.3 Tip: + CASE_TYPE_LABELS sade text',
-    /<span className="text-slate-400">Tip:<\/span>[\s\S]{0,200}CASE_TYPE_LABELS\[item\.caseType\]/.test(src), true);
+  // 4b.2 — Öncelik · Tip tek sönük satır (label prefix yok)
+  expect('4b.2 metadata tek sönük satır "Orta · Genel Destek" pattern',
+    /CASE_PRIORITY_LABELS\[item\.priority\]\}\s*·\s*\{CASE_TYPE_LABELS\[item\.caseType\]\}/.test(src), true);
+  // 4b.3 — SLA İhlali artık inline rose dot + "SLA aşıldı" (Badge component yok)
+  expect('4b.3 SLA aşıldı inline rose dot + text',
+    /text-rose-600[\s\S]{0,400}bg-rose-500[\s\S]{0,400}SLA aşıldı/.test(src), true);
   // 4b.4 — Metadata bloğu sağa yaslandı (ml-auto)
   expect('4b.4 metadata bloğu ml-auto ile sağa yaslandı',
     /<div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1/.test(src), true);
