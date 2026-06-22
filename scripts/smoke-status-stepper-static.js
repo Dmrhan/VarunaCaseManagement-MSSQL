@@ -196,6 +196,42 @@ console.log('\n── 4c) Modal akışı — 7 kart grid kaldırıldı (compactM
     /<StatusTransitionPanel[\s\S]{0,300}compactMode[\s\S]{0,100}initialPending=\{reasonTarget\}|<StatusTransitionPanel[\s\S]{0,200}initialPending=\{reasonTarget\}[\s\S]{0,100}compactMode/.test(stepper), true);
 }
 
+console.log('\n── 4d) LBD PR-A — sol panel sakinleştirme (A6/A7/A12) ────');
+{
+  const src = read('src/features/cases/CaseDetailPage.tsx');
+
+  // A6 — WatchersPanel Agent rolünde gizli; diğer rollerde görünür
+  expect('4d.1 WatchersPanel userRole !== "Agent" guard',
+    /userRole !== 'Agent' && \(\s*\n?\s*<WatchersPanel/.test(src), true);
+  expect('4d.2 LeftPanel userRole prop tanımı (string optional)',
+    /userRole\?:\s*string/.test(src), true);
+  expect('4d.3 LeftPanel caller userRole={user?.role}',
+    /userRole=\{user\?\.role\}/.test(src), true);
+
+  // A7 — Hızlı Aksiyonlar PanelSection kaldırıldı
+  expect('4d.4 "Hızlı Aksiyonlar" PanelSection sol panelde yok',
+    /PanelSection title="Hızlı Aksiyonlar"/.test(src), false);
+  // A7 — Header'da Çağrı Başlat + Devret + Durum Raporu hala var
+  expect('4d.5 header: "Çağrı Başlat" butonu',
+    /Çağrı Başlat[\s\S]{0,200}handleStartCall/.test(src) || /handleStartCall[\s\S]{0,400}Çağrı Başlat/.test(src), true);
+  expect('4d.6 header: "Devret" butonu',
+    /Devret[\s\S]{0,200}setTransferOpen/.test(src) || /setTransferOpen[\s\S]{0,400}Devret/.test(src), true);
+  // A7 — LeftPanel artık onStartCall/onTransfer/onNoteAdded/onTabFocusNote/callActive almaz
+  expect('4d.7 LeftPanel onStartCall prop kalktı',
+    /onStartCall:\s*\(\)\s*=>\s*void/.test(src), false);
+  expect('4d.8 LeftPanel onTransfer prop kalktı',
+    /onTransfer:\s*\(\)\s*=>\s*void/.test(src), false);
+  // A7 — handleQuickActionAddNote kaldırıldı (caller yoktu)
+  expect('4d.9 handleQuickActionAddNote silindi',
+    /function handleQuickActionAddNote\(\)/.test(src), false);
+
+  // A12 — Müşteri adı tıklanır; "Detay →" zaten bağlı (regression guard)
+  expect('4d.10 müşteri adı button onOpenAccount(item.accountId)',
+    /onClick=\{\(\) => onOpenAccount\(item\.accountId as string\)\}[\s\S]{0,400}\{customerContext\?\.accountName \?\? item\.accountName\}/.test(src), true);
+  expect('4d.11 "Detay →" link hala bağlı (regression)',
+    /onOpenAccount\(item\.accountId as string\)[\s\S]{0,400}Detay →/.test(src), true);
+}
+
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
 {
   // Bu task tamamen FE görsel katmanı; backend dosyaları değişmemeli.

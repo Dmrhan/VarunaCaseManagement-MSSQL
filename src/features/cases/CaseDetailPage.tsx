@@ -52,7 +52,6 @@ import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
-import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -389,10 +388,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
     });
   }
 
-  function handleQuickActionAddNote() {
-    setTab('notes');
-    setTimeout(() => noteRef.current?.focus(), 50);
-  }
+  // handleQuickActionAddNote — eski "Hızlı Aksiyonlar" PanelSection'undaki
+  // "Tüm not akışını aç" linkinden çağrılıyordu. LBD A7 ile o blok kalktı;
+  // Notlar sekmesine geçmek için doğal yol artık tab tıklaması.
+  // Fonksiyon: silindi (caller yok).
 
   // Breadcrumb stack üzerinden geçmiş vakaya geçiş — Spec UX 4
   function navigateToCase(targetId: string) {
@@ -838,16 +837,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                 }
               : undefined
           }
-          onStartCall={handleStartCall}
-          onTransfer={() => setTransferOpen(true)}
           onClaim={handleClaim}
           claiming={claiming}
           canClaim={!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi'}
-          onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
-          onTabFocusNote={handleQuickActionAddNote}
-          callActive={callActive}
           drawerOpen={leftDrawerOpen}
           onCloseDrawer={() => setLeftDrawerOpen(false)}
+          userRole={user?.role}
         />
 
         {/* Main */}
@@ -1113,16 +1108,12 @@ function LeftPanel({
   canLinkAccount,
   onLinkAccount,
   onConfirmLinkSuggestion,
-  onStartCall,
-  onTransfer,
   onClaim,
   claiming,
   canClaim,
-  onNoteAdded,
-  onTabFocusNote,
-  callActive,
   drawerOpen,
   onCloseDrawer,
+  userRole,
 }: {
   item: Case;
   accountPhone?: string;
@@ -1133,19 +1124,16 @@ function LeftPanel({
   canLinkAccount?: boolean;
   onLinkAccount?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
-  onStartCall: () => void;
-  onTransfer: () => void;
   /** WR-C1 — Üstlen click handler (parent state'i günceller). */
   onClaim: () => void;
   /** WR-C1 — Claim akışı çalışırken disabled + spinner için. */
   claiming: boolean;
   /** WR-C1 — Vaka açık + atanmamış + user.personId varsa true. */
   canClaim: boolean;
-  onNoteAdded: (note: import('./types').CaseNote) => void;
-  onTabFocusNote: () => void;
-  callActive: boolean;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
+  /** LBD A6 — Agent rolünde WatchersPanel gizlenir; diğer tüm rollerde görünür. */
+  userRole?: string;
 }) {
   const ctxCompany = customerContext?.company ?? null;
   const content = (
@@ -1156,9 +1144,22 @@ function LeftPanel({
             <>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
-                    {customerContext?.accountName ?? item.accountName}
-                  </div>
+                  {/* LBD A12 — Müşteri adı tıklanır; "Detay →" ile aynı yere
+                      yönlendirir. onOpenAccount yoksa düz metin. */}
+                  {onOpenAccount ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAccount(item.accountId as string)}
+                      title="Müşteri Detayı'na git"
+                      className="block w-full truncate cursor-pointer text-left text-sm font-semibold text-slate-900 hover:text-brand-700 hover:underline dark:text-ndark-text dark:hover:text-brand-300"
+                    >
+                      {customerContext?.accountName ?? item.accountName}
+                    </button>
+                  ) : (
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                      {customerContext?.accountName ?? item.accountName}
+                    </div>
+                  )}
                   {customerContext?.vknMasked && (
                     <div className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
                       VKN {customerContext.vknMasked}
@@ -1386,49 +1387,19 @@ function LeftPanel({
         </div>
       </PanelSection>
 
-      {/* FAZ 2 Collab — izleyiciler. Self-watch + Supervisor başkasını ekleyebilir. */}
-      <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
+      {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
+          tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.
+          Self-watch + Supervisor başkasını ekleyebilir. */}
+      {userRole !== 'Agent' && (
+        <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
+      )}
 
-      <PanelSection title="Hızlı Aksiyonlar" icon={<Sparkles size={12} />}>
-        <div className="grid grid-cols-1 gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<Phone size={12} />}
-            onClick={onStartCall}
-            disabled={callActive}
-          >
-            {callActive ? 'Çağrı aktif' : 'Çağrı Başlat'}
-          </Button>
-          <Button size="sm" variant="outline" leftIcon={<UserPlus size={12} />} onClick={onTransfer}>
-            Devret
-          </Button>
-          <QuickNotePopover
-            caseId={item.id}
-            align="start"
-            width={280}
-            onAdded={onNoteAdded}
-            trigger={({ toggle }) => (
-              <Button
-                size="sm"
-                variant="outline"
-                leftIcon={<MessageSquare size={12} />}
-                onClick={toggle}
-              >
-                Hızlı Not
-              </Button>
-            )}
-          />
-          <button
-            type="button"
-            onClick={onTabFocusNote}
-            className="text-[11px] text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-          >
-            Tüm not akışını aç →
-          </button>
-        </div>
-      </PanelSection>
-
+      {/* LBD A7: "Hızlı Aksiyonlar" PanelSection kaldırıldı.
+          Aksiyonların erişim noktası:
+            - Çağrı Başlat → header "Çağrı Başlat" butonu
+            - Devret → header "Devret" butonu
+            - Hızlı Not / Tüm not akışı → Notlar sekmesi
+          Header aksiyonları KALDI (kullanıcı hızlı erişim istedi). */}
     </div>
   );
 
