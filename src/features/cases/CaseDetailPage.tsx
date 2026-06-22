@@ -1177,49 +1177,36 @@ function LeftPanel({
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge tint="slate">{item.companyName}</Badge>
-                {ctxCompany?.externalCustomerCode && (
-                  <span
-                    title="Müşteri Dış Kodu"
-                    className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
-                  >
-                    Kod {ctxCompany.externalCustomerCode}
+              {/* LBD baseline 1+5 — Çip çorbası → sönük tek satır metin.
+                  Tek vurgu: priority Critical olduğunda küçük rose dot inline.
+                  Diğerleri (şirket / kod / paket / proje / ürün / supportLevel /
+                  non-Critical priority) düz sönük metin "·" ile ayrılır. */}
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+                {(() => {
+                  const parts: string[] = [];
+                  parts.push(item.companyName);
+                  if (ctxCompany?.externalCustomerCode) parts.push(`Kod ${ctxCompany.externalCustomerCode}`);
+                  if (ctxCompany?.packageName) parts.push(ctxCompany.packageName);
+                  if (item.accountProjectName) parts.push(`Proje: ${item.accountProjectName}`);
+                  if (item.packageName) parts.push(`Paket: ${item.packageName}`);
+                  if (item.productName) parts.push(`Ürün: ${item.productName}`);
+                  if (item.supportLevel) parts.push(SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel);
+                  // Critical olmayan priority düz metinde göster
+                  if (item.priority !== 'Critical') {
+                    parts.push(CASE_PRIORITY_LABELS[item.priority] ?? item.priority);
+                  }
+                  return <span title={parts.join(' · ')}>{parts.join(' · ')}</span>;
+                })()}
+                {item.priority === 'Critical' && (
+                  <span className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400">
+                    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                    Kritik
                   </span>
                 )}
-                {ctxCompany?.packageName && <Badge tint="indigo">{ctxCompany.packageName}</Badge>}
-                {/* WR-A4 / PM-04 — Bağlı proje badge'i. */}
-                {item.accountProjectName && (
-                  <span title="Bağlı proje">
-                    <Badge tint="violet">Proje: {item.accountProjectName}</Badge>
-                  </span>
-                )}
-                {/* WR-A7b / PM-05 — Catalog ürün ve paket badge'leri. */}
-                {item.packageName && (
-                  <span title="Vakaya bağlı catalog paketi">
-                    <Badge tint="indigo">Paket: {item.packageName}</Badge>
-                  </span>
-                )}
-                {item.productName && (
-                  <span title="Vakaya bağlı ürün">
-                    <Badge tint="blue">Ürün: {item.productName}</Badge>
-                  </span>
-                )}
-                {/* WR-A5 / PM-03 — Destek seviyesi badge'i. */}
-                {item.supportLevel && (
-                  <span title="Destek seviyesi">
-                    <Badge tint={item.supportLevel === 'L1' ? 'slate' : 'amber'}>
-                      {SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel}
-                    </Badge>
-                  </span>
-                )}
-                <Badge tint={item.priority === 'Critical' ? 'rose' : 'blue'}>
-                  {item.priority}
-                </Badge>
               </div>
               {ctxCompany?.activeProducts && ctxCompany.activeProducts.length > 0 && (
                 <div className="pt-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">
+                  <div className="text-[10px] font-medium text-slate-400 dark:text-ndark-dim">
                     Aktif Ürünler
                   </div>
                   <div className="mt-0.5 flex flex-wrap gap-1">
@@ -1293,7 +1280,7 @@ function LeftPanel({
                 item.customerContactPhone ||
                 item.customerContactEmail) && (
                 <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-700 dark:border-ndark-border dark:text-ndark-text">
-                  <div className="mb-1 font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                  <div className="mb-1 font-medium text-slate-500 dark:text-ndark-muted">
                     Başvuran Bilgileri
                   </div>
                   <dl className="space-y-0.5">
@@ -1339,7 +1326,7 @@ function LeftPanel({
 
       {/* Customer Pulse — müşterinin geniş durumu (Roadmap §"Customer Context
           Intelligence"). Self-fetch; hata olursa case detail bozulmaz. */}
-      <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} />
+      <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} metricsLayout="summary" />
 
       <PanelSection title="SLA Durumu" icon={<Clock size={12} />}>
         <div className="space-y-1.5 text-xs">
@@ -1413,7 +1400,7 @@ function LeftPanel({
           <div className="absolute inset-0 bg-slate-900/30" onClick={onCloseDrawer} />
           <aside className="absolute left-0 top-0 h-full w-[320px] overflow-y-auto bg-white p-4 shadow-xl dark:bg-ndark-bg">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">Müşteri Özeti</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Müşteri Özeti</span>
               <button
                 type="button"
                 onClick={onCloseDrawer}
@@ -1567,7 +1554,7 @@ function RightPanel({
               )}
               {item.aiCallBrief && (
                 <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="mb-1 text-[10px] font-medium text-slate-500">
                     Çağrı Özeti
                   </div>
                   {item.aiCallBrief}
@@ -1575,7 +1562,7 @@ function RightPanel({
               )}
               {item.aiFollowupRecommendation && (
                 <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="mb-1 text-[10px] font-medium text-slate-500">
                     Takip Önerisi
                   </div>
                   {item.aiFollowupRecommendation}
@@ -1583,7 +1570,7 @@ function RightPanel({
               )}
               {item.aiRetentionOfferSuggestion && (
                 <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="mb-1 text-[10px] font-medium text-rose-700">
                     Retention Teklif Önerisi
                   </div>
                   {item.aiRetentionOfferSuggestion}
@@ -1682,7 +1669,7 @@ function RightPanel({
               )}
               {item.offeredSolutions && item.offeredSolutions.length > 0 && (
                 <div className="space-y-1 pt-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="text-[10px] font-medium text-rose-700">
                     Sunulan Teklifler
                   </div>
                   {item.offeredSolutions.map((id) => {
@@ -1697,7 +1684,7 @@ function RightPanel({
               )}
               {item.offerRejectionReason && (
                 <div className="rounded-md bg-rose-50 px-2 py-1.5 text-rose-900 ring-1 ring-rose-200">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="text-[10px] font-medium text-rose-700">
                     Red Gerekçesi
                   </div>
                   {item.offerRejectionReason}
@@ -2136,7 +2123,7 @@ function LinksTab({
       {/* AI öneri kartı */}
       <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
         <header className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
+          <h3 className="flex items-center gap-1.5 text-xs font-medium text-violet-900 dark:text-violet-200">
             <Sparkles size={12} />
             RUNA AI Benzer Vakalar
           </h3>
@@ -2228,7 +2215,7 @@ function LinksTab({
       {/* Existing links — gruplandırılmış */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+          <h3 className="text-xs font-medium text-slate-600 dark:text-ndark-muted">
             Mevcut Bağlantılar
           </h3>
           <Button size="sm" leftIcon={<Plus size={12} />} onClick={() => setLinkModalOpen(true)}>
@@ -2674,7 +2661,7 @@ function CustomerMatchSuggestionsPanel({
   if (loading) {
     return (
       <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
           <Sparkles size={11} /> Önerilen müşteriler
         </div>
         <div className="space-y-1.5">
@@ -2706,7 +2693,7 @@ function CustomerMatchSuggestionsPanel({
   if (suggestions.length === 0) {
     return (
       <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:text-ndark-muted">
-        <div className="mb-1 flex items-center gap-1.5 font-semibold uppercase tracking-wide text-slate-500">
+        <div className="mb-1 flex items-center gap-1.5 font-medium text-slate-500">
           <Sparkles size={11} /> Önerilen müşteriler
         </div>
         <div>Bu vaka için otomatik öneri bulunamadı. Manuel arama ile devam edebilirsin.</div>
@@ -2716,7 +2703,7 @@ function CustomerMatchSuggestionsPanel({
 
   return (
     <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
         <Sparkles size={11} /> Önerilen müşteriler
       </div>
       <ul className="space-y-1.5">
@@ -2808,7 +2795,9 @@ function PanelSection({
   return (
     <section className={`rounded-lg bg-white p-3 ring-1 ring-inset dark:bg-ndark-card ${ring}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+        {/* LBD baseline 2 — sentence-case + sönük, ALL CAPS YOK.
+            PanelSection bu dosyaya local; başka ekrana yayılmaz. */}
+        <h3 className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-ndark-muted">
           {icon}
           {title}
         </h3>
@@ -2822,7 +2811,8 @@ function PanelSection({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</span>
+      {/* LBD baseline 2 — sentence-case + sönük (Row da bu dosyaya local). */}
+      <span className="text-xs text-slate-500 dark:text-ndark-muted">{label}</span>
       <span className="truncate text-right text-slate-800 dark:text-ndark-text">{value}</span>
     </div>
   );
@@ -2843,7 +2833,7 @@ function AiTile({
       : 'bg-white ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border';
   return (
     <div className={`rounded-md px-2.5 py-2 ring-1 ring-inset ${cls}`}>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</div>
+      <div className="text-[10px] font-medium text-slate-500 dark:text-ndark-muted">{label}</div>
       <div className="mt-0.5 text-sm font-semibold text-slate-800 dark:text-ndark-text">{value}</div>
     </div>
   );
@@ -2858,7 +2848,7 @@ function QaScorePill({ label, value }: { label: string; value: number }) {
       : 'bg-rose-50 text-rose-800 ring-rose-200 dark:bg-rose-950/30 dark:text-rose-200 dark:ring-rose-900/40';
   return (
     <div className={`rounded-md px-2 py-1.5 text-center ring-1 ring-inset ${tone}`}>
-      <div className="text-[9px] font-medium uppercase tracking-wide opacity-80">{label}</div>
+      <div className="text-[9px] font-medium opacity-80">{label}</div>
       <div className="mt-0.5 text-sm font-bold">{value}/5</div>
     </div>
   );
@@ -2867,7 +2857,7 @@ function QaScorePill({ label, value }: { label: string; value: number }) {
 function SlaRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="text-[10px]  text-slate-500">{label}</div>
       <div className="text-slate-800">{value}</div>
     </div>
   );
@@ -3370,7 +3360,7 @@ function DetailTab({
 
           <div className="mt-3 grid grid-cols-1 gap-2">
             <div>
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <h4 className="mb-1 text-[11px] font-medium text-slate-500">
                 Yapılan Aksiyon
               </h4>
               <InlineEdit
@@ -3387,7 +3377,7 @@ function DetailTab({
             </div>
             {(v('offerOutcome') === 'Reddedildi' || drafts.offerOutcome === 'Reddedildi') && (
               <div>
-                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                <h4 className="mb-1 text-[11px] font-medium text-rose-700">
                   Red Gerekçesi
                 </h4>
                 <InlineEdit
@@ -3566,7 +3556,7 @@ function OfferedSolutionsBlock({
     <>
       <div className="mt-3">
         <div className="mb-1.5 flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <h4 className="text-[11px] font-medium text-slate-500">
             Sunulan Teklifler
             {isDraft && (
               <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 ring-1 ring-amber-200">
@@ -3807,7 +3797,7 @@ function ChecklistSection({
                   {it.label}
                 </span>
                 {it.required && !it.checked && (
-                  <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700">
+                  <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-medium text-rose-700">
                     Zorunlu
                   </span>
                 )}
@@ -3849,17 +3839,30 @@ function KpiInlineRow({ item }: { item: Case }) {
 
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <KpiInlineTile icon={<TrendingUp size={12} />} label="Müdahale Süresi" value={responseMin != null ? fmt(responseMin) : '—'} />
-      <KpiInlineTile icon={<CheckCircle2 size={12} />} label="Çözüm Süresi"   value={resolutionMin != null ? fmt(resolutionMin) : '—'} />
+      {/* LBD baseline 3 — "—" placeholder yerine sönük italik worded empty.
+          Dolu olanlar (sayısal değer) aynen kalır. */}
+      <KpiInlineTile
+        icon={<TrendingUp size={12} />}
+        label="Müdahale süresi"
+        value={responseMin != null ? fmt(responseMin) : 'veri yok'}
+        emptyValue={responseMin == null}
+      />
+      <KpiInlineTile
+        icon={<CheckCircle2 size={12} />}
+        label="Çözüm süresi"
+        value={resolutionMin != null ? fmt(resolutionMin) : 'henüz çözülmedi'}
+        emptyValue={resolutionMin == null}
+      />
       <KpiInlineTile
         icon={<Target size={12} />}
-        label="İlk Temas Çözüm"
-        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : '—'}
+        label="İlk temas çözüm"
+        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : 'henüz çözülmedi'}
         tone={fcr ? 'good' : resolutionMin != null ? 'warn' : 'neutral'}
+        emptyValue={resolutionMin == null}
       />
       <KpiInlineTile
         icon={<HistoryIcon size={12} />}
-        label="Yeniden Açılma"
+        label="Yeniden açılma"
         value={reopened ? 'Var' : 'Yok'}
         tone={reopened ? 'warn' : 'neutral'}
       />
@@ -3872,11 +3875,14 @@ function KpiInlineTile({
   label,
   value,
   tone = 'neutral',
+  emptyValue = false,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   tone?: 'neutral' | 'good' | 'warn';
+  /** LBD baseline 3 — true ise value italik + sönük (worded empty state). */
+  emptyValue?: boolean;
 }) {
   const cls =
     tone === 'good' ? 'bg-emerald-50 ring-emerald-200' :
@@ -3884,11 +3890,19 @@ function KpiInlineTile({
                        'bg-slate-50 ring-slate-200';
   return (
     <div className={`rounded-lg p-3 ring-1 ring-inset ${cls}`}>
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
         {icon}
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-ndark-text">{value}</div>
+      <div
+        className={
+          emptyValue
+            ? 'mt-1 text-sm italic text-slate-400 dark:text-ndark-dim'
+            : 'mt-1 text-lg font-semibold text-slate-900 dark:text-ndark-text'
+        }
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -4733,7 +4747,7 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
       {visibleOpening.length > 0 && visibleClosure.length > 0 && (
         <div className="my-2 flex items-center gap-2">
           <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
-          <span className="text-[10px] font-medium uppercase tracking-wide text-violet-400 dark:text-violet-600">
+          <span className="text-[10px] font-medium text-violet-400 dark:text-violet-600">
             Kapanış
           </span>
           <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
@@ -4768,7 +4782,7 @@ function Section({
                           'ring-slate-200 bg-white';
   return (
     <section className={`rounded-lg p-4 ring-1 ring-inset ${ring}`}>
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+      <h3 className="mb-2 text-xs font-medium text-slate-600">{title}</h3>
       {children}
     </section>
   );
@@ -4784,7 +4798,7 @@ function DetailGrid({ rows }: { rows: [string, React.ReactNode][] }) {
             i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
           }`}
         >
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</dt>
+          <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
           <dd className="text-sm text-slate-800">{value}</dd>
         </div>
       ))}
@@ -4802,7 +4816,7 @@ function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }
             i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
           }`}
         >
-          <dt className="px-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">{r.label}</dt>
+          <dt className="px-2 text-[11px] font-medium text-slate-500">{r.label}</dt>
           <dd>{r.node}</dd>
         </div>
       ))}

@@ -311,6 +311,64 @@ console.log('\n── 4e) LBD A9 — "Eskalasyon" → "Eskale Edildi" display re
     leakedDisplay, 0);
 }
 
+console.log('\n── 4f) LBD PR-B — görsel sakinleştirme baseline ──────────');
+{
+  const cd = read('src/features/cases/CaseDetailPage.tsx');
+  const pulse = read('src/features/cases/components/CustomerPulsePanel.tsx');
+
+  // 4f.1 — Baseline 2: ALL CAPS yok (uppercase tracking-wide pattern temizlendi)
+  expect('4f.1 CaseDetailPage uppercase tracking-wide kaldırıldı',
+    /uppercase tracking-wide/.test(cd), false);
+
+  // 4f.2 — PanelSection sentence-case stil
+  expect('4f.2 PanelSection h3 text-xs font-medium text-slate-500',
+    /<h3 className="flex items-center gap-1\.5 text-xs font-medium text-slate-500/.test(cd), true);
+  // 4f.3 — Row sentence-case stil
+  expect('4f.3 Row label text-xs text-slate-500 (uppercase yok)',
+    /<span className="text-xs text-slate-500 dark:text-ndark-muted">\{label\}<\/span>/.test(cd), true);
+
+  // 4f.4 — Baseline 1 (Müşteri çip çorbası): companyName Badge tint="slate"
+  // pattern artık çip değil; sönük metin satırı içinde join edilir.
+  expect('4f.4 müşteri pill <Badge tint="slate">{item.companyName}</Badge> kaldırıldı',
+    /<Badge tint="slate">\{item\.companyName\}<\/Badge>/.test(cd), false);
+  // 4f.5 — Sönük tek satır pattern (companyName + ostalar parts.join)
+  expect('4f.5 müşteri sönük satır parts.push(item.companyName)',
+    /parts\.push\(item\.companyName\)/.test(cd), true);
+  expect('4f.5b müşteri sönük satır return <span>{parts.join...',
+    /return <span title=\{parts\.join\(' · '\)\}>\{parts\.join\(' · '\)\}<\/span>/.test(cd), true);
+  // 4f.6 — Kritik priority tek vurgu (rose dot inline)
+  expect('4f.6 Critical tek vurgu inline rose dot',
+    /item\.priority === 'Critical'[\s\S]{0,400}bg-rose-500[\s\S]{0,200}Kritik/.test(cd), true);
+
+  // 4f.7 — CustomerPulsePanel metricsLayout prop tanımlı
+  expect('4f.7 CustomerPulsePanel metricsLayout?: "chips" | "summary"',
+    /metricsLayout\?:\s*'chips' \| 'summary'/.test(pulse), true);
+  // 4f.8 — summary modunda tek satır sönük metin (MetricChip JSX yok bu branch'te)
+  expect('4f.8 summary mode tek satır parts.join',
+    /metricsLayout === 'summary'[\s\S]{0,400}parts\.push\(`\$\{pulse\.metrics\.openCases\} açık vaka`\)/.test(pulse), true);
+  // 4f.9 — CaseDetailPage CustomerPulsePanel metricsLayout="summary"
+  expect('4f.9 CaseDetailPage CustomerPulsePanel metricsLayout="summary"',
+    /<CustomerPulsePanel source=\{\{ kind: 'case', caseId: item\.id \}\} metricsLayout="summary"/.test(cd), true);
+
+  // 4f.10 — Baseline 3: metrik kartlarda "—" placeholder kalktı, worded empty
+  expect('4f.10 KpiInlineTile "henüz çözülmedi" worded empty',
+    cd.includes('henüz çözülmedi'), true);
+  expect('4f.11 KpiInlineTile "veri yok" worded empty',
+    cd.includes("'veri yok'") || cd.includes('"veri yok"'), true);
+  // 4f.12 — emptyValue prop ve italic stil
+  expect('4f.12a KpiInlineTile emptyValue?: boolean prop',
+    /emptyValue\?:\s*boolean;/.test(cd), true);
+  expect('4f.12b KpiInlineTile italic text-slate-400 empty stili',
+    /italic text-slate-400/.test(cd), true);
+  // 4f.13 — KpiInlineTile value param'inde "—" string'i artık karşılaşılmıyor
+  expect('4f.13 KpiInlineTile value="—" placeholder kaldırıldı',
+    /KpiInlineTile[\s\S]{0,400}value=\{.*'—'.*\}/.test(cd), false);
+
+  // 4f.14 — A8 regression: header müşteri pill yok
+  expect('4f.14 A8 regression — header müşteri pill yok',
+    /onShowCustomer && \(\s*\n\s*<button[\s\S]{0,200}onShowCustomer\(item\.accountId\)/.test(cd), false);
+}
+
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
 {
   // Bu task tamamen FE görsel katmanı; backend dosyaları değişmemeli.

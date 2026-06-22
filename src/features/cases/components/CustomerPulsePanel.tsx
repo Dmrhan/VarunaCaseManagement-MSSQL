@@ -30,6 +30,13 @@ interface CustomerPulsePanelProps {
   source: Source;
   /** AI upgrade'i devre dışı bırak (account variant'ta zaten devre dışı). */
   skipAi?: boolean;
+  /**
+   * Sayısal metric chip'leri render etme şekli.
+   *  - 'chips' (default): MetricChip pill'leri (Açık 2 · SLA 1 · Eskale 1 …)
+   *  - 'summary': Tek satır sönük metin (LBD baseline — Case Detail kullanımı).
+   * Diğer çağrı yerleri (Smart Ticket drawer) default 'chips' ile korunur.
+   */
+  metricsLayout?: 'chips' | 'summary';
 }
 
 const PULSE_STATE_META: Record<
@@ -112,7 +119,7 @@ function MetricChip({
   );
 }
 
-export function CustomerPulsePanel({ source, skipAi }: CustomerPulsePanelProps) {
+export function CustomerPulsePanel({ source, skipAi, metricsLayout = 'chips' }: CustomerPulsePanelProps) {
   const [pulse, setPulse] = useState<CustomerPulse | null>(null);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
@@ -217,23 +224,40 @@ export function CustomerPulsePanel({ source, skipAi }: CustomerPulsePanelProps) 
       }
     >
       <div className="space-y-2.5">
-        <div className="flex flex-wrap gap-1.5 text-[11px]">
-          <MetricChip
-            label="Açık"
-            value={pulse.metrics.openCases}
-            tint={pulse.metrics.openCases > 0 ? 'amber' : 'slate'}
-          />
-          <MetricChip label="Son 30g" value={pulse.metrics.recent30d} tint="slate" />
-          {pulse.metrics.slaViolations > 0 && (
-            <MetricChip label="SLA ihlali" value={pulse.metrics.slaViolations} tint="rose" />
-          )}
-          {pulse.metrics.criticalCases > 0 && (
-            <MetricChip label="Kritik" value={pulse.metrics.criticalCases} tint="rose" />
-          )}
-          {pulse.metrics.escalatedCases > 0 && (
-            <MetricChip label="Eskale Edildi" value={pulse.metrics.escalatedCases} tint="amber" />
-          )}
-        </div>
+        {/* LBD baseline 1 — Case Detail kullanımında sayısal metric chip'leri
+            tek satır sönük metne indir. Diğer çağrı yerleri (Smart Ticket
+            drawer) default 'chips' modunda kalır. */}
+        {metricsLayout === 'summary' ? (
+          <div className="text-xs text-slate-500 dark:text-ndark-muted">
+            {(() => {
+              const parts: string[] = [];
+              parts.push(`${pulse.metrics.openCases} açık vaka`);
+              if (pulse.metrics.slaViolations > 0) parts.push(`${pulse.metrics.slaViolations} SLA ihlali`);
+              if (pulse.metrics.criticalCases > 0) parts.push(`${pulse.metrics.criticalCases} kritik`);
+              if (pulse.metrics.escalatedCases > 0) parts.push(`${pulse.metrics.escalatedCases} eskale edilmiş`);
+              parts.push(`son 30g ${pulse.metrics.recent30d}`);
+              return parts.join(' · ');
+            })()}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5 text-[11px]">
+            <MetricChip
+              label="Açık"
+              value={pulse.metrics.openCases}
+              tint={pulse.metrics.openCases > 0 ? 'amber' : 'slate'}
+            />
+            <MetricChip label="Son 30g" value={pulse.metrics.recent30d} tint="slate" />
+            {pulse.metrics.slaViolations > 0 && (
+              <MetricChip label="SLA ihlali" value={pulse.metrics.slaViolations} tint="rose" />
+            )}
+            {pulse.metrics.criticalCases > 0 && (
+              <MetricChip label="Kritik" value={pulse.metrics.criticalCases} tint="rose" />
+            )}
+            {pulse.metrics.escalatedCases > 0 && (
+              <MetricChip label="Eskale Edildi" value={pulse.metrics.escalatedCases} tint="amber" />
+            )}
+          </div>
+        )}
 
         {pulse.repeatedIssues.length > 0 && (
           <div>
