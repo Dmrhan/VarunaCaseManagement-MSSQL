@@ -37,9 +37,7 @@ import {
   Settings2,
   Sparkles,
   Star,
-  Target,
   TrendingDown,
-  TrendingUp,
   User,
   UserPlus,
   Wallet,
@@ -807,45 +805,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Statü bandı — LBD-Move: header'dan içerik alanına taşındı.
-              Tam genişlik, sekme nav'ının hemen ÜSTÜNDE. İnce bg + alt border
-              ile içerikten ayrışır ama header gibi ağır değil.
-              DEFAULT: scroll edilebilir (sticky değil) — header tam sade.
-              OPSİYON: statünün her zaman görünür kalması istenirse `sticky top-0`
-              + `z-20` ekleyip sekme nav'ının z'sini de yükselt. */}
+          {/* Statü bandı — Adım-1: progress bar geniş + kimlik (Öncelik · Tip).
+              SLA göstergesi aşağıdaki KPI/SLA şeridine taşındı (tek yerde olsun). */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
-            {/* [Statü] stepper + "Durumu değiştir ▾" */}
-            <CompactStatusStepper item={item} onApplied={setItem} />
+            {/* [Statü] progress bar (wideConnectors=true ile banda yayılır) */}
+            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors />
 
-            {/* Sağa it — metadata sönük tek satır + SLA tek renkli sinyal */}
-            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
+            {/* Sağ: yalnız kimlik metadata — SLA / Watcher KPI şeridinde */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
               <span title={`Öncelik: ${CASE_PRIORITY_LABELS[item.priority]} · Tip: ${CASE_TYPE_LABELS[item.caseType]}`}>
                 {CASE_PRIORITY_LABELS[item.priority]} · {CASE_TYPE_LABELS[item.caseType]}
               </span>
-              {item.slaViolation && (
-                <span
-                  className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400"
-                  title="SLA süresi aşıldı"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
-                  SLA aşıldı
-                </span>
-              )}
-              {item.slaPausedAt && (
-                <span className="inline-flex items-center gap-1 text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                  SLA durdu
-                </span>
-              )}
-              {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-                <span className="inline-flex items-center gap-1 text-slate-500">
-                  <Clock size={11} />
-                  Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-                </span>
-              )}
-              <WatcherHeaderBadge caseId={item.id} />
             </div>
           </div>
+
+          {/* KPI/SLA/tarih birleşik şeridi — status bandının ALTINDA, tab nav'ın ÜSTÜNDE.
+              Tek satır sönük metin "·" ayraçlı; SLA aşıldı tek kırmızı sinyal.
+              Sticky değil — content ile scroll olur. */}
+          <KpiSummaryStrip item={item} caseId={item.id} />
 
           <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
             <TabButton
@@ -2957,8 +2934,9 @@ function DetailTab({
         Alanlara tıklayarak düzenleyebilirsiniz. Değişiklikleri üst köşedeki <strong>Kaydet</strong> butonuyla saklayın.
       </p>
 
-      {/* KPI 4-tile satırı (sol panelden buraya taşındı) */}
-      <KpiInlineRow item={item} />
+      {/* Adım-1: KpiInlineRow buradan çıkarıldı — content band'a (status'un
+          altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
+          Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
 
       <Section title="Açıklama">
         <InlineEdit
@@ -3816,9 +3794,12 @@ function ChecklistSection({
 }
 
 // ----------------------------------------------------------------
-// KPI Inline Row — Detay sekmesinin üstünde 4-tile satır
+// KPI / SLA / tarih birleşik şeridi — Adım-1.
+// Status bandının altında, tab nav'ın üstünde, tek satır sönük metin.
+// Dağınık 4 kutu yerine kompakt şerit; SLA aşıldı tek kırmızı sinyal
+// (sayfada tek SLA göstergesi burası).
 // ----------------------------------------------------------------
-function KpiInlineRow({ item }: { item: Case }) {
+function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   const minutes = (a: string, b: string) =>
     Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
   const fmt = (m: number) => {
@@ -3837,72 +3818,51 @@ function KpiInlineRow({ item }: { item: Case }) {
     (h) => h.action === 'Statü değişti' && h.fromValue === 'Çözüldü' && h.toValue === 'YenidenAcildi',
   );
 
-  return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {/* LBD baseline 3 — "—" placeholder yerine sönük italik worded empty.
-          Dolu olanlar (sayısal değer) aynen kalır. */}
-      <KpiInlineTile
-        icon={<TrendingUp size={12} />}
-        label="Müdahale süresi"
-        value={responseMin != null ? fmt(responseMin) : 'veri yok'}
-        emptyValue={responseMin == null}
-      />
-      <KpiInlineTile
-        icon={<CheckCircle2 size={12} />}
-        label="Çözüm süresi"
-        value={resolutionMin != null ? fmt(resolutionMin) : 'henüz çözülmedi'}
-        emptyValue={resolutionMin == null}
-      />
-      <KpiInlineTile
-        icon={<Target size={12} />}
-        label="İlk temas çözüm"
-        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : 'henüz çözülmedi'}
-        tone={fcr ? 'good' : resolutionMin != null ? 'warn' : 'neutral'}
-        emptyValue={resolutionMin == null}
-      />
-      <KpiInlineTile
-        icon={<HistoryIcon size={12} />}
-        label="Yeniden açılma"
-        value={reopened ? 'Var' : 'Yok'}
-        tone={reopened ? 'warn' : 'neutral'}
-      />
-    </div>
-  );
-}
+  // Parts: sönük metin parçaları; boş alanlar atlanır (graceful empty).
+  const parts: Array<{ key: string; node: React.ReactNode }> = [];
+  if (responseMin != null) parts.push({ key: 'response', node: <>Müdahale {fmt(responseMin)}</> });
+  if (resolutionMin != null) parts.push({ key: 'resolution', node: <>Çözüm {fmt(resolutionMin)}</> });
+  parts.push({
+    key: 'fcr',
+    node: <>İlk temas {fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : <span className="italic text-slate-400">henüz</span>}</>,
+  });
+  parts.push({ key: 'reopen', node: <>Y.açılma {reopened ? 'Var' : 'Yok'}</> });
+  if (item.slaResponseDueAt) {
+    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
+  }
+  if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
+    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
+  }
+  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
+  parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
+  if (item.resolvedAt) {
+    parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
+  }
 
-function KpiInlineTile({
-  icon,
-  label,
-  value,
-  tone = 'neutral',
-  emptyValue = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone?: 'neutral' | 'good' | 'warn';
-  /** LBD baseline 3 — true ise value italik + sönük (worded empty state). */
-  emptyValue?: boolean;
-}) {
-  const cls =
-    tone === 'good' ? 'bg-emerald-50 ring-emerald-200' :
-    tone === 'warn' ? 'bg-amber-50 ring-amber-200' :
-                       'bg-slate-50 ring-slate-200';
   return (
-    <div className={`rounded-lg p-3 ring-1 ring-inset ${cls}`}>
-      <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-ndark-muted">
-        {icon}
-        {label}
-      </div>
-      <div
-        className={
-          emptyValue
-            ? 'mt-1 text-sm italic text-slate-400 dark:text-ndark-dim'
-            : 'mt-1 text-lg font-semibold text-slate-900 dark:text-ndark-text'
-        }
-      >
-        {value}
-      </div>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-white px-4 py-1.5 text-xs text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+      {parts.map((p, idx) => (
+        <span key={p.key} className="inline-flex items-center gap-2">
+          {idx > 0 && <span aria-hidden="true" className="text-slate-300">·</span>}
+          <span>{p.node}</span>
+        </span>
+      ))}
+      {/* SLA aşıldı / durdu — tek kırmızı/amber sinyal (sayfada tek SLA göstergesi) */}
+      {item.slaViolation && (
+        <span className="ml-2 inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400" title="SLA süresi aşıldı">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          SLA aşıldı
+        </span>
+      )}
+      {item.slaPausedAt && (
+        <span className="ml-2 inline-flex items-center gap-1 text-amber-700 dark:text-amber-300" title="SLA duraklatıldı">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          SLA durdu
+        </span>
+      )}
+      <span className="ml-auto">
+        <WatcherHeaderBadge caseId={caseId} />
+      </span>
     </div>
   );
 }

@@ -53,6 +53,12 @@ import {
 interface CompactStatusStepperProps {
   item: Case;
   onApplied: (updated: Case) => void;
+  /**
+   * Faz noktaları arası bağlantı çubuklarını içerik genişliğine yayar
+   * (`flex-1`, min 80px). Content band'da gerçek "progress bar" görünümü için.
+   * Default `false` — eski sıkışık görünüm (sticky/dar yerleşim için).
+   */
+  wideConnectors?: boolean;
 }
 
 /**
@@ -142,7 +148,7 @@ const STATUS_VERB_LABELS: Record<CaseStatus, string> = {
   'İptalEdildi':         'İptal et',
 };
 
-export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperProps) {
+export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
   const currentPhase = CASE_STATUS_PHASE_MAP[item.status];
   const currentPhaseIdx = PHASE_ORDER[currentPhase];
@@ -183,14 +189,15 @@ export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperPr
   const subStatusNote = activeVisual.subStatusNote;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {/* Faz rayı — nokta + 1px hairline. Kutu/dolu pill yok. */}
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${wideConnectors ? 'w-full' : ''}`}>
+      {/* Faz rayı — nokta + 1px hairline. Kutu/dolu pill yok.
+          wideConnectors=true → ray content band genişliğine yayılır (progress bar). */}
       <div
-        className="flex flex-col"
+        className={`flex flex-col ${wideConnectors ? 'flex-1' : ''}`}
         role="group"
         aria-label={`Vaka statü adımları — şu an ${CASE_STATUS_LABELS[item.status]}`}
       >
-        <div className="flex items-center">
+        <div className={`flex items-center ${wideConnectors ? 'w-full' : ''}`}>
           {CASE_STATUS_PHASES.map((phase, idx) => {
             const isCurrent = phase === currentPhase;
             const isCompleted = idx < currentPhaseIdx;
@@ -209,8 +216,8 @@ export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperPr
                   : 'bg-slate-200';
 
             return (
-              <div key={phase} className="flex items-center">
-                {idx > 0 && <span className={`block h-px w-7 ${connectorClass}`} aria-hidden="true" />}
+              <div key={phase} className={`flex items-center ${wideConnectors && idx > 0 ? 'flex-1' : ''}`}>
+                {idx > 0 && <span className={`block h-px ${wideConnectors ? 'flex-1 min-w-[80px]' : 'w-7'} ${connectorClass}`} aria-hidden="true" />}
                 <div className="flex flex-col items-center gap-1 px-2">
                   <span
                     className={`flex h-2.5 w-2.5 items-center justify-center rounded-full ${dotClass}`}

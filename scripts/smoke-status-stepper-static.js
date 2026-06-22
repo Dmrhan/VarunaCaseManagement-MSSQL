@@ -173,9 +173,11 @@ console.log('\n── 4b) Header sade — müşteri pill kaldırıldı + metadat
   // 4b.3 — SLA İhlali artık inline rose dot + "SLA aşıldı" (Badge component yok)
   expect('4b.3 SLA aşıldı inline rose dot + text',
     /text-rose-600[\s\S]{0,400}bg-rose-500[\s\S]{0,400}SLA aşıldı/.test(src), true);
-  // 4b.4 — Metadata bloğu sağa yaslandı (ml-auto)
-  expect('4b.4 metadata bloğu ml-auto ile sağa yaslandı',
-    /<div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1/.test(src), true);
+  // 4b.4 — Adım-1 sonrası metadata layout değişti; ml-auto artık KpiSummaryStrip
+  // içinde watcher için kullanılıyor. Status bandı kimliği (Öncelik · Tip)
+  // wideConnectors flex-1 ile otomatik sağa düşer.
+  expect('4b.4 LBD-B regression: kimlik metadata satırı status bandında var',
+    /CASE_PRIORITY_LABELS\[item\.priority\]\}\s*·\s*\{CASE_TYPE_LABELS\[item\.caseType\]\}/.test(src), true);
   // 4b.5 — Header import: PriorityBadge + CaseTypeBadge artık import edilmiyor
   expect('4b.5 PriorityBadge / CaseTypeBadge artık CaseDetailPage\'de import yok',
     /CaseTypeBadge,\s*PriorityBadge/.test(src), false);
@@ -361,23 +363,90 @@ console.log('\n── 4f) LBD PR-B — görsel sakinleştirme baseline ───
   expect('4f.9 CaseDetailPage CustomerPulsePanel metricsLayout="summary"',
     /<CustomerPulsePanel source=\{\{ kind: 'case', caseId: item\.id \}\} metricsLayout="summary"/.test(cd), true);
 
-  // 4f.10 — Baseline 3: metrik kartlarda "—" placeholder kalktı, worded empty
-  expect('4f.10 KpiInlineTile "henüz çözülmedi" worded empty',
-    cd.includes('henüz çözülmedi'), true);
-  expect('4f.11 KpiInlineTile "veri yok" worded empty',
-    cd.includes("'veri yok'") || cd.includes('"veri yok"'), true);
-  // 4f.12 — emptyValue prop ve italic stil
-  expect('4f.12a KpiInlineTile emptyValue?: boolean prop',
-    /emptyValue\?:\s*boolean;/.test(cd), true);
-  expect('4f.12b KpiInlineTile italic text-slate-400 empty stili',
+  // 4f.10 — Adım-1 sonrası KpiInlineTile silindi; KpiSummaryStrip tek satır
+  // sönük metin pattern'iyle "henüz" italik kullanır (FCR için).
+  expect('4f.10 KpiSummaryStrip "henüz" italik (FCR için)',
+    /italic text-slate-400[\s\S]{0,40}>henüz</.test(cd), true);
+  // 4f.11 — KpiSummaryStrip içinde "Müdahale", "Çözüm", "Y.açılma" labels
+  expect('4f.11 KpiSummaryStrip Müdahale + Çözüm + Y.açılma labels',
+    /Müdahale[\s\S]{0,500}Çözüm[\s\S]{0,500}Y\.açılma/.test(cd), true);
+  // 4f.12 — emptyValue prop yok artık (KpiInlineTile silindi); italic + text-slate-400
+  // KpiSummaryStrip'te kullanılır (henüz spanı için)
+  expect('4f.12 italic text-slate-400 KpiSummaryStrip içinde',
     /italic text-slate-400/.test(cd), true);
-  // 4f.13 — KpiInlineTile value param'inde "—" string'i artık karşılaşılmıyor
-  expect('4f.13 KpiInlineTile value="—" placeholder kaldırıldı',
-    /KpiInlineTile[\s\S]{0,400}value=\{.*'—'.*\}/.test(cd), false);
+  // 4f.13 — "—" KpiSummaryStrip render path'inde yok (comment'leri dışla)
+  const stripFnStart = cd.indexOf('function KpiSummaryStrip');
+  const stripFnEnd = cd.indexOf('\nfunction ', stripFnStart + 50);
+  const stripBodyRaw = stripFnEnd > stripFnStart ? cd.slice(stripFnStart, stripFnEnd) : '';
+  // Block + line comment'lerini striple — yorumdaki em dash false positive olmasın
+  const stripBodyCode = stripBodyRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  expect('4f.13 KpiSummaryStrip render path "—" placeholder yok',
+    stripBodyCode.includes('—'), false);
 
   // 4f.14 — A8 regression: header müşteri pill yok
   expect('4f.14 A8 regression — header müşteri pill yok',
     /onShowCustomer && \(\s*\n\s*<button[\s\S]{0,200}onShowCustomer\(item\.accountId\)/.test(cd), false);
+}
+
+console.log('\n── 4g) Adım-1 — progress bar + KPI/SLA şeridi ────────────');
+{
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+  const cd = read('src/features/cases/CaseDetailPage.tsx');
+
+  // 4g.1 — wideConnectors prop tanımlı + default false
+  expect('4g.1 CompactStatusStepper wideConnectors?: boolean prop',
+    /wideConnectors\?:\s*boolean/.test(stepper), true);
+  expect('4g.2 wideConnectors = false default',
+    /wideConnectors = false/.test(stepper), true);
+  // 4g.3 — connector class wideConnectors ile flex-1 min-w
+  expect('4g.3 connector flex-1 min-w-[80px] wideConnectors true',
+    /wideConnectors \? 'flex-1 min-w-\[80px\]' : 'w-7'/.test(stepper), true);
+  // 4g.4 — phase wrapper'a flex-1 (idx>0 + wideConnectors)
+  expect('4g.4 phase wrapper flex-1 (idx>0 + wideConnectors)',
+    /flex items-center \$\{wideConnectors && idx > 0 \? 'flex-1' : ''\}/.test(stepper), true);
+
+  // 4g.5 — CaseDetailPage Status bandı CompactStatusStepper wideConnectors veriyor
+  expect('4g.5 Status bandı stepper wideConnectors prop pass',
+    /<CompactStatusStepper item=\{item\} onApplied=\{setItem\} wideConnectors/.test(cd), true);
+
+  // 4g.6 — Status bandında SLA aşıldı YOK (KPI şeridine taşındı)
+  const statusBandStart = cd.indexOf('Statü bandı — Adım-1');
+  const statusBandEnd = cd.indexOf('KPI/SLA/tarih birleşik şeridi');
+  const statusBandBlock = statusBandStart >= 0 && statusBandEnd > statusBandStart
+    ? cd.slice(statusBandStart, statusBandEnd)
+    : '';
+  expect('4g.6 status bandında "SLA aşıldı" yok',
+    statusBandBlock.includes('SLA aşıldı'), false);
+  expect('4g.7 status bandında WatcherHeaderBadge yok',
+    statusBandBlock.includes('WatcherHeaderBadge'), false);
+  // 4g.8 — Status bandında kimlik (Öncelik · Tip) KALDI
+  expect('4g.8 status bandında kimlik (Öncelik · Tip) var',
+    /CASE_PRIORITY_LABELS\[item\.priority\]\}\s*·\s*\{CASE_TYPE_LABELS\[item\.caseType\]\}/.test(statusBandBlock), true);
+
+  // 4g.9 — KpiSummaryStrip component tanımlı
+  expect('4g.9 KpiSummaryStrip fonksiyonu tanımlı',
+    /function KpiSummaryStrip\(\{ item, caseId \}: \{ item: Case; caseId: string \}\)/.test(cd), true);
+  // 4g.10 — Eski KpiInlineRow ve KpiInlineTile silindi
+  expect('4g.10 KpiInlineRow silindi',
+    /function KpiInlineRow\(/.test(cd), false);
+  expect('4g.11 KpiInlineTile silindi',
+    /function KpiInlineTile\(/.test(cd), false);
+
+  // 4g.12 — KpiSummaryStrip status bandının altında, tab nav'ın üstünde render
+  const stripIdx = cd.indexOf('<KpiSummaryStrip');
+  const tabNavIdx2 = cd.indexOf('<nav className="sticky top-0 z-10');
+  expect('4g.12 KpiSummaryStrip status bandı altı + tab nav öncesi',
+    stripIdx > 0 && tabNavIdx2 > 0 && stripIdx < tabNavIdx2, true);
+
+  // 4g.13 — Detay tab içeriğinden <KpiInlineRow item={item} /> kaldırıldı
+  expect('4g.13 Detay tab içinde <KpiInlineRow /> render yok',
+    /<KpiInlineRow item=\{item\}/.test(cd), false);
+
+  // 4g.14 — SLA aşıldı şeritte (KpiSummaryStrip içinde)
+  const stripBlockStart = cd.indexOf('function KpiSummaryStrip');
+  const stripBlock = stripBlockStart > 0 ? cd.slice(stripBlockStart, stripBlockStart + 4000) : '';
+  expect('4g.14 KpiSummaryStrip içinde "SLA aşıldı" rose dot inline',
+    /bg-rose-500[\s\S]{0,200}SLA aşıldı/.test(stripBlock), true);
 }
 
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
