@@ -60,6 +60,12 @@ interface StatusTransitionPanelProps {
    * gösterir. Reason/closure/KB/checklist logic'i AYNI dosyada, parçalanmaz.
    */
   compactMode?: boolean;
+  /**
+   * Vazgeç click'inde caller'a haber ver (Codex P2 — compactMode modal'ında
+   * Vazgeç sadece pending'i temizliyordu; parent reasonTarget açık kalıp
+   * boş modal görüntüsü oluşuyordu). compactMode için zorunlu pattern.
+   */
+  onCancel?: () => void;
 }
 
 // Spec 11.1 renk paletiyle uyumlu kart tonları
@@ -145,7 +151,7 @@ const STATUS_LABELS: Record<CaseStatus, string> = {
   'İptalEdildi':         'İptal Edildi',
 };
 
-export function StatusTransitionPanel({ item, onApplied, initialPending, compactMode = false }: StatusTransitionPanelProps) {
+export function StatusTransitionPanel({ item, onApplied, initialPending, compactMode = false, onCancel }: StatusTransitionPanelProps) {
   const allowedTransitions = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
 
   const [pending, setPending] = useState<CaseStatus | null>(initialPending ?? null);
@@ -825,7 +831,18 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" size="sm" onClick={() => setPending(null)} disabled={submitting}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setPending(null);
+                // Codex P2 — compactMode modal'ında parent reasonTarget'ı
+                // temizle ki Vazgeç sonrası boş modal kalmasın. Standalone
+                // (non-compact) caller'da onCancel verilmediği için no-op.
+                onCancel?.();
+              }}
+              disabled={submitting}
+            >
               Vazgeç
             </Button>
             <Button

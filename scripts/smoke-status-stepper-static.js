@@ -625,6 +625,22 @@ console.log('\n── 4j) Adım-4 — Sınıflandırma + Atama PR-B baseline tut
     /<Section title="Atama & Eskalasyon">/.test(cd), false);
 }
 
+console.log('\n── 4k) Codex P2 — Vazgeç modal kapanır (compactMode) ─────');
+{
+  const panel = read('src/features/cases/StatusTransitionPanel.tsx');
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+
+  // 4k.1 — StatusTransitionPanel onCancel?: prop tanımlı
+  expect('4k.1 onCancel?: () => void prop',
+    /onCancel\?:\s*\(\) => void/.test(panel), true);
+  // 4k.2 — Vazgeç click setPending(null) + onCancel?.() çağırıyor
+  expect('4k.2 Vazgeç handler setPending(null) + onCancel?.()',
+    /setPending\(null\);[\s\S]{0,400}onCancel\?\.\(\);[\s\S]{0,400}Vazgeç/.test(panel), true);
+  // 4k.3 — Stepper Modal'da onCancel={() => setReasonTarget(null)} pass ediyor
+  expect('4k.3 Stepper Modal onCancel=setReasonTarget(null)',
+    /onCancel=\{\(\) => setReasonTarget\(null\)\}/.test(stepper), true);
+}
+
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
 {
   // Bu task tamamen FE görsel katmanı; backend dosyaları değişmemeli.
