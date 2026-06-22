@@ -68,12 +68,7 @@ const STATUS_VISUAL: Record<
     nodeBg: string;
     nodeRing: string;
     nodeText: string;
-    /** Button (aksiyon satırı) tint (hedef statünün rengini taşır) */
-    btnBg: string;
-    btnHoverBg: string;
-    btnText: string;
-    btnRing: string;
-    /** Alt-durum rozeti chip */
+    /** Alt-durum rozeti chip + menü ikonu chip */
     chipBg: string;
     chipText: string;
   }
@@ -83,10 +78,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-blue-50',
     nodeRing: 'ring-blue-200',
     nodeText: 'text-blue-700',
-    btnBg: 'bg-blue-50',
-    btnHoverBg: 'hover:bg-blue-100',
-    btnText: 'text-blue-700',
-    btnRing: 'ring-blue-200',
     chipBg: 'bg-blue-50',
     chipText: 'text-blue-700',
   },
@@ -95,10 +86,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-amber-50',
     nodeRing: 'ring-amber-200',
     nodeText: 'text-amber-700',
-    btnBg: 'bg-amber-50',
-    btnHoverBg: 'hover:bg-amber-100',
-    btnText: 'text-amber-700',
-    btnRing: 'ring-amber-200',
     chipBg: 'bg-amber-50',
     chipText: 'text-amber-700',
   },
@@ -107,10 +94,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-slate-100',
     nodeRing: 'ring-slate-300',
     nodeText: 'text-slate-700',
-    btnBg: 'bg-slate-100',
-    btnHoverBg: 'hover:bg-slate-200',
-    btnText: 'text-slate-700',
-    btnRing: 'ring-slate-300',
     chipBg: 'bg-slate-100',
     chipText: 'text-slate-700',
   },
@@ -119,10 +102,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-rose-50',
     nodeRing: 'ring-rose-300',
     nodeText: 'text-rose-700',
-    btnBg: 'bg-rose-50',
-    btnHoverBg: 'hover:bg-rose-100',
-    btnText: 'text-rose-700',
-    btnRing: 'ring-rose-300',
     chipBg: 'bg-rose-50',
     chipText: 'text-rose-700',
   },
@@ -131,10 +110,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-violet-50',
     nodeRing: 'ring-violet-300',
     nodeText: 'text-violet-700',
-    btnBg: 'bg-violet-50',
-    btnHoverBg: 'hover:bg-violet-100',
-    btnText: 'text-violet-700',
-    btnRing: 'ring-violet-300',
     chipBg: 'bg-violet-50',
     chipText: 'text-violet-700',
   },
@@ -143,10 +118,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-emerald-50',
     nodeRing: 'ring-emerald-300',
     nodeText: 'text-emerald-700',
-    btnBg: 'bg-emerald-50',
-    btnHoverBg: 'hover:bg-emerald-100',
-    btnText: 'text-emerald-700',
-    btnRing: 'ring-emerald-300',
     chipBg: 'bg-emerald-50',
     chipText: 'text-emerald-700',
   },
@@ -155,10 +126,6 @@ const STATUS_VISUAL: Record<
     nodeBg: 'bg-slate-100',
     nodeRing: 'ring-slate-300',
     nodeText: 'text-slate-600',
-    btnBg: 'bg-slate-100',
-    btnHoverBg: 'hover:bg-slate-200',
-    btnText: 'text-slate-600',
-    btnRing: 'ring-slate-300',
     chipBg: 'bg-slate-100',
     chipText: 'text-slate-600',
   },
@@ -181,8 +148,20 @@ const PHASE_FALLBACK_STATUS: Record<CaseStatusPhase, CaseStatus> = {
   result: 'Çözüldü',
 };
 
-/** Aksiyon satırında en sık görülen 2 hedef öne, gerisi "⋯" menüsüne. */
-const PRIMARY_LIMIT = 2;
+/**
+ * Hedef statünün FİİL etiketi — header butonlarında durum adı yerine işlemi
+ * tarif eder ("Çözüldü" yerine "Çöz", "Eskalasyon" yerine "Eskale et").
+ * Şekil/anlam ayrımı için: pill = durum, buton = işlem.
+ */
+const STATUS_VERB_LABELS: Record<CaseStatus, string> = {
+  'Açık':                'Aç',
+  'İncelemede':          'İncelemeye al',
+  '3rdPartyBekleniyor':  'Beklemeye al',
+  'Eskalasyon':          'Eskale et',
+  'Çözüldü':             'Çöz',
+  'YenidenAcildi':       'Yeniden aç',
+  'İptalEdildi':         'İptal et',
+};
 
 export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperProps) {
   const { toast } = useToast();
@@ -219,9 +198,6 @@ export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperPr
       setDirectSubmitting(null);
     }
   }
-
-  const primary = allowed.slice(0, PRIMARY_LIMIT);
-  const overflow = allowed.slice(PRIMARY_LIMIT);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -297,81 +273,67 @@ export function CompactStatusStepper({ item, onApplied }: CompactStatusStepperPr
         </span>
       )}
 
-      {/* Aksiyon satırı — geçerli geçişler */}
-      {primary.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          {primary.map((target) => {
-            const v = STATUS_VISUAL[target];
-            const submitting = directSubmitting === target;
-            return (
-              <button
-                key={target}
-                type="button"
-                onClick={() => handleClick(target)}
-                disabled={!!directSubmitting}
-                className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-50 ${v.btnBg} ${v.btnHoverBg} ${v.btnText} ${v.btnRing}`}
-                title={
-                  STATUS_REQUIRES_REASON[target]
-                    ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
-                    : `${CASE_STATUS_LABELS[target]} olarak işaretle`
-                }
-              >
-                {v.icon}
-                {CASE_STATUS_LABELS[target]}
-                {STATUS_REQUIRES_REASON[target] && (
-                  <AlertTriangle size={10} className="text-slate-500" aria-hidden="true" />
-                )}
-                {submitting && <span className="ml-0.5 animate-pulse">…</span>}
-              </button>
-            );
-          })}
-
-          {/* Taşma menüsü */}
-          {overflow.length > 0 && (
-            <Popover
-              trigger={({ open, toggle }) => (
-                <button
-                  type="button"
-                  onClick={toggle}
-                  className={`inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 ${open ? 'ring-slate-400' : ''}`}
-                  title="Diğer geçişler"
-                  aria-label="Diğer geçişler"
-                >
-                  Daha fazla
-                  <ChevronDown size={11} />
-                </button>
-              )}
-              align="end"
-              width={220}
+      {/* Tek işlem kontrolü — "Durumu değiştir ▾".
+          Şekil/anlam ayrımı: durum = pill (stepper + alt-durum); işlem =
+          KÖŞELİ buton (rounded-md). Buton statü renk dilini taşımaz;
+          menü içindeki hedeflerde sadece ikon hedef rengini gösterir. */}
+      {allowed.length > 0 && (
+        <Popover
+          trigger={({ open, toggle }) => (
+            <button
+              type="button"
+              onClick={toggle}
+              disabled={!!directSubmitting}
+              className={`inline-flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-ndark-card dark:text-ndark-text ${open ? 'border-slate-400 ring-1 ring-slate-200' : 'border-slate-300'}`}
+              title="Statü değiştir"
+              aria-label="Durumu değiştir"
+              aria-haspopup="menu"
+              aria-expanded={open}
             >
-              {({ close }) => (
-                <ul className="py-1">
-                  {overflow.map((target) => {
-                    const v = STATUS_VISUAL[target];
-                    return (
-                      <li key={target}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            close();
-                            handleClick(target);
-                          }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 ${v.btnText}`}
-                        >
-                          {v.icon}
-                          <span className="flex-1">{CASE_STATUS_LABELS[target]}</span>
-                          {STATUS_REQUIRES_REASON[target] && (
-                            <AlertTriangle size={10} className="text-slate-500" aria-hidden="true" />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Popover>
+              Durumu değiştir
+              <ChevronDown size={12} className="text-slate-500" />
+              {directSubmitting && <span className="ml-0.5 animate-pulse">…</span>}
+            </button>
           )}
-        </div>
+          align="start"
+          width={240}
+        >
+          {({ close }) => (
+            <ul className="py-1" role="menu" aria-label="Geçerli geçişler">
+              {allowed.map((target) => {
+                const v = STATUS_VISUAL[target];
+                return (
+                  <li key={target} role="none">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        close();
+                        handleClick(target);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-ndark-text dark:hover:bg-ndark-card"
+                      title={
+                        STATUS_REQUIRES_REASON[target]
+                          ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
+                          : `${CASE_STATUS_LABELS[target]} olarak işaretle`
+                      }
+                    >
+                      {/* Sol ikon hedef statü rengini taşır — ipucu, dolgu yok */}
+                      <span className={`flex h-5 w-5 items-center justify-center rounded ${v.chipBg} ${v.chipText}`}>
+                        {v.icon}
+                      </span>
+                      <span className="flex-1 font-medium">{STATUS_VERB_LABELS[target]}</span>
+                      <span className="text-[10px] text-slate-400">{CASE_STATUS_LABELS[target]}</span>
+                      {STATUS_REQUIRES_REASON[target] && (
+                        <AlertTriangle size={10} className="text-slate-500" aria-hidden="true" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Popover>
       )}
 
       {/* Reason zorunlu hedef için modal — StatusTransitionPanel'i bütün halinde

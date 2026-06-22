@@ -72,7 +72,7 @@ import { NoteAvatar, NotesTab } from './components/CaseNotes';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
-import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
+import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import {
   apiFetch,
@@ -91,7 +91,9 @@ import {
   CALL_OUTCOMES,
   CASE_FIELD_LABELS,
   CASE_ORIGINS,
+  CASE_PRIORITY_LABELS,
   CASE_REQUEST_TYPES,
+  CASE_TYPE_LABELS,
   ESCALATION_LEVELS,
   ESCALATION_LEVEL_LABELS,
   FINANCIAL_STATUSES,
@@ -131,7 +133,10 @@ interface CaseDetailPageProps {
   onOpenAccount?: (accountId: string) => void;
 }
 
-export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+// onShowCustomer prop'u header müşteri butonu kaldırıldı; başka yerden çağrılırsa
+// caller'da etkisi yok (opsiyonel kalır). Şu an iç kullanım yok — sessizce alındı.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
   const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
@@ -603,41 +608,32 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
             </nav>
             <CaseTitleEditable item={item} onUpdated={setItem} />
 
-            {/* Header — 3 bölge:
-                  [Kimlik] müşteri butonu (uzun isim truncate + title)
-                  [Statü]  CompactStatusStepper — kendi bölgesinde, separator ile ayrılmış
-                  [Metadata] PriorityBadge / CaseTypeBadge / SLA badge'leri / Watcher
-                Dar ekranda flex-wrap ile alt satıra düşer; bölge ayrımı korunur. */}
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-              {/* [Kimlik] */}
-              {onShowCustomer && (
-                <button
-                  type="button"
-                  onClick={() => onShowCustomer(item.accountId)}
-                  title={item.accountName}
-                  className="inline-flex max-w-[240px] items-center gap-1 truncate rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
-                >
-                  <Building2 size={11} className="shrink-0" />
-                  <span className="truncate">{item.accountName}</span>
-                </button>
-              )}
-
-              {/* dikey ayraç — kimlik / statü */}
-              <span aria-hidden="true" className="hidden h-5 border-l border-slate-200 sm:inline-block dark:border-ndark-border" />
-
-              {/* [Statü] CompactStatusStepper — kendi bölgesinde.
-                  Reason zorunlu geçişler modal'da panel reuse (compactMode). */}
+            {/* Header — 2 bölge (kimlik breadcrumb + sol panelde zaten var, tekrar etme):
+                  SOL:  [Statü stepper] | [Durumu değiştir ▾]   — tek grup, separator ile içerde
+                  SAĞ:  [Metadata: Öncelik / Tip / SLA / Watcher]  — sönük, statü renk diliyle yarışmaz
+                Dar ekranda metadata alt satıra wrap olur; statü grubu bütün kalır. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+              {/* [Statü] stepper + "Durumu değiştir ▾" — CompactStatusStepper'ın
+                  kendi içinde durum (pill) + işlem (köşeli buton) ayrımı var. */}
               <CompactStatusStepper item={item} onApplied={setItem} />
 
-              {/* dikey ayraç — statü / metadata */}
-              <span aria-hidden="true" className="hidden h-5 border-l border-slate-200 sm:inline-block dark:border-ndark-border" />
-
-              {/* [Metadata] — öncelik / tip / SLA / watcher. Nötr stilde;
-                  statü renk diline KARIŞMAZ (PriorityBadge ve CaseTypeBadge
-                  zaten slate/outline). */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <PriorityBadge priority={item.priority} />
-                <CaseTypeBadge type={item.caseType} />
+              {/* Sağa it — metadata bloğunu net ayır */}
+              <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-ndark-muted">
+                {/* Öncelik — sönük metadata (renkli pill değil). */}
+                <span>
+                  <span className="text-slate-400">Öncelik:</span>{' '}
+                  <span className="font-medium text-slate-700 dark:text-ndark-text">
+                    {CASE_PRIORITY_LABELS[item.priority]}
+                  </span>
+                </span>
+                {/* Tip — sönük metadata. */}
+                <span>
+                  <span className="text-slate-400">Tip:</span>{' '}
+                  <span className="font-medium text-slate-700 dark:text-ndark-text">
+                    {CASE_TYPE_LABELS[item.caseType]}
+                  </span>
+                </span>
+                {/* SLA — gerçek uyarı; metadata bölgesinde, statü grubundan ayrı. */}
                 {item.slaViolation && (
                   <Badge tint="rose" icon={<ShieldAlert size={12} />}>
                     SLA İhlali
@@ -645,9 +641,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 )}
                 {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
                 {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-                  <Badge tint="slate" icon={<Clock size={12} />}>
+                  <span className="inline-flex items-center gap-1 text-slate-500">
+                    <Clock size={11} />
                     Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-                  </Badge>
+                  </span>
                 )}
                 <WatcherHeaderBadge caseId={item.id} />
               </div>
