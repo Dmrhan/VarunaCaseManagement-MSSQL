@@ -3138,37 +3138,15 @@ function DetailTab({
         />
       </Section>
 
-      {/* Adım-2: Müşteri geçmiş vakaları Sınıflandırma'nın ALTINA taşındı.
-          Şu an mevcut slice(0, 3) özet liste konumu — Adım-3'te tam liste
-          ("ilk 10 + Hepsini gör" toggle) gelecek. */}
-      {previousCases.length > 0 && (
-        <Section title={`Önceki Vakalar (${previousCases.length})`}>
-          <ul className="space-y-1.5">
-            {previousCases.slice(0, 3).map((p) => {
-              const refDate = p.resolvedAt ?? p.updatedAt;
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectPrevious(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
-                  >
-                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">{p.caseNumber}</span>
-                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{p.title}</span>
-                    <StatusPill status={p.status} />
-                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{formatRelative(refDate)}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {previousCases.length > 3 && (
-              <li className="pl-2 text-[11px] text-slate-500">
-                +{previousCases.length - 3} vaka daha…
-              </li>
-            )}
-          </ul>
-        </Section>
-      )}
+      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
+          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
+          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
+          Boş durumda worded empty. */}
+      <PreviousCasesSection
+        previousCases={previousCases}
+        currentCaseId={item.id}
+        onSelectPrevious={onSelectPrevious}
+      />
 
       {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar */}
       <Section title="Atama & Eskalasyon">
@@ -4764,6 +4742,96 @@ function Section({
 
 // DetailGrid eski "SLA & Tarihler" Section'unda kullanılıyordu; Adım-2'de
 // section silindi, tek caller'ı kalmadı → function de silindi.
+
+/**
+ * PreviousCasesSection — Müşteri geçmiş vakaları (Adım-3 / direktif #6).
+ *
+ * Veri: `previousCases` parent state'inden — `caseService.findByAccount`
+ * mevcut fetch'i reuse (YENİ İSTEK YOK).
+ *
+ * Davranış:
+ *  - Mevcut vaka filtrelenir (kendi geçmiş listesinde görünmez).
+ *  - En yeni üstte: `resolvedAt ?? updatedAt` DESC.
+ *  - Varsayılan ilk 10 satır; "Hepsini gör (N)" toggle ile tüm liste açılır.
+ *  - Açık listede max-h + iç scroll (sayfa sonsuz büyümesin).
+ *  - Boş durumda worded empty ("Bu müşterinin başka vakası yok"); "—" çizilmez.
+ *  - Satır: caseNumber · başlık (truncate) · status pill · tarih · "Aç →"
+ *  - Status pill StatusPill component'ini reuse (TR label "Eskale Edildi" dahil — PR-C).
+ */
+function PreviousCasesSection({
+  previousCases,
+  currentCaseId,
+  onSelectPrevious,
+}: {
+  previousCases: Case[];
+  currentCaseId: string;
+  onSelectPrevious: (id: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  const sorted = useMemo(() => {
+    const refDate = (c: Case) => new Date(c.resolvedAt ?? c.updatedAt).getTime();
+    return previousCases
+      .filter((c) => c.id !== currentCaseId)
+      .slice()
+      .sort((a, b) => refDate(b) - refDate(a));
+  }, [previousCases, currentCaseId]);
+
+  const totalCount = sorted.length;
+  const visible = showAll ? sorted : sorted.slice(0, 10);
+
+  return (
+    <Section title={`Müşteri geçmiş vakaları (${totalCount})`}>
+      {totalCount === 0 ? (
+        <p className="text-xs italic text-slate-400 dark:text-ndark-dim">
+          Bu müşterinin başka vakası yok.
+        </p>
+      ) : (
+        <>
+          <ul
+            className={`space-y-1.5 ${showAll ? 'max-h-[480px] overflow-y-auto pr-1' : ''}`}
+          >
+            {visible.map((p) => {
+              const refDate = p.resolvedAt ?? p.updatedAt;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPrevious(p.id)}
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                  >
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {p.caseNumber}
+                    </span>
+                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                      {p.title}
+                    </span>
+                    <StatusPill status={p.status} />
+                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {formatRelative(refDate)}
+                    </span>
+                    <span className="ml-1 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+                      Aç →
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {totalCount > 10 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((s) => !s)}
+              className="mt-2 text-[11px] font-medium text-brand-700 hover:underline dark:text-brand-300"
+            >
+              {showAll ? 'Daha az göster' : `Hepsini gör (${totalCount})`}
+            </button>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
 
 function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }[] }) {
   return (
