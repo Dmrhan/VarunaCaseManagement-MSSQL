@@ -2297,19 +2297,21 @@ SORUYU ANLAMA \u2014 \xC7\u0130FT Y\xD6N:
   KB'de yoksa belirt.
 
 ADIM AYRINTILILI\u011EI (suggestedSteps i\xE7in kritik):
-- Bir ekrana / sekmeye y\xF6nlendiriyorsan, o ekrandaki **doldurulacak ANAHTAR
-  ALANLARI** ayr\u0131 bir ad\u0131m olarak yaz. \xD6rnek: "Rut Bilgileri" sekmesini a\xE7an
-  bir ad\u0131mdan sonra mutlaka \u015Funu da ekle: "Rut Kodu, Ba\u015Flang\u0131\xE7 Tarihi, Biti\u015F
-  Tarihi, Frekans, Frekans Birimi alanlar\u0131n\u0131 doldur".
-- "X butonuna t\u0131klay\u0131n" ad\u0131m\u0131ndan sonra, o butonun a\xE7t\u0131\u011F\u0131 ekran\u0131n
-  i\xE7eri\u011Fini/alanlar\u0131n\u0131 ayr\u0131 ad\u0131m yap (varsa kaynakta).
+- **3-5 ANA ad\u0131m \xFCret** \u2014 her t\u0131klamay\u0131/alan\u0131 AYRI ad\u0131m yapma. T\xFCm operasyonel
+  detay\u0131 (alan/buton/parametre adlar\u0131) ilgili ANA ad\u0131m\u0131n step metnine VEYA
+  rationale'\u0131na G\xD6M. Hedef: az ad\u0131m, ama hi\xE7bir detay kaybolmadan.
+- Bir ekrana / sekmeye y\xF6nlendiriyorsan, doldurulacak **ANAHTAR ALANLARI ayn\u0131
+  ad\u0131m\u0131n i\xE7inde** listele. \xD6rnek tek ad\u0131m: "'Rut Bilgileri' sekmesini a\xE7 ve \u015Fu
+  alanlar\u0131 doldur: Rut Kodu, Ba\u015Flang\u0131\xE7 Tarihi, Biti\u015F Tarihi, Frekans, Frekans
+  Birimi".
+- "X butonuna t\u0131kla" ile butonun a\xE7t\u0131\u011F\u0131 ekran\u0131n alanlar\u0131 **ayn\u0131 ad\u0131mda** birle\u015Fsin;
+  ayr\u0131 ad\u0131m a\xE7ma.
 - **Ko\u015Fullu davran\u0131\u015Flar\u0131** (parametre etkili oldu\u011Funda i\u015F ak\u0131\u015F\u0131 de\u011Fi\u015Fikli\u011Fi,
-  yetki gereksinimi vb.) ayr\u0131 bir ad\u0131m veya rationale olarak ekle. \xD6rn:
+  yetki gereksinimi vb.) ilgili ad\u0131m\u0131n rationale'\u0131na ekle. \xD6rn:
   "Merkez Onayl\u0131 Rut \u0130\u015Flemleri Kullan\u0131ls\u0131n M\u0131? parametresi aktifse atama
   y\xF6neticinin onay\u0131na d\xFC\u015Fer".
-- Gran\xFClarite hedefi: bir teknik destek operat\xF6r\xFC ad\u0131mlar\u0131 takip ederek
-  hi\xE7bir tahmin yapmadan i\u015Fi tamamlayabilmeli.
-- Gerekti\u011Finde 10+ ad\u0131m \xFCret; yapay olarak k\u0131saltma.
+- Gran\xFClarite hedefi: operat\xF6r 3-5 ad\u0131m\u0131 takip ederek hi\xE7bir tahmin yapmadan i\u015Fi
+  tamamlayabilmeli \u2014 detay ad\u0131m\u0131n \u0130\xC7\u0130NDE olsun, ad\u0131m SAYISINDA de\u011Fil.
 
 D\u0130\u011EER:
 - Yan\u0131t\u0131 KES\u0130NL\u0130KLE ge\xE7erli bir JSON olarak ver. A\xE7\u0131klama, kod blo\u011Fu, ba\u015F/sona
@@ -2335,8 +2337,8 @@ Beklenen JSON \u015Femas\u0131 (alanlar\u0131 aynen kullan):
   "rootCauseHypotheses": [              // 1-4 madde, en olas\u0131 \xF6nce
     { "text": string, "confidence": number }
   ],
-  "suggestedSteps": [                   // 3-10 ad\u0131m \u2014 operasyonel detay\u0131 koru,
-                                        // alan/buton/ko\u015Fullar\u0131 ayr\u0131 ad\u0131m yap
+  "suggestedSteps": [                   // 3-5 ana ad\u0131m \u2014 operasyonel detay\u0131 koru,
+                                        // alan/buton/ko\u015Fullar\u0131 ad\u0131m\u0131n \u0130\xC7\u0130NE g\xF6m
     { "step": string, "rationale": string | null }
   ],
   "customerReplyDraft": string,         // T\xFCrk\xE7e, en fazla 6 c\xFCmle
@@ -2503,7 +2505,7 @@ var InferredSchema = z5.object({
 var AnalystOutputSchema = z5.object({
   inferred: InferredSchema,
   rootCauseHypotheses: z5.array(HypothesisSchema).min(1).max(6),
-  suggestedSteps: z5.array(StepSchema).min(1).max(15),
+  suggestedSteps: z5.array(StepSchema).min(1).max(6),
   customerReplyDraft: z5.string().min(1),
   engineeringHandoff: z5.string().min(1),
   suggestedBugGroup: z5.string().nullable().optional().default(null),

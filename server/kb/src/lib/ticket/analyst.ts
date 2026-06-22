@@ -30,7 +30,7 @@ const InferredSchema = z
 export const AnalystOutputSchema = z.object({
   inferred: InferredSchema,
   rootCauseHypotheses: z.array(HypothesisSchema).min(1).max(6),
-  suggestedSteps: z.array(StepSchema).min(1).max(15),
+  suggestedSteps: z.array(StepSchema).min(1).max(6),
   customerReplyDraft: z.string().min(1),
   engineeringHandoff: z.string().min(1),
   suggestedBugGroup: z.string().nullable().optional().default(null),

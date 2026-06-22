@@ -69,19 +69,21 @@ SORUYU ANLAMA — ÇİFT YÖN:
   KB'de yoksa belirt.
 
 ADIM AYRINTILILIĞI (suggestedSteps için kritik):
-- Bir ekrana / sekmeye yönlendiriyorsan, o ekrandaki **doldurulacak ANAHTAR
-  ALANLARI** ayrı bir adım olarak yaz. Örnek: "Rut Bilgileri" sekmesini açan
-  bir adımdan sonra mutlaka şunu da ekle: "Rut Kodu, Başlangıç Tarihi, Bitiş
-  Tarihi, Frekans, Frekans Birimi alanlarını doldur".
-- "X butonuna tıklayın" adımından sonra, o butonun açtığı ekranın
-  içeriğini/alanlarını ayrı adım yap (varsa kaynakta).
+- **3-5 ANA adım üret** — her tıklamayı/alanı AYRI adım yapma. Tüm operasyonel
+  detayı (alan/buton/parametre adları) ilgili ANA adımın step metnine VEYA
+  rationale'ına GÖM. Hedef: az adım, ama hiçbir detay kaybolmadan.
+- Bir ekrana / sekmeye yönlendiriyorsan, doldurulacak **ANAHTAR ALANLARI aynı
+  adımın içinde** listele. Örnek tek adım: "'Rut Bilgileri' sekmesini aç ve şu
+  alanları doldur: Rut Kodu, Başlangıç Tarihi, Bitiş Tarihi, Frekans, Frekans
+  Birimi".
+- "X butonuna tıkla" ile butonun açtığı ekranın alanları **aynı adımda** birleşsin;
+  ayrı adım açma.
 - **Koşullu davranışları** (parametre etkili olduğunda iş akışı değişikliği,
-  yetki gereksinimi vb.) ayrı bir adım veya rationale olarak ekle. Örn:
+  yetki gereksinimi vb.) ilgili adımın rationale'ına ekle. Örn:
   "Merkez Onaylı Rut İşlemleri Kullanılsın Mı? parametresi aktifse atama
   yöneticinin onayına düşer".
-- Granülarite hedefi: bir teknik destek operatörü adımları takip ederek
-  hiçbir tahmin yapmadan işi tamamlayabilmeli.
-- Gerektiğinde 10+ adım üret; yapay olarak kısaltma.
+- Granülarite hedefi: operatör 3-5 adımı takip ederek hiçbir tahmin yapmadan işi
+  tamamlayabilmeli — detay adımın İÇİNDE olsun, adım SAYISINDA değil.
 
 DİĞER:
 - Yanıtı KESİNLİKLE geçerli bir JSON olarak ver. Açıklama, kod bloğu, baş/sona
@@ -142,8 +144,8 @@ Beklenen JSON şeması (alanları aynen kullan):
   "rootCauseHypotheses": [              // 1-4 madde, en olası önce
     { "text": string, "confidence": number }
   ],
-  "suggestedSteps": [                   // 3-10 adım — operasyonel detayı koru,
-                                        // alan/buton/koşulları ayrı adım yap
+  "suggestedSteps": [                   // 3-5 ana adım — operasyonel detayı koru,
+                                        // alan/buton/koşulları adımın İÇİNE göm
     { "step": string, "rationale": string | null }
   ],
   "customerReplyDraft": string,         // Türkçe, en fazla 6 cümle
