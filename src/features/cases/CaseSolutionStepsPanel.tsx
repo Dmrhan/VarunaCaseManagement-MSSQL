@@ -34,9 +34,8 @@ import type { Case } from './types';
  *   - 3 outcome aksiyonu: "İşe yaradı" / "İşe yaramadı" / "Uygun değil"
  *   - "Denedim" aksiyonu UI'da YOKTUR (backend 'tried' status'unu hala
  *     destekler, ama bu PR'da kullanılmaz).
- *   - "İşe yaradı" ve "İşe yaramadı" tıklayınca önce inline yorum kutusu
- *     açılır; Kaydet'e basılınca status yazılır.
- *   - "Uygun değil" doğrudan yazar.
+ *   - Üç aksiyonun hepsi tıklayınca önce inline yorum kutusu açılır;
+ *     Kaydet'e basılınca status yazılır. Yorum opsiyoneldir.
  *   - Vaka otomatik kapatılmaz / aktarılmaz / closure metadata
  *     yazılmaz — bu aksiyonlar bilinçle dışarda.
  */
@@ -47,7 +46,7 @@ interface CaseSolutionStepsPanelProps {
   onChange?: () => void;
 }
 
-type PendingOutcome = 'worked' | 'not_worked' | null;
+type PendingOutcome = 'worked' | 'not_worked' | 'skipped' | null;
 
 const STATUS_LABEL: Record<CaseSolutionStepStatus, string> = {
   suggested: 'Önerildi',
@@ -225,9 +224,7 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
     }
   }
 
-  // Row outcome handlers — 3 buton.
-  // "İşe yaradı" / "İşe yaramadı": önce yorum kutusu aç.
-  // "Uygun değil": doğrudan yaz.
+  // Row outcome handlers — 3 buton, üçü de önce inline yorum kutusu açar.
   function openComment(stepId: string, intent: PendingOutcome) {
     if (!intent) return;
     setPending({ stepId, intent, comment: '' });
@@ -459,7 +456,6 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
                   setPending((p) => (p && p.stepId === step.id ? { ...p, comment } : p))
                 }
                 onSaveOutcome={(status, note) => void saveOutcome(step.id, status, note)}
-                onSkipDirect={() => void saveOutcome(step.id, 'skipped', undefined)}
               />
             ))}
           </ul>
@@ -640,7 +636,6 @@ interface SolutionStepRowProps {
   onCancelComment: () => void;
   onCommentChange: (comment: string) => void;
   onSaveOutcome: (status: CaseSolutionStepStatus, note: string | undefined) => void;
-  onSkipDirect: () => void;
 }
 
 function SolutionStepRow({
@@ -651,7 +646,6 @@ function SolutionStepRow({
   onCancelComment,
   onCommentChange,
   onSaveOutcome,
-  onSkipDirect,
 }: SolutionStepRowProps) {
   const sourcePill = useMemo(() => {
     if (step.source === 'ai_suggested_step') return { label: 'AI Önerisi', tint: 'violet' as const };
@@ -712,13 +706,15 @@ function SolutionStepRow({
         </div>
       </div>
 
-      {/* Inline yorum kutusu — worked / not_worked için */}
+      {/* Inline yorum kutusu — worked / not_worked / skipped için */}
       {pending && pending.intent && (
         <div className="mt-2 rounded-md border border-brand-100 bg-brand-50/40 p-2 dark:border-brand-900/30 dark:bg-brand-950/20">
           <div className="mb-1 text-[11px] font-medium text-brand-800 dark:text-brand-200">
             {pending.intent === 'worked'
               ? 'Bu adım nasıl çözdü?'
-              : 'Ne denendi, neden işe yaramadı?'}
+              : pending.intent === 'not_worked'
+                ? 'Ne denendi, neden işe yaramadı?'
+                : 'Bu adım neden uygun değil?'}
           </div>
           <TextArea
             autoFocus
@@ -734,10 +730,7 @@ function SolutionStepRow({
             <Button
               size="sm"
               onClick={() =>
-                onSaveOutcome(
-                  pending.intent === 'worked' ? 'worked' : 'not_worked',
-                  pending.comment.trim() || undefined,
-                )
+                onSaveOutcome(pending.intent!, pending.comment.trim() || undefined)
               }
               disabled={isBusy}
             >
@@ -773,7 +766,7 @@ function SolutionStepRow({
           <Button
             size="sm"
             variant="ghost"
-            onClick={onSkipDirect}
+            onClick={() => onIntent('skipped')}
             disabled={isBusy || step.status === 'skipped'}
             title="Bu adım bu vaka için uygun değil"
           >
