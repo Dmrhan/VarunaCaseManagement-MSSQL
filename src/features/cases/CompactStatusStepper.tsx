@@ -368,6 +368,8 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
               setReasonTarget(null);
               onApplied(updated);
             }}
+            // Codex P2 — Vazgeç click'inde modal kapansın, boş kalmasın
+            onCancel={() => setReasonTarget(null)}
           />
         </Modal>
       )}
