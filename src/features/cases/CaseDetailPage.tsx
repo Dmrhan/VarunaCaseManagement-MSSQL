@@ -2962,10 +2962,10 @@ function DetailTab({
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
-          Şirket/Müşteri inline-edit yok; account create sırasında set ediliyor
-          ve burada salt-okur span'di. */}
-      <Section title="Sınıflandırma">
+          Adım-4 #3 — PR-B baseline: flat variant (ringless, sönük başlık). */}
+      <Section title="Sınıflandırma" variant="flat">
         <EditableGrid
+          variant="flat"
           rows={[
             { label: 'Kategori', node: (
               <InlineEdit
@@ -3148,9 +3148,12 @@ function DetailTab({
         onSelectPrevious={onSelectPrevious}
       />
 
-      {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar */}
-      <Section title="Atama & Eskalasyon">
+      {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar
+          Adım-4 #3 — PR-B baseline flat: ringless, sönük başlık. Sol panel
+          okuma özeti; merkez edit. Duplikasyon değil, ayrı amaç. */}
+      <Section title="Atama & eskalasyon" variant="flat">
         <EditableGrid
+          variant="flat"
           rows={[
             { label: 'Atanan Takım', node: (
               <InlineEdit
@@ -3163,11 +3166,14 @@ function DetailTab({
                 onCommit={(val) => onCommitDraft('assignedTeamId', val)}
                 onCancel={onCancelEdit}
                 options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName ?? '—'}
-                  </span>
-                )}
+                renderDisplay={() => {
+                  const val = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
+                  return val ? (
+                    <span className="text-sm text-slate-800">{val}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  );
+                }}
               />
             )},
             { label: 'Atanan Kişi', node: (
@@ -3185,11 +3191,14 @@ function DetailTab({
                   ...personOptions.map((p) => ({ value: p.id, label: p.name })),
                 ]}
                 disabled={!activeTeamId}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName ?? '—'}
-                  </span>
-                )}
+                renderDisplay={() => {
+                  const val = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
+                  return val ? (
+                    <span className="text-sm text-slate-800">{val}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  );
+                }}
               />
             )},
             { label: 'Eskalasyon', node: (
@@ -3231,7 +3240,13 @@ function DetailTab({
                 )}
               />
             )},
-            { label: 'Vaka Sahibi', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-500" title="Otomatik atanır">{item.assignedPersonName ?? 'Atanmadı'}</span> },
+            { label: 'Vaka Sahibi', node: (
+              item.assignedPersonName ? (
+                <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Otomatik atanır">{item.assignedPersonName}</span>
+              ) : (
+                <span className="block cursor-default px-2 py-1 text-sm italic text-slate-400" title="Otomatik atanır">Atanmadı</span>
+              )
+            ) },
           ]}
         />
       </Section>
@@ -4721,20 +4736,33 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
 function Section({
   title,
   tint = 'default',
+  variant = 'card',
   children,
 }: {
   title: string;
   tint?: 'default' | 'violet' | 'rose' | 'emerald';
+  /**
+   * 'card' (default) — ağır ring + bg-white kutu (eski davranış)
+   * 'flat'           — Adım-4 PR-B baseline: ringless, transparent bg,
+   *                    sadece minimal padding + sönük başlık. Sayfanın
+   *                    geneliyle aynı görsel dilde.
+   */
+  variant?: 'card' | 'flat';
   children: React.ReactNode;
 }) {
   const ring =
+    variant === 'flat'    ? '' :
     tint === 'violet'  ? 'ring-violet-200 bg-violet-50/30' :
     tint === 'rose'    ? 'ring-rose-200 bg-rose-50/30' :
     tint === 'emerald' ? 'ring-emerald-200 bg-emerald-50/30' :
                           'ring-slate-200 bg-white';
+  const wrapperCls =
+    variant === 'flat'
+      ? 'pt-1'
+      : `rounded-lg p-4 ring-1 ring-inset ${ring}`;
   return (
-    <section className={`rounded-lg p-4 ring-1 ring-inset ${ring}`}>
-      <h3 className="mb-2 text-xs font-medium text-slate-600">{title}</h3>
+    <section className={wrapperCls}>
+      <h3 className="mb-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">{title}</h3>
       {children}
     </section>
   );
@@ -4833,14 +4861,31 @@ function PreviousCasesSection({
   );
 }
 
-function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }[] }) {
+function EditableGrid({
+  rows,
+  variant = 'card',
+}: {
+  rows: { label: string; node: React.ReactNode }[];
+  /**
+   * 'card' (default) — ağır ring + grid (eski davranış)
+   * 'flat'           — Adım-4 PR-B baseline: ringless, satır border yok,
+   *                    sayfanın geneliyle akışkan.
+   */
+  variant?: 'card' | 'flat';
+}) {
+  const dlCls =
+    variant === 'flat'
+      ? 'grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2'
+      : 'grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2';
   return (
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2">
+    <dl className={dlCls}>
       {rows.map((r, i) => (
         <div
           key={r.label}
           className={`flex flex-col gap-0.5 px-2 py-1.5 ${
-            i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
+            variant === 'card' && i < rows.length - 1
+              ? 'border-b border-slate-100 sm:border-b-0'
+              : ''
           }`}
         >
           <dt className="px-2 text-[11px] font-medium text-slate-500">{r.label}</dt>
