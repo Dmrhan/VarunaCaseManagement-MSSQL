@@ -433,7 +433,7 @@
           ]
         },
         {
-          "group": "Kullanım / Eğitim",
+          "group": "Kullanım/Bilgi Eksikliği",
           "details": [
             "Kullanıcı işlem adımı hatası",
             "Yasal süreç (8 gün / ay kapanışı)",
@@ -465,6 +465,10 @@
         },
         {
           "group": "E-belge (Gönderim)",
+          "details": []
+        },
+        {
+          "group": "Koşul Yakalanmadı",
           "details": []
         }
       ]
