@@ -76,7 +76,8 @@ const STATUS_LABEL: Record<string, string> = {
   Acik:              'Açık',
   Incelemede:        'İncelemede',
   ThirdPartyWaiting: '3. Parti Bekleniyor',
-  Eskalasyon:        'Eskalasyon',
+  // LBD A9 — display rename (DB identifier 'Eskalasyon' korunur)
+  Eskalasyon:        'Eskale Edildi',
   Cozuldu:           'Çözüldü',
   YenidenAcildi:     'Yeniden Açıldı',
   IptalEdildi:       'İptal',
@@ -1552,7 +1553,7 @@ function AtRiskAccountsCard({
                 <th className="px-4 py-2.5">Müşteri</th>
                 <th className="px-4 py-2.5 text-right">Açık Vaka</th>
                 <th className="px-4 py-2.5 text-right">SLA İhlal</th>
-                <th className="px-4 py-2.5 text-right">Eskalasyon</th>
+                <th className="px-4 py-2.5 text-right">Eskale Edildi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">

@@ -37,7 +37,8 @@ const STATUS_LABELS: Record<CaseStatus, string> = {
   'Açık':                'Açık',
   'İncelemede':          'İncelemede',
   '3rdPartyBekleniyor':  '3. Parti Bekleniyor',
-  'Eskalasyon':          'Eskalasyon',
+  // LBD A9 — display rename (enum identifier 'Eskalasyon' korunur)
+  'Eskalasyon':          'Eskale Edildi',
   'Çözüldü':             'Çözüldü',
   'YenidenAcildi':       'Yeniden Açıldı',
   'İptalEdildi':         'İptal Edildi',
