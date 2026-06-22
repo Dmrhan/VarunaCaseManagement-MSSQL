@@ -120,8 +120,8 @@ console.log('\n── 3) CompactStatusStepper.tsx — yeni component ───�
   // 3.16 — subStatusNote (alt-durum metni) field'ı tanımlı + render
   expect('3.16 subStatusNote: "3. parti · SLA durdu"',
     src.includes("subStatusNote: '3. parti · SLA durdu'"), true);
-  expect('3.17 subStatusNote: "Eskale edildi"',
-    src.includes("subStatusNote: 'Eskale edildi'"), true);
+  expect('3.17 subStatusNote: "Eskale Edildi" (LBD A9 hizalı)',
+    src.includes("subStatusNote: 'Eskale Edildi'"), true);
   expect('3.18 alt-durum notu render — activeVisual.subStatusNote',
     /const subStatusNote = activeVisual\.subStatusNote/.test(src), true);
   // 3.19 — Tamamlanan etiket sönük (text-slate-400) — rötuş
@@ -230,6 +230,85 @@ console.log('\n── 4d) LBD PR-A — sol panel sakinleştirme (A6/A7/A12) ─�
     /onClick=\{\(\) => onOpenAccount\(item\.accountId as string\)\}[\s\S]{0,400}\{customerContext\?\.accountName \?\? item\.accountName\}/.test(src), true);
   expect('4d.11 "Detay →" link hala bağlı (regression)',
     /onOpenAccount\(item\.accountId as string\)[\s\S]{0,400}Detay →/.test(src), true);
+}
+
+console.log('\n── 4e) LBD A9 — "Eskalasyon" → "Eskale Edildi" display rename ──');
+{
+  // 4e.1 — Merkezi label map güncellendi
+  const t = read('src/features/cases/types.ts');
+  expect('4e.1 CASE_STATUS_LABELS["Eskalasyon"] = "Eskale Edildi"',
+    /'Eskalasyon':\s*'Eskale Edildi'/.test(t), true);
+  // 4e.2 — Enum identifier (CaseStatus type union) korundu
+  expect('4e.2 CaseStatus type union "Eskalasyon" identifier korundu',
+    /\|\s*'Eskalasyon'\s*$/m.test(t) || /\|\s*'Eskalasyon'\s*\n/.test(t), true);
+  // 4e.3 — CASE_STATUSES array identifier korundu
+  expect('4e.3 CASE_STATUSES array "Eskalasyon" identifier korundu',
+    /CASE_STATUSES:\s*CaseStatus\[\]\s*=\s*\[[\s\S]{0,300}'Eskalasyon',/.test(t), true);
+  // 4e.4 — STATUS_TRANSITIONS map identifier korundu
+  expect('4e.4 STATUS_TRANSITIONS "Eskalasyon" identifier korundu (key + value array)',
+    /'Eskalasyon':\s*\['İncelemede'/.test(t), true);
+
+  // 4e.5 — StatusPill local STATUS_LABELS güncellendi
+  const pill = read('src/components/ui/StatusPill.tsx');
+  expect('4e.5 StatusPill STATUS_LABELS["Eskalasyon"] = "Eskale Edildi"',
+    /'Eskalasyon':\s*'Eskale Edildi'/.test(pill), true);
+
+  // 4e.6 — StatusTransitionPanel local STATUS_LABELS güncellendi
+  const panel = read('src/features/cases/StatusTransitionPanel.tsx');
+  expect('4e.6 StatusTransitionPanel STATUS_LABELS["Eskalasyon"] = "Eskale Edildi"',
+    /'Eskalasyon':\s*'Eskale Edildi'/.test(panel), true);
+
+  // 4e.7 — CasesListPage STATUS_LABELS_SHORT + team.escalation tile label
+  const list = read('src/features/cases/CasesListPage.tsx');
+  expect('4e.7 CasesListPage STATUS_LABELS_SHORT["Eskalasyon"] = "Eskale Edildi"',
+    /'Eskalasyon':\s*'Eskale Edildi'/.test(list), true);
+  expect('4e.8 CasesListPage team.escalation tile label "Eskale Edildi"',
+    /tile\('team\.escalation',\s*'Eskale Edildi'/.test(list), true);
+
+  // 4e.9 — Analytics Ops + ReportPreview tablo başlığı
+  const ops = read('src/features/analytics/OperationsDashboardPage.tsx');
+  expect('4e.9 OperationsDashboard STATUS_LABEL.Eskalasyon = "Eskale Edildi"',
+    /Eskalasyon:\s*'Eskale Edildi'/.test(ops), true);
+  expect('4e.10 OperationsDashboard tablo başlığı "Eskale Edildi"',
+    />Eskale Edildi</.test(ops), true);
+  const report = read('src/features/analytics/ReportPreview.tsx');
+  expect('4e.11 ReportPreview <th>Eskale Edildi</th>',
+    />Eskale Edildi</.test(report), true);
+
+  // 4e.12 — My Home + CustomerPulsePanel + Stepper subStatusNote
+  const myH = read('src/features/my/MyHomePage.tsx');
+  expect('4e.12 MyHomePage STATUS_LABEL.Eskalasyon = "Eskale Edildi"',
+    /Eskalasyon:\s*'Eskale Edildi'/.test(myH), true);
+  const pulse = read('src/features/cases/components/CustomerPulsePanel.tsx');
+  expect('4e.13 CustomerPulsePanel MetricChip label="Eskale Edildi"',
+    /MetricChip label="Eskale Edildi"/.test(pulse), true);
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+  expect('4e.14 CompactStatusStepper subStatusNote: "Eskale Edildi"',
+    /subStatusNote:\s*'Eskale Edildi'/.test(stepper), true);
+
+  // 4e.15 — Hiçbir UI dosyasında "<>Eskalasyon<" veya "'Eskalasyon':\s*'Eskalasyon'"
+  //         display kullanımı kalmadı.
+  const filesToScan = [
+    'src/features/cases/types.ts',
+    'src/components/ui/StatusPill.tsx',
+    'src/features/cases/StatusTransitionPanel.tsx',
+    'src/features/cases/CasesListPage.tsx',
+    'src/features/analytics/OperationsDashboardPage.tsx',
+    'src/features/analytics/ReportPreview.tsx',
+    'src/features/my/MyHomePage.tsx',
+    'src/features/cases/components/CustomerPulsePanel.tsx',
+    'src/features/cases/CompactStatusStepper.tsx',
+  ];
+  let leakedDisplay = 0;
+  for (const f of filesToScan) {
+    const s = read(f);
+    // 'X': 'Eskalasyon' (label map value) kalıbı yok
+    if (/'\w+':\s*'Eskalasyon'/.test(s)) leakedDisplay += 1;
+    // >Eskalasyon< JSX text yok
+    if (/>Eskalasyon</.test(s)) leakedDisplay += 1;
+  }
+  expect('4e.15 hiçbir tarama dosyasında display "Eskalasyon" string kalmadı',
+    leakedDisplay, 0);
 }
 
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');

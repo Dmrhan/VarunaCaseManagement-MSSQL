@@ -851,7 +851,10 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   'Açık':                'Açık',
   'İncelemede':          'İncelemede',
   '3rdPartyBekleniyor':  '3. Parti Bekleniyor',
-  'Eskalasyon':          'Eskalasyon',
+  // LBD A9: TR display label "Eskalasyon" → "Eskale Edildi" (sentence-case
+  // kardeş statülerle hizalı). Enum identifier 'Eskalasyon' + DB değeri
+  // AYNEN KALIR — backend, allowed-transition, SLA, reason logic dokunulmaz.
+  'Eskalasyon':          'Eskale Edildi',
   'Çözüldü':             'Çözüldü',
   'YenidenAcildi':       'Yeniden Açıldı',
   'İptalEdildi':         'İptal Edildi',

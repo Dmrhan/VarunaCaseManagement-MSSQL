@@ -97,7 +97,7 @@ const STATUS_VISUAL: Record<
     dotColor: 'bg-rose-500',
     chipBg: 'bg-rose-50',
     chipText: 'text-rose-700',
-    subStatusNote: 'Eskale edildi',
+    subStatusNote: 'Eskale Edildi',
   },
   'YenidenAcildi': {
     icon: <RotateCw size={13} />,

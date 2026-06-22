@@ -231,7 +231,7 @@ export function CustomerPulsePanel({ source, skipAi }: CustomerPulsePanelProps) 
             <MetricChip label="Kritik" value={pulse.metrics.criticalCases} tint="rose" />
           )}
           {pulse.metrics.escalatedCases > 0 && (
-            <MetricChip label="Eskalasyon" value={pulse.metrics.escalatedCases} tint="amber" />
+            <MetricChip label="Eskale Edildi" value={pulse.metrics.escalatedCases} tint="amber" />
           )}
         </div>
 

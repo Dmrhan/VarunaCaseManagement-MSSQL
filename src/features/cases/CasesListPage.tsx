@@ -184,7 +184,8 @@ const STATUS_LABELS_SHORT: Record<CaseStatus, string> = {
   'Açık':                'Açık',
   'İncelemede':          'İncelemede',
   '3rdPartyBekleniyor':  '3.Parti',
-  'Eskalasyon':          'Eskalasyon',
+  // LBD A9 — display rename (enum identifier 'Eskalasyon' korunur)
+  'Eskalasyon':          'Eskale Edildi',
   'Çözüldü':             'Çözüldü',
   'YenidenAcildi':       'Yeniden',
   'İptalEdildi':         'İptal',
@@ -819,7 +820,7 @@ export function CasesListPage({
                 setInboxTab('open');
                 setQuickFilter(null);
               }),
-              tile('team.escalation', 'Eskalasyon', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
+              tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
                 setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
                 setInboxTab('open');
                 setQuickFilter(null);
