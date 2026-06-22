@@ -2908,25 +2908,9 @@ function DetailTab({
           Reason zorunlu geçişler StatusTransitionPanel'i modal içinde reuse eder;
           burada geniş kart grid'i render edilmez. */}
 
-      {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
-      <ResolutionApprovalCard
-        item={item}
-        onApprovalChanged={() => {
-          void caseService.get(item.id).then((c) => {
-            if (c) onTransitionApplied(c);
-          });
-        }}
-      />
-
-      {/* WR-D4 Phase 2 — İletişim bildirimleri (yalnız bu vakaya dispatch varsa) */}
-      <CommunicationDispatchCard
-        item={item}
-        onChanged={() => {
-          void caseService.get(item.id).then((c) => {
-            if (c) onTransitionApplied(c);
-          });
-        }}
-      />
+      {/* Adım-2: ResolutionApprovalCard + CommunicationDispatchCard kalan
+          koşullu bloklar grubuna (Atama'nın altına) taşındı.
+          Aksiyonel önemleri var → grubun başında konumlanır. */}
 
       {/* Inline edit bilgi notu */}
       <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
@@ -2954,6 +2938,21 @@ function DetailTab({
         />
       </Section>
 
+      {/* Adım-2 — Çözüm Notu Açıklama'nın hemen ALTINDA (problem → çözüm).
+          Yeni stil: emerald sol-şerit + nötr arka plan (PR-B sakin dili).
+          Boşsa render edilmez. */}
+      {item.resolutionNote && (
+        <Section title="Çözüm Notu">
+          <div className="rounded-md bg-slate-50/60 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 border-l-2 border-emerald-400 dark:bg-ndark-bg/30 dark:text-ndark-text dark:ring-ndark-border">
+            <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 size={11} />
+              Çözüm
+            </div>
+            <p className="whitespace-pre-wrap">{item.resolutionNote}</p>
+          </div>
+        </Section>
+      )}
+
       {/* Business review Madde 4 (PR-4) — Smart Ticket açılış kategorileri
           chip görünümü. Yalnız customFields.smartTicket varsa render edilir;
           klasik vakalarda null döner. L1 Devir Özeti kartı (Çözüm Adımları
@@ -2961,11 +2960,13 @@ function DetailTab({
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
       <SmartTicketMetaSection item={item} />
 
-      <Section title="Müşteri & Sınıflandırma">
+      {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
+          Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
+          Şirket/Müşteri inline-edit yok; account create sırasında set ediliyor
+          ve burada salt-okur span'di. */}
+      <Section title="Sınıflandırma">
         <EditableGrid
           rows={[
-            { label: 'Şirket', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.companyName}</span> },
-            { label: 'Müşteri', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.accountName}</span> },
             { label: 'Kategori', node: (
               <InlineEdit
                 fieldKey="category"
@@ -3136,6 +3137,38 @@ function DetailTab({
           ]}
         />
       </Section>
+
+      {/* Adım-2: Müşteri geçmiş vakaları Sınıflandırma'nın ALTINA taşındı.
+          Şu an mevcut slice(0, 3) özet liste konumu — Adım-3'te tam liste
+          ("ilk 10 + Hepsini gör" toggle) gelecek. */}
+      {previousCases.length > 0 && (
+        <Section title={`Önceki Vakalar (${previousCases.length})`}>
+          <ul className="space-y-1.5">
+            {previousCases.slice(0, 3).map((p) => {
+              const refDate = p.resolvedAt ?? p.updatedAt;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPrevious(p.id)}
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                  >
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">{p.caseNumber}</span>
+                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{p.title}</span>
+                    <StatusPill status={p.status} />
+                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{formatRelative(refDate)}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {previousCases.length > 3 && (
+              <li className="pl-2 text-[11px] text-slate-500">
+                +{previousCases.length - 3} vaka daha…
+              </li>
+            )}
+          </ul>
+        </Section>
+      )}
 
       {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar */}
       <Section title="Atama & Eskalasyon">
@@ -3383,33 +3416,41 @@ function DetailTab({
         </Section>
       )}
 
-      <Section title="SLA & Tarihler">
-        <DetailGrid
-          rows={[
-            ['Yanıt SLA', item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'],
-            ['Çözüm SLA', item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'],
-            ['SLA Duraklatıldı', item.slaPausedAt ? formatDateTime(item.slaPausedAt) : 'Hayır'],
-            ['Toplam Pause', `${item.slaPausedDurationMin} dk`],
-            ['Açılış', formatDateTime(item.createdAt)],
-            ['Son Güncelleme', formatDateTime(item.updatedAt)],
-            ['Çözüm', item.resolvedAt ? formatDateTime(item.resolvedAt) : '—'],
-          ]}
-        />
-      </Section>
+      {/* Adım-2 #4 — "SLA & Tarihler" Section kaldırıldı. KPI/SLA şeridi
+          (status bandı altı) tek kaynak; tarih duplikasyonu yok.
+          SLA Duraklatıldı / Toplam Pause özel detaylar şu an gizlendi —
+          ihtiyaç olursa Aktivite tab'ında zaten history satırlarında görünür. */}
 
-      {item.resolutionNote && (
-        <Section title="Çözüm Notu" tint="emerald">
-          <p className="whitespace-pre-wrap rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900 ring-1 ring-emerald-200">
-            {item.resolutionNote}
-          </p>
-        </Section>
-      )}
+      {/* Çözüm Notu Adım-2 #2 ile Açıklama'nın hemen ALTINA taşındı —
+          bu konumdan kaldırıldı. */}
+
+      {/* Kalan koşullu bloklar — Atama'nın altına grup olarak.
+          Önemli/aksiyonel olanlar başta: Approval → Dispatch → KB/SmartTicket. */}
+
+      {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
+      <ResolutionApprovalCard
+        item={item}
+        onApprovalChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
+
+      {/* WR-D4 Phase 2 — İletişim bildirimleri (yalnız bu vakaya dispatch varsa) */}
+      <CommunicationDispatchCard
+        item={item}
+        onChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
 
       {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı.
           KbDraftCard customFields.smartTicket.aiDrafts varsa render eder;
           aksi takdirde null döner (klasik vakalar etkilenmez). */}
       <KbDraftSection item={item} />
-
 
       {item.cancellationReason && (
         <Section title="İptal Gerekçesi">
@@ -3419,35 +3460,8 @@ function DetailTab({
         </Section>
       )}
 
-      {/* Sol panelden buraya taşındı — bu müşteriye ait kapalı/çözülmüş vakalar */}
-      {previousCases.length > 0 && (
-        <Section title={`Önceki Vakalar (${previousCases.length})`}>
-          <ul className="space-y-1.5">
-            {previousCases.slice(0, 3).map((p) => {
-              const refDate = p.resolvedAt ?? p.updatedAt;
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectPrevious(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
-                  >
-                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">{p.caseNumber}</span>
-                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{p.title}</span>
-                    <StatusPill status={p.status} />
-                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{formatRelative(refDate)}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {previousCases.length > 3 && (
-              <li className="pl-2 text-[11px] text-slate-500">
-                +{previousCases.length - 3} vaka daha…
-              </li>
-            )}
-          </ul>
-        </Section>
-      )}
+      {/* Adım-2: Önceki Vakalar bloğu Sınıflandırma'nın altına taşındı —
+          bu konumdan kaldırıldı. */}
 
       {/* Custom Fields — şirket FieldDefinition'larına göre dinamik */}
       <CustomFieldsCaseSection item={item} onCommitDraft={onCommitDraft} drafts={drafts} />
@@ -4748,23 +4762,8 @@ function Section({
   );
 }
 
-function DetailGrid({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md ring-1 ring-slate-200 sm:grid-cols-2">
-      {rows.map(([label, value], i) => (
-        <div
-          key={label}
-          className={`flex flex-col gap-0.5 px-3 py-2 ${
-            i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
-          }`}
-        >
-          <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
-          <dd className="text-sm text-slate-800">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+// DetailGrid eski "SLA & Tarihler" Section'unda kullanılıyordu; Adım-2'de
+// section silindi, tek caller'ı kalmadı → function de silindi.
 
 function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }[] }) {
   return (
