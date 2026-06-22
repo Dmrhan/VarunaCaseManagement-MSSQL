@@ -73,6 +73,8 @@ import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
+import { accountService } from './services/accountService';
+import { SOFTPHONE_ANSWERED_EVENT } from './contexts/SoftphoneContext';
 
 type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'root-cause-report' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
@@ -99,6 +101,8 @@ export default function App() {
   // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
   const [caseDetailOrigin, setCaseDetailOrigin] = useState<View>('cases');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  // Gelen çağrı screen pop'u: yanıtlanınca müşteri ön-seçili Akıllı Ticket için.
+  const [smartTicketAccount, setSmartTicketAccount] = useState<{ id: string; name: string } | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [pendingQuickPrefill, setPendingQuickPrefill] = useState<string | null>(null);
@@ -124,6 +128,27 @@ export default function App() {
   const [todayCalendarCount, setTodayCalendarCount] = useState(0);
 
   const { theme, toggle: toggleTheme } = useTheme();
+
+  // Gelen çağrı YANITLANDIĞINDA: callerId → müşteri eşleştir → Akıllı Ticket (müşteri ön-seçili).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const callerId = (e as CustomEvent).detail?.number as string | undefined;
+      void (async () => {
+        let acc: { id: string; name: string } | null = null;
+        if (callerId) {
+          try {
+            const res = await accountService.list({ search: callerId, limit: 1 });
+            const a = res?.accounts?.[0];
+            if (a) acc = { id: a.id, name: a.name };
+          } catch { /* eşleşme yoksa müşterisiz aç */ }
+        }
+        setSmartTicketAccount(acc);
+        setView('smart-ticket-new');
+      })();
+    };
+    window.addEventListener(SOFTPHONE_ANSWERED_EVENT, handler);
+    return () => window.removeEventListener(SOFTPHONE_ANSWERED_EVENT, handler);
+  }, []);
   const { user, signOut } = useAuth();
 
   useHotkey('?', () => setHelpOpen(true));
@@ -842,8 +867,10 @@ export default function App() {
           )}
           {view === 'smart-ticket-new' && featureFlags.smartTicketIntakeEnabled && (
             <SmartTicketNewPage
-              onCancel={() => setView('cases')}
-              onCreated={(caseId) => openCase(caseId)}
+              initialAccountId={smartTicketAccount?.id ?? null}
+              initialAccountName={smartTicketAccount?.name ?? null}
+              onCancel={() => { setView('cases'); setSmartTicketAccount(null); }}
+              onCreated={(caseId) => { setSmartTicketAccount(null); openCase(caseId); }}
               onOpenExistingCase={(caseId) => openCase(caseId)}
             />
           )}

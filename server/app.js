@@ -17,6 +17,7 @@ import actionCenterRouter from './routes/action-center.js';
 import kbV1Router from './routes/kbV1.js';
 import reportsRouter from './routes/reports.js';
 import reportViewsRouter from './routes/reportViews.js';
+import alotechRouter from './routes/alotech.js';
 import { prisma } from './db/client.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -107,6 +108,7 @@ app.use('/api/v1', kbV1Router);
 // /api/reports/cases/* reportsRouter'a düşer.
 app.use('/api/reports/views', reportViewsRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/integrations/alotech', alotechRouter);
 
 // API 404 — bilinmeyen /api/* yolları JSON döner (SPA fallback'ine düşmesin).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
