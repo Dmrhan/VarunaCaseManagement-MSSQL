@@ -1,0 +1,110 @@
+[
+  {
+    "no": "VK-MQGPN4BQ",
+    "acilisYorum": "Tutarli. Platform Backoffice, is sureci E-Belge, islem tipi E-Belge gonderme, etkilenen nesne E-Belge Gonderim hepsi sorundaki 'fatura gonder kullanici adi/sifre hatasi' ile uyumlu. Etki 'tek kullanici' makul.",
+    "kapanisYorum": "Kok neden grubu 'E-Belge/Entegrator' DOGRU (entegrator sifre yansimamasi). Kok neden detayi BOS/eksik; cozumdeki entegrator sifre konusuna gore 'Entegrator servis/sifre/kontor' onerilir. Cozum tipi 'Veri/kart duzeltme' SUPHELI; gercekte E-Belge Ayarlari ekranindan sifre guncelleme yapildigi icin 'Parametre duzeltme' daha uygun. Kalici onlem 'Kontrol/validasyon eklenecek' makul ama sifre hatasi icin 'Hata mesaji iyilestirilecek' de uygun.",
+    "genelNot": "kapanis orta - detay eksik, cozum tipi supheli"
+  },
+  {
+    "no": "VK-MQGOBNOQ",
+    "acilisYorum": "Tutarli. ST depo kodu revizyon talebi; is sureci Satis Ekibi/Rut, etkilenen nesne Satis Temsilcisi Parametreler, islem tipi Guncelleme hepsi uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Parametre/Konfigurasyon' DOGRU. Detay 'ST parametresi eksik' makul (depo saha kodu parametresi). Cozum tipi 'Script calistirma (DbUpdate)' DOGRU - TBLSTPARAMETRE update edilmis. Kalici onlem 'Bilgi bankasi yazisi' SUPHELI; talep bazli toplu guncelleme oldugu icin self-servis ekran veya parametre sihirbazi daha uygun olabilir.",
+    "genelNot": "tutarli - kalici onlem zayif"
+  },
+  {
+    "no": "VK-MQGO7EY8",
+    "acilisYorum": "Tutarli. Excel veri alma ile irsaliye olusturma sorusu; is sureci Veri Alma Aktarim, etkilenen nesne Veri Alma Excelden uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Kullanim/Egitim' DOGRU (nasil yapilir sorusu). Detay 'Bilgi/nasil yapilir' DOGRU. Cozum tipi 'Egitim' makul ama adim adim anlatim oldugu icin 'Bilgilendirme' de uygun. Kalici onlem 'Bilgi bankasi yazisi hazirlanacak' DOGRU.",
+    "genelNot": "tutarli"
+  },
+  {
+    "no": "VK-MQGN8DL8",
+    "acilisYorum": "Acilis EKSIK - is sureci, islem tipi, etkilenen nesne bos. Sorun SSL sertifika yenileme; etki 'Gecici cozum yok' degil 'Sunucu/sertifika' baglamina gore is sureci 'Sistem/Altyapi' onerilir, etkilenen nesne 'SSL Sertifika', islem tipi 'Guncelleme/Yenileme'. Platform Backoffice supheli, bu sunucu/altyapi isi.",
+    "kapanisYorum": "Kok neden grubu 'Sunucu/Altyapi/Performans' DOGRU. Detay 'Giris/sunucu hatasi' SUPHELI; sertifika suresi dolmasi olduğu icin daha spesifik bir detay uygun. Cozum tipi 'Entegrator/servis mudahalesi' SUPHELI; IT ekibi sunucuya sertifika kurmus, 3.parti entegrator degil - daha cok altyapi mudahalesi. Kalici onlem 'Log/izleme' SUPHELI; sertifika sure takibi/izleme alakali olabilir ama e-belge logu degil.",
+    "genelNot": "acilis eksik - kapanis kismen alakasiz"
+  },
+  {
+    "no": "VK-MQGKX7SL",
+    "acilisYorum": "Tutarli. Toplu stok/bakiye sifirlama talebi; is sureci Musteri/Cari Karti, etkilenen nesne StokCari Sifirlama uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Kullanim/Egitim' DOGRU (nasil yapilir gosterildi). Detay 'Bilgi/nasil yapilir' DOGRU. Cozum tipi 'Bilgilendirme' DOGRU. Kalici onlem 'Egitim icerigi hazirlanacak' makul; 'Bilgi bankasi yazisi' da uygundu.",
+    "genelNot": "tutarli"
+  },
+  {
+    "no": "VK-MQGAHC5T",
+    "acilisYorum": "Tutarli. Smartconnect/Generic Xml aktarimda 'Aktarilacak Kayit Bulunamadi'; is sureci Web Servis Entegrasyon/Aktarim, etkilenen nesne Ticari Pakete Aktarim uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Entegrasyon/Aktarim' makul ama YANLIS olabilir; gercek neden belgenin yazdirilmamasi/aktarim durumu yani kullanim kosulu - 'Kullanim/Egitim' daha dogru. Detay 'Eslestirme eksik' YANLIS; xml eslestirme degil, belge yazdirilmamis/durumu uygun degil. Cozum tipi 'Entegrator/servis mudahalesi' YANLIS; sadece tarih araligi/yazdirma kosulu aciklanmis, bu 'Bilgilendirme'. Kalici onlem 'Bilgi bankasi yazisi' DOGRU.",
+    "genelNot": "kapanis zayif - neden/cozum tipi yanlis"
+  },
+  {
+    "no": "VK-MQGKFHRO",
+    "acilisYorum": "Tutarli. Mobil bilgi almada datetime hatasi; platform Mobil, is sureci Satis Kocu, etkilenen nesne Bilgi Alma uyumlu. islem tipi Bilgi Alma dogru.",
+    "kapanisYorum": "Kok neden grubu 'Ana Veri/Kart Tanimi' SUPHELI; cozum rut tarih alanlarinin duzeltilmesi yani 'Veri Tutarsizligi' veya rut tanimi ile ilgili. Detay 'Satis temsilcisi tanimi hatali' SUPHELI; aslinda rut tarih alani hatali, detay rut tanimina yonelik olmali. Cozum tipi 'Veri/kart duzeltme' DOGRU. Kalici onlem 'Kontrol/validasyon eklenecek' DOGRU (datetime validasyonu).",
+    "genelNot": "kapanis orta - detay rut ile ilgili olmali"
+  },
+  {
+    "no": "VK-MQGK3CA1",
+    "acilisYorum": "Tutarli. E-fatura mukellefiyet/e-arsiv sorunu; is sureci E-Belge, etkilenen nesne Fatura, islem tipi Olusturma uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Ana Veri/Kart Tanimi' SUPHELI; cozum GIB sorgusu ile musterinin e-fatura mukellefi OLMADIGI tespit edilmis yani aslinda sistem dogru calismis, hata yok - 'Kullanim/Egitim' veya 'Bilgilendirme' daha dogru. Detay 'Musteri karti eksik/hatali' SUPHELI; kart hatali degildi. Cozum tipi 'Veri/kart duzeltme' YANLIS; veri duzeltilmedi, bilgilendirme yapildi - 'Bilgilendirme' uygun. Kalici onlem 'Kontrol/validasyon' makul.",
+    "genelNot": "kapanis yanlis - cozum bilgilendirme"
+  },
+  {
+    "no": "VK-MQGA0PB3",
+    "acilisYorum": "Kismen tutarli. is sureci E-Belge dogru. islem tipi 'Aktarim yapma' SUPHELI; talep Uni-Dox kapatma yani 'Guncelleme/Kapatma' daha uygun. Etkilenen nesne E-Belge Ayarlari uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Parametre/Konfigurasyon' makul; entegrator/adres kapatma konusu olduğu icin 'E-Belge/Entegrator' da uygun. Detay 'E-Belge ayari/entegrator sifresi' SUPHELI; sifre degil adres kapatma/mali muhur konusu. Cozum tipi 'Parametre duzeltme' YANLIS; aslinda islem yapilmadi, mali muhur gerektigi bilgisi verildi - 'Bilgilendirme' dogru. Kalici onlem 'Bilgi bankasi yazisi' makul.",
+    "genelNot": "kapanis yanlis - cozum bilgilendirme"
+  },
+  {
+    "no": "VK-MQG9ND72",
+    "acilisYorum": "Tutarli. Mobil guncelleme sonrasi giris yapamama; platform Mobil, is sureci Kullanici/Yetki/Giris, islem tipi Giris yapma uyumlu. Etkilenen nesne Mobil Versiyon Guncelleme uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Cihaz/Mobil Ortam' DOGRU. Detay 'APK versiyon uyumsuz' makul (guncelleme sonrasi veri uyumsuzlugu). Cozum tipi 'Egitim' SUPHELI; veri temizleme/sifre sifirlama adimlari verildi - 'Bilgilendirme' daha uygun. Kalici onlem 'Hata mesaji iyilestirilecek' makul.",
+    "genelNot": "tutarli - cozum tipi egitim yerine bilgilendirme"
+  },
+  {
+    "no": "VK-MQG9JPQ5",
+    "acilisYorum": "Tutarli. Distributor bayi kullanicisinin stant alaninda dist gorememe yetki sorunu; is sureci Kullanici/Yetki/Giris, etkilenen nesne Kullanici Yetki uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Yetki/Rol' DOGRU. Detay 'Distributor/sube yetkisi eksik' DOGRU. Cozum tipi 'Yetki duzenleme' SUPHELI; cozum cok kisa ve 'kullanici bilgisi paylasildi' diyor, gercekte yetki mi duzenlendi belirsiz. Kalici onlem 'Kontrol/validasyon eklenecek' makul.",
+    "genelNot": "tutarli - cozum metni belirsiz"
+  },
+  {
+    "no": "VK-MQG9DBAC",
+    "acilisYorum": "Tutarli. ST mobil sifre bilmiyor, giris yapamiyor; platform Mobil, is sureci Kullanici/Yetki/Giris, islem tipi Giris yapma uyumlu. Etkilenen nesne Kullanici uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Cihaz/Mobil Ortam' YANLIS; sorun cihaz degil sifre bilinmemesi - 'Yetki/Rol/Parametre' veya 'Kullanim/Egitim' daha dogru. Detay BOS/eksik; 'Mobil sifre bilinmiyor/default sifre' onerilir. Cozum tipi 'Veri/kart duzeltme' SUPHELI; sifre paylasildi, 'Bilgilendirme' daha uygun. Kalici onlem BOS/eksik; 'Self-servis ekran yapilacak' veya 'Bilgi bankasi yazisi' onerilir.",
+    "genelNot": "kapanis zayif - kok neden yanlis, alanlar eksik"
+  },
+  {
+    "no": "VK-MQG8OSQH",
+    "acilisYorum": "Tutarli. Mobilde 'farkli kullanici bilgi alma' uyarisi; platform Mobil, is sureci Kullanici/Yetki/Giris, islem tipi Giris yapma uyumlu. Etkilenen nesne Satis Temsilcisi makul.",
+    "kapanisYorum": "Kok neden grubu 'Cihaz/Mobil Ortam' SUPHELI; gercek neden eski kullanicinin bilgi gonderme/kapanis yapmamasi - 'Kullanim/Egitim' daha dogru. Detay 'Cihaz baglantisi/eslestirme' SUPHELI; baglanti degil oturum kapatma/veri sorunu. Cozum tipi BOS/eksik; 'Bilgilendirme' veya veri silme adimi gore 'Veri/kart duzeltme' onerilir. Kalici onlem BOS/eksik; 'Bilgi bankasi yazisi' onerilir.",
+    "genelNot": "kapanis eksik - cozum tipi ve onlem bos"
+  },
+  {
+    "no": "VK-MQG7UKCK",
+    "acilisYorum": "Tutarli. ST cihazinda mobil uygulama acilmiyor/atiyor; platform Mobil, is sureci Kullanici/Yetki/Giris, islem tipi Giris yapma uyumlu. Etkilenen nesne Satis Temsilcisi makul.",
+    "kapanisYorum": "Kok neden grubu 'Cihaz/Mobil Ortam' DOGRU (uygulama veri/cache sorunu). Detay 'Cihaz baglantisi/eslestirme' SUPHELI; cozum veri silme/yeniden kurulum yani 'APK/uygulama veri' daha uygun. Cozum tipi BOS/eksik; veri silme+yeniden giris yapildigi icin 'Bilgilendirme' veya 'Veri/kart duzeltme' onerilir. Kalici onlem BOS/eksik; 'Bilgi bankasi yazisi' onerilir.",
+    "genelNot": "kapanis eksik - cozum tipi ve onlem bos"
+  },
+  {
+    "no": "VK-MQFAJRJR",
+    "acilisYorum": "Acilis kismen EKSIK - is sureci ve islem tipi bos. Sorun guncel mobil uygulama ios/android link talebi; is sureci 'Kullanici/Yetki/Giris' veya mobil kurulum, islem tipi 'Bilgi talebi/Dosya Indirme' onerilir. Etkilenen nesne Mobil Versiyon Guncelleme uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Kullanim/Egitim' DOGRU. Detay 'Bilgi/nasil yapilir' DOGRU. Cozum tipi 'Bilgilendirme' DOGRU (link paylasildi). Kalici onlem 'Bilgi bankasi yazisi' DOGRU.",
+    "genelNot": "acilis eksik - kapanis tutarli"
+  },
+  {
+    "no": "VK-MQF9DQAC",
+    "acilisYorum": "Tutarli. Sabah bilgi alirken object reference hatasi tum temsilcilerde; platform Mobil, is sureci Satis Ekibi/Rut, islem tipi Bilgi Alma, etki 'Tum kullanicilar' uyumlu.",
+    "kapanisYorum": "DIKKAT: Cozum metni placeholder ('Detay aciklama yapilacak alan burasidirc') yani gercek cozum YOK, kapanis dogrulanamaz. Kok neden grubu 'Yazilim Hatasi' sorundaki object reference ile uyumlu gorunuyor. Detay 'Gorev calismiyor (object reference)' makul. Cozum tipi 'Veri/kart duzeltme' DOGRULANAMAZ - cozum metni bos. Kalici onlem 'Hata mesaji iyilestirilecek' makul. Cozum metni doldurulmali.",
+    "genelNot": "cozum metni bos - kapanis dogrulanamaz"
+  },
+  {
+    "no": "VK-MQF878OZ",
+    "acilisYorum": "Tutarli. Saticiya iade faturasinda iskontolarin uygulanmamasi; is sureci Iade Islemleri, etkilenen nesne Saticiya Iade Faturasi, islem tipi Kayit etme uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'Hesaplama/Is Kurali' SUPHELI; cozum yanlis ekran kullanimi (Duzenle yerine Baglantili Iade Duzenleme ekrani) yani 'Kullanim/Egitim' daha dogru. Detay BOS/eksik; 'Yanlis ekran/islem yontemi' onerilir. Cozum tipi 'Veri/kart duzeltme' SUPHELI; veri duzeltme degil dogru ekran yonlendirmesi - 'Bilgilendirme' uygun. Kalici onlem 'Kontrol/validasyon eklenecek' makul.",
+    "genelNot": "kapanis orta - neden kullanim, detay eksik"
+  },
+  {
+    "no": "VK-MQF7479S",
+    "acilisYorum": "Tutarli. E-Arsiv belge gonderimde hata; is sureci E-Belge, islem tipi E-Belge gonderme, etkilenen nesne E-Belge Gonderim, etki 'Bazi islemler' uyumlu.",
+    "kapanisYorum": "Kok neden grubu 'E-Belge/Entegrator (3.parti)' DOGRU (E-Logo genel sorunu). Detay 'Entegrator servis/sifre/kontor' makul. Cozum tipi 'Parametre duzeltme' YANLIS; entegrator tarafinda genel sorun, parametre duzeltilmedi, inceleme devam ediyor - 'Entegrator/servis mudahalesi' dogru. Kalici onlem 'Hata mesaji iyilestirilecek' makul; 'Log/izleme' de uygun.",
+    "genelNot": "kapanis orta - cozum tipi yanlis"
+  }
+]

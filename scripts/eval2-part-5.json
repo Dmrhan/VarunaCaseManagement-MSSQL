@@ -1,0 +1,306 @@
+[
+  {
+    "no": "VK-MQ9F01XV",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "E-Belge (e-fatura / e-arşiv)",
+      "islemTipi": "E-Belge gönderme",
+      "etkilenenNesne": "E-Belge Gönderim",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Hesaplama / İş Kuralı",
+      "kokNedenDetayi": "KDV / muafiyet",
+      "cozumTipi": "Veri / kart düzeltme",
+      "kaliciOnlem": "Kontrol / validasyon eklenecek"
+    }
+  },
+  {
+    "no": "VK-MQ9DHE3L",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "Finans  Tahsilat İşlemleri",
+      "islemTipi": "Düzeltme",
+      "etkilenenNesne": "Tahsilat Aktarim Onay",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Kullanım / Eğitim",
+      "kokNedenDetayi": "Operatörlük / merkez onayı gereken işlem",
+      "cozumTipi": "Veri / kart düzeltme",
+      "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ9AUWG7",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Kullanıcı / Yetki / Giriş",
+      "islemTipi": "Giriş yapma",
+      "etkilenenNesne": "Kullanıcı",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Cihaz / Mobil Ortam",
+      "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+      "cozumTipi": "Parametre düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ9AUTEM",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Belge Dizaynı / Matbu",
+      "islemTipi": "Yazdırma",
+      "etkilenenNesne": "Belge Dizaynı",
+      "etki": "Bazı işlemler etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Dizayn / Matbu / Baskı",
+      "kokNedenDetayi": "Belge dizaynı eksik / hatalı",
+      "cozumTipi": "Dizayn düzeltme",
+      "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ99EG7N",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "E-Belge (e-fatura / e-arşiv)",
+      "islemTipi": "Bilgi talebi",
+      "etkilenenNesne": "E-Belge Ayarları",
+      "etki": "Tüm kullanıcılar / distribütör etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Kullanım / Eğitim",
+      "kokNedenDetayi": "Bilgi / nasıl yapılır",
+      "cozumTipi": "Eğitim",
+      "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ99537Q",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Dağıtım Kanalı İşlemleri",
+      "islemTipi": "Bilgi Alma",
+      "etkilenenNesne": "Bilgi Alma",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Cihaz / Mobil Ortam",
+      "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+      "cozumTipi": "Bilgilendirme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ987Q2E",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "Belge Basım İşlemleri",
+      "islemTipi": "Yazdırma",
+      "etkilenenNesne": "Toplu Irsaliye Basim",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Dizayn / Matbu / Baskı",
+      "kokNedenDetayi": "Belge dizaynı eksik / hatalı",
+      "cozumTipi": "Dizayn düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ980TH5",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Veri Alma Aktarım işlemleri",
+      "islemTipi": "Bilgi Alma",
+      "etkilenenNesne": "Bilgi Alma",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Veri Tutarsızlığı",
+      "kokNedenDetayi": "Bozuk kayıt (stok tipi / belge detayı)",
+      "cozumTipi": "Script çalıştırma (DbUpdate)",
+      "kaliciOnlem": "Log / izleme geliştirilecek (aktarım / e-belge)"
+    }
+  },
+  {
+    "no": "VK-MQ92PEYK",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "Fiyat işlemleri",
+      "islemTipi": "Veri Gelme",
+      "etkilenenNesne": "Veri Alma Excelden",
+      "etki": "Tüm kullanıcılar / distribütör etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Parametre / Konfigürasyon",
+      "kokNedenDetayi": "Yanlış parametre",
+      "cozumTipi": "Script çalıştırma (DbUpdate)",
+      "kaliciOnlem": "Kontrol / validasyon eklenecek"
+    }
+  },
+  {
+    "no": "VK-MQ86LGYT",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Belge Basım İşlemleri",
+      "islemTipi": "Yazdırma",
+      "etkilenenNesne": "Fatura Basım",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Cihaz / Mobil Ortam",
+      "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+      "cozumTipi": "Parametre düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ86C1PG",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "Satış İşlemleri",
+      "islemTipi": "Yazdırma",
+      "etkilenenNesne": "Sipariş",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Dizayn / Matbu / Baskı",
+      "kokNedenDetayi": "Belge dizaynı eksik / hatalı",
+      "cozumTipi": "Veri / kart düzeltme",
+      "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ85Z1DN",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "İade İşlemleri",
+      "islemTipi": "Oluşturma",
+      "etkilenenNesne": "Satış Irs. S.İade Fatura Olusturma",
+      "etki": "Bazı işlemler etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Ana Veri / Kart Tanımı",
+      "kokNedenDetayi": "Müşteri kartı eksik / hatalı",
+      "cozumTipi": "Veri / kart düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ84GCPB",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "E-Belge (e-fatura / e-arşiv)",
+      "islemTipi": "E-Belge gönderme",
+      "etkilenenNesne": "E-Belge Gönderim",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Veri / Veritabanı Hatası",
+      "kokNedenDetayi": "Update ve insert işlemi",
+      "cozumTipi": "Script çalıştırma (DbUpdate)",
+      "kaliciOnlem": "Log / izleme geliştirilecek (aktarım / e-belge)"
+    }
+  },
+  {
+    "no": "VK-MQ84ZJHI",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Stok İşlemleri",
+      "islemTipi": "Bilgi gönderme",
+      "etkilenenNesne": "Bilgi Gönderme",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Veri Tutarsızlığı",
+      "kokNedenDetayi": "Bozuk kayıt (stok tipi / belge detayı)",
+      "cozumTipi": "Veri / kart düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ84JF2U",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "E-Belge (e-fatura / e-arşiv)",
+      "islemTipi": "E-Belge gönderme",
+      "etkilenenNesne": "E-Belge Gönderim",
+      "etki": "Bazı işlemler etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Parametre / Konfigürasyon",
+      "kokNedenDetayi": "E-Belge ayarı / entegratör şifresi",
+      "cozumTipi": "Parametre düzeltme",
+      "kaliciOnlem": "Hata mesajı iyileştirilecek"
+    }
+  },
+  {
+    "no": "VK-MQ847TA0",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "İade İşlemleri",
+      "islemTipi": "Oluşturma",
+      "etkilenenNesne": "İade Faturası (Saglam)",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Yetki / Rol",
+      "kokNedenDetayi": "İşlem yetkisi eksik",
+      "cozumTipi": "Yetki düzenleme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ8445NI",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Satış Koçu İşlemleri",
+      "islemTipi": "Oluşturma",
+      "etkilenenNesne": "Parametreler",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Parametre / Konfigürasyon",
+      "kokNedenDetayi": "ST parametresi eksik",
+      "cozumTipi": "Parametre düzeltme",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ83NPOS",
+    "acilis": {
+      "platform": "Backoffice",
+      "isSureci": "Satış Ekibi / Rut ve Ziyaret işlemleri",
+      "islemTipi": "Bilgi talebi",
+      "etkilenenNesne": "Rut Tanım",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Kullanım / Eğitim",
+      "kokNedenDetayi": "Bilgi / nasıl yapılır",
+      "cozumTipi": "Eğitim",
+      "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+    }
+  },
+  {
+    "no": "VK-MQ839EQJ",
+    "acilis": {
+      "platform": "Mobil",
+      "isSureci": "Sevkiyat / Dağıtım Araç Yükleme İşlemleri",
+      "islemTipi": "Bilgi Alma",
+      "etkilenenNesne": "Bilgi Alma",
+      "etki": "Tek kullanıcı etkileniyor"
+    },
+    "kapanis": {
+      "kokNedenGrubu": "Kullanım / Eğitim",
+      "kokNedenDetayi": "Bilgi / nasıl yapılır",
+      "cozumTipi": "Eğitim",
+      "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+    }
+  }
+]

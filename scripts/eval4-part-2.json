@@ -1,0 +1,194 @@
+[
+ {
+  "no": "VK-MQHYJ3YI",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Bilgi talebi",
+   "etkilenenNesne": "Mobil Versiyon Güncelleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kurulum",
+   "kokNedenDetayi": "Kurulum",
+   "cozumTipi": "Eğitim",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHYIL0J",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "İade İşlemleri",
+   "islemTipi": "Hata mesajı",
+   "etkilenenNesne": "İade Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHYFLKZ",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "Bilgi gönderme",
+   "etkilenenNesne": "Bilgi Gönderme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Ana Veri / Kart Tanımı",
+   "kokNedenDetayi": "Satış temsilcisi tanımı hatalı",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Kontrol / validasyon eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQHYAHIC",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "Bilgi gönderme",
+   "etkilenenNesne": "Bilgi Gönderme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "E-Belge / Entegratör (3. parti)",
+   "kokNedenDetayi": "Matbu no / sıra",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Kontrol / validasyon eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQHY7YRJ",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Finans  Tahsilat İşlemleri",
+   "islemTipi": "İptal etme",
+   "etkilenenNesne": "Nakit",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Operatörlük / merkez onayı gereken işlem",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Self-servis ekran yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHY7HTW",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Kullanıcı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+   "cozumTipi": "Eğitim",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHY2U83",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "E-Belge gönderme",
+   "etkilenenNesne": "E-Belge Gönderim",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "E-Belge / Entegratör (3. parti)",
+   "kokNedenDetayi": "Entegratör servis / şifre / kontör",
+   "cozumTipi": "Entegratör / servis müdahalesi",
+   "kaliciOnlem": "Log / izleme geliştirilecek (aktarım / e-belge)"
+  }
+ },
+ {
+  "no": "VK-MQHXXMAM",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "Görünüm problemi",
+   "etkilenenNesne": "Stok İşlemleri",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Yanlış parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHXZEC9",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Müşteri / Cari Kartı ve Gruplama İşlemleri",
+   "islemTipi": "Görünüm problemi",
+   "etkilenenNesne": "Müşteri / Cari Kartı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHSZR1X",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Bağlantı Bilgileri",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Yanlış parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQGRCANV",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "Bilgi gönderme",
+   "etkilenenNesne": "Bilgi Gönderme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Ana Veri / Kart Tanımı",
+   "kokNedenDetayi": "Müşteri kartı eksik / hatalı",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Kontrol / validasyon eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQGQWSFT",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Satış Ekibi / Rut ve Ziyaret işlemleri",
+   "islemTipi": "Bilgi Alma",
+   "etkilenenNesne": "Ziyaret Izleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ }
+]

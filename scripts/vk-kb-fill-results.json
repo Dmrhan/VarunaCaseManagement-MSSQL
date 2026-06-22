@@ -1,0 +1,3498 @@
+[
+  {
+    "caseId": "cmqkr5xpq00v8nybwqxf3vdxr",
+    "caseNumber": "VK-MQKR5XP5",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.e_belge_e_fatura_e_arsiv",
+        "label": "E-Belge (e-fatura / e-arşiv)"
+      },
+      "operationType": {
+        "code": "ot.bilgi_alabilir_miyim",
+        "label": "Bilgi talebi"
+      },
+      "impact": {
+        "code": "imp.tek_kullanici_etkileniyor",
+        "label": "Tek kullanıcı etkileniyor"
+      }
+    },
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhzwl7300dinyv4izbt5dzn",
+    "caseNumber": "VK-MQHZWL6C",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9m8cyw000tl7048y0772l9",
+    "caseNumber": "VK-MQ9M88HI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.kosul_yakalanmadi",
+        "label": "Koşul Yakalanmadı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoz3a7q00uvnyn0tdgdptk7",
+    "caseNumber": "VK-MQOZ3A76",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.matbu_basim_parametresi",
+        "label": "Matbu / basım parametresi"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      },
+      "permanentPrevention": {
+        "code": "pp.log_izleme_gelistirilecek_aktarim_e_belge",
+        "label": "Log / izleme geliştirilecek (aktarım / e-belge)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxy15v00olnyn06m8j1tbw",
+    "caseNumber": "VK-MQOXY15B",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      },
+      "permanentPrevention": {
+        "code": "pp.kontrol_validasyon_eklenecek",
+        "label": "Kontrol / validasyon eklenecek"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqow7mbf00efnyn01ignuhnf",
+    "caseNumber": "VK-MQOW7MB4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_parametre",
+        "label": "Eksik parametre"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      },
+      "permanentPrevention": {
+        "code": "pp.bilgi_bankasi_yazisi_hazirlanacak",
+        "label": "Bilgi bankası yazısı hazırlanacak"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq7uvvr00004ky04e9fmfr4b",
+    "caseNumber": "VK-MQ7UVV0W",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": [
+      "kapanis atlandi: resolution<5"
+    ]
+  },
+  {
+    "caseId": "cmq7xdhnv0001jr04irca8582",
+    "caseNumber": "VK-MQ7XDHAQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": [
+      "kapanis atlandi: resolution<5"
+    ]
+  },
+  {
+    "caseId": "cmqp0lxnn00zonyn05upi8fib",
+    "caseNumber": "VK-MQP0LXML",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_kart_iliskisi_depo_sevk_seri",
+        "label": "Eksik kart ilişkisi (depo / sevk / seri)"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoy5khp00p9nyn0jj4y1dz0",
+    "caseNumber": "VK-MQOY5KH7",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "affectedObject": {
+        "code": "ao.alis_irsaliyesi_onaylama",
+        "label": "Alış İrsaliyesi Onaylama"
+      }
+    },
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.hesaplama_is_kurali",
+        "label": "Hesaplama / İş Kuralı"
+      },
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxiupn00lcnyn056y12gb2",
+    "caseNumber": "VK-MQOXIUP7",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "platform": {
+        "code": "plat.backoffice",
+        "label": "Backoffice"
+      },
+      "businessProcess": {
+        "code": "bp.musteri_cari_karti_ve_gruplama_islemleri",
+        "label": "Müşteri / Cari Kartı ve Gruplama İşlemleri"
+      },
+      "affectedObject": {
+        "code": "ao.musteri_cari_karti",
+        "label": "Müşteri / Cari Kartı"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoupxwj0088nyn0uqchn92z",
+    "caseNumber": "VK-MQOUPXW6",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkvt6i60001nymwm8qfk91q",
+    "caseNumber": "VK-MQKVT6HW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.urun_gelistirme",
+        "label": "Geliştirme / değişiklik talebi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkqskjs00ujnybwv3a0sa6e",
+    "caseNumber": "VK-MQKQSKJH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.hesaplama_is_kurali",
+        "label": "Hesaplama / İş Kuralı"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpuuif00stnybwmo81dgyw",
+    "caseNumber": "VK-MQKPUUHX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpuesm00spnybw2se97tw1",
+    "caseNumber": "VK-MQKPUES4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.yanlis_parametre",
+        "label": "Yanlış parametre"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpkk7700s7nybwrobw27ex",
+    "caseNumber": "VK-MQKPKK6K",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.yanlis_parametre",
+        "label": "Yanlış parametre"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpan2400ranybwk0suawqt",
+    "caseNumber": "VK-MQKPAN1L",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.yanlis_parametre",
+        "label": "Yanlış parametre"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkoo2k200ponybw15vq4rh9",
+    "caseNumber": "VK-MQKOO2JT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.entegrasyon_aktarim",
+        "label": "Entegrasyon / Aktarım"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmi8no00j6nybw1btqpodg",
+    "caseNumber": "VK-MQKMI8N9",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.rol_kullanici_tanimsiz",
+        "label": "Rol / kullanıcı tanımsız"
+      },
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkm5m1q00i2nybw18f2ob0a",
+    "caseNumber": "VK-MQKM5M1I",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqklzc2900hcnybwawftkws2",
+    "caseNumber": "VK-MQKLZC1O",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.entegrasyon_aktarim",
+        "label": "Entegrasyon / Aktarım"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqklxibi00gtnybwjfllij68",
+    "caseNumber": "VK-MQKLXIAZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.musteri_karti_eksik_hatali",
+        "label": "Müşteri kartı eksik / hatalı"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqklta6l00gdnybwrxwmxv69",
+    "caseNumber": "VK-MQKLTA6D",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjt71h005yny2c8hbx8tyn",
+    "caseNumber": "VK-MQJJT71C",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.cihaz_mobil_ortam",
+        "label": "Donanım/Cihaz"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.apk_versiyon_uyumsuz",
+        "label": "APK versiyon uyumsuz"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjmiir004lny2cutdobne8",
+    "caseNumber": "VK-MQJJMIIE",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjg7hx003cny2ciqur915k",
+    "caseNumber": "VK-MQJJG7HD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.update_ve_insert_islemi",
+        "label": "Update ve insert işlemi"
+      },
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjijo5p0048nysk0q5sridx",
+    "caseNumber": "VK-MQJIJO5G",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.update_ve_insert_islemi",
+        "label": "Update ve insert işlemi"
+      },
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi1jb9p00hwnyv4rlc9ttlg",
+    "caseNumber": "VK-MQI1JB99",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.rol_kullanici_tanimsiz",
+        "label": "Rol / kullanıcı tanımsız"
+      },
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi08pgw00frnyv4ztqulgav",
+    "caseNumber": "VK-MQI08PGI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.musteri_karti_eksik_hatali",
+        "label": "Müşteri kartı eksik / hatalı"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhzyobq00e7nyv4w0emo9ns",
+    "caseNumber": "VK-MQHZYOBI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.yanlis_parametre",
+        "label": "Yanlış parametre"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhz8lw200b5nyv43cvm7oba",
+    "caseNumber": "VK-MQHZ8LVV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.hesaplama_is_kurali",
+        "label": "Hesaplama / İş Kuralı"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhy7ys20059nyv4k93ays5a",
+    "caseNumber": "VK-MQHY7YRJ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.onay_yetkisi_yok",
+        "label": "Onay yetkisi yok"
+      },
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhszr2a000ynyv4egnt7njf",
+    "caseNumber": "VK-MQHSZR1X",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqgn8dln0008ny10rwu3ekwz",
+    "caseNumber": "VK-MQGN8DL8",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgkx7sy001cnyc81is1rhvc",
+    "caseNumber": "VK-MQGKX7SL",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_parametre",
+        "label": "Eksik parametre"
+      },
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqfajrkq000znyl0y6htrodk",
+    "caseNumber": "VK-MQFAJRJR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.kurulum",
+        "label": "Kurulum"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.kurulum",
+        "label": "Kurulum"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq7ugzld0002jj04hipjncwl",
+    "caseNumber": "VK-MQ7UGZ8D",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.st_parametresi_eksik",
+        "label": "ST parametresi eksik"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqozgazv00x6nyn0bvze9rqj",
+    "caseNumber": "VK-MQOZGAZL",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoykvqy00s9nyn0rdmafd4x",
+    "caseNumber": "VK-MQOYKVQF",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.belge_dizayni_matbu",
+        "label": "Belge Dizaynı / Matbu"
+      },
+      "operationType": {
+        "code": "ot.yazdiramiyorum",
+        "label": "Yazdırma"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqox4c1x00ibnyn06o97fawd",
+    "caseNumber": "VK-MQOX4C1J",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "affectedObject": {
+        "code": "ao.ticari_pakete_aktarim",
+        "label": "Ticari Pakete Aktarim"
+      }
+    },
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqow1sqd00cdnyn0dww1sbpi",
+    "caseNumber": "VK-MQOW1SPS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkp7o7200r1nybwkrc0j32g",
+    "caseNumber": "VK-MQKP7O6P",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.rol_kullanici_tanimsiz",
+        "label": "Rol / kullanıcı tanımsız"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkm6qt400i6nybwo1qtm30f",
+    "caseNumber": "VK-MQKM6QSR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yazilim_hatasi",
+        "label": "Uygulama Hatası"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.kod_hatasi",
+        "label": "Kod hatası"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqklsa1m00g6nybwbrx4hvhx",
+    "caseNumber": "VK-MQKLSA12",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_kart_iliskisi_depo_sevk_seri",
+        "label": "Eksik kart ilişkisi (depo / sevk / seri)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkl58ds00ennybw4q22mfoy",
+    "caseNumber": "VK-MQKL58DA",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.dizayn_matbu_baski",
+        "label": "Dizayn / Matbu / Baskı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkk1htb007znybw2peheiz8",
+    "caseNumber": "VK-MQKK1HSV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_tutarsizligi",
+        "label": "Veri Tutarsızlığı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_iliski",
+        "label": "Eksik ilişki"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjlye0700dnny2cly5ynk3w",
+    "caseNumber": "VK-MQJLYDZU",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.rol_kullanici_tanimsiz",
+        "label": "Rol / kullanıcı tanımsız"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjocj80053ny2cjmytokkv",
+    "caseNumber": "VK-MQJJOCJ2",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.islem_yetkisi_eksik",
+        "label": "İşlem yetkisi eksik"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjj4krk000kny2cyhdx7utn",
+    "caseNumber": "VK-MQJJ4KRC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_kart_iliskisi_depo_sevk_seri",
+        "label": "Eksik kart ilişkisi (depo / sevk / seri)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi49z1400jdnyv42pspenrm",
+    "caseNumber": "VK-MQI49Z0V",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.hesaplama_is_kurali",
+        "label": "Hesaplama / İş Kuralı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.gecikme_kredi_limiti",
+        "label": "Gecikme / kredi limiti"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi3ubg200j6nyv4yhblppky",
+    "caseNumber": "VK-MQI3UBFT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.dizayn_matbu_baski",
+        "label": "Dizayn / Matbu / Baskı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.belge_dizayni_eksik_hatali",
+        "label": "Belge dizaynı eksik / hatalı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqgo7eyv000xny10kminjdyk",
+    "caseNumber": "VK-MQGO7EY8",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_parametre",
+        "label": "Eksik parametre"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqaxtlwj005dny8wmwffqsal",
+    "caseNumber": "VK-MQAXTLW5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.satis_temsilcisi_tanimi_hatali",
+        "label": "Satış temsilcisi tanımı hatalı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqawyiyg002jny8w2flb5jma",
+    "caseNumber": "VK-MQAWYIXY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9m6g460008l704d93610nf",
+    "caseNumber": "VK-MQ9M6F8T",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.update_ve_insert_islemi",
+        "label": "Update ve insert işlemi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9llfyu0003l404ntzmkj3y",
+    "caseNumber": "VK-MQ9LLFLT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.veri_veritabani_hatasi",
+        "label": "Veri / Veritabanı Hatası"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.update_ve_insert_islemi",
+        "label": "Update ve insert işlemi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9iz98k0005ld04rvjbpwls",
+    "caseNumber": "VK-MQ9IZ79Q",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.matbu_basim_parametresi",
+        "label": "Matbu / basım parametresi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9j79gx002ula04ndo54ssi",
+    "caseNumber": "VK-MQ9J7860",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.eksik_parametre",
+        "label": "Eksik parametre"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9gh1j8002vjl04w1ot1ipx",
+    "caseNumber": "VK-MQ9GGBG9",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.yanlis_parametre",
+        "label": "Yanlış parametre"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9fymhc001tl704kmiurd6o",
+    "caseNumber": "VK-MQ9FYIQD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseDetail": {
+        "code": "rcd.yazici_logo_basim_ayari",
+        "label": "Yazıcı / logo basım ayarı"
+      },
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9fzezm001wl704q7jcplxn",
+    "caseNumber": "VK-MQ9FZCOM",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.rol_kullanici_tanimsiz",
+        "label": "Rol / kullanıcı tanımsız"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9dhgrn0001jr040u2xqwkg",
+    "caseNumber": "VK-MQ9DHE3L",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.yetki_rol",
+        "label": "Yetki / Rol"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.onay_yetkisi_yok",
+        "label": "Onay yetkisi yok"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq99eiim0005kz045rehne2m",
+    "caseNumber": "VK-MQ99EG7N",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.e_belge_ayari_entegrator_sifresi",
+        "label": "E-Belge ayarı / entegratör şifresi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq83nq1w000bl4049b5k3jsu",
+    "caseNumber": "VK-MQ83NPOS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq839g740003ib04q2y4hf9e",
+    "caseNumber": "VK-MQ839EQJ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.parametre_konfigurasyon",
+        "label": "Parametre / Konfigürasyon"
+      },
+      "rootCauseDetail": {
+        "code": "rcd.st_parametresi_eksik",
+        "label": "ST parametresi eksik"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq81i60x001il504ynx552yc",
+    "caseNumber": "VK-MQ81I5AV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseGroup": {
+        "code": "rcg.ana_veri_kart_tanimi",
+        "label": "Ana Veri / Kart Tanımı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq80ldkf0003ji044x7e3fg0",
+    "caseNumber": "VK-MQ80LD75",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqp090r500yznyn0b1i75r26",
+    "caseNumber": "VK-MQP090QY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqp0261f00ysnyn0n17wyesp",
+    "caseNumber": "VK-MQP0260X",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.planlanmis_gorev_islemleri",
+        "label": "Planlanmış Görev işlemleri"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyet4500r0nyn0vji1zwjx",
+    "caseNumber": "VK-MQOYET3X",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyc3ks00q3nyn0iw0lx7wu",
+    "caseNumber": "VK-MQOYC3KL",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxmtwv00m7nyn0j1gork0x",
+    "caseNumber": "VK-MQOXMTWC",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.satis_ekibi_rut_ve_ziyaret_islemleri",
+        "label": "Satış Ekibi / Rut ve Ziyaret işlemleri"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxbcy600j8nyn050shtcus",
+    "caseNumber": "VK-MQOXBCXU",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.iskonto_ve_promosyon",
+        "label": "İskonto  ve  Promosyon"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqow90do00f5nyn0mej2dx7i",
+    "caseNumber": "VK-MQOW90DF",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqow4h5g00dlnyn0l1iress6",
+    "caseNumber": "VK-MQOW4H4U",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.iskonto_ve_promosyon",
+        "label": "İskonto  ve  Promosyon"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqow1o2200c9nyn0tt0bi0ne",
+    "caseNumber": "VK-MQOW1O1I",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "businessProcess": {
+        "code": "bp.e_belge_e_fatura_e_arsiv",
+        "label": "E-Belge (e-fatura / e-arşiv)"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqovjyro00aknyn0d1alilgc",
+    "caseNumber": "VK-MQOVJYR5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkux17w001fnybo5o28geor",
+    "caseNumber": "VK-MQKUX17E",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkuvcqj0018nyboy050gsmx",
+    "caseNumber": "VK-MQKUVCQ4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.dizayn_duzeltme",
+        "label": "Dizayn düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqktlhjn000knyboashln7re",
+    "caseNumber": "VK-MQKTLHJ4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkt2pmb0007nybosc46jbas",
+    "caseNumber": "VK-MQKT2PM4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkru6r200vynybwv7pwr6ba",
+    "caseNumber": "VK-MQKRU6QS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkrgbr100vknybwfrsgax1l",
+    "caseNumber": "VK-MQKRGBQK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseDetail": {
+        "code": "rcd.musteri_karti_eksik_hatali",
+        "label": "Müşteri kartı eksik / hatalı"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkr3wet00v4nybw2gltv8f4",
+    "caseNumber": "VK-MQKR3WEA",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "operationType": {
+        "code": "ot.iptal_etme",
+        "label": "İptal etme"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkqy5kb00uxnybwh1kdm30q",
+    "caseNumber": "VK-MQKQY5JU",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkqvx0w00uqnybwbh0no7j6",
+    "caseNumber": "VK-MQKQVX0I",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkq79nq00tsnybwbi5cv4vh",
+    "caseNumber": "VK-MQKQ79N7",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpe5vs00rmnybwxybgzk7z",
+    "caseNumber": "VK-MQKPE5VD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkp5jv600qxnybworkag2xn",
+    "caseNumber": "VK-MQKP5JUS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkp06g000qhnybwk265mr8k",
+    "caseNumber": "VK-MQKP06FQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkoctxx00omnybw5cosuwgl",
+    "caseNumber": "VK-MQKOCTXN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkod3nb00oqnybw5no0033t",
+    "caseNumber": "VK-MQKOD3N3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseDetail": {
+        "code": "rcd.st_parametresi_eksik",
+        "label": "ST parametresi eksik"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqknlsax00mpnybwppo014f3",
+    "caseNumber": "VK-MQKNLSAN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknitul00m8nybwf6gdef21",
+    "caseNumber": "VK-MQKNITUC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmyrqh00ksnybw7g34qk23",
+    "caseNumber": "VK-MQKMYRPX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmtgwq00k8nybwyp4dm71o",
+    "caseNumber": "VK-MQKMTGW9",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "affectedObject": {
+        "code": "ao.ziyaret_izleme",
+        "label": "Ziyaret Izleme"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmtyw600kfnybw729npd89",
+    "caseNumber": "VK-MQKMTYVQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {
+      "affectedObject": {
+        "code": "ao.kullanici",
+        "label": "Kullanıcı"
+      }
+    },
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqklv77a00gjnybws9u9seen",
+    "caseNumber": "VK-MQKLV772",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqklq98j00flnybwyaditwpa",
+    "caseNumber": "VK-MQKLQ98D",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkkkenl00arnybwjlb8t7lo",
+    "caseNumber": "VK-MQKKKEN1",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkkug8d00dknybwswa4wyfs",
+    "caseNumber": "VK-MQKKUG7R",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkk6j3f008jnybwhuadt24l",
+    "caseNumber": "VK-MQKK6J30",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkknpu700conybwrt91y632",
+    "caseNumber": "VK-MQKKNPTW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkk8f5h0097nybwyc29x3s3",
+    "caseNumber": "VK-MQKK8F50",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqkiqy87003enya0adnhur61",
+    "caseNumber": "VK-MQKIQY89",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqki5moq0006nya0yub50n6b",
+    "caseNumber": "VK-MQKI5MO3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjlq7hz00cuny2cqpfwcnh2",
+    "caseNumber": "VK-MQJLQ7I2",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.dll_gecisi",
+        "label": "DLL Geçişi / Versiyon geçişi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjl5s5s00asny2chwz9zeod",
+    "caseNumber": "VK-MQJL5S5G",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjkrtxd009yny2cpv8pwa6d",
+    "caseNumber": "VK-MQJKRTX0",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.urun_gelistirme",
+        "label": "Geliştirme / değişiklik talebi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjijufc004enysk5b30jca2",
+    "caseNumber": "VK-MQJIJUF1",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjgtge5002enysk1vrokwoi",
+    "caseNumber": "VK-MQJGTGDK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.veri_kart_duzeltme",
+        "label": "Veri / kart düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjgirod001nnysknby5oke0",
+    "caseNumber": "VK-MQJGIRNW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.entegrator_servis_mudahalesi",
+        "label": "Entegratör / servis müdahalesi"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqjfxea80009nyska78cirtw",
+    "caseNumber": "VK-MQJFXE9U",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqj2iib600kgnyv40kkmm4p4",
+    "caseNumber": "VK-MQJ2IIAX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi3n72000j0nyv4q6whmubd",
+    "caseNumber": "VK-MQI3N71Q",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.yetki_duzenleme",
+        "label": "Yetki düzenleme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi1l4lq00i1nyv4of4m7tr3",
+    "caseNumber": "VK-MQI1L4L7",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqi0fmhz00gmnyv4lx1a534n",
+    "caseNumber": "VK-MQI0FMHK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhzaze300bpnyv47sw2utdd",
+    "caseNumber": "VK-MQHZAZDR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqhy7hu70054nyv4bqa04dbc",
+    "caseNumber": "VK-MQHY7HTW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqgpn4bz0008nyrcibqslrxq",
+    "caseNumber": "VK-MQGPN4BQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "rootCauseDetail": {
+        "code": "rcd.entegrator_servis_sifre_kontor",
+        "label": "Entegratör servis / şifre / kontör"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmqb1pfh9009nny8wzmnfrrm6",
+    "caseNumber": "VK-MQB1PFGP",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9maip1003ijs04yd1cg6e9",
+    "caseNumber": "VK-MQ9MAET5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9ln78z0006l4041y6ta03l",
+    "caseNumber": "VK-MQ9LN2YY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9i9zlr005nl7040slmeg9y",
+    "caseNumber": "VK-MQ9I9MT2",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.parametre_duzeltme",
+        "label": "Parametre düzeltme"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9fx0rc0002le04feyo9oyd",
+    "caseNumber": "VK-MQ9FWY09",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9fj2nn0009jp04ar1ecldp",
+    "caseNumber": "VK-MQ9FJ1DG",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.script_calistirma_dbupdate",
+        "label": "Script çalıştırma (DbUpdate)"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq9954gf0002kz04mt5j1jfv",
+    "caseNumber": "VK-MQ99537Q",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq84zokl000tla04zm09m3f4",
+    "caseNumber": "VK-MQ84ZJHI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq7ylybh0002jm04auwrsy3l",
+    "caseNumber": "VK-MQ7YLXY5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {
+      "resolutionType": {
+        "code": "rt.egitim",
+        "label": "Kullanıcı Eğitim"
+      }
+    },
+    "notes": []
+  },
+  {
+    "caseId": "cmq7qd9z80001i704kyd5a08k",
+    "caseNumber": "VK-MQ7QD93G",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqozulce00y3nyn0x3cvbfnq",
+    "caseNumber": "VK-MQOZULC0",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqozc6yl00wbnyn0nga351xh",
+    "caseNumber": "VK-MQOZC6YF",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoz97zz00vnnyn0qi5m8l6w",
+    "caseNumber": "VK-MQOZ97ZG",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyx9c400uknyn09ynwla8p",
+    "caseNumber": "VK-MQOYX9BH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyrc8900tsnyn0fhojis6b",
+    "caseNumber": "VK-MQOYRC7R",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyp0zz00t1nyn0chfp7ets",
+    "caseNumber": "VK-MQOYP0ZF",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoyekc100qwnyn0tcl9xj4c",
+    "caseNumber": "VK-MQOYEKBR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxqlv200n7nyn0wdqv8idv",
+    "caseNumber": "VK-MQOXQLU3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxasmq00j4nyn0rtnp23ie",
+    "caseNumber": "VK-MQOXASMF",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoxd4al00kinyn0r4716iit",
+    "caseNumber": "VK-MQOXD4A6",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqowocc800hhnyn0n23rtfro",
+    "caseNumber": "VK-MQOWOCBX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqowlex200gvnyn0oxnsaien",
+    "caseNumber": "VK-MQOWLEVR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqowek6300g4nyn0czyun4c9",
+    "caseNumber": "VK-MQOWEK5S",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqovp0qq00b9nyn0e04vbp9u",
+    "caseNumber": "VK-MQOVP0PY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqouu5io009nnyn0vir2y9zl",
+    "caseNumber": "VK-MQOUU5IA",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqouq5ah008cnyn0aruu0418",
+    "caseNumber": "VK-MQOUQ5A3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqoujmh5007dnyn0uyew6jv6",
+    "caseNumber": "VK-MQOUJMGP",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqotte6y005unyn07mxrev8j",
+    "caseNumber": "VK-MQOTTE6C",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqotsbh7005qnyn0n8uk2ng1",
+    "caseNumber": "VK-MQOTSBGX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqotjezk004wnyn0fe0wpedw",
+    "caseNumber": "VK-MQOTJEYV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkzly3a001vnyn0zdt3dup6",
+    "caseNumber": "VK-MQKZLY30",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkylnhs000unyn05gedl6vx",
+    "caseNumber": "VK-MQKYLNHH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkwssje002wnymwurq73toa",
+    "caseNumber": "VK-MQKWSSIT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqaukjce0001ny8wsz34l7nj",
+    "caseNumber": "VK-MQAUKJBV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkw8r5r001gnymwcnaw4had",
+    "caseNumber": "VK-MQKW8R5C",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkw6vol000wnymwwc39a9tf",
+    "caseNumber": "VK-MQKW6VNY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkvt8va0005nymwje2c03eb",
+    "caseNumber": "VK-MQKVT8UW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkurxmp0011nybo2vrjsb8n",
+    "caseNumber": "VK-MQKURXM4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkuludf000unybooc2z29pe",
+    "caseNumber": "VK-MQKULUCS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkt1g7p0003nyboi2jq6cgb",
+    "caseNumber": "VK-MQKT1G76",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqks1zsr00wlnybwy7k7l03p",
+    "caseNumber": "VK-MQKS1ZSK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkryjq200wenybwbxjn54gy",
+    "caseNumber": "VK-MQKRYJPT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkq3vr500tnnybw4s5e0w01",
+    "caseNumber": "VK-MQKQ3VQS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkq0w1y00tdnybwsomev47h",
+    "caseNumber": "VK-MQKQ0W1S",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpz2ov00t7nybw4fwaxnqw",
+    "caseNumber": "VK-MQKPZ2OH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkpf4lz00rqnybwsgsdn1ff",
+    "caseNumber": "VK-MQKPF4LH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkp272z00qonybwtg85vlcg",
+    "caseNumber": "VK-MQKP272S",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkoo43000psnybwh7urvm06",
+    "caseNumber": "VK-MQKOO42R",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkow3mg00q3nybwm5v83kjb",
+    "caseNumber": "VK-MQKOW3M4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkoawm900oinybwgogtnmq1",
+    "caseNumber": "VK-MQKOAWLF",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkokbu200p8nybwze5zaxbu",
+    "caseNumber": "VK-MQKOKBTN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkojet200p2nybwmm8nkgtf",
+    "caseNumber": "VK-MQKOJESK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqko9wz500obnybw3vet2qoe",
+    "caseNumber": "VK-MQKO9WYO",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqko7rz300o5nybwybfovgef",
+    "caseNumber": "VK-MQKO7RYN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknsvwp00n5nybw3sk96oxz",
+    "caseNumber": "VK-MQKNSVWB",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknzk6v00nqnybwnt663hbx",
+    "caseNumber": "VK-MQKNZK6M",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknw4mh00ndnybwroe2slaq",
+    "caseNumber": "VK-MQKNW4M3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknvirv00n9nybws5jnsbv2",
+    "caseNumber": "VK-MQKNVIRD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknjeny00mcnybwvxy1m416",
+    "caseNumber": "VK-MQKNJENQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqknmy6000mtnybwjy374rcs",
+    "caseNumber": "VK-MQKNMY5J",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkn7z3p00ljnybwhlyqkomx",
+    "caseNumber": "VK-MQKN7Z3H",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkn9gpb00lrnybwyfo69lvs",
+    "caseNumber": "VK-MQKN9GOX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkn91e800lnnybwoisrx6do",
+    "caseNumber": "VK-MQKN91DR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmq52u00jynybwnajf7sdt",
+    "caseNumber": "VK-MQKMQ52K",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmze6w00kwnybwm4f6pat6",
+    "caseNumber": "VK-MQKMZE6M",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmrynw00k2nybwj28ochwe",
+    "caseNumber": "VK-MQKMRYNP",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmlp7b00jqnybwv1blbyax",
+    "caseNumber": "VK-MQKMLP72",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmhsvh00iznybwpyjblscc",
+    "caseNumber": "VK-MQKMHSV3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmfo5b00isnybws11gxc12",
+    "caseNumber": "VK-MQKMFO57",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkm8r2d00ianybwjeozqssn",
+    "caseNumber": "VK-MQKM8R22",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkmfb6f00ionybw1gw1n5u0",
+    "caseNumber": "VK-MQKMFB64",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkm1t9600hqnybwx3lp86t3",
+    "caseNumber": "VK-MQKM1T8Q",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqklo7da00fhnybwfhmnb2zc",
+    "caseNumber": "VK-MQKLO7CX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqklkg0t00f7nybwzkhmtg20",
+    "caseNumber": "VK-MQKLKG08",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqklb52100eznybwhpog4uew",
+    "caseNumber": "VK-MQKLB51T",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkkw0st00eenybwcciyzpbj",
+    "caseNumber": "VK-MQKKW0SN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkkkys700avnybw8l3alvgb",
+    "caseNumber": "VK-MQKKKYRS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkk9krg009bnybwewj5crja",
+    "caseNumber": "VK-MQKK9KR9",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkkjo3h00annybwoals7we5",
+    "caseNumber": "VK-MQKKJO2Y",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjrhjs006dnybwwj6mvh2u",
+    "caseNumber": "VK-MQKJRHJH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjtk8t0070nybwutsuhi8h",
+    "caseNumber": "VK-MQKJTK8K",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjemlu004dnybwpbat2yej",
+    "caseNumber": "VK-MQKJEMLC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjkcvq005enybwq1wd4el9",
+    "caseNumber": "VK-MQKJKCVI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjcv8h002znybwhtbsms3q",
+    "caseNumber": "VK-MQKJCV81",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkj2az1000snybwku6m89r3",
+    "caseNumber": "VK-MQKJ2AYJ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkjcvnc0033nybwszngao8g",
+    "caseNumber": "VK-MQKJCVMZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkj6rhx001lnybwambw6lmy",
+    "caseNumber": "VK-MQKJ6RHL",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkiyxud0001nybwz8y3jaz7",
+    "caseNumber": "VK-MQKIYXTY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkiuob80043nya0axbkl4q5",
+    "caseNumber": "VK-MQKIUOAY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkii8hq001tnya0e89sfaga",
+    "caseNumber": "VK-MQKII8HG",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqkijf1d001xnya0rdk4or31",
+    "caseNumber": "VK-MQKIJF0U",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqki8j61000snya02ke33c2q",
+    "caseNumber": "VK-MQKI8J5R",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqj5d77g000pnyiotqijl5mi",
+    "caseNumber": "VK-MQJ5D772",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjlw6ru00djny2cotxdo41e",
+    "caseNumber": "VK-MQJLW6RQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjlmjrg00cony2cyz9iieho",
+    "caseNumber": "VK-MQJLMJR0",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjl7o9u00bgny2csh55z0n1",
+    "caseNumber": "VK-MQJL7O9A",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjk8fg30089ny2cynevfte2",
+    "caseNumber": "VK-MQJK8FFN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjk86z70085ny2cz1jlz2mm",
+    "caseNumber": "VK-MQJK86YS",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjk0erv0067ny2c9zkbyl49",
+    "caseNumber": "VK-MQJK0ERI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjk21nl006vny2ca7vtj3es",
+    "caseNumber": "VK-MQJK21NB",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjeog0002jny2cn16z39cg",
+    "caseNumber": "VK-MQJJEOFR",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjjb7m1001ony2cjaw2n6qc",
+    "caseNumber": "VK-MQJJB7LT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjibsls003fnyskm9g0pvr8",
+    "caseNumber": "VK-MQJIBSLB",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqji92950038nyskce6f3fxw",
+    "caseNumber": "VK-MQJI928U",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqjg8bhk000wnysk0qm2c9y7",
+    "caseNumber": "VK-MQJG8BH7",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi5b74n00jjnyv4l5ybumba",
+    "caseNumber": "VK-MQI5B742",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi39j3b00iqnyv49h8hnazr",
+    "caseNumber": "VK-MQI39J2P",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi2jbyd00iinyv4kqytf1ds",
+    "caseNumber": "VK-MQI2JBY4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi1gf2700hrnyv40dosxov4",
+    "caseNumber": "VK-MQI1GF1W",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi0ktc000gxnyv4h5kgbd49",
+    "caseNumber": "VK-MQI0KTBK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqi0435400f2nyv4dmbgts8t",
+    "caseNumber": "VK-MQI0434L",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhxzuyx002vnyv4kbzdvxh9",
+    "caseNumber": "VK-MQHXZUYH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhzkhlv00chnyv41iehh8iq",
+    "caseNumber": "VK-MQHZKHLI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhyweqg00a3nyv42s9e7igg",
+    "caseNumber": "VK-MQHYWEQ2",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhykrgv009bnyv44uyuykmq",
+    "caseNumber": "VK-MQHYKRGC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhyj3yt0081nyv42lrfq7a6",
+    "caseNumber": "VK-MQHYJ3YI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhyil0u007wnyv492gih17c",
+    "caseNumber": "VK-MQHYIL0J",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhyfll80079nyv43xj4rbas",
+    "caseNumber": "VK-MQHYFLKZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhyahiq006gnyv4zfcnmnn0",
+    "caseNumber": "VK-MQHYAHIC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhy2u8o0042nyv4d8f62koo",
+    "caseNumber": "VK-MQHY2U83",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhxxmaw002anyv49ibkmfen",
+    "caseNumber": "VK-MQHXXMAM",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqhxzecq002snyv4wen2r7so",
+    "caseNumber": "VK-MQHXZEC9",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgrcao2001unyrcemh7xlcp",
+    "caseNumber": "VK-MQGRCANV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgqwsg60011nyrc6hkfpbtd",
+    "caseNumber": "VK-MQGQWSFT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgobnpc001mny10o0afcrvn",
+    "caseNumber": "VK-MQGOBNOQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgahc62008fnyl0ff416n5m",
+    "caseNumber": "VK-MQGAHC5T",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgkfhso000rnyc8psvm775y",
+    "caseNumber": "VK-MQGKFHRO",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqgk3cag0002nyc8v6u40ila",
+    "caseNumber": "VK-MQGK3CA1",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqga0pbb007unyl0n8zl7p3l",
+    "caseNumber": "VK-MQGA0PB3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg9nd7m0073nyl0ohxcu0du",
+    "caseNumber": "VK-MQG9ND72",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg9jpqb006ynyl01xxfhorx",
+    "caseNumber": "VK-MQG9JPQ5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg9dbas006cnyl09ski8zpl",
+    "caseNumber": "VK-MQG9DBAC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg8osqu003jnyl0pl3g1zhz",
+    "caseNumber": "VK-MQG8OSQH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg8oiv2003gnyl0f5nsewas",
+    "caseNumber": "VK-MQG8OIUQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqg7ukd5002nnyl0c8vuoupe",
+    "caseNumber": "VK-MQG7UKCK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf9dqav0001nyl0o69wvl4q",
+    "caseNumber": "VK-MQF9DQAC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf878pb001gnywsfyvo41xb",
+    "caseNumber": "VK-MQF878OZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf7479y0004nyws5j9di3ya",
+    "caseNumber": "VK-MQF7479S",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf783i0000rnyws77oswsua",
+    "caseNumber": "VK-MQF783HD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf6jbrn0007nynk9fe0yb4b",
+    "caseNumber": "VK-MQF6JBRD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf2uf7e005mny04uuo40c9b",
+    "caseNumber": "VK-MQF2UF71",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqf0iqyv003rny04p73589dz",
+    "caseNumber": "VK-MQF0IQYH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqezx2hk002tny04t87v2n8v",
+    "caseNumber": "VK-MQEZX2H7",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqeuml1n000uny045xjfkd6x",
+    "caseNumber": "VK-MQEUML1G",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqayg57h0069ny8wccfsd8ez",
+    "caseNumber": "VK-MQAYG56N",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqaxqkit004qny8w8srnv09a",
+    "caseNumber": "VK-MQAXQKI4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqawyh1c002gny8wslul1a1d",
+    "caseNumber": "VK-MQAWYH0N",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqax57yw003ony8wwq0a7o13",
+    "caseNumber": "VK-MQAX57YH",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqawo9jp001kny8w9yuqlses",
+    "caseNumber": "VK-MQAWO9J8",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqawkmv8000yny8wx647mbl9",
+    "caseNumber": "VK-MQAWKMUU",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqawk8sg000vny8wogcb5tjw",
+    "caseNumber": "VK-MQAWK8S4",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqat5zeu0037toiw2lrqccd4",
+    "caseNumber": "VK-MQAT5ZDY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqasmv97002htoiw63a3okde",
+    "caseNumber": "VK-MQASMV6T",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqapz1jt0017toiwwst980a4",
+    "caseNumber": "VK-MQAPZ1IX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqapc9uj0001toiwaimkovo6",
+    "caseNumber": "VK-MQAPC9RO",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqaotlwi0005to1cfb3ggj26",
+    "caseNumber": "VK-MQAOTLVM",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqanfn6k0035tox48hq28yll",
+    "caseNumber": "VK-MQANFN4A",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmqamipz1000ztox4rcznrkb3",
+    "caseNumber": "VK-MQAMIPWZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9mdfvy0011l7042e6yxpel",
+    "caseNumber": "VK-MQ9MDDPP",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9le1ui001tjs04f5ovdqfc",
+    "caseNumber": "VK-MQ9LDY70",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9l2ppa001qjs04baq0rvf8",
+    "caseNumber": "VK-MQ9L2OGY",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9kmlev0001l404dwc7fhcp",
+    "caseNumber": "VK-MQ9KMJLD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9krzjj0001l404y2kqegud",
+    "caseNumber": "VK-MQ9KRZ6A",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9k2hd4001sky046sis7hsn",
+    "caseNumber": "VK-MQ9K2GA1",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9jqmtt0001jp04kc73psc2",
+    "caseNumber": "VK-MQ9JQMGE",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9jwn98000xky04rs560vbm",
+    "caseNumber": "VK-MQ9JWKID",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9j6mt1002rla04yu3zqikd",
+    "caseNumber": "VK-MQ9J6LKE",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9ilvb8001gla04f8e8zg37",
+    "caseNumber": "VK-MQ9ILNOQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9gxd8z000ql704gzsdm568",
+    "caseNumber": "VK-MQ9GX35M",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9ip3h6006il704yz96dtu8",
+    "caseNumber": "VK-MQ9IOULZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9hcqci002tl704yz7s9w6j",
+    "caseNumber": "VK-MQ9HCC33",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq80s9u70001l704usfqna8k",
+    "caseNumber": "VK-MQ80S8XT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9i8mor000rla04szfk76c5",
+    "caseNumber": "VK-MQ9I8LGB",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9hpg93003nl704jvpo6uix",
+    "caseNumber": "VK-MQ9HP366",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9h42z90027l704e1fdn7z3",
+    "caseNumber": "VK-MQ9H41QZ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9gysi4003jjl040yx6ai64",
+    "caseNumber": "VK-MQ9GYEC3",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9g5ky40002jl04enr585yz",
+    "caseNumber": "VK-MQ9G5HHJ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9gc7si001pjl04gjfp6wnw",
+    "caseNumber": "VK-MQ9GC5HK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9gbvxh001mjl04eim5urdc",
+    "caseNumber": "VK-MQ9GBUPA",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9g6fdz0006jl04r8i5o0fq",
+    "caseNumber": "VK-MQ9G6B4N",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9fuu0f000ql7045uhrbimd",
+    "caseNumber": "VK-MQ9FUQLC",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9f036g0001l704vuo4k2p0",
+    "caseNumber": "VK-MQ9F01XV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9av05a001il804bwv1xxak",
+    "caseNumber": "VK-MQ9AUWG7",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq9auwg7001fl804g7vc3yuo",
+    "caseNumber": "VK-MQ9AUTEM",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq987raw0001l804qdinnh70",
+    "caseNumber": "VK-MQ987Q2E",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq980upg0001js04gsk90zaa",
+    "caseNumber": "VK-MQ980TH5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq92phm10001kz04muc04t37",
+    "caseNumber": "VK-MQ92PEYK",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq86lp2d0003ld04y43fh0jg",
+    "caseNumber": "VK-MQ86LGYT",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq86c530000tif04llserybo",
+    "caseNumber": "VK-MQ86C1PG",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq85z2m10002if04iryfqph9",
+    "caseNumber": "VK-MQ85Z1DN",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq84gfxu0004kw04lcmsdxvs",
+    "caseNumber": "VK-MQ84GCPB",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq84ji5x000rkw04a061p9d9",
+    "caseNumber": "VK-MQ84JF2U",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq847uq1000pie04yohgd0f0",
+    "caseNumber": "VK-MQ847TA0",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq8447360001ie049abazpms",
+    "caseNumber": "VK-MQ8445NI",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq83egzx000sib04s2sq81m2",
+    "caseNumber": "VK-MQ83EGMQ",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq81enu0000sl5044mx84wqf",
+    "caseNumber": "VK-MQ81ENGX",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq8287y90012l5045mtgtrd3",
+    "caseNumber": "VK-MQ8285FE",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq817llr0003l5048kujokjx",
+    "caseNumber": "VK-MQ817L8K",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq805v64000oid04pv4tdf19",
+    "caseNumber": "VK-MQ805USV",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq7zlksd0001ld04vses9j9d",
+    "caseNumber": "VK-MQ7ZLJWW",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq7vgqfi0005l504f9t72xsa",
+    "caseNumber": "VK-MQ7VGPCA",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq7t7f290001jo047ethnx51",
+    "caseNumber": "VK-MQ7T7EP5",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  },
+  {
+    "caseId": "cmq7pn92i0001l504wu05jker",
+    "caseNumber": "VK-MQ7PN8PD",
+    "companyId": "COMP-UNIVERA",
+    "open": {},
+    "close": {},
+    "notes": []
+  }
+]

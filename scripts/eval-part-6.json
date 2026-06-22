@@ -1,0 +1,110 @@
+[
+  {
+    "no": "VK-MQ839EQJ",
+    "acilisYorum": "Tutarlı. Dağıtıcı bilgi almada 'belge bulunamadı' uyarısı; platform Mobil, süreç Sevkiyat/Dağıtım Araç Yükleme, etkilenenNesne Bilgi Alma uygun. islemTipi 'Hata mesajı' yerinde.",
+    "kapanisYorum": "Kök neden grubu Kullanım/Eğitim: doğru, çözüm araç yükleme/belgeleştirme adımlarının anlatılmasıdır. Detay 'Bilgi/nasıl yapılır': doğru. Çözüm tipi Eğitim: doğru. Kalıcı önlem 'Eğitim içeriği hazırlanacak': uygun.",
+    "genelNot": "Eğitim odaklı tutarlı vaka"
+  },
+  {
+    "no": "VK-MQ83EGMQ",
+    "acilisYorum": "Tutarlı. 2. nüsha otomatik basım talebi; Mobil, Belge Basım, etkilenenNesne Fatura uygun. islemTipi 'Basım problemi' kabul edilebilir, aslında talep/güncelleme niteliğinde.",
+    "kapanisYorum": "Kök neden grubu Parametre/Konfigürasyon: doğru, Belge Kopya Sayısı parametresi 2 yapıldı. Detay boş: eksik, 'ST parametresi eksik/varsayılan' önerilir. Çözüm tipi Parametre düzeltme: doğru. Kalıcı önlem 'Kontrol/validasyon eklenecek': şüpheli, talep niteliğinde olduğundan 'Bilgi bankası yazısı hazırlanacak' daha uygun.",
+    "genelNot": "Parametre düzeltme, detay eksik"
+  },
+  {
+    "no": "VK-MQ81ENGX",
+    "acilisYorum": "Tutarlı. Stok uyarısı nedeniyle bilgi gönderememe; Mobil, Stok İşlemleri, etkilenenNesne Bilgi Gönderme uygun.",
+    "kapanisYorum": "Kök neden grubu Cihaz/Mobil Ortam: şüpheli, sorun cihaz değil mobil datadaki hatalı belge satırı; 'Veri Tutarsızlığı' daha uygun. Detay boş: eksik, 'Mobil data/s3Db tutarsızlığı' önerilir. Çözüm tipi 'Veri/kart düzeltme': şüpheli, s3Db müdahalesi olduğundan 'Script çalıştırma (DbUpdate)' daha uygun. Kalıcı önlem 'Eğitim içeriği hazırlanacak': şüpheli, 'Kontrol/validasyon eklenecek' daha uygun.",
+    "genelNot": "Kök neden grubu yanlış sınıflanmış"
+  },
+  {
+    "no": "VK-MQ8285FE",
+    "acilisYorum": "Tutarlı. Ürünler mobilde listelenmiyor; Mobil, Satış İşlemleri, etkilenenNesne Fatura uygun (Ürün/Senkronizasyon de olabilirdi).",
+    "kapanisYorum": "Kök neden grubu Ana Veri/Kart Tanımı: doğru, ST tanımında Ürün Grupları boş. Detay boş: eksik, 'Satış temsilcisi tanımı hatalı/eksik ürün grubu' önerilir. Çözüm tipi 'Veri/kart düzeltme': doğru. Kalıcı önlem 'Kontrol/validasyon eklenecek': uygun.",
+    "genelNot": "Ana veri tutarlı, detay eksik"
+  },
+  {
+    "no": "VK-MQ817L8K",
+    "acilisYorum": "Tutarlı. Müşteri alıcı etiketi listelenmiyor; Backoffice, Müşteri/Cari Kartı, etkilenenNesne Müşteri/Cari Kartı uygun.",
+    "kapanisYorum": "Kök neden grubu Ana Veri/Kart Tanımı: doğru, alıcı etiketi eklenip görev tetiklendi. Detay 'Müşteri kartı eksik/hatalı': doğru. Çözüm tipi 'Veri/kart düzeltme': doğru. Kalıcı önlem 'Kontrol/validasyon eklenecek': uygun.",
+    "genelNot": "Tutarlı müşteri kartı vakası"
+  },
+  {
+    "no": "VK-MQ81I5AV",
+    "acilisYorum": "Tutarlı. Satıcıya İade Faturası e-belge gönderiminde hata; Backoffice, İade İşlemleri, etkilenenNesne Saticiya İade Faturası uygun.",
+    "kapanisYorum": "Kök neden grubu Kullanım/Eğitim: şüpheli, çözüm bağlantılı iade tikini açıp alış faturası bağlamaktır; iş kuralı/eksik ilişki olduğundan 'Ana Veri/Kart Tanımı' veya iş kuralı daha uygun, ancak kullanıcı işlem adımı eksiği yorumu da savunulabilir. Detay 'Kullanıcı işlem adımı hatası': doğru. Çözüm tipi 'Veri/kart düzeltme': doğru. Kalıcı önlem 'Kontrol/validasyon eklenecek': uygun.",
+    "genelNot": "Kök neden grubu tartışmalı"
+  },
+  {
+    "no": "VK-MQ80LD75",
+    "acilisYorum": "Tutarlı. Ticari pakete aktarımda 'kayıt bulunamadı'; Backoffice, Smart Connect, etkilenenNesne Ticari Pakete Aktarim uygun.",
+    "kapanisYorum": "Kök neden grubu Entegrasyon/Aktarım: doğru, e-arşiv GİB gönderimi yapılmadan aktarım engelleniyordu. Detay boş: eksik, 'Belge statüsü/aktarım koşulu' önerilir. Çözüm tipi Bilgilendirme: doğru, fatura gönderilerek koşul sağlandı. Kalıcı önlem 'Log/izleme geliştirilecek': uygun.",
+    "genelNot": "Aktarım tutarlı, detay eksik"
+  },
+  {
+    "no": "VK-MQ805USV",
+    "acilisYorum": "Tutarlı. Müşteri ek saha durumu güncelleme; Backoffice, Müşteri/Cari Kartı, etkilenenNesne Müşteri Ek Saha uygun. islemTipi 'Oluşturma problemi' şüpheli, 'Güncelleme/Bilgi talebi' daha uygun.",
+    "kapanisYorum": "Kök neden grubu Ana Veri/Kart Tanımı: doğru, ek saha düzeltildi. Detay 'Müşteri kartı eksik/hatalı': doğru. Çözüm tipi 'Veri/kart düzeltme': doğru. Kalıcı önlem 'Eğitim içeriği hazırlanacak': şüpheli, basit kart düzeltmesinde 'Bilgi bankası yazısı hazırlanacak' daha uygun.",
+    "genelNot": "Kart düzeltme, islemTipi zayıf"
+  },
+  {
+    "no": "VK-MQ7ZLJWW",
+    "acilisYorum": "Tutarlı. Bilgi göndermede 'mahsup hesabı bulunamadı'; Mobil, Finans Tahsilat, etkilenenNesne Bilgi Gönderme uygun.",
+    "kapanisYorum": "Kök neden grubu Entegrasyon/Aktarım: doğru, online AXA servis entegrasyonundan kaynaklı. Detay 'Alan eşleşmesi hatalı': şüpheli, sorun 3.parti tarafında mahsup hesabı tanımı eksikliği; detay 'Eşleştirme/tanım eksik' daha uygun. Çözüm tipi 'Veri/kart düzeltme': şüpheli, müdahale entegre yazılımda yapılacağından 'Entegratör/servis müdahalesi' daha uygun. Kalıcı önlem boş: eksik, 'Log/izleme geliştirilecek' önerilir.",
+    "genelNot": "Çözüm tipi ve önlem zayıf"
+  },
+  {
+    "no": "VK-MQ7YLXY5",
+    "acilisYorum": "Tutarlı. Bilgi almada rut kodu hatası; Mobil, Satış/Rut, etkilenenNesne Rut Tanım uygun.",
+    "kapanisYorum": "Kök neden grubu Cihaz/Mobil Ortam: doğru, çözümde cihaz tarih/saat ve kullanıcı bilgisi düzeltildi. Detay 'Cihaz tarih/saat': doğru. Çözüm tipi Bilgilendirme: şüpheli, ayar düzeltmesi yapıldığından 'Parametre düzeltme' daha uygun. Kalıcı önlem 'Test senaryosu eklenecek': şüpheli, 'Eğitim içeriği hazırlanacak' daha uygun.",
+    "genelNot": "Çözüm tipi ve önlem şüpheli"
+  },
+  {
+    "no": "VK-MQ7VGPCA",
+    "acilisYorum": "Tutarlı. Konsinye irsaliyesi raporunda hatalı müşteri; Backoffice, Demirbaş İşlemleri, etkilenenNesne Demirbaş Durum uygun. islemTipi 'Raporda veri tutarsızlığı' yerinde.",
+    "kapanisYorum": "Kök neden grubu Veri Tutarsızlığı: doğru, TBLMSDSERILOT'ta hatalı LNGMUSTERIKOD düzeltildi. Detay boş: eksik, 'Seri/lot müşteri kodu hatalı' önerilir. Çözüm tipi 'Script çalıştırma (DbUpdate)': doğru. Kalıcı önlem 'Log/izleme geliştirilecek': uygun.",
+    "genelNot": "Veri düzeltme tutarlı, detay eksik"
+  },
+  {
+    "no": "VK-MQ7UGZ8D",
+    "acilisYorum": "Eksik: tüm açılış alanları (platform, isSureci, islemTipi, etkilenenNesne, etki) boş. Sorun 'bilgi alamıyorum' belirsiz; platform 'Mobil', isSureci 'Satış/Rut', etki en az 'Tek kullanıcı etkileniyor' önerilir. Ayrıca cozum 'test' olduğundan vaka gerçek değil/test kaydı.",
+    "kapanisYorum": "Tüm kapanış alanları boş: eksik. Çözüm 'test' içeriksiz olduğundan değerlendirilemez. Geçerli bir kapanış için kök neden ve çözüm tipi atanamaz; kayıt test/çöp olarak işaretlenmeli.",
+    "genelNot": "Test kaydı, içerik yok"
+  },
+  {
+    "no": "VK-MQ7T7EP5",
+    "acilisYorum": "Tutarlı. Fatura basımında hata; Backoffice, Satış İşlemleri, etkilenenNesne Fatura Basım uygun. isSureci 'Belge Basım İşlemleri' daha isabetli olurdu.",
+    "kapanisYorum": "Kök neden grubu Dizayn/Matbu/Baskı: doğru, matbu numarası düzeltildi. Detay 'Matbu no/sıra': doğru. Çözüm tipi 'Dizayn düzeltme': şüpheli, matbu no düzeltmesi parametre/veri niteliğinde, 'Parametre düzeltme' veya 'Veri/kart düzeltme' daha uygun. Kalıcı önlem 'Hata mesajı iyileştirilecek': uygun.",
+    "genelNot": "Çözüm tipi tartışmalı"
+  },
+  {
+    "no": "VK-MQ7QD93G",
+    "acilisYorum": "Tutarlı. Araç yüklemede object reference hatası; Backoffice, Sevkiyat/Dağıtım Araç Yükleme, etkilenenNesne Siparişten Araç Yükleme uygun.",
+    "kapanisYorum": "Tüm kapanış alanları boş: eksik. Çözüm NULL belge kod düzeltmesi olduğundan kök neden grubu 'Yazılım Hatası' veya 'Veri/Veritabanı Hatası', detay 'Görev çalışmıyor (object reference)', çözüm tipi 'Script çalıştırma (DbUpdate)', kalıcı önlem 'Hata mesajı iyileştirilecek' önerilir.",
+    "genelNot": "Kapanış tamamen boş"
+  },
+  {
+    "no": "VK-MQ7PN8PD",
+    "acilisYorum": "Tutarlı. Fatura GİB'e gönderilemiyor; Backoffice, E-Belge, etkilenenNesne E-Belge Gönderim uygun. etki 'İş tamamen durdu' tek faturaya göre yüksek görünüyor, 'Bazı işlemler etkileniyor' daha uygun olabilir.",
+    "kapanisYorum": "Kök neden grubu E-Belge/Entegratör (3.parti): doğru. Detay 'Mükellefiyet/sertifika': belirsiz çözümde olası nedenlerden biri, kabul edilebilir. Çözüm tipi 'Script çalıştırma (DbUpdate)': şüpheli, çözüm net değil/araştırma niteliğinde, 'Bilgilendirme' daha uygun. Kalıcı önlem 'Hata mesajı iyileştirilecek': uygun.",
+    "genelNot": "Çözüm belirsiz, etki abartılı"
+  },
+  {
+    "no": "VK-MQ7UVV0W",
+    "acilisYorum": "Eksik: durum 'İptal Edildi' ve tüm açılış alanları boş. Sorun 'bilgi göndermede object reference hatası' verildiğinden platform 'Mobil', isSureci 'Satış/Rut', etkilenenNesne 'Bilgi Gönderme' önerilebilirdi; ancak iptal vakasında etiketleme yapılmaması beklenir.",
+    "kapanisYorum": "Tüm kapanış alanları boş ve cozum boş: iptal edilen vakada doğal. Çözüm üretilmediğinden kök neden atanması beklenmez; tutarlı kabul edilebilir.",
+    "genelNot": "İptal vaka, etiketsiz"
+  },
+  {
+    "no": "VK-MQ7XDHAQ",
+    "acilisYorum": "Eksik: durum 'İptal Edildi', tüm açılış alanları boş. Sorun 'bilgi göndermede rut kodu bulunamadı' olduğundan Mobil/Satış-Rut etiketlenebilirdi; iptal olduğu için boş bırakılması kabul edilir.",
+    "kapanisYorum": "Tüm kapanış alanları ve cozum boş: iptal vakasında doğal ve tutarlı. Çözüm yok, kök neden atanması beklenmez.",
+    "genelNot": "İptal vaka, etiketsiz"
+  },
+  {
+    "no": "VK-MQ9M88HI",
+    "acilisYorum": "Yanlış/eksik: sorun 'AAFSAGAGADGDAAAAA' anlamsız çöp metin, vaka 'İptal Edildi'. Buna rağmen isSureci 'Dinamik Rapor İşlemleri', islemTipi 'Düzeltme problemi', etkilenenNesne 'Web Servis/Aktarım' doldurulmuş ve birbirleriyle de çelişiyor; platform boş. Tüm açılış etiketleri geçersiz, temizlenmeli.",
+    "kapanisYorum": "Tüm kapanış alanları boş: iptal/çöp kayıtta doğal. Anlamsız içerik nedeniyle kök neden atanamaz; kayıt çöp/test olarak işaretlenmeli.",
+    "genelNot": "Çöp kayıt, açılış hatalı dolu"
+  }
+]

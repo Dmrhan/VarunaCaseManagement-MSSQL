@@ -1,0 +1,116 @@
+[
+  {
+    "no": "VK-MQ9F01XV",
+    "acilisYorum": "Tutarlı. Platform Backoffice, e-belge gönderim süreci ve etkilenen nesne sorunla uyumlu.",
+    "kapanisYorum": "Şüpheli. Kök neden grubu 'Ana Veri / Kart Tanımı' seçilmiş ama çözüm tevkifat bilgilerinin (oran/kod/tutar) faturada eksik/hatalı olmasına işaret ediyor; bu daha çok 'Hesaplama / İş Kuralı' veya en azından fatura kaynaklı. Detay 'Müşteri kartı eksik / hatalı' kısmen doğru ama çözümde asıl vurgu fatura tevkifat alanı. Çözüm tipi 'Veri / kart düzeltme' doğru. Kalıcı önlem 'Kontrol / validasyon eklenecek' doğru.",
+    "genelNot": "Kök neden grubu tartışmalı, geneli tutarlı."
+  },
+  {
+    "no": "VK-MQ9DHE3L",
+    "acilisYorum": "Tutarlı. Finans Tahsilat süreci, düzeltme/iptal ve tahsilat nesnesi sorunla uyumlu.",
+    "kapanisYorum": "Şüpheli. Çözüm bir bilgilendirme değil, admin ekranından tahsilatın fiilen silinmesi (operatör müdahalesi). 'Kullanım / Eğitim' yerine 'Yetki/Rol/Parametre' veya operasyonel müdahale daha uygun; çözüm tipi 'Eğitim' yerine 'Veri / kart düzeltme' olmalı. Detay 'Bilgi / nasıl yapılır' yanlış. Kalıcı önlem makul.",
+    "genelNot": "Müdahale vakası eğitim olarak etiketlenmiş."
+  },
+  {
+    "no": "VK-MQ9AUWG7",
+    "acilisYorum": "Tutarlı. Mobil giriş/bağlantı problemi, kullanıcı nesnesi sorunla uyumlu.",
+    "kapanisYorum": "Doğru. Kök neden 'Cihaz / Mobil Ortam', detay 'Cihaz bağlantısı / eşleştirme' SSL ayarı sorunuyla uyumlu. Çözüm tipi 'Parametre düzeltme' (SSL aktifleştirme) doğru. Kalıcı önlem 'Eğitim içeriği' uygun.",
+    "genelNot": "Tutarlı, SSL bağlantı düzeltmesi."
+  },
+  {
+    "no": "VK-MQ9AUTEM",
+    "acilisYorum": "Tutarlı. Belge Basım, görünüm problemi ve Belge Dizaynı nesnesi dizayn talebiyle uyumlu.",
+    "kapanisYorum": "Doğru. Kök neden 'Dizayn / Matbu / Baskı', çözüm tipi 'Dizayn düzeltme' (alan uzatma) tam uyumlu. Detay boş, 'Belge dizaynı eksik / hatalı' eklenebilir. Kalıcı önlem makul.",
+    "genelNot": "Tutarlı, detay alanı eksik."
+  },
+  {
+    "no": "VK-MQ99EG7N",
+    "acilisYorum": "Tutarlı. E-belge süreci, bilgi talebi ve E-Belge Ayarları nesnesi uyumlu.",
+    "kapanisYorum": "Şüpheli. Çözümde offline parametresi aktifleştirilip süreç anlatılmış; hem parametre hem eğitim var. 'Kullanım / Eğitim' kabul edilebilir ancak parametre değişikliği yapıldığı için çözüm tipinde 'Parametre düzeltme' de değerlendirilmeli. Detay boş, 'Bilgi / nasıl yapılır' eklenebilir. Kalıcı önlem makul.",
+    "genelNot": "Parametre+eğitim karması, eğitim ağırlıklı."
+  },
+  {
+    "no": "VK-MQ99537Q",
+    "acilisYorum": "Tutarlı. Mobil bilgi alma problemi, Connection Reset sorunla uyumlu.",
+    "kapanisYorum": "Şüpheli. Gerçek kök neden mobil cihazın internet bağlantısının olmaması; 'Cihaz / Mobil Ortam' kabul edilebilir ama detay 'Cihaz bağlantısı / eşleştirme' yerine ağ/internet sorunu. Çözüm tipi 'Bilgilendirme' (farklı ağa bağlanma) doğru. Kalıcı önlem makul.",
+    "genelNot": "İnternet kaynaklı, detay zorlama."
+  },
+  {
+    "no": "VK-MQ987Q2E",
+    "acilisYorum": "Tutarlı. Belge Basım, yazdırma problemi ve Toplu İrsaliye Basım nesnesi xslt hatasıyla uyumlu.",
+    "kapanisYorum": "Doğru. Kök neden 'Dizayn / Matbu / Baskı', detay 'Belge dizaynı eksik / hatalı', çözüm tipi 'Dizayn düzeltme' (xslt şablon yükleme) tam uyumlu. Kalıcı önlem uygun.",
+    "genelNot": "Tamamen tutarlı, xslt dizayn."
+  },
+  {
+    "no": "VK-MQ980TH5",
+    "acilisYorum": "Şüpheli. Sorun bilgi gönderme tutarsızlığı; 'Veri Alma Aktarım' süreci seçilmiş ama olay bilgi gönderme/senkron sorunu, isSureci daha uygun seçilebilir.",
+    "kapanisYorum": "Doğru. Kök neden 'Veri Tutarsızlığı' gönderilmemiş bilgi uyarısıyla uyumlu. Çözüm tipi 'Script çalıştırma (DbUpdate)' (unidev.txt + DbSil) doğru. Detay boş, 'Senkron/aktarım tutarsızlığı' eklenebilir. Kalıcı önlem uygun.",
+    "genelNot": "Kapanış tutarlı, açılış süreci şüpheli."
+  },
+  {
+    "no": "VK-MQ92PEYK",
+    "acilisYorum": "Tutarlı. Fiyat işlemleri, hata mesajı ve Veri Alma Excelden nesnesi sorunla uyumlu.",
+    "kapanisYorum": "Şüpheli. Kök neden 'Veri / Veritabanı Hatası' seçilmiş ama gerçek neden görev kriterindeki hatalı IP/sunucu adı (network path). Bu 'Parametre / Konfigürasyon' veya 'Entegrasyon / Aktarım' olmalı. Çözüm tipi 'Script çalıştırma (DbUpdate)' tabloda düzeltme yapıldığı için kabul edilebilir. Detay 'Update ve insert işlemi' kısmen. Kalıcı önlem boş, 'Kontrol/validasyon eklenecek' eklenebilir.",
+    "genelNot": "Kök neden grubu hatalı (konfigürasyon)."
+  },
+  {
+    "no": "VK-MQ86LGYT",
+    "acilisYorum": "Tutarlı. Mobil Belge Basım, yazdırma problemi ve Fatura Basım nesnesi logo/qr sorunuyla uyumlu.",
+    "kapanisYorum": "Şüpheli. Çözüm 'Logo Basımı Otomatik Yapılsın Mı?' parametresinin aktifleştirilmesi; 'Cihaz / Mobil Ortam' yerine 'Parametre / Konfigürasyon' kök neden daha uygun. Çözüm tipi 'Parametre düzeltme' doğru. Detay boş, 'Mobil parametre kapalı' eklenebilir. Kalıcı önlem uygun.",
+    "genelNot": "Kök neden parametre olmalıydı."
+  },
+  {
+    "no": "VK-MQ86C1PG",
+    "acilisYorum": "Şüpheli. Sorun dizayn bulunamadı uyarısı; Satış İşlemleri süreci yerine Belge Basım/Dizayn süreci daha uygun. İşlemTipi boş, 'Yazdırma problemi' eklenmeli.",
+    "kapanisYorum": "Doğru. Kök neden 'Dizayn / Matbu / Baskı', detay 'Belge dizaynı eksik / hatalı' (dizayn ataması yok) uyumlu. Çözüm tipi 'Veri / kart düzeltme' (dizayn atama) kabul edilebilir, 'Dizayn düzeltme' de değerlendirilebilir. Kalıcı önlem uygun.",
+    "genelNot": "Açılışta işlemTipi eksik."
+  },
+  {
+    "no": "VK-MQ85Z1DN",
+    "acilisYorum": "Şüpheli. İade İşlemleri süreci uyumlu ancak işlemTipi boş, 'Oluşturma problemi' eklenmeli.",
+    "kapanisYorum": "Doğru. Kök neden 'Ana Veri / Kart Tanımı', detay 'Müşteri kartı eksik / hatalı' (merkeze faturala / mağaza ilişkisi) uyumlu. Çözüm tipi 'Veri / kart düzeltme' doğru. Kalıcı önlem uygun.",
+    "genelNot": "Kapanış tutarlı, işlemTipi eksik."
+  },
+  {
+    "no": "VK-MQ84GCPB",
+    "acilisYorum": "Tutarlı. E-belge gönderme problemi ve E-Belge Gönderim nesnesi sorunla uyumlu.",
+    "kapanisYorum": "Şüpheli. Çözüm belge statüsünün 'e-arşiv gönderilmedi' durumuna güncellenmesi; 'Veri / Veritabanı Hatası' yerine 'Veri Tutarsızlığı' (belge durumu) daha uygun olabilir. Çözüm tipi 'Script çalıştırma (DbUpdate)' doğru. Detay 'Update ve insert işlemi' kabul edilebilir. Kalıcı önlem uygun.",
+    "genelNot": "Kök neden veri tutarsızlığı olabilir."
+  },
+  {
+    "no": "VK-MQ84ZJHI",
+    "acilisYorum": "Tutarlı. Mobil Stok İşlemleri, bilgi gönderme problemi ve Bilgi Gönderme nesnesi stok hatasıyla uyumlu.",
+    "kapanisYorum": "Şüpheli. Çözüm s3Db düzenlenip sorunlu mal talep fişinin silinmesi (veri müdahalesi). 'Cihaz / Mobil Ortam' yerine 'Veri Tutarsızlığı' kök neden daha uygun. Çözüm tipi 'Veri / kart düzeltme' yerine 'Script çalıştırma (DbUpdate)' daha doğru. Detay boş. Kalıcı önlem uygun.",
+    "genelNot": "Kök neden ve çözüm tipi şüpheli."
+  },
+  {
+    "no": "VK-MQ84JF2U",
+    "acilisYorum": "Tutarlı. E-belge gönderme problemi, kullanıcı adı/şifre uyarısı E-Belge Gönderim nesnesiyle uyumlu.",
+    "kapanisYorum": "Doğru. Kök neden 'E-Belge / Entegratör (3. parti)', entegratör kullanıcı/şifre güncellemesi uyumlu. Çözüm tipi 'Parametre düzeltme' doğru. Detay boş, 'Entegratör servis / şifre / kontör' eklenmeli. Kalıcı önlem 'Hata mesajı iyileştirilecek' uygun.",
+    "genelNot": "Tutarlı, detay alanı eksik."
+  },
+  {
+    "no": "VK-MQ847TA0",
+    "acilisYorum": "Tutarlı. İade İşlemleri ve İade Faturası nesnesi iskonto müdahale sorunuyla uyumlu. İşlemTipi boş, 'Düzeltme/giriş problemi' eklenebilir.",
+    "kapanisYorum": "Doğru. Kök neden 'Parametre / Konfigürasyon', detay 'Eksik parametre' iskonto yetkisi/parametresiyle uyumlu. Çözüm tipi 'Yetki düzenleme' (iskonto yetkisi) doğru. Kalıcı önlem uygun.",
+    "genelNot": "Tutarlı, açılış işlemTipi eksik."
+  },
+  {
+    "no": "VK-MQ8445NI",
+    "acilisYorum": "Tutarlı. Satış Koçu / Ziyaret süreci ve Parametreler nesnesi ziyaret ekranı sorunuyla uyumlu.",
+    "kapanisYorum": "Yanlış. Çözüm 'Veri Aktarım Tipi' parametresinin değiştirilmesi; kök neden 'Cihaz / Mobil Ortam' yanlış, 'Parametre / Konfigürasyon' olmalı. Çözüm tipi 'Versiyon geçişi' tamamen yanlış, 'Parametre düzeltme' olmalı. Kalıcı önlem 'Log/izleme' yerine konuyla alakasız; 'Eğitim içeriği' daha uygun. Detay boş.",
+    "genelNot": "Kapanış etiketleri büyük ölçüde hatalı."
+  },
+  {
+    "no": "VK-MQ83NPOS",
+    "acilisYorum": "Tutarlı. Rut/Ziyaret süreci, bilgi talebi ve Rut Tanım nesnesi sorunla uyumlu.",
+    "kapanisYorum": "Doğru. Çözüm rut tanımının nasıl yapılacağının anlatımı; kök neden 'Kullanım / Eğitim', detay 'Bilgi / nasıl yapılır', çözüm tipi 'Eğitim' tam uyumlu. Kalıcı önlem 'Bilgi bankası yazısı' uygun.",
+    "genelNot": "Tamamen tutarlı, eğitim vakası."
+  },
+  {
+    "no": "VK-MQ839EQJ",
+    "acilisYorum": "Tutarlı. Sevkiyat / Araç Yükleme süreci, hata mesajı ve Bilgi Alma nesnesi 'belge bulunamadı' sorunuyla uyumlu.",
+    "kapanisYorum": "Doğru. Çözüm araç yükleme/belgeleştirme kontrolünün anlatımı; kök neden 'Kullanım / Eğitim', detay 'Bilgi / nasıl yapılır', çözüm tipi 'Eğitim' uyumlu. Kalıcı önlem uygun.",
+    "genelNot": "Tutarlı, süreç eğitimi."
+  }
+]

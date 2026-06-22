@@ -1,0 +1,458 @@
+[
+ {
+  "no": "VK-MQI1L4L7",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcim mobil cihazında bilgi alımı yapamıyor",
+  "cozum": "Satış temsilcisi mobil cihazında tarih ve saat bilgisi kontrol edildi ve saat bilgisinin yanlış olduğu tespit edildi.Otomatik tarih saate alınarak bilgi alımı başarıyla sağlandı.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "Veri Gitme",
+   "etkilenenNesne": "Bilgi Alma",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz tarih / saat",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQI1GF1W",
+  "sirket": "UNIVERA",
+  "sorun": "satış temsilcisi mobil cihazda satış siparişi girerken ilerleme aşamasında günlük iade net tutarı satış tutarını aşmaktadır uyarısı almaktadır.",
+  "cozum": "Satış temsilcisi parametrelerine gidildi . Düzenle ile açıp , iade belge girişlerinde satış ve iade belgelerinin net fiyatları kontrol edilsin mi ? Parametresini hayır durumuna çekildi. Temsilci tekrar bilgi aldığında satış tutar uyarısı almadı.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "Oluşturma",
+   "etkilenenNesne": "Müşteri / Cari Kartı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQI08PGI",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderim yapmak istediğim zaman müşteri e-fatura mükellefi olmasına rağmen alıcı etiketi seçini uyarısı geliyor ve belgeyi gönderemiyorum.",
+  "cozum": "Gönderim sorunu yaşanan fatura içerisindeki müşteri panorama ekranı üzerinden Müşteriler > Tanımlamalar > Müşteri ekranı üzerinde düzenle ile açılarak mükelleflik durumu ve e-fatura varsayılan pk alanı kontrol edilmelidir. Müşteri mükelleflik mevcut ve pk adresi gelmediği tespit edilmiş olup müşteri tanımı içerisindeki vkn/tckn aynı anda kayıt edildiği için pk adres bilgisi listelenmediği görüntül",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "E-Belge gönderme",
+   "etkilenenNesne": "E-Belge Gönderim",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQI0KTBK",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil uygulamada Temsilci iade faturası girmek istediğinde yeteri kadar satış yapılmadığını bildiren bir bildirim gelmektedir. Müşteride birebir satış-iade karşılamamaktadır. Operatör bu parametrenin kapatılmasını istemektedir",
+  "cozum": "Satış temsilcisi parametrelerinde birebir iade parametreleri düzenlenmeli — Satış temsilcisi parametrelerinde \"İade belge girişlerinde satış ve iade belgelerinin net fiyatları kontrol edilsin mi?\" parametresi ve satış iade için birebir iade parametresi kapatılmalıdır. Parametre düzenlendikten sonra bilgi alıp kontrol edilebilir.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "İade İşlemleri",
+   "islemTipi": "Oluşturma",
+   "etkilenenNesne": "İade Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQI0FMHK",
+  "sirket": "UNIVERA",
+  "sorun": "Motul müşterimizde 8.31 testleri yapıyoruz. Smartconnect ile Generic Xml aktarımını test ettiğimizde aktarım sonucunda “Aktarılacak Kayıt Bulunamadı” uyarısı alıyoruz. Aynı xml’i farklı test ortamlarında aktardığımızda normal aktarım uyarıları alıyoruz, yani xml dosyasında bir hata gözükmüyor.",
+  "cozum": "Verdiğiniz tarih aralığında 1 belge olması ve bu belgenin de yazdırılmamış olmasından dolayı aktarılacak kayıt bulunamadı uyarısı vermektedir. Belge aktarımı testinde belirlenen tarih aralığında belgelerin yazdırıldı durumda ve aktarım durumu aktarılmadı olduğundan emin olunmalıdır.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Smart Connect İşlemleri",
+   "islemTipi": "Aktarım yapma (muhasebeye / ticari pakete)",
+   "etkilenenNesne": "Ticari Pakete Aktarim",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Entegrasyon / Aktarım",
+   "kokNedenDetayi": "Matbu / basım parametresi",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQI0434L",
+  "sirket": "UNIVERA",
+  "sorun": "Lngdist kod: 1 olan Aşağıdaki 3 satış temsilcinin Yerel depo ve Sipariş Depo kodunu: 424 Merkez Depo ASYA depo olarak revize edebilir misiniz?",
+  "cozum": "İlgili st'lerin st parametrelerindeki yerel ve sipariş depo lngsaha kodları alınarak tblstparametre alanından kriter verilerek txtdeger alanları 424 kodlu depo ile revize edilmiştir.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış Ekibi / Rut ve Ziyaret işlemleri",
+   "islemTipi": "Düzeltme",
+   "etkilenenNesne": "Satış Temsilcisi Parametreler",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Eksik parametre",
+   "cozumTipi": "Script çalıştırma (DbUpdate)",
+   "kaliciOnlem": ""
+  }
+ },
+ {
+  "no": "VK-MQHZYOBI",
+  "sirket": "UNIVERA",
+  "sorun": "Verilen hizmet faturasında dosya yüklemek istendiğinde Dosya yüklenirken hata oluştu uyarısı geliyor",
+  "cozum": "Verilen hizmet faturasında dosya ekleme alanından ilgili dosyanın adı çok uzun olmasından kaynaklı hata alınıyordu, karakter sayısı azaltıldı ve formata uygun şekilde başarıyla yüklendi.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "Hata mesajı",
+   "etkilenenNesne": "Verilen Hizmet Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Bilgi / nasıl yapılır",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHZWL6C",
+  "sirket": "UNIVERA",
+  "sorun": "https://perfectim.net adresinin sertifikasının süresinin dolmasına 1 aydan az zaman kaldı. Lütfen gerekli aksiyonu alır mısınız?",
+  "cozum": "perfectim.net domain'ine ait mevcut SSL/TLS sertifikasının son geçerlilik tarihini kontrol edin (openssl s_client -connect perfectim.net:443 -servername perfectim.net | openssl x509 -noout -dates komutu veya tarayıcıdan sertifika detaylarına bakarak). — Doğru yönlendirme Sertifika sağlayıcısından (Let's Encrypt, Sectigo, DigiCert vb.) yeni sertifika temin edin veya mevcut sertifikayı yenileyin. Ot",
+  "acilis": {
+   "platform": "",
+   "isSureci": "",
+   "islemTipi": "",
+   "etkilenenNesne": "",
+   "etki": ""
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Sunucu / Altyapı / Performans",
+   "kokNedenDetayi": "",
+   "cozumTipi": "",
+   "kaliciOnlem": ""
+  }
+ },
+ {
+  "no": "VK-MQHXZUYH",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi cihazından mobil uygulamaya giriş yapmak istediğimde herhangi bir işlem yapmadan direkt olarak uygulama atıyor.",
+  "cozum": "Mobil panorama uygulamasına giriş yapılmak istendiğinde uygulamadan atma sorunu yaşandığı tespit edilmiştir. Uygulamaya giriş yapılabilmesi adına cihazın kendi ayarları içerisinden uygulamaları yönet alanına gidilerek veri silme yapılmıştır. Uygulama verisi silindikten sonra Mobil Panorama giriş yapılarak gelen sorulara uygulamayı kullanırken ve izin ver şeklinde yanıt verilmelidir. Sağ üstte yer ",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Kullanıcı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Giriş / sunucu hatası",
+   "cozumTipi": "Eğitim",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHZKHLI",
+  "sirket": "UNIVERA",
+  "sorun": "Merkez müşteriye bağlı alt müşteri bilgileri Logo tarafına aktarılmıyor. Bu bilgilerin sevkiyat adresi alanına gelmesi gerekiyor. XML içerisinde ise SHIPLOC_CODE alanında yer alması bekleniyor. Ekte, sevkiyat kodu seçili olan ve olmayan iki farklı Logo faturasının XML çıktısını paylaşıyorum. SHIPLOC_CODE alanının dolu gelecek şekilde düzenlenmesi gerekiyor.",
+  "cozum": "Görüşmemize istinaden kontrollerimiz sonucunda SHIPLOC_CODE bilgisi xml içerisinde bulunmayan bir alandır. Bundan dolayı geliştirme kapsamında değerlendirilmesi gerekmektedir. Proje yöneticiniz ile süreci değerlendirebilirsiniz.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Smart Connect İşlemleri",
+   "islemTipi": "Aktarım yapma (muhasebeye / ticari pakete)",
+   "etkilenenNesne": "",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Entegrasyon / Aktarım",
+   "kokNedenDetayi": "Aktarım (SmartConnect) parametresi",
+   "cozumTipi": "Ürün geliştirme",
+   "kaliciOnlem": ""
+  }
+ },
+ {
+  "no": "VK-MQHZAZDR",
+  "sirket": "UNIVERA",
+  "sorun": "Kullanıcı girişi ekranında HOST url bulunamadı uyarısı alıyor",
+  "cozum": "Kullanıcıdan mobil cihazda Panorama Mobile uygulamasını açmasını ve giriş ekranındaki ayarlar (dişli) ikonuna tıklamasını isteyin. Bağlantı bilgilerinde doğru URL bilgisi girilmiş ve SSL desteği açılmıştır. Giriş sağlanmıştır.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Bağlantı Bilgileri",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Bilgi / nasıl yapılır",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHZ8LVV",
+  "sirket": "UNIVERA",
+  "sorun": "Satış siparişim doğru tarih aralığı girmeme rağmen yeni bir siparişten araç yükleme kayıdında listelenmiyor",
+  "cozum": "Sipariş onay durumunu kontrol edin. Satış ve Alış İşlemleri → Satış İşlemleri → Sipariş Listesi ekranından ilgili siparişi bulun ve Onay Durumu alanını inceleyin , Bu adımlar kontrol edildiğinde sipariş durumunun onaylanmadı olduğu görünütlendi.Onaylanmayan siparişler yükelmede listelenmemektedir.İlgili sipariş bölge şefi onayında görüntülenerek onay için talepte bulunulması rica edildi.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Sevkiyat / Dağıtım Araç Yükleme İşlemleri",
+   "islemTipi": "Görünüm problemi",
+   "etkilenenNesne": "Siparişten Araç Yükleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Operatörlük / merkez onayı gereken işlem",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHYWEQ2",
+  "sirket": "UNIVERA",
+  "sorun": "Bayi smart connect uygulamasını çalıştıramamaktadır.",
+  "cozum": "Google Chrome tarayıcısından Aktarım programı yani Smart Connect uygulaması çalışmamaktadır. Edge tarayıcısından Panorama açılıp oradan denendiğinde aktarım programı başarıyla çalışmıştır ve işlemler tamamlanmıştır.",
+  "acilis": {
+   "platform": "",
+   "isSureci": "Smart Connect İşlemleri",
+   "islemTipi": "Bağlantı kurma",
+   "etkilenenNesne": "",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kurulum",
+   "kokNedenDetayi": "Dosya indirilemiyor",
+   "cozumTipi": "Versiyon geçişi",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHYKRGC",
+  "sirket": "UNIVERA",
+  "sorun": "Backoffice sisteminde satış faturası silindiğinde satış faturasına bağlı sipariş silinmemesini talep etmektedir.",
+  "cozum": "Yetki ve parametre şablonu düzenle ile açınız . Fatura silindiğinde bağlı irsaliye silinsin mi evet olur ise , irsaliye silindiğinde bağlı sipariş silinsin mi parametresi Hayır olduğu takdirde Fatura silinip bağlı irsaliye silinmesine rağmen sipariş aktif kalacaktır.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "İptal etme",
+   "etkilenenNesne": "Satış Faturası Düzenleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Eksik parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHYJ3YI",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi kendi el cihazına Panorama kurulumu talep etmektedir.",
+  "cozum": "Temsilcinin cihazına uzaktan bağlantı kurarak veya yönlendirerek Panorama Mobile APK dosyasını cihaza yükleyin. Panorama Mobile uygulamasını açın ve bağlantı ayarları ekranında sunucu adresi, port numarası ve veritabanı bilgilerini girin. İlgili satış temsilcisinin kaydını bulun ve 'Mobil Kullanıcı' alanında doğru kullanıcı kodunun atanmış olduğunu kontrol edin. Temsilci ile birlikte Panorama Mobi",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Dosya İndirme",
+   "etkilenenNesne": "Mobil Versiyon Güncelleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kurulum",
+   "kokNedenDetayi": "Kurulum",
+   "cozumTipi": "Eğitim",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHYIL0J",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcim mobilde iadre girişi sağlarken bir hata mesajı ile karşılaşıyor , bunu nasıl çözümleyebiliriz ? Hata Mesajı : Günlük iade net tutarı, satış net tutarını aşmaktadır.Satis Faturası Net Tutarı: 0,0 İade Faturası Net Tutarı: 1248,0 Fark: -1248,0",
+  "cozum": "Satış Temsilcisi Parametreler Ekranına Git",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "İade İşlemleri",
+   "islemTipi": "Hata mesajı",
+   "etkilenenNesne": "İade Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Hesaplama / İş Kuralı",
+   "kokNedenDetayi": "Bilgi / nasıl yapılır",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHYFLKZ",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi mobil cihazda bilgi göndermede schematron il ilçe boş bırakılamaz hatası almaktadır.",
+  "cozum": "Personel kartı düzenle ile açılır , tckn ,il , ilçe , telefon , posta kodu alanının doluluğundan emin olunuz.İlgili alanlar doldurulduğunda bilgi gönderme işlemi sağlanabilecektir.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "Bilgi gönderme",
+   "etkilenenNesne": "Bilgi Gönderme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Ana Veri / Kart Tanımı",
+   "kokNedenDetayi": "Satış temsilcisi tanımı hatalı",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Kontrol / validasyon eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQHYAHIC",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi mobil cihazından bilgi göndermede matbu numarası hatasına takılmaktadır.",
+  "cozum": "Konu hakkında matbu numarasında güncelleme sağlanmıştır ve bilgi gönderme işlemi sağlanmıştır.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "",
+   "islemTipi": "Bilgi gönderme",
+   "etkilenenNesne": "Matbu No",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Matbu / basım parametresi",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHY7YRJ",
+  "sirket": "UNIVERA",
+  "sorun": "Tahsilat girişini yanlış gerçekleştirdik , iptal edebilir misiniz ?",
+  "cozum": "Öncelikle işlem için bölge müdürü onayı mevcuttu , Kullanıcıdan hatalı tahsilat kaydının detaylarını talep edin: Tahsilat No, İşlem Tarihi, Müşteri Adı, Tutar, Tahsilat Tipi bilgilerini alın, İlgili tahsilat kaydını seçin ve 'Sil' butonuna tıklayın. Bu işlem adımları ile sorun çözümü sağlanmıştır.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Finans  Tahsilat İşlemleri",
+   "islemTipi": "İptal etme",
+   "etkilenenNesne": "HavaleEFT",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Operatörlük / merkez onayı gereken işlem",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHY7HTW",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil Panoramada giriş yapmak istendiğinde uygulamadan atıyor",
+  "cozum": "Panorama Mobile uygulaması detaylarında 'Depolama' veya 'Veri' seçeneğine girin ve 'Verileri Sil' (Clear Data) butonuna tıklayın. — Uygulama bilgilerinde Depolama>Verileri temizle seçeneği ile uygulama verisi silinir ve giriş sağlanır",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Kullanıcı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHY2U83",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderimde 2 belgesini gönderirken farklı hatalar almaktadır. bir belge yanlış oluşmuş diğeri çok farklı bir hata almaktadır.",
+  "cozum": "Konu ile alakalı olarak bir belge logoda var gözükmekte ama durumu Panorama'da gönderildi olarak güncellenmemektedir. Diğer belge ise E-arşiv oluşmuş fakat E-Fatura oluşması gerekmekteydi. İlgili belgelerin durumlarının düzeltilmesi için üst birimlerimize iletim sağlanmıştır.",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "E-Belge gönderme",
+   "etkilenenNesne": "E-Belge Gönderim",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "E-Belge / Entegratör (3. parti)",
+   "kokNedenDetayi": "Entegratör servis / şifre / kontör",
+   "cozumTipi": "Entegratör / servis müdahalesi",
+   "kaliciOnlem": "Log / izleme geliştirilecek (aktarım / e-belge)"
+  }
+ },
+ {
+  "no": "VK-MQHXXMAM",
+  "sirket": "UNIVERA",
+  "sorun": "Sipariş girişlerinde stoklarının ekside geldiğini ve düzeltmek istediğini belirtti",
+  "cozum": "Siparişte net stok kontrolü yapılsın mı parametresi kapatılmalı — Yetki ve parametre şablonunda \"siparişte net stok kontrolü yapılsın mı?\" parametresi evet olmasından kaynaklı bekleyen siparişleri stoktan düşmüş olarak gösteriyor , ilgili parametre kapatılıp sadece faturalaştırılmış belgelerin stoğu etkilemesi sağlanabilir. Bayi yetkisi yok ise merkez ile görüşmeli",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Stok İşlemleri",
+   "islemTipi": "Düzeltme",
+   "etkilenenNesne": "Stok İşlemleri",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Yanlış parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHXZEC9",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi müşteri işlemlerine girdiğinde son işlemlerde kayıt atmamaktadır.",
+  "cozum": "'Online Olarak Aktarılacak Son İşlem Sayısı' parametresini kontrol et; değer 0 veya boş ise 10 veya daha yüksek bir sayı girildi. Temsilci tekrar bilgi aldığında müşteride hareket gören son 10 satış ve tahsilat bilgilerini görmüştür.",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Müşteri İşlemleri (Nokta Devri/Dist Nokta devri vb.)",
+   "islemTipi": "Oluşturma",
+   "etkilenenNesne": "Satış Temsilcisi",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Eksik parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHSZR1X",
+  "sirket": "UNIVERA",
+  "sorun": "Giriş ekranında kullanıcı girişi yapmak istediğinde küçük bir panorama logosu ekrana geliyor ve giriş yapamıyor",
+  "cozum": "Uygulama yeniden açıldığında bağlantı bilgilerini doğru girin: URL (örn. https://[firma].univera.com.tr), Firma Kodu, Zaman Aşımı değeri ve SSL ayarını kontrol edin. — Bağlantı bilgilerinde URL bilgisi hatalıydı projeye ait URL bilgisi girildi ve tekrar denediğinde giriş yapabildi",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Kullanıcı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Bilgi / nasıl yapılır",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ }
+]

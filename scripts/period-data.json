@@ -1,0 +1,416 @@
+[
+ {
+  "no": "VK-MQI1L4L7",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcim mobil cihazında bilgi alımı yapamıyor",
+  "cozum": "Satış temsilcisi mobil cihazında tarih ve saat bilgisi kontrol edildi ve saat bilgisinin yanlış olduğu tespit edildi.Otomatik tarih saate alınarak bilgi alımı başarıyla sağlandı."
+ },
+ {
+  "no": "VK-MQI1GF1W",
+  "sirket": "UNIVERA",
+  "sorun": "satış temsilcisi mobil cihazda satış siparişi girerken ilerleme aşamasında günlük iade net tutarı satış tutarını aşmaktadır uyarısı almaktadır.",
+  "cozum": "Satış temsilcisi parametrelerine gidildi . Düzenle ile açıp , iade belge girişlerinde satış ve iade belgelerinin net fiyatları kontrol edilsin mi ? Parametresini hayır durumuna çekildi. Temsilci tekrar bilgi aldığında satış tutar uyarısı almadı."
+ },
+ {
+  "no": "VK-MQI08PGI",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderim yapmak istediğim zaman müşteri e-fatura mükellefi olmasına rağmen alıcı etiketi seçini uyarısı geliyor ve belgeyi gönderemiyorum.",
+  "cozum": "Gönderim sorunu yaşanan fatura içerisindeki müşteri panorama ekranı üzerinden Müşteriler > Tanımlamalar > Müşteri ekranı üzerinde düzenle ile açılarak mükelleflik durumu ve e-fatura varsayılan pk alanı kontrol edilmelidir. Müşteri mükelleflik mevcut ve pk adresi gelmediği tespit edilmiş olup müşteri tanımı içerisindeki vkn/tckn aynı anda kayıt edildiği için pk adres bilgisi listelenmediği görüntülenmiştir. Müşteri tanımı içerisinden mükelleflik kayıt bilgisine göre gerçek/tüzel kişi düzenlenir ve müşteri kayıt edilmelidir. E-belge gönderim üzerinden pk adresi varsayılan olarak geldiği görülüp "
+ },
+ {
+  "no": "VK-MQI0KTBK",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil uygulamada Temsilci iade faturası girmek istediğinde yeteri kadar satış yapılmadığını bildiren bir bildirim gelmektedir. Müşteride birebir satış-iade karşılamamaktadır. Operatör bu parametrenin kapatılmasını istemektedir",
+  "cozum": "Satış temsilcisi parametrelerinde birebir iade parametreleri düzenlenmeli — Satış temsilcisi parametrelerinde \"İade belge girişlerinde satış ve iade belgelerinin net fiyatları kontrol edilsin mi?\" parametresi ve satış iade için birebir iade parametresi kapatılmalıdır. Parametre düzenlendikten sonra bilgi alıp kontrol edilebilir."
+ },
+ {
+  "no": "VK-MQI0FMHK",
+  "sirket": "UNIVERA",
+  "sorun": "Motul müşterimizde 8.31 testleri yapıyoruz. Smartconnect ile Generic Xml aktarımını test ettiğimizde aktarım sonucunda “Aktarılacak Kayıt Bulunamadı” uyarısı alıyoruz. Aynı xml’i farklı test ortamlarında aktardığımızda normal aktarım uyarıları alıyoruz, yani xml dosyasında bir hata gözükmüyor.",
+  "cozum": "Verdiğiniz tarih aralığında 1 belge olması ve bu belgenin de yazdırılmamış olmasından dolayı aktarılacak kayıt bulunamadı uyarısı vermektedir. Belge aktarımı testinde belirlenen tarih aralığında belgelerin yazdırıldı durumda ve aktarım durumu aktarılmadı olduğundan emin olunmalıdır."
+ },
+ {
+  "no": "VK-MQI0434L",
+  "sirket": "UNIVERA",
+  "sorun": "Lngdist kod: 1 olan Aşağıdaki 3 satış temsilcinin Yerel depo ve Sipariş Depo kodunu: 424 Merkez Depo ASYA depo olarak revize edebilir misiniz?",
+  "cozum": "İlgili st'lerin st parametrelerindeki yerel ve sipariş depo lngsaha kodları alınarak tblstparametre alanından kriter verilerek txtdeger alanları 424 kodlu depo ile revize edilmiştir."
+ },
+ {
+  "no": "VK-MQHZYOBI",
+  "sirket": "UNIVERA",
+  "sorun": "Verilen hizmet faturasında dosya yüklemek istendiğinde Dosya yüklenirken hata oluştu uyarısı geliyor",
+  "cozum": "Verilen hizmet faturasında dosya ekleme alanından ilgili dosyanın adı çok uzun olmasından kaynaklı hata alınıyordu, karakter sayısı azaltıldı ve formata uygun şekilde başarıyla yüklendi."
+ },
+ {
+  "no": "VK-MQHZWL6C",
+  "sirket": "UNIVERA",
+  "sorun": "https://perfectim.net adresinin sertifikasının süresinin dolmasına 1 aydan az zaman kaldı. Lütfen gerekli aksiyonu alır mısınız?",
+  "cozum": "perfectim.net domain'ine ait mevcut SSL/TLS sertifikasının son geçerlilik tarihini kontrol edin (openssl s_client -connect perfectim.net:443 -servername perfectim.net | openssl x509 -noout -dates komutu veya tarayıcıdan sertifika detaylarına bakarak). — Doğru yönlendirme Sertifika sağlayıcısından (Let's Encrypt, Sectigo, DigiCert vb.) yeni sertifika temin edin veya mevcut sertifikayı yenileyin. Otomatik yenileme varsa çalışıp çalışmadığını kontrol edin. — IT ekipleri ile görüşerek sunucuya sertifika alınarak geçilmesi sağlandı. Yeni sertifikayı (certificate + private key + intermediate chain) "
+ },
+ {
+  "no": "VK-MQHXZUYH",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi cihazından mobil uygulamaya giriş yapmak istediğimde herhangi bir işlem yapmadan direkt olarak uygulama atıyor.",
+  "cozum": "Mobil panorama uygulamasına giriş yapılmak istendiğinde uygulamadan atma sorunu yaşandığı tespit edilmiştir. Uygulamaya giriş yapılabilmesi adına cihazın kendi ayarları içerisinden uygulamaları yönet alanına gidilerek veri silme yapılmıştır. Uygulama verisi silindikten sonra Mobil Panorama giriş yapılarak gelen sorulara uygulamayı kullanırken ve izin ver şeklinde yanıt verilmelidir. Sağ üstte yer alan bağlantı bilgileri (URL, Firma Kodu, Zaman Aşımı, SSL) kayıt edilmelidir. Kullanıcı adı ve şifre ile sisteme başarılı bir şekilde giriş yapılıp bilgi alma gerçekleştirilebiliyor olacaktır."
+ },
+ {
+  "no": "VK-MQHZKHLI",
+  "sirket": "UNIVERA",
+  "sorun": "Merkez müşteriye bağlı alt müşteri bilgileri Logo tarafına aktarılmıyor. Bu bilgilerin sevkiyat adresi alanına gelmesi gerekiyor. XML içerisinde ise SHIPLOC_CODE alanında yer alması bekleniyor. Ekte, sevkiyat kodu seçili olan ve olmayan iki farklı Logo faturasının XML çıktısını paylaşıyorum. SHIPLOC_CODE alanının dolu gelecek şekilde düzenlenmesi gerekiyor.",
+  "cozum": "Görüşmemize istinaden kontrollerimiz sonucunda SHIPLOC_CODE bilgisi xml içerisinde bulunmayan bir alandır. Bundan dolayı geliştirme kapsamında değerlendirilmesi gerekmektedir. Proje yöneticiniz ile süreci değerlendirebilirsiniz."
+ },
+ {
+  "no": "VK-MQHZAZDR",
+  "sirket": "UNIVERA",
+  "sorun": "Kullanıcı girişi ekranında HOST url bulunamadı uyarısı alıyor",
+  "cozum": "Kullanıcıdan mobil cihazda Panorama Mobile uygulamasını açmasını ve giriş ekranındaki ayarlar (dişli) ikonuna tıklamasını isteyin. Bağlantı bilgilerinde doğru URL bilgisi girilmiş ve SSL desteği açılmıştır. Giriş sağlanmıştır."
+ },
+ {
+  "no": "VK-MQHZ8LVV",
+  "sirket": "UNIVERA",
+  "sorun": "Satış siparişim doğru tarih aralığı girmeme rağmen yeni bir siparişten araç yükleme kayıdında listelenmiyor",
+  "cozum": "Sipariş onay durumunu kontrol edin. Satış ve Alış İşlemleri → Satış İşlemleri → Sipariş Listesi ekranından ilgili siparişi bulun ve Onay Durumu alanını inceleyin , Bu adımlar kontrol edildiğinde sipariş durumunun onaylanmadı olduğu görünütlendi.Onaylanmayan siparişler yükelmede listelenmemektedir.İlgili sipariş bölge şefi onayında görüntülenerek onay için talepte bulunulması rica edildi."
+ },
+ {
+  "no": "VK-MQHYWEQ2",
+  "sirket": "UNIVERA",
+  "sorun": "Bayi smart connect uygulamasını çalıştıramamaktadır.",
+  "cozum": "Google Chrome tarayıcısından Aktarım programı yani Smart Connect uygulaması çalışmamaktadır. Edge tarayıcısından Panorama açılıp oradan denendiğinde aktarım programı başarıyla çalışmıştır ve işlemler tamamlanmıştır."
+ },
+ {
+  "no": "VK-MQHYKRGC",
+  "sirket": "UNIVERA",
+  "sorun": "Backoffice sisteminde satış faturası silindiğinde satış faturasına bağlı sipariş silinmemesini talep etmektedir.",
+  "cozum": "Yetki ve parametre şablonu düzenle ile açınız . Fatura silindiğinde bağlı irsaliye silinsin mi evet olur ise , irsaliye silindiğinde bağlı sipariş silinsin mi parametresi Hayır olduğu takdirde Fatura silinip bağlı irsaliye silinmesine rağmen sipariş aktif kalacaktır."
+ },
+ {
+  "no": "VK-MQHYJ3YI",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi kendi el cihazına Panorama kurulumu talep etmektedir.",
+  "cozum": "Temsilcinin cihazına uzaktan bağlantı kurarak veya yönlendirerek Panorama Mobile APK dosyasını cihaza yükleyin. Panorama Mobile uygulamasını açın ve bağlantı ayarları ekranında sunucu adresi, port numarası ve veritabanı bilgilerini girin. İlgili satış temsilcisinin kaydını bulun ve 'Mobil Kullanıcı' alanında doğru kullanıcı kodunun atanmış olduğunu kontrol edin. Temsilci ile birlikte Panorama Mobile uygulamasından kullanıcı adı ve şifre ile giriş yapın ve 'Bilgi Al' işlemini test edin. Giriş başarılı olduktan sonra temsilciye uygulamanın temel kullanımı hakkında kısa bilgilendirme yapın ve ger"
+ },
+ {
+  "no": "VK-MQHYIL0J",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcim mobilde iadre girişi sağlarken bir hata mesajı ile karşılaşıyor , bunu nasıl çözümleyebiliriz ? Hata Mesajı : Günlük iade net tutarı, satış net tutarını aşmaktadır.Satis Faturası Net Tutarı: 0,0 İade Faturası Net Tutarı: 1248,0 Fark: -1248,0",
+  "cozum": "Satış Temsilcisi Parametreler Ekranına Git"
+ },
+ {
+  "no": "VK-MQHYFLKZ",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi mobil cihazda bilgi göndermede schematron il ilçe boş bırakılamaz hatası almaktadır.",
+  "cozum": "Personel kartı düzenle ile açılır , tckn ,il , ilçe , telefon , posta kodu alanının doluluğundan emin olunuz.İlgili alanlar doldurulduğunda bilgi gönderme işlemi sağlanabilecektir."
+ },
+ {
+  "no": "VK-MQHYAHIC",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi mobil cihazından bilgi göndermede matbu numarası hatasına takılmaktadır.",
+  "cozum": "Konu hakkında matbu numarasında güncelleme sağlanmıştır ve bilgi gönderme işlemi sağlanmıştır."
+ },
+ {
+  "no": "VK-MQHY7YRJ",
+  "sirket": "UNIVERA",
+  "sorun": "Tahsilat girişini yanlış gerçekleştirdik , iptal edebilir misiniz ?",
+  "cozum": "Öncelikle işlem için bölge müdürü onayı mevcuttu , Kullanıcıdan hatalı tahsilat kaydının detaylarını talep edin: Tahsilat No, İşlem Tarihi, Müşteri Adı, Tutar, Tahsilat Tipi bilgilerini alın, İlgili tahsilat kaydını seçin ve 'Sil' butonuna tıklayın. Bu işlem adımları ile sorun çözümü sağlanmıştır."
+ },
+ {
+  "no": "VK-MQHY7HTW",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil Panoramada giriş yapmak istendiğinde uygulamadan atıyor",
+  "cozum": "Panorama Mobile uygulaması detaylarında 'Depolama' veya 'Veri' seçeneğine girin ve 'Verileri Sil' (Clear Data) butonuna tıklayın. — Uygulama bilgilerinde Depolama>Verileri temizle seçeneği ile uygulama verisi silinir ve giriş sağlanır"
+ },
+ {
+  "no": "VK-MQHY2U83",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderimde 2 belgesini gönderirken farklı hatalar almaktadır. bir belge yanlış oluşmuş diğeri çok farklı bir hata almaktadır.",
+  "cozum": "Konu ile alakalı olarak bir belge logoda var gözükmekte ama durumu Panorama'da gönderildi olarak güncellenmemektedir. Diğer belge ise E-arşiv oluşmuş fakat E-Fatura oluşması gerekmekteydi. İlgili belgelerin durumlarının düzeltilmesi için üst birimlerimize iletim sağlanmıştır."
+ },
+ {
+  "no": "VK-MQHXXMAM",
+  "sirket": "UNIVERA",
+  "sorun": "Sipariş girişlerinde stoklarının ekside geldiğini ve düzeltmek istediğini belirtti",
+  "cozum": "Siparişte net stok kontrolü yapılsın mı parametresi kapatılmalı — Yetki ve parametre şablonunda \"siparişte net stok kontrolü yapılsın mı?\" parametresi evet olmasından kaynaklı bekleyen siparişleri stoktan düşmüş olarak gösteriyor , ilgili parametre kapatılıp sadece faturalaştırılmış belgelerin stoğu etkilemesi sağlanabilir. Bayi yetkisi yok ise merkez ile görüşmeli"
+ },
+ {
+  "no": "VK-MQHXZEC9",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi müşteri işlemlerine girdiğinde son işlemlerde kayıt atmamaktadır.",
+  "cozum": "'Online Olarak Aktarılacak Son İşlem Sayısı' parametresini kontrol et; değer 0 veya boş ise 10 veya daha yüksek bir sayı girildi. Temsilci tekrar bilgi aldığında müşteride hareket gören son 10 satış ve tahsilat bilgilerini görmüştür."
+ },
+ {
+  "no": "VK-MQHSZR1X",
+  "sirket": "UNIVERA",
+  "sorun": "Giriş ekranında kullanıcı girişi yapmak istediğinde küçük bir panorama logosu ekrana geliyor ve giriş yapamıyor",
+  "cozum": "Uygulama yeniden açıldığında bağlantı bilgilerini doğru girin: URL (örn. https://[firma].univera.com.tr), Firma Kodu, Zaman Aşımı değeri ve SSL ayarını kontrol edin. — Bağlantı bilgilerinde URL bilgisi hatalıydı projeye ait URL bilgisi girildi ve tekrar denediğinde giriş yapabildi"
+ },
+ {
+  "no": "VK-MQGRCANV",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi mobilde yeni müşteri kaydı açmıştır ve o müşteriye fatura kesmiştir. Fakat bilgi göndermede E-Fatura kesmeniz gereklidir diye bir hata almıştır.",
+  "cozum": "Konu ile alakalı olarak öncelikle tablete bağlanıp Panorama'nın datası alınmıştır. Data içerisinde müşteri yeni kaydedildiği için e-fatura müşterisi olup olmadığı bilgisi güncellenmemiştir. Son faturası silinmiştir ve müşteri tablosundan müşteri e-fatura müşterisi yapılmıştır. Ardından tablet datası içeri alınarak bilgi gönderilmiştir ve işlemler başarıyla sağlanmıştır."
+ },
+ {
+  "no": "VK-MQGQWSFT",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsiclileri, merkezin aldığı raporda ziyaret etmemiş ve gps bilgisi almamış gibi gözükmektedir. Temsilci tabletleri kontrol edilecektir.",
+  "cozum": "Satış temsilcisinin tabletine bağlandı ve GPS, konum izinleri kontrol edildi. Ardından Google Play açılarak Haritalar uygulaması etkinleştirilip güncellendi. Sonrasında Panorama'ya tekrar girilip ziyaret test edildi ve konum başarıyla alındı."
+ },
+ {
+  "no": "VK-MQGPN4BQ",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderim ekranında fatura gönder dediğimde kullanıcı adı ve şifre hatalıdır uyarısı almaktayım",
+  "cozum": "E-belge gönderiminde aldığınız 'kullanıcı adı ve şifre hatalı' uyarısı genellikle entegratör (EDM, UniDox vb.) tarafında yapılan şifre değişikliğinin Panorama sistemine yansıtılmamasından kaynaklanmaktadır. Sorununuzu çözmek için öncelikle kullandığınız entegratör portalına giriş yaparak kullanıcı adı ve şifrenizin doğruluğunu kontrol etmenizi rica ediyoruz. Eğer entegratör tarafında şifre değişikliği yaptıysanız, lütfen yeni kullanıcı adı ve şifrenizi bizimle paylaşın; Panorama'daki 'Sistem Yönetimi → E-Belge Ayarları' ekranından bu bilgileri güncelleyeceğiz. Güncelleme sonrası test gönderimi"
+ },
+ {
+  "no": "VK-MQGOBNOQ",
+  "sirket": "UNIVERA",
+  "sorun": "Lngdist kod: 1 olan Aşağıdaki 3 satış temsilcinin Yerel depo ve Sipariş Depo kodunu: 424 Merkez Depo ASYA depo olarak revize edebilir misiniz?",
+  "cozum": "İlgili st'lerin st parametrelerindeki yerel ve sipariş depo saha kodları alınarak TBLSTPARAMETREDE kriterlere lngstkod ve saha kod kriteri verilerek txtdeger kolonunun değeri 424 yapılarak parametre düzeltildi."
+ },
+ {
+  "no": "VK-MQGO7EY8",
+  "sirket": "UNIVERA",
+  "sorun": "60-70 adet alış irsaliyesi oluşturacağım ancak veri almada doğru şablon ve hareketi bulamadım . Nasıl ilerlemeliyim?",
+  "cozum": "veri alma ekranına girdikten sonra Görev ve Distribütör seçerek yukarıdaki Excel şablon indir ile şablonu indirebilirsiniz. Şablonu açtığınızda kırmızı başlıklı kolonlar zorunlu alanlar buralar mutlaka doldurulmalıdır. Başlıklara tıkladığınızda neye göre doldurulması ile ilgili açıklamayı bulabilirsiniz. SiparisNo yazan başlık sizin siparişleri kalem kalem ekleyeceğiniz için ayırmanızı sağlamak için vardır örneğin 1 siparişin 2 kalemi varsa: birinci ve ikinci satırda siparis no 1 yazacak fakat farklı ürünler seçilmiş olacaktır. Şablonu doldurduktan sonra kaydederek tekrar veri alma ekranına gi"
+ },
+ {
+  "no": "VK-MQGN8DL8",
+  "sirket": "UNIVERA",
+  "sorun": "https://perfectim.net adresinin sertifikasının süresinin dolmasına 1 aydan az zaman kaldı. Lütfen gerekli aksiyonu alır mısınız?",
+  "cozum": "perfectim.net domain'ine ait mevcut SSL/TLS sertifikasının son geçerlilik tarihini kontrol edin (openssl s_client -connect perfectim.net:443 -servername perfectim.net | openssl x509 -noout -dates komutu veya tarayıcıdan sertifika detaylarına bakarak). — Doğru yönlendirme Sertifika sağlayıcısından (Let's Encrypt, Sectigo, DigiCert vb.) yeni sertifika temin edin veya mevcut sertifikayı yenileyin. Otomatik yenileme varsa çalışıp çalışmadığını kontrol edin. — IT ekipleri ile görüşerek sunucuya sertifika alınarak geçilmesi sağlandı. Yeni sertifikayı (certificate + private key + intermediate chain) "
+ },
+ {
+  "no": "VK-MQGKX7SL",
+  "sirket": "UNIVERA",
+  "sorun": "Müşterilerimdeki stokları ve bakiyeleri toplu olarak sıfırlamak istiyorum",
+  "cozum": "Stok/Cari sıfırlama ekranından müşteri kodunu yazarak stokları ve bakiyeleri sıfırlama yapılmıştır."
+ },
+ {
+  "no": "VK-MQGAHC5T",
+  "sirket": "UNIVERA",
+  "sorun": "Motul müşterimizde 8.31 testleri yapıyoruz. Smartconnect ile Generic Xml aktarımını test ettiğimizde aktarım sonucunda “Aktarılacak Kayıt Bulunamadı” uyarısı alıyoruz. Aynı xml’i farklı test ortamlarında aktardığımızda normal aktarım uyarıları alıyoruz, yani xml dosyasında bir hata gözükmüyor. Hem sunucu içerisinden hem de dışarıdan kontrol sağladık fakat maalesef tespit edebildiğimiz bir hata yok. Konuyla ilgili destek olabilir misiniz?",
+  "cozum": "Verdiğiniz tarih aralığında 1 belge olması ve bu belgenin de yazdırılmamış olmasından dolayı aktarılacak kayıt bulunamadı uyarısı vermektedir. Belge aktarımı testinde belirlenen tarih aralığında belgelerin yazdırıldı durumda ve aktarım durumu aktarılmadı olduğundan emin olunmalıdır."
+ },
+ {
+  "no": "VK-MQGKFHRO",
+  "sirket": "UNIVERA",
+  "sorun": "Bilgi alma aşamasında datetime data type hatası almaktadır.",
+  "cozum": "Backoffice'ten Entegrasyon → İşlemler → Rut Tanım Bilgileri Alma ekranından ilgili rut kayıtlarınızın tarih alanlarını (Başlangıç Tarihi, Bitiş Tarihi) kontrol edin ve gerekirse güncelleyin. Bu adımları uyguladıktan sonra bilgi alma işlemini tekrar deneyiniz. Bu işlemler sonucunda sorun çözümlenecektir."
+ },
+ {
+  "no": "VK-MQGK3CA1",
+  "sirket": "UNIVERA",
+  "sorun": "Müşterim e-fatura mükellefi olduğunu söylüyor fakat kestiğim faturada e-arşiv cıkıyor.",
+  "cozum": "Müşteri mükellefliği https://ebelge.gib.gov.tr/anasayfa.html sitesinden sorgulanarak e-fatura mükellefi olmadığı tespit edildi.Tespit sonucunda fatura kesildiğinde de e-arşiv ibaresi faturada yer aldı ve mükelleflik ile ilgili sorun yaşamadığı bilgisi verilmiştir."
+ },
+ {
+  "no": "VK-MQGA0PB3",
+  "sirket": "UNIVERA",
+  "sorun": "Panorama'da da EDM kullanmaktalar. Yani Panorama'dan kestikleri belgeler EDM'ye gitmekte. Uni-Dox'u hiç kullanmamaktalar. Uni-Dox'un kapatılmasını istemektedirler.",
+  "cozum": "Uni-Dox'taki gelen ve giden adreslerinin kapatılması için mali mührün olması gerektiği bilgisi verilmiştir. Mali Mühür olduğu zaman tarafımızla iletişime geçebileceği söylenmiştir."
+ },
+ {
+  "no": "VK-MQG9ND72",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil güncelleme yaptığını, yaptıktan sonra uygulamadan attığını belirtmekte, giriş sağlayamıyor",
+  "cozum": "Mobil uygulama güncellemesi sonrası yaşadığınız giriş sorunu için üzgünüz. Bu durum genellikle güncelleme sonrası eski uygulama verilerinin yeni sürümle uyumsuzluğundan kaynaklanmaktadır. Sorunu çözmek için lütfen şu adımları uygulayın: 1) Cihazınızın Ayarlar → Uygulamalar menüsünden EnRoute Mobile uygulamasını bulun ve 'Verileri Temizle' işlemini yapın. 2) Uygulamayı yeniden açın ve sunucu URL, kullanıcı adı ve şifrenizi tekrar girin. 3) Eğer şifrenizi hatırlamıyorsanız, destek ekibimiz sizin için şifre sıfırlama yapabilir. Bu işlemler sonrası uygulamaya giriş yapabilecek ve 'Bilgi Al' ile ve"
+ },
+ {
+  "no": "VK-MQG9JPQ5",
+  "sirket": "UNIVERA",
+  "sorun": "jtı mnasip.cetinkaya kullanıcı adlı distribütör bayi kullanıcısı kullanıcı yetkide şekerci bitlis ve Şekerci muş distlerini görebilmesine rağmen stant takma sökme alanında sadece şekerci bitlis gelmektedir. Bir seçim dahi yaptırtmamaktadır. şifre : 5436921155",
+  "cozum": "şekerci muşu görebilmesi için kullanıcı bilgisi paylaşılmıştır."
+ },
+ {
+  "no": "VK-MQG9DBAC",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcisi olarak görev yapıyorum ve mobil kullanıcı adı şifremi bilmediğim için panorama uygulamasına giriş yapamıyorum.",
+  "cozum": "Satış temsilcisinden alınan isim - soyisim ile Backoffice panorama üzerinden satış temsilcisi tanımına giriş yaparak mobil kullanıcı kontrol edilmiştir. Mobil kullanıcı için çağrı merkezi destek ekibi olarak tarafımızca arayüz üzerinde mobil şifre görüntülenmemesi sebebi ile kullanıcı ekranı üzerinden default olarak 123456789 şeklinde şifre kayıt edilir. Satış temsilcisine kullanıcı adı - şifre bilgisi paylaşılmış ve giriş yapılabildiği konusunda mutabık kalınmıştır."
+ },
+ {
+  "no": "VK-MQG8OSQH",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil cihaz üzerinden kullanıcı girişi yapmak istediğimiz zaman farklı bir kullanıcı üzerinden bilgi alma yapıldığı uyarısı geldiği için yeni kullanıcı ile mobil panoramaya giriş yapamıyoruz.",
+  "cozum": "Mobil Cihaz üzerinden Team Viewer - Quick support uygulaması ile uzaktan bağlantı gerçekleştirilmiştir. Eski kullanıcı ile bilgi alma yapılmış ancak kullanıcıdan bilgi gönderme ve kapanış işlemi yapılmadan oturum kapatıldığı için yeni kullanıcı girişinde eski kullanıcının bilgi alma yapmış olduğu uyarısı geldiği tespit edilmiştir. Bu ve benzeri durumlarda Cihazın kendi ayarları içerisinden uygulamaları yönet içerisinden ilgili mobil panorama uygulaması içerisine giriş yapılıp Depolama alanından veri sil yapılmalıdır. Veri silme sonrası mobil uygulamaya giriş yapılarak gelen sorulara uygulamayı"
+ },
+ {
+  "no": "VK-MQG8OIUQ",
+  "sirket": "UNIVERA",
+  "sorun": "e-arşiv faturalarımı logo servis hatasından dolayı e-belge gönderim yapamıyorum",
+  "cozum": "Logo eski web servis adresini tekrar açtığı için belgeler gönderimi sağlanmıştır."
+ },
+ {
+  "no": "VK-MQG7UKCK",
+  "sirket": "UNIVERA",
+  "sorun": "Satış Temsilcisi cihazından mobil panorama uygulamasına giriş yapmak istediğim zaman uygulama atıyor.",
+  "cozum": "Satış Temsilcisine ait mobil cihaza Team Viewer - Quick Support uygulaması ile uzaktan bağlantı gerçekleştirilmiştir. Panorama uygulamasına giriş yapılmak istendiği zaman uygulamanın direkt olarak açılmadığı ve uygulama yanıt vermiyor şeklinde uyarısı geldiği görüntülenmiştir. Cihaz ayarları içerisinden uygulamaları yönet başlığı altında Panorama Mobil uygulaması bulunarak depolama alanından veri sil yapılmıştır. Panorama uygulamasına giriş yapılıp tüm sorulara uygulamayı kullanırken ve izin ver şeklinde yanıt verilmiştir. Kullanıcı adı - şifre giriş ekranında sağ üstte yer alan çark simgesine"
+ },
+ {
+  "no": "VK-MQFAJRJR",
+  "sirket": "UNIVERA",
+  "sorun": "Güncel exco mobil uygulamasının ios ve android linkini bizimle paylaşabilir misiniz?",
+  "cozum": "Anroid linki için öncelikle sunucuda panorama dizini kontrol edildi. Apk olduğu için adres.com.tr/exco.apk(apknın tam adı) verilerek link test edildi. Çalıştığı gözlemlendi. İos ipa'sının sertifikası geçtiği için yazılıma maddeler açılarak yeniden derlendirildi. Link oluşturularak ios cihazda test edildi ve müşteri ile paylaşıldı."
+ },
+ {
+  "no": "VK-MQF9DQAC",
+  "sirket": "UNIVERA",
+  "sorun": "Temsilciler sabah bilgi alırken object reference hatası alıyorlar",
+  "cozum": "Detay açıklama yapılacak alan burasıdırç"
+ },
+ {
+  "no": "VK-MQF878OZ",
+  "sirket": "UNIVERA",
+  "sorun": "Satıcıya iade faturasını düzenle ile açıp bağlantılı iade ile alış belgesi bağlayıp kaydettiğinde zaten uygulanmış olan iskontoların uygulanmadığını söylemektedir.",
+  "cozum": "Satıcıya iade faturasını düzenle demek yerine Bağlantılı İade Düzenleme ekranından ilgili iade faturasını bulup bağlamak istenilen alış faturası seçilip bağlandıktan sonra işlemler başarıyla tamamlanmıştır."
+ },
+ {
+  "no": "VK-MQF7479S",
+  "sirket": "UNIVERA",
+  "sorun": "E-belge gönderim ekranından belge gönderimde E-Arşiv belgelerde hata alınmakta.",
+  "cozum": "Konu hakkında E-Logo tarafında genel bir sorun olduğu için Entegratör olarak E-Logo kullanan bayilerde e-belge gönderimde hata bulunmaktadır. Bu hata için uzman birimlerimiz kontrollerini sağlamakta ve incelemelerine devam etmektedirler."
+ },
+ {
+  "no": "VK-MQF783HD",
+  "sirket": "UNIVERA",
+  "sorun": "Panorama üzerinden iptal olan faturaları NETSİS'e aktarmak istiyor.",
+  "cozum": "İptal belgelerin aktarımı SMARTCONNECT üzerinden mümkün değildir. Belgeler Netsisten manuel olarak girilebilir veya Panoramada merkez yetkililerinin onayıyla belgeler aktife alınıp aktarımı yapılabilir."
+ },
+ {
+  "no": "VK-MQF6JBRD",
+  "sirket": "UNIVERA",
+  "sorun": "Unidox üzerinden gönderdiği iade faturası başarılı ve onaylandı durumda olmasına rağmen müşterinin faturayı göremediğini iletti",
+  "cozum": "Unidox üzerinde fatura zarf sorgulama yapılmıştır. Fatura hata vermemiş,başarıyla tamamlandı durumdadır. Konuyla ilgili mali müşaviriyle görüşüp GIB portalında faturayı kontrol edebileceği, sonrasında müşterisiyle görüşüp karşı entegratörden kontrol ettirebileceği bilgisi verilmiştir."
+ },
+ {
+  "no": "VK-MQF2UF71",
+  "sirket": "UNIVERA",
+  "sorun": "Bilgi almak istediğinde zaman aralığı dışındasınız 04-05 saatleri arasında bilgi alınız şeklinde uyarı geliyor",
+  "cozum": "Satış temsilcisi parametrelerinde iletişim grubunda \"Bilgi almada zaman aralığı kısıtlaması kullanılsın mı\" parametresi hayır olarak işaretlenmeli ve tekrar bilgi alınmalıdır."
+ },
+ {
+  "no": "VK-MQF0IQYH",
+  "sirket": "UNIVERA",
+  "sorun": "Mobilde satış temsilcisi bilgi al dediğinde, stye tanımlı rut bulunamadı gibi bir hata vermektedir.",
+  "cozum": "Konu hakkında satış temsilcisi tanımlarından ilgili temsilci bulunmuştur ve düzenle ile açılmıştır. Ardından Rut Bilgileri butonuna tıklandığında Pazartesi rutunun farklı bir günce gözüktüğü görülmüştür. Başlangıç tarihi doğru bir şekilde düzenlendikten sonra kaydedilmiştir ve temsilci tabletinde başarılı bir şekilde bilgi alımı sağlanmıştır."
+ },
+ {
+  "no": "VK-MQEZX2H7",
+  "sirket": "UNIVERA",
+  "sorun": "Takip Kod: 29 CİHAN ALKOLLÜ VE ALKOLSÜZ İÇECEKLER Ltd. Ştİ. Takip Kod: 28 SÖNMEZ TOPTAN TİCARET Takip Kod: 31 ARTI İÇECEK DAĞITIM TİCARET LİMİTED ŞİRKETİ Distribütörlerinin satış temsilcisi mobil cihazlarında bulunurluk tanımları mobil cihazlarda çıkmamaktadır. Ekte tüm alanları gösteren video ekledim. Acil olarak bu problemin düzeltilmesi gerekiyor.",
+  "cozum": "Bu distlere ait temsilcilerin parametrelerinde bulunurluk toplansın parametresi kapalıydı. Bunu açarak tekrar bilgi aldığımda bulunurluk gelmiştir. Paylaştığınız distlerin stlerinin parametresini toplu olarak güncelledim."
+ },
+ {
+  "no": "VK-MQEUML1G",
+  "sirket": "UNIVERA",
+  "sorun": "Müşterimiz Yüksel Gıda 8.31 setini kullanmaktadır. Panorama üzerinden Smartconnect ile Logo’ya belge aktarımı yapıyorlar ve belgeleri Logo’dan Gib’e gönderiyorlar. E-arşiv belgelerin aktarımının yapılmadığını farkettiler. VIEWFATURAGENERIC’i kontrol ettiğimizde belgelerin viewdan döndüğünü gördük. Aktarım sırasında profiler kaydı alarak incelediğimizde atılan sorguda BYTEARSIV durumu 1 olan belgelerin BYTEFATURADURUM’ larının 0 olması koşulunun olduğunu gördük. Bu nedenle belgeler aktarılamıyor. Profiler kaydını ve ilgili sorguyu iletiyorum. Konuyla ilgili destek olabilir misiniz? exec sp_exec",
+  "cozum": "Faturaların e-arşiv oluşurken BYTEFATURADURUM'nun 0 olarak gelmesi ile ilgili bir koşulunuz varsa konuyu inceleyebiliriz. Şu an için önerim eğer herhangi bir koşul bulunmuyorsa tblmsdfatura ekranına trigger koymak olabilir böylelikle koşulu tespit edebilirsiniz. Şu an için datadan durumlarını değiştirerek ilerleyebilirsiniz. Ayrıca E-müşteri güncelleme görevi paylaştığınız sorgunun tarih aralığından bir gün önce doğru çalışmadığını tespit ettim. Belgeler belkide müşteri durumları güncel değilken oluştuğundan yaşanmış olabilir. Not: Datadan kontrol edildiğinde ilettiğiniz koşula uyan bir belge "
+ },
+ {
+  "no": "VK-MQB1PFGP",
+  "sirket": "UNIVERA",
+  "sorun": "Müşteri Smart Connect aktarımdan Satıcıya İade Faturalarını aktaramamış, aktarılması için destek istemektedir.",
+  "cozum": "Aktarımda akmayan bir belgesi bulunmaktaydı. Belge incelendi ve yazdırılmadığı görülmüştür. Belge, Belge Basım Düzenleme ekranından Yazdırıldı konumuna alınıp denendiğinde aktarım işlemi başarıyla sağlanmıştır."
+ },
+ {
+  "no": "VK-MQAYG56N",
+  "sirket": "UNIVERA",
+  "sorun": "e belge fatura gönderiminde null hatası alıyorum.",
+  "cozum": "Gökhan db den fatura tablosunda bytefaturadurum alanı 0 olarak update edildi."
+ },
+ {
+  "no": "VK-MQAXTLW5",
+  "sirket": "UNIVERA",
+  "sorun": "Bayi Satış Temsilcisi Tanımının nasıl yapılacağını öğrenmek istemektedir.",
+  "cozum": "Konu ile alakalı olarak Satış Temsilcisi ekranına gidilip Yeni butonu ile yeni bir st tanım ekranı açılmıştır. Ardından tüm bilgiler doldurulup kaydedilmiştir, sonrasında diğer temsilci için de kendisinin yapması istenmiştir ve bayi de işlemleri tamamlamıştır. Ardından Satış Temsilcisi Parametreler ekranından parametre tanımları da yapılarak işlem tamamlanmıştır."
+ },
+ {
+  "no": "VK-MQAXQKI4",
+  "sirket": "UNIVERA",
+  "sorun": "Gks muşterı tanımı ve datasını veri alma ile içeri alınması için yardımlarınızı rica ederiz",
+  "cozum": "Veri alma ile iletilen excel içeri alınmıştır."
+ },
+ {
+  "no": "VK-MQAWYH0N",
+  "sirket": "UNIVERA",
+  "sorun": "E-arşiv tipinde belgeleri e-belge gönderim ekranı üzerinden gönderimini yapamadığım için ticari paket aktarım da yapamıyorum.",
+  "cozum": "E-belge gönderim üzerinden belge gönderimi kontrol edildiğinde Server wasunable to process request.---> Schematron kontrolünde hata oluştu. (3) şeklinde uyarı geldiği görüntülenmiştir. Kullanılan entegratör Sistem Yönetimi > Genel Parametreler > E-belge Ayarları üzerinden kontrol edilmelidir. Mevcutta Logo entegratör firmasını kullanan distribütörler tarafında erişim problemi mevcuttur. Bu sebeple Logo firma yetkililerine yönlendirme yapılmıştır."
+ },
+ {
+  "no": "VK-MQAX57YH",
+  "sirket": "UNIVERA",
+  "sorun": "Özpaş müşterimizde 5370 raporu için bilgilendirme maili kurulu çalıştırdığımızda aşağıdaki hatayı alıyoruz. Kontrol edebilir misiniz? Hata: Varılan bir bağlantı uzaktaki bir ana bilgisayar tarafından zorla kapatıldı.",
+  "cozum": "Firma tanım tablosunda bulunan mail bilgileri hatalı. Mail sunucusuna mail adresi değil sunucunun adresi yazılmalı. Gmail kullanılıyorsa gmail sunucu adresi, mail portu ve ssl açık veya kapalıysa ona göre 1 veya 0 verilmelidir. Mail şifresi hatalı mail adresine girilen yapılan şifre değildir. Gmail uygulama şifresi mail şifresi alanına girilmelidir. Ayrıca antivirüste istekleri engelliyor bu yüzden mail ile smtp sunucuna mail atmak istediğinde bloklamakta. Bunları giderdikten sonra tekrar rapor bilgilendirme tanımını çalıştırabilirsiniz."
+ },
+ {
+  "no": "VK-MQAWYIXY",
+  "sirket": "UNIVERA",
+  "sorun": "Başka bir panoramada ekte ilettiğim ekran görüntüsünde görüldüğü üzere mobil uygulamada Müşteri İşlemleri ekranında sağ üst köşedeki üç nokta menüsüne tıklandığında harita seçeneği görüntülenmektedir. Bu seçeneğe tıklandığında ise ikinci ekran görüntüsündeki gibi müşterilerin konum bilgileri harita üzerinde görüntülenebilmektedir. Aynı özelliğin 8.31 panoramada da kullanılabilmesi için hangi ayarların yapılması gerektiği konusunda bilgi verebilir misiniz?",
+  "cozum": "Sorun sayısal harita entegrasyonu lisansı olmadığı için yaşanmaktadır. Lisansı aldığınızda lisans yenileme yaparak bilgi alınması yeterli olacaktır."
+ },
+ {
+  "no": "VK-MQAWO9J8",
+  "sirket": "UNIVERA",
+  "sorun": "Şener Gıda siparişte toplu ürün kod'da Birim KL değilde adet görmek istiyor. Konu hakkında yardımcı olabilir misiniz?",
+  "cozum": "Merkez ile görüşerek varsayılan değer getirmek yerine ürün biriminde değişiklik yapabilme yetkisi distte kapalı olduğu için açılması sağlandı. Yetki ve parametreden Çoklu birim uygulaması yapılsın mı? değeri evet olarak düzeltildi. Toplu ürün kodu girişinde birim seçilebilir hale geldi."
+ },
+ {
+  "no": "VK-MQAWKMUU",
+  "sirket": "UNIVERA",
+  "sorun": "Panorama mobil uygulama kurulumu istedi",
+  "cozum": "Android veya IOS bilgisi alındıktan sonra indirme linki müşteri ile paylaşılır ve tarayıcı üzerinden indirme başlatılır. Uygulama yüklendikten sonra proje bazlı değişen bağlantı bilgileri girilir. Kullanıcı girişi sağlandıktan sonra işlemlerine başlayabilir."
+ },
+ {
+  "no": "VK-MQAWK8S4",
+  "sirket": "UNIVERA",
+  "sorun": "Ankara bölge içindeki ankara.alpedo kullanıcısnın haklarının aynısını ankara.muhasebe kullanıcı hakları içinde yaparsanız sevinirim. Ankara.muhasebe kullanıcısının yetkilerinin kısıtlanması gerekiyor.Bu kullanıcı için düzenleme yapılacak.",
+  "cozum": "Ankara.muhasebe kullanıcısının kullanıcı bazlı yetkileri vardı ve kullanıcı grup hakkı bulunmuyordu. ankara.alpedo kullanıcısının kullanıcı yetkisi yoktu fakat kullanıcı grup hakkı vardı. Ercsis datası üzerinde bulunan TBLKULLANICIHAKLAR tablosunda önce Ankara.muhasebe kullanıcısının lngkod ile filtreleyerek tanımları yedeklenerek silindi."
+ },
+ {
+  "no": "VK-MQAT5ZDY",
+  "sirket": "UNIVERA",
+  "sorun": "Satış temsilcilerinin mobil üzerinde kesmiş oldukları tahsilatlara backoffice üzerinden otomatik seri no gelmesini istiyorum.",
+  "cozum": "Öncelikle Sistem Yönetimi > Genel Parametreler > Yetki ve Parametre Şablon içerisinde yer alan Kıymetli Evrak Takibi Yapılacak Mı? parametresinin EVET konumda olduğu kontrol edilmelidir. Parametre evet olması durumunda Satış Ekibi > Tanımlamalar > Kıymetli Evrak Takibi ekranı üzerinden temsilci / dağıtıcı bazlı olarak seri belirlenebileceği şeklinde örnek tanımlama yapılmıştır."
+ },
+ {
+  "no": "VK-MQASMV6T",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil panorama üzerinde bilgi gönderme yapılabiliyor ancak bilgi alma yapılamıyor.",
+  "cozum": "Mobil cihazlar üzerindeki bilgi alma işlemi sırasında gelen 'gönderilmemiş bilgiler var, lütfen bilgi almadan önce bilgi gönderme yapınız.' Şen piliç projesinde release geçişi kaynaklı sorun oluştuğu tespit edilerek operasyon destek birimimize yönlendirme yapılmıştır. Geçici çözüm olarak ise temsilcilerin sahada işlemlerinin aksamaması adına cihazlara bağlanılarak unidev dosyası atılmıştır. [DbSil] yapılarak yeniden bilgi alma işlemi gerçekleştirilmiştir."
+ },
+ {
+  "no": "VK-MQAPZ1IX",
+  "sirket": "UNIVERA",
+  "sorun": "Mobil cihazda Bilgi alma adımında gönderilmemiş bilgiler var hatası alınmaktadır.",
+  "cozum": "Mobil cihazınızda 'gönderilmemiş bilgiler var' hatası alıyorsanız, öncelikle cihazda bekleyen senkronize edilmemiş belgeler olup olmadığını kontrol etmenizi rica ederiz. 'Bilgi Gönder' işlemini başlatarak hangi belgenin hata verdiğini tespit edin; belge içinde yanlış ürün kodu veya stok bilgisi varsa düzeltin. Eğer sorun devam ederse, mobil cihazdan mevcut kullanıcı verisini silip yeniden giriş yapmanızı öneririz (Ayarlar → Veri Sil)."
+ },
+ {
+  "no": "VK-MQAPC9RO",
+  "sirket": "UNIVERA",
+  "sorun": "Panorama'da Mobilde Açılış işlemi yaparken Panorama_Log gibi bir hata vermektedir.",
+  "cozum": "Konu hakkında cihazın içerisinde dosyalarda Panorama_Logs isimli bir dosya bulunmaktadır. Buradaki Log dosyaları silinip tekrar denendiğinde başarıyla bilgi gönderme işlemi sağlanmıştır."
+ },
+ {
+  "no": "VK-MQAOTLVM",
+  "sirket": "UNIVERA",
+  "sorun": "Panorama'da E-Belge Dizyanları içerisinde satır açıklaması ve diğer vergiler sütunlarının kaldırılmasını istemektedirler.",
+  "cozum": "Bayi Uni-Dox entegratörü kullandığı için dizaynlarda düzenleme sağlanabilir. Müşteri Uni-Dox dışında bir entegratör kullansaydı dizaynlardaki düzenlemeler için destek aldığı entegratöre yönlendirme sağlanacaktı. İstenilen E-Belge Dizaynları XSLT EDITOR üzerinden düzenlendi ve istediği şekilde Satır Açıklaması ve Diğer Vergiler sütunları kaldırıldı. Dizaynlar Panorama'ya ve Uni-Dox ekranına yüklendi."
+ },
+ {
+  "no": "VK-MQANFN4A",
+  "sirket": "UNIVERA",
+  "sorun": "Başarıyla bilgi gönderiyor ancak bilgi alma ekranında gönderilmemiş bilgileri var uyarısı veriyor",
+  "cozum": "Bilgi gönder işlemi başarılı bir şekilde oluyor ancak bilgi almada gönderilmemiş bilgiler var uyarısı gelmeye devam ediyor ise Temsilcinin cihazına unidev.txt dosyayı atılıp dbsil butonu aktifleştirildikten sonra dbsil işlemi gerçekleştirilerek uygulama verisi silinir ve yeniden bilgi alması sağlanır."
+ },
+ {
+  "no": "VK-MQ9MAET5",
+  "sirket": "UNIVERA",
+  "sorun": "El terminalinden e-belge gönderiminde entegratör hatası alıyorum.",
+  "cozum": "Merhaba, el terminalinden e-belge gönderiminde aldığınız entegratör hatası için destek talebinizi aldık. Bu hata genellikle e-arşiv belgelerinin online modda gönderilmesi sırasında ETTN (Elektronik Tablo Takip Numarası) çakışmasından kaynaklanmaktadır. Sorununuzu çözmek için Panorama sisteminizde Sistem Yönetimi → Genel Parametreler → E-Belge Ayarları ekranından 'E-Arşiv Belgeleri Offline Kaydedilsin Mi?' parametresini aktif hale getirmenizi öneriyoruz. Ayar değişikliğinden sonra el terminalinden çıkış yapıp yeniden giriş yaparak işlemi tekrar deneyebilirsiniz. Sorun devam ederse, entegratör k"
+ },
+ {
+  "no": "VK-MQAMIPWZ",
+  "sirket": "UNIVERA",
+  "sorun": "Girdiğim faturada iskonto uygulaması sağlayamıyorum",
+  "cozum": "Satış Ve Pazarlama Kriterleri → İskonto Promosyon → İsk/Pro ekranından ilgili iskonto tanımının aktif ve geçerli tarih aralığında olup /olmaması. İlgili işlem adımları ile kontrol edildiğinde, uygulanması istenen iskontonun bitiş tarihinin sonlandığı görüntülendi , iskontonun bu yüzen uygulanamadığı tespit edilerek sorun giderildi."
+ }
+]

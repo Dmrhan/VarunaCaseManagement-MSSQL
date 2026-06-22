@@ -1,0 +1,194 @@
+[
+ {
+  "no": "VK-MQI1L4L7",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Satış Ekibi / Rut ve Ziyaret işlemleri",
+   "islemTipi": "Bilgi Alma",
+   "etkilenenNesne": "Bilgi Alma",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz tarih / saat",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQI1GF1W",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "İade İşlemleri",
+   "islemTipi": "Hata mesajı",
+   "etkilenenNesne": "İade Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQI08PGI",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "E-Belge (e-fatura / e-arşiv)",
+   "islemTipi": "E-Belge gönderme",
+   "etkilenenNesne": "E-Belge Gönderim",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Ana Veri / Kart Tanımı",
+   "kokNedenDetayi": "Müşteri kartı eksik / hatalı",
+   "cozumTipi": "Veri / kart düzeltme",
+   "kaliciOnlem": "Kontrol / validasyon eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQI0KTBK",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "İade İşlemleri",
+   "islemTipi": "Hata mesajı",
+   "etkilenenNesne": "İade Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Parametre sihirbazı yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQI0FMHK",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Smart Connect İşlemleri",
+   "islemTipi": "Aktarım yapma (muhasebeye / ticari pakete)",
+   "etkilenenNesne": "Ticari Pakete Aktarim",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Kullanıcı işlem adımı hatası",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQI0434L",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış Ekibi / Rut ve Ziyaret işlemleri",
+   "islemTipi": "Güncelleme",
+   "etkilenenNesne": "Satış Temsilcisi Parametreler",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "ST parametresi eksik",
+   "cozumTipi": "Script çalıştırma (DbUpdate)",
+   "kaliciOnlem": "Self-servis ekran yapılacak"
+  }
+ },
+ {
+  "no": "VK-MQHZYOBI",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Satış İşlemleri",
+   "islemTipi": "Dosya İndirme",
+   "etkilenenNesne": "Verilen Hizmet Faturası",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Kullanıcı işlem adımı hatası",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHZWL6C",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Web Servis Entegrasyon / Aktarım",
+   "islemTipi": "Bilgi talebi",
+   "etkilenenNesne": "Bağlantı Bilgileri",
+   "etki": "Tüm kullanıcılar / distribütör etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Sunucu / Altyapı / Performans",
+   "kokNedenDetayi": "Giriş / sunucu hatası",
+   "cozumTipi": "Entegratör / servis müdahalesi",
+   "kaliciOnlem": "Log / izleme geliştirilecek (aktarım / e-belge)"
+  }
+ },
+ {
+  "no": "VK-MQHXZUYH",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Kullanıcı",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Cihaz / Mobil Ortam",
+   "kokNedenDetayi": "Cihaz bağlantısı / eşleştirme",
+   "cozumTipi": "Eğitim",
+   "kaliciOnlem": "Hata mesajı iyileştirilecek"
+  }
+ },
+ {
+  "no": "VK-MQHZKHLI",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Web Servis Entegrasyon / Aktarım",
+   "islemTipi": "Aktarım yapma (muhasebeye / ticari pakete)",
+   "etkilenenNesne": "Ticari Pakete Aktarim",
+   "etki": "Bazı işlemler etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Yazılım Hatası",
+   "kokNedenDetayi": "Kod hatası",
+   "cozumTipi": "Ürün geliştirme",
+   "kaliciOnlem": "Test senaryosu eklenecek"
+  }
+ },
+ {
+  "no": "VK-MQHZAZDR",
+  "acilis": {
+   "platform": "Mobil",
+   "isSureci": "Kullanıcı / Yetki / Giriş",
+   "islemTipi": "Giriş yapma",
+   "etkilenenNesne": "Bağlantı Bilgileri",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Parametre / Konfigürasyon",
+   "kokNedenDetayi": "Yanlış parametre",
+   "cozumTipi": "Parametre düzeltme",
+   "kaliciOnlem": "Eğitim içeriği hazırlanacak"
+  }
+ },
+ {
+  "no": "VK-MQHZ8LVV",
+  "acilis": {
+   "platform": "Backoffice",
+   "isSureci": "Sevkiyat / Dağıtım Araç Yükleme İşlemleri",
+   "islemTipi": "Görünüm problemi",
+   "etkilenenNesne": "Siparişten Araç Yükleme",
+   "etki": "Tek kullanıcı etkileniyor"
+  },
+  "kapanis": {
+   "kokNedenGrubu": "Kullanım / Eğitim",
+   "kokNedenDetayi": "Bilgi / nasıl yapılır",
+   "cozumTipi": "Bilgilendirme",
+   "kaliciOnlem": "Bilgi bankası yazısı hazırlanacak"
+  }
+ }
+]

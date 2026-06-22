@@ -1,0 +1,116 @@
+[
+  {
+    "no": "VK-MQ9ILNOQ",
+    "acilisYorum": "Tutarlı. Reader/Smart Connect aktarımında müşteri eşleştirme sorunu; platform Backoffice, Web Servis Entegrasyon, ticari paket aktarım problemi sorunla uyumlu. EtkilenenNesne 'Toplu Aktarim' yerine 'Reader Aktarim/Müşteri Eşleştirme' daha spesifik olurdu ama kabul edilebilir.",
+    "kapanisYorum": "KökNedenGrubu 'Entegrasyon/Aktarım' doğru (Smart Connect müşteri eşleştirme). Detay 'Eşleştirme eksik' doğru (TP Kod boş). ÇözümTipi 'Parametre düzeltme' şüpheli; çözüm eşleştirme/kart düzeltmesi olduğu için 'Veri/kart düzeltme' daha uygun. KalıcıÖnlem 'Kontrol/validasyon eklenecek' doğru.",
+    "genelNot": "Çoğunlukla tutarlı, çözüm tipi şüpheli"
+  },
+  {
+    "no": "VK-MQ9GX35M",
+    "acilisYorum": "Tutarlı. ETTN çakışması nedeniyle bilgi gönderme uyarısı; platform Mobil, E-Belge, bilgi gönderme problemi, EtkilenenNesne Bilgi Gönderme uyumlu.",
+    "kapanisYorum": "Çözüm metni neredeyse boş ('Sorun giderildi'), bu yüzden etiketler doğrulanamaz. KökNedenGrubu 'Veri/Veritabanı Hatası' şüpheli; ETTN/entegratör çakışması olduğu için 'E-Belge/Entegratör (3.parti)' daha uygun. ÇözümTipi 'DLL Geçişi' yanlış/temelsiz, çözümde DLL geçişine dair kanıt yok; daha uygun 'Entegratör/servis müdahalesi'. KalıcıÖnlem 'Kontrol/validasyon eklenecek' makul.",
+    "genelNot": "Çözüm boş, etiketler doğrulanamaz"
+  },
+  {
+    "no": "VK-MQ9IOULZ",
+    "acilisYorum": "Tutarlı. Reader aktarımında müşteri bulunamadı; platform Backoffice, Web Servis Entegrasyon, EtkilenenNesne 'Toplu Aktarim' uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Entegrasyon/Aktarım' doğru (Smart Connect müşteri eşleştirme). Detay 'Eşleştirme eksik' doğru (TP Kod boş). ÇözümTipi 'Parametre düzeltme' şüpheli; eşleştirme kaydı düzeltmesi olduğu için 'Veri/kart düzeltme' daha uygun. KalıcıÖnlem 'Kontrol/validasyon eklenecek' doğru.",
+    "genelNot": "Tutarlı, çözüm tipi şüpheli"
+  },
+  {
+    "no": "VK-MQ9HCC33",
+    "acilisYorum": "Tutarlı. Lisans kontrolü başarısız mobil giriş; platform Mobil, Giriş problemi, EtkilenenNesne 'Lisans Izleme' uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Cihaz/Mobil Ortam' şüpheli; sorun lisans tanımı/versiyon olduğu için 'Yetki/Rol/Parametre/Konfigürasyon' daha uygun olabilir. Detay 'Cihaz bağlantısı/eşleştirme' kısmen uyumlu (Cihaz ID ile lisans). ÇözümTipi 'Yetki düzenleme' şüpheli; lisans tanımlama + versiyon güncelleme olduğu için 'Parametre düzeltme' veya 'Versiyon geçişi' daha uygun. KalıcıÖnlem 'Eğitim içeriği hazırlanacak' makul.",
+    "genelNot": "Lisans konusu, etiketler kısmen şüpheli"
+  },
+  {
+    "no": "VK-MQ9I9MT2",
+    "acilisYorum": "Şüpheli. Gecikme ekranı temsilciye gelmiyor sorunu hesaplama/iş kuralı niteliğinde; EtkilenenNesne 'Ziyaret Izleme' yanlış, 'Gecikme/Fatura' daha uygun. İslemTipi 'Bilgi alabilir miyim' uyumsuz; 'Hatalı hesaplama' daha uygun.",
+    "kapanisYorum": "Tüm kapanış alanları BOŞ (kokNedenGrubu, detay, cozumTipi, kaliciOnlem eksik). Çözüme göre öneri: KökNedenGrubu 'Hesaplama/İş Kuralı', Detay 'Gecikme/kredi limiti', ÇözümTipi 'Bilgilendirme' (gecikme hesaplama görevi manuel tetikleme anlatıldı), KalıcıÖnlem 'Eğitim içeriği hazırlanacak'.",
+    "genelNot": "Kapanış tamamen eksik, açılış şüpheli"
+  },
+  {
+    "no": "VK-MQ80S8XT",
+    "acilisYorum": "Tutarlı. Müşteri çift görünme sorunu; platform Backoffice, Müşteri/Cari Kartı, EtkilenenNesne Müşteri/Cari Kartı uyumlu. İslemTipi 'Oluşturma problemi' yerine 'Görünüm/Veri tutarsızlığı' daha uygun olurdu.",
+    "kapanisYorum": "KökNedenGrubu 'Veri Tutarsızlığı' doğru (çiftlemiş kayıt). Detay BOŞ; 'Bozuk/mükerrer kayıt' eklenebilir. ÇözümTipi 'Veri/kart düzeltme' doğru (kayıt silindi). KalıcıÖnlem 'Kontrol/validasyon eklenecek' doğru (mükerrer engelleme).",
+    "genelNot": "Tutarlı, detay alanı eksik"
+  },
+  {
+    "no": "VK-MQ9I8LGB",
+    "acilisYorum": "Tutarlı. Unidox portalına fatura düşmemesi; platform Backoffice, E-Belge, EtkilenenNesne E-Belge Gönderim uyumlu. İslemTipi 'Webservis aktarım hatası' uygun.",
+    "kapanisYorum": "KökNedenGrubu 'E-Belge/Entegratör (3.parti)' doğru. Detay 'Unidox V1/V2 geçişi' doğru (yeni portal adresi). ÇözümTipi 'Versiyon geçişi' doğru. KalıcıÖnlem 'Kontrol/validasyon eklenecek' makul; 'Bilgi bankası yazısı' da uygun olurdu.",
+    "genelNot": "Tutarlı"
+  },
+  {
+    "no": "VK-MQ9HP366",
+    "acilisYorum": "Tutarlı. İade irsaliyeleri mobilde listelenmiyor; platform Mobil, İade İşlemleri, EtkilenenNesne İade İrsaliyesi uyumlu. İslemTipi BOŞ; 'Görünüm/Listeleme problemi' eklenmeli.",
+    "kapanisYorum": "KökNedenGrubu 'Ana Veri/Kart Tanımı' doğru (ST kartı çalışma tipi/parametre). Detay BOŞ; 'Satış temsilcisi tanımı/parametresi hatalı' eklenmeli. ÇözümTipi 'Veri/kart düzeltme' doğru. KalıcıÖnlem 'Kontrol/validasyon eklenecek' makul.",
+    "genelNot": "Tutarlı, detay/işlem tipi eksik"
+  },
+  {
+    "no": "VK-MQ9H41QZ",
+    "acilisYorum": "Tutarlı. XSLT dizayn düzenleme sorunu; platform Backoffice, Belge Dizaynı/Matbu, EtkilenenNesne Xslt Dizayn uyumlu. İslemTipi BOŞ; 'Yazdırma/Dizayn problemi' eklenebilir.",
+    "kapanisYorum": "KökNedenGrubu 'Dizayn/Matbu/Baskı' doğru. Detay BOŞ; 'Belge dizaynı eksik/hatalı' eklenmeli. ÇözümTipi 'Dizayn düzeltme' doğru (XSLT alan düzeltildi). KalıcıÖnlem 'Log/izleme geliştirilecek' yanlış; dizayn konusu olduğu için 'Test senaryosu eklenecek' veya 'Bilgi bankası yazısı' daha uygun.",
+    "genelNot": "Tutarlı, kalıcı önlem yanlış"
+  },
+  {
+    "no": "VK-MQ9GGBG9",
+    "acilisYorum": "Şüpheli. Stok raporunda eksik miktar sorunu aslında kullanım/eğitim (rapor kriteri); İslemTipi 'Raporda veri tutarsızlığı' yanıltıcı, gerçek tutarsızlık yok. 'Rapor alma/kullanım' daha uygun. Platform Backoffice, Rapor uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Kullanım/Eğitim' doğru (Devreden Miktar tiki işaretlenmemiş). Detay 'Bilgi/nasıl yapılır' doğru. ÇözümTipi 'Eğitim' doğru. KalıcıÖnlem 'Bilgi bankası yazısı hazırlanacak' doğru.",
+    "genelNot": "Kapanış tutarlı, açılış işlem tipi şüpheli"
+  },
+  {
+    "no": "VK-MQ9GYEC3",
+    "acilisYorum": "Tutarlı. Panoramaya giriş takılması; platform Backoffice, Kullanıcı/Yetki/Giriş, EtkilenenNesne Kullanıcı uyumlu. İslemTipi BOŞ; 'Giriş problemi' eklenmeli.",
+    "kapanisYorum": "KökNedenGrubu 'Yetki/Rol' YANLIŞ; çözümde kullanıcı/şifre çalıştı, sorun tarayıcı cache/cihaz kaynaklı, yetkiyle ilgisi yok. 'Cihaz/Mobil Ortam' (tarayıcı/istemci) veya 'Kullanım/Eğitim' daha uygun. Detay BOŞ. ÇözümTipi 'Yetki düzenleme' YANLIŞ; yetki düzenlenmedi, 'Bilgilendirme' uygun. KalıcıÖnlem 'Hata mesajı iyileştirilecek' makul.",
+    "genelNot": "Kapanış kök neden ve çözüm tipi yanlış"
+  },
+  {
+    "no": "VK-MQ9G5HHJ",
+    "acilisYorum": "Tutarlı. Mobil fatura yazdırma sorunu; platform Mobil, Belge Basım, EtkilenenNesne Fatura Basım, İslemTipi Yazdırma problemi uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Cihaz/Mobil Ortam' kısmen uygun (yazıcı/cihaz) ancak çözüm büyük ölçüde parametre/dizayn ayarı (Logo basım, dizayn ekranı) içerdiğinden 'Dizayn/Matbu/Baskı' veya 'Parametre/Konfigürasyon' da güçlü aday. Detay BOŞ; 'Yazıcı/logo basım ayarı' eklenmeli. ÇözümTipi 'Eğitim' şüpheli; parametre değişiklikleri var, 'Parametre düzeltme' daha uygun. KalıcıÖnlem 'Eğitim içeriği hazırlanacak' makul.",
+    "genelNot": "Açılış tutarlı, kapanış kısmen şüpheli"
+  },
+  {
+    "no": "VK-MQ9GC5HK",
+    "acilisYorum": "Şüpheli. GİB gönderimlerinin yeniden gönderilmedi gelmesi ve aynı tarih sorunu; İslemTipi 'Güncelleme problemi' zayıf, 'Webservis/aktarım/E-Belge problemi' daha uygun. EtkilenenNesne Irsaliye uyumlu. İsSureci 'Satış İşlemleri' yerine 'E-Belge/Entegrasyon' daha uygun.",
+    "kapanisYorum": "KökNedenGrubu 'Veri Tutarsızlığı' şüpheli; çözümde entegrasyon kaynaklı denmiş, 'Entegrasyon/Aktarım' daha uygun. Detay 'Bozuk kayıt (stok tipi/belge detayı)' kısmen uygun. ÇözümTipi 'Script çalıştırma (DbUpdate)' doğru (SQL düzeltme). KalıcıÖnlem BOŞ; 'Log/izleme geliştirilecek (aktarım/e-belge)' eklenmeli.",
+    "genelNot": "Kök neden ve açılış şüpheli, önlem eksik"
+  },
+  {
+    "no": "VK-MQ9GBUPA",
+    "acilisYorum": "Tutarlı. Bilgi göndermede il/ilçe boş uyarısı; platform Mobil, Satış İşlemleri, bilgi gönderme problemi, EtkilenenNesne Bilgi Gönderme uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Ana Veri/Kart Tanımı' doğru (müşteri/temsilci kartında il/ilçe eksik). Detay 'Müşteri kartı eksik/hatalı' doğru. ÇözümTipi 'Veri/kart düzeltme' doğru. KalıcıÖnlem 'Hata mesajı iyileştirilecek' makul; 'Kontrol/validasyon eklenecek' de uygun.",
+    "genelNot": "Tutarlı"
+  },
+  {
+    "no": "VK-MQ9G6B4N",
+    "acilisYorum": "Tutarlı. Satıcıya iadede bağlantılı alış faturaları listelenmiyor; platform Backoffice, İade İşlemleri, EtkilenenNesne Saticiya İade Faturası uyumlu. İslemTipi 'Bilgi alabilir miyim' yerine 'Listeleme/Görünüm problemi' daha uygun.",
+    "kapanisYorum": "KökNedenGrubu 'Ana Veri/Kart Tanımı' doğru (distribütör kartı Tedarikçi Müşteri). Detay 'Eksik kart ilişkisi (depo/sevk/seri)' kısmen uygun. ÇözümTipi 'Veri/kart düzeltme' doğru; ancak çözüm büyük ölçüde bilgilendirme niteliğinde, 'Bilgilendirme' de uygun olabilir. KalıcıÖnlem 'Kontrol/validasyon eklenecek' makul.",
+    "genelNot": "Tutarlı"
+  },
+  {
+    "no": "VK-MQ9FUQLC",
+    "acilisYorum": "Tutarlı. Mobil giriş yapılamıyor; platform Mobil, Kullanıcı/Yetki/Giriş, Giriş problemi, EtkilenenNesne Kullanıcı uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Ana Veri/Kart Tanımı' şüpheli; sorun şifre yenileme + cihaz veri temizleme olduğundan 'Yetki/Rol/Parametre/Konfigürasyon' veya 'Cihaz/Mobil Ortam' daha uygun. Detay 'Müşteri kartı eksik/hatalı' YANLIŞ; müşteri kartıyla ilgisi yok, 'Kullanıcı/şifre' temelli olmalı. ÇözümTipi 'Veri/kart düzeltme' şüpheli; şifre yenileme olduğu için 'Yetki düzenleme' daha uygun. KalıcıÖnlem 'Hata mesajı iyileştirilecek' makul.",
+    "genelNot": "Kapanış kök neden/detay yanlış"
+  },
+  {
+    "no": "VK-MQ9FYIQD",
+    "acilisYorum": "Tutarlı. Resmi fatura kağıdına basımda harf eksikliği; platform Backoffice, Belge Basım, Basım problemi, EtkilenenNesne Fatura Basım uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Dizayn/Matbu/Baskı' makul; ancak çözümde sorunun yazılımda olmadığı (matbu kağıt/yazıcı kaynaklı) söylendiğinden 'Cihaz/Mobil Ortam' veya 'Kullanım/Eğitim' de düşünülebilir. Detay BOŞ; 'Yazıcı/matbu kağıt' eklenebilir. ÇözümTipi 'Bilgilendirme' doğru (sorun bizde değil denip kapatıldı). KalıcıÖnlem BOŞ; 'Bilgi bankası yazısı hazırlanacak' eklenebilir.",
+    "genelNot": "Kabul edilebilir, detay/önlem eksik"
+  },
+  {
+    "no": "VK-MQ9FZCOM",
+    "acilisYorum": "Tutarlı. Mobil giriş kullanıcı/şifre hatası, BO'dan şifre güncellendi; platform Mobil, Kullanıcı/Yetki/Giriş, Giriş problemi, EtkilenenNesne Kullanıcı uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Kullanım/Eğitim' şüpheli; şifre güncelleme olduğundan 'Yetki/Rol/Parametre/Konfigürasyon' daha uygun. Detay BOŞ; 'Kullanıcı/şifre güncelleme' eklenmeli. ÇözümTipi 'Veri/kart düzeltme' şüpheli; 'Yetki düzenleme' daha uygun. KalıcıÖnlem 'Bilgi bankası yazısı hazırlanacak' makul.",
+    "genelNot": "Kapanış kök neden ve çözüm tipi şüpheli"
+  },
+  {
+    "no": "VK-MQ9FWY09",
+    "acilisYorum": "Tutarlı. Mobil yazdırmada boşluklu/düzensiz çıktı; platform Mobil, Belge Dizaynı/Matbu, Yazdırma problemi, EtkilenenNesne Belge Dizaynı uyumlu.",
+    "kapanisYorum": "KökNedenGrubu 'Dizayn/Matbu/Baskı' doğru (yazıcı/dizayn ayarı). Detay 'Yazıcı/logo basım ayarı' doğru. ÇözümTipi 'Bilgilendirme' makul (ayar kontrolü anlatıldı); parametre değişikliği varsa 'Parametre düzeltme' de uygun. KalıcıÖnlem 'Bilgi bankası yazısı hazırlanacak' doğru.",
+    "genelNot": "Tutarlı"
+  }
+]
