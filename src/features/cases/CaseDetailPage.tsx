@@ -57,7 +57,10 @@ import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
-import { StatusTransitionPanel } from './StatusTransitionPanel';
+// StatusTransitionPanel artık CompactStatusStepper içinde reason zorunlu
+// geçişler için modal olarak reuse ediliyor; CaseDetailPage gövdesinde
+// doğrudan render edilmez.
+import { CompactStatusStepper } from './CompactStatusStepper';
 import { CaseSolutionStepsPanel } from './CaseSolutionStepsPanel';
 import { KbDraftCard } from './KbDraftCard';
 import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
@@ -611,8 +614,11 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 </button>
               )}
 
-              {/* StatusPill artık görsel/display-only — geçişler StatusTransitionPanel ile yapılıyor */}
-              <StatusPill status={item.status} />
+              {/* Vaka Detay sticky header — 3 fazlı renk-kodlu çizgi + alt-durum
+                  rozeti + aksiyon satırı. Eski geniş StatusTransitionPanel
+                  görünümü kaldırıldı; reason zorunlu geçişler aynı paneli modal
+                  içinde reuse eder (initialPending preselect). */}
+              <CompactStatusStepper item={item} onApplied={setItem} />
 
               {/* FAZ 2 Collab — kullanıcı bu vakada watcher mı? */}
               <WatcherHeaderBadge caseId={item.id} />
@@ -2948,8 +2954,9 @@ function DetailTab({
 
   return (
     <div className="space-y-5">
-      {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
-      <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+      {/* Statü Geçişi artık sticky header'da CompactStatusStepper olarak duruyor.
+          Reason zorunlu geçişler StatusTransitionPanel'i modal içinde reuse eder;
+          burada geniş kart grid'i render edilmez. */}
 
       {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
       <ResolutionApprovalCard

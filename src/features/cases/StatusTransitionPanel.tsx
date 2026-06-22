@@ -47,6 +47,12 @@ import {
 interface StatusTransitionPanelProps {
   item: Case;
   onApplied: (updated: Case) => void;
+  /**
+   * Compact Status Stepper'dan modal içinde preselect ile açılınca kullanılır.
+   * Verilirse mount/değişiminde `pending` bu değere set edilir; akış aynı
+   * panel ve aynı reason/closure mantığı ile devam eder.
+   */
+  initialPending?: CaseStatus | null;
 }
 
 // Spec 11.1 renk paletiyle uyumlu kart tonları
@@ -131,10 +137,10 @@ const STATUS_LABELS: Record<CaseStatus, string> = {
   'İptalEdildi':         'İptal Edildi',
 };
 
-export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanelProps) {
+export function StatusTransitionPanel({ item, onApplied, initialPending }: StatusTransitionPanelProps) {
   const allowedTransitions = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
 
-  const [pending, setPending] = useState<CaseStatus | null>(null);
+  const [pending, setPending] = useState<CaseStatus | null>(initialPending ?? null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [thirdPartyId, setThirdPartyId] = useState('');
@@ -174,7 +180,7 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
   // sızıp yanlış code/label persist edilebiliyordu. closureTax'i de
   // sıfırlıyoruz; yeni item için aşağıdaki fetch effect tetiklenir.
   useEffect(() => {
-    setPending(null);
+    setPending(initialPending ?? null);
     setResolutionNote('');
     setCancelReason('');
     setThirdPartyId('');
@@ -189,6 +195,10 @@ export function StatusTransitionPanel({ item, onApplied }: StatusTransitionPanel
     setKbSuggesting(false);
     setKbSuggestion(null);
     setKbSuggestionError(null);
+    // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
+    // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
+    // tıklamaları normal akışla pending'i değiştirir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
   // Smart Ticket → Çözüldü kararı seçildiğinde taxonomy listelerini çek.
