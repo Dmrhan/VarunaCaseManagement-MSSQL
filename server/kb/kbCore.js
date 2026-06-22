@@ -243,13 +243,13 @@ async function* claudeAttempts(tier) {
     label: "primary-fallback-to-fast"
   };
 }
-function estimateCostUsd(model, inputTokens, outputTokens) {
-  const p = CLAUDE_PRICING[model];
+function estimateCostUsd(model, inputTokens, outputTokens, cacheReadTokens = 0, cacheWriteTokens = 0) {
+  let p = CLAUDE_PRICING[model];
   if (!p) {
     console.warn(`[gemini] bilinmeyen model fiyat\u0131: ${model} \u2192 Sonnet rate kullan\u0131l\u0131yor`);
-    return (inputTokens * 3 + outputTokens * 15) / 1e6;
+    p = { inputPerMTok: 3, outputPerMTok: 15 };
   }
-  return (inputTokens * p.inputPerMTok + outputTokens * p.outputPerMTok) / 1e6;
+  return (inputTokens * p.inputPerMTok + cacheReadTokens * p.inputPerMTok * 0.1 + cacheWriteTokens * p.inputPerMTok * 1.25 + outputTokens * p.outputPerMTok) / 1e6;
 }
 async function generate(systemInstruction, userPrompt, options = {}) {
   const tier = options.tier ?? "primary";
@@ -261,23 +261,41 @@ async function generate(systemInstruction, userPrompt, options = {}) {
     if (delayMs > 0) await sleep(delayMs);
     try {
       const start = Date.now();
+      const userContent = options.cachePrefix ? [
+        {
+          type: "text",
+          text: options.cachePrefix,
+          cache_control: { type: "ephemeral" }
+        },
+        { type: "text", text: userPrompt }
+      ] : userPrompt;
       const resp = await getAnthropic().messages.create({
         model,
         max_tokens: options.maxOutputTokens ?? 2048,
         temperature: options.temperature ?? 0.2,
         system: effectiveSystem,
-        messages: [{ role: "user", content: userPrompt }]
+        messages: [{ role: "user", content: userContent }]
       });
       const text = resp.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
       const inputTokens = resp.usage?.input_tokens ?? 0;
       const outputTokens = resp.usage?.output_tokens ?? 0;
+      const cacheReadTokens = resp.usage?.cache_read_input_tokens ?? 0;
+      const cacheWriteTokens = resp.usage?.cache_creation_input_tokens ?? 0;
       return {
         text,
         modelUsed: model,
         latencyMs: Date.now() - start,
         inputTokens,
         outputTokens,
-        costUsd: estimateCostUsd(model, inputTokens, outputTokens)
+        cacheReadTokens,
+        cacheWriteTokens,
+        costUsd: estimateCostUsd(
+          model,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens
+        )
       };
     } catch (err) {
       lastErr = err;
@@ -1594,7 +1612,7 @@ function extractJson3(raw) {
   return s.trim();
 }
 async function categorizeV2(input) {
-  const userPrompt = [
+  const fullPrompt = [
     "TAKSONOM\u0130 \u2014 6 A\xC7ILI\u015E ALANI:",
     formatOpenForPrompt(),
     "",
@@ -1620,12 +1638,16 @@ async function categorizeV2(input) {
     `  "reason": string                  // 1 c\xFCmle T\xFCrk\xE7e gerek\xE7e`,
     `}`
   ].filter(Boolean).join("\n");
+  const splitAt = fullPrompt.indexOf("SORUN B\u0130LG\u0130S\u0130:");
+  const cachePrefix = splitAt > 0 ? fullPrompt.slice(0, splitAt) : void 0;
+  const userPrompt = splitAt > 0 ? fullPrompt.slice(splitAt) : fullPrompt;
   const res = await generate(SYSTEM3, userPrompt, {
     temperature: 0,
     maxOutputTokens: 600,
     responseMimeType: "application/json",
-    tier: "fast"
+    tier: "fast",
     // sınıflandırma tek-shot, Haiku yeterli ve ucuz
+    cachePrefix
   });
   let parsed;
   try {
@@ -1713,7 +1735,7 @@ async function suggestClose(input) {
   if (input.open_urun) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \xDCr\xFCn: ${input.open_urun}`);
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
-  const userPrompt = [
+  const fullPrompt = [
     "K\xD6K NEDEN GRUBU (biri):",
     getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
     "",
@@ -1746,11 +1768,15 @@ async function suggestClose(input) {
     `  "reason": string                    // 1 c\xFCmle gerek\xE7e`,
     `}`
   ].join("\n");
+  const splitAt = fullPrompt.indexOf("TICKET BA\u011ELAMI:");
+  const cachePrefix = splitAt > 0 ? fullPrompt.slice(0, splitAt) : void 0;
+  const userPrompt = splitAt > 0 ? fullPrompt.slice(splitAt) : fullPrompt;
   const res = await generate(CLOSE_SYSTEM, userPrompt, {
     temperature: 0,
     maxOutputTokens: 600,
     responseMimeType: "application/json",
-    tier: "fast"
+    tier: "fast",
+    cachePrefix
   });
   let parsed;
   try {

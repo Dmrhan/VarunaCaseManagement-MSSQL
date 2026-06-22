@@ -198,6 +198,15 @@ export type GenerateOptions = {
   responseMimeType?: "text/plain" | "application/json";
   /** primary = Sonnet (kaliteli), fast = Haiku (ucuz/hızlı). Default primary. */
   tier?: "primary" | "fast";
+  /**
+   * Stabil önek (taksonomi + few-shot gibi her çağrıda DEĞİŞMEYEN büyük blok).
+   * Verilirse ayrı, cache_control'lü bir content bloğuna konur → prompt caching:
+   * system + bu önek cache'lenir (yazma 1.25×, okuma 0.1×); değişken userPrompt
+   * cache dışı kalır. Tekrarlı çağrılarda (toplu etiketleme) input maliyetini
+   * ~%90 düşürür. Önek byte-byte aynı + ≥ min token (Haiku 4096 / Sonnet 2048)
+   * olmalı; yoksa sessizce cache'lenmez (usage.cache_read_input_tokens ile doğrula).
+   */
+  cachePrefix?: string;
 };
 
 type AttemptPlan = { model: string; delayMs: number; label: string };
@@ -251,14 +260,22 @@ export function estimateCostUsd(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
 ): number {
-  const p = CLAUDE_PRICING[model];
+  let p = CLAUDE_PRICING[model];
   if (!p) {
     // Bilinmeyen model → konservatif Sonnet fiyatına düş; yine de logla
     console.warn(`[gemini] bilinmeyen model fiyatı: ${model} → Sonnet rate kullanılıyor`);
-    return (inputTokens * 3.0 + outputTokens * 15.0) / 1_000_000;
+    p = { inputPerMTok: 3.0, outputPerMTok: 15.0 };
   }
-  return (inputTokens * p.inputPerMTok + outputTokens * p.outputPerMTok) / 1_000_000;
+  // Prompt caching: cache okuma ≈ 0.1× input, cache yazma (5dk TTL) ≈ 1.25× input.
+  return (
+    inputTokens * p.inputPerMTok +
+    cacheReadTokens * p.inputPerMTok * 0.1 +
+    cacheWriteTokens * p.inputPerMTok * 1.25 +
+    outputTokens * p.outputPerMTok
+  ) / 1_000_000;
 }
 
 export type GenerateResult = {
@@ -267,7 +284,11 @@ export type GenerateResult = {
   latencyMs: number;
   inputTokens: number;
   outputTokens: number;
-  /** USD cinsinden tahmini maliyet — modele göre. */
+  /** Prompt cache'ten okunan token (0.1× fiyatlanır). */
+  cacheReadTokens: number;
+  /** Prompt cache'e yazılan token (1.25× fiyatlanır). */
+  cacheWriteTokens: number;
+  /** USD cinsinden tahmini maliyet — modele göre (cache dahil). */
   costUsd: number;
 };
 
@@ -289,12 +310,25 @@ export async function generate(
     if (delayMs > 0) await sleep(delayMs);
     try {
       const start = Date.now();
+      // Prompt caching — stabil önek varsa ayrı cache_control'lü bloğa konur.
+      // Caching prefix-match olduğundan breakpoint system + öneği birlikte cache'ler;
+      // değişken userPrompt cache dışı kalır.
+      const userContent: Anthropic.MessageParam["content"] = options.cachePrefix
+        ? [
+            {
+              type: "text",
+              text: options.cachePrefix,
+              cache_control: { type: "ephemeral" },
+            },
+            { type: "text", text: userPrompt },
+          ]
+        : userPrompt;
       const resp = await getAnthropic().messages.create({
         model,
         max_tokens: options.maxOutputTokens ?? 2048,
         temperature: options.temperature ?? 0.2,
         system: effectiveSystem,
-        messages: [{ role: "user", content: userPrompt }],
+        messages: [{ role: "user", content: userContent }],
       });
       // Claude content blokları array — text bloklarını birleştir.
       const text = resp.content
@@ -303,13 +337,23 @@ export async function generate(
         .join("\n");
       const inputTokens = resp.usage?.input_tokens ?? 0;
       const outputTokens = resp.usage?.output_tokens ?? 0;
+      const cacheReadTokens = resp.usage?.cache_read_input_tokens ?? 0;
+      const cacheWriteTokens = resp.usage?.cache_creation_input_tokens ?? 0;
       return {
         text,
         modelUsed: model,
         latencyMs: Date.now() - start,
         inputTokens,
         outputTokens,
-        costUsd: estimateCostUsd(model, inputTokens, outputTokens),
+        cacheReadTokens,
+        cacheWriteTokens,
+        costUsd: estimateCostUsd(
+          model,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
+        ),
       };
     } catch (err) {
       lastErr = err;

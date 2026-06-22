@@ -87,7 +87,13 @@ function extractJson(raw: string): string {
 export async function categorizeV2(
   input: CategorizeV2Input,
 ): Promise<CategorizationV2Result> {
-  const userPrompt = [
+  // Tek prompt'u ORİJİNALLE BİREBİR kur, sonra cache sınırından slice ile böl.
+  // cachePrefix = "SORUN BİLGİSİ:" öncesi (taksonomi + hints + few-shot — her
+  // çağrıda DEĞİŞMEZ) → ayrı cache_control'lü bloğa konur (system + önek
+  // cache'lenir). userPrompt = "SORUN BİLGİSİ:"'den itibaren (değişken).
+  // slice garanti eder: cachePrefix + userPrompt === fullPrompt (byte-identical;
+  // yalnız caching eklenir). Tekrarlı etiketlemede ~%90 input tasarrufu.
+  const fullPrompt = [
     "TAKSONOMİ — 6 AÇILIŞ ALANI:",
     formatOpenForPrompt(),
     "",
@@ -115,12 +121,16 @@ export async function categorizeV2(
   ]
     .filter(Boolean)
     .join("\n");
+  const splitAt = fullPrompt.indexOf("SORUN BİLGİSİ:");
+  const cachePrefix = splitAt > 0 ? fullPrompt.slice(0, splitAt) : undefined;
+  const userPrompt = splitAt > 0 ? fullPrompt.slice(splitAt) : fullPrompt;
 
   const res: GenerateResult = await generate(SYSTEM, userPrompt, {
     temperature: 0,
     maxOutputTokens: 600,
     responseMimeType: "application/json",
     tier: "fast", // sınıflandırma tek-shot, Haiku yeterli ve ucuz
+    cachePrefix,
   });
 
   let parsed: unknown;
@@ -258,7 +268,12 @@ export async function suggestClose(
   if (input.open_is_sureci) ctxLines.push(`Açılış · İş Süreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`Açılış · İşlem Tipi: ${input.open_islem_tipi}`);
 
-  const userPrompt = [
+  // Tek prompt'u ORİJİNALLE BİREBİR kur, sonra cache sınırından slice ile böl.
+  // cachePrefix = "TICKET BAĞLAMI:" öncesi (kapanış taksonomileri + few-shot —
+  // her çağrıda DEĞİŞMEZ) → ayrı cache_control'lü bloğa konur. userPrompt =
+  // "TICKET BAĞLAMI:"'den itibaren (değişken). slice garanti eder: cachePrefix
+  // + userPrompt === fullPrompt (byte-identical; yalnız caching). ~%90 tasarruf.
+  const fullPrompt = [
     "KÖK NEDEN GRUBU (biri):",
     getKokNedenGroups().map((g) => `  • ${g.group}`).join("\n"),
     "",
@@ -293,12 +308,16 @@ export async function suggestClose(
     `  "reason": string                    // 1 cümle gerekçe`,
     `}`,
   ].join("\n");
+  const splitAt = fullPrompt.indexOf("TICKET BAĞLAMI:");
+  const cachePrefix = splitAt > 0 ? fullPrompt.slice(0, splitAt) : undefined;
+  const userPrompt = splitAt > 0 ? fullPrompt.slice(splitAt) : fullPrompt;
 
   const res: GenerateResult = await generate(CLOSE_SYSTEM, userPrompt, {
     temperature: 0,
     maxOutputTokens: 600,
     responseMimeType: "application/json",
     tier: "fast",
+    cachePrefix,
   });
 
   let parsed: unknown;
