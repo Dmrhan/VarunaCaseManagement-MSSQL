@@ -606,48 +606,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
             <CaseTitleEditable item={item} onUpdated={setItem} />
-
-            {/* Header — 2 bölge (kimlik breadcrumb + sol panelde zaten var, tekrar etme):
-                  SOL:  [Statü stepper] | [Durumu değiştir ▾]   — tek grup, separator ile içerde
-                  SAĞ:  [Metadata: Öncelik / Tip / SLA / Watcher]  — sönük, statü renk diliyle yarışmaz
-                Dar ekranda metadata alt satıra wrap olur; statü grubu bütün kalır. */}
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2">
-              {/* [Statü] stepper + "Durumu değiştir ▾" — CompactStatusStepper'ın
-                  kendi içinde durum (pill) + işlem (köşeli buton) ayrımı var. */}
-              <CompactStatusStepper item={item} onApplied={setItem} />
-
-              {/* Sağa it — metadata sönük tek satır + SLA tek renkli sinyal */}
-              <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
-                {/* Öncelik · Tip — sönük düz metin (pill değil); statü renk
-                    diliyle yarışmaz. */}
-                <span title={`Öncelik: ${CASE_PRIORITY_LABELS[item.priority]} · Tip: ${CASE_TYPE_LABELS[item.caseType]}`}>
-                  {CASE_PRIORITY_LABELS[item.priority]} · {CASE_TYPE_LABELS[item.caseType]}
-                </span>
-                {/* SLA İhlali — tek renkli sinyal (sayfadaki tek dikkat çeken renk) */}
-                {item.slaViolation && (
-                  <span
-                    className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400"
-                    title="SLA süresi aşıldı"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
-                    SLA aşıldı
-                  </span>
-                )}
-                {item.slaPausedAt && (
-                  <span className="inline-flex items-center gap-1 text-slate-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                    SLA durdu
-                  </span>
-                )}
-                {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-                  <span className="inline-flex items-center gap-1 text-slate-500">
-                    <Clock size={11} />
-                    Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-                  </span>
-                )}
-                <WatcherHeaderBadge caseId={item.id} />
-              </div>
-            </div>
+            {/* Statü bandı LBD-Move ile header'dan içerik alanına taşındı —
+                sekme navigasyonunun hemen üstünde, tam genişlikte. */}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -847,6 +807,46 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Statü bandı — LBD-Move: header'dan içerik alanına taşındı.
+              Tam genişlik, sekme nav'ının hemen ÜSTÜNDE. İnce bg + alt border
+              ile içerikten ayrışır ama header gibi ağır değil.
+              DEFAULT: scroll edilebilir (sticky değil) — header tam sade.
+              OPSİYON: statünün her zaman görünür kalması istenirse `sticky top-0`
+              + `z-20` ekleyip sekme nav'ının z'sini de yükselt. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
+            {/* [Statü] stepper + "Durumu değiştir ▾" */}
+            <CompactStatusStepper item={item} onApplied={setItem} />
+
+            {/* Sağa it — metadata sönük tek satır + SLA tek renkli sinyal */}
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
+              <span title={`Öncelik: ${CASE_PRIORITY_LABELS[item.priority]} · Tip: ${CASE_TYPE_LABELS[item.caseType]}`}>
+                {CASE_PRIORITY_LABELS[item.priority]} · {CASE_TYPE_LABELS[item.caseType]}
+              </span>
+              {item.slaViolation && (
+                <span
+                  className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400"
+                  title="SLA süresi aşıldı"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden="true" />
+                  SLA aşıldı
+                </span>
+              )}
+              {item.slaPausedAt && (
+                <span className="inline-flex items-center gap-1 text-slate-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                  SLA durdu
+                </span>
+              )}
+              {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
+                <span className="inline-flex items-center gap-1 text-slate-500">
+                  <Clock size={11} />
+                  Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
+                </span>
+              )}
+              <WatcherHeaderBadge caseId={item.id} />
+            </div>
+          </div>
+
           <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
             <TabButton
               active={tab === 'detail'}

@@ -141,7 +141,7 @@ console.log('\n── 4) CaseDetailPage — sticky header wiring ─────
   const src = read('src/features/cases/CaseDetailPage.tsx');
   expect('4.1 CompactStatusStepper import',
     src.includes("import { CompactStatusStepper } from './CompactStatusStepper'"), true);
-  expect('4.2 sticky header\'da <CompactStatusStepper render',
+  expect('4.2 CompactStatusStepper içerik bandında render (header DEĞİL)',
     /<CompactStatusStepper item=\{item\} onApplied=\{setItem\}/.test(src), true);
   // 4.3 — Geniş panel render gövdede kaldırıldı (sadece comment kaldı)
   expect('4.3 <StatusTransitionPanel JSX gövdede yok',
@@ -149,6 +149,16 @@ console.log('\n── 4) CaseDetailPage — sticky header wiring ─────
   // 4.4 — Sticky header'daki StatusPill kaldırıldı (stepper onun yerini aldı)
   expect('4.4 sticky header StatusPill\'i CompactStepper ile değiştirildi',
     /\{\/\* StatusPill artık görsel\/display-only/.test(src), false);
+  // 4.5 — LBD-Move: stepper artık <header> içinde değil; <main> içinde
+  // sekme nav'ından ÖNCE render edilir (içerik bandı).
+  // Pattern: stepper band → sekme nav (sticky top-0) — bu sırayla bulunmalı.
+  const stepperIdx = src.indexOf('<CompactStatusStepper item={item} onApplied={setItem}');
+  const tabNavIdx = src.indexOf('<nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b');
+  expect('4.5 stepper içerik bandı, sekme nav\'ından önce',
+    stepperIdx > 0 && tabNavIdx > 0 && stepperIdx < tabNavIdx, true);
+  // 4.6 — Header'daki eski statü satırı (<div className="mt-1.5 flex flex-wrap items-center gap-x-4 ...) artık yok
+  expect('4.6 header gövdesinde statü satırı kalmadı',
+    /<CaseTitleEditable[\s\S]{0,300}flex flex-wrap items-center gap-x-4[\s\S]{0,200}<CompactStatusStepper/.test(src), false);
 }
 
 console.log('\n── 4b) Header sade — müşteri pill kaldırıldı + metadata sönük ──');
@@ -169,9 +179,10 @@ console.log('\n── 4b) Header sade — müşteri pill kaldırıldı + metadat
   // 4b.5 — Header import: PriorityBadge + CaseTypeBadge artık import edilmiyor
   expect('4b.5 PriorityBadge / CaseTypeBadge artık CaseDetailPage\'de import yok',
     /CaseTypeBadge,\s*PriorityBadge/.test(src), false);
-  // 4b.6 — flex-wrap responsive (dar ekranda alt satıra düşer)
-  expect('4b.6 ana satır flex flex-wrap gap-x-4 (responsive)',
-    /mt-1\.5 flex flex-wrap items-center gap-x-4 gap-y-2/.test(src), true);
+  // 4b.6 — LBD-Move sonrası header'daki "mt-1.5 flex flex-wrap..." satırı
+  // kaldırıldı; statü bandı içerik alanına taşındı.
+  expect('4b.6 header gövdesinde statü/metadata flex satırı yok',
+    /mt-1\.5 flex flex-wrap items-center gap-x-4 gap-y-2/.test(src), false);
 }
 
 console.log('\n── 4c) Modal akışı — 7 kart grid kaldırıldı (compactMode) ──');
