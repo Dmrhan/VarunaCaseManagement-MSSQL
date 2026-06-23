@@ -2912,11 +2912,9 @@ function DetailTab({
           koşullu bloklar grubuna (Atama'nın altına) taşındı.
           Aksiyonel önemleri var → grubun başında konumlanır. */}
 
-      {/* Inline edit bilgi notu */}
-      <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
-        <Pencil size={11} className="text-slate-400" />
-        Alanlara tıklayarak düzenleyebilirsiniz. Değişiklikleri üst köşedeki <strong>Kaydet</strong> butonuyla saklayın.
-      </p>
+      {/* Cila-1 (madde #5) — "Alanlara tıklayarak düzenleyebilirsiniz…"
+          statik notu kaldırıldı. Edit cue'lar (Cila-4'te chevron + hover
+          pencil) bu bilgiyi taşıyacak. */}
 
       {/* Adım-1: KpiInlineRow buradan çıkarıldı — content band'a (status'un
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
