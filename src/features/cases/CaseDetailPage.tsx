@@ -107,6 +107,7 @@ import {
   type Case,
   type CaseHistoryActionType,
   type CaseHistoryEntry,
+  type CaseTransferRecord,
   type EscalationLevel,
   type NoteVisibility,
   type SupportLevel,
@@ -3042,6 +3043,33 @@ function DetailTab({
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
 
+  // Devir Notu — en son aktarımın notu, Açıklama'nın hemen altında.
+  // Stale guard CaseSolutionStepsPanel.tsx'teki reqIdRef/caseIdRef pattern'iyle
+  // aynı mantık: CaseDetailPage breadcrumb/önceki-vaka navigasyonuyla aynı
+  // instance üzerinde item.id'yi değiştirebiliyor (unmount olmadan), eski
+  // case'in transfer yanıtı geç gelirse yeni case panelinde görünmemeli.
+  // transferCount bağımlılığı şart — "Devret" item.id'yi değiştirmez, sadece
+  // transferCount'u increment eder; bu olmadan Devret sonrası not anında
+  // güncellenmez.
+  const [latestTransfer, setLatestTransfer] = useState<CaseTransferRecord | null>(null);
+  const transferReqIdRef = useRef(0);
+  const transferCaseIdRef = useRef(item.id);
+
+  useEffect(() => {
+    const reqId = ++transferReqIdRef.current;
+    transferCaseIdRef.current = item.id;
+    setLatestTransfer(null);
+    void caseService.listTransfers(item.id).then((list) => {
+      if (reqId !== transferReqIdRef.current || transferCaseIdRef.current !== item.id) return;
+      if (list.length === 0) return;
+      const sorted = [...list].sort(
+        (a, b) => new Date(b.transferredAt).getTime() - new Date(a.transferredAt).getTime(),
+      );
+      const latest = sorted[0];
+      if (latest.reasonLabel || latest.reason) setLatestTransfer(latest);
+    });
+  }, [item.id, item.transferCount]);
+
   // WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" panel'i artık Detay body'sinde
   // değil; kendi tab'inde (Case Detail tab listinin son sırasında, tüm
   // vakalar için). Bu sayede L2/L3 ekipleri ve non-Smart-Ticket vakalar
@@ -3080,6 +3108,31 @@ function DetailTab({
           )}
         />
       </Section>
+
+      {/* Devir Notu — en son "Devret" aktarımının notu, Açıklama'nın hemen
+          altında. Hiç devir yapılmamışsa veya not boşsa render edilmez. */}
+      {latestTransfer && (
+        <Section title="Devir Notu">
+          <div className="rounded-md bg-slate-50/60 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 border-l-2 border-violet-400 dark:bg-ndark-bg/30 dark:text-ndark-text dark:ring-ndark-border">
+            <div className="flex flex-wrap items-baseline gap-x-1.5 text-sm">
+              <span className="text-slate-700 line-through decoration-slate-300 dark:text-ndark-muted">
+                {latestTransfer.fromTeamName ?? '—'}
+                {latestTransfer.fromPersonName ? ` - ${latestTransfer.fromPersonName}` : ''}
+              </span>
+              <span className="text-slate-400">→</span>
+              <span className="font-semibold text-slate-800 dark:text-ndark-text">
+                {latestTransfer.toTeamName ?? '—'}
+                {latestTransfer.toPersonName ? ` - ${latestTransfer.toPersonName}` : ''}
+              </span>
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-xs italic text-violet-800 dark:text-violet-300">
+              Gerekçe: {latestTransfer.reasonLabel
+                ? `${latestTransfer.reasonLabel} — ${latestTransfer.reason}`
+                : latestTransfer.reason}
+            </p>
+          </div>
+        </Section>
+      )}
 
       {/* Adım-2 — Çözüm Notu Açıklama'nın hemen ALTINDA (problem → çözüm).
           Yeni stil: emerald sol-şerit + nötr arka plan (PR-B sakin dili).
