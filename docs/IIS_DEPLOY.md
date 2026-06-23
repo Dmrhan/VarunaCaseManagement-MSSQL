@@ -169,8 +169,18 @@ cd C:\apps\VarunaCaseManagement
 npm run deploy:onprem
 ```
 
-Tek komut şu sırayı garanti eder:
-`pm2 stop varuna-cm && git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 start varuna-cm`
+İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
+yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+
+**Rollback safety (Codex P2)**: herhangi bir mutate adımı fail ederse
+(git conflict, npm ci hata, migration crash, build fail) `pm2 start`
+yine ÇAĞRILIR — eski build üzerinden servis ayağa kalkar, production
+kalıcı down kalmaz. Çıkış kodları:
+- `0` — yeni build canlıda
+- `1` — mutate fail, eski build geri yüklendi (operator log incelemeli,
+  düzelt + tekrar `npm run deploy:onprem`)
+- `2` — KRİTİK: `pm2 start` de fail; manuel müdahale gerek
+  (`pm2 status`, `pm2 logs varuna-cm`, `pm2 start ecosystem.config.cjs`)
 
 **Downtime**: build + npm ci süresi kadar (~30-120 sn). Zero-downtime
 gerekiyorsa atomik release-dir / symlink swap pattern'i kullanılmalı
