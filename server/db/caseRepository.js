@@ -118,6 +118,9 @@ const CASE_INCLUDE = {
   // sayisi: Related/Parent A->B yonu + Duplicate symmetric'in A->B satiri.
   // Detay sayfasi tam listeyi LinksTab'de gosterir; bu yalniz chip icin.
   _count: { select: { outgoingLinks: true } },
+  // PR-SD — Arşiv banner için kim arşivledi adı (audit JOIN; PII guard
+  // sadece display name).
+  archivedByUser: { select: { id: true, fullName: true } },
 };
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
@@ -131,7 +134,7 @@ export const NOTE_REACTION_EMOJIS = ['thumbs_up', 'eyes', 'check', 'important', 
 //  - callLog'lardaki enum'ları da TR'ye çevir
 function shape(c) {
   if (!c) return null;
-  const { attachments, callLogs, _count, ...rest } = c;
+  const { attachments, callLogs, _count, archivedByUser, ...rest } = c;
   const baseShape = fromDb(rest);
   return {
     ...baseShape,
@@ -139,6 +142,8 @@ function shape(c) {
     callLogs: (callLogs ?? []).map((cl) => fromDb(cl)),
     // _count.outgoingLinks → linkCount (frontend için tek flat number).
     linkCount: _count?.outgoingLinks ?? 0,
+    // PR-SD — Arşiv banner için flat display name (UI JOIN gerekmez).
+    archivedByUserName: archivedByUser?.fullName ?? null,
   };
 }
 
@@ -969,12 +974,15 @@ export const caseRepository = {
     return { items: items.map(shape), total };
   },
 
-  async get(id, allowedCompanyIds) {
+  async get(id, allowedCompanyIds, actorRole) {
     const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     if (!c) return null;
     if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
       throw new CaseAccessError();
     }
+    // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
+    // roller için 404 davranışı (null döner → route 404 yansıtır).
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
     return shape(c);
   },
 
@@ -1214,6 +1222,18 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    await notifyAssignmentTargets({
+      caseId: created.id,
+      companyId: created.companyId,
+      assignedPersonId: created.assignedPersonId,
+      assignedTeamId: created.assignedTeamId,
+      actorUserId: actorUserIdOf(actor),
+      message: `${created.caseNumber} oluşturuldu ve atandı.`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+
     return shape(created);
   },
 
@@ -1222,6 +1242,20 @@ export const caseRepository = {
     // stamp atılır (post-migration audit FK doldurulur). Caller pass
     // etmezse NULL kalır (legacy davranış — backwards-compat).
     assertActor(actor, 'caseRepository.update');
+    // PR-SD (Codex P1) — Arşiv alanları generic PATCH ile YAZILAMAZ. SystemAdmin
+    // bile generic update üzerinden arşivleyemez; tek doğru yol POST /:id/archive
+    // ve /:id/restore (rol guard + audit + idempotency garantili). Bu guard
+    // olmadan herhangi bir authenticated user vakayı arşivleyebilirdi.
+    const ARCHIVE_FIELDS = ['isArchived', 'archivedAt', 'archivedByUserId', 'archiveReason'];
+    for (const field of ARCHIVE_FIELDS) {
+      if (field in patch) {
+        throw new CaseValidationError(
+          `Arşiv alanı (${field}) generic PATCH ile değiştirilemez. ` +
+            'POST /api/cases/:id/archive veya /:id/restore kullanılmalı.',
+          { status: 400, code: 'archive_field_immutable' },
+        );
+      }
+    }
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
     if ('supportLevel' in patch && actorRole) {
@@ -1482,6 +1516,22 @@ export const caseRepository = {
       });
     }
 
+    const assignmentChanged = historyEntries.some((h) =>
+      ['assignedPersonId', 'assignedTeamId', 'assignedPersonName', 'assignedTeamName'].includes(h.fieldName ?? ''),
+    );
+    if (assignmentChanged) {
+      await notifyAssignmentTargets({
+        caseId: id,
+        companyId,
+        assignedPersonId: updated.assignedPersonId,
+        assignedTeamId: updated.assignedTeamId,
+        actorUserId: actorUserIdOf(actorObject),
+        message: `${updated.caseNumber}'de atama değişti.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
+
     return shape(updated);
   },
 
@@ -1599,10 +1649,129 @@ export const caseRepository = {
       kind: 'assignment',
     });
 
+    await notifyAssignmentTargets({
+      caseId,
+      companyId,
+      assignedPersonId: user.personId,
+      assignedTeamId,
+      actorUserId: typeof user?.id === 'string' ? user.id : null,
+      message: `Vaka üstlenildi: ${assignedPersonName}`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+
     const updated = await prisma.case.findUnique({
       where: { id: caseId },
       include: CASE_INCLUDE,
     });
+    return shape(updated);
+  },
+
+  /**
+   * PR-SD — Vakayı arşivle (SystemAdmin-only). Hard delete YOK; tüm child
+   * kayıtlar intact, sadece UI listelerinden default exclude'la gizlenir.
+   * Status enum dokunulmaz — archive orthogonal bayrak. Reason zorunlu
+   * (route layer 3+ char validate eder; defansif olarak burada da kontrol).
+   *
+   * Audit: CaseActivity actionType='Archived', note=reason, actor.
+   * Watcher bildirimi YOK (operasyonel olmayan event).
+   */
+  async archive(id, { reason, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.archive');
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (trimmedReason.length < 3) {
+      throw new CaseValidationError(
+        'Arşiv sebebi gerekli (en az 3 karakter).',
+        { status: 400, code: 'archive_reason_required' },
+      );
+    }
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (before.isArchived) {
+      // Idempotent: zaten arşivli — current state'i döndür (UI'da double-click
+      // edilirse 409 yerine sessizce success).
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: true,
+          archivedAt: new Date(),
+          archivedByUserId: actor.userId ?? null,
+          archiveReason: trimmedReason,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Archived',
+          action: 'Vaka arşivlendi',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: trimmedReason,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
+   * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
+   */
+  async restore(id, { actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.restore');
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (!before.isArchived) {
+      // Idempotent: zaten arşivli değil.
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: false,
+          archivedAt: null,
+          archivedByUserId: null,
+          archiveReason: null,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Restored',
+          action: 'Vaka arşivden çıkarıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     return shape(updated);
   },
 
@@ -2414,10 +2583,13 @@ export const caseRepository = {
       return { error: 'Toplu işlemde kapatma (Çözüldü/İptalEdildi) yapılamaz.' };
     }
 
+    const bulkTouchesAssignment =
+      filtered.assignedPersonId !== undefined || filtered.assignedTeamId !== undefined;
+
     // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
     const cases = await prisma.case.findMany({
       where: { id: { in: caseIds } },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, assignedPersonId: true, assignedTeamId: true },
     });
     if (cases.length !== caseIds.length) {
       const foundIds = new Set(cases.map((c) => c.id));
@@ -2494,6 +2666,28 @@ export const caseRepository = {
           where: { id: c.id },
           data: { ...dataPatch, history: { create: historyEntries } },
         });
+
+        if (bulkTouchesAssignment) {
+          const finalAssignedPersonId =
+            filtered.assignedPersonId !== undefined ? filtered.assignedPersonId : c.assignedPersonId;
+          const finalAssignedTeamId =
+            filtered.assignedTeamId !== undefined ? filtered.assignedTeamId : c.assignedTeamId;
+          const assignmentChanged =
+            finalAssignedPersonId !== c.assignedPersonId || finalAssignedTeamId !== c.assignedTeamId;
+          if (assignmentChanged) {
+            await notifyAssignmentTargets({
+              caseId: c.id,
+              companyId: c.companyId,
+              assignedPersonId: finalAssignedPersonId,
+              assignedTeamId: finalAssignedTeamId,
+              actorUserId: actorUserIdOf(actorObject),
+              message: 'Toplu işlemle atama değişti.',
+              eventType: 'watcher_update',
+              kind: 'assignment',
+            });
+          }
+        }
+
         updated++;
       } catch (e) {
         failed++;
@@ -2873,6 +3067,18 @@ export const caseRepository = {
       companyId,
       message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
       kind: 'transfer',
+    });
+
+    await notifyAssignmentTargets({
+      caseId: id,
+      companyId,
+      assignedPersonId: person?.id ?? null,
+      assignedTeamId: input.toTeamId,
+      actorUserId: input.transferredBy,
+      message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
+      eventType: 'transfer',
+      kind: 'transfer_assignee',
+      extraPayload: { fromTeam: fromTeamName, toTeam: team.name },
     });
 
     // Race-safe: post-increment değerini DB'den oku — pre-computed
@@ -3544,6 +3750,122 @@ async function notifyWatchers({ caseId, companyId, message, kind }) {
 }
 
 /**
+ * notifyAssignmentTargets — atanan kişi / hedef takım üyelerine bildirim
+ * yazar. Watcher olmayan hedeflere gider; actor ve mevcut watcher'lar hariç
+ * tutulur (notifyWatchers ile çift bildirim olmasın).
+ *
+ * Hata olursa ana akışı durdurmaz — sessiz warn.
+ */
+async function notifyAssignmentTargets({
+  caseId,
+  companyId,
+  assignedPersonId,
+  assignedTeamId,
+  actorUserId,
+  message,
+  eventType,
+  kind,
+  extraPayload = {},
+}) {
+  try {
+    const normalizeEmail = (value) =>
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+    const personEmails = new Set();
+
+    if (assignedPersonId) {
+      const assignedPerson = await prisma.person.findUnique({
+        where: { id: assignedPersonId },
+        select: { email: true },
+      });
+      const assignedEmail = normalizeEmail(assignedPerson?.email);
+      if (assignedEmail) personEmails.add(assignedEmail);
+    }
+
+    if (assignedTeamId) {
+      const teamMembers = await prisma.person.findMany({
+        where: { teamId: assignedTeamId, isActive: true },
+        select: { id: true, email: true },
+      });
+      for (const member of teamMembers) {
+        const email = normalizeEmail(member.email);
+        if (email) personEmails.add(email);
+      }
+    }
+
+    if (personEmails.size === 0) return;
+
+    const users = await prisma.user.findMany({
+      where: {
+        email: { in: [...personEmails] },
+        isActive: true,
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, email: true },
+    });
+    if (users.length === 0) return;
+
+    const resolvedEmails = new Set(
+      users.map((u) => normalizeEmail(u.email)).filter(Boolean),
+    );
+    const unresolvedCount = [...personEmails].filter(
+      (email) => !resolvedEmails.has(email),
+    ).length;
+    if (unresolvedCount > 0) {
+      console.warn('[notifyAssignmentTargets] unresolved email targets', {
+        caseId,
+        count: unresolvedCount,
+      });
+    }
+
+    const watchers = await prisma.caseWatcher.findMany({
+      where: { caseId },
+      select: { userId: true },
+    });
+    const watcherUserIds = new Set(watchers.map((w) => w.userId));
+
+    const recipients = new Set();
+    for (const user of users) {
+      if (!user.id) continue;
+      if (actorUserId && user.id === actorUserId) continue;
+      if (watcherUserIds.has(user.id)) continue;
+      recipients.add(user.id);
+    }
+    if (recipients.size === 0) return;
+
+    const payload = { message, kind, ...extraPayload };
+    await prisma.caseNotification.createMany({
+      data: [...recipients].map((userId) => ({
+        caseId,
+        companyId,
+        eventType,
+        channel: 'InApp',
+        recipient: userId,
+        payload,
+      })),
+    });
+
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true, title: true },
+    });
+    for (const userId of recipients) {
+      void emitGenericNotification({
+        caseId,
+        companyId,
+        eventType,
+        recipientUserId: userId,
+        payload,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+      });
+    }
+  } catch (err) {
+    console.warn('[notifyAssignmentTargets]', err?.message ?? err);
+  }
+}
+
+/**
  * Watcher repository — vaka takipçileri (FAZ 2 Collab).
  * Multi-tenant scope: vakanın companyId'si allowedCompanyIds'de olmalı.
  * Çapraz tenant watcher imkânsız.
@@ -4101,6 +4423,14 @@ function buildWhere(f, allowedCompanyIds) {
   // hiçbir şey görmez).
   if (allowedCompanyIds) {
     andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
+  // PR-SD — Soft archive default exclude. SystemAdmin'in UI'dan açık seçimi
+  // ile includeArchived: true override eder. Diğer query path'lerinde (KPI,
+  // report, AI count'ları vb.) DEFAULT EXCLUDE yok — bu PR sadece liste
+  // temizliği için minimum scope (1-2 arşivli vaka KPI sayımında tolere
+  // edilebilir).
+  if (!f.includeArchived) {
+    andClauses.push({ isArchived: false });
   }
   // Default: snooze aktif vakalar (snoozeUntil > now) listede gizli — "Later"
   // sekmesi ayrı endpoint kullanıyor. includeSnoozed flag ile override edilir.

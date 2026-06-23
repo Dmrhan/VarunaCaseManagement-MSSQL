@@ -226,21 +226,32 @@ npm run deploy:onprem
 İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
 yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
 
-**KRİTİK SIRA:** `service stop → mutate → service start`. Üç kural birlikte:
+**KRİTİK SIRA:** `pre-flight → service stop → mutate → (rollback if fail)
+→ service start`. Dört kural birlikte:
 
-1. **Migration mutlaka yeni process başlamadan ÖNCE bitmiş olmalı**;
+1. **Pre-flight snapshot mutate'ten ÖNCE, pm2 stop'tan da ÖNCE** (Codex P1+P2
+   sonraki review): script ilk olarak LIVE service hâlâ çalışırken
+   `git rev-parse HEAD` + `dist/` yedeği alır. Snapshot adımı fail
+   ederse exit 3 ile temiz çıkar; servis hâlâ ayakta, live tree
+   dokunulmadı. Eski sırada (stop → snapshot → mutate) snapshot fail
+   durumunda servis stopped kalıyordu.
+
+2. **Migration mutlaka yeni process başlamadan ÖNCE bitmiş olmalı**;
    aksi halde Prisma Client yeni alanları select edip P2022
    (`column does not exist`) ile çakar.
-2. **`npm ci` ve `npm run build` live tree'yi mutate eder** — Express
+
+3. **`npm ci` ve `npm run build` live tree'yi mutate eder** — Express
    `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan paket
    çeker. Service ayaktayken yarım/eksik dosyalara çakar (codex review
    bulgusu). Service önce DURUR, sonra mutate, sonra START.
-3. **PM2 stop verify** (Codex P2): `pm2 stop` exit'i yetersiz — daemon
-   problemi / permission / yanlış user durumlarında stop fail ama service
-   ÇALIŞIYOR olabilir. Script `pm2 jlist` ile state doğrular; "online"
-   veya "launching" durumda mutate İPTAL (exit 3) — live tree dokunulmaz.
 
-4. **Real rollback** (Codex P1): mutate fail durumunda script:
+4. **PM2 stop verify** (Codex P2 ilk review): `pm2 stop` exit'i yetersiz —
+   daemon problemi / permission / yanlış user durumlarında stop fail ama
+   service ÇALIŞIYOR olabilir. Script `pm2 jlist` ile state doğrular;
+   "online" veya "launching" durumda mutate İPTAL (exit 3) — live tree
+   dokunulmaz, dist backup temizlenir.
+
+5. **Real rollback** (Codex P1 ilk review): mutate fail durumunda script:
    - `git reset --hard <oldHead>` — kaynak eski revizyona döner
    - `dist/` backup'tan restore
    - `npm ci` tekrar koşulur (eski package-lock)
@@ -259,8 +270,10 @@ yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2
    - `0` — yeni build canlıda
    - `1` — mutate fail, ESKİ state restore edildi, servis çalışıyor
    - `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
-   - `3` — pre-flight fail (pm2 still online / git rev-parse fail);
-     mutate başlamadı, hiçbir şey değişmedi
+   - `3` — pre-flight fail (`git rev-parse` / `dist/` backup / pm2 stop
+     verify); mutate başlamadı. Snapshot fail durumunda servis hâlâ
+     ayakta (pm2 stop çağrılmadı); pm2 stop verify fail durumunda da
+     servis ayakta (stop tamamlanmadı)
 
 **Downtime**: build + npm ci süresi kadar (~30-120 sn). Pure zero-downtime
 gerekiyorsa bkz. "Zero-downtime atomic release — opsiyonel" altta.
