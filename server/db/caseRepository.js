@@ -1214,6 +1214,18 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    await notifyAssignmentTargets({
+      caseId: created.id,
+      companyId: created.companyId,
+      assignedPersonId: created.assignedPersonId,
+      assignedTeamId: created.assignedTeamId,
+      actorUserId: actorUserIdOf(actor),
+      message: `${created.caseNumber} oluşturuldu ve atandı.`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+
     return shape(created);
   },
 
@@ -1482,6 +1494,22 @@ export const caseRepository = {
       });
     }
 
+    const assignmentChanged = historyEntries.some((h) =>
+      ['assignedPersonId', 'assignedTeamId', 'assignedPersonName', 'assignedTeamName'].includes(h.fieldName ?? ''),
+    );
+    if (assignmentChanged) {
+      await notifyAssignmentTargets({
+        caseId: id,
+        companyId,
+        assignedPersonId: updated.assignedPersonId,
+        assignedTeamId: updated.assignedTeamId,
+        actorUserId: actorUserIdOf(actorObject),
+        message: `${updated.caseNumber}'de atama değişti.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
+
     return shape(updated);
   },
 
@@ -1596,6 +1624,17 @@ export const caseRepository = {
       caseId,
       companyId,
       message: `Vaka üstlenildi: ${assignedPersonName}`,
+      kind: 'assignment',
+    });
+
+    await notifyAssignmentTargets({
+      caseId,
+      companyId,
+      assignedPersonId: user.personId,
+      assignedTeamId,
+      actorUserId: typeof user?.id === 'string' ? user.id : null,
+      message: `Vaka üstlenildi: ${assignedPersonName}`,
+      eventType: 'watcher_update',
       kind: 'assignment',
     });
 
@@ -2414,10 +2453,13 @@ export const caseRepository = {
       return { error: 'Toplu işlemde kapatma (Çözüldü/İptalEdildi) yapılamaz.' };
     }
 
+    const bulkTouchesAssignment =
+      filtered.assignedPersonId !== undefined || filtered.assignedTeamId !== undefined;
+
     // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
     const cases = await prisma.case.findMany({
       where: { id: { in: caseIds } },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, assignedPersonId: true, assignedTeamId: true },
     });
     if (cases.length !== caseIds.length) {
       const foundIds = new Set(cases.map((c) => c.id));
@@ -2494,6 +2536,28 @@ export const caseRepository = {
           where: { id: c.id },
           data: { ...dataPatch, history: { create: historyEntries } },
         });
+
+        if (bulkTouchesAssignment) {
+          const finalAssignedPersonId =
+            filtered.assignedPersonId !== undefined ? filtered.assignedPersonId : c.assignedPersonId;
+          const finalAssignedTeamId =
+            filtered.assignedTeamId !== undefined ? filtered.assignedTeamId : c.assignedTeamId;
+          const assignmentChanged =
+            finalAssignedPersonId !== c.assignedPersonId || finalAssignedTeamId !== c.assignedTeamId;
+          if (assignmentChanged) {
+            await notifyAssignmentTargets({
+              caseId: c.id,
+              companyId: c.companyId,
+              assignedPersonId: finalAssignedPersonId,
+              assignedTeamId: finalAssignedTeamId,
+              actorUserId: actorUserIdOf(actorObject),
+              message: 'Toplu işlemle atama değişti.',
+              eventType: 'watcher_update',
+              kind: 'assignment',
+            });
+          }
+        }
+
         updated++;
       } catch (e) {
         failed++;
@@ -2873,6 +2937,18 @@ export const caseRepository = {
       companyId,
       message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
       kind: 'transfer',
+    });
+
+    await notifyAssignmentTargets({
+      caseId: id,
+      companyId,
+      assignedPersonId: person?.id ?? null,
+      assignedTeamId: input.toTeamId,
+      actorUserId: input.transferredBy,
+      message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
+      eventType: 'transfer',
+      kind: 'transfer_assignee',
+      extraPayload: { fromTeam: fromTeamName, toTeam: team.name },
     });
 
     // Race-safe: post-increment değerini DB'den oku — pre-computed
@@ -3540,6 +3616,92 @@ async function notifyWatchers({ caseId, companyId, message, kind }) {
     }
   } catch (err) {
     console.warn('[notifyWatchers]', err?.message ?? err);
+  }
+}
+
+/**
+ * notifyAssignmentTargets — atanan kişi / hedef takım üyelerine bildirim
+ * yazar. Watcher olmayan hedeflere gider; actor ve mevcut watcher'lar hariç
+ * tutulur (notifyWatchers ile çift bildirim olmasın).
+ *
+ * Hata olursa ana akışı durdurmaz — sessiz warn.
+ */
+async function notifyAssignmentTargets({
+  caseId,
+  companyId,
+  assignedPersonId,
+  assignedTeamId,
+  actorUserId,
+  message,
+  eventType,
+  kind,
+  extraPayload = {},
+}) {
+  try {
+    const personIds = new Set();
+    if (assignedPersonId) personIds.add(assignedPersonId);
+    if (assignedTeamId) {
+      const teamMembers = await prisma.person.findMany({
+        where: { teamId: assignedTeamId, isActive: true },
+        select: { id: true },
+      });
+      for (const p of teamMembers) personIds.add(p.id);
+    }
+    if (personIds.size === 0) return;
+
+    const users = await prisma.user.findMany({
+      where: {
+        personId: { in: [...personIds] },
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, personId: true },
+    });
+    if (users.length === 0) return;
+
+    const watchers = await prisma.caseWatcher.findMany({
+      where: { caseId },
+      select: { userId: true },
+    });
+    const watcherUserIds = new Set(watchers.map((w) => w.userId));
+
+    const recipients = new Set();
+    for (const user of users) {
+      if (!user.id) continue;
+      if (actorUserId && user.id === actorUserId) continue;
+      if (watcherUserIds.has(user.id)) continue;
+      recipients.add(user.id);
+    }
+    if (recipients.size === 0) return;
+
+    const payload = { message, kind, ...extraPayload };
+    await prisma.caseNotification.createMany({
+      data: [...recipients].map((userId) => ({
+        caseId,
+        companyId,
+        eventType,
+        channel: 'InApp',
+        recipient: userId,
+        payload,
+      })),
+    });
+
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true, title: true },
+    });
+    for (const userId of recipients) {
+      void emitGenericNotification({
+        caseId,
+        companyId,
+        eventType,
+        recipientUserId: userId,
+        payload,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+      });
+    }
+  } catch (err) {
+    console.warn('[notifyAssignmentTargets]', err?.message ?? err);
   }
 }
 
