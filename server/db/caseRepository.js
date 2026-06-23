@@ -3638,25 +3638,55 @@ async function notifyAssignmentTargets({
   extraPayload = {},
 }) {
   try {
-    const personIds = new Set();
-    if (assignedPersonId) personIds.add(assignedPersonId);
+    const normalizeEmail = (value) =>
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+    const personEmails = new Set();
+
+    if (assignedPersonId) {
+      const assignedPerson = await prisma.person.findUnique({
+        where: { id: assignedPersonId },
+        select: { email: true },
+      });
+      const assignedEmail = normalizeEmail(assignedPerson?.email);
+      if (assignedEmail) personEmails.add(assignedEmail);
+    }
+
     if (assignedTeamId) {
       const teamMembers = await prisma.person.findMany({
         where: { teamId: assignedTeamId, isActive: true },
-        select: { id: true },
+        select: { id: true, email: true },
       });
-      for (const p of teamMembers) personIds.add(p.id);
+      for (const member of teamMembers) {
+        const email = normalizeEmail(member.email);
+        if (email) personEmails.add(email);
+      }
     }
-    if (personIds.size === 0) return;
+
+    if (personEmails.size === 0) return;
 
     const users = await prisma.user.findMany({
       where: {
-        personId: { in: [...personIds] },
+        email: { in: [...personEmails] },
+        isActive: true,
         companies: { some: { companyId, isActive: true } },
       },
-      select: { id: true, personId: true },
+      select: { id: true, email: true },
     });
     if (users.length === 0) return;
+
+    const resolvedEmails = new Set(
+      users.map((u) => normalizeEmail(u.email)).filter(Boolean),
+    );
+    const unresolvedCount = [...personEmails].filter(
+      (email) => !resolvedEmails.has(email),
+    ).length;
+    if (unresolvedCount > 0) {
+      console.warn('[notifyAssignmentTargets] unresolved email targets', {
+        caseId,
+        count: unresolvedCount,
+      });
+    }
 
     const watchers = await prisma.caseWatcher.findMany({
       where: { caseId },
