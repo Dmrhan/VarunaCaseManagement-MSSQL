@@ -412,6 +412,30 @@ expect('13.9 status-report status: DB identifier kullanır',
 expect('13.10 status-report TR status literal kalmadı',
   /prisma\.case\.count[\s\S]{0,500}status:\s*\{\s*in:\s*\['Çözüldü',\s*'İptalEdildi'\]/.test(asCode), false);
 
+console.log('\n── 14) Runtime fix — Prisma field name uyumu ───────────');
+// 14.1 — caseCallLog orderBy callDate (startedAt değil)
+expect('14.1 caseCallLog orderBy: { callDate: "desc" }',
+  /prisma\.caseCallLog\.findMany\([\s\S]{0,500}orderBy:\s*\{\s*callDate:\s*'desc'\s*\}/.test(promptCode), true);
+expect('14.2 caseCallLog orderBy startedAt KULLANMAZ',
+  /caseCallLog[\s\S]{0,500}orderBy:\s*\{\s*startedAt/.test(promptCode), false);
+// 14.3 — callLog select callDisposition / callOutcome / description
+expect('14.3 caseCallLog select callDisposition + callOutcome + description',
+  /prisma\.caseCallLog\.findMany\([\s\S]{0,500}select:\s*\{\s*callDisposition:\s*true,\s*callOutcome:\s*true,\s*description:\s*true,?\s*\}/.test(promptCode), true);
+expect('14.4 caseCallLog select aiCallBrief/summary KULLANMAZ (Prisma model\'inde yok)',
+  /prisma\.caseCallLog\.findMany\([\s\S]{0,500}aiCallBrief|prisma\.caseCallLog\.findMany\([\s\S]{0,500}summary:\s*true/.test(promptCode), false);
+// 14.5 — caseTransfer select sadece reason + reasonCode (reasonLabel kalktı)
+expect('14.5 caseTransfer select reason + reasonCode (reasonLabel KALDIRILDI)',
+  /prisma\.caseTransfer\.findMany\([\s\S]{0,500}select:\s*\{\s*reason:\s*true,\s*reasonCode:\s*true\s*\}/.test(promptCode), true);
+expect('14.6 caseTransfer reasonLabel select\'te yok',
+  /prisma\.caseTransfer\.findMany\([\s\S]{0,500}reasonLabel:\s*true/.test(promptCode), false);
+// 14.7 — prompt builder map'lerinde uyumlu field kullanımı
+expect('14.7 reasonLabels map t.reason ?? t.reasonCode',
+  /t\.reason \?\? t\.reasonCode/.test(promptCode), true);
+expect('14.8 callBits map cl.callDisposition + cl.callOutcome',
+  /cl\.callDisposition,\s*cl\.callOutcome/.test(promptCode), true);
+expect('14.9 callBits map cl.description (aiCallBrief\\/summary değil)',
+  /cl\.description \?\? ''/.test(promptCode), true);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

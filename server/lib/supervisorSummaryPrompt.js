@@ -135,20 +135,21 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
     }),
     prisma.caseCallLog.findMany({
       where: { caseId },
-      orderBy: { startedAt: 'desc' },
+      orderBy: { callDate: 'desc' },
       take: CALL_CAP,
       select: {
-        disposition: true,
-        outcome: true,
-        aiCallBrief: true,
-        summary: true,
+        callDisposition: true,
+        callOutcome: true,
+        description: true,
       },
     }),
     prisma.caseTransfer.findMany({
       where: { caseId },
       orderBy: { transferredAt: 'desc' },
       take: TRANSFER_REASON_CAP,
-      select: { reasonLabel: true, reason: true },
+      // Prisma model'inde reasonLabel yok (BFF join'inde response'a eklenir);
+      // sadece reason + reasonCode çekilir, prompt builder fallback ile gösterir.
+      select: { reason: true, reasonCode: true },
     }),
     // Codex P1 — companyId scope: Account AccountCompany üzerinden çoklu
     // tenant'a bağlanabilir. companyId filtresi olmazsa cross-tenant case
@@ -380,7 +381,7 @@ export function buildSupervisorSummaryPrompt(enrichment) {
   if (account?.supportLevel) transferBits.push(`Destek seviyesi: ${account.supportLevel}`);
   const reasonLabels = (transfers ?? [])
     .slice(0, TRANSFER_REASON_CAP)
-    .map((t) => (t.reasonLabel ?? t.reason ?? '').trim())
+    .map((t) => (t.reason ?? t.reasonCode ?? '').trim())
     .filter(Boolean);
   if (reasonLabels.length) {
     transferBits.push(`Devir sebepleri: ${reasonLabels.join(' / ')}`);
@@ -395,13 +396,13 @@ export function buildSupervisorSummaryPrompt(enrichment) {
   if (productBits.length) sections.push(['## Ürün/Paket', productBits.join(' · ')]);
 
   // ───────── ## Çağrılar ─────────
-  // Bugün sadece SAYI gidiyordu; şimdi son 3 çağrı içeriği. PII'siz: disposition
-  // + outcome + brief (AI-generated özet); kişisel veri içermez.
+  // Bugün sadece SAYI gidiyordu; şimdi son 3 çağrı içeriği. PII'siz:
+  // callDisposition + callOutcome + description (callerName/Id gönderilmez).
   const callBits = (callLogs ?? [])
     .slice(0, CALL_CAP)
     .map((cl) => {
-      const head = [cl.disposition, cl.outcome].filter(Boolean).join(' / ') || '(çağrı)';
-      const brief = truncate(cl.aiCallBrief ?? cl.summary ?? '', TRUNCATE.callBrief);
+      const head = [cl.callDisposition, cl.callOutcome].filter(Boolean).join(' / ') || '(çağrı)';
+      const brief = truncate(cl.description ?? '', TRUNCATE.callBrief);
       return brief ? `- ${head}: ${brief}` : `- ${head}`;
     });
   if (callBits.length) sections.push(['## Çağrılar', callBits.join('\n')]);
