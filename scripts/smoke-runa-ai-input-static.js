@@ -288,6 +288,100 @@ expect('11.12 handleAnalyze persist aiRiskLevel + aiKeyPoints',
 expect('11.13 handleAnalyze conditional aiConfidenceScore (typeof number guard)',
   /typeof r\.data\.confidence === 'number'[\s\S]{0,200}aiConfidenceScore:\s*r\.data\.confidence/.test(detailCode), true);
 
+console.log('\n── 12) Faz 4 — status-report input enrichment ──────────');
+const asSrc = read('server/lib/actionSummaryAi.js');
+const asCode = stripComments(asSrc);
+
+// 12.1 — FAZ4_SOLUTION_STEP_CAP = 5 (supervisor 10'dan daha tutucu)
+expect('12.1 FAZ4_SOLUTION_STEP_CAP = 5 (status-report daha tutucu)',
+  /const FAZ4_SOLUTION_STEP_CAP = 5/.test(asCode), true);
+// 12.2 — TRUNCATE cap'leri
+expect('12.2 FAZ4_TRUNCATE.solutionStepNote = 100',
+  /solutionStepNote:\s*100/.test(asCode), true);
+expect('12.3 FAZ4_TRUNCATE.resolutionNote = 300',
+  /resolutionNote:\s*300/.test(asCode), true);
+expect('12.4 FAZ4_TRUNCATE.cancellationReason = 300',
+  /cancellationReason:\s*300/.test(asCode), true);
+
+// 12.5 — extractSmartTicket helper
+expect('12.5 extractSmartTicket helper mevcut',
+  /function extractSmartTicket\(customFieldsRaw\)/.test(asCode), true);
+expect('12.6 pickStLabel helper mevcut',
+  /function pickStLabel\(obj, codeKey, labelKey\)/.test(asCode), true);
+
+// 12.7 — Case select Faz 4 alanları
+expect('12.7 Case select customFields + productName + packageName + accountProjectName + resolutionNote + cancellationReason',
+  /customFields:\s*true[\s\S]{0,500}productName:\s*true[\s\S]{0,500}packageName:\s*true[\s\S]{0,500}accountProjectName:\s*true[\s\S]{0,500}resolutionNote:\s*true[\s\S]{0,500}cancellationReason:\s*true/.test(asCode), true);
+
+// 12.8 — 3 yeni paralel fetch
+expect('12.8 caseSolutionStep findMany cap 5 + status !== suggested',
+  /prisma\.caseSolutionStep\.findMany\([\s\S]{0,500}status:\s*\{\s*not:\s*'suggested'\s*\}[\s\S]{0,200}take:\s*FAZ4_SOLUTION_STEP_CAP/.test(asCode), true);
+expect('12.9 previousOpenCount destructuring + Çözüldü/İptalEdildi count',
+  /previousOpenCount/.test(asCode)
+    && /status:\s*\{\s*in:\s*\['Çözüldü',\s*'İptalEdildi'\]\s*\}/.test(asCode), true);
+expect('12.10 previousSlaBreachCount destructuring + slaViolation count',
+  /previousSlaBreachCount/.test(asCode)
+    && /slaViolation:\s*true/.test(asCode), true);
+
+// 12.11 — 5 yeni yapısal bölüm başlığı (SINIFLANDIRMA / DENENEN ÇÖZÜMLER /
+// MÜŞTERİ GEÇMİŞ / ÜRÜN/PAKET / ÇÖZÜM/İPTAL NOTU)
+expect('12.11 SINIFLANDIRMA section başlığı',
+  /SINIFLANDIRMA \(Smart Ticket\)/.test(asCode), true);
+expect('12.12 DENENEN ÇÖZÜMLER section başlığı',
+  /DENENEN ÇÖZÜMLER \(özet, max \$\{FAZ4_SOLUTION_STEP_CAP\}\)/.test(asCode), true);
+expect('12.13 MÜŞTERİ GEÇMİŞ section başlığı',
+  /MÜŞTERİ GEÇMİŞ \(sayı\)/.test(asCode), true);
+expect('12.14 ÜRÜN/PAKET section başlığı',
+  /ÜRÜN\/PAKET/.test(asCode), true);
+expect('12.15 ÇÖZÜM/İPTAL NOTU section başlığı',
+  /ÇÖZÜM\/İPTAL NOTU/.test(asCode), true);
+
+// 12.16 — Boş atla disiplini (her bölüm "if (X.length)" conditional)
+const asIfChecks = (asCode.match(/if \(\w+\.length\)/g) ?? []).length;
+expect('12.16 if (X.length) kontrolleri Faz 4 enrichment için >= 5',
+  asIfChecks >= 5, true, `bulunan=${asIfChecks}`);
+
+// 12.17 — Tüm bölümler boşsa enrichmentSections.length conditional spread
+expect('12.17 enrichmentSections.length conditional user prompt insert',
+  /\.\.\.\(enrichmentSections\.length \? \[enrichmentSections\.join\('\\n\\n'\),\s*''\] : \[\]\)/.test(asCode), true);
+
+// 12.18 — PII guard (status-report) — accountName ve assignedPersonName
+// MEVCUT davranış İZİNLİ; yasak alanlar HÂLÂ yok.
+// status-report için yasak: Account.email, phone, tckn*, customerContact*,
+// customerCompanyName, AccountContact.
+const FORBIDDEN_STATUS_REPORT = [
+  'customerContactName',
+  'customerContactPhone',
+  'customerContactEmail',
+  'customerCompanyName',
+  'tcknHash',
+  'tcknLast4',
+  'accountContacts',
+];
+for (const field of FORBIDDEN_STATUS_REPORT) {
+  const re = new RegExp(`\\b${field}\\b`);
+  expect(`12.x PII guard (status-report) — "${field}" code'da YOK`,
+    re.test(asCode), false);
+}
+
+// 12.26 — accountName + assignedPersonName İZİNLİ (mevcut davranış)
+expect('12.26 accountName MEVCUT davranış (mail muhatabı)',
+  /accountName:\s*true/.test(asCode), true);
+expect('12.27 assignedPersonName MEVCUT davranış (mail imzası)',
+  /assignedPersonName:\s*true/.test(asCode), true);
+
+// 12.28 — Mevcut "Tahmin etme, uydurma" kuralı KORUNDU (status-report tonu)
+expect('12.28 "Tahmin etme, uydurma" kuralı korundu',
+  /Tahmin etme,\s*uydurma/.test(asCode), true);
+
+// 12.29 — Mevcut AIUsageLog endpoint = "status-report"
+expect('12.29 AIUsageLog endpoint "status-report" değişmedi',
+  /endpoint:\s*'status-report'/.test(asCode), true);
+
+// 12.30 — Mevcut "loglarda görünmüyor" disiplini korundu
+expect('12.30 "loglarda görünmüyor" disiplini korundu',
+  /loglarda görünmüyor/.test(asCode), true);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
