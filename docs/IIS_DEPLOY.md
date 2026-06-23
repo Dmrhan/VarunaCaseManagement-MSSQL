@@ -151,15 +151,44 @@ HTTP'yi HTTPS'e yönlendirir, upload limitini 100 MB'a çıkarır
 
 ## 6. Güncelleme prosedürü (yeni sunucuda)
 
+**KRİTİK SIRA:** `migrate → build → app restart`. Migration **mutlaka** app
+restart'tan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
+(`column does not exist`) ile çakar.
+
+### 6.a Sunucu PM2 ile yönetiliyorsa (kanonik kısayol)
+
 ```powershell
-nssm stop VarunaCM
+cd C:\apps\VarunaCaseManagement
+npm run deploy:onprem
+```
+
+Tek komut şu sırayı garanti eder:
+`git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm`
+
+PM2 reload graceful — zero-downtime restart. `varuna-cm` PM2 app adı
+[ecosystem.config.cjs](../ecosystem.config.cjs).
+
+### 6.b Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`)
+
+PM2 yerine nssm kurulu kutularda aynı sırayı **el ile** koşmak gerek (nssm
+graceful reload sunmaz — stop/start şart):
+
+```powershell
 cd C:\apps\VarunaCaseManagement
 git pull
 npm ci
-npx prisma migrate deploy
+npm run db:migrate:deploy   # ← MUTLAKA stop'tan ÖNCE çalışsın da olur,
+                             #   sonra da olur; ÖNEMLİ olan app start'tan
+                             #   ÖNCE bitmiş olmasıdır
 npm run build
+nssm stop VarunaCM
 nssm start VarunaCM
 ```
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK** — schema drift +
+> veri kaybı riski. `migrate deploy` idempotent + non-destructive (pending
+> migration yoksa no-op).
 
 IIS tarafında hiçbir şey değişmez (proxy konfigürasyonu sabittir).
 

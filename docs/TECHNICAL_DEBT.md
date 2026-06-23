@@ -205,15 +205,11 @@ config'ini de paralel güncellemek gerek (operasyonel risk var).
 
 ## CI / build script comment drift
 
-**Trigger:** CI workflow editing turu.
-
-**Status:** Stale yorum
-
-`.github/workflows/ci.yml:51-56` Vite build adımı yorumu "Build script'i (`prisma migrate deploy && tsc -b && vite build`) CI'da DB'ye bağlanmaya çalışıyor" diyor — ama `package.json:10` `"build": "tsc -b && vite build"` (migrate yok). Yorum production geçmişinden kalıntı.
-
-**Eylem:** Yorumu yeniden yaz veya tamamen sil; gerçek workaround zaten step description'da.
-
-**Çaba:** 10 dakika.
+**Status:** ✅ Resolved — `chore/onprem-deploy-migrate-step` commit'inde
+ci.yml:54-56 stale yorumu temizlendi; `package.json:11` `"build": "tsc -b
+&& vite build"` ile uyumlu. On-prem migrate→build→reload sırası
+`npm run deploy:onprem` script'inde garantili (bkz. IIS_DEPLOY.md §6.a,
+OPERATIONS.md "On-Prem (PM2) Deploy").
 
 ---
 

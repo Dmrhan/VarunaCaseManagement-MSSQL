@@ -157,14 +157,35 @@ KB/RAG çekirdeği (eski ticket-analiz) uygulamaya gömülüdür (`server/kb/kbC
 
 ## 7. Güncelleme
 
+**KRİTİK SIRA:** `migrate → build → app restart`. Migration **mutlaka** app
+restart'tan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
+(`column does not exist`) ile çakar.
+
+### PM2 ile (kanonik kısayol)
+
 ```powershell
-nssm stop VarunaCM
+cd C:\apps\VarunaCaseManagement
+npm run deploy:onprem
+```
+
+Tek komut sırayı garanti eder:
+`git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm`
+
+### nssm ile (Windows Service `VarunaCM`)
+
+```powershell
+cd C:\apps\VarunaCaseManagement
 git pull
-npm install
-npx prisma migrate deploy
+npm ci
+npm run db:migrate:deploy   # ← app start'tan ÖNCE bitmiş olmalı
 npm run build
+nssm stop VarunaCM
 nssm start VarunaCM
 ```
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK**. `migrate deploy`
+> idempotent + non-destructive — pending migration yoksa no-op.
 
 ## 8. Sağlık kontrolü / sorun giderme
 
