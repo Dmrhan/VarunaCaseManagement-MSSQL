@@ -83,6 +83,9 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
       resolutionNote: true,
       cancellationReason: true,
       customFields: true,
+      // Schema'da Case-level alanlar — Account modelinde yok:
+      financialStatus: true,
+      supportLevel: true,
     },
   });
   if (!c) return { error: 'not_found' };
@@ -90,22 +93,31 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
     return { error: 'forbidden' };
   }
 
-  // PII'siz Account alanları — sadece segment/customerType/financialStatus +
-  // supportLevel. accountName, email, phone, tckn HİÇ çekilmez.
+  // PII'siz Account alanı — yalnız customerType (Account modelinde olan).
+  // segment AccountCompany modelinde (tenant scope'lu); ayrı fetch.
+  // financialStatus + supportLevel Case modelinde (yukarıdaki select'te).
+  // accountName, email, phone, tckn HİÇ çekilmez.
   const accountPromise = c.accountId
     ? prisma.account.findUnique({
         where: { id: c.accountId },
         select: {
           customerType: true,
-          segment: true,
-          financialStatus: true,
-          supportLevel: true,
         },
+      })
+    : Promise.resolve(null);
+
+  // AccountCompany tenant scope'lu segment — Account aynı tenant'ta birden
+  // fazla satıra bağlı olsa bile mevcut vakanın companyId'sine ait olan.
+  const accountCompanyPromise = c.accountId
+    ? prisma.accountCompany.findFirst({
+        where: { accountId: c.accountId, companyId: c.companyId },
+        select: { segment: true },
       })
     : Promise.resolve(null);
 
   const [
     account,
+    accountCompany,
     notes,
     activityRaw,
     solutionStepsRaw,
@@ -115,6 +127,7 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
     previousSlaBreachCount,
   ] = await Promise.all([
     accountPromise,
+    accountCompanyPromise,
     prisma.caseNote.findMany({
       where: { caseId },
       orderBy: { createdAt: 'desc' },
@@ -178,9 +191,24 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
       : Promise.resolve(0),
   ]);
 
+  // Sinyalleri tek "account" view'ında topla — prompt builder şu an
+  // account.{customerType, segment, financialStatus, supportLevel}
+  // okuyor; her birinin schema kaynağı farklı:
+  //   - customerType    → Account
+  //   - segment         → AccountCompany (tenant scope'lu)
+  //   - financialStatus → Case (vakanın kendi alanı; mevcut snapshot)
+  //   - supportLevel    → Case
+  // Bu compose layer field source'ları soyutlar; prompt builder değişmez.
+  const accountView = {
+    customerType: account?.customerType ?? null,
+    segment: accountCompany?.segment ?? null,
+    financialStatus: c.financialStatus ?? null,
+    supportLevel: c.supportLevel ?? null,
+  };
+
   return {
     case: c,
-    account,
+    account: accountView,
     notes: notes.reverse(), // eskiden yeniye okumayı kolaylaştırmak için
     activity: activityRaw,
     solutionSteps: solutionStepsRaw,

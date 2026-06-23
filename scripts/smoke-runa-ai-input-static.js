@@ -92,9 +92,16 @@ for (const field of FORBIDDEN_FIELDS) {
     re.test(promptCode), false);
 }
 
-// Account select'inde sadece izinli alanlar (customerType/segment/financialStatus/supportLevel)
-expect('2.10 Account select sadece izinli 4 alan',
-  /prisma\.account\.findUnique\([\s\S]{0,400}select:\s*\{\s*customerType:\s*true,\s*segment:\s*true,\s*financialStatus:\s*true,\s*supportLevel:\s*true,?\s*\}/.test(promptCode), true);
+// Account select'inde sadece izinli 1 alan (customerType).
+// Diğerleri farklı modellerde: segment → AccountCompany, financialStatus +
+// supportLevel → Case (Account.segment/financialStatus/supportLevel YOK —
+// runtime hata sebebi, schema'ya hizalandı).
+expect('2.10 Account select sadece customerType (izinli)',
+  /prisma\.account\.findUnique\([\s\S]{0,400}select:\s*\{\s*customerType:\s*true,?\s*\}/.test(promptCode), true);
+expect('2.10b AccountCompany.findFirst segment (tenant scope)',
+  /prisma\.accountCompany\.findFirst\([\s\S]{0,400}select:\s*\{\s*segment:\s*true\s*\}/.test(promptCode), true);
+expect('2.10c AccountCompany where accountId + companyId (tenant scope guard)',
+  /accountId:\s*c\.accountId,\s*companyId:\s*c\.companyId/.test(promptCode), true);
 
 // Account email/phone select'lerde geçmiyor (yasak)
 expect('2.11 Account select\'inde "email: true" yok',
