@@ -78,6 +78,8 @@ import {
   type ActionSummary,
   type CaseLinkType,
   type CaseTransferRecord,
+  type CaseTaggingReview,
+  type TaggingVerdict,
   type CaseWatcherRecord,
   type LinkedCaseEntry,
   type CustomerPulse,
@@ -400,6 +402,53 @@ export const caseService = {
       'Vakalar yüklenemedi',
     );
     return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
+  },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+   * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
+   */
+  async listTaggingReviews(
+    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[] },
+    pagination?: CaseListPagination,
+  ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
+    if (USE_MOCK) {
+      return { items: [], total: 0, reviews: new Map() };
+    }
+    const params = new URLSearchParams();
+    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+    if (pagination) {
+      params.set('page', String(pagination.page));
+      params.set('pageSize', String(pagination.pageSize));
+    }
+    const data = await apiFetch<{
+      value: Case[];
+      '@odata.count': number;
+      reviews: Record<string, CaseTaggingReview>;
+    }>(`${API_BASE}/tagging-review?${params.toString()}`, undefined, 'Etiket doğrulama listesi yüklenemedi');
+    return {
+      items: data?.value ?? [],
+      total: data?.['@odata.count'] ?? 0,
+      reviews: new Map(Object.entries(data?.reviews ?? {})),
+    };
+  },
+
+  async updateTaggingReview(
+    caseId: string,
+    patch: { openingVerdict?: TaggingVerdict | null; closingVerdict?: TaggingVerdict | null; note?: string | null },
+  ): Promise<CaseTaggingReview | undefined> {
+    if (USE_MOCK) return undefined;
+    return apiFetch<CaseTaggingReview>(
+      `${API_BASE}/${caseId}/tagging-review`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+      'Etiket doğrulama kaydedilemedi',
+    );
   },
 
   /**

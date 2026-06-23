@@ -1184,6 +1184,8 @@ model Case {
   reminders              CaseReminder[]
   transfers              CaseTransfer[]
   watchers               CaseWatcher[]
+  /// Vaka Etiket Doğrulama Ekranı — açılış/kapanış etiketleme kontrolü (1:1).
+  taggingReview          CaseTaggingReview?
   // Case A → linkedCaseId: A "outgoing" links (CaseLinkSource).
   // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
   outgoingLinks          CaseLink[]               @relation("CaseLinkSource")
@@ -1689,6 +1691,34 @@ model CaseTransfer {
   @@index([caseId])
   @@index([companyId])
   @@index([companyId, transferredAt])
+}
+
+// CaseTaggingReview — Vaka Etiket Doğrulama Ekranı (bilgi bankası seed'i için
+// audit). Supervisor/Admin/SystemAdmin her vakanın açılış (5 alan) ve kapanış
+// (4 alan, sadece Smart Ticket + Çözüldü vakalarda dolu) etiketlemesini
+// Doğru/Yanlış/Belirsiz olarak işaretler. caseId @unique → tek vaka tek kayıt,
+// upsert pattern (QAScoreLog ile aynı desen — concurrency token yok, son
+// yazan kazanır). reviewerId/reviewerName/reviewedAt backend'de (req.user)
+// stamplenir, client body'den asla okunmaz.
+model CaseTaggingReview {
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @unique @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+
+  openingVerdict String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingVerdict String? @db.NVarChar(50) // enum:TaggingVerdict
+  note           String? @db.NVarChar(Max)
+
+  reviewerId   String?   @db.NVarChar(450)
+  reviewerName String?   @db.NVarChar(Max)
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt DateTime @updatedAt
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId])
 }
 
 // CaseWatcher — FAZ 2 Collab. Vaka takipçileri; vakada değişiklik olunca
