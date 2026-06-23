@@ -316,9 +316,10 @@ expect('12.7 Case select customFields + productName + packageName + accountProje
 // 12.8 — 3 yeni paralel fetch
 expect('12.8 caseSolutionStep findMany cap 5 + status !== suggested',
   /prisma\.caseSolutionStep\.findMany\([\s\S]{0,500}status:\s*\{\s*not:\s*'suggested'\s*\}[\s\S]{0,200}take:\s*FAZ4_SOLUTION_STEP_CAP/.test(asCode), true);
-expect('12.9 previousOpenCount destructuring + Çözüldü/İptalEdildi count',
-  /previousOpenCount/.test(asCode)
-    && /status:\s*\{\s*in:\s*\['Çözüldü',\s*'İptalEdildi'\]\s*\}/.test(asCode), true);
+// 12.9 — Codex P2 sonrası TR literal yerine DB ASCII identifier kullanılır;
+// gerçek invariant 13.9'da. Burada sadece destructuring varlığını guard'la.
+expect('12.9 previousOpenCount destructuring var',
+  /previousOpenCount/.test(asCode), true);
 expect('12.10 previousSlaBreachCount destructuring + slaViolation count',
   /previousSlaBreachCount/.test(asCode)
     && /slaViolation:\s*true/.test(asCode), true);
@@ -381,6 +382,35 @@ expect('12.29 AIUsageLog endpoint "status-report" değişmedi',
 // 12.30 — Mevcut "loglarda görünmüyor" disiplini korundu
 expect('12.30 "loglarda görünmüyor" disiplini korundu',
   /loglarda görünmüyor/.test(asCode), true);
+
+console.log('\n── 13) Codex P1+P2 fixes — companyId scope + DB ASCII ──');
+// 13.1-13.2 — supervisor-summary M_STATUS import + ASCII const
+expect('13.1 supervisorSummaryPrompt M_STATUS import',
+  /import \{ fromDb, M_STATUS \} from '\.\.\/db\/enumMap\.js'/.test(promptCode), true);
+expect('13.2 supervisorSummaryPrompt STATUS_DB_RESOLVED + STATUS_DB_CANCELLED',
+  /STATUS_DB_RESOLVED = M_STATUS\['Çözüldü'\][\s\S]{0,200}STATUS_DB_CANCELLED = M_STATUS\['İptalEdildi'\]/.test(promptCode), true);
+// 13.3 — supervisor count where companyId scope (her iki count'ta)
+const supervisorCountWheres = (promptCode.match(/prisma\.case\.count\(\{\s*where:\s*\{\s*companyId:\s*c\.companyId/g) ?? []).length;
+expect('13.3 supervisor case.count en az 2 yerde companyId: c.companyId',
+  supervisorCountWheres >= 2, true, `bulunan=${supervisorCountWheres}`);
+// 13.4 — supervisor count status: DB identifier (TR literal kalmadı)
+expect('13.4 supervisor status: { in: [STATUS_DB_RESOLVED, STATUS_DB_CANCELLED] }',
+  /status:\s*\{\s*in:\s*\[STATUS_DB_RESOLVED,\s*STATUS_DB_CANCELLED\]\s*\}/.test(promptCode), true);
+expect('13.5 supervisor count TR status literal kalmadı',
+  /prisma\.case\.count[\s\S]{0,500}status:\s*\{\s*in:\s*\['Çözüldü',\s*'İptalEdildi'\]/.test(promptCode), false);
+
+// 13.6-13.10 — status-report (actionSummaryAi)
+expect('13.6 actionSummaryAi M_STATUS import',
+  /import \{ fromDb, M_STATUS \} from '\.\.\/db\/enumMap\.js'/.test(asCode), true);
+expect('13.7 actionSummaryAi STATUS_DB_RESOLVED_AS + STATUS_DB_CANCELLED_AS',
+  /STATUS_DB_RESOLVED_AS = M_STATUS\['Çözüldü'\][\s\S]{0,200}STATUS_DB_CANCELLED_AS = M_STATUS\['İptalEdildi'\]/.test(asCode), true);
+const asCountWheres = (asCode.match(/prisma\.case\.count\(\{\s*where:\s*\{\s*companyId:\s*c\.companyId/g) ?? []).length;
+expect('13.8 status-report case.count en az 2 yerde companyId: c.companyId',
+  asCountWheres >= 2, true, `bulunan=${asCountWheres}`);
+expect('13.9 status-report status: DB identifier kullanır',
+  /status:\s*\{\s*in:\s*\[STATUS_DB_RESOLVED_AS,\s*STATUS_DB_CANCELLED_AS\]\s*\}/.test(asCode), true);
+expect('13.10 status-report TR status literal kalmadı',
+  /prisma\.case\.count[\s\S]{0,500}status:\s*\{\s*in:\s*\['Çözüldü',\s*'İptalEdildi'\]/.test(asCode), false);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

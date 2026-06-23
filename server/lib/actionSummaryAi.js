@@ -1,6 +1,10 @@
 import { prisma } from '../db/client.js';
 import { aiClient, callOpenAI, logAIUsage } from './aiClient.js';
-import { fromDb } from '../db/enumMap.js';
+import { fromDb, M_STATUS } from '../db/enumMap.js';
+
+// Codex P2 — DB'de status ASCII identifier tutulur (Cozuldu/IptalEdildi).
+const STATUS_DB_RESOLVED_AS = M_STATUS['Çözüldü'];      // 'Cozuldu'
+const STATUS_DB_CANCELLED_AS = M_STATUS['İptalEdildi']; // 'IptalEdildi'
 
 /**
  * Case Status Report — vakanın paydaşlara gönderilebilecek profesyonel,
@@ -193,12 +197,15 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       select: { title: true, status: true, note: true },
     }),
     // Faz 4 — Önceki vaka sayısı (Çözüldü + İptalEdildi). PII'siz, sayı.
+    // Codex P1 — companyId scope (Account çoklu tenant'a bağlanabilir).
+    // Codex P2 — status DB'de ASCII tutulur (M_STATUS).
     c.accountId
       ? prisma.case.count({
           where: {
+            companyId: c.companyId,
             accountId: c.accountId,
             id: { not: caseId },
-            status: { in: ['Çözüldü', 'İptalEdildi'] },
+            status: { in: [STATUS_DB_RESOLVED_AS, STATUS_DB_CANCELLED_AS] },
           },
         })
       : Promise.resolve(0),
@@ -206,6 +213,7 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     c.accountId
       ? prisma.case.count({
           where: {
+            companyId: c.companyId,
             accountId: c.accountId,
             id: { not: caseId },
             slaViolation: true,
