@@ -775,14 +775,53 @@ function buildSmartTicketAiDraftsMerge(prev, drafts) {
   };
 }
 
-async function assertCaseInScope(caseId, allowedCompanyIds) {
+/**
+ * PR-SD (Codex P2 round-4) — Read path scope guard. Read endpoint'leri
+ * için kullanılır; arşivli case yalnız SystemAdmin'e açıktır, diğer roller
+ * null alır (route 404 yansıtır). Bu helper write semantiği taşımaz —
+ * arşivli case write için assertCaseInScope (default flags) kullanılır
+ * ve 409 case_archived_readonly döner.
+ *
+ * actorRole null/undefined → SystemAdmin değil sayılır (defansif: legacy
+ * caller arşivli case'e erişim alamasın).
+ */
+async function assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole = null) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
-    select: { id: true, companyId: true },
+    select: { id: true, companyId: true, isArchived: true },
   });
   if (!found) return null;
   if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
     throw new CaseAccessError();
+  }
+  // Arşivli case → sadece SystemAdmin görür; diğer roller (Agent/Admin/...)
+  // null alır → route 404 yansıtır (ana case GET /:id rol guard'ı ile
+  // tutarlı; Codex P2 round-4).
+  if (found.isArchived && actorRole !== 'SystemAdmin') {
+    return null;
+  }
+  return found.companyId;
+}
+
+async function assertCaseInScope(caseId, allowedCompanyIds, { allowArchived = false } = {}) {
+  const found = await prisma.case.findUnique({
+    where: { id: caseId },
+    select: { id: true, companyId: true, isArchived: true },
+  });
+  if (!found) return null;
+  if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
+    throw new CaseAccessError();
+  }
+  // PR-SD (Codex P2) — Arşivli vaka tüm write path'lerde READ-ONLY.
+  // SystemAdmin bile transfer/transition/note/file/checklist/solution-step
+  // yapamaz. Önce restore (POST /:id/restore) edilmeli. allowArchived flag
+  // sadece archive()/restore() helper'larının kendileri için (idempotent
+  // davranışı korumak amacıyla).
+  if (found.isArchived && !allowArchived) {
+    throw new CaseValidationError(
+      'Arşivli vakaya yazılamaz. Önce SystemAdmin tarafından restore edilmeli.',
+      { status: 409, code: 'case_archived_readonly' },
+    );
   }
   return found.companyId;
 }
@@ -1685,7 +1724,10 @@ export const caseRepository = {
         { status: 400, code: 'archive_reason_required' },
       );
     }
-    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    // allowArchived: true — assertCaseInScope arşivli case'leri throw eder
+    // (Codex P2 write guard), ama archive() kendisi idempotent: zaten arşivli
+    // case'i tekrar arşivlemek throw değil, current state döndürmek demek.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const before = await prisma.case.findUnique({
@@ -1734,7 +1776,8 @@ export const caseRepository = {
    */
   async restore(id, { actor, allowedCompanyIds }) {
     assertActor(actor, 'caseRepository.restore');
-    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    // allowArchived: true — restore zaten arşivli case'i çevirmek için var.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const before = await prisma.case.findUnique({
@@ -1916,8 +1959,10 @@ export const caseRepository = {
    * Auth: vaka scope + parent note aynı vakaya ait olmalı.
    * Sıralama: createdAt ASC — kronolojik thread.
    */
-  async listReplies(caseId, noteId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listReplies(caseId, noteId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path; arşivli case SystemAdmin'e
+    // açık, diğer roller null/404.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const parent = await prisma.caseNote.findUnique({
@@ -2223,8 +2268,9 @@ export const caseRepository = {
    * personId yoksa (Person'a bağlanmamış User) liste'de görünmez — atama
    * hedefi olamadığı için mention'da da anlamsız.
    */
-  async listMentionableUsers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listMentionableUsers(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const users = await prisma.user.findMany({
@@ -2492,8 +2538,10 @@ export const caseRepository = {
   },
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
-  async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
-    if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
+  async getDownloadUrl(caseId, fileId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path; arşivli case dosyaları
+    // SystemAdmin için erişilebilir kalmalı, diğer roller 404.
+    if (!(await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName);
@@ -3099,8 +3147,9 @@ export const caseRepository = {
    * Bir vakanın tüm aktarım geçmişi — UI için takım/kişi adları enrich edilir.
    * En yeni en üstte. allowedCompanyIds scope'lu.
    */
-  async listTransfers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listTransfers(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const rows = await prisma.caseTransfer.findMany({
@@ -3871,8 +3920,9 @@ async function notifyAssignmentTargets({
  * Çapraz tenant watcher imkânsız.
  */
 export const watcherRepo = {
-  async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async list(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
     const rows = await prisma.caseWatcher.findMany({
       where: { caseId },
@@ -4099,8 +4149,9 @@ const LINK_TYPE_TR = {
 };
 
 export const linkRepo = {
-  async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async list(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
     const rows = await prisma.caseLink.findMany({
       where: { caseId },

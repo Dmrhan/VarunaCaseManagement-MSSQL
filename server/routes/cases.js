@@ -513,7 +513,7 @@ router.get(
   requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     // Scope verify via existing get (404/403 mantığı reuse).
-    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const out = await customerMatchRepository.suggestCustomerMatches({
       caseId: req.params.id,
@@ -674,7 +674,7 @@ router.get(
 router.get(
   '/:id/customer-context',
   asyncRoute(async (req, res) => {
-    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const context = await accountRepository.getCaseCustomerContext({
       accountId: caseRow.accountId,
@@ -719,7 +719,7 @@ router.get(
 router.get(
   '/:id/watchers',
   asyncRoute(async (req, res) => {
-    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -747,7 +747,7 @@ router.post(
       const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(role);
       let assignedOwner = false;
       if (!elevated && req.user.personId) {
-        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
         if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
         assignedOwner = c.assignedPersonId === req.user.personId;
       }
@@ -803,7 +803,7 @@ router.delete(
 router.get(
   '/:id/links',
   asyncRoute(async (req, res) => {
-    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -846,7 +846,7 @@ router.delete(
   asyncRoute(async (req, res) => {
     const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(req.user.role);
     if (!elevated) {
-      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
       if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
       if (!req.user.personId || c.assignedPersonId !== req.user.personId) {
         return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
@@ -872,6 +872,7 @@ router.get(
     const list = await caseRepository.listTransfers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -968,6 +969,7 @@ router.get(
       req.params.id,
       req.params.noteId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (replies === null) return res.status(404).json({ error: 'Not bulunamadı' });
     res.json({ value: replies });
@@ -1068,6 +1070,7 @@ router.get(
     const users = await caseRepository.listMentionableUsers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (users === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: users });
@@ -1082,7 +1085,7 @@ router.post(
   '/:id/mentions/seen',
   asyncRoute(async (req, res) => {
     // Önce case scope check (allowedCompanyIds), sonra updateMany.
-    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds))) {
+    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role))) {
       return res.status(404).json({ error: 'Vaka bulunamadı' });
     }
     const result = await mentionRepo.markCaseAsSeen(
@@ -1285,6 +1288,7 @@ router.get(
       req.params.id,
       req.params.fileId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (!result) return res.status(404).json({ error: 'Dosya bulunamadı' });
     res.json(result);
