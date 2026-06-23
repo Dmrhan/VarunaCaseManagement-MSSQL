@@ -773,9 +773,16 @@ console.log('\n── 4o) Cila-3 — Popover portal + statü adı (madde #3+#4) 
   // 4o.6 — scroll/resize'da kapan (reposition değil)
   expect('4o.6 scroll/resize listeners → setOpen(false) (kapan)',
     /onScroll = \(\) => setOpen\(false\)[\s\S]{0,200}onResize = \(\) => setOpen\(false\)/.test(pop), true);
-  // 4o.7 — Trigger slot ref (getBoundingClientRect için)
-  expect('4o.7 triggerSlotRef getBoundingClientRect',
-    /triggerSlotRef\.current[\s\S]{0,100}getBoundingClientRect/.test(pop), true);
+  // 4o.7 — Pozisyon hesabı için wrapperRef rect (Cila-3 fix:
+  //        eski triggerSlotRef + span "contents" pattern getBoundingClientRect
+  //        {0,0,0,0} döndürüyordu → menü sol üst köşede açılıyordu).
+  expect('4o.7 wrapperRef.current.getBoundingClientRect (display:contents bug fix)',
+    /const trig = wrapperRef\.current;[\s\S]{0,100}getBoundingClientRect\(\)/.test(pop), true);
+  // 4o.7b — Eski triggerSlotRef + contents span pattern code path'ten silindi
+  // (comment'lerde açıklama için geçebilir — code-only kontrol).
+  const popCode = pop.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  expect('4o.7b eski triggerSlotRef / className="contents" code path silindi',
+    /triggerSlotRef|className="contents"/.test(popCode), false);
   // 4o.8 — Portal pozisyon fixed
   expect('4o.8 portal content position: fixed',
     /position: 'fixed', top: portalPos\.top, left: portalPos\.left/.test(pop), true);

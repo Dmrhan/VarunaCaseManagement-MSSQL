@@ -2,6 +2,13 @@ import { useEffect, useRef, useState, useLayoutEffect, type ReactNode, type CSSP
 import { createPortal } from 'react-dom';
 import { cn } from './cn';
 
+// Cila-3 fix — portal pozisyonu için trigger rect'i. Eski versiyon
+// <span className="contents"> üzerine ref koyuyordu; display: contents
+// element box'unu render etmez → getBoundingClientRect() {0,0,0,0} döner
+// → menü ekranın sol üst köşesinde açılırdı. Şimdi wrapperRef'i
+// (relative inline-flex div) kullanıyoruz; trigger button'un dış
+// sarmalayıcısı olarak gerçek rect'i verir.
+
 interface PopoverProps {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode;
   children: (props: { close: () => void }) => ReactNode;
@@ -45,7 +52,6 @@ export function Popover({
 }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const triggerSlotRef = useRef<HTMLSpanElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
   const [portalPos, setPortalPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -57,7 +63,10 @@ export function Popover({
       return;
     }
     const compute = () => {
-      const trig = triggerSlotRef.current;
+      // Cila-3 fix — trigger rect'i için wrapperRef (relative inline-flex
+      // div) kullanılır. Eski span/contents pattern getBoundingClientRect
+      // {0,0,0,0} döndürdüğü için menü sol üst köşede açılıyordu.
+      const trig = wrapperRef.current;
       if (!trig) return;
       const r = trig.getBoundingClientRect();
       // İlk render'da portalRef daha bağlanmamış olabilir — varsayım 240px.
@@ -133,9 +142,7 @@ export function Popover({
 
   return (
     <div ref={wrapperRef} className="relative inline-flex">
-      <span ref={triggerSlotRef} className="contents">
-        {trigger({ open, toggle: () => setOpen((v) => !v) })}
-      </span>
+      {trigger({ open, toggle: () => setOpen((v) => !v) })}
       {open && (usePortal ? createPortal(content, document.body) : content)}
     </div>
   );
