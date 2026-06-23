@@ -392,6 +392,7 @@ export function CasesListPage({
     filters.teamScope,
     filters.slaViolation,
     filters.resolvedToday,
+    filters.includeArchived,
   ]);
 
   const stats = useMemo(() => {
@@ -1169,6 +1170,28 @@ export function CasesListPage({
                       />
                     </div>
                   </FilterPanelSection>
+
+                  {/* PR-SD — Arşivlenenleri göster: yalnız SystemAdmin. Backend
+                      includeArchived rol guard'ı her durumda enforce eder; UI
+                      sadece chip görünürlüğünü kapatır. */}
+                  {user?.role === 'SystemAdmin' && (
+                    <FilterPanelSection label="Arşiv">
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-ndark-text">
+                        <input
+                          type="checkbox"
+                          checked={filters.includeArchived === true}
+                          onChange={(e) =>
+                            setFilters((f) => ({
+                              ...f,
+                              includeArchived: e.target.checked || undefined,
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Arşivlenenleri göster
+                      </label>
+                    </FilterPanelSection>
+                  )}
 
                   <div className="flex items-center justify-between border-t border-slate-200 pt-3 dark:border-ndark-border">
                     {hasActiveFilters ? (

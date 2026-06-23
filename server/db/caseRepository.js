@@ -118,6 +118,9 @@ const CASE_INCLUDE = {
   // sayisi: Related/Parent A->B yonu + Duplicate symmetric'in A->B satiri.
   // Detay sayfasi tam listeyi LinksTab'de gosterir; bu yalniz chip icin.
   _count: { select: { outgoingLinks: true } },
+  // PR-SD — Arşiv banner için kim arşivledi adı (audit JOIN; PII guard
+  // sadece display name).
+  archivedByUser: { select: { id: true, fullName: true } },
 };
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
@@ -131,7 +134,7 @@ export const NOTE_REACTION_EMOJIS = ['thumbs_up', 'eyes', 'check', 'important', 
 //  - callLog'lardaki enum'ları da TR'ye çevir
 function shape(c) {
   if (!c) return null;
-  const { attachments, callLogs, _count, ...rest } = c;
+  const { attachments, callLogs, _count, archivedByUser, ...rest } = c;
   const baseShape = fromDb(rest);
   return {
     ...baseShape,
@@ -139,6 +142,8 @@ function shape(c) {
     callLogs: (callLogs ?? []).map((cl) => fromDb(cl)),
     // _count.outgoingLinks → linkCount (frontend için tek flat number).
     linkCount: _count?.outgoingLinks ?? 0,
+    // PR-SD — Arşiv banner için flat display name (UI JOIN gerekmez).
+    archivedByUserName: archivedByUser?.fullName ?? null,
   };
 }
 
@@ -969,12 +974,15 @@ export const caseRepository = {
     return { items: items.map(shape), total };
   },
 
-  async get(id, allowedCompanyIds) {
+  async get(id, allowedCompanyIds, actorRole) {
     const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     if (!c) return null;
     if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
       throw new CaseAccessError();
     }
+    // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
+    // roller için 404 davranışı (null döner → route 404 yansıtır).
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
     return shape(c);
   },
 
@@ -1603,6 +1611,114 @@ export const caseRepository = {
       where: { id: caseId },
       include: CASE_INCLUDE,
     });
+    return shape(updated);
+  },
+
+  /**
+   * PR-SD — Vakayı arşivle (SystemAdmin-only). Hard delete YOK; tüm child
+   * kayıtlar intact, sadece UI listelerinden default exclude'la gizlenir.
+   * Status enum dokunulmaz — archive orthogonal bayrak. Reason zorunlu
+   * (route layer 3+ char validate eder; defansif olarak burada da kontrol).
+   *
+   * Audit: CaseActivity actionType='Archived', note=reason, actor.
+   * Watcher bildirimi YOK (operasyonel olmayan event).
+   */
+  async archive(id, { reason, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.archive');
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (trimmedReason.length < 3) {
+      throw new CaseValidationError(
+        'Arşiv sebebi gerekli (en az 3 karakter).',
+        { status: 400, code: 'archive_reason_required' },
+      );
+    }
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (before.isArchived) {
+      // Idempotent: zaten arşivli — current state'i döndür (UI'da double-click
+      // edilirse 409 yerine sessizce success).
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: true,
+          archivedAt: new Date(),
+          archivedByUserId: actor.userId ?? null,
+          archiveReason: trimmedReason,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Archived',
+          action: 'Vaka arşivlendi',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: trimmedReason,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
+   * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
+   */
+  async restore(id, { actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.restore');
+    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (!before.isArchived) {
+      // Idempotent: zaten arşivli değil.
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: false,
+          archivedAt: null,
+          archivedByUserId: null,
+          archiveReason: null,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Restored',
+          action: 'Vaka arşivden çıkarıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     return shape(updated);
   },
 
@@ -4101,6 +4217,14 @@ function buildWhere(f, allowedCompanyIds) {
   // hiçbir şey görmez).
   if (allowedCompanyIds) {
     andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
+  // PR-SD — Soft archive default exclude. SystemAdmin'in UI'dan açık seçimi
+  // ile includeArchived: true override eder. Diğer query path'lerinde (KPI,
+  // report, AI count'ları vb.) DEFAULT EXCLUDE yok — bu PR sadece liste
+  // temizliği için minimum scope (1-2 arşivli vaka KPI sayımında tolere
+  // edilebilir).
+  if (!f.includeArchived) {
+    andClauses.push({ isArchived: false });
   }
   // Default: snooze aktif vakalar (snoozeUntil > now) listede gizli — "Later"
   // sekmesi ayrı endpoint kullanıyor. includeSnoozed flag ile override edilir.
