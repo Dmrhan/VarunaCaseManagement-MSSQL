@@ -719,7 +719,7 @@ router.get(
 router.get(
   '/:id/watchers',
   asyncRoute(async (req, res) => {
-    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -803,7 +803,7 @@ router.delete(
 router.get(
   '/:id/links',
   asyncRoute(async (req, res) => {
-    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -872,6 +872,7 @@ router.get(
     const list = await caseRepository.listTransfers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -968,6 +969,7 @@ router.get(
       req.params.id,
       req.params.noteId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (replies === null) return res.status(404).json({ error: 'Not bulunamadı' });
     res.json({ value: replies });
@@ -1068,6 +1070,7 @@ router.get(
     const users = await caseRepository.listMentionableUsers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (users === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: users });
@@ -1285,6 +1288,7 @@ router.get(
       req.params.id,
       req.params.fileId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (!result) return res.status(404).json({ error: 'Dosya bulunamadı' });
     res.json(result);
