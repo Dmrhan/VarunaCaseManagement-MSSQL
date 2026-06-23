@@ -28,6 +28,10 @@ import {
   mapDrilldownCase,
   bucketLabel,
 } from '../analytics/drilldownQuery.js';
+import {
+  fetchSupervisorEnrichment,
+  buildSupervisorSummaryPrompt,
+} from '../lib/supervisorSummaryPrompt.js';
 
 const router = Router();
 
@@ -436,41 +440,72 @@ router.post(
   '/supervisor-summary',
   rateLimit,
   aiHandler('supervisor-summary', async (req, res) => {
-    const { case: c, history, notes, callLogs } = req.body ?? {};
-    req.aiLog.caseId = c?.id;
-    req.aiLog.companyId = c?.companyId;
+    // Faz 1 — caseId tabanlı enrichment. Frontend artık zengin payload taşımaz;
+    // backend caseId'den (PII guard'lı select'le) Smart Ticket sınıflandırma +
+    // Çözüm Adımları + Müşteri sayısal sinyalleri + Devir + Ürün + son 3 çağrı
+    // + resolutionNote/cancellationReason toplar.
+    //
+    // Geriye dönük uyum: caseId yoksa eski payload (case + history + notes +
+    // callLogs) ile fallback. (Test/UI iki şekilde de çalışır.)
+    const { caseId, case: legacyCase } = req.body ?? {};
 
-    const system = [
-      "Sen Varuna CRM'de supervisor incelemelerine yardımcı olan bir asistanısın.",
-      'Türkçe yaz. SADECE JSON formatında yanıt ver.',
-    ].join('\n');
+    // Tenant scope guard — allowedCompanyIds users.allowedCompanyIds'ten gelir
+    // (verifyJwt zaten req.user'a koyar).
+    const allowedCompanyIds = req.user?.allowedCompanyIds;
 
-    // SLA bilgisini human-readable formata çevir (now'a göre kalan/geçen süre)
-    const slaSummary = formatSlaInfo(c);
+    let enrichment = null;
+    if (caseId) {
+      enrichment = await fetchSupervisorEnrichment({ caseId, allowedCompanyIds });
+      if (enrichment.error === 'not_found') return res.status(404).json({ error: 'not_found' });
+      if (enrichment.error === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+      req.aiLog.caseId = enrichment.case.id;
+      req.aiLog.companyId = enrichment.case.companyId;
+    } else if (legacyCase) {
+      // Legacy path — eski (kısa) payload akışı; richer enrichment olmadan.
+      req.aiLog.caseId = legacyCase?.id;
+      req.aiLog.companyId = legacyCase?.companyId;
+    } else {
+      return res.status(400).json({ error: 'caseId veya case gerekli.' });
+    }
 
-    const user = [
-      'Vaka bilgileri:',
-      `- Konu: ${c?.title ?? '-'}`,
-      `- Kategori: ${c?.category ?? '-'} / ${c?.subCategory ?? '-'}`,
-      `- Statü: ${c?.status ?? '-'}`,
-      `- Öncelik: ${c?.priority ?? '-'}`,
-      `- SLA Yanıt: ${slaSummary.response}`,
-      `- SLA Çözüm: ${slaSummary.resolution}`,
-      `- SLA Durum: ${slaSummary.status}`,
-      `- Açıklama: ${c?.description ?? '-'}`,
-      '',
-      `History (son 5): ${(Array.isArray(history) ? history.slice(-5) : []).map((h) => h.action ?? h.fieldName).join(' / ')}`,
-      `Notlar: ${(Array.isArray(notes) ? notes.slice(0, 3) : []).map((n) => n.content ?? n).join(' | ')}`,
-      `Çağrılar: ${Array.isArray(callLogs) ? callLogs.length : 0} adet`,
-      '',
-      'JSON formatı:',
-      '{',
-      '  "summary": "2-3 cümle vaka özeti",',
-      '  "riskLevel": "Düşük|Orta|Yüksek|Kritik",',
-      '  "keyPoints": ["nokta 1", "nokta 2", "nokta 3"],',
-      '  "recommendation": "1 cümle öneri"',
-      '}',
-    ].join('\n');
+    let system;
+    let user;
+    if (enrichment) {
+      ({ system, user } = buildSupervisorSummaryPrompt(enrichment));
+    } else {
+      // Legacy fallback prompt — input zenginleştirme yok; PII alanları YINE
+      // gönderilmez (legacyCase mevcut frontend tarafından zaten PII'siz dolar).
+      const c = legacyCase;
+      const { history, notes, callLogs } = req.body ?? {};
+      system = [
+        "Sen Varuna CRM'de supervisor incelemelerine yardımcı olan bir asistanısın.",
+        'Türkçe yaz. SADECE JSON formatında yanıt ver.',
+      ].join('\n');
+      const slaSummary = formatSlaInfo(c);
+      user = [
+        'Vaka bilgileri:',
+        `- Konu: ${c?.title ?? '-'}`,
+        `- Kategori: ${c?.category ?? '-'} / ${c?.subCategory ?? '-'}`,
+        `- Statü: ${c?.status ?? '-'}`,
+        `- Öncelik: ${c?.priority ?? '-'}`,
+        `- SLA Yanıt: ${slaSummary.response}`,
+        `- SLA Çözüm: ${slaSummary.resolution}`,
+        `- SLA Durum: ${slaSummary.status}`,
+        `- Açıklama: ${c?.description ?? '-'}`,
+        '',
+        `History (son 5): ${(Array.isArray(history) ? history.slice(-5) : []).map((h) => h.action ?? h.fieldName).join(' / ')}`,
+        `Notlar: ${(Array.isArray(notes) ? notes.slice(0, 3) : []).map((n) => n.content ?? n).join(' | ')}`,
+        `Çağrılar: ${Array.isArray(callLogs) ? callLogs.length : 0} adet`,
+        '',
+        'JSON formatı:',
+        '{',
+        '  "summary": "2-3 cümle vaka özeti",',
+        '  "riskLevel": "Düşük|Orta|Yüksek|Kritik",',
+        '  "keyPoints": ["nokta 1", "nokta 2", "nokta 3"],',
+        '  "recommendation": "1 cümle öneri"',
+        '}',
+      ].join('\n');
+    }
 
     const { json } = await callOpenAI({ system, user, expectJson: true });
     res.json(json);

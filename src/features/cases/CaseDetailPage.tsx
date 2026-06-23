@@ -1418,24 +1418,10 @@ function RightPanel({
 
   async function handleAnalyze() {
     setAnalyzing(true);
-    const r = await aiService.supervisorSummary({
-      case: {
-        title: item.title,
-        description: item.description,
-        category: item.category,
-        subCategory: item.subCategory,
-        status: item.status,
-        priority: item.priority,
-        slaViolation: item.slaViolation,
-        slaResponseDueAt: item.slaResponseDueAt,
-        slaResolutionDueAt: item.slaResolutionDueAt,
-        slaPausedAt: item.slaPausedAt,
-        createdAt: item.createdAt,
-      },
-      history: item.history,
-      notes: item.notes,
-      callLogs: item.callLogs,
-    });
+    // Faz 1 — caseId tabanlı. Backend zengin sinyalleri (Smart Ticket +
+    // Çözüm Adımları + Müşteri durumu + Devir + Ürün + son 3 çağrı +
+    // resolutionNote) PII guard'lı select'lerle kendisi toplar.
+    const r = await aiService.supervisorSummary({ caseId: item.id });
     if (!r.ok) {
       setAnalyzing(false);
       toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
