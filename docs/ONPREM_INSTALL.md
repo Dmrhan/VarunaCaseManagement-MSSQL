@@ -171,8 +171,12 @@ cd C:\apps\VarunaCaseManagement
 npm run deploy:onprem
 ```
 
-Tek komut sırayı garanti eder:
-`pm2 stop varuna-cm && git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 start varuna-cm`
+İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
+yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+
+Rollback safety: mutate fail ederse `pm2 start` yine çağrılır (eski build
+geri yüklenir; production kalıcı down kalmaz). Bkz.
+[OPERATIONS.md "On-Prem (PM2) Deploy"](OPERATIONS.md) çıkış kodları.
 
 Downtime: ~30-120 sn (build süresi).
 
