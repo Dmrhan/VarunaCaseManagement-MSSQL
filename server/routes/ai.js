@@ -31,6 +31,7 @@ import {
 import {
   fetchSupervisorEnrichment,
   buildSupervisorSummaryPrompt,
+  SUPERVISOR_SUMMARY_SCHEMA,
 } from '../lib/supervisorSummaryPrompt.js';
 
 const router = Router();
@@ -507,7 +508,21 @@ router.post(
       ].join('\n');
     }
 
-    const { json } = await callOpenAI({ system, user, expectJson: true });
+    // Faz 2 — strict json_schema. callOpenAI({ schema }) decoding-time'da
+    // model çıktısını SUPERVISOR_SUMMARY_SCHEMA'ya kilitler:
+    // - riskLevel enum
+    // - keyPoints array<string>
+    // - confidence number
+    // - kategori/öncelik alanı YOK (sert kural)
+    //
+    // Legacy fallback yolunda da aynı şema kullanılır — eski caller varsa
+    // confidence alanı yeni gelir (geriye dönük: opsiyonel parser frontend'de).
+    const { json } = await callOpenAI({
+      system,
+      user,
+      schema: SUPERVISOR_SUMMARY_SCHEMA,
+      schemaName: 'supervisor_summary',
+    });
     res.json(json);
   }),
 );

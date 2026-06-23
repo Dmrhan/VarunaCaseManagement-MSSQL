@@ -174,9 +174,11 @@ expect('7.1 prompt\'ta kategori üretimi yok ("categorySuggestion"/"categoryPred
   /categorySuggestion|categoryPrediction/.test(promptCode), false);
 expect('7.2 prompt\'ta öncelik üretimi yok',
   /prioritySuggestion|priorityPrediction/.test(promptCode), false);
-// 4-alan şema korundu (summary/riskLevel/keyPoints/recommendation)
-expect('7.3 çıktı şeması 4 alan (summary/riskLevel/keyPoints/recommendation)',
-  /"summary":[\s\S]{0,300}"riskLevel":[\s\S]{0,300}"keyPoints":[\s\S]{0,300}"recommendation":/.test(promptCode), true);
+// Çıktı şeması 11.2'de strict json_schema üzerinden guard'lanıyor;
+// eski 4-alan JSON format bloğu (text-blob) Faz 2'de kaldırıldı.
+// Buradaki invariant SUPERVISOR_SUMMARY_SCHEMA üzerinden geçer.
+expect('7.3 schema 5 required (Faz 2 strict mode — kategori/öncelik YOK)',
+  /required:\s*\[\s*'summary',\s*'riskLevel',\s*'keyPoints',\s*'recommendation',\s*'confidence'\s*\]/.test(promptCode), true);
 
 console.log('\n── 8) Frontend handleAnalyze caseId-only payload ───────');
 const caseDetail = read('src/features/cases/CaseDetailPage.tsx');
@@ -243,6 +245,48 @@ expect('10.15 RunaAiCard çağrısı riskLevel + keyPoints geçer',
   /<RunaAiCard[\s\S]{0,800}riskLevel=\{item\.aiRiskLevel \?\? null\}[\s\S]{0,200}keyPoints=\{parseAiKeyPoints\(item\.aiKeyPoints\)\}/.test(detailCode), true);
 expect('10.16 parseAiKeyPoints JSON.parse + Array.isArray guard',
   /JSON\.parse\(raw\)[\s\S]{0,200}Array\.isArray/.test(detailCode), true);
+
+console.log('\n── 11) Faz 2 — strict json_schema + persist ─────────────');
+// 11.1 — SUPERVISOR_SUMMARY_SCHEMA export
+expect('11.1 SUPERVISOR_SUMMARY_SCHEMA export',
+  /export const SUPERVISOR_SUMMARY_SCHEMA = \{/.test(promptModule), true);
+// 11.2 — Schema 5 alan required (sert kural: kategori/öncelik YOK)
+expect('11.2 schema required 5 alan (summary/riskLevel/keyPoints/recommendation/confidence)',
+  /required:\s*\[\s*'summary',\s*'riskLevel',\s*'keyPoints',\s*'recommendation',\s*'confidence'\s*\]/.test(promptModule), true);
+// 11.3 — Schema enum riskLevel 4 seviye TR
+expect('11.3 schema riskLevel enum ["Düşük","Orta","Yüksek","Kritik"]',
+  /enum:\s*\['Düşük',\s*'Orta',\s*'Yüksek',\s*'Kritik'\]/.test(promptModule), true);
+// 11.4 — confidence number type
+expect('11.4 schema confidence number type',
+  /confidence:\s*\{\s*type:\s*'number'\s*\}/.test(promptModule), true);
+// 11.5 — Schema'da kategori/öncelik alanı YOK (sert kural)
+expect('11.5 schema\'da categorySuggestion/Prediction YOK',
+  /categorySuggestion|categoryPrediction/.test(promptModule), false);
+expect('11.6 schema\'da prioritySuggestion/Prediction YOK',
+  /prioritySuggestion|priorityPrediction/.test(promptModule), false);
+
+// 11.7 — Route handler schema mode kullanıyor (expectJson değil)
+expect('11.7 ai.js supervisor-summary callOpenAI({ schema: SUPERVISOR_SUMMARY_SCHEMA })',
+  /callOpenAI\(\{\s*system,\s*user,\s*schema:\s*SUPERVISOR_SUMMARY_SCHEMA/.test(aiRoutes), true);
+// 11.8 — supervisor_summary schemaName
+expect('11.8 schemaName: "supervisor_summary"',
+  /schemaName:\s*'supervisor_summary'/.test(aiRoutes), true);
+
+// 11.9 — Prompt builder system'da kategori/öncelik üretim YASAĞI metni
+expect('11.9 system prompt "KATEGORİ veya ÖNCELİK ÜRETME" talimatı',
+  /KATEGORİ veya ÖNCELİK ÜRETME/.test(promptCode), true);
+
+// 11.10 — aiService.ts SupervisorSummary.confidence
+expect('11.10 SupervisorSummary.confidence optional number',
+  /interface SupervisorSummary \{[\s\S]{0,500}confidence\?:\s*number/.test(aiService), true);
+
+// 11.11 — handleAnalyze persist 5 alan (eski 2 + yeni 3)
+expect('11.11 handleAnalyze persist aiSummary + aiFollowupRecommendation',
+  /caseService\.update\(item\.id,\s*\{[\s\S]{0,500}aiSummary:\s*r\.data\.summary,[\s\S]{0,200}aiFollowupRecommendation:\s*r\.data\.recommendation,/.test(detailCode), true);
+expect('11.12 handleAnalyze persist aiRiskLevel + aiKeyPoints',
+  /aiRiskLevel:\s*r\.data\.riskLevel,[\s\S]{0,200}aiKeyPoints:\s*JSON\.stringify\(r\.data\.keyPoints/.test(detailCode), true);
+expect('11.13 handleAnalyze conditional aiConfidenceScore (typeof number guard)',
+  /typeof r\.data\.confidence === 'number'[\s\S]{0,200}aiConfidenceScore:\s*r\.data\.confidence/.test(detailCode), true);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

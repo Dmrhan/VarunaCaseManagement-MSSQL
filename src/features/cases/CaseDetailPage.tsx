@@ -1443,9 +1443,19 @@ function RightPanel({
       toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
       return;
     }
+    // Faz 2 — supervisor-summary çıktısının persist edilen 5 alanı.
+    // Eski 2 alan (aiSummary, aiFollowupRecommendation) korunur; yeni 3 alan
+    // (aiRiskLevel, aiKeyPoints, aiConfidenceScore) Faz 3 schema'sıyla
+    // birlikte gelir. confidence opsiyonel — eski çağrı cache'inden
+    // dönerse undefined olur, payload'a yazılmaz (Partial<Case>).
     const updated = await caseService.update(item.id, {
       aiSummary: r.data.summary,
       aiFollowupRecommendation: r.data.recommendation,
+      aiRiskLevel: r.data.riskLevel,
+      aiKeyPoints: JSON.stringify(r.data.keyPoints ?? []),
+      ...(typeof r.data.confidence === 'number'
+        ? { aiConfidenceScore: r.data.confidence }
+        : {}),
     });
     setAnalyzing(false);
     if (updated) {

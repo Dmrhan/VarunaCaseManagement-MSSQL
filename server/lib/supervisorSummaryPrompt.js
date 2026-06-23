@@ -402,29 +402,53 @@ export function buildSupervisorSummaryPrompt(enrichment) {
   // ───────── Birleştir ─────────
   const body = sections.map(([title, content]) => `${title}\n${content}`).join('\n\n');
 
-  // System prompt — çıktı şeması ESKİ (Faz 1 sadece input zenginleşir;
-  // çıktı şeması Faz 2/3'te değişir).
+  // System prompt — Faz 2 strict json_schema mode'da. Model çıktıyı
+  // SUPERVISOR_SUMMARY_SCHEMA enum/required kilidi ile döner; user prompt
+  // talimat içermez ama bağlam talimatı verir.
+  //
+  // KATI KURAL: KATEGORİ veya ÖNCELİK ÜRETME — RUNA paneli yalnız yorum
+  // (özet/risk/keyPoints/öneri/confidence) yazar. Kategori/öncelik
+  // intake'ten (suggest-category / KB) gelir.
   const system = [
     "Sen Varuna CRM'de supervisor incelemelerine yardımcı olan bir asistanısın.",
     'Türkçe yaz. SADECE JSON formatında yanıt ver.',
     'Bağlamı yapılandırılmış bölümler hâlinde alacaksın (## Vaka, ## Sınıflandırma vb.).',
     'Bir bölüm yoksa o bilgi de yoktur — uydurma. Verilmeyen kişi/iletişim bilgisini ASLA tahmin etme.',
+    'KATEGORİ veya ÖNCELİK ÜRETME — bunlar intake aşamasında belirlenir; sen değiştirmez/önermezsin.',
   ].join('\n');
 
   const user = [
     body,
     '',
-    'JSON formatı:',
-    '{',
-    '  "summary": "2-3 cümle vaka özeti — yukarıdaki bağlam üzerinden",',
-    '  "riskLevel": "Düşük|Orta|Yüksek|Kritik",',
-    '  "keyPoints": ["nokta 1", "nokta 2", "nokta 3"],',
-    '  "recommendation": "1 cümle öneri"',
-    '}',
+    'GÖREV:',
+    '- summary: 2-3 cümle vaka özeti — yukarıdaki bağlam üzerinden.',
+    '- riskLevel: Düşük | Orta | Yüksek | Kritik.',
+    '- keyPoints: 2-5 madde kısa bullet (her biri 1 cümle).',
+    '- recommendation: 1 cümle takip önerisi.',
+    '- confidence: 0.0-1.0 arası — yorumun bağlam yeterliliğine güvenin',
+    '  (kategori/öncelik güveni DEĞİL; özet analizinin güveni).',
   ].join('\n');
 
   return { system, user };
 }
+
+/**
+ * Faz 2 — strict json_schema. callOpenAI({ schema }) ile geçirilir; modelin
+ * çıktısı decoding-time'da bu şemaya kilitlenir. Kategori/öncelik alanları
+ * burada YOK (sert kural — RUNA paneli intake değiştirmez).
+ */
+export const SUPERVISOR_SUMMARY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'riskLevel', 'keyPoints', 'recommendation', 'confidence'],
+  properties: {
+    summary:        { type: 'string' },
+    riskLevel:      { type: 'string', enum: ['Düşük', 'Orta', 'Yüksek', 'Kritik'] },
+    keyPoints:      { type: 'array', items: { type: 'string' } },
+    recommendation: { type: 'string' },
+    confidence:     { type: 'number' },
+  },
+};
 
 // Test/smoke için constant export — cap'leri tek yerden okumak.
 export const SUPERVISOR_SUMMARY_CAPS = {

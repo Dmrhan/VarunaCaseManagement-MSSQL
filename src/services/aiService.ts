@@ -169,6 +169,11 @@ export interface SupervisorSummary {
   riskLevel: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
   keyPoints: string[];
   recommendation: string;
+  /**
+   * Faz 2 — özet analizinin güveni (0-1). Kategori güveni DEĞİL. Mevcut
+   * caller'lar opsiyonel parse edebilsin diye optional tutulur (eski cache).
+   */
+  confidence?: number;
 }
 
 // ---- 4) Churn dönüşüm önerisi ----
