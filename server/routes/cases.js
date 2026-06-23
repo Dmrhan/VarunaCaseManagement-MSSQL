@@ -513,7 +513,7 @@ router.get(
   requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     // Scope verify via existing get (404/403 mantığı reuse).
-    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const out = await customerMatchRepository.suggestCustomerMatches({
       caseId: req.params.id,
@@ -674,7 +674,7 @@ router.get(
 router.get(
   '/:id/customer-context',
   asyncRoute(async (req, res) => {
-    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const context = await accountRepository.getCaseCustomerContext({
       accountId: caseRow.accountId,
@@ -747,7 +747,7 @@ router.post(
       const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(role);
       let assignedOwner = false;
       if (!elevated && req.user.personId) {
-        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
         if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
         assignedOwner = c.assignedPersonId === req.user.personId;
       }
@@ -846,7 +846,7 @@ router.delete(
   asyncRoute(async (req, res) => {
     const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(req.user.role);
     if (!elevated) {
-      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
       if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
       if (!req.user.personId || c.assignedPersonId !== req.user.personId) {
         return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
@@ -1082,7 +1082,7 @@ router.post(
   '/:id/mentions/seen',
   asyncRoute(async (req, res) => {
     // Önce case scope check (allowedCompanyIds), sonra updateMany.
-    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds))) {
+    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role))) {
       return res.status(404).json({ error: 'Vaka bulunamadı' });
     }
     const result = await mentionRepo.markCaseAsSeen(

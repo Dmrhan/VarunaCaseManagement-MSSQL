@@ -182,6 +182,32 @@ const dataAssignsArchive = (repoCode.match(/data:\s*\{[\s\S]{0,400}isArchived:/g
 expect('6.4 isArchived data assign sadece archive/restore içinde (en fazla 2 yerde)',
   dataAssignsArchive <= 2, true, `bulunan=${dataAssignsArchive}`);
 
+console.log('\n── 7) Codex P2 round-2 ────────────────────────────────');
+// P2.1 — TÜM caseRepository.get çağrılarında req.user.role 3. parametre
+const allGetCalls = (routesCode.match(/caseRepository\.get\(/g) ?? []).length;
+const withRole = (routesCode.match(/caseRepository\.get\(req\.params\.id, req\.user\.allowedCompanyIds, req\.user\.role\)/g) ?? []).length;
+expect('7.1 caseRepository.get çağrı sayısı (genel)', allGetCalls > 0, true, `bulunan=${allGetCalls}`);
+expect('7.2 TÜM caseRepository.get çağrıları req.user.role ile (P2.1)',
+  withRole === allGetCalls, true, `withRole=${withRole}/${allGetCalls}`);
+
+// P2.2 — assertCaseInScope arşivli case için throw (write guard)
+expect('7.3 assertCaseInScope { allowArchived = false } parametre',
+  /async function assertCaseInScope\(caseId, allowedCompanyIds, \{ allowArchived = false \} = \{\}\)/.test(repoCode), true);
+expect('7.4 assertCaseInScope select isArchived: true',
+  /select:\s*\{\s*id:\s*true,\s*companyId:\s*true,\s*isArchived:\s*true\s*\}/.test(repoCode), true);
+expect('7.5 assertCaseInScope archived + !allowArchived → throw 409',
+  /found\.isArchived && !allowArchived[\s\S]{0,400}case_archived_readonly/.test(repoCode), true);
+expect('7.6 archive() allowArchived: true (idempotent için)',
+  /async archive[\s\S]{0,500}assertCaseInScope\(id, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+expect('7.7 restore() allowArchived: true (restore için zorunlu)',
+  /async restore[\s\S]{0,500}assertCaseInScope\(id, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+
+// P2.2 — sadece archive/restore'da allowArchived flag var; diğer write
+// method'larda YOK (otomatik korumayı alırlar).
+const allowArchivedCallers = (repoCode.match(/assertCaseInScope\([^)]+allowArchived: true/g) ?? []).length;
+expect('7.8 allowArchived flag SADECE archive+restore (2 yer)',
+  allowArchivedCallers === 2, true, `bulunan=${allowArchivedCallers}`);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

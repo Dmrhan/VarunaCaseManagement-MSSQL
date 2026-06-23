@@ -775,14 +775,25 @@ function buildSmartTicketAiDraftsMerge(prev, drafts) {
   };
 }
 
-async function assertCaseInScope(caseId, allowedCompanyIds) {
+async function assertCaseInScope(caseId, allowedCompanyIds, { allowArchived = false } = {}) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
-    select: { id: true, companyId: true },
+    select: { id: true, companyId: true, isArchived: true },
   });
   if (!found) return null;
   if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
     throw new CaseAccessError();
+  }
+  // PR-SD (Codex P2) — Arşivli vaka tüm write path'lerde READ-ONLY.
+  // SystemAdmin bile transfer/transition/note/file/checklist/solution-step
+  // yapamaz. Önce restore (POST /:id/restore) edilmeli. allowArchived flag
+  // sadece archive()/restore() helper'larının kendileri için (idempotent
+  // davranışı korumak amacıyla).
+  if (found.isArchived && !allowArchived) {
+    throw new CaseValidationError(
+      'Arşivli vakaya yazılamaz. Önce SystemAdmin tarafından restore edilmeli.',
+      { status: 409, code: 'case_archived_readonly' },
+    );
   }
   return found.companyId;
 }
@@ -1685,7 +1696,10 @@ export const caseRepository = {
         { status: 400, code: 'archive_reason_required' },
       );
     }
-    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    // allowArchived: true — assertCaseInScope arşivli case'leri throw eder
+    // (Codex P2 write guard), ama archive() kendisi idempotent: zaten arşivli
+    // case'i tekrar arşivlemek throw değil, current state döndürmek demek.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const before = await prisma.case.findUnique({
@@ -1734,7 +1748,8 @@ export const caseRepository = {
    */
   async restore(id, { actor, allowedCompanyIds }) {
     assertActor(actor, 'caseRepository.restore');
-    const companyId = await assertCaseInScope(id, allowedCompanyIds);
+    // allowArchived: true — restore zaten arşivli case'i çevirmek için var.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const before = await prisma.case.findUnique({
