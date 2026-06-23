@@ -214,6 +214,9 @@ router.get(
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
       // WR-A4 — Proje filtresi.
       accountProjectId: typeof f.accountProjectId === 'string' && f.accountProjectId ? f.accountProjectId : undefined,
+      // PR-SD — Arşivli vakaları dahil et: sadece SystemAdmin. Diğer roller
+      // query param gönderse bile sessizce ignore edilir (sızıntı yok).
+      includeArchived: f.includeArchived === 'true' && req.user.role === 'SystemAdmin' ? true : undefined,
     };
     // WR-H1 — Defansif large-query guard (AGENTIC_PLANNING_PROTOCOL §③ #6).
     // pageSize her zaman [1, 200] içine clamp edilir; pagination object'i her zaman
@@ -367,7 +370,9 @@ router.get(
 router.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    // PR-SD — actorRole rol-aware guard: arşivli vaka direct URL'de
+    // yalnız SystemAdmin görür; diğer roller 404 alır.
+    const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
     // WR-ACTION-CENTER Phase 1 — auto-InProgress: flip user's Pending
     // ActionItems for this case to InProgress, stamp firstSeenAt.
@@ -409,6 +414,53 @@ router.patch(
       req.user.personId ?? null,
       actorObj,
     );
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-SD — POST /api/cases/:id/archive (SystemAdmin-only)
+ *
+ * Vakayı soft-archive. Hard delete YOK; tüm child kayıtlar intact, sadece
+ * UI listelerinden gizlenir. status enum dokunulmaz.
+ *
+ * Body: { reason: string }  // min 3 char
+ * Audit: CaseActivity actionType='Archived', actor.
+ * Idempotent: zaten arşivli ise sessizce 200 döner.
+ */
+router.post(
+  '/:id/archive',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const { reason } = req.body ?? {};
+    const actor = requireActor(req);
+    const updated = await caseRepository.archive(req.params.id, {
+      reason,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-SD — POST /api/cases/:id/restore (SystemAdmin-only)
+ *
+ * Arşivli vakayı geri yükler. Status enum dokunulmaz.
+ * Audit: CaseActivity actionType='Restored', actor.
+ * Idempotent: zaten arşivli değilse sessizce 200 döner.
+ */
+router.post(
+  '/:id/restore',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const updated = await caseRepository.restore(req.params.id, {
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
   }),

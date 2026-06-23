@@ -388,6 +388,8 @@ export const caseService = {
     if (filters?.teamScope) params.set('teamScope', 'true');
     if (filters?.slaViolation) params.set('slaViolation', 'true');
     if (filters?.resolvedToday) params.set('resolvedToday', 'true');
+    // PR-SD — SystemAdmin opt-in; backend rol filtresi de uygulayacak.
+    if (filters?.includeArchived) params.set('includeArchived', 'true');
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -810,6 +812,38 @@ export const caseService = {
       'Müşteri eşleştirme',
     );
     if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
+  },
+
+  /**
+   * PR-SD — Vakayı arşivle (SystemAdmin-only). Hard delete YOK.
+   * Backend 403 → apiFetch toast eder, undefined döner.
+   * Backend 400 (reason kısa) → toast.
+   */
+  async archive(caseId: string, reason: string): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `${API_BASE}/${caseId}/archive`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      },
+      'Vaka arşivlenemedi',
+    );
+    if (result) invalidateCaseDetail(caseId);
+    return result;
+  },
+
+  /**
+   * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only).
+   */
+  async restore(caseId: string): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `${API_BASE}/${caseId}/restore`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'Vaka geri yüklenemedi',
+    );
+    if (result) invalidateCaseDetail(caseId);
     return result;
   },
 

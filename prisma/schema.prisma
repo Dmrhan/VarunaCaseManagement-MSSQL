@@ -106,6 +106,8 @@ model User {
   /// PR-5 — Case actor FK back-relations
   caseActivities            CaseActivity[]      @relation("CaseActivityActor")
   caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
+  /// PR-SD — Soft archive actor FK back-relation
+  casesArchived             Case[]              @relation("CaseArchivedBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -1102,6 +1104,15 @@ model Case {
   aiRiskLevel                String? @db.NVarChar(50)
   aiKeyPoints                String? @db.NVarChar(Max)
 
+  // PR-SD — Soft archive (SystemAdmin-only UI temizliği). Hard delete YOK;
+  // arşivli vaka tüm child kayıtlarıyla intact kalır, sadece liste/detay
+  // default exclude'la gizlenir. status enum dokunulmaz — archive orthogonal
+  // bayrak. archivedByUserId User FK (audit).
+  isArchived       Boolean   @default(false)
+  archivedAt       DateTime?
+  archivedByUserId String?   @db.NVarChar(450)
+  archiveReason    String?   @db.NVarChar(Max)
+
   // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
   /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
   checklistItems String? @db.NVarChar(Max) // json
@@ -1146,6 +1157,8 @@ model Case {
   product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Package referansı (opsiyonel).
   package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// PR-SD — Soft archive actor (User FK; audit için JOIN).
+  archivedByUser User?           @relation("CaseArchivedBy", fields: [archivedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   notes                  CaseNote[]
   attachments            CaseAttachment[]
@@ -1191,6 +1204,8 @@ model Case {
   @@index([companyId, resolvedAt])
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
+  // PR-SD — list default exclude path için. companyId zaten her sorguda.
+  @@index([companyId, isArchived])
   // WR-A7b — Catalog filter / report path'leri için.
   @@index([companyId, productId])
   @@index([companyId, packageId])

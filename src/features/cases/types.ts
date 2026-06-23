@@ -332,6 +332,12 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   aiRiskLevel:                'AI Risk Seviyesi',
   aiKeyPoints:                'AI Anahtar Noktalar',
 
+  // Soft archive
+  isArchived:                 'Arşivli',
+  archivedAt:                 'Arşiv Tarihi',
+  archivedByUserName:         'Arşivleyen',
+  archiveReason:              'Arşiv Sebebi',
+
   // Snooze
   snoozeUntil:          'Erteleme Tarihi',
   snoozeReason:         'Erteleme Nedeni',
@@ -492,6 +498,16 @@ export interface Case {
    */
   aiRiskLevel?: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
   aiKeyPoints?: string;
+
+  /**
+   * PR-SD — Soft archive (SystemAdmin-only UI temizliği). Hard delete YOK;
+   * arşivli vaka backend'de intact, sadece default exclude'la gizli.
+   */
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedByUserId?: string;
+  archivedByUserName?: string;
+  archiveReason?: string;
 
   /**
    * FAZ 4 — Vaka açılırken `getChecklistFor()` 3-tuple match'inden gelen
@@ -768,6 +784,10 @@ export interface CaseFilters {
   resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
   // WR-A4 — proje bazlı filter
   accountProjectId?: string;
+  // PR-SD — Soft archive. Default false (UI'da chip OFF).
+  // SystemAdmin opt-in için chip açar; diğer roller backend tarafında
+  // ignore edilir (buildWhere her durumda exclude eder).
+  includeArchived?: boolean;
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.

@@ -8,8 +8,10 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  Archive,
   ArrowRightLeft,
   ChevronDown,
+  RotateCw,
   ChevronRight,
   Clock,
   Clock3,
@@ -138,6 +140,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
   const { user } = useAuth();
   // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
   const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
+  // PR-SD — Soft archive yalnız SystemAdmin yetkisinde.
+  const canArchive = user?.role === 'SystemAdmin';
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [archiveReason, setArchiveReason] = useState('');
+  const [archiving, setArchiving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [item, setItem] = useState<Case | null>(null);
   const [loading, setLoading] = useState(false);
   const [customerContext, setCustomerContext] = useState<CaseCustomerContext | null>(null);
@@ -557,6 +565,36 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
     toast({ type: 'success', title: 'Erteleme kaldırıldı', message: 'Vaka tekrar açıldı.' });
   }
 
+  // PR-SD — Arşivle (SystemAdmin-only). Reason min 3 char zorunlu (UI + backend).
+  async function handleArchive() {
+    if (!item) return;
+    const reason = archiveReason.trim();
+    if (reason.length < 3) {
+      toast({ type: 'warn', message: 'Arşiv sebebi en az 3 karakter olmalı.' });
+      return;
+    }
+    setArchiving(true);
+    const updated = await caseService.archive(item.id, reason);
+    setArchiving(false);
+    if (!updated) return;
+    setItem(updated);
+    setArchiveModalOpen(false);
+    setArchiveReason('');
+    toast({ type: 'success', title: 'Vaka arşivlendi', message: 'Listelerden gizlendi.' });
+  }
+
+  // PR-SD — Geri yükle (SystemAdmin-only).
+  async function handleRestore() {
+    if (!item) return;
+    if (!window.confirm('Vakayı arşivden geri yüklemek istediğinizden emin misiniz?')) return;
+    setRestoring(true);
+    const updated = await caseService.restore(item.id);
+    setRestoring(false);
+    if (!updated) return;
+    setItem(updated);
+    toast({ type: 'success', title: 'Vaka geri yüklendi', message: 'Listelerde görünür.' });
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header — sticky */}
@@ -706,6 +744,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                       window.print();
                     }}
                   />
+                  {/* PR-SD — Arşivle (SystemAdmin-only, arşivli değilse). */}
+                  {canArchive && !item.isArchived && (
+                    <MenuAction
+                      label="Arşivle"
+                      onClick={() => {
+                        close();
+                        setArchiveReason('');
+                        setArchiveModalOpen(true);
+                      }}
+                    />
+                  )}
                 </ul>
               )}
             </Popover>
@@ -722,6 +771,37 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
           onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
           onEnd={handleEndCall}
         />
+      )}
+
+      {/* PR-SD — Arşivli vaka banner (SystemAdmin görür). Diğer roller bu
+          vakanın detayına zaten erişemez (route 404). */}
+      {item.isArchived && (
+        <div className="flex items-start gap-3 border-b border-rose-200 bg-rose-50 px-6 py-3 text-sm text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+          <Archive size={16} className="mt-0.5 shrink-0 text-rose-700 dark:text-rose-400" />
+          <div className="flex-1">
+            <div className="font-medium">Bu vaka arşivlendi</div>
+            <div className="mt-0.5 text-rose-800 dark:text-rose-300">
+              {item.archivedByUserName ? <>Arşivleyen: <strong>{item.archivedByUserName}</strong> · </> : null}
+              {item.archivedAt
+                ? new Date(item.archivedAt).toLocaleString('tr-TR', {
+                    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                  })
+                : '—'}
+              {item.archiveReason ? <> · Sebep: <em>{item.archiveReason}</em></> : null}
+            </div>
+          </div>
+          {canArchive && (
+            <button
+              type="button"
+              onClick={() => void handleRestore()}
+              disabled={restoring}
+              className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-white px-2.5 py-1 text-xs font-medium text-rose-800 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200"
+            >
+              <RotateCw size={12} />
+              {restoring ? 'Geri yükleniyor…' : 'Geri Yükle'}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Aktarım uyarısı — FAZ 2 §20.2: 2+ aktarımda kök neden analizi tetiklenir */}
@@ -765,6 +845,59 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
           </Button>
         </div>
       )}
+
+      {/* PR-SD — Arşive sebep modal'ı (SystemAdmin) */}
+      <Modal
+        open={archiveModalOpen}
+        onClose={() => {
+          setArchiveModalOpen(false);
+          setArchiveReason('');
+        }}
+        title="Vakayı Arşivle"
+        size="md"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600 dark:text-ndark-muted">
+            Bu vaka arşivlenecek. Tüm geçmiş (notlar, dosyalar, audit) korunur; sadece
+            operasyonel listelerden gizlenir. SystemAdmin "Arşivlenenleri göster" filtresiyle erişebilir.
+          </p>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-ndark-muted">
+              Arşiv sebebi (zorunlu, en az 3 karakter)
+            </label>
+            <textarea
+              value={archiveReason}
+              onChange={(e) => setArchiveReason(e.target.value)}
+              rows={3}
+              placeholder="Örn: Yanlış açılmış test vakası"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setArchiveModalOpen(false);
+                setArchiveReason('');
+              }}
+              disabled={archiving}
+            >
+              Vazgeç
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Archive size={12} />}
+              onClick={() => void handleArchive()}
+              disabled={archiving || archiveReason.trim().length < 3}
+            >
+              {archiving ? 'Arşivleniyor…' : 'Arşivle'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Body — 3 columns */}
       <div className="relative flex flex-1 overflow-hidden">
