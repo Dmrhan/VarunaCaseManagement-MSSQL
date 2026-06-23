@@ -14,7 +14,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "deploy:onprem": "git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm",
+    "deploy:onprem": "pm2 stop varuna-cm && git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 start varuna-cm",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:auth": "tsx prisma/seedAuth.ts",
     "db:seed:scenarios": "tsx prisma/seedScenarios.ts --confirm-demo-seed",

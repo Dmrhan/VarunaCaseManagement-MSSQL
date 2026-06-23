@@ -151,9 +151,16 @@ HTTP'yi HTTPS'e yönlendirir, upload limitini 100 MB'a çıkarır
 
 ## 6. Güncelleme prosedürü (yeni sunucuda)
 
-**KRİTİK SIRA:** `migrate → build → app restart`. Migration **mutlaka** app
-restart'tan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
-(`column does not exist`) ile çakar.
+**KRİTİK SIRA:** `service stop → mutate (pull/install/migrate/build) → service start`.
+İki kural birlikte:
+1. Migration **mutlaka** yeni process başlamadan ÖNCE bitmiş olmalı; aksi
+   halde Prisma Client yeni alanları select edip P2022
+   (`column does not exist`) ile çakar.
+2. `npm ci` ve `npm run build` **çalışan service'in altından** tree'yi
+   mutate eder (`node_modules/` silinir/kurulur, `dist/` yeniden yazılır).
+   Express `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan
+   paket çeker — service ayaktayken yarım/eksik dosyalara çakar. Service
+   önce DURUR, sonra mutate, sonra START.
 
 ### 6.a Sunucu PM2 ile yönetiliyorsa (kanonik kısayol)
 
@@ -163,25 +170,28 @@ npm run deploy:onprem
 ```
 
 Tek komut şu sırayı garanti eder:
-`git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm`
+`pm2 stop varuna-cm && git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 start varuna-cm`
 
-PM2 reload graceful — zero-downtime restart. `varuna-cm` PM2 app adı
-[ecosystem.config.cjs](../ecosystem.config.cjs).
+**Downtime**: build + npm ci süresi kadar (~30-120 sn). Zero-downtime
+gerekiyorsa atomik release-dir / symlink swap pattern'i kullanılmalı
+(bkz. OPERATIONS.md "Zero-downtime atomic release — opsiyonel").
+
+`varuna-cm` PM2 app adı [ecosystem.config.cjs](../ecosystem.config.cjs).
 
 ### 6.b Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`)
 
-PM2 yerine nssm kurulu kutularda aynı sırayı **el ile** koşmak gerek (nssm
-graceful reload sunmaz — stop/start şart):
+PM2 yerine nssm kurulu kutularda aynı sırayı **el ile** koşmak gerek.
+**Service mutasyondan ÖNCE durdurulur** — `npm ci`/`npm run build`
+ayakta service'i kıracak `node_modules` / `dist/` mutasyonları yapar.
 
 ```powershell
 cd C:\apps\VarunaCaseManagement
+nssm stop VarunaCM            # ← ÖNCE: live tree kapansın
 git pull
 npm ci
-npm run db:migrate:deploy   # ← MUTLAKA stop'tan ÖNCE çalışsın da olur,
-                             #   sonra da olur; ÖNEMLİ olan app start'tan
-                             #   ÖNCE bitmiş olmasıdır
+npm run db:migrate:deploy     # ← migration bu noktada yapılır (kritik:
+                              #   start'tan ÖNCE bitmiş olmalı)
 npm run build
-nssm stop VarunaCM
 nssm start VarunaCM
 ```
 
