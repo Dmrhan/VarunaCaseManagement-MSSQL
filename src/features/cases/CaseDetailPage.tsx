@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle2,
   ArrowRightLeft,
+  ChevronDown,
   ChevronRight,
   Clock,
   Clock3,
@@ -37,9 +38,7 @@ import {
   Settings2,
   Sparkles,
   Star,
-  Target,
   TrendingDown,
-  TrendingUp,
   User,
   UserPlus,
   Wallet,
@@ -52,12 +51,14 @@ import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
-import { QuickNotePopover } from '@/components/ui/QuickNotePopover';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
 import { RunaAiCard } from '@/components/ui/RunaAiCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CustomFieldRenderer } from '@/components/CustomFieldRenderer';
-import { StatusTransitionPanel } from './StatusTransitionPanel';
+// StatusTransitionPanel artık CompactStatusStepper içinde reason zorunlu
+// geçişler için modal olarak reuse ediliyor; CaseDetailPage gövdesinde
+// doğrudan render edilmez.
+import { CompactStatusStepper } from './CompactStatusStepper';
 import { CaseSolutionStepsPanel } from './CaseSolutionStepsPanel';
 import { KbDraftCard } from './KbDraftCard';
 import { ResolutionApprovalCard } from './components/ResolutionApprovalCard';
@@ -69,7 +70,7 @@ import { NoteAvatar, NotesTab } from './components/CaseNotes';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
-import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
+import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import {
   apiFetch,
@@ -88,7 +89,9 @@ import {
   CALL_OUTCOMES,
   CASE_FIELD_LABELS,
   CASE_ORIGINS,
+  CASE_PRIORITY_LABELS,
   CASE_REQUEST_TYPES,
+  CASE_TYPE_LABELS,
   ESCALATION_LEVELS,
   ESCALATION_LEVEL_LABELS,
   FINANCIAL_STATUSES,
@@ -128,7 +131,10 @@ interface CaseDetailPageProps {
   onOpenAccount?: (accountId: string) => void;
 }
 
-export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+// onShowCustomer prop'u header müşteri butonu kaldırıldı; başka yerden çağrılırsa
+// caller'da etkisi yok (opsiyonel kalır). Şu an iç kullanım yok — sessizce alındı.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
   const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
@@ -381,10 +387,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     });
   }
 
-  function handleQuickActionAddNote() {
-    setTab('notes');
-    setTimeout(() => noteRef.current?.focus(), 50);
-  }
+  // handleQuickActionAddNote — eski "Hızlı Aksiyonlar" PanelSection'undaki
+  // "Tüm not akışını aç" linkinden çağrılıyordu. LBD A7 ile o blok kalktı;
+  // Notlar sekmesine geçmek için doğal yol artık tab tıklaması.
+  // Fonksiyon: silindi (caller yok).
 
   // Breadcrumb stack üzerinden geçmiş vakaya geçiş — Spec UX 4
   function navigateToCase(targetId: string) {
@@ -599,38 +605,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               <span className="truncate text-slate-600">{item.accountName}</span>
             </nav>
             <CaseTitleEditable item={item} onUpdated={setItem} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              {onShowCustomer && (
-                <button
-                  type="button"
-                  onClick={() => onShowCustomer(item.accountId)}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-300 hover:bg-brand-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text dark:hover:border-brand-500 dark:hover:bg-brand-950/30"
-                >
-                  <Building2 size={11} />
-                  {item.accountName}
-                </button>
-              )}
-
-              {/* StatusPill artık görsel/display-only — geçişler StatusTransitionPanel ile yapılıyor */}
-              <StatusPill status={item.status} />
-
-              {/* FAZ 2 Collab — kullanıcı bu vakada watcher mı? */}
-              <WatcherHeaderBadge caseId={item.id} />
-
-              <PriorityBadge priority={item.priority} />
-              {item.slaViolation && (
-                <Badge tint="rose" icon={<ShieldAlert size={12} />}>
-                  SLA İhlali
-                </Badge>
-              )}
-              {item.slaPausedAt && <Badge tint="amber">SLA Duraklatıldı</Badge>}
-              {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-                <Badge tint="slate" icon={<Clock size={12} />}>
-                  Çözüm SLA {formatRelative(item.slaResolutionDueAt)}
-                </Badge>
-              )}
-              <CaseTypeBadge type={item.caseType} />
-            </div>
+            {/* Statü bandı LBD-Move ile header'dan içerik alanına taşındı —
+                sekme navigasyonunun hemen üstünde, tam genişlikte. */}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -820,20 +796,35 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 }
               : undefined
           }
-          onStartCall={handleStartCall}
-          onTransfer={() => setTransferOpen(true)}
           onClaim={handleClaim}
           claiming={claiming}
           canClaim={!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi'}
-          onNoteAdded={(note) => setItem({ ...item, notes: [note, ...item.notes] })}
-          onTabFocusNote={handleQuickActionAddNote}
-          callActive={callActive}
           drawerOpen={leftDrawerOpen}
           onCloseDrawer={() => setLeftDrawerOpen(false)}
+          userRole={user?.role}
         />
 
         {/* Main */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Statü bandı — Adım-1: progress bar geniş + kimlik (Öncelik · Tip).
+              SLA göstergesi aşağıdaki KPI/SLA şeridine taşındı (tek yerde olsun). */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2 dark:border-ndark-border dark:bg-ndark-bg/40">
+            {/* [Statü] progress bar (wideConnectors=true ile banda yayılır) */}
+            <CompactStatusStepper item={item} onApplied={setItem} wideConnectors />
+
+            {/* Sağ: yalnız kimlik metadata — SLA / Watcher KPI şeridinde */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-ndark-muted">
+              <span title={`Öncelik: ${CASE_PRIORITY_LABELS[item.priority]} · Tip: ${CASE_TYPE_LABELS[item.caseType]}`}>
+                {CASE_PRIORITY_LABELS[item.priority]} · {CASE_TYPE_LABELS[item.caseType]}
+              </span>
+            </div>
+          </div>
+
+          {/* KPI/SLA/tarih birleşik şeridi — status bandının ALTINDA, tab nav'ın ÜSTÜNDE.
+              Tek satır sönük metin "·" ayraçlı; SLA aşıldı tek kırmızı sinyal.
+              Sticky değil — content ile scroll olur. */}
+          <KpiSummaryStrip item={item} caseId={item.id} />
+
           <nav className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
             <TabButton
               active={tab === 'detail'}
@@ -1095,16 +1086,12 @@ function LeftPanel({
   canLinkAccount,
   onLinkAccount,
   onConfirmLinkSuggestion,
-  onStartCall,
-  onTransfer,
   onClaim,
   claiming,
   canClaim,
-  onNoteAdded,
-  onTabFocusNote,
-  callActive,
   drawerOpen,
   onCloseDrawer,
+  userRole,
 }: {
   item: Case;
   accountPhone?: string;
@@ -1115,19 +1102,16 @@ function LeftPanel({
   canLinkAccount?: boolean;
   onLinkAccount?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
-  onStartCall: () => void;
-  onTransfer: () => void;
   /** WR-C1 — Üstlen click handler (parent state'i günceller). */
   onClaim: () => void;
   /** WR-C1 — Claim akışı çalışırken disabled + spinner için. */
   claiming: boolean;
   /** WR-C1 — Vaka açık + atanmamış + user.personId varsa true. */
   canClaim: boolean;
-  onNoteAdded: (note: import('./types').CaseNote) => void;
-  onTabFocusNote: () => void;
-  callActive: boolean;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
+  /** LBD A6 — Agent rolünde WatchersPanel gizlenir; diğer tüm rollerde görünür. */
+  userRole?: string;
 }) {
   const ctxCompany = customerContext?.company ?? null;
   const content = (
@@ -1138,9 +1122,22 @@ function LeftPanel({
             <>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
-                    {customerContext?.accountName ?? item.accountName}
-                  </div>
+                  {/* LBD A12 — Müşteri adı tıklanır; "Detay →" ile aynı yere
+                      yönlendirir. onOpenAccount yoksa düz metin. */}
+                  {onOpenAccount ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAccount(item.accountId as string)}
+                      title="Müşteri Detayı'na git"
+                      className="block w-full truncate cursor-pointer text-left text-sm font-semibold text-slate-900 hover:text-brand-700 hover:underline dark:text-ndark-text dark:hover:text-brand-300"
+                    >
+                      {customerContext?.accountName ?? item.accountName}
+                    </button>
+                  ) : (
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text">
+                      {customerContext?.accountName ?? item.accountName}
+                    </div>
+                  )}
                   {customerContext?.vknMasked && (
                     <div className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
                       VKN {customerContext.vknMasked}
@@ -1158,49 +1155,36 @@ function LeftPanel({
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge tint="slate">{item.companyName}</Badge>
-                {ctxCompany?.externalCustomerCode && (
-                  <span
-                    title="Müşteri Dış Kodu"
-                    className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-ndark-surface dark:text-ndark-muted"
-                  >
-                    Kod {ctxCompany.externalCustomerCode}
+              {/* LBD baseline 1+5 — Çip çorbası → sönük tek satır metin.
+                  Tek vurgu: priority Critical olduğunda küçük rose dot inline.
+                  Diğerleri (şirket / kod / paket / proje / ürün / supportLevel /
+                  non-Critical priority) düz sönük metin "·" ile ayrılır. */}
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+                {(() => {
+                  const parts: string[] = [];
+                  parts.push(item.companyName);
+                  if (ctxCompany?.externalCustomerCode) parts.push(`Kod ${ctxCompany.externalCustomerCode}`);
+                  if (ctxCompany?.packageName) parts.push(ctxCompany.packageName);
+                  if (item.accountProjectName) parts.push(`Proje: ${item.accountProjectName}`);
+                  if (item.packageName) parts.push(`Paket: ${item.packageName}`);
+                  if (item.productName) parts.push(`Ürün: ${item.productName}`);
+                  if (item.supportLevel) parts.push(SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel);
+                  // Critical olmayan priority düz metinde göster
+                  if (item.priority !== 'Critical') {
+                    parts.push(CASE_PRIORITY_LABELS[item.priority] ?? item.priority);
+                  }
+                  return <span title={parts.join(' · ')}>{parts.join(' · ')}</span>;
+                })()}
+                {item.priority === 'Critical' && (
+                  <span className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400">
+                    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                    Kritik
                   </span>
                 )}
-                {ctxCompany?.packageName && <Badge tint="indigo">{ctxCompany.packageName}</Badge>}
-                {/* WR-A4 / PM-04 — Bağlı proje badge'i. */}
-                {item.accountProjectName && (
-                  <span title="Bağlı proje">
-                    <Badge tint="violet">Proje: {item.accountProjectName}</Badge>
-                  </span>
-                )}
-                {/* WR-A7b / PM-05 — Catalog ürün ve paket badge'leri. */}
-                {item.packageName && (
-                  <span title="Vakaya bağlı catalog paketi">
-                    <Badge tint="indigo">Paket: {item.packageName}</Badge>
-                  </span>
-                )}
-                {item.productName && (
-                  <span title="Vakaya bağlı ürün">
-                    <Badge tint="blue">Ürün: {item.productName}</Badge>
-                  </span>
-                )}
-                {/* WR-A5 / PM-03 — Destek seviyesi badge'i. */}
-                {item.supportLevel && (
-                  <span title="Destek seviyesi">
-                    <Badge tint={item.supportLevel === 'L1' ? 'slate' : 'amber'}>
-                      {SUPPORT_LEVEL_LABELS[item.supportLevel] ?? item.supportLevel}
-                    </Badge>
-                  </span>
-                )}
-                <Badge tint={item.priority === 'Critical' ? 'rose' : 'blue'}>
-                  {item.priority}
-                </Badge>
               </div>
               {ctxCompany?.activeProducts && ctxCompany.activeProducts.length > 0 && (
                 <div className="pt-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-ndark-dim">
+                  <div className="text-[10px] font-medium text-slate-400 dark:text-ndark-dim">
                     Aktif Ürünler
                   </div>
                   <div className="mt-0.5 flex flex-wrap gap-1">
@@ -1274,7 +1258,7 @@ function LeftPanel({
                 item.customerContactPhone ||
                 item.customerContactEmail) && (
                 <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-700 dark:border-ndark-border dark:text-ndark-text">
-                  <div className="mb-1 font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+                  <div className="mb-1 font-medium text-slate-500 dark:text-ndark-muted">
                     Başvuran Bilgileri
                   </div>
                   <dl className="space-y-0.5">
@@ -1320,7 +1304,7 @@ function LeftPanel({
 
       {/* Customer Pulse — müşterinin geniş durumu (Roadmap §"Customer Context
           Intelligence"). Self-fetch; hata olursa case detail bozulmaz. */}
-      <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} />
+      <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} metricsLayout="summary" />
 
       <PanelSection title="SLA Durumu" icon={<Clock size={12} />}>
         <div className="space-y-1.5 text-xs">
@@ -1368,49 +1352,19 @@ function LeftPanel({
         </div>
       </PanelSection>
 
-      {/* FAZ 2 Collab — izleyiciler. Self-watch + Supervisor başkasını ekleyebilir. */}
-      <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
+      {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
+          tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.
+          Self-watch + Supervisor başkasını ekleyebilir. */}
+      {userRole !== 'Agent' && (
+        <WatchersPanel caseId={item.id} assignedPersonId={item.assignedPersonId ?? null} />
+      )}
 
-      <PanelSection title="Hızlı Aksiyonlar" icon={<Sparkles size={12} />}>
-        <div className="grid grid-cols-1 gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<Phone size={12} />}
-            onClick={onStartCall}
-            disabled={callActive}
-          >
-            {callActive ? 'Çağrı aktif' : 'Çağrı Başlat'}
-          </Button>
-          <Button size="sm" variant="outline" leftIcon={<UserPlus size={12} />} onClick={onTransfer}>
-            Devret
-          </Button>
-          <QuickNotePopover
-            caseId={item.id}
-            align="start"
-            width={280}
-            onAdded={onNoteAdded}
-            trigger={({ toggle }) => (
-              <Button
-                size="sm"
-                variant="outline"
-                leftIcon={<MessageSquare size={12} />}
-                onClick={toggle}
-              >
-                Hızlı Not
-              </Button>
-            )}
-          />
-          <button
-            type="button"
-            onClick={onTabFocusNote}
-            className="text-[11px] text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-          >
-            Tüm not akışını aç →
-          </button>
-        </div>
-      </PanelSection>
-
+      {/* LBD A7: "Hızlı Aksiyonlar" PanelSection kaldırıldı.
+          Aksiyonların erişim noktası:
+            - Çağrı Başlat → header "Çağrı Başlat" butonu
+            - Devret → header "Devret" butonu
+            - Hızlı Not / Tüm not akışı → Notlar sekmesi
+          Header aksiyonları KALDI (kullanıcı hızlı erişim istedi). */}
     </div>
   );
 
@@ -1424,7 +1378,7 @@ function LeftPanel({
           <div className="absolute inset-0 bg-slate-900/30" onClick={onCloseDrawer} />
           <aside className="absolute left-0 top-0 h-full w-[320px] overflow-y-auto bg-white p-4 shadow-xl dark:bg-ndark-bg">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">Müşteri Özeti</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Müşteri Özeti</span>
               <button
                 type="button"
                 onClick={onCloseDrawer}
@@ -1440,6 +1394,22 @@ function LeftPanel({
       )}
     </>
   );
+}
+
+/**
+ * Faz 3 — Case.aiKeyPoints DB'de JSON array<string> string olarak tutulur
+ * (MSSQL JSON tip yok — customFields aynı pattern). Parse hatası sessiz
+ * fallback: boş array. Non-array veya non-string element → filtre.
+ */
+function parseAiKeyPoints(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function RightPanel({
@@ -1464,32 +1434,28 @@ function RightPanel({
 
   async function handleAnalyze() {
     setAnalyzing(true);
-    const r = await aiService.supervisorSummary({
-      case: {
-        title: item.title,
-        description: item.description,
-        category: item.category,
-        subCategory: item.subCategory,
-        status: item.status,
-        priority: item.priority,
-        slaViolation: item.slaViolation,
-        slaResponseDueAt: item.slaResponseDueAt,
-        slaResolutionDueAt: item.slaResolutionDueAt,
-        slaPausedAt: item.slaPausedAt,
-        createdAt: item.createdAt,
-      },
-      history: item.history,
-      notes: item.notes,
-      callLogs: item.callLogs,
-    });
+    // Faz 1 — caseId tabanlı. Backend zengin sinyalleri (Smart Ticket +
+    // Çözüm Adımları + Müşteri durumu + Devir + Ürün + son 3 çağrı +
+    // resolutionNote) PII guard'lı select'lerle kendisi toplar.
+    const r = await aiService.supervisorSummary({ caseId: item.id });
     if (!r.ok) {
       setAnalyzing(false);
       toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
       return;
     }
+    // Faz 2 — supervisor-summary çıktısının persist edilen 5 alanı.
+    // Eski 2 alan (aiSummary, aiFollowupRecommendation) korunur; yeni 3 alan
+    // (aiRiskLevel, aiKeyPoints, aiConfidenceScore) Faz 3 schema'sıyla
+    // birlikte gelir. confidence opsiyonel — eski çağrı cache'inden
+    // dönerse undefined olur, payload'a yazılmaz (Partial<Case>).
     const updated = await caseService.update(item.id, {
       aiSummary: r.data.summary,
       aiFollowupRecommendation: r.data.recommendation,
+      aiRiskLevel: r.data.riskLevel,
+      aiKeyPoints: JSON.stringify(r.data.keyPoints ?? []),
+      ...(typeof r.data.confidence === 'number'
+        ? { aiConfidenceScore: r.data.confidence }
+        : {}),
     });
     setAnalyzing(false);
     if (updated) {
@@ -1533,11 +1499,16 @@ function RightPanel({
   return (
     <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
       <div className="space-y-4">
-        {/* RUNA AI — Vaka özeti / analiz */}
+        {/* RUNA AI — Vaka özeti / analiz.
+            Faz 3 — riskLevel rozeti + keyPoints liste persist edilen
+            alanlardan okunur. aiKeyPoints DB'de JSON array<string> string
+            tutulur; parse hatası sessiz fallback (boş array). */}
         <RunaAiCard
           title={item.aiSummary ? 'Vaka Özeti' : 'RUNA AI Hazır'}
           body={item.aiSummary ?? 'Bu vaka için henüz AI analizi yapılmadı.'}
           isLoading={analyzing}
+          riskLevel={item.aiRiskLevel ?? null}
+          keyPoints={parseAiKeyPoints(item.aiKeyPoints)}
           badges={
             item.aiConfidenceScore != null
               ? [`%${Math.round(item.aiConfidenceScore * 100)} güven`]
@@ -1578,7 +1549,7 @@ function RightPanel({
               )}
               {item.aiCallBrief && (
                 <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="mb-1 text-[10px] font-medium text-slate-500">
                     Çağrı Özeti
                   </div>
                   {item.aiCallBrief}
@@ -1586,7 +1557,7 @@ function RightPanel({
               )}
               {item.aiFollowupRecommendation && (
                 <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="mb-1 text-[10px] font-medium text-slate-500">
                     Takip Önerisi
                   </div>
                   {item.aiFollowupRecommendation}
@@ -1594,7 +1565,7 @@ function RightPanel({
               )}
               {item.aiRetentionOfferSuggestion && (
                 <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="mb-1 text-[10px] font-medium text-rose-700">
                     Retention Teklif Önerisi
                   </div>
                   {item.aiRetentionOfferSuggestion}
@@ -1693,7 +1664,7 @@ function RightPanel({
               )}
               {item.offeredSolutions && item.offeredSolutions.length > 0 && (
                 <div className="space-y-1 pt-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="text-[10px] font-medium text-rose-700">
                     Sunulan Teklifler
                   </div>
                   {item.offeredSolutions.map((id) => {
@@ -1708,7 +1679,7 @@ function RightPanel({
               )}
               {item.offerRejectionReason && (
                 <div className="rounded-md bg-rose-50 px-2 py-1.5 text-rose-900 ring-1 ring-rose-200">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                  <div className="text-[10px] font-medium text-rose-700">
                     Red Gerekçesi
                   </div>
                   {item.offerRejectionReason}
@@ -2147,7 +2118,7 @@ function LinksTab({
       {/* AI öneri kartı */}
       <section className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900/40 dark:bg-violet-950/20">
         <header className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-violet-900 dark:text-violet-200">
+          <h3 className="flex items-center gap-1.5 text-xs font-medium text-violet-900 dark:text-violet-200">
             <Sparkles size={12} />
             RUNA AI Benzer Vakalar
           </h3>
@@ -2239,7 +2210,7 @@ function LinksTab({
       {/* Existing links — gruplandırılmış */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+          <h3 className="text-xs font-medium text-slate-600 dark:text-ndark-muted">
             Mevcut Bağlantılar
           </h3>
           <Button size="sm" leftIcon={<Plus size={12} />} onClick={() => setLinkModalOpen(true)}>
@@ -2685,7 +2656,7 @@ function CustomerMatchSuggestionsPanel({
   if (loading) {
     return (
       <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
           <Sparkles size={11} /> Önerilen müşteriler
         </div>
         <div className="space-y-1.5">
@@ -2717,7 +2688,7 @@ function CustomerMatchSuggestionsPanel({
   if (suggestions.length === 0) {
     return (
       <div className="rounded-md border border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-ndark-border dark:text-ndark-muted">
-        <div className="mb-1 flex items-center gap-1.5 font-semibold uppercase tracking-wide text-slate-500">
+        <div className="mb-1 flex items-center gap-1.5 font-medium text-slate-500">
           <Sparkles size={11} /> Önerilen müşteriler
         </div>
         <div>Bu vaka için otomatik öneri bulunamadı. Manuel arama ile devam edebilirsin.</div>
@@ -2727,7 +2698,7 @@ function CustomerMatchSuggestionsPanel({
 
   return (
     <div className="rounded-md border border-slate-200 px-3 py-2 dark:border-ndark-border">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-ndark-muted">
         <Sparkles size={11} /> Önerilen müşteriler
       </div>
       <ul className="space-y-1.5">
@@ -2819,7 +2790,9 @@ function PanelSection({
   return (
     <section className={`rounded-lg bg-white p-3 ring-1 ring-inset dark:bg-ndark-card ${ring}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
+        {/* LBD baseline 2 — sentence-case + sönük, ALL CAPS YOK.
+            PanelSection bu dosyaya local; başka ekrana yayılmaz. */}
+        <h3 className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-ndark-muted">
           {icon}
           {title}
         </h3>
@@ -2833,7 +2806,8 @@ function PanelSection({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</span>
+      {/* LBD baseline 2 — sentence-case + sönük (Row da bu dosyaya local). */}
+      <span className="text-xs text-slate-500 dark:text-ndark-muted">{label}</span>
       <span className="truncate text-right text-slate-800 dark:text-ndark-text">{value}</span>
     </div>
   );
@@ -2854,7 +2828,7 @@ function AiTile({
       : 'bg-white ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border';
   return (
     <div className={`rounded-md px-2.5 py-2 ring-1 ring-inset ${cls}`}>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">{label}</div>
+      <div className="text-[10px] font-medium text-slate-500 dark:text-ndark-muted">{label}</div>
       <div className="mt-0.5 text-sm font-semibold text-slate-800 dark:text-ndark-text">{value}</div>
     </div>
   );
@@ -2869,7 +2843,7 @@ function QaScorePill({ label, value }: { label: string; value: number }) {
       : 'bg-rose-50 text-rose-800 ring-rose-200 dark:bg-rose-950/30 dark:text-rose-200 dark:ring-rose-900/40';
   return (
     <div className={`rounded-md px-2 py-1.5 text-center ring-1 ring-inset ${tone}`}>
-      <div className="text-[9px] font-medium uppercase tracking-wide opacity-80">{label}</div>
+      <div className="text-[9px] font-medium opacity-80">{label}</div>
       <div className="mt-0.5 text-sm font-bold">{value}/5</div>
     </div>
   );
@@ -2878,7 +2852,7 @@ function QaScorePill({ label, value }: { label: string; value: number }) {
 function SlaRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="text-[10px]  text-slate-500">{label}</div>
       <div className="text-slate-800">{value}</div>
     </div>
   );
@@ -2948,37 +2922,21 @@ function DetailTab({
 
   return (
     <div className="space-y-5">
-      {/* Statü Geçişi (header popover'ının yerini aldı — inline kart grid) */}
-      <StatusTransitionPanel item={item} onApplied={onTransitionApplied} />
+      {/* Statü Geçişi artık sticky header'da CompactStatusStepper olarak duruyor.
+          Reason zorunlu geçişler StatusTransitionPanel'i modal içinde reuse eder;
+          burada geniş kart grid'i render edilmez. */}
 
-      {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
-      <ResolutionApprovalCard
-        item={item}
-        onApprovalChanged={() => {
-          void caseService.get(item.id).then((c) => {
-            if (c) onTransitionApplied(c);
-          });
-        }}
-      />
+      {/* Adım-2: ResolutionApprovalCard + CommunicationDispatchCard kalan
+          koşullu bloklar grubuna (Atama'nın altına) taşındı.
+          Aksiyonel önemleri var → grubun başında konumlanır. */}
 
-      {/* WR-D4 Phase 2 — İletişim bildirimleri (yalnız bu vakaya dispatch varsa) */}
-      <CommunicationDispatchCard
-        item={item}
-        onChanged={() => {
-          void caseService.get(item.id).then((c) => {
-            if (c) onTransitionApplied(c);
-          });
-        }}
-      />
+      {/* Cila-1 (madde #5) — "Alanlara tıklayarak düzenleyebilirsiniz…"
+          statik notu kaldırıldı. Edit cue'lar (Cila-4'te chevron + hover
+          pencil) bu bilgiyi taşıyacak. */}
 
-      {/* Inline edit bilgi notu */}
-      <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
-        <Pencil size={11} className="text-slate-400" />
-        Alanlara tıklayarak düzenleyebilirsiniz. Değişiklikleri üst köşedeki <strong>Kaydet</strong> butonuyla saklayın.
-      </p>
-
-      {/* KPI 4-tile satırı (sol panelden buraya taşındı) */}
-      <KpiInlineRow item={item} />
+      {/* Adım-1: KpiInlineRow buradan çıkarıldı — content band'a (status'un
+          altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
+          Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
 
       <Section title="Açıklama">
         <InlineEdit
@@ -2996,6 +2954,21 @@ function DetailTab({
         />
       </Section>
 
+      {/* Adım-2 — Çözüm Notu Açıklama'nın hemen ALTINDA (problem → çözüm).
+          Yeni stil: emerald sol-şerit + nötr arka plan (PR-B sakin dili).
+          Boşsa render edilmez. */}
+      {item.resolutionNote && (
+        <Section title="Çözüm Notu">
+          <div className="rounded-md bg-slate-50/60 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 border-l-2 border-emerald-400 dark:bg-ndark-bg/30 dark:text-ndark-text dark:ring-ndark-border">
+            <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 size={11} />
+              Çözüm
+            </div>
+            <p className="whitespace-pre-wrap">{item.resolutionNote}</p>
+          </div>
+        </Section>
+      )}
+
       {/* Business review Madde 4 (PR-4) — Smart Ticket açılış kategorileri
           chip görünümü. Yalnız customFields.smartTicket varsa render edilir;
           klasik vakalarda null döner. L1 Devir Özeti kartı (Çözüm Adımları
@@ -3003,11 +2976,14 @@ function DetailTab({
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
       <SmartTicketMetaSection item={item} />
 
-      <Section title="Müşteri & Sınıflandırma">
+      {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
+          Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
+          Cila-4 #2 — "operable" structured variant: hafif başlık şeridi +
+          bg-white içerik + hairline çerçeve + sıkı ızgara. */}
+      <Section title="Sınıflandırma" variant="structured">
         <EditableGrid
+          variant="structured"
           rows={[
-            { label: 'Şirket', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.companyName}</span> },
-            { label: 'Müşteri', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-800">{item.accountName}</span> },
             { label: 'Kategori', node: (
               <InlineEdit
                 fieldKey="category"
@@ -3179,9 +3155,22 @@ function DetailTab({
         />
       </Section>
 
-      {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar */}
-      <Section title="Atama & Eskalasyon">
+      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
+          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
+          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
+          Boş durumda worded empty. */}
+      <PreviousCasesSection
+        previousCases={previousCases}
+        currentCaseId={item.id}
+        onSelectPrevious={onSelectPrevious}
+      />
+
+      {/* Atama & eskalasyon — sol panelden bağımsız, inline-edit'li alanlar.
+          Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
+          sıkı ızgara). Sol panel okuma özeti; merkez edit. */}
+      <Section title="Atama & eskalasyon" variant="structured">
         <EditableGrid
+          variant="structured"
           rows={[
             { label: 'Atanan Takım', node: (
               <InlineEdit
@@ -3194,11 +3183,14 @@ function DetailTab({
                 onCommit={(val) => onCommitDraft('assignedTeamId', val)}
                 onCancel={onCancelEdit}
                 options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName ?? '—'}
-                  </span>
-                )}
+                renderDisplay={() => {
+                  const val = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
+                  return val ? (
+                    <span className="text-sm text-slate-800">{val}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  );
+                }}
               />
             )},
             { label: 'Atanan Kişi', node: (
@@ -3216,11 +3208,14 @@ function DetailTab({
                   ...personOptions.map((p) => ({ value: p.id, label: p.name })),
                 ]}
                 disabled={!activeTeamId}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName ?? '—'}
-                  </span>
-                )}
+                renderDisplay={() => {
+                  const val = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
+                  return val ? (
+                    <span className="text-sm text-slate-800">{val}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  );
+                }}
               />
             )},
             { label: 'Eskalasyon', node: (
@@ -3262,7 +3257,13 @@ function DetailTab({
                 )}
               />
             )},
-            { label: 'Vaka Sahibi', node: <span className="block cursor-default px-2 py-1 text-sm text-slate-500" title="Otomatik atanır">{item.assignedPersonName ?? 'Atanmadı'}</span> },
+            { label: 'Vaka Sahibi', node: (
+              item.assignedPersonName ? (
+                <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Otomatik atanır">{item.assignedPersonName}</span>
+              ) : (
+                <span className="block cursor-default px-2 py-1 text-sm italic text-slate-400" title="Otomatik atanır">Atanmadı</span>
+              )
+            ) },
           ]}
         />
       </Section>
@@ -3380,7 +3381,7 @@ function DetailTab({
 
           <div className="mt-3 grid grid-cols-1 gap-2">
             <div>
-              <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <h4 className="mb-1 text-[11px] font-medium text-slate-500">
                 Yapılan Aksiyon
               </h4>
               <InlineEdit
@@ -3397,7 +3398,7 @@ function DetailTab({
             </div>
             {(v('offerOutcome') === 'Reddedildi' || drafts.offerOutcome === 'Reddedildi') && (
               <div>
-                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                <h4 className="mb-1 text-[11px] font-medium text-rose-700">
                   Red Gerekçesi
                 </h4>
                 <InlineEdit
@@ -3425,33 +3426,41 @@ function DetailTab({
         </Section>
       )}
 
-      <Section title="SLA & Tarihler">
-        <DetailGrid
-          rows={[
-            ['Yanıt SLA', item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'],
-            ['Çözüm SLA', item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'],
-            ['SLA Duraklatıldı', item.slaPausedAt ? formatDateTime(item.slaPausedAt) : 'Hayır'],
-            ['Toplam Pause', `${item.slaPausedDurationMin} dk`],
-            ['Açılış', formatDateTime(item.createdAt)],
-            ['Son Güncelleme', formatDateTime(item.updatedAt)],
-            ['Çözüm', item.resolvedAt ? formatDateTime(item.resolvedAt) : '—'],
-          ]}
-        />
-      </Section>
+      {/* Adım-2 #4 — "SLA & Tarihler" Section kaldırıldı. KPI/SLA şeridi
+          (status bandı altı) tek kaynak; tarih duplikasyonu yok.
+          SLA Duraklatıldı / Toplam Pause özel detaylar şu an gizlendi —
+          ihtiyaç olursa Aktivite tab'ında zaten history satırlarında görünür. */}
 
-      {item.resolutionNote && (
-        <Section title="Çözüm Notu" tint="emerald">
-          <p className="whitespace-pre-wrap rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900 ring-1 ring-emerald-200">
-            {item.resolutionNote}
-          </p>
-        </Section>
-      )}
+      {/* Çözüm Notu Adım-2 #2 ile Açıklama'nın hemen ALTINA taşındı —
+          bu konumdan kaldırıldı. */}
+
+      {/* Kalan koşullu bloklar — Atama'nın altına grup olarak.
+          Önemli/aksiyonel olanlar başta: Approval → Dispatch → KB/SmartTicket. */}
+
+      {/* WR-D4 Phase 1 — Çözüm Onayı kartı (yalnız eşleşen politika varsa) */}
+      <ResolutionApprovalCard
+        item={item}
+        onApprovalChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
+
+      {/* WR-D4 Phase 2 — İletişim bildirimleri (yalnız bu vakaya dispatch varsa) */}
+      <CommunicationDispatchCard
+        item={item}
+        onChanged={() => {
+          void caseService.get(item.id).then((c) => {
+            if (c) onTransitionApplied(c);
+          });
+        }}
+      />
 
       {/* Madde 2 — KB Teknik Devir Notu + Müşteri Yanıt Taslağı.
           KbDraftCard customFields.smartTicket.aiDrafts varsa render eder;
           aksi takdirde null döner (klasik vakalar etkilenmez). */}
       <KbDraftSection item={item} />
-
 
       {item.cancellationReason && (
         <Section title="İptal Gerekçesi">
@@ -3461,35 +3470,8 @@ function DetailTab({
         </Section>
       )}
 
-      {/* Sol panelden buraya taşındı — bu müşteriye ait kapalı/çözülmüş vakalar */}
-      {previousCases.length > 0 && (
-        <Section title={`Önceki Vakalar (${previousCases.length})`}>
-          <ul className="space-y-1.5">
-            {previousCases.slice(0, 3).map((p) => {
-              const refDate = p.resolvedAt ?? p.updatedAt;
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectPrevious(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
-                  >
-                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">{p.caseNumber}</span>
-                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">{p.title}</span>
-                    <StatusPill status={p.status} />
-                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">{formatRelative(refDate)}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {previousCases.length > 3 && (
-              <li className="pl-2 text-[11px] text-slate-500">
-                +{previousCases.length - 3} vaka daha…
-              </li>
-            )}
-          </ul>
-        </Section>
-      )}
+      {/* Adım-2: Önceki Vakalar bloğu Sınıflandırma'nın altına taşındı —
+          bu konumdan kaldırıldı. */}
 
       {/* Custom Fields — şirket FieldDefinition'larına göre dinamik */}
       <CustomFieldsCaseSection item={item} onCommitDraft={onCommitDraft} drafts={drafts} />
@@ -3576,7 +3558,7 @@ function OfferedSolutionsBlock({
     <>
       <div className="mt-3">
         <div className="mb-1.5 flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <h4 className="text-[11px] font-medium text-slate-500">
             Sunulan Teklifler
             {isDraft && (
               <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 ring-1 ring-amber-200">
@@ -3817,7 +3799,7 @@ function ChecklistSection({
                   {it.label}
                 </span>
                 {it.required && !it.checked && (
-                  <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700">
+                  <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-medium text-rose-700">
                     Zorunlu
                   </span>
                 )}
@@ -3836,9 +3818,12 @@ function ChecklistSection({
 }
 
 // ----------------------------------------------------------------
-// KPI Inline Row — Detay sekmesinin üstünde 4-tile satır
+// KPI / SLA / tarih birleşik şeridi — Adım-1.
+// Status bandının altında, tab nav'ın üstünde, tek satır sönük metin.
+// Dağınık 4 kutu yerine kompakt şerit; SLA aşıldı tek kırmızı sinyal
+// (sayfada tek SLA göstergesi burası).
 // ----------------------------------------------------------------
-function KpiInlineRow({ item }: { item: Case }) {
+function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   const minutes = (a: string, b: string) =>
     Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
   const fmt = (m: number) => {
@@ -3857,48 +3842,51 @@ function KpiInlineRow({ item }: { item: Case }) {
     (h) => h.action === 'Statü değişti' && h.fromValue === 'Çözüldü' && h.toValue === 'YenidenAcildi',
   );
 
-  return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <KpiInlineTile icon={<TrendingUp size={12} />} label="Müdahale Süresi" value={responseMin != null ? fmt(responseMin) : '—'} />
-      <KpiInlineTile icon={<CheckCircle2 size={12} />} label="Çözüm Süresi"   value={resolutionMin != null ? fmt(resolutionMin) : '—'} />
-      <KpiInlineTile
-        icon={<Target size={12} />}
-        label="İlk Temas Çözüm"
-        value={fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : '—'}
-        tone={fcr ? 'good' : resolutionMin != null ? 'warn' : 'neutral'}
-      />
-      <KpiInlineTile
-        icon={<HistoryIcon size={12} />}
-        label="Yeniden Açılma"
-        value={reopened ? 'Var' : 'Yok'}
-        tone={reopened ? 'warn' : 'neutral'}
-      />
-    </div>
-  );
-}
+  // Parts: sönük metin parçaları; boş alanlar atlanır (graceful empty).
+  const parts: Array<{ key: string; node: React.ReactNode }> = [];
+  if (responseMin != null) parts.push({ key: 'response', node: <>Müdahale {fmt(responseMin)}</> });
+  if (resolutionMin != null) parts.push({ key: 'resolution', node: <>Çözüm {fmt(resolutionMin)}</> });
+  parts.push({
+    key: 'fcr',
+    node: <>İlk temas {fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : <span className="italic text-slate-400">henüz</span>}</>,
+  });
+  parts.push({ key: 'reopen', node: <>Y.açılma {reopened ? 'Var' : 'Yok'}</> });
+  if (item.slaResponseDueAt) {
+    parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
+  }
+  if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
+    parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
+  }
+  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
+  parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
+  if (item.resolvedAt) {
+    parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
+  }
 
-function KpiInlineTile({
-  icon,
-  label,
-  value,
-  tone = 'neutral',
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone?: 'neutral' | 'good' | 'warn';
-}) {
-  const cls =
-    tone === 'good' ? 'bg-emerald-50 ring-emerald-200' :
-    tone === 'warn' ? 'bg-amber-50 ring-amber-200' :
-                       'bg-slate-50 ring-slate-200';
   return (
-    <div className={`rounded-lg p-3 ring-1 ring-inset ${cls}`}>
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:text-ndark-muted">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-ndark-text">{value}</div>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-white px-4 py-1.5 text-xs text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+      {parts.map((p, idx) => (
+        <span key={p.key} className="inline-flex items-center gap-2">
+          {idx > 0 && <span aria-hidden="true" className="text-slate-300">·</span>}
+          <span>{p.node}</span>
+        </span>
+      ))}
+      {/* SLA aşıldı / durdu — tek kırmızı/amber sinyal (sayfada tek SLA göstergesi) */}
+      {item.slaViolation && (
+        <span className="ml-2 inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400" title="SLA süresi aşıldı">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          SLA aşıldı
+        </span>
+      )}
+      {item.slaPausedAt && (
+        <span className="ml-2 inline-flex items-center gap-1 text-amber-700 dark:text-amber-300" title="SLA duraklatıldı">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+          SLA durdu
+        </span>
+      )}
+      <span className="ml-auto">
+        <WatcherHeaderBadge caseId={caseId} />
+      </span>
     </div>
   );
 }
@@ -3964,11 +3952,21 @@ function InlineEdit({
           {renderDisplay ? renderDisplay(value) : (value ? String(value) : <span className="text-slate-400">—</span>)}
         </span>
         {!disabled && !isDraft && (
-          <Pencil
-            size={12}
-            aria-hidden
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
-          />
+          // Cila-4 — edit cue: type === 'select' ise ChevronDown ipucu
+          // (kalıcı opacity-60 + hover'da full); diğer tiplerde Pencil hover.
+          type === 'select' ? (
+            <ChevronDown
+              size={12}
+              aria-hidden
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-60 transition-opacity group-hover:opacity-100"
+            />
+          ) : (
+            <Pencil
+              size={12}
+              aria-hidden
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+            />
+          )
         )}
         {isDraft && (
           <span className="absolute right-1 top-1 rounded bg-amber-200 px-1 text-[9px] font-semibold text-amber-900">
@@ -4743,7 +4741,7 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
       {visibleOpening.length > 0 && visibleClosure.length > 0 && (
         <div className="my-2 flex items-center gap-2">
           <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
-          <span className="text-[10px] font-medium uppercase tracking-wide text-violet-400 dark:text-violet-600">
+          <span className="text-[10px] font-medium text-violet-400 dark:text-violet-600">
             Kapanış
           </span>
           <div className="h-px flex-1 bg-violet-100 dark:bg-violet-900/30" />
@@ -4765,57 +4763,181 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
 function Section({
   title,
   tint = 'default',
+  variant = 'card',
   children,
 }: {
   title: string;
   tint?: 'default' | 'violet' | 'rose' | 'emerald';
+  /**
+   * 'card' (default) — ağır ring + bg-white kutu (eski davranış)
+   * 'flat'           — PR-B baseline: ringless, transparent bg + minimal padding
+   * 'structured'     — Cila-4 "operable" dengesi: hafif başlık şeridi +
+   *                    bg-white içerik + ring-1 ring-slate-100 hairline çerçeve.
+   *                    Sınıflandırma/Atama gibi form benzeri bölümler için.
+   */
+  variant?: 'card' | 'flat' | 'structured';
   children: React.ReactNode;
 }) {
+  // 'card' variant tint mantığı
   const ring =
+    variant === 'flat' || variant === 'structured' ? '' :
     tint === 'violet'  ? 'ring-violet-200 bg-violet-50/30' :
     tint === 'rose'    ? 'ring-rose-200 bg-rose-50/30' :
     tint === 'emerald' ? 'ring-emerald-200 bg-emerald-50/30' :
                           'ring-slate-200 bg-white';
+
+  if (variant === 'structured') {
+    return (
+      <section className="overflow-hidden rounded-md ring-1 ring-slate-100 dark:ring-ndark-border">
+        <h3 className="bg-slate-50/40 px-3 py-1.5 text-xs font-medium text-slate-500 dark:bg-ndark-bg/40 dark:text-ndark-muted">
+          {title}
+        </h3>
+        <div className="bg-white px-1 py-1 dark:bg-ndark-card">{children}</div>
+      </section>
+    );
+  }
+
+  const wrapperCls =
+    variant === 'flat'
+      ? 'pt-1'
+      : `rounded-lg p-4 ring-1 ring-inset ${ring}`;
   return (
-    <section className={`rounded-lg p-4 ring-1 ring-inset ${ring}`}>
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+    <section className={wrapperCls}>
+      <h3 className="mb-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">{title}</h3>
       {children}
     </section>
   );
 }
 
-function DetailGrid({ rows }: { rows: [string, React.ReactNode][] }) {
+// DetailGrid eski "SLA & Tarihler" Section'unda kullanılıyordu; Adım-2'de
+// section silindi, tek caller'ı kalmadı → function de silindi.
+
+/**
+ * PreviousCasesSection — Müşteri geçmiş vakaları (Adım-3 / direktif #6).
+ *
+ * Veri: `previousCases` parent state'inden — `caseService.findByAccount`
+ * mevcut fetch'i reuse (YENİ İSTEK YOK).
+ *
+ * Davranış:
+ *  - Mevcut vaka filtrelenir (kendi geçmiş listesinde görünmez).
+ *  - En yeni üstte: `resolvedAt ?? updatedAt` DESC.
+ *  - Varsayılan ilk 10 satır; "Hepsini gör (N)" toggle ile tüm liste açılır.
+ *  - Açık listede max-h + iç scroll (sayfa sonsuz büyümesin).
+ *  - Boş durumda worded empty ("Bu müşterinin başka vakası yok"); "—" çizilmez.
+ *  - Satır: caseNumber · başlık (truncate) · status pill · tarih · "Aç →"
+ *  - Status pill StatusPill component'ini reuse (TR label "Eskale Edildi" dahil — PR-C).
+ */
+function PreviousCasesSection({
+  previousCases,
+  currentCaseId,
+  onSelectPrevious,
+}: {
+  previousCases: Case[];
+  currentCaseId: string;
+  onSelectPrevious: (id: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  const sorted = useMemo(() => {
+    const refDate = (c: Case) => new Date(c.resolvedAt ?? c.updatedAt).getTime();
+    return previousCases
+      .filter((c) => c.id !== currentCaseId)
+      .slice()
+      .sort((a, b) => refDate(b) - refDate(a));
+  }, [previousCases, currentCaseId]);
+
+  const totalCount = sorted.length;
+  const visible = showAll ? sorted : sorted.slice(0, 10);
+
   return (
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md ring-1 ring-slate-200 sm:grid-cols-2">
-      {rows.map(([label, value], i) => (
-        <div
-          key={label}
-          className={`flex flex-col gap-0.5 px-3 py-2 ${
-            i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
-          }`}
-        >
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-          <dd className="text-sm text-slate-800">{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <Section title={`Müşteri geçmiş vakaları (${totalCount})`}>
+      {totalCount === 0 ? (
+        <p className="text-xs italic text-slate-400 dark:text-ndark-dim">
+          Bu müşterinin başka vakası yok.
+        </p>
+      ) : (
+        <>
+          <ul
+            className={`space-y-1.5 ${showAll ? 'max-h-[480px] overflow-y-auto pr-1' : ''}`}
+          >
+            {visible.map((p) => {
+              const refDate = p.resolvedAt ?? p.updatedAt;
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPrevious(p.id)}
+                    className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40 dark:border-ndark-border dark:bg-ndark-card dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                  >
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {p.caseNumber}
+                    </span>
+                    <span className="flex-1 truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                      {p.title}
+                    </span>
+                    <StatusPill status={p.status} />
+                    <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                      {formatRelative(refDate)}
+                    </span>
+                    <span className="ml-1 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+                      Aç →
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {totalCount > 10 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((s) => !s)}
+              className="mt-2 text-[11px] font-medium text-brand-700 hover:underline dark:text-brand-300"
+            >
+              {showAll ? 'Daha az göster' : `Hepsini gör (${totalCount})`}
+            </button>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 
-function EditableGrid({ rows }: { rows: { label: string; node: React.ReactNode }[] }) {
+function EditableGrid({
+  rows,
+  variant = 'card',
+}: {
+  rows: { label: string; node: React.ReactNode }[];
+  /**
+   * 'card' (default) — ağır ring + grid (eski davranış)
+   * 'flat'           — PR-B baseline: ringless, satır border yok, akışkan
+   * 'structured'     — Cila-4 sıkı ızgara: ringless, her satır border-b
+   *                    border-slate-100 (son hariç). Form/tablo dengesi.
+   */
+  variant?: 'card' | 'flat' | 'structured';
+}) {
+  const dlCls =
+    variant === 'flat' || variant === 'structured'
+      ? 'grid grid-cols-1 gap-x-4 gap-y-0 sm:grid-cols-2'
+      : 'grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2';
   return (
-    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2">
-      {rows.map((r, i) => (
-        <div
-          key={r.label}
-          className={`flex flex-col gap-0.5 px-2 py-1.5 ${
-            i < rows.length - 1 ? 'border-b border-slate-100 sm:border-b-0' : ''
-          }`}
-        >
-          <dt className="px-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">{r.label}</dt>
-          <dd>{r.node}</dd>
-        </div>
-      ))}
+    <dl className={dlCls}>
+      {rows.map((r, i) => {
+        // Cila-4 — structured: her satır altında ince hairline (sıkı ızgara).
+        // 'card' eski davranışı + 'structured' yeni: ikisi de border-b ile
+        // ayrım gösterir; 'flat' ayrımsız.
+        const rowBorder =
+          variant === 'flat'
+            ? ''
+            : i < rows.length - 1
+              ? 'border-b border-slate-100 sm:border-b-0'
+              : '';
+        return (
+          <div key={r.label} className={`flex flex-col gap-0.5 px-2 py-1.5 ${rowBorder}`}>
+            <dt className="px-2 text-[11px] font-medium text-slate-500">{r.label}</dt>
+            <dd>{r.node}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }

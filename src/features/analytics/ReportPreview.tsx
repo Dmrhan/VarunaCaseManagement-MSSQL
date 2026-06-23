@@ -137,7 +137,7 @@ export function ReportPreview(props: ReportPreviewProps) {
                 <th className="py-1.5">Müşteri</th>
                 <th className="py-1.5 text-right">Açık</th>
                 <th className="py-1.5 text-right">SLA İhlal</th>
-                <th className="py-1.5 text-right">Eskalasyon</th>
+                <th className="py-1.5 text-right">Eskale Edildi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border">

@@ -329,6 +329,8 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   aiRejectReason:             'AI Red Gerekçesi',
   aiRetentionOfferSuggestion: 'AI Elde Tutma Önerisi',
   aiRootCause:                'AI Kök Neden',
+  aiRiskLevel:                'AI Risk Seviyesi',
+  aiKeyPoints:                'AI Anahtar Noktalar',
 
   // Snooze
   snoozeUntil:          'Erteleme Tarihi',
@@ -482,6 +484,14 @@ export interface Case {
   aiCallBrief?: string;
   aiFollowupRecommendation?: string;
   aiRetentionOfferSuggestion?: string;
+  /**
+   * RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen iki alanı.
+   * Faz 1 input zenginleşti; Faz 2'de buraya yazılır; UI burada okur.
+   * - aiRiskLevel: 'Düşük'|'Orta'|'Yüksek'|'Kritik' (string)
+   * - aiKeyPoints: JSON array<string> stringify (parse zaman UI'da)
+   */
+  aiRiskLevel?: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
+  aiKeyPoints?: string;
 
   /**
    * FAZ 4 — Vaka açılırken `getChecklistFor()` 3-tuple match'inden gelen
@@ -843,6 +853,57 @@ export interface OfferedSolutionDef {
   description?: string;
   isActive: boolean;
 }
+
+// Tek noktadan paylaşılan TR etiketler (StatusPill + StatusTransitionPanel local
+// copy'lerini ileride buraya hizalanabilir; şu an yeni CompactStatusStepper
+// için eklendi — task "Türkçe etiketler kod tabanındaki mevcut map'ten gelsin").
+export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
+  'Açık':                'Açık',
+  'İncelemede':          'İncelemede',
+  '3rdPartyBekleniyor':  '3. Parti Bekleniyor',
+  // LBD A9: TR display label "Eskalasyon" → "Eskale Edildi" (sentence-case
+  // kardeş statülerle hizalı). Enum identifier 'Eskalasyon' + DB değeri
+  // AYNEN KALIR — backend, allowed-transition, SLA, reason logic dokunulmaz.
+  'Eskalasyon':          'Eskale Edildi',
+  'Çözüldü':             'Çözüldü',
+  'YenidenAcildi':       'Yeniden Açıldı',
+  'İptalEdildi':         'İptal Edildi',
+};
+
+// 3 fazlı omurga — task spec'i: Açık → İşlemde → Sonuç.
+// Dallanan statüler (3.parti, Eskalasyon, YenidenAcildi) İşlemde fazına bağlı.
+export type CaseStatusPhase = 'open' | 'in_progress' | 'result';
+
+export const CASE_STATUS_PHASES: CaseStatusPhase[] = ['open', 'in_progress', 'result'];
+
+export const CASE_STATUS_PHASE_LABELS: Record<CaseStatusPhase, string> = {
+  open:        'Açık',
+  in_progress: 'İşlemde',
+  result:      'Sonuç',
+};
+
+export const CASE_STATUS_PHASE_MAP: Record<CaseStatus, CaseStatusPhase> = {
+  'Açık':                'open',
+  'İncelemede':          'in_progress',
+  '3rdPartyBekleniyor':  'in_progress',
+  'Eskalasyon':          'in_progress',
+  'YenidenAcildi':       'in_progress',
+  'Çözüldü':             'result',
+  'İptalEdildi':         'result',
+};
+
+// Hedef statüye geçişte gerekçe/zorunlu alan akışı tetiklenir mi?
+// (StatusTransitionPanel mevcut kuralı: Çözüldü+resolutionNote, İptal+reason,
+//  3.parti+thirdPartyId, Eskalasyon+level+reason). Diğer geçişler doğrudan.
+export const STATUS_REQUIRES_REASON: Record<CaseStatus, boolean> = {
+  'Açık':                false,
+  'İncelemede':          false,
+  '3rdPartyBekleniyor':  true,
+  'Eskalasyon':          true,
+  'Çözüldü':             true,
+  'YenidenAcildi':       false,
+  'İptalEdildi':         true,
+};
 
 export const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   'Açık':                ['İncelemede', 'İptalEdildi'],

@@ -157,14 +157,54 @@ KB/RAG çekirdeği (eski ticket-analiz) uygulamaya gömülüdür (`server/kb/kbC
 
 ## 7. Güncelleme
 
+**KRİTİK SIRA:** `service stop → mutate → service start`. İki kural birlikte:
+1. Migration **mutlaka** yeni process başlamadan ÖNCE bitmiş olmalı; aksi
+   halde Prisma Client yeni alanları select edip P2022 ile çakar.
+2. `npm ci` + `npm run build` **çalışan service'in altından** node_modules
+   ve dist/'i mutate eder → service ayaktayken yarım dosyalara çakar.
+   Service ÖNCE durur, sonra mutate, sonra başlar.
+
+### PM2 ile (kanonik kısayol)
+
 ```powershell
-nssm stop VarunaCM
+cd C:\apps\VarunaCaseManagement
+npm run deploy:onprem
+```
+
+İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
+yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+
+**PM2 stop verify**: script `pm2 jlist` ile service'in gerçekten durduğunu
+doğrular; "online" ise mutate iptal (exit 3).
+
+**Real rollback**: mutate fail durumunda `git reset --hard <oldHead>` +
+`dist/` backup restore + `npm ci` ile eski state geri yüklenir, sonra
+`pm2 start` eski state ile ayağa kalkar (chimera state YOK). Çıkış kodları:
+- 0 yeni build canlıda · 1 mutate fail rollback yapıldı · 2 pm2 start fail ·
+3 pre-flight fail
+
+Detay: [OPERATIONS.md "On-Prem (PM2) Deploy"](OPERATIONS.md).
+
+Downtime: ~30-120 sn (build süresi).
+
+### nssm ile (Windows Service `VarunaCM`)
+
+```powershell
+cd C:\apps\VarunaCaseManagement
+nssm stop VarunaCM            # ÖNCE: live tree kapansın
 git pull
-npm install
-npx prisma migrate deploy
+npm ci
+npm run db:migrate:deploy     # start'tan ÖNCE bitmiş olmalı
 npm run build
 nssm start VarunaCM
 ```
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK**. `migrate deploy`
+> idempotent + non-destructive — pending migration yoksa no-op.
+
+Zero-downtime gerekiyorsa atomik release-dir / symlink swap pattern'i kullan
+(bkz. [docs/OPERATIONS.md "Zero-downtime atomic release"](OPERATIONS.md)).
 
 ## 8. Sağlık kontrolü / sorun giderme
 

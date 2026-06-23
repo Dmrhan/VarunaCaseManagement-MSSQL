@@ -708,7 +708,8 @@ const STATUS_LABEL: Record<string, string> = {
   Acik: 'Açık',
   Incelemede: 'İncelemede',
   ThirdPartyWaiting: '3. Parti',
-  Eskalasyon: 'Eskalasyon',
+  // LBD A9 — display rename (DB identifier 'Eskalasyon' korunur)
+  Eskalasyon: 'Eskale Edildi',
   Cozuldu: 'Çözüldü',
   YenidenAcildi: 'Yeniden',
   IptalEdildi: 'İptal',

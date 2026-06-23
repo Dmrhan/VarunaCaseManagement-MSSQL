@@ -151,15 +151,82 @@ HTTP'yi HTTPS'e yönlendirir, upload limitini 100 MB'a çıkarır
 
 ## 6. Güncelleme prosedürü (yeni sunucuda)
 
+**KRİTİK SIRA:** `service stop → mutate (pull/install/migrate/build) → service start`.
+İki kural birlikte:
+1. Migration **mutlaka** yeni process başlamadan ÖNCE bitmiş olmalı; aksi
+   halde Prisma Client yeni alanları select edip P2022
+   (`column does not exist`) ile çakar.
+2. `npm ci` ve `npm run build` **çalışan service'in altından** tree'yi
+   mutate eder (`node_modules/` silinir/kurulur, `dist/` yeniden yazılır).
+   Express `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan
+   paket çeker — service ayaktayken yarım/eksik dosyalara çakar. Service
+   önce DURUR, sonra mutate, sonra START.
+
+### 6.a Sunucu PM2 ile yönetiliyorsa (kanonik kısayol)
+
 ```powershell
-nssm stop VarunaCM
 cd C:\apps\VarunaCaseManagement
+npm run deploy:onprem
+```
+
+İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
+yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+
+**PM2 stop verify**: `pm2 stop` exit'i yetersiz — daemon/permission/yanlış
+user durumlarında stop fail ama service ÇALIŞIYOR olabilir. Script
+`pm2 jlist` ile state doğrular; "online"/"launching" ise mutate İPTAL —
+live tree dokunulmaz (exit 3).
+
+**Real rollback**: deploy başlamadan ÖNCE `git rev-parse HEAD` + `dist/`
+yedeği alınır. Mutate fail durumunda:
+1. `git reset --hard <oldHead>` — kaynak eski revizyona döner
+2. `dist/` backup'tan restore
+3. `npm ci` tekrar koşulur (eski package-lock üzerinden)
+
+Sonra `pm2 start` eski state ile ayağa kalkar.
+
+> **Migration caveat**: Prisma migrate forward-only. Migrate başarılı +
+> sonraki adım fail durumunda schema YENİ kalır, code ESKİ döner. Pratikte
+> sorunsuz çünkü migration'lar nullable column addition pattern'ine uyar
+> (Faz 3 örneği). Code yeni schema gerektiriyorsa (zorunlu yeni kolon,
+> breaking change) manuel rollback gerekir; script operatöre uyarı yazar.
+
+Çıkış kodları:
+- `0` — yeni build canlıda
+- `1` — mutate fail, ESKİ state restore edildi (git reset + dist + npm ci),
+  servis çalışıyor; operator log incelemeli + düzelt + tekrar koştur
+- `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
+  (`pm2 status`, `pm2 logs varuna-cm`, `pm2 start ecosystem.config.cjs`)
+- `3` — pre-flight fail (pm2 hâlâ online VEYA git rev-parse fail); mutate
+  başlamadı, hiçbir şey değişmedi
+
+**Downtime**: build + npm ci süresi kadar (~30-120 sn). Zero-downtime
+gerekiyorsa atomik release-dir / symlink swap pattern'i kullanılmalı
+(bkz. OPERATIONS.md "Zero-downtime atomic release — opsiyonel").
+
+`varuna-cm` PM2 app adı [ecosystem.config.cjs](../ecosystem.config.cjs).
+
+### 6.b Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`)
+
+PM2 yerine nssm kurulu kutularda aynı sırayı **el ile** koşmak gerek.
+**Service mutasyondan ÖNCE durdurulur** — `npm ci`/`npm run build`
+ayakta service'i kıracak `node_modules` / `dist/` mutasyonları yapar.
+
+```powershell
+cd C:\apps\VarunaCaseManagement
+nssm stop VarunaCM            # ← ÖNCE: live tree kapansın
 git pull
 npm ci
-npx prisma migrate deploy
+npm run db:migrate:deploy     # ← migration bu noktada yapılır (kritik:
+                              #   start'tan ÖNCE bitmiş olmalı)
 npm run build
 nssm start VarunaCM
 ```
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK** — schema drift +
+> veri kaybı riski. `migrate deploy` idempotent + non-destructive (pending
+> migration yoksa no-op).
 
 IIS tarafında hiçbir şey değişmez (proxy konfigürasyonu sabittir).
 
