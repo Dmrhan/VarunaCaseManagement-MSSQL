@@ -27,7 +27,13 @@
  */
 
 import { prisma } from '../db/client.js';
-import { fromDb } from '../db/enumMap.js';
+import { fromDb, M_STATUS } from '../db/enumMap.js';
+
+// Codex P2 — DB'de status ASCII identifier tutulur (Cozuldu/IptalEdildi);
+// enumMap.M_STATUS TR → ASCII haritasıdır. UI literal'ı ile sorgulamak
+// her zaman boş set döner — historik sinyal kaybolur.
+const STATUS_DB_RESOLVED = M_STATUS['Çözüldü'];      // 'Cozuldu'
+const STATUS_DB_CANCELLED = M_STATUS['İptalEdildi']; // 'IptalEdildi'
 
 const SOLUTION_STEP_CAP = 10;
 const CALL_CAP = 3;
@@ -144,18 +150,25 @@ export async function fetchSupervisorEnrichment({ caseId, allowedCompanyIds }) {
       take: TRANSFER_REASON_CAP,
       select: { reasonLabel: true, reason: true },
     }),
+    // Codex P1 — companyId scope: Account AccountCompany üzerinden çoklu
+    // tenant'a bağlanabilir. companyId filtresi olmazsa cross-tenant case
+    // sayıları AI prompt'una sızar. Mevcut vakanın companyId'sini ZORUNLU
+    // ek filtre olarak ver.
+    // Codex P2 — status DB'de ASCII tutulur (M_STATUS).
     c.accountId
       ? prisma.case.count({
           where: {
+            companyId: c.companyId,
             accountId: c.accountId,
             id: { not: caseId },
-            status: { in: ['Çözüldü', 'İptalEdildi'] },
+            status: { in: [STATUS_DB_RESOLVED, STATUS_DB_CANCELLED] },
           },
         })
       : Promise.resolve(0),
     c.accountId
       ? prisma.case.count({
           where: {
+            companyId: c.companyId,
             accountId: c.accountId,
             id: { not: caseId },
             slaViolation: true,
@@ -272,9 +285,9 @@ function extractSmartTicket(customFieldsRaw) {
 
 /**
  * Yapısal prompt builder — etiketli bölümler. Boş alan/bölüm yazılmaz.
- * PII alanları (accountName/assignedPersonName/customerContact*/Account email
- * vb.) bu fonksiyonun kapsamına girmez — fetchSupervisorEnrichment zaten
- * select'lerinde tutmaz.
+ * PII alanları (accountName, assignedPersonName, customerContact alanları,
+ * Account email vb.) bu fonksiyonun kapsamına girmez —
+ * fetchSupervisorEnrichment zaten select'lerinde tutmaz.
  */
 export function buildSupervisorSummaryPrompt(enrichment) {
   const { case: c, account, notes, activity, solutionSteps, callLogs, transfers, customerSignals } = enrichment;
