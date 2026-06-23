@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle2,
   ArrowRightLeft,
+  ChevronDown,
   ChevronRight,
   Clock,
   Clock3,
@@ -2912,11 +2913,9 @@ function DetailTab({
           koşullu bloklar grubuna (Atama'nın altına) taşındı.
           Aksiyonel önemleri var → grubun başında konumlanır. */}
 
-      {/* Inline edit bilgi notu */}
-      <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
-        <Pencil size={11} className="text-slate-400" />
-        Alanlara tıklayarak düzenleyebilirsiniz. Değişiklikleri üst köşedeki <strong>Kaydet</strong> butonuyla saklayın.
-      </p>
+      {/* Cila-1 (madde #5) — "Alanlara tıklayarak düzenleyebilirsiniz…"
+          statik notu kaldırıldı. Edit cue'lar (Cila-4'te chevron + hover
+          pencil) bu bilgiyi taşıyacak. */}
 
       {/* Adım-1: KpiInlineRow buradan çıkarıldı — content band'a (status'un
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
@@ -2962,10 +2961,11 @@ function DetailTab({
 
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
-          Adım-4 #3 — PR-B baseline: flat variant (ringless, sönük başlık). */}
-      <Section title="Sınıflandırma" variant="flat">
+          Cila-4 #2 — "operable" structured variant: hafif başlık şeridi +
+          bg-white içerik + hairline çerçeve + sıkı ızgara. */}
+      <Section title="Sınıflandırma" variant="structured">
         <EditableGrid
-          variant="flat"
+          variant="structured"
           rows={[
             { label: 'Kategori', node: (
               <InlineEdit
@@ -3148,12 +3148,12 @@ function DetailTab({
         onSelectPrevious={onSelectPrevious}
       />
 
-      {/* Atama & Eskalasyon — sol panelden bağımsız, inline-edit'li alanlar
-          Adım-4 #3 — PR-B baseline flat: ringless, sönük başlık. Sol panel
-          okuma özeti; merkez edit. Duplikasyon değil, ayrı amaç. */}
-      <Section title="Atama & eskalasyon" variant="flat">
+      {/* Atama & eskalasyon — sol panelden bağımsız, inline-edit'li alanlar.
+          Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
+          sıkı ızgara). Sol panel okuma özeti; merkez edit. */}
+      <Section title="Atama & eskalasyon" variant="structured">
         <EditableGrid
-          variant="flat"
+          variant="structured"
           rows={[
             { label: 'Atanan Takım', node: (
               <InlineEdit
@@ -3935,11 +3935,21 @@ function InlineEdit({
           {renderDisplay ? renderDisplay(value) : (value ? String(value) : <span className="text-slate-400">—</span>)}
         </span>
         {!disabled && !isDraft && (
-          <Pencil
-            size={12}
-            aria-hidden
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
-          />
+          // Cila-4 — edit cue: type === 'select' ise ChevronDown ipucu
+          // (kalıcı opacity-60 + hover'da full); diğer tiplerde Pencil hover.
+          type === 'select' ? (
+            <ChevronDown
+              size={12}
+              aria-hidden
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-60 transition-opacity group-hover:opacity-100"
+            />
+          ) : (
+            <Pencil
+              size={12}
+              aria-hidden
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100"
+            />
+          )
         )}
         {isDraft && (
           <span className="absolute right-1 top-1 rounded bg-amber-200 px-1 text-[9px] font-semibold text-amber-900">
@@ -4743,19 +4753,33 @@ function Section({
   tint?: 'default' | 'violet' | 'rose' | 'emerald';
   /**
    * 'card' (default) — ağır ring + bg-white kutu (eski davranış)
-   * 'flat'           — Adım-4 PR-B baseline: ringless, transparent bg,
-   *                    sadece minimal padding + sönük başlık. Sayfanın
-   *                    geneliyle aynı görsel dilde.
+   * 'flat'           — PR-B baseline: ringless, transparent bg + minimal padding
+   * 'structured'     — Cila-4 "operable" dengesi: hafif başlık şeridi +
+   *                    bg-white içerik + ring-1 ring-slate-100 hairline çerçeve.
+   *                    Sınıflandırma/Atama gibi form benzeri bölümler için.
    */
-  variant?: 'card' | 'flat';
+  variant?: 'card' | 'flat' | 'structured';
   children: React.ReactNode;
 }) {
+  // 'card' variant tint mantığı
   const ring =
-    variant === 'flat'    ? '' :
+    variant === 'flat' || variant === 'structured' ? '' :
     tint === 'violet'  ? 'ring-violet-200 bg-violet-50/30' :
     tint === 'rose'    ? 'ring-rose-200 bg-rose-50/30' :
     tint === 'emerald' ? 'ring-emerald-200 bg-emerald-50/30' :
                           'ring-slate-200 bg-white';
+
+  if (variant === 'structured') {
+    return (
+      <section className="overflow-hidden rounded-md ring-1 ring-slate-100 dark:ring-ndark-border">
+        <h3 className="bg-slate-50/40 px-3 py-1.5 text-xs font-medium text-slate-500 dark:bg-ndark-bg/40 dark:text-ndark-muted">
+          {title}
+        </h3>
+        <div className="bg-white px-1 py-1 dark:bg-ndark-card">{children}</div>
+      </section>
+    );
+  }
+
   const wrapperCls =
     variant === 'flat'
       ? 'pt-1'
@@ -4868,30 +4892,35 @@ function EditableGrid({
   rows: { label: string; node: React.ReactNode }[];
   /**
    * 'card' (default) — ağır ring + grid (eski davranış)
-   * 'flat'           — Adım-4 PR-B baseline: ringless, satır border yok,
-   *                    sayfanın geneliyle akışkan.
+   * 'flat'           — PR-B baseline: ringless, satır border yok, akışkan
+   * 'structured'     — Cila-4 sıkı ızgara: ringless, her satır border-b
+   *                    border-slate-100 (son hariç). Form/tablo dengesi.
    */
-  variant?: 'card' | 'flat';
+  variant?: 'card' | 'flat' | 'structured';
 }) {
   const dlCls =
-    variant === 'flat'
-      ? 'grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2'
+    variant === 'flat' || variant === 'structured'
+      ? 'grid grid-cols-1 gap-x-4 gap-y-0 sm:grid-cols-2'
       : 'grid grid-cols-1 gap-x-4 gap-y-1 rounded-md ring-1 ring-slate-200 sm:grid-cols-2';
   return (
     <dl className={dlCls}>
-      {rows.map((r, i) => (
-        <div
-          key={r.label}
-          className={`flex flex-col gap-0.5 px-2 py-1.5 ${
-            variant === 'card' && i < rows.length - 1
+      {rows.map((r, i) => {
+        // Cila-4 — structured: her satır altında ince hairline (sıkı ızgara).
+        // 'card' eski davranışı + 'structured' yeni: ikisi de border-b ile
+        // ayrım gösterir; 'flat' ayrımsız.
+        const rowBorder =
+          variant === 'flat'
+            ? ''
+            : i < rows.length - 1
               ? 'border-b border-slate-100 sm:border-b-0'
-              : ''
-          }`}
-        >
-          <dt className="px-2 text-[11px] font-medium text-slate-500">{r.label}</dt>
-          <dd>{r.node}</dd>
-        </div>
-      ))}
+              : '';
+        return (
+          <div key={r.label} className={`flex flex-col gap-0.5 px-2 py-1.5 ${rowBorder}`}>
+            <dt className="px-2 text-[11px] font-medium text-slate-500">{r.label}</dt>
+            <dd>{r.node}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }

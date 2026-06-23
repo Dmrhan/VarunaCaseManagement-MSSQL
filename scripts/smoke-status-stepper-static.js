@@ -99,12 +99,14 @@ console.log('\n── 3) CompactStatusStepper.tsx — yeni component ───�
   // 3.8 — Popover import + role="menu"
   expect('3.8 Popover import + role="menu"',
     src.includes("import { Popover }") && src.includes('role="menu"'), true);
-  // 3.9 — Fiil etiket map (Çöz / Beklemeye al / Eskale et / İptal et)
-  expect('3.9 STATUS_VERB_LABELS map (fiil etiketleri)',
-    /STATUS_VERB_LABELS: Record<CaseStatus, string>[\s\S]{0,600}'Eskalasyon':\s*'Eskale et'[\s\S]{0,200}'Çözüldü':\s*'Çöz'[\s\S]{0,200}'İptalEdildi':\s*'İptal et'/.test(src), true);
-  // 3.10 — Menüde STATUS_VERB_LABELS kullanılıyor (durum adı değil)
-  expect('3.10 menü içinde STATUS_VERB_LABELS[target] render ediliyor',
-    /STATUS_VERB_LABELS\[target\]/.test(src), true);
+  // 3.9 + 3.10 — Cila-3 ile STATUS_VERB_LABELS silindi (Q5 onayı); menü etiketleri
+  // CASE_STATUS_LABELS[target] (statü adı) kullanır. Yeni invariant'lar 4o.12-4o.13'te.
+  // Comment'leri striple — açıklamada geçen "STATUS_VERB_LABELS" false positive olmasın.
+  const srcCode = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  expect('3.9 STATUS_VERB_LABELS dead code silindi (render path)',
+    /STATUS_VERB_LABELS/.test(srcCode), false);
+  expect('3.10 menü CASE_STATUS_LABELS[target] (statü adı) render',
+    /<span className="flex-1 font-medium">\{CASE_STATUS_LABELS\[target\]\}<\/span>/.test(src), true);
   // 3.11 — STATUS_VISUAL dotColor field'ı + 5 farklı dot rengi (ek kriter 1)
   expect('3.11 STATUS_VISUAL dotColor: bg-amber-500 (İncelemede)',
     /'İncelemede':[\s\S]{0,200}dotColor:\s*'bg-amber-500'/.test(src), true);
@@ -115,8 +117,9 @@ console.log('\n── 3) CompactStatusStepper.tsx — yeni component ───�
   expect('3.14 STATUS_VISUAL dotColor: bg-violet-500 (YenidenAcildi)',
     /'YenidenAcildi':[\s\S]{0,200}dotColor:\s*'bg-violet-500'/.test(src), true);
   // 3.15 — Aktif faz dot rengi activeVisual.dotColor'dan gelir (sabit amber DEĞİL)
-  expect('3.15 aktif faz dot rengi activeVisual.dotColor',
-    /isCurrent\s*\?\s*activeVisual\.dotColor/.test(src), true);
+  // Cila-2 sonrası: nodeBase template + activeVisual.dotColor
+  expect('3.15 aktif faz dot rengi activeVisual.dotColor (template)',
+    /\$\{activeVisual\.dotColor\} text-white ring-4/.test(src), true);
   // 3.16 — subStatusNote (alt-durum metni) field'ı tanımlı + render
   expect('3.16 subStatusNote: "3. parti · SLA durdu"',
     src.includes("subStatusNote: '3. parti · SLA durdu'"), true);
@@ -399,8 +402,10 @@ console.log('\n── 4g) Adım-1 — progress bar + KPI/SLA şeridi ───�
   expect('4g.2 wideConnectors = false default',
     /wideConnectors = false/.test(stepper), true);
   // 4g.3 — connector class wideConnectors ile flex-1 min-w
-  expect('4g.3 connector flex-1 min-w-[80px] wideConnectors true',
-    /wideConnectors \? 'flex-1 min-w-\[80px\]' : 'w-7'/.test(stepper), true);
+  // Cila-2 sonrası: 28px node + 4px ray kombinasyonu band şişmesin diye
+  // min-w 60px (eski 80'den düşürüldü)
+  expect('4g.3 connector flex-1 min-w-[60px] (Cila-2 sıkı yükseklik)',
+    /wideConnectors \? 'flex-1 min-w-\[60px\]' : 'w-10'/.test(stepper), true);
   // 4g.4 — phase wrapper'a flex-1 (idx>0 + wideConnectors)
   expect('4g.4 phase wrapper flex-1 (idx>0 + wideConnectors)',
     /flex items-center \$\{wideConnectors && idx > 0 \? 'flex-1' : ''\}/.test(stepper), true);
@@ -596,22 +601,18 @@ console.log('\n── 4j) Adım-4 — Sınıflandırma + Atama PR-B baseline tut
   expect('4j.4 EditableGrid variant?: "card" | "flat"',
     /variant\?:\s*'card' \| 'flat'/.test(cd) &&
     /function EditableGrid\(\{[\s\S]{0,200}variant/.test(cd), true);
-  // 4j.5 — EditableGrid flat: ringless (rounded-md ring-1 yok)
-  expect('4j.5 EditableGrid flat ringless dl class',
-    /variant === 'flat'\s*\?\s*'grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2'/.test(cd), true);
+  // 4j.5 — EditableGrid flat: ringless. Cila-4 sonrası structured + flat
+  // ikisi de aynı ringless grid (gap-y-0) kullanır.
+  expect('4j.5 EditableGrid flat/structured ringless gap-y-0 dl class',
+    /'flat' \|\| variant === 'structured'\s*\n?\s*\? 'grid grid-cols-1 gap-x-4 gap-y-0/.test(cd), true);
 
-  // 4j.6 — Sınıflandırma Section variant="flat"
-  expect('4j.6 Sınıflandırma Section variant="flat"',
-    /<Section title="Sınıflandırma" variant="flat">/.test(cd), true);
-  // 4j.7 — Sınıflandırma EditableGrid variant="flat"
-  expect('4j.7 Sınıflandırma EditableGrid variant="flat"',
-    /<Section title="Sınıflandırma" variant="flat">\s*\n\s*<EditableGrid\s*\n\s*variant="flat"/.test(cd), true);
-  // 4j.8 — Atama Section variant="flat" + sentence-case başlık ("Atama & eskalasyon")
-  expect('4j.8 Atama Section variant="flat" + sentence-case başlık',
-    /<Section title="Atama & eskalasyon" variant="flat">/.test(cd), true);
-  // 4j.9 — Atama EditableGrid variant="flat"
-  expect('4j.9 Atama EditableGrid variant="flat"',
-    /<Section title="Atama & eskalasyon" variant="flat">\s*\n\s*<EditableGrid\s*\n\s*variant="flat"/.test(cd), true);
+  // 4j.6-4j.9: Sınıflandırma + Atama Cila-4'te flat → structured upgrade.
+  // Sentence-case başlık ve component yapısı korunur; smoke 4n.6-4n.10'da
+  // yeni davranış doğrulanır.
+  expect('4j.6 Sınıflandırma Section variant değişti (flat → structured)',
+    /<Section title="Sınıflandırma" variant="structured">/.test(cd), true);
+  expect('4j.8 Atama Section sentence-case başlık + variant',
+    /<Section title="Atama & eskalasyon" variant="structured">/.test(cd), true);
 
   // 4j.10 — Atanan Takım/Kişi renderDisplay'lerinde "Atanmadı" worded empty italic
   expect('4j.10 Atanan Takım/Kişi renderDisplay worded empty "Atanmadı" italic',
@@ -639,6 +640,231 @@ console.log('\n── 4k) Codex P2 — Vazgeç modal kapanır (compactMode) ─�
   // 4k.3 — Stepper Modal'da onCancel={() => setReasonTarget(null)} pass ediyor
   expect('4k.3 Stepper Modal onCancel=setReasonTarget(null)',
     /onCancel=\{\(\) => setReasonTarget\(null\)\}/.test(stepper), true);
+}
+
+console.log('\n── 4l) Cila-1 — üst not kaldırıldı (madde #5) ─────────────');
+{
+  const cd = read('src/features/cases/CaseDetailPage.tsx');
+  // Comment'leri striple — yorumdaki açıklama kalır, JSX text taranır
+  const cdCode = cd.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  expect('4l.1 "Alanlara tıklayarak düzenleyebilirsiniz" JSX render yok',
+    /Alanlara tıklayarak düzenleyebilirsiniz/.test(cdCode), false);
+  // Pencil import korunur (InlineEdit görsel cue için kullanılıyor)
+  expect('4l.2 Pencil import korundu (InlineEdit\'te edit cue)',
+    /import\s*\{[^}]*Pencil[^}]*\}/.test(cd) || /^\s*Pencil,/m.test(cd), true);
+}
+
+console.log('\n── 4m) Cila-2 — Stepper process göstergesi (madde #1) ───');
+{
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+
+  // 4m.1 — STATUS_VISUAL iconLg + ringColor fields eklendi
+  expect('4m.1 STATUS_VISUAL iconLg field tanımlı',
+    /iconLg:\s*ReactNode/.test(stepper), true);
+  expect('4m.2 STATUS_VISUAL ringColor field (halo)',
+    /ringColor:\s*string/.test(stepper), true);
+  // 4m.3 — Aktif node halo: ring-X-500/30
+  expect('4m.3 İncelemede ringColor "ring-amber-500/30"',
+    /'İncelemede':\s*\{[\s\S]{0,300}ringColor:\s*'ring-amber-500\/30'/.test(stepper), true);
+
+  // 4m.4 — Node 28px daire (h-7 w-7)
+  expect('4m.4 node h-7 w-7 (28px daire)',
+    /flex h-7 w-7 items-center justify-center rounded-full/.test(stepper), true);
+
+  // 4m.5 — Aktif node ring-4 halo
+  expect('4m.5 aktif node ring-4 halo (text-white + activeVisual.ringColor)',
+    /isCurrent\s*\?\s*`\$\{nodeBase\} \$\{activeVisual\.dotColor\} text-white ring-4 \$\{activeVisual\.ringColor\}/.test(stepper), true);
+
+  // 4m.6 — Gelecek node border-2 + Flag ikonu sönük
+  expect('4m.6 gelecek node border-2 border-slate-300',
+    /border-2 border-slate-300 bg-white text-slate-300/.test(stepper), true);
+  expect('4m.7 gelecek node Flag ikonu',
+    /<Flag size=\{12\} strokeWidth=\{2\} aria-hidden="true" \/>/.test(stepper), true);
+
+  // 4m.8 — Tamamlanan node Check beyaz 14px
+  expect('4m.8 tamamlanan node Check 14 strokeWidth-3',
+    /<Check size=\{14\} strokeWidth=\{3\} aria-hidden="true" \/>/.test(stepper), true);
+
+  // 4m.9 — Aktif node ikonu activeVisual.iconLg ?? activeVisual.icon
+  expect('4m.9 aktif node ikonu activeVisual.iconLg',
+    /activeVisual\.iconLg \?\? activeVisual\.icon/.test(stepper), true);
+
+  // 4m.10 — Ray h-1 (4px) + rounded-full
+  expect('4m.10 ray h-1 rounded-full (kalın ray)',
+    /block h-1 rounded-full/.test(stepper), true);
+
+  // 4m.11 — Tamamlanan etiket text-slate-500 (rötuş — sönük ama okunabilir)
+  expect('4m.11 tamamlanan etiket text-slate-500 (Cila-2 rötuş)',
+    /isCompleted\s*\?\s*'text-slate-500/.test(stepper), true);
+}
+
+console.log('\n── 4n) Cila-4 — structured variant + edit cue (madde #2) ──');
+{
+  const cd = read('src/features/cases/CaseDetailPage.tsx');
+
+  // 4n.1 — Section variant 'structured' eklendi
+  expect('4n.1 Section variant?: "card" | "flat" | "structured"',
+    /variant\?:\s*'card' \| 'flat' \| 'structured'/.test(cd), true);
+  // 4n.2 — structured: bg-slate-50/40 başlık + bg-white içerik + ring-1 ring-slate-100
+  expect('4n.2 structured başlık şeridi bg-slate-50/40',
+    /bg-slate-50\/40 px-3 py-1\.5 text-xs font-medium text-slate-500/.test(cd), true);
+  expect('4n.3 structured wrapper ring-1 ring-slate-100 hairline',
+    /overflow-hidden rounded-md ring-1 ring-slate-100/.test(cd), true);
+
+  // 4n.4 — EditableGrid variant 'structured' eklendi (3 seçenek)
+  expect('4n.4 EditableGrid variant?: card | flat | structured',
+    /function EditableGrid[\s\S]{0,500}variant\?:\s*'card' \| 'flat' \| 'structured'/.test(cd), true);
+  // 4n.5 — structured gap-y-0 (sıkı ızgara)
+  expect('4n.5 structured/flat gap-y-0 sıkı ızgara',
+    /'flat' \|\| variant === 'structured'\s*\n?\s*\? 'grid grid-cols-1 gap-x-4 gap-y-0/.test(cd), true);
+
+  // 4n.6 — Sınıflandırma Section variant="structured"
+  expect('4n.6 Sınıflandırma Section variant="structured"',
+    /<Section title="Sınıflandırma" variant="structured">/.test(cd), true);
+  // 4n.7 — Sınıflandırma EditableGrid variant="structured"
+  expect('4n.7 Sınıflandırma EditableGrid variant="structured"',
+    /<Section title="Sınıflandırma" variant="structured">\s*\n\s*<EditableGrid\s*\n\s*variant="structured"/.test(cd), true);
+
+  // 4n.8 — Atama Section variant="structured" (sentence-case korunur)
+  expect('4n.8 Atama Section variant="structured"',
+    /<Section title="Atama & eskalasyon" variant="structured">/.test(cd), true);
+
+  // 4n.9 — Eski variant="flat" Sınıflandırma/Atama'da yok
+  expect('4n.9 Sınıflandırma "flat" → "structured" rename',
+    /<Section title="Sınıflandırma" variant="flat">/.test(cd), false);
+  expect('4n.10 Atama "flat" → "structured" rename',
+    /<Section title="Atama & eskalasyon" variant="flat">/.test(cd), false);
+
+  // 4n.11 — InlineEdit display select için ChevronDown ipucu (type === 'select' guard)
+  expect('4n.11 InlineEdit select type ChevronDown edit cue',
+    /type === 'select' \? \(\s*\n\s*<ChevronDown/.test(cd), true);
+  // 4n.12 — ChevronDown opacity-60 kalıcı (görünür ipucu)
+  expect('4n.12 ChevronDown opacity-60 transition group-hover:opacity-100',
+    /<ChevronDown[\s\S]{0,300}opacity-60 transition-opacity group-hover:opacity-100/.test(cd), true);
+  // 4n.13 — Diğer tip (Pencil) hover-only korundu
+  expect('4n.13 Pencil hover-only (opacity-0 → group-hover:opacity-100) korundu',
+    /<Pencil[\s\S]{0,300}opacity-0 transition-opacity group-hover:opacity-100/.test(cd), true);
+
+  // 4n.14 — ChevronDown CaseDetailPage import edildi
+  expect('4n.14 ChevronDown import',
+    /^\s*ChevronDown,/m.test(cd), true);
+}
+
+console.log('\n── 4o) Cila-3 — Popover portal + statü adı (madde #3+#4) ──');
+{
+  const pop = read('src/components/ui/Popover.tsx');
+  const stepper = read('src/features/cases/CompactStatusStepper.tsx');
+
+  // 4o.1 — Popover usePortal?: boolean prop (default false)
+  expect('4o.1 Popover usePortal?: boolean prop',
+    /usePortal\?:\s*boolean/.test(pop), true);
+  expect('4o.2 Popover usePortal = false default',
+    /usePortal = false/.test(pop), true);
+  // 4o.3 — nowrap + minWidth props
+  expect('4o.3 Popover nowrap?: boolean + minWidth?: number props',
+    /nowrap\?:\s*boolean/.test(pop) && /minWidth\?:\s*number/.test(pop), true);
+  // 4o.4 — createPortal import + render
+  expect('4o.4 createPortal import + render usePortal branch',
+    /import \{ createPortal \} from 'react-dom'/.test(pop) &&
+    /usePortal \? createPortal\(content, document\.body\) : content/.test(pop), true);
+  // 4o.5 — Viewport-aware flip (placeBelow hesabı)
+  expect('4o.5 viewport-aware flip — placeBelow + r.top fallback',
+    /const placeBelow = spaceBelow >= estHeight \+ 8 \|\| spaceBelow >= r\.top/.test(pop), true);
+  // 4o.6 — scroll/resize'da kapan (reposition değil)
+  expect('4o.6 scroll/resize listeners → setOpen(false) (kapan)',
+    /onScroll = \(\) => setOpen\(false\)[\s\S]{0,200}onResize = \(\) => setOpen\(false\)/.test(pop), true);
+  // 4o.7 — Pozisyon hesabı için wrapperRef rect (Cila-3 fix:
+  //        eski triggerSlotRef + span "contents" pattern getBoundingClientRect
+  //        {0,0,0,0} döndürüyordu → menü sol üst köşede açılıyordu).
+  expect('4o.7 wrapperRef.current.getBoundingClientRect (display:contents bug fix)',
+    /const trig = wrapperRef\.current;[\s\S]{0,100}getBoundingClientRect\(\)/.test(pop), true);
+  // 4o.7b — Eski triggerSlotRef + contents span pattern code path'ten silindi
+  // (comment'lerde açıklama için geçebilir — code-only kontrol).
+  const popCode = pop.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  expect('4o.7b eski triggerSlotRef / className="contents" code path silindi',
+    /triggerSlotRef|className="contents"/.test(popCode), false);
+  // 4o.8 — Portal pozisyon fixed
+  expect('4o.8 portal content position: fixed',
+    /position: 'fixed', top: portalPos\.top, left: portalPos\.left/.test(pop), true);
+  // 4o.9 — Portal mode z-50 (modal seviyesi)
+  expect('4o.9 portal mode z-50, normal mode z-30',
+    /usePortal \? 'z-50' : 'absolute top-full z-30 mt-1'/.test(pop), true);
+  // 4o.10 — nowrap whitespace-nowrap class
+  expect('4o.10 nowrap → whitespace-nowrap',
+    /nowrap && 'whitespace-nowrap'/.test(pop), true);
+
+  // ─── Stepper menü opt-in ───
+  // 4o.11 — Stepper Popover usePortal nowrap minWidth=260
+  expect('4o.11 Stepper menü usePortal + nowrap + minWidth={260}',
+    /align="start"\s*\n\s*width=\{260\}\s*\n\s*minWidth=\{260\}\s*\n\s*usePortal\s*\n\s*nowrap/.test(stepper), true);
+  // 4o.12 — Menü etiketi CASE_STATUS_LABELS[target] (fiil değil)
+  expect('4o.12 menü etiketi CASE_STATUS_LABELS[target] (statü adı)',
+    /<span className="flex-1 font-medium">\{CASE_STATUS_LABELS\[target\]\}<\/span>/.test(stepper), true);
+  // 4o.13 — STATUS_VERB_LABELS map'i silindi
+  expect('4o.13 STATUS_VERB_LABELS map silindi (caller\'sız dead code)',
+    /const STATUS_VERB_LABELS: Record<CaseStatus, string>/.test(stepper), false);
+  // 4o.14 — Eski sağdaki ikincil "statü adı" span'ı kalmadı (artık ana etiket)
+  expect('4o.14 eski sağdaki text-[10px] text-slate-400 secondary statü adı yok',
+    /<span className="text-\[10px\] text-slate-400">\{CASE_STATUS_LABELS\[target\]\}<\/span>/.test(stepper), false);
+
+  // ─── Diğer 5 caller opt-in dışı (regression guard) ───
+  // 4o.15 — App.tsx user menu usePortal vermez
+  const app = read('src/App.tsx');
+  expect('4o.15 App.tsx user menu Popover usePortal yok',
+    /<Popover[\s\S]{0,500}usePortal/.test(app), false);
+  // 4o.16 — CaseDetailPage header ⋯ menü usePortal vermez
+  const cd = read('src/features/cases/CaseDetailPage.tsx');
+  // Sadece header ⋯ Popover'ı (line 671 civarı) kontrol — diğer Popover yok
+  const cdPopovers = (cd.match(/<Popover/g) || []).length;
+  expect('4o.16 CaseDetailPage tek Popover (header ⋯) — usePortal yok',
+    cdPopovers === 1 && /<Popover[\s\S]{0,300}usePortal/.test(cd) === false, true);
+  // 4o.17 — QuickNotePopover usePortal vermez
+  const qnp = read('src/components/ui/QuickNotePopover.tsx');
+  expect('4o.17 QuickNotePopover usePortal yok',
+    /<Popover[\s\S]{0,300}usePortal/.test(qnp), false);
+  // 4o.18 — CasesListPage Popover usePortal vermez
+  const cl = read('src/features/cases/CasesListPage.tsx');
+  expect('4o.18 CasesListPage Popover usePortal yok',
+    /<Popover[\s\S]{0,300}usePortal/.test(cl), false);
+}
+
+console.log('\n── 4p) Genel #45 — CasesList "Tümü" tab ──────────────────');
+{
+  const cl = read('src/features/cases/CasesListPage.tsx');
+
+  // 4p.1 — InboxTab type 'all' eklendi
+  expect('4p.1 InboxTab = "all" | "open" | "later" | "closed"',
+    /type InboxTab = 'all' \| 'open' \| 'later' \| 'closed'/.test(cl), true);
+
+  // 4p.2 — Default açılış HÂLÂ "open" (mevcut davranış korunur)
+  expect('4p.2 default useState<InboxTab>("open") korundu',
+    /useState<InboxTab>\('open'\)/.test(cl), true);
+
+  // 4p.3 — load() içinde "all" branch: statü filtresi yok / undefined
+  expect('4p.3 "all" branch: statuses undefined (statü filtresi yok)',
+    /inboxTab === 'all'[\s\S]{0,400}filters\.statuses\?\.length \? filters\.statuses : undefined/.test(cl), true);
+
+  // 4p.4 — Filtre chip seçimi varsa "all" içinde de uygulanır
+  expect('4p.4 "all" branch filter chip seçimi uygulanır',
+    /inboxTab === 'all'[\s\S]{0,500}caseService\.list\(\{ \.\.\.filters, statuses: effectiveStatuses \}\)/.test(cl), true);
+
+  // 4p.5 — Tab UI başında "Tümü" InboxTabButton
+  expect('4p.5 Tab UI: "Tümü" başta + onClick=setInboxTab("all")',
+    /<InboxTabButton\s*\n\s*label="Tümü"[\s\S]{0,300}onClick=\{\(\) => setInboxTab\('all'\)\}/.test(cl), true);
+
+  // 4p.6 — Tab sırası: Tümü → Açık → Ertelendi → Kapalı
+  const tabUiStart = cl.indexOf('<InboxTabButton\n            label="Tümü"');
+  const tabUi = tabUiStart > 0 ? cl.slice(tabUiStart, tabUiStart + 2000) : '';
+  expect('4p.6 tab sırası: Tümü → Açık → Ertelendi → Kapalı',
+    /label="Tümü"[\s\S]+?label="Açık"[\s\S]+?label="Ertelendi"[\s\S]+?label="Kapalı"/.test(tabUi), true);
+
+  // 4p.7 — Layers icon import edildi (Tümü tab ikonu)
+  expect('4p.7 Layers import (Tümü tab ikonu)',
+    /^\s*Layers,/m.test(cl), true);
+
+  // 4p.8 — "later" branch (snoozed endpoint) AYNI kaldı (regression)
+  expect('4p.8 later branch /api/cases/snoozed regression yok',
+    /inboxTab === 'later'[\s\S]{0,400}'\/api\/cases\/snoozed'/.test(cl), true);
 }
 
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');

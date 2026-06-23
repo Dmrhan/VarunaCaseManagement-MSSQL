@@ -27,6 +27,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Flag,
   Inbox,
   PauseCircle,
   RotateCw,
@@ -70,8 +71,12 @@ const STATUS_VISUAL: Record<
   CaseStatus,
   {
     icon: ReactNode;
+    /** Cila-2 — aktif 28px node içinde kullanılan büyük ikon (16px). */
+    iconLg: ReactNode;
     /** Faz rayında nokta dolgusu (aktif alt-statü rengini taşır). */
     dotColor: string;
+    /** Cila-2 — aktif node halo'su (ring-{color}/30 saydam). */
+    ringColor: string;
     /** Menü dropdown'unda hedef ipucu (küçük chip). */
     chipBg: string;
     chipText: string;
@@ -81,46 +86,60 @@ const STATUS_VISUAL: Record<
 > = {
   'Açık': {
     icon: <Inbox size={13} />,
+    iconLg: <Inbox size={14} strokeWidth={2.5} />,
     dotColor: 'bg-blue-500',
+    ringColor: 'ring-blue-500/30',
     chipBg: 'bg-blue-50',
     chipText: 'text-blue-700',
   },
   'İncelemede': {
     icon: <SearchIcon size={13} />,
+    iconLg: <SearchIcon size={14} strokeWidth={2.5} />,
     dotColor: 'bg-amber-500',
+    ringColor: 'ring-amber-500/30',
     chipBg: 'bg-amber-50',
     chipText: 'text-amber-700',
   },
   '3rdPartyBekleniyor': {
     icon: <PauseCircle size={13} />,
+    iconLg: <PauseCircle size={14} strokeWidth={2.5} />,
     dotColor: 'bg-slate-400',
+    ringColor: 'ring-slate-400/30',
     chipBg: 'bg-slate-100',
     chipText: 'text-slate-700',
     subStatusNote: '3. parti · SLA durdu',
   },
   'Eskalasyon': {
     icon: <TrendingUp size={13} />,
+    iconLg: <TrendingUp size={14} strokeWidth={2.5} />,
     dotColor: 'bg-rose-500',
+    ringColor: 'ring-rose-500/30',
     chipBg: 'bg-rose-50',
     chipText: 'text-rose-700',
     subStatusNote: 'Eskale Edildi',
   },
   'YenidenAcildi': {
     icon: <RotateCw size={13} />,
+    iconLg: <RotateCw size={14} strokeWidth={2.5} />,
     dotColor: 'bg-violet-500',
+    ringColor: 'ring-violet-500/30',
     chipBg: 'bg-violet-50',
     chipText: 'text-violet-700',
     subStatusNote: 'Yeniden açıldı',
   },
   'Çözüldü': {
     icon: <CheckCircle2 size={13} />,
+    iconLg: <CheckCircle2 size={14} strokeWidth={2.5} />,
     dotColor: 'bg-emerald-500',
+    ringColor: 'ring-emerald-500/30',
     chipBg: 'bg-emerald-50',
     chipText: 'text-emerald-700',
   },
   'İptalEdildi': {
     icon: <Ban size={13} />,
+    iconLg: <Ban size={14} strokeWidth={2.5} />,
     dotColor: 'bg-slate-400',
+    ringColor: 'ring-slate-400/30',
     chipBg: 'bg-slate-100',
     chipText: 'text-slate-600',
     subStatusNote: 'İptal edildi',
@@ -133,20 +152,10 @@ const PHASE_ORDER: Record<CaseStatusPhase, number> = {
   result: 2,
 };
 
-/**
- * Hedef statünün FİİL etiketi — header butonlarında durum adı yerine işlemi
- * tarif eder ("Çözüldü" yerine "Çöz", "Eskalasyon" yerine "Eskale et").
- * Şekil/anlam ayrımı için: pill = durum, buton = işlem.
- */
-const STATUS_VERB_LABELS: Record<CaseStatus, string> = {
-  'Açık':                'Aç',
-  'İncelemede':          'İncelemeye al',
-  '3rdPartyBekleniyor':  'Beklemeye al',
-  'Eskalasyon':          'Eskale et',
-  'Çözüldü':             'Çöz',
-  'YenidenAcildi':       'Yeniden aç',
-  'İptalEdildi':         'İptal et',
-};
+// Cila-3 (madde #4) — STATUS_VERB_LABELS map'i kaldırıldı. Menü etiketleri
+// artık doğrudan CASE_STATUS_LABELS (statü adı) kullanır: "Çözüldü",
+// "3. Parti Bekliyor", "Eskale Edildi", "İptal Edildi". Sol renkli dot
+// hedef geçişi sinyal verir; etiket sade ve PR-C A9 ile tutarlı.
 
 export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
@@ -201,13 +210,21 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
           {CASE_STATUS_PHASES.map((phase, idx) => {
             const isCurrent = phase === currentPhase;
             const isCompleted = idx < currentPhaseIdx;
-            // Aktif faz nokta rengi GERÇEK alt-statüden gelir (ek kriter 1).
-            const dotClass = isCompleted
-              ? 'bg-emerald-500'
-              : isCurrent
-                ? activeVisual.dotColor
-                : 'border border-slate-300 bg-white';
 
+            // Cila-2 — gerçek process göstergesi: dolu node + ikon + halo.
+            // Tamamlanan → bg-emerald-500 dolu + beyaz Check
+            // Aktif      → activeVisual.dotColor dolu + statünün kendi ikonu
+            //              (beyaz) + ring-4 ring-{color}/30 halo (öne çıkar)
+            // Gelecek    → border-2 border-slate-300 bg-white + sönük Flag ikonu
+            // Yön B renk mantığı: aktif node rengi alt-statüden gelir.
+            const nodeBase = 'flex h-7 w-7 items-center justify-center rounded-full transition';
+            const nodeCls = isCompleted
+              ? `${nodeBase} bg-emerald-500 text-white`
+              : isCurrent
+                ? `${nodeBase} ${activeVisual.dotColor} text-white ring-4 ${activeVisual.ringColor}`
+                : `${nodeBase} border-2 border-slate-300 bg-white text-slate-300`;
+
+            // Kalın ray (~4px) — Cila-2.
             const connectorClass =
               idx === 0
                 ? 'hidden'
@@ -217,10 +234,15 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
 
             return (
               <div key={phase} className={`flex items-center ${wideConnectors && idx > 0 ? 'flex-1' : ''}`}>
-                {idx > 0 && <span className={`block h-px ${wideConnectors ? 'flex-1 min-w-[80px]' : 'w-7'} ${connectorClass}`} aria-hidden="true" />}
-                <div className="flex flex-col items-center gap-1 px-2">
+                {idx > 0 && (
                   <span
-                    className={`flex h-2.5 w-2.5 items-center justify-center rounded-full ${dotClass}`}
+                    className={`block h-1 rounded-full ${wideConnectors ? 'flex-1 min-w-[60px]' : 'w-10'} ${connectorClass}`}
+                    aria-hidden="true"
+                  />
+                )}
+                <div className="flex flex-col items-center gap-1 px-1.5">
+                  <span
+                    className={nodeCls}
                     title={
                       isCurrent
                         ? CASE_STATUS_LABELS[item.status]
@@ -236,14 +258,23 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
                           : CASE_STATUS_PHASE_LABELS[phase]
                     }
                   >
-                    {/* Tamamlanan node içinde küçük beyaz check — erişilebilirlik (renk + ikon) */}
-                    {isCompleted && <Check size={8} strokeWidth={3} className="text-white" aria-hidden="true" />}
+                    {/* Cila-2 — node içinde ikon (renk + ikon birlikte, erişilebilirlik):
+                        tamamlanan=Check, aktif=statünün kendi ikonu, gelecek=Flag (sönük) */}
+                    {isCompleted ? (
+                      <Check size={14} strokeWidth={3} aria-hidden="true" />
+                    ) : isCurrent ? (
+                      activeVisual.iconLg ?? activeVisual.icon
+                    ) : (
+                      <Flag size={12} strokeWidth={2} aria-hidden="true" />
+                    )}
                   </span>
                   <span
                     className={`text-[11px] leading-none ${
                       isCurrent
                         ? 'font-medium text-slate-900 dark:text-ndark-text'
-                        : 'text-slate-400 dark:text-ndark-muted'
+                        : isCompleted
+                          ? 'text-slate-500 dark:text-ndark-muted'
+                          : 'text-slate-400 dark:text-ndark-muted'
                     }`}
                   >
                     {CASE_STATUS_PHASE_LABELS[phase]}
@@ -304,7 +335,10 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
             </button>
           )}
           align="start"
-          width={240}
+          width={260}
+          minWidth={260}
+          usePortal
+          nowrap
         >
           {({ close }) => (
             <ul className="py-1" role="menu" aria-label="Geçerli geçişler">
@@ -326,13 +360,14 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
                           : `${CASE_STATUS_LABELS[target]} olarak işaretle`
                       }
                     >
-                      {/* Küçük renkli nokta — hedef statü rengi ipucu (renk + ikon birlikte) */}
+                      {/* Küçük renkli nokta — hedef statü rengi ipucu */}
                       <span
                         className={`flex h-2 w-2 shrink-0 rounded-full ${v.dotColor}`}
                         aria-hidden="true"
                       />
-                      <span className="flex-1 font-medium">{STATUS_VERB_LABELS[target]}</span>
-                      <span className="text-[10px] text-slate-400">{CASE_STATUS_LABELS[target]}</span>
+                      {/* Cila-3 (madde #4) — etiket = statü adı (CASE_STATUS_LABELS),
+                          fiil değil. Sade + PR-C A9 ile tutarlı ("Eskale Edildi"). */}
+                      <span className="flex-1 font-medium">{CASE_STATUS_LABELS[target]}</span>
                       {STATUS_REQUIRES_REASON[target] && (
                         <span
                           className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-slate-400"
