@@ -41,7 +41,6 @@ import {
   Sparkles,
   Star,
   TrendingDown,
-  User,
   UserPlus,
   Wallet,
   Workflow,
@@ -1465,25 +1464,20 @@ function LeftPanel({
         </div>
       </PanelSection>
 
-      <PanelSection title="Atama" icon={<User size={12} />}>
-        <div className="space-y-1 text-xs">
-          <Row label="Vaka Sahibi" value={item.createdByName ?? '—'} />
-          <Row label="Takım" value={item.assignedTeamName ?? '—'} />
-          <Row label="Eskalasyon" value={ESCALATION_LEVEL_LABELS[item.escalationLevel]} />
-          {/* WR-C1 — Atanmamış + açık vakalar için "Üstlen" butonu. */}
-          {canClaim && (
-            <button
-              type="button"
-              onClick={onClaim}
-              disabled={claiming}
-              className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
-              title="Bu vakayı üstlen"
-            >
-              {claiming ? 'Üstleniliyor…' : 'Üstlen'}
-            </button>
-          )}
-        </div>
-      </PanelSection>
+      {/* "Atama" PanelSection (Vaka Sahibi / Takım / Eskalasyon) görsel
+          arayüzden kaldırıldı. "Üstlen" butonu (WR-C1) bağımsız aksiyon
+          olduğu için korunuyor — artık PanelSection'a sarılı değil. */}
+      {canClaim && (
+        <button
+          type="button"
+          onClick={onClaim}
+          disabled={claiming}
+          className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+          title="Bu vakayı üstlen"
+        >
+          {claiming ? 'Üstleniliyor…' : 'Üstlen'}
+        </button>
+      )}
 
       {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
           tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.
