@@ -206,8 +206,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
             <tr>
               <th className="px-3 py-2">Vaka</th>
               <th className="px-3 py-2">Statü</th>
+              <th className="px-3 py-2">Açıklama</th>
               <th className="px-3 py-2">Açılış Etiketleri</th>
               <th className="px-3 py-2">Açılış Kontrolü</th>
+              <th className="px-3 py-2">Çözüm Notu</th>
               <th className="px-3 py-2">Kapanış Etiketleri</th>
               <th className="px-3 py-2">Kapanış Kontrolü</th>
               <th className="px-3 py-2">Not</th>
@@ -218,14 +220,14 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
+                <td colSpan={11} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
                   <Loader2 size={16} className="mx-auto animate-spin text-brand-500" />
                 </td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
+                <td colSpan={11} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
                   Filtreyle eşleşen vaka yok.
                 </td>
               </tr>
@@ -258,6 +260,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                       <Badge tint="slate">{STATUS_LABELS_SHORT[c.status]}</Badge>
                     </td>
                     <td className="px-3 py-2 text-xs">
+                      <div className="line-clamp-4 max-w-[200px]" title={c.description}>
+                        {c.description || <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
                       {opening.every((f) => !f.value) ? (
                         <span className="text-slate-400 dark:text-ndark-dim">Veri yok</span>
                       ) : (
@@ -284,6 +291,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                           </option>
                         ))}
                       </Select>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      <div className="line-clamp-4 max-w-[200px]" title={c.resolutionNote}>
+                        {c.resolutionNote || <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {!hasClosureData ? (
