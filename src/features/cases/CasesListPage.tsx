@@ -15,6 +15,7 @@ import {
   Filter,
   Flag,
   Inbox,
+  Layers,
   Link as LinkIcon,
   Plus,
   RotateCw,
@@ -102,7 +103,9 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 // Açık (default): aktif statüler, snoozed gizli (BE filter).
 // Later: GET /api/cases/snoozed (me) — assignedPersonId = current user.
 // Kapalı: status IN (Çözüldü, İptalEdildi).
-type InboxTab = 'open' | 'later' | 'closed';
+// Genel #45 — "Tümü" tab'ı eklendi. Default opt-in; ilk sırada görünür ama
+// açılışta hâlâ 'open' (mevcut davranış korunur).
+type InboxTab = 'all' | 'open' | 'later' | 'closed';
 const OPEN_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 const CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
@@ -349,6 +352,14 @@ export function CasesListPage({
         'Ertelenmiş vakalar yüklenemedi',
       );
       setAllFiltered(data?.value ?? []);
+    } else if (inboxTab === 'all') {
+      // Genel #45 — "Tümü": statü filtresi YOK; tüm statülerdeki vakalar.
+      // Erişim kapsamı (allowedCompanyIds + rol guard) backend tarafında zaten
+      // korunur. Filtre chip seçimi varsa onu uygula (kullanıcı isterse
+      // Tümü içinde de statü daraltabilir).
+      const effectiveStatuses = filters.statuses?.length ? filters.statuses : undefined;
+      const { items } = await caseService.list({ ...filters, statuses: effectiveStatuses });
+      setAllFiltered(items);
     } else {
       // Açık/Kapalı — chip seçimi varsa onu, yoksa tab default statüsünü kullan.
       const tabDefault = inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES;
@@ -955,8 +966,14 @@ export function CasesListPage({
       )}
 
       <Card>
-        {/* Inbox sekmeleri — Açık / Later / Kapalı */}
+        {/* Inbox sekmeleri — Tümü / Açık / Ertelendi / Kapalı (Genel #45) */}
         <div className="flex items-center gap-1 border-b border-slate-200 px-3 pt-2">
+          <InboxTabButton
+            label="Tümü"
+            icon={<Layers size={13} />}
+            active={inboxTab === 'all'}
+            onClick={() => setInboxTab('all')}
+          />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}

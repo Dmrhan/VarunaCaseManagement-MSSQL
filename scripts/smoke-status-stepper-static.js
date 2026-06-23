@@ -821,6 +821,45 @@ console.log('\n── 4o) Cila-3 — Popover portal + statü adı (madde #3+#4) 
     /<Popover[\s\S]{0,300}usePortal/.test(cl), false);
 }
 
+console.log('\n── 4p) Genel #45 — CasesList "Tümü" tab ──────────────────');
+{
+  const cl = read('src/features/cases/CasesListPage.tsx');
+
+  // 4p.1 — InboxTab type 'all' eklendi
+  expect('4p.1 InboxTab = "all" | "open" | "later" | "closed"',
+    /type InboxTab = 'all' \| 'open' \| 'later' \| 'closed'/.test(cl), true);
+
+  // 4p.2 — Default açılış HÂLÂ "open" (mevcut davranış korunur)
+  expect('4p.2 default useState<InboxTab>("open") korundu',
+    /useState<InboxTab>\('open'\)/.test(cl), true);
+
+  // 4p.3 — load() içinde "all" branch: statü filtresi yok / undefined
+  expect('4p.3 "all" branch: statuses undefined (statü filtresi yok)',
+    /inboxTab === 'all'[\s\S]{0,400}filters\.statuses\?\.length \? filters\.statuses : undefined/.test(cl), true);
+
+  // 4p.4 — Filtre chip seçimi varsa "all" içinde de uygulanır
+  expect('4p.4 "all" branch filter chip seçimi uygulanır',
+    /inboxTab === 'all'[\s\S]{0,500}caseService\.list\(\{ \.\.\.filters, statuses: effectiveStatuses \}\)/.test(cl), true);
+
+  // 4p.5 — Tab UI başında "Tümü" InboxTabButton
+  expect('4p.5 Tab UI: "Tümü" başta + onClick=setInboxTab("all")',
+    /<InboxTabButton\s*\n\s*label="Tümü"[\s\S]{0,300}onClick=\{\(\) => setInboxTab\('all'\)\}/.test(cl), true);
+
+  // 4p.6 — Tab sırası: Tümü → Açık → Ertelendi → Kapalı
+  const tabUiStart = cl.indexOf('<InboxTabButton\n            label="Tümü"');
+  const tabUi = tabUiStart > 0 ? cl.slice(tabUiStart, tabUiStart + 2000) : '';
+  expect('4p.6 tab sırası: Tümü → Açık → Ertelendi → Kapalı',
+    /label="Tümü"[\s\S]+?label="Açık"[\s\S]+?label="Ertelendi"[\s\S]+?label="Kapalı"/.test(tabUi), true);
+
+  // 4p.7 — Layers icon import edildi (Tümü tab ikonu)
+  expect('4p.7 Layers import (Tümü tab ikonu)',
+    /^\s*Layers,/m.test(cl), true);
+
+  // 4p.8 — "later" branch (snoozed endpoint) AYNI kaldı (regression)
+  expect('4p.8 later branch /api/cases/snoozed regression yok',
+    /inboxTab === 'later'[\s\S]{0,400}'\/api\/cases\/snoozed'/.test(cl), true);
+}
+
 console.log('\n── 5) Backend / Prisma / API touch-check ─────────────────');
 {
   // Bu task tamamen FE görsel katmanı; backend dosyaları değişmemeli.
