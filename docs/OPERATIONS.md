@@ -235,16 +235,32 @@ yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2
    `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan paket
    çeker. Service ayaktayken yarım/eksik dosyalara çakar (codex review
    bulgusu). Service önce DURUR, sonra mutate, sonra START.
-3. **Rollback safety** (Codex P2): herhangi bir mutate adımı fail ederse
-   (git conflict, npm ci, migration crash, build fail) `pm2 start` yine
-   ÇAĞRILIR — eski build üzerinden servis ayağa kalkar, production kalıcı
-   down kalmaz. Eski `&&` zincirinde mutate fail → start ÇAĞRILMAZ pattern'i
-   manuel müdahale gerektiren stopped state'i bırakıyordu.
+3. **PM2 stop verify** (Codex P2): `pm2 stop` exit'i yetersiz — daemon
+   problemi / permission / yanlış user durumlarında stop fail ama service
+   ÇALIŞIYOR olabilir. Script `pm2 jlist` ile state doğrular; "online"
+   veya "launching" durumda mutate İPTAL (exit 3) — live tree dokunulmaz.
+
+4. **Real rollback** (Codex P1): mutate fail durumunda script:
+   - `git reset --hard <oldHead>` — kaynak eski revizyona döner
+   - `dist/` backup'tan restore
+   - `npm ci` tekrar koşulur (eski package-lock)
+   - Sonra `pm2 start` eski state ile ayağa kalkar
+
+   Eski script "start her durumda" pattern'i CHIMERA state'e yol açıyordu
+   (yeni kaynak + eski dist + yarım migrate). Yeni script gerçek restore
+   yapar.
+
+   > **Migration caveat**: Prisma migrate forward-only. Migrate başarılı +
+   > sonraki adım fail durumunda schema YENİ kaldı, code ESKİ döner. Pratikte
+   > sorunsuz çünkü migration'lar nullable column addition pattern'ine uyar
+   > (Faz 3 örneği). Breaking change varsa manuel rollback gerekir.
 
    Çıkış kodları:
    - `0` — yeni build canlıda
-   - `1` — mutate fail, eski build geri yüklendi (operator log incelemeli)
-   - `2` — KRİTİK: `pm2 start` de fail; manuel müdahale gerek
+   - `1` — mutate fail, ESKİ state restore edildi, servis çalışıyor
+   - `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
+   - `3` — pre-flight fail (pm2 still online / git rev-parse fail);
+     mutate başlamadı, hiçbir şey değişmedi
 
 **Downtime**: build + npm ci süresi kadar (~30-120 sn). Pure zero-downtime
 gerekiyorsa bkz. "Zero-downtime atomic release — opsiyonel" altta.

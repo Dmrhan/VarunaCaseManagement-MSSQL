@@ -172,15 +172,33 @@ npm run deploy:onprem
 İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
 yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
 
-**Rollback safety (Codex P2)**: herhangi bir mutate adımı fail ederse
-(git conflict, npm ci hata, migration crash, build fail) `pm2 start`
-yine ÇAĞRILIR — eski build üzerinden servis ayağa kalkar, production
-kalıcı down kalmaz. Çıkış kodları:
+**PM2 stop verify**: `pm2 stop` exit'i yetersiz — daemon/permission/yanlış
+user durumlarında stop fail ama service ÇALIŞIYOR olabilir. Script
+`pm2 jlist` ile state doğrular; "online"/"launching" ise mutate İPTAL —
+live tree dokunulmaz (exit 3).
+
+**Real rollback**: deploy başlamadan ÖNCE `git rev-parse HEAD` + `dist/`
+yedeği alınır. Mutate fail durumunda:
+1. `git reset --hard <oldHead>` — kaynak eski revizyona döner
+2. `dist/` backup'tan restore
+3. `npm ci` tekrar koşulur (eski package-lock üzerinden)
+
+Sonra `pm2 start` eski state ile ayağa kalkar.
+
+> **Migration caveat**: Prisma migrate forward-only. Migrate başarılı +
+> sonraki adım fail durumunda schema YENİ kalır, code ESKİ döner. Pratikte
+> sorunsuz çünkü migration'lar nullable column addition pattern'ine uyar
+> (Faz 3 örneği). Code yeni schema gerektiriyorsa (zorunlu yeni kolon,
+> breaking change) manuel rollback gerekir; script operatöre uyarı yazar.
+
+Çıkış kodları:
 - `0` — yeni build canlıda
-- `1` — mutate fail, eski build geri yüklendi (operator log incelemeli,
-  düzelt + tekrar `npm run deploy:onprem`)
-- `2` — KRİTİK: `pm2 start` de fail; manuel müdahale gerek
+- `1` — mutate fail, ESKİ state restore edildi (git reset + dist + npm ci),
+  servis çalışıyor; operator log incelemeli + düzelt + tekrar koştur
+- `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
   (`pm2 status`, `pm2 logs varuna-cm`, `pm2 start ecosystem.config.cjs`)
+- `3` — pre-flight fail (pm2 hâlâ online VEYA git rev-parse fail); mutate
+  başlamadı, hiçbir şey değişmedi
 
 **Downtime**: build + npm ci süresi kadar (~30-120 sn). Zero-downtime
 gerekiyorsa atomik release-dir / symlink swap pattern'i kullanılmalı
