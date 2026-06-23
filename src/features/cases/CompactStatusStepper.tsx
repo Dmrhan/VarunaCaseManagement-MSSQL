@@ -152,20 +152,10 @@ const PHASE_ORDER: Record<CaseStatusPhase, number> = {
   result: 2,
 };
 
-/**
- * Hedef statünün FİİL etiketi — header butonlarında durum adı yerine işlemi
- * tarif eder ("Çözüldü" yerine "Çöz", "Eskalasyon" yerine "Eskale et").
- * Şekil/anlam ayrımı için: pill = durum, buton = işlem.
- */
-const STATUS_VERB_LABELS: Record<CaseStatus, string> = {
-  'Açık':                'Aç',
-  'İncelemede':          'İncelemeye al',
-  '3rdPartyBekleniyor':  'Beklemeye al',
-  'Eskalasyon':          'Eskale et',
-  'Çözüldü':             'Çöz',
-  'YenidenAcildi':       'Yeniden aç',
-  'İptalEdildi':         'İptal et',
-};
+// Cila-3 (madde #4) — STATUS_VERB_LABELS map'i kaldırıldı. Menü etiketleri
+// artık doğrudan CASE_STATUS_LABELS (statü adı) kullanır: "Çözüldü",
+// "3. Parti Bekliyor", "Eskale Edildi", "İptal Edildi". Sol renkli dot
+// hedef geçişi sinyal verir; etiket sade ve PR-C A9 ile tutarlı.
 
 export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
@@ -345,7 +335,10 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
             </button>
           )}
           align="start"
-          width={240}
+          width={260}
+          minWidth={260}
+          usePortal
+          nowrap
         >
           {({ close }) => (
             <ul className="py-1" role="menu" aria-label="Geçerli geçişler">
@@ -367,13 +360,14 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
                           : `${CASE_STATUS_LABELS[target]} olarak işaretle`
                       }
                     >
-                      {/* Küçük renkli nokta — hedef statü rengi ipucu (renk + ikon birlikte) */}
+                      {/* Küçük renkli nokta — hedef statü rengi ipucu */}
                       <span
                         className={`flex h-2 w-2 shrink-0 rounded-full ${v.dotColor}`}
                         aria-hidden="true"
                       />
-                      <span className="flex-1 font-medium">{STATUS_VERB_LABELS[target]}</span>
-                      <span className="text-[10px] text-slate-400">{CASE_STATUS_LABELS[target]}</span>
+                      {/* Cila-3 (madde #4) — etiket = statü adı (CASE_STATUS_LABELS),
+                          fiil değil. Sade + PR-C A9 ile tutarlı ("Eskale Edildi"). */}
+                      <span className="flex-1 font-medium">{CASE_STATUS_LABELS[target]}</span>
                       {STATUS_REQUIRES_REASON[target] && (
                         <span
                           className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-slate-400"
