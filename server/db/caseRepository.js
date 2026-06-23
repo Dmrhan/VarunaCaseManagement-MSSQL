@@ -1932,7 +1932,10 @@ export const caseRepository = {
    * Sıralama: createdAt ASC — kronolojik thread.
    */
   async listReplies(caseId, noteId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    // PR-SD (Codex P2 round-3) — Read path; arşivli case okunabilir kalmalı
+    // (SystemAdmin'in arşivli case detayında reply listesi 409 olmasın).
+    // Rol guard route layer'da caseRepository.get() ile.
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const parent = await prisma.caseNote.findUnique({
@@ -2239,7 +2242,8 @@ export const caseRepository = {
    * hedefi olamadığı için mention'da da anlamsız.
    */
   async listMentionableUsers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    // PR-SD (Codex P2 round-3) — Read path.
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const users = await prisma.user.findMany({
@@ -2508,7 +2512,9 @@ export const caseRepository = {
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
   async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
-    if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
+    // PR-SD (Codex P2 round-3) — Read path (download); arşivli case dosyaları
+    // SystemAdmin için erişilebilir kalmalı.
+    if (!(await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true }))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName);
@@ -3115,7 +3121,8 @@ export const caseRepository = {
    * En yeni en üstte. allowedCompanyIds scope'lu.
    */
   async listTransfers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    // PR-SD (Codex P2 round-3) — Read path.
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
 
     const rows = await prisma.caseTransfer.findMany({
@@ -3887,7 +3894,8 @@ async function notifyAssignmentTargets({
  */
 export const watcherRepo = {
   async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    // PR-SD (Codex P2 round-3) — Read path.
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
     const rows = await prisma.caseWatcher.findMany({
       where: { caseId },
@@ -4115,7 +4123,8 @@ const LINK_TYPE_TR = {
 
 export const linkRepo = {
   async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    // PR-SD (Codex P2 round-3) — Read path.
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds, { allowArchived: true });
     if (!companyId) return null;
     const rows = await prisma.caseLink.findMany({
       where: { caseId },
