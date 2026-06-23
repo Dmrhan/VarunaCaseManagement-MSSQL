@@ -701,6 +701,23 @@ export interface CaseTransferRecord {
   aiConfidence: number | null;
 }
 
+// Vaka Etiket Doğrulama Ekranı
+export type TaggingVerdict = 'Dogru' | 'Yanlis' | 'Belirsiz';
+
+export interface CaseTaggingReview {
+  id: string;
+  caseId: string;
+  companyId: string;
+  openingVerdict: TaggingVerdict | null;
+  closingVerdict: TaggingVerdict | null;
+  note: string | null;
+  reviewerId: string | null;
+  reviewerName: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // @mention — Faz 1.5 Madde 3
 export interface MentionableUser {
   userId: string;

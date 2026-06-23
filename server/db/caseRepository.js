@@ -3465,6 +3465,60 @@ export const caseRepository = {
       caseIdForResponse: null,
     });
   },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — verilen caseId listesi için review
+   * kayıtlarını Map<caseId, review> olarak döner. Çağıran (route layer)
+   * caseId listesini zaten allowedCompanyIds ile scope'lanmış bir
+   * caseRepository.list() sonucundan türetir — burada tekrar companyId
+   * kontrolü yapılmaz.
+   */
+  async getTaggingReviewsByCaseIds(caseIds) {
+    if (!caseIds?.length) return new Map();
+    const rows = await prisma.caseTaggingReview.findMany({
+      where: { caseId: { in: caseIds } },
+    });
+    return new Map(rows.map((r) => [r.caseId, r]));
+  },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — tek vakanın review kaydını upsert eder.
+   * reviewerId/reviewerName/reviewedAt route layer'da req.user'dan stamplenir
+   * ve buraya actor üzerinden geçirilir — client body'den asla okunmaz.
+   * caseId @unique → son yazan kazanır, concurrency token yok (QAScoreLog
+   * ile aynı kabul edilebilir risk).
+   */
+  async upsertTaggingReview(id, input, allowedCompanyIds, actor) {
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
+    if (!companyId) return null;
+
+    const VALID_VERDICTS = ['Dogru', 'Yanlis', 'Belirsiz'];
+    if (input.openingVerdict !== undefined && input.openingVerdict !== null) {
+      if (!VALID_VERDICTS.includes(input.openingVerdict)) {
+        return { error: 'invalid_input', message: `Geçersiz openingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
+      }
+    }
+    if (input.closingVerdict !== undefined && input.closingVerdict !== null) {
+      if (!VALID_VERDICTS.includes(input.closingVerdict)) {
+        return { error: 'invalid_input', message: `Geçersiz closingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
+      }
+    }
+
+    const data = {
+      openingVerdict: input.openingVerdict ?? null,
+      closingVerdict: input.closingVerdict ?? null,
+      note: typeof input.note === 'string' ? input.note.trim() || null : null,
+      reviewerId: actor.userId,
+      reviewerName: actor.displayName,
+      reviewedAt: new Date(),
+    };
+
+    return prisma.caseTaggingReview.upsert({
+      where: { caseId: id },
+      create: { caseId: id, companyId, ...data },
+      update: data,
+    });
+  },
 };
 
 /**
