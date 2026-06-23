@@ -1396,6 +1396,22 @@ function LeftPanel({
   );
 }
 
+/**
+ * Faz 3 — Case.aiKeyPoints DB'de JSON array<string> string olarak tutulur
+ * (MSSQL JSON tip yok — customFields aynı pattern). Parse hatası sessiz
+ * fallback: boş array. Non-array veya non-string element → filtre.
+ */
+function parseAiKeyPoints(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 function RightPanel({
   item,
   offeredSolutions,
@@ -1473,11 +1489,16 @@ function RightPanel({
   return (
     <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
       <div className="space-y-4">
-        {/* RUNA AI — Vaka özeti / analiz */}
+        {/* RUNA AI — Vaka özeti / analiz.
+            Faz 3 — riskLevel rozeti + keyPoints liste persist edilen
+            alanlardan okunur. aiKeyPoints DB'de JSON array<string> string
+            tutulur; parse hatası sessiz fallback (boş array). */}
         <RunaAiCard
           title={item.aiSummary ? 'Vaka Özeti' : 'RUNA AI Hazır'}
           body={item.aiSummary ?? 'Bu vaka için henüz AI analizi yapılmadı.'}
           isLoading={analyzing}
+          riskLevel={item.aiRiskLevel ?? null}
+          keyPoints={parseAiKeyPoints(item.aiKeyPoints)}
           badges={
             item.aiConfidenceScore != null
               ? [`%${Math.round(item.aiConfidenceScore * 100)} güven`]

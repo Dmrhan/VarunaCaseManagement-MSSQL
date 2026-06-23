@@ -329,6 +329,8 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   aiRejectReason:             'AI Red Gerekçesi',
   aiRetentionOfferSuggestion: 'AI Elde Tutma Önerisi',
   aiRootCause:                'AI Kök Neden',
+  aiRiskLevel:                'AI Risk Seviyesi',
+  aiKeyPoints:                'AI Anahtar Noktalar',
 
   // Snooze
   snoozeUntil:          'Erteleme Tarihi',
@@ -482,6 +484,14 @@ export interface Case {
   aiCallBrief?: string;
   aiFollowupRecommendation?: string;
   aiRetentionOfferSuggestion?: string;
+  /**
+   * RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen iki alanı.
+   * Faz 1 input zenginleşti; Faz 2'de buraya yazılır; UI burada okur.
+   * - aiRiskLevel: 'Düşük'|'Orta'|'Yüksek'|'Kritik' (string)
+   * - aiKeyPoints: JSON array<string> stringify (parse zaman UI'da)
+   */
+  aiRiskLevel?: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
+  aiKeyPoints?: string;
 
   /**
    * FAZ 4 — Vaka açılırken `getChecklistFor()` 3-tuple match'inden gelen

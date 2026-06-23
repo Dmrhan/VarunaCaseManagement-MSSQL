@@ -200,6 +200,50 @@ expect('9.2 ai.js suggest-title endpoint\'i mevcut',
 expect('9.3 AI_MODEL gpt-4o-mini SABİT',
   /export const AI_MODEL = 'gpt-4o-mini'/.test(aiClientSrc), true);
 
+console.log('\n── 10) Faz 3 — Case.aiRiskLevel + aiKeyPoints alanları ─');
+const schema = read('prisma/schema.prisma');
+expect('10.1 Prisma Case.aiRiskLevel NVarChar(50) nullable',
+  /aiRiskLevel\s+String\?\s+@db\.NVarChar\(50\)/.test(schema), true);
+expect('10.2 Prisma Case.aiKeyPoints NVarChar(Max) nullable',
+  /aiKeyPoints\s+String\?\s+@db\.NVarChar\(Max\)/.test(schema), true);
+
+const migration = read('prisma/migrations/00000000000006_case_ai_risk_keypoints/migration.sql');
+expect('10.3 Migration aiRiskLevel ADD NVARCHAR(50) NULL',
+  /ALTER TABLE \[dbo\]\.\[Case\][\s\S]{0,150}ADD \[aiRiskLevel\] NVARCHAR\(50\) NULL/.test(migration), true);
+expect('10.4 Migration aiKeyPoints ADD NVARCHAR(MAX) NULL',
+  /ALTER TABLE \[dbo\]\.\[Case\][\s\S]{0,150}ADD \[aiKeyPoints\] NVARCHAR\(MAX\) NULL/.test(migration), true);
+expect('10.5 Migration BEGIN TRY / TRAN wrapper (rollback safety)',
+  /BEGIN TRY[\s\S]{0,800}BEGIN TRAN[\s\S]+COMMIT TRAN[\s\S]+ROLLBACK TRAN/.test(migration), true);
+
+const types = read('src/features/cases/types.ts');
+expect('10.6 Case interface aiRiskLevel optional union literal',
+  /aiRiskLevel\?: 'Düşük' \| 'Orta' \| 'Yüksek' \| 'Kritik'/.test(types), true);
+expect('10.7 Case interface aiKeyPoints optional string (JSON)',
+  /aiKeyPoints\?: string;/.test(types), true);
+expect('10.8 CASE_FIELD_LABELS aiRiskLevel + aiKeyPoints',
+  /aiRiskLevel:\s+'AI Risk Seviyesi'[\s\S]{0,200}aiKeyPoints:\s+'AI Anahtar Noktalar'/.test(types), true);
+
+const card = read('src/components/ui/RunaAiCard.tsx');
+expect('10.9 RunaAiCard riskLevel prop type',
+  /riskLevel\?:\s*RiskLevel\s*\|\s*null/.test(card), true);
+expect('10.10 RunaAiCard keyPoints prop type',
+  /keyPoints\?:\s*string\[\]\s*\|\s*null/.test(card), true);
+expect('10.11 RunaAiCard RISK_STYLE 4 seviye (Düşük/Orta/Yüksek/Kritik)',
+  /'Düşük':\s*\{[\s\S]{0,80}'Orta':\s*\{[\s\S]{0,80}'Yüksek':\s*\{[\s\S]{0,80}'Kritik':\s*\{/.test(card), true);
+expect('10.12 RunaAiCard riskLevel conditional render (safeRisk)',
+  /\{safeRisk && \(/.test(card), true);
+expect('10.13 RunaAiCard keyPoints conditional ul/li render',
+  /safeKeyPoints\.length > 0 && \(\s*<ul/.test(card), true);
+
+const detailRaw = read('src/features/cases/CaseDetailPage.tsx');
+const detailCode = stripComments(detailRaw);
+expect('10.14 parseAiKeyPoints helper mevcut',
+  /function parseAiKeyPoints\(raw:\s*string\s*\|\s*undefined\s*\|\s*null\)/.test(detailCode), true);
+expect('10.15 RunaAiCard çağrısı riskLevel + keyPoints geçer',
+  /<RunaAiCard[\s\S]{0,800}riskLevel=\{item\.aiRiskLevel \?\? null\}[\s\S]{0,200}keyPoints=\{parseAiKeyPoints\(item\.aiKeyPoints\)\}/.test(detailCode), true);
+expect('10.16 parseAiKeyPoints JSON.parse + Array.isArray guard',
+  /JSON\.parse\(raw\)[\s\S]{0,200}Array\.isArray/.test(detailCode), true);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
