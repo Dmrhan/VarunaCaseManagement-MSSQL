@@ -108,6 +108,8 @@ model User {
   caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
   /// PR-SD — Soft archive actor FK back-relation
   casesArchived             Case[]              @relation("CaseArchivedBy")
+  /// Vaka Sahibi — vakayı açan kullanıcı (creator) FK back-relation
+  casesCreated              Case[]              @relation("CaseCreatedBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -1005,6 +1007,11 @@ model Case {
   assignedPersonId   String? @db.NVarChar(450)
   assignedPersonName String? @db.NVarChar(Max)
 
+  // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız,
+  // sadece create() set eder; claim/atama/devir asla değiştirmez.
+  createdByUserId String? @db.NVarChar(450)
+  createdByName   String? @db.NVarChar(Max)
+
   // Eskalasyon
   escalationLevel String @default("Yok") @db.NVarChar(50) // enum:EscalationLevel
 
@@ -1152,6 +1159,7 @@ model Case {
   accountProject AccountProject? @relation(fields: [accountProjectId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy      User?           @relation("CaseCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Product referansı (opsiyonel).
   product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)

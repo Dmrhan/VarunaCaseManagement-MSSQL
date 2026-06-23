@@ -427,6 +427,10 @@ export interface Case {
   assignedPersonId?: string;
   assignedPersonName?: string;
 
+  // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız.
+  createdByUserId?: string;
+  createdByName?: string | null;
+
   escalationLevel: EscalationLevel;
 
   /** WR-A5 / PM-03 — destek seviyesi. Default L1. */

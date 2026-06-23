@@ -1214,6 +1214,10 @@ export const caseRepository = {
         assignedTeamName: finalAssignedTeamName,
         assignedPersonId: m.assignedPersonId,
         assignedPersonName: m.assignedPersonName,
+        // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız,
+        // bu alan yalnız create()'te set edilir, claim/atama/devirde değişmez.
+        createdByUserId: actor.userId,
+        createdByName: actor.displayName,
         // WR-A5 / PM-03 — Cascade person → team → L1.
         supportLevel: resolvedSupportLevel,
         // ProactiveTracking

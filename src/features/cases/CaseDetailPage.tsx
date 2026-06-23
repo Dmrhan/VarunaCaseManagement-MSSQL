@@ -1467,7 +1467,7 @@ function LeftPanel({
 
       <PanelSection title="Atama" icon={<User size={12} />}>
         <div className="space-y-1 text-xs">
-          <Row label="Vaka Sahibi" value={item.assignedPersonName ?? 'Atanmadı'} />
+          <Row label="Vaka Sahibi" value={item.createdByName ?? '—'} />
           <Row label="Takım" value={item.assignedTeamName ?? '—'} />
           <Row label="Eskalasyon" value={ESCALATION_LEVEL_LABELS[item.escalationLevel]} />
           {/* WR-C1 — Atanmamış + açık vakalar için "Üstlen" butonu. */}
@@ -3391,11 +3391,7 @@ function DetailTab({
               />
             )},
             { label: 'Vaka Sahibi', node: (
-              item.assignedPersonName ? (
-                <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Otomatik atanır">{item.assignedPersonName}</span>
-              ) : (
-                <span className="block cursor-default px-2 py-1 text-sm italic text-slate-400" title="Otomatik atanır">Atanmadı</span>
-              )
+              <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
             ) },
           ]}
         />
