@@ -224,11 +224,20 @@ npm run deploy:onprem
 ```
 
 İçeriği (sıra GARANTİLİ):
-`git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm`
+`pm2 stop varuna-cm && git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 start varuna-cm`
 
-**KRİTİK SIRA:** `migrate → build → app reload`. Migration **mutlaka** app
-reload'dan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
-(`column does not exist`) ile çakar. PM2 reload graceful — zero-downtime.
+**KRİTİK SIRA:** `service stop → mutate → service start`. İki kural birlikte:
+
+1. **Migration mutlaka yeni process başlamadan ÖNCE bitmiş olmalı**;
+   aksi halde Prisma Client yeni alanları select edip P2022
+   (`column does not exist`) ile çakar.
+2. **`npm ci` ve `npm run build` live tree'yi mutate eder** — Express
+   `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan paket
+   çeker. Service ayaktayken yarım/eksik dosyalara çakar (codex review
+   bulgusu). Service önce DURUR, sonra mutate, sonra START.
+
+**Downtime**: build + npm ci süresi kadar (~30-120 sn). Pure zero-downtime
+gerekiyorsa bkz. "Zero-downtime atomic release — opsiyonel" altta.
 
 > **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
 > migrate dev`), `db:reset`, `prisma db push` **YASAK** — schema drift +
@@ -237,7 +246,40 @@ reload'dan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
 
 PM2 app adı `varuna-cm` ([ecosystem.config.cjs](../ecosystem.config.cjs)).
 Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`) bkz.
-[docs/IIS_DEPLOY.md §6.b](IIS_DEPLOY.md) — sıra aynı, restart komutu farklı.
+[docs/IIS_DEPLOY.md §6.b](IIS_DEPLOY.md) — aynı stop→mutate→start sırası,
+sadece komut adı farklı (`nssm stop VarunaCM` / `nssm start VarunaCM`).
+
+#### Zero-downtime atomic release — opsiyonel
+
+Stop→build→start akışında ~30-120 sn kesinti var. Sıfır kesinti gerekiyorsa
+Capistrano-stili atomik release pattern uygulanabilir (bu repo'da default
+değil; ileri seviye operasyon):
+
+```
+/apps/varuna-cm/
+  current → releases/20260623-1530   (symlink)
+  releases/
+    20260623-1530/   ← yeni deploy hedefi
+    20260622-1100/
+    20260621-0900/
+  shared/
+    .env, data/, logs/   (release'ler arası paylaşılır)
+```
+
+Adımlar:
+1. Yeni `releases/<timestamp>` dir'a clone/checkout
+2. `shared/.env` + `shared/data` + `shared/logs` symlink'le
+3. Yeni release dir'da `npm ci && npm run build`
+4. `npm run db:migrate:deploy` (DB shared — current process bunu yaşayabilir
+   *eğer* yeni migration backward-compatible ise; değilse stop→start akışı
+   zorunlu)
+5. `ln -sfn releases/<timestamp> current` (atomik symlink swap)
+6. `pm2 reload varuna-cm` (yeni `current`'a graceful geçiş)
+7. Eski release'ler temizlik (keep last 3)
+
+Bu pattern PowerShell/Windows'ta `ln` yerine `mklink /J` veya `New-Item
+-ItemType Junction` ile yapılır; kurulum bu repo'nun standartı değildir
+ama gerekirse [planlanabilir](BACKLOG.md).
 
 ### Production Deploy Checklist (Vercel)
 
