@@ -168,6 +168,20 @@ expect('5.10 List filter includeArchived checkbox',
 expect('5.11 List useEffect deps includeArchived',
   /filters\.includeArchived,?\s*\]/.test(listCode), true);
 
+console.log('\n── 6) Codex P1 — generic PATCH archive field guard ─────');
+expect('6.1 ARCHIVE_FIELDS guard array (4 alan)',
+  /ARCHIVE_FIELDS = \['isArchived',\s*'archivedAt',\s*'archivedByUserId',\s*'archiveReason'\]/.test(repoCode), true);
+expect('6.2 update() loop throws CaseValidationError on archive field',
+  /for \(const field of ARCHIVE_FIELDS\)[\s\S]{0,400}archive_field_immutable/.test(repoCode), true);
+expect('6.3 guard 400 status code',
+  /status:\s*400,\s*code:\s*'archive_field_immutable'/.test(repoCode), true);
+// Pattern guard: update() içinde arşiv alanları HİÇBİR data spread'inde olmasın.
+// Yani `data: { ...patch }` veya `data: { isArchived: ... }` kalıbı sadece
+// archive()/restore() içinde geçer.
+const dataAssignsArchive = (repoCode.match(/data:\s*\{[\s\S]{0,400}isArchived:/g) ?? []).length;
+expect('6.4 isArchived data assign sadece archive/restore içinde (en fazla 2 yerde)',
+  dataAssignsArchive <= 2, true, `bulunan=${dataAssignsArchive}`);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

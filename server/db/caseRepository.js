@@ -1230,6 +1230,20 @@ export const caseRepository = {
     // stamp atılır (post-migration audit FK doldurulur). Caller pass
     // etmezse NULL kalır (legacy davranış — backwards-compat).
     assertActor(actor, 'caseRepository.update');
+    // PR-SD (Codex P1) — Arşiv alanları generic PATCH ile YAZILAMAZ. SystemAdmin
+    // bile generic update üzerinden arşivleyemez; tek doğru yol POST /:id/archive
+    // ve /:id/restore (rol guard + audit + idempotency garantili). Bu guard
+    // olmadan herhangi bir authenticated user vakayı arşivleyebilirdi.
+    const ARCHIVE_FIELDS = ['isArchived', 'archivedAt', 'archivedByUserId', 'archiveReason'];
+    for (const field of ARCHIVE_FIELDS) {
+      if (field in patch) {
+        throw new CaseValidationError(
+          `Arşiv alanı (${field}) generic PATCH ile değiştirilemez. ` +
+            'POST /api/cases/:id/archive veya /:id/restore kullanılmalı.',
+          { status: 400, code: 'archive_field_immutable' },
+        );
+      }
+    }
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
     if ('supportLevel' in patch && actorRole) {
