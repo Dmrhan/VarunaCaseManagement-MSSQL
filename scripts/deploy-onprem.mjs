@@ -2,53 +2,52 @@
 /**
  * On-prem deploy orchestrator — REAL rollback (Codex P1+P2 fix).
  *
- * Sıra: pm2 stop → VERIFY stopped → snapshot HEAD+dist/ → mutate steps
- *       → (fail durumda restore HEAD+dist+lock) → pm2 start.
+ * Sıra: PRE-FLIGHT (snapshot) → pm2 stop → mutate → (rollback if fail)
+ *       → pm2 start.
  *
  * KRİTİK GARANTİLER:
  *
- *   1) **PM2 verify stopped (Codex P2)**: `pm2 stop` exit'i tek başına
- *      yeterli değil — daemon problemi / permission / yanlış user
- *      durumlarında stop fail ama service ÇALIŞIYOR olabilir. `pm2 jlist`
- *      ile process state doğrulanır; "online" / "launching" ise mutate
- *      İPTAL — live tree dokunulmaz.
+ *   1) **Pre-flight snapshot mutate'ten ÖNCE, pm2 stop'tan da ÖNCE**
+ *      (Codex P1+P2 sonraki review): git rev-parse HEAD + dist/ yedeği
+ *      henüz LIVE service çalışırken alınır. Snapshot fail durumunda
+ *      service AYAKTA, hiçbir şey değişmedi — temiz exit 3.
  *
- *   2) **Real rollback (Codex P1)**: Eski script'te mutate fail olunca
- *      `pm2 start` çağrılıyordu ama git pull başarılı olmuş + sonraki
- *      adım fail durumunda checkout YENİ kaynak kodda kalıyordu →
- *      pm2 boot YENİ server kodu + (belki) eski dist/ + (belki) yarım
- *      migrate = chimera state, potansiyel olarak unmigrated DB'ye karşı.
+ *      Eski sırada (pm2 stop → snapshot → mutate):
+ *        - git rev-parse fail → exit 3 ama PM2 zaten durmuş, service down
+ *        - dist backup fail → continue + warn → build fail durumunda
+ *          dist/ silinmiş ve restore edilemez → "eski state restore"
+ *          yalanı.
+ *      Yeni sırada: snapshot başarılı olmadan PM2 stop çağrılmaz.
  *
- *      Yeni: deploy başlamadan ÖNCE `git rev-parse HEAD` + dist/ kopyası
- *      alınır. Mutate fail durumunda:
- *        a) `git reset --hard <oldHead>` — kaynak eski revizyona döner
- *        b) `dist/` backup'tan restore edilir
- *        c) `npm ci` tekrar koşulur — eski package-lock'a göre
- *           node_modules eski versiyona getirilir
- *      Sonra pm2 start eski state üzerinden ayağa kalkar.
+ *   2) **PM2 verify stopped (Codex P2 ilk review)**: pm2 stop sonrası
+ *      `pm2 jlist` ile state doğrulanır; "online"/"launching" ise mutate
+ *      İPTAL (exit 3) — daemon/permission problemi durumunda live tree
+ *      dokunulmaz.
  *
- *      MIGRATION CAVEAT: Prisma migrate forward-only. Eğer migrate
- *      başarılı olduktan SONRA build/start fail varsa, schema YENİ kaldı
- *      ama code ESKİ döndü. Bu pratikte sorunsuz çünkü migration'lar
- *      nullable column addition pattern'ine uyar (Faz 3 örneği) — eski
- *      Prisma Client yeni schema'da fazla kolonu yok sayar. Eğer code
- *      yeni schema GEREKTİRİYORSA (zorunlu yeni kolon, breaking change)
- *      manuel rollback gerekir; bu durum operator'a uyarı olarak yazılır.
+ *   3) **Real rollback** (Codex P1 ilk review): Mutate fail durumunda
+ *      git reset --hard <oldHead> + dist/ backup restore + npm ci ile
+ *      eski state geri yüklenir. Sonra pm2 start eski state ile ayağa
+ *      kalkar (CHIMERA state YOK).
+ *
+ *      MIGRATION CAVEAT: Prisma migrate forward-only. Migrate başarılı +
+ *      sonraki adım fail durumunda schema YENİ kaldı, code ESKİ döndü.
+ *      Pratikte sorunsuz (nullable column addition pattern). Breaking
+ *      change varsa manuel rollback gerekir.
  *
  * Çıkış kodları:
  *   0 — yeni build canlıda
- *   1 — mutate fail, ESKİ state geri yüklendi (git reset + dist restore +
- *       npm ci eski lock), servis çalışıyor; operator log incelemeli
+ *   1 — mutate fail, ESKİ state restore edildi, servis çalışıyor
  *   2 — KRİTİK: pm2 start fail; manuel müdahale gerek
- *   3 — pre-flight fail (pm2 still online / git rev-parse fail); mutate
- *       başlamadı, hiçbir şey değişmedi
+ *   3 — pre-flight fail (git rev-parse / dist backup / pm2 stop verify);
+ *       mutate başlamadı; servis MUTLAKA ya hâlâ ayakta (snapshot fail
+ *       durumu) ya da pre-flight'tan önceki durumda kaldı
  *
  * Cross-platform (Windows + Linux + macOS) — execSync + node:fs.
  *
  * Zero-downtime gerekiyorsa atomic release-dir / symlink swap pattern'i
  * tek doğru çözüm (bkz. docs/OPERATIONS.md "Zero-downtime atomic release —
  * opsiyonel"). Bu script "best-effort safe rollback" — atomik değil ama
- * eski script'ten radikal olarak daha güvenli.
+ * eski script'lerden radikal olarak daha güvenli.
  */
 
 import { execSync } from 'node:child_process';
@@ -79,15 +78,64 @@ function tryExec(cmd) {
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// 0) Servisi durdur + VERIFY (Codex P2)
-//    `pm2 stop` exit yetersiz — daemon problemi / permission /
-//    yanlış user durumunda stop fail ama service ÇALIŞIYOR
-//    olabilir. pm2 jlist ile state doğrulanır.
-// ─────────────────────────────────────────────────────────
-log('Step 0: stopping PM2 service to release live tree...');
+function cleanupBackup() {
+  if (existsSync(DIST_BACKUP)) {
+    try {
+      rmSync(DIST_BACKUP, { recursive: true, force: true });
+    } catch {
+      /* yok say */
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PRE-FLIGHT (LIVE service hâlâ çalışırken — pm2 stop'tan ÖNCE)
+// ═════════════════════════════════════════════════════════════════════════
+// Bu blokta herhangi bir fail → exit 3 ve PM2 service AYAKTA. Hiçbir live
+// state mutasyona uğramadı.
+
+log('Pre-flight 1/2: capturing old HEAD (git rev-parse)...');
+let oldHead;
+try {
+  oldHead = exec('git rev-parse HEAD');
+  log(`✓ Old HEAD captured: ${oldHead.slice(0, 8)}`);
+} catch (e) {
+  err(`git rev-parse HEAD fail: ${e.message ?? e}`);
+  err('Pre-flight iptal; live service hâlâ çalışıyor (pm2 stop çağrılmadı).');
+  err('Manuel kontrol: cd <repo-root> && git status');
+  process.exit(3);
+}
+
+log('Pre-flight 2/2: backing up dist/...');
+if (existsSync(DIST_DIR)) {
+  try {
+    // Eski yarım kalmış backup'ı temizle (önceki deploy interrupt olmuş
+    // olabilir) — temiz başlangıç.
+    cleanupBackup();
+    cpSync(DIST_DIR, DIST_BACKUP, { recursive: true });
+    log(`✓ dist/ backed up → ${DIST_BACKUP}/`);
+  } catch (e) {
+    err(`dist/ backup fail: ${e.message ?? e}`);
+    err('Pre-flight iptal; live service hâlâ çalışıyor (pm2 stop çağrılmadı).');
+    err('Olası sebep: disk dolu, izin sorunu, yarım copy bıraktı.');
+    // Kısmi backup'ı temizle ki sonraki deploy interrupt yorumlanmaz.
+    cleanupBackup();
+    err('Manuel kontrol: df -h, ls -la .dist-deploy-backup');
+    process.exit(3);
+  }
+} else {
+  log('dist/ mevcut değil (ilk deploy olabilir) — backup atlandı.');
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// STOP SERVICE — Pre-flight başarılı, live tree mutate edilmeden kapatılır
+// ═════════════════════════════════════════════════════════════════════════
+
+log('Stopping PM2 service to release live tree...');
 tryExec(`pm2 stop ${PM2_APP}`);
 
+// VERIFY stopped — pm2 stop exit yetersiz; daemon/permission durumunda
+// stop fail ama service ÇALIŞIYOR olabilir (Codex P2 ilk review).
 let pm2State = 'unknown';
 try {
   const raw = exec('pm2 jlist');
@@ -98,6 +146,7 @@ try {
   err(`pm2 jlist okunamadı — PM2 daemon erişilemiyor olabilir: ${e.message ?? e}`);
   err('Mutate iptal; live tree dokunulmadı.');
   err('Manuel kontrol: pm2 status / pm2 ping / pm2 resurrect');
+  cleanupBackup();
   process.exit(3);
 }
 
@@ -108,36 +157,15 @@ if (pm2State === 'online' || pm2State === 'launching') {
   err('  pm2 status');
   err(`  pm2 stop ${PM2_APP}`);
   err(`  pm2 describe ${PM2_APP}`);
+  cleanupBackup();
   process.exit(3);
 }
-log(`PM2 service state: ${pm2State} (mutate safe)`);
+log(`✓ PM2 service state: ${pm2State} (mutate safe)`);
 
-// ─────────────────────────────────────────────────────────
-// 1) Rollback context — eski HEAD + dist/ yedeği (Codex P1)
-// ─────────────────────────────────────────────────────────
-let oldHead;
-try {
-  oldHead = exec('git rev-parse HEAD');
-  log(`Old HEAD captured: ${oldHead.slice(0, 8)}`);
-} catch (e) {
-  err(`git rev-parse HEAD fail: ${e.message ?? e}`);
-  err('Mutate iptal; live tree dokunulmadı.');
-  process.exit(3);
-}
+// ═════════════════════════════════════════════════════════════════════════
+// MUTATE
+// ═════════════════════════════════════════════════════════════════════════
 
-if (existsSync(DIST_DIR)) {
-  try {
-    rmSync(DIST_BACKUP, { recursive: true, force: true });
-    cpSync(DIST_DIR, DIST_BACKUP, { recursive: true });
-    log(`✓ dist/ backed up → ${DIST_BACKUP}/`);
-  } catch (e) {
-    warn(`dist/ backup fail (rollback'te dist/ restore edilemez): ${e.message ?? e}`);
-  }
-}
-
-// ─────────────────────────────────────────────────────────
-// 2) Mutate steps
-// ─────────────────────────────────────────────────────────
 let mutateError = null;
 try {
   log('Step 1/4: git pull');
@@ -156,9 +184,10 @@ try {
   err(`Mutate fail: ${e.message ?? e}`);
 }
 
-// ─────────────────────────────────────────────────────────
-// 3) Rollback if needed — REAL restore (Codex P1)
-// ─────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════
+// ROLLBACK (mutate fail durumunda)
+// ═════════════════════════════════════════════════════════════════════════
+
 if (mutateError) {
   warn('Rolling back to previous state...');
 
@@ -178,6 +207,8 @@ if (mutateError) {
     } catch (e) {
       err(`dist/ restore fail: ${e.message ?? e}`);
     }
+  } else {
+    warn('dist/ backup yok (ilk deploy olabilir) — restore atlandı.');
   }
 
   try {
@@ -190,18 +221,13 @@ if (mutateError) {
 }
 
 // Cleanup backup (success case)
-if (!mutateError && existsSync(DIST_BACKUP)) {
-  try {
-    rmSync(DIST_BACKUP, { recursive: true, force: true });
-  } catch {
-    /* yok say */
-  }
-}
+if (!mutateError) cleanupBackup();
 
-// ─────────────────────────────────────────────────────────
-// 4) PM2 start
-// ─────────────────────────────────────────────────────────
-log('Step 5: starting PM2 service...');
+// ═════════════════════════════════════════════════════════════════════════
+// PM2 START
+// ═════════════════════════════════════════════════════════════════════════
+
+log('Starting PM2 service...');
 try {
   run(`pm2 start ${PM2_APP}`);
 } catch (e) {

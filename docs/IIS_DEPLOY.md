@@ -170,15 +170,19 @@ npm run deploy:onprem
 ```
 
 İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
-yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+yönetir: `pre-flight → pm2 stop → mutate → (rollback if fail) → pm2 start`.
+
+**Pre-flight ÖNCE, pm2 stop SONRA**: snapshot adımları (git rev-parse +
+`dist/` yedek) LIVE service hâlâ çalışırken alınır. Snapshot fail
+durumunda servis ayakta kalır — exit 3 ile temiz çıkış, live tree
+dokunulmadı.
 
 **PM2 stop verify**: `pm2 stop` exit'i yetersiz — daemon/permission/yanlış
 user durumlarında stop fail ama service ÇALIŞIYOR olabilir. Script
 `pm2 jlist` ile state doğrular; "online"/"launching" ise mutate İPTAL —
-live tree dokunulmaz (exit 3).
+live tree dokunulmaz (exit 3, backup temizlenir).
 
-**Real rollback**: deploy başlamadan ÖNCE `git rev-parse HEAD` + `dist/`
-yedeği alınır. Mutate fail durumunda:
+**Real rollback**: Mutate fail durumunda:
 1. `git reset --hard <oldHead>` — kaynak eski revizyona döner
 2. `dist/` backup'tan restore
 3. `npm ci` tekrar koşulur (eski package-lock üzerinden)
@@ -197,8 +201,10 @@ Sonra `pm2 start` eski state ile ayağa kalkar.
   servis çalışıyor; operator log incelemeli + düzelt + tekrar koştur
 - `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
   (`pm2 status`, `pm2 logs varuna-cm`, `pm2 start ecosystem.config.cjs`)
-- `3` — pre-flight fail (pm2 hâlâ online VEYA git rev-parse fail); mutate
-  başlamadı, hiçbir şey değişmedi
+- `3` — pre-flight fail (`git rev-parse` / `dist/` backup / pm2 stop verify);
+  mutate başlamadı, hiçbir şey değişmedi. Snapshot fail durumunda servis
+  hâlâ ayakta (pm2 stop çağrılmadı); pm2 stop verify fail durumunda da
+  servis ayakta (stop tamamlanmadı)
 
 **Downtime**: build + npm ci süresi kadar (~30-120 sn). Zero-downtime
 gerekiyorsa atomik release-dir / symlink swap pattern'i kullanılmalı
