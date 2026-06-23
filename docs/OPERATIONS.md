@@ -215,7 +215,31 @@ Vite static build -> dist/ -> Vercel CDN
 - Supabase Auth redirect/origin ayarlari production domain'i iceriyor
 - Supabase Storage bucket ve policy ayarlari upload/download akisina uygun
 
-### Production Deploy Checklist
+### On-Prem (PM2) Deploy — kanonik
+
+On-prem MSSQL kurulumunda kanonik komut:
+
+```bash
+npm run deploy:onprem
+```
+
+İçeriği (sıra GARANTİLİ):
+`git pull && npm ci && npm run db:migrate:deploy && npm run build && pm2 reload varuna-cm`
+
+**KRİTİK SIRA:** `migrate → build → app reload`. Migration **mutlaka** app
+reload'dan ÖNCE; aksi halde Prisma Client yeni alanları select edip P2022
+(`column does not exist`) ile çakar. PM2 reload graceful — zero-downtime.
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK** — schema drift +
+> veri kaybı riski. `migrate deploy` idempotent + non-destructive (pending
+> migration yoksa no-op, her deploy'da güvenli).
+
+PM2 app adı `varuna-cm` ([ecosystem.config.cjs](../ecosystem.config.cjs)).
+Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`) bkz.
+[docs/IIS_DEPLOY.md §6.b](IIS_DEPLOY.md) — sıra aynı, restart komutu farklı.
+
+### Production Deploy Checklist (Vercel)
 
 Schema degisikligi (yeni migration) iceren PR'lar icin uygulama siralamasi
 asagidaki gibidir. `npm run build` icinde **otomatik migrate calistirilmaz**:
