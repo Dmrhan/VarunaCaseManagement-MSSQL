@@ -208,6 +208,54 @@ const allowArchivedCallers = (repoCode.match(/assertCaseInScope\([^)]+allowArchi
 expect('7.8 allowArchived flag SADECE archive+restore (2 yer)',
   allowArchivedCallers === 2, true, `bulunan=${allowArchivedCallers}`);
 
+console.log('\n── 8) Codex P2 round-4 — read role-gate ──────────────');
+// Yeni read helper var
+expect('8.1 assertCaseInScopeForRead helper export',
+  /async function assertCaseInScopeForRead\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.2 read helper select isArchived',
+  /assertCaseInScopeForRead[\s\S]{0,500}select:\s*\{\s*id:\s*true,\s*companyId:\s*true,\s*isArchived:\s*true\s*\}/.test(repoCode), true);
+expect('8.3 read helper archived + non-SystemAdmin → null',
+  /found\.isArchived && actorRole !== 'SystemAdmin'[\s\S]{0,200}return null/.test(repoCode), true);
+
+// 6 read method actorRole parametresi alıyor
+expect('8.4 listReplies(caseId, noteId, allowedCompanyIds, actorRole)',
+  /async listReplies\(caseId, noteId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.5 listMentionableUsers actorRole',
+  /async listMentionableUsers\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.6 getDownloadUrl actorRole',
+  /async getDownloadUrl\(caseId, fileId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.7 listTransfers actorRole',
+  /async listTransfers\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.8 watcherRepo.list actorRole',
+  /export const watcherRepo[\s\S]{0,300}async list\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+expect('8.9 linkRepo.list actorRole',
+  /export const linkRepo[\s\S]{0,300}async list\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
+
+// 6 read method assertCaseInScopeForRead'a çevrildi, eski assertCaseInScope kullanmıyor
+const forReadCalls = (repoCode.match(/assertCaseInScopeForRead\(caseId, allowedCompanyIds, actorRole\)/g) ?? []).length;
+expect('8.10 assertCaseInScopeForRead çağrı sayısı 6',
+  forReadCalls === 6, true, `bulunan=${forReadCalls}`);
+
+// Route handler'larda req.user.role 4. parametre olarak (5 endpoint) +
+// listReplies için 5. (noteId araya giriyor)
+expect('8.11 GET /:id/watchers req.user.role',
+  /watcherRepo\.list\(req\.params\.id, req\.user\.allowedCompanyIds, req\.user\.role\)/.test(routesCode), true);
+expect('8.12 GET /:id/links req.user.role',
+  /linkRepo\.list\(req\.params\.id, req\.user\.allowedCompanyIds, req\.user\.role\)/.test(routesCode), true);
+expect('8.13 listTransfers route req.user.role',
+  /listTransfers\([\s\S]{0,300}req\.user\.allowedCompanyIds,\s*req\.user\.role,?\s*\)/.test(routesCode), true);
+expect('8.14 listReplies route req.user.role',
+  /listReplies\([\s\S]{0,300}req\.user\.allowedCompanyIds,\s*req\.user\.role,?\s*\)/.test(routesCode), true);
+expect('8.15 listMentionableUsers route req.user.role',
+  /listMentionableUsers\([\s\S]{0,300}req\.user\.allowedCompanyIds,\s*req\.user\.role,?\s*\)/.test(routesCode), true);
+expect('8.16 getDownloadUrl route req.user.role',
+  /getDownloadUrl\([\s\S]{0,300}req\.user\.allowedCompanyIds,\s*req\.user\.role,?\s*\)/.test(routesCode), true);
+
+// assertCaseInScope (write) çağrılarında allowArchived flag SADECE archive+restore'da
+const writeFlagCount = (repoCode.match(/assertCaseInScope\([^)]+allowArchived: true/g) ?? []).length;
+expect('8.17 allowArchived flag SADECE archive + restore (2 yer)',
+  writeFlagCount === 2, true, `bulunan=${writeFlagCount}`);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
