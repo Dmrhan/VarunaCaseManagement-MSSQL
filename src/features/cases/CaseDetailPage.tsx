@@ -1396,6 +1396,22 @@ function LeftPanel({
   );
 }
 
+/**
+ * Faz 3 — Case.aiKeyPoints DB'de JSON array<string> string olarak tutulur
+ * (MSSQL JSON tip yok — customFields aynı pattern). Parse hatası sessiz
+ * fallback: boş array. Non-array veya non-string element → filtre.
+ */
+function parseAiKeyPoints(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 function RightPanel({
   item,
   offeredSolutions,
@@ -1418,32 +1434,28 @@ function RightPanel({
 
   async function handleAnalyze() {
     setAnalyzing(true);
-    const r = await aiService.supervisorSummary({
-      case: {
-        title: item.title,
-        description: item.description,
-        category: item.category,
-        subCategory: item.subCategory,
-        status: item.status,
-        priority: item.priority,
-        slaViolation: item.slaViolation,
-        slaResponseDueAt: item.slaResponseDueAt,
-        slaResolutionDueAt: item.slaResolutionDueAt,
-        slaPausedAt: item.slaPausedAt,
-        createdAt: item.createdAt,
-      },
-      history: item.history,
-      notes: item.notes,
-      callLogs: item.callLogs,
-    });
+    // Faz 1 — caseId tabanlı. Backend zengin sinyalleri (Smart Ticket +
+    // Çözüm Adımları + Müşteri durumu + Devir + Ürün + son 3 çağrı +
+    // resolutionNote) PII guard'lı select'lerle kendisi toplar.
+    const r = await aiService.supervisorSummary({ caseId: item.id });
     if (!r.ok) {
       setAnalyzing(false);
       toast({ type: 'warn', message: aiErrorMessage(r.error), duration: 2500 });
       return;
     }
+    // Faz 2 — supervisor-summary çıktısının persist edilen 5 alanı.
+    // Eski 2 alan (aiSummary, aiFollowupRecommendation) korunur; yeni 3 alan
+    // (aiRiskLevel, aiKeyPoints, aiConfidenceScore) Faz 3 schema'sıyla
+    // birlikte gelir. confidence opsiyonel — eski çağrı cache'inden
+    // dönerse undefined olur, payload'a yazılmaz (Partial<Case>).
     const updated = await caseService.update(item.id, {
       aiSummary: r.data.summary,
       aiFollowupRecommendation: r.data.recommendation,
+      aiRiskLevel: r.data.riskLevel,
+      aiKeyPoints: JSON.stringify(r.data.keyPoints ?? []),
+      ...(typeof r.data.confidence === 'number'
+        ? { aiConfidenceScore: r.data.confidence }
+        : {}),
     });
     setAnalyzing(false);
     if (updated) {
@@ -1487,11 +1499,16 @@ function RightPanel({
   return (
     <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/40 p-4 xl:block">
       <div className="space-y-4">
-        {/* RUNA AI — Vaka özeti / analiz */}
+        {/* RUNA AI — Vaka özeti / analiz.
+            Faz 3 — riskLevel rozeti + keyPoints liste persist edilen
+            alanlardan okunur. aiKeyPoints DB'de JSON array<string> string
+            tutulur; parse hatası sessiz fallback (boş array). */}
         <RunaAiCard
           title={item.aiSummary ? 'Vaka Özeti' : 'RUNA AI Hazır'}
           body={item.aiSummary ?? 'Bu vaka için henüz AI analizi yapılmadı.'}
           isLoading={analyzing}
+          riskLevel={item.aiRiskLevel ?? null}
+          keyPoints={parseAiKeyPoints(item.aiKeyPoints)}
           badges={
             item.aiConfidenceScore != null
               ? [`%${Math.round(item.aiConfidenceScore * 100)} güven`]

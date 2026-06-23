@@ -8,7 +8,12 @@ import { prisma } from '../db/client.js';
  */
 
 export const AI_MODEL = 'gpt-4o-mini';
-export const AI_MAX_TOKENS = 1000;
+// RUNA AI Faz 1 — supervisor-summary input zenginleştirme sonrası input/output
+// daha geniş bağlamı taşır. 1000 → 1500 (output limit). Diğer endpoint'ler bu
+// limitin altında zaten kalır; supervisor-summary'nin 4-alan JSON çıktısı
+// (summary + riskLevel + keyPoints + recommendation) ortalama 400-700 token,
+// curated input ~1700 token. Maliyet etkisi: ~$0.0004 → ~$0.0011/vaka.
+export const AI_MAX_TOKENS = 1500;
 export const AI_TIMEOUT_MS = 30_000;
 
 const apiKey = process.env.OPENAI_API_KEY;

@@ -1095,6 +1095,12 @@ model Case {
   aiCallBrief                String? @db.NVarChar(Max)
   aiFollowupRecommendation   String? @db.NVarChar(Max)
   aiRetentionOfferSuggestion String? @db.NVarChar(Max)
+  // RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen iki alanı.
+  // riskLevel: 'Düşük'|'Orta'|'Yüksek'|'Kritik' (string tutulur — mevcut
+  // aiPriorityPrediction pattern'i ile uyumlu, ileride genişletilebilir).
+  // keyPoints: JSON array<string> (MSSQL JSON tipi yok — customFields aynı).
+  aiRiskLevel                String? @db.NVarChar(50)
+  aiKeyPoints                String? @db.NVarChar(Max)
 
   // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
   /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
