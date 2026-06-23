@@ -202,11 +202,26 @@ expect('7.6 archive() allowArchived: true (idempotent için)',
 expect('7.7 restore() allowArchived: true (restore için zorunlu)',
   /async restore[\s\S]{0,500}assertCaseInScope\(id, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
 
-// P2.2 — sadece archive/restore'da allowArchived flag var; diğer write
-// method'larda YOK (otomatik korumayı alırlar).
+// P2.2 — archive/restore + 5 read method (Codex P2 round-3) `allowArchived: true`
 const allowArchivedCallers = (repoCode.match(/assertCaseInScope\([^)]+allowArchived: true/g) ?? []).length;
-expect('7.8 allowArchived flag SADECE archive+restore (2 yer)',
-  allowArchivedCallers === 2, true, `bulunan=${allowArchivedCallers}`);
+expect('7.8 allowArchived flag 8 yerde (archive + restore + 6 read)',
+  allowArchivedCallers === 8, true, `bulunan=${allowArchivedCallers}`);
+
+console.log('\n── 8) Codex P2 round-3 — read paths preserve archived ─');
+// Read method'ları arşivli case için 409 yerine 200 dönmeli — SystemAdmin'in
+// arşivli case detayında watcher/link/transfer/note/file listesi görünür.
+expect('8.1 listReplies allowArchived: true',
+  /async listReplies\(caseId, noteId, allowedCompanyIds\) \{[\s\S]{0,400}assertCaseInScope\(caseId, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+expect('8.2 listMentionableUsers allowArchived: true',
+  /async listMentionableUsers\(caseId, allowedCompanyIds\) \{[\s\S]{0,400}assertCaseInScope\(caseId, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+expect('8.3 getDownloadUrl allowArchived: true',
+  /async getDownloadUrl\(caseId, fileId, allowedCompanyIds\) \{[\s\S]{0,400}assertCaseInScope\(caseId, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+expect('8.4 listTransfers allowArchived: true',
+  /async listTransfers\(caseId, allowedCompanyIds\) \{[\s\S]{0,400}assertCaseInScope\(caseId, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
+expect('8.5 watcherRepo.list allowArchived: true (prisma.caseWatcher path)',
+  /allowArchived: true \}\);[\s\S]{0,400}prisma\.caseWatcher\.findMany/.test(repoCode), true);
+expect('8.6 linkRepo.list allowArchived: true (prisma.caseLink path)',
+  /allowArchived: true \}\);[\s\S]{0,400}prisma\.caseLink\.findMany/.test(repoCode), true);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
