@@ -659,7 +659,40 @@ function SolutionStepRow({
     step.status === 'worked' || step.status === 'not_worked' || step.status === 'skipped';
 
   const [expanded, setExpanded] = useState(false);
-  const isLong = (step.description?.length ?? 0) > 120;
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const descriptionRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = descriptionRef.current;
+    if (!el || !step.description) {
+      setIsOverflowing(false);
+      return;
+    }
+
+    const measure = () => {
+      // Ölçüm collapsed durumda yapılmalı; line-clamp-2 aktifken
+      // scrollHeight > clientHeight ise metin kırpılıyor demektir.
+      if (!expanded) {
+        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+      }
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      measure();
+    });
+
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [step.description, expanded]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [step.description]);
 
   return (
     <li className="rounded-md border border-slate-200 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
@@ -678,15 +711,16 @@ function SolutionStepRow({
           {step.description && (
             <div>
               <p
+                ref={descriptionRef}
                 className={cn(
                   'mt-1 break-words text-xs text-slate-600 dark:text-ndark-muted',
-                  !expanded && isLong && 'line-clamp-2',
+                  !expanded && 'line-clamp-2',
                 )}
               >
                 {step.description}
               </p>
 
-              {isLong && (
+              {isOverflowing && (
                 <button
                   type="button"
                   onClick={() => setExpanded((current) => !current)}
