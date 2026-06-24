@@ -16,8 +16,9 @@ Müşteri Başarı (CS) ekipleri şu an Next4biz (N4B) kullanıyor. N4B'de vaka 
 
 **MVP'de yok** (Faz 2): Varuna'dan defect oluşturma · cron/çift-yön sync · NTLM · per-tenant admin UI · SLA pause on link.
 
-**TFS endpoint**: `https://unitfs.univera.com.tr/tfs/DefaultCollection/Sirius/_apis`
+**TFS endpoint**: `https://unitfs.univera.com.tr/tfs/DefaultCollection/_apis` (KOLEKSİYON seviyesi; proje "Sirius" URL'ye girmez — proje bilgisi work item `Univera.ProjectName` alanından gelir).
 **Auth**: PAT (Personal Access Token) — Basic auth (`Authorization: Basic base64(":" + PAT)`).
+**API version**: `4.1` (on-prem TFS sürümü; PR-D1 connectivity testinde doğrulandı).
 
 ---
 
@@ -81,26 +82,48 @@ CaseDetailPage'de DevOps section'ı yok. PanelSection pattern'i ile eklenecek.
 
 ## 5. Gösterilecek Alan Seti (DevOps'tan dönen — 16 alan)
 
-| # | Alan | Beklenen TFS reference | Tip |
-|---|------|------------------------|-----|
-| 1 | ID | `System.Id` | int (standart) |
-| 2 | State | `System.State` | string (standart) |
-| 3 | Proje | `System.TeamProject` | string (standart) |
-| 4 | Work Item Type | `System.WorkItemType` | string (standart) |
-| 5 | PackageType | **CUSTOM** — PR-D1'de keşfedilecek | string |
-| 6 | ProjectLayer | **CUSTOM** — PR-D1'de keşfedilecek | string |
-| 7 | Title | `System.Title` | string (standart) |
-| 8 | Assigned To | `System.AssignedTo.displayName` | string (standart) |
-| 9 | ExtraField4 | **CUSTOM** — PR-D1'de keşfedilecek | string |
-| 10 | Found In | muhtemelen `Microsoft.VSTS.Build.FoundIn` veya CUSTOM | string |
-| 11 | FoundInRelease | **CUSTOM** — PR-D1'de keşfedilecek | string |
-| 12 | Created Date | `System.CreatedDate` | ISO datetime (standart) |
-| 13 | Resolved Date | `Microsoft.VSTS.Common.ResolvedDate` | ISO datetime (standart) |
-| 14 | Closed Date | `Microsoft.VSTS.Common.ClosedDate` | ISO datetime (standart) |
-| 15 | Root Cause | muhtemelen `Microsoft.VSTS.CMMI.RootCause` veya CUSTOM | string |
-| 16 | BugGroup | **CUSTOM** — PR-D1'de keşfedilecek | string |
+PR-D1 connectivity testi sonrası **gerçek dump ile DOĞRULANDI** (Univera org). 16 alan kesin reference adlarıyla `server/lib/devopsClient.js` `FIELD_MAP` constant'ına işlendi.
 
-**Kritik not**: 5 alan kesin CUSTOM (PackageType, ProjectLayer, ExtraField4, FoundInRelease, BugGroup); Found In + Root Cause muhtemelen CUSTOM. **Gerçek reference adları PR-D1 çıktısıyla canlı work item'ın tam alan dökümünden çıkarılıp `devopsClient` içinde bir `FIELD_MAP` constant'ına işlenecek.** Plan dokümanı bu noktada tamamlanmadan PR-D2 (saklama) ve PR-D3 (UI) başlatılamaz.
+| # | Alan (UI) | TFS reference | Tip | Not |
+|---|----------|---------------|-----|-----|
+| 1 | ID | `System.Id` | int | standart |
+| 2 | State | `System.State` | string | standart |
+| 3 | Proje | `Univera.ProjectName` | string | **CUSTOM** (org-özel) |
+| 4 | Work Item Type | `System.WorkItemType` | string | standart |
+| 5 | PackageType | `Univera.PackageType` | string | **CUSTOM** |
+| 6 | ProjectLayer | `Univera.MobileLayer` | string | **CUSTOM** (UI'da ProjectLayer ad'ı; ref `MobileLayer`) |
+| 7 | Title | `System.Title` | string | standart |
+| 8 | Assigned To | `System.AssignedTo` → displayName parse | string | standart — value `"Ad Soyad <DOMAIN\user>"` formatında string; sadece **displayName** ("Ad Soyad") çıkarılır, uniqueName UI'a sızdırılmaz |
+| 9 | ExtraField4 | `Univera.Resource` | string | **CUSTOM** (UI'da ExtraField4 ad'ı; ref `Resource`) |
+| 10 | Found In | `Microsoft.VSTS.Build.FoundIn` | string | standart |
+| 11 | FoundInRelease | `Univera.FoundInRelease` | string | **CUSTOM** |
+| 12 | Created Date | `System.CreatedDate` | ISO datetime | standart |
+| 13 | Resolved Date | `Microsoft.VSTS.Common.ResolvedDate` | ISO datetime | standart; Active state'te `null` |
+| 14 | Closed Date | `Microsoft.VSTS.Common.ClosedDate` | ISO datetime | standart; Active state'te `null` |
+| 15 | Root Cause | `Microsoft.VSTS.CMMI.RootCause` | string | standart |
+| 16 | BugGroup | `Univera.BugGroup` | string | **CUSTOM** |
+
+**6 CUSTOM alan** Univera org'a özel (Univera.* prefix'i). **10 standart alan** TFS Microsoft + Univera mix.
+
+**Boş alan davranışı**: `normalizeWorkItem` boş/null/'' → `null` döner. UI graceful "—" gösterir (Active state'te ResolvedDate/ClosedDate normalde boştur).
+
+---
+
+### 5.1 GÜVENLİK GUARDRAIL — Allowlist Normalize
+
+**KRİTİK**: `normalizeWorkItem()` YALNIZCA yukarıdaki 16 alan + `id` + `url`'i döndürür. **Aşağıdaki alanlar ASLA çekilmez/saklanmaz/loglanmaz**:
+
+- `System.Description` (serbest metin gövde)
+- `Microsoft.VSTS.TCM.ReproSteps` (reproduce adımları)
+- `System.History` (yorum/log)
+- `Microsoft.VSTS.Common.AcceptanceCriteria`
+- Tüm diğer serbest-metin alanlar
+
+**Sebep**: PR-D1 canlı dump'ında bu alanlarda **kullanıcı parolaları + sırlar** gözlemlendi (operator/QA test verisi olarak yazılmış). DevOps work item açıklamaları sınırsız user-input alanı — Varuna DB'sine veya UI'ya AKTARMAK YASAK.
+
+**Operasyonel kural**: `normalizeWorkItem` içinde `...raw.fields` veya benzeri spread/iteration KESİNLİKLE YOK; tek tek `pick(FIELD_MAP.<key>)` ile **sadece allowlist'teki referans adlar** okunur. Yeni alan eklemek için `FIELD_MAP` + `normalizeWorkItem` body ikisi birlikte güncellenmeli.
+
+**Test script** (`scripts/devops-test-get-workitem.js`) HAM `fields` dökümünü yazdırır — bu **dev-only** araç, üretimde ASLA çağrılmaz; çıktısı sırları içerebilir, dev workstation hassas kabul edilir.
 
 ---
 
@@ -146,11 +169,19 @@ CaseDetailPage'de DevOps section'ı yok. PanelSection pattern'i ile eklenecek.
 
 ### MVP `.env` (tek on-prem tenant)
 ```
-TFS_BASE_URL=https://unitfs.univera.com.tr/tfs/DefaultCollection/Sirius/_apis
+TFS_BASE_URL=https://unitfs.univera.com.tr/tfs/DefaultCollection/_apis
+                                         # KOLEKSİYON seviyesi; proje "Sirius" URL'ye girmez
 TFS_PAT=<personal-access-token>          # 1 yıl expiry; rotate prosedürü doc'a
-TFS_API_VERSION=7.0                      # TFS 2019+ standardı
-TFS_TIMEOUT_MS=15000                     # KB modülünde 30s default; defect ufak, 15s yeterli
+TFS_API_VERSION=4.1                      # on-prem TFS sürümü (PR-D1 connectivity testinde doğrulandı)
+TFS_TIMEOUT_MS=15000                     # KB modülünde 120s default; defect ufak, 15s yeterli
+TFS_TEST_WORKITEM_ID=<canlı bir id>      # scripts/devops-test-get-workitem.js için
 ```
+
+**Çağrı pattern'leri** (devopsClient otomatik):
+- Tekil: `GET ${TFS_BASE_URL}/wit/workitems/${id}?$expand=all&api-version=4.1`
+- Batch: `GET ${TFS_BASE_URL}/wit/workItems?ids=${ids}&$expand=all&api-version=4.1` (max 200)
+
+`$expand=all` **ŞART** — custom alanlar (`Univera.*`) bu olmadan response'a girmez.
 
 ### Faz 2 (per-tenant)
 `ExternalKbSetting`'in DevOps muadili: `DevOpsSetting` model — aynı pattern (baseUrl + authType=basic + apiKeySecretName + timeoutMs). MVP'de YOK.
@@ -248,7 +279,7 @@ TFS_TIMEOUT_MS=15000                     # KB modülünde 30s default; defect uf
 | **TBD-5** | Vaka başına 1 mi çok mu work item? | **ÇOKLU (array) — karar verildi**. `customFields.devops` array; her item ayrı snapshot. | ✅ Onaylandı |
 | **TBD-6** | Canlı çek mi cache+yenile mi? | Canlı çek her render'da (cache: snapshot fallback) | ⏳ Onay bekliyor |
 | **TBD-7** | Bağlanınca SLA dursun mu? | HAYIR | ⏳ Onay bekliyor |
-| **TBD-8** | Custom alan referans adları | **PR-D1 çıktısı** ile netleşecek | ⏳ PR-D1'e bağlı |
+| **TBD-8** | Custom alan referans adları | PR-D1 dump ile doğrulandı: `Univera.ProjectName`, `Univera.PackageType`, `Univera.MobileLayer`, `Univera.Resource`, `Univera.FoundInRelease`, `Univera.BugGroup` | ✅ ÇÖZÜLDÜ |
 | **TBD-9** | Yetki: kim DevOps bağlayabilir? | Agent/CSM/Supervisor/Admin/SystemAdmin (atayan kişi). Backoffice: opsiyonel. | ⏳ Onay bekliyor |
 | **TBD-10** | Bağı kim kaldırabilir? | Bağlayan + Supervisor/Admin/SystemAdmin | ⏳ Onay bekliyor |
 | **TBD-11** | Arşivli case'te DevOps section davranışı | Mevcut soft-archive guard ile uyumlu: SystemAdmin read 200 + write 409 (link/unlink). Otomatik kapsam. | ⏳ Onay bekliyor |

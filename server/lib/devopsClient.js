@@ -25,41 +25,61 @@
 
 const RAW_SOURCE = 'tfs-devops';
 const DEFAULT_TIMEOUT_MS = 15000;
-const DEFAULT_API_VERSION = '6.0';
+// On-prem TFS (test edilen sürüm) 4.1 — connectivity testinde doğrulandı.
+const DEFAULT_API_VERSION = '4.1';
 
 /**
  * Tüm hedef gösterim alanları → TFS reference adı haritası.
  *
- * Standart alanlar (System.*, Microsoft.VSTS.*) TFS dokümantasyonundan
- * sabit; custom alanlar ORG-ÖZEL ve PR-D1 test script'i çıktısından
- * doğrulanacak. Şu an best-guess olarak işaretli; canlı dump sonrası
- * güncelle.
+ * PR-D1 connectivity testi sonrası gerçek dump ile DOĞRULANDI (Univera org).
+ * Standart alanlar (System.*, Microsoft.VSTS.*) + 6 custom alan
+ * (Univera.* prefix'li).
  *
- * ⚠ TODO PR-D1: PackageType, ProjectLayer, ExtraField4, FoundInRelease,
- *               BugGroup için gerçek reference adlarını canlı work item
- *               dump'ından al ve burayı güncelle. Found In + Root Cause
- *               muhtemelen Microsoft.VSTS.Build.FoundIn ve
- *               Microsoft.VSTS.CMMI.RootCause ama org-özel olabilir.
+ * KRİTİK GÜVENLİK: normalizeWorkItem() YALNIZ bu 16 allowlist alanını
+ * döndürür. System.Description, Microsoft.VSTS.TCM.ReproSteps ve
+ * tüm diğer serbest-metin gövdeler ASLA çekilmez/saklanmaz/loglanmaz —
+ * canlı work item'larda kullanıcı parolası gibi sırlar gözlemlendi.
  */
 export const FIELD_MAP = {
-  id:              'System.Id',                       // standart
-  state:           'System.State',                    // standart
-  project:         'System.TeamProject',              // standart
-  type:            'System.WorkItemType',             // standart
-  title:           'System.Title',                    // standart
-  assignee:        'System.AssignedTo',               // standart (.displayName)
-  createdDate:     'System.CreatedDate',              // standart
+  id:              'System.Id',                          // standart
+  state:           'System.State',                       // standart
+  project:         'Univera.ProjectName',                // CUSTOM (System.TeamProject yerine)
+  type:            'System.WorkItemType',                // standart
+  title:           'System.Title',                       // standart
+  assignee:        'System.AssignedTo',                  // standart (displayName parse — bkz. parseAssignedTo)
+  createdDate:     'System.CreatedDate',                 // standart
   resolvedDate:    'Microsoft.VSTS.Common.ResolvedDate', // standart
   closedDate:      'Microsoft.VSTS.Common.ClosedDate',   // standart
-  // ⚠ PR-D1 dump ile doğrulanacak (best-guess):
-  rootCause:       'Microsoft.VSTS.CMMI.RootCause',
-  foundIn:         'Microsoft.VSTS.Build.FoundIn',
-  // ⚠ PR-D1 dump ile doğrulanacak (CUSTOM, kesin org-özel):
-  packageType:     null,  // örn. 'Custom.PackageType' veya 'Sirius.PackageType'
-  projectLayer:    null,
-  extraField4:     null,
-  foundInRelease:  null,
-  bugGroup:        null,
+  rootCause:       'Microsoft.VSTS.CMMI.RootCause',      // standart
+  foundIn:         'Microsoft.VSTS.Build.FoundIn',       // standart
+  packageType:     'Univera.PackageType',                // CUSTOM
+  projectLayer:    'Univera.MobileLayer',                // CUSTOM (UI'da ProjectLayer olarak gösterilir)
+  extraField4:     'Univera.Resource',                   // CUSTOM (UI'da ExtraField4 olarak gösterilir)
+  foundInRelease:  'Univera.FoundInRelease',             // CUSTOM
+  bugGroup:        'Univera.BugGroup',                   // CUSTOM
+};
+
+/**
+ * UI'da gösterilen friendly etiketler (debug/log için). normalizeWorkItem
+ * çıktı anahtarları DEĞİL — bunlar sadece operatöre yansıyan TR/EN ad.
+ */
+export const FIELD_LABELS = {
+  id:              'ID',
+  state:           'State',
+  project:         'Proje',
+  type:            'Work Item Type',
+  title:           'Title',
+  assignee:        'Assigned To',
+  createdDate:     'Created Date',
+  resolvedDate:    'Resolved Date',
+  closedDate:      'Closed Date',
+  rootCause:       'Root Cause',
+  foundIn:         'Found In',
+  packageType:     'PackageType',
+  projectLayer:    'ProjectLayer',
+  extraField4:     'ExtraField4',
+  foundInRelease:  'FoundInRelease',
+  bugGroup:        'BugGroup',
 };
 
 export class DevOpsConfigError extends Error {
@@ -201,41 +221,74 @@ async function tfsRequest({ path, method = 'GET', body }) {
 }
 
 /**
- * Ham TFS work item response'unu hedef 16 alanlık gösterim şemasına eşle.
- * FIELD_MAP üzerinden — custom alan adı null/eksikse o alan undefined döner.
- * Standart "url" alanı doğrudan response.url'den alınır (TFS web UI linki).
+ * AssignedTo değerini parse et.
+ *
+ * On-prem TFS REST 4.1 AssignedTo'yu **string** formatında döner:
+ *   "Ad Soyad <DOMAIN\user>"
+ * veya bazı durumlarda obje formunda ({ displayName, uniqueName }).
+ *
+ * Sadece displayName ("Ad Soyad") döndürürüz — uniqueName/domain hesabını
+ * UI'a sızdırmaz (PII minimization).
+ */
+function parseAssignedTo(raw) {
+  if (raw === null || raw === undefined) return null;
+  // Modern format: { displayName, uniqueName, ... }
+  if (typeof raw === 'object') {
+    if (typeof raw.displayName === 'string' && raw.displayName.trim()) {
+      return raw.displayName.trim();
+    }
+    return null;
+  }
+  // Legacy/4.1 string format: "Ad Soyad <DOMAIN\user>"
+  if (typeof raw === 'string') {
+    const m = raw.match(/^\s*(.*?)\s*<[^>]+>\s*$/);
+    if (m) return m[1].trim() || null;
+    return raw.trim() || null;
+  }
+  return null;
+}
+
+/**
+ * Ham TFS work item response'unu **allowlist** 16 alanlık gösterim şemasına
+ * eşle.
+ *
+ * KRİTİK GÜVENLİK GUARDRAIL:
+ *  - Çıktı YALNIZCA FIELD_MAP'teki 16 alan + url + id'yi içerir.
+ *  - System.Description, Microsoft.VSTS.TCM.ReproSteps, History, Comments,
+ *    AcceptanceCriteria gibi serbest-metin gövdeler ASLA dahil edilmez —
+ *    canlı work item'larda kullanıcı parolaları gözlemlendi.
+ *  - Bilinmeyen/yeni custom alan eklemek için BURASI güncellenmeli; spread
+ *    veya `...raw.fields` kullanmak YASAK (sızıntı vektörü).
+ *  - Boş alanlar `null` döner (UI graceful "—" gösterir).
  */
 export function normalizeWorkItem(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const fields = raw.fields ?? {};
   const pick = (refName) => {
-    if (!refName) return undefined;
+    if (!refName) return null;
     const v = fields[refName];
-    return v === undefined || v === null ? undefined : v;
+    return v === undefined || v === null || v === '' ? null : v;
   };
-  // assignee: AssignedTo bir obje olabilir ({ displayName, uniqueName, ... })
-  const assigneeRaw = pick(FIELD_MAP.assignee);
-  const assignee = assigneeRaw && typeof assigneeRaw === 'object'
-    ? (assigneeRaw.displayName ?? assigneeRaw.uniqueName ?? null)
-    : (assigneeRaw ?? null);
 
+  // Allowlist — yalnız FIELD_MAP'teki 16 alan + url. Hiçbir başka alan
+  // (description/repro/history/...) çıktıya konmaz.
   return {
     id:              raw.id ?? pick(FIELD_MAP.id) ?? null,
-    state:           pick(FIELD_MAP.state) ?? null,
-    project:         pick(FIELD_MAP.project) ?? null,
-    type:            pick(FIELD_MAP.type) ?? null,
-    title:           pick(FIELD_MAP.title) ?? null,
-    assignee,
-    createdDate:     pick(FIELD_MAP.createdDate) ?? null,
-    resolvedDate:    pick(FIELD_MAP.resolvedDate) ?? null,
-    closedDate:      pick(FIELD_MAP.closedDate) ?? null,
-    rootCause:       pick(FIELD_MAP.rootCause) ?? null,
-    foundIn:         pick(FIELD_MAP.foundIn) ?? null,
-    packageType:     pick(FIELD_MAP.packageType) ?? null,
-    projectLayer:    pick(FIELD_MAP.projectLayer) ?? null,
-    extraField4:     pick(FIELD_MAP.extraField4) ?? null,
-    foundInRelease:  pick(FIELD_MAP.foundInRelease) ?? null,
-    bugGroup:        pick(FIELD_MAP.bugGroup) ?? null,
+    state:           pick(FIELD_MAP.state),
+    project:         pick(FIELD_MAP.project),
+    type:            pick(FIELD_MAP.type),
+    title:           pick(FIELD_MAP.title),
+    assignee:        parseAssignedTo(fields[FIELD_MAP.assignee]),
+    createdDate:     pick(FIELD_MAP.createdDate),
+    resolvedDate:    pick(FIELD_MAP.resolvedDate),
+    closedDate:      pick(FIELD_MAP.closedDate),
+    rootCause:       pick(FIELD_MAP.rootCause),
+    foundIn:         pick(FIELD_MAP.foundIn),
+    packageType:     pick(FIELD_MAP.packageType),
+    projectLayer:    pick(FIELD_MAP.projectLayer),
+    extraField4:     pick(FIELD_MAP.extraField4),
+    foundInRelease:  pick(FIELD_MAP.foundInRelease),
+    bugGroup:        pick(FIELD_MAP.bugGroup),
     // Web UI link — TFS response içinde _links.html.href olarak gelir.
     url:             raw._links?.html?.href ?? null,
   };
@@ -334,4 +387,5 @@ export const devopsClient = {
   diag,
   normalizeWorkItem,
   FIELD_MAP,
+  FIELD_LABELS,
 };
