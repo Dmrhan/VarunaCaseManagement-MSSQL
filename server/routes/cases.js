@@ -541,6 +541,81 @@ router.post(
 );
 
 /**
+ * PR-D2 — POST /api/cases/:id/devops-link
+ *
+ * Mevcut TFS work item'ı vakaya bağlar (çoklu/array). Yetki: case-write
+ * (PATCH /:id ile aynı kapı — requireActor + allowedCompanyIds; explicit
+ * requireRole yok). Arşivli case için assertCaseInScope otomatik 409.
+ *
+ * Body: { workItemRef: number | string }  // id veya TFS URL
+ * Dönen: güncel Case (devops array customFields'te).
+ *
+ * Hatalar:
+ *   400 devops_workitem_ref_invalid — id/URL parse edilemedi
+ *   404 (tfs_not_found) — TFS'te yok
+ *   502 (tfs_auth_error / tfs_network_error / tfs_timeout) — TFS down
+ *   409 case_archived_readonly — arşivli vaka
+ */
+router.post(
+  '/:id/devops-link',
+  asyncRoute(async (req, res) => {
+    const { workItemRef } = req.body ?? {};
+    const actor = requireActor(req);
+    const updated = await caseRepository.linkDevops(req.params.id, {
+      workItemRef,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-D2 — DELETE /api/cases/:id/devops-link/:workItemId
+ *
+ * Bağlı TFS work item'ı array'den kaldırır + audit (DevopsUnlinked).
+ * Idempotent: zaten yoksa sessizce 200 döner.
+ */
+router.delete(
+  '/:id/devops-link/:workItemId',
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const updated = await caseRepository.unlinkDevops(req.params.id, {
+      workItemId: req.params.workItemId,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-D2 — GET /api/cases/:id/devops-items
+ *
+ * Bağlı TFS work item'larının CANLI değerlerini batch çek (UI render
+ * öncesi tazeleme). TFS erişilemezse snapshot fallback + `stale: true`.
+ *
+ * Read endpoint — assertCaseInScopeForRead: SystemAdmin arşivli case için
+ * 200, diğer roller 404.
+ *
+ * Dönen: { items: Array<entry>, stale: boolean, error?: {...} }
+ */
+router.get(
+  '/:id/devops-items',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.listDevopsLive(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (result === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(result);
+  }),
+);
+
+/**
  * WR-C1 / PM-07 — POST /api/cases/:id/claim ("Üstlen")
  *
  * Atanmamış açık bir vakayı çağıran kullanıcıya atomik olarak atar.

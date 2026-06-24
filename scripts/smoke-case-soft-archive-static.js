@@ -202,11 +202,13 @@ expect('7.6 archive() allowArchived: true (idempotent için)',
 expect('7.7 restore() allowArchived: true (restore için zorunlu)',
   /async restore[\s\S]{0,500}assertCaseInScope\(id, allowedCompanyIds, \{ allowArchived: true \}\)/.test(repoCode), true);
 
-// P2.2 — sadece archive/restore'da allowArchived flag var; diğer write
-// method'larda YOK (otomatik korumayı alırlar).
+// P2.2 — allowArchived flag SADECE özel write semantik gerektiren method'larda:
+//   archive (idempotent), restore (arşivli case'i çevirir), upsertTaggingReview
+//   (post-archive analiz override — review state arşivli case için de güncellenir).
+// Diğer write method'lar default false → arşivli case 409.
 const allowArchivedCallers = (repoCode.match(/assertCaseInScope\([^)]+allowArchived: true/g) ?? []).length;
-expect('7.8 allowArchived flag SADECE archive+restore (2 yer)',
-  allowArchivedCallers === 2, true, `bulunan=${allowArchivedCallers}`);
+expect('7.8 allowArchived flag özel write semantiği (archive + restore + upsertTaggingReview = 3)',
+  allowArchivedCallers === 3, true, `bulunan=${allowArchivedCallers}`);
 
 console.log('\n── 8) Codex P2 round-4 — read role-gate ──────────────');
 // Yeni read helper var
@@ -231,10 +233,12 @@ expect('8.8 watcherRepo.list actorRole',
 expect('8.9 linkRepo.list actorRole',
   /export const linkRepo[\s\S]{0,300}async list\(caseId, allowedCompanyIds, actorRole = null\)/.test(repoCode), true);
 
-// 6 read method assertCaseInScopeForRead'a çevrildi, eski assertCaseInScope kullanmıyor
+// Read method'lar assertCaseInScopeForRead'a çevrildi. 6 read endpoint
+// (listReplies, listMentionableUsers, getDownloadUrl, listTransfers,
+// watcherRepo.list, linkRepo.list) + PR-D2 ile eklenen listDevopsLive = 7.
 const forReadCalls = (repoCode.match(/assertCaseInScopeForRead\(caseId, allowedCompanyIds, actorRole\)/g) ?? []).length;
-expect('8.10 assertCaseInScopeForRead çağrı sayısı 6',
-  forReadCalls === 6, true, `bulunan=${forReadCalls}`);
+expect('8.10 assertCaseInScopeForRead çağrı sayısı ≥ 6 (PR-D2 ile 7)',
+  forReadCalls >= 6, true, `bulunan=${forReadCalls}`);
 
 // Route handler'larda req.user.role 4. parametre olarak (5 endpoint) +
 // listReplies için 5. (noteId araya giriyor)
@@ -251,10 +255,11 @@ expect('8.15 listMentionableUsers route req.user.role',
 expect('8.16 getDownloadUrl route req.user.role',
   /getDownloadUrl\([\s\S]{0,300}req\.user\.allowedCompanyIds,\s*req\.user\.role,?\s*\)/.test(routesCode), true);
 
-// assertCaseInScope (write) çağrılarında allowArchived flag SADECE archive+restore'da
+// 7.8 ile aynı kontrol (round-4 bağlamında tekrar) — özel write semantiği
+// gerektiren 3 method: archive, restore, upsertTaggingReview.
 const writeFlagCount = (repoCode.match(/assertCaseInScope\([^)]+allowArchived: true/g) ?? []).length;
-expect('8.17 allowArchived flag SADECE archive + restore (2 yer)',
-  writeFlagCount === 2, true, `bulunan=${writeFlagCount}`);
+expect('8.17 allowArchived özel write 3 method (archive + restore + upsertTaggingReview)',
+  writeFlagCount === 3, true, `bulunan=${writeFlagCount}`);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

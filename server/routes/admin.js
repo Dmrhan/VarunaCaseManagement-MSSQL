@@ -20,6 +20,8 @@ import {
   userRepo,
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
+import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
+import { devopsClient } from '../lib/devopsClient.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
 
@@ -704,6 +706,114 @@ router.patch('/external-kb-settings/:companyId', asyncRoute(async (req, res) => 
   delete patch.updatedAt;
   const item = await externalKbSettingRepo.upsert(companyId, patch);
   res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps entegrasyon ayarları.
+// Pattern: external-kb-settings ile birebir (assertCompanyAdmin gate).
+//
+// KRİTİK GÜVENLİK:
+//  - GET response'unda PAT (plain VEYA ciphertext) ASLA gözükmez; sadece
+//    patIsSet boolean + patSetAt. Repository SELECTABLE_PUBLIC sıkı tutar.
+//  - PATCH body'sinde `pat` field'ı varsa encrypt edilip persistlenir;
+//    yoksa mevcut PAT'a dokunulmaz (rotate semantiği).
+//  - POST /test saklı PAT'ı decrypt edip devopsClient.getWorkItem ile
+//    bağlantı denemesi yapar; PAT response'a inmez.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/external-devops-settings', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const item = await externalDevOpsSettingRepo.getByCompany(companyId);
+  res.json(item);
+}));
+
+router.patch('/external-devops-settings/:companyId', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const patch = { ...(req.body ?? {}) };
+  delete patch.companyId;
+  delete patch.id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  // Server-side derived alanları client override edemez.
+  delete patch.patIsSet;
+  delete patch.patSetAt;
+  delete patch.patCiphertext;
+  delete patch.patIv;
+  delete patch.patAuthTag;
+  delete patch.createdByUserId;
+  delete patch.updatedByUserId;
+  const actor = requireActor(req);
+  const item = await externalDevOpsSettingRepo.upsert(companyId, patch, actor.userId ?? null);
+  res.json(item);
+}));
+
+/**
+ * POST /external-devops-settings/:companyId/test
+ *
+ * Saklı PAT'ı decrypt edip devopsClient.getWorkItem ile bir test
+ * çağrısı yapar. Body: { testWorkItemId?: number } — opsiyonel, yoksa
+ * env'deki TFS_TEST_WORKITEM_ID kullanılır.
+ *
+ * Dönen: { ok: boolean, error?: { code, message, status } }
+ * PAT response'a inmez, log'a basılmaz.
+ *
+ * NOT: devopsClient şu an process.env'den config çeker. Adım 4 wiring'i
+ * tamamlandığında DB config aktif olacak; bu test endpoint zaten DB'den
+ * PAT'ı decrypt edip env'i geçici override etmeden devopsClient'ı
+ * companyId-aware çağırır.
+ */
+router.post('/external-devops-settings/:companyId/test', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const body = req.body ?? {};
+  const testIdRaw = body.testWorkItemId ?? process.env.TFS_TEST_WORKITEM_ID;
+  if (!testIdRaw) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_workitem_id_missing',
+        message: 'Test için bir work item id gerekli (body.testWorkItemId veya TFS_TEST_WORKITEM_ID).',
+      },
+    });
+  }
+  const testId = Number.parseInt(testIdRaw, 10);
+  if (!Number.isInteger(testId) || testId <= 0) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_workitem_id_invalid',
+        message: 'Test work item id geçersiz.',
+      },
+    });
+  }
+  // devopsClient companyId scope'lu çağrı yapar; resolveActiveConfig
+  // ile DB'den decrypt edilen PAT veya env fallback kullanılır.
+  const result = await devopsClient.getWorkItem(testId, { companyId });
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      error: {
+        code: result.error.code,
+        message: result.error.message,
+        status: result.error.status,
+      },
+    });
+  }
+  // Başarı: minimum cevap — PAT/ham response sızdırmadan.
+  return res.json({
+    ok: true,
+    workItem: {
+      id: result.data.normalized?.id ?? testId,
+      title: result.data.normalized?.title ?? null,
+      state: result.data.normalized?.state ?? null,
+    },
+    meta: { apiVersion: result.meta?.apiVersion, latencyMs: result.meta?.latencyMs },
+  });
 }));
 
 // ─────────────────────────────────────────────────────────────────
