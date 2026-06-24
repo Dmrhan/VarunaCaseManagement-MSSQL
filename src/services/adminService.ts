@@ -988,6 +988,55 @@ export const adminService = {
     },
   },
 
+  /**
+   * DevOps Faz 2.1 — Per-tenant TFS integration settings (admin-only).
+   *
+   * PAT plain text bu service'te asla görünmez:
+   *  - get() response'unda yok (sadece patIsSet + patSetAt)
+   *  - save() request'inde `pat` opsiyonel; yalnız değiştirmek istediğinde
+   *    gönderilir, yoksa mevcut şifreli PAT'a dokunulmaz
+   *  - test() PAT'ı server-side decrypt edip TFS'e bir test çağrısı yapar
+   */
+  externalDevOpsSettings: {
+    async get(companyId: string): Promise<ExternalDevOpsSetting | undefined> {
+      return apiFetch<ExternalDevOpsSetting>(
+        `${ADMIN_BASE}/external-devops-settings?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'DevOps ayarları yüklenemedi',
+      );
+    },
+    async save(
+      companyId: string,
+      patch: ExternalDevOpsSettingInput,
+    ): Promise<AdminResult<ExternalDevOpsSetting>> {
+      const item = await apiFetch<ExternalDevOpsSetting>(
+        `${ADMIN_BASE}/external-devops-settings/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'DevOps ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async test(
+      companyId: string,
+      testWorkItemId?: number,
+    ): Promise<ExternalDevOpsTestResult | undefined> {
+      return apiFetch<ExternalDevOpsTestResult>(
+        `${ADMIN_BASE}/external-devops-settings/${encodeURIComponent(companyId)}/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testWorkItemId ? { testWorkItemId } : {}),
+        },
+        'DevOps bağlantı testi başarısız',
+      );
+    },
+  },
+
   // ─────────────────────────────────────────────────────────────────
   // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
   // ─────────────────────────────────────────────────────────────────
@@ -1186,4 +1235,54 @@ export interface ExternalKbSettingInput {
   allowSupervisorUse?: boolean;
   allowCsmUse?: boolean;
   notes?: string | null;
+}
+
+/**
+ * DevOps Faz 2.1 — Per-tenant TFS entegrasyon ayarları (admin).
+ *
+ * PAT plain text bu interface'te YOK; sadece patIsSet + patSetAt. Server
+ * GET response'unda hiçbir ciphertext/iv/authTag alanı dönmez.
+ */
+export interface ExternalDevOpsSetting {
+  id: string | null;
+  companyId: string;
+  enabled: boolean;
+  baseUrl: string | null;
+  apiVersion: string | null;
+  timeoutMs: number;
+  /**
+   * Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\\user").
+   * SECRET DEĞİL; plain GET'te döner. On-prem TFS user+secret bekliyor;
+   * cloud Azure DevOps boş bırakılabilir (PAT-only).
+   */
+  username: string | null;
+  /** PAT/parola şifreli olarak DB'de var mı? */
+  patIsSet: boolean;
+  /** PAT/parola'nın en son set edildiği zaman (ISO). */
+  patSetAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExternalDevOpsSettingInput {
+  enabled?: boolean;
+  baseUrl?: string | null;
+  apiVersion?: string | null;
+  timeoutMs?: number;
+  /** Basic auth kullanıcı adı (plain saklanır; örn. "DOMAIN\\user"). */
+  username?: string | null;
+  /**
+   * Yalnız yeni PAT/parola set/rotate ederken gönderilir. Undefined →
+   * mevcut secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
+   */
+  pat?: string;
+}
+
+export interface ExternalDevOpsTestResult {
+  ok: boolean;
+  workItem?: { id: number; title: string | null; state: string | null };
+  meta?: { apiVersion?: string; latencyMs?: number };
+  error?: { code: string; message: string; status?: number };
 }
