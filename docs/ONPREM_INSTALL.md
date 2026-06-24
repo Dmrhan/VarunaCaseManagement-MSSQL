@@ -64,6 +64,13 @@ kullanıcıları oluştur, demo kullanıcıları pasifleştir/şifrelerini deği
 | `CRON_SECRET` | HTTP cron endpoint'lerini manuel tetiklemek için (opsiyonel; scheduler zaten gömülü) |
 | `CORS_ORIGIN` | Yalnız frontend ayrı origin'den sunuluyorsa |
 | `CRON_SCHEDULER_ENABLED` | `false` → gömülü zamanlayıcı kapanır (harici zamanlayıcı kullanılacaksa) |
+| `DEVOPS_PAT_ENC_KEY` | **DevOps Faz 2.1 — ZORUNLU** (PAT şifreleme). 32 byte; üret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Tek seferlik ops kurulumu; PAT'in aksine rotate edilmez. Anahtar yoksa admin DevOps Ayarları'nda 503 + "DevOps PAT şifreleme anahtarı sunucuda tanımlı değil" |
+| `TFS_BASE_URL` | DevOps Faz 1 — TFS koleksiyon URL'i (sonu `/_apis`, proje route'u GİRMEZ). Örn: `https://unitfs.univera.com.tr/tfs/DefaultCollection/_apis` |
+| `TFS_USERNAME` | DevOps Faz 2.1 follow-up — on-prem TFS Basic/NTLM kullanıcı adı. `DOMAIN\user` veya UPN. Cloud Azure DevOps PAT-only ise BOŞ bırak (Basic `:pat` kullanılır) |
+| `TFS_PAT` | DevOps Faz 1 — default tenant secret (DB satırı yokken fallback). Admin UI üzerinden per-tenant override edilebilir; o zaman bu env opsiyonel |
+| `TFS_API_VERSION` | DevOps Faz 1 — TFS REST sürümü, on-prem default `4.1`, cloud `6.0` |
+| `TFS_TIMEOUT_MS` | DevOps Faz 1 — request timeout, default `15000` |
+| `TFS_TEST_WORKITEM_ID` | DevOps Faz 2.1 — admin "Bağlantıyı test et" için varsayılan work item id (body'de gönderilmediğinde) |
 
 ## 3. Kalıcı çalıştırma
 
