@@ -785,6 +785,64 @@ function writeDevopsArray(customFieldsRaw, devopsArr) {
   return JSON.stringify(obj);
 }
 
+/**
+ * Fix 2 (Codex P2 pre-main) — Atomik devops array mutate (optimistic
+ * concurrency control + retry).
+ *
+ * Sorun: linkDevops/unlinkDevops naïve read-modify-write race condition'a
+ * açıktı. İki eşzamanlı POST /devops-link:
+ *   Tx A read arr=[]
+ *   Tx B read arr=[]
+ *   Tx A write arr=[X]
+ *   Tx B write arr=[Y]   ← X kaybedildi
+ *
+ * Çözüm: `updateMany(where: { id, updatedAt })` optimistic guard. Prisma
+ * @updatedAt directive update'lerde otomatik yeni timestamp set eder;
+ * concurrent write timestamp eşleşmesi nedeniyle count=0 döner → retry.
+ *
+ * Aktivite (CaseActivity) successful update sonrası ayrı satır — append-only
+ * audit, race-relevant değil.
+ *
+ * @param {string} caseId
+ * @param {(arr: Array<object>) => { nextArr: Array<object>, op: 'append'|'remove'|'noop', target?: object }} mutate
+ *   Mevcut array → next array dönüştürücüsü.
+ * @returns {Promise<{ ok: true, op: string, target?: object } | null>}
+ *   - null: case bulunamadı
+ *   - { ok: true, op: 'noop' }: idempotent (zaten istenen state)
+ *   - { ok: true, op: 'append'|'remove', target }: değişiklik kaydedildi
+ *
+ * Throws CaseValidationError(409, 'devops_concurrent_update') retry tükenirse.
+ */
+const DEVOPS_MUTATE_MAX_RETRIES = 5;
+async function atomicMutateDevopsArray(caseId, mutate) {
+  for (let attempt = 0; attempt < DEVOPS_MUTATE_MAX_RETRIES; attempt += 1) {
+    const current = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true, updatedAt: true },
+    });
+    if (!current) return null;
+    const arr = readDevopsArray(current.customFields);
+    const result = mutate(arr);
+    if (result.op === 'noop') {
+      return { ok: true, op: 'noop' };
+    }
+    const next = writeDevopsArray(current.customFields, result.nextArr);
+    const updated = await prisma.case.updateMany({
+      where: { id: caseId, updatedAt: current.updatedAt },
+      data: { customFields: next },
+    });
+    if (updated.count === 1) {
+      return { ok: true, op: result.op, target: result.target };
+    }
+    // Race lost — exponential-ish backoff (10/35/85/185/385 ms ortalama)
+    await new Promise((r) => setTimeout(r, 10 + attempt * 25));
+  }
+  throw new CaseValidationError(
+    'Eşzamanlı değişiklik nedeniyle DevOps bağlantısı güncellenemedi. Lütfen tekrar deneyin.',
+    { status: 409, code: 'devops_concurrent_update' },
+  );
+}
+
 function buildSmartTicketAiDraftsMerge(prev, drafts) {
   if (!drafts || typeof drafts !== 'object') return null;
   const engineering =
@@ -1898,7 +1956,11 @@ export const caseRepository = {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
-    // Önce mevcut customFields'i oku — dedup için.
+    // TFS'ten canlı çek + normalize (allowlist guard devopsClient'ta).
+    // Fix 1 + Fix 2: request-level allowlist (?fields=) + race-safe write
+    // helper'ı. Önce dedup için pre-check yaparız (TFS çağrısını boşa
+    // harcamamak için), sonra atomic mutate içinde tekrar dedup
+    // (race-safe).
     const fresh = await prisma.case.findUnique({
       where: { id: caseId },
       select: { customFields: true },
@@ -1911,7 +1973,6 @@ export const caseRepository = {
       return shape(c);
     }
 
-    // TFS'ten canlı çek + normalize (allowlist guard devopsClient'ta).
     const tfs = await devopsClient.getWorkItem(workItemId);
     if (!tfs.ok) {
       const status = tfs.error.code === 'tfs_not_found' ? 404
@@ -1938,16 +1999,22 @@ export const caseRepository = {
       linkedByUserName: actor.displayName,
       lastSyncedAt: now,
     };
-    const nextArr = [...existingArr, entry];
-    const nextCustomFields = writeDevopsArray(fresh.customFields, nextArr);
 
-    const noteText = `#${workItemId} bağlandı${snapshot.title ? `: ${snapshot.title}` : ''}`;
-    await prisma.$transaction([
-      prisma.case.update({
-        where: { id: caseId },
-        data: { customFields: nextCustomFields },
-      }),
-      prisma.caseActivity.create({
+    // Fix 2 — atomic mutate (race-safe). Helper içinde dedup tekrar
+    // kontrol edilir: concurrent link gelirse op='noop' veya
+    // updateMany count=0 → retry.
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      if (arr.some((e) => e?.id === workItemId)) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return { nextArr: [...arr, entry], op: 'append', target: entry };
+    });
+    if (!mutateResult) return null;
+
+    // Activity log — sadece gerçek append durumunda (noop = zaten bağlıydı).
+    if (mutateResult.op === 'append') {
+      const noteText = `#${workItemId} bağlandı${snapshot.title ? `: ${snapshot.title}` : ''}`;
+      await prisma.caseActivity.create({
         data: {
           caseId,
           companyId,
@@ -1958,8 +2025,8 @@ export const caseRepository = {
           note: noteText,
           at: new Date(),
         },
-      }),
-    ]);
+      });
+    }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
     return shape(updated);
@@ -1984,28 +2051,23 @@ export const caseRepository = {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
-    const fresh = await prisma.case.findUnique({
-      where: { id: caseId },
-      select: { customFields: true },
+    // Fix 2 — atomic mutate (race-safe).
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      const target = arr.find((entry) => entry?.id === id);
+      if (!target) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return {
+        nextArr: arr.filter((entry) => entry?.id !== id),
+        op: 'remove',
+        target,
+      };
     });
-    if (!fresh) return null;
-    const existingArr = readDevopsArray(fresh.customFields);
-    const target = existingArr.find((entry) => entry?.id === id);
-    if (!target) {
-      // Idempotent: zaten bağlı değil.
-      const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
-      return shape(c);
-    }
-    const nextArr = existingArr.filter((entry) => entry?.id !== id);
-    const nextCustomFields = writeDevopsArray(fresh.customFields, nextArr);
+    if (!mutateResult) return null;
 
-    const noteText = `#${id} kaldırıldı${target.title ? `: ${target.title}` : ''}`;
-    await prisma.$transaction([
-      prisma.case.update({
-        where: { id: caseId },
-        data: { customFields: nextCustomFields },
-      }),
-      prisma.caseActivity.create({
+    if (mutateResult.op === 'remove') {
+      const noteText = `#${id} kaldırıldı${mutateResult.target?.title ? `: ${mutateResult.target.title}` : ''}`;
+      await prisma.caseActivity.create({
         data: {
           caseId,
           companyId,
@@ -2016,8 +2078,8 @@ export const caseRepository = {
           note: noteText,
           at: new Date(),
         },
-      }),
-    ]);
+      });
+    }
 
     const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
     return shape(updated);
@@ -2057,16 +2119,47 @@ export const caseRepository = {
       return { items: [], stale: false };
     }
 
-    const tfs = await devopsClient.getWorkItems(ids);
-    if (!tfs.ok) {
-      // TFS down → snapshot fallback. Her item'da stale meta'sı ile dön.
+    // Fix 3 (Codex P2 pre-main) — Chunk batch fetch + try/catch fallback.
+    //   - TFS REST batch limiti 200; biz 100 chunk'larız (güvenli marj).
+    //   - Tüm chunk'ları paralel çek (Promise.all).
+    //   - Herhangi BİR chunk fail → tüm response stale fallback (snapshot
+    //     döner, _stale:true her item'da, error meta'sı).
+    //   - Hiçbir senaryoda 500 atılmaz — try/catch tüm live path'i sarar.
+    const DEVOPS_LIVE_CHUNK = 100;
+    let liveList = [];
+    let stale = false;
+    let liveError = null;
+    try {
+      const chunks = [];
+      for (let i = 0; i < ids.length; i += DEVOPS_LIVE_CHUNK) {
+        chunks.push(ids.slice(i, i + DEVOPS_LIVE_CHUNK));
+      }
+      const results = await Promise.all(chunks.map((c) => devopsClient.getWorkItems(c)));
+      const firstFail = results.find((r) => !r.ok);
+      if (firstFail) {
+        stale = true;
+        liveError = { code: firstFail.error.code, message: firstFail.error.message };
+      } else {
+        liveList = results.flatMap((r) => (Array.isArray(r.data?.normalized) ? r.data.normalized : []));
+      }
+    } catch (err) {
+      // Bilinmeyen runtime hata (devopsClient throw, fetch internal vs.)
+      // — snapshot fallback'a düş, 500 yansıtma.
+      stale = true;
+      liveError = {
+        code: 'devops_live_unexpected_error',
+        message: err?.message ?? 'DevOps canlı çek başarısız.',
+      };
+    }
+
+    if (stale) {
       return {
         items: stored.map((entry) => ({ ...entry, _stale: true })),
         stale: true,
-        error: { code: tfs.error.code, message: tfs.error.message },
+        error: liveError ?? { code: 'devops_live_unknown', message: 'TFS canlı çek başarısız.' },
       };
     }
-    const liveList = Array.isArray(tfs.data.normalized) ? tfs.data.normalized : [];
+
     const liveById = new Map(liveList.map((n) => [n.id, n]));
     const now = new Date().toISOString();
     // Live ile snapshot meta'sını birleştir: live alanları + linked* + lastSyncedAt

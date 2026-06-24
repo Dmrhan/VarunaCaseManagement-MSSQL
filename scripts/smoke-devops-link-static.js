@@ -119,12 +119,12 @@ expect('2.11 linkDevops dedup (existingArr.some id check)',
 // devopsClient.getWorkItem doğrulama
 expect('2.12 linkDevops devopsClient.getWorkItem doğrulama',
   /devopsClient\.getWorkItem\(workItemId\)/.test(repoCode), true);
-// Batch live için getWorkItems
-expect('2.13 listDevopsLive devopsClient.getWorkItems batch',
-  /devopsClient\.getWorkItems\(ids\)/.test(repoCode), true);
+// Batch live için getWorkItems (Fix 3 sonrası chunk içinde — devopsClient.getWorkItems(c))
+expect('2.13 listDevopsLive devopsClient.getWorkItems batch (chunk)',
+  /devopsClient\.getWorkItems\(c\)/.test(repoCode), true);
 // Fallback stale işareti
 expect('2.14 listDevopsLive TFS down → stale: true + snapshot fallback',
-  /stale:\s*true[\s\S]{0,200}error:\s*\{\s*code:\s*tfs\.error\.code/.test(repoCode), true);
+  /items:\s*stored\.map\(\(entry\) => \(\{ \.\.\.entry, _stale:\s*true \}\)\)[\s\S]{0,400}stale:\s*true/.test(repoCode), true);
 
 console.log('\n── 3) Routes (3 yeni endpoint) ────────────────────────');
 const routes = read('server/routes/cases.js');
@@ -213,6 +213,56 @@ expect('6.1 "Jira\'ya Aktar" MenuAction kaldırıldı',
   /label="Jira'ya Aktar"/.test(detail), false);
 expect('6.2 "Jira entegrasyonu FAZ 2" toast mesajı kalmadı',
   /Jira entegrasyonu FAZ 2/.test(detail), false);
+
+console.log('\n── 7) Codex P2 pre-main fix\'leri ─────────────────────');
+
+// Fix 1 — $expand=all CODE PATH'inden kayboldu; fields= allowlist URL'lerinde.
+// Comment'lerde geçebilir (eski/yeni karşılaştırma açıklaması).
+expect('7.1 server/ code path $expand=all KALDIRILDI (request-level allowlist)',
+  /\$expand=all/.test(clientCode), false);
+expect('7.2 devopsClient FIELDS_QUERY_PARAM allowlist (FIELD_MAP.values)',
+  /const FIELDS_QUERY_PARAM = \(\(\) => \{[\s\S]{0,300}Object\.values\(FIELD_MAP\)/.test(clientCode), true);
+expect('7.3 getWorkItem URL fields= kullanır',
+  /workitems\/\$\{encodeURIComponent\(id\)\}\?fields=\$\{FIELDS_QUERY_PARAM\}/.test(clientCode), true);
+expect('7.4 getWorkItems URL fields= kullanır',
+  /workitems\?ids=\$\{idsParam\}&fields=\$\{FIELDS_QUERY_PARAM\}/.test(clientCode), true);
+
+// Fix 2 — Atomik mutate helper + linkDevops/unlinkDevops kullanır
+const repoSrc = read('server/db/caseRepository.js');
+const repoSrcCode = strip(repoSrc);
+expect('7.5 atomicMutateDevopsArray helper + updateMany updatedAt guard',
+  /async function atomicMutateDevopsArray\(caseId, mutate\)[\s\S]{0,1500}prisma\.case\.updateMany\(\{\s*where: \{ id: caseId, updatedAt: current\.updatedAt \}/.test(repoSrcCode), true);
+expect('7.6 retry mechanism (MAX_RETRIES + 409 devops_concurrent_update)',
+  /DEVOPS_MUTATE_MAX_RETRIES/.test(repoSrcCode)
+    && /devops_concurrent_update/.test(repoSrcCode), true);
+expect('7.7 linkDevops atomicMutateDevopsArray kullanır',
+  /async linkDevops[\s\S]{0,3000}atomicMutateDevopsArray\(caseId, \(arr\)/.test(repoSrcCode), true);
+expect('7.8 unlinkDevops atomicMutateDevopsArray kullanır',
+  /async unlinkDevops[\s\S]{0,2000}atomicMutateDevopsArray\(caseId, \(arr\)/.test(repoSrcCode), true);
+expect('7.9 link/unlink eski naïve $transaction read-modify-write KALDIRILDI',
+  /await prisma\.\$transaction\(\[[\s\S]{0,500}prisma\.case\.update\(\{[\s\S]{0,200}data: \{ customFields:/.test(repoSrcCode), false);
+
+// Fix 3 — listDevopsLive chunk ≤100 + try/catch fallback
+expect('7.10 DEVOPS_LIVE_CHUNK = 100',
+  /DEVOPS_LIVE_CHUNK = 100/.test(repoSrcCode), true);
+expect('7.11 listDevopsLive Promise.all chunks',
+  /Promise\.all\(chunks\.map\(\(c\) => devopsClient\.getWorkItems\(c\)\)\)/.test(repoSrcCode), true);
+expect('7.12 listDevopsLive try/catch sarmalı (500 yok, stale fallback)',
+  /try \{[\s\S]{0,1500}Promise\.all\(chunks[\s\S]{0,800}\} catch \(err\) \{[\s\S]{0,400}devops_live_unexpected_error/.test(repoSrcCode), true);
+expect('7.13 listDevopsLive herhangi chunk fail → stale fallback (firstFail check)',
+  /const firstFail = results\.find\(\(r\) => !r\.ok\)/.test(repoSrcCode), true);
+
+// Codex P2 (yeni) — DevOpsSection caseId reset + stale response guard
+const sectionSrc = read('src/features/cases/components/DevOpsSection.tsx');
+const sectionSrcCode = strip(sectionSrc);
+expect('7.14 DevOpsSection requestedCaseIdRef (stale response guard)',
+  /requestedCaseIdRef = useRef<string>\(caseId\)/.test(sectionSrcCode), true);
+expect('7.15 load() response stale-guard (requestedCaseIdRef !== caseId → return)',
+  /if \(requestedCaseIdRef\.current !== caseId\) return/.test(sectionSrcCode), true);
+expect('7.16 caseId değişince setData(null) — eski case item gizleme',
+  /useEffect\(\(\) => \{\s*setData\(null\)[\s\S]{0,400}void load\(\);\s*\}, \[caseId, load\]\)/.test(sectionSrcCode), true);
+expect('7.17 caseId değişince modal/linkInput/unlinkingId reset',
+  /setLinkModalOpen\(false\);\s*setLinkInput\(''\);\s*setUnlinkingId\(null\);/.test(sectionSrcCode), true);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

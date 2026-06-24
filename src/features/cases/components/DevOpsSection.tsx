@@ -25,7 +25,7 @@
  * çağırır. Backend allowlist guard (Description/ReproSteps yok) korunur.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, Link2, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
@@ -108,16 +108,33 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
   const [linking, setLinking] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
 
+  // Codex P2 (pre-main) — caseId değişince state'i SIFIRLAYIP yeni çekiş
+  // sonrasına stale response guard. Aksi halde önceki vakanın item'ları
+  // yeni vakanın detayında görünür ve "Aç"/"Kaldır" yanlış case'e gider.
+  // requestedCaseIdRef her yeni load'da güncellenir; cevap dönerken setData
+  // yalnız aktif caseId ile eşleşirse uygulanır.
+  const requestedCaseIdRef = useRef<string>(caseId);
+
   const load = useCallback(async () => {
+    requestedCaseIdRef.current = caseId;
     setLoading(true);
     const res = await devopsService.getItems(caseId);
+    // Yarış (race) korumas: bu cevap güncel caseId'ye mi ait?
+    if (requestedCaseIdRef.current !== caseId) return;
     setLoading(false);
     if (res) setData(res);
   }, [caseId]);
 
+  // caseId değişince eski case'in item'larını gizle ANINDA (yeni load
+  // tamamlanmasını bekleme). Aksi halde geçiş window'unda eski case'in
+  // ID'leriyle action tetiklenebilir.
   useEffect(() => {
+    setData(null);
+    setLinkModalOpen(false);
+    setLinkInput('');
+    setUnlinkingId(null);
     void load();
-  }, [load]);
+  }, [caseId, load]);
 
   async function handleLink() {
     const ref = linkInput.trim();
