@@ -278,6 +278,24 @@ function parseUsernameForNtlm(raw) {
   return { domain: '', username: s };
 }
 
+/**
+ * TFS web UI URL'ini deterministik inşa et.
+ *
+ * Allowlist `?fields=` request'inde TFS yanıtı `_links.html.href`
+ * dökmüyor (`fields` filtresine takılıyor). Web URL'i her tenant için
+ * sabit pattern'le hesaplanabilir:
+ *
+ *   API base: https://host/tfs/Collection/_apis
+ *   Web URL:  https://host/tfs/Collection/_workitems/edit/{id}
+ *
+ * TFS proje route gerekmeden ID'yi otomatik bulur.
+ */
+function inferWebUrl(baseUrl, id) {
+  if (!baseUrl || !id) return null;
+  const root = String(baseUrl).replace(/\/+_apis\/?$/i, '');
+  return `${root}/_workitems/edit/${id}`;
+}
+
 function joinUrl(base, path) {
   const trimmedBase = base.replace(/\/+$/, '');
   const trimmedPath = String(path || '').replace(/^\/+/, '');
@@ -465,7 +483,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
           status,
         },
         data,
-        meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
+        meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? "ntlm" : "basic", baseUrl: config.baseUrl },
       };
     }
 
@@ -473,7 +491,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
       ok: true,
       rawSource: RAW_SOURCE,
       data,
-      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
+      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? "ntlm" : "basic", baseUrl: config.baseUrl },
     };
   } catch (err) {
     const latencyMs = Date.now() - t0;
@@ -488,7 +506,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
           : (err?.message ?? 'TFS erişilemedi.'),
         status: null,
       },
-      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
+      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? "ntlm" : "basic", baseUrl: config.baseUrl },
     };
   }
 }
@@ -534,7 +552,7 @@ function parseAssignedTo(raw) {
  *    veya `...raw.fields` kullanmak YASAK (sızıntı vektörü).
  *  - Boş alanlar `null` döner (UI graceful "—" gösterir).
  */
-export function normalizeWorkItem(raw) {
+export function normalizeWorkItem(raw, baseUrl = null) {
   if (!raw || typeof raw !== 'object') return null;
   const fields = raw.fields ?? {};
   const pick = (refName) => {
@@ -562,8 +580,11 @@ export function normalizeWorkItem(raw) {
     extraField4:     pick(FIELD_MAP.extraField4),
     foundInRelease:  pick(FIELD_MAP.foundInRelease),
     bugGroup:        pick(FIELD_MAP.bugGroup),
-    // Web UI link — TFS response içinde _links.html.href olarak gelir.
-    url:             raw._links?.html?.href ?? null,
+    // Web UI link — TFS response içinde `_links.html.href` olarak gelir.
+    // Ancak allowlist `?fields=` request'i `_links`'i filtreliyor →
+    // null kalırsa `baseUrl + /_workitems/edit/{id}` deterministik fallback.
+    url:             raw._links?.html?.href
+                       ?? inferWebUrl(baseUrl, raw.id ?? pick(FIELD_MAP.id)),
   };
 }
 
@@ -592,7 +613,7 @@ export async function getWorkItem(id, opts = {}) {
     rawSource: RAW_SOURCE,
     data: {
       raw: result.data,
-      normalized: normalizeWorkItem(result.data),
+      normalized: normalizeWorkItem(result.data, result.meta?.baseUrl ?? null),
     },
     meta: result.meta,
   };
@@ -632,7 +653,7 @@ export async function getWorkItems(ids, opts = {}) {
     rawSource: RAW_SOURCE,
     data: {
       raw,
-      normalized: list.map(normalizeWorkItem),
+      normalized: list.map((wi) => normalizeWorkItem(wi, result.meta?.baseUrl ?? null)),
     },
     meta: result.meta,
   };

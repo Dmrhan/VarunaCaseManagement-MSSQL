@@ -243,7 +243,7 @@ expect('11.6c tfsRequest username\'e göre route (boş→Basic, dolu→NTLM)',
     && /if \(useNtlm\)[\s\S]{0,500}await ntlmRequest/.test(clientCode)
     && /else \{[\s\S]{0,300}await basicRequest/.test(clientCode), true);
 expect('11.6d meta.authMode bildirimi (ntlm | basic)',
-  /authMode: useNtlm \? 'ntlm' : 'basic'/.test(clientCode), true);
+  /authMode: useNtlm \? ["']ntlm["'] : ["']basic["']/.test(clientCode), true);
 expect('11.7 getConfig DB-first username + env TFS_USERNAME fallback',
   /dbConfig\?\.username \|\| process\.env\.TFS_USERNAME \|\| ''/.test(clientCode), true);
 expect('11.8 getConfig return shape\'inde username var',
