@@ -37,6 +37,7 @@ import {
   Box,
   Boxes,
   Flame,
+  Gauge,
   Layers,
   Package,
   Settings2,
@@ -44,7 +45,10 @@ import {
   Sparkles,
   Star,
   TrendingDown,
+  User,
+  UserCheck,
   UserPlus,
+  Users,
   Wallet,
   Workflow,
   X,
@@ -2988,6 +2992,62 @@ function SlaRow({ label, value }: { label: string; value: string }) {
 
 // KpiCompact + KpiMini kaldırıldı — KPI artık Detay sekmesinin üstünde KpiInlineRow ile gösteriliyor
 
+// Açıklama alanı — uzun metinlerde "Devamını oku" göster; kısa metinlerde
+// buton hiç render edilmez (CaseSolutionStepsPanel'deki overflow-ölçüm
+// pattern'iyle aynı: scrollHeight > clientHeight ise kırpılmış demektir).
+function ExpandableDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      setIsOverflowing(false);
+      return;
+    }
+    const measure = () => {
+      if (!expanded) {
+        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={`whitespace-pre-wrap text-sm text-slate-700 ${!expanded ? 'line-clamp-6' : ''}`}
+      >
+        {text}
+      </p>
+      {isOverflowing && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          aria-expanded={expanded}
+          className="mt-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {expanded ? 'Daralt' : 'Devamını oku'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ----------------------------------------------------------------
 // Tab Components
 // ----------------------------------------------------------------
@@ -3050,6 +3110,11 @@ function DetailTab({
   // Aktif değer = pending draft varsa onu göster, yoksa item değeri
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
+
+  // Atama & eskalasyon kartı — Sınıflandırma kartındakiyle aynı iki katmanlı
+  // kompakt tasarım. İkincil katman varsayılan kapalı; içindeki bir alan
+  // doldurulunca üst (her zaman görünen) bölüme otomatik taşınır.
+  const [showOtherAssignment, setShowOtherAssignment] = useState(false);
 
   // Devir Notu — en son aktarımın notu, Açıklama'nın hemen altında.
   // Stale guard CaseSolutionStepsPanel.tsx'teki reqIdRef/caseIdRef pattern'iyle
@@ -3116,9 +3181,7 @@ function DetailTab({
           onStart={() => onStartEdit('description')}
           onCommit={(val) => onCommitDraft('description', val)}
           onCancel={onCancelEdit}
-          renderDisplay={(val) => (
-            <p className="whitespace-pre-wrap text-sm text-slate-700">{String(val ?? '—')}</p>
-          )}
+          renderDisplay={(val) => <ExpandableDescription text={String(val ?? '—')} />}
         />
       </Section>
 
@@ -3133,7 +3196,7 @@ function DetailTab({
                 {latestTransfer.fromPersonName ? ` - ${latestTransfer.fromPersonName}` : ''}
               </span>
               <span className="text-slate-400">→</span>
-              <span className="font-semibold text-slate-800 dark:text-ndark-text">
+              <span className="text-slate-800 dark:text-ndark-text">
                 {latestTransfer.toTeamName ?? '—'}
                 {latestTransfer.toPersonName ? ` - ${latestTransfer.toPersonName}` : ''}
               </span>
@@ -3364,14 +3427,14 @@ function DetailTab({
               {primaryClassificationItems.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                  <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                  <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
@@ -3381,7 +3444,7 @@ function DetailTab({
                 <button
                   type="button"
                   onClick={() => setShowOtherClassification((s) => !s)}
-                  className="flex w-full items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                  className="flex w-full items-center gap-1 px-1.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700"
                 >
                   <ChevronRight
                     size={12}
@@ -3395,7 +3458,7 @@ function DetailTab({
                     {emptySecondary.map((i) => (
                       <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                         <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                        <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                        <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
                         <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                       </div>
                     ))}
@@ -3421,56 +3484,12 @@ function DetailTab({
           Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
           sıkı ızgara). Sol panel okuma özeti; merkez edit. */}
       <Section title="Atama & eskalasyon" variant="structured">
-        <EditableGrid
-          variant="structured"
-          rows={[
-            { label: 'Atanan Takım', node: (
-              <InlineEdit
-                fieldKey="assignedTeamId"
-                type="select"
-                value={v('assignedTeamId') ?? ''}
-                editing={editingField === 'assignedTeamId'}
-                isDraft={drafts.assignedTeamId !== undefined}
-                onStart={() => onStartEdit('assignedTeamId')}
-                onCommit={(val) => onCommitDraft('assignedTeamId', val)}
-                onCancel={onCancelEdit}
-                options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-                renderDisplay={() => {
-                  const val = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
-                  return val ? (
-                    <span className="text-sm text-slate-800">{val}</span>
-                  ) : (
-                    <span className="text-sm italic text-slate-400">Atanmadı</span>
-                  );
-                }}
-              />
-            )},
-            { label: 'Atanan Kişi', node: (
-              <InlineEdit
-                fieldKey="assignedPersonId"
-                type="select"
-                value={v('assignedPersonId') ?? ''}
-                editing={editingField === 'assignedPersonId'}
-                isDraft={drafts.assignedPersonId !== undefined}
-                onStart={() => onStartEdit('assignedPersonId')}
-                onCommit={(val) => onCommitDraft('assignedPersonId', val)}
-                onCancel={onCancelEdit}
-                options={[
-                  { value: '', label: activeTeamId ? '— Atanmadı —' : '— Önce takım seçin —' },
-                  ...personOptions.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-                disabled={!activeTeamId}
-                renderDisplay={() => {
-                  const val = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
-                  return val ? (
-                    <span className="text-sm text-slate-800">{val}</span>
-                  ) : (
-                    <span className="text-sm italic text-slate-400">Atanmadı</span>
-                  );
-                }}
-              />
-            )},
-            { label: 'Eskalasyon', node: (
+        {(() => {
+          const assignedTeamName = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
+          const assignedPersonName = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
+
+          const primaryAssignmentItems = [
+            { label: 'Eskalasyon', icon: AlertTriangle, node: (
               <InlineEdit
                 fieldKey="escalationLevel"
                 type="select"
@@ -3491,7 +3510,7 @@ function DetailTab({
             // WR-A5 / PM-03 — Destek seviyesi. Inline edit Supervisor+ (BFF guard
             // 403 verir; UI gating role bazlı zaten yok — backend response toast
             // gösterir). Phase 1 foundation; SLA/routing entegrasyonu Phase 2.
-            { label: 'Destek Seviyesi', node: (
+            { label: 'Destek Seviyesi', icon: Gauge, node: (
               <InlineEdit
                 fieldKey="supportLevel"
                 type="select"
@@ -3509,11 +3528,109 @@ function DetailTab({
                 )}
               />
             )},
-            { label: 'Vaka Sahibi', node: (
-              <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
-            ) },
-          ]}
-        />
+            { label: 'Vaka Sahibi', icon: UserCheck, node: (
+              <span className="block cursor-default text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
+            )},
+          ];
+
+          const secondaryAssignmentItems = [
+            { label: 'Atanan Takım', icon: Users, isEmpty: !assignedTeamName, node: (
+              <InlineEdit
+                fieldKey="assignedTeamId"
+                type="select"
+                value={v('assignedTeamId') ?? ''}
+                editing={editingField === 'assignedTeamId'}
+                isDraft={drafts.assignedTeamId !== undefined}
+                onStart={() => onStartEdit('assignedTeamId')}
+                onCommit={(val) => onCommitDraft('assignedTeamId', val)}
+                onCancel={onCancelEdit}
+                options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+                renderDisplay={() => (
+                  assignedTeamName ? (
+                    <span className="text-sm text-slate-800">{assignedTeamName}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  )
+                )}
+              />
+            )},
+            { label: 'Atanan Kişi', icon: User, isEmpty: !assignedPersonName, node: (
+              <InlineEdit
+                fieldKey="assignedPersonId"
+                type="select"
+                value={v('assignedPersonId') ?? ''}
+                editing={editingField === 'assignedPersonId'}
+                isDraft={drafts.assignedPersonId !== undefined}
+                onStart={() => onStartEdit('assignedPersonId')}
+                onCommit={(val) => onCommitDraft('assignedPersonId', val)}
+                onCancel={onCancelEdit}
+                options={[
+                  { value: '', label: activeTeamId ? '— Atanmadı —' : '— Önce takım seçin —' },
+                  ...personOptions.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                disabled={!activeTeamId}
+                renderDisplay={() => (
+                  assignedPersonName ? (
+                    <span className="text-sm text-slate-800">{assignedPersonName}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  )
+                )}
+              />
+            )},
+          ];
+
+          const filledSecondaryAssignment = secondaryAssignmentItems.filter((i) => !i.isEmpty);
+          const emptySecondaryAssignment = secondaryAssignmentItems.filter((i) => i.isEmpty);
+
+          return (
+            <>
+              <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+                {filledSecondaryAssignment.map((i) => (
+                  <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                    <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                    <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                    <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                  </div>
+                ))}
+                {primaryAssignmentItems.map((i) => (
+                  <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                    <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                    <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                    <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                  </div>
+                ))}
+              </div>
+              {emptySecondaryAssignment.length > 0 && (
+                <div className="mt-0.5 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowOtherAssignment((s) => !s)}
+                    className="flex w-full items-center gap-1 px-1.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700"
+                  >
+                    <ChevronRight
+                      size={12}
+                      className={`transition-transform ${showOtherAssignment ? 'rotate-90' : ''}`}
+                      aria-hidden
+                    />
+                    Diğer atama bilgileri
+                  </button>
+                  {showOtherAssignment && (
+                    <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+                      {emptySecondaryAssignment.map((i) => (
+                        <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                          <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                          <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                          <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </Section>
 
       {/* PR-D3 — Azure DevOps İş Öğeleri.
