@@ -9,6 +9,7 @@ import {
   emitGenericNotification,
 } from './actionItemRepository.js';
 import { ActorRequiredError } from '../lib/actor.js';
+import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 
 /**
@@ -740,6 +741,50 @@ function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
 //   - version + capturedAt server-side stamp. Raw KB persist EDİLMEZ
 //     (yalnız iki normalized string + meta).
 const SMART_TICKET_AI_DRAFTS_VERSION = 1;
+/**
+ * PR-D2 — customFields.devops array read/write helper'ları.
+ *
+ * Case.customFields Prisma'da NVarChar(Max) (JSON string olabilir VEYA
+ * smart-ticket merge fonksiyonlarındaki gibi object olarak elden geçmiş
+ * olabilir). İki durumu da güvenli ele al: parse fail → boş object.
+ *
+ * writeDevopsArray her zaman JSON string döndürür (Prisma'ya yazılır).
+ */
+function readDevopsArray(customFieldsRaw) {
+  if (!customFieldsRaw) return [];
+  let obj;
+  if (typeof customFieldsRaw === 'string') {
+    try {
+      obj = JSON.parse(customFieldsRaw);
+    } catch {
+      return [];
+    }
+  } else if (typeof customFieldsRaw === 'object') {
+    obj = customFieldsRaw;
+  } else {
+    return [];
+  }
+  const arr = obj?.devops;
+  return Array.isArray(arr) ? arr : [];
+}
+
+function writeDevopsArray(customFieldsRaw, devopsArr) {
+  let obj = {};
+  if (customFieldsRaw) {
+    if (typeof customFieldsRaw === 'string') {
+      try {
+        obj = JSON.parse(customFieldsRaw);
+      } catch {
+        obj = {};
+      }
+    } else if (typeof customFieldsRaw === 'object') {
+      obj = { ...customFieldsRaw };
+    }
+  }
+  obj.devops = devopsArr;
+  return JSON.stringify(obj);
+}
+
 function buildSmartTicketAiDraftsMerge(prev, drafts) {
   if (!drafts || typeof drafts !== 'object') return null;
   const engineering =
@@ -1820,6 +1865,227 @@ export const caseRepository = {
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Azure DevOps / TFS work item bağla.
+   *
+   * Saklama: Case.customFields.devops = Array<DevopsLinkEntry>.
+   * Her entry SADECE devopsClient.normalizeWorkItem çıktısının 16 allowlist
+   * alanı + bağlama meta'sı (linkedAt, linkedBy{Id,Name}, lastSyncedAt) içerir.
+   * Description/ReproSteps/History HİÇBİR YERDE saklanmaz (devopsClient
+   * allowlist guard'ı zaten engeller).
+   *
+   * Davranış:
+   *  - workItemRef (id veya TFS URL) → numeric id'ye parse
+   *  - devopsClient.getWorkItem(id) ile canlı doğrula
+   *  - aynı id zaten array'de varsa idempotent: mevcut hali döndür (yeniden ekleme yok)
+   *  - değilse normalize snapshot + meta'yı array'e push
+   *  - CaseActivity: 'DevopsLinked' (note = `#<id> bağlandı: <title>`)
+   *
+   * Arşivli vaka guard'ı: assertCaseInScope (write semantiği) otomatik
+   * 409 case_archived_readonly döner — arşivli vakaya link atılamaz.
+   */
+  async linkDevops(caseId, { workItemRef, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.linkDevops');
+    const workItemId = parseWorkItemId(workItemRef);
+    if (!workItemId) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id veya TFS URL gerekli.',
+        { status: 400, code: 'devops_workitem_ref_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Önce mevcut customFields'i oku — dedup için.
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const existingArr = readDevopsArray(fresh.customFields);
+    if (existingArr.some((entry) => entry?.id === workItemId)) {
+      // Idempotent: zaten bağlı, güncel state'i döndür.
+      const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+      return shape(c);
+    }
+
+    // TFS'ten canlı çek + normalize (allowlist guard devopsClient'ta).
+    const tfs = await devopsClient.getWorkItem(workItemId);
+    if (!tfs.ok) {
+      const status = tfs.error.code === 'tfs_not_found' ? 404
+        : tfs.error.code === 'tfs_auth_error' ? 502
+          : 502;
+      throw new CaseValidationError(
+        tfs.error.message,
+        { status, code: tfs.error.code },
+      );
+    }
+    const snapshot = tfs.data.normalized;
+    if (!snapshot || !snapshot.id) {
+      throw new CaseValidationError(
+        'TFS work item normalize edilemedi.',
+        { status: 502, code: 'devops_normalize_failed' },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const entry = {
+      ...snapshot,                       // 16 allowlist alanı + url + id
+      linkedAt: now,
+      linkedByUserId: actor.userId ?? null,
+      linkedByUserName: actor.displayName,
+      lastSyncedAt: now,
+    };
+    const nextArr = [...existingArr, entry];
+    const nextCustomFields = writeDevopsArray(fresh.customFields, nextArr);
+
+    const noteText = `#${workItemId} bağlandı${snapshot.title ? `: ${snapshot.title}` : ''}`;
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id: caseId },
+        data: { customFields: nextCustomFields },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsLinked',
+          action: 'DevOps work item bağlandı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'ı kaldır (array'den çıkar).
+   *
+   * Idempotent: aranan id array'de yoksa mevcut state'i döndürür (silent).
+   * CaseActivity 'DevopsUnlinked' kayıt atar.
+   * Arşivli vaka guard'ı assertCaseInScope ile otomatik 409.
+   */
+  async unlinkDevops(caseId, { workItemId, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.unlinkDevops');
+    const id = parseWorkItemId(workItemId);
+    if (!id) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id gerekli.',
+        { status: 400, code: 'devops_workitem_id_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const existingArr = readDevopsArray(fresh.customFields);
+    const target = existingArr.find((entry) => entry?.id === id);
+    if (!target) {
+      // Idempotent: zaten bağlı değil.
+      const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+      return shape(c);
+    }
+    const nextArr = existingArr.filter((entry) => entry?.id !== id);
+    const nextCustomFields = writeDevopsArray(fresh.customFields, nextArr);
+
+    const noteText = `#${id} kaldırıldı${target.title ? `: ${target.title}` : ''}`;
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id: caseId },
+        data: { customFields: nextCustomFields },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsUnlinked',
+          action: 'DevOps work item kaldırıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'larının CANLI değerlerini çek.
+   *
+   * customFields.devops array'indeki id'leri batch ile TFS'ten sorgular.
+   * TFS erişilemezse saklı snapshot'a düşer (fallback) + her item'a stale
+   * meta'sı ekler.
+   *
+   * Read endpoint olduğu için assertCaseInScopeForRead (SystemAdmin arşivli
+   * case için 200; diğer roller arşivli case'te 404 — soft-archive guard
+   * otomatik).
+   *
+   * Dönen:
+   *   { items: Array<entry>, stale: boolean, error?: { code, message } }
+   *   stale=true → TFS down, snapshot fallback gösteriliyor.
+   */
+  async listDevopsLive(caseId, allowedCompanyIds, actorRole) {
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
+    if (!companyId) return null;
+
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const stored = readDevopsArray(fresh.customFields);
+    if (stored.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    const ids = stored.map((e) => e?.id).filter((n) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    const tfs = await devopsClient.getWorkItems(ids);
+    if (!tfs.ok) {
+      // TFS down → snapshot fallback. Her item'da stale meta'sı ile dön.
+      return {
+        items: stored.map((entry) => ({ ...entry, _stale: true })),
+        stale: true,
+        error: { code: tfs.error.code, message: tfs.error.message },
+      };
+    }
+    const liveList = Array.isArray(tfs.data.normalized) ? tfs.data.normalized : [];
+    const liveById = new Map(liveList.map((n) => [n.id, n]));
+    const now = new Date().toISOString();
+    // Live ile snapshot meta'sını birleştir: live alanları + linked* + lastSyncedAt
+    const items = stored.map((entry) => {
+      const live = liveById.get(entry?.id);
+      if (live) {
+        return {
+          ...live,                       // 16 allowlist alanı (canlı)
+          linkedAt: entry?.linkedAt ?? null,
+          linkedByUserId: entry?.linkedByUserId ?? null,
+          linkedByUserName: entry?.linkedByUserName ?? null,
+          lastSyncedAt: now,
+        };
+      }
+      // Live çağrı 200 döndü ama bu id batch response'da yok (TFS rare):
+      // snapshot'a düş + stale.
+      return { ...entry, _stale: true };
+    });
+    return { items, stale: false };
   },
 
   /**
