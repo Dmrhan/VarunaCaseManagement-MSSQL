@@ -230,6 +230,24 @@ async function getConfig({ companyId } = {}) {
 }
 
 /**
+ * Basic auth header — base64("${username}:${secret}").
+ *
+ * **Yalnız PAT-only (cloud Azure DevOps) senaryosu için kullanılır.**
+ * Username boşsa `tfsRequest` Basic + fetch yol'unu seçer; doluysa NTLM
+ * çalıştırılır (on-prem TFS).
+ *
+ * - username boş → ":pat" (cloud Azure DevOps PAT-only standart)
+ * - username dolu → tfsRequest bu fonksiyonu çağırmaz, NTLM kullanır
+ *
+ * NOT: header değeri inşa edilir ve doğrudan `Authorization` field'ına
+ * yazılır; hata mesajlarına/console.log'a secret sızdırılmaz.
+ */
+function buildAuthHeader(username, secret) {
+  const token = Buffer.from(`${username ?? ''}:${secret}`).toString('base64');
+  return { Authorization: `Basic ${token}` };
+}
+
+/**
  * Faz 2.1 follow-up (NTLM) — Username'i NTLM bileşenlerine ayrıştır.
  *
  * Kabul edilen formatlar:
@@ -323,12 +341,50 @@ function ntlmRequest({ url, method, body, username, domain, password, timeoutMs 
 }
 
 /**
+ * Basic auth ile HTTP isteği (PAT-only senaryosu — cloud Azure DevOps).
+ *
+ * Eski fetch + AbortController timeout yolu burada korunur. Yalnız
+ * `tfsRequest` username boş gördüğünde çağrılır; on-prem TFS NTLM
+ * yoluna gider.
+ */
+async function basicRequest({ url, method, body, username, password, timeoutMs }) {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const init = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...buildAuthHeader(username, password),
+      },
+      signal: controller.signal,
+    };
+    if (body !== undefined && method !== 'GET') {
+      init.body = JSON.stringify(body);
+    }
+    const resp = await fetch(url, init);
+    const text = await resp.text();
+    return { statusCode: resp.status, body: text };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+/**
  * Düşük seviye HTTP proxy. Wrapped response döner.
  * Hata mesajlarında secret geçmez.
  *
  * Faz 2.1: opts.companyId → per-tenant DB config (env fallback).
- * Faz 2.1 follow-up (NTLM): Basic auth header'ı yerine httpntlm
- * challenge-response.
+ * Faz 2.1 follow-up (NTLM): on-prem TFS Basic'i reddediyor → NTLM
+ * challenge-response (httpntlm).
+ *
+ * **Codex P1 fix — username'e göre auth routing**:
+ *   - `username` BOŞ → Basic auth (`:pat`) + fetch  — cloud Azure
+ *     DevOps PAT-only senaryosu KORUNUR.
+ *   - `username` DOLU → NTLM challenge-response  — on-prem TFS.
+ *
+ * Caller wrapped response shape'i her iki yolda aynı.
  */
 async function tfsRequest({ path, method = 'GET', body, companyId }) {
   let config;
@@ -351,24 +407,39 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
   }
   const url = withApiVersion(joinUrl(config.baseUrl, path), config.apiVersion);
 
-  // NTLM için username + domain ayrıştırması ("DOMAIN\user" veya UPN).
-  const { domain, username } = parseUsernameForNtlm(config.username);
-
+  // Codex P1 fix — auth routing username'e göre.
+  const usernameTrim = (config.username ?? '').trim();
+  const useNtlm = usernameTrim.length > 0;
   const proxiedAt = new Date().toISOString();
   const t0 = Date.now();
 
   try {
-    const resp = await ntlmRequest({
-      url,
-      method,
-      body,
-      username,
-      domain,
-      password: config.pat,
-      timeoutMs: config.timeoutMs,
-    });
-    const latencyMs = Date.now() - t0;
+    let resp;
+    if (useNtlm) {
+      // on-prem TFS: NTLM challenge-response.
+      const { domain, username } = parseUsernameForNtlm(usernameTrim);
+      resp = await ntlmRequest({
+        url,
+        method,
+        body,
+        username,
+        domain,
+        password: config.pat,
+        timeoutMs: config.timeoutMs,
+      });
+    } else {
+      // cloud Azure DevOps PAT-only: Basic ":pat" + fetch.
+      resp = await basicRequest({
+        url,
+        method,
+        body,
+        username: '',
+        password: config.pat,
+        timeoutMs: config.timeoutMs,
+      });
+    }
 
+    const latencyMs = Date.now() - t0;
     let data = null;
     const text = resp?.body ?? '';
     if (text) {
@@ -394,7 +465,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
           status,
         },
         data,
-        meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion },
+        meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
       };
     }
 
@@ -402,7 +473,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
       ok: true,
       rawSource: RAW_SOURCE,
       data,
-      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion },
+      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
     };
   } catch (err) {
     const latencyMs = Date.now() - t0;
@@ -417,7 +488,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
           : (err?.message ?? 'TFS erişilemedi.'),
         status: null,
       },
-      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion },
+      meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion, authMode: useNtlm ? 'ntlm' : 'basic' },
     };
   }
 }
