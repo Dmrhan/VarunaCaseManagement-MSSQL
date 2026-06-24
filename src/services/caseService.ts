@@ -437,7 +437,27 @@ export const caseService = {
 
   async updateTaggingReview(
     caseId: string,
-    patch: { openingVerdict?: TaggingVerdict | null; closingVerdict?: TaggingVerdict | null; note?: string | null },
+    patch: {
+      note?: string | null;
+      openingPlatformVerdict?: TaggingVerdict | null;
+      openingPlatformCorrectedCode?: string | null;
+      openingBusinessProcessVerdict?: TaggingVerdict | null;
+      openingBusinessProcessCorrectedCode?: string | null;
+      openingOperationTypeVerdict?: TaggingVerdict | null;
+      openingOperationTypeCorrectedCode?: string | null;
+      openingAffectedObjectVerdict?: TaggingVerdict | null;
+      openingAffectedObjectCorrectedCode?: string | null;
+      openingImpactVerdict?: TaggingVerdict | null;
+      openingImpactCorrectedCode?: string | null;
+      closingRootCauseGroupVerdict?: TaggingVerdict | null;
+      closingRootCauseGroupCorrectedCode?: string | null;
+      closingRootCauseDetailVerdict?: TaggingVerdict | null;
+      closingRootCauseDetailCorrectedCode?: string | null;
+      closingResolutionTypeVerdict?: TaggingVerdict | null;
+      closingResolutionTypeCorrectedCode?: string | null;
+      closingPermanentPreventionVerdict?: TaggingVerdict | null;
+      closingPermanentPreventionCorrectedCode?: string | null;
+    },
   ): Promise<CaseTaggingReview | undefined> {
     if (USE_MOCK) return undefined;
     return apiFetch<CaseTaggingReview>(
