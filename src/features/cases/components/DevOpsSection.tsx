@@ -108,37 +108,55 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
   const [linking, setLinking] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
 
-  // Codex P2 fix — monotonic request token + caseId reset.
+  // Codex P1 fix — current-case ref + monotonic token (iki katman).
   //
-  // Önceki PR'da requestedCaseIdRef yaklaşımı vardı (cevap dönüşünde caseId
-  // eşleşmesi kontrolü). Bu eski case'in eski load() closure'undan caseId
-  // === A iken handleLink/handleUnlink sonrası `void load()` çağrılırsa
-  // self-resetting'e açıktı (eski load REF'i kendisi tekrar A'ya set
-  // ediyordu → guard kendi kendine açılıyordu).
+  // Bug evrim:
+  //  #150 — requestedCaseIdRef = caseId (kendi closure'undan): handleLink
+  //         tamamlanır → eski A closure `void load()` → ref'i A'ya yazar
+  //         → guard self-reset.
+  //  #151 — monotonic ++token: eski A closure'ın `void load()` ÇAĞRISI
+  //         token'ı kendine ARTIRIR (myToken = en yeni) → A response
+  //         guard'ı geçer, inflight B response discard edilir → "A items
+  //         B detayında" bug HÂLÂ var.
   //
-  // Çözüm: monotonic counter. Her load() başında ++; response dönüşünde
-  // myToken !== ref ise discard. Stale closure'lar token'ı artıramaz, sadece
-  // okur — kendine açamaz.
+  // Bu fix: current-case ref'i useEffect ile **prop'tan** sync ederiz;
+  // closure'lar onu **OKUR**, **ASLA GÜNCELLEYEMEZ**. load() içinde
+  // başında + response sonrası bu ref'i kontrol ederiz. Eski caseId=A
+  // closure'ın `void load()` çağrısı, currentCaseIdRef.current === B
+  // gördüğünde HİÇ token almadan return eder; B response bozulmaz.
   //
-  // useEffect(caseId) ANINDA state reset (eski case items gizle) +
-  // ref'i ++'la → tüm in-flight handler'ların token'ı geçersiz.
+  // Monotonic token ekstra emniyet: aynı caseId içinde hızlı arka-arkaya
+  // load (örn handleLink success → load + ardından manuel refresh) — son
+  // response kazanır, eski response stale olarak discard.
+  const currentCaseIdRef = useRef(caseId);
   const requestTokenRef = useRef(0);
 
+  // currentCaseIdRef yalnız caseId prop değişince güncellenir; başka kimse
+  // (handler/closure) yazmaz. Closure'lar OKUR ve eski case'in load'unu
+  // erken iptal eder.
+  useEffect(() => {
+    currentCaseIdRef.current = caseId;
+  }, [caseId]);
+
   const load = useCallback(async () => {
+    // EARLY-RETURN: bu closure'ın caseId'i artık güncel değilse hiç başlama
+    // (token bile alma — Codex P1 fix).
+    if (currentCaseIdRef.current !== caseId) return;
     const myToken = ++requestTokenRef.current;
     setLoading(true);
     const res = await devopsService.getItems(caseId);
-    // Yarış guard: bu cevap en güncel istek mi?
+    // Response sonrası ikili guard:
+    //  - caseId hâlâ güncel mi? (eski case'in inflight load'u olabilir)
+    //  - token hâlâ en yeni mi? (aynı case'te yeni load başlatıldıysa)
+    if (currentCaseIdRef.current !== caseId) return;
     if (requestTokenRef.current !== myToken) return;
     setLoading(false);
     if (res) setData(res);
   }, [caseId]);
 
-  // caseId değişince eski case'in item'larını gizle ANINDA + tüm in-flight
-  // handler'ların token'ını geçersiz kıl (eski load closure'ı dahil — yeni
-  // load() içindeki ++ zaten artırır, ama burada da defansif olarak ++
-  // yapıyoruz ki bekleyen handleLink/handleUnlink'in `void load()` çağrısı
-  // yenilenirken state'i toparlasın).
+  // caseId değişince eski case'in item'larını gizle ANINDA + token++ ile
+  // bu noktada inflight olan kendi-case'i-uyumlu load'ları da invalidate
+  // et (handleLink → setLinking → o sırada caseId değişirse).
   useEffect(() => {
     requestTokenRef.current += 1;
     setData(null);

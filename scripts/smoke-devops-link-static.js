@@ -268,8 +268,20 @@ expect('7.16 caseId değişince token++ + setData(null) — eski in-flight inval
   /useEffect\(\(\) => \{\s*requestTokenRef\.current \+= 1;\s*setData\(null\)[\s\S]{0,400}void load\(\);\s*\}, \[caseId, load\]\)/.test(sectionSrcCode), true);
 expect('7.17 caseId değişince modal/linkInput/unlinkingId reset',
   /setLinkModalOpen\(false\);\s*setLinkInput\(''\);\s*setUnlinkingId\(null\);/.test(sectionSrcCode), true);
-// Codex P2 fix kanıtı — eski requestedCaseIdRef pattern'i KALMADI
-expect('7.18 eski requestedCaseIdRef kullanımı KALDIRILDI (self-reset bug)',
+// Codex P1 fix (#153 sonrası) — currentCaseIdRef ile early-return.
+// Sadece monotonic token bug'ı tam çözmüyordu: handleLink completion'da
+// eski A closure ++token yapıp kendine yeni en yüksek token alıyordu →
+// A response guard'ı geçiyordu, B response discard ediliyordu.
+// currentCaseIdRef useEffect ile **prop'tan** sync edilir; closure'lar
+// OKUR, asla yazamaz → eski closure'lar load başlamadan early-return.
+expect('7.18 currentCaseIdRef prop\'tan sync (closure-immune)',
+  /currentCaseIdRef = useRef\(caseId\)/.test(sectionSrcCode), true);
+expect('7.19 useEffect(caseId) currentCaseIdRef.current = caseId (sync)',
+  /useEffect\(\(\) => \{\s*currentCaseIdRef\.current = caseId;\s*\}, \[caseId\]\)/.test(sectionSrcCode), true);
+expect('7.20 load() başında early-return: currentCaseIdRef.current !== caseId',
+  /if \(currentCaseIdRef\.current !== caseId\) return/.test(sectionSrcCode), true);
+// Eski (artık relevant olmayan) requestedCaseIdRef pattern'i KALMADI
+expect('7.21 eski requestedCaseIdRef kullanımı KALDIRILDI',
   /requestedCaseIdRef/.test(sectionSrcCode), false);
 
 console.log('\n────────────────────────────────────────────────────────');
