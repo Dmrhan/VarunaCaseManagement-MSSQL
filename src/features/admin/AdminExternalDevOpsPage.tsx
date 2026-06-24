@@ -37,6 +37,12 @@ interface DraftState {
   apiVersion: string;
   timeoutMs: number;
   /**
+   * Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\\user").
+   * Plain saklanır; secret değil. GET'te döndüğünden form'a otomatik
+   * dolar.
+   */
+  username: string;
+  /**
    * UI-only — "Değiştir" tıklanıp input açıldıysa true. Save'de bu true'sa
    * pat değeri patch'e konur; false'sa pat patch'e GİRMEZ → mevcut PAT
    * korunur.
@@ -51,6 +57,7 @@ function toDraft(s: ExternalDevOpsSetting): DraftState {
     baseUrl: s.baseUrl ?? '',
     apiVersion: s.apiVersion ?? '4.1',
     timeoutMs: s.timeoutMs,
+    username: s.username ?? '',
     editingPat: false,
     patInput: '',
   };
@@ -62,6 +69,8 @@ function toPatch(d: DraftState): ExternalDevOpsSettingInput {
     baseUrl: d.baseUrl.trim() ? d.baseUrl.trim() : null,
     apiVersion: d.apiVersion.trim() ? d.apiVersion.trim() : null,
     timeoutMs: d.timeoutMs,
+    // username plain saklanır; trim ile boş → null.
+    username: d.username.trim() ? d.username.trim() : null,
   };
   // PAT yalnız değiştirmek için input açıldıysa ve girildiyse gönder.
   if (d.editingPat && d.patInput.trim().length > 0) {
@@ -302,10 +311,28 @@ export function AdminExternalDevOpsPage() {
                 </Field>
               </div>
 
-              {/* PAT — WRITE-ONLY widget. */}
+              {/*
+                Faz 2.1 follow-up — Basic auth kullanıcı adı. Plain text;
+                secret değil. On-prem TFS user+secret bekliyor; cloud Azure
+                DevOps PAT-only çalışır (boş bırakılabilir).
+              */}
               <Field
-                label="Personal Access Token (PAT)"
-                hint="Sunucuda AES-256-GCM ile şifreli saklanır; bu sayfada geri gösterilmez."
+                label="Kullanıcı Adı"
+                hint='Basic auth için. On-prem TFS: "DOMAIN\user". Cloud Azure DevOps: boş bırak (PAT-only).'
+                error={errors.username}
+              >
+                <TextInput
+                  value={draft.username}
+                  onChange={(e) => update('username', e.target.value)}
+                  placeholder="DOMAIN\user"
+                  autoComplete="off"
+                />
+              </Field>
+
+              {/* PAT/Parola — WRITE-ONLY widget. */}
+              <Field
+                label="PAT veya Parola"
+                hint="Sunucuda AES-256-GCM ile şifreli saklanır; bu sayfada geri gösterilmez. Hangisi (PAT veya parola) kullanıldığını kullanıcı adına verilen secret belirler."
                 error={errors.patInput}
               >
                 {!draft.editingPat ? (
@@ -313,12 +340,12 @@ export function AdminExternalDevOpsPage() {
                     {setting?.patIsSet ? (
                       <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                         <CheckCircle2 size={12} />
-                        PAT ayarlı · {formatDate(setting.patSetAt)}
+                        Secret ayarlı · {formatDate(setting.patSetAt)}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                         <Lock size={12} />
-                        PAT henüz ayarlanmadı
+                        Secret henüz ayarlanmadı
                       </span>
                     )}
                     <Button
@@ -326,7 +353,7 @@ export function AdminExternalDevOpsPage() {
                       size="sm"
                       onClick={() => update('editingPat', true)}
                     >
-                      {setting?.patIsSet ? 'Değiştir' : 'PAT gir'}
+                      {setting?.patIsSet ? 'Değiştir' : 'Secret gir'}
                     </Button>
                   </div>
                 ) : (
@@ -338,8 +365,8 @@ export function AdminExternalDevOpsPage() {
                       onChange={(e) => update('patInput', e.target.value)}
                       placeholder={
                         setting?.patIsSet
-                          ? 'Değiştirmek için yeni PAT gir'
-                          : 'PAT gir (en az 8 karakter)'
+                          ? 'Değiştirmek için yeni secret gir'
+                          : 'PAT veya parola gir (en az 8 karakter)'
                       }
                     />
                     <div className="flex items-center gap-2">
@@ -376,7 +403,7 @@ export function AdminExternalDevOpsPage() {
                   disabled={testing || !setting?.patIsSet}
                   title={
                     !setting?.patIsSet
-                      ? 'Önce PAT kaydet, sonra test edebilirsin.'
+                      ? 'Önce secret kaydet, sonra test edebilirsin.'
                       : 'Saklı PAT ile bir test work item çekmeyi dener.'
                   }
                 >
