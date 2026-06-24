@@ -414,23 +414,38 @@ router.get(
 /**
  * PUT /api/cases/:id/tagging-review
  *
- * Body: { openingVerdict?, closingVerdict?, note? } — SADECE bunlar kabul
- * edilir. reviewerId/reviewerName/reviewedAt req.user'dan stamplenir, client
- * body'den asla okunmaz (transferCase'teki transferredBy emsali).
+ * Alan bazlı model (9 etiket × Verdict + CorrectedCode) + note. SADECE bu
+ * alanlar kabul edilir — Original{Code,Label} ve Corrected*Label client'tan
+ * asla okunmaz (snapshot create'te server'da set edilir, label TaxonomyDef'ten
+ * server-side resolve edilir). reviewerId/reviewerName/reviewedAt
+ * req.user'dan stamplenir, client body'den asla okunmaz (transferCase'teki
+ * transferredBy emsali).
  */
+const TAGGING_REVIEW_FIELD_KEYS = [
+  'openingPlatformVerdict', 'openingPlatformCorrectedCode',
+  'openingBusinessProcessVerdict', 'openingBusinessProcessCorrectedCode',
+  'openingOperationTypeVerdict', 'openingOperationTypeCorrectedCode',
+  'openingAffectedObjectVerdict', 'openingAffectedObjectCorrectedCode',
+  'openingImpactVerdict', 'openingImpactCorrectedCode',
+  'closingRootCauseGroupVerdict', 'closingRootCauseGroupCorrectedCode',
+  'closingRootCauseDetailVerdict', 'closingRootCauseDetailCorrectedCode',
+  'closingResolutionTypeVerdict', 'closingResolutionTypeCorrectedCode',
+  'closingPermanentPreventionVerdict', 'closingPermanentPreventionCorrectedCode',
+];
+
 router.put(
   '/:id/tagging-review',
   requireRole('Supervisor', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     const actor = requireActor(req);
     const body = req.body ?? {};
+    const input = { note: body.note };
+    for (const key of TAGGING_REVIEW_FIELD_KEYS) {
+      if (key in body) input[key] = body[key];
+    }
     const result = await caseRepository.upsertTaggingReview(
       req.params.id,
-      {
-        openingVerdict: body.openingVerdict,
-        closingVerdict: body.closingVerdict,
-        note: body.note,
-      },
+      input,
       req.user.allowedCompanyIds,
       actor,
     );

@@ -1738,19 +1738,76 @@ model CaseTransfer {
 
 // CaseTaggingReview — Vaka Etiket Doğrulama Ekranı (bilgi bankası seed'i için
 // audit). Supervisor/Admin/SystemAdmin her vakanın açılış (5 alan) ve kapanış
-// (4 alan, sadece Smart Ticket + Çözüldü vakalarda dolu) etiketlemesini
-// Doğru/Yanlış/Belirsiz olarak işaretler. caseId @unique → tek vaka tek kayıt,
-// upsert pattern (QAScoreLog ile aynı desen — concurrency token yok, son
-// yazan kazanır). reviewerId/reviewerName/reviewedAt backend'de (req.user)
-// stamplenir, client body'den asla okunmaz.
+// (4 alan, sadece Smart Ticket + Çözüldü vakalarda dolu) etiketini ALAN
+// BAZINDA Doğru/Yanlış/Belirsiz olarak işaretler. Original{Code,Label} snapshot
+// alanları create sırasında Case.customFields'tan KOPYALANIR ve bir daha
+// değişmez — bu kayıtlar bilgi bankası doğrulama/eğitim veri setini besler,
+// dolayısıyla vaka arşivlenip silinse bile bağımsız kalmalı. Corrected{Code,Label}
+// sadece kendi taxonomyType'ına ait TaxonomyDef'ten seçilir (server-side
+// batch validasyon — caseRepository.upsertTaggingReview). caseId @unique →
+// tek vaka tek kayıt, upsert pattern (QAScoreLog ile aynı desen — concurrency
+// token yok, son yazan kazanır). reviewerId/reviewerName/reviewedAt backend'de
+// (req.user) stamplenir, client body'den asla okunmaz.
 model CaseTaggingReview {
   id        String @id @default(cuid()) @db.NVarChar(450)
   caseId    String @unique @db.NVarChar(450)
   companyId String @db.NVarChar(450)
 
-  openingVerdict String? @db.NVarChar(50) // enum:TaggingVerdict
-  closingVerdict String? @db.NVarChar(50) // enum:TaggingVerdict
-  note           String? @db.NVarChar(Max)
+  openingPlatformOriginalCode    String? @db.NVarChar(255)
+  openingPlatformOriginalLabel   String? @db.NVarChar(Max)
+  openingPlatformVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingPlatformCorrectedCode   String? @db.NVarChar(255)
+  openingPlatformCorrectedLabel  String? @db.NVarChar(Max)
+
+  openingBusinessProcessOriginalCode   String? @db.NVarChar(255)
+  openingBusinessProcessOriginalLabel  String? @db.NVarChar(Max)
+  openingBusinessProcessVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingBusinessProcessCorrectedCode  String? @db.NVarChar(255)
+  openingBusinessProcessCorrectedLabel String? @db.NVarChar(Max)
+
+  openingOperationTypeOriginalCode   String? @db.NVarChar(255)
+  openingOperationTypeOriginalLabel  String? @db.NVarChar(Max)
+  openingOperationTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingOperationTypeCorrectedCode  String? @db.NVarChar(255)
+  openingOperationTypeCorrectedLabel String? @db.NVarChar(Max)
+
+  openingAffectedObjectOriginalCode   String? @db.NVarChar(255)
+  openingAffectedObjectOriginalLabel  String? @db.NVarChar(Max)
+  openingAffectedObjectVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingAffectedObjectCorrectedCode  String? @db.NVarChar(255)
+  openingAffectedObjectCorrectedLabel String? @db.NVarChar(Max)
+
+  openingImpactOriginalCode    String? @db.NVarChar(255)
+  openingImpactOriginalLabel   String? @db.NVarChar(Max)
+  openingImpactVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingImpactCorrectedCode   String? @db.NVarChar(255)
+  openingImpactCorrectedLabel  String? @db.NVarChar(Max)
+
+  closingRootCauseGroupOriginalCode   String? @db.NVarChar(255)
+  closingRootCauseGroupOriginalLabel  String? @db.NVarChar(Max)
+  closingRootCauseGroupVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingRootCauseGroupCorrectedCode  String? @db.NVarChar(255)
+  closingRootCauseGroupCorrectedLabel String? @db.NVarChar(Max)
+
+  closingRootCauseDetailOriginalCode   String? @db.NVarChar(255)
+  closingRootCauseDetailOriginalLabel  String? @db.NVarChar(Max)
+  closingRootCauseDetailVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingRootCauseDetailCorrectedCode  String? @db.NVarChar(255)
+  closingRootCauseDetailCorrectedLabel String? @db.NVarChar(Max)
+
+  closingResolutionTypeOriginalCode   String? @db.NVarChar(255)
+  closingResolutionTypeOriginalLabel  String? @db.NVarChar(Max)
+  closingResolutionTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingResolutionTypeCorrectedCode  String? @db.NVarChar(255)
+  closingResolutionTypeCorrectedLabel String? @db.NVarChar(Max)
+
+  closingPermanentPreventionOriginalCode   String? @db.NVarChar(255)
+  closingPermanentPreventionOriginalLabel  String? @db.NVarChar(Max)
+  closingPermanentPreventionVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingPermanentPreventionCorrectedCode  String? @db.NVarChar(255)
+  closingPermanentPreventionCorrectedLabel String? @db.NVarChar(Max)
+
+  note String? @db.NVarChar(Max)
 
   reviewerId   String?   @db.NVarChar(450)
   reviewerName String?   @db.NVarChar(Max)
