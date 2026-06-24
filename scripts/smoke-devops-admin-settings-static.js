@@ -223,13 +223,15 @@ const usernameMigration = read('prisma/migrations/00000000000010_external_devops
 expect('11.3 migration ALTER TABLE ADD username NVARCHAR(256) NULL (additive)',
   /ALTER TABLE \[dbo\]\.\[ExternalDevOpsSetting\]\s+ADD \[username\] NVARCHAR\(256\) NULL/.test(usernameMigration), true);
 
-// devopsClient
-expect('11.4 buildAuthHeader(username, secret) imzası',
-  /function buildAuthHeader\(username, secret\)/.test(clientCode), true);
-expect('11.5 buildAuthHeader base64("${username ?? \'\'}:${secret}")',
-  /Buffer\.from\(`\$\{username \?\? ''\}:\$\{secret\}`\)\.toString\('base64'\)/.test(clientCode), true);
-expect('11.6 buildAuthHeader call site config.username, config.pat',
-  /buildAuthHeader\(config\.username, config\.pat\)/.test(clientCode), true);
+// devopsClient — NTLM auth (httpntlm) Faz 2.1 follow-up
+expect('11.4 httpntlm import (NTLM challenge-response)',
+  /import httpntlm from 'httpntlm'/.test(clientCode), true);
+expect('11.5 parseUsernameForNtlm — DOMAIN\\user + UPN destek',
+  /function parseUsernameForNtlm\(raw\)/.test(clientCode)
+    && /s\.indexOf\('\\\\'\)/.test(clientCode)
+    && /s\.indexOf\('@'\)/.test(clientCode), true);
+expect('11.6 tfsRequest NTLM (ntlmRequest + config.username/pat/timeoutMs)',
+  /await ntlmRequest\(\{[\s\S]{0,500}username,[\s\S]{0,200}domain,[\s\S]{0,200}password: config\.pat/.test(clientCode), true);
 expect('11.7 getConfig DB-first username + env TFS_USERNAME fallback',
   /dbConfig\?\.username \|\| process\.env\.TFS_USERNAME \|\| ''/.test(clientCode), true);
 expect('11.8 getConfig return shape\'inde username var',

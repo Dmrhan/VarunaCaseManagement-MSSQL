@@ -21,7 +21,14 @@
  *   TFS_TIMEOUT_MS     — request timeout ms (default 15000)
  *
  * MVP: tek tenant (.env). Faz 2: per-tenant DevOpsSetting model.
+ *
+ * Faz 2.1 follow-up (NTLM): On-prem TFS Basic auth'u reddediyor
+ * (WWW-Authenticate: NTLM/Negotiate dönüyor, Basic 401). httpntlm
+ * paketi ile NTLM challenge-response kullanılıyor; kullanıcı adı +
+ * parola/PAT aynı admin UI'dan gelir.
  */
+
+import httpntlm from 'httpntlm';
 
 const RAW_SOURCE = 'tfs-devops';
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -223,21 +230,34 @@ async function getConfig({ companyId } = {}) {
 }
 
 /**
- * Basic auth header — base64("${username}:${secret}").
+ * Faz 2.1 follow-up (NTLM) — Username'i NTLM bileşenlerine ayrıştır.
  *
- * - username boş → ":pat" (cloud Azure DevOps PAT-only standart; backward
- *   compat).
- * - username dolu → "DOMAIN\user:secret" (on-prem TFS user+pat veya
- *   user+parola; SECRET'in PAT mı parola mı olduğunu istemci bilmez —
- *   user'a verilen secret ne ise o).
+ * Kabul edilen formatlar:
+ *   - "DOMAIN\user"     → { domain: 'DOMAIN', username: 'user' }
+ *   - "user@DOMAIN.com" → { domain: 'DOMAIN.com', username: 'user' } (UPN)
+ *   - "user"            → { domain: '', username: 'user' }
+ *   - "" / null         → { domain: '', username: '' }
  *
- * NOT: username log'lanmaz. Header değeri inşa edilir ve doğrudan
- * `Authorization` field'ına yazılır; hata mesajlarına/console.log'a
- * username + secret hiçbir şekilde sızdırılmaz.
+ * On-prem TFS Basic auth'u reddediyor (WWW-Authenticate: NTLM/Negotiate);
+ * NTLM challenge-response için kullanıcı + parola + domain gerek. Domain
+ * kullanıcı adının prefix'inde (DOMAIN\user) veya UPN (user@domain)
+ * formatında geliyor — UI'da ek alan eklemeden parse ediyoruz.
+ *
+ * NOT: parse sonucu log'lanmaz; sadece httpntlm option'ına geçer.
  */
-function buildAuthHeader(username, secret) {
-  const token = Buffer.from(`${username ?? ''}:${secret}`).toString('base64');
-  return { Authorization: `Basic ${token}` };
+function parseUsernameForNtlm(raw) {
+  if (!raw || typeof raw !== 'string') return { domain: '', username: '' };
+  const s = raw.trim();
+  if (!s) return { domain: '', username: '' };
+  const bs = s.indexOf('\\');
+  if (bs > 0) {
+    return { domain: s.slice(0, bs), username: s.slice(bs + 1) };
+  }
+  const at = s.indexOf('@');
+  if (at > 0) {
+    return { domain: s.slice(at + 1), username: s.slice(0, at) };
+  }
+  return { domain: '', username: s };
 }
 
 function joinUrl(base, path) {
@@ -252,10 +272,63 @@ function withApiVersion(url, apiVersion) {
 }
 
 /**
+ * httpntlm Promise wrapper — callback API → async/await.
+ *
+ * Timeout: `setTimeout` ile manuel — httpntlm built-in timeout sunmuyor.
+ * Timeout durumunda Promise reject('AbortError') eder; tfsRequest mevcut
+ * 'tfs_timeout' code'una map'ler.
+ *
+ * NTLM 4-aşamalı challenge-response (NEGOTIATE → CHALLENGE → AUTHENTICATE)
+ * httpntlm tarafında otomatik yönetilir.
+ */
+function ntlmRequest({ url, method, body, username, domain, password, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      const err = new Error(`TFS NTLM timeout (${timeoutMs} ms).`);
+      err.name = 'AbortError';
+      reject(err);
+    }, timeoutMs);
+
+    const opts = {
+      url,
+      username,
+      password,
+      domain,
+      workstation: '',
+      headers: {
+        Accept: 'application/json',
+      },
+    };
+    if (body !== undefined && method !== 'GET') {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+
+    const m = (method || 'GET').toLowerCase();
+    const fn = httpntlm[m];
+    if (typeof fn !== 'function') {
+      clearTimeout(timeoutHandle);
+      return reject(new Error(`Desteklenmeyen HTTP metodu: ${method}`));
+    }
+
+    fn(opts, (err, res) => {
+      if (timedOut) return; // timeout zaten reject etti
+      clearTimeout(timeoutHandle);
+      if (err) return reject(err);
+      resolve(res); // { statusCode, headers, body }
+    });
+  });
+}
+
+/**
  * Düşük seviye HTTP proxy. Wrapped response döner.
- * Hata mesajlarında PAT geçmez.
+ * Hata mesajlarında secret geçmez.
  *
  * Faz 2.1: opts.companyId → per-tenant DB config (env fallback).
+ * Faz 2.1 follow-up (NTLM): Basic auth header'ı yerine httpntlm
+ * challenge-response.
  */
 async function tfsRequest({ path, method = 'GET', body, companyId }) {
   let config;
@@ -277,28 +350,27 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
     };
   }
   const url = withApiVersion(joinUrl(config.baseUrl, path), config.apiVersion);
-  const headers = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...buildAuthHeader(config.username, config.pat),
-  };
 
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), config.timeoutMs);
+  // NTLM için username + domain ayrıştırması ("DOMAIN\user" veya UPN).
+  const { domain, username } = parseUsernameForNtlm(config.username);
 
   const proxiedAt = new Date().toISOString();
   const t0 = Date.now();
 
   try {
-    const init = { method, headers, signal: controller.signal };
-    if (body !== undefined && method !== 'GET') {
-      init.body = JSON.stringify(body);
-    }
-    const resp = await fetch(url, init);
+    const resp = await ntlmRequest({
+      url,
+      method,
+      body,
+      username,
+      domain,
+      password: config.pat,
+      timeoutMs: config.timeoutMs,
+    });
     const latencyMs = Date.now() - t0;
 
     let data = null;
-    const text = await resp.text();
+    const text = resp?.body ?? '';
     if (text) {
       try {
         data = JSON.parse(text);
@@ -307,18 +379,19 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
       }
     }
 
-    if (!resp.ok) {
+    const status = resp?.statusCode;
+    if (status < 200 || status >= 300) {
       return {
         ok: false,
         rawSource: RAW_SOURCE,
         error: {
-          code: resp.status === 401 || resp.status === 403
+          code: status === 401 || status === 403
             ? 'tfs_auth_error'
-            : resp.status === 404
+            : status === 404
               ? 'tfs_not_found'
               : 'tfs_http_error',
-          message: `TFS HTTP ${resp.status}${resp.statusText ? ' ' + resp.statusText : ''}`,
-          status: resp.status,
+          message: `TFS HTTP ${status}`,
+          status,
         },
         data,
         meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion },
@@ -346,8 +419,6 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
       },
       meta: { proxiedAt, latencyMs, apiVersion: config.apiVersion },
     };
-  } finally {
-    clearTimeout(timeoutHandle);
   }
 }
 
