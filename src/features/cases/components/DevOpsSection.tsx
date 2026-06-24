@@ -268,9 +268,22 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
                   item._stale ? 'opacity-60' : ''
                 }`}
               >
-                {/* Başlık satırı: ID · State · Title · DevOps'ta aç · Kaldır */}
+                {/* Başlık satırı: ID (TFS link) · State · Title · Kaldır */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium text-slate-700 dark:text-ndark-text">#{item.id}</span>
+                  {item.url ? (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline dark:text-blue-400"
+                      title="DevOps'ta aç (yeni sekme)"
+                    >
+                      #{item.id}
+                      <ExternalLink size={10} />
+                    </a>
+                  ) : (
+                    <span className="text-xs font-medium text-slate-700 dark:text-ndark-text">#{item.id}</span>
+                  )}
                   {item.state && (
                     <span
                       className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${stateBadgeClasses(item.state)}`}
@@ -285,18 +298,6 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
                   >
                     {item.title ?? '—'}
                   </span>
-                  {item.url && (
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400"
-                      title="DevOps'ta aç (yeni sekme)"
-                    >
-                      DevOps'ta aç
-                      <ExternalLink size={10} />
-                    </a>
-                  )}
                   {canWrite && (
                     <button
                       type="button"
