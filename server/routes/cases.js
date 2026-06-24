@@ -366,6 +366,80 @@ router.get(
   }),
 );
 
+/**
+ * GET /api/cases/tagging-review?dateFrom&dateTo&statuses&page&pageSize
+ *
+ * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+ * KRİTİK: bu literal route GET /:id'den (aşağıda) ÖNCE mount edilmeli,
+ * yoksa Express '/:id' ile eşleşir (id="tagging-review") ve buraya hiç
+ * ulaşılmaz — bkz. aşağıdaki /watching route'undaki aynı uyarı.
+ *
+ * caseRepository.list/shape/CASE_INCLUDE'a dokunulmaz: vaka listesi mevcut
+ * filtre/scope mantığıyla çekilir, review kayıtları ayrı sorgulanıp
+ * caseId → review map'i olarak ayrı bir alanda döner.
+ */
+router.get(
+  '/tagging-review',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const f = req.query;
+    const filters = {
+      statuses: f.statuses ? f.statuses.split(',') : undefined,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+    };
+    const HARD_MAX_PAGE_SIZE = 200;
+    const requestedPageSize = Number(f.pageSize ?? 25);
+    const safePageSize = Math.min(
+      HARD_MAX_PAGE_SIZE,
+      Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 25),
+    );
+    const safePage = Math.max(1, Number(f.page) || 1);
+    const pagination = { page: safePage, pageSize: safePageSize };
+
+    const { items, total } = await caseRepository.list({
+      filters,
+      pagination,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
+    res.json({
+      value: items,
+      '@odata.count': total,
+      reviews: Object.fromEntries(reviewMap),
+    });
+  }),
+);
+
+/**
+ * PUT /api/cases/:id/tagging-review
+ *
+ * Body: { openingVerdict?, closingVerdict?, note? } — SADECE bunlar kabul
+ * edilir. reviewerId/reviewerName/reviewedAt req.user'dan stamplenir, client
+ * body'den asla okunmaz (transferCase'teki transferredBy emsali).
+ */
+router.put(
+  '/:id/tagging-review',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const body = req.body ?? {};
+    const result = await caseRepository.upsertTaggingReview(
+      req.params.id,
+      {
+        openingVerdict: body.openingVerdict,
+        closingVerdict: body.closingVerdict,
+        note: body.note,
+      },
+      req.user.allowedCompanyIds,
+      actor,
+    );
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
 /** GET /api/cases/:id */
 router.get(
   '/:id',

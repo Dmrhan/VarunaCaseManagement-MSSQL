@@ -1728,7 +1728,7 @@ function DrilldownDrawer({
                   <th className="px-4 py-2.5">Müşteri</th>
                   <th className="px-4 py-2.5">Statü</th>
                   <SortableDrawerTh label="Öncelik" sortKey="priority" request={request} onSort={onSort} align="right" />
-                  <th className="px-4 py-2.5">Sahip</th>
+                  <th className="px-4 py-2.5">Atanan</th>
                   <SortableDrawerTh label="SLA" sortKey="slaResolutionDueAt" request={request} onSort={onSort} align="right" />
                   <SortableDrawerTh label="Yaş" sortKey="ageHours" request={request} onSort={onSort} align="right" />
                 </tr>

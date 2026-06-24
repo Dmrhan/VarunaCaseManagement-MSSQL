@@ -617,9 +617,9 @@ console.log('\n── 4j) Adım-4 — Sınıflandırma + Atama PR-B baseline tut
   // 4j.10 — Atanan Takım/Kişi renderDisplay'lerinde "Atanmadı" worded empty italic
   expect('4j.10 Atanan Takım/Kişi renderDisplay worded empty "Atanmadı" italic',
     /italic text-slate-400">Atanmadı</.test(cd), true);
-  // 4j.11 — Vaka Sahibi worded empty
-  expect('4j.11 Vaka Sahibi renderDisplay worded empty "Atanmadı"',
-    /title="Otomatik atanır">Atanmadı</.test(cd), true);
+  // 4j.11 — Vaka Sahibi artık creator gösterir (assignedPersonName değil)
+  expect('4j.11 Vaka Sahibi title="Vakayı açan kullanıcı"',
+    /title="Vakayı açan kullanıcı"/.test(cd), true);
 
   // 4j.12 — Eski "Atama & Eskalasyon" (Title Case) başlığı kalmadı
   expect('4j.12 eski "Atama & Eskalasyon" başlığı kalktı (sentence-case)',
