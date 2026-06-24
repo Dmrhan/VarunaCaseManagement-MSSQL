@@ -82,6 +82,22 @@ export const FIELD_LABELS = {
   bugGroup:        'BugGroup',
 };
 
+/**
+ * Fix 1 (Codex P2 pre-main) — Request-level allowlist.
+ *
+ * TFS REST 'fields' query param ile sadece istediğimiz alanları çekiyoruz
+ * ($expand=all yerine). Description / ReproSteps / History gibi
+ * serbest-metin gövdeler sunucu belleğine HİÇ ulaşmaz; allowlist guardrail
+ * server-side normalizeWorkItem'dan TFS request katmanına kadar derinleşti.
+ *
+ * 16 unique TFS reference adı (FIELD_MAP.values; null'lar elenir).
+ * URL'de virgülle ayrılır, encode'lanır.
+ */
+const FIELDS_QUERY_PARAM = (() => {
+  const refs = Array.from(new Set(Object.values(FIELD_MAP).filter(Boolean)));
+  return refs.map(encodeURIComponent).join(',');
+})();
+
 export class DevOpsConfigError extends Error {
   constructor(message, { code = 'devops_config_error', status = 400 } = {}) {
     super(message);
@@ -354,9 +370,13 @@ export async function getWorkItem(id) {
       { code: 'tfs_workitem_id_required' },
     );
   }
-  // $expand=all → custom alanları dahil tüm fields'i döner.
+  // Fix 1 (Codex P2 pre-main) — REQUEST-LEVEL ALLOWLIST.
+  // Eski: ?$expand=all (tüm alanlar; Description/ReproSteps sunucu belleğine
+  // gelir → log/heap sızıntı vektörü). Yeni: ?fields=<16 reference adı>.
+  // TFS REST 'fields' ve '$expand' birlikte gelmez; allowlist tek başına
+  // istenen alanları döndürür. Sırlar sunucuya HİÇ ulaşmaz.
   const result = await tfsRequest({
-    path: `wit/workitems/${encodeURIComponent(id)}?$expand=all`,
+    path: `wit/workitems/${encodeURIComponent(id)}?fields=${FIELDS_QUERY_PARAM}`,
   });
   if (!result.ok) return result;
   return {
@@ -390,8 +410,9 @@ export async function getWorkItems(ids) {
     );
   }
   const idsParam = ids.map((n) => encodeURIComponent(n)).join(',');
+  // Fix 1 (Codex P2 pre-main) — REQUEST-LEVEL ALLOWLIST (bkz. getWorkItem).
   const result = await tfsRequest({
-    path: `wit/workitems?ids=${idsParam}&$expand=all`,
+    path: `wit/workitems?ids=${idsParam}&fields=${FIELDS_QUERY_PARAM}`,
   });
   if (!result.ok) return result;
   const raw = result.data;
