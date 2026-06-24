@@ -52,9 +52,13 @@ export class SecretCipherError extends Error {
 function resolveKey() {
   const raw = process.env[KEY_ENV_NAME];
   if (!raw) {
+    // 503 + kullanıcı dostu mesaj (admin UI'da toast'ta görünür). Teknik
+    // detay (env adı + 32 byte + openssl) ops konfigürasyon dokümanında.
+    // Status 503: "Service Unavailable" — geçici durum, ops müdahalesi
+    // gerekir (generic 500 değil — sistem yöneticisi farkında olsun).
     throw new SecretCipherError(
-      `${KEY_ENV_NAME} env tanımlı değil. AES-256 için 32 byte (base64 veya hex) bir anahtar üretilmeli (ör: openssl rand -base64 32).`,
-      { code: 'devops_enc_key_missing', status: 500 },
+      'DevOps PAT şifreleme anahtarı (DEVOPS_PAT_ENC_KEY) sunucuda tanımlı değil. Sistem yöneticisiyle iletişime geçin.',
+      { code: 'devops_enc_key_missing', status: 503 },
     );
   }
   // Önce base64 dene

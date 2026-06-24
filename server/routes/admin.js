@@ -45,6 +45,21 @@ function asyncRoute(handler) {
           .status(err.status)
           .json({ error: err.code ?? 'admin', message: err.message });
       }
+      // Faz 2.1 followup — sistem hataları (örn. SecretCipherError
+      // 'devops_enc_key_missing' 503) status + code + message taşıyorsa
+      // generic 500'e DÜŞÜRME; net mesajı admin UI toast'ında göster.
+      // AdminError dışındaki tüm "yapılı" hatalar için duck-type kontrol.
+      if (
+        err &&
+        typeof err.status === 'number' &&
+        err.status >= 400 &&
+        err.status < 600 &&
+        typeof err.code === 'string'
+      ) {
+        return res
+          .status(err.status)
+          .json({ error: err.code, message: err.message });
+      }
       console.error('[admin]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
     }

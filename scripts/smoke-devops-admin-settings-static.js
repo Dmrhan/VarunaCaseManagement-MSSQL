@@ -53,6 +53,20 @@ expect('1.8 env key adı DEVOPS_PAT_ENC_KEY', /KEY_ENV_NAME\s*=\s*'DEVOPS_PAT_EN
 expect('1.9 export encrypt/decrypt fonksiyonları',
   /export function encrypt\(plain\)/.test(cipherCode)
     && /export function decrypt\(\{ ciphertext, iv, authTag \}\)/.test(cipherCode), true);
+// Faz 2.1 followup — anahtar yok hatası 503 + net mesaj (500 değil).
+expect('1.10 devops_enc_key_missing → status 503 (Service Unavailable)',
+  /devops_enc_key_missing'[^}]{0,200}status: 503/.test(cipherCode), true);
+expect('1.11 anahtar yok mesajı kullanıcı dostu (DEVOPS_PAT_ENC_KEY env ipucu + yönetici)',
+  /DevOps PAT şifreleme anahtarı.+DEVOPS_PAT_ENC_KEY.+Sistem yöneticisiyle iletişime geçin/.test(cipherCode), true);
+
+// Admin asyncRoute duck-type — sistem error'larını generic 500'e DÜŞÜRMEZ.
+console.log('\n── 1b) Admin asyncRoute duck-type system errors ───');
+const adminRoute = read('server/routes/admin.js');
+const adminRouteCode = strip(adminRoute);
+expect('1b.1 asyncRoute err.status+err.code duck-type kontrol',
+  /typeof err\.status === 'number'[\s\S]{0,200}err\.status >= 400[\s\S]{0,200}err\.status < 600[\s\S]{0,200}typeof err\.code === 'string'/.test(adminRouteCode), true);
+expect('1b.2 duck-type → res.status(err.status).json({ error, message })',
+  /res\s*\.status\(err\.status\)\s*\.json\(\{ error: err\.code, message: err\.message \}\)/.test(adminRouteCode), true);
 
 console.log('\n── 2) Prisma model + migration ────────────────────');
 const schema = read('prisma/schema.prisma');
