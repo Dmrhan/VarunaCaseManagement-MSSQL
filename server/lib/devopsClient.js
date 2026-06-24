@@ -196,6 +196,10 @@ async function getConfig({ companyId } = {}) {
   // DB'den gelen (varsa) + env fallback (boş alanları doldur).
   const baseUrl = dbConfig?.baseUrl || process.env.TFS_BASE_URL;
   const pat = dbConfig?.pat || process.env.TFS_PAT;
+  // Faz 2.1 follow-up — Basic auth username (örn. DOMAIN\user).
+  // On-prem TFS user+secret bekliyor. Cloud Azure DevOps username
+  // boşsa "" + PAT ile çalışır (backward-compat).
+  const username = dbConfig?.username || process.env.TFS_USERNAME || '';
   const apiVersion =
     dbConfig?.apiVersion || process.env.TFS_API_VERSION || DEFAULT_API_VERSION;
   const timeoutMs =
@@ -215,13 +219,24 @@ async function getConfig({ companyId } = {}) {
       { code: 'tfs_pat_missing', status: 500 },
     );
   }
-  return { baseUrl, pat, apiVersion, timeoutMs };
+  return { baseUrl, pat, username, apiVersion, timeoutMs };
 }
 
-function buildAuthHeader(pat) {
-  // PAT için Basic auth: empty username + PAT password.
-  // base64(':' + pat) — TFS standart.
-  const token = Buffer.from(`:${pat}`).toString('base64');
+/**
+ * Basic auth header — base64("${username}:${secret}").
+ *
+ * - username boş → ":pat" (cloud Azure DevOps PAT-only standart; backward
+ *   compat).
+ * - username dolu → "DOMAIN\user:secret" (on-prem TFS user+pat veya
+ *   user+parola; SECRET'in PAT mı parola mı olduğunu istemci bilmez —
+ *   user'a verilen secret ne ise o).
+ *
+ * NOT: username log'lanmaz. Header değeri inşa edilir ve doğrudan
+ * `Authorization` field'ına yazılır; hata mesajlarına/console.log'a
+ * username + secret hiçbir şekilde sızdırılmaz.
+ */
+function buildAuthHeader(username, secret) {
+  const token = Buffer.from(`${username ?? ''}:${secret}`).toString('base64');
   return { Authorization: `Basic ${token}` };
 }
 
@@ -265,7 +280,7 @@ async function tfsRequest({ path, method = 'GET', body, companyId }) {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
-    ...buildAuthHeader(config.pat),
+    ...buildAuthHeader(config.username, config.pat),
   };
 
   const controller = new AbortController();
@@ -488,12 +503,15 @@ export async function getWorkItems(ids, opts = {}) {
  */
 export async function diag(opts = {}) {
   try {
-    const { baseUrl, pat, apiVersion, timeoutMs } = await getConfig({
+    const { baseUrl, pat, username, apiVersion, timeoutMs } = await getConfig({
       companyId: opts.companyId,
     });
     return {
       ok: true,
       baseUrl,
+      // Username plain ama diag çıktısında varlığını boolean ile bildirelim
+      // (PAT/parola asla sızdırılmaz — username de log'a basılmasın).
+      usernameSet: Boolean(username && username.length > 0),
       patMasked: maskPat(pat),
       apiVersion,
       timeoutMs,

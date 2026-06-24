@@ -178,8 +178,8 @@ expect('7.1 PAT input WRITE-ONLY (default kapalı; editingPat toggle)',
     && /editingPat:\s*false,/.test(pageCode), true);
 expect('7.2 toPatch — pat yalnız editingPat && trim().length > 0 ise eklenir',
   /if \(d\.editingPat && d\.patInput\.trim\(\)\.length > 0\) \{\s*patch\.pat = d\.patInput\.trim\(\)/.test(pageCode), true);
-expect('7.3 "Değiştir" button (patIsSet ise) / "PAT gir" (yoksa)',
-  /setting\?\.patIsSet \? 'Değiştir' : 'PAT gir'/.test(pageCode), true);
+expect('7.3 "Değiştir" button (patIsSet ise) / "Secret gir" (yoksa)',
+  /setting\?\.patIsSet \? 'Değiştir' : 'Secret gir'/.test(pageCode), true);
 expect('7.4 PAT input type="password" autoComplete="new-password"',
   /type="password"[\s\S]{0,80}autoComplete="new-password"/.test(pageCode), true);
 expect('7.5 Bağlantı testi button + adminService.externalDevOpsSettings.test',
@@ -212,6 +212,62 @@ expect('10.1 AdminView union admin-external-devops içerir',
   /'admin-external-devops'/.test(layout), true);
 expect('10.2 NAV entry "DevOps / TFS Entegrasyonu" + GitBranch icon',
   /admin-external-devops[\s\S]{0,100}DevOps \/ TFS Entegrasyonu[\s\S]{0,100}GitBranch/.test(layout), true);
+
+console.log('\n── 11) Faz 2.1 follow-up — Basic auth username ─────');
+// Schema
+expect('11.1 ExternalDevOpsSetting.username NVarChar(256) nullable',
+  /model ExternalDevOpsSetting[\s\S]{0,2000}username\s+String\?\s+@db\.NVarChar\(256\)/.test(schema), true);
+expect('11.2 migration 00000000000010_external_devops_setting_username mevcut',
+  existsSync('prisma/migrations/00000000000010_external_devops_setting_username/migration.sql'), true);
+const usernameMigration = read('prisma/migrations/00000000000010_external_devops_setting_username/migration.sql');
+expect('11.3 migration ALTER TABLE ADD username NVARCHAR(256) NULL (additive)',
+  /ALTER TABLE \[dbo\]\.\[ExternalDevOpsSetting\]\s+ADD \[username\] NVARCHAR\(256\) NULL/.test(usernameMigration), true);
+
+// devopsClient
+expect('11.4 buildAuthHeader(username, secret) imzası',
+  /function buildAuthHeader\(username, secret\)/.test(clientCode), true);
+expect('11.5 buildAuthHeader base64("${username ?? \'\'}:${secret}")',
+  /Buffer\.from\(`\$\{username \?\? ''\}:\$\{secret\}`\)\.toString\('base64'\)/.test(clientCode), true);
+expect('11.6 buildAuthHeader call site config.username, config.pat',
+  /buildAuthHeader\(config\.username, config\.pat\)/.test(clientCode), true);
+expect('11.7 getConfig DB-first username + env TFS_USERNAME fallback',
+  /dbConfig\?\.username \|\| process\.env\.TFS_USERNAME \|\| ''/.test(clientCode), true);
+expect('11.8 getConfig return shape\'inde username var',
+  /return \{ baseUrl, pat, username, apiVersion, timeoutMs \}/.test(clientCode), true);
+expect('11.9 diag() username plain DÖKMEZ (usernameSet boolean)',
+  /usernameSet:\s*Boolean\(username/.test(clientCode), true);
+
+// Repository
+expect('11.10 SELECTABLE_PUBLIC username: true (plain GET\'te döner)',
+  /const SELECTABLE_PUBLIC = \{[\s\S]*?username: true/.test(repoCode), true);
+expect('11.11 resolveActiveConfig select username + return',
+  /select: \{[\s\S]{0,400}username: true[\s\S]{0,400}patCiphertext/.test(repoCode)
+    && /username: row\.username \?\? null/.test(repoCode), true);
+expect('11.12 upsert patch.username normalize (plain)',
+  /if \(patch\.username !== undefined\) data\.username = normalizeOptionalText\(patch\.username\)/.test(repoCode), true);
+expect('11.13 validatePatch username 256 char max',
+  /patch\.username\.length > 256/.test(repoCode), true);
+
+// .env.example
+expect('11.14 .env.example TFS_USERNAME placeholder',
+  /TFS_USERNAME=/.test(envEx), true);
+
+// adminService TS
+expect('11.15 ExternalDevOpsSetting interface username: string | null',
+  /export interface ExternalDevOpsSetting \{[\s\S]{0,1500}username:\s*string \| null/.test(svc), true);
+expect('11.16 ExternalDevOpsSettingInput username opsiyonel',
+  /export interface ExternalDevOpsSettingInput \{[\s\S]{0,500}username\?\:\s*string \| null/.test(svc), true);
+
+// AdminPage
+expect('11.17 AdminPage DraftState.username + toDraft mapping',
+  /username:\s*string/.test(pageCode)
+    && /username:\s*s\.username \?\? ''/.test(pageCode), true);
+expect('11.18 toPatch username trim ile null/plain gönderir (secret değil)',
+  /username: d\.username\.trim\(\) \? d\.username\.trim\(\) : null/.test(pageCode), true);
+expect('11.19 "Kullanıcı Adı" Field render (plain text input)',
+  /label="Kullanıcı Adı"/.test(pageCode), true);
+expect('11.20 PAT widget label "PAT veya Parola"',
+  /label="PAT veya Parola"/.test(pageCode), true);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

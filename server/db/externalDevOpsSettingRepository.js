@@ -39,6 +39,9 @@ const SELECTABLE_PUBLIC = {
   baseUrl: true,
   apiVersion: true,
   timeoutMs: true,
+  // Faz 2.1 follow-up — username SECRET DEĞİL (parola/PAT şifreli; username
+  // plain). GET response'unda dönebilir (UI alanını doldurabilsin).
+  username: true,
   patSetAt: true,
   createdByUserId: true,
   updatedByUserId: true,
@@ -58,6 +61,7 @@ function defaultShape(companyId) {
     baseUrl: null,
     apiVersion: '4.1',
     timeoutMs: 15000,
+    username: null,
     patIsSet: false,
     patSetAt: null,
     createdByUserId: null,
@@ -100,6 +104,14 @@ function validatePatch(patch) {
       throw new AdminError('PAT en az 8 karakter olmalı.', 400);
     }
   }
+  if (patch.username !== undefined && patch.username !== null) {
+    if (typeof patch.username !== 'string') {
+      throw new AdminError('username string olmalı.', 400);
+    }
+    if (patch.username.length > 256) {
+      throw new AdminError('username en fazla 256 karakter olabilir.', 400);
+    }
+  }
 }
 
 /**
@@ -114,6 +126,7 @@ function shapeForPublic(row, companyId) {
     baseUrl: row.baseUrl ?? null,
     apiVersion: row.apiVersion ?? null,
     timeoutMs: row.timeoutMs,
+    username: row.username ?? null,
     patIsSet: row.patSetAt !== null && row.patSetAt !== undefined,
     patSetAt: row.patSetAt ?? null,
     createdByUserId: row.createdByUserId ?? null,
@@ -161,6 +174,7 @@ export const externalDevOpsSettingRepo = {
         baseUrl: true,
         apiVersion: true,
         timeoutMs: true,
+        username: true,
         patCiphertext: true,
         patIv: true,
         patAuthTag: true,
@@ -185,6 +199,7 @@ export const externalDevOpsSettingRepo = {
       baseUrl: row.baseUrl ?? null,
       apiVersion: row.apiVersion ?? null,
       timeoutMs: row.timeoutMs,
+      username: row.username ?? null,
       pat,
     };
   },
@@ -225,6 +240,8 @@ export const externalDevOpsSettingRepo = {
     if (patch.baseUrl !== undefined) data.baseUrl = normalizeOptionalText(patch.baseUrl);
     if (patch.apiVersion !== undefined) data.apiVersion = normalizeOptionalText(patch.apiVersion);
     if (patch.timeoutMs !== undefined) data.timeoutMs = Number(patch.timeoutMs);
+    // Faz 2.1 follow-up — username plain saklanır (secret değil).
+    if (patch.username !== undefined) data.username = normalizeOptionalText(patch.username);
 
     // PAT encrypt: yalnız body'de varsa.
     if (typeof patch.pat === 'string' && patch.pat.trim().length > 0) {
