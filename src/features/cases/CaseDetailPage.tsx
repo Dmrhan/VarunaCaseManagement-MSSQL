@@ -71,6 +71,7 @@ import { NoteAvatar, NotesTab } from './components/CaseNotes';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
+import { DevOpsSection } from './components/DevOpsSection';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -730,13 +731,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                       toast({ type: 'info', message: 'İptal akışı status popover üzerinden çalıştırılır.' });
                     }}
                   />
-                  <MenuAction
-                    label="Jira'ya Aktar"
-                    onClick={() => {
-                      close();
-                      toast({ type: 'info', message: 'Jira entegrasyonu FAZ 2 kapsamında.' });
-                    }}
-                  />
+                  {/* PR-D3 — "Jira'ya Aktar" stub kaldırıldı (TBD-12).
+                      DevOps section bu ihtiyacı karşılıyor; ayrı bir Jira
+                      entegrasyonu planlanmıyor. */}
                   <MenuAction
                     label="Yazdır"
                     onClick={() => {
@@ -3033,6 +3030,14 @@ function DetailTab({
   onCommitDraft: (field: keyof Case, value: unknown) => void;
   onTransitionApplied: (updated: Case) => void;
 }) {
+  // PR-D3 — case-write yetkili rol set'i. DevOps section'da Bağla/Kaldır
+  // gating'i için kullanılır. Backend'de PATCH /:id ile aynı kapı
+  // (allowedCompanyIds scope; explicit requireRole yok), UI sadece
+  // görünürlüğü düşürür — sızıntı yok.
+  const { user } = useAuth();
+  const canWriteCase =
+    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
   const subCategoryOptions = categories.find((c) => c.category === activeCategory)?.subCategories ?? [];
@@ -3443,6 +3448,11 @@ function DetailTab({
           ]}
         />
       </Section>
+
+      {/* PR-D3 — Azure DevOps İş Öğeleri.
+          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
+          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (

@@ -159,6 +159,61 @@ expect('4.2 raw.fields spread yok (repo)',
 expect('4.3 Description/ReproSteps okuma yok',
   /System\.Description|ReproSteps/.test(repoCode), false);
 
+console.log('\n── 5) PR-D3 — Service + UI section ───────────────────');
+const svc = read('src/services/devopsService.ts');
+expect('5.1 devopsService.getItems',
+  /async getItems\(caseId: string\): Promise<DevopsItemsResponse \| undefined>/.test(svc), true);
+expect('5.2 devopsService.link(caseId, workItemRef)',
+  /async link\(caseId: string, workItemRef: string \| number\)/.test(svc), true);
+expect('5.3 devopsService.unlink(caseId, workItemId)',
+  /async unlink\(caseId: string, workItemId: number\)/.test(svc), true);
+expect('5.4 devopsService BFF endpoint URLs (devops-items / devops-link)',
+  /devops-items/.test(svc) && /devops-link/.test(svc), true);
+expect('5.5 devopsService TFS\'e doğrudan çağrı YOK (sadece /api/cases/...)',
+  /unitfs|TFS_BASE_URL|tfs\.\w+/.test(svc), false);
+
+const section = read('src/features/cases/components/DevOpsSection.tsx');
+const sectionCode = strip(section);
+expect('5.6 DevOpsSection bileşeni export',
+  /export function DevOpsSection\(\{ caseId, canWrite \}: DevOpsSectionProps\)/.test(sectionCode), true);
+expect('5.7 FIELD_TR_LABELS 13 alan (id/title/state/url üst başlıkta)',
+  /const FIELD_TR_LABELS: Array<\{ key: keyof DevopsItem; label: string \}>/.test(sectionCode), true);
+const labelCount = (sectionCode.match(/key: '\w+', label: '/g) ?? []).length;
+expect('5.8 FIELD_TR_LABELS toplam 13 entry',
+  labelCount === 13, true, `bulunan=${labelCount}`);
+expect('5.9 devopsService.getItems mount\'ta çağrılır',
+  /devopsService\.getItems\(caseId\)/.test(sectionCode), true);
+expect('5.10 Bağla modal — link çağrısı',
+  /devopsService\.link\(caseId, ref\)/.test(sectionCode), true);
+expect('5.11 Kaldır — unlink çağrısı',
+  /devopsService\.unlink\(caseId, id\)/.test(sectionCode), true);
+expect('5.12 canWrite gating (Bağla/Kaldır gizli read-only rolde)',
+  /\{canWrite && items\.length > 0/.test(sectionCode) && /canWrite && \(\s*<Button/.test(sectionCode), true);
+expect('5.13 Stale rozet (TFS down — Sync hatası)',
+  /Sync hatası/.test(sectionCode), true);
+expect('5.14 item\._stale → opacity-60 (sönük)',
+  /item\._stale \? 'opacity-60'/.test(sectionCode), true);
+expect('5.15 "DevOps\'ta aç" external link (target=_blank)',
+  /target="_blank"/.test(sectionCode) && /DevOps'ta aç/.test(sectionCode), true);
+expect('5.16 PR-D3 SERBESTMETİN sızıntı yok (Description/ReproSteps okuma yok)',
+  /Description|ReproSteps/.test(sectionCode), false);
+
+const detail = read('src/features/cases/CaseDetailPage.tsx');
+const detailCode = strip(detail);
+expect('5.17 CaseDetailPage DevOpsSection import',
+  /import \{ DevOpsSection \} from '\.\/components\/DevOpsSection'/.test(detailCode), true);
+expect('5.18 DevOpsSection DetailTab içinde render (Atama sonrası)',
+  /<DevOpsSection caseId=\{item\.id\} canWrite=\{canWriteCase\}\s*\/>/.test(detailCode), true);
+expect('5.19 canWriteCase = Agent+ rolleri',
+  /canWriteCase\s*=[\s\S]{0,200}'Agent',\s*'Backoffice',\s*'CSM',\s*'Supervisor',\s*'Admin',\s*'SystemAdmin'/.test(detailCode), true);
+
+console.log('\n── 6) Jira stub kaldırıldı (TBD-12) ──────────────────');
+// MenuAction label="Jira'ya Aktar" silindi — kebab menüde Jira yok.
+expect('6.1 "Jira\'ya Aktar" MenuAction kaldırıldı',
+  /label="Jira'ya Aktar"/.test(detail), false);
+expect('6.2 "Jira entegrasyonu FAZ 2" toast mesajı kalmadı',
+  /Jira entegrasyonu FAZ 2/.test(detail), false);
+
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
