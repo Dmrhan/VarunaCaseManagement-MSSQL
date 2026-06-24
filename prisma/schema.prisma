@@ -313,6 +313,11 @@ model ExternalDevOpsSetting {
   baseUrl          String?   @db.NVarChar(Max)
   apiVersion       String?   @db.NVarChar(50)
   timeoutMs        Int       @default(15000)
+  /// Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\user").
+  /// On-prem TFS user+secret bekliyor; cloud Azure DevOps yalnız PAT
+  /// kabul ettiğinden username nullable. Username SECRET DEĞİL, plain
+  /// saklanır; PAT/parola hâlâ AES-256-GCM şifreli kalır.
+  username         String?   @db.NVarChar(256)
   /// AES-256-GCM ciphertext (base64). null → PAT henüz set edilmedi.
   patCiphertext    String?   @db.NVarChar(Max)
   /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.

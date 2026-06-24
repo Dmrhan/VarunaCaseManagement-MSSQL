@@ -1250,9 +1250,15 @@ export interface ExternalDevOpsSetting {
   baseUrl: string | null;
   apiVersion: string | null;
   timeoutMs: number;
-  /** PAT şifreli olarak DB'de var mı? */
+  /**
+   * Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\\user").
+   * SECRET DEĞİL; plain GET'te döner. On-prem TFS user+secret bekliyor;
+   * cloud Azure DevOps boş bırakılabilir (PAT-only).
+   */
+  username: string | null;
+  /** PAT/parola şifreli olarak DB'de var mı? */
   patIsSet: boolean;
-  /** PAT'in en son set edildiği zaman (ISO). */
+  /** PAT/parola'nın en son set edildiği zaman (ISO). */
   patSetAt: string | null;
   createdByUserId: string | null;
   updatedByUserId: string | null;
@@ -1265,9 +1271,11 @@ export interface ExternalDevOpsSettingInput {
   baseUrl?: string | null;
   apiVersion?: string | null;
   timeoutMs?: number;
+  /** Basic auth kullanıcı adı (plain saklanır; örn. "DOMAIN\\user"). */
+  username?: string | null;
   /**
-   * Yalnız yeni PAT set/rotate ederken gönderilir. Undefined → mevcut PAT'a
-   * dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
+   * Yalnız yeni PAT/parola set/rotate ederken gönderilir. Undefined →
+   * mevcut secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
    */
   pat?: string;
 }
