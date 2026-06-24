@@ -964,6 +964,23 @@ function notSnoozedClause() {
   return { OR: [{ snoozeUntil: null }, { snoozeUntil: { lte: new Date() } }] };
 }
 
+// Vaka Etiket Doğrulama Ekranı — alan bazlı (per-field) model. Her giriş
+// CaseTaggingReview'daki `${prefix}${tag}{Original,Verdict,Corrected}*`
+// kolon ailesini, Case.customFields.smartTicket(.closure) içindeki kaynak
+// alanı ve TaxonomyDef.taxonomyType değerini birbirine bağlar — tek yerden
+// değişsin diye repository + route + (frontend'de ayrıca) tekrarlanır.
+const TAGGING_FIELD_DEFS = [
+  { prefix: 'opening', tag: 'Platform', customField: 'platform', taxonomyType: 'platform' },
+  { prefix: 'opening', tag: 'BusinessProcess', customField: 'businessProcess', taxonomyType: 'businessProcess' },
+  { prefix: 'opening', tag: 'OperationType', customField: 'operationType', taxonomyType: 'operationType' },
+  { prefix: 'opening', tag: 'AffectedObject', customField: 'affectedObject', taxonomyType: 'affectedObject' },
+  { prefix: 'opening', tag: 'Impact', customField: 'impact', taxonomyType: 'impact' },
+  { prefix: 'closing', tag: 'RootCauseGroup', customField: 'rootCauseGroup', taxonomyType: 'rootCauseGroup' },
+  { prefix: 'closing', tag: 'RootCauseDetail', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' },
+  { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
+  { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+];
+
 export const caseRepository = {
   /**
    * Madde 2 — Smart Ticket akışında KB analyze cevabından extract edilen
@@ -3852,6 +3869,13 @@ export const caseRepository = {
 
   /**
    * Vaka Etiket Doğrulama Ekranı — tek vakanın review kaydını upsert eder.
+   * Alan bazlı model: 9 etiketin her biri kendi Verdict + CorrectedCode'unu
+   * taşır (bkz. TAGGING_FIELD_DEFS). Original{Code,Label} snapshot alanları
+   * SADECE create'te Case.customFields'tan kopyalanır, update'te asla
+   * dokunulmaz — bilgi bankası veri seti vaka arşivlenip silinse bile
+   * bağımsız kalmalı. correctedCode her zaman kendi taxonomyType'ına karşı
+   * tek bir batched sorguda doğrulanır; correctedLabel client'tan asla
+   * okunmaz, TaxonomyDef'ten server-side resolve edilir.
    * reviewerId/reviewerName/reviewedAt route layer'da req.user'dan stamplenir
    * ve buraya actor üzerinden geçirilir — client body'den asla okunmaz.
    * caseId @unique → son yazan kazanır, concurrency token yok (QAScoreLog
@@ -3862,30 +3886,77 @@ export const caseRepository = {
     if (!companyId) return null;
 
     const VALID_VERDICTS = ['Dogru', 'Yanlis', 'Belirsiz'];
-    if (input.openingVerdict !== undefined && input.openingVerdict !== null) {
-      if (!VALID_VERDICTS.includes(input.openingVerdict)) {
-        return { error: 'invalid_input', message: `Geçersiz openingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
-      }
-    }
-    if (input.closingVerdict !== undefined && input.closingVerdict !== null) {
-      if (!VALID_VERDICTS.includes(input.closingVerdict)) {
-        return { error: 'invalid_input', message: `Geçersiz closingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const v = input[verdictKey];
+      if (v !== undefined && v !== null && !VALID_VERDICTS.includes(v)) {
+        return { error: 'invalid_input', message: `Geçersiz ${verdictKey}. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
       }
     }
 
+    // correctedCode → kendi taxonomyType'ına karşı tek batched sorgu.
+    const correctedEntries = TAGGING_FIELD_DEFS
+      .map((def) => ({ def, code: input[`${def.prefix}${def.tag}CorrectedCode`] }))
+      .filter((e) => e.code !== undefined && e.code !== null && e.code !== '');
+
+    if (correctedEntries.length) {
+      const rows = await prisma.taxonomyDef.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          OR: correctedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
+        },
+        select: { taxonomyType: true, code: true, label: true },
+      });
+      const found = new Map(rows.map((r) => [`${r.taxonomyType}::${r.code}`, r.label]));
+      for (const e of correctedEntries) {
+        const label = found.get(`${e.def.taxonomyType}::${e.code}`);
+        if (!label) {
+          return {
+            error: 'invalid_input',
+            message: `Geçersiz doğru etiket kodu: ${e.def.prefix}${e.def.tag} = "${e.code}" (taxonomyType: ${e.def.taxonomyType}).`,
+          };
+        }
+        e.label = label;
+      }
+    }
+    const correctedByDef = new Map(correctedEntries.map((e) => [e.def, e]));
+
     const data = {
-      openingVerdict: input.openingVerdict ?? null,
-      closingVerdict: input.closingVerdict ?? null,
       note: typeof input.note === 'string' ? input.note.trim() || null : null,
       reviewerId: actor.userId,
       reviewerName: actor.displayName,
       reviewedAt: new Date(),
     };
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const codeKey = `${def.prefix}${def.tag}CorrectedCode`;
+      const labelKey = `${def.prefix}${def.tag}CorrectedLabel`;
+      if (verdictKey in input) data[verdictKey] = input[verdictKey] ?? null;
+      if (codeKey in input) {
+        const entry = correctedByDef.get(def);
+        data[codeKey] = entry ? entry.code : null;
+        data[labelKey] = entry ? entry.label : null;
+      }
+    }
 
-    return prisma.caseTaggingReview.upsert({
-      where: { caseId: id },
-      create: { caseId: id, companyId, ...data },
-      update: data,
+    const existing = await prisma.caseTaggingReview.findUnique({ where: { caseId: id } });
+    if (existing) {
+      return prisma.caseTaggingReview.update({ where: { caseId: id }, data });
+    }
+
+    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true } });
+    const smartTicket = caseRow?.customFields?.smartTicket ?? {};
+    const closure = smartTicket?.closure ?? {};
+    const originalData = {};
+    for (const def of TAGGING_FIELD_DEFS) {
+      const src = def.prefix === 'opening' ? smartTicket : closure;
+      originalData[`${def.prefix}${def.tag}OriginalCode`] = src?.[def.customField] ?? null;
+      originalData[`${def.prefix}${def.tag}OriginalLabel`] = src?.[`${def.customField}Label`] ?? null;
+    }
+
+    return prisma.caseTaggingReview.create({
+      data: { caseId: id, companyId, ...originalData, ...data },
     });
   },
 };
