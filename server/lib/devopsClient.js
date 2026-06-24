@@ -91,6 +91,53 @@ export class DevOpsConfigError extends Error {
 }
 
 /**
+ * Ham id veya TFS web URL'inden numeric work item id çıkar.
+ *
+ * Kabul edilen formatlar:
+ *   - "324813"                                              → 324813
+ *   - 324813 (number)                                       → 324813
+ *   - ".../_workitems/edit/324813"                           → 324813
+ *   - ".../_workitems/edit/324813?..."                       → 324813
+ *   - ".../_workitems?id=324813"                             → 324813
+ *   - ".../workItems/324813"                                 → 324813
+ *   - ".../wit/workitems/324813"                             → 324813
+ *
+ * Negatif id, 0, NaN, string-trimmed-empty → null.
+ *
+ * Not: PR-D2. UI input'unda hem id hem URL yapıştırma desteklenir.
+ */
+export function parseWorkItemId(input) {
+  if (input === null || input === undefined) return null;
+  if (typeof input === 'number') {
+    return Number.isInteger(input) && input > 0 ? input : null;
+  }
+  const s = String(input).trim();
+  if (!s) return null;
+
+  // Düz sayı.
+  if (/^\d+$/.test(s)) {
+    const n = Number.parseInt(s, 10);
+    return n > 0 ? n : null;
+  }
+
+  // URL pattern'leri — id query string'de veya path'in sonunda.
+  const patterns = [
+    /[?&]id=(\d+)\b/i,                       // ?id=324813
+    /\/_workitems\/edit\/(\d+)\b/i,          // /_workitems/edit/324813
+    /\/workitems\/(\d+)\b/i,                 // /workitems/324813 veya /workItems/324813
+    /\/wit\/workitems\/(\d+)\b/i,            // /wit/workitems/324813 (API)
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m) {
+      const n = Number.parseInt(m[1], 10);
+      if (n > 0) return n;
+    }
+  }
+  return null;
+}
+
+/**
  * PAT'i log mesajlarında maskele. İlk 4 + son 2 char + '***'.
  * Hata mesajlarında bile PAT raw çıkmasın.
  */
@@ -386,6 +433,7 @@ export const devopsClient = {
   getWorkItems,
   diag,
   normalizeWorkItem,
+  parseWorkItemId,
   FIELD_MAP,
   FIELD_LABELS,
 };
