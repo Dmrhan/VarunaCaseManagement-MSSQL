@@ -3427,14 +3427,14 @@ function DetailTab({
               {primaryClassificationItems.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                  <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
               {filledSecondary.map((i) => (
                 <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                   <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                  <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
                   <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                 </div>
               ))}
@@ -3444,7 +3444,7 @@ function DetailTab({
                 <button
                   type="button"
                   onClick={() => setShowOtherClassification((s) => !s)}
-                  className="flex w-full items-center gap-1 px-1.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700"
+                  className="flex w-full items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-700"
                 >
                   <ChevronRight
                     size={12}
@@ -3458,7 +3458,7 @@ function DetailTab({
                     {emptySecondary.map((i) => (
                       <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
                         <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
-                        <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                        <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
                         <div className="min-w-0 flex-1 text-sm">{i.node}</div>
                       </div>
                     ))}
