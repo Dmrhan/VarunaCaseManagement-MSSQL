@@ -252,17 +252,25 @@ expect('7.12 listDevopsLive try/catch sarmalı (500 yok, stale fallback)',
 expect('7.13 listDevopsLive herhangi chunk fail → stale fallback (firstFail check)',
   /const firstFail = results\.find\(\(r\) => !r\.ok\)/.test(repoSrcCode), true);
 
-// Codex P2 (yeni) — DevOpsSection caseId reset + stale response guard
+// Codex P2 fix — DevOpsSection monotonic request token + caseId reset.
+// Eski `requestedCaseIdRef` self-reset bug'ı (handleLink/Unlink sonrası
+// eski closure'ın `void load()` çağrısı kendi ref'ini güncelliyordu) için
+// monotonic counter pattern'ine geçildi. Stale closure'lar token okur,
+// artıramaz (ref'i kendine açamaz).
 const sectionSrc = read('src/features/cases/components/DevOpsSection.tsx');
 const sectionSrcCode = strip(sectionSrc);
-expect('7.14 DevOpsSection requestedCaseIdRef (stale response guard)',
-  /requestedCaseIdRef = useRef<string>\(caseId\)/.test(sectionSrcCode), true);
-expect('7.15 load() response stale-guard (requestedCaseIdRef !== caseId → return)',
-  /if \(requestedCaseIdRef\.current !== caseId\) return/.test(sectionSrcCode), true);
-expect('7.16 caseId değişince setData(null) — eski case item gizleme',
-  /useEffect\(\(\) => \{\s*setData\(null\)[\s\S]{0,400}void load\(\);\s*\}, \[caseId, load\]\)/.test(sectionSrcCode), true);
+expect('7.14 DevOpsSection requestTokenRef monotonic counter',
+  /requestTokenRef = useRef\(0\)/.test(sectionSrcCode), true);
+expect('7.15 load() monotonic token guard (++ + check)',
+  /const myToken = \+\+requestTokenRef\.current/.test(sectionSrcCode)
+    && /if \(requestTokenRef\.current !== myToken\) return/.test(sectionSrcCode), true);
+expect('7.16 caseId değişince token++ + setData(null) — eski in-flight invalidate',
+  /useEffect\(\(\) => \{\s*requestTokenRef\.current \+= 1;\s*setData\(null\)[\s\S]{0,400}void load\(\);\s*\}, \[caseId, load\]\)/.test(sectionSrcCode), true);
 expect('7.17 caseId değişince modal/linkInput/unlinkingId reset',
   /setLinkModalOpen\(false\);\s*setLinkInput\(''\);\s*setUnlinkingId\(null\);/.test(sectionSrcCode), true);
+// Codex P2 fix kanıtı — eski requestedCaseIdRef pattern'i KALMADI
+expect('7.18 eski requestedCaseIdRef kullanımı KALDIRILDI (self-reset bug)',
+  /requestedCaseIdRef/.test(sectionSrcCode), false);
 
 console.log('\n────────────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

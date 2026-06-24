@@ -108,27 +108,39 @@ export function DevOpsSection({ caseId, canWrite }: DevOpsSectionProps) {
   const [linking, setLinking] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
 
-  // Codex P2 (pre-main) — caseId değişince state'i SIFIRLAYIP yeni çekiş
-  // sonrasına stale response guard. Aksi halde önceki vakanın item'ları
-  // yeni vakanın detayında görünür ve "Aç"/"Kaldır" yanlış case'e gider.
-  // requestedCaseIdRef her yeni load'da güncellenir; cevap dönerken setData
-  // yalnız aktif caseId ile eşleşirse uygulanır.
-  const requestedCaseIdRef = useRef<string>(caseId);
+  // Codex P2 fix — monotonic request token + caseId reset.
+  //
+  // Önceki PR'da requestedCaseIdRef yaklaşımı vardı (cevap dönüşünde caseId
+  // eşleşmesi kontrolü). Bu eski case'in eski load() closure'undan caseId
+  // === A iken handleLink/handleUnlink sonrası `void load()` çağrılırsa
+  // self-resetting'e açıktı (eski load REF'i kendisi tekrar A'ya set
+  // ediyordu → guard kendi kendine açılıyordu).
+  //
+  // Çözüm: monotonic counter. Her load() başında ++; response dönüşünde
+  // myToken !== ref ise discard. Stale closure'lar token'ı artıramaz, sadece
+  // okur — kendine açamaz.
+  //
+  // useEffect(caseId) ANINDA state reset (eski case items gizle) +
+  // ref'i ++'la → tüm in-flight handler'ların token'ı geçersiz.
+  const requestTokenRef = useRef(0);
 
   const load = useCallback(async () => {
-    requestedCaseIdRef.current = caseId;
+    const myToken = ++requestTokenRef.current;
     setLoading(true);
     const res = await devopsService.getItems(caseId);
-    // Yarış (race) korumas: bu cevap güncel caseId'ye mi ait?
-    if (requestedCaseIdRef.current !== caseId) return;
+    // Yarış guard: bu cevap en güncel istek mi?
+    if (requestTokenRef.current !== myToken) return;
     setLoading(false);
     if (res) setData(res);
   }, [caseId]);
 
-  // caseId değişince eski case'in item'larını gizle ANINDA (yeni load
-  // tamamlanmasını bekleme). Aksi halde geçiş window'unda eski case'in
-  // ID'leriyle action tetiklenebilir.
+  // caseId değişince eski case'in item'larını gizle ANINDA + tüm in-flight
+  // handler'ların token'ını geçersiz kıl (eski load closure'ı dahil — yeni
+  // load() içindeki ++ zaten artırır, ama burada da defansif olarak ++
+  // yapıyoruz ki bekleyen handleLink/handleUnlink'in `void load()` çağrısı
+  // yenilenirken state'i toparlasın).
   useEffect(() => {
+    requestTokenRef.current += 1;
     setData(null);
     setLinkModalOpen(false);
     setLinkInput('');
