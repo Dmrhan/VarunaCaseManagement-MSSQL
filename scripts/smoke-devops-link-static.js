@@ -116,12 +116,12 @@ expect('2.10 CaseActivity DevopsUnlinked',
 // Idempotent dedup: linkDevops mevcut id varsa idempotent
 expect('2.11 linkDevops dedup (existingArr.some id check)',
   /existingArr\.some\(\(entry\) => entry\?\.id === workItemId\)/.test(repoCode), true);
-// devopsClient.getWorkItem doğrulama
-expect('2.12 linkDevops devopsClient.getWorkItem doğrulama',
-  /devopsClient\.getWorkItem\(workItemId\)/.test(repoCode), true);
-// Batch live için getWorkItems (Fix 3 sonrası chunk içinde — devopsClient.getWorkItems(c))
-expect('2.13 listDevopsLive devopsClient.getWorkItems batch (chunk)',
-  /devopsClient\.getWorkItems\(c\)/.test(repoCode), true);
+// devopsClient.getWorkItem doğrulama (Faz 2.1 — companyId opts ile)
+expect('2.12 linkDevops devopsClient.getWorkItem doğrulama (companyId)',
+  /devopsClient\.getWorkItem\(workItemId, \{ companyId \}\)/.test(repoCode), true);
+// Batch live için getWorkItems (Fix 3 chunk + Faz 2.1 companyId)
+expect('2.13 listDevopsLive devopsClient.getWorkItems batch (chunk + companyId)',
+  /devopsClient\.getWorkItems\(c, \{ companyId \}\)/.test(repoCode), true);
 // Fallback stale işareti
 expect('2.14 listDevopsLive TFS down → stale: true + snapshot fallback',
   /items:\s*stored\.map\(\(entry\) => \(\{ \.\.\.entry, _stale:\s*true \}\)\)[\s\S]{0,400}stale:\s*true/.test(repoCode), true);
@@ -245,10 +245,10 @@ expect('7.9 link/unlink eski naïve $transaction read-modify-write KALDIRILDI',
 // Fix 3 — listDevopsLive chunk ≤100 + try/catch fallback
 expect('7.10 DEVOPS_LIVE_CHUNK = 100',
   /DEVOPS_LIVE_CHUNK = 100/.test(repoSrcCode), true);
-expect('7.11 listDevopsLive Promise.all chunks',
-  /Promise\.all\(chunks\.map\(\(c\) => devopsClient\.getWorkItems\(c\)\)\)/.test(repoSrcCode), true);
+expect('7.11 listDevopsLive Promise.all chunks (Faz 2.1: companyId opts)',
+  /Promise\.all\(\s*chunks\.map\(\(c\) => devopsClient\.getWorkItems\(c, \{ companyId \}\)\)/.test(repoSrcCode), true);
 expect('7.12 listDevopsLive try/catch sarmalı (500 yok, stale fallback)',
-  /try \{[\s\S]{0,1500}Promise\.all\(chunks[\s\S]{0,800}\} catch \(err\) \{[\s\S]{0,400}devops_live_unexpected_error/.test(repoSrcCode), true);
+  /try \{[\s\S]{0,1500}Promise\.all\([\s\S]{0,200}chunks[\s\S]{0,800}\} catch \(err\) \{[\s\S]{0,400}devops_live_unexpected_error/.test(repoSrcCode), true);
 expect('7.13 listDevopsLive herhangi chunk fail → stale fallback (firstFail check)',
   /const firstFail = results\.find\(\(r\) => !r\.ok\)/.test(repoSrcCode), true);
 

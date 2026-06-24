@@ -1973,11 +1973,14 @@ export const caseRepository = {
       return shape(c);
     }
 
-    const tfs = await devopsClient.getWorkItem(workItemId);
+    // Faz 2.1 — per-tenant config (DB-first, env fallback). companyId
+    // assertCaseInScope tarafından döndürüldü.
+    const tfs = await devopsClient.getWorkItem(workItemId, { companyId });
     if (!tfs.ok) {
       const status = tfs.error.code === 'tfs_not_found' ? 404
         : tfs.error.code === 'tfs_auth_error' ? 502
-          : 502;
+          : tfs.error.code === 'tfs_integration_disabled' ? 503
+            : tfs.error.status ?? 502;
       throw new CaseValidationError(
         tfs.error.message,
         { status, code: tfs.error.code },
@@ -2134,7 +2137,10 @@ export const caseRepository = {
       for (let i = 0; i < ids.length; i += DEVOPS_LIVE_CHUNK) {
         chunks.push(ids.slice(i, i + DEVOPS_LIVE_CHUNK));
       }
-      const results = await Promise.all(chunks.map((c) => devopsClient.getWorkItems(c)));
+      // Faz 2.1 — per-tenant config (DB-first, env fallback).
+      const results = await Promise.all(
+        chunks.map((c) => devopsClient.getWorkItems(c, { companyId })),
+      );
       const firstFail = results.find((r) => !r.ok);
       if (firstFail) {
         stale = true;

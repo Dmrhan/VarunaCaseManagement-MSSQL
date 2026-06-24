@@ -163,22 +163,56 @@ export function maskPat(pat) {
   return `${pat.slice(0, 4)}***${pat.slice(-2)}`;
 }
 
-function getConfig() {
-  const baseUrl = process.env.TFS_BASE_URL;
-  const pat = process.env.TFS_PAT;
-  const apiVersion = process.env.TFS_API_VERSION || DEFAULT_API_VERSION;
-  const timeoutMs = Number.parseInt(process.env.TFS_TIMEOUT_MS, 10) || DEFAULT_TIMEOUT_MS;
+/**
+ * Config resolver — Faz 2.1 DB-first, env fallback.
+ *
+ * Karar matrisi (Q2 kuralı, plan onaylı):
+ *   - DB satır YOK (`resolveActiveConfig` → null) → process.env.TFS_*
+ *     fallback (MVP backward-compat: dev tek-tenant senaryo).
+ *   - DB satır var + enabled=true → DB config (PAT decrypt edilmiş).
+ *     baseUrl/apiVersion boş ise env değeriyle TAMAMLA (admin sadece PAT
+ *     yenilemek için satır oluşturmuş olabilir).
+ *   - DB satır var + enabled=false → throw `tfs_integration_disabled`
+ *     (503). env'e DÜŞME — disable gerçekten disable etsin.
+ *
+ * companyId opsiyonel — yoksa direkt env (admin/diag/test path'leri).
+ *
+ * Lazy import: `externalDevOpsSettingRepository` boot crash önlemek için
+ * dinamik import edilir (server/db/client devopsClient boot anında
+ * gerekmez).
+ */
+async function getConfig({ companyId } = {}) {
+  let dbConfig = null;
+  if (companyId) {
+    const repo = (await import('../db/externalDevOpsSettingRepository.js')).externalDevOpsSettingRepo;
+    dbConfig = await repo.resolveActiveConfig(companyId);
+    if (dbConfig && dbConfig.enabled === false) {
+      throw new DevOpsConfigError(
+        'DevOps entegrasyonu bu şirket için kapalı (admin tarafından devre dışı).',
+        { code: 'tfs_integration_disabled', status: 503 },
+      );
+    }
+  }
+  // DB'den gelen (varsa) + env fallback (boş alanları doldur).
+  const baseUrl = dbConfig?.baseUrl || process.env.TFS_BASE_URL;
+  const pat = dbConfig?.pat || process.env.TFS_PAT;
+  const apiVersion =
+    dbConfig?.apiVersion || process.env.TFS_API_VERSION || DEFAULT_API_VERSION;
+  const timeoutMs =
+    dbConfig?.timeoutMs ||
+    Number.parseInt(process.env.TFS_TIMEOUT_MS, 10) ||
+    DEFAULT_TIMEOUT_MS;
 
   if (!baseUrl) {
     throw new DevOpsConfigError(
-      'TFS_BASE_URL .env içinde tanımlı değil.',
-      { code: 'tfs_base_url_missing' },
+      'TFS baseUrl tanımlı değil (DB ayarı veya TFS_BASE_URL gerekli).',
+      { code: 'tfs_base_url_missing', status: 500 },
     );
   }
   if (!pat) {
     throw new DevOpsConfigError(
-      'TFS_PAT .env içinde tanımlı değil (Basic auth için PAT zorunlu).',
-      { code: 'tfs_pat_missing' },
+      'TFS PAT tanımlı değil (Admin UI veya TFS_PAT gerekli).',
+      { code: 'tfs_pat_missing', status: 500 },
     );
   }
   return { baseUrl, pat, apiVersion, timeoutMs };
@@ -205,9 +239,28 @@ function withApiVersion(url, apiVersion) {
 /**
  * Düşük seviye HTTP proxy. Wrapped response döner.
  * Hata mesajlarında PAT geçmez.
+ *
+ * Faz 2.1: opts.companyId → per-tenant DB config (env fallback).
  */
-async function tfsRequest({ path, method = 'GET', body }) {
-  const config = getConfig();
+async function tfsRequest({ path, method = 'GET', body, companyId }) {
+  let config;
+  try {
+    config = await getConfig({ companyId });
+  } catch (err) {
+    // Config hatası (disabled / missing baseUrl/pat / crypto fail) →
+    // wrapped ok:false. Throw etme — caller listDevopsLive try/catch
+    // ile snapshot fallback'a düşer.
+    return {
+      ok: false,
+      rawSource: RAW_SOURCE,
+      error: {
+        code: err?.code ?? 'tfs_config_error',
+        message: err?.message ?? 'TFS yapılandırma hatası.',
+        status: err?.status ?? null,
+      },
+      meta: { proxiedAt: new Date().toISOString(), latencyMs: 0, apiVersion: null },
+    };
+  }
   const url = withApiVersion(joinUrl(config.baseUrl, path), config.apiVersion);
   const headers = {
     'Content-Type': 'application/json',
@@ -363,7 +416,7 @@ export function normalizeWorkItem(raw) {
  *  - data.raw: TFS'ten dönen ham object (fields nesnesi tam dökümü için)
  *  - data.normalized: 16 alanlık gösterim şemasına eşlenmiş hâli
  */
-export async function getWorkItem(id) {
+export async function getWorkItem(id, opts = {}) {
   if (!id || (typeof id !== 'number' && typeof id !== 'string')) {
     throw new DevOpsConfigError(
       'workItemId gerekli (number veya numeric string).',
@@ -371,12 +424,10 @@ export async function getWorkItem(id) {
     );
   }
   // Fix 1 (Codex P2 pre-main) — REQUEST-LEVEL ALLOWLIST.
-  // Eski: ?$expand=all (tüm alanlar; Description/ReproSteps sunucu belleğine
-  // gelir → log/heap sızıntı vektörü). Yeni: ?fields=<16 reference adı>.
-  // TFS REST 'fields' ve '$expand' birlikte gelmez; allowlist tek başına
-  // istenen alanları döndürür. Sırlar sunucuya HİÇ ulaşmaz.
+  // Faz 2.1 — opts.companyId per-tenant config resolution.
   const result = await tfsRequest({
     path: `wit/workitems/${encodeURIComponent(id)}?fields=${FIELDS_QUERY_PARAM}`,
+    companyId: opts.companyId,
   });
   if (!result.ok) return result;
   return {
@@ -396,7 +447,7 @@ export async function getWorkItem(id) {
  *  - Wrapped response: data.raw = { count, value: [...] }, data.normalized = [...]
  *  - D3 çoklu link UI'sında kullanılacak.
  */
-export async function getWorkItems(ids) {
+export async function getWorkItems(ids, opts = {}) {
   if (!Array.isArray(ids) || ids.length === 0) {
     throw new DevOpsConfigError(
       'ids array gerekli (boş olamaz).',
@@ -411,8 +462,10 @@ export async function getWorkItems(ids) {
   }
   const idsParam = ids.map((n) => encodeURIComponent(n)).join(',');
   // Fix 1 (Codex P2 pre-main) — REQUEST-LEVEL ALLOWLIST (bkz. getWorkItem).
+  // Faz 2.1 — opts.companyId per-tenant config resolution.
   const result = await tfsRequest({
     path: `wit/workitems?ids=${idsParam}&fields=${FIELDS_QUERY_PARAM}`,
+    companyId: opts.companyId,
   });
   if (!result.ok) return result;
   const raw = result.data;
@@ -430,16 +483,21 @@ export async function getWorkItems(ids) {
 
 /**
  * Diagnostic helper — config sağlığını rapor et. PAT raw asla içermez.
+ *
+ * Faz 2.1: opts.companyId per-tenant config kontrolü; yoksa env-only.
  */
-export function diag() {
+export async function diag(opts = {}) {
   try {
-    const { baseUrl, pat, apiVersion, timeoutMs } = getConfig();
+    const { baseUrl, pat, apiVersion, timeoutMs } = await getConfig({
+      companyId: opts.companyId,
+    });
     return {
       ok: true,
       baseUrl,
       patMasked: maskPat(pat),
       apiVersion,
       timeoutMs,
+      source: opts.companyId ? 'db-or-env' : 'env',
     };
   } catch (e) {
     return {
