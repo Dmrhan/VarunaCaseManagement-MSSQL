@@ -228,6 +228,8 @@ model CompanySettings {
   /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
   /// operasyonu ile flip edilir.
   projectsRequired            Boolean  @default(false)
+  /// true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false.
+  requireKbAnalysis           Boolean  @default(false)
   createdAt                   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                   DateTime @updatedAt
 

@@ -170,6 +170,7 @@ async function bootstrapInner(allowedCompanyIds) {
                 requireCustomerOnCaseCreate: true,
                 projectsEnabled: true,
                 projectsRequired: true,
+                requireKbAnalysis: true,
               },
             },
           },
@@ -253,6 +254,7 @@ async function bootstrapInner(allowedCompanyIds) {
       // WR-A4 / PM-04 — AccountProject opt-in (default false; mevcut davranışı korur)
       projectsEnabled: c.settings?.projectsEnabled ?? false,
       projectsRequired: c.settings?.projectsRequired ?? false,
+      requireKbAnalysis: c.settings?.requireKbAnalysis ?? false,
     }));
 
     return {
