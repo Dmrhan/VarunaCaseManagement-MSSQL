@@ -302,18 +302,34 @@ export function stripSignatureAndQuotes(raw) {
  *
  * @returns { auto: boolean, accountId: string|null, confidence, reasons }
  */
-function pickAutoLinkSuggestion(suggestions) {
+function pickAutoLinkSuggestion(suggestions, engineMeta = {}) {
   if (!Array.isArray(suggestions) || suggestions.length === 0) {
     return { auto: false, accountId: null, confidence: null, reasons: [] };
   }
   const best = suggestions[0]; // en yüksek score (engine sıralı döndürür)
   const hasEmail = Array.isArray(best.reasons)
     && best.reasons.some((r) => r?.type === 'email');
+
+  // M2.3 — Öğrenilen sender eşlemesi tetikleyicisi.
+  // engineMeta.learned (suggestCustomerMatches return shape) varsa:
+  //   - isRoleAddress=false (kişisel) → auto-link OK
+  //   - isRoleAddress=true (rol adres) → SADECE öneri, auto-link YOK
+  // Best suggestion'da 'learned' reason var ve engine.learned kişisel ise
+  // auto kabul edilir.
+  const hasLearned = Array.isArray(best.reasons)
+    && best.reasons.some((r) => r?.type === 'learned');
+  const learnedAutoOk = hasLearned
+    && engineMeta.learned
+    && !engineMeta.learned.isRoleAddress
+    && engineMeta.learned.accountId === best.accountId;
+
+  const auto = hasEmail || learnedAutoOk;
   return {
-    auto: hasEmail,
-    accountId: hasEmail ? best.accountId : null,
+    auto,
+    accountId: auto ? best.accountId : null,
     confidence: best.confidence ?? null,
     reasons: best.reasons ?? [],
+    triggeredBy: hasEmail ? 'email_exact' : (learnedAutoOk ? 'learned_personal' : null),
   };
 }
 
@@ -509,7 +525,9 @@ export async function intakeInboundEmail({
       limit: 5,
     });
     if (result && Array.isArray(result.suggestions)) {
-      const pick = pickAutoLinkSuggestion(result.suggestions);
+      // M2.3 — engine response shape'inde learned meta'sı var; pick
+      // fonksiyonu kişisel learned'i auto-link tetikleyicisi sayar.
+      const pick = pickAutoLinkSuggestion(result.suggestions, { learned: result.learned });
       match = {
         confidence: pick.confidence,
         accountId: null, // doğrulama sonrası set edilir
@@ -528,32 +546,45 @@ export async function intakeInboundEmail({
       // === sender email (parsed.from.email) eşleşmesini DB'den doğrulayalım.
       // Eşleşmiyorsa auto-link yapma; vaka Supervisor sırasına düşer.
       if (pick.auto && pick.accountId) {
-        const senderEmail = parsed.from.email; // normalize: parser lowercased
-        const { prisma } = await import('../db/client.js');
-        const account = await prisma.account.findUnique({
-          where: { id: pick.accountId },
-          select: {
-            email: true,
-            contacts: { where: { isActive: true }, select: { email: true } },
-          },
-        });
-        const accountEmails = [
-          account?.email,
-          ...(account?.contacts ?? []).map((c) => c.email),
-        ]
-          .filter(Boolean)
-          .map((e) => String(e).trim().toLowerCase());
-        const senderMatches = accountEmails.includes(senderEmail);
+        // M2.3 — Learned tetikleyici DB-doğrulamalı (learnedSenderAccount
+        // satırı zaten manuel insan onayıydı); ekstra email guard'a gerek
+        // yok. email_exact tetikleyicide ise Codex P1 sender-email guard
+        // çalışır.
+        let canLink = false;
+        if (pick.triggeredBy === 'learned_personal') {
+          canLink = true;
+        } else {
+          // email_exact path — Codex P1 sender guard
+          const senderEmail = parsed.from.email; // normalize: parser lowercased
+          const { prisma } = await import('../db/client.js');
+          const account = await prisma.account.findUnique({
+            where: { id: pick.accountId },
+            select: {
+              email: true,
+              contacts: { where: { isActive: true }, select: { email: true } },
+            },
+          });
+          const accountEmails = [
+            account?.email,
+            ...(account?.contacts ?? []).map((c) => c.email),
+          ]
+            .filter(Boolean)
+            .map((e) => String(e).trim().toLowerCase());
+          canLink = accountEmails.includes(senderEmail);
+        }
 
-        if (senderMatches) {
+        if (canLink) {
           try {
             // linkAccount route layer'da actor='string' (displayName);
             // sistem aktörü için actor.displayName (server/routes/cases.js:713).
+            // M2.3 — source='auto' geç → öğrenme TETİKLEMEZ (intake'in
+            // auto-link redundant; manuel link öğrenir).
             await caseRepository.linkAccount(
               created.id,
               pick.accountId,
               actor.displayName,
               allowedCompanyIds,
+              { source: 'auto' },
             );
             match.accountId = pick.accountId;
           } catch (linkErr) {

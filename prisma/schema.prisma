@@ -165,6 +165,8 @@ model Company {
   externalDevOpsSetting      ExternalDevOpsSetting?
   /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
   externalMailSetting        ExternalMailSetting?
+  /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemeleri.
+  learnedSenderAccounts      LearnedSenderAccount[]
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -402,6 +404,51 @@ model ExternalMailSetting {
   @@index([companyId, enabled])
 }
 
+/// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemesi.
+///
+/// Manuel link sırasında insan onaylı bir eşleme oluşturulur:
+///   "Bu sender email, bu account'a aittir."
+/// Sonraki inbound mail aynı gönderenden geldiğinde:
+///   - Kişisel adres (isRoleAddress=false) → 'learned' reason ile OTOMATİK BAĞLA
+///   - Rol adres (info@/support@/sales@/...) → 'learned' reason ile SADECE ÖNERİ
+///
+/// Tek MANUEL linkAccount çağrıları öğrenir (route layer'da source='manual');
+/// intake AUTO-link çağrıları öğrenmez (redundant).
+///
+/// Self-correction: yeni manuel link OVERWRITE eder (en güncel insan
+/// kararı kazanır). companyId + senderEmail @unique → bir şirkette bir
+/// gönderen = bir eşleme.
+///
+/// Tenant izolasyon: companyId scope; aynı senderEmail farklı şirkette
+/// farklı account'a bağlanabilir.
+///
+/// Spec: docs/MAIL_INTEGRATION.md M2.3 (varsa) / PR feature/mail-learned-sender-m2-3
+model LearnedSenderAccount {
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  companyId       String   @db.NVarChar(450)
+  /// Normalize edilmiş (trim + lowercase) gönderen e-posta.
+  senderEmail     String   @db.NVarChar(320)
+  accountId       String   @db.NVarChar(450)
+  /// Rol adresi mi (info@, support@, sales@ vb.)? Auto-link tetiklemesi
+  /// için kişisel adresler (isRoleAddress=false) yetkili; rol adresleri
+  /// yalnız öneri üretir.
+  isRoleAddress   Boolean  @default(false)
+  /// Hangi kaynaktan öğrenildi. M2.3'te sabit 'manual_link'; ileride
+  /// 'admin_explicit' gibi değerler eklenebilir.
+  source          String   @default("manual_link") @db.NVarChar(50)
+  /// Manuel linki yapan user (audit).
+  createdByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([companyId, senderEmail])
+  @@index([companyId])
+  @@index([accountId])
+}
+
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
 // Phase A: Account global kimlik. Şirkete özel alanlar (Univera kodu, paket,
 // kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
@@ -468,6 +515,8 @@ model Account {
   contacts  AccountContact[]
   /// WR-A3 / PM-02 — country-agnostic address book. Account silindiğinde cascade.
   addresses Address[]
+  /// Mail M2.3 — Bu account'a öğrenilmiş sender eşlemeleri.
+  learnedSenderAccounts LearnedSenderAccount[]
 
   @@index([companyId])
   @@index([name])
