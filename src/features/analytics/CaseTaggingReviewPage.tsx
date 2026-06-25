@@ -79,9 +79,6 @@ function originalLabel(c: Case, def: TagDef): string | null {
   return (src?.[`${def.customField}Label`] as string | undefined) ?? null;
 }
 
-function hasClosureData(c: Case): boolean {
-  return TAG_DEFS.filter((d) => d.prefix === 'closing').some((d) => originalLabel(c, d));
-}
 
 interface FieldDraft {
   verdict: TaggingVerdict | '';
@@ -540,8 +537,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
             items.map((c) => {
               const review   = reviews.get(c.id);
               const draft    = drafts.get(c.id) ?? draftFromReview(review);
-              const caseHasClosureData = hasClosureData(c);
-              const taxonomies         = taxonomiesByCompany.get(c.companyId);
+              const taxonomies = taxonomiesByCompany.get(c.companyId);
 
               return (
                 <div
@@ -590,13 +586,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
                   {/* Sağ kayan etiket hücreleri */}
                   {TAG_DEFS.map((def) => {
-                    const key              = tagKey(def);
-                    const isClosing        = def.prefix === 'closing';
-                    const cellsDisabled    = isClosing && !caseHasClosureData;
-                    const value            = originalLabel(c, def);
-                    const field            = draft.fields[key];
-                    const correctedDisabled = cellsDisabled || field.verdict === '' || field.verdict === 'Dogru';
-                    const options          = taxonomies?.[def.taxonomyType] ?? [];
+                    const key               = tagKey(def);
+                    const value             = originalLabel(c, def);
+                    const field             = draft.fields[key];
+                    const correctedDisabled = field.verdict === '' || field.verdict === 'Dogru';
+                    const options           = taxonomies?.[def.taxonomyType] ?? [];
 
                     return (
                       <Fragment key={key}>
@@ -615,9 +609,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                           style={{ width: COL_WIDTHS[`${key}:verdict`], minWidth: COL_WIDTHS[`${key}:verdict`] }}
                         >
                           <Select
-                            value={cellsDisabled ? '' : field.verdict}
-                            disabled={cellsDisabled}
-                            title={cellsDisabled ? 'Kapanış verisi yok' : undefined}
+                            value={field.verdict}
                             onChange={(e) => {
                               const v = e.target.value as TaggingVerdict | '';
                               updateFieldDraft(c.id, def, {
