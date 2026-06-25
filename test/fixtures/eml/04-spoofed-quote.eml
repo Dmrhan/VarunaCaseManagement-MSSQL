@@ -1,0 +1,19 @@
+From: "Spam Gönderici" <random.spammer@otherorg-test.local>
+To: support@varuna.com
+Subject: İlginç durum
+Date: Wed, 25 Jun 2026 13:00:00 +0300
+Message-ID: <inbound-test-spoofed-1@otherorg-test.local>
+Content-Type: text/plain; charset=UTF-8
+
+Merhaba,
+
+Geçenlerde bilinen.musteri@varuna-test.local adresinden bir mesaj
+gördüm ve sizinle ilgili bir konu vardı. Bu konuda bilgi almak istiyorum.
+
+Saygılar,
+Spam Gönderici
+
+----- Forwarded message -----
+From: known.customer@varuna-test.local
+Subject: Re: Test
+Yukarıdaki adresten ilgili konu hakkında detay bekliyorum.
