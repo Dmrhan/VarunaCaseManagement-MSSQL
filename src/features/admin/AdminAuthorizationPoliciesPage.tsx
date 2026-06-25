@@ -53,9 +53,9 @@ const ENFORCEMENT_STATUS: Record<
     description: 'Menü görünürlüğü, feature flag açık olduğunda uygulama navigasyonunda dikkate alınır.',
   },
   resource: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Kayıt işlemi kuralları şu an tanım ve önizleme amaçlıdır; API guard bağlantısı ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Kayıt işlemi kuralları seçili vaka notu/dosya API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı guard olarak çalışır.',
   },
   field: {
     label: 'Önizleme',
@@ -750,12 +750,13 @@ function EnforcementStatusNotice() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">Uygulama durumu:</span>
         <Badge tint="emerald">Menü canlı</Badge>
-        <Badge tint="amber">CRUD / Alan / Güvenlik filtresi önizleme</Badge>
+        <Badge tint="violet">CRUD pilot</Badge>
+        <Badge tint="amber">Alan / Güvenlik filtresi önizleme</Badge>
       </div>
       <p className="mt-1 text-amber-800">
-        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi, alan zorunluluğu
-        ve güvenlik filtresi kuralları bu fazda tanım ve kontrol amaçlıdır; ilgili ekran/API guard bağlantıları
-        ayrı fazlarda devreye alınacaktır.
+        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi kuralları seçili
+        vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu ve güvenlik filtresi kuralları bu
+        fazda tanım ve kontrol amaçlıdır; ilgili ekran/API guard bağlantıları ayrı fazlarda devreye alınacaktır.
       </p>
     </div>
   );
