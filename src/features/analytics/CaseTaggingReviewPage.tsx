@@ -686,9 +686,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 >
                   {c.caseNumber}
                 </button>
-                <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-ndark-muted" title={c.title}>
-                  {c.title}
-                </div>
+                {c.title && (
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+                    <ExpandableCell text={c.title} />
+                  </div>
+                )}
               </div>
               {/* Statü */}
               <div className="px-3 py-2">
