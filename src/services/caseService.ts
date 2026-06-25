@@ -409,7 +409,7 @@ export const caseService = {
    * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
    */
   async listTaggingReviews(
-    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[] },
+    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
     pagination?: CaseListPagination,
   ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
     if (USE_MOCK) {
@@ -419,6 +419,7 @@ export const caseService = {
     if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
     if (filters?.dateTo) params.set('dateTo', filters.dateTo);
     if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+    if (filters?.teamId) params.set('teamId', filters.teamId);
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));

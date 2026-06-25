@@ -7,6 +7,7 @@ import { Field, Select, TextInput, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
+import { formatDateTime } from '@/lib/format';
 
 /**
  * Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin.
@@ -146,10 +147,11 @@ function ExpandableCell({ text }: { text: string }) {
 
 // Kolon genişlikleri (px).
 const COL_WIDTHS: Record<string, number> = {
-  caseNo: 180,
-  status: 120,
+  caseNo: 155,
+  status: 100,
   description: 280,
   resolutionNote: 280,
+  createdAt: 150,
   note: 220,
   reviewer: 180,
   save: 100,
@@ -163,7 +165,7 @@ for (const def of TAG_DEFS) {
 
 // Sol sabit karar alanının toplam genişliği.
 const LEFT_PANEL_WIDTH =
-  COL_WIDTHS.caseNo + COL_WIDTHS.status + COL_WIDTHS.description + COL_WIDTHS.resolutionNote;
+  COL_WIDTHS.caseNo + COL_WIDTHS.status + COL_WIDTHS.description + COL_WIDTHS.resolutionNote + COL_WIDTHS.createdAt;
 
 // İç div'in yatay scroll oluşturması için gereken minimum genişlik.
 const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
@@ -171,12 +173,27 @@ const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
 // Header sınıf sabitleri
 const HDR = 'flex items-center px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted';
 
+const FILTER_KEY = 'varuna:tagging-review-filters-v2';
+
+function loadSavedFilters() {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as { dateFrom: string; dateTo: string; statuses: CaseStatus[]; teamId: string };
+  } catch {
+    return null;
+  }
+}
+
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
-  const [statuses, setStatuses] = useState<CaseStatus[]>([]);
+  const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
+  const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
+  const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
+  const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
   const pageSize = 25;
+
+  const teams = lookupService.teams();
 
   const [loading, setLoading]   = useState(false);
   const [items, setItems]       = useState<Case[]>([]);
@@ -190,11 +207,16 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   // Tek scroll container — yatay ve dikey scroll aynı element'te, sync gerekmez.
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  async function fetchPage() {
+  async function fetchPage(pageOverride?: number) {
     setLoading(true);
     const result = await caseService.listTaggingReviews(
-      { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, statuses: statuses.length ? statuses : undefined },
-      { page, pageSize },
+      {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        statuses: statuses.length ? statuses : undefined,
+        teamId: teamId || undefined,
+      },
+      { page: pageOverride ?? page, pageSize },
     );
     setItems(result.items);
     setTotal(result.total);
@@ -202,6 +224,12 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setDrafts(new Map(result.items.map((c) => [c.id, draftFromReview(result.reviews.get(c.id))])));
     setLoading(false);
   }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ dateFrom, dateTo, statuses, teamId }));
+    } catch {}
+  }, [dateFrom, dateTo, statuses, teamId]);
 
   useEffect(() => {
     void fetchPage();
@@ -291,10 +319,18 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           <Field label="Bitiş tarihi" className="w-36">
             <TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} />
           </Field>
+          <Field label="Takım" className="w-48">
+            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">Tüm takımlar</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </Select>
+          </Field>
           <Button
             leftIcon={loading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}
             disabled={loading}
-            onClick={() => { setPage(1); void fetchPage(); }}
+            onClick={() => { setPage(1); void fetchPage(1); }}
           >
             {loading ? 'Yükleniyor…' : 'Filtrele'}
           </Button>
@@ -386,6 +422,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <div className={HDR} style={{ width: COL_WIDTHS.status }}>Statü</div>
                 <div className={HDR} style={{ width: COL_WIDTHS.description }}>Açıklama</div>
                 <div className={HDR} style={{ width: COL_WIDTHS.resolutionNote }}>Çözüm Notu</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.createdAt }}>Oluşturma Tarihi</div>
               </div>
               {/* Etiket alt başlıkları */}
               {TAG_DEFS.map((def) => {
@@ -479,6 +516,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                       {c.resolutionNote
                         ? <ExpandableCell text={c.resolutionNote} />
                         : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                    </div>
+                    {/* Oluşturma Tarihi */}
+                    <div className="px-3 py-2 text-xs whitespace-nowrap" style={{ width: COL_WIDTHS.createdAt, minWidth: COL_WIDTHS.createdAt }}>
+                      {formatDateTime(c.createdAt)}
                     </div>
                   </div>
 
