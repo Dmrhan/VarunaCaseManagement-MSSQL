@@ -37,6 +37,8 @@ const pkg = JSON.parse(read('package.json'));
 expect('1.1 authorization route exists', exists(routePath), true);
 expect('1.2 authorization route uses verifyJwt', /router\.use\(verifyJwt\)/.test(route), true);
 expect('1.3 route exposes effective-menus endpoint', /router\.get\('\/effective-menus'/.test(route), true);
+expect('1.3b route exposes read-only registry endpoint', /router\.get\('\/registry'/.test(route), true);
+expect('1.3c route returns static authorization registry', /getAuthorizationRegistry/.test(route), true);
 expect('1.4 route resolves allowed company scope', /resolveRequestedCompany/.test(route), true);
 expect('1.5 route rejects out-of-scope company', /company_forbidden/.test(route), true);
 expect('1.6 route resolves teamId from Person', /prisma\.person\.findUnique/.test(route), true);
@@ -58,6 +60,8 @@ expect('3.1 frontend authorization service exists', exists(servicePath), true);
 expect('3.2 frontend service exports authorizationService', /export const authorizationService/.test(service), true);
 expect('3.3 frontend service calls effective-menus', /\/api\/authorization\/effective-menus/.test(service), true);
 expect('3.4 frontend service documents current-user menu API', /Current-user effective menu snapshot/.test(service), true);
+expect('3.5 frontend service calls registry endpoint', /\/api\/authorization\/registry/.test(service), true);
+expect('3.6 frontend service defines AuthorizationRegistry type', /export interface AuthorizationRegistry/.test(service), true);
 
 expect('4.1 App imports authorizationService', /import \{ authorizationService \}/.test(appTsx), true);
 expect('4.2 App stores effective menu access state', /setEffectiveMenuAccess/.test(appTsx), true);

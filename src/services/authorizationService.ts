@@ -2,6 +2,31 @@ import { apiFetch } from './caseService';
 
 export type AuthorizationPrincipalType = 'systemRole' | 'companyRole' | 'team' | 'user';
 
+export interface AuthorizationRegistry {
+  principalTypes: AuthorizationPrincipalType[];
+  resourceActions: string[];
+  fieldActions: string[];
+  securityFilterOperators: string[];
+  securityFilterTokens: string[];
+  menus: Array<{
+    key: string;
+    label: string;
+    viewKey: string;
+    group: string;
+    defaultRoles: string[];
+    featureFlag?: string;
+    entryPointOnly?: boolean;
+  }>;
+  resources: Array<{
+    key: string;
+    label: string;
+    category: string;
+    actions: string[];
+    currentEnforcement?: string;
+  }>;
+  fieldPolicyScopes: string[];
+}
+
 export interface EffectiveMenuAccess {
   companyId: string;
   principal: {
@@ -32,6 +57,21 @@ export interface EffectiveMenuAccess {
 }
 
 export const authorizationService = {
+  /**
+   * Static policy vocabulary used by admin selector UIs. This is read-only and
+   * intentionally auth-protected so internal menu/resource keys are not exposed
+   * publicly.
+   */
+  async registry(): Promise<AuthorizationRegistry> {
+    const data = await apiFetch<AuthorizationRegistry>(
+      '/api/authorization/registry',
+      undefined,
+      'Yetki sözlüğü alınamadı',
+    );
+    if (!data) throw new Error('Yetki sözlüğü alınamadı');
+    return data;
+  },
+
   /**
    * Current-user effective menu snapshot. This is intentionally not wired into
    * App navigation yet; runtime menu enforcement will be a separate PR after

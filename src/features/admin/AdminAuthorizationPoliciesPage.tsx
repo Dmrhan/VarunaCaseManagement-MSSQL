@@ -9,6 +9,7 @@ import { CompanySelector } from '@/components/ui/CompanySelector';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { lookupService } from '@/services/caseService';
+import { authorizationService, type AuthorizationRegistry } from '@/services/authorizationService';
 import {
   adminService,
   type AdminUser,
@@ -271,6 +272,26 @@ const FIELD_SCOPE_OPTIONS: FieldScopeOption[] = [
   },
 ];
 
+function menuOptionsFromRegistry(registry: AuthorizationRegistry | null): MenuOption[] {
+  if (!registry) return MENU_OPTIONS;
+  return registry.menus.map((m) => ({
+    key: m.key,
+    value: m.viewKey,
+    label: m.label,
+    group: m.group,
+  }));
+}
+
+function resourceOptionsFromRegistry(registry: AuthorizationRegistry | null): ResourceOption[] {
+  if (!registry) return RESOURCE_OPTIONS;
+  return registry.resources.map((r) => ({
+    value: r.key,
+    label: r.label,
+    category: r.category,
+    actions: r.actions,
+  }));
+}
+
 /**
  * Bu ekran eski Varuna'daki yetkilendirme matrisini menü, kayıt işlemi, alan ve
  * güvenlik filtresi düzeyinde yönetmek için kullanılır.
@@ -285,6 +306,7 @@ export function AdminAuthorizationPoliciesPage() {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AuthorizationPolicy[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [registry, setRegistry] = useState<AuthorizationRegistry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
@@ -299,6 +321,8 @@ export function AdminAuthorizationPoliciesPage() {
     () => buildPrincipalOptions(previewPrincipalType, companyId, companies, teams, persons, users),
     [previewPrincipalType, companyId, companies, teams, persons, users],
   );
+  const menuOptions = useMemo(() => menuOptionsFromRegistry(registry), [registry]);
+  const resourceOptions = useMemo(() => resourceOptionsFromRegistry(registry), [registry]);
 
   async function refresh() {
     if (!companyId) {
@@ -335,6 +359,21 @@ export function AdminAuthorizationPoliciesPage() {
       })
       .catch(() => {
         if (alive) setUsers([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    authorizationService
+      .registry()
+      .then((value) => {
+        if (alive) setRegistry(value);
+      })
+      .catch(() => {
+        if (alive) setRegistry(null);
       });
     return () => {
       alive = false;
@@ -560,7 +599,7 @@ export function AdminAuthorizationPoliciesPage() {
                       )}
                     </Td>
                     <Td>
-                      <PolicyTargetSummary row={row} />
+                      <PolicyTargetSummary row={row} menuOptions={menuOptions} resourceOptions={resourceOptions} />
                     </Td>
                     <Td align="right" className="text-slate-600">{row.priority}</Td>
                     <Td>
@@ -607,6 +646,8 @@ export function AdminAuthorizationPoliciesPage() {
         teams={teams}
         persons={persons}
         users={users}
+        menuOptions={menuOptions}
+        resourceOptions={resourceOptions}
         items={items}
         onClose={() => setEditor(null)}
         onSaved={() => void refresh()}
@@ -759,9 +800,17 @@ function Metric({ label, value, tint }: { label: string; value: number; tint: 'e
   );
 }
 
-function PolicyTargetSummary({ row }: { row: AuthorizationPolicy }) {
+function PolicyTargetSummary({
+  row,
+  menuOptions,
+  resourceOptions,
+}: {
+  row: AuthorizationPolicy;
+  menuOptions: MenuOption[];
+  resourceOptions: ResourceOption[];
+}) {
   if (row.target === 'menu') {
-    const menu = findMenuOptionByViewKey(row.viewKey ?? '');
+    const menu = findMenuOptionByViewKey(row.viewKey ?? '', menuOptions);
     return (
       <SummaryLine
         icon={<KeyRound size={13} />}
@@ -771,7 +820,7 @@ function PolicyTargetSummary({ row }: { row: AuthorizationPolicy }) {
     );
   }
   if (row.target === 'resource') {
-    const resource = findResourceOption(row.resourceKey ?? '');
+    const resource = findResourceOption(row.resourceKey ?? '', resourceOptions);
     return (
       <SummaryLine
         icon={<ShieldCheck size={13} />}
@@ -791,7 +840,7 @@ function PolicyTargetSummary({ row }: { row: AuthorizationPolicy }) {
       />
     );
   }
-  const resource = findResourceOption(row.resourceKey ?? '');
+  const resource = findResourceOption(row.resourceKey ?? '', resourceOptions);
   return <SummaryLine icon={<Filter size={13} />} title={resource?.label ?? row.resourceKey ?? '—'} detail="Güvenlik filtresi" />;
 }
 
@@ -828,9 +877,9 @@ function renderOptionsWithCurrent(options: SelectOption[], currentValue: string 
   );
 }
 
-function renderGroupedMenuOptions(currentValue: string) {
-  const hasCurrent = currentValue ? MENU_OPTIONS.some((o) => o.value === currentValue) : true;
-  const groups = groupBy(MENU_OPTIONS, (option) => option.group);
+function renderGroupedMenuOptions(currentValue: string, menuOptions: MenuOption[]) {
+  const hasCurrent = currentValue ? menuOptions.some((o) => o.value === currentValue) : true;
+  const groups = groupBy(menuOptions, (option) => option.group);
   return (
     <>
       {!currentValue && <option value="">Seçin…</option>}
@@ -848,9 +897,9 @@ function renderGroupedMenuOptions(currentValue: string) {
   );
 }
 
-function renderGroupedResourceOptions(currentValue: string) {
-  const hasCurrent = currentValue ? RESOURCE_OPTIONS.some((o) => o.value === currentValue) : true;
-  const groups = groupBy(RESOURCE_OPTIONS, (option) => option.category);
+function renderGroupedResourceOptions(currentValue: string, resourceOptions: ResourceOption[]) {
+  const hasCurrent = currentValue ? resourceOptions.some((o) => o.value === currentValue) : true;
+  const groups = groupBy(resourceOptions, (option) => option.category);
   return (
     <>
       {!currentValue && <option value="">Seçin…</option>}
@@ -879,12 +928,12 @@ function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
-function findMenuOptionByViewKey(viewKey: string): MenuOption | undefined {
-  return MENU_OPTIONS.find((m) => m.value === viewKey);
+function findMenuOptionByViewKey(viewKey: string, menuOptions: MenuOption[]): MenuOption | undefined {
+  return menuOptions.find((m) => m.value === viewKey);
 }
 
-function findResourceOption(resourceKey: string): ResourceOption | undefined {
-  return RESOURCE_OPTIONS.find((r) => r.value === resourceKey);
+function findResourceOption(resourceKey: string, resourceOptions: ResourceOption[]): ResourceOption | undefined {
+  return resourceOptions.find((r) => r.value === resourceKey);
 }
 
 function findFieldScopeOption(scope: string): FieldScopeOption | undefined {
@@ -954,6 +1003,8 @@ function AuthorizationPolicyModal({
   teams,
   persons,
   users,
+  menuOptions,
+  resourceOptions,
   items,
   onClose,
   onSaved,
@@ -966,6 +1017,8 @@ function AuthorizationPolicyModal({
   teams: CaseTeam[];
   persons: CasePerson[];
   users: AdminUser[];
+  menuOptions: MenuOption[];
+  resourceOptions: ResourceOption[];
   items: AuthorizationPolicy[];
   onClose: () => void;
   onSaved: () => void;
@@ -979,7 +1032,7 @@ function AuthorizationPolicyModal({
     () => buildPrincipalOptions(form.principalType, companyId, companies, teams, persons, users),
     [form.principalType, companyId, companies, teams, persons, users],
   );
-  const selectedResource = findResourceOption(form.resourceKey ?? '');
+  const selectedResource = findResourceOption(form.resourceKey ?? '', resourceOptions);
   const resourceActionOptions = selectedResource?.actions.map((action) => ({
     value: action,
     label: ACTION_LABELS[action] ?? action,
@@ -1028,12 +1081,12 @@ function AuthorizationPolicyModal({
   }
 
   function handleMenuChange(viewKey: string) {
-    const menu = findMenuOptionByViewKey(viewKey);
+    const menu = findMenuOptionByViewKey(viewKey, menuOptions);
     patch({ viewKey, menuKey: menu?.key ?? null });
   }
 
   function handleResourceChange(resourceKey: string) {
-    const nextResource = findResourceOption(resourceKey);
+    const nextResource = findResourceOption(resourceKey, resourceOptions);
     patch({ resourceKey, action: nextResource?.actions[0] ?? null });
   }
 
@@ -1171,7 +1224,7 @@ function AuthorizationPolicyModal({
           <>
             <Field label="Ekran / Menü" required hint="Kullanıcının sol menüde veya ana akışta göreceği ekran.">
               <Select value={form.viewKey ?? ''} onChange={(e) => handleMenuChange(e.target.value)}>
-                {renderGroupedMenuOptions(form.viewKey ?? '')}
+                {renderGroupedMenuOptions(form.viewKey ?? '', menuOptions)}
               </Select>
               <KeyHint value={form.viewKey ?? ''} prefix="Ekran" />
             </Field>
@@ -1188,7 +1241,7 @@ function AuthorizationPolicyModal({
                 value={form.resourceKey ?? ''}
                 onChange={(e) => handleResourceChange(e.target.value)}
               >
-                {renderGroupedResourceOptions(form.resourceKey ?? '')}
+                {renderGroupedResourceOptions(form.resourceKey ?? '', resourceOptions)}
               </Select>
               <KeyHint value={form.resourceKey ?? ''} />
             </Field>
@@ -1234,7 +1287,7 @@ function AuthorizationPolicyModal({
                 value={form.resourceKey ?? ''}
                 onChange={(e) => patch({ resourceKey: e.target.value })}
               >
-                {renderGroupedResourceOptions(form.resourceKey ?? '')}
+                {renderGroupedResourceOptions(form.resourceKey ?? '', resourceOptions)}
               </Select>
               <KeyHint value={form.resourceKey ?? ''} />
             </Field>
