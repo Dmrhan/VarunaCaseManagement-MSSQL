@@ -283,8 +283,17 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggestionError(null);
     setKbSuggestion(null);
     try {
+      // Smart Ticket: caseId ile server-side opening context fetch + operatörün
+      // YAZDIĞI çözüm notunu resolutionOverride olarak gönder. Eski hâlde yalnız
+      // { caseId } gidiyordu → backend resolution'ı solution-step'lerden compose
+      // ediyordu; operatörün gerçek çözüm metni AI'ya ulaşmıyor, yanlış bağlamla
+      // sınıflandırılıyordu (production accuracy bug'ı). resolutionNote zaten
+      // ≥5 char guard'ından geçti → boş override gönderilmez.
       const res = isSmartTicket
-        ? await lookupService.suggestSmartTicketClosure({ caseId: targetCaseId })
+        ? await lookupService.suggestSmartTicketClosure({
+            caseId: targetCaseId,
+            resolutionOverride: resolutionNote.trim(),
+          })
         : await lookupService.suggestSmartTicketClosure({
             companyId: item.companyId,
             description: item.description,
