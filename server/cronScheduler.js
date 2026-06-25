@@ -4,6 +4,7 @@ import { runPatternDetect } from './cron/patternDetect.js';
 import { runQaScoreBatch } from './cron/qaScoreBatch.js';
 import { runNotificationCleanup } from './cron/notificationCleanup.js';
 import { runActionItemArchive } from './cron/actionItemArchive.js';
+import { startImapPollingInterval } from './lib/imapPoller.js';
 
 /**
  * On-prem cron scheduler (Faz 5) — Vercel Cron / UptimeRobot / GitHub Actions
@@ -50,5 +51,9 @@ export function startCronScheduler() {
   schedule('qa-score-batch', '0 2 * * *', runQaScoreBatch);
   schedule('notification-cleanup', '0 3 * * *', runNotificationCleanup);
   schedule('actionitem-archive', '30 3 * * *', runActionItemArchive);
+  // Mail M3 — IMAP polling. env MAIL_IMAP_POLL_INTERVAL_SEC > 0 → aktif;
+  // default kapalı. imapPoller.js içinde setInterval yönetimi (manuel
+  // tetik admin POST /external-mail-settings/:companyId/poll).
+  startImapPollingInterval();
   console.log('[cron] scheduler aktif: snooze 5dk, pattern 15dk, qa 02:00, cleanup 03:00, archive 03:30 (Europe/Istanbul).');
 }
