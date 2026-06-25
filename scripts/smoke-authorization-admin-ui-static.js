@@ -49,6 +49,9 @@ expect('1.11 page has resource selector catalog', /const RESOURCE_OPTIONS/.test(
 expect('1.12 page has field scope selector catalog', /const FIELD_SCOPE_OPTIONS/.test(page), true);
 expect('1.13 page renders technical key hint instead of raw-only input', /function KeyHint/.test(page), true);
 expect('1.14 principal target uses selectable options', /buildPrincipalOptions/.test(page), true);
+expect('1.15 page reads registry through authorizationService', /authorizationService[\s\S]*\.registry\(\)/.test(page), true);
+expect('1.16 page derives menu options from registry', /function menuOptionsFromRegistry/.test(page), true);
+expect('1.17 page derives resource options from registry', /function resourceOptionsFromRegistry/.test(page), true);
 
 expect('2.1 adminService has AuthorizationPolicy type', /export interface AuthorizationPolicy\s*\{/.test(adminService), true);
 expect('2.2 adminService has list wrapper', /authorizationPolicies:[\s\S]*async list\(filter: AuthorizationPolicyListFilter\)/.test(adminService), true);

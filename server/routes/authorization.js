@@ -3,10 +3,15 @@ import { prisma } from '../db/client.js';
 import { verifyJwt } from '../db/auth.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
+import { getAuthorizationRegistry } from '../lib/authorizationRegistry.js';
 
 const router = Router();
 
 router.use(verifyJwt);
+
+router.get('/registry', (_req, res) => {
+  res.json(getAuthorizationRegistry());
+});
 
 function resolveRequestedCompany(req) {
   const requested = typeof req.query.companyId === 'string' ? req.query.companyId.trim() : '';
