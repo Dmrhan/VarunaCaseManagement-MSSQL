@@ -173,11 +173,23 @@ const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
 // Header sınıf sabitleri
 const HDR = 'flex items-center px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted';
 
+const FILTER_KEY = 'varuna:tagging-review-filters';
+
+function loadSavedFilters() {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as { dateFrom: string; dateTo: string; statuses: CaseStatus[]; teamId: string };
+  } catch {
+    return null;
+  }
+}
+
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
-  const [statuses, setStatuses] = useState<CaseStatus[]>([]);
-  const [teamId, setTeamId]     = useState('');
+  const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
+  const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
+  const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? []);
+  const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
   const pageSize = 25;
 
@@ -212,6 +224,12 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setDrafts(new Map(result.items.map((c) => [c.id, draftFromReview(result.reviews.get(c.id))])));
     setLoading(false);
   }
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ dateFrom, dateTo, statuses, teamId }));
+    } catch {}
+  }, [dateFrom, dateTo, statuses, teamId]);
 
   useEffect(() => {
     void fetchPage();
