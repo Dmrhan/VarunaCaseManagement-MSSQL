@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Filter, KeyRound, Pencil, Power, PowerOff, ShieldCheck } from 'lucide-react';
 import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Badge, type BadgeTint } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { CompanySelector } from '@/components/ui/CompanySelector';
@@ -42,6 +42,32 @@ const EFFECTS: { value: AuthorizationPolicyEffect; label: string }[] = [
   { value: 'allow', label: 'İzin ver' },
   { value: 'deny', label: 'Engelle' },
 ];
+
+const ENFORCEMENT_STATUS: Record<
+  AuthorizationPolicyTarget,
+  { label: string; tint: BadgeTint; description: string }
+> = {
+  menu: {
+    label: 'Canlı',
+    tint: 'emerald',
+    description: 'Menü görünürlüğü, feature flag açık olduğunda uygulama navigasyonunda dikkate alınır.',
+  },
+  resource: {
+    label: 'Önizleme',
+    tint: 'amber',
+    description: 'Kayıt işlemi kuralları şu an tanım ve önizleme amaçlıdır; API guard bağlantısı ayrı fazdır.',
+  },
+  field: {
+    label: 'Önizleme',
+    tint: 'amber',
+    description: 'Alan kuralları şu an tanım ve önizleme amaçlıdır; form bazlı enforcement ayrı fazdır.',
+  },
+  securityFilter: {
+    label: 'Önizleme',
+    tint: 'amber',
+    description: 'Güvenlik filtresi kuralları şu an tanım ve önizleme amaçlıdır; kayıt sorgularına bağlama ayrı fazdır.',
+  },
+};
 
 const TARGET_LABELS = Object.fromEntries(POLICY_TARGETS.map((x) => [x.value, x.label])) as Record<
   AuthorizationPolicyTarget,
@@ -578,6 +604,8 @@ export function AdminAuthorizationPoliciesPage() {
           </div>
         }
       >
+        <EnforcementStatusNotice />
+
         <EffectivePreviewPanel
           principalType={previewPrincipalType}
           principalKey={previewPrincipalKey}
@@ -626,6 +654,7 @@ export function AdminAuthorizationPoliciesPage() {
                   <Th>Kime Uygulanır?</Th>
                   <Th>Etki</Th>
                   <Th>Hedef</Th>
+                  <Th>Uygulama</Th>
                   <Th align="right">Öncelik</Th>
                   <Th>Durum</Th>
                   <Th align="right">Aksiyon</Th>
@@ -656,6 +685,9 @@ export function AdminAuthorizationPoliciesPage() {
                     </Td>
                     <Td>
                       <PolicyTargetSummary row={row} menuOptions={menuOptions} resourceOptions={resourceOptions} />
+                    </Td>
+                    <Td>
+                      <EnforcementBadge target={row.target} />
                     </Td>
                     <Td align="right" className="text-slate-600">{row.priority}</Td>
                     <Td>
@@ -709,6 +741,33 @@ export function AdminAuthorizationPoliciesPage() {
         onSaved={() => void refresh()}
       />
     </>
+  );
+}
+
+function EnforcementStatusNotice() {
+  return (
+    <div className="border-b border-slate-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">Uygulama durumu:</span>
+        <Badge tint="emerald">Menü canlı</Badge>
+        <Badge tint="amber">CRUD / Alan / Güvenlik filtresi önizleme</Badge>
+      </div>
+      <p className="mt-1 text-amber-800">
+        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi, alan zorunluluğu
+        ve güvenlik filtresi kuralları bu fazda tanım ve kontrol amaçlıdır; ilgili ekran/API guard bağlantıları
+        ayrı fazlarda devreye alınacaktır.
+      </p>
+    </div>
+  );
+}
+
+function EnforcementBadge({ target }: { target: AuthorizationPolicyTarget }) {
+  const info = ENFORCEMENT_STATUS[target];
+  return (
+    <div className="max-w-56">
+      <Badge tint={info.tint}>{info.label}</Badge>
+      <div className="mt-1 text-[11px] leading-snug text-slate-500">{info.description}</div>
+    </div>
   );
 }
 
