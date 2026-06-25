@@ -58,6 +58,62 @@ const DEFAULT_FILTER_JSON = `{
   "value": "@user.allowedCompanyIds"
 }`;
 
+const SECURITY_FILTER_PRESETS: Array<{
+  value: string;
+  label: string;
+  description: string;
+  expression: unknown;
+}> = [
+  {
+    value: 'company_scope',
+    label: 'Yetkili olduğu şirket kayıtları',
+    description: 'Kullanıcı yalnızca erişim hakkı olan şirketlerin kayıtlarını görür.',
+    expression: {
+      op: 'in',
+      field: '@record.companyId',
+      value: '@user.allowedCompanyIds',
+    },
+  },
+  {
+    value: 'assigned_to_me',
+    label: 'Bana atanmış kayıtlar',
+    description: 'Kullanıcı yalnızca kendisine atanmış kayıtları görür.',
+    expression: {
+      op: 'eq',
+      field: '@record.assignedPersonId',
+      value: '@user.personId',
+    },
+  },
+  {
+    value: 'assigned_to_my_team',
+    label: 'Takımıma atanmış kayıtlar',
+    description: 'Kullanıcı yalnızca kendi takımına atanmış kayıtları görür.',
+    expression: {
+      op: 'eq',
+      field: '@record.assignedTeamId',
+      value: '@user.teamId',
+    },
+  },
+  {
+    value: 'company_and_me_or_team',
+    label: 'Şirket + bana veya takımıma atanmış',
+    description: 'Kullanıcı yetkili şirketlerde, kendisine veya takımına atanmış kayıtları görür.',
+    expression: {
+      op: 'and',
+      conditions: [
+        { op: 'in', field: '@record.companyId', value: '@user.allowedCompanyIds' },
+        {
+          op: 'or',
+          conditions: [
+            { op: 'eq', field: '@record.assignedPersonId', value: '@user.personId' },
+            { op: 'eq', field: '@record.assignedTeamId', value: '@user.teamId' },
+          ],
+        },
+      ],
+    },
+  },
+];
+
 type SelectOption = { value: string; label: string; detail?: string };
 type MenuOption = SelectOption & { key: string; group: string };
 type ResourceOption = SelectOption & { category: string; actions: string[] };
@@ -1099,6 +1155,12 @@ function AuthorizationPolicyModal({
     });
   }
 
+  function applySecurityFilterPreset(presetValue: string) {
+    const preset = SECURITY_FILTER_PRESETS.find((p) => p.value === presetValue);
+    if (!preset) return;
+    setFilterText(JSON.stringify(preset.expression, null, 2));
+  }
+
   async function handleSave() {
     setSubmitting(true);
     setError(null);
@@ -1290,6 +1352,26 @@ function AuthorizationPolicyModal({
                 {renderGroupedResourceOptions(form.resourceKey ?? '', resourceOptions)}
               </Select>
               <KeyHint value={form.resourceKey ?? ''} />
+            </Field>
+            <Field
+              label="Hazır Filtre"
+              hint="Sık kullanılan kayıt erişim kurallarından birini seçin; alttaki JSON otomatik dolar."
+            >
+              <Select defaultValue="" onChange={(e) => applySecurityFilterPreset(e.target.value)}>
+                <option value="">Şablon seç…</option>
+                {SECURITY_FILTER_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </Select>
+              <div className="mt-2 space-y-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                {SECURITY_FILTER_PRESETS.map((preset) => (
+                  <div key={preset.value}>
+                    <span className="font-medium text-slate-700">{preset.label}:</span> {preset.description}
+                  </div>
+                ))}
+              </div>
             </Field>
             <Field label="Güvenlik Filtresi JSON" required className="md:col-span-2">
               <TextArea
