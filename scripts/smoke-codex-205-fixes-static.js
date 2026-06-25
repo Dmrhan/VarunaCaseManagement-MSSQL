@@ -44,6 +44,18 @@ function expectNotContains(name, content, needle) {
     imap,
     'Codex #205 P1',
   );
+  // Codex #205 P1 follow-up — fetchOne signature: (range, query, options).
+  // UID modu options (3. arg) ile geçer; query'deki uid:true silently ignore.
+  expectContains(
+    'fetchOne UID modu 3. argümanda (options)',
+    imap,
+    "fetchOne(uid, { source: true }, { uid: true })",
+  );
+  expectNotContains(
+    "fetchOne'da 'uid: true,' query field'ı kalmadı (silently ignore'lanan eski kullanım)",
+    imap,
+    "fetchOne(uid, {\n            uid: true,",
+  );
 
   console.log('\n=== P2a — NotificationRule editor Active round-trip ===');
   const editor = await readFile('src/features/admin/NotificationRulesPage.tsx', 'utf8');

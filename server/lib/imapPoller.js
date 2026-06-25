@@ -244,10 +244,16 @@ export async function pollMailbox(companyId) {
         let qKey = null;
         try {
           // Önce minimal fetch ile message-id'yi al; quarantine kontrolü.
-          const headerFetch = await client.fetchOne(uid, {
-            uid: true,
-            source: true,
-          });
+          //
+          // Codex #205 P1 follow-up (kritik) — ImapFlow.fetchOne signature:
+          //   fetchOne(range, query, options)
+          // UID modu **3. argüman** (options). Önceki kullanım:
+          //   fetchOne(uid, { uid: true, source: true })
+          // burada query objesindeki `uid: true` SILENTLY IGNORE oluyor →
+          // range default sequence number gibi yorumlanıyor → UID modunda
+          // gelen search sonucuyla uyuşmaz → yanlış/eksik mesaj fetch'i +
+          // doğru UID `\Seen` işaretlenir → kaybolan ya da yanlış intake.
+          const headerFetch = await client.fetchOne(uid, { source: true }, { uid: true });
           if (!headerFetch || !headerFetch.source) {
             stats.skipped += 1;
             continue;
