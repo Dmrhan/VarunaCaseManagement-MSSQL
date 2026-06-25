@@ -56,6 +56,10 @@ expect('1.18 page has security filter presets', /SECURITY_FILTER_PRESETS/.test(p
 expect('1.19 page has assigned-to-me preset', /assigned_to_me/.test(page), true);
 expect('1.20 page has team-assignment preset', /assigned_to_my_team/.test(page), true);
 expect('1.21 page applies preset into JSON textarea', /applySecurityFilterPreset/.test(page), true);
+expect('1.22 page shows enforcement status notice', /function EnforcementStatusNotice/.test(page), true);
+expect('1.23 page marks menu as live', /Menü canlı/.test(page), true);
+expect('1.24 page marks CRUD field filter as preview', /CRUD \/ Alan \/ Güvenlik filtresi önizleme/.test(page), true);
+expect('1.25 table has enforcement column', />Uygulama</.test(page), true);
 
 expect('2.1 adminService has AuthorizationPolicy type', /export interface AuthorizationPolicy\s*\{/.test(adminService), true);
 expect('2.2 adminService has list wrapper', /authorizationPolicies:[\s\S]*async list\(filter: AuthorizationPolicyListFilter\)/.test(adminService), true);
