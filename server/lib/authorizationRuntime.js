@@ -1,4 +1,4 @@
-import { resolveFieldState, explainResourceAccess } from './authorizationPolicy.js';
+import { listFieldStates, resolveFieldState, explainResourceAccess } from './authorizationPolicy.js';
 import {
   compileSecurityFilterWhere,
   mergeSecurityFilterWhere,
@@ -202,4 +202,20 @@ export function assertRequiredFieldsPresent({
     );
   }
   return { required, missing: [] };
+}
+
+export function resolveFieldStatesForUser({
+  scope,
+  resourceKey = 'case',
+  fields = [],
+  user,
+  overrides = [],
+} = {}) {
+  return listFieldStates({
+    scope,
+    resourceKey,
+    fields,
+    user,
+    overrides,
+  });
 }

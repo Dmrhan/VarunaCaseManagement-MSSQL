@@ -60,7 +60,7 @@ const ENFORCEMENT_STATUS: Record<
   field: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Alan zorunluluğu kuralları case.close kapsamındaki seçili kapanış alanlarında AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED=true iken pilot çalışır.',
+    description: 'Alan kuralları case.close required kontrolünde ve Case Detail Detay sekmesinde VITE_AUTHORIZATION_FIELD_UI_ENFORCEMENT_ENABLED=true iken visible/readable/editable/masked pilotu olarak çalışır.',
   },
   securityFilter: {
     label: 'Pilot',
@@ -757,7 +757,8 @@ function EnforcementStatusNotice() {
       <p className="mt-1 text-amber-800">
         Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi kuralları seçili
         vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu case.close kapsamındaki seçili kapanış
-        alanlarında flag ile pilot çalışır. Güvenlik filtresi kuralları vaka listesi ve etiket doğrulama liste/export
+        alanlarında flag ile pilot çalışır; Case Detail Detay sekmesinde görünürlük/maskeleme/editlenebilirlik ayrı
+        frontend flag ile pilot uygulanır. Güvenlik filtresi kuralları vaka listesi ve etiket doğrulama liste/export
         uçlarında flag ile daraltıcı kayıt filtresi olarak pilot çalışır.
       </p>
     </div>
