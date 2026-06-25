@@ -1240,30 +1240,14 @@ export function SmartTicketNewPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdCase?.id]);
 
-  // L2 takım filtreleme — hard-code teamId/name yok; yalnız metadata.
+  // Takım filtreleme — hard-code teamId/name yok; yalnız metadata.
   const transferTeamOptions = useMemo(() => {
-    if (!createdCase) return { all: [], l2: [], nonL2: [], hasL2: false };
+    if (!createdCase) return { all: [] };
     const all = lookupService
       .teams()
-      .filter(
-        (t) =>
-          t.companyId === createdCase.companyId &&
-          t.id !== createdCase.assignedTeamId,
-      );
-    const l2 = all.filter((t) => t.defaultSupportLevel === 'L2');
-    const nonL2 = all.filter((t) => t.defaultSupportLevel !== 'L2');
-    return { all, l2, nonL2, hasL2: l2.length > 0 };
+      .filter((t) => t.companyId === createdCase.companyId);
+    return { all };
   }, [createdCase]);
-
-  // Tek L2 ekip varsa preselect. Çoklu L2 → seçim zorunlu (auto-select yok).
-  // Sıfır L2 → calm warning, tüm aktif takımlar gösterilir, seçim zorunlu.
-  useEffect(() => {
-    if (stage !== 'transfer') return;
-    if (transferTeamOptions.l2.length === 1 && !transferToTeamId) {
-      setTransferToTeamId(transferTeamOptions.l2[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, transferTeamOptions.l2.length, createdCase?.id]);
 
   // Seçili takıma ait persons.
   const transferPersonOptions = useMemo(() => {
@@ -1280,6 +1264,7 @@ export function SmartTicketNewPage({
 
   async function handleSubmitTransfer() {
     if (!createdCase || transferring) return;
+    const isSameTeam = transferToTeamId === createdCase.assignedTeamId;
     const trimmedNote = transferNote.trim();
     if (!trimmedNote) {
       setTransferError('Devir notu zorunlu.');
@@ -1298,19 +1283,31 @@ export function SmartTicketNewPage({
       // varsa ekle (network payload temiz, backend FieldUpdate row'u
       // duplicate yazmaz).
       const priorityChanged = transferPriority !== createdCase.priority;
-      const updated = await caseService.transferCase(createdCase.id, {
-        toTeamId: transferToTeamId,
-        toPersonId: transferToPersonId || undefined,
-        reason: trimmedNote,
-        reasonCode: 'expertise',
-        smartTicketTransfer: {
-          transferNote: trimmedNote,
-          ...(summary ? { composedSummary: summary } : {}),
-          attemptedStepIds: transferAttemptedStepIds,
-          ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
-        },
-        ...(priorityChanged ? { priority: transferPriority } : {}),
-      });
+      let updated: Case | null | undefined;
+      if (isSameTeam) {
+        // Aynı takım içi kişi değişimi — update endpoint kullan
+        const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
+        updated = await caseService.update(createdCase.id, {
+          assignedPersonId: transferToPersonId,
+          assignedPersonName: targetPerson?.name ?? '',
+        });
+      } else {
+        // Farklı takıma devir — mevcut transferCase akışı
+        const updated2 = await caseService.transferCase(createdCase.id, {
+          toTeamId: transferToTeamId,
+          toPersonId: transferToPersonId || undefined,
+          reason: trimmedNote,
+          reasonCode: 'expertise',
+          smartTicketTransfer: {
+            transferNote: trimmedNote,
+            ...(summary ? { composedSummary: summary } : {}),
+            attemptedStepIds: transferAttemptedStepIds,
+            ...(transferStepOutcomes ? { stepOutcomesSummary: transferStepOutcomes } : {}),
+          },
+          ...(priorityChanged ? { priority: transferPriority } : {}),
+        });
+        updated = updated2 ?? null;
+      }
       if (!updated) {
         setTransferError('Vaka aktarılamadı.');
         return;
@@ -1318,7 +1315,7 @@ export function SmartTicketNewPage({
       setCreatedCase(updated);
       toast({
         type: 'success',
-        message: `Vaka L2'ye aktarıldı (${updated.caseNumber}).`,
+        message: `Vaka aktarıldı (${updated.caseNumber}).`,
         duration: 2500,
       });
       // Devir tamamlandı — kullanıcıyı Case Detail'e götür.
@@ -2051,7 +2048,7 @@ function Stage2Solution({
               Kapanışa Geç
             </Button>
             <Button variant="outline" leftIcon={<ArrowRight size={12} />} onClick={onGoToTransfer}>
-              L2'ye Devret
+              Devret / Aktar
             </Button>
             <Button variant="ghost" leftIcon={<ExternalLink size={12} />} onClick={onGoToCaseDetail}>
               Vaka Detayına Git
@@ -2470,7 +2467,7 @@ function Stage3Transfer({
   onGoToCaseDetail,
 }: {
   createdCase: Case;
-  teamOptions: { all: TransferTeamOption[]; l2: TransferTeamOption[]; nonL2: TransferTeamOption[]; hasL2: boolean };
+  teamOptions: { all: TransferTeamOption[] };
   personOptions: TransferPersonOption[];
   transferToTeamId: string;
   transferToPersonId: string;
@@ -2496,9 +2493,13 @@ function Stage3Transfer({
   // ve composedSummary fallback metin olarak gönderilir → L1 context kaybı.
   // Loading bitene kadar submit'i kilitle; success path'te composer ve
   // metadata dolu olarak gönderilir.
+  const isSameTeamForHint = transferToTeamId === createdCase?.assignedTeamId;
+  const isSameTeam = transferToTeamId !== '' && transferToTeamId === createdCase?.assignedTeamId;
   const canSubmit =
     transferToTeamId !== '' &&
     transferNote.trim().length > 0 &&
+    !(isSameTeam && !transferToPersonId) &&
+    !(isSameTeam && transferToPersonId === createdCase?.assignedPersonId) &&
     !transferring &&
     !transferBriefLoading;
   const noTeamsAtAll = teamOptions.all.length === 0;
@@ -2507,7 +2508,7 @@ function Stage3Transfer({
     <Card>
       <CardBody className="space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <SectionTitle text="3. L2'ye Devir" />
+          <SectionTitle text="3. Devir / Atama" />
           <div className="flex items-center gap-1.5">
             <Button
               size="sm"
@@ -2532,7 +2533,7 @@ function Stage3Transfer({
         </div>
         <p className="text-xs text-slate-500 dark:text-ndark-muted">
           L1'de çözemediğin vakayı başka bir ekibe veya kişiye aktar. Vaka <strong>kapatılmaz</strong>,
-          SLA değişmez, yeni vaka oluşturulmaz. L2 vakayı aynı numarayla devralır.
+          SLA değişmez, yeni vaka oluşturulmaz. Hedef ekip veya kişi vakayı devralır.
         </p>
 
         {/* Empty-state: bu şirketin başka aktif takımı yok */}
@@ -2541,15 +2542,6 @@ function Stage3Transfer({
             ⚠ Bu vakanın şirketinde ({createdCase.companyName ?? '—'}) aktarılabilecek başka aktif
             takım bulunmuyor. Yönetim → Takımlar altından yeni takım oluştur veya pasif bir takımı
             aktif et.
-          </div>
-        )}
-
-        {/* L2 yok uyarı — calm, blocking değil */}
-        {!noTeamsAtAll && !teamOptions.hasL2 && (
-          <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-            <strong>L2 olarak işaretli takım bulunamadı.</strong>{' '}
-            Başka aktif bir takım veya kişi seçerek devredebilirsin. Yönetim → Takımlar altından
-            takımın "Varsayılan Destek Seviyesi" alanını <strong>L2</strong> yapabilirsin.
           </div>
         )}
 
@@ -2563,13 +2555,6 @@ function Stage3Transfer({
               </span>
             }
             required
-            hint={
-              teamOptions.l2.length === 1
-                ? 'Tek L2 takım otomatik seçildi; değiştirebilirsin.'
-                : teamOptions.l2.length > 1
-                  ? 'Birden fazla L2 takım var — seçim yap.'
-                  : undefined
-            }
           >
             <Select
               value={transferToTeamId}
@@ -2579,25 +2564,12 @@ function Stage3Transfer({
               <option value="">
                 {noTeamsAtAll ? '— Aktif takım yok —' : 'Takım seç…'}
               </option>
-              {teamOptions.l2.length > 0 && (
-                <optgroup label="Önerilen L2 ekipleri">
-                  {teamOptions.l2.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {teamOptions.nonL2.length > 0 && (
-                <optgroup label={teamOptions.l2.length > 0 ? 'Diğer aktif takımlar' : 'Aktif takımlar'}>
-                  {teamOptions.nonL2.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                      {t.defaultSupportLevel ? ` · ${t.defaultSupportLevel}` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
+              {teamOptions.all.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}{t.defaultSupportLevel ? ` · ${t.defaultSupportLevel}` : ''}
+                  {t.id === createdCase?.assignedTeamId ? ' (mevcut)' : ''}
+                </option>
+              ))}
             </Select>
           </Field>
           <Field
@@ -2612,7 +2584,9 @@ function Stage3Transfer({
                 ? 'Önce takım seç.'
                 : personOptions.length === 0
                   ? 'Bu takımın aktif kişi kaydı yok.'
-                  : 'Boş bırakılırsa takıma genel atanır.'
+                  : isSameTeamForHint
+                    ? 'Aynı takım içinde aktarım için hedef kişi zorunludur.'
+                    : 'Boş bırakılırsa takıma genel atanır.'
             }
           >
             <Select
@@ -2664,7 +2638,7 @@ function Stage3Transfer({
         <Field
           label="Devir Notu"
           required
-          hint="L2 vakayı açtığında neyi göreceği. Mevcut adımları ekrana bakmadan anlasın."
+          hint="Hedef ekip veya kişi vakayı açtığında neyi göreceği. Mevcut adımları ekrana bakmadan anlasın."
         >
           <TextArea
             rows={3}
@@ -2757,7 +2731,7 @@ function Stage3Transfer({
                 )
               }
             >
-              {transferring ? 'Aktarılıyor…' : 'Devret ve L2\'ye Gönder'}
+              {transferring ? 'Aktarılıyor…' : 'Devret / Ata'}
             </Button>
           </div>
         </div>
