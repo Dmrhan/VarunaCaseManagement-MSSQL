@@ -489,5 +489,37 @@ expect('10.3 effective preview resource deny visible',
 expect('10.4 effective preview security filters counted', effectivePreview.summary.securityFilterCount, 1);
 expect('10.5 effective preview includes field states', effectivePreview.fields.some((s) => s.scope === 'case.close' && s.fields.length > 0), true);
 
+const currentUserPreview = buildAuthorizationEffectivePreview({
+  companyId: 'UNIVERA',
+  user: {
+    ...agent,
+    companyRoles: ['UNIVERA:Agent'],
+    allowedCompanyIds: ['UNIVERA'],
+  },
+  featureFlags: { smartTicketIntakeEnabled: true },
+  overrides: [
+    {
+      target: 'menu',
+      viewKey: 'accounts',
+      effect: 'allow',
+      principal: { type: 'team', key: 'team-l1' },
+      priority: 100,
+    },
+    {
+      target: 'menu',
+      viewKey: 'cases',
+      effect: 'deny',
+      principal: { type: 'user', key: 'user-agent' },
+      priority: 100,
+    },
+  ],
+});
+expect('10.6 current-user preview honors team allow for default-denied menu',
+  currentUserPreview.menus.find((m) => m.viewKey === 'accounts')?.allowed,
+  true);
+expect('10.7 current-user preview honors user deny for default-allowed menu',
+  currentUserPreview.menus.find((m) => m.viewKey === 'cases')?.allowed,
+  false);
+
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

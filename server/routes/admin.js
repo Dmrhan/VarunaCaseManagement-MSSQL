@@ -306,7 +306,17 @@ router.post('/authorization-policies/effective-preview', asyncRoute(async (req, 
   res.json(preview);
 }));
 
+async function assertAuthorizationPolicyCompanyAdmin(req, id) {
+  const row = await authorizationPolicyRepository.getById(
+    id,
+    req.user.allowedCompanyIds,
+  );
+  assertCompanyAdmin(req, row.companyId);
+  return row;
+}
+
 router.patch('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  await assertAuthorizationPolicyCompanyAdmin(req, req.params.id);
   const actor = requireActor(req);
   const item = await authorizationPolicyRepository.update(
     req.params.id,
@@ -318,6 +328,7 @@ router.patch('/authorization-policies/:id', asyncRoute(async (req, res) => {
 }));
 
 router.delete('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  await assertAuthorizationPolicyCompanyAdmin(req, req.params.id);
   const actor = requireActor(req);
   const item = await authorizationPolicyRepository.remove(
     req.params.id,

@@ -300,7 +300,6 @@ export default function App() {
   }
 
   function canShowView(key: View | string, fallback: boolean): boolean {
-    if (!fallback) return false;
     if (!featureFlags.authorizationMenuEnforcementEnabled || effectiveMenuFailed) return fallback;
     if (!effectiveMenuAccess) return fallback;
     const menu = effectiveMenuAccess.menus.find((m) => m.viewKey === key);
