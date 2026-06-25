@@ -1084,12 +1084,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
           </div>
         </main>
 
-        {/* Right panel — RUNA AI + type-specific summary (her vakada görünür) */}
-        <RightPanel
-          item={item}
-          offeredSolutions={offeredSolutions}
-          onCaseUpdated={(updated) => setItem(updated)}
-        />
+        {/* Right panel — RUNA AI + type-specific summary (Agent rolünde gizli) */}
+        {user?.role !== 'Agent' && (
+          <RightPanel
+            item={item}
+            offeredSolutions={offeredSolutions}
+            onCaseUpdated={(updated) => setItem(updated)}
+          />
+        )}
 
       </div>
 
