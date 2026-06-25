@@ -743,6 +743,9 @@ router.patch(
       accountId,
       req.user.fullName,
       req.user.allowedCompanyIds,
+      // M2.3 — Manuel link öğrenme tetikleyicisi (intake'in auto-link
+      // çağrısı opts geçmez → öğrenmez).
+      { source: 'manual', actorUserId: req.user.id ?? null },
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);

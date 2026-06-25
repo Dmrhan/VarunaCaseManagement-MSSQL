@@ -289,6 +289,19 @@ function scoreCandidate(account, signals, ctx = {}) {
     }
   }
 
+  // M2.3 — Öğrenilen sender eşlemesi (yalnız inbound; ctx.learnedAccountId
+  // suggestCustomerMatches'te getByEmail ile çözüldü). 'learned' reason
+  // exact-email ile EŞİT/üstün güç → +80 puan. Intake katmanı 'learned'
+  // reason'ı auto-link tetikleyicisi olarak da kullanır (kişisel adres ise).
+  if (ctx.learnedAccountId && ctx.learnedAccountId === account.id) {
+    score += 80;
+    reasons.push({
+      type: 'learned',
+      label: 'Önceki vakadan öğrenildi',
+      valueMasked: signals.requesterEmail ? maskEmail(signals.requesterEmail) : null,
+    });
+  }
+
   // M2.2 (5) — Domain önerisi (yalnız evrensel, exact email YOKsa devreye girer).
   // Gönderen email'inin domain'i (signals.requesterEmailDomain) aday hesabın
   // Account.email VEYA Contact.email domain'leriyle eşleşiyorsa → 'domain' reason.
@@ -452,6 +465,27 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   const signals = extractSignalsFromCase(c);
   const candidates = await fetchCandidateAccounts(c.companyId);
 
+  // M2.3 — Inbound için öğrenilen sender eşlemesi.
+  // YALNIZ c.origin='Eposta' VE customerContactEmail dolu iken devreye girer.
+  // learnedAccountId aday havuzunda mevcut + aktif olmalı; aksi halde
+  // null kalır → scoreCandidate'e ctx.learnedAccountId YOK gibi gelir.
+  let learnedAccountId = null;
+  let learnedIsRoleAddress = false;
+  if (signals.isInbound && signals.requesterEmail) {
+    try {
+      const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
+      const learned = await learnedSenderAccountRepo.getByEmail(c.companyId, signals.requesterEmail);
+      if (learned && candidates.some((a) => a.id === learned.accountId)) {
+        learnedAccountId = learned.accountId;
+        learnedIsRoleAddress = learned.isRoleAddress;
+      }
+    } catch (err) {
+      // Defensive: log + devam. learned'siz fallback davranış.
+      console.warn('[suggestCustomerMatches] learned lookup fail',
+        err?.message ?? err);
+    }
+  }
+
   // M2.2 (4) — Placeholder telefon filtresi: aday havuzunda bir signal
   // telefon PLACEHOLDER_PHONE_THRESHOLD'dan fazla farklı hesapla eşleşiyorsa
   // discriminator değildir. Burada bir kez hesaplayıp scoreCandidate'a
@@ -477,7 +511,7 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
     }
   }
 
-  const scoreCtx = { placeholderPhones };
+  const scoreCtx = { placeholderPhones, learnedAccountId };
 
   const scored = candidates
     .map((a) => {
@@ -515,7 +549,17 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
     };
   });
 
-  return { suggestions, generatedAt: new Date().toISOString() };
+  // M2.3 — Intake auto-link kararı için learned info açıkça döndürülür.
+  // null → öğrenilmiş eşleme yok / aday değil; obj varsa kişisel/rol bilgi.
+  const learnedMeta = learnedAccountId
+    ? { accountId: learnedAccountId, isRoleAddress: learnedIsRoleAddress }
+    : null;
+
+  return {
+    suggestions,
+    generatedAt: new Date().toISOString(),
+    learned: learnedMeta,
+  };
 }
 
 export const customerMatchRepository = {

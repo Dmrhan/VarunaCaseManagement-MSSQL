@@ -2220,7 +2220,7 @@ export const caseRepository = {
    *  - Update: Case.accountId + Case.accountName + customerMatchPending=false
    *  - Audit: CaseActivity "Müşteri eşleştirildi: {accountName}"
    */
-  async linkAccount(caseId, accountId, actor, allowedCompanyIds) {
+  async linkAccount(caseId, accountId, actor, allowedCompanyIds, opts = {}) {
     const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
     if (!companyId) return null;
 
@@ -2284,6 +2284,34 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    // M2.3 — Manuel link sonrası öğrenme.
+    // YALNIZ source='manual' VE case.origin='Eposta' VE customerContactEmail
+    // doluysa öğren. Intake'in auto-link çağrısı opts.source='auto' geçer →
+    // öğrenmez (zaten exact email match'le tetiklendi, redundant).
+    // Hata kapsanır: öğrenme fail olursa linkAccount başarısı bozulmaz.
+    if (opts.source === 'manual') {
+      try {
+        const caseRow = await prisma.case.findUnique({
+          where: { id: caseId },
+          select: { origin: true, customerContactEmail: true },
+        });
+        if (caseRow?.origin === 'Eposta' && caseRow.customerContactEmail) {
+          const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
+          await learnedSenderAccountRepo.upsert(
+            companyId,
+            caseRow.customerContactEmail,
+            account.id,
+            { source: 'manual_link', createdByUserId: opts.actorUserId ?? null },
+          );
+        }
+      } catch (err) {
+        // Defensive: log + devam et. linkAccount return shape değişmez.
+        console.warn('[linkAccount] learnedSender upsert fail',
+          err?.message ?? err);
+      }
+    }
+
     return shape(updated);
   },
 
