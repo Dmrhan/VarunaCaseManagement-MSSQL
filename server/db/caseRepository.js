@@ -1298,13 +1298,22 @@ export const caseRepository = {
       customerCompanyName: m.customerCompanyName,
     });
 
+    // Smart Ticket self-assign: açan kişinin personId'si varsa vaka İncelemede
+    // başlar ve takıma atama bildirimi gitmez.
+    const isSmartTicketCreate =
+      m.customFields &&
+      typeof m.customFields === 'object' &&
+      m.customFields.smartTicket &&
+      typeof m.customFields.smartTicket === 'object';
+    const isSmartTicketSelfAssigned = isSmartTicketCreate && !!m.assignedPersonId;
+
     const created = await prisma.case.create({
       data: {
         caseNumber,
         title: m.title,
         description: m.description,
         caseType: m.caseType,
-        status: 'Acik',
+        status: isSmartTicketSelfAssigned ? 'Incelemede' : 'Acik',
         priority: m.priority,
         origin: m.origin,
         originDescription: m.originDescription,
@@ -1386,16 +1395,18 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
 
-    await notifyAssignmentTargets({
-      caseId: created.id,
-      companyId: created.companyId,
-      assignedPersonId: created.assignedPersonId,
-      assignedTeamId: created.assignedTeamId,
-      actorUserId: actorUserIdOf(actor),
-      message: `${created.caseNumber} oluşturuldu ve atandı.`,
-      eventType: 'watcher_update',
-      kind: 'assignment',
-    });
+    if (!isSmartTicketSelfAssigned) {
+      await notifyAssignmentTargets({
+        caseId: created.id,
+        companyId: created.companyId,
+        assignedPersonId: created.assignedPersonId,
+        assignedTeamId: created.assignedTeamId,
+        actorUserId: actorUserIdOf(actor),
+        message: `${created.caseNumber} oluşturuldu ve atandı.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
 
     return shape(created);
   },

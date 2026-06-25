@@ -37,7 +37,6 @@ import {
   Box,
   Boxes,
   Flame,
-  Gauge,
   Layers,
   Package,
   Settings2,
@@ -107,7 +106,6 @@ import {
   OFFER_OUTCOMES,
   PRODUCT_USAGES,
   RESPONSE_LEVELS,
-  SUPPORT_LEVELS,
   SUPPORT_LEVEL_LABELS,
   USAGE_CHANGE_ALERTS,
   type CallDisposition,
@@ -3510,27 +3508,6 @@ function DetailTab({
                 renderDisplay={() => (
                   <span className="text-sm text-slate-800">
                     {ESCALATION_LEVEL_LABELS[(drafts.escalationLevel as EscalationLevel | undefined) ?? item.escalationLevel]}
-                  </span>
-                )}
-              />
-            )},
-            // WR-A5 / PM-03 — Destek seviyesi. Inline edit Supervisor+ (BFF guard
-            // 403 verir; UI gating role bazlı zaten yok — backend response toast
-            // gösterir). Phase 1 foundation; SLA/routing entegrasyonu Phase 2.
-            { label: 'Destek Seviyesi', icon: Gauge, node: (
-              <InlineEdit
-                fieldKey="supportLevel"
-                type="select"
-                value={(v('supportLevel') as string | undefined) ?? 'L1'}
-                editing={editingField === 'supportLevel'}
-                isDraft={drafts.supportLevel !== undefined}
-                onStart={() => onStartEdit('supportLevel')}
-                onCommit={(val) => onCommitDraft('supportLevel', val)}
-                onCancel={onCancelEdit}
-                options={SUPPORT_LEVELS.map((l) => ({ value: l, label: SUPPORT_LEVEL_LABELS[l] }))}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {SUPPORT_LEVEL_LABELS[((drafts.supportLevel as SupportLevel | undefined) ?? item.supportLevel ?? 'L1') as SupportLevel]}
                   </span>
                 )}
               />
