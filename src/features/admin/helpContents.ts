@@ -753,3 +753,129 @@ export const TAXONOMY_DEFS_HELP: HelpContent = {
     },
   ],
 };
+
+export const AUTHORIZATION_POLICIES_HELP: HelpContent = {
+  title: 'Yetkilendirme Yönetimi',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Bu ekran, bir kullanıcının, rolün veya takımın Varuna içinde hangi menüleri görebileceğini, hangi kayıtlar üzerinde işlem yapabileceğini ve hangi alanları görebileceğini ya da zorunlu dolduracağını tanımlamak için kullanılır. Kısaca: "Kim, nerede, ne yapabilir?" sorusunun yönetim ekranıdır.',
+      warning:
+        'Yetki değişikliklerini geniş kullanıcı gruplarına uygulamadan önce Etkili Yetki Önizlemesi ile kontrol edin ve mümkünse tek bir test kullanıcısı üzerinde doğrulayın.',
+    },
+    {
+      heading: 'Kime uygulanır? (Kuralın hedef kişisi/grubu)',
+      content:
+        'Kuralı tek bir kullanıcıya, bir takıma, şirket içindeki role veya sistem rolüne uygulayabilirsiniz. Bu alan eski ekrandaki "Kullanıcı Grubu" seçiminin genişletilmiş halidir.',
+      example: `Sistem rolü  → Agent olan herkes
+Şirket rolü  → UNIVERA şirketinde Supervisor olanlar
+Takım        → Univera L1 takımı
+Kullanıcı    → Sadece Kübra Şahin gibi tek bir kişi`,
+      tip:
+        'Genel kuralları rol veya takım bazında, istisnaları kullanıcı bazında tanımlayın. Böylece yönetim kolay kalır.',
+    },
+    {
+      heading: 'Kural tipi ne demek?',
+      content:
+        'Kural tipi, yetkinin hangi alanı kontrol edeceğini seçer. Menü görünürlüğü ekranı açıp açamayacağını, Kayıt İşlemleri kayıt üzerinde hangi işlemi yapabileceğini, Alan Yetkisi bir form alanını görüp/düzenleyip/doldurmak zorunda olup olmadığını, Güvenlik Filtresi ise hangi kayıtları görebileceğini belirler.',
+      example: `Menü               → "Rapor Stüdyosu menüsü Agent'a kapalı olsun"
+Kayıt İşlemleri    → "L1 vaka silemesin, L2 transfer edebilsin"
+Alan Yetkisi       → "Kapanışta Çözüm Açıklaması zorunlu olsun"
+Güvenlik Filtresi  → "Takım sadece kendi takımına atanmış vakaları görsün"`,
+    },
+    {
+      heading: 'İzin ver / Engelle nasıl çalışır?',
+      content:
+        '"İzin ver" seçili hedef için kapalı veya kısıtlı bir yetkiyi açmak için kullanılır. "Engelle" ise normalde açık olan bir menüyü, aksiyonu veya alan davranışını kapatmak için kullanılır. Aynı konuya birden fazla kural denk gelirse öncelik değeri yüksek olan kural baskın değerlendirilir.',
+      tip:
+        'Güvenli başlangıç için önce geniş rol kuralını tanımlayın, sonra özel kullanıcı veya takım istisnasını daha yüksek öncelikle ekleyin.',
+    },
+    {
+      heading: 'Öncelik alanı',
+      content:
+        'Öncelik, aynı kullanıcıya birden fazla kural denk geldiğinde hangisinin kazanacağını belirler. Sayı büyüdükçe kural daha baskın kabul edilir.',
+      example: `Örnek:
+Agent rolü için "Raporlar engelli" priority 100
+Kübra Şahin için "Raporlar izinli" priority 200
+→ Kübra için özel kural kazanır.`,
+    },
+    {
+      heading: 'Menü yetkisi nasıl verilir veya daraltılır?',
+      content:
+        'Kural tipi "Menü" seçildiğinde hangi ekranın menüde görüneceğini kontrol edersiniz. Ekran anahtarı, Varuna içindeki sayfa adıdır. Örneğin Vakalar, Rapor Stüdyosu, Akıllı Ticket veya Yönetim Paneli alt ekranları.',
+      example: `Senaryo: Agent kullanıcısı Rapor Stüdyosu'nu görmesin
+1. Kural tipi: Menü
+2. Kime uygulanır: Sistem rolü / Agent
+3. Etki: Engelle
+4. Ekran anahtarı: reports
+5. Not: "Agent raporlara girmeyecek"`,
+      warning:
+        'Menü yetkisi yalnızca sayfanın görünürlüğünü yönetir. Kayıt oluşturma, güncelleme, kapatma veya dışa aktarma gibi işlemler için ayrıca Kayıt İşlemleri kuralı tanımlayın.',
+    },
+    {
+      heading: 'Kayıt işlemi yetkisi nasıl kullanılır?',
+      content:
+        'Kural tipi "Kayıt İşlemleri" olduğunda bir kayıt üzerinde yapılabilecek işlemi kontrol edersiniz. Kayıt/Kaynak Anahtarı hangi kayıt türü olduğunu; İşlem alanı ise o kayıt üzerinde ne yapılacağını ifade eder.',
+      example: `Kayıt türü örnekleri:
+case          → Vaka
+case.note     → Vaka notu
+account       → Müşteri
+report        → Rapor
+
+İşlem örnekleri:
+create        → oluştur
+read          → görüntüle
+update        → güncelle
+delete        → sil / pasifleştir
+transfer      → devret
+close         → kapat
+export        → dışa aktar`,
+      tip:
+        'Business olarak düşünürken "Kayıt/Kaynak = hangi kayıt?", "İşlem = bu kayıtla ne yapacak?" diye okuyun.',
+    },
+    {
+      heading: 'Alan yetkisi ve zorunluluk',
+      content:
+        'Kural tipi "Alan Yetkisi" form veya detay ekranındaki tek bir alanı kontrol eder. Alan görünür mü, düzenlenebilir mi, zorunlu mu veya maskeli mi sorularını burada yönetirsiniz.',
+      example: `Senaryo: L1 takımında kapanış notu zorunlu olsun
+1. Kural tipi: Alan Yetkisi
+2. Kime uygulanır: Takım / Univera L1
+3. Etki: İzin ver
+4. Ekran/bölüm: case.close
+5. Alan anahtarı: resolutionNote
+6. Aksiyon: required`,
+      warning:
+        'Alan anahtarı teknik bir anahtardır; kullanıcıya görünen etiketle bire bir aynı olmayabilir. Emin olmadığınız alanlarda önce küçük bir test kuralı oluşturup önizleme ile kontrol edin.',
+    },
+    {
+      heading: 'Güvenlik filtresi ne işe yarar?',
+      content:
+        'Güvenlik filtresi, kullanıcının kayıtların tamamını değil sadece belirli kısmını görmesini sağlar. Örneğin bir takım yalnız kendi takımına atanmış vakaları, bir kullanıcı yalnız kendisine atanmış vakaları görebilir. Bu alan JSON formatındadır çünkü kural makine tarafından okunur.',
+      example: `Kullanıcının yalnız kendi şirketlerindeki kayıtları görmesi:
+{
+  "op": "in",
+  "field": "@record.companyId",
+  "value": "@user.allowedCompanyIds"
+}`,
+      tip:
+        'Güvenlik filtresi güçlü ama hassas bir alandır. İlk kullanımda teknik ekip ile birlikte tanımlayın; yanlış filtre fazla kayıt gösterebilir veya kullanıcıya hiçbir kayıt göstermeyebilir.',
+    },
+    {
+      heading: 'Etkili Yetki Önizlemesi',
+      content:
+        'Üstteki önizleme paneli, seçilen rol/kullanıcı/takım için aktif kuralların toplam sonucunu gösterir. Kural yazdıktan sonra "Bu kişi menüyü görebiliyor mu?", "Bu aksiyon engellenmiş mi?" sorusunu canlı akışa geçmeden önce burada kontrol edin.',
+      tip:
+        'Her yeni kuraldan sonra önce önizleme yapın, sonra gerçek kullanıcıyla kısa bir test yapın. Böylece yanlışlıkla fazla yetki verme veya menü kapatma riski azalır.',
+    },
+    {
+      heading: 'Önerilen kullanım sırası',
+      content:
+        'Önce menü görünürlüğünü sadeleştirin, sonra kayıt işlemi yetkilerini, en son alan zorunluluğu ve güvenlik filtrelerini ekleyin. Bu sıra hem test etmeyi kolaylaştırır hem de kullanıcıların ekranı kaybetmesini önler.',
+      example: `1. Agent hangi menüleri görsün?
+2. Supervisor hangi kayıtları güncelleyebilsin?
+3. L1/L2 için hangi alanlar zorunlu olsun?
+4. Takımlar sadece kendi kayıtlarını mı görsün?`,
+    },
+  ],
+};
