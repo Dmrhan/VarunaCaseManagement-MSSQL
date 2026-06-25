@@ -102,9 +102,9 @@ function draftFromReview(r: CaseTaggingReview | undefined): RowDraft {
   return { note: r?.note ?? '', saving: false, fields };
 }
 
-/** Açılış/kapanış bölümü için kaç alanın verdict'i dolu — özet satırı için. */
-function countVerdicts(draft: RowDraft, defs: TagDef[]): number {
-  return defs.filter((d) => draft.fields[tagKey(d)]?.verdict !== '').length;
+/** Yanlış işaretlenen alan sayısı — özet satırı için. */
+function countWrong(draft: RowDraft, defs: TagDef[]): number {
+  return defs.filter((d) => draft.fields[tagKey(d)]?.verdict === 'Yanlis').length;
 }
 
 // Tablo hücresi için genişletilebilir metin
@@ -677,8 +677,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           const review = reviews.get(c.id);
           const draft  = drafts.get(c.id) ?? draftFromReview(review);
 
-          const openingCount = countVerdicts(draft, OPENING_DEFS);
-          const closingCount = countVerdicts(draft, CLOSING_DEFS);
+          const openingCount = countWrong(draft, OPENING_DEFS);
+          const closingCount = countWrong(draft, CLOSING_DEFS);
 
           return (
             <div
