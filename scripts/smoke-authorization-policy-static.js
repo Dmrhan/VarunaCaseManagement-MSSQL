@@ -19,6 +19,7 @@ import {
   isSecurityFilterExpressionValid,
   validateSecurityFilterExpression,
 } from '../server/lib/authorizationPolicy.js';
+import { buildAuthorizationEffectivePreview } from '../server/lib/authorizationEffectivePreview.js';
 
 const root = process.cwd();
 let pass = 0;
@@ -448,6 +449,45 @@ expect('9.10 security filter error carries path',
     conditions: [{ op: 'eq', field: '@record.unknown', value: 'x' }],
   }).errors.some((e) => e.includes('$.conditions[0].field')),
   true);
+
+const effectivePreview = buildAuthorizationEffectivePreview({
+  companyId: 'UNIVERA',
+  principalType: 'systemRole',
+  principalKey: 'Agent',
+  featureFlags: { smartTicketIntakeEnabled: true },
+  overrides: [
+    {
+      target: 'menu',
+      viewKey: 'accounts',
+      effect: 'allow',
+      principal: { type: 'systemRole', key: 'Agent' },
+      priority: 100,
+    },
+    {
+      target: 'resource',
+      resourceKey: 'case',
+      action: 'transfer',
+      effect: 'deny',
+      principal: { type: 'systemRole', key: 'Agent' },
+      priority: 100,
+    },
+    {
+      target: 'securityFilter',
+      resourceKey: 'case',
+      effect: 'allow',
+      principal: { type: 'systemRole', key: 'Agent' },
+      priority: 100,
+      filter: { op: 'exists', field: '@record.companyId' },
+    },
+  ],
+});
+expect('10.1 effective preview builds synthetic user role', effectivePreview.principal.syntheticUser.role, 'Agent');
+expect('10.2 effective preview menu override visible', effectivePreview.menus.find((m) => m.viewKey === 'accounts')?.allowed, true);
+expect('10.3 effective preview resource deny visible',
+  effectivePreview.resources.find((r) => r.key === 'case')?.actions.find((a) => a.action === 'transfer')?.allowed,
+  false);
+expect('10.4 effective preview security filters counted', effectivePreview.summary.securityFilterCount, 1);
+expect('10.5 effective preview includes field states', effectivePreview.fields.some((s) => s.scope === 'case.close' && s.fields.length > 0), true);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

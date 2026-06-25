@@ -12,6 +12,7 @@ import { lookupService } from '@/services/caseService';
 import {
   adminService,
   type AuthorizationPolicy,
+  type AuthorizationEffectivePreview,
   type AuthorizationPolicyEffect,
   type AuthorizationPolicyInput,
   type AuthorizationPolicyTarget,
@@ -70,6 +71,11 @@ export function AdminAuthorizationPoliciesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
+  const [previewPrincipalType, setPreviewPrincipalType] = useState<AuthorizationPrincipalType>('systemRole');
+  const [previewPrincipalKey, setPreviewPrincipalKey] = useState('Agent');
+  const [preview, setPreview] = useState<AuthorizationEffectivePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function refresh() {
@@ -133,6 +139,25 @@ export function AdminAuthorizationPoliciesPage() {
       });
     } else {
       toast({ type: 'error', message: result.error });
+    }
+  }
+
+  async function handlePreview() {
+    if (!companyId || !previewPrincipalKey.trim()) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const result = await adminService.authorizationPolicies.effectivePreview({
+        companyId,
+        principalType: previewPrincipalType,
+        principalKey: previewPrincipalKey.trim(),
+        featureFlags: { smartTicketIntakeEnabled: true },
+      });
+      setPreview(result);
+    } catch (err) {
+      setPreviewError((err as Error).message ?? 'Önizleme hesaplanamadı');
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -204,6 +229,23 @@ export function AdminAuthorizationPoliciesPage() {
           </div>
         }
       >
+        <EffectivePreviewPanel
+          principalType={previewPrincipalType}
+          principalKey={previewPrincipalKey}
+          preview={preview}
+          loading={previewLoading}
+          error={previewError}
+          onPrincipalTypeChange={(value) => {
+            setPreviewPrincipalType(value);
+            setPreview(null);
+          }}
+          onPrincipalKeyChange={(value) => {
+            setPreviewPrincipalKey(value);
+            setPreview(null);
+          }}
+          onPreview={() => void handlePreview()}
+        />
+
         {filtered.length === 0 ? (
           <CardBody>
             <EmptyState
@@ -307,6 +349,146 @@ export function AdminAuthorizationPoliciesPage() {
         onSaved={() => void refresh()}
       />
     </>
+  );
+}
+
+function EffectivePreviewPanel({
+  principalType,
+  principalKey,
+  preview,
+  loading,
+  error,
+  onPrincipalTypeChange,
+  onPrincipalKeyChange,
+  onPreview,
+}: {
+  principalType: AuthorizationPrincipalType;
+  principalKey: string;
+  preview: AuthorizationEffectivePreview | null;
+  loading: boolean;
+  error: string | null;
+  onPrincipalTypeChange: (value: AuthorizationPrincipalType) => void;
+  onPrincipalKeyChange: (value: string) => void;
+  onPreview: () => void;
+}) {
+  const visibleMenus = preview?.menus.filter((m) => m.allowed).slice(0, 6) ?? [];
+  const deniedMenus = preview?.menus.filter((m) => !m.allowed).slice(0, 4) ?? [];
+  const resourceHighlights = preview?.resources
+    .flatMap((r) => r.actions.map((a) => ({ ...a, resourceKey: r.key, label: r.label })))
+    .filter((a) => a.reason === 'override_deny' || a.reason === 'override_allow')
+    .slice(0, 6) ?? [];
+
+  return (
+    <div className="border-b border-slate-200 bg-slate-50/70 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <ShieldCheck size={16} className="text-violet-600" />
+            Etkili Yetki Önizlemesi
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Kayıtlı aktif policy'ler bu principal için nasıl sonuç üretir? Bu panel sadece analiz amaçlıdır.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Principal Tipi" className="w-44">
+            <Select
+              value={principalType}
+              onChange={(e) => onPrincipalTypeChange(e.target.value as AuthorizationPrincipalType)}
+            >
+              {PRINCIPAL_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Principal Key" className="w-56">
+            <TextInput
+              value={principalKey}
+              onChange={(e) => onPrincipalKeyChange(e.target.value)}
+              placeholder="Agent / team-id / user-id"
+            />
+          </Field>
+          <Button
+            variant="outline"
+            onClick={onPreview}
+            disabled={loading || !principalKey.trim()}
+            leftIcon={<ShieldCheck size={14} />}
+          >
+            {loading ? 'Hesaplanıyor…' : 'Önizle'}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+          {error}
+        </div>
+      )}
+
+      {preview && (
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Özet</div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <Metric label="Menü açık" value={preview.summary.menuAllowed} tint="emerald" />
+              <Metric label="Menü kapalı" value={preview.summary.menuDenied} tint="rose" />
+              <Metric label="CRUD izin" value={preview.summary.resourceAllowed} tint="emerald" />
+              <Metric label="CRUD engel" value={preview.summary.resourceDenied} tint="amber" />
+            </div>
+            <div className="mt-2">
+              <Badge tint={preview.summary.securityFilterCount > 0 ? 'violet' : 'slate'}>
+                {preview.summary.securityFilterCount} güvenlik filtresi
+              </Badge>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Menüler</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {visibleMenus.map((m) => (
+                <Badge key={m.key} tint="emerald">{m.label}</Badge>
+              ))}
+              {deniedMenus.map((m) => (
+                <Badge key={m.key} tint="slate">{m.label}</Badge>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Override Etkileri</div>
+            {resourceHighlights.length === 0 ? (
+              <div className="mt-2 text-xs text-slate-500">Resource override etkisi yok.</div>
+            ) : (
+              <div className="mt-2 space-y-1">
+                {resourceHighlights.map((r) => (
+                  <div key={`${r.resourceKey}:${r.action}`} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-mono text-slate-700">{r.resourceKey}.{r.action}</span>
+                    <Badge tint={r.allowed ? 'emerald' : 'rose'}>
+                      {r.allowed ? 'İzin' : 'Engel'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value, tint }: { label: string; value: number; tint: 'emerald' | 'rose' | 'amber' }) {
+  return (
+    <div className="rounded-md bg-slate-50 px-2 py-1">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className={`text-lg font-semibold ${
+        tint === 'emerald' ? 'text-emerald-700' : tint === 'rose' ? 'text-rose-700' : 'text-amber-700'
+      }`}>
+        {value}
+      </div>
+    </div>
   );
 }
 

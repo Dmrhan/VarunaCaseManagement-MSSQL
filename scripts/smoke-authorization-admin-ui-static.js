@@ -41,12 +41,17 @@ expect('1.3 page uses adminService.authorizationPolicies', /adminService\.author
 expect('1.4 page has target filter', /Policy Tipi/.test(page), true);
 expect('1.5 page supports security filter JSON textarea', /Güvenlik Filtresi JSON/.test(page), true);
 expect('1.6 page documents shadow-mode boundary', /runtime enforcement ayrı fazda/.test(page), true);
+expect('1.7 page has effective preview panel', /Etkili Yetki Önizlemesi/.test(page), true);
+expect('1.8 page calls effectivePreview wrapper', /authorizationPolicies\.effectivePreview/.test(page), true);
+expect('1.9 page renders security filter count', /securityFilterCount/.test(page), true);
 
 expect('2.1 adminService has AuthorizationPolicy type', /export interface AuthorizationPolicy\s*\{/.test(adminService), true);
 expect('2.2 adminService has list wrapper', /authorizationPolicies:[\s\S]*async list\(filter: AuthorizationPolicyListFilter\)/.test(adminService), true);
 expect('2.3 adminService has create wrapper', /authorizationPolicies:[\s\S]*async create\(input: AuthorizationPolicyInput\)/.test(adminService), true);
 expect('2.4 adminService has update wrapper', /authorizationPolicies:[\s\S]*async update\(/.test(adminService), true);
 expect('2.5 adminService has deactivate wrapper', /authorizationPolicies:[\s\S]*async deactivate\(id: string\)/.test(adminService), true);
+expect('2.6 adminService has effectivePreview wrapper', /authorizationPolicies:[\s\S]*async effectivePreview\(input: \{/.test(adminService), true);
+expect('2.7 adminService defines AuthorizationEffectivePreview type', /export interface AuthorizationEffectivePreview\s*\{/.test(adminService), true);
 
 expect('3.1 AdminView includes authorization view', /'admin-authorization-policies'/.test(adminLayout), true);
 expect('3.2 AdminLayout nav label present', /Yetkilendirme Yönetimi/.test(adminLayout), true);

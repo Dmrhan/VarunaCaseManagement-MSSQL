@@ -25,6 +25,7 @@ import { authorizationPolicyRepository } from '../db/authorizationPolicyReposito
 import { devopsClient } from '../lib/devopsClient.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
+import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
 
 const router = Router();
 
@@ -284,6 +285,23 @@ router.post('/authorization-policies', asyncRoute(async (req, res) => {
   const actor = requireActor(req);
   const item = await authorizationPolicyRepository.create(body, req.user.allowedCompanyIds, actor);
   res.status(201).json(item);
+}));
+
+router.post('/authorization-policies/effective-preview', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    body.companyId,
+    req.user.allowedCompanyIds,
+  );
+  const preview = buildAuthorizationEffectivePreview({
+    companyId: body.companyId,
+    principalType: body.principalType,
+    principalKey: body.principalKey,
+    featureFlags: body.featureFlags ?? {},
+    overrides,
+  });
+  res.json(preview);
 }));
 
 router.patch('/authorization-policies/:id', asyncRoute(async (req, res) => {

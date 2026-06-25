@@ -353,6 +353,55 @@ export interface AuthorizationPolicyListFilter {
   isActive?: boolean;
 }
 
+export interface AuthorizationEffectivePreview {
+  principal: {
+    type: AuthorizationPrincipalType;
+    key: string;
+    syntheticUser: {
+      id: string;
+      role: string;
+      teamId: string | null;
+      companyRoles: string[];
+      allowedCompanyIds: string[];
+    };
+  };
+  summary: {
+    menuAllowed: number;
+    menuDenied: number;
+    resourceAllowed: number;
+    resourceDenied: number;
+    securityFilterCount: number;
+  };
+  menus: Array<{
+    key: string;
+    viewKey: string;
+    label: string;
+    group: string;
+    allowed: boolean;
+    reason: string;
+  }>;
+  resources: Array<{
+    key: string;
+    label: string;
+    category: string;
+    actions: Array<{ action: string; allowed: boolean; reason: string }>;
+  }>;
+  fields: Array<{
+    scope: string;
+    fields: Array<{
+      fieldKey: string;
+      state: Record<string, boolean>;
+      reasons: Record<string, string>;
+    }>;
+  }>;
+  securityFilters: Array<{
+    resourceKey: string;
+    effect: AuthorizationPolicyEffect;
+    priority: number;
+    filter: unknown;
+  }>;
+}
+
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
 
 // ─────────────────────────────────────────────────────────────────
@@ -1198,6 +1247,24 @@ export const adminService = {
       );
       if (!result) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true };
+    },
+    async effectivePreview(input: {
+      companyId: string;
+      principalType: AuthorizationPrincipalType;
+      principalKey: string;
+      featureFlags?: Record<string, boolean>;
+    }): Promise<AuthorizationEffectivePreview> {
+      const data = await apiFetch<AuthorizationEffectivePreview>(
+        `${ADMIN_BASE}/authorization-policies/effective-preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        },
+        'Yetki önizlemesi hesaplanamadı',
+      );
+      if (!data) throw new Error('Yetki önizlemesi hesaplanamadı');
+      return data;
     },
   },
 };

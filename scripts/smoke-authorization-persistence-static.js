@@ -195,6 +195,17 @@ expect('7.10 admin route uses requireActor on update',
 expect('7.11 admin route delete calls repository remove',
   /router\.delete\('\/authorization-policies\/:id'[\s\S]*authorizationPolicyRepository\.remove/.test(adminRoute),
   true);
+expect('7.12 admin route effective preview exists before id route',
+  adminRoute.indexOf("router.post('/authorization-policies/effective-preview'") > -1 &&
+    adminRoute.indexOf("router.post('/authorization-policies/effective-preview'") <
+      adminRoute.indexOf("router.patch('/authorization-policies/:id'"),
+  true);
+expect('7.13 admin route preview checks company admin',
+  /router\.post\('\/authorization-policies\/effective-preview'[\s\S]*assertCompanyAdmin\(req, body\.companyId\)/.test(adminRoute),
+  true);
+expect('7.14 admin route preview uses active overrides',
+  /router\.post\('\/authorization-policies\/effective-preview'[\s\S]*authorizationPolicyRepository\.listOverrides/.test(adminRoute),
+  true);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);
