@@ -35,36 +35,93 @@ export class MailProviderError extends Error {
 }
 
 /**
- * Mail config — env-driven, M1 kapsamı.
+ * Mail config resolver — M1 env + M5 per-tenant DB-first.
  *
- * Karar matrisi:
- *   - MAIL_TRANSPORT=ethereal (default) → nodemailer.createTestAccount()
- *     ile anında sahte SMTP. previewUrl ile mesajı browser'da göster.
+ * M5 karar matrisi (ExternalDevOpsSetting deseninin aynısı):
+ *   - opts.companyId verildi + DB satır var + enabled=true → DB config
+ *     (smtp host/port + secret decrypt) kullan.
+ *   - opts.companyId verildi + DB satır var + enabled=false → throw
+ *     'mail_integration_disabled' (env'e DÜŞME — "kapalı gerçekten kapalı").
+ *   - opts.companyId verildi + DB satır yok → env fallback (M1
+ *     backward-compat).
+ *   - opts.companyId verilmedi → direkt env (mail:probe / sistem path).
+ *
+ * Transport seçimi (env yolu):
+ *   - MAIL_TRANSPORT=ethereal (default) → sahte SMTP + preview URL.
  *   - MAIL_TRANSPORT=smtp → SMTP_HOST/PORT/SECURE/USER/PASS gerçek transport.
  *
  * Auth:
  *   - MAIL_AUTH=password (default) → user/pass ile auth.
- *   - MAIL_AUTH=oauth2 → M5'te. Şimdilik throw.
+ *   - MAIL_AUTH=oauth2 → henüz desteklenmiyor (M3+ OAuth2).
  *
- * NOT: secretCipher entegrasyonu M5'te (per-tenant ExternalSetting).
- * Şimdilik SMTP_PASS düz env — production'a koyma.
+ * Lazy import: externalMailSettingRepository boot crash önlemek için
+ * dinamik import edilir (server/db/client mailProvider boot anında
+ * gerekmez).
  */
-function resolveConfig() {
+async function resolveConfig({ companyId } = {}) {
+  let dbConfig = null;
+  if (companyId) {
+    const repo = (await import('../db/externalMailSettingRepository.js')).externalMailSettingRepo;
+    dbConfig = await repo.resolveActiveConfig(companyId);
+    if (dbConfig && dbConfig.enabled === false) {
+      throw new MailProviderError(
+        'Mail entegrasyonu bu şirket için kapalı (admin tarafından devre dışı).',
+        { code: 'mail_integration_disabled', status: 503 },
+      );
+    }
+  }
+
+  // DB satır var + enabled=true → DB config (smtp transport zorunlu, env'e
+  // gerek yok). Yoksa env fallback.
+  if (dbConfig && dbConfig.enabled === true) {
+    // M5'te yalnız 'password' auth desteklenir; oauth2 sonraki PR'a.
+    if (dbConfig.authMode !== 'password') {
+      throw new MailProviderError(
+        `authMode=${dbConfig.authMode} henüz desteklenmiyor (oauth2 sonraki PR'da).`,
+        { code: 'mail_auth_unsupported', status: 501 },
+      );
+    }
+    if (!dbConfig.smtpHost) {
+      throw new MailProviderError(
+        'smtpHost tanımlı değil (admin ayarlarından doldur).',
+        { code: 'mail_smtp_host_missing', status: 500 },
+      );
+    }
+    if (!dbConfig.username || !dbConfig.secret) {
+      throw new MailProviderError(
+        'SMTP username + secret zorunlu (admin ayarlarından doldur).',
+        { code: 'mail_smtp_creds_missing', status: 500 },
+      );
+    }
+    return {
+      transport: 'smtp',
+      auth: 'password',
+      from: dbConfig.fromAddress || DEFAULT_FROM,
+      smtp: {
+        host: dbConfig.smtpHost,
+        port: dbConfig.smtpPort || 587,
+        secure: !!dbConfig.smtpSecure,
+        user: dbConfig.username,
+        pass: dbConfig.secret,
+      },
+      source: 'db',
+    };
+  }
+
+  // Env fallback (M1)
   const transport = (process.env.MAIL_TRANSPORT || 'ethereal').toLowerCase();
   const auth = (process.env.MAIL_AUTH || 'password').toLowerCase();
   const from = process.env.MAIL_FROM || DEFAULT_FROM;
 
   if (auth !== 'password') {
-    // OAuth2 plugin seam — M5'te eklenecek. Buraya
-    // refresh_token/access_token/client_id/secret çözücüsü gelecek.
     throw new MailProviderError(
-      `MAIL_AUTH=${auth} henüz desteklenmiyor (M5'te OAuth2).`,
+      `MAIL_AUTH=${auth} henüz desteklenmiyor (oauth2 sonraki PR'da).`,
       { code: 'mail_auth_unsupported', status: 501 },
     );
   }
 
   if (transport === 'ethereal') {
-    return { transport, auth, from };
+    return { transport, auth, from, source: 'env' };
   }
 
   if (transport === 'smtp') {
@@ -85,7 +142,7 @@ function resolveConfig() {
         { code: 'mail_smtp_creds_missing', status: 500 },
       );
     }
-    return { transport, auth, from, smtp: { host, port, secure, user, pass } };
+    return { transport, auth, from, smtp: { host, port, secure, user, pass }, source: 'env' };
   }
 
   throw new MailProviderError(
@@ -155,7 +212,7 @@ export async function sendMail({
   from,
   replyTo,
   headers,
-} = {}) {
+} = {}, opts = {}) {
   const proxiedAt = new Date().toISOString();
 
   if (!to || !subject || (!text && !html)) {
@@ -173,7 +230,8 @@ export async function sendMail({
 
   let config;
   try {
-    config = resolveConfig();
+    // M5 — opts.companyId verildiyse per-tenant DB config; yoksa env (M1).
+    config = await resolveConfig({ companyId: opts.companyId });
   } catch (err) {
     return {
       ok: false,
@@ -199,7 +257,7 @@ export async function sendMail({
         message: err?.message ?? 'Transport oluşturulamadı.',
         status: err?.status ?? 500,
       },
-      meta: { proxiedAt, transport: config.transport },
+      meta: { proxiedAt, transport: config.transport, source: config.source },
     };
   }
 
@@ -226,7 +284,7 @@ export async function sendMail({
       rawSource: RAW_SOURCE,
       messageId: info?.messageId ?? null,
       previewUrl,
-      meta: { proxiedAt, transport: config.transport },
+      meta: { proxiedAt, transport: config.transport, source: config.source },
     };
   } catch (err) {
     return {
@@ -237,7 +295,7 @@ export async function sendMail({
         message: err?.message ?? 'Gönderim başarısız.',
         status: 502,
       },
-      meta: { proxiedAt, transport: config.transport },
+      meta: { proxiedAt, transport: config.transport, source: config.source },
     };
   }
 }
