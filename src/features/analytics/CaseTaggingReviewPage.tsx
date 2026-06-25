@@ -653,8 +653,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       {/* Ana tablo */}
       <div className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
-        <div className="sticky top-0 z-10 grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_110px_110px_150px_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
-          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Açılış Özeti', 'Kapanış Özeti', 'Kontrol Eden', ''].map((h) => (
+        <div className="sticky top-0 z-10 grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_150px_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
             </div>
@@ -677,13 +677,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           const review = reviews.get(c.id);
           const draft  = drafts.get(c.id) ?? draftFromReview(review);
 
-          const openingCount = countWrong(draft, OPENING_DEFS);
-          const closingCount = countWrong(draft, CLOSING_DEFS);
-
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_110px_110px_150px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_150px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
@@ -725,18 +722,6 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 {c.resolutionNote
                   ? <ExpandableCell text={c.resolutionNote} />
                   : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
-              </div>
-              {/* Açılış Özeti */}
-              <div className="px-3 py-2 text-xs">
-                <span className={openingCount > 0 ? 'font-medium text-brand-600 dark:text-ndark-link' : 'text-slate-400'}>
-                  {openingCount}/{OPENING_DEFS.length}
-                </span>
-              </div>
-              {/* Kapanış Özeti */}
-              <div className="px-3 py-2 text-xs">
-                <span className={closingCount > 0 ? 'font-medium text-brand-600 dark:text-ndark-link' : 'text-slate-400'}>
-                  {closingCount}/{CLOSING_DEFS.length}
-                </span>
               </div>
               {/* Kontrol Eden */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
