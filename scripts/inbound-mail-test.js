@@ -338,6 +338,70 @@ async function runScenario4() {
   }
 }
 
+async function runScenario7(refCaseNumberA) {
+  // Codex P2 fix kanıtı — Per-case attachment cap (FILE_MAX_COUNT=20).
+  // Senaryo: A tenant vakasında 18 mevcut attachment dolduralım,
+  // sonra subject [VK-xxx] token'lı 3 PNG'li mail gelsin. Beklenen:
+  // stored=2 (kalan 2 slot), skipped=1 reason='attachment_cap_reached'.
+  console.log('\n=== Senaryo 7 (Codex P2 fix): per-case attachment cap (20) ===');
+  if (!refCaseNumberA) {
+    console.log('  ! Senaryo 1 caseNumber yok → atlanıyor');
+    return;
+  }
+  const refCase = await prisma.case.findFirst({
+    where: { caseNumber: refCaseNumberA, companyId: TEST_COMPANY_ID },
+    select: { id: true },
+  });
+  if (!refCase) {
+    console.log('  ! reference case bulunamadı → atlanıyor');
+    return;
+  }
+
+  // Mevcut attachment count'unu 18'e tamamla
+  const existing = await prisma.caseAttachment.count({ where: { caseId: refCase.id } });
+  const dummiesNeeded = Math.max(0, 18 - existing);
+  for (let i = 0; i < dummiesNeeded; i += 1) {
+    await prisma.caseAttachment.create({
+      data: {
+        caseId: refCase.id,
+        companyId: TEST_COMPANY_ID,
+        fileName: `dummy-${i}.txt`,
+        fileSize: 1,
+        mimeType: 'text/plain',
+        fileUrl: `__dummy__/${refCase.id}/${i}.txt`,
+        uploadedBy: 'test-dummy',
+        uploadedByUserId: null,
+      },
+    });
+  }
+  const before = await prisma.caseAttachment.count({ where: { caseId: refCase.id } });
+  expect('mevcut attachment count = 18 (setup)', before, 18);
+
+  // 3 PNG'li mail (subject token = A vakası) intake et
+  const rawTemplate = readFixture('07-three-attachments-cap.eml');
+  const raw = rawTemplate.replace(/__CASE_NUMBER__/g, refCaseNumberA.replace(/^VK-/, ''));
+  const parsedRes = await parseInboundEml(raw);
+  expect('parse ok', parsedRes.ok, true);
+  expect('parser 3 PNG ek çıkardı', parsedRes.data?.attachments?.length, 3);
+
+  const intakeRes = await intakeInboundEmail({
+    parsed: parsedRes.data,
+    companyId: TEST_COMPANY_ID,
+    companyName: TEST_COMPANY_NAME,
+    actor: SYSTEM_ACTOR,
+  });
+  expect('intake ok', intakeRes.ok, true);
+  expect('action=appended (token eşleşti)', intakeRes.action, 'appended');
+  expect('attachments.stored = 2 (kalan slot)', intakeRes.attachments?.stored, 2);
+  expect('attachments.skipped = 1', intakeRes.attachments?.skipped?.length, 1);
+  expect('skipped reason = attachment_cap_reached',
+    intakeRes.attachments?.skipped?.[0]?.reason, 'attachment_cap_reached');
+
+  // DB cap doğrula: tam 20
+  const after = await prisma.caseAttachment.count({ where: { caseId: refCase.id } });
+  expect('cap sonrası DB attachment count = 20 (FILE_MAX_COUNT)', after, 20);
+}
+
 async function runScenario3(refCaseNumber) {
   console.log('\n=== Senaryo 3: Reply (subject token) — mevcut vakaya not ekle ===');
   if (!refCaseNumber) {
@@ -379,6 +443,7 @@ async function runScenario3(refCaseNumber) {
     await runScenario5(caseNumber1); // M2.1 ek/inline
     await runScenario6(caseNumber1); // M2.1 tenant izolasyon
     await runScenario3(caseNumber1);
+    await runScenario7(caseNumber1); // Codex P2 cap fix
   } catch (err) {
     console.error('\n[test] BEKLENMEYEN HATA:', err.message);
     console.error(err.stack);
