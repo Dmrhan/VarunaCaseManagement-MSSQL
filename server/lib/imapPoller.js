@@ -226,8 +226,15 @@ export async function pollMailbox(companyId) {
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // UNSEEN search
-      const uids = await client.search({ seen: false });
+      // UNSEEN search — { uid: true } ZORUNLU.
+      //
+      // Codex #205 P1 (kritik) — search default'u SEQUENCE numarası döndürür;
+      // mailbox dolu/silme/expunge sonrası sequence ≠ UID olur. Aşağıda
+      // fetchOne(uid, { uid: true }) ve messageFlagsAdd(uid, ..., { uid: true })
+      // UID modunda çalışıyor → search da UID modunda olmalı. Aksi halde
+      // yanlış mesaj `\Seen` işaretlenir, işlenen mail UNSEEN kalır → her
+      // poll'de DUPLICATE vaka açılır.
+      const uids = await client.search({ seen: false }, { uid: true });
       const limited = (uids ?? []).slice(0, MAX_MESSAGES_PER_POLL);
       stats.fetched = limited.length;
 
