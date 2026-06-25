@@ -705,15 +705,83 @@ export interface CaseTransferRecord {
   aiConfidence: number | null;
 }
 
-// Vaka Etiket Doğrulama Ekranı
+// Vaka Etiket Doğrulama Ekranı — alan bazlı (per-field) model.
 export type TaggingVerdict = 'Dogru' | 'Yanlis' | 'Belirsiz';
+
+// 9 etiket: 5 açılış + 4 kapanış. Her biri Original{Code,Label} (create'te
+// Case.customFields'tan kopyalanan değişmez snapshot) + Verdict +
+// Corrected{Code,Label} (Verdict=Yanlış/Belirsiz iken kendi taxonomyType
+// dropdown'ından seçilir, label server-side TaxonomyDef'ten resolve edilir).
+export type TaggingFieldName =
+  | 'openingPlatform'
+  | 'openingBusinessProcess'
+  | 'openingOperationType'
+  | 'openingAffectedObject'
+  | 'openingImpact'
+  | 'closingRootCauseGroup'
+  | 'closingRootCauseDetail'
+  | 'closingResolutionType'
+  | 'closingPermanentPrevention';
 
 export interface CaseTaggingReview {
   id: string;
   caseId: string;
   companyId: string;
-  openingVerdict: TaggingVerdict | null;
-  closingVerdict: TaggingVerdict | null;
+
+  openingPlatformOriginalCode: string | null;
+  openingPlatformOriginalLabel: string | null;
+  openingPlatformVerdict: TaggingVerdict | null;
+  openingPlatformCorrectedCode: string | null;
+  openingPlatformCorrectedLabel: string | null;
+
+  openingBusinessProcessOriginalCode: string | null;
+  openingBusinessProcessOriginalLabel: string | null;
+  openingBusinessProcessVerdict: TaggingVerdict | null;
+  openingBusinessProcessCorrectedCode: string | null;
+  openingBusinessProcessCorrectedLabel: string | null;
+
+  openingOperationTypeOriginalCode: string | null;
+  openingOperationTypeOriginalLabel: string | null;
+  openingOperationTypeVerdict: TaggingVerdict | null;
+  openingOperationTypeCorrectedCode: string | null;
+  openingOperationTypeCorrectedLabel: string | null;
+
+  openingAffectedObjectOriginalCode: string | null;
+  openingAffectedObjectOriginalLabel: string | null;
+  openingAffectedObjectVerdict: TaggingVerdict | null;
+  openingAffectedObjectCorrectedCode: string | null;
+  openingAffectedObjectCorrectedLabel: string | null;
+
+  openingImpactOriginalCode: string | null;
+  openingImpactOriginalLabel: string | null;
+  openingImpactVerdict: TaggingVerdict | null;
+  openingImpactCorrectedCode: string | null;
+  openingImpactCorrectedLabel: string | null;
+
+  closingRootCauseGroupOriginalCode: string | null;
+  closingRootCauseGroupOriginalLabel: string | null;
+  closingRootCauseGroupVerdict: TaggingVerdict | null;
+  closingRootCauseGroupCorrectedCode: string | null;
+  closingRootCauseGroupCorrectedLabel: string | null;
+
+  closingRootCauseDetailOriginalCode: string | null;
+  closingRootCauseDetailOriginalLabel: string | null;
+  closingRootCauseDetailVerdict: TaggingVerdict | null;
+  closingRootCauseDetailCorrectedCode: string | null;
+  closingRootCauseDetailCorrectedLabel: string | null;
+
+  closingResolutionTypeOriginalCode: string | null;
+  closingResolutionTypeOriginalLabel: string | null;
+  closingResolutionTypeVerdict: TaggingVerdict | null;
+  closingResolutionTypeCorrectedCode: string | null;
+  closingResolutionTypeCorrectedLabel: string | null;
+
+  closingPermanentPreventionOriginalCode: string | null;
+  closingPermanentPreventionOriginalLabel: string | null;
+  closingPermanentPreventionVerdict: TaggingVerdict | null;
+  closingPermanentPreventionCorrectedCode: string | null;
+  closingPermanentPreventionCorrectedLabel: string | null;
+
   note: string | null;
   reviewerId: string | null;
   reviewerName: string | null;

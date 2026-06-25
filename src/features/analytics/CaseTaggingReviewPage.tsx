@@ -1,20 +1,22 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Loader2, ShieldCheck } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextInput, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
-import { caseService } from '@/services/caseService';
+import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
+import { formatDateTime } from '@/lib/format';
 
 /**
  * Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin.
  *
- * Bilgi bankası seed'i için: her vakanın açılış (5 alan) ve kapanış (4 alan,
- * sadece Smart Ticket kökenli + Çözüldü vakalarda dolu) etiketlemesinin
- * doğruluğunu Doğru/Yanlış/Belirsiz olarak işaretler. Bu kayıt başka bir
- * akışı beslemez — sadece audit/rapor amaçlı.
+ * Bilgi bankası seed'i için: vakanın 9 etiketinin (5 açılış + 4 kapanış,
+ * kapanış sadece Smart Ticket kökenli + Çözüldü vakalarda dolu) her birini
+ * AYRI AYRI Doğru/Yanlış/Belirsiz olarak işaretler ve yanlış/belirsiz
+ * olanlar için kendi taxonomyType dropdown'ından "doğru etiket" seçtirir.
+ * Bu kayıt başka bir akışı beslemez — sadece audit/bilgi bankası amaçlı.
  */
 
 interface CaseTaggingReviewPageProps {
@@ -37,66 +39,184 @@ const VERDICT_LABELS: Record<TaggingVerdict, string> = {
   Belirsiz: 'Belirsiz',
 };
 
-const OPENING_FIELDS: { key: string; label: string }[] = [
-  { key: 'businessProcess', label: 'İş Süreci' },
-  { key: 'operationType', label: 'İşlem Tipi' },
-  { key: 'affectedObject', label: 'Etkilenen Nesne' },
-  { key: 'impact', label: 'Etki' },
-  { key: 'platform', label: 'Platform' },
+type TaxonomyType = keyof SmartTicketTaxonomyResponse['taxonomies'];
+
+interface TagDef {
+  prefix: 'opening' | 'closing';
+  field: string;
+  label: string;
+  customField: string;
+  taxonomyType: TaxonomyType;
+}
+
+const TAG_DEFS: TagDef[] = [
+  { prefix: 'opening', field: 'Platform',          label: 'Platform',          customField: 'platform',          taxonomyType: 'platform' },
+  { prefix: 'opening', field: 'BusinessProcess',   label: 'İş Süreci',         customField: 'businessProcess',   taxonomyType: 'businessProcess' },
+  { prefix: 'opening', field: 'OperationType',     label: 'İşlem Tipi',        customField: 'operationType',     taxonomyType: 'operationType' },
+  { prefix: 'opening', field: 'AffectedObject',    label: 'Etkilenen Nesne',   customField: 'affectedObject',    taxonomyType: 'affectedObject' },
+  { prefix: 'opening', field: 'Impact',            label: 'Etki',              customField: 'impact',            taxonomyType: 'impact' },
+  { prefix: 'closing', field: 'RootCauseGroup',    label: 'Kök Neden Grubu',   customField: 'rootCauseGroup',    taxonomyType: 'rootCauseGroup' },
+  { prefix: 'closing', field: 'RootCauseDetail',   label: 'Kök Neden Detayı',  customField: 'rootCauseDetail',   taxonomyType: 'rootCauseDetail' },
+  { prefix: 'closing', field: 'ResolutionType',    label: 'Çözüm Tipi',        customField: 'resolutionType',    taxonomyType: 'resolutionType' },
+  { prefix: 'closing', field: 'PermanentPrevention', label: 'Kalıcı Önlem',    customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
 ];
 
-const CLOSURE_FIELDS: { key: string; label: string }[] = [
-  { key: 'rootCauseGroup', label: 'Kök Neden Grubu' },
-  { key: 'rootCauseDetail', label: 'Kök Neden Detayı' },
-  { key: 'resolutionType', label: 'Çözüm Tipi' },
-  { key: 'permanentPrevention', label: 'Kalıcı Önlem' },
-];
+function tagKey(def: TagDef) {
+  return `${def.prefix}${def.field}`;
+}
 
-function extractLabels(obj: Record<string, unknown> | undefined, fields: { key: string; label: string }[]) {
-  return fields.map((f) => ({
-    label: f.label,
-    value: (obj?.[`${f.key}Label`] as string | undefined) ?? null,
-  }));
+function verdictField(def: TagDef): keyof CaseTaggingReview {
+  return `${tagKey(def)}Verdict` as keyof CaseTaggingReview;
+}
+
+function correctedCodeField(def: TagDef): keyof CaseTaggingReview {
+  return `${tagKey(def)}CorrectedCode` as keyof CaseTaggingReview;
+}
+
+function originalLabel(c: Case, def: TagDef): string | null {
+  const smartTicket = (c.customFields?.smartTicket ?? {}) as Record<string, unknown>;
+  const src = def.prefix === 'opening' ? smartTicket : ((smartTicket.closure ?? {}) as Record<string, unknown>);
+  return (src?.[`${def.customField}Label`] as string | undefined) ?? null;
+}
+
+function hasClosureData(c: Case): boolean {
+  return TAG_DEFS.filter((d) => d.prefix === 'closing').some((d) => originalLabel(c, d));
+}
+
+interface FieldDraft {
+  verdict: TaggingVerdict | '';
+  correctedCode: string;
 }
 
 interface RowDraft {
-  openingVerdict: TaggingVerdict | '';
-  closingVerdict: TaggingVerdict | '';
   note: string;
   saving: boolean;
+  fields: Record<string, FieldDraft>;
 }
 
 function draftFromReview(r: CaseTaggingReview | undefined): RowDraft {
-  return {
-    openingVerdict: r?.openingVerdict ?? '',
-    closingVerdict: r?.closingVerdict ?? '',
-    note: r?.note ?? '',
-    saving: false,
-  };
+  const fields: Record<string, FieldDraft> = {};
+  for (const def of TAG_DEFS) {
+    fields[tagKey(def)] = {
+      verdict: ((r?.[verdictField(def)] as TaggingVerdict | null) ?? '') as TaggingVerdict | '',
+      correctedCode: (r?.[correctedCodeField(def)] as string | null) ?? '',
+    };
+  }
+  return { note: r?.note ?? '', saving: false, fields };
+}
+
+// Tablo hücresi için genişletilebilir metin — scrollHeight > clientHeight ise
+// "Devamını göster" butonu gösterilir; içerik sığıyorsa buton render edilmez.
+// CaseDetailPage.tsx:2998 ExpandableDescription ile aynı overflow-ölçüm pattern'i.
+function ExpandableCell({ text }: { text: string }) {
+  const [expanded, setExpanded]         = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) { setIsOverflowing(false); return; }
+    const measure = () => { if (!expanded) setIsOverflowing(el.scrollHeight > el.clientHeight + 1); };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  useEffect(() => { setExpanded(false); }, [text]);
+
+  return (
+    <div>
+      <div ref={ref} className={!expanded ? 'line-clamp-2' : ''} title={!expanded ? text : undefined}>
+        {text}
+      </div>
+      {isOverflowing && (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
+          aria-expanded={expanded}
+          className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {expanded ? 'Gizle' : 'Devamını göster'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Kolon genişlikleri (px).
+const COL_WIDTHS: Record<string, number> = {
+  caseNo: 155,
+  status: 100,
+  description: 280,
+  resolutionNote: 280,
+  createdAt: 150,
+  note: 220,
+  reviewer: 180,
+  save: 100,
+};
+for (const def of TAG_DEFS) {
+  const key = tagKey(def);
+  COL_WIDTHS[`${key}:value`]     = 180;
+  COL_WIDTHS[`${key}:verdict`]   = 150;
+  COL_WIDTHS[`${key}:corrected`] = 360;
+}
+
+// Sol sabit karar alanının toplam genişliği.
+const LEFT_PANEL_WIDTH =
+  COL_WIDTHS.caseNo + COL_WIDTHS.status + COL_WIDTHS.description + COL_WIDTHS.resolutionNote + COL_WIDTHS.createdAt;
+
+// İç div'in yatay scroll oluşturması için gereken minimum genişlik.
+const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
+
+// Header sınıf sabitleri
+const HDR = 'flex items-center px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted';
+
+const FILTER_KEY = 'varuna:tagging-review-filters-v2';
+
+function loadSavedFilters() {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as { dateFrom: string; dateTo: string; statuses: CaseStatus[]; teamId: string };
+  } catch {
+    return null;
+  }
 }
 
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [statuses, setStatuses] = useState<CaseStatus[]>([]);
-  const [page, setPage] = useState(1);
+  const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
+  const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
+  const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
+  const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
+  const [page, setPage]         = useState(1);
   const pageSize = 25;
 
-  const [loading, setLoading] = useState(false);
-  const [items, setItems] = useState<Case[]>([]);
-  const [total, setTotal] = useState(0);
-  const [reviews, setReviews] = useState<Map<string, CaseTaggingReview>>(new Map());
-  const [drafts, setDrafts] = useState<Map<string, RowDraft>>(new Map());
+  const teams = lookupService.teams();
+
+  const [loading, setLoading]   = useState(false);
+  const [items, setItems]       = useState<Case[]>([]);
+  const [total, setTotal]       = useState(0);
+  const [reviews, setReviews]   = useState<Map<string, CaseTaggingReview>>(new Map());
+  const [drafts, setDrafts]     = useState<Map<string, RowDraft>>(new Map());
+  const [taxonomiesByCompany, setTaxonomiesByCompany] = useState<Map<string, SmartTicketTaxonomyResponse['taxonomies']>>(new Map());
 
   const { toast } = useToast();
 
-  async function fetchPage() {
+  // Tek scroll container — yatay ve dikey scroll aynı element'te, sync gerekmez.
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  async function fetchPage(pageOverride?: number) {
     setLoading(true);
-    // apiFetch hata durumunda kendi toast'ını gösterir ve undefined/boş döner —
-    // burada ek bir error state'i gerekmiyor.
     const result = await caseService.listTaggingReviews(
-      { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, statuses: statuses.length ? statuses : undefined },
-      { page, pageSize },
+      {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        statuses: statuses.length ? statuses : undefined,
+        teamId: teamId || undefined,
+      },
+      { page: pageOverride ?? page, pageSize },
     );
     setItems(result.items);
     setTotal(result.total);
@@ -106,9 +226,28 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   }
 
   useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ dateFrom, dateTo, statuses, teamId }));
+    } catch {}
+  }, [dateFrom, dateTo, statuses, teamId]);
+
+  useEffect(() => {
     void fetchPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  useEffect(() => {
+    const missing = Array.from(new Set(items.map((c) => c.companyId))).filter((id) => !taxonomiesByCompany.has(id));
+    if (!missing.length) return;
+    void Promise.all(missing.map((id) => lookupService.smartTicketTaxonomies(id))).then((results) => {
+      setTaxonomiesByCompany((prev) => {
+        const next = new Map(prev);
+        for (const r of results) next.set(r.companyId, r.taxonomies);
+        return next;
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   function toggleStatus(s: CaseStatus) {
     setStatuses((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
@@ -123,15 +262,30 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     });
   }
 
+  function updateFieldDraft(caseId: string, def: TagDef, patch: Partial<FieldDraft>) {
+    setDrafts((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(caseId) ?? draftFromReview(reviews.get(caseId));
+      const curField = cur.fields[tagKey(def)];
+      next.set(caseId, { ...cur, fields: { ...cur.fields, [tagKey(def)]: { ...curField, ...patch } } });
+      return next;
+    });
+  }
+
   async function saveRow(caseId: string) {
     const draft = drafts.get(caseId);
     if (!draft) return;
     updateDraft(caseId, { saving: true });
-    const result = await caseService.updateTaggingReview(caseId, {
-      openingVerdict: draft.openingVerdict || null,
-      closingVerdict: draft.closingVerdict || null,
-      note: draft.note || null,
-    });
+    const patch: Record<string, unknown> = { note: draft.note || null };
+    for (const def of TAG_DEFS) {
+      const f = draft.fields[tagKey(def)];
+      patch[verdictField(def)]       = f.verdict || null;
+      patch[correctedCodeField(def)] = f.correctedCode || null;
+    }
+    const result = await caseService.updateTaggingReview(
+      caseId,
+      patch as Parameters<typeof caseService.updateTaggingReview>[1],
+    );
     if (result) {
       setReviews((prev) => new Map(prev).set(caseId, result));
       updateDraft(caseId, { saving: false });
@@ -145,6 +299,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      {/* Başlık + filtreler */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -154,10 +309,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
             </h1>
           </div>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
-            Açılış ve kapanış etiketlemesinin doğruluğunu işaretleyin — bilgi bankası seed'i için.
+            Her etiketi ayrı ayrı Doğru/Yanlış/Belirsiz işaretleyin; yanlış/belirsiz olanlar için doğru etiketi seçin — bilgi bankası seed'i için.
           </p>
         </div>
-
         <div className="ml-auto flex flex-wrap items-end gap-2">
           <Field label="Başlangıç tarihi" className="w-36">
             <TextInput type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} max={dateTo || undefined} />
@@ -165,19 +319,25 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           <Field label="Bitiş tarihi" className="w-36">
             <TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} />
           </Field>
+          <Field label="Takım" className="w-48">
+            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">Tüm takımlar</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </Select>
+          </Field>
           <Button
             leftIcon={loading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}
             disabled={loading}
-            onClick={() => {
-              setPage(1);
-              void fetchPage();
-            }}
+            onClick={() => { setPage(1); void fetchPage(1); }}
           >
             {loading ? 'Yükleniyor…' : 'Filtrele'}
           </Button>
         </div>
       </div>
 
+      {/* Statü filtreleri */}
       <Card>
         <CardBody>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -200,51 +360,136 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         </CardBody>
       </Card>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 dark:border-ndark-border">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-ndark-card dark:text-ndark-muted">
-            <tr>
-              <th className="px-3 py-2">Vaka</th>
-              <th className="px-3 py-2">Statü</th>
-              <th className="px-3 py-2">Açıklama</th>
-              <th className="px-3 py-2">Açılış Etiketleri</th>
-              <th className="px-3 py-2">Açılış Kontrolü</th>
-              <th className="px-3 py-2">Çözüm Notu</th>
-              <th className="px-3 py-2">Kapanış Etiketleri</th>
-              <th className="px-3 py-2">Kapanış Kontrolü</th>
-              <th className="px-3 py-2">Not</th>
-              <th className="px-3 py-2">Kontrol Eden</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
-                  <Loader2 size={16} className="mx-auto animate-spin text-brand-500" />
-                </td>
-              </tr>
-            )}
-            {!loading && items.length === 0 && (
-              <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-slate-400 dark:text-ndark-dim">
-                  Filtreyle eşleşen vaka yok.
-                </td>
-              </tr>
-            )}
-            {!loading &&
-              items.map((c) => {
-                const st = c.customFields?.smartTicket as Record<string, unknown> | undefined;
-                const cl = st?.closure as Record<string, unknown> | undefined;
-                const opening = extractLabels(st, OPENING_FIELDS);
-                const closing = extractLabels(cl, CLOSURE_FIELDS);
-                const hasClosureData = closing.some((f) => f.value);
-                const review = reviews.get(c.id);
-                const draft = drafts.get(c.id) ?? draftFromReview(review);
+      {/*
+        Tek scroll container yaklaşımı:
+        - Sol hücreler (Vaka/Statü/Açıklama/Çözüm Notu) sticky left-0 → yatay scroll'da sabit.
+        - Sağ hücreler aynı flex row içinde → satır yüksekliği otomatik eşit (items-stretch).
+        - border-bottom row wrapper'da → sol ve sağ boyunca tek çizgi.
+        - İki ayrı tablo/panel ve height sync ihtiyacı yok.
+      */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 dark:border-ndark-border"
+      >
+        <div style={{ minWidth: TOTAL_WIDTH }}>
 
+          {/* ── BAŞLIK (iki satırlı, sticky top) ── */}
+          <div className="sticky top-0 z-30 border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+
+            {/* Başlık satır 1 — etiket grup başlıkları */}
+            <div className="flex">
+              {/* Sol köşe (sticky left) */}
+              <div
+                className="sticky left-0 z-30 shrink-0 border-r border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card"
+                style={{ width: LEFT_PANEL_WIDTH }}
+              />
+              {/* Etiket grup başlıkları */}
+              {TAG_DEFS.map((def) => {
+                const key = tagKey(def);
+                const groupW = COL_WIDTHS[`${key}:value`] + COL_WIDTHS[`${key}:verdict`] + COL_WIDTHS[`${key}:corrected`];
                 return (
-                  <tr key={c.id} className="border-t border-slate-100 align-top dark:border-ndark-border">
-                    <td className="px-3 py-2">
+                  <div
+                    key={key}
+                    className={`${HDR} justify-center border-l border-slate-200 dark:border-ndark-border`}
+                    style={{ width: groupW, minWidth: groupW }}
+                  >
+                    {def.prefix === 'opening' ? 'Açılış' : 'Kapanış'}: {def.label}
+                  </div>
+                );
+              })}
+              {/* Not / Kontrol Eden başlıkları */}
+              <div className={`${HDR} border-l border-slate-200 dark:border-ndark-border`} style={{ width: COL_WIDTHS.note, minWidth: COL_WIDTHS.note }}>
+                Not
+              </div>
+              <div className={HDR} style={{ width: COL_WIDTHS.reviewer, minWidth: COL_WIDTHS.reviewer }}>
+                Kontrol Eden
+              </div>
+              {/* Kaydet sticky-right */}
+              <div
+                className="sticky right-0 z-30 shrink-0 bg-slate-50 dark:bg-ndark-card"
+                style={{ width: COL_WIDTHS.save }}
+              />
+            </div>
+
+            {/* Başlık satır 2 — kolon alt başlıkları */}
+            <div className="flex border-t border-slate-100 dark:border-ndark-border">
+              {/* Sol kolon başlıkları (sticky left) */}
+              <div
+                className="sticky left-0 z-30 flex shrink-0 border-r border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card"
+                style={{ width: LEFT_PANEL_WIDTH }}
+              >
+                <div className={HDR} style={{ width: COL_WIDTHS.caseNo }}>Vaka</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.status }}>Statü</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.description }}>Açıklama</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.resolutionNote }}>Çözüm Notu</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.createdAt }}>Oluşturma Tarihi</div>
+              </div>
+              {/* Etiket alt başlıkları */}
+              {TAG_DEFS.map((def) => {
+                const key = tagKey(def);
+                return (
+                  <Fragment key={`${key}-sub`}>
+                    <div className={`${HDR} border-l border-slate-200 dark:border-ndark-border`} style={{ width: COL_WIDTHS[`${key}:value`], minWidth: COL_WIDTHS[`${key}:value`] }}>
+                      Değer
+                    </div>
+                    <div className={`${HDR} border-l border-slate-100 dark:border-ndark-border`} style={{ width: COL_WIDTHS[`${key}:verdict`], minWidth: COL_WIDTHS[`${key}:verdict`] }}>
+                      Kontrol
+                    </div>
+                    <div className={`${HDR} whitespace-nowrap border-l border-slate-100 dark:border-ndark-border`} style={{ width: COL_WIDTHS[`${key}:corrected`], minWidth: COL_WIDTHS[`${key}:corrected`] }}>
+                      Doğru Etiket
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {/* Not / Kontrol Eden alt başlık boş */}
+              <div className="border-l border-slate-200 dark:border-ndark-border" style={{ width: COL_WIDTHS.note, minWidth: COL_WIDTHS.note }} />
+              <div style={{ width: COL_WIDTHS.reviewer, minWidth: COL_WIDTHS.reviewer }} />
+              {/* Kaydet sticky-right */}
+              <div
+                className="sticky right-0 z-30 shrink-0 bg-slate-50 dark:bg-ndark-card"
+                style={{ width: COL_WIDTHS.save }}
+              />
+            </div>
+          </div>
+
+          {/* ── YÜKLENIYOR ── */}
+          {loading && (
+            <div className="flex items-center justify-center py-10 text-slate-400 dark:text-ndark-dim">
+              <Loader2 size={16} className="animate-spin text-brand-500" />
+            </div>
+          )}
+
+          {/* ── BOŞ DURUM ── */}
+          {!loading && items.length === 0 && (
+            <div className="py-10 text-center text-xs text-slate-400 dark:text-ndark-dim">
+              Filtreyle eşleşen vaka yok.
+            </div>
+          )}
+
+          {/* ── VERİ SATIRLARI ──
+              Her <div> bir kayıt satırı. Sol ve sağ hücreler aynı flex row içinde
+              olduğundan items-stretch sayesinde yükseklikleri otomatik eşit.
+              border-bottom row düzeyinde → sol ve sağ boyunca tek çizgi.
+          */}
+          {!loading &&
+            items.map((c) => {
+              const review   = reviews.get(c.id);
+              const draft    = drafts.get(c.id) ?? draftFromReview(review);
+              const caseHasClosureData = hasClosureData(c);
+              const taxonomies         = taxonomiesByCompany.get(c.companyId);
+
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-stretch border-b border-slate-100 dark:border-ndark-border"
+                >
+                  {/* Sol sabit hücreler (sticky left-0) */}
+                  <div
+                    className="sticky left-0 z-10 flex shrink-0 items-stretch border-r border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card"
+                    style={{ width: LEFT_PANEL_WIDTH }}
+                  >
+                    {/* Vaka */}
+                    <div className="px-3 py-2" style={{ width: COL_WIDTHS.caseNo, minWidth: COL_WIDTHS.caseNo }}>
                       <button
                         type="button"
                         className="font-medium text-brand-600 hover:underline dark:text-ndark-link"
@@ -252,122 +497,151 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                       >
                         {c.caseNumber}
                       </button>
-                      <div className="mt-0.5 max-w-[220px] truncate text-xs text-slate-500 dark:text-ndark-muted" title={c.title}>
+                      <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-ndark-muted" title={c.title}>
                         {c.title}
                       </div>
-                    </td>
-                    <td className="px-3 py-2">
+                    </div>
+                    {/* Statü */}
+                    <div className="flex items-start px-3 py-2" style={{ width: COL_WIDTHS.status, minWidth: COL_WIDTHS.status }}>
                       <Badge tint="slate">{STATUS_LABELS_SHORT[c.status]}</Badge>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <div className="line-clamp-4 max-w-[200px]" title={c.description}>
-                        {c.description || <span className="text-slate-400 dark:text-ndark-dim">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      {opening.every((f) => !f.value) ? (
-                        <span className="text-slate-400 dark:text-ndark-dim">Veri yok</span>
-                      ) : (
-                        <ul className="space-y-0.5">
-                          {opening.map((f) => (
-                            <li key={f.label}>
-                              <span className="text-slate-400 dark:text-ndark-dim">{f.label}:</span>{' '}
-                              {f.value ?? <span className="text-slate-400 dark:text-ndark-dim">—</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Select
-                        value={draft.openingVerdict}
-                        onChange={(e) => updateDraft(c.id, { openingVerdict: e.target.value as TaggingVerdict | '' })}
-                        className="h-8 w-32 py-1 text-xs"
-                      >
-                        <option value="">—</option>
-                        {(['Dogru', 'Yanlis', 'Belirsiz'] as TaggingVerdict[]).map((v) => (
-                          <option key={v} value={v}>
-                            {VERDICT_LABELS[v]}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <div className="line-clamp-4 max-w-[200px]" title={c.resolutionNote}>
-                        {c.resolutionNote || <span className="text-slate-400 dark:text-ndark-dim">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      {!hasClosureData ? (
-                        <span className="text-slate-400 dark:text-ndark-dim">Veri yok / Smart Ticket değil</span>
-                      ) : (
-                        <ul className="space-y-0.5">
-                          {closing.map((f) => (
-                            <li key={f.label}>
-                              <span className="text-slate-400 dark:text-ndark-dim">{f.label}:</span>{' '}
-                              {f.value ?? <span className="text-slate-400 dark:text-ndark-dim">—</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Select
-                        value={draft.closingVerdict}
-                        disabled={!hasClosureData}
-                        title={!hasClosureData ? 'Kapanış verisi yok' : undefined}
-                        onChange={(e) => updateDraft(c.id, { closingVerdict: e.target.value as TaggingVerdict | '' })}
-                        className="h-8 w-32 py-1 text-xs"
-                      >
-                        <option value="">—</option>
-                        {(['Dogru', 'Yanlis', 'Belirsiz'] as TaggingVerdict[]).map((v) => (
-                          <option key={v} value={v}>
-                            {VERDICT_LABELS[v]}
-                          </option>
-                        ))}
-                      </Select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <TextArea
-                        value={draft.note}
-                        onChange={(e) => updateDraft(c.id, { note: e.target.value })}
-                        rows={2}
-                        className="w-44 text-xs"
-                        placeholder="Not…"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-ndark-muted">
-                      {review?.reviewerName ? (
-                        <>
-                          <div>{review.reviewerName}</div>
-                          {review.reviewedAt && (
-                            <div className="text-slate-400 dark:text-ndark-dim">
-                              {new Date(review.reviewedAt).toLocaleString('tr-TR', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-slate-400 dark:text-ndark-dim">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Button size="sm" disabled={draft.saving} onClick={() => void saveRow(c.id)}>
-                        {draft.saving ? <Loader2 size={12} className="animate-spin" /> : 'Kaydet'}
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
+                    </div>
+                    {/* Açıklama */}
+                    <div className="px-3 py-2 text-xs" style={{ width: COL_WIDTHS.description, minWidth: COL_WIDTHS.description }}>
+                      {c.description
+                        ? <ExpandableCell text={c.description} />
+                        : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                    </div>
+                    {/* Çözüm Notu */}
+                    <div className="px-3 py-2 text-xs" style={{ width: COL_WIDTHS.resolutionNote, minWidth: COL_WIDTHS.resolutionNote }}>
+                      {c.resolutionNote
+                        ? <ExpandableCell text={c.resolutionNote} />
+                        : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                    </div>
+                    {/* Oluşturma Tarihi */}
+                    <div className="px-3 py-2 text-xs whitespace-nowrap" style={{ width: COL_WIDTHS.createdAt, minWidth: COL_WIDTHS.createdAt }}>
+                      {formatDateTime(c.createdAt)}
+                    </div>
+                  </div>
+
+                  {/* Sağ kayan etiket hücreleri */}
+                  {TAG_DEFS.map((def) => {
+                    const key              = tagKey(def);
+                    const isClosing        = def.prefix === 'closing';
+                    const cellsDisabled    = isClosing && !caseHasClosureData;
+                    const value            = originalLabel(c, def);
+                    const field            = draft.fields[key];
+                    const correctedDisabled = cellsDisabled || field.verdict === '' || field.verdict === 'Dogru';
+                    const options          = taxonomies?.[def.taxonomyType] ?? [];
+
+                    return (
+                      <Fragment key={key}>
+                        {/* Değer */}
+                        <div
+                          className="border-l border-slate-100 px-3 py-2 text-xs dark:border-ndark-border"
+                          style={{ width: COL_WIDTHS[`${key}:value`], minWidth: COL_WIDTHS[`${key}:value`] }}
+                        >
+                          <div className="line-clamp-2" title={value ?? undefined}>
+                            {value ?? <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                          </div>
+                        </div>
+                        {/* Kontrol */}
+                        <div
+                          className="border-l border-slate-100 px-3 py-2 dark:border-ndark-border"
+                          style={{ width: COL_WIDTHS[`${key}:verdict`], minWidth: COL_WIDTHS[`${key}:verdict`] }}
+                        >
+                          <Select
+                            value={cellsDisabled ? '' : field.verdict}
+                            disabled={cellsDisabled}
+                            title={cellsDisabled ? 'Kapanış verisi yok' : undefined}
+                            onChange={(e) => {
+                              const v = e.target.value as TaggingVerdict | '';
+                              updateFieldDraft(c.id, def, {
+                                verdict: v,
+                                ...(v !== 'Yanlis' && v !== 'Belirsiz' ? { correctedCode: '' } : {}),
+                              });
+                            }}
+                            className="h-8 py-1 text-xs"
+                          >
+                            <option value="">—</option>
+                            {(['Dogru', 'Yanlis', 'Belirsiz'] as TaggingVerdict[]).map((v) => (
+                              <option key={v} value={v}>{VERDICT_LABELS[v]}</option>
+                            ))}
+                          </Select>
+                        </div>
+                        {/* Doğru Etiket */}
+                        <div
+                          className="border-l border-slate-100 px-3 py-2 dark:border-ndark-border"
+                          style={{ width: COL_WIDTHS[`${key}:corrected`], minWidth: COL_WIDTHS[`${key}:corrected`] }}
+                        >
+                          <Select
+                            value={correctedDisabled ? '' : field.correctedCode}
+                            disabled={correctedDisabled}
+                            title={correctedDisabled ? 'Önce Yanlış/Belirsiz işaretleyin' : undefined}
+                            onChange={(e) => updateFieldDraft(c.id, def, { correctedCode: e.target.value })}
+                            className="h-8 py-1 text-xs"
+                          >
+                            <option value="">—</option>
+                            {options.map((o) => (
+                              <option key={o.code} value={o.code}>{o.label}</option>
+                            ))}
+                          </Select>
+                        </div>
+                      </Fragment>
+                    );
+                  })}
+
+                  {/* Not */}
+                  <div
+                    className="border-l border-slate-100 px-3 py-2 dark:border-ndark-border"
+                    style={{ width: COL_WIDTHS.note, minWidth: COL_WIDTHS.note }}
+                  >
+                    <TextArea
+                      value={draft.note}
+                      onChange={(e) => updateDraft(c.id, { note: e.target.value })}
+                      rows={2}
+                      className="text-xs"
+                      placeholder="Not…"
+                    />
+                  </div>
+
+                  {/* Kontrol Eden */}
+                  <div
+                    className="px-3 py-2 text-xs text-slate-500 dark:text-ndark-muted"
+                    style={{ width: COL_WIDTHS.reviewer, minWidth: COL_WIDTHS.reviewer }}
+                  >
+                    {review?.reviewerName ? (
+                      <>
+                        <div>{review.reviewerName}</div>
+                        {review.reviewedAt && (
+                          <div className="text-slate-400 dark:text-ndark-dim">
+                            {new Date(review.reviewedAt).toLocaleString('tr-TR', {
+                              day: '2-digit', month: '2-digit', year: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-slate-400 dark:text-ndark-dim">—</span>
+                    )}
+                  </div>
+
+                  {/* Kaydet (sticky right-0) */}
+                  <div
+                    className="sticky right-0 z-10 flex shrink-0 items-center bg-white px-3 py-2 dark:bg-ndark-card"
+                    style={{ width: COL_WIDTHS.save }}
+                  >
+                    <Button size="sm" disabled={draft.saving} onClick={() => void saveRow(c.id)}>
+                      {draft.saving ? <Loader2 size={12} className="animate-spin" /> : 'Kaydet'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
       </div>
 
+      {/* Sayfalama */}
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-ndark-muted">
         <span>{total} vaka</span>
         <div className="flex items-center gap-2">
@@ -380,9 +654,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           >
             Önceki
           </Button>
-          <span>
-            Sayfa <strong>{page}</strong> / {totalPages}
-          </span>
+          <span>Sayfa <strong>{page}</strong> / {totalPages}</span>
           <Button
             size="sm"
             variant="outline"

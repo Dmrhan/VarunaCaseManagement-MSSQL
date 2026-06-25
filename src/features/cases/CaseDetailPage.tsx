@@ -35,13 +35,20 @@ import {
   Save,
   ShieldAlert,
   Box,
+  Boxes,
   Flame,
+  Gauge,
   Layers,
+  Package,
   Settings2,
+  ShoppingBag,
   Sparkles,
   Star,
   TrendingDown,
+  User,
+  UserCheck,
   UserPlus,
+  Users,
   Wallet,
   Workflow,
   X,
@@ -71,6 +78,7 @@ import { NoteAvatar, NotesTab } from './components/CaseNotes';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
+import { DevOpsSection } from './components/DevOpsSection';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -730,13 +738,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                       toast({ type: 'info', message: 'İptal akışı status popover üzerinden çalıştırılır.' });
                     }}
                   />
-                  <MenuAction
-                    label="Jira'ya Aktar"
-                    onClick={() => {
-                      close();
-                      toast({ type: 'info', message: 'Jira entegrasyonu FAZ 2 kapsamında.' });
-                    }}
-                  />
+                  {/* PR-D3 — "Jira'ya Aktar" stub kaldırıldı (TBD-12).
+                      DevOps section bu ihtiyacı karşılıyor; ayrı bir Jira
+                      entegrasyonu planlanmıyor. */}
                   <MenuAction
                     label="Yazdır"
                     onClick={() => {
@@ -2988,6 +2992,62 @@ function SlaRow({ label, value }: { label: string; value: string }) {
 
 // KpiCompact + KpiMini kaldırıldı — KPI artık Detay sekmesinin üstünde KpiInlineRow ile gösteriliyor
 
+// Açıklama alanı — uzun metinlerde "Devamını oku" göster; kısa metinlerde
+// buton hiç render edilmez (CaseSolutionStepsPanel'deki overflow-ölçüm
+// pattern'iyle aynı: scrollHeight > clientHeight ise kırpılmış demektir).
+function ExpandableDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const ref = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      setIsOverflowing(false);
+      return;
+    }
+    const measure = () => {
+      if (!expanded) {
+        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={`whitespace-pre-wrap text-sm text-slate-700 ${!expanded ? 'line-clamp-6' : ''}`}
+      >
+        {text}
+      </p>
+      {isOverflowing && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          aria-expanded={expanded}
+          className="mt-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {expanded ? 'Daralt' : 'Devamını oku'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ----------------------------------------------------------------
 // Tab Components
 // ----------------------------------------------------------------
@@ -3033,6 +3093,14 @@ function DetailTab({
   onCommitDraft: (field: keyof Case, value: unknown) => void;
   onTransitionApplied: (updated: Case) => void;
 }) {
+  // PR-D3 — case-write yetkili rol set'i. DevOps section'da Bağla/Kaldır
+  // gating'i için kullanılır. Backend'de PATCH /:id ile aynı kapı
+  // (allowedCompanyIds scope; explicit requireRole yok), UI sadece
+  // görünürlüğü düşürür — sızıntı yok.
+  const { user } = useAuth();
+  const canWriteCase =
+    !!user && ['Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role);
+
   // Kategori cascade — taslakta seçili kategoriye göre alt-kategori opsiyonları
   const activeCategory = (drafts.category ?? item.category) as string;
   const subCategoryOptions = categories.find((c) => c.category === activeCategory)?.subCategories ?? [];
@@ -3042,6 +3110,11 @@ function DetailTab({
   // Aktif değer = pending draft varsa onu göster, yoksa item değeri
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
+
+  // Atama & eskalasyon kartı — Sınıflandırma kartındakiyle aynı iki katmanlı
+  // kompakt tasarım. İkincil katman varsayılan kapalı; içindeki bir alan
+  // doldurulunca üst (her zaman görünen) bölüme otomatik taşınır.
+  const [showOtherAssignment, setShowOtherAssignment] = useState(false);
 
   // Devir Notu — en son aktarımın notu, Açıklama'nın hemen altında.
   // Stale guard CaseSolutionStepsPanel.tsx'teki reqIdRef/caseIdRef pattern'iyle
@@ -3069,6 +3142,11 @@ function DetailTab({
       if (latest.reasonLabel || latest.reason) setLatestTransfer(latest);
     });
   }, [item.id, item.transferCount]);
+
+  // Sınıflandırma kartı — iki katmanlı kompakt tasarım. İkincil katman
+  // ("Diğer sınıflandırma bilgileri") varsayılan kapalı; açılınca tüm
+  // ikincil alanları gösterir (ayrı bir "tümünü göster" anahtarı yok).
+  const [showOtherClassification, setShowOtherClassification] = useState(false);
 
   // WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" panel'i artık Detay body'sinde
   // değil; kendi tab'inde (Case Detail tab listinin son sırasında, tüm
@@ -3103,9 +3181,7 @@ function DetailTab({
           onStart={() => onStartEdit('description')}
           onCommit={(val) => onCommitDraft('description', val)}
           onCancel={onCancelEdit}
-          renderDisplay={(val) => (
-            <p className="whitespace-pre-wrap text-sm text-slate-700">{String(val ?? '—')}</p>
-          )}
+          renderDisplay={(val) => <ExpandableDescription text={String(val ?? '—')} />}
         />
       </Section>
 
@@ -3120,7 +3196,7 @@ function DetailTab({
                 {latestTransfer.fromPersonName ? ` - ${latestTransfer.fromPersonName}` : ''}
               </span>
               <span className="text-slate-400">→</span>
-              <span className="font-semibold text-slate-800 dark:text-ndark-text">
+              <span className="text-slate-800 dark:text-ndark-text">
                 {latestTransfer.toTeamName ?? '—'}
                 {latestTransfer.toPersonName ? ` - ${latestTransfer.toPersonName}` : ''}
               </span>
@@ -3160,180 +3236,239 @@ function DetailTab({
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
           Cila-4 #2 — "operable" structured variant: hafif başlık şeridi +
           bg-white içerik + hairline çerçeve + sıkı ızgara. */}
-      <Section title="Sınıflandırma" variant="structured">
-        <EditableGrid
-          variant="structured"
-          rows={[
-            { label: 'Kategori', node: (
-              <InlineEdit
-                fieldKey="category"
-                type="select"
-                value={v('category') ?? ''}
-                editing={editingField === 'category'}
-                isDraft={drafts.category !== undefined}
-                onStart={() => onStartEdit('category')}
-                onCommit={(val) => onCommitDraft('category', val)}
-                onCancel={onCancelEdit}
-                options={categories.map((c) => ({ value: c.category, label: c.category }))}
-              />
-            )},
-            { label: 'Alt Kategori', node: (
-              <InlineEdit
-                fieldKey="subCategory"
-                type="select"
-                value={v('subCategory') ?? ''}
-                editing={editingField === 'subCategory'}
-                isDraft={drafts.subCategory !== undefined}
-                onStart={() => onStartEdit('subCategory')}
-                onCommit={(val) => onCommitDraft('subCategory', val)}
-                onCancel={onCancelEdit}
-                options={[{ value: '', label: '— Seçin —' }, ...subCategoryOptions.map((s) => ({ value: s, label: s }))]}
-                disabled={!activeCategory}
-              />
-            )},
-            { label: 'Talep Türü', node: (
-              <InlineEdit
-                fieldKey="requestType"
-                type="select"
-                value={v('requestType')}
-                editing={editingField === 'requestType'}
-                isDraft={drafts.requestType !== undefined}
-                onStart={() => onStartEdit('requestType')}
-                onCommit={(val) => onCommitDraft('requestType', val)}
-                onCancel={onCancelEdit}
-                options={CASE_REQUEST_TYPES.map((r) => ({ value: r, label: r }))}
-              />
-            )},
-            { label: 'Ürün Grubu', node: (
-              <InlineEdit
-                fieldKey="productGroup"
-                type="select"
-                value={v('productGroup') ?? ''}
-                editing={editingField === 'productGroup'}
-                isDraft={drafts.productGroup !== undefined}
-                onStart={() => onStartEdit('productGroup')}
-                onCommit={(val) => onCommitDraft('productGroup', val)}
-                onCancel={onCancelEdit}
-                options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
-              />
-            )},
-            // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
-            // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
-            { label: 'Paket', node: (
-              <InlineEdit
-                fieldKey="packageId"
-                type="select"
-                value={(v('packageId') as string | null | undefined) ?? ''}
-                editing={editingField === 'packageId'}
-                isDraft={drafts.packageId !== undefined}
-                onStart={() => onStartEdit('packageId')}
-                onCommit={(val) => onCommitDraft('packageId', val || null)}
-                onCancel={onCancelEdit}
-                options={[
-                  { value: '', label: '— Paket Yok —' },
-                  ...catalogPackages.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
-                ]}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(() => {
-                      const pid =
-                        (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
-                      if (!pid) return item.packageName ?? '—';
-                      const found = catalogPackages.find((p) => p.id === pid);
-                      return found ? `${found.name} (${found.code})` : item.packageName ?? pid;
-                    })()}
-                  </span>
+      {(() => {
+        const primaryClassificationItems = [
+          { label: 'Kategori', icon: Layers, node: (
+            <InlineEdit
+              fieldKey="category"
+              type="select"
+              value={v('category') ?? ''}
+              editing={editingField === 'category'}
+              isDraft={drafts.category !== undefined}
+              onStart={() => onStartEdit('category')}
+              onCommit={(val) => onCommitDraft('category', val)}
+              onCancel={onCancelEdit}
+              options={categories.map((c) => ({ value: c.category, label: c.category }))}
+            />
+          )},
+          { label: 'Alt Kategori', icon: Box, node: (
+            <InlineEdit
+              fieldKey="subCategory"
+              type="select"
+              value={v('subCategory') ?? ''}
+              editing={editingField === 'subCategory'}
+              isDraft={drafts.subCategory !== undefined}
+              onStart={() => onStartEdit('subCategory')}
+              onCommit={(val) => onCommitDraft('subCategory', val)}
+              onCancel={onCancelEdit}
+              options={[{ value: '', label: '— Seçin —' }, ...subCategoryOptions.map((s) => ({ value: s, label: s }))]}
+              disabled={!activeCategory}
+            />
+          )},
+          { label: 'Talep Türü', icon: ListChecks, node: (
+            <InlineEdit
+              fieldKey="requestType"
+              type="select"
+              value={v('requestType')}
+              editing={editingField === 'requestType'}
+              isDraft={drafts.requestType !== undefined}
+              onStart={() => onStartEdit('requestType')}
+              onCommit={(val) => onCommitDraft('requestType', val)}
+              onCancel={onCancelEdit}
+              options={CASE_REQUEST_TYPES.map((r) => ({ value: r, label: r }))}
+            />
+          )},
+          { label: 'Origin', icon: Workflow, node: (
+            <InlineEdit
+              fieldKey="origin"
+              type="select"
+              value={v('origin')}
+              editing={editingField === 'origin'}
+              isDraft={drafts.origin !== undefined}
+              onStart={() => onStartEdit('origin')}
+              onCommit={(val) => onCommitDraft('origin', val)}
+              onCancel={onCancelEdit}
+              options={CASE_ORIGINS.map((o) => ({ value: o, label: o }))}
+            />
+          )},
+        ];
+
+        // WR-A7b — Catalog Paket/Ürün inline edit; renderDisplay'in kullandığı
+        // aynı id/name çözümlemesi burada da reuse edilir.
+        const packageDisplayId = (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
+        const productDisplayId = (drafts.productId as string | null | undefined) ?? item.productId ?? null;
+        const thirdPartyDisplayName = (drafts.thirdPartyName as string | undefined) ?? item.thirdPartyName;
+        const isBlankValue = (val: unknown) =>
+          val === null || val === undefined || String(val).trim() === '' || String(val).trim() === '—';
+
+        const secondaryClassificationItems = [
+          { label: 'Ürün Grubu', icon: Boxes, isEmpty: isBlankValue(v('productGroup')), node: (
+            <InlineEdit
+              fieldKey="productGroup"
+              type="select"
+              value={v('productGroup') ?? ''}
+              editing={editingField === 'productGroup'}
+              isDraft={drafts.productGroup !== undefined}
+              onStart={() => onStartEdit('productGroup')}
+              onCommit={(val) => onCommitDraft('productGroup', val)}
+              onCancel={onCancelEdit}
+              options={[{ value: '', label: '— Seçin —' }, ...lookupService.productGroups().map((p) => ({ value: p, label: p }))]}
+            />
+          )},
+          // WR-A7b — Catalog Paket inline edit. BFF DI.3/4/5 enforce eder; role gate
+          // (Supervisor/Admin/SystemAdmin) BFF tarafında, UI 403 ise toast gösterir.
+          { label: 'Paket', icon: Package, isEmpty: !packageDisplayId && !item.packageName, node: (
+            <InlineEdit
+              fieldKey="packageId"
+              type="select"
+              value={(v('packageId') as string | null | undefined) ?? ''}
+              editing={editingField === 'packageId'}
+              isDraft={drafts.packageId !== undefined}
+              onStart={() => onStartEdit('packageId')}
+              onCommit={(val) => onCommitDraft('packageId', val || null)}
+              onCancel={onCancelEdit}
+              options={[
+                { value: '', label: '— Paket Yok —' },
+                ...catalogPackages.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
+              ]}
+              renderDisplay={() => (
+                <span className="text-sm text-slate-800">
+                  {(() => {
+                    if (!packageDisplayId) return item.packageName ?? '—';
+                    const found = catalogPackages.find((p) => p.id === packageDisplayId);
+                    return found ? `${found.name} (${found.code})` : item.packageName ?? packageDisplayId;
+                  })()}
+                </span>
+              )}
+            />
+          )},
+          // WR-A7b — Catalog Ürün inline edit. BFF DI.2 enforce; role gate
+          // (Supervisor/CSM/Admin/SystemAdmin) BFF tarafında.
+          { label: 'Ürün', icon: ShoppingBag, isEmpty: !productDisplayId && !item.productName, node: (
+            <InlineEdit
+              fieldKey="productId"
+              type="select"
+              value={(v('productId') as string | null | undefined) ?? ''}
+              editing={editingField === 'productId'}
+              isDraft={drafts.productId !== undefined}
+              onStart={() => onStartEdit('productId')}
+              onCommit={(val) => onCommitDraft('productId', val || null)}
+              onCancel={onCancelEdit}
+              options={(() => {
+                const pid =
+                  (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
+                // Paket seçiliyse o pakete bağlı ürünleri öncelikle göster (cascade filter UI hint).
+                // Tüm ürünleri yine yedek olarak sun ki paketsiz ürün de eklenebilsin.
+                return [
+                  { value: '', label: '— Ürün Yok —' },
+                  ...catalogProducts.map((p) => ({
+                    value: p.id,
+                    label:
+                      `${p.name} (${p.code})` +
+                      (pid && p.id ? '' : '') /* paket filtresi UI yardımı; backend katı değil */,
+                  })),
+                ];
+              })()}
+              renderDisplay={() => (
+                <span className="text-sm text-slate-800">
+                  {(() => {
+                    if (!productDisplayId) return item.productName ?? '—';
+                    const found = catalogProducts.find((p) => p.id === productDisplayId);
+                    return found ? `${found.name} (${found.code})` : item.productName ?? productDisplayId;
+                  })()}
+                </span>
+              )}
+            />
+          )},
+          { label: 'Origin Açıklama', icon: FileText, isEmpty: isBlankValue(v('originDescription')), node: (
+            <InlineEdit
+              fieldKey="originDescription"
+              type="text"
+              value={v('originDescription')}
+              editing={editingField === 'originDescription'}
+              isDraft={drafts.originDescription !== undefined}
+              onStart={() => onStartEdit('originDescription')}
+              onCommit={(val) => onCommitDraft('originDescription', String(val))}
+              onCancel={onCancelEdit}
+              disabled={v('origin') !== 'Diğer'}
+              placeholder={v('origin') === 'Diğer' ? 'Origin = Diğer için zorunlu' : 'Yalnızca origin = Diğer'}
+            />
+          )},
+          { label: '3. Parti Bekleniyor', icon: Building2, isEmpty: isBlankValue(thirdPartyDisplayName), node: (
+            <InlineEdit
+              fieldKey="thirdPartyId"
+              type="select"
+              value={v('thirdPartyId') ?? ''}
+              editing={editingField === 'thirdPartyId'}
+              isDraft={drafts.thirdPartyId !== undefined}
+              onStart={() => onStartEdit('thirdPartyId')}
+              onCommit={(val) => onCommitDraft('thirdPartyId', val)}
+              onCancel={onCancelEdit}
+              options={[{ value: '', label: '— Yok —' }, ...thirdParties.map((tp) => ({ value: tp.id, label: tp.name }))]}
+              renderDisplay={() => (
+                <span className="text-sm text-slate-800">{thirdPartyDisplayName ?? '—'}</span>
+              )}
+            />
+          )},
+        ];
+
+        // Kompakt tek satır düzeni: "İkon Label: değer" — yalnız bu kartta.
+        // EditableGrid'in dt/dd dikey istifi burada kullanılmıyor (alan
+        // tasarrufu için); InlineEdit davranışı/propları değişmedi.
+        // Doldurulmuş ikincil alanlar (Paket, Ürün vb.) artık üst (her zaman
+        // açık) bölüme taşınır — "Diğer sınıflandırma bilgileri" katlanabilir
+        // kısmı yalnız HENÜZ BOŞ olan ikincil alanları barındırır.
+        const filledSecondary = secondaryClassificationItems.filter((i) => !i.isEmpty);
+        const emptySecondary = secondaryClassificationItems.filter((i) => i.isEmpty);
+
+        return (
+          <Section title="Sınıflandırma" variant="structured">
+            <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+              {primaryClassificationItems.map((i) => (
+                <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                  <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                  <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                </div>
+              ))}
+              {filledSecondary.map((i) => (
+                <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                  <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                  <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                  <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                </div>
+              ))}
+            </div>
+            {emptySecondary.length > 0 && (
+              <div className="mt-0.5 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowOtherClassification((s) => !s)}
+                  className="flex w-full items-center gap-1 px-1.5 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+                >
+                  <ChevronRight
+                    size={12}
+                    className={`transition-transform ${showOtherClassification ? 'rotate-90' : ''}`}
+                    aria-hidden
+                  />
+                  Diğer sınıflandırma bilgileri
+                </button>
+                {showOtherClassification && (
+                  <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+                    {emptySecondary.map((i) => (
+                      <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                        <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                        <span className="shrink-0 text-[11px] font-medium text-slate-500">{i.label}:</span>
+                        <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              />
-            )},
-            // WR-A7b — Catalog Ürün inline edit. BFF DI.2 enforce; role gate
-            // (Supervisor/CSM/Admin/SystemAdmin) BFF tarafında.
-            { label: 'Ürün', node: (
-              <InlineEdit
-                fieldKey="productId"
-                type="select"
-                value={(v('productId') as string | null | undefined) ?? ''}
-                editing={editingField === 'productId'}
-                isDraft={drafts.productId !== undefined}
-                onStart={() => onStartEdit('productId')}
-                onCommit={(val) => onCommitDraft('productId', val || null)}
-                onCancel={onCancelEdit}
-                options={(() => {
-                  const pid =
-                    (drafts.packageId as string | null | undefined) ?? item.packageId ?? null;
-                  // Paket seçiliyse o pakete bağlı ürünleri öncelikle göster (cascade filter UI hint).
-                  // Tüm ürünleri yine yedek olarak sun ki paketsiz ürün de eklenebilsin.
-                  return [
-                    { value: '', label: '— Ürün Yok —' },
-                    ...catalogProducts.map((p) => ({
-                      value: p.id,
-                      label:
-                        `${p.name} (${p.code})` +
-                        (pid && p.id ? '' : '') /* paket filtresi UI yardımı; backend katı değil */,
-                    })),
-                  ];
-                })()}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(() => {
-                      const pid =
-                        (drafts.productId as string | null | undefined) ?? item.productId ?? null;
-                      if (!pid) return item.productName ?? '—';
-                      const found = catalogProducts.find((p) => p.id === pid);
-                      return found ? `${found.name} (${found.code})` : item.productName ?? pid;
-                    })()}
-                  </span>
-                )}
-              />
-            )},
-            { label: 'Origin', node: (
-              <InlineEdit
-                fieldKey="origin"
-                type="select"
-                value={v('origin')}
-                editing={editingField === 'origin'}
-                isDraft={drafts.origin !== undefined}
-                onStart={() => onStartEdit('origin')}
-                onCommit={(val) => onCommitDraft('origin', val)}
-                onCancel={onCancelEdit}
-                options={CASE_ORIGINS.map((o) => ({ value: o, label: o }))}
-              />
-            )},
-            { label: 'Origin Açıklama', node: (
-              <InlineEdit
-                fieldKey="originDescription"
-                type="text"
-                value={v('originDescription')}
-                editing={editingField === 'originDescription'}
-                isDraft={drafts.originDescription !== undefined}
-                onStart={() => onStartEdit('originDescription')}
-                onCommit={(val) => onCommitDraft('originDescription', String(val))}
-                onCancel={onCancelEdit}
-                disabled={v('origin') !== 'Diğer'}
-                placeholder={v('origin') === 'Diğer' ? 'Origin = Diğer için zorunlu' : 'Yalnızca origin = Diğer'}
-              />
-            )},
-            { label: '3. Parti Bekleniyor', node: (
-              <InlineEdit
-                fieldKey="thirdPartyId"
-                type="select"
-                value={v('thirdPartyId') ?? ''}
-                editing={editingField === 'thirdPartyId'}
-                isDraft={drafts.thirdPartyId !== undefined}
-                onStart={() => onStartEdit('thirdPartyId')}
-                onCommit={(val) => onCommitDraft('thirdPartyId', val)}
-                onCancel={onCancelEdit}
-                options={[{ value: '', label: '— Yok —' }, ...thirdParties.map((tp) => ({ value: tp.id, label: tp.name }))]}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {(drafts.thirdPartyName as string | undefined) ?? item.thirdPartyName ?? '—'}
-                  </span>
-                )}
-              />
-            )},
-          ]}
-        />
-      </Section>
+              </div>
+            )}
+          </Section>
+        );
+      })()}
 
       {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
           previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
@@ -3349,56 +3484,12 @@ function DetailTab({
           Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
           sıkı ızgara). Sol panel okuma özeti; merkez edit. */}
       <Section title="Atama & eskalasyon" variant="structured">
-        <EditableGrid
-          variant="structured"
-          rows={[
-            { label: 'Atanan Takım', node: (
-              <InlineEdit
-                fieldKey="assignedTeamId"
-                type="select"
-                value={v('assignedTeamId') ?? ''}
-                editing={editingField === 'assignedTeamId'}
-                isDraft={drafts.assignedTeamId !== undefined}
-                onStart={() => onStartEdit('assignedTeamId')}
-                onCommit={(val) => onCommitDraft('assignedTeamId', val)}
-                onCancel={onCancelEdit}
-                options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-                renderDisplay={() => {
-                  const val = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
-                  return val ? (
-                    <span className="text-sm text-slate-800">{val}</span>
-                  ) : (
-                    <span className="text-sm italic text-slate-400">Atanmadı</span>
-                  );
-                }}
-              />
-            )},
-            { label: 'Atanan Kişi', node: (
-              <InlineEdit
-                fieldKey="assignedPersonId"
-                type="select"
-                value={v('assignedPersonId') ?? ''}
-                editing={editingField === 'assignedPersonId'}
-                isDraft={drafts.assignedPersonId !== undefined}
-                onStart={() => onStartEdit('assignedPersonId')}
-                onCommit={(val) => onCommitDraft('assignedPersonId', val)}
-                onCancel={onCancelEdit}
-                options={[
-                  { value: '', label: activeTeamId ? '— Atanmadı —' : '— Önce takım seçin —' },
-                  ...personOptions.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-                disabled={!activeTeamId}
-                renderDisplay={() => {
-                  const val = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
-                  return val ? (
-                    <span className="text-sm text-slate-800">{val}</span>
-                  ) : (
-                    <span className="text-sm italic text-slate-400">Atanmadı</span>
-                  );
-                }}
-              />
-            )},
-            { label: 'Eskalasyon', node: (
+        {(() => {
+          const assignedTeamName = (drafts.assignedTeamName as string | undefined) ?? item.assignedTeamName;
+          const assignedPersonName = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
+
+          const primaryAssignmentItems = [
+            { label: 'Eskalasyon', icon: AlertTriangle, node: (
               <InlineEdit
                 fieldKey="escalationLevel"
                 type="select"
@@ -3419,7 +3510,7 @@ function DetailTab({
             // WR-A5 / PM-03 — Destek seviyesi. Inline edit Supervisor+ (BFF guard
             // 403 verir; UI gating role bazlı zaten yok — backend response toast
             // gösterir). Phase 1 foundation; SLA/routing entegrasyonu Phase 2.
-            { label: 'Destek Seviyesi', node: (
+            { label: 'Destek Seviyesi', icon: Gauge, node: (
               <InlineEdit
                 fieldKey="supportLevel"
                 type="select"
@@ -3437,12 +3528,115 @@ function DetailTab({
                 )}
               />
             )},
-            { label: 'Vaka Sahibi', node: (
-              <span className="block cursor-default px-2 py-1 text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
-            ) },
-          ]}
-        />
+            { label: 'Vaka Sahibi', icon: UserCheck, node: (
+              <span className="block cursor-default text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
+            )},
+          ];
+
+          const secondaryAssignmentItems = [
+            { label: 'Atanan Takım', icon: Users, isEmpty: !assignedTeamName, node: (
+              <InlineEdit
+                fieldKey="assignedTeamId"
+                type="select"
+                value={v('assignedTeamId') ?? ''}
+                editing={editingField === 'assignedTeamId'}
+                isDraft={drafts.assignedTeamId !== undefined}
+                onStart={() => onStartEdit('assignedTeamId')}
+                onCommit={(val) => onCommitDraft('assignedTeamId', val)}
+                onCancel={onCancelEdit}
+                options={[{ value: '', label: '— Atanmadı —' }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
+                renderDisplay={() => (
+                  assignedTeamName ? (
+                    <span className="text-sm text-slate-800">{assignedTeamName}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  )
+                )}
+              />
+            )},
+            { label: 'Atanan Kişi', icon: User, isEmpty: !assignedPersonName, node: (
+              <InlineEdit
+                fieldKey="assignedPersonId"
+                type="select"
+                value={v('assignedPersonId') ?? ''}
+                editing={editingField === 'assignedPersonId'}
+                isDraft={drafts.assignedPersonId !== undefined}
+                onStart={() => onStartEdit('assignedPersonId')}
+                onCommit={(val) => onCommitDraft('assignedPersonId', val)}
+                onCancel={onCancelEdit}
+                options={[
+                  { value: '', label: activeTeamId ? '— Atanmadı —' : '— Önce takım seçin —' },
+                  ...personOptions.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+                disabled={!activeTeamId}
+                renderDisplay={() => (
+                  assignedPersonName ? (
+                    <span className="text-sm text-slate-800">{assignedPersonName}</span>
+                  ) : (
+                    <span className="text-sm italic text-slate-400">Atanmadı</span>
+                  )
+                )}
+              />
+            )},
+          ];
+
+          const filledSecondaryAssignment = secondaryAssignmentItems.filter((i) => !i.isEmpty);
+          const emptySecondaryAssignment = secondaryAssignmentItems.filter((i) => i.isEmpty);
+
+          return (
+            <>
+              <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+                {filledSecondaryAssignment.map((i) => (
+                  <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                    <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                    <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                    <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                  </div>
+                ))}
+                {primaryAssignmentItems.map((i) => (
+                  <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                    <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                    <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                    <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                  </div>
+                ))}
+              </div>
+              {emptySecondaryAssignment.length > 0 && (
+                <div className="mt-0.5 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowOtherAssignment((s) => !s)}
+                    className="flex w-full items-center gap-1 px-1.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700"
+                  >
+                    <ChevronRight
+                      size={12}
+                      className={`transition-transform ${showOtherAssignment ? 'rotate-90' : ''}`}
+                      aria-hidden
+                    />
+                    Diğer atama bilgileri
+                  </button>
+                  {showOtherAssignment && (
+                    <div className="grid grid-cols-1 gap-x-3 gap-y-0 sm:grid-cols-2">
+                      {emptySecondaryAssignment.map((i) => (
+                        <div key={i.label} className="flex items-center gap-1 px-1.5 py-0.5">
+                          <i.icon size={12} className="shrink-0 text-slate-400" aria-hidden />
+                          <span className="shrink-0 text-xs font-medium text-slate-500">{i.label}:</span>
+                          <div className="min-w-0 flex-1 text-sm">{i.node}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </Section>
+
+      {/* PR-D3 — Azure DevOps İş Öğeleri.
+          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
+          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (

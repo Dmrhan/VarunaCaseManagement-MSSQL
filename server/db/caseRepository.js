@@ -9,6 +9,7 @@ import {
   emitGenericNotification,
 } from './actionItemRepository.js';
 import { ActorRequiredError } from '../lib/actor.js';
+import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 
 /**
@@ -740,6 +741,108 @@ function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
 //   - version + capturedAt server-side stamp. Raw KB persist EDİLMEZ
 //     (yalnız iki normalized string + meta).
 const SMART_TICKET_AI_DRAFTS_VERSION = 1;
+/**
+ * PR-D2 — customFields.devops array read/write helper'ları.
+ *
+ * Case.customFields Prisma'da NVarChar(Max) (JSON string olabilir VEYA
+ * smart-ticket merge fonksiyonlarındaki gibi object olarak elden geçmiş
+ * olabilir). İki durumu da güvenli ele al: parse fail → boş object.
+ *
+ * writeDevopsArray her zaman JSON string döndürür (Prisma'ya yazılır).
+ */
+function readDevopsArray(customFieldsRaw) {
+  if (!customFieldsRaw) return [];
+  let obj;
+  if (typeof customFieldsRaw === 'string') {
+    try {
+      obj = JSON.parse(customFieldsRaw);
+    } catch {
+      return [];
+    }
+  } else if (typeof customFieldsRaw === 'object') {
+    obj = customFieldsRaw;
+  } else {
+    return [];
+  }
+  const arr = obj?.devops;
+  return Array.isArray(arr) ? arr : [];
+}
+
+function writeDevopsArray(customFieldsRaw, devopsArr) {
+  let obj = {};
+  if (customFieldsRaw) {
+    if (typeof customFieldsRaw === 'string') {
+      try {
+        obj = JSON.parse(customFieldsRaw);
+      } catch {
+        obj = {};
+      }
+    } else if (typeof customFieldsRaw === 'object') {
+      obj = { ...customFieldsRaw };
+    }
+  }
+  obj.devops = devopsArr;
+  return JSON.stringify(obj);
+}
+
+/**
+ * Fix 2 (Codex P2 pre-main) — Atomik devops array mutate (optimistic
+ * concurrency control + retry).
+ *
+ * Sorun: linkDevops/unlinkDevops naïve read-modify-write race condition'a
+ * açıktı. İki eşzamanlı POST /devops-link:
+ *   Tx A read arr=[]
+ *   Tx B read arr=[]
+ *   Tx A write arr=[X]
+ *   Tx B write arr=[Y]   ← X kaybedildi
+ *
+ * Çözüm: `updateMany(where: { id, updatedAt })` optimistic guard. Prisma
+ * @updatedAt directive update'lerde otomatik yeni timestamp set eder;
+ * concurrent write timestamp eşleşmesi nedeniyle count=0 döner → retry.
+ *
+ * Aktivite (CaseActivity) successful update sonrası ayrı satır — append-only
+ * audit, race-relevant değil.
+ *
+ * @param {string} caseId
+ * @param {(arr: Array<object>) => { nextArr: Array<object>, op: 'append'|'remove'|'noop', target?: object }} mutate
+ *   Mevcut array → next array dönüştürücüsü.
+ * @returns {Promise<{ ok: true, op: string, target?: object } | null>}
+ *   - null: case bulunamadı
+ *   - { ok: true, op: 'noop' }: idempotent (zaten istenen state)
+ *   - { ok: true, op: 'append'|'remove', target }: değişiklik kaydedildi
+ *
+ * Throws CaseValidationError(409, 'devops_concurrent_update') retry tükenirse.
+ */
+const DEVOPS_MUTATE_MAX_RETRIES = 5;
+async function atomicMutateDevopsArray(caseId, mutate) {
+  for (let attempt = 0; attempt < DEVOPS_MUTATE_MAX_RETRIES; attempt += 1) {
+    const current = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true, updatedAt: true },
+    });
+    if (!current) return null;
+    const arr = readDevopsArray(current.customFields);
+    const result = mutate(arr);
+    if (result.op === 'noop') {
+      return { ok: true, op: 'noop' };
+    }
+    const next = writeDevopsArray(current.customFields, result.nextArr);
+    const updated = await prisma.case.updateMany({
+      where: { id: caseId, updatedAt: current.updatedAt },
+      data: { customFields: next },
+    });
+    if (updated.count === 1) {
+      return { ok: true, op: result.op, target: result.target };
+    }
+    // Race lost — exponential-ish backoff (10/35/85/185/385 ms ortalama)
+    await new Promise((r) => setTimeout(r, 10 + attempt * 25));
+  }
+  throw new CaseValidationError(
+    'Eşzamanlı değişiklik nedeniyle DevOps bağlantısı güncellenemedi. Lütfen tekrar deneyin.',
+    { status: 409, code: 'devops_concurrent_update' },
+  );
+}
+
 function buildSmartTicketAiDraftsMerge(prev, drafts) {
   if (!drafts || typeof drafts !== 'object') return null;
   const engineering =
@@ -860,6 +963,23 @@ function buildTodayRange() {
 function notSnoozedClause() {
   return { OR: [{ snoozeUntil: null }, { snoozeUntil: { lte: new Date() } }] };
 }
+
+// Vaka Etiket Doğrulama Ekranı — alan bazlı (per-field) model. Her giriş
+// CaseTaggingReview'daki `${prefix}${tag}{Original,Verdict,Corrected}*`
+// kolon ailesini, Case.customFields.smartTicket(.closure) içindeki kaynak
+// alanı ve TaxonomyDef.taxonomyType değerini birbirine bağlar — tek yerden
+// değişsin diye repository + route + (frontend'de ayrıca) tekrarlanır.
+const TAGGING_FIELD_DEFS = [
+  { prefix: 'opening', tag: 'Platform', customField: 'platform', taxonomyType: 'platform' },
+  { prefix: 'opening', tag: 'BusinessProcess', customField: 'businessProcess', taxonomyType: 'businessProcess' },
+  { prefix: 'opening', tag: 'OperationType', customField: 'operationType', taxonomyType: 'operationType' },
+  { prefix: 'opening', tag: 'AffectedObject', customField: 'affectedObject', taxonomyType: 'affectedObject' },
+  { prefix: 'opening', tag: 'Impact', customField: 'impact', taxonomyType: 'impact' },
+  { prefix: 'closing', tag: 'RootCauseGroup', customField: 'rootCauseGroup', taxonomyType: 'rootCauseGroup' },
+  { prefix: 'closing', tag: 'RootCauseDetail', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' },
+  { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
+  { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+];
 
 export const caseRepository = {
   /**
@@ -1820,6 +1940,268 @@ export const caseRepository = {
 
     const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Azure DevOps / TFS work item bağla.
+   *
+   * Saklama: Case.customFields.devops = Array<DevopsLinkEntry>.
+   * Her entry SADECE devopsClient.normalizeWorkItem çıktısının 16 allowlist
+   * alanı + bağlama meta'sı (linkedAt, linkedBy{Id,Name}, lastSyncedAt) içerir.
+   * Description/ReproSteps/History HİÇBİR YERDE saklanmaz (devopsClient
+   * allowlist guard'ı zaten engeller).
+   *
+   * Davranış:
+   *  - workItemRef (id veya TFS URL) → numeric id'ye parse
+   *  - devopsClient.getWorkItem(id) ile canlı doğrula
+   *  - aynı id zaten array'de varsa idempotent: mevcut hali döndür (yeniden ekleme yok)
+   *  - değilse normalize snapshot + meta'yı array'e push
+   *  - CaseActivity: 'DevopsLinked' (note = `#<id> bağlandı: <title>`)
+   *
+   * Arşivli vaka guard'ı: assertCaseInScope (write semantiği) otomatik
+   * 409 case_archived_readonly döner — arşivli vakaya link atılamaz.
+   */
+  async linkDevops(caseId, { workItemRef, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.linkDevops');
+    const workItemId = parseWorkItemId(workItemRef);
+    if (!workItemId) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id veya TFS URL gerekli.',
+        { status: 400, code: 'devops_workitem_ref_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // TFS'ten canlı çek + normalize (allowlist guard devopsClient'ta).
+    // Fix 1 + Fix 2: request-level allowlist (?fields=) + race-safe write
+    // helper'ı. Önce dedup için pre-check yaparız (TFS çağrısını boşa
+    // harcamamak için), sonra atomic mutate içinde tekrar dedup
+    // (race-safe).
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const existingArr = readDevopsArray(fresh.customFields);
+    if (existingArr.some((entry) => entry?.id === workItemId)) {
+      // Idempotent: zaten bağlı, güncel state'i döndür.
+      const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+      return shape(c);
+    }
+
+    // Faz 2.1 — per-tenant config (DB-first, env fallback). companyId
+    // assertCaseInScope tarafından döndürüldü.
+    const tfs = await devopsClient.getWorkItem(workItemId, { companyId });
+    if (!tfs.ok) {
+      const status = tfs.error.code === 'tfs_not_found' ? 404
+        : tfs.error.code === 'tfs_auth_error' ? 502
+          : tfs.error.code === 'tfs_integration_disabled' ? 503
+            : tfs.error.status ?? 502;
+      throw new CaseValidationError(
+        tfs.error.message,
+        { status, code: tfs.error.code },
+      );
+    }
+    const snapshot = tfs.data.normalized;
+    if (!snapshot || !snapshot.id) {
+      throw new CaseValidationError(
+        'TFS work item normalize edilemedi.',
+        { status: 502, code: 'devops_normalize_failed' },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const entry = {
+      ...snapshot,                       // 16 allowlist alanı + url + id
+      linkedAt: now,
+      linkedByUserId: actor.userId ?? null,
+      linkedByUserName: actor.displayName,
+      lastSyncedAt: now,
+    };
+
+    // Fix 2 — atomic mutate (race-safe). Helper içinde dedup tekrar
+    // kontrol edilir: concurrent link gelirse op='noop' veya
+    // updateMany count=0 → retry.
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      if (arr.some((e) => e?.id === workItemId)) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return { nextArr: [...arr, entry], op: 'append', target: entry };
+    });
+    if (!mutateResult) return null;
+
+    // Activity log — sadece gerçek append durumunda (noop = zaten bağlıydı).
+    if (mutateResult.op === 'append') {
+      const noteText = `#${workItemId} bağlandı${snapshot.title ? `: ${snapshot.title}` : ''}`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsLinked',
+          action: 'DevOps work item bağlandı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      });
+    }
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'ı kaldır (array'den çıkar).
+   *
+   * Idempotent: aranan id array'de yoksa mevcut state'i döndürür (silent).
+   * CaseActivity 'DevopsUnlinked' kayıt atar.
+   * Arşivli vaka guard'ı assertCaseInScope ile otomatik 409.
+   */
+  async unlinkDevops(caseId, { workItemId, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.unlinkDevops');
+    const id = parseWorkItemId(workItemId);
+    if (!id) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id gerekli.',
+        { status: 400, code: 'devops_workitem_id_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Fix 2 — atomic mutate (race-safe).
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      const target = arr.find((entry) => entry?.id === id);
+      if (!target) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return {
+        nextArr: arr.filter((entry) => entry?.id !== id),
+        op: 'remove',
+        target,
+      };
+    });
+    if (!mutateResult) return null;
+
+    if (mutateResult.op === 'remove') {
+      const noteText = `#${id} kaldırıldı${mutateResult.target?.title ? `: ${mutateResult.target.title}` : ''}`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsUnlinked',
+          action: 'DevOps work item kaldırıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      });
+    }
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'larının CANLI değerlerini çek.
+   *
+   * customFields.devops array'indeki id'leri batch ile TFS'ten sorgular.
+   * TFS erişilemezse saklı snapshot'a düşer (fallback) + her item'a stale
+   * meta'sı ekler.
+   *
+   * Read endpoint olduğu için assertCaseInScopeForRead (SystemAdmin arşivli
+   * case için 200; diğer roller arşivli case'te 404 — soft-archive guard
+   * otomatik).
+   *
+   * Dönen:
+   *   { items: Array<entry>, stale: boolean, error?: { code, message } }
+   *   stale=true → TFS down, snapshot fallback gösteriliyor.
+   */
+  async listDevopsLive(caseId, allowedCompanyIds, actorRole) {
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
+    if (!companyId) return null;
+
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const stored = readDevopsArray(fresh.customFields);
+    if (stored.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    const ids = stored.map((e) => e?.id).filter((n) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    // Fix 3 (Codex P2 pre-main) — Chunk batch fetch + try/catch fallback.
+    //   - TFS REST batch limiti 200; biz 100 chunk'larız (güvenli marj).
+    //   - Tüm chunk'ları paralel çek (Promise.all).
+    //   - Herhangi BİR chunk fail → tüm response stale fallback (snapshot
+    //     döner, _stale:true her item'da, error meta'sı).
+    //   - Hiçbir senaryoda 500 atılmaz — try/catch tüm live path'i sarar.
+    const DEVOPS_LIVE_CHUNK = 100;
+    let liveList = [];
+    let stale = false;
+    let liveError = null;
+    try {
+      const chunks = [];
+      for (let i = 0; i < ids.length; i += DEVOPS_LIVE_CHUNK) {
+        chunks.push(ids.slice(i, i + DEVOPS_LIVE_CHUNK));
+      }
+      // Faz 2.1 — per-tenant config (DB-first, env fallback).
+      const results = await Promise.all(
+        chunks.map((c) => devopsClient.getWorkItems(c, { companyId })),
+      );
+      const firstFail = results.find((r) => !r.ok);
+      if (firstFail) {
+        stale = true;
+        liveError = { code: firstFail.error.code, message: firstFail.error.message };
+      } else {
+        liveList = results.flatMap((r) => (Array.isArray(r.data?.normalized) ? r.data.normalized : []));
+      }
+    } catch (err) {
+      // Bilinmeyen runtime hata (devopsClient throw, fetch internal vs.)
+      // — snapshot fallback'a düş, 500 yansıtma.
+      stale = true;
+      liveError = {
+        code: 'devops_live_unexpected_error',
+        message: err?.message ?? 'DevOps canlı çek başarısız.',
+      };
+    }
+
+    if (stale) {
+      return {
+        items: stored.map((entry) => ({ ...entry, _stale: true })),
+        stale: true,
+        error: liveError ?? { code: 'devops_live_unknown', message: 'TFS canlı çek başarısız.' },
+      };
+    }
+
+    const liveById = new Map(liveList.map((n) => [n.id, n]));
+    const now = new Date().toISOString();
+    // Live ile snapshot meta'sını birleştir: live alanları + linked* + lastSyncedAt
+    const items = stored.map((entry) => {
+      const live = liveById.get(entry?.id);
+      if (live) {
+        return {
+          ...live,                       // 16 allowlist alanı (canlı)
+          linkedAt: entry?.linkedAt ?? null,
+          linkedByUserId: entry?.linkedByUserId ?? null,
+          linkedByUserName: entry?.linkedByUserName ?? null,
+          lastSyncedAt: now,
+        };
+      }
+      // Live çağrı 200 döndü ama bu id batch response'da yok (TFS rare):
+      // snapshot'a düş + stale.
+      return { ...entry, _stale: true };
+    });
+    return { items, stale: false };
   },
 
   /**
@@ -3487,6 +3869,13 @@ export const caseRepository = {
 
   /**
    * Vaka Etiket Doğrulama Ekranı — tek vakanın review kaydını upsert eder.
+   * Alan bazlı model: 9 etiketin her biri kendi Verdict + CorrectedCode'unu
+   * taşır (bkz. TAGGING_FIELD_DEFS). Original{Code,Label} snapshot alanları
+   * SADECE create'te Case.customFields'tan kopyalanır, update'te asla
+   * dokunulmaz — bilgi bankası veri seti vaka arşivlenip silinse bile
+   * bağımsız kalmalı. correctedCode her zaman kendi taxonomyType'ına karşı
+   * tek bir batched sorguda doğrulanır; correctedLabel client'tan asla
+   * okunmaz, TaxonomyDef'ten server-side resolve edilir.
    * reviewerId/reviewerName/reviewedAt route layer'da req.user'dan stamplenir
    * ve buraya actor üzerinden geçirilir — client body'den asla okunmaz.
    * caseId @unique → son yazan kazanır, concurrency token yok (QAScoreLog
@@ -3497,30 +3886,77 @@ export const caseRepository = {
     if (!companyId) return null;
 
     const VALID_VERDICTS = ['Dogru', 'Yanlis', 'Belirsiz'];
-    if (input.openingVerdict !== undefined && input.openingVerdict !== null) {
-      if (!VALID_VERDICTS.includes(input.openingVerdict)) {
-        return { error: 'invalid_input', message: `Geçersiz openingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
-      }
-    }
-    if (input.closingVerdict !== undefined && input.closingVerdict !== null) {
-      if (!VALID_VERDICTS.includes(input.closingVerdict)) {
-        return { error: 'invalid_input', message: `Geçersiz closingVerdict. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const v = input[verdictKey];
+      if (v !== undefined && v !== null && !VALID_VERDICTS.includes(v)) {
+        return { error: 'invalid_input', message: `Geçersiz ${verdictKey}. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
       }
     }
 
+    // correctedCode → kendi taxonomyType'ına karşı tek batched sorgu.
+    const correctedEntries = TAGGING_FIELD_DEFS
+      .map((def) => ({ def, code: input[`${def.prefix}${def.tag}CorrectedCode`] }))
+      .filter((e) => e.code !== undefined && e.code !== null && e.code !== '');
+
+    if (correctedEntries.length) {
+      const rows = await prisma.taxonomyDef.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          OR: correctedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
+        },
+        select: { taxonomyType: true, code: true, label: true },
+      });
+      const found = new Map(rows.map((r) => [`${r.taxonomyType}::${r.code}`, r.label]));
+      for (const e of correctedEntries) {
+        const label = found.get(`${e.def.taxonomyType}::${e.code}`);
+        if (!label) {
+          return {
+            error: 'invalid_input',
+            message: `Geçersiz doğru etiket kodu: ${e.def.prefix}${e.def.tag} = "${e.code}" (taxonomyType: ${e.def.taxonomyType}).`,
+          };
+        }
+        e.label = label;
+      }
+    }
+    const correctedByDef = new Map(correctedEntries.map((e) => [e.def, e]));
+
     const data = {
-      openingVerdict: input.openingVerdict ?? null,
-      closingVerdict: input.closingVerdict ?? null,
       note: typeof input.note === 'string' ? input.note.trim() || null : null,
       reviewerId: actor.userId,
       reviewerName: actor.displayName,
       reviewedAt: new Date(),
     };
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const codeKey = `${def.prefix}${def.tag}CorrectedCode`;
+      const labelKey = `${def.prefix}${def.tag}CorrectedLabel`;
+      if (verdictKey in input) data[verdictKey] = input[verdictKey] ?? null;
+      if (codeKey in input) {
+        const entry = correctedByDef.get(def);
+        data[codeKey] = entry ? entry.code : null;
+        data[labelKey] = entry ? entry.label : null;
+      }
+    }
 
-    return prisma.caseTaggingReview.upsert({
-      where: { caseId: id },
-      create: { caseId: id, companyId, ...data },
-      update: data,
+    const existing = await prisma.caseTaggingReview.findUnique({ where: { caseId: id } });
+    if (existing) {
+      return prisma.caseTaggingReview.update({ where: { caseId: id }, data });
+    }
+
+    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true } });
+    const smartTicket = caseRow?.customFields?.smartTicket ?? {};
+    const closure = smartTicket?.closure ?? {};
+    const originalData = {};
+    for (const def of TAGGING_FIELD_DEFS) {
+      const src = def.prefix === 'opening' ? smartTicket : closure;
+      originalData[`${def.prefix}${def.tag}OriginalCode`] = src?.[def.customField] ?? null;
+      originalData[`${def.prefix}${def.tag}OriginalLabel`] = src?.[`${def.customField}Label`] ?? null;
+    }
+
+    return prisma.caseTaggingReview.create({
+      data: { caseId: id, companyId, ...originalData, ...data },
     });
   },
 };

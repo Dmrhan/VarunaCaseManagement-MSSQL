@@ -62,6 +62,7 @@ import { AdminLayout, type AdminView, isAdminView } from './features/admin/Admin
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
+import { AdminExternalDevOpsPage } from './features/admin/AdminExternalDevOpsPage';
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -277,6 +278,11 @@ export default function App() {
   }
 
   const isDetail = view === 'case-detail';
+  // Etiket Doğrulama ekranı kendi içinde sol sabit/sağ kayan iki panelli scroll
+  // yapısı kullanıyor; bunun çalışması için sayfa kendisi değil, panel'lerin
+  // kendi overflow-auto container'ları scroll olmalı. Bu yüzden case-detail ile
+  // aynı yükseklik-sınırlı (h-screen + overflow-hidden main) düzeni kullanır.
+  const isFixedHeight = isDetail || view === 'tagging-review';
 
   // Admin view → AdminLayout. Ana app sidebar/header'dan tamamen ayrış.
   if (isAdminView(view)) {
@@ -298,6 +304,7 @@ export default function App() {
         {view === 'admin-fields' && <AdminFieldsPage />}
         {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
         {view === 'admin-external-kb' && <AdminExternalKbPage />}
+        {view === 'admin-external-devops' && <AdminExternalDevOpsPage />}
         {view === 'admin-data-import' && <AdminDataImportPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
@@ -310,7 +317,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
+    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />
@@ -431,7 +438,7 @@ export default function App() {
       {changePasswordOpen && <ChangePasswordModal onClose={() => setChangePasswordOpen(false)} />}
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
-      <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>
+      <div className={`flex flex-1 ${isFixedHeight ? 'overflow-hidden' : ''}`}>
         <aside
           onMouseEnter={() => setSidebarHovered(true)}
           onMouseLeave={() => setSidebarHovered(false)}
@@ -775,7 +782,7 @@ export default function App() {
 
         </aside>
 
-        <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'min-w-0 flex-1 px-6 py-6'}>
+        <main className={isFixedHeight ? 'flex flex-1 flex-col overflow-hidden' : 'min-w-0 flex-1 px-6 py-6'}>
           {view === 'my-home' && (
             <MyHomePage
               onSelectCase={openCase}
