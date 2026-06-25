@@ -6,11 +6,18 @@ import {
 } from '../server/lib/authorizationRegistry.js';
 import {
   canAccessResource,
+  canAccessField,
   canSeeMenu,
+  DEFAULT_FIELD_STATE,
+  explainFieldAccess,
   explainResourceAccess,
   explainMenuAccess,
+  listFieldStates,
   listResourceActions,
   listVisibleMenus,
+  resolveFieldState,
+  isSecurityFilterExpressionValid,
+  validateSecurityFilterExpression,
 } from '../server/lib/authorizationPolicy.js';
 
 const root = process.cwd();
@@ -245,6 +252,201 @@ expect('7.12 listResourceActions includes case read',
   true);
 expect('7.13 listResourceActions only returns registered actions',
   resourceActions.every((r) => RESOURCE_REGISTRY.some((resource) => resource.key === r.resourceKey && resource.actions.includes(r.action))),
+  true);
+
+expect('8.1 default field visible true',
+  canAccessField({ scope: 'case.open', fieldKey: 'description', action: 'visible', user: agent }),
+  true);
+expect('8.2 default field required false',
+  canAccessField({ scope: 'case.open', fieldKey: 'description', action: 'required', user: agent }),
+  false);
+expect('8.3 invalid scope denied',
+  explainFieldAccess({ scope: 'unknown', fieldKey: 'description', action: 'visible', user: agent }).reason,
+  'scope_not_supported');
+expect('8.4 missing field denied',
+  explainFieldAccess({ scope: 'case.open', fieldKey: '   ', action: 'visible', user: agent }).reason,
+  'field_not_provided');
+expect('8.5 invalid field action denied',
+  explainFieldAccess({ scope: 'case.open', fieldKey: 'description', action: 'fly', user: agent }).reason,
+  'field_action_not_supported');
+expect('8.6 no user denied for field',
+  explainFieldAccess({ scope: 'case.open', fieldKey: 'description', action: 'visible', user: null }).reason,
+  'no_user');
+expect('8.7 field override deny hides field',
+  canAccessField({
+    scope: 'case.open',
+    fieldKey: 'internalNote',
+    action: 'visible',
+    user: agent,
+    overrides: [{
+      target: 'field',
+      scope: 'case.open',
+      resourceKey: 'case',
+      fieldKey: 'internalNote',
+      action: 'visible',
+      effect: 'deny',
+      principal: { type: 'systemRole', key: 'Agent' },
+    }],
+  }),
+  false);
+expect('8.8 field override allow can require field',
+  canAccessField({
+    scope: 'case.transfer',
+    fieldKey: 'transferNote',
+    action: 'required',
+    user: supervisor,
+    overrides: [{
+      target: 'field',
+      scope: 'case.transfer',
+      resourceKey: 'case',
+      fieldKey: 'transferNote',
+      action: 'required',
+      effect: 'allow',
+      principal: { type: 'team', key: 'team-l2' },
+    }],
+  }),
+  true);
+expect('8.9 field wildcard deny works',
+  canAccessField({
+    scope: 'case.detail',
+    fieldKey: 'resolutionNote',
+    action: 'editable',
+    user: agent,
+    overrides: [{
+      target: 'field',
+      scope: 'case.detail',
+      resourceKey: 'case',
+      fieldKey: '*',
+      action: 'editable',
+      effect: 'deny',
+      principal: { type: 'systemRole', key: 'Agent' },
+    }],
+  }),
+  false);
+expect('8.10 field deny beats allow',
+  canAccessField({
+    scope: 'case.close',
+    fieldKey: 'rootCauseGroup',
+    action: 'required',
+    user: supervisor,
+    overrides: [
+      {
+        target: 'field',
+        scope: 'case.close',
+        resourceKey: 'case',
+        fieldKey: 'rootCauseGroup',
+        action: 'required',
+        effect: 'allow',
+        principal: { type: 'systemRole', key: 'Supervisor' },
+      },
+      {
+        target: 'field',
+        scope: 'case.close',
+        resourceKey: 'case',
+        fieldKey: 'rootCauseGroup',
+        action: 'required',
+        effect: 'deny',
+        principal: { type: 'user', key: 'user-supervisor' },
+      },
+    ],
+  }),
+  false);
+const transferNoteState = resolveFieldState({
+  scope: 'case.transfer',
+  fieldKey: 'transferNote',
+  user: supervisor,
+  overrides: [{
+    target: 'field',
+    scope: 'case.transfer',
+    resourceKey: 'case',
+    fieldKey: 'transferNote',
+    action: 'required',
+    effect: 'allow',
+    principal: { type: 'team', key: 'team-l2' },
+  }],
+});
+expect('8.11 resolveFieldState preserves visible', transferNoteState.visible, true);
+expect('8.12 resolveFieldState applies required', transferNoteState.required, true);
+expect('8.13 resolveFieldState default masked false', transferNoteState.masked, false);
+const fieldStates = listFieldStates({
+  scope: 'case.open',
+  fields: ['title', 'description'],
+  user: agent,
+});
+expect('8.14 listFieldStates returns all fields', fieldStates.length, 2);
+expect('8.15 listFieldStates title visible', fieldStates[0].state.visible, true);
+expect('8.16 default field state visible', DEFAULT_FIELD_STATE.visible, true);
+expect('8.17 default field state required', DEFAULT_FIELD_STATE.required, false);
+expect('8.18 field override allow reason',
+  explainFieldAccess({
+    scope: 'case.close',
+    fieldKey: 'resolutionNote',
+    action: 'required',
+    user: supervisor,
+    overrides: [{
+      target: 'field',
+      scope: 'case.close',
+      resourceKey: 'case',
+      fieldKey: 'resolutionNote',
+      action: 'required',
+      effect: 'allow',
+      principal: { type: 'systemRole', key: 'Supervisor' },
+    }],
+  }).reason,
+  'override_allow');
+
+expect('9.1 security filter tenant equality valid',
+  isSecurityFilterExpressionValid({
+    op: 'in',
+    field: '@record.companyId',
+    value: '@user.allowedCompanyIds',
+  }),
+  true);
+expect('9.2 security filter assigned person valid',
+  isSecurityFilterExpressionValid({
+    op: 'eq',
+    field: '@record.assignedPersonId',
+    value: '@user.personId',
+  }),
+  true);
+expect('9.3 security filter nested and/or valid',
+  isSecurityFilterExpressionValid({
+    op: 'and',
+    conditions: [
+      { op: 'in', field: '@record.companyId', value: '@user.allowedCompanyIds' },
+      {
+        op: 'or',
+        conditions: [
+          { op: 'eq', field: '@record.assignedPersonId', value: '@user.personId' },
+          { op: 'exists', field: '@record.assignedTeamId' },
+        ],
+      },
+    ],
+  }),
+  true);
+expect('9.4 security filter rejects unsupported op',
+  validateSecurityFilterExpression({ op: 'startsWith', field: '@record.companyId', value: 'x' }).ok,
+  false);
+expect('9.5 security filter rejects unknown field token',
+  validateSecurityFilterExpression({ op: 'eq', field: '@record.secretTenantId', value: 'x' }).ok,
+  false);
+expect('9.6 security filter rejects unknown value token',
+  validateSecurityFilterExpression({ op: 'eq', field: '@record.companyId', value: '@user.secret' }).ok,
+  false);
+expect('9.7 security filter rejects empty compound',
+  validateSecurityFilterExpression({ op: 'and', conditions: [] }).ok,
+  false);
+expect('9.8 security filter rejects exists value',
+  validateSecurityFilterExpression({ op: 'exists', field: '@record.companyId', value: 'x' }).ok,
+  false);
+expect('9.9 security filter rejects raw string expression',
+  validateSecurityFilterExpression('@record.companyId == @user.companyId').ok,
+  false);
+expect('9.10 security filter error carries path',
+  validateSecurityFilterExpression({
+    op: 'and',
+    conditions: [{ op: 'eq', field: '@record.unknown', value: 'x' }],
+  }).errors.some((e) => e.includes('$.conditions[0].field')),
   true);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
