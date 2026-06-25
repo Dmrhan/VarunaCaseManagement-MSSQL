@@ -193,6 +193,15 @@ export async function pollMailbox(companyId) {
     socketTimeout: IMAP_CONNECT_TIMEOUT_MS,
   });
 
+  // Codex hotfix — ImapFlow EventEmitter; 'error' event'i unhandled
+  // kalırsa Node process'i crash eder (örn. authenticationFailed sonrası
+  // internal close() çağrısı NoConnection throw eder, error emit edilir).
+  // Listener ekleyerek process'i koruyoruz; logging defensive.
+  client.on('error', (err) => {
+    console.warn(`[imap-poll] client error companyId=${companyId}`,
+      err?.code ?? err?.message);
+  });
+
   let quarantine = failedQuarantine.get(companyId);
   if (!quarantine) {
     quarantine = new Map(); // key → retryCount
