@@ -67,6 +67,7 @@ expect('1.2 current policy user keeps system role', policyUser.role, 'Agent');
 expect('1.3 current policy user keeps team id', policyUser.teamId, 'team-l1');
 expect('1.4 current policy user uses company-role key shape', policyUser.companyRoles[0], 'COMP-UNIVERA:Agent');
 expect('1.5 current policy user keeps allowed companies', policyUser.allowedCompanyIds[0], 'COMP-UNIVERA');
+expect('1.6 current policy user keeps person id for security filters', policyUser.personId, 'person-1');
 
 const candidates = buildAuthorizationPrincipalCandidates(user, 'COMP-UNIVERA', 'team-l1');
 expect('2.1 principal candidates include system role', candidates.some((c) => c.type === 'systemRole' && c.key === 'Agent'), true);

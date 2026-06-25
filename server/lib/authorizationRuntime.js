@@ -66,6 +66,7 @@ export function buildCurrentAuthorizationUser(user, companyId, teamId) {
   const companyRole = user.companyRoles?.find((r) => r.companyId === companyId);
   return {
     id: user.id,
+    personId: user.personId ?? null,
     role: user.role,
     teamId: teamId ?? null,
     companyRoles: companyRole ? [`${companyRole.companyId}:${companyRole.role}`] : [],

@@ -89,6 +89,19 @@ expectJson('1.3 non-matching principal returns empty where', compileSecurityFilt
   user: { ...user, teamId: 'no-policy', role: 'Backoffice', companyRoles: [] },
   overrides,
 }), {});
+expectJson('1.4 assigned-to-me preset keeps concrete personId (Codex P1)', compileSecurityFilterOverrides({
+  resourceKey: 'case',
+  user,
+  overrides: [{
+    target: 'securityFilter',
+    resourceKey: 'case',
+    effect: 'allow',
+    principal: { type: 'systemRole', key: 'Agent' },
+    filter: { op: 'eq', field: '@record.assignedPersonId', value: '@user.personId' },
+  }],
+}), {
+  assignedPersonId: 'person-1',
+});
 
 const casesRoute = read('server/routes/cases.js');
 const repo = read('server/db/caseRepository.js');
@@ -118,6 +131,7 @@ expect('4.1 runtime exports compileSecurityFilterOverrides', /export function co
 expect('4.2 runtime compiles deny filters as NOT', /if \(override\.effect === 'deny'\) return \{ NOT: compiled \}/.test(runtime), true);
 expect('4.3 runtime uses shared compiler', /compileSecurityFilterWhere/.test(runtime), true);
 expect('4.4 runtime does not import Prisma client singleton', /@prisma\/client|db\/client/.test(runtime), false);
+expect('4.5 runtime preserves user.personId for compiler tokens', /personId: user\.personId \?\? null/.test(runtime), true);
 
 expect('5.1 env documents security filter flag', /AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('5.2 env docs say enforcement narrows scope', /DARALTAN ek where/.test(envExample), true);
