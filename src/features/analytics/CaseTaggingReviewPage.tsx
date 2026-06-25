@@ -214,8 +214,6 @@ function TaggingModal({
     </span>
   );
 
-  const hasClosingData = CLOSING_DEFS.some((def) => originalLabel(case_, def) !== null);
-
   return (
     <Modal
       open
@@ -301,21 +299,14 @@ function TaggingModal({
           />
 
           {/* Kapanış Etiketleri */}
-          {hasClosingData ? (
-            <TagSection
-              title="Kapanış Etiketleri"
-              defs={CLOSING_DEFS}
-              case_={case_}
-              draft={draft}
-              taxonomies={taxonomies}
-              onUpdateField={onUpdateField}
-            />
-          ) : (
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-ndark-text">Kapanış Etiketleri</p>
-              <p className="text-xs text-slate-400 dark:text-ndark-dim">Bu vaka için kapanış etiketi verisi yok.</p>
-            </div>
-          )}
+          <TagSection
+            title="Kapanış Etiketleri"
+            defs={CLOSING_DEFS}
+            case_={case_}
+            draft={draft}
+            taxonomies={taxonomies}
+            onUpdateField={onUpdateField}
+          />
         </div>
       </div>
     </Modal>
@@ -686,9 +677,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           const review = reviews.get(c.id);
           const draft  = drafts.get(c.id) ?? draftFromReview(review);
 
-          const openingCount  = countVerdicts(draft, OPENING_DEFS);
-          const closingCount  = countVerdicts(draft, CLOSING_DEFS);
-          const hasClosing    = CLOSING_DEFS.some((def) => originalLabel(c, def) !== null);
+          const openingCount = countVerdicts(draft, OPENING_DEFS);
+          const closingCount = countVerdicts(draft, CLOSING_DEFS);
 
           return (
             <div
@@ -744,11 +734,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
               </div>
               {/* Kapanış Özeti */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
-                {!hasClosing
-                  ? <span className="text-slate-400">—</span>
-                  : closingCount > 0
-                    ? <span className="font-medium text-brand-600 dark:text-ndark-link">{closingCount}/{CLOSING_DEFS.length}</span>
-                    : <span className="text-slate-400">0/{CLOSING_DEFS.length}</span>}
+                {closingCount > 0
+                  ? <span className="font-medium text-brand-600 dark:text-ndark-link">{closingCount}/{CLOSING_DEFS.length}</span>
+                  : <span className="text-slate-400">—</span>}
               </div>
               {/* Kontrol Eden */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
