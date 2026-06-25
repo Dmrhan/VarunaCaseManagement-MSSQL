@@ -182,7 +182,7 @@ export function AdminAuthorizationPoliciesPage() {
     <>
       <AdminListLayout
         title="Yetkilendirme Yönetimi"
-        description="Kullanıcı, rol ve takım bazında menü görünürlüğü, işlem yetkileri, alan zorunluluğu ve kayıt erişim kurallarını yönetin."
+        description="Kullanıcı, rol ve takım bazında menü görünürlüğünü yönetin; kayıt işlemi, alan ve kayıt erişim kurallarını önizleyip kontrollü devreye alın."
         count={filtered.length}
         searchPlaceholder="Kime uygulanır, kaynak, işlem veya nota göre ara…"
         searchValue={search}
@@ -672,7 +672,7 @@ function AuthorizationPolicyModal({
         <Field
           label="Hedef Değer"
           required
-          hint="Seçilen hedef tipine göre rol adı, şirket rolü, takım ID'si veya kullanıcı ID'si. Örn. Agent, UNIVERA:Supervisor."
+          hint="Sistem rolünde rol adı; şirket rolünde companyId:rol; takım ve kullanıcıda ilgili kayıt ID'si. Örn. Agent, COMP-UNIVERA:Supervisor."
         >
           <TextInput
             autoFocus

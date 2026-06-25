@@ -760,20 +760,20 @@ export const AUTHORIZATION_POLICIES_HELP: HelpContent = {
     {
       heading: 'Bu ekran ne işe yarar?',
       content:
-        'Bu ekran, bir kullanıcının, rolün veya takımın Varuna içinde hangi menüleri görebileceğini, hangi kayıtlar üzerinde işlem yapabileceğini ve hangi alanları görebileceğini ya da zorunlu dolduracağını tanımlamak için kullanılır. Kısaca: "Kim, nerede, ne yapabilir?" sorusunun yönetim ekranıdır.',
+        'Bu ekran, bir kullanıcının, rolün veya takımın Varuna içinde hangi menüleri görebileceğini yönetmek; kayıt işlemi, alan zorunluluğu ve kayıt erişim kurallarını ise merkezi olarak tanımlayıp önizlemek için kullanılır. Kısaca: "Kim, nerede, ne yapabilir?" sorusunun yönetim ekranıdır.',
       warning:
-        'Yetki değişikliklerini geniş kullanıcı gruplarına uygulamadan önce Etkili Yetki Önizlemesi ile kontrol edin ve mümkünse tek bir test kullanıcısı üzerinde doğrulayın.',
+        'Menü görünürlüğü kullanıcı arayüzünde uygulanır. Kayıt işlemi, alan zorunluluğu ve güvenlik filtresi kuralları için canlı akışa almadan önce Etkili Yetki Önizlemesi ile kontrol edin ve ilgili işlem ekranında doğrulama yapın.',
     },
     {
       heading: 'Kime uygulanır? (Kuralın hedef kişisi/grubu)',
       content:
-        'Kuralı tek bir kullanıcıya, bir takıma, şirket içindeki role veya sistem rolüne uygulayabilirsiniz. Bu alan eski ekrandaki "Kullanıcı Grubu" seçiminin genişletilmiş halidir.',
-      example: `Sistem rolü  → Agent olan herkes
-Şirket rolü  → UNIVERA şirketinde Supervisor olanlar
-Takım        → Univera L1 takımı
-Kullanıcı    → Sadece Kübra Şahin gibi tek bir kişi`,
+        'Kuralı tek bir kullanıcıya, bir takıma, şirket içindeki role veya sistem rolüne uygulayabilirsiniz. Bu alan eski ekrandaki "Kullanıcı Grubu" seçiminin genişletilmiş halidir. Hedef Değer alanı görünen isim değil, sistemin eşleştirdiği anahtardır.',
+      example: `Sistem rolü  → Agent
+Şirket rolü  → COMP-UNIVERA:Supervisor
+Takım        → teamId (Takımlar ekranındaki kayıt ID'si)
+Kullanıcı    → userId (Kullanıcı kayıt ID'si)`,
       tip:
-        'Genel kuralları rol veya takım bazında, istisnaları kullanıcı bazında tanımlayın. Böylece yönetim kolay kalır.',
+        'Genel kuralları rol veya takım bazında, istisnaları kullanıcı bazında tanımlayın. Takım ve kullanıcı kurallarında isim/e-posta yerine ilgili kayıt ID değerini kullanın.',
     },
     {
       heading: 'Kural tipi ne demek?',
