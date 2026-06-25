@@ -649,7 +649,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       {/* Ana tablo */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
-        <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_140px_90px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+        <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_130px_110px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
           {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
@@ -675,7 +675,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_140px_90px] items-start border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_130px_110px] items-start border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
