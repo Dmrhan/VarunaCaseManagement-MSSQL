@@ -1,0 +1,36 @@
+From: "Cap Test Müşteri" <known.customer@varuna-test.local>
+To: support@varuna.com
+Subject: Re: [VK-__CASE_NUMBER__] Cap test — 3 yeni ek
+Date: Wed, 25 Jun 2026 15:00:00 +0300
+Message-ID: <inbound-test-cap-1@varuna-test.local>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_CAP_BOUND"
+
+------=_CAP_BOUND
+Content-Type: text/plain; charset=UTF-8
+
+Bu maile 3 PNG ek var. Vakada 18 mevcut attachment bekleniyor,
+2 slot kaldı → 2 stored, 1 cap-skipped beklenir.
+
+------=_CAP_BOUND
+Content-Type: image/png; name="cap-a.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="cap-a.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=
+
+------=_CAP_BOUND
+Content-Type: image/png; name="cap-b.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="cap-b.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=
+
+------=_CAP_BOUND
+Content-Type: image/png; name="cap-c.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="cap-c.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=
+
+------=_CAP_BOUND--

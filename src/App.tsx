@@ -63,6 +63,7 @@ import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
 import { AdminExternalDevOpsPage } from './features/admin/AdminExternalDevOpsPage';
+import { AdminExternalMailPage } from './features/admin/AdminExternalMailPage';
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -305,6 +306,7 @@ export default function App() {
         {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
         {view === 'admin-external-kb' && <AdminExternalKbPage />}
         {view === 'admin-external-devops' && <AdminExternalDevOpsPage />}
+        {view === 'admin-external-mail' && <AdminExternalMailPage />}
         {view === 'admin-data-import' && <AdminDataImportPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
@@ -789,6 +791,11 @@ export default function App() {
               onShowCases={() => setView('cases')}
               onShowCalendar={() => setView('my-calendar')}
               onShowPatterns={() => setView('analytics-patterns')}
+              onOpenSmartTicket={
+                featureFlags.smartTicketIntakeEnabled
+                  ? () => setView('smart-ticket-new')
+                  : undefined
+              }
             />
           )}
           {(view === 'cases' || (isDetail && caseDetailOrigin === 'cases')) && (
