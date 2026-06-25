@@ -303,7 +303,10 @@ export default function App() {
     if (!featureFlags.authorizationMenuEnforcementEnabled || effectiveMenuFailed) return fallback;
     if (!effectiveMenuAccess) return fallback;
     const menu = effectiveMenuAccess.menus.find((m) => m.viewKey === key);
-    return menu ? menu.allowed : fallback;
+    // MVP runtime enforcement is deny-only until backend resource guards honor
+    // authorization allow grants. Policies can hide legacy-visible menus, but
+    // cannot open pages whose APIs still reject the user's role.
+    return menu ? fallback && menu.allowed : fallback;
   }
 
   const showMyHome = !!user && canShowView('my-home', ['Agent', 'Supervisor', 'Backoffice', 'CSM'].includes(user.role));
