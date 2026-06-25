@@ -300,6 +300,36 @@ async function runScenarioE({ placeholderPhone }) {
   return c.id;
 }
 
+async function runScenarioF({ accountAId }) {
+  // Codex P2 fix kanıtı — TR national format ↔ E.164 canonicalize.
+  // Account A.phone = '+905320001122'. User customerless case'te
+  // '0532 000 1122' (TR national format) girer → normalizePhoneE164
+  // her ikisini de '+905320001122'e çevirir → exact match.
+  // Eski naive normalize (sadece whitespace/parantez sil) bu eşleşmeyi
+  // SKIP ederdi → manuel Phase D phone-based öneri kaybolurdu.
+  console.log('\n=== Senaryo (f) Codex P2: TR national format → E.164 canonicalize ===');
+  const c = await prisma.case.create({
+    data: {
+      caseNumber: `VK-M22-F-${Date.now().toString(36).toUpperCase()}`,
+      title: 'TR national phone test',
+      description: '-',
+      caseType: 'GeneralSupport', status: 'Acik', priority: 'Medium',
+      origin: 'Telefon', // manuel — text kazıma aktif
+      companyId: TENANT, companyName: TENANT_NAME,
+      category: 'Genel', subCategory: 'Telefon', requestType: 'Bilgi',
+      customerMatchPending: true,
+      // Account A.phone = '+905320001122' (E.164); user TR national girer:
+      customerContactPhone: '0532 000 1122',
+    },
+  });
+  const r = await suggestCustomerMatches({ caseId: c.id, allowedCompanyIds: [TENANT] });
+  const hitA = (r.suggestions ?? []).find((s) => s.accountId === accountAId);
+  expectTruthy('Account A önerildi (canonicalize sonrası exact match)', !!hitA);
+  const phoneReason = hitA?.reasons?.find((rs) => rs.type === 'phone');
+  expectTruthy('phone reason mevcut (TR national ↔ E.164)', !!phoneReason);
+  return c.id;
+}
+
 (async () => {
   let ctx = null;
   try {
@@ -309,6 +339,7 @@ async function runScenarioE({ placeholderPhone }) {
     await runScenarioC(ctx);
     await runScenarioD(ctx);
     await runScenarioE(ctx);
+    await runScenarioF(ctx);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

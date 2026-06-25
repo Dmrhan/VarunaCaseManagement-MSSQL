@@ -16,6 +16,10 @@
  */
 
 import { prisma } from './client.js';
+// Codex P2 fix (M2.2) — TAM eşleşme için kanonik form gerekir.
+// Mevcut helper'ı REUSE et (tek formatta yazılmamış kullanıcı girdileriyle
+// E.164 saklı DB kayıtları arasında uyumsuzluk yapmamak için).
+import { normalizePhoneE164 } from '../utils/accountValidation.js';
 
 // ─────────────────────────────────────────────────────────────────
 // Signal extraction (case → tokens)
@@ -31,8 +35,23 @@ const NAME_STOP = new Set([
   'müşterisiz', 'musterisiz', 'vaka', 'bilinmiyor', 'bilinmeyen',
 ]);
 
+/**
+ * Codex P2 fix (M2.2) — Phone canonicalization for exact-match comparison.
+ *
+ * normalizePhoneE164 (server/utils/accountValidation.js:177): TR yaygın
+ * formatları E.164'e çevirir:
+ *   "0532 555 12 34" → "+905325551234"
+ *   "5325551234"     → "+905325551234"
+ *   "+905325551234"  → "+905325551234"
+ *
+ * Tanınmayan format → null (skip — yanlış eşleşme önlenir).
+ * Eski naive normalize ('+'/'0' prefix korurdu) yerine kanonik form
+ * üretir; account.phone (raw display) veya account.phoneE164 (kanonik)
+ * fark etmez, AccountCompany.responsePhone vs. her input aynı form'da
+ * karşılaştırılır.
+ */
 function normalizePhone(s) {
-  return (s ?? '').replace(/[\s()\-+]/g, '');
+  return normalizePhoneE164(s);
 }
 function normalizeEmail(s) {
   return (s ?? '').trim().toLowerCase();
@@ -126,7 +145,7 @@ function extractSignalsFromCase(c) {
     ? []
     : Array.from(text.matchAll(PHONE_RX))
         .map((m) => normalizePhone(m[0]))
-        .filter((p) => p.length >= 7);
+        .filter((p) => p && p.length >= 7); // Codex P2: null guard
   const textEmails = isInbound
     ? []
     : Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
@@ -240,9 +259,11 @@ function scoreCandidate(account, signals, ctx = {}) {
   // discriminator değil → reason SAYILMAZ.
   const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
     .filter(Boolean)
-    .map(normalizePhone);
+    .map(normalizePhone)
+    .filter(Boolean); // tanınmayan format → null elenir
   const placeholderPhones = ctx.placeholderPhones ?? null;
   for (const p of signals.phones) {
+    if (!p) continue;
     if (placeholderPhones && placeholderPhones.has(p)) continue; // discriminator değil
     if (accountPhones.some((ap) => ap === p)) {
       score += 50;
@@ -438,11 +459,13 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   const placeholderPhones = new Set();
   if (signals.phones.length > 0) {
     for (const p of signals.phones) {
+      if (!p) continue; // Codex P2: null normalize sonucu atla
       let hits = 0;
       for (const a of candidates) {
         const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
           .filter(Boolean)
-          .map(normalizePhone);
+          .map(normalizePhone)
+          .filter(Boolean);
         if (ap.includes(p)) {
           hits += 1;
           if (hits > PLACEHOLDER_PHONE_THRESHOLD) {
