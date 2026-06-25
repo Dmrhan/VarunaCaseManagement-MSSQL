@@ -170,6 +170,7 @@ async function bootstrapInner(allowedCompanyIds) {
                 requireCustomerOnCaseCreate: true,
                 projectsEnabled: true,
                 projectsRequired: true,
+                requireKbAnalysis: true,
               },
             },
           },
