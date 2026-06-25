@@ -71,6 +71,7 @@ import { ResolutionApprovalPoliciesPage } from './features/admin/ResolutionAppro
 import { NotificationTemplatesPage } from './features/admin/NotificationTemplatesPage';
 import { NotificationRulesPage } from './features/admin/NotificationRulesPage';
 import { NotificationDispatchesPage } from './features/admin/NotificationDispatchesPage';
+import { AdminAuthorizationPoliciesPage } from './features/admin/AdminAuthorizationPoliciesPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
@@ -312,6 +313,7 @@ export default function App() {
         {view === 'admin-notification-templates' && <NotificationTemplatesPage />}
         {view === 'admin-notification-rules' && <NotificationRulesPage />}
         {view === 'admin-notification-dispatches' && <NotificationDispatchesPage />}
+        {view === 'admin-authorization-policies' && <AdminAuthorizationPoliciesPage />}
       </AdminLayout>
     );
   }

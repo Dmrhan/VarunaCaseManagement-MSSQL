@@ -93,6 +93,7 @@ export const MENU_REGISTRY = Object.freeze([
   { key: 'admin.notificationTemplates', label: 'Bildirim Şablonları', viewKey: 'admin-notification-templates', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.notificationRules', label: 'Bildirim Kuralları', viewKey: 'admin-notification-rules', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.notificationDispatches', label: 'Bildirim Kayıtları', viewKey: 'admin-notification-dispatches', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
+  { key: 'admin.authorizationPolicies', label: 'Yetkilendirme Yönetimi', viewKey: 'admin-authorization-policies', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.companies', label: 'Şirketler', viewKey: 'admin-companies', group: 'admin.company', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.users', label: 'Kullanıcılar', viewKey: 'admin-users', group: 'admin.company', defaultRoles: ['Admin', 'SystemAdmin'] },
 ]);
