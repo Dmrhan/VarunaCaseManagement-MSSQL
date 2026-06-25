@@ -40,6 +40,7 @@ const schema = read('prisma/schema.prisma');
 const migration = read('prisma/migrations/00000000000012_authorization_policy/migration.sql');
 const repo = read('server/db/authorizationPolicyRepository.js');
 const rows = read('server/lib/authorizationPolicyRows.js');
+const adminRoute = read('server/routes/admin.js');
 
 expect('1.1 schema has AuthorizationPolicy model', /model AuthorizationPolicy\s*\{/.test(schema), true);
 expect('1.2 schema has Company relation', /authorizationPolicies\s+AuthorizationPolicy\[\]/.test(schema), true);
@@ -160,6 +161,40 @@ expect('6.3 repository asserts actor on update', /assertActorObject\(actor, 'aut
 expect('6.4 repository checks company scope', /assertCompanyScope\(input\?\.companyId, allowedCompanyIds\)/.test(repo), true);
 expect('6.5 repository soft disables remove', /async remove\(id, allowedCompanyIds, actor\)[\s\S]*setActive\(id, false/.test(repo), true);
 expect('6.6 rows module does not import prisma', /from ['"]@?prisma|from ['"]\.\.\/db\/client/.test(rows), false);
+
+expect('7.1 admin route imports authorization repository',
+  /import \{ authorizationPolicyRepository \} from '\.\.\/db\/authorizationPolicyRepository\.js';/.test(adminRoute),
+  true);
+expect('7.2 admin route GET authorization-policies exists',
+  /router\.get\('\/authorization-policies'/.test(adminRoute),
+  true);
+expect('7.3 admin route POST authorization-policies exists',
+  /router\.post\('\/authorization-policies'/.test(adminRoute),
+  true);
+expect('7.4 admin route PATCH authorization-policies exists',
+  /router\.patch\('\/authorization-policies\/:id'/.test(adminRoute),
+  true);
+expect('7.5 admin route DELETE authorization-policies exists',
+  /router\.delete\('\/authorization-policies\/:id'/.test(adminRoute),
+  true);
+expect('7.6 admin route list requires companyId',
+  /companyId query parametresi gerekli/.test(adminRoute),
+  true);
+expect('7.7 admin route checks company admin on list',
+  /router\.get\('\/authorization-policies'[\s\S]*assertCompanyAdmin\(req, companyId\)/.test(adminRoute),
+  true);
+expect('7.8 admin route checks company admin on create',
+  /router\.post\('\/authorization-policies'[\s\S]*assertCompanyAdmin\(req, body\.companyId\)/.test(adminRoute),
+  true);
+expect('7.9 admin route uses requireActor on create',
+  /router\.post\('\/authorization-policies'[\s\S]*const actor = requireActor\(req\)/.test(adminRoute),
+  true);
+expect('7.10 admin route uses requireActor on update',
+  /router\.patch\('\/authorization-policies\/:id'[\s\S]*const actor = requireActor\(req\)/.test(adminRoute),
+  true);
+expect('7.11 admin route delete calls repository remove',
+  /router\.delete\('\/authorization-policies\/:id'[\s\S]*authorizationPolicyRepository\.remove/.test(adminRoute),
+  true);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

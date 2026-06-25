@@ -21,6 +21,7 @@ import {
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
+import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { devopsClient } from '../lib/devopsClient.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
@@ -254,6 +255,55 @@ router.delete('/field-definitions/:id', asyncRoute(async (req, res) => {
   if (cur) assertCompanyAdmin(req, cur.companyId);
   const actor = requireActor(req);
   const item = await fieldDefinitionRepo.remove(req.params.id, actor);
+  res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Authorization Policies — foundation only; runtime enforcement is not
+// wired here. Admin UI will use these endpoints to manage menu/resource/
+// field/security-filter rows per company.
+// ─────────────────────────────────────────────────────────────────
+router.get('/authorization-policies', asyncRoute(async (req, res) => {
+  const companyId = req.query.companyId;
+  if (!companyId) throw new AdminError('companyId query parametresi gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const items = await authorizationPolicyRepository.list(
+    {
+      companyId,
+      target: req.query.target,
+      ...(req.query.isActive !== undefined && { isActive: req.query.isActive === 'true' || req.query.isActive === '1' }),
+    },
+    req.user.allowedCompanyIds,
+  );
+  res.json({ value: items });
+}));
+
+router.post('/authorization-policies', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.create(body, req.user.allowedCompanyIds, actor);
+  res.status(201).json(item);
+}));
+
+router.patch('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+    actor,
+  );
+  res.json(item);
+}));
+
+router.delete('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.remove(
+    req.params.id,
+    req.user.allowedCompanyIds,
+    actor,
+  );
   res.json(item);
 }));
 
