@@ -1,0 +1,61 @@
+From: "Ekli Müşteri" <known.customer@varuna-test.local>
+To: support@varuna.com
+Subject: Hata ekran görüntüsü ekte
+Date: Wed, 25 Jun 2026 14:00:00 +0300
+Message-ID: <inbound-test-attachments-1@varuna-test.local>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_OUTER_BOUND"
+
+------=_OUTER_BOUND
+Content-Type: multipart/related; boundary="----=_RELATED_BOUND"
+
+------=_RELATED_BOUND
+Content-Type: multipart/alternative; boundary="----=_ALT_BOUND"
+
+------=_ALT_BOUND
+Content-Type: text/plain; charset=UTF-8
+
+Merhaba,
+
+Stok modülünde aşağıdaki hatayı alıyoruz (ekran görüntüsü ekte
+ve logo imzamızda inline olarak gömülü).
+
+Saygılar.
+
+------=_ALT_BOUND
+Content-Type: text/html; charset=UTF-8
+
+<html><body>
+<p>Merhaba,</p>
+<p>Hata: <img src="cid:inline-logo-1@test"/></p>
+</body></html>
+
+------=_ALT_BOUND--
+
+------=_RELATED_BOUND
+Content-Type: image/png; name="logo.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="logo.png"
+Content-ID: <inline-logo-1@test>
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8A
+AAAASUVORK5CYII=
+
+------=_RELATED_BOUND--
+
+------=_OUTER_BOUND
+Content-Type: image/png; name="screenshot.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="screenshot.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8A
+AAAASUVORK5CYII=
+
+------=_OUTER_BOUND
+Content-Type: application/x-msdownload; name="virus.exe"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="virus.exe"
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAA==
+
+------=_OUTER_BOUND--

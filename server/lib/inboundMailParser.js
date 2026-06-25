@@ -86,7 +86,14 @@ function parseReferences(refs) {
  *     inReplyTo: string|null,
  *     references: string[],
  *     date: string|null,
- *     attachments: Array<{ filename: string|null, contentType: string|null, size: number }>
+ *     attachments: Array<{
+ *       filename: string|null,
+ *       contentType: string|null,
+ *       size: number,
+ *       content: Buffer|null,     // M2.1 — gerçek içerik (intake disk-yazma için)
+ *       cid: string|null,         // HTML inline referans
+ *       inline: boolean           // disposition === 'inline' veya cid var
+ *     }>
  *   },
  *   error?: { code: string, message: string, status?: number },
  *   meta?: { parsedAt: string, rawSource: string }
@@ -122,8 +129,10 @@ export async function parseInboundEml(raw) {
   }
 
   const attachments = Array.isArray(parsed.attachments) ? parsed.attachments : [];
-  // TODO (M3): attachment.content (Buffer) → storage'a yaz. Şimdi sadece
-  // metadata; storage entegrasyonu IMAP polling ile beraber gelir.
+  // M2.1 — Ek + inline/cid görseller İÇERİK (Buffer) ile dışa verilir.
+  // Storage'a yazma + caseAttachment satırı oluşturma intake katmanında
+  // (inboundMailIntake.js writeCaseFile). isAcceptedUpload + boyut limiti
+  // uygulamaları intake'te.
 
   return {
     ok: true,
@@ -143,6 +152,14 @@ export async function parseInboundEml(raw) {
         filename: a.filename ?? null,
         contentType: a.contentType ?? null,
         size: Number.isFinite(a.size) ? a.size : 0,
+        // M2.1 — content Buffer; intake writeCaseFile için. cid varsa
+        // HTML referansı; inline=true ise mail body içine gömülü
+        // (typically image/png signature/logos).
+        content: Buffer.isBuffer(a.content)
+          ? a.content
+          : (a.content ? Buffer.from(a.content) : null),
+        cid: a.cid ? String(a.cid) : null,
+        inline: a.contentDisposition === 'inline' || !!a.cid,
       })),
     },
     meta: { parsedAt, rawSource: RAW_SOURCE },

@@ -163,6 +163,8 @@ model Company {
   externalKbSetting          ExternalKbSetting?
   /// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps integration.
   externalDevOpsSetting      ExternalDevOpsSetting?
+  /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+  externalMailSetting        ExternalMailSetting?
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -235,6 +237,8 @@ model CompanySettings {
   /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
   /// operasyonu ile flip edilir.
   projectsRequired            Boolean  @default(false)
+  /// true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false.
+  requireKbAnalysis           Boolean  @default(false)
   createdAt                   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                   DateTime @updatedAt
 
@@ -333,6 +337,61 @@ model ExternalDevOpsSetting {
   patAuthTag       String?   @db.NVarChar(Max)
   /// PAT'in en son set edildiği zaman (rotation tracking).
   patSetAt         DateTime?
+  createdByUserId  String?   @db.NVarChar(450)
+  updatedByUserId  String?   @db.NVarChar(450)
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId, enabled])
+}
+
+/// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+///
+/// Tek satır per company (companyId @unique). mailProvider.sendMail
+/// per-tenant config kullanırken (opts.companyId verildi) önce bu tabloya
+/// bakar; satır yoksa process.env (SMTP_*, MAIL_TRANSPORT) fallback
+/// (M1 backward-compat). enabled=false ise entegrasyon KAPALI semantiği
+/// (env'e DÜŞMEZ, ExternalDevOpsSetting kuralının aynısı).
+///
+/// Sır şifrelemesi: AES-256-GCM (server/lib/secretCipher.js;
+/// DEVOPS_PAT_ENC_KEY env reuse — DevOps PAT için doğdu, M5'te mail
+/// secret'ları da bu key ile şifreli). Plain secret DB'de ASLA saklanmaz;
+/// ciphertext + iv + authTag base64 üçlüsü + secretSetAt timestamp.
+///
+/// GET response'unda hiçbir ciphertext alanı dönmez; sadece secretIsSet
+/// boolean + secretSetAt.
+model ExternalMailSetting {
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  companyId        String    @unique @db.NVarChar(450)
+  enabled          Boolean   @default(false)
+  /// Giden mail için "From" adresi (örn. "Varuna <no-reply@univera.com.tr>").
+  fromAddress      String?   @db.NVarChar(Max)
+  /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
+  inboundAddress   String?   @db.NVarChar(Max)
+  /// SMTP gönderim (M1 + M4).
+  smtpHost         String?   @db.NVarChar(Max)
+  smtpPort         Int?
+  smtpSecure       Boolean   @default(false)
+  /// IMAP polling (M3).
+  imapHost         String?   @db.NVarChar(Max)
+  imapPort         Int?
+  /// Auth modu — 'password' (M1+M5 — App Password / SMTP pwd) veya
+  /// 'oauth2' (M3+ — Google Workspace OAuth2). M5'te yalnız 'password'.
+  authMode         String    @default("password") @db.NVarChar(50)
+  /// AES-256-GCM ciphertext (base64). null → secret henüz set edilmedi.
+  /// 'password' modunda SMTP password; 'oauth2' modunda refresh_token (M3).
+  secretCiphertext String?   @db.NVarChar(Max)
+  /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.
+  secretIv         String?   @db.NVarChar(Max)
+  /// 16-byte GCM authTag (base64).
+  secretAuthTag    String?   @db.NVarChar(Max)
+  /// secret'in en son set edildiği zaman (rotation tracking).
+  secretSetAt      DateTime?
+  /// SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). Secret
+  /// DEĞİL, plain saklanır.
+  username         String?   @db.NVarChar(256)
   createdByUserId  String?   @db.NVarChar(450)
   updatedByUserId  String?   @db.NVarChar(450)
   createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))

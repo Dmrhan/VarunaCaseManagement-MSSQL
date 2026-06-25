@@ -23,6 +23,8 @@ import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { devopsClient } from '../lib/devopsClient.js';
+import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
+import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
@@ -896,6 +898,110 @@ router.post('/external-devops-settings/:companyId/test', asyncRoute(async (req, 
       state: result.data.normalized?.state ?? null,
     },
     meta: { apiVersion: result.meta?.apiVersion, latencyMs: result.meta?.latencyMs },
+  });
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+// DevOps Faz 2.1 desenin aynası (yukarıdaki external-devops-settings).
+//
+// KRİTİK GÜVENLİK:
+//  - GET response'unda secret (plain VEYA ciphertext) ASLA gözükmez;
+//    sadece secretIsSet boolean + secretSetAt (repository
+//    SELECTABLE_PUBLIC sıkı tutar).
+//  - PATCH body'sinde `secret` field'ı varsa encrypt edilip persistlenir;
+//    yoksa mevcut secret'a dokunulmaz (rotate semantiği).
+//  - POST /test mailProvider.sendMail companyId-aware çağrısıyla bağlantı
+//    doğrular; secret response'a inmez.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/external-mail-settings', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const item = await externalMailSettingRepo.getByCompany(companyId);
+  res.json(item);
+}));
+
+router.patch('/external-mail-settings/:companyId', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const patch = { ...(req.body ?? {}) };
+  delete patch.companyId;
+  delete patch.id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  // Server-side derived alanları client override edemez.
+  delete patch.secretIsSet;
+  delete patch.secretSetAt;
+  delete patch.secretCiphertext;
+  delete patch.secretIv;
+  delete patch.secretAuthTag;
+  delete patch.createdByUserId;
+  delete patch.updatedByUserId;
+  const actor = requireActor(req);
+  const item = await externalMailSettingRepo.upsert(companyId, patch, actor.userId ?? null);
+  res.json(item);
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/test
+ *
+ * Saklı secret'ı decrypt edip mailProvider.sendMail ile bir test gönderim
+ * çağrısı yapar. Body: { testTo?: string } — opsiyonel; yoksa
+ * fromAddress (kendi kendine) kullanılır.
+ *
+ * Dönen: { ok, messageId?, previewUrl?, meta?, error? }
+ * Secret response'a inmez, log'a basılmaz.
+ */
+router.post('/external-mail-settings/:companyId/test', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const body = req.body ?? {};
+  const setting = await externalMailSettingRepo.getByCompany(companyId);
+  const testTo = (typeof body.testTo === 'string' && body.testTo.trim())
+    ? body.testTo.trim()
+    : setting?.fromAddress || null;
+  if (!testTo) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_to_missing',
+        message: 'Test için bir hedef adres gerekli (body.testTo veya kayıtlı fromAddress).',
+      },
+    });
+  }
+  // mailProvider companyId-aware: ExternalMailSetting'i DB'den okur,
+  // secret decrypt eder. Env fallback satır yoksa devreye girer.
+  const result = await mailProviderSendMail(
+    {
+      to: testTo,
+      subject: 'Varuna Mail Connection Test',
+      text: 'Bu bir bağlantı testidir. Bu maili gördüyseniz mail entegrasyonu çalışıyor.',
+    },
+    { companyId },
+  );
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      error: {
+        code: result.error.code,
+        message: result.error.message,
+        status: result.error.status,
+      },
+    });
+  }
+  // Başarı: minimum cevap — secret/ham response sızdırmadan.
+  return res.json({
+    ok: true,
+    messageId: result.messageId,
+    previewUrl: result.previewUrl,
+    meta: {
+      transport: result.meta?.transport,
+      source: result.meta?.source,
+    },
   });
 }));
 
