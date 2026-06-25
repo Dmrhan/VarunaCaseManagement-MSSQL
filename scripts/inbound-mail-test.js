@@ -175,6 +175,41 @@ async function runScenario2() {
   }
 }
 
+async function runScenario4() {
+  // Codex P1 fix doğrulaması — bilinmeyen gönderici, body'de bilinen
+  // müşterinin emailini quote ediyor. Engine signal extraction (text
+  // regex EMAIL_RX) bu emaili sinyale alır, suggestion top'a known
+  // müşteri çıkar. ANCAK auto-link YAPILMAMALI çünkü parsed.from.email
+  // !== eşleşen account email'i. Vaka Supervisor sırasına düşmeli.
+  console.log('\n=== Senaryo 4 (P1 fix): bilinmeyen gönderici, body\'de tanımlı müşteri emaili quote ediyor ===');
+  const raw = readFixture('04-spoofed-quote.eml');
+  const parsedRes = await parseInboundEml(raw);
+  expect('parse ok', parsedRes.ok, true);
+  expect('parsed.from.email = spam', parsedRes.data?.from?.email, 'random.spammer@otherorg-test.local');
+  expectTruthy('body içinde bilinen müşteri emaili quote edilmiş',
+    (parsedRes.data?.text ?? '').includes('known.customer@varuna-test.local'));
+
+  const intakeRes = await intakeInboundEmail({
+    parsed: parsedRes.data,
+    companyId: TEST_COMPANY_ID,
+    companyName: TEST_COMPANY_NAME,
+    actor: SYSTEM_ACTOR,
+  });
+  expect('intake ok', intakeRes.ok, true);
+  expect('action=created', intakeRes.action, 'created');
+  // KRİTİK: auto-link YAPILMAMALI — sender !== matched account email.
+  expect('match.accountId = null (P1 sender-email guard)', intakeRes.match?.accountId, null);
+
+  if (intakeRes.caseId) {
+    const c = await prisma.case.findUnique({
+      where: { id: intakeRes.caseId },
+      select: { accountId: true, customerMatchPending: true },
+    });
+    expect('Case.accountId = null (auto-link blocked)', c?.accountId, null);
+    expect('Case.customerMatchPending = true (Supervisor sırası)', c?.customerMatchPending, true);
+  }
+}
+
 async function runScenario3(refCaseNumber) {
   console.log('\n=== Senaryo 3: Reply (subject token) — mevcut vakaya not ekle ===');
   if (!refCaseNumber) {
@@ -212,6 +247,7 @@ async function runScenario3(refCaseNumber) {
     setupRes = await setup();
     const caseNumber1 = await runScenario1();
     await runScenario2();
+    await runScenario4();
     await runScenario3(caseNumber1);
   } catch (err) {
     console.error('\n[test] BEKLENMEYEN HATA:', err.message);

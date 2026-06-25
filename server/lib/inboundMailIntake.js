@@ -207,7 +207,9 @@ export async function intakeInboundEmail({
           existing.id,
           {
             content: noteContent,
-            visibility: 'internal',
+            // Codex P2 fix — NoteVisibility enum PascalCase ('Internal'|'Customer').
+            // lowercase 'internal' UI'de `!== 'Internal'` ile customer-görünür sayılır.
+            visibility: 'Internal',
             // mailparser çıktısından author ad
             authorName: parsed.from.name || parsed.from.email,
           },
@@ -301,26 +303,58 @@ export async function intakeInboundEmail({
       const pick = pickAutoLinkSuggestion(result.suggestions);
       match = {
         confidence: pick.confidence,
-        accountId: pick.auto ? pick.accountId : null,
+        accountId: null, // doğrulama sonrası set edilir
         reasons: pick.reasons,
       };
-      // Email reason → otomatik bağla
+      // Codex P1 fix — Auto-link YALNIZ sender email eşleşmesinde.
+      //
+      // suggestCustomerMatches signals.emails'i case description'dan da
+      // çıkarır (extractSignalsFromCase: text matchAll EMAIL_RX). Biz inbound
+      // mail body'sini description'a koyduğumuz için, bilinmeyen göndericiden
+      // gelen ama metninde başka müşterinin emaili geçen mail engine'i
+      // yanlış yönlendirip yanlış müşteriye otomatik bağlanmasına yol açar
+      // (engine reason.valueMasked maskedir, tam email vermez).
+      //
+      // Güvenlik için: önerilen account'un Account.email VEYA Contact.email
+      // === sender email (parsed.from.email) eşleşmesini DB'den doğrulayalım.
+      // Eşleşmiyorsa auto-link yapma; vaka Supervisor sırasına düşer.
       if (pick.auto && pick.accountId) {
-        try {
-          // linkAccount route layer'da actor='string' (displayName) geçiriyor;
-          // bizim sistem aktörü için actor.displayName kullanılır
-          // (server/routes/cases.js:713 → req.user.fullName).
-          await caseRepository.linkAccount(
-            created.id,
-            pick.accountId,
-            actor.displayName,
-            allowedCompanyIds,
-          );
-        } catch (linkErr) {
-          // linkAccount başarısız → vaka açık kalır (Supervisor sırasına düşer).
-          // Mail asla düşürülmez; yalnız match.accountId null'a çek.
-          match = { ...match, accountId: null };
+        const senderEmail = parsed.from.email; // normalize: parser lowercased
+        const { prisma } = await import('../db/client.js');
+        const account = await prisma.account.findUnique({
+          where: { id: pick.accountId },
+          select: {
+            email: true,
+            contacts: { where: { isActive: true }, select: { email: true } },
+          },
+        });
+        const accountEmails = [
+          account?.email,
+          ...(account?.contacts ?? []).map((c) => c.email),
+        ]
+          .filter(Boolean)
+          .map((e) => String(e).trim().toLowerCase());
+        const senderMatches = accountEmails.includes(senderEmail);
+
+        if (senderMatches) {
+          try {
+            // linkAccount route layer'da actor='string' (displayName);
+            // sistem aktörü için actor.displayName (server/routes/cases.js:713).
+            await caseRepository.linkAccount(
+              created.id,
+              pick.accountId,
+              actor.displayName,
+              allowedCompanyIds,
+            );
+            match.accountId = pick.accountId;
+          } catch (linkErr) {
+            // linkAccount başarısız → vaka açık kalır. Mail düşürülmez.
+            match.accountId = null;
+          }
         }
+        // senderMatches=false → engine eşleşmesi description'daki başka
+        // bir emaildan kaynaklanmış olabilir. Auto-link YAPMA, vaka
+        // Supervisor sırasına düşer (match.accountId null kalır).
       }
     }
   } catch {
