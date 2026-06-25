@@ -10,6 +10,7 @@ import {
   fetchAgentStatus, callViaClick2Call, hangupCall, fetchActiveCall, setAgentStatusApi,
   fetchSoftphoneSession, startSoftphone, onAwjsEvent, AWJS_EVENTS,
   dial as awjsDial, answer as awjsAnswer, hangup as awjsHangup, hold as awjsHold, unhold as awjsUnhold, toggleMute as awjsToggleMute,
+  getAlotechEmail, setAlotechEmail,
   type AgentStatusValue,
 } from '../services/softphoneService';
 
@@ -55,6 +56,7 @@ interface SoftphoneState {
   toggleHold: () => void;
   dismissIncoming: () => void;
   changeStatus: (status: AgentStatusValue) => Promise<void>;
+  saveAgentEmail: (email: string) => void;
 }
 
 const SoftphoneContext = createContext<SoftphoneState | null>(null);
@@ -65,7 +67,7 @@ export const SOFTPHONE_ANSWERED_EVENT = 'varuna:softphone-answered';
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
-  const [agentEmail, setAgentEmail] = useState<string | null>(null);
+  const [agentEmail, setAgentEmail] = useState<string | null>(() => getAlotechEmail());
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
@@ -86,6 +88,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(async () => {
     if (startedRef.current) return;
+    // Agent AloTech e-postası girilmemişse bağlanma — widget'tan girilmesi beklenir.
+    if (!getAlotechEmail()) { setStatus('idle'); return; }
     startedRef.current = true;
     setStatus('connecting');
     setError(null);
@@ -113,8 +117,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (user && status === 'idle') void connect();
+    if (user && status === 'idle' && getAlotechEmail()) void connect();
   }, [user, status, connect]);
+
+  // Agent softphone'da AloTech e-postasını girer/değiştirir → kalıcı (localStorage)
+  // + yeniden bağlan. Tüm AloTech çağrıları bu e-postayı header ile gönderir.
+  const saveAgentEmail = useCallback((email: string) => {
+    const clean = email.trim().toLowerCase();
+    if (!clean.includes('@')) return;
+    setAlotechEmail(clean);
+    setAgentEmail(clean);
+    startedRef.current = false;
+    setStatus('idle');
+    void connect();
+  }, [connect]);
 
   // ── EMBEDDED: AWJS jQuery event'leri (gerçek zamanlı, boran WebSocket) ──
   useEffect(() => {
@@ -273,7 +289,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const value: SoftphoneState = {
     mode: MODE,
     status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
-    connect, refreshStatus, dialNumber, answerCall, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus,
+    connect, refreshStatus, dialNumber, answerCall, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;
 }

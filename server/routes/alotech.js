@@ -19,11 +19,14 @@ router.use(verifyJwt);
 const HOST = process.env.ALOTECH_TENANT || ''; // param-univera.alo-tech.com
 
 /**
- * Giriş yapan kullanıcının AloTech agent e-postasını çöz.
- * NOT: Eşleştirme User tablosunda DEĞİL — ayrı tutulacak (AloTechConfig/agent
- * mapping tablosu, kararlaştırılacak). Şimdilik env tabanlı test eşleştirmesi.
+ * İstekteki AloTech agent e-postasını çöz.
+ * Eşleştirme User tablosunda DEĞİL — agent kendi AloTech e-postasını softphone
+ * widget'ında girer ve `X-Alotech-Email` header'ı ile gönderilir (tarayıcıda
+ * localStorage'da kalıcı). Header yoksa env tabanlı test fallback'i kullanılır.
  */
-function resolveAgentEmail(_req) {
+function resolveAgentEmail(req) {
+  const fromHeader = req?.get?.('x-alotech-email');
+  if (fromHeader && fromHeader.includes('@')) return fromHeader.trim().toLowerCase();
   return process.env.ALOTECH_DEV_AGENT_EMAIL || null;
 }
 

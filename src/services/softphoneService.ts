@@ -3,6 +3,26 @@
 // yüklenir (on-prem'de internet yoksa app bloklanmaz, softphone sessizce kapalı kalır).
 import { apiFetch } from './caseService';
 
+// ── Agent AloTech e-postası (User tablosunda DEĞİL; softphone'da girilir) ──
+// Tarayıcıda kalıcı (localStorage). Tüm AloTech çağrılarında X-Alotech-Email
+// header'ı ile gönderilir; backend bununla agent'ı çözer.
+const ALOTECH_EMAIL_KEY = 'alotech_agent_email';
+
+export function getAlotechEmail(): string | null {
+  try { return localStorage.getItem(ALOTECH_EMAIL_KEY); } catch { return null; }
+}
+export function setAlotechEmail(email: string): void {
+  try { localStorage.setItem(ALOTECH_EMAIL_KEY, email.trim().toLowerCase()); } catch { /* yoksay */ }
+}
+export function clearAlotechEmail(): void {
+  try { localStorage.removeItem(ALOTECH_EMAIL_KEY); } catch { /* yoksay */ }
+}
+/** AloTech isteklerine eklenecek agent e-posta header'ı. */
+function alotechHeaders(): Record<string, string> {
+  const e = getAlotechEmail();
+  return e ? { 'X-Alotech-Email': e } : {};
+}
+
 declare global {
   interface Window {
     AJS?: any;
@@ -76,7 +96,7 @@ export interface AgentStatus {
 
 /** Giriş yapan agent'ın AloTech müsaitlik durumu. */
 export async function fetchAgentStatus(): Promise<AgentStatus | undefined> {
-  return apiFetch<AgentStatus>('/api/integrations/alotech/agent-status', {}, 'Agent durumu');
+  return apiFetch<AgentStatus>('/api/integrations/alotech/agent-status', { headers: alotechHeaders() }, 'Agent durumu');
 }
 
 /** Geçerli agent durumları (AloTech v1). */
@@ -87,7 +107,7 @@ export type AgentStatusValue = typeof AGENT_STATUSES[number];
 export async function setAgentStatusApi(status: AgentStatusValue): Promise<{ ok: boolean; status: string } | undefined> {
   return apiFetch('/api/integrations/alotech/set-status', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
     body: JSON.stringify({ status }),
   }, 'Durum değiştirme');
 }
@@ -96,7 +116,7 @@ export async function setAgentStatusApi(status: AgentStatusValue): Promise<{ ok:
 export async function callViaClick2Call(phoneNumber: string, opts?: { caseId?: string }): Promise<{ ok: boolean } | undefined> {
   return apiFetch('/api/integrations/alotech/call', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
     body: JSON.stringify({ phoneNumber, caseId: opts?.caseId }),
   }, 'Arama');
 }
@@ -114,14 +134,14 @@ export interface ActiveCallInfo {
 
 /** Agent'ın o anki aktif/çalan çağrıları + gerçek müsaitlik durumu (polling). */
 export async function fetchActiveCall(): Promise<{ calls: ActiveCallInfo[]; agentStatus: string | null } | undefined> {
-  return apiFetch('/api/integrations/alotech/active-call', {}, 'Aktif çağrı');
+  return apiFetch('/api/integrations/alotech/active-call', { headers: alotechHeaders() }, 'Aktif çağrı');
 }
 
 /** Aktif çağrıyı/çaldırmayı sonlandırır (v1 click2hang). */
 export async function hangupCall(): Promise<{ ok: boolean } | undefined> {
   return apiFetch('/api/integrations/alotech/hangup', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...alotechHeaders() },
     body: '{}',
   }, 'Çağrıyı kapatma');
 }
@@ -130,7 +150,7 @@ export async function hangupCall(): Promise<{ ok: boolean } | undefined> {
 export async function fetchSoftphoneSession(): Promise<SoftphoneSession> {
   const data = await apiFetch<SoftphoneSession>(
     '/api/integrations/alotech/session',
-    {},
+    { headers: alotechHeaders() },
     'Softphone oturumu',
   );
   if (!data?.session) throw new Error('AloTech session alınamadı');

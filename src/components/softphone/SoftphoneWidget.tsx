@@ -2,7 +2,7 @@
 // embedded: gerçek çağrı kontrolü (mute/hold/kapat, AJS event'leriyle). click2call: çaldırma.
 // AJS Varuna içine UI render etmez; tüm UI Varuna'nındır, AJS yalnız event/ses sağlar.
 import { useEffect, useState } from 'react';
-import { Phone, PhoneOff, Pause, Play, Mic, MicOff, Loader2, X } from 'lucide-react';
+import { Phone, PhoneOff, Pause, Play, Mic, MicOff, Loader2, X, Pencil, LogIn } from 'lucide-react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
 import { AGENT_STATUSES, type AgentStatusValue } from '../../services/softphoneService';
 
@@ -22,10 +22,12 @@ const STATUS_TR: Record<string, string> = {
 const CALL_STATE_TR: Record<string, string> = { active: 'Görüşmede', hold: 'Beklemede', ringing: 'Çalıyor' };
 
 export function SoftphoneWidget() {
-  const { mode, status, agentStatus, agentEmail, error, activeCall, muted, dialNumber, endCall, toggleMute, toggleHold, changeStatus } = useSoftphone();
+  const { mode, status, agentStatus, agentEmail, error, activeCall, muted, dialNumber, endCall, toggleMute, toggleHold, changeStatus, saveAgentEmail } = useSoftphone();
   const [open, setOpen] = useState(false);
   const [dialInput, setDialInput] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
 
   useEffect(() => {
     if (!activeCall) return;
@@ -33,10 +35,17 @@ export function SoftphoneWidget() {
     return () => clearInterval(t);
   }, [activeCall]);
 
-  if (status === 'idle') return null;
+  // E-posta girilmemişse widget'ı GÖSTER (agent girsin). Girilmiş + idle ise gizle.
+  if (status === 'idle' && agentEmail) return null;
 
   const isEmbedded = mode === 'embedded';
-  const dotColor = status === 'ready' ? 'bg-emerald-500' : status === 'connecting' ? 'bg-amber-400' : 'bg-rose-500';
+  const needsEmail = !agentEmail || editingEmail;
+  const submitEmail = () => {
+    if (!emailInput.includes('@')) return;
+    saveAgentEmail(emailInput);
+    setEditingEmail(false);
+  };
+  const dotColor = needsEmail ? 'bg-slate-400' : status === 'ready' ? 'bg-emerald-500' : status === 'connecting' ? 'bg-amber-400' : 'bg-rose-500';
   const statusLabel = status === 'connecting' ? 'Bağlanıyor…'
     : status === 'error' ? (error ?? 'Hata')
     : agentStatus ? (STATUS_TR[agentStatus] ?? agentStatus) : 'Hazır';
@@ -55,7 +64,7 @@ export function SoftphoneWidget() {
             <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 dark:border-slate-700">
               <div className="flex items-center gap-2">
                 <span className={`h-2.5 w-2.5 rounded-full ${dotColor} ${status === 'connecting' ? 'animate-pulse' : ''}`} />
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{isEmbedded ? 'AloTech Softphone' : 'AloTech · Ara'}</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{needsEmail ? 'AloTech · Giriş' : (isEmbedded ? 'AloTech Softphone' : 'AloTech · Ara')}</span>
               </div>
               <button onClick={() => setOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700" aria-label="Kapat">
                 <X className="h-4 w-4" />
@@ -63,6 +72,34 @@ export function SoftphoneWidget() {
             </div>
 
             <div className="p-3">
+              {needsEmail ? (
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">AloTech e-postanız</label>
+                  <input
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitEmail(); }}
+                    placeholder="ad.soyad@param.com.tr"
+                    type="email"
+                    autoFocus
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
+                  />
+                  <button
+                    onClick={submitEmail}
+                    disabled={!emailInput.includes('@')}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+                  >
+                    <LogIn className="h-4 w-4" /> Bağlan
+                  </button>
+                  {editingEmail && agentEmail && (
+                    <button onClick={() => { setEditingEmail(false); setEmailInput(''); }} className="w-full text-center text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                      Vazgeç
+                    </button>
+                  )}
+                  <p className="text-[11px] leading-snug text-slate-400 dark:text-slate-500">AloTech agent hesabınızın e-postası. Tarayıcınızda saklanır; tüm çağrı işlemleri bununla yapılır.</p>
+                </div>
+              ) : (
+              <>
               <div className="mb-2 flex items-center gap-2">
                 {status === 'ready' ? (
                   <select
@@ -80,7 +117,16 @@ export function SoftphoneWidget() {
                   <span className="text-xs text-slate-500 dark:text-slate-400">{statusLabel}</span>
                 )}
               </div>
-              {agentEmail && <div className="mb-2 truncate text-[11px] text-slate-400 dark:text-slate-500">{agentEmail}</div>}
+              {agentEmail && (
+                <button
+                  onClick={() => { setEmailInput(agentEmail); setEditingEmail(true); }}
+                  className="mb-2 flex w-full items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                  title="AloTech e-postasını değiştir"
+                >
+                  <Pencil className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{agentEmail}</span>
+                </button>
+              )}
 
               {activeCall ? (
                 <div className="space-y-3">
@@ -130,6 +176,8 @@ export function SoftphoneWidget() {
                     <Phone className="h-5 w-5" />
                   </button>
                 </div>
+              )}
+              </>
               )}
             </div>
           </div>
