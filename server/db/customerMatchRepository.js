@@ -50,6 +50,42 @@ function maskEmail(e) {
   return `${head}***@${domain}`;
 }
 
+/**
+ * M2.2 (5) — Public/ücretsiz email domain blocklist (büyük harf duyarsız).
+ * Bu domain'ler farklı müşterilerce paylaşıldığından "aynı domain" sinyali
+ * discriminator DEĞİL — domain önerisi üretmezler.
+ */
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'yahoo.com',
+  'icloud.com',
+  'me.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'yandex.com',
+]);
+
+/**
+ * M2.2 (4) — Placeholder telefon eşiği. Bir telefon numarası aday havuzunda
+ * bu sayıdan fazla farklı hesapta görünüyorsa = discriminator değil
+ * (örn. demo numaraları, "0555 555 5555"). Reason sayılmaz.
+ */
+const PLACEHOLDER_PHONE_THRESHOLD = 3;
+
+/**
+ * Email'in domain part'ını döndürür (lower, "@" yoksa null).
+ */
+function emailDomain(email) {
+  if (!email || typeof email !== 'string') return null;
+  const at = email.lastIndexOf('@');
+  return at > 0 ? email.slice(at + 1).toLowerCase() : null;
+}
+
 function normalizeTokens(text) {
   return (text ?? '')
     .toLowerCase()
@@ -74,11 +110,26 @@ function extractSignalsFromCase(c) {
   }
   const text = textParts.join(' \n ');
 
-  // Text-extracted signals (low-confidence; free-text regex tabanlı)
-  const textPhones = Array.from(text.matchAll(PHONE_RX))
-    .map((m) => normalizePhone(m[0]))
-    .filter((p) => p.length >= 7);
-  const textEmails = Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
+  // M2.2 (2/3) — Inbound (origin='Eposta') vakalarında structured gönderen
+  // (customerContactEmail/customerContactName + customerCompanyName) esas
+  // sinyaller; gövdeden phone/email KAZIMAZ. Mail imza/footer ve quoted
+  // bloklar gürültü olur (M2.2 (3) inbound parser stripleyebilir ama
+  // savunmacı kural: inbound'da text regex'lerini kapat).
+  //
+  // Manuel Phase D vakaları (origin='Telefon', 'Web' vs.) eski davranışla
+  // gövdeden de kazımaya devam eder — regresyon yok.
+  const isInbound = c.origin === 'Eposta';
+
+  // Text-extracted signals (low-confidence; free-text regex tabanlı).
+  // Inbound'da boş bırak.
+  const textPhones = isInbound
+    ? []
+    : Array.from(text.matchAll(PHONE_RX))
+        .map((m) => normalizePhone(m[0]))
+        .filter((p) => p.length >= 7);
+  const textEmails = isInbound
+    ? []
+    : Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
   const fiveDigit = Array.from(text.matchAll(FIVE_DIGIT_RX)).map((m) => m[0]);
 
   // Phase D Step 2 — Requester intake fields (high-confidence; Agent explicit).
@@ -87,6 +138,8 @@ function extractSignalsFromCase(c) {
   const requesterEmail = c.customerContactEmail ? normalizeEmail(c.customerContactEmail) : null;
   const requesterCompany = c.customerCompanyName ?? '';
   const requesterContactName = c.customerContactName ?? '';
+  // M2.2 (5) — domain önerisi için gönderen email domain'i.
+  const requesterEmailDomain = requesterEmail ? emailDomain(requesterEmail) : null;
 
   const phones = [...new Set([...(requesterPhone ? [requesterPhone] : []), ...textPhones])];
   const emails = [...new Set([...(requesterEmail ? [requesterEmail] : []), ...textEmails])];
@@ -105,8 +158,10 @@ function extractSignalsFromCase(c) {
     contactNameTokens,
     requesterPhone,
     requesterEmail,
+    requesterEmailDomain,
     requesterCompany,
     rawText: text,
+    isInbound,
   };
 }
 
@@ -171,34 +226,65 @@ function tokenOverlap(aTokens, bTokens) {
   return hit;
 }
 
-function scoreCandidate(account, signals) {
+function scoreCandidate(account, signals, ctx = {}) {
   /** @type {Array<{ type: string; label: string; valueMasked: string | null }>} */
   const reasons = [];
   let score = 0;
 
-  // Phone — Account.phone + Contact.phone. Phase D Step 2: requester phone
-  // (Agent'ın explicit girdiği) yüksek-öncelik kabul edilir. Tek bir reason
-  // ekleriz; double-count yok.
+  // M2.2 (1) — Telefon eşleşmesi YALNIZ tam (normalized) eşitlikle. Eski
+  // gevşek `ap.endsWith(p.slice(-7))` suffix kuralı KALDIRILDI; rastgele
+  // numara collision'ları (örn. son 7 hane çakışması) artık eşleşmez.
+  //
+  // M2.2 (4) — Placeholder telefon filtresi. ctx.placeholderPhones set'i
+  // verildiyse, bu numara aday havuzunda >threshold hesapla eşleşiyor =
+  // discriminator değil → reason SAYILMAZ.
   const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
     .filter(Boolean)
     .map(normalizePhone);
+  const placeholderPhones = ctx.placeholderPhones ?? null;
   for (const p of signals.phones) {
-    if (accountPhones.some((ap) => ap === p || ap.endsWith(p.slice(-7)))) {
+    if (placeholderPhones && placeholderPhones.has(p)) continue; // discriminator değil
+    if (accountPhones.some((ap) => ap === p)) {
       score += 50;
       reasons.push({ type: 'phone', label: 'Telefon eşleşti', valueMasked: maskPhone(p) });
       break;
     }
   }
 
-  // Email — Account.email + Contact.email
+  // M2.2 (2) — Skor hiyerarşisi: email exact >> phone exact > domain > name.
+  // Email TEK auto-link tetikleyicisidir (intake katmanı). 50 → 80 yükseltildi
+  // ki eşleştiğinde diğer reason'larla birlikte listeyi domine etsin
+  // (sıralama tie-breaker'ında üstte kalır).
   const accountEmails = [account.email, ...account.contacts.map((c) => c.email)]
     .filter(Boolean)
     .map(normalizeEmail);
+  let emailMatched = false;
   for (const e of signals.emails) {
     if (accountEmails.includes(e)) {
-      score += 50;
+      score += 80;
       reasons.push({ type: 'email', label: 'E-posta eşleşti', valueMasked: maskEmail(e) });
+      emailMatched = true;
       break;
+    }
+  }
+
+  // M2.2 (5) — Domain önerisi (yalnız evrensel, exact email YOKsa devreye girer).
+  // Gönderen email'inin domain'i (signals.requesterEmailDomain) aday hesabın
+  // Account.email VEYA Contact.email domain'leriyle eşleşiyorsa → 'domain' reason.
+  // Public/ücretsiz domain'ler (gmail/outlook/...) blocklist ile filtrelenir.
+  // ASLA auto-link tetikleyicisi DEĞİL — yalnız öneri.
+  if (!emailMatched && signals.requesterEmailDomain) {
+    const d = signals.requesterEmailDomain;
+    if (!PUBLIC_EMAIL_DOMAINS.has(d)) {
+      const candidateDomains = accountEmails.map(emailDomain).filter(Boolean);
+      if (candidateDomains.includes(d)) {
+        score += 25;
+        reasons.push({
+          type: 'domain',
+          label: 'Aynı e-posta domaini',
+          valueMasked: `@${d}`,
+        });
+      }
     }
   }
 
@@ -317,6 +403,8 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
       accountId: true,
       accountName: true,
       customerMatchPending: true,
+      // M2.2 — inbound (origin='Eposta') vakalarda gövde-kazımayı kapat.
+      origin: true,
       // Phase D Step 2 — Agent intake'inde alınan başvuran bilgileri,
       // extractSignalsFromCase'in yüksek-öncelik sinyalleri.
       customerContactName: true,
@@ -343,9 +431,34 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   const signals = extractSignalsFromCase(c);
   const candidates = await fetchCandidateAccounts(c.companyId);
 
+  // M2.2 (4) — Placeholder telefon filtresi: aday havuzunda bir signal
+  // telefon PLACEHOLDER_PHONE_THRESHOLD'dan fazla farklı hesapla eşleşiyorsa
+  // discriminator değildir. Burada bir kez hesaplayıp scoreCandidate'a
+  // ctx olarak geçeriz (ekstra DB sorgusu yok — zaten yüklü candidate set).
+  const placeholderPhones = new Set();
+  if (signals.phones.length > 0) {
+    for (const p of signals.phones) {
+      let hits = 0;
+      for (const a of candidates) {
+        const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
+          .filter(Boolean)
+          .map(normalizePhone);
+        if (ap.includes(p)) {
+          hits += 1;
+          if (hits > PLACEHOLDER_PHONE_THRESHOLD) {
+            placeholderPhones.add(p);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const scoreCtx = { placeholderPhones };
+
   const scored = candidates
     .map((a) => {
-      const { score, confidence, reasons } = scoreCandidate(a, signals);
+      const { score, confidence, reasons } = scoreCandidate(a, signals, scoreCtx);
       return { account: a, score, confidence, reasons };
     })
     .filter((s) => s.score > 0)
