@@ -106,6 +106,8 @@ model User {
   /// PR-5 — Case actor FK back-relations
   caseActivities            CaseActivity[]      @relation("CaseActivityActor")
   caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
+  authorizationPoliciesCreated AuthorizationPolicy[] @relation("AuthorizationPolicyCreatedBy")
+  authorizationPoliciesUpdated AuthorizationPolicy[] @relation("AuthorizationPolicyUpdatedBy")
   /// PR-SD — Soft archive actor FK back-relation
   casesArchived             Case[]              @relation("CaseArchivedBy")
   /// Vaka Sahibi — vakayı açan kullanıcı (creator) FK back-relation
@@ -161,6 +163,8 @@ model Company {
   externalKbSetting          ExternalKbSetting?
   /// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps integration.
   externalDevOpsSetting      ExternalDevOpsSetting?
+  /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+  externalMailSetting        ExternalMailSetting?
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -178,6 +182,11 @@ model Company {
   solutionSteps              CaseSolutionStep[]
   /// Phase 4 — tenant-scoped kayıtlı rapor görünümleri.
   reportViews                ReportView[]
+  /// Authorization Management — tenant-scoped policy rows for menu,
+  /// resource CRUD, field policy, and security filters. Enforcement is
+  /// not wired by the initial migration; admin UI/runtime phases consume
+  /// this table later.
+  authorizationPolicies       AuthorizationPolicy[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -228,6 +237,8 @@ model CompanySettings {
   /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
   /// operasyonu ile flip edilir.
   projectsRequired            Boolean  @default(false)
+  /// true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false.
+  requireKbAnalysis           Boolean  @default(false)
   createdAt                   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                   DateTime @updatedAt
 
@@ -326,6 +337,61 @@ model ExternalDevOpsSetting {
   patAuthTag       String?   @db.NVarChar(Max)
   /// PAT'in en son set edildiği zaman (rotation tracking).
   patSetAt         DateTime?
+  createdByUserId  String?   @db.NVarChar(450)
+  updatedByUserId  String?   @db.NVarChar(450)
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId, enabled])
+}
+
+/// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+///
+/// Tek satır per company (companyId @unique). mailProvider.sendMail
+/// per-tenant config kullanırken (opts.companyId verildi) önce bu tabloya
+/// bakar; satır yoksa process.env (SMTP_*, MAIL_TRANSPORT) fallback
+/// (M1 backward-compat). enabled=false ise entegrasyon KAPALI semantiği
+/// (env'e DÜŞMEZ, ExternalDevOpsSetting kuralının aynısı).
+///
+/// Sır şifrelemesi: AES-256-GCM (server/lib/secretCipher.js;
+/// DEVOPS_PAT_ENC_KEY env reuse — DevOps PAT için doğdu, M5'te mail
+/// secret'ları da bu key ile şifreli). Plain secret DB'de ASLA saklanmaz;
+/// ciphertext + iv + authTag base64 üçlüsü + secretSetAt timestamp.
+///
+/// GET response'unda hiçbir ciphertext alanı dönmez; sadece secretIsSet
+/// boolean + secretSetAt.
+model ExternalMailSetting {
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  companyId        String    @unique @db.NVarChar(450)
+  enabled          Boolean   @default(false)
+  /// Giden mail için "From" adresi (örn. "Varuna <no-reply@univera.com.tr>").
+  fromAddress      String?   @db.NVarChar(Max)
+  /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
+  inboundAddress   String?   @db.NVarChar(Max)
+  /// SMTP gönderim (M1 + M4).
+  smtpHost         String?   @db.NVarChar(Max)
+  smtpPort         Int?
+  smtpSecure       Boolean   @default(false)
+  /// IMAP polling (M3).
+  imapHost         String?   @db.NVarChar(Max)
+  imapPort         Int?
+  /// Auth modu — 'password' (M1+M5 — App Password / SMTP pwd) veya
+  /// 'oauth2' (M3+ — Google Workspace OAuth2). M5'te yalnız 'password'.
+  authMode         String    @default("password") @db.NVarChar(50)
+  /// AES-256-GCM ciphertext (base64). null → secret henüz set edilmedi.
+  /// 'password' modunda SMTP password; 'oauth2' modunda refresh_token (M3).
+  secretCiphertext String?   @db.NVarChar(Max)
+  /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.
+  secretIv         String?   @db.NVarChar(Max)
+  /// 16-byte GCM authTag (base64).
+  secretAuthTag    String?   @db.NVarChar(Max)
+  /// secret'in en son set edildiği zaman (rotation tracking).
+  secretSetAt      DateTime?
+  /// SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). Secret
+  /// DEĞİL, plain saklanır.
+  username         String?   @db.NVarChar(256)
   createdByUserId  String?   @db.NVarChar(450)
   updatedByUserId  String?   @db.NVarChar(450)
   createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
@@ -2151,10 +2217,16 @@ model NotificationDispatch {
   /// Required at API layer when transitioning to mode=Manual / state=Sent.
   deliveryNote      String?   @db.NVarChar(Max)
 
-  /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
-  dispatchedAt  DateTime?
-  failureReason String?   @db.NVarChar(Max)
-  attempts      Int       @default(0)
+  /// Phase 4 active delivery fields. M4 (mail outbound) → dispatchedAt
+  /// = sent timestamp; providerMessageId = mailProvider'ın döndürdüğü
+  /// SMTP Message-ID (round-trip threading için).
+  dispatchedAt      DateTime?
+  failureReason     String?   @db.NVarChar(Max)
+  attempts          Int       @default(0)
+  /// M4 — mailProvider sendMail başarısı sonrası dolar. Round-trip
+  /// threading için (önceki dispatch'in providerMessageId'si
+  /// In-Reply-To/References header'ına geçer).
+  providerMessageId String?   @db.NVarChar(Max)
 
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
@@ -2281,4 +2353,61 @@ model ReportView {
   @@unique([companyId, ownerId, name])
   @@index([companyId, ownerId])
   @@index([companyId, isShared])
+}
+
+/// Authorization Management — tenant-scoped policy rows.
+///
+/// MVP persistence foundation only: no runtime enforcement is wired by this
+/// migration. `server/lib/authorizationRegistry.js` defines the static
+/// vocabulary; `server/lib/authorizationPolicy.js` consumes policy-shaped
+/// override rows. This table persists those overrides for later Admin UI and
+/// runtime phases.
+///
+/// target:
+///   - "menu"           → menuKey/viewKey + effect
+///   - "resource"       → resourceKey + action + effect
+///   - "field"          → scope + resourceKey + fieldKey + action + effect
+///   - "securityFilter" → resourceKey + filterJson
+///
+/// principalType:
+///   - "systemRole" | "companyRole" | "team" | "user"
+///
+/// JSON is stored as NVARCHAR(MAX) for MSSQL provider compatibility.
+model AuthorizationPolicy {
+  id            String  @id @default(cuid()) @db.NVarChar(450)
+  companyId     String  @db.NVarChar(450)
+  target        String  @db.NVarChar(50)
+  principalType String  @db.NVarChar(50)
+  principalKey  String  @db.NVarChar(450)
+  effect        String  @db.NVarChar(20)
+
+  menuKey     String? @db.NVarChar(150)
+  viewKey     String? @db.NVarChar(150)
+  resourceKey String? @db.NVarChar(150)
+  action      String? @db.NVarChar(50)
+  scope       String? @db.NVarChar(100)
+  fieldKey    String? @db.NVarChar(150)
+
+  /// Security filter DSL JSON, validated in app-layer by
+  /// validateSecurityFilterExpression().
+  filterJson String? @db.NVarChar(Max) // json
+
+  priority Int     @default(100)
+  isActive Boolean @default(true)
+  notes    String? @db.NVarChar(Max)
+
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  createdBy User?   @relation("AuthorizationPolicyCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?   @relation("AuthorizationPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([companyId, target, isActive])
+  @@index([companyId, principalType, principalKey])
+  @@index([companyId, resourceKey, action])
+  @@index([companyId, scope, fieldKey])
+  @@index([companyId, menuKey])
 }

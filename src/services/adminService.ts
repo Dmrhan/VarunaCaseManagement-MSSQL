@@ -301,6 +301,107 @@ export interface PackageItem {
   product?: { id: string; code: string; name: string; isActive: boolean; supportLevel?: string };
 }
 
+// Authorization Management — shadow-mode policy definitions.
+export type AuthorizationPolicyTarget = 'menu' | 'resource' | 'field' | 'securityFilter';
+export type AuthorizationPrincipalType = 'systemRole' | 'companyRole' | 'team' | 'user';
+export type AuthorizationPolicyEffect = 'allow' | 'deny';
+
+export interface AuthorizationPolicy {
+  id: string;
+  companyId: string;
+  target: AuthorizationPolicyTarget;
+  principalType: AuthorizationPrincipalType;
+  principalKey: string;
+  effect: AuthorizationPolicyEffect;
+  menuKey: string | null;
+  viewKey: string | null;
+  resourceKey: string | null;
+  action: string | null;
+  scope: string | null;
+  fieldKey: string | null;
+  filterJson: string | null;
+  priority: number;
+  isActive: boolean;
+  notes: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AuthorizationPolicyInput {
+  companyId: string;
+  target: AuthorizationPolicyTarget;
+  principalType: AuthorizationPrincipalType;
+  principalKey: string;
+  effect: AuthorizationPolicyEffect;
+  menuKey?: string | null;
+  viewKey?: string | null;
+  resourceKey?: string | null;
+  action?: string | null;
+  scope?: string | null;
+  fieldKey?: string | null;
+  filterJson?: unknown;
+  priority?: number;
+  isActive?: boolean;
+  notes?: string | null;
+}
+
+export interface AuthorizationPolicyListFilter {
+  companyId: string;
+  target?: AuthorizationPolicyTarget;
+  isActive?: boolean;
+}
+
+export interface AuthorizationEffectivePreview {
+  principal: {
+    type: AuthorizationPrincipalType;
+    key: string;
+    syntheticUser: {
+      id: string;
+      role: string;
+      teamId: string | null;
+      companyRoles: string[];
+      allowedCompanyIds: string[];
+    };
+  };
+  summary: {
+    menuAllowed: number;
+    menuDenied: number;
+    resourceAllowed: number;
+    resourceDenied: number;
+    securityFilterCount: number;
+  };
+  menus: Array<{
+    key: string;
+    viewKey: string;
+    label: string;
+    group: string;
+    allowed: boolean;
+    reason: string;
+  }>;
+  resources: Array<{
+    key: string;
+    label: string;
+    category: string;
+    actions: Array<{ action: string; allowed: boolean; reason: string }>;
+  }>;
+  fields: Array<{
+    scope: string;
+    fields: Array<{
+      fieldKey: string;
+      state: Record<string, boolean>;
+      reasons: Record<string, string>;
+    }>;
+  }>;
+  securityFilters: Array<{
+    resourceKey: string;
+    effect: AuthorizationPolicyEffect;
+    priority: number;
+    filter: unknown;
+  }>;
+}
+
 export type AdminResult<T> = { ok: true; item: T } | { ok: false; error: string };
 
 // ─────────────────────────────────────────────────────────────────
@@ -1037,6 +1138,55 @@ export const adminService = {
     },
   },
 
+  /**
+   * Mail M5 — Per-tenant SMTP/IMAP integration settings (admin-only).
+   *
+   * Secret plain text bu service'te asla görünmez:
+   *  - get() response'unda yok (sadece secretIsSet + secretSetAt)
+   *  - save() request'inde `secret` opsiyonel; yalnız değiştirmek istediğinde
+   *    gönderilir, yoksa mevcut şifreli secret'a dokunulmaz
+   *  - test() secret'ı server-side decrypt edip mailProvider'a verir
+   */
+  externalMailSettings: {
+    async get(companyId: string): Promise<ExternalMailSetting | undefined> {
+      return apiFetch<ExternalMailSetting>(
+        `${ADMIN_BASE}/external-mail-settings?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'Mail ayarları yüklenemedi',
+      );
+    },
+    async save(
+      companyId: string,
+      patch: ExternalMailSettingInput,
+    ): Promise<AdminResult<ExternalMailSetting>> {
+      const item = await apiFetch<ExternalMailSetting>(
+        `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'Mail ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async test(
+      companyId: string,
+      testTo?: string,
+    ): Promise<ExternalMailTestResult | undefined> {
+      return apiFetch<ExternalMailTestResult>(
+        `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testTo ? { testTo } : {}),
+        },
+        'Mail bağlantı testi başarısız',
+      );
+    },
+  },
+
   // ─────────────────────────────────────────────────────────────────
   // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
   // ─────────────────────────────────────────────────────────────────
@@ -1087,6 +1237,83 @@ export const adminService = {
       );
       if (!result) return { ok: false, error: 'Sunucu hatası' };
       return { ok: true };
+    },
+  },
+
+  // Authorization Management — policy CRUD only. Runtime enforcement is a
+  // later PR; this UI/API layer stores definitions for review and UAT.
+  authorizationPolicies: {
+    async list(filter: AuthorizationPolicyListFilter): Promise<AuthorizationPolicy[]> {
+      const qs = new URLSearchParams();
+      qs.set('companyId', filter.companyId);
+      if (filter.target) qs.set('target', filter.target);
+      if (filter.isActive !== undefined) qs.set('isActive', String(filter.isActive));
+      const data = await apiFetch<{ value: AuthorizationPolicy[] }>(
+        `${ADMIN_BASE}/authorization-policies?${qs.toString()}`,
+        undefined,
+        'Yetkilendirme politikaları yüklenemedi',
+      );
+      if (!data) return [];
+      return data.value ?? [];
+    },
+    async create(input: AuthorizationPolicyInput): Promise<AdminResult<AuthorizationPolicy>> {
+      const item = await apiFetch<AuthorizationPolicy>(
+        `${ADMIN_BASE}/authorization-policies`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        },
+        'Yetkilendirme politikası oluşturulamadı',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async update(
+      id: string,
+      patch: Partial<AuthorizationPolicyInput>,
+    ): Promise<AdminResult<AuthorizationPolicy>> {
+      const item = await apiFetch<AuthorizationPolicy>(
+        `${ADMIN_BASE}/authorization-policies/${id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'Yetkilendirme politikası güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async setActive(id: string, isActive: boolean): Promise<AdminResult<AuthorizationPolicy>> {
+      return this.update(id, { isActive });
+    },
+    async deactivate(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const result = await apiFetch<{ id: string; deactivated: boolean }>(
+        `${ADMIN_BASE}/authorization-policies/${id}`,
+        { method: 'DELETE' },
+        'Yetkilendirme politikası pasifleştirilemedi',
+      );
+      if (!result) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true };
+    },
+    async effectivePreview(input: {
+      companyId: string;
+      principalType: AuthorizationPrincipalType;
+      principalKey: string;
+      featureFlags?: Record<string, boolean>;
+    }): Promise<AuthorizationEffectivePreview> {
+      const data = await apiFetch<AuthorizationEffectivePreview>(
+        `${ADMIN_BASE}/authorization-policies/effective-preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        },
+        'Yetki önizlemesi hesaplanamadı',
+      );
+      if (!data) throw new Error('Yetki önizlemesi hesaplanamadı');
+      return data;
     },
   },
 };
@@ -1284,5 +1511,61 @@ export interface ExternalDevOpsTestResult {
   ok: boolean;
   workItem?: { id: number; title: string | null; state: string | null };
   meta?: { apiVersion?: string; latencyMs?: number };
+  error?: { code: string; message: string; status?: number };
+}
+
+/**
+ * Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları (admin).
+ *
+ * Secret plain text bu interface'te YOK; sadece secretIsSet + secretSetAt.
+ * Server GET response'unda hiçbir ciphertext/iv/authTag alanı dönmez.
+ */
+export interface ExternalMailSetting {
+  id: string | null;
+  companyId: string;
+  enabled: boolean;
+  fromAddress: string | null;
+  inboundAddress: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecure: boolean;
+  imapHost: string | null;
+  imapPort: number | null;
+  authMode: 'password' | 'oauth2';
+  /** SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). */
+  username: string | null;
+  /** Secret şifreli olarak DB'de var mı? */
+  secretIsSet: boolean;
+  /** Secret'in en son set edildiği zaman (ISO). */
+  secretSetAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExternalMailSettingInput {
+  enabled?: boolean;
+  fromAddress?: string | null;
+  inboundAddress?: string | null;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecure?: boolean;
+  imapHost?: string | null;
+  imapPort?: number | null;
+  authMode?: 'password' | 'oauth2';
+  username?: string | null;
+  /**
+   * Yalnız yeni secret set/rotate ederken gönderilir. Undefined → mevcut
+   * secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
+   */
+  secret?: string;
+}
+
+export interface ExternalMailTestResult {
+  ok: boolean;
+  messageId?: string | null;
+  previewUrl?: string | null;
+  meta?: { transport?: string; source?: 'db' | 'env' };
   error?: { code: string; message: string; status?: number };
 }

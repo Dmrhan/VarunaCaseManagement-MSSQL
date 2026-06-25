@@ -9,10 +9,12 @@ import {
   FileText,
   FolderTree,
   GitBranch,
+  Mail,
   History,
   MessageSquare,
   Network,
   Package,
+  KeyRound,
   Settings2,
   Shield,
   ShieldCheck,
@@ -44,6 +46,7 @@ export type AdminView =
   | 'admin-knowledge'
   | 'admin-external-kb'
   | 'admin-external-devops'
+  | 'admin-external-mail'
   | 'admin-data-import'
   | 'admin-companies'
   | 'admin-users'
@@ -51,6 +54,7 @@ export type AdminView =
   | 'admin-notification-templates'
   | 'admin-notification-rules'
   | 'admin-notification-dispatches'
+  | 'admin-authorization-policies'
   | 'admin-taxonomy-defs';
 
 export const ADMIN_VIEWS: AdminView[] = [
@@ -66,6 +70,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-knowledge',
   'admin-external-kb',
   'admin-external-devops',
+  'admin-external-mail',
   'admin-data-import',
   'admin-companies',
   'admin-users',
@@ -73,6 +78,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-notification-templates',
   'admin-notification-rules',
   'admin-notification-dispatches',
+  'admin-authorization-policies',
   'admin-taxonomy-defs',
 ];
 
@@ -107,11 +113,13 @@ const NAV: NavGroup[] = [
       { key: 'admin-knowledge',           label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
       { key: 'admin-external-kb',         label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
       { key: 'admin-external-devops',     label: 'DevOps / TFS Entegrasyonu',  icon: <GitBranch size={14} /> },
+      { key: 'admin-external-mail',       label: 'Mail Entegrasyonu',          icon: <Mail size={14} /> },
       { key: 'admin-data-import',         label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
       { key: 'admin-resolution-approval',     label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
       { key: 'admin-notification-templates',  label: 'Bildirim Şablonları',        icon: <MessageSquare size={14} /> },
       { key: 'admin-notification-rules',      label: 'Bildirim Kuralları',          icon: <Bell size={14} /> },
       { key: 'admin-notification-dispatches', label: 'Bildirim Kayıtları',          icon: <History size={14} /> },
+      { key: 'admin-authorization-policies',  label: 'Yetkilendirme Yönetimi',      icon: <KeyRound size={14} /> },
     ],
   },
   {
