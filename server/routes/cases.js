@@ -17,6 +17,7 @@ import { requireActor } from '../lib/actor.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import {
   AuthorizationRuntimeError,
+  assertRequiredFieldsPresent,
   assertDenyOnlyResourceAccess,
   buildCurrentAuthorizationUser,
   resolveAuthorizationTeamId,
@@ -178,6 +179,10 @@ function isAuthorizationResourceEnforcementEnabled() {
   return process.env.AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED === 'true';
 }
 
+function isAuthorizationFieldEnforcementEnabled() {
+  return process.env.AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED === 'true';
+}
+
 async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
   if (!isAuthorizationResourceEnforcementEnabled()) return null;
   const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
@@ -196,6 +201,60 @@ async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllo
     user: policyUser,
     overrides,
     baselineAllowed,
+  });
+}
+
+function closeFieldCandidatesFor(nextStatus) {
+  if (nextStatus === 'Çözüldü') {
+    return [
+      'resolutionNote',
+      'rootCauseGroup',
+      'rootCauseDetail',
+      'resolutionType',
+      'permanentPrevention',
+    ];
+  }
+  if (nextStatus === 'İptal Edildi') {
+    return ['cancellationReason'];
+  }
+  return [];
+}
+
+function closeFieldValuesFrom(payload) {
+  const closure = payload?.smartTicketClosure && typeof payload.smartTicketClosure === 'object'
+    ? payload.smartTicketClosure
+    : {};
+  return {
+    resolutionNote: payload?.resolutionNote,
+    cancellationReason: payload?.cancellationReason,
+    rootCauseGroup: closure.rootCauseGroup,
+    rootCauseDetail: closure.rootCauseDetail,
+    resolutionType: closure.resolutionType,
+    permanentPrevention: closure.permanentPrevention,
+  };
+}
+
+async function assertCaseCloseRequiredFields(req, { nextStatus, payload }) {
+  if (!isAuthorizationFieldEnforcementEnabled()) return null;
+  const fields = closeFieldCandidatesFor(nextStatus);
+  if (fields.length === 0) return null;
+  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  if (!c) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, c.companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    c.companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertRequiredFieldsPresent({
+    scope: 'case.close',
+    resourceKey: 'case',
+    fields,
+    values: closeFieldValuesFrom(payload),
+    user: policyUser,
+    overrides,
   });
 }
 
@@ -797,6 +856,7 @@ router.post(
   asyncRoute(async (req, res) => {
     const { nextStatus, ...payload } = req.body ?? {};
     if (!nextStatus) return res.status(400).json({ error: 'nextStatus gerekli' });
+    await assertCaseCloseRequiredFields(req, { nextStatus, payload });
     const actorObj = requireActor(req); // PR-5 follow-up
     const updated = await caseRepository.transitionStatus(
       req.params.id,

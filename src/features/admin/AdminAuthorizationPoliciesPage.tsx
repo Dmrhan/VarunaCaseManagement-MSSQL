@@ -58,9 +58,9 @@ const ENFORCEMENT_STATUS: Record<
     description: 'Kayıt işlemi kuralları seçili vaka notu/dosya API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı guard olarak çalışır.',
   },
   field: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Alan kuralları şu an tanım ve önizleme amaçlıdır; form bazlı enforcement ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Alan zorunluluğu kuralları case.close kapsamındaki seçili kapanış alanlarında AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED=true iken pilot çalışır.',
   },
   securityFilter: {
     label: 'Önizleme',
@@ -751,12 +751,14 @@ function EnforcementStatusNotice() {
         <span className="font-semibold">Uygulama durumu:</span>
         <Badge tint="emerald">Menü canlı</Badge>
         <Badge tint="violet">CRUD pilot</Badge>
-        <Badge tint="amber">Alan / Güvenlik filtresi önizleme</Badge>
+        <Badge tint="violet">Alan zorunluluğu pilot</Badge>
+        <Badge tint="amber">Güvenlik filtresi önizleme</Badge>
       </div>
       <p className="mt-1 text-amber-800">
         Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi kuralları seçili
-        vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu ve güvenlik filtresi kuralları bu
-        fazda tanım ve kontrol amaçlıdır; ilgili ekran/API guard bağlantıları ayrı fazlarda devreye alınacaktır.
+        vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu case.close kapsamındaki seçili kapanış
+        alanlarında flag ile pilot çalışır. Güvenlik filtresi kuralları bu fazda tanım ve kontrol amaçlıdır;
+        ilgili ekran/API guard bağlantıları ayrı fazlarda devreye alınacaktır.
       </p>
     </div>
   );

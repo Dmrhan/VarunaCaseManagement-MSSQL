@@ -1,4 +1,4 @@
-import { explainResourceAccess } from './authorizationPolicy.js';
+import { resolveFieldState, explainResourceAccess } from './authorizationPolicy.js';
 
 export class AuthorizationRuntimeError extends Error {
   constructor(message, status = 403, code = 'authorization_forbidden') {
@@ -118,4 +118,52 @@ export function assertDenyOnlyResourceAccess(args = {}) {
     throw new AuthorizationRuntimeError('Bu işlem için yetkin yok.', 403, result.reason);
   }
   return result;
+}
+
+export function listRequiredFields({
+  scope,
+  resourceKey = 'case',
+  fields = [],
+  user,
+  overrides = [],
+} = {}) {
+  return fields.filter((fieldKey) => resolveFieldState({
+    scope,
+    resourceKey,
+    fieldKey,
+    user,
+    overrides,
+  }).required === true);
+}
+
+function isBlankValue(value) {
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return value == null;
+}
+
+export function assertRequiredFieldsPresent({
+  scope,
+  resourceKey = 'case',
+  fields = [],
+  values = {},
+  user,
+  overrides = [],
+} = {}) {
+  const required = listRequiredFields({
+    scope,
+    resourceKey,
+    fields,
+    user,
+    overrides,
+  });
+  const missing = required.filter((fieldKey) => isBlankValue(values[fieldKey]));
+  if (missing.length > 0) {
+    throw new AuthorizationRuntimeError(
+      `Zorunlu alan eksik: ${missing.join(', ')}`,
+      400,
+      'authorization_required_field_missing',
+    );
+  }
+  return { required, missing: [] };
 }
