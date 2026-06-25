@@ -3234,6 +3234,11 @@ function DetailTab({
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
       <SmartTicketMetaSection item={item} />
 
+      {/* PR-D3 — Azure DevOps İş Öğeleri.
+          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
+          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
           Cila-4 #2 — "operable" structured variant: hafif başlık şeridi +
@@ -3634,11 +3639,6 @@ function DetailTab({
           );
         })()}
       </Section>
-
-      {/* PR-D3 — Azure DevOps İş Öğeleri.
-          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
-          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
-      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (
