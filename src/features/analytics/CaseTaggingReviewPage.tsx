@@ -675,7 +675,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[2fr_90px_110px_1.5fr_1.2fr_2fr_2fr_160px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[2fr_90px_110px_1.5fr_1.2fr_2fr_2fr_160px_80px] items-start border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
