@@ -47,6 +47,11 @@ const RAW_SOURCE = 'inbound-mail-intake';
 // (server/routes/cases.js:72 express.raw limit '25mb') ile uyumlu.
 const MAIL_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
+// Codex P2 fix — Per-case attachment cap. caseRepository.requestUpload
+// (caseRepository.js:2825) FILE_MAX_COUNT = 20 sınırını HTTP upload
+// akışında enforce ediyor. Mail intake bypass etmemeli; aynı limit.
+const CASE_FILE_MAX_COUNT = 20;
+
 // M2.1 — Sistem-tetikli upload aktörü. CaseAttachment.uploadedBy string
 // alanına yazılır; uploadedByUserId NULL (User FK yok — intake bir kullanıcı
 // değil).
@@ -120,6 +125,12 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
   if (!Array.isArray(attachments) || attachments.length === 0) {
     return { stored: 0, skipped: [] };
   }
+  // Codex P2 fix — Cap enforcement. Mevcut attachment count alınır;
+  // remaining slots hesaplanır. Cap aşımı → skipped:
+  // 'attachment_cap_reached'.
+  const existingCount = await prisma.caseAttachment.count({ where: { caseId } });
+  let remaining = Math.max(0, CASE_FILE_MAX_COUNT - existingCount);
+
   for (const a of attachments) {
     const filename = a?.filename ?? null;
     const contentType = a?.contentType ?? null;
@@ -136,6 +147,13 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
       skipped.push({ filename, reason: 'mime_not_accepted' });
       continue;
     }
+    // Cap check — geçerli (allowlist + boyut) ek için kontrol.
+    // Format kontrolleri ile sonra: mime-reject'i cap'e SAYMAYIZ; yalnız
+    // gerçekten yazılacak ekler slot tüketir.
+    if (remaining <= 0) {
+      skipped.push({ filename, reason: 'attachment_cap_reached' });
+      continue;
+    }
     try {
       const saved = await writeCaseFile({
         caseId,
@@ -146,6 +164,7 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
         prisma,
       });
       stored.push(saved);
+      remaining -= 1;
     } catch (err) {
       // Disk/DB write fail → atla + skipped (intake düşürülmez)
       skipped.push({ filename, reason: 'write_failed' });
