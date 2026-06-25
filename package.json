@@ -29,6 +29,7 @@
     "smoke:data-contracts": "node --env-file=.env scripts/smoke-data-contracts.js",
     "smoke:help-content": "node scripts/smoke-help-content.js",
     "smoke:ai-telemetry": "node --env-file=.env scripts/smoke-ai-telemetry.js",
+    "smoke:authorization-registry": "node scripts/smoke-authorization-registry-static.js",
     "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js",
     "smoke:pr5-static-guards": "node scripts/smoke-pr5-static-guards.js",
     "smoke:account-tckn-search": "node --env-file=.env scripts/smoke-account-tckn-search.js",
