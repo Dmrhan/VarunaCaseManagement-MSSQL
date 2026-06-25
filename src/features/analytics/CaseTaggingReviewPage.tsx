@@ -177,8 +177,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [statuses, setStatuses] = useState<CaseStatus[]>([]);
+  const [teamId, setTeamId]     = useState('');
   const [page, setPage]         = useState(1);
   const pageSize = 25;
+
+  const teams = lookupService.teams();
 
   const [loading, setLoading]   = useState(false);
   const [items, setItems]       = useState<Case[]>([]);
@@ -192,11 +195,16 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   // Tek scroll container — yatay ve dikey scroll aynı element'te, sync gerekmez.
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  async function fetchPage() {
+  async function fetchPage(pageOverride?: number) {
     setLoading(true);
     const result = await caseService.listTaggingReviews(
-      { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, statuses: statuses.length ? statuses : undefined },
-      { page, pageSize },
+      {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        statuses: statuses.length ? statuses : undefined,
+        teamId: teamId || undefined,
+      },
+      { page: pageOverride ?? page, pageSize },
     );
     setItems(result.items);
     setTotal(result.total);
@@ -293,10 +301,18 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           <Field label="Bitiş tarihi" className="w-36">
             <TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} min={dateFrom || undefined} />
           </Field>
+          <Field label="Takım" className="w-48">
+            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              <option value="">Tüm takımlar</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </Select>
+          </Field>
           <Button
             leftIcon={loading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}
             disabled={loading}
-            onClick={() => { setPage(1); void fetchPage(); }}
+            onClick={() => { setPage(1); void fetchPage(1); }}
           >
             {loading ? 'Yükleniyor…' : 'Filtrele'}
           </Button>
