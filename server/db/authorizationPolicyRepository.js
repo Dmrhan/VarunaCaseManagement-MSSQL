@@ -31,6 +31,10 @@ async function getScopedPolicy(id, allowedCompanyIds) {
 }
 
 export const authorizationPolicyRepository = {
+  async getById(id, allowedCompanyIds) {
+    return getScopedPolicy(id, allowedCompanyIds);
+  },
+
   async list({ companyId, target, isActive } = {}, allowedCompanyIds) {
     if (companyId) assertCompanyScope(companyId, allowedCompanyIds);
     const where = {

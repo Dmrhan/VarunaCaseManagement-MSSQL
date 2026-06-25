@@ -43,6 +43,13 @@ expect('1.6 route resolves teamId from Person', /prisma\.person\.findUnique/.tes
 expect('1.7 route loads active policy overrides', /authorizationPolicyRepository\.listOverrides/.test(route), true);
 expect('1.8 route uses effective preview builder', /buildAuthorizationEffectivePreview/.test(route), true);
 expect('1.9 route returns menus only, not full field matrix', /menus: preview\.menus/.test(route), true);
+expect('1.10 route builds current policy user for all principal types', /function buildCurrentPolicyUser/.test(route), true);
+expect('1.11 route uses current user context when principalType is absent',
+  /requestedPrincipalType[\s\S]*\? \{ principalType: principal\.type, principalKey: principal\.key \}[\s\S]*: \{ user: buildCurrentPolicyUser/.test(route),
+  true);
+expect('1.12 route still supports explicit single-principal preview',
+  /requestedPrincipalType[\s\S]*principalType: principal\.type/.test(route),
+  true);
 
 expect('2.1 app imports authorization router', /authorizationRouter/.test(app), true);
 expect('2.2 app mounts authorization router', /app\.use\('\/api\/authorization', authorizationRouter\)/.test(app), true);
@@ -63,6 +70,9 @@ expect('4.8 handleNavSelect blocks hidden menu keys', /function handleNavSelect[
 expect('4.9 NAV list is filtered by canShowView', /NAV\.filter\(\(item\) => canShowView\(item\.key, item\.available\)\)\.map/.test(appTsx), true);
 expect('4.10 Workspace buttons are policy-gated', /showCalendar[\s\S]*showWatching[\s\S]*showKbViewer/.test(appTsx), true);
 expect('4.11 Report buttons are policy-gated', /showReportsSection[\s\S]*showAiUsage[\s\S]*showQaScores[\s\S]*showPatterns/.test(appTsx), true);
+expect('4.12 canShowView does not short-circuit default-denied menus before policy result',
+  /function canShowView[\s\S]*if \(!fallback\) return false/.test(appTsx),
+  false);
 
 expect('5.1 feature flag registered', /authorizationMenuEnforcementEnabled/.test(read('src/config/featureFlags.ts')), true);
 expect('5.2 smoke script registered', pkg.scripts['smoke:authorization-current-user'], 'node scripts/smoke-authorization-current-user-static.js');

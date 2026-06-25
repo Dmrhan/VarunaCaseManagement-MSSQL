@@ -69,7 +69,18 @@ function choosePrincipal(user, companyId, teamId, requestedType) {
     const found = candidates.find((c) => c.type === requestedType);
     if (found) return found;
   }
-  return candidates[0];
+  return { type: 'user', key: user.id, label: 'Geçerli kullanıcı (tüm principal kuralları)' };
+}
+
+function buildCurrentPolicyUser(user, companyId, teamId) {
+  const companyRole = user.companyRoles?.find((r) => r.companyId === companyId);
+  return {
+    id: user.id,
+    role: user.role,
+    teamId: teamId ?? null,
+    companyRoles: companyRole ? [`${companyRole.companyId}:${companyRole.role}`] : [],
+    allowedCompanyIds: Array.isArray(user.allowedCompanyIds) ? user.allowedCompanyIds : [],
+  };
 }
 
 router.get('/effective-menus', async (req, res) => {
@@ -86,10 +97,12 @@ router.get('/effective-menus', async (req, res) => {
       companyId,
       req.user.allowedCompanyIds,
     );
+    const requestedPrincipalType = typeof req.query.principalType === 'string' ? req.query.principalType : '';
     const preview = buildAuthorizationEffectivePreview({
       companyId,
-      principalType: principal.type,
-      principalKey: principal.key,
+      ...(requestedPrincipalType
+        ? { principalType: principal.type, principalKey: principal.key }
+        : { user: buildCurrentPolicyUser(req.user, companyId, teamId) }),
       overrides,
       featureFlags: getServerFeatureFlags(),
     });

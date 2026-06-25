@@ -74,10 +74,11 @@ export function buildAuthorizationEffectivePreview({
   companyId,
   principalType,
   principalKey,
+  user: effectiveUser,
   overrides = [],
   featureFlags = {},
 } = {}) {
-  const user = buildSyntheticUser({ principalType, principalKey, companyId });
+  const user = effectiveUser ?? buildSyntheticUser({ principalType, principalKey, companyId });
   const menus = MENU_REGISTRY.map((menu) => {
     const decision = explainMenuAccess({
       menuKey: menu.key,
@@ -144,8 +145,8 @@ export function buildAuthorizationEffectivePreview({
 
   return {
     principal: {
-      type: principalType,
-      key: principalKey,
+      type: principalType ?? (effectiveUser ? 'user' : undefined),
+      key: principalKey ?? effectiveUser?.id,
       syntheticUser: user,
     },
     summary: {

@@ -161,6 +161,9 @@ expect('6.3 repository asserts actor on update', /assertActorObject\(actor, 'aut
 expect('6.4 repository checks company scope', /assertCompanyScope\(input\?\.companyId, allowedCompanyIds\)/.test(repo), true);
 expect('6.5 repository soft disables remove', /async remove\(id, allowedCompanyIds, actor\)[\s\S]*setActive\(id, false/.test(repo), true);
 expect('6.6 rows module does not import prisma', /from ['"]@?prisma|from ['"]\.\.\/db\/client/.test(rows), false);
+expect('6.7 repository exposes scoped getById for ID-based route guards',
+  /async getById\(id, allowedCompanyIds\)[\s\S]*getScopedPolicy\(id, allowedCompanyIds\)/.test(repo),
+  true);
 
 expect('7.1 admin route imports authorization repository',
   /import \{ authorizationPolicyRepository \} from '\.\.\/db\/authorizationPolicyRepository\.js';/.test(adminRoute),
@@ -192,18 +195,27 @@ expect('7.9 admin route uses requireActor on create',
 expect('7.10 admin route uses requireActor on update',
   /router\.patch\('\/authorization-policies\/:id'[\s\S]*const actor = requireActor\(req\)/.test(adminRoute),
   true);
-expect('7.11 admin route delete calls repository remove',
+expect('7.11 admin route checks company admin before ID-based update',
+  /router\.patch\('\/authorization-policies\/:id'[\s\S]*assertAuthorizationPolicyCompanyAdmin\(req, req\.params\.id\)[\s\S]*authorizationPolicyRepository\.update/.test(adminRoute),
+  true);
+expect('7.12 admin route checks company admin before ID-based delete',
+  /router\.delete\('\/authorization-policies\/:id'[\s\S]*assertAuthorizationPolicyCompanyAdmin\(req, req\.params\.id\)[\s\S]*authorizationPolicyRepository\.remove/.test(adminRoute),
+  true);
+expect('7.13 admin ID helper resolves row then asserts company admin',
+  /async function assertAuthorizationPolicyCompanyAdmin\(req, id\)[\s\S]*authorizationPolicyRepository\.getById[\s\S]*assertCompanyAdmin\(req, row\.companyId\)/.test(adminRoute),
+  true);
+expect('7.14 admin route delete calls repository remove',
   /router\.delete\('\/authorization-policies\/:id'[\s\S]*authorizationPolicyRepository\.remove/.test(adminRoute),
   true);
-expect('7.12 admin route effective preview exists before id route',
+expect('7.15 admin route effective preview exists before id route',
   adminRoute.indexOf("router.post('/authorization-policies/effective-preview'") > -1 &&
     adminRoute.indexOf("router.post('/authorization-policies/effective-preview'") <
       adminRoute.indexOf("router.patch('/authorization-policies/:id'"),
   true);
-expect('7.13 admin route preview checks company admin',
+expect('7.16 admin route preview checks company admin',
   /router\.post\('\/authorization-policies\/effective-preview'[\s\S]*assertCompanyAdmin\(req, body\.companyId\)/.test(adminRoute),
   true);
-expect('7.14 admin route preview uses active overrides',
+expect('7.17 admin route preview uses active overrides',
   /router\.post\('\/authorization-policies\/effective-preview'[\s\S]*authorizationPolicyRepository\.listOverrides/.test(adminRoute),
   true);
 
