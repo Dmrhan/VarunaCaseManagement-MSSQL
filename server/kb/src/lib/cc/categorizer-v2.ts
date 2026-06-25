@@ -33,6 +33,8 @@ import {
   type OpenFieldsResult,
   type CloseFieldsResult,
 } from "./taxonomy-v2";
+import { searchSimilarByText } from "../ticket/similarity";
+import { getTicket } from "../ticket/local-store";
 
 const SYSTEM = `
 Sen bir çağrı merkezi açılış sınıflandırıcısısın. Görevin: gelen sorun metnini
@@ -268,6 +270,33 @@ export async function suggestClose(
   if (input.open_is_sureci) ctxLines.push(`Açılış · İş Süreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`Açılış · İşlem Tipi: ${input.open_islem_tipi}`);
 
+  // FAZ 1 — Kapanışa retrieval (feature-flag: CLOSE_RETRIEVAL=1, default KAPALI).
+  // Geçmiş benzer ÇÖZÜLMÜŞ vakaları (kök nedenleriyle) bulup dinamik few-shot ver
+  // → ince-taneli kök-neden ıskalarını örnekle düzeltir (en yüksek kaldıraç).
+  // Graceful: embeddings yok / hata → sessizce retrieval'sız devam (regresyon yok).
+  // Değişken (ticket'a özel) → cache'li öneğe DEĞİL, TICKET BAĞLAMI sonrasına eklenir.
+  let retrievalBlock = "";
+  if (process.env.CLOSE_RETRIEVAL === "1") {
+    try {
+      const hits = await searchSimilarByText(input.description, {}, 3);
+      const exs = hits
+        .map((h) => getTicket(h.bildirim_no))
+        .filter((t): t is NonNullable<typeof t> => !!t && !!t.kok_neden)
+        .map((t) => {
+          const a = (t.aciklama || "").replace(/\s+/g, " ").slice(0, 220);
+          const c = (t.cozum || "").replace(/\s+/g, " ").slice(0, 150);
+          return `  • Sorun: ${a}\n    → Kök Neden: ${t.kok_neden}${c ? ` · Çözüm: ${c}` : ""}`;
+        });
+      if (exs.length) {
+        retrievalBlock =
+          "BENZER ÇÖZÜLMÜŞ VAKALAR (geçmişten en yakın — aynı tip için doğru kök nedeni örnek al, körü körüne kopyalama):\n" +
+          exs.join("\n");
+      }
+    } catch {
+      /* embeddings yok / model hatası → retrieval'sız devam, regresyon yok */
+    }
+  }
+
   // Tek prompt'u ORİJİNALLE BİREBİR kur, sonra cache sınırından slice ile böl.
   // cachePrefix = "TICKET BAĞLAMI:" öncesi (kapanış taksonomileri + few-shot —
   // her çağrıda DEĞİŞMEZ) → ayrı cache_control'lü bloğa konur. userPrompt =
@@ -294,6 +323,7 @@ export async function suggestClose(
     "TICKET BAĞLAMI:",
     ctxLines.join("\n") || "(açılış sınıflandırması yok)",
     "",
+    ...(retrievalBlock ? [retrievalBlock, ""] : []),
     `Sorun açıklaması: ${input.description.slice(0, 2000)}`,
     "",
     `Çözüm taslağı (ajan yazdı): ${input.resolution.slice(0, 3000)}`,

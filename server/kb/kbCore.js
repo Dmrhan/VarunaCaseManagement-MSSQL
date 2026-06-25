@@ -1578,6 +1578,192 @@ function formatOpenForPrompt() {
   }).join("\n\n");
 }
 
+// server/kb/src/lib/ticket/similarity.ts
+init_env();
+init_gemini();
+
+// server/kb/src/lib/ticket/local-store.ts
+import Database2 from "better-sqlite3";
+import { mkdirSync as mkdirSync2 } from "node:fs";
+import path4 from "node:path";
+function defaultDbPath2() {
+  return path4.resolve(process.cwd(), "data/embeddings.sqlite");
+}
+var dbInstance2 = null;
+function getDb(dbPath) {
+  if (dbInstance2) return dbInstance2;
+  const finalPath = dbPath ?? defaultDbPath2();
+  mkdirSync2(path4.dirname(finalPath), { recursive: true });
+  const db = new Database2(finalPath);
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("foreign_keys = ON");
+  initSchema2(db);
+  dbInstance2 = db;
+  return db;
+}
+function initSchema2(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      bildirim_no       INTEGER PRIMARY KEY,
+      bildirim_tarihi   TEXT,
+      bildirim_tipi     TEXT,
+      oncelik           TEXT,
+      katman            TEXT,
+      proje             TEXT,
+      urun              TEXT,
+      ana_kategori      TEXT,
+      alt_kategori      TEXT,
+      kategori_kisa     TEXT,
+      kategori_uzun     TEXT,
+      kok_neden         TEXT,
+      acil_ticket       TEXT,
+      support_seviye    TEXT,
+      aciklama          TEXT,
+      cozum             TEXT,
+      musteri_notu      TEXT,
+      tfs_no            INTEGER,
+      tfs_durum         TEXT,
+      tfs_tip           TEXT,
+      bug_group         TEXT,
+      text_hash         TEXT NOT NULL,
+      synced_at         TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tickets_proje ON tickets(proje);
+    CREATE INDEX IF NOT EXISTS idx_tickets_tarih ON tickets(bildirim_tarihi);
+    CREATE INDEX IF NOT EXISTS idx_tickets_tipi ON tickets(bildirim_tipi);
+
+    CREATE TABLE IF NOT EXISTS embeddings (
+      bildirim_no  INTEGER PRIMARY KEY REFERENCES tickets(bildirim_no) ON DELETE CASCADE,
+      model        TEXT NOT NULL,
+      dim          INTEGER NOT NULL,
+      vector       BLOB NOT NULL,
+      text_hash    TEXT NOT NULL,
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_state (
+      key          TEXT PRIMARY KEY,
+      value        TEXT NOT NULL,
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+}
+var TICKET_COLS = [
+  "bildirim_no",
+  "bildirim_tarihi",
+  "bildirim_tipi",
+  "oncelik",
+  "katman",
+  "proje",
+  "urun",
+  "ana_kategori",
+  "alt_kategori",
+  "kategori_kisa",
+  "kategori_uzun",
+  "kok_neden",
+  "acil_ticket",
+  "support_seviye",
+  "aciklama",
+  "cozum",
+  "musteri_notu",
+  "tfs_no",
+  "tfs_durum",
+  "tfs_tip",
+  "bug_group",
+  "text_hash"
+];
+var UPSERT_TICKET_SQL = `
+  INSERT INTO tickets (${TICKET_COLS.join(", ")}, synced_at)
+  VALUES (${TICKET_COLS.map((c) => `@${c}`).join(", ")}, datetime('now'))
+  ON CONFLICT(bildirim_no) DO UPDATE SET
+    ${TICKET_COLS.filter((c) => c !== "bildirim_no").map((c) => `${c} = excluded.${c}`).join(",\n    ")},
+    synced_at = datetime('now')
+`;
+function getTicket(bildirimNo) {
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM tickets WHERE bildirim_no = ?`).get(bildirimNo);
+  return row ?? null;
+}
+function loadAllVectors(model) {
+  const db = getDb();
+  const rows = db.prepare(`SELECT bildirim_no, vector FROM embeddings WHERE model = ?`).all(model);
+  return rows.map((r) => ({
+    bildirim_no: r.bildirim_no,
+    vector: new Float32Array(
+      r.vector.buffer,
+      r.vector.byteOffset,
+      r.vector.byteLength / 4
+    )
+  }));
+}
+
+// server/kb/src/lib/ticket/similarity.ts
+var vectorCache = null;
+function getVectors(model) {
+  if (vectorCache && vectorCache.model === model) return vectorCache.vectors;
+  vectorCache = { model, vectors: loadAllVectors(model) };
+  return vectorCache.vectors;
+}
+function normalize(v) {
+  let sum = 0;
+  for (let i = 0; i < v.length; i++) sum += v[i] * v[i];
+  const norm = Math.sqrt(sum) || 1;
+  const out = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
+  return out;
+}
+function dot(a, b) {
+  let s = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+function eligibleIds(filter) {
+  const where = [];
+  const params = [];
+  if (filter.proje) {
+    where.push("proje = ?");
+    params.push(filter.proje);
+  }
+  if (filter.tipi) {
+    where.push("bildirim_tipi = ?");
+    params.push(filter.tipi);
+  }
+  if (filter.katman) {
+    where.push("katman = ?");
+    params.push(filter.katman);
+  }
+  if (filter.excludeBildirimNo) {
+    where.push("bildirim_no <> ?");
+    params.push(filter.excludeBildirimNo);
+  }
+  if (where.length === 0) return null;
+  const sql2 = `SELECT bildirim_no FROM tickets WHERE ${where.join(" AND ")}`;
+  const rows = getDb().prepare(sql2).all(...params);
+  return new Set(rows.map((r) => r.bildirim_no));
+}
+async function searchSimilarByText(queryText, filter = {}, topK) {
+  if (!queryText || queryText.trim().length === 0) return [];
+  const e = env();
+  const model = e.GEMINI_EMBEDDING_MODEL;
+  const k = topK ?? e.TICKET_SIMILARITY_TOPK;
+  const queryVec = normalize(new Float32Array(await embed(queryText)));
+  const corpus = getVectors(model);
+  if (corpus.length === 0) return [];
+  const eligible = eligibleIds(filter);
+  const hits = [];
+  for (const item of corpus) {
+    if (eligible && !eligible.has(item.bildirim_no)) continue;
+    const normalized = normalize(item.vector);
+    const score = dot(queryVec, normalized);
+    hits.push({ bildirim_no: item.bildirim_no, score });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  return hits.slice(0, k);
+}
+
 // server/kb/src/lib/cc/categorizer-v2.ts
 var SYSTEM3 = `
 Sen bir \xE7a\u011Fr\u0131 merkezi a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131r\u0131c\u0131s\u0131s\u0131n. G\xF6revin: gelen sorun metnini
@@ -1735,6 +1921,22 @@ async function suggestClose(input) {
   if (input.open_urun) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \xDCr\xFCn: ${input.open_urun}`);
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
+  let retrievalBlock = "";
+  if (process.env.CLOSE_RETRIEVAL === "1") {
+    try {
+      const hits = await searchSimilarByText(input.description, {}, 3);
+      const exs = hits.map((h) => getTicket(h.bildirim_no)).filter((t) => !!t && !!t.kok_neden).map((t) => {
+        const a = (t.aciklama || "").replace(/\s+/g, " ").slice(0, 220);
+        const c = (t.cozum || "").replace(/\s+/g, " ").slice(0, 150);
+        return `  \u2022 Sorun: ${a}
+    \u2192 K\xF6k Neden: ${t.kok_neden}${c ? ` \xB7 \xC7\xF6z\xFCm: ${c}` : ""}`;
+      });
+      if (exs.length) {
+        retrievalBlock = "BENZER \xC7\xD6Z\xDCLM\xDC\u015E VAKALAR (ge\xE7mi\u015Ften en yak\u0131n \u2014 ayn\u0131 tip i\xE7in do\u011Fru k\xF6k nedeni \xF6rnek al, k\xF6r\xFC k\xF6r\xFCne kopyalama):\n" + exs.join("\n");
+      }
+    } catch {
+    }
+  }
   const fullPrompt = [
     "K\xD6K NEDEN GRUBU (biri):",
     getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
@@ -1754,6 +1956,7 @@ async function suggestClose(input) {
     "TICKET BA\u011ELAMI:",
     ctxLines.join("\n") || "(a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131rmas\u0131 yok)",
     "",
+    ...retrievalBlock ? [retrievalBlock, ""] : [],
     `Sorun a\xE7\u0131klamas\u0131: ${input.description.slice(0, 2e3)}`,
     "",
     `\xC7\xF6z\xFCm tasla\u011F\u0131 (ajan yazd\u0131): ${input.resolution.slice(0, 3e3)}`,
@@ -2022,190 +2225,6 @@ async function getById(bildirimNo) {
   const q = getByIdQuery(bildirimNo);
   const res = await runReadOnly(q.text, q.params);
   return res.rows[0] ?? null;
-}
-
-// server/kb/src/lib/ticket/local-store.ts
-import Database2 from "better-sqlite3";
-import { mkdirSync as mkdirSync2 } from "node:fs";
-import path4 from "node:path";
-function defaultDbPath2() {
-  return path4.resolve(process.cwd(), "data/embeddings.sqlite");
-}
-var dbInstance2 = null;
-function getDb(dbPath) {
-  if (dbInstance2) return dbInstance2;
-  const finalPath = dbPath ?? defaultDbPath2();
-  mkdirSync2(path4.dirname(finalPath), { recursive: true });
-  const db = new Database2(finalPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
-  initSchema2(db);
-  dbInstance2 = db;
-  return db;
-}
-function initSchema2(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tickets (
-      bildirim_no       INTEGER PRIMARY KEY,
-      bildirim_tarihi   TEXT,
-      bildirim_tipi     TEXT,
-      oncelik           TEXT,
-      katman            TEXT,
-      proje             TEXT,
-      urun              TEXT,
-      ana_kategori      TEXT,
-      alt_kategori      TEXT,
-      kategori_kisa     TEXT,
-      kategori_uzun     TEXT,
-      kok_neden         TEXT,
-      acil_ticket       TEXT,
-      support_seviye    TEXT,
-      aciklama          TEXT,
-      cozum             TEXT,
-      musteri_notu      TEXT,
-      tfs_no            INTEGER,
-      tfs_durum         TEXT,
-      tfs_tip           TEXT,
-      bug_group         TEXT,
-      text_hash         TEXT NOT NULL,
-      synced_at         TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tickets_proje ON tickets(proje);
-    CREATE INDEX IF NOT EXISTS idx_tickets_tarih ON tickets(bildirim_tarihi);
-    CREATE INDEX IF NOT EXISTS idx_tickets_tipi ON tickets(bildirim_tipi);
-
-    CREATE TABLE IF NOT EXISTS embeddings (
-      bildirim_no  INTEGER PRIMARY KEY REFERENCES tickets(bildirim_no) ON DELETE CASCADE,
-      model        TEXT NOT NULL,
-      dim          INTEGER NOT NULL,
-      vector       BLOB NOT NULL,
-      text_hash    TEXT NOT NULL,
-      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS sync_state (
-      key          TEXT PRIMARY KEY,
-      value        TEXT NOT NULL,
-      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-}
-var TICKET_COLS = [
-  "bildirim_no",
-  "bildirim_tarihi",
-  "bildirim_tipi",
-  "oncelik",
-  "katman",
-  "proje",
-  "urun",
-  "ana_kategori",
-  "alt_kategori",
-  "kategori_kisa",
-  "kategori_uzun",
-  "kok_neden",
-  "acil_ticket",
-  "support_seviye",
-  "aciklama",
-  "cozum",
-  "musteri_notu",
-  "tfs_no",
-  "tfs_durum",
-  "tfs_tip",
-  "bug_group",
-  "text_hash"
-];
-var UPSERT_TICKET_SQL = `
-  INSERT INTO tickets (${TICKET_COLS.join(", ")}, synced_at)
-  VALUES (${TICKET_COLS.map((c) => `@${c}`).join(", ")}, datetime('now'))
-  ON CONFLICT(bildirim_no) DO UPDATE SET
-    ${TICKET_COLS.filter((c) => c !== "bildirim_no").map((c) => `${c} = excluded.${c}`).join(",\n    ")},
-    synced_at = datetime('now')
-`;
-function getTicket(bildirimNo) {
-  const db = getDb();
-  const row = db.prepare(`SELECT * FROM tickets WHERE bildirim_no = ?`).get(bildirimNo);
-  return row ?? null;
-}
-function loadAllVectors(model) {
-  const db = getDb();
-  const rows = db.prepare(`SELECT bildirim_no, vector FROM embeddings WHERE model = ?`).all(model);
-  return rows.map((r) => ({
-    bildirim_no: r.bildirim_no,
-    vector: new Float32Array(
-      r.vector.buffer,
-      r.vector.byteOffset,
-      r.vector.byteLength / 4
-    )
-  }));
-}
-
-// server/kb/src/lib/ticket/similarity.ts
-init_env();
-init_gemini();
-var vectorCache = null;
-function getVectors(model) {
-  if (vectorCache && vectorCache.model === model) return vectorCache.vectors;
-  vectorCache = { model, vectors: loadAllVectors(model) };
-  return vectorCache.vectors;
-}
-function normalize(v) {
-  let sum = 0;
-  for (let i = 0; i < v.length; i++) sum += v[i] * v[i];
-  const norm = Math.sqrt(sum) || 1;
-  const out = new Float32Array(v.length);
-  for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
-  return out;
-}
-function dot(a, b) {
-  let s = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) s += a[i] * b[i];
-  return s;
-}
-function eligibleIds(filter) {
-  const where = [];
-  const params = [];
-  if (filter.proje) {
-    where.push("proje = ?");
-    params.push(filter.proje);
-  }
-  if (filter.tipi) {
-    where.push("bildirim_tipi = ?");
-    params.push(filter.tipi);
-  }
-  if (filter.katman) {
-    where.push("katman = ?");
-    params.push(filter.katman);
-  }
-  if (filter.excludeBildirimNo) {
-    where.push("bildirim_no <> ?");
-    params.push(filter.excludeBildirimNo);
-  }
-  if (where.length === 0) return null;
-  const sql2 = `SELECT bildirim_no FROM tickets WHERE ${where.join(" AND ")}`;
-  const rows = getDb().prepare(sql2).all(...params);
-  return new Set(rows.map((r) => r.bildirim_no));
-}
-async function searchSimilarByText(queryText, filter = {}, topK) {
-  if (!queryText || queryText.trim().length === 0) return [];
-  const e = env();
-  const model = e.GEMINI_EMBEDDING_MODEL;
-  const k = topK ?? e.TICKET_SIMILARITY_TOPK;
-  const queryVec = normalize(new Float32Array(await embed(queryText)));
-  const corpus = getVectors(model);
-  if (corpus.length === 0) return [];
-  const eligible = eligibleIds(filter);
-  const hits = [];
-  for (const item of corpus) {
-    if (eligible && !eligible.has(item.bildirim_no)) continue;
-    const normalized = normalize(item.vector);
-    const score = dot(queryVec, normalized);
-    hits.push({ bildirim_no: item.bildirim_no, score });
-  }
-  hits.sort((a, b) => b.score - a.score);
-  return hits.slice(0, k);
 }
 
 // server/kb/src/lib/ticket/taxonomy.ts
