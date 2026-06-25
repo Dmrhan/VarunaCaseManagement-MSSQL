@@ -52,6 +52,10 @@ expect('1.14 principal target uses selectable options', /buildPrincipalOptions/.
 expect('1.15 page reads registry through authorizationService', /authorizationService[\s\S]*\.registry\(\)/.test(page), true);
 expect('1.16 page derives menu options from registry', /function menuOptionsFromRegistry/.test(page), true);
 expect('1.17 page derives resource options from registry', /function resourceOptionsFromRegistry/.test(page), true);
+expect('1.18 page has security filter presets', /SECURITY_FILTER_PRESETS/.test(page), true);
+expect('1.19 page has assigned-to-me preset', /assigned_to_me/.test(page), true);
+expect('1.20 page has team-assignment preset', /assigned_to_my_team/.test(page), true);
+expect('1.21 page applies preset into JSON textarea', /applySecurityFilterPreset/.test(page), true);
 
 expect('2.1 adminService has AuthorizationPolicy type', /export interface AuthorizationPolicy\s*\{/.test(adminService), true);
 expect('2.2 adminService has list wrapper', /authorizationPolicies:[\s\S]*async list\(filter: AuthorizationPolicyListFilter\)/.test(adminService), true);
