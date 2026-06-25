@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 const GOLDEN = "data/eval/golden-set-v1.json";
 const args = process.argv.slice(2);
 const baseline = args.includes("--baseline");
+const reviewWrong = args.includes("--review-wrong");
 const li = args.indexOf("--limit");
 const limit = li >= 0 ? parseInt(args[li + 1], 10) : Infinity;
 
@@ -47,6 +48,39 @@ if (baseline) {
     const x = byDay[d];
     console.log(`  ${d}  açılış ${pct(x.ao, x.at)} (${x.ao}/${x.at})  kapanış ${pct(x.ko, x.kt)} (${x.ko}/${x.kt})`);
   }
+  process.exit(0);
+}
+
+if (reviewWrong) {
+  // İnsanın YANLIŞ işaretlediği vakaları AI'ya tekrar etiketlet → eski yanlış
+  // etiket + insan notu + AI'nın yeni cevabını yan yana bas. Otomatik skor YOK
+  // (doğru truth henüz yok); amaç göz-kararı "düzeldi mi / hâlâ yanlış mı".
+  if (!process.env.ANTHROPIC_API_KEY) { console.error("ANTHROPIC_API_KEY gerekli"); process.exit(1); }
+  const { categorizeV2, suggestClose } = await import("../server/kb/kbCore.js");
+  const wrong = data.filter((r) => r.acilisVerdict === false || r.kapanisVerdict === false);
+  console.log(`=== YANLIŞ VAKALAR — AI TEKRAR ETİKETLİYOR (${wrong.length} vaka) ===`);
+  console.log(`ORİJİNAL = eski yanlış etiket · NOT = insan düzeltmesi · ŞİMDİ = AI'nın yeni cevabı\n`);
+  let i = 0;
+  for (const r of wrong) {
+    process.stderr.write(`\r  ${++i}/${wrong.length} ...`);
+    const L = [`[${r.vakaNo}] ${r.baslik || ""}`];
+    if (r.acilisVerdict === false) {
+      const p = await categorizeV2({ description: r.aciklama, project: null, customerName: r.musteri });
+      const t = r.truth.acilis;
+      L.push(`  AÇILIŞ  ORİJİNAL: platform=${t.platform} · is=${t.isSureci} · işlem=${t.islemTipi} · nesne=${t.etkilenenNesne} · etki=${t.etki}`);
+      if (r.duzeltmeNotuAcilis) L.push(`          NOT: ${r.duzeltmeNotuAcilis}`);
+      L.push(`          ŞİMDİ:    platform=${p.platform} · is=${p.is_sureci} · işlem=${p.islem_tipi} · nesne=${p.etkilenen_nesne} · etki=${p.etki}`);
+    }
+    if (r.kapanisVerdict === false) {
+      const p = await suggestClose({ description: r.aciklama, resolution: r.cozumAciklamasi, open_is_sureci: r.truth.acilis.isSureci, open_islem_tipi: r.truth.acilis.islemTipi });
+      const t = r.truth.kapanis;
+      L.push(`  KAPANIŞ ORİJİNAL: grup=${t.kokNedenGrubu} · detay=${t.kokNedenDetayi} · tip=${t.cozumTipi} · önlem=${t.kaliciOnlem}`);
+      if (r.duzeltmeNotuKapanis) L.push(`          NOT: ${r.duzeltmeNotuKapanis}`);
+      L.push(`          ŞİMDİ:    grup=${p.kok_neden_grubu} · detay=${p.kok_neden_detayi} · tip=${p.cozum_tipi} · önlem=${p.kalici_onlem}`);
+    }
+    console.log(L.join("\n") + "\n");
+  }
+  process.stderr.write("\r");
   process.exit(0);
 }
 
