@@ -60,7 +60,7 @@ expect('1.22 page shows enforcement status notice', /function EnforcementStatusN
 expect('1.23 page marks menu as live', /Menü canlı/.test(page), true);
 expect('1.24 page marks CRUD as pilot', /CRUD pilot/.test(page), true);
 expect('1.24b page marks field required as pilot', /Alan zorunluluğu pilot/.test(page), true);
-expect('1.24c page keeps security filter as preview', /Güvenlik filtresi önizleme/.test(page), true);
+expect('1.24c page marks security filter as pilot', /Güvenlik filtresi pilot/.test(page), true);
 expect('1.25 table has enforcement column', />Uygulama</.test(page), true);
 
 expect('2.1 adminService has AuthorizationPolicy type', /export interface AuthorizationPolicy\s*\{/.test(adminService), true);

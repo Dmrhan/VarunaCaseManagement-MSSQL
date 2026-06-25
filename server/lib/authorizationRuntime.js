@@ -1,4 +1,8 @@
 import { resolveFieldState, explainResourceAccess } from './authorizationPolicy.js';
+import {
+  compileSecurityFilterWhere,
+  mergeSecurityFilterWhere,
+} from './authorizationSecurityFilter.js';
 
 export class AuthorizationRuntimeError extends Error {
   constructor(message, status = 403, code = 'authorization_forbidden') {
@@ -62,11 +66,43 @@ export function buildCurrentAuthorizationUser(user, companyId, teamId) {
   const companyRole = user.companyRoles?.find((r) => r.companyId === companyId);
   return {
     id: user.id,
+    personId: user.personId ?? null,
     role: user.role,
     teamId: teamId ?? null,
     companyRoles: companyRole ? [`${companyRole.companyId}:${companyRole.role}`] : [],
     allowedCompanyIds: Array.isArray(user.allowedCompanyIds) ? user.allowedCompanyIds : [],
   };
+}
+
+function principalMatchesAuthorizationUser(principal, user) {
+  if (!principal || !user) return false;
+  if (principal.type === 'systemRole') return principal.key === user.role;
+  if (principal.type === 'user') return principal.key === user.id;
+  if (principal.type === 'team') return principal.key === user.teamId;
+  if (principal.type === 'companyRole') {
+    return Array.isArray(user.companyRoles) && user.companyRoles.includes(principal.key);
+  }
+  return false;
+}
+
+export function compileSecurityFilterOverrides({
+  resourceKey = 'case',
+  user,
+  overrides = [],
+} = {}) {
+  const filters = overrides
+    .filter((override) => (
+      override?.target === 'securityFilter' &&
+      override.resourceKey === resourceKey &&
+      override.filter &&
+      principalMatchesAuthorizationUser(override.principal, user)
+    ))
+    .map((override) => {
+      const compiled = compileSecurityFilterWhere(override.filter, { user });
+      if (override.effect === 'deny') return { NOT: compiled };
+      return compiled;
+    });
+  return mergeSecurityFilterWhere(filters);
 }
 
 export function explainDenyOnlyResourceAccess({
