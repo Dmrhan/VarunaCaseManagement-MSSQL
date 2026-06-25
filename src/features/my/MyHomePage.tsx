@@ -250,20 +250,22 @@ export function MyHomePage({
             </p>
           </div>
         </div>
-        <Button leftIcon={<Plus size={14} />} onClick={onShowCases}>
-          Yeni Vaka
-        </Button>
-        {onOpenSmartTicket && (
-          <Button
-            variant="outline"
-            leftIcon={<Sparkles size={14} className="text-white" />}
-            onClick={onOpenSmartTicket}
-            title="Akıllı Ticket akışıyla vaka aç (RUNA AI)"
-            className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white ring-0 hover:from-violet-700 hover:to-fuchsia-700 dark:from-violet-700 dark:to-fuchsia-700 dark:hover:from-violet-600 dark:hover:to-fuchsia-600"
-          >
-            Akıllı Ticket
+        <div className="flex items-center gap-2">
+          <Button leftIcon={<Plus size={14} />} onClick={onShowCases}>
+            Yeni Vaka
           </Button>
-        )}
+          {onOpenSmartTicket && (
+            <Button
+              variant="outline"
+              leftIcon={<Sparkles size={14} className="text-white" />}
+              onClick={onOpenSmartTicket}
+              title="Akıllı Ticket akışıyla vaka aç (RUNA AI)"
+              className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white ring-0 hover:from-violet-700 hover:to-fuchsia-700 dark:from-violet-700 dark:to-fuchsia-700 dark:hover:from-violet-600 dark:hover:to-fuchsia-600"
+            >
+              Akıllı Ticket
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* URGENT SIGNALS */}
