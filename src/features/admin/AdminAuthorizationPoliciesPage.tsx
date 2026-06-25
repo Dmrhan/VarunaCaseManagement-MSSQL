@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/Toast';
 import { lookupService } from '@/services/caseService';
 import {
   adminService,
+  type AdminUser,
   type AuthorizationPolicy,
   type AuthorizationEffectivePreview,
   type AuthorizationPolicyEffect,
@@ -18,6 +19,7 @@ import {
   type AuthorizationPolicyTarget,
   type AuthorizationPrincipalType,
 } from '@/services/adminService';
+import type { CasePerson, CaseTeam } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { AUTHORIZATION_POLICIES_HELP } from './helpContents';
 
@@ -55,17 +57,234 @@ const DEFAULT_FILTER_JSON = `{
   "value": "@user.allowedCompanyIds"
 }`;
 
+type SelectOption = { value: string; label: string; detail?: string };
+type MenuOption = SelectOption & { key: string; group: string };
+type ResourceOption = SelectOption & { category: string; actions: string[] };
+type FieldScopeOption = SelectOption & { resourceKey: string; fields: SelectOption[] };
+
+const SYSTEM_ROLE_OPTIONS: SelectOption[] = [
+  { value: 'Agent', label: 'Agent' },
+  { value: 'Backoffice', label: 'Backoffice' },
+  { value: 'Supervisor', label: 'Supervisor' },
+  { value: 'CSM', label: 'CSM' },
+  { value: 'Admin', label: 'Admin' },
+  { value: 'SystemAdmin', label: 'SystemAdmin' },
+];
+
+const COMPANY_ROLE_OPTIONS: SelectOption[] = [
+  { value: 'Agent', label: 'Agent' },
+  { value: 'Supervisor', label: 'Supervisor' },
+  { value: 'Admin', label: 'Admin' },
+  { value: 'SystemAdmin', label: 'SystemAdmin' },
+];
+
+const MENU_GROUP_LABELS: Record<string, string> = {
+  main: 'Ana Menü',
+  workspace: 'Çalışma Alanı',
+  reports: 'Raporlar',
+  case: 'Vaka',
+  'admin.definitions': 'Yönetim / Tanımlar',
+  'admin.configuration': 'Yönetim / Yapılandırma',
+  'admin.company': 'Yönetim / Şirket',
+};
+
+const MENU_OPTIONS: MenuOption[] = [
+  { key: 'main.myHome', value: 'my-home', label: 'Anasayfa', group: 'main' },
+  { key: 'main.cases', value: 'cases', label: 'Vakalar', group: 'main' },
+  { key: 'main.dashboard', value: 'dashboard', label: 'Vaka Raporları', group: 'main' },
+  { key: 'main.accounts', value: 'accounts', label: 'Müşteriler', group: 'main' },
+  { key: 'workspace.calendar', value: 'my-calendar', label: 'Takvimim', group: 'workspace' },
+  { key: 'workspace.watching', value: 'watching', label: 'İzleyici Inbox', group: 'workspace' },
+  { key: 'workspace.knowledgeBase', value: 'kb-viewer', label: 'Bilgi Bankası', group: 'workspace' },
+  { key: 'reports.aiUsage', value: 'analytics-ai-usage', label: 'AI Kullanımı', group: 'reports' },
+  { key: 'reports.qaScores', value: 'analytics-qa-scores', label: 'QA Skorları', group: 'reports' },
+  { key: 'reports.patterns', value: 'analytics-patterns', label: 'Örüntü Alarmları', group: 'reports' },
+  { key: 'reports.caseStudio', value: 'case-report-studio', label: 'Rapor Stüdyosu', group: 'reports' },
+  { key: 'reports.rootCause', value: 'root-cause-report', label: 'Kök Neden Analiz Raporu', group: 'reports' },
+  { key: 'reports.taggingReview', value: 'tagging-review', label: 'Etiket Doğrulama', group: 'reports' },
+  { key: 'smartTicket.intake', value: 'smart-ticket-new', label: 'Akıllı Ticket', group: 'case' },
+  { key: 'admin.categories', value: 'admin-categories', label: 'Kategori & Alt Kategori', group: 'admin.definitions' },
+  { key: 'admin.sla', value: 'admin-sla', label: 'SLA Kuralları', group: 'admin.definitions' },
+  { key: 'admin.checklist', value: 'admin-checklist', label: 'Kontrol Listesi', group: 'admin.definitions' },
+  { key: 'admin.thirdParty', value: 'admin-thirdparty', label: '3. Parti Tanımları', group: 'admin.definitions' },
+  { key: 'admin.documents', value: 'admin-documents', label: 'Belge Türleri', group: 'admin.definitions' },
+  { key: 'admin.offeredSolutions', value: 'admin-offered-solutions', label: 'Teklif Tanımları', group: 'admin.definitions' },
+  { key: 'admin.productCatalog', value: 'admin-product-catalog', label: 'Ürün Kataloğu', group: 'admin.definitions' },
+  { key: 'admin.teams', value: 'admin-teams', label: 'Takımlar & Üyeler', group: 'admin.definitions' },
+  { key: 'admin.taxonomyDefs', value: 'admin-taxonomy-defs', label: 'Akıllı Ticket Tanımları', group: 'admin.definitions' },
+  { key: 'admin.fields', value: 'admin-fields', label: 'Dinamik Alanlar', group: 'admin.configuration' },
+  { key: 'admin.knowledgeSources', value: 'admin-knowledge', label: 'Bilgi Kaynakları', group: 'admin.configuration' },
+  { key: 'admin.externalKb', value: 'admin-external-kb', label: 'Bilgi Bankası Entegrasyonu', group: 'admin.configuration' },
+  { key: 'admin.externalDevOps', value: 'admin-external-devops', label: 'DevOps / TFS Entegrasyonu', group: 'admin.configuration' },
+  { key: 'admin.externalMail', value: 'admin-external-mail', label: 'Mail Entegrasyonu', group: 'admin.configuration' },
+  { key: 'admin.dataImport', value: 'admin-data-import', label: 'Veri Aktarım Stüdyosu', group: 'admin.configuration' },
+  { key: 'admin.resolutionApproval', value: 'admin-resolution-approval', label: 'Çözüm Onayı Politikaları', group: 'admin.configuration' },
+  { key: 'admin.notificationTemplates', value: 'admin-notification-templates', label: 'Bildirim Şablonları', group: 'admin.configuration' },
+  { key: 'admin.notificationRules', value: 'admin-notification-rules', label: 'Bildirim Kuralları', group: 'admin.configuration' },
+  { key: 'admin.notificationDispatches', value: 'admin-notification-dispatches', label: 'Bildirim Kayıtları', group: 'admin.configuration' },
+  { key: 'admin.authorizationPolicies', value: 'admin-authorization-policies', label: 'Yetkilendirme Yönetimi', group: 'admin.configuration' },
+  { key: 'admin.companies', value: 'admin-companies', label: 'Şirketler', group: 'admin.company' },
+  { key: 'admin.users', value: 'admin-users', label: 'Kullanıcılar', group: 'admin.company' },
+];
+
+const RESOURCE_CATEGORY_LABELS: Record<string, string> = {
+  case: 'Vaka',
+  customer360: 'Müşteri 360',
+  reporting: 'Raporlama',
+  admin: 'Yönetim',
+};
+
+const RESOURCE_OPTIONS: ResourceOption[] = [
+  { value: 'case', label: 'Vaka', category: 'case', actions: ['create', 'read', 'update', 'assign', 'transfer', 'close', 'archive', 'restore'] },
+  { value: 'case.note', label: 'Vaka Notu', category: 'case', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'case.attachment', label: 'Vaka Dosyası', category: 'case', actions: ['create', 'read', 'delete'] },
+  { value: 'case.solutionStep', label: 'Çözüm Adımı', category: 'case', actions: ['create', 'read', 'update'] },
+  { value: 'case.watcher', label: 'Vaka İzleyicisi', category: 'case', actions: ['create', 'read', 'delete'] },
+  { value: 'case.link', label: 'Vaka Bağlantısı', category: 'case', actions: ['create', 'read', 'delete'] },
+  { value: 'account', label: 'Müşteri', category: 'customer360', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'account.contact', label: 'Müşteri Kontağı', category: 'customer360', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'account.project', label: 'Müşteri Projesi', category: 'customer360', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'report.caseStudio', label: 'Vaka Rapor Stüdyosu', category: 'reporting', actions: ['read', 'export'] },
+  { value: 'report.view', label: 'Kayıtlı Rapor Görünümü', category: 'reporting', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.team', label: 'Takım', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.category', label: 'Kategori', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.slaPolicy', label: 'SLA Politikası', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.fieldDefinition', label: 'Dinamik Alan', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.taxonomyDef', label: 'Akıllı Ticket Tanımı', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.notificationRule', label: 'Bildirim Kuralı', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+  { value: 'admin.user', label: 'Kullanıcı', category: 'admin', actions: ['create', 'read', 'update', 'delete'] },
+];
+
+const ACTION_LABELS: Record<string, string> = {
+  create: 'Oluştur',
+  read: 'Oku',
+  update: 'Güncelle',
+  delete: 'Sil / Pasifleştir',
+  export: 'Dışa aktar',
+  approve: 'Onayla',
+  assign: 'Üstlen / Ata',
+  transfer: 'Devret',
+  close: 'Kapat / Çöz',
+  archive: 'Arşivle',
+  restore: 'Geri al',
+};
+
+const FIELD_ACTION_OPTIONS: SelectOption[] = [
+  { value: 'visible', label: 'Görünsün' },
+  { value: 'readable', label: 'Okunabilsin' },
+  { value: 'editable', label: 'Düzenlenebilsin' },
+  { value: 'required', label: 'Zorunlu olsun' },
+  { value: 'masked', label: 'Maskelensin' },
+];
+
+const FIELD_SCOPE_OPTIONS: FieldScopeOption[] = [
+  {
+    value: 'case.open',
+    label: 'Vaka Açılışı',
+    resourceKey: 'case',
+    fields: [
+      { value: 'accountId', label: 'Müşteri' },
+      { value: 'projectId', label: 'Proje' },
+      { value: 'title', label: 'Başlık' },
+      { value: 'description', label: 'Açıklama' },
+      { value: 'requestType', label: 'Talep Türü' },
+      { value: 'priority', label: 'Öncelik' },
+      { value: 'category', label: 'Kategori' },
+      { value: 'subCategory', label: 'Alt Kategori' },
+      { value: 'attachments', label: 'Dosyalar' },
+    ],
+  },
+  {
+    value: 'case.detail',
+    label: 'Vaka Detayı',
+    resourceKey: 'case',
+    fields: [
+      { value: 'priority', label: 'Öncelik' },
+      { value: 'assignedTeamId', label: 'Atanan Takım' },
+      { value: 'assignedPersonId', label: 'Atanan Kişi' },
+      { value: 'category', label: 'Kategori' },
+      { value: 'subCategory', label: 'Alt Kategori' },
+      { value: 'requestType', label: 'Talep Türü' },
+      { value: 'description', label: 'Açıklama' },
+      { value: 'internalNote', label: 'İç Not' },
+    ],
+  },
+  {
+    value: 'case.close',
+    label: 'Vaka Kapanışı',
+    resourceKey: 'case',
+    fields: [
+      { value: 'resolutionNote', label: 'Çözüm Açıklaması' },
+      { value: 'rootCauseGroup', label: 'Kök Neden Grubu' },
+      { value: 'rootCauseDetail', label: 'Kök Neden Detayı' },
+      { value: 'resolutionType', label: 'Çözüm Tipi' },
+      { value: 'permanentPrevention', label: 'Kalıcı Önlem' },
+    ],
+  },
+  {
+    value: 'case.transfer',
+    label: 'Vaka Devri',
+    resourceKey: 'case',
+    fields: [
+      { value: 'transferNote', label: 'Devir Notu' },
+      { value: 'toTeamId', label: 'Hedef Takım' },
+      { value: 'toPersonId', label: 'Hedef Kişi' },
+      { value: 'priority', label: 'Öncelik' },
+    ],
+  },
+  {
+    value: 'smartTicket.stage1',
+    label: 'Akıllı Ticket / 1. Adım',
+    resourceKey: 'case',
+    fields: [
+      { value: 'accountId', label: 'Müşteri' },
+      { value: 'projectId', label: 'Proje' },
+      { value: 'title', label: 'Başlık' },
+      { value: 'description', label: 'Konu Detayı' },
+      { value: 'requestType', label: 'Talep Türü' },
+      { value: 'priority', label: 'Öncelik' },
+      { value: 'attachments', label: 'Dosyalar' },
+    ],
+  },
+  {
+    value: 'smartTicket.stage3Closure',
+    label: 'Akıllı Ticket / Çözümle Kapat',
+    resourceKey: 'case',
+    fields: [
+      { value: 'rootCauseGroup', label: 'Kök Neden Grubu' },
+      { value: 'rootCauseDetail', label: 'Kök Neden Detayı' },
+      { value: 'resolutionType', label: 'Çözüm Tipi' },
+      { value: 'permanentPrevention', label: 'Kalıcı Önlem' },
+      { value: 'resolutionNote', label: 'Çözüm Açıklaması' },
+    ],
+  },
+  {
+    value: 'smartTicket.stage3Transfer',
+    label: 'Akıllı Ticket / L2 Devri',
+    resourceKey: 'case',
+    fields: [
+      { value: 'transferNote', label: 'Devir Notu' },
+      { value: 'toTeamId', label: 'Hedef Takım' },
+      { value: 'toPersonId', label: 'Hedef Kişi' },
+      { value: 'priority', label: 'Öncelik' },
+    ],
+  },
+];
+
 /**
  * Bu ekran eski Varuna'daki yetkilendirme matrisini menü, kayıt işlemi, alan ve
  * güvenlik filtresi düzeyinde yönetmek için kullanılır.
  */
 export function AdminAuthorizationPoliciesPage() {
   const companies = useMemo(() => lookupService.companies(), []);
+  const teams = useMemo(() => lookupService.teams(), []);
+  const persons = useMemo(() => lookupService.persons(), []);
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? '');
   const [target, setTarget] = useState<AuthorizationPolicyTarget | ''>('');
   const [includeInactive, setIncludeInactive] = useState(false);
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AuthorizationPolicy[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null);
@@ -75,6 +294,11 @@ export function AdminAuthorizationPoliciesPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  const previewPrincipalOptions = useMemo(
+    () => buildPrincipalOptions(previewPrincipalType, companyId, companies, teams, persons, users),
+    [previewPrincipalType, companyId, companies, teams, persons, users],
+  );
 
   async function refresh() {
     if (!companyId) {
@@ -101,6 +325,21 @@ export function AdminAuthorizationPoliciesPage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, target, includeInactive]);
+
+  useEffect(() => {
+    let alive = true;
+    adminService.users
+      .list()
+      .then((list) => {
+        if (alive) setUsers(list);
+      })
+      .catch(() => {
+        if (alive) setUsers([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('tr-TR');
@@ -200,7 +439,20 @@ export function AdminAuthorizationPoliciesPage() {
               <CompanySelector
                 label="Şirket"
                 value={companyId}
-                onChange={(id) => setCompanyId(id ?? '')}
+                  onChange={(id) => {
+                    const nextCompanyId = id ?? '';
+                    setCompanyId(nextCompanyId);
+                    setPreview(null);
+                    const nextOptions = buildPrincipalOptions(
+                      previewPrincipalType,
+                      nextCompanyId,
+                      companies,
+                      teams,
+                      persons,
+                      users,
+                    );
+                    setPreviewPrincipalKey(nextOptions[0]?.value ?? '');
+                  }}
                 required
               />
             </div>
@@ -234,11 +486,14 @@ export function AdminAuthorizationPoliciesPage() {
         <EffectivePreviewPanel
           principalType={previewPrincipalType}
           principalKey={previewPrincipalKey}
+          principalOptions={previewPrincipalOptions}
           preview={preview}
           loading={previewLoading}
           error={previewError}
           onPrincipalTypeChange={(value) => {
             setPreviewPrincipalType(value);
+            const nextOptions = buildPrincipalOptions(value, companyId, companies, teams, persons, users);
+            setPreviewPrincipalKey(nextOptions[0]?.value ?? '');
             setPreview(null);
           }}
           onPrincipalKeyChange={(value) => {
@@ -292,7 +547,9 @@ export function AdminAuthorizationPoliciesPage() {
                       {row.notes && <div className="mt-1 text-xs text-slate-500">{row.notes}</div>}
                     </Td>
                     <Td>
-                      <div className="font-medium text-slate-800">{row.principalKey}</div>
+                      <div className="font-medium text-slate-800">
+                        {formatPrincipalLabel(row.principalType, row.principalKey, row.companyId, companies, teams, persons, users)}
+                      </div>
                       <div className="text-xs text-slate-500">{PRINCIPAL_LABELS[row.principalType]}</div>
                     </Td>
                     <Td>
@@ -346,6 +603,10 @@ export function AdminAuthorizationPoliciesPage() {
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
         companyId={companyId}
+        companies={companies}
+        teams={teams}
+        persons={persons}
+        users={users}
         items={items}
         onClose={() => setEditor(null)}
         onSaved={() => void refresh()}
@@ -357,6 +618,7 @@ export function AdminAuthorizationPoliciesPage() {
 function EffectivePreviewPanel({
   principalType,
   principalKey,
+  principalOptions,
   preview,
   loading,
   error,
@@ -366,6 +628,7 @@ function EffectivePreviewPanel({
 }: {
   principalType: AuthorizationPrincipalType;
   principalKey: string;
+  principalOptions: SelectOption[];
   preview: AuthorizationEffectivePreview | null;
   loading: boolean;
   error: string | null;
@@ -406,12 +669,13 @@ function EffectivePreviewPanel({
               ))}
             </Select>
           </Field>
-          <Field label="Hedef Değer" className="w-56">
-            <TextInput
+          <Field label="Hedef" className="w-64">
+            <Select
               value={principalKey}
               onChange={(e) => onPrincipalKeyChange(e.target.value)}
-              placeholder="Agent / team-id / user-id"
-            />
+            >
+              {renderOptionsWithCurrent(principalOptions, principalKey)}
+            </Select>
           </Field>
           <Button
             variant="outline"
@@ -497,21 +761,38 @@ function Metric({ label, value, tint }: { label: string; value: number; tint: 'e
 
 function PolicyTargetSummary({ row }: { row: AuthorizationPolicy }) {
   if (row.target === 'menu') {
-    return <SummaryLine icon={<KeyRound size={13} />} title={row.viewKey ?? row.menuKey ?? '—'} detail="Menü görünürlüğü" />;
-  }
-  if (row.target === 'resource') {
-    return <SummaryLine icon={<ShieldCheck size={13} />} title={row.resourceKey ?? '—'} detail={row.action ?? 'Aksiyon yok'} />;
-  }
-  if (row.target === 'field') {
+    const menu = findMenuOptionByViewKey(row.viewKey ?? '');
     return (
       <SummaryLine
         icon={<KeyRound size={13} />}
-        title={`${row.scope ?? 'bölüm yok'} · ${row.fieldKey ?? 'alan yok'}`}
-        detail={row.action ?? 'Alan aksiyonu yok'}
+        title={menu?.label ?? row.viewKey ?? row.menuKey ?? '—'}
+        detail={`Menü görünürlüğü${menu ? ` · ${MENU_GROUP_LABELS[menu.group] ?? menu.group}` : ''}`}
       />
     );
   }
-  return <SummaryLine icon={<Filter size={13} />} title={row.resourceKey ?? '—'} detail="Güvenlik filtresi" />;
+  if (row.target === 'resource') {
+    const resource = findResourceOption(row.resourceKey ?? '');
+    return (
+      <SummaryLine
+        icon={<ShieldCheck size={13} />}
+        title={resource?.label ?? row.resourceKey ?? '—'}
+        detail={row.action ? ACTION_LABELS[row.action] ?? row.action : 'İşlem yok'}
+      />
+    );
+  }
+  if (row.target === 'field') {
+    const scope = findFieldScopeOption(row.scope ?? '');
+    const field = scope?.fields.find((f) => f.value === row.fieldKey);
+    return (
+      <SummaryLine
+        icon={<KeyRound size={13} />}
+        title={`${scope?.label ?? row.scope ?? 'Bölüm yok'} · ${field?.label ?? row.fieldKey ?? 'Alan yok'}`}
+        detail={row.action ? FIELD_ACTION_OPTIONS.find((x) => x.value === row.action)?.label ?? row.action : 'Alan davranışı yok'}
+      />
+    );
+  }
+  const resource = findResourceOption(row.resourceKey ?? '');
+  return <SummaryLine icon={<Filter size={13} />} title={resource?.label ?? row.resourceKey ?? '—'} detail="Güvenlik filtresi" />;
 }
 
 function SummaryLine({ icon, title, detail }: { icon: ReactNode; title: string; detail: string }) {
@@ -526,11 +807,153 @@ function SummaryLine({ icon, title, detail }: { icon: ReactNode; title: string; 
   );
 }
 
+function KeyHint({ value, prefix = 'Kaydedilecek değer' }: { value: string | null | undefined; prefix?: string }) {
+  if (!value) return null;
+  return <div className="mt-1 font-mono text-[11px] text-slate-400">{prefix}: {value}</div>;
+}
+
+function renderOptionsWithCurrent(options: SelectOption[], currentValue: string | null | undefined) {
+  const current = currentValue ?? '';
+  const hasCurrent = current ? options.some((o) => o.value === current) : true;
+  return (
+    <>
+      {!current && <option value="">Seçin…</option>}
+      {current && !hasCurrent && <option value={current}>{current} (mevcut özel değer)</option>}
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.detail ? `${option.label} — ${option.detail}` : option.label}
+        </option>
+      ))}
+    </>
+  );
+}
+
+function renderGroupedMenuOptions(currentValue: string) {
+  const hasCurrent = currentValue ? MENU_OPTIONS.some((o) => o.value === currentValue) : true;
+  const groups = groupBy(MENU_OPTIONS, (option) => option.group);
+  return (
+    <>
+      {!currentValue && <option value="">Seçin…</option>}
+      {currentValue && !hasCurrent && <option value={currentValue}>{currentValue} (mevcut özel değer)</option>}
+      {Array.from(groups.entries()).map(([group, options]) => (
+        <optgroup key={group} label={MENU_GROUP_LABELS[group] ?? group}>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
+function renderGroupedResourceOptions(currentValue: string) {
+  const hasCurrent = currentValue ? RESOURCE_OPTIONS.some((o) => o.value === currentValue) : true;
+  const groups = groupBy(RESOURCE_OPTIONS, (option) => option.category);
+  return (
+    <>
+      {!currentValue && <option value="">Seçin…</option>}
+      {currentValue && !hasCurrent && <option value={currentValue}>{currentValue} (mevcut özel değer)</option>}
+      {Array.from(groups.entries()).map(([category, options]) => (
+        <optgroup key={category} label={RESOURCE_CATEGORY_LABELS[category] ?? category}>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
+function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  items.forEach((item) => {
+    const key = getKey(item);
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  });
+  return groups;
+}
+
+function findMenuOptionByViewKey(viewKey: string): MenuOption | undefined {
+  return MENU_OPTIONS.find((m) => m.value === viewKey);
+}
+
+function findResourceOption(resourceKey: string): ResourceOption | undefined {
+  return RESOURCE_OPTIONS.find((r) => r.value === resourceKey);
+}
+
+function findFieldScopeOption(scope: string): FieldScopeOption | undefined {
+  return FIELD_SCOPE_OPTIONS.find((s) => s.value === scope);
+}
+
+function buildPrincipalOptions(
+  principalType: AuthorizationPrincipalType,
+  companyId: string,
+  companies: ReturnType<typeof lookupService.companies>,
+  teams: CaseTeam[],
+  persons: CasePerson[],
+  users: AdminUser[],
+): SelectOption[] {
+  if (principalType === 'systemRole') return SYSTEM_ROLE_OPTIONS;
+  const company = companies.find((c) => c.id === companyId);
+  if (principalType === 'companyRole') {
+    return COMPANY_ROLE_OPTIONS.map((role) => ({
+      value: `${companyId}:${role.value}`,
+      label: `${company?.name ?? companyId} / ${role.label}`,
+      detail: `${companyId}:${role.value}`,
+    }));
+  }
+  if (principalType === 'team') {
+    return teams
+      .filter((team) => team.companyId === companyId)
+      .map((team) => ({
+        value: team.id,
+        label: team.name,
+        detail: [team.defaultSupportLevel, team.id].filter(Boolean).join(' · '),
+      }));
+  }
+  const personById = new Map(persons.map((person) => [person.id, person]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+  return users
+    .filter((user) => user.isActive && (user.role === 'SystemAdmin' || user.assignments.some((a) => a.companyId === companyId)))
+    .map((user) => {
+      const person = user.personId ? personById.get(user.personId) : undefined;
+      const team = person ? teamById.get(person.teamId) : undefined;
+      return {
+        value: user.id,
+        label: `${user.fullName || user.email}`,
+        detail: [user.email, user.role, team?.name].filter(Boolean).join(' · '),
+      };
+    });
+}
+
+function formatPrincipalLabel(
+  principalType: AuthorizationPrincipalType,
+  principalKey: string,
+  companyId: string,
+  companies: ReturnType<typeof lookupService.companies>,
+  teams: CaseTeam[],
+  persons: CasePerson[],
+  users: AdminUser[],
+): string {
+  const options = buildPrincipalOptions(principalType, companyId, companies, teams, persons, users);
+  return options.find((option) => option.value === principalKey)?.label ?? principalKey;
+}
+
 function AuthorizationPolicyModal({
   open,
   mode,
   editingId,
   companyId,
+  companies,
+  teams,
+  persons,
+  users,
   items,
   onClose,
   onSaved,
@@ -539,6 +962,10 @@ function AuthorizationPolicyModal({
   mode: 'create' | 'edit';
   editingId: string | null;
   companyId: string;
+  companies: ReturnType<typeof lookupService.companies>;
+  teams: CaseTeam[];
+  persons: CasePerson[];
+  users: AdminUser[];
   items: AuthorizationPolicy[];
   onClose: () => void;
   onSaved: () => void;
@@ -548,6 +975,17 @@ function AuthorizationPolicyModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+  const principalOptions = useMemo(
+    () => buildPrincipalOptions(form.principalType, companyId, companies, teams, persons, users),
+    [form.principalType, companyId, companies, teams, persons, users],
+  );
+  const selectedResource = findResourceOption(form.resourceKey ?? '');
+  const resourceActionOptions = selectedResource?.actions.map((action) => ({
+    value: action,
+    label: ACTION_LABELS[action] ?? action,
+  })) ?? [];
+  const selectedFieldScope = findFieldScopeOption(form.scope ?? '');
+  const fieldOptions = selectedFieldScope?.fields ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -582,6 +1020,30 @@ function AuthorizationPolicyModal({
 
   function patch(patchValue: Partial<AuthorizationPolicyInput>) {
     setForm((f) => ({ ...f, ...patchValue }));
+  }
+
+  function handlePrincipalTypeChange(value: AuthorizationPrincipalType) {
+    const nextOptions = buildPrincipalOptions(value, companyId, companies, teams, persons, users);
+    patch({ principalType: value, principalKey: nextOptions[0]?.value ?? '' });
+  }
+
+  function handleMenuChange(viewKey: string) {
+    const menu = findMenuOptionByViewKey(viewKey);
+    patch({ viewKey, menuKey: menu?.key ?? null });
+  }
+
+  function handleResourceChange(resourceKey: string) {
+    const nextResource = findResourceOption(resourceKey);
+    patch({ resourceKey, action: nextResource?.actions[0] ?? null });
+  }
+
+  function handleFieldScopeChange(scope: string) {
+    const nextScope = findFieldScopeOption(scope);
+    patch({
+      scope,
+      resourceKey: nextScope?.resourceKey ?? form.resourceKey ?? 'case',
+      fieldKey: nextScope?.fields[0]?.value ?? '',
+    });
   }
 
   async function handleSave() {
@@ -659,7 +1121,7 @@ function AuthorizationPolicyModal({
         <Field label="Kime Uygulanır?" required>
           <Select
             value={form.principalType}
-            onChange={(e) => patch({ principalType: e.target.value as AuthorizationPrincipalType })}
+            onChange={(e) => handlePrincipalTypeChange(e.target.value as AuthorizationPrincipalType)}
           >
             {PRINCIPAL_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -670,15 +1132,18 @@ function AuthorizationPolicyModal({
         </Field>
 
         <Field
-          label="Hedef Değer"
+          label="Hedef"
           required
-          hint="Sistem rolünde rol adı; şirket rolünde companyId:rol; takım ve kullanıcıda ilgili kayıt ID'si. Örn. Agent, COMP-UNIVERA:Supervisor."
+          hint="Kaydedilecek teknik değer altta gösterilir; elle ID yazmanız gerekmez."
         >
-          <TextInput
+          <Select
             autoFocus
             value={form.principalKey}
             onChange={(e) => patch({ principalKey: e.target.value })}
-          />
+          >
+            {renderOptionsWithCurrent(principalOptions, form.principalKey)}
+          </Select>
+          <KeyHint value={form.principalKey} />
         </Field>
 
         <Field label="Etki" required>
@@ -704,56 +1169,74 @@ function AuthorizationPolicyModal({
 
         {form.target === 'menu' && (
           <>
-            <Field label="Ekran Anahtarı" required hint="Hangi sayfa/menü kontrol edilecek? Örn. cases, admin-users, smart-ticket-new">
-              <TextInput value={form.viewKey ?? ''} onChange={(e) => patch({ viewKey: e.target.value })} />
+            <Field label="Ekran / Menü" required hint="Kullanıcının sol menüde veya ana akışta göreceği ekran.">
+              <Select value={form.viewKey ?? ''} onChange={(e) => handleMenuChange(e.target.value)}>
+                {renderGroupedMenuOptions(form.viewKey ?? '')}
+              </Select>
+              <KeyHint value={form.viewKey ?? ''} prefix="Ekran" />
             </Field>
-            <Field label="Menü Anahtarı" hint="Genellikle boş bırakılır; sistem ekran anahtarından çözer.">
-              <TextInput value={form.menuKey ?? ''} onChange={(e) => patch({ menuKey: e.target.value })} />
+            <Field label="Menü Kodu" hint="Sistem tarafından otomatik doldurulur.">
+              <TextInput value={form.menuKey ?? ''} disabled />
             </Field>
           </>
         )}
 
         {form.target === 'resource' && (
           <>
-            <Field label="Kayıt/Kaynak Anahtarı" required hint="Hangi kayıt türü? Örn. case, case.note, account">
-              <TextInput
+            <Field label="Kayıt / Kaynak" required hint="Hangi veri tipi üzerinde işlem yapılacak?">
+              <Select
                 value={form.resourceKey ?? ''}
-                onChange={(e) => patch({ resourceKey: e.target.value })}
-              />
+                onChange={(e) => handleResourceChange(e.target.value)}
+              >
+                {renderGroupedResourceOptions(form.resourceKey ?? '')}
+              </Select>
+              <KeyHint value={form.resourceKey ?? ''} />
             </Field>
-            <Field label="İşlem" required hint="Ne yapabilir? create/read/update/delete/transfer/close/export…">
-              <TextInput value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })} />
+            <Field label="İşlem" required hint="Bu kaynak için izin verilecek veya engellenecek işlem.">
+              <Select value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })}>
+                {renderOptionsWithCurrent(resourceActionOptions, form.action ?? '')}
+              </Select>
+              <KeyHint value={form.action ?? ''} />
             </Field>
           </>
         )}
 
         {form.target === 'field' && (
           <>
-            <Field label="Ekran/Bölüm" required hint="Alan hangi form veya bölümde? Örn. case.close, smartTicket.stage3Transfer">
-              <TextInput value={form.scope ?? ''} onChange={(e) => patch({ scope: e.target.value })} />
+            <Field label="Ekran / Bölüm" required hint="Alan hangi form veya bölümde yönetilecek?">
+              <Select value={form.scope ?? ''} onChange={(e) => handleFieldScopeChange(e.target.value)}>
+                {renderOptionsWithCurrent(FIELD_SCOPE_OPTIONS, form.scope ?? '')}
+              </Select>
+              <KeyHint value={form.scope ?? ''} />
             </Field>
-            <Field label="Alan Anahtarı" required hint="Kontrol edilecek alan. Örn. resolutionNote, priority">
-              <TextInput value={form.fieldKey ?? ''} onChange={(e) => patch({ fieldKey: e.target.value })} />
+            <Field label="Alan" required hint="Zorunlu, gizli, maskeli veya düzenlenebilir yapılacak alan.">
+              <Select value={form.fieldKey ?? ''} onChange={(e) => patch({ fieldKey: e.target.value })}>
+                {renderOptionsWithCurrent(fieldOptions, form.fieldKey ?? '')}
+              </Select>
+              <KeyHint value={form.fieldKey ?? ''} />
             </Field>
-            <Field label="Alan Davranışı" required hint="visible/readable/editable/required/masked">
-              <TextInput value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })} />
+            <Field label="Alan Davranışı" required hint="Bu alan kullanıcıya nasıl davranacak?">
+              <Select value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })}>
+                {renderOptionsWithCurrent(FIELD_ACTION_OPTIONS, form.action ?? '')}
+              </Select>
+              <KeyHint value={form.action ?? ''} />
             </Field>
             <Field label="Kayıt/Kaynak Anahtarı" hint="Genellikle case.">
-              <TextInput
-                value={form.resourceKey ?? ''}
-                onChange={(e) => patch({ resourceKey: e.target.value })}
-              />
+              <TextInput value={form.resourceKey ?? ''} disabled />
             </Field>
           </>
         )}
 
         {form.target === 'securityFilter' && (
           <>
-            <Field label="Kayıt/Kaynak Anahtarı" required hint="Hangi kayıtlar filtrelenecek? Örn. case, account">
-              <TextInput
+            <Field label="Kayıt / Kaynak" required hint="Hangi kayıtlar bu güvenlik filtresinden geçecek?">
+              <Select
                 value={form.resourceKey ?? ''}
                 onChange={(e) => patch({ resourceKey: e.target.value })}
-              />
+              >
+                {renderGroupedResourceOptions(form.resourceKey ?? '')}
+              </Select>
+              <KeyHint value={form.resourceKey ?? ''} />
             </Field>
             <Field label="Güvenlik Filtresi JSON" required className="md:col-span-2">
               <TextArea
@@ -800,6 +1283,7 @@ function emptyPolicy(companyId: string): AuthorizationPolicyInput {
     principalType: 'systemRole',
     principalKey: 'Agent',
     effect: 'allow',
+    menuKey: 'main.cases',
     viewKey: 'cases',
     priority: 100,
     isActive: true,
@@ -818,7 +1302,7 @@ function resetTargetSpecific(target: AuthorizationPolicyTarget): Partial<Authori
     fieldKey: null,
     filterJson: null,
   };
-  if (target === 'menu') return { ...base, viewKey: 'cases' };
+  if (target === 'menu') return { ...base, viewKey: 'cases', menuKey: 'main.cases' };
   if (target === 'resource') return { ...base, resourceKey: 'case', action: 'read' };
   if (target === 'field') {
     return { ...base, resourceKey: 'case', scope: 'case.detail', fieldKey: 'priority', action: 'editable' };
@@ -844,7 +1328,7 @@ function buildPayload(
     isActive: form.isActive ?? true,
   };
 
-  if (!payload.principalKey) return { error: 'Hedef Değer zorunlu.' };
+  if (!payload.principalKey) return { error: 'Hedef seçimi zorunlu.' };
 
   if (payload.target === 'securityFilter') {
     try {
