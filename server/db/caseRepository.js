@@ -1111,8 +1111,8 @@ export const caseRepository = {
     return { mode: 'unknown' };
   },
 
-  async list({ filters, pagination, allowedCompanyIds } = {}) {
-    const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
+  async list({ filters, pagination, allowedCompanyIds, securityWhere } = {}) {
+    const where = buildWhere(toDbFilters(filters), allowedCompanyIds, securityWhere);
     const total = await prisma.case.count({ where });
 
     const orderBy = { createdAt: 'desc' };
@@ -4997,7 +4997,7 @@ function pickRestoreStatus(previous, current) {
   return 'Acik';
 }
 
-function buildWhere(f, allowedCompanyIds) {
+function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (!f) f = {};
   const where = {};
   const andClauses = [];
@@ -5007,6 +5007,14 @@ function buildWhere(f, allowedCompanyIds) {
   // hiçbir şey görmez).
   if (allowedCompanyIds) {
     andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
+  if (
+    securityWhere &&
+    typeof securityWhere === 'object' &&
+    !Array.isArray(securityWhere) &&
+    Object.keys(securityWhere).length > 0
+  ) {
+    andClauses.push(securityWhere);
   }
   // PR-SD — Soft archive default exclude. SystemAdmin'in UI'dan açık seçimi
   // ile includeArchived: true override eder. Diğer query path'lerinde (KPI,

@@ -63,9 +63,9 @@ const ENFORCEMENT_STATUS: Record<
     description: 'Alan zorunluluğu kuralları case.close kapsamındaki seçili kapanış alanlarında AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED=true iken pilot çalışır.',
   },
   securityFilter: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Güvenlik filtresi kuralları şu an tanım ve önizleme amaçlıdır; kayıt sorgularına bağlama ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Güvenlik filtresi kuralları vaka listeleme uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken daraltıcı kayıt filtresi olarak pilot çalışır.',
   },
 };
 
@@ -752,13 +752,13 @@ function EnforcementStatusNotice() {
         <Badge tint="emerald">Menü canlı</Badge>
         <Badge tint="violet">CRUD pilot</Badge>
         <Badge tint="violet">Alan zorunluluğu pilot</Badge>
-        <Badge tint="amber">Güvenlik filtresi önizleme</Badge>
+        <Badge tint="violet">Güvenlik filtresi pilot</Badge>
       </div>
       <p className="mt-1 text-amber-800">
         Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi kuralları seçili
         vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu case.close kapsamındaki seçili kapanış
-        alanlarında flag ile pilot çalışır. Güvenlik filtresi kuralları bu fazda tanım ve kontrol amaçlıdır;
-        ilgili ekran/API guard bağlantıları ayrı fazlarda devreye alınacaktır.
+        alanlarında flag ile pilot çalışır. Güvenlik filtresi kuralları vaka listesi ve etiket doğrulama liste/export
+        uçlarında flag ile daraltıcı kayıt filtresi olarak pilot çalışır.
       </p>
     </div>
   );

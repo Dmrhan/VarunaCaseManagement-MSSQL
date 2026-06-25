@@ -20,6 +20,7 @@ import {
   assertRequiredFieldsPresent,
   assertDenyOnlyResourceAccess,
   buildCurrentAuthorizationUser,
+  compileSecurityFilterOverrides,
   resolveAuthorizationTeamId,
 } from '../lib/authorizationRuntime.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
@@ -183,6 +184,49 @@ function isAuthorizationFieldEnforcementEnabled() {
   return process.env.AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED === 'true';
 }
 
+function isAuthorizationSecurityFilterEnforcementEnabled() {
+  return process.env.AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED === 'true';
+}
+
+function hasWhereClause(where) {
+  return where && typeof where === 'object' && !Array.isArray(where) && Object.keys(where).length > 0;
+}
+
+async function buildCaseListSecurityWhere(req) {
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return null;
+  const allowedCompanyIds = Array.isArray(req.user?.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  if (allowedCompanyIds.length === 0) return null;
+
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const scopedClauses = [];
+  let hasAnySecurityFilter = false;
+
+  for (const companyId of allowedCompanyIds) {
+    const policyUser = buildCurrentAuthorizationUser(req.user, companyId, teamId);
+    const overrides = await authorizationPolicyRepository.listOverrides(
+      companyId,
+      req.user.allowedCompanyIds,
+    );
+    const compiled = compileSecurityFilterOverrides({
+      resourceKey: 'case',
+      user: policyUser,
+      overrides,
+    });
+    if (hasWhereClause(compiled)) {
+      hasAnySecurityFilter = true;
+      scopedClauses.push({ AND: [{ companyId }, compiled] });
+    } else {
+      scopedClauses.push({ companyId });
+    }
+  }
+
+  if (!hasAnySecurityFilter) return null;
+  if (scopedClauses.length === 1) return scopedClauses[0];
+  return { OR: scopedClauses };
+}
+
 async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
   if (!isAuthorizationResourceEnforcementEnabled()) return null;
   const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
@@ -325,10 +369,12 @@ router.get(
     );
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     res.json({ value: items, '@odata.count': total });
   }),
@@ -476,10 +522,12 @@ router.get(
       dateTo: f.dateTo,
       teamId: f.teamId || undefined,
     };
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items } = await caseRepository.list({
       filters,
       pagination: { page: 1, pageSize: 5000 },
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
     res.json({
@@ -521,10 +569,12 @@ router.get(
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
 
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
     res.json({
