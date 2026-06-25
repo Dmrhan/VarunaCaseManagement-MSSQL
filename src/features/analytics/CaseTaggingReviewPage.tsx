@@ -102,10 +102,6 @@ function draftFromReview(r: CaseTaggingReview | undefined): RowDraft {
   return { note: r?.note ?? '', saving: false, fields };
 }
 
-/** Yanlış işaretlenen alan sayısı — özet satırı için. */
-function countWrong(draft: RowDraft, defs: TagDef[]): number {
-  return defs.filter((d) => draft.fields[tagKey(d)]?.verdict === 'Yanlis').length;
-}
 
 // Tablo hücresi için genişletilebilir metin
 function ExpandableCell({ text }: { text: string }) {
@@ -651,9 +647,9 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       </Card>
 
       {/* Ana tablo */}
-      <div className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 dark:border-ndark-border">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
-        <div className="sticky top-0 z-10 grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_150px_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+        <div className="sticky top-0 z-10 grid grid-cols-[1.5fr_0.7fr_1fr_1.5fr_1.2fr_2fr_2fr_1.4fr_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
           {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
@@ -675,12 +671,11 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
         {!loading && items.map((c) => {
           const review = reviews.get(c.id);
-          const draft  = drafts.get(c.id) ?? draftFromReview(review);
 
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_150px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[1.5fr_0.7fr_1fr_1.5fr_1.2fr_2fr_2fr_1.4fr_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
