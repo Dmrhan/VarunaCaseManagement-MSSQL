@@ -1249,11 +1249,15 @@ export function SmartTicketNewPage({
     return { all };
   }, [createdCase]);
 
-  // Seçili takıma ait persons.
+  // Seçili takıma ait persons. Aynı takım seçilince mevcut atanan kişi listeden çıkar.
   const transferPersonOptions = useMemo(() => {
     if (!transferToTeamId) return [];
-    return lookupService.personsByTeam(transferToTeamId);
-  }, [transferToTeamId]);
+    const persons = lookupService.personsByTeam(transferToTeamId);
+    const isSameTeam = transferToTeamId === createdCase?.assignedTeamId;
+    return isSameTeam
+      ? persons.filter((p) => p.id !== createdCase?.assignedPersonId)
+      : persons;
+  }, [transferToTeamId, createdCase?.assignedTeamId, createdCase?.assignedPersonId]);
 
   // Takım değişince geçersiz kişi seçimini temizle.
   useEffect(() => {
@@ -2499,7 +2503,6 @@ function Stage3Transfer({
     transferToTeamId !== '' &&
     transferNote.trim().length > 0 &&
     !(isSameTeam && !transferToPersonId) &&
-    !(isSameTeam && transferToPersonId === createdCase?.assignedPersonId) &&
     !transferring &&
     !transferBriefLoading;
   const noTeamsAtAll = teamOptions.all.length === 0;
@@ -2721,7 +2724,9 @@ function Stage3Transfer({
                     ? 'Hedef takım seçin.'
                     : transferNote.trim().length === 0
                       ? 'Devir notu zorunlu.'
-                      : undefined
+                      : isSameTeam && !transferToPersonId
+                        ? 'Aynı takımda devir için hedef kişi seçin.'
+                        : undefined
               }
               leftIcon={
                 transferring ? (
