@@ -25,6 +25,7 @@ import { authorizationPolicyRepository } from '../db/authorizationPolicyReposito
 import { devopsClient } from '../lib/devopsClient.js';
 import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
+import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
@@ -1002,6 +1003,38 @@ router.post('/external-mail-settings/:companyId/test', asyncRoute(async (req, re
       transport: result.meta?.transport,
       source: result.meta?.source,
     },
+  });
+}));
+
+/**
+ * Mail M3 — POST /external-mail-settings/:companyId/poll
+ *
+ * IMAP polling'i manuel tetikler (SystemAdmin guard — DevOps test rotası
+ * deseni). Cron seam (interval) ek olarak; bu endpoint debug / acil
+ * tetik için.
+ *
+ * Dönen: { ok, stats: { fetched, intaken, skipped, failed }, error? }
+ * Secret/raw mesaj response'a inmez; sadece sayım istatistikleri.
+ */
+router.post('/external-mail-settings/:companyId/poll', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  // SystemAdmin guard (DevOps test endpoint'inden farklı — IMAP polling
+  // tüm tenant kapsamlı kaynak tüketir, SystemAdmin yetkisi şart).
+  requireSystemAdminOnly(req);
+
+  const result = await imapPollMailbox(companyId);
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      stats: result.stats,
+      error: result.error,
+    });
+  }
+  return res.json({
+    ok: true,
+    stats: result.stats,
+    meta: result.meta,
   });
 }));
 
