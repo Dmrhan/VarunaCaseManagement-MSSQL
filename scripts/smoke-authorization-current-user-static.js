@@ -50,12 +50,22 @@ expect('2.2 app mounts authorization router', /app\.use\('\/api\/authorization',
 expect('3.1 frontend authorization service exists', exists(servicePath), true);
 expect('3.2 frontend service exports authorizationService', /export const authorizationService/.test(service), true);
 expect('3.3 frontend service calls effective-menus', /\/api\/authorization\/effective-menus/.test(service), true);
-expect('3.4 frontend service documents not wired into App yet', /not wired into[\s\S]*App navigation/.test(service), true);
+expect('3.4 frontend service documents current-user menu API', /Current-user effective menu snapshot/.test(service), true);
 
-expect('4.1 App does not import authorizationService yet', /authorizationService/.test(appTsx), false);
-expect('4.2 App does not runtime-filter NAV by effective menus yet', /effectiveMenus\(/.test(appTsx), false);
+expect('4.1 App imports authorizationService', /import \{ authorizationService \}/.test(appTsx), true);
+expect('4.2 App stores effective menu access state', /setEffectiveMenuAccess/.test(appTsx), true);
+expect('4.3 App calls effectiveMenus behind feature flag', /authorizationService\.effectiveMenus\(\)/.test(appTsx), true);
+expect('4.4 App uses authorization menu feature flag', /featureFlags\.authorizationMenuEnforcementEnabled/.test(appTsx), true);
+expect('4.5 App keeps fail-open behavior on endpoint failure', /Fail-open[\s\S]*setEffectiveMenuFailed\(true\)/.test(appTsx), true);
+expect('4.6 canShowView checks effectiveMenuFailed', /function canShowView[\s\S]*effectiveMenuFailed/.test(appTsx), true);
+expect('4.7 canShowView checks effective menu allowed flag', /menu \? menu\.allowed : fallback/.test(appTsx), true);
+expect('4.8 handleNavSelect blocks hidden menu keys', /function handleNavSelect[\s\S]*canShowView\(key, true\)/.test(appTsx), true);
+expect('4.9 NAV list is filtered by canShowView', /NAV\.filter\(\(item\) => canShowView\(item\.key, item\.available\)\)\.map/.test(appTsx), true);
+expect('4.10 Workspace buttons are policy-gated', /showCalendar[\s\S]*showWatching[\s\S]*showKbViewer/.test(appTsx), true);
+expect('4.11 Report buttons are policy-gated', /showReportsSection[\s\S]*showAiUsage[\s\S]*showQaScores[\s\S]*showPatterns/.test(appTsx), true);
 
-expect('5.1 smoke script registered', pkg.scripts['smoke:authorization-current-user'], 'node scripts/smoke-authorization-current-user-static.js');
+expect('5.1 feature flag registered', /authorizationMenuEnforcementEnabled/.test(read('src/config/featureFlags.ts')), true);
+expect('5.2 smoke script registered', pkg.scripts['smoke:authorization-current-user'], 'node scripts/smoke-authorization-current-user-static.js');
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

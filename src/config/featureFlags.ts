@@ -61,4 +61,10 @@ export const featureFlags = {
    * Akıllı Ticket butonudur.
    */
   quickCaseEnabled: readFlag('VITE_QUICK_CASE_ENABLED', false),
+  /**
+   * Authorization Management — runtime sidebar menu filtering. Default false:
+   * policy CRUD/preview güvenle devreye alınabilir; gerçek menü enforcement
+   * UAT'ta açıkça bu flag ile test edilir.
+   */
+  authorizationMenuEnforcementEnabled: readFlag('VITE_AUTHORIZATION_MENU_ENFORCEMENT_ENABLED', false),
 };
