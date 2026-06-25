@@ -10,23 +10,32 @@
 // Canlı mod: AI'yı çalıştırıp YALNIZ insan-doğrulanmış (confirmed) truth ile
 // karşılaştırır. Yanlış (pending) satırların doğru etiketi henüz yok → skorlanmaz;
 // onları golden-set'te insan tamamladıkça kapsam (ve hard-case ölçümü) büyür.
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 
-const GOLDEN = "data/eval/golden-set-v1.json";
 const args = process.argv.slice(2);
 const baseline = args.includes("--baseline");
 const reviewWrong = args.includes("--review-wrong");
 const li = args.indexOf("--limit");
 const limit = li >= 0 ? parseInt(args[li + 1], 10) : Infinity;
 
+// Önce CANLI golden set (CaseTaggingReview'dan sync — per-field), yoksa Excel bootstrap.
+let GOLDEN = "data/eval/golden-set.json";
+if (!existsSync(GOLDEN)) GOLDEN = "data/eval/golden-set-v1.json";
 let data;
 try {
   data = JSON.parse(readFileSync(GOLDEN, "utf8"));
 } catch {
-  console.error(`Golden set yok: ${GOLDEN}\nÖnce üret: node scripts/build-golden-set.mjs "<xlsx>"`);
+  console.error("Golden set yok.\n  Canlı: node --env-file=.env scripts/sync-tagging-feedback.mjs\n  veya Excel: node scripts/build-golden-set.mjs \"<xlsx>\"");
   process.exit(1);
 }
 data = data.slice(0, limit);
+// Format tespiti: yeni per-field (truth.platform...) mı, eski blok (truth.acilis) mı?
+const perField = !!(data[0]?.truth && !data[0].truth.acilis);
+process.stderr.write(`(golden: ${GOLDEN} · ${perField ? "per-field/canlı" : "blok/Excel"} · ${data.length} vaka)\n`);
+if (perField && (baseline || reviewWrong)) {
+  console.error("--baseline / --review-wrong yalnız eski Excel formatında. Canlı format için düz koş (truth zaten dolu).");
+  process.exit(1);
+}
 
 const norm = (s) => (s == null ? "" : String(s).trim().toLocaleLowerCase("tr"));
 const pct = (a, b) => (b ? Math.round((100 * a) / b) + "%" : "—");
@@ -95,32 +104,38 @@ const { categorizeV2, suggestClose } = await import("../server/kb/kbCore.js");
 const OPEN = [["platform", "platform"], ["is_sureci", "isSureci"], ["islem_tipi", "islemTipi"], ["etkilenen_nesne", "etkilenenNesne"], ["etki", "etki"]];
 const CLOSE = [["kok_neden_grubu", "kokNedenGrubu"], ["kok_neden_detayi", "kokNedenDetayi"], ["cozum_tipi", "cozumTipi"], ["kalici_onlem", "kaliciOnlem"]];
 
+// Truth erişimi — iki format: per-field (canlı/CaseTaggingReview) veya blok (Excel).
+// confirmed değilse undefined döner → o alan skorlanmaz.
+const oTruth = (r, tk) => perField ? (r.truth[tk]?.confirmed ? r.truth[tk].label : undefined) : (r.acilisConfirmed ? r.truth.acilis[tk] : undefined);
+const cTruth = (r, tk) => perField ? (r.truth[tk]?.confirmed ? r.truth[tk].label : undefined) : (r.kapanisConfirmed ? r.truth.kapanis[tk] : undefined);
+const openHint = (r) => perField ? { is: r.truth.isSureci?.label, islem: r.truth.islemTipi?.label } : { is: r.truth.acilis.isSureci, islem: r.truth.acilis.islemTipi };
+
 let oF = 0, oFt = 0, cF = 0, cFt = 0, oC = 0, oCt = 0, cC = 0, cCt = 0;
 const miss = [];
 let i = 0;
 for (const r of data) {
   i++;
   process.stderr.write(`\r  ${i}/${data.length} ...`);
-  if (r.acilisConfirmed) {
+  const openFields = OPEN.filter(([, tk]) => oTruth(r, tk) !== undefined);
+  if (openFields.length) {
     const p = await categorizeV2({ description: r.aciklama, project: null, customerName: r.musteri });
     let ok = true;
-    for (const [pk, tk] of OPEN) {
+    for (const [pk, tk] of openFields) {
       oFt++;
-      if (norm(p[pk]) === norm(r.truth.acilis[tk])) oF++;
-      else { ok = false; miss.push(`AÇILIŞ.${tk}: AI="${p[pk]}" ≠ "${r.truth.acilis[tk]}" [${r.vakaNo}]`); }
+      if (norm(p[pk]) === norm(oTruth(r, tk))) oF++;
+      else { ok = false; miss.push(`AÇILIŞ.${tk}: AI="${p[pk]}" ≠ "${oTruth(r, tk)}" [${r.vakaNo}]`); }
     }
     oCt++; if (ok) oC++;
   }
-  if (r.kapanisConfirmed) {
-    const p = await suggestClose({
-      description: r.aciklama, resolution: r.cozumAciklamasi,
-      open_is_sureci: r.truth.acilis.isSureci, open_islem_tipi: r.truth.acilis.islemTipi,
-    });
+  const closeFields = CLOSE.filter(([, tk]) => cTruth(r, tk) !== undefined);
+  if (closeFields.length) {
+    const h = openHint(r);
+    const p = await suggestClose({ description: r.aciklama, resolution: r.cozumAciklamasi, open_is_sureci: h.is, open_islem_tipi: h.islem });
     let ok = true;
-    for (const [pk, tk] of CLOSE) {
+    for (const [pk, tk] of closeFields) {
       cFt++;
-      if (norm(p[pk]) === norm(r.truth.kapanis[tk])) cF++;
-      else { ok = false; miss.push(`KAPANIŞ.${tk}: AI="${p[pk]}" ≠ "${r.truth.kapanis[tk]}" [${r.vakaNo}]`); }
+      if (norm(p[pk]) === norm(cTruth(r, tk))) cF++;
+      else { ok = false; miss.push(`KAPANIŞ.${tk}: AI="${p[pk]}" ≠ "${cTruth(r, tk)}" [${r.vakaNo}]`); }
     }
     cCt++; if (ok) cC++;
   }
