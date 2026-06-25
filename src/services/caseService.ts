@@ -2732,6 +2732,14 @@ export interface SuggestClosureResponse {
     /** 'analyze' = drafts paralel analyze çağrısından geldi. Yoksa drafts
      *  yok demektir (eski persisted aiDrafts render edilir). */
     draftsSource?: 'analyze';
+    /** Telemetry attribution — AI'nın GERÇEKTEN sınıflandırdığı çözüm metni
+     *  (resolutionOverride varsa o; yoksa step'lerden compose). closureSuggestion
+     *  telemetry'sinde aiSuggested.resolutionSeen'e taşınır. */
+    resolutionSeen?: string;
+    /** AI katmanı (primary/fast) — upstream henüz dönmüyorsa undefined. */
+    tier?: string;
+    /** Aktif kapanış taksonomisi sürümü — upstream henüz dönmüyorsa undefined. */
+    taxonomyVersion?: string;
   };
 }
 

@@ -540,7 +540,79 @@ function sanitizeRequesterContext(raw) {
 //     AYNEN korunur — sadece `closure` alt-objesi set edilir.
 //   - version + updatedAt server-side stamplenir; client gönderemez.
 const SMART_TICKET_CLOSURE_VERSION = 1;
-function buildSmartTicketClosureMerge(prev, closureInput) {
+
+// Kapanışın 4 bağımsız alanı — telemetry perField anahtarları bu set ile
+// allowlist'lenir (beklenmedik key persist edilmesin).
+const CLOSURE_TELEMETRY_FIELD_KEYS = new Set([
+  'rootCauseGroup',
+  'rootCauseDetail',
+  'resolutionType',
+  'permanentPrevention',
+]);
+
+// closureSuggestion.aiSuggested — sıkı bounded sanitize. Frontend'in ürettiği
+// NORMALIZE telemetry (raw KB cevabı değil); yine de yalnız bilinen alanlar
+// geçer, bilinmeyen anahtarlar düşürülür.
+function sanitizeAiSuggestedTelemetry(ai) {
+  if (!ai || typeof ai !== 'object' || Array.isArray(ai)) return undefined;
+  const out = {};
+  for (const k of [
+    'suggestedAt',
+    'resolutionSeen',
+    'modelUsed',
+    'tier',
+    'promptVersion',
+    'taxonomyVersion',
+    'reason',
+  ]) {
+    if (typeof ai[k] === 'string') out[k] = ai[k];
+  }
+  if (typeof ai.confidence === 'number') out.confidence = ai.confidence;
+  if (ai.perField && typeof ai.perField === 'object' && !Array.isArray(ai.perField)) {
+    const pf = {};
+    for (const [field, v] of Object.entries(ai.perField)) {
+      if (!CLOSURE_TELEMETRY_FIELD_KEYS.has(field) || !v || typeof v !== 'object') continue;
+      const e = {};
+      if (typeof v.code === 'string') e.code = v.code;
+      if (typeof v.label === 'string') e.label = v.label;
+      if (typeof v.matchedBy === 'string') e.matchedBy = v.matchedBy;
+      if (typeof v.confidence === 'number') e.confidence = v.confidence;
+      pf[field] = e;
+    }
+    out.perField = pf;
+  }
+  if (Array.isArray(ai.unmatched)) {
+    out.unmatched = ai.unmatched
+      .filter((u) => u && typeof u === 'object' && typeof u.taxonomyType === 'string')
+      .map((u) => ({
+        taxonomyType: u.taxonomyType,
+        ...(typeof u.rawValue === 'string' ? { rawValue: u.rawValue } : {}),
+      }));
+  }
+  return out;
+}
+
+// closureSuggestion.humanApplied — sıkı bounded sanitize.
+function sanitizeHumanAppliedTelemetry(ha) {
+  if (!ha || typeof ha !== 'object' || Array.isArray(ha)) return undefined;
+  const out = {};
+  if (typeof ha.appliedAt === 'string') out.appliedAt = ha.appliedAt;
+  if (ha.perField && typeof ha.perField === 'object' && !Array.isArray(ha.perField)) {
+    const pf = {};
+    for (const [field, v] of Object.entries(ha.perField)) {
+      if (!CLOSURE_TELEMETRY_FIELD_KEYS.has(field) || !v || typeof v !== 'object') continue;
+      const e = {};
+      if (typeof v.code === 'string') e.code = v.code;
+      if (typeof v.label === 'string') e.label = v.label;
+      if (typeof v.changedFromAi === 'boolean') e.changedFromAi = v.changedFromAi;
+      pf[field] = e;
+    }
+    out.perField = pf;
+  }
+  return out;
+}
+
+export function buildSmartTicketClosureMerge(prev, closureInput) {
   if (!closureInput || typeof closureInput !== 'object') {
     throw new CaseValidationError('Geçersiz Smart Ticket closure payload.', {
       status: 400,
@@ -605,6 +677,11 @@ function buildSmartTicketClosureMerge(prev, closureInput) {
     if (typeof cs.confidence === 'number') meta.confidence = cs.confidence;
     if (typeof cs.reason === 'string') meta.reason = cs.reason;
     if (typeof cs.modelUsed === 'string') meta.modelUsed = cs.modelUsed;
+    // Telemetry attribution (ai_suggested / human_applied) — bounded allow.
+    const aiSuggested = sanitizeAiSuggestedTelemetry(cs.aiSuggested);
+    if (aiSuggested) meta.aiSuggested = aiSuggested;
+    const humanApplied = sanitizeHumanAppliedTelemetry(cs.humanApplied);
+    if (humanApplied) meta.humanApplied = humanApplied;
     closure.closureSuggestion = meta;
   }
   // Undefined alanları temizle (Postgres JSON içinde null tutmaktansa hiç koyma).

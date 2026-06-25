@@ -29,6 +29,10 @@ import {
   type SuggestClosureResponse,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
+import {
+  buildClosureSuggestionTelemetry,
+  type AppliedClosureSelection,
+} from '@/services/closureTelemetry';
 import { MentionTextarea } from './components/MentionTextarea';
 
 // Mention regex — `@[Name](userId)` formatı. Bir text bunu içeriyorsa BE'nin
@@ -185,6 +189,9 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const [kbSuggesting, setKbSuggesting] = useState(false);
   const [kbSuggestion, setKbSuggestion] = useState<SuggestClosureResponse | null>(null);
   const [kbSuggestionError, setKbSuggestionError] = useState<string | null>(null);
+  // Telemetry — AI önerisinin client'a ulaştığı an (ISO). Kapanış submit'inde
+  // closureSuggestion.aiSuggested.suggestedAt'e yazılır.
+  const kbSuggestedAtRef = useRef<string | null>(null);
 
   const thirdParties = useMemo(() => lookupService.thirdParties(), []);
 
@@ -209,6 +216,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggesting(false);
     setKbSuggestion(null);
     setKbSuggestionError(null);
+    kbSuggestedAtRef.current = null;
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
@@ -308,6 +316,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         return;
       }
       setKbSuggestion(res);
+      kbSuggestedAtRef.current = new Date().toISOString();
       // Smart Ticket: dropdown'lara pre-fill (yalnız boş alanlar).
       // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
       if (isSmartTicket) {
@@ -445,6 +454,27 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       pending === 'Çözüldü' &&
       (closureRcg || closureRcd || closureRt || closurePp);
 
+    // Telemetry — Smart Ticket kapanışında AI önerisi alındıysa ai_suggested /
+    // human_applied attribution'ı persist et (prompt'a beslenmez; yalnız
+    // hata-tipi ayrımı için). Öneri yoksa eski davranış: sadece label'lar.
+    let smartTicketClosurePayload: Record<string, unknown> | undefined;
+    if (closureHasAnyField) {
+      smartTicketClosurePayload = { ...closureLabels };
+      if (kbSuggestion) {
+        const applied: AppliedClosureSelection = {
+          rootCauseGroup: { code: closureRcg || undefined, label: closureLabels.rootCauseGroupLabel },
+          rootCauseDetail: { code: closureRcd || undefined, label: closureLabels.rootCauseDetailLabel },
+          resolutionType: { code: closureRt || undefined, label: closureLabels.resolutionTypeLabel },
+          permanentPrevention: { code: closurePp || undefined, label: closureLabels.permanentPreventionLabel },
+        };
+        smartTicketClosurePayload.closureSuggestion = buildClosureSuggestionTelemetry({
+          suggestion: kbSuggestion,
+          suggestedAt: kbSuggestedAtRef.current,
+          applied,
+        });
+      }
+    }
+
     const updated = await caseService.transitionStatus(item.id, pending, {
       resolutionNote: pending === 'Çözüldü' ? resolutionNote.trim() : undefined,
       cancellationReason: pending === 'İptalEdildi' ? cancelReason.trim() : undefined,
@@ -452,7 +482,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       thirdPartyName: pending === '3rdPartyBekleniyor' ? tp?.name : undefined,
       escalationLevel: pending === 'Eskalasyon' && escalationLevel ? (escalationLevel as EscalationLevel) : undefined,
       escalationReason: pending === 'Eskalasyon' ? escalationReason.trim() : undefined,
-      smartTicketClosure: closureHasAnyField ? closureLabels : undefined,
+      smartTicketClosure: smartTicketClosurePayload,
     });
     setSubmitting(false);
     if (updated) {
