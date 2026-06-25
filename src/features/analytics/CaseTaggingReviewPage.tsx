@@ -7,6 +7,7 @@ import { Field, Select, TextInput, TextArea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
+import { formatDateTime } from '@/lib/format';
 
 /**
  * Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin.
@@ -146,10 +147,11 @@ function ExpandableCell({ text }: { text: string }) {
 
 // Kolon genişlikleri (px).
 const COL_WIDTHS: Record<string, number> = {
-  caseNo: 180,
-  status: 120,
+  caseNo: 155,
+  status: 100,
   description: 280,
   resolutionNote: 280,
+  createdAt: 150,
   note: 220,
   reviewer: 180,
   save: 100,
@@ -163,7 +165,7 @@ for (const def of TAG_DEFS) {
 
 // Sol sabit karar alanının toplam genişliği.
 const LEFT_PANEL_WIDTH =
-  COL_WIDTHS.caseNo + COL_WIDTHS.status + COL_WIDTHS.description + COL_WIDTHS.resolutionNote;
+  COL_WIDTHS.caseNo + COL_WIDTHS.status + COL_WIDTHS.description + COL_WIDTHS.resolutionNote + COL_WIDTHS.createdAt;
 
 // İç div'in yatay scroll oluşturması için gereken minimum genişlik.
 const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
@@ -386,6 +388,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <div className={HDR} style={{ width: COL_WIDTHS.status }}>Statü</div>
                 <div className={HDR} style={{ width: COL_WIDTHS.description }}>Açıklama</div>
                 <div className={HDR} style={{ width: COL_WIDTHS.resolutionNote }}>Çözüm Notu</div>
+                <div className={HDR} style={{ width: COL_WIDTHS.createdAt }}>Oluşturma Tarihi</div>
               </div>
               {/* Etiket alt başlıkları */}
               {TAG_DEFS.map((def) => {
@@ -479,6 +482,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                       {c.resolutionNote
                         ? <ExpandableCell text={c.resolutionNote} />
                         : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
+                    </div>
+                    {/* Oluşturma Tarihi */}
+                    <div className="px-3 py-2 text-xs whitespace-nowrap" style={{ width: COL_WIDTHS.createdAt, minWidth: COL_WIDTHS.createdAt }}>
+                      {formatDateTime(c.createdAt)}
                     </div>
                   </div>
 
