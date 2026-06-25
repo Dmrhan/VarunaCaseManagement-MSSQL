@@ -59,6 +59,8 @@ export interface CaseCompany {
   projectsEnabled?: boolean;
   /** WR-A4 / PM-04: accountId varken vaka açarken proje zorunlu mu? Default false. */
   projectsRequired?: boolean;
+  /** true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false. */
+  requireKbAnalysis?: boolean;
 }
 
 export interface CaseThirdParty {
@@ -329,6 +331,14 @@ export const CASE_FIELD_LABELS: Record<string, string> = {
   aiRejectReason:             'AI Red Gerekçesi',
   aiRetentionOfferSuggestion: 'AI Elde Tutma Önerisi',
   aiRootCause:                'AI Kök Neden',
+  aiRiskLevel:                'AI Risk Seviyesi',
+  aiKeyPoints:                'AI Anahtar Noktalar',
+
+  // Soft archive
+  isArchived:                 'Arşivli',
+  archivedAt:                 'Arşiv Tarihi',
+  archivedByUserName:         'Arşivleyen',
+  archiveReason:              'Arşiv Sebebi',
 
   // Snooze
   snoozeUntil:          'Erteleme Tarihi',
@@ -419,6 +429,10 @@ export interface Case {
   assignedPersonId?: string;
   assignedPersonName?: string;
 
+  // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız.
+  createdByUserId?: string;
+  createdByName?: string | null;
+
   escalationLevel: EscalationLevel;
 
   /** WR-A5 / PM-03 — destek seviyesi. Default L1. */
@@ -482,6 +496,24 @@ export interface Case {
   aiCallBrief?: string;
   aiFollowupRecommendation?: string;
   aiRetentionOfferSuggestion?: string;
+  /**
+   * RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen iki alanı.
+   * Faz 1 input zenginleşti; Faz 2'de buraya yazılır; UI burada okur.
+   * - aiRiskLevel: 'Düşük'|'Orta'|'Yüksek'|'Kritik' (string)
+   * - aiKeyPoints: JSON array<string> stringify (parse zaman UI'da)
+   */
+  aiRiskLevel?: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
+  aiKeyPoints?: string;
+
+  /**
+   * PR-SD — Soft archive (SystemAdmin-only UI temizliği). Hard delete YOK;
+   * arşivli vaka backend'de intact, sadece default exclude'la gizli.
+   */
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedByUserId?: string;
+  archivedByUserName?: string;
+  archiveReason?: string;
 
   /**
    * FAZ 4 — Vaka açılırken `getChecklistFor()` 3-tuple match'inden gelen
@@ -675,6 +707,91 @@ export interface CaseTransferRecord {
   aiConfidence: number | null;
 }
 
+// Vaka Etiket Doğrulama Ekranı — alan bazlı (per-field) model.
+export type TaggingVerdict = 'Dogru' | 'Yanlis' | 'Belirsiz';
+
+// 9 etiket: 5 açılış + 4 kapanış. Her biri Original{Code,Label} (create'te
+// Case.customFields'tan kopyalanan değişmez snapshot) + Verdict +
+// Corrected{Code,Label} (Verdict=Yanlış/Belirsiz iken kendi taxonomyType
+// dropdown'ından seçilir, label server-side TaxonomyDef'ten resolve edilir).
+export type TaggingFieldName =
+  | 'openingPlatform'
+  | 'openingBusinessProcess'
+  | 'openingOperationType'
+  | 'openingAffectedObject'
+  | 'openingImpact'
+  | 'closingRootCauseGroup'
+  | 'closingRootCauseDetail'
+  | 'closingResolutionType'
+  | 'closingPermanentPrevention';
+
+export interface CaseTaggingReview {
+  id: string;
+  caseId: string;
+  companyId: string;
+
+  openingPlatformOriginalCode: string | null;
+  openingPlatformOriginalLabel: string | null;
+  openingPlatformVerdict: TaggingVerdict | null;
+  openingPlatformCorrectedCode: string | null;
+  openingPlatformCorrectedLabel: string | null;
+
+  openingBusinessProcessOriginalCode: string | null;
+  openingBusinessProcessOriginalLabel: string | null;
+  openingBusinessProcessVerdict: TaggingVerdict | null;
+  openingBusinessProcessCorrectedCode: string | null;
+  openingBusinessProcessCorrectedLabel: string | null;
+
+  openingOperationTypeOriginalCode: string | null;
+  openingOperationTypeOriginalLabel: string | null;
+  openingOperationTypeVerdict: TaggingVerdict | null;
+  openingOperationTypeCorrectedCode: string | null;
+  openingOperationTypeCorrectedLabel: string | null;
+
+  openingAffectedObjectOriginalCode: string | null;
+  openingAffectedObjectOriginalLabel: string | null;
+  openingAffectedObjectVerdict: TaggingVerdict | null;
+  openingAffectedObjectCorrectedCode: string | null;
+  openingAffectedObjectCorrectedLabel: string | null;
+
+  openingImpactOriginalCode: string | null;
+  openingImpactOriginalLabel: string | null;
+  openingImpactVerdict: TaggingVerdict | null;
+  openingImpactCorrectedCode: string | null;
+  openingImpactCorrectedLabel: string | null;
+
+  closingRootCauseGroupOriginalCode: string | null;
+  closingRootCauseGroupOriginalLabel: string | null;
+  closingRootCauseGroupVerdict: TaggingVerdict | null;
+  closingRootCauseGroupCorrectedCode: string | null;
+  closingRootCauseGroupCorrectedLabel: string | null;
+
+  closingRootCauseDetailOriginalCode: string | null;
+  closingRootCauseDetailOriginalLabel: string | null;
+  closingRootCauseDetailVerdict: TaggingVerdict | null;
+  closingRootCauseDetailCorrectedCode: string | null;
+  closingRootCauseDetailCorrectedLabel: string | null;
+
+  closingResolutionTypeOriginalCode: string | null;
+  closingResolutionTypeOriginalLabel: string | null;
+  closingResolutionTypeVerdict: TaggingVerdict | null;
+  closingResolutionTypeCorrectedCode: string | null;
+  closingResolutionTypeCorrectedLabel: string | null;
+
+  closingPermanentPreventionOriginalCode: string | null;
+  closingPermanentPreventionOriginalLabel: string | null;
+  closingPermanentPreventionVerdict: TaggingVerdict | null;
+  closingPermanentPreventionCorrectedCode: string | null;
+  closingPermanentPreventionCorrectedLabel: string | null;
+
+  note: string | null;
+  reviewerId: string | null;
+  reviewerName: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // @mention — Faz 1.5 Madde 3
 export interface MentionableUser {
   userId: string;
@@ -758,6 +875,10 @@ export interface CaseFilters {
   resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
   // WR-A4 — proje bazlı filter
   accountProjectId?: string;
+  // PR-SD — Soft archive. Default false (UI'da chip OFF).
+  // SystemAdmin opt-in için chip açar; diğer roller backend tarafında
+  // ignore edilir (buildWhere her durumda exclude eder).
+  includeArchived?: boolean;
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.
@@ -843,6 +964,57 @@ export interface OfferedSolutionDef {
   description?: string;
   isActive: boolean;
 }
+
+// Tek noktadan paylaşılan TR etiketler (StatusPill + StatusTransitionPanel local
+// copy'lerini ileride buraya hizalanabilir; şu an yeni CompactStatusStepper
+// için eklendi — task "Türkçe etiketler kod tabanındaki mevcut map'ten gelsin").
+export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
+  'Açık':                'Açık',
+  'İncelemede':          'İncelemede',
+  '3rdPartyBekleniyor':  '3. Parti Bekleniyor',
+  // LBD A9: TR display label "Eskalasyon" → "Eskale Edildi" (sentence-case
+  // kardeş statülerle hizalı). Enum identifier 'Eskalasyon' + DB değeri
+  // AYNEN KALIR — backend, allowed-transition, SLA, reason logic dokunulmaz.
+  'Eskalasyon':          'Eskale Edildi',
+  'Çözüldü':             'Çözüldü',
+  'YenidenAcildi':       'Yeniden Açıldı',
+  'İptalEdildi':         'İptal Edildi',
+};
+
+// 3 fazlı omurga — task spec'i: Açık → İşlemde → Sonuç.
+// Dallanan statüler (3.parti, Eskalasyon, YenidenAcildi) İşlemde fazına bağlı.
+export type CaseStatusPhase = 'open' | 'in_progress' | 'result';
+
+export const CASE_STATUS_PHASES: CaseStatusPhase[] = ['open', 'in_progress', 'result'];
+
+export const CASE_STATUS_PHASE_LABELS: Record<CaseStatusPhase, string> = {
+  open:        'Açık',
+  in_progress: 'İşlemde',
+  result:      'Sonuç',
+};
+
+export const CASE_STATUS_PHASE_MAP: Record<CaseStatus, CaseStatusPhase> = {
+  'Açık':                'open',
+  'İncelemede':          'in_progress',
+  '3rdPartyBekleniyor':  'in_progress',
+  'Eskalasyon':          'in_progress',
+  'YenidenAcildi':       'in_progress',
+  'Çözüldü':             'result',
+  'İptalEdildi':         'result',
+};
+
+// Hedef statüye geçişte gerekçe/zorunlu alan akışı tetiklenir mi?
+// (StatusTransitionPanel mevcut kuralı: Çözüldü+resolutionNote, İptal+reason,
+//  3.parti+thirdPartyId, Eskalasyon+level+reason). Diğer geçişler doğrudan.
+export const STATUS_REQUIRES_REASON: Record<CaseStatus, boolean> = {
+  'Açık':                false,
+  'İncelemede':          false,
+  '3rdPartyBekleniyor':  true,
+  'Eskalasyon':          true,
+  'Çözüldü':             true,
+  'YenidenAcildi':       false,
+  'İptalEdildi':         true,
+};
 
 export const STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]> = {
   'Açık':                ['İncelemede', 'İptalEdildi'],

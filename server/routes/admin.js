@@ -20,6 +20,10 @@ import {
   userRepo,
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
+import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
+import { devopsClient } from '../lib/devopsClient.js';
+import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
+import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
 
@@ -42,6 +46,21 @@ function asyncRoute(handler) {
         return res
           .status(err.status)
           .json({ error: err.code ?? 'admin', message: err.message });
+      }
+      // Faz 2.1 followup — sistem hataları (örn. SecretCipherError
+      // 'devops_enc_key_missing' 503) status + code + message taşıyorsa
+      // generic 500'e DÜŞÜRME; net mesajı admin UI toast'ında göster.
+      // AdminError dışındaki tüm "yapılı" hatalar için duck-type kontrol.
+      if (
+        err &&
+        typeof err.status === 'number' &&
+        err.status >= 400 &&
+        err.status < 600 &&
+        typeof err.code === 'string'
+      ) {
+        return res
+          .status(err.status)
+          .json({ error: err.code, message: err.message });
       }
       console.error('[admin]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
@@ -704,6 +723,218 @@ router.patch('/external-kb-settings/:companyId', asyncRoute(async (req, res) => 
   delete patch.updatedAt;
   const item = await externalKbSettingRepo.upsert(companyId, patch);
   res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps entegrasyon ayarları.
+// Pattern: external-kb-settings ile birebir (assertCompanyAdmin gate).
+//
+// KRİTİK GÜVENLİK:
+//  - GET response'unda PAT (plain VEYA ciphertext) ASLA gözükmez; sadece
+//    patIsSet boolean + patSetAt. Repository SELECTABLE_PUBLIC sıkı tutar.
+//  - PATCH body'sinde `pat` field'ı varsa encrypt edilip persistlenir;
+//    yoksa mevcut PAT'a dokunulmaz (rotate semantiği).
+//  - POST /test saklı PAT'ı decrypt edip devopsClient.getWorkItem ile
+//    bağlantı denemesi yapar; PAT response'a inmez.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/external-devops-settings', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const item = await externalDevOpsSettingRepo.getByCompany(companyId);
+  res.json(item);
+}));
+
+router.patch('/external-devops-settings/:companyId', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const patch = { ...(req.body ?? {}) };
+  delete patch.companyId;
+  delete patch.id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  // Server-side derived alanları client override edemez.
+  delete patch.patIsSet;
+  delete patch.patSetAt;
+  delete patch.patCiphertext;
+  delete patch.patIv;
+  delete patch.patAuthTag;
+  delete patch.createdByUserId;
+  delete patch.updatedByUserId;
+  const actor = requireActor(req);
+  const item = await externalDevOpsSettingRepo.upsert(companyId, patch, actor.userId ?? null);
+  res.json(item);
+}));
+
+/**
+ * POST /external-devops-settings/:companyId/test
+ *
+ * Saklı PAT'ı decrypt edip devopsClient.getWorkItem ile bir test
+ * çağrısı yapar. Body: { testWorkItemId?: number } — opsiyonel, yoksa
+ * env'deki TFS_TEST_WORKITEM_ID kullanılır.
+ *
+ * Dönen: { ok: boolean, error?: { code, message, status } }
+ * PAT response'a inmez, log'a basılmaz.
+ *
+ * NOT: devopsClient şu an process.env'den config çeker. Adım 4 wiring'i
+ * tamamlandığında DB config aktif olacak; bu test endpoint zaten DB'den
+ * PAT'ı decrypt edip env'i geçici override etmeden devopsClient'ı
+ * companyId-aware çağırır.
+ */
+router.post('/external-devops-settings/:companyId/test', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const body = req.body ?? {};
+  const testIdRaw = body.testWorkItemId ?? process.env.TFS_TEST_WORKITEM_ID;
+  if (!testIdRaw) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_workitem_id_missing',
+        message: 'Test için bir work item id gerekli (body.testWorkItemId veya TFS_TEST_WORKITEM_ID).',
+      },
+    });
+  }
+  const testId = Number.parseInt(testIdRaw, 10);
+  if (!Number.isInteger(testId) || testId <= 0) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_workitem_id_invalid',
+        message: 'Test work item id geçersiz.',
+      },
+    });
+  }
+  // devopsClient companyId scope'lu çağrı yapar; resolveActiveConfig
+  // ile DB'den decrypt edilen PAT veya env fallback kullanılır.
+  const result = await devopsClient.getWorkItem(testId, { companyId });
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      error: {
+        code: result.error.code,
+        message: result.error.message,
+        status: result.error.status,
+      },
+    });
+  }
+  // Başarı: minimum cevap — PAT/ham response sızdırmadan.
+  return res.json({
+    ok: true,
+    workItem: {
+      id: result.data.normalized?.id ?? testId,
+      title: result.data.normalized?.title ?? null,
+      state: result.data.normalized?.state ?? null,
+    },
+    meta: { apiVersion: result.meta?.apiVersion, latencyMs: result.meta?.latencyMs },
+  });
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+// DevOps Faz 2.1 desenin aynası (yukarıdaki external-devops-settings).
+//
+// KRİTİK GÜVENLİK:
+//  - GET response'unda secret (plain VEYA ciphertext) ASLA gözükmez;
+//    sadece secretIsSet boolean + secretSetAt (repository
+//    SELECTABLE_PUBLIC sıkı tutar).
+//  - PATCH body'sinde `secret` field'ı varsa encrypt edilip persistlenir;
+//    yoksa mevcut secret'a dokunulmaz (rotate semantiği).
+//  - POST /test mailProvider.sendMail companyId-aware çağrısıyla bağlantı
+//    doğrular; secret response'a inmez.
+// ─────────────────────────────────────────────────────────────────
+
+router.get('/external-mail-settings', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const item = await externalMailSettingRepo.getByCompany(companyId);
+  res.json(item);
+}));
+
+router.patch('/external-mail-settings/:companyId', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const patch = { ...(req.body ?? {}) };
+  delete patch.companyId;
+  delete patch.id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  // Server-side derived alanları client override edemez.
+  delete patch.secretIsSet;
+  delete patch.secretSetAt;
+  delete patch.secretCiphertext;
+  delete patch.secretIv;
+  delete patch.secretAuthTag;
+  delete patch.createdByUserId;
+  delete patch.updatedByUserId;
+  const actor = requireActor(req);
+  const item = await externalMailSettingRepo.upsert(companyId, patch, actor.userId ?? null);
+  res.json(item);
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/test
+ *
+ * Saklı secret'ı decrypt edip mailProvider.sendMail ile bir test gönderim
+ * çağrısı yapar. Body: { testTo?: string } — opsiyonel; yoksa
+ * fromAddress (kendi kendine) kullanılır.
+ *
+ * Dönen: { ok, messageId?, previewUrl?, meta?, error? }
+ * Secret response'a inmez, log'a basılmaz.
+ */
+router.post('/external-mail-settings/:companyId/test', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const body = req.body ?? {};
+  const setting = await externalMailSettingRepo.getByCompany(companyId);
+  const testTo = (typeof body.testTo === 'string' && body.testTo.trim())
+    ? body.testTo.trim()
+    : setting?.fromAddress || null;
+  if (!testTo) {
+    return res.json({
+      ok: false,
+      error: {
+        code: 'test_to_missing',
+        message: 'Test için bir hedef adres gerekli (body.testTo veya kayıtlı fromAddress).',
+      },
+    });
+  }
+  // mailProvider companyId-aware: ExternalMailSetting'i DB'den okur,
+  // secret decrypt eder. Env fallback satır yoksa devreye girer.
+  const result = await mailProviderSendMail(
+    {
+      to: testTo,
+      subject: 'Varuna Mail Connection Test',
+      text: 'Bu bir bağlantı testidir. Bu maili gördüyseniz mail entegrasyonu çalışıyor.',
+    },
+    { companyId },
+  );
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      error: {
+        code: result.error.code,
+        message: result.error.message,
+        status: result.error.status,
+      },
+    });
+  }
+  // Başarı: minimum cevap — secret/ham response sızdırmadan.
+  return res.json({
+    ok: true,
+    messageId: result.messageId,
+    previewUrl: result.previewUrl,
+    meta: {
+      transport: result.meta?.transport,
+      source: result.meta?.source,
+    },
+  });
 }));
 
 // ─────────────────────────────────────────────────────────────────

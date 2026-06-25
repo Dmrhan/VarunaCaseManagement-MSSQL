@@ -215,7 +215,112 @@ Vite static build -> dist/ -> Vercel CDN
 - Supabase Auth redirect/origin ayarlari production domain'i iceriyor
 - Supabase Storage bucket ve policy ayarlari upload/download akisina uygun
 
-### Production Deploy Checklist
+### On-Prem (PM2) Deploy — kanonik
+
+On-prem MSSQL kurulumunda kanonik komut:
+
+```bash
+npm run deploy:onprem
+```
+
+İçeride [`scripts/deploy-onprem.mjs`](../scripts/deploy-onprem.mjs) sırayı
+yönetir: `pm2 stop → git pull → npm ci → migrate deploy → build → pm2 start`.
+
+**KRİTİK SIRA:** `pre-flight → service stop → mutate → (rollback if fail)
+→ service start`. Dört kural birlikte:
+
+1. **Pre-flight snapshot mutate'ten ÖNCE, pm2 stop'tan da ÖNCE** (Codex P1+P2
+   sonraki review): script ilk olarak LIVE service hâlâ çalışırken
+   `git rev-parse HEAD` + `dist/` yedeği alır. Snapshot adımı fail
+   ederse exit 3 ile temiz çıkar; servis hâlâ ayakta, live tree
+   dokunulmadı. Eski sırada (stop → snapshot → mutate) snapshot fail
+   durumunda servis stopped kalıyordu.
+
+2. **Migration mutlaka yeni process başlamadan ÖNCE bitmiş olmalı**;
+   aksi halde Prisma Client yeni alanları select edip P2022
+   (`column does not exist`) ile çakar.
+
+3. **`npm ci` ve `npm run build` live tree'yi mutate eder** — Express
+   `dist/`'i serve eder ve KB lazy-import'ları `node_modules/`'tan paket
+   çeker. Service ayaktayken yarım/eksik dosyalara çakar (codex review
+   bulgusu). Service önce DURUR, sonra mutate, sonra START.
+
+4. **PM2 stop verify** (Codex P2 ilk review): `pm2 stop` exit'i yetersiz —
+   daemon problemi / permission / yanlış user durumlarında stop fail ama
+   service ÇALIŞIYOR olabilir. Script `pm2 jlist` ile state doğrular;
+   "online" veya "launching" durumda mutate İPTAL (exit 3) — live tree
+   dokunulmaz, dist backup temizlenir.
+
+5. **Real rollback** (Codex P1 ilk review): mutate fail durumunda script:
+   - `git reset --hard <oldHead>` — kaynak eski revizyona döner
+   - `dist/` backup'tan restore
+   - `npm ci` tekrar koşulur (eski package-lock)
+   - Sonra `pm2 start` eski state ile ayağa kalkar
+
+   Eski script "start her durumda" pattern'i CHIMERA state'e yol açıyordu
+   (yeni kaynak + eski dist + yarım migrate). Yeni script gerçek restore
+   yapar.
+
+   > **Migration caveat**: Prisma migrate forward-only. Migrate başarılı +
+   > sonraki adım fail durumunda schema YENİ kaldı, code ESKİ döner. Pratikte
+   > sorunsuz çünkü migration'lar nullable column addition pattern'ine uyar
+   > (Faz 3 örneği). Breaking change varsa manuel rollback gerekir.
+
+   Çıkış kodları:
+   - `0` — yeni build canlıda
+   - `1` — mutate fail, ESKİ state restore edildi, servis çalışıyor
+   - `2` — KRİTİK: `pm2 start` fail; manuel müdahale gerek
+   - `3` — pre-flight fail (`git rev-parse` / `dist/` backup / pm2 stop
+     verify); mutate başlamadı. Snapshot fail durumunda servis hâlâ
+     ayakta (pm2 stop çağrılmadı); pm2 stop verify fail durumunda da
+     servis ayakta (stop tamamlanmadı)
+
+**Downtime**: build + npm ci süresi kadar (~30-120 sn). Pure zero-downtime
+gerekiyorsa bkz. "Zero-downtime atomic release — opsiyonel" altta.
+
+> **Sadece `db:migrate:deploy` kullanılır.** Prod'da `db:migrate` (= `prisma
+> migrate dev`), `db:reset`, `prisma db push` **YASAK** — schema drift +
+> veri kaybı riski. `migrate deploy` idempotent + non-destructive (pending
+> migration yoksa no-op, her deploy'da güvenli).
+
+PM2 app adı `varuna-cm` ([ecosystem.config.cjs](../ecosystem.config.cjs)).
+Sunucu nssm ile yönetiliyorsa (Windows Service `VarunaCM`) bkz.
+[docs/IIS_DEPLOY.md §6.b](IIS_DEPLOY.md) — aynı stop→mutate→start sırası,
+sadece komut adı farklı (`nssm stop VarunaCM` / `nssm start VarunaCM`).
+
+#### Zero-downtime atomic release — opsiyonel
+
+Stop→build→start akışında ~30-120 sn kesinti var. Sıfır kesinti gerekiyorsa
+Capistrano-stili atomik release pattern uygulanabilir (bu repo'da default
+değil; ileri seviye operasyon):
+
+```
+/apps/varuna-cm/
+  current → releases/20260623-1530   (symlink)
+  releases/
+    20260623-1530/   ← yeni deploy hedefi
+    20260622-1100/
+    20260621-0900/
+  shared/
+    .env, data/, logs/   (release'ler arası paylaşılır)
+```
+
+Adımlar:
+1. Yeni `releases/<timestamp>` dir'a clone/checkout
+2. `shared/.env` + `shared/data` + `shared/logs` symlink'le
+3. Yeni release dir'da `npm ci && npm run build`
+4. `npm run db:migrate:deploy` (DB shared — current process bunu yaşayabilir
+   *eğer* yeni migration backward-compatible ise; değilse stop→start akışı
+   zorunlu)
+5. `ln -sfn releases/<timestamp> current` (atomik symlink swap)
+6. `pm2 reload varuna-cm` (yeni `current`'a graceful geçiş)
+7. Eski release'ler temizlik (keep last 3)
+
+Bu pattern PowerShell/Windows'ta `ln` yerine `mklink /J` veya `New-Item
+-ItemType Junction` ile yapılır; kurulum bu repo'nun standartı değildir
+ama gerekirse [planlanabilir](BACKLOG.md).
+
+### Production Deploy Checklist (Vercel)
 
 Schema degisikligi (yeni migration) iceren PR'lar icin uygulama siralamasi
 asagidaki gibidir. `npm run build` icinde **otomatik migrate calistirilmaz**:

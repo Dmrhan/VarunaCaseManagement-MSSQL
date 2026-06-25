@@ -1,6 +1,10 @@
 import { prisma } from '../db/client.js';
 import { aiClient, callOpenAI, logAIUsage } from './aiClient.js';
-import { fromDb } from '../db/enumMap.js';
+import { fromDb, M_STATUS } from '../db/enumMap.js';
+
+// Codex P2 — DB'de status ASCII identifier tutulur (Cozuldu/IptalEdildi).
+const STATUS_DB_RESOLVED_AS = M_STATUS['Çözüldü'];      // 'Cozuldu'
+const STATUS_DB_CANCELLED_AS = M_STATUS['İptalEdildi']; // 'IptalEdildi'
 
 /**
  * Case Status Report — vakanın paydaşlara gönderilebilecek profesyonel,
@@ -28,6 +32,74 @@ import { fromDb } from '../db/enumMap.js';
 
 const MAX_EVENTS = 50;
 
+// Faz 4 (Plan v2 — /tmp/runa-ai-enrichment-plan.md) — status-report input
+// enrichment cap'leri. supervisor-summary'dakilerden DAHA TUTUCU: status-report
+// zaten 50-olay JSON içerdiği için input bütçesi yüksek.
+const FAZ4_SOLUTION_STEP_CAP = 5;
+const FAZ4_TRUNCATE = {
+  solutionStepNote: 100,
+  resolutionNote: 300,
+  cancellationReason: 300,
+};
+
+// Smart Ticket label extraction — supervisorSummaryPrompt.js'in pattern'i
+// (duplikasyon: ayrı modül; status-report bağımsız tonu/akışı korur).
+function pickStLabel(obj, codeKey, labelKey) {
+  if (!obj || typeof obj !== 'object') return null;
+  const label = obj[labelKey];
+  if (typeof label === 'string' && label.trim()) return label.trim();
+  const code = obj[codeKey];
+  if (typeof code === 'string' && code.trim()) return code.trim();
+  return null;
+}
+function extractSmartTicket(customFieldsRaw) {
+  if (!customFieldsRaw) return { opening: [], closure: [] };
+  let cf;
+  try {
+    cf = typeof customFieldsRaw === 'string' ? JSON.parse(customFieldsRaw) : customFieldsRaw;
+  } catch {
+    return { opening: [], closure: [] };
+  }
+  const st = cf && typeof cf === 'object' ? cf.smartTicket : null;
+  if (!st || typeof st !== 'object') return { opening: [], closure: [] };
+
+  const openingSpec = [
+    ['Platform', 'platform', 'platformLabel'],
+    ['İş Süreci', 'businessProcess', 'businessProcessLabel'],
+    ['İşlem Tipi', 'operationType', 'operationTypeLabel'],
+    ['Etkilenen Nesne', 'affectedObject', 'affectedObjectLabel'],
+    ['Etki', 'impact', 'impactLabel'],
+  ];
+  const closureRaw = st.closure && typeof st.closure === 'object' ? st.closure : null;
+  const closureSpec = [
+    ['Kök Neden Grubu', 'rootCauseGroup', 'rootCauseGroupLabel'],
+    ['Kök Neden Detayı', 'rootCauseDetail', 'rootCauseDetailLabel'],
+    ['Çözüm Tipi', 'resolutionType', 'resolutionTypeLabel'],
+    ['Kalıcı Önlem', 'permanentPrevention', 'permanentPreventionLabel'],
+  ];
+  const opening = openingSpec
+    .map(([lbl, code, lblKey]) => {
+      const v = pickStLabel(st, code, lblKey);
+      return v ? `${lbl}: ${v}` : null;
+    })
+    .filter(Boolean);
+  const closure = closureRaw
+    ? closureSpec
+        .map(([lbl, code, lblKey]) => {
+          const v = pickStLabel(closureRaw, code, lblKey);
+          return v ? `${lbl}: ${v}` : null;
+        })
+        .filter(Boolean)
+    : [];
+  return { opening, closure };
+}
+
+function truncate(s, max) {
+  if (!s) return '';
+  const t = String(s).trim();
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
 // Süreç özetinde gösterilmemesi gereken AI metadata field'ları.
 // Bu alanların FieldUpdate event'leri rapora dahil edilmez.
 const AI_META_FIELDS = new Set([
@@ -54,9 +126,13 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     select: {
       id: true,
       companyId: true,
+      accountId: true,
       caseNumber: true,
       title: true,
       description: true,
+      // PII tablosu: status-report endpoint'i için accountName +
+      // assignedPersonName İZİNLİ (mail muhatabı/imza zorunlu).
+      // Account.email/phone/tckn*, customerContact* HÂLÂ YASAK.
       accountName: true,
       status: true,
       priority: true,
@@ -68,6 +144,13 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       resolvedAt: true,
       slaViolation: true,
       transferCount: true,
+      // Faz 4 — yeni alanlar (enrichment için)
+      customFields: true,
+      productName: true,
+      packageName: true,
+      accountProjectName: true,
+      resolutionNote: true,
+      cancellationReason: true,
     },
   });
   if (!c) return { error: 'not_found' };
@@ -75,8 +158,15 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     return { error: 'forbidden' };
   }
 
-  // Aktivite akışı + son 3 not (sorunun özeti için ek bağlam).
-  const [activitiesRaw, recentNotes] = await Promise.all([
+  // Aktivite akışı + son 3 not (sorunun özeti için ek bağlam) +
+  // Faz 4: Çözüm Adımları (max 5) + Önceki Vaka sayıları.
+  const [
+    activitiesRaw,
+    recentNotes,
+    solutionStepsRaw,
+    previousOpenCount,
+    previousSlaBreachCount,
+  ] = await Promise.all([
     prisma.caseActivity.findMany({
       where: { caseId },
       orderBy: { at: 'asc' },
@@ -98,6 +188,38 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
       take: 3,
       select: { content: true, authorName: true, createdAt: true },
     }),
+    // Faz 4 — Çözüm Adımları (status !== 'suggested', max 5; supervisor'dan
+    // daha tutucu cap çünkü status-report zaten ağır).
+    prisma.caseSolutionStep.findMany({
+      where: { caseId, status: { not: 'suggested' } },
+      orderBy: [{ outcomeAt: 'desc' }, { triedAt: 'desc' }, { createdAt: 'desc' }],
+      take: FAZ4_SOLUTION_STEP_CAP,
+      select: { title: true, status: true, note: true },
+    }),
+    // Faz 4 — Önceki vaka sayısı (Çözüldü + İptalEdildi). PII'siz, sayı.
+    // Codex P1 — companyId scope (Account çoklu tenant'a bağlanabilir).
+    // Codex P2 — status DB'de ASCII tutulur (M_STATUS).
+    c.accountId
+      ? prisma.case.count({
+          where: {
+            companyId: c.companyId,
+            accountId: c.accountId,
+            id: { not: caseId },
+            status: { in: [STATUS_DB_RESOLVED_AS, STATUS_DB_CANCELLED_AS] },
+          },
+        })
+      : Promise.resolve(0),
+    // Faz 4 — Geçmiş SLA ihlal sayısı (PII'siz, sayı).
+    c.accountId
+      ? prisma.case.count({
+          where: {
+            companyId: c.companyId,
+            accountId: c.accountId,
+            id: { not: caseId },
+            slaViolation: true,
+          },
+        })
+      : Promise.resolve(0),
   ]);
 
   // AI metadata field güncellemelerini ele — mailı kirletir, operasyonel
@@ -230,6 +352,67 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
 
   const footerBlock = ['Saygılarımızla,', owner, 'Varuna Vaka Yönetim Sistemi'].join('\n');
 
+  // ───────── Faz 4 — yeni yapısal bölümler ─────────
+  // Q2 kuralı: boş alan/bölüm yazılmaz. Her bölüm conditional toplanır,
+  // sonra mevcut user prompt'a "VAKA META" altına eklenir.
+  const enrichmentSections = [];
+
+  // ## Sınıflandırma (Smart Ticket)
+  const st = extractSmartTicket(c.customFields);
+  const stLines = [];
+  if (st.opening.length) stLines.push(`Açılış: ${st.opening.join(' · ')}`);
+  if (st.closure.length) stLines.push(`Kapanış: ${st.closure.join(' · ')}`);
+  if (stLines.length) {
+    enrichmentSections.push(`SINIFLANDIRMA (Smart Ticket):\n${stLines.join('\n')}`);
+  }
+
+  // ## Denenen Çözümler
+  const STATUS_TR = {
+    tried: 'denendi',
+    worked: 'işe yaradı',
+    not_worked: 'işe yaramadı',
+    skipped: 'atlandı',
+  };
+  const stepLines = (solutionStepsRaw ?? [])
+    .slice(0, FAZ4_SOLUTION_STEP_CAP)
+    .map((s) => {
+      const head = `- ${truncate(s.title, 120)} → ${STATUS_TR[s.status] ?? s.status}`;
+      const note = s.note ? ` (${truncate(s.note, FAZ4_TRUNCATE.solutionStepNote)})` : '';
+      return head + note;
+    });
+  if (stepLines.length) {
+    enrichmentSections.push(`DENENEN ÇÖZÜMLER (özet, max ${FAZ4_SOLUTION_STEP_CAP}):\n${stepLines.join('\n')}`);
+  }
+
+  // ## Müşteri Geçmiş (sayı)
+  const custBits = [];
+  if (previousOpenCount > 0) custBits.push(`Geçmiş vaka: ${previousOpenCount}`);
+  if (previousSlaBreachCount > 0) custBits.push(`Geçmiş SLA ihlali: ${previousSlaBreachCount}`);
+  if (custBits.length) {
+    enrichmentSections.push(`MÜŞTERİ GEÇMİŞ (sayı):\n${custBits.join(' · ')}`);
+  }
+
+  // ## Ürün/Paket (Faz 4 — sade)
+  const productBits = [];
+  if (c.productName) productBits.push(`Ürün: ${c.productName}`);
+  if (c.packageName) productBits.push(`Paket: ${c.packageName}`);
+  if (c.accountProjectName) productBits.push(`Proje: ${c.accountProjectName}`);
+  if (productBits.length) {
+    enrichmentSections.push(`ÜRÜN/PAKET:\n${productBits.join(' · ')}`);
+  }
+
+  // ## Çözüm/İptal Notu (vaka çözülmüş/iptal edilmişse currentStatus'a katkı)
+  const closeBits = [];
+  if (c.resolutionNote) {
+    closeBits.push(`Çözüm notu: ${truncate(c.resolutionNote, FAZ4_TRUNCATE.resolutionNote)}`);
+  }
+  if (c.cancellationReason) {
+    closeBits.push(`İptal gerekçesi: ${truncate(c.cancellationReason, FAZ4_TRUNCATE.cancellationReason)}`);
+  }
+  if (closeBits.length) {
+    enrichmentSections.push(`ÇÖZÜM/İPTAL NOTU:\n${closeBits.join('\n')}`);
+  }
+
   const user = [
     'VAKA META:',
     `- No: ${c.caseNumber}`,
@@ -245,6 +428,10 @@ export async function generateActionSummary({ caseId, userId, allowedCompanyIds 
     `- SLA İhlali: ${c.slaViolation ? 'Var' : 'Yok'}`,
     `- Aktarım Sayısı: ${c.transferCount ?? 0}`,
     '',
+    // Faz 4 enrichment bölümleri — sıra "log üzerinden" özet kuralı için
+    // VAKA AÇIKLAMASI ve LOG'dan ÖNCE; model bağlamı bütüncül görür.
+    // Bölüm boşsa array'e hiç eklenmedi → join'de görünmez (Q2).
+    ...(enrichmentSections.length ? [enrichmentSections.join('\n\n'), ''] : []),
     'VAKA AÇIKLAMASI (sorunun özeti için ana kaynak):',
     (c.description ?? '').slice(0, 1000) || '(boş)',
     '',

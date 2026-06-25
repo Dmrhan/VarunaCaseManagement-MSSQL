@@ -79,6 +79,7 @@
         "Kayıt etme",
         "Oluşturma",
         "Yazdırma",
+        "Görünüm problemi",
         "Basım yapma",
         "Güncelleme",
         "Düzeltme",
@@ -92,7 +93,6 @@
         "Yavaş çalışma",
         "Bilgi talebi",
         "Hata mesajı",
-        "Görünüm problemi",
         "İptal etme"
       ]
     },
@@ -390,7 +390,7 @@
           "group": "Donanım/Cihaz",
           "details": [
             "APK versiyon uyumsuz",
-            "Cihaz bağlantısı / eşleştirme",
+            "Cihaz bağlantı bilgileri",
             "Dosya indirilemiyor",
             "Cihaz tarih / saat"
           ]
@@ -433,15 +433,6 @@
           ]
         },
         {
-          "group": "Kullanım/Bilgi Eksikliği",
-          "details": [
-            "Kullanıcı işlem adımı hatası",
-            "Yasal süreç (8 gün / ay kapanışı)",
-            "Operatörlük / merkez onayı gereken işlem",
-            "Bilgi / nasıl yapılır"
-          ]
-        },
-        {
           "group": "Veri Tutarsızlığı",
           "details": [
             "Bozuk kayıt (stok tipi / belge detayı)",
@@ -468,7 +459,7 @@
           "details": []
         },
         {
-          "group": "Koşul Yakalanmadı",
+          "group": "Veri Tabanı İsteği",
           "details": []
         }
       ]
@@ -477,18 +468,17 @@
       "label": "Çözüm Tipi",
       "description": "Uygulanan çözüm türü",
       "values": [
-        "Bilgilendirme",
         "Parametre düzeltme",
         "Yetki düzenleme",
         "Veri / kart düzeltme",
         "Script çalıştırma (DbUpdate)",
         "Entegratör / servis müdahalesi",
         "Dizayn düzeltme",
-        "DLL Geçişi",
-        "Versiyon geçişi",
+        "DLL Geçişi / Versiyon geçişi",
         "Kullanıcı Eğitim",
         "Doküman / SSS",
-        "Geliştirme / değişiklik talebi"
+        "Geliştirme / değişiklik talebi",
+        "Koşul Yakalanmadı"
       ]
     },
     "kalici_onlem": {
@@ -506,5 +496,5 @@
       ]
     }
   },
-  "syncedFromDbAt": "2026-06-12T09:03:55.876Z"
+  "syncedFromDbAt": "2026-06-22T10:52:47.340Z"
 }

@@ -78,6 +78,8 @@ import {
   type ActionSummary,
   type CaseLinkType,
   type CaseTransferRecord,
+  type CaseTaggingReview,
+  type TaggingVerdict,
   type CaseWatcherRecord,
   type LinkedCaseEntry,
   type CustomerPulse,
@@ -388,6 +390,8 @@ export const caseService = {
     if (filters?.teamScope) params.set('teamScope', 'true');
     if (filters?.slaViolation) params.set('slaViolation', 'true');
     if (filters?.resolvedToday) params.set('resolvedToday', 'true');
+    // PR-SD — SystemAdmin opt-in; backend rol filtresi de uygulayacak.
+    if (filters?.includeArchived) params.set('includeArchived', 'true');
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
@@ -398,6 +402,93 @@ export const caseService = {
       'Vakalar yüklenemedi',
     );
     return { items: data?.value ?? [], total: data?.['@odata.count'] ?? 0 };
+  },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+   * Vaka listesi + her vakanın review kaydı (varsa) tek çağrıda döner.
+   */
+  async listTaggingReviews(
+    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+    pagination?: CaseListPagination,
+  ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
+    if (USE_MOCK) {
+      return { items: [], total: 0, reviews: new Map() };
+    }
+    const params = new URLSearchParams();
+    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+    if (filters?.teamId) params.set('teamId', filters.teamId);
+    if (pagination) {
+      params.set('page', String(pagination.page));
+      params.set('pageSize', String(pagination.pageSize));
+    }
+    const data = await apiFetch<{
+      value: Case[];
+      '@odata.count': number;
+      reviews: Record<string, CaseTaggingReview>;
+    }>(`${API_BASE}/tagging-review?${params.toString()}`, undefined, 'Etiket doğrulama listesi yüklenemedi');
+    return {
+      items: data?.value ?? [],
+      total: data?.['@odata.count'] ?? 0,
+      reviews: new Map(Object.entries(data?.reviews ?? {})),
+    };
+  },
+
+  async exportTaggingReviews(
+    filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
+  ): Promise<{ items: Case[]; reviews: Map<string, CaseTaggingReview> }> {
+    if (USE_MOCK) return { items: [], reviews: new Map() };
+    const params = new URLSearchParams();
+    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+    if (filters?.teamId) params.set('teamId', filters.teamId);
+    const data = await apiFetch<{
+      value: Case[];
+      reviews: Record<string, CaseTaggingReview>;
+    }>(`${API_BASE}/tagging-review/export?${params.toString()}`, undefined, 'Export verisi alınamadı');
+    return {
+      items: data?.value ?? [],
+      reviews: new Map(Object.entries(data?.reviews ?? {})),
+    };
+  },
+
+  async updateTaggingReview(
+    caseId: string,
+    patch: {
+      note?: string | null;
+      openingPlatformVerdict?: TaggingVerdict | null;
+      openingPlatformCorrectedCode?: string | null;
+      openingBusinessProcessVerdict?: TaggingVerdict | null;
+      openingBusinessProcessCorrectedCode?: string | null;
+      openingOperationTypeVerdict?: TaggingVerdict | null;
+      openingOperationTypeCorrectedCode?: string | null;
+      openingAffectedObjectVerdict?: TaggingVerdict | null;
+      openingAffectedObjectCorrectedCode?: string | null;
+      openingImpactVerdict?: TaggingVerdict | null;
+      openingImpactCorrectedCode?: string | null;
+      closingRootCauseGroupVerdict?: TaggingVerdict | null;
+      closingRootCauseGroupCorrectedCode?: string | null;
+      closingRootCauseDetailVerdict?: TaggingVerdict | null;
+      closingRootCauseDetailCorrectedCode?: string | null;
+      closingResolutionTypeVerdict?: TaggingVerdict | null;
+      closingResolutionTypeCorrectedCode?: string | null;
+      closingPermanentPreventionVerdict?: TaggingVerdict | null;
+      closingPermanentPreventionCorrectedCode?: string | null;
+    },
+  ): Promise<CaseTaggingReview | undefined> {
+    if (USE_MOCK) return undefined;
+    return apiFetch<CaseTaggingReview>(
+      `${API_BASE}/${caseId}/tagging-review`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+      'Etiket doğrulama kaydedilemedi',
+    );
   },
 
   /**
@@ -810,6 +901,38 @@ export const caseService = {
       'Müşteri eşleştirme',
     );
     if (result) invalidateCaseDetail(caseId); // WR-H2
+    return result;
+  },
+
+  /**
+   * PR-SD — Vakayı arşivle (SystemAdmin-only). Hard delete YOK.
+   * Backend 403 → apiFetch toast eder, undefined döner.
+   * Backend 400 (reason kısa) → toast.
+   */
+  async archive(caseId: string, reason: string): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `${API_BASE}/${caseId}/archive`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      },
+      'Vaka arşivlenemedi',
+    );
+    if (result) invalidateCaseDetail(caseId);
+    return result;
+  },
+
+  /**
+   * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only).
+   */
+  async restore(caseId: string): Promise<Case | undefined> {
+    const result = await apiFetch<Case>(
+      `${API_BASE}/${caseId}/restore`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      'Vaka geri yüklenemedi',
+    );
+    if (result) invalidateCaseDetail(caseId);
     return result;
   },
 

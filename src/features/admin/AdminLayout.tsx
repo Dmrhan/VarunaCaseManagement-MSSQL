@@ -8,6 +8,8 @@ import {
   Database,
   FileText,
   FolderTree,
+  GitBranch,
+  Mail,
   History,
   MessageSquare,
   Network,
@@ -42,6 +44,8 @@ export type AdminView =
   | 'admin-fields'
   | 'admin-knowledge'
   | 'admin-external-kb'
+  | 'admin-external-devops'
+  | 'admin-external-mail'
   | 'admin-data-import'
   | 'admin-companies'
   | 'admin-users'
@@ -63,6 +67,8 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-fields',
   'admin-knowledge',
   'admin-external-kb',
+  'admin-external-devops',
+  'admin-external-mail',
   'admin-data-import',
   'admin-companies',
   'admin-users',
@@ -103,6 +109,8 @@ const NAV: NavGroup[] = [
       { key: 'admin-fields',              label: 'Dinamik Alanlar',           icon: <Sliders size={14} /> },
       { key: 'admin-knowledge',           label: 'Bilgi Kaynakları',          icon: <BookOpen size={14} /> },
       { key: 'admin-external-kb',         label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
+      { key: 'admin-external-devops',     label: 'DevOps / TFS Entegrasyonu',  icon: <GitBranch size={14} /> },
+      { key: 'admin-external-mail',       label: 'Mail Entegrasyonu',          icon: <Mail size={14} /> },
       { key: 'admin-data-import',         label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
       { key: 'admin-resolution-approval',     label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
       { key: 'admin-notification-templates',  label: 'Bildirim Şablonları',        icon: <MessageSquare size={14} /> },

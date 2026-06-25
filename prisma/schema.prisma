@@ -106,6 +106,10 @@ model User {
   /// PR-5 — Case actor FK back-relations
   caseActivities            CaseActivity[]      @relation("CaseActivityActor")
   caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
+  /// PR-SD — Soft archive actor FK back-relation
+  casesArchived             Case[]              @relation("CaseArchivedBy")
+  /// Vaka Sahibi — vakayı açan kullanıcı (creator) FK back-relation
+  casesCreated              Case[]              @relation("CaseCreatedBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -155,6 +159,10 @@ model Company {
   /// WR-KB1 — Dış Bilgi Bankası entegrasyon tanımları (yalnız config; API
   /// çağrısı sonraki fazda). Her şirket için tek satır.
   externalKbSetting          ExternalKbSetting?
+  /// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps integration.
+  externalDevOpsSetting      ExternalDevOpsSetting?
+  /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+  externalMailSetting        ExternalMailSetting?
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -222,6 +230,8 @@ model CompanySettings {
   /// Phase 1'de hiçbir tenantta aktive değil; UNIVERA için Phase 2 admin
   /// operasyonu ile flip edilir.
   projectsRequired            Boolean  @default(false)
+  /// true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false.
+  requireKbAnalysis           Boolean  @default(false)
   createdAt                   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                   DateTime @updatedAt
 
@@ -283,6 +293,102 @@ model ExternalKbSetting {
   notes                    String?  @db.NVarChar(Max)
   createdAt                DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt                DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId, enabled])
+}
+
+/// DevOps Faz 2.1 — Per-tenant TFS/Azure DevOps entegrasyon ayarları.
+///
+/// Tek satır per company (companyId @unique). devopsClient.getConfig()
+/// önce bu tabloya bakar; satır yoksa process.env.TFS_* fallback (MVP
+/// backward-compat). enabled=false ise entegrasyon KAPALI (env fallback
+/// YAPILMAZ — gerçekten kapalı semantiği).
+///
+/// PAT şifrelemesi: AES-256-GCM (server/lib/secretCipher.js).
+/// Plain PAT DB'de ASLA saklanmaz; ciphertext + iv + authTag base64
+/// üçlüsü ve patSetAt timestamp tutulur. GET response'unda hiçbir
+/// ciphertext alanı DÖNMEZ; sadece patIsSet boolean + patSetAt.
+model ExternalDevOpsSetting {
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  companyId        String    @unique @db.NVarChar(450)
+  enabled          Boolean   @default(false)
+  baseUrl          String?   @db.NVarChar(Max)
+  apiVersion       String?   @db.NVarChar(50)
+  timeoutMs        Int       @default(15000)
+  /// Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\user").
+  /// On-prem TFS user+secret bekliyor; cloud Azure DevOps yalnız PAT
+  /// kabul ettiğinden username nullable. Username SECRET DEĞİL, plain
+  /// saklanır; PAT/parola hâlâ AES-256-GCM şifreli kalır.
+  username         String?   @db.NVarChar(256)
+  /// AES-256-GCM ciphertext (base64). null → PAT henüz set edilmedi.
+  patCiphertext    String?   @db.NVarChar(Max)
+  /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.
+  patIv            String?   @db.NVarChar(Max)
+  /// 16-byte GCM authTag (base64).
+  patAuthTag       String?   @db.NVarChar(Max)
+  /// PAT'in en son set edildiği zaman (rotation tracking).
+  patSetAt         DateTime?
+  createdByUserId  String?   @db.NVarChar(450)
+  updatedByUserId  String?   @db.NVarChar(450)
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId, enabled])
+}
+
+/// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
+///
+/// Tek satır per company (companyId @unique). mailProvider.sendMail
+/// per-tenant config kullanırken (opts.companyId verildi) önce bu tabloya
+/// bakar; satır yoksa process.env (SMTP_*, MAIL_TRANSPORT) fallback
+/// (M1 backward-compat). enabled=false ise entegrasyon KAPALI semantiği
+/// (env'e DÜŞMEZ, ExternalDevOpsSetting kuralının aynısı).
+///
+/// Sır şifrelemesi: AES-256-GCM (server/lib/secretCipher.js;
+/// DEVOPS_PAT_ENC_KEY env reuse — DevOps PAT için doğdu, M5'te mail
+/// secret'ları da bu key ile şifreli). Plain secret DB'de ASLA saklanmaz;
+/// ciphertext + iv + authTag base64 üçlüsü + secretSetAt timestamp.
+///
+/// GET response'unda hiçbir ciphertext alanı dönmez; sadece secretIsSet
+/// boolean + secretSetAt.
+model ExternalMailSetting {
+  id               String    @id @default(cuid()) @db.NVarChar(450)
+  companyId        String    @unique @db.NVarChar(450)
+  enabled          Boolean   @default(false)
+  /// Giden mail için "From" adresi (örn. "Varuna <no-reply@univera.com.tr>").
+  fromAddress      String?   @db.NVarChar(Max)
+  /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
+  inboundAddress   String?   @db.NVarChar(Max)
+  /// SMTP gönderim (M1 + M4).
+  smtpHost         String?   @db.NVarChar(Max)
+  smtpPort         Int?
+  smtpSecure       Boolean   @default(false)
+  /// IMAP polling (M3).
+  imapHost         String?   @db.NVarChar(Max)
+  imapPort         Int?
+  /// Auth modu — 'password' (M1+M5 — App Password / SMTP pwd) veya
+  /// 'oauth2' (M3+ — Google Workspace OAuth2). M5'te yalnız 'password'.
+  authMode         String    @default("password") @db.NVarChar(50)
+  /// AES-256-GCM ciphertext (base64). null → secret henüz set edilmedi.
+  /// 'password' modunda SMTP password; 'oauth2' modunda refresh_token (M3).
+  secretCiphertext String?   @db.NVarChar(Max)
+  /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.
+  secretIv         String?   @db.NVarChar(Max)
+  /// 16-byte GCM authTag (base64).
+  secretAuthTag    String?   @db.NVarChar(Max)
+  /// secret'in en son set edildiği zaman (rotation tracking).
+  secretSetAt      DateTime?
+  /// SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). Secret
+  /// DEĞİL, plain saklanır.
+  username         String?   @db.NVarChar(256)
+  createdByUserId  String?   @db.NVarChar(450)
+  updatedByUserId  String?   @db.NVarChar(450)
+  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime  @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -1003,6 +1109,11 @@ model Case {
   assignedPersonId   String? @db.NVarChar(450)
   assignedPersonName String? @db.NVarChar(Max)
 
+  // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız,
+  // sadece create() set eder; claim/atama/devir asla değiştirmez.
+  createdByUserId String? @db.NVarChar(450)
+  createdByName   String? @db.NVarChar(Max)
+
   // Eskalasyon
   escalationLevel String @default("Yok") @db.NVarChar(50) // enum:EscalationLevel
 
@@ -1095,6 +1206,21 @@ model Case {
   aiCallBrief                String? @db.NVarChar(Max)
   aiFollowupRecommendation   String? @db.NVarChar(Max)
   aiRetentionOfferSuggestion String? @db.NVarChar(Max)
+  // RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen iki alanı.
+  // riskLevel: 'Düşük'|'Orta'|'Yüksek'|'Kritik' (string tutulur — mevcut
+  // aiPriorityPrediction pattern'i ile uyumlu, ileride genişletilebilir).
+  // keyPoints: JSON array<string> (MSSQL JSON tipi yok — customFields aynı).
+  aiRiskLevel                String? @db.NVarChar(50)
+  aiKeyPoints                String? @db.NVarChar(Max)
+
+  // PR-SD — Soft archive (SystemAdmin-only UI temizliği). Hard delete YOK;
+  // arşivli vaka tüm child kayıtlarıyla intact kalır, sadece liste/detay
+  // default exclude'la gizlenir. status enum dokunulmaz — archive orthogonal
+  // bayrak. archivedByUserId User FK (audit).
+  isArchived       Boolean   @default(false)
+  archivedAt       DateTime?
+  archivedByUserId String?   @db.NVarChar(450)
+  archiveReason    String?   @db.NVarChar(Max)
 
   // Checklist (snapshot — template sonradan değişirse vaka etkilenmez)
   /// CaseChecklistItemInstance[] — { id, templateItemId, label, required, checked, checkedAt?, checkedBy? }
@@ -1135,11 +1261,14 @@ model Case {
   accountProject AccountProject? @relation(fields: [accountProjectId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   assignedTeam   Team?           @relation(fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   assignedPerson Person?         @relation("CaseAssignedPerson", fields: [assignedPersonId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy      User?           @relation("CaseCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   thirdParty     ThirdParty?     @relation(fields: [thirdPartyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Product referansı (opsiyonel).
   product        Product?        @relation("CaseProduct", fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   /// WR-A7b — Catalog Package referansı (opsiyonel).
   package        Package?        @relation("CasePackage", fields: [packageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// PR-SD — Soft archive actor (User FK; audit için JOIN).
+  archivedByUser User?           @relation("CaseArchivedBy", fields: [archivedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   notes                  CaseNote[]
   attachments            CaseAttachment[]
@@ -1157,6 +1286,8 @@ model Case {
   reminders              CaseReminder[]
   transfers              CaseTransfer[]
   watchers               CaseWatcher[]
+  /// Vaka Etiket Doğrulama Ekranı — açılış/kapanış etiketleme kontrolü (1:1).
+  taggingReview          CaseTaggingReview?
   // Case A → linkedCaseId: A "outgoing" links (CaseLinkSource).
   // Case B ← linkedCaseId: B "incoming" links (CaseLinkTarget).
   outgoingLinks          CaseLink[]               @relation("CaseLinkSource")
@@ -1185,6 +1316,8 @@ model Case {
   @@index([companyId, resolvedAt])
   // WR-A5 / PM-03 — tier filter / routing Phase 2 için.
   @@index([companyId, supportLevel])
+  // PR-SD — list default exclude path için. companyId zaten her sorguda.
+  @@index([companyId, isArchived])
   // WR-A7b — Catalog filter / report path'leri için.
   @@index([companyId, productId])
   @@index([companyId, packageId])
@@ -1660,6 +1793,91 @@ model CaseTransfer {
   @@index([caseId])
   @@index([companyId])
   @@index([companyId, transferredAt])
+}
+
+// CaseTaggingReview — Vaka Etiket Doğrulama Ekranı (bilgi bankası seed'i için
+// audit). Supervisor/Admin/SystemAdmin her vakanın açılış (5 alan) ve kapanış
+// (4 alan, sadece Smart Ticket + Çözüldü vakalarda dolu) etiketini ALAN
+// BAZINDA Doğru/Yanlış/Belirsiz olarak işaretler. Original{Code,Label} snapshot
+// alanları create sırasında Case.customFields'tan KOPYALANIR ve bir daha
+// değişmez — bu kayıtlar bilgi bankası doğrulama/eğitim veri setini besler,
+// dolayısıyla vaka arşivlenip silinse bile bağımsız kalmalı. Corrected{Code,Label}
+// sadece kendi taxonomyType'ına ait TaxonomyDef'ten seçilir (server-side
+// batch validasyon — caseRepository.upsertTaggingReview). caseId @unique →
+// tek vaka tek kayıt, upsert pattern (QAScoreLog ile aynı desen — concurrency
+// token yok, son yazan kazanır). reviewerId/reviewerName/reviewedAt backend'de
+// (req.user) stamplenir, client body'den asla okunmaz.
+model CaseTaggingReview {
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @unique @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+
+  openingPlatformOriginalCode    String? @db.NVarChar(255)
+  openingPlatformOriginalLabel   String? @db.NVarChar(Max)
+  openingPlatformVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingPlatformCorrectedCode   String? @db.NVarChar(255)
+  openingPlatformCorrectedLabel  String? @db.NVarChar(Max)
+
+  openingBusinessProcessOriginalCode   String? @db.NVarChar(255)
+  openingBusinessProcessOriginalLabel  String? @db.NVarChar(Max)
+  openingBusinessProcessVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingBusinessProcessCorrectedCode  String? @db.NVarChar(255)
+  openingBusinessProcessCorrectedLabel String? @db.NVarChar(Max)
+
+  openingOperationTypeOriginalCode   String? @db.NVarChar(255)
+  openingOperationTypeOriginalLabel  String? @db.NVarChar(Max)
+  openingOperationTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingOperationTypeCorrectedCode  String? @db.NVarChar(255)
+  openingOperationTypeCorrectedLabel String? @db.NVarChar(Max)
+
+  openingAffectedObjectOriginalCode   String? @db.NVarChar(255)
+  openingAffectedObjectOriginalLabel  String? @db.NVarChar(Max)
+  openingAffectedObjectVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingAffectedObjectCorrectedCode  String? @db.NVarChar(255)
+  openingAffectedObjectCorrectedLabel String? @db.NVarChar(Max)
+
+  openingImpactOriginalCode    String? @db.NVarChar(255)
+  openingImpactOriginalLabel   String? @db.NVarChar(Max)
+  openingImpactVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingImpactCorrectedCode   String? @db.NVarChar(255)
+  openingImpactCorrectedLabel  String? @db.NVarChar(Max)
+
+  closingRootCauseGroupOriginalCode   String? @db.NVarChar(255)
+  closingRootCauseGroupOriginalLabel  String? @db.NVarChar(Max)
+  closingRootCauseGroupVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingRootCauseGroupCorrectedCode  String? @db.NVarChar(255)
+  closingRootCauseGroupCorrectedLabel String? @db.NVarChar(Max)
+
+  closingRootCauseDetailOriginalCode   String? @db.NVarChar(255)
+  closingRootCauseDetailOriginalLabel  String? @db.NVarChar(Max)
+  closingRootCauseDetailVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingRootCauseDetailCorrectedCode  String? @db.NVarChar(255)
+  closingRootCauseDetailCorrectedLabel String? @db.NVarChar(Max)
+
+  closingResolutionTypeOriginalCode   String? @db.NVarChar(255)
+  closingResolutionTypeOriginalLabel  String? @db.NVarChar(Max)
+  closingResolutionTypeVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingResolutionTypeCorrectedCode  String? @db.NVarChar(255)
+  closingResolutionTypeCorrectedLabel String? @db.NVarChar(Max)
+
+  closingPermanentPreventionOriginalCode   String? @db.NVarChar(255)
+  closingPermanentPreventionOriginalLabel  String? @db.NVarChar(Max)
+  closingPermanentPreventionVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  closingPermanentPreventionCorrectedCode  String? @db.NVarChar(255)
+  closingPermanentPreventionCorrectedLabel String? @db.NVarChar(Max)
+
+  note String? @db.NVarChar(Max)
+
+  reviewerId   String?   @db.NVarChar(450)
+  reviewerName String?   @db.NVarChar(Max)
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt DateTime @updatedAt
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([companyId])
 }
 
 // CaseWatcher — FAZ 2 Collab. Vaka takipçileri; vakada değişiklik olunca

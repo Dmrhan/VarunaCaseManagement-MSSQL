@@ -988,6 +988,104 @@ export const adminService = {
     },
   },
 
+  /**
+   * DevOps Faz 2.1 — Per-tenant TFS integration settings (admin-only).
+   *
+   * PAT plain text bu service'te asla görünmez:
+   *  - get() response'unda yok (sadece patIsSet + patSetAt)
+   *  - save() request'inde `pat` opsiyonel; yalnız değiştirmek istediğinde
+   *    gönderilir, yoksa mevcut şifreli PAT'a dokunulmaz
+   *  - test() PAT'ı server-side decrypt edip TFS'e bir test çağrısı yapar
+   */
+  externalDevOpsSettings: {
+    async get(companyId: string): Promise<ExternalDevOpsSetting | undefined> {
+      return apiFetch<ExternalDevOpsSetting>(
+        `${ADMIN_BASE}/external-devops-settings?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'DevOps ayarları yüklenemedi',
+      );
+    },
+    async save(
+      companyId: string,
+      patch: ExternalDevOpsSettingInput,
+    ): Promise<AdminResult<ExternalDevOpsSetting>> {
+      const item = await apiFetch<ExternalDevOpsSetting>(
+        `${ADMIN_BASE}/external-devops-settings/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'DevOps ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async test(
+      companyId: string,
+      testWorkItemId?: number,
+    ): Promise<ExternalDevOpsTestResult | undefined> {
+      return apiFetch<ExternalDevOpsTestResult>(
+        `${ADMIN_BASE}/external-devops-settings/${encodeURIComponent(companyId)}/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testWorkItemId ? { testWorkItemId } : {}),
+        },
+        'DevOps bağlantı testi başarısız',
+      );
+    },
+  },
+
+  /**
+   * Mail M5 — Per-tenant SMTP/IMAP integration settings (admin-only).
+   *
+   * Secret plain text bu service'te asla görünmez:
+   *  - get() response'unda yok (sadece secretIsSet + secretSetAt)
+   *  - save() request'inde `secret` opsiyonel; yalnız değiştirmek istediğinde
+   *    gönderilir, yoksa mevcut şifreli secret'a dokunulmaz
+   *  - test() secret'ı server-side decrypt edip mailProvider'a verir
+   */
+  externalMailSettings: {
+    async get(companyId: string): Promise<ExternalMailSetting | undefined> {
+      return apiFetch<ExternalMailSetting>(
+        `${ADMIN_BASE}/external-mail-settings?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'Mail ayarları yüklenemedi',
+      );
+    },
+    async save(
+      companyId: string,
+      patch: ExternalMailSettingInput,
+    ): Promise<AdminResult<ExternalMailSetting>> {
+      const item = await apiFetch<ExternalMailSetting>(
+        `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+        'Mail ayarları kaydedilemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
+    },
+    async test(
+      companyId: string,
+      testTo?: string,
+    ): Promise<ExternalMailTestResult | undefined> {
+      return apiFetch<ExternalMailTestResult>(
+        `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/test`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testTo ? { testTo } : {}),
+        },
+        'Mail bağlantı testi başarısız',
+      );
+    },
+  },
+
   // ─────────────────────────────────────────────────────────────────
   // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
   // ─────────────────────────────────────────────────────────────────
@@ -1186,4 +1284,110 @@ export interface ExternalKbSettingInput {
   allowSupervisorUse?: boolean;
   allowCsmUse?: boolean;
   notes?: string | null;
+}
+
+/**
+ * DevOps Faz 2.1 — Per-tenant TFS entegrasyon ayarları (admin).
+ *
+ * PAT plain text bu interface'te YOK; sadece patIsSet + patSetAt. Server
+ * GET response'unda hiçbir ciphertext/iv/authTag alanı dönmez.
+ */
+export interface ExternalDevOpsSetting {
+  id: string | null;
+  companyId: string;
+  enabled: boolean;
+  baseUrl: string | null;
+  apiVersion: string | null;
+  timeoutMs: number;
+  /**
+   * Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\\user").
+   * SECRET DEĞİL; plain GET'te döner. On-prem TFS user+secret bekliyor;
+   * cloud Azure DevOps boş bırakılabilir (PAT-only).
+   */
+  username: string | null;
+  /** PAT/parola şifreli olarak DB'de var mı? */
+  patIsSet: boolean;
+  /** PAT/parola'nın en son set edildiği zaman (ISO). */
+  patSetAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExternalDevOpsSettingInput {
+  enabled?: boolean;
+  baseUrl?: string | null;
+  apiVersion?: string | null;
+  timeoutMs?: number;
+  /** Basic auth kullanıcı adı (plain saklanır; örn. "DOMAIN\\user"). */
+  username?: string | null;
+  /**
+   * Yalnız yeni PAT/parola set/rotate ederken gönderilir. Undefined →
+   * mevcut secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
+   */
+  pat?: string;
+}
+
+export interface ExternalDevOpsTestResult {
+  ok: boolean;
+  workItem?: { id: number; title: string | null; state: string | null };
+  meta?: { apiVersion?: string; latencyMs?: number };
+  error?: { code: string; message: string; status?: number };
+}
+
+/**
+ * Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları (admin).
+ *
+ * Secret plain text bu interface'te YOK; sadece secretIsSet + secretSetAt.
+ * Server GET response'unda hiçbir ciphertext/iv/authTag alanı dönmez.
+ */
+export interface ExternalMailSetting {
+  id: string | null;
+  companyId: string;
+  enabled: boolean;
+  fromAddress: string | null;
+  inboundAddress: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecure: boolean;
+  imapHost: string | null;
+  imapPort: number | null;
+  authMode: 'password' | 'oauth2';
+  /** SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). */
+  username: string | null;
+  /** Secret şifreli olarak DB'de var mı? */
+  secretIsSet: boolean;
+  /** Secret'in en son set edildiği zaman (ISO). */
+  secretSetAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ExternalMailSettingInput {
+  enabled?: boolean;
+  fromAddress?: string | null;
+  inboundAddress?: string | null;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecure?: boolean;
+  imapHost?: string | null;
+  imapPort?: number | null;
+  authMode?: 'password' | 'oauth2';
+  username?: string | null;
+  /**
+   * Yalnız yeni secret set/rotate ederken gönderilir. Undefined → mevcut
+   * secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.
+   */
+  secret?: string;
+}
+
+export interface ExternalMailTestResult {
+  ok: boolean;
+  messageId?: string | null;
+  previewUrl?: string | null;
+  meta?: { transport?: string; source?: 'db' | 'env' };
+  error?: { code: string; message: string; status?: number };
 }

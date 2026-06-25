@@ -131,8 +131,18 @@ export interface ResolutionDraftInput {
 
 // ---- 3) Supervisor özeti ----
 
+/**
+ * Faz 1 — supervisor-summary artık caseId tabanlı. Backend zengin sinyalleri
+ * (Smart Ticket sınıflandırma + Çözüm Adımları + Müşteri sayısal sinyalleri +
+ * Devir + Ürün + son 3 çağrı + Çözüm/İptal) caseId'den (PII guard'lı) toplar.
+ *
+ * Frontend sadece caseId gönderir; geriye dönük uyum için eski payload alanları
+ * opsiyonel olarak tutulur (test/legacy çağrılar için).
+ */
 export interface SupervisorSummaryInput {
-  case: Pick<
+  caseId: string;
+  /** @deprecated Faz 1 sonrası backend caseId'den toplar; bu alan ileride kaldırılabilir. */
+  case?: Pick<
     Case,
     | 'title'
     | 'description'
@@ -146,8 +156,11 @@ export interface SupervisorSummaryInput {
     | 'slaPausedAt'
     | 'createdAt'
   >;
+  /** @deprecated Faz 1 sonrası backend toplar. */
   history?: CaseHistoryEntry[];
+  /** @deprecated Faz 1 sonrası backend toplar. */
   notes?: CaseNote[];
+  /** @deprecated Faz 1 sonrası backend toplar. */
   callLogs?: CaseCallLog[];
 }
 
@@ -156,6 +169,11 @@ export interface SupervisorSummary {
   riskLevel: 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
   keyPoints: string[];
   recommendation: string;
+  /**
+   * Faz 2 — özet analizinin güveni (0-1). Kategori güveni DEĞİL. Mevcut
+   * caller'lar opsiyonel parse edebilsin diye optional tutulur (eski cache).
+   */
+  confidence?: number;
 }
 
 // ---- 4) Churn dönüşüm önerisi ----

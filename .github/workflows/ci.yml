@@ -51,10 +51,14 @@ jobs:
         run: npx tsc -b
 
       - name: Vite build
-        # Build script'i (`prisma migrate deploy && tsc -b && vite build`) CI'da
-        # DB'ye bağlanmaya çalışıyor. Burada sadece vite build'i çalıştırıyoruz —
-        # migration'lar Vercel deploy'ında uygulanır, type check + schema doğrulamasını
-        # önceki adımlarda yaptık.
+        # DB-bağımsız build — bu job'da gerçek MSSQL service yok (sadece
+        # placeholder DATABASE_URL ile `prisma validate`). Migration'lar
+        # deploy zamanı uygulanır:
+        #   - On-prem: `npm run deploy:onprem` (PM2) veya nssm akışı
+        #     migrate → build → restart sırasını garanti eder
+        #     (bkz. docs/IIS_DEPLOY.md §6, docs/OPERATIONS.md "On-Prem (PM2) Deploy")
+        #   - Vercel: ayrı `npm run db:migrate:deploy` adımı
+        #     (bkz. docs/OPERATIONS.md "Production Deploy Checklist (Vercel)")
         run: npx vite build
 
       - name: Help registry script syntax check

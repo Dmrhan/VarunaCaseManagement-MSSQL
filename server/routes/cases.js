@@ -214,6 +214,9 @@ router.get(
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
       // WR-A4 — Proje filtresi.
       accountProjectId: typeof f.accountProjectId === 'string' && f.accountProjectId ? f.accountProjectId : undefined,
+      // PR-SD — Arşivli vakaları dahil et: sadece SystemAdmin. Diğer roller
+      // query param gönderse bile sessizce ignore edilir (sızıntı yok).
+      includeArchived: f.includeArchived === 'true' && req.user.role === 'SystemAdmin' ? true : undefined,
     };
     // WR-H1 — Defansif large-query guard (AGENTIC_PLANNING_PROTOCOL §③ #6).
     // pageSize her zaman [1, 200] içine clamp edilir; pagination object'i her zaman
@@ -363,11 +366,131 @@ router.get(
   }),
 );
 
+/**
+ * GET /api/cases/tagging-review/export
+ * Sayfalama olmadan tüm filtreli kayıtları döner — Excel export için.
+ */
+router.get(
+  '/tagging-review/export',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const f = req.query;
+    const filters = {
+      statuses: f.statuses ? f.statuses.split(',') : undefined,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+      teamId: f.teamId || undefined,
+    };
+    const { items } = await caseRepository.list({
+      filters,
+      pagination: { page: 1, pageSize: 5000 },
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
+    res.json({
+      value: items,
+      reviews: Object.fromEntries(reviewMap),
+    });
+  }),
+);
+
+/**
+ * GET /api/cases/tagging-review?dateFrom&dateTo&statuses&page&pageSize
+ *
+ * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
+ * KRİTİK: bu literal route GET /:id'den (aşağıda) ÖNCE mount edilmeli,
+ * yoksa Express '/:id' ile eşleşir (id="tagging-review") ve buraya hiç
+ * ulaşılmaz — bkz. aşağıdaki /watching route'undaki aynı uyarı.
+ *
+ * caseRepository.list/shape/CASE_INCLUDE'a dokunulmaz: vaka listesi mevcut
+ * filtre/scope mantığıyla çekilir, review kayıtları ayrı sorgulanıp
+ * caseId → review map'i olarak ayrı bir alanda döner.
+ */
+router.get(
+  '/tagging-review',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const f = req.query;
+    const filters = {
+      statuses: f.statuses ? f.statuses.split(',') : undefined,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+      teamId: f.teamId || undefined,
+    };
+    const HARD_MAX_PAGE_SIZE = 200;
+    const requestedPageSize = Number(f.pageSize ?? 25);
+    const safePageSize = Math.min(
+      HARD_MAX_PAGE_SIZE,
+      Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 25),
+    );
+    const safePage = Math.max(1, Number(f.page) || 1);
+    const pagination = { page: safePage, pageSize: safePageSize };
+
+    const { items, total } = await caseRepository.list({
+      filters,
+      pagination,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
+    res.json({
+      value: items,
+      '@odata.count': total,
+      reviews: Object.fromEntries(reviewMap),
+    });
+  }),
+);
+
+/**
+ * PUT /api/cases/:id/tagging-review
+ *
+ * Alan bazlı model (9 etiket × Verdict + CorrectedCode) + note. SADECE bu
+ * alanlar kabul edilir — Original{Code,Label} ve Corrected*Label client'tan
+ * asla okunmaz (snapshot create'te server'da set edilir, label TaxonomyDef'ten
+ * server-side resolve edilir). reviewerId/reviewerName/reviewedAt
+ * req.user'dan stamplenir, client body'den asla okunmaz (transferCase'teki
+ * transferredBy emsali).
+ */
+const TAGGING_REVIEW_FIELD_KEYS = [
+  'openingPlatformVerdict', 'openingPlatformCorrectedCode',
+  'openingBusinessProcessVerdict', 'openingBusinessProcessCorrectedCode',
+  'openingOperationTypeVerdict', 'openingOperationTypeCorrectedCode',
+  'openingAffectedObjectVerdict', 'openingAffectedObjectCorrectedCode',
+  'openingImpactVerdict', 'openingImpactCorrectedCode',
+  'closingRootCauseGroupVerdict', 'closingRootCauseGroupCorrectedCode',
+  'closingRootCauseDetailVerdict', 'closingRootCauseDetailCorrectedCode',
+  'closingResolutionTypeVerdict', 'closingResolutionTypeCorrectedCode',
+  'closingPermanentPreventionVerdict', 'closingPermanentPreventionCorrectedCode',
+];
+
+router.put(
+  '/:id/tagging-review',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const body = req.body ?? {};
+    const input = { note: body.note };
+    for (const key of TAGGING_REVIEW_FIELD_KEYS) {
+      if (key in body) input[key] = body[key];
+    }
+    const result = await caseRepository.upsertTaggingReview(
+      req.params.id,
+      input,
+      req.user.allowedCompanyIds,
+      actor,
+    );
+    if (!result) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  }),
+);
+
 /** GET /api/cases/:id */
 router.get(
   '/:id',
   asyncRoute(async (req, res) => {
-    const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    // PR-SD — actorRole rol-aware guard: arşivli vaka direct URL'de
+    // yalnız SystemAdmin görür; diğer roller 404 alır.
+    const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
     // WR-ACTION-CENTER Phase 1 — auto-InProgress: flip user's Pending
     // ActionItems for this case to InProgress, stamp firstSeenAt.
@@ -411,6 +534,128 @@ router.patch(
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);
+  }),
+);
+
+/**
+ * PR-SD — POST /api/cases/:id/archive (SystemAdmin-only)
+ *
+ * Vakayı soft-archive. Hard delete YOK; tüm child kayıtlar intact, sadece
+ * UI listelerinden gizlenir. status enum dokunulmaz.
+ *
+ * Body: { reason: string }  // min 3 char
+ * Audit: CaseActivity actionType='Archived', actor.
+ * Idempotent: zaten arşivli ise sessizce 200 döner.
+ */
+router.post(
+  '/:id/archive',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const { reason } = req.body ?? {};
+    const actor = requireActor(req);
+    const updated = await caseRepository.archive(req.params.id, {
+      reason,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-SD — POST /api/cases/:id/restore (SystemAdmin-only)
+ *
+ * Arşivli vakayı geri yükler. Status enum dokunulmaz.
+ * Audit: CaseActivity actionType='Restored', actor.
+ * Idempotent: zaten arşivli değilse sessizce 200 döner.
+ */
+router.post(
+  '/:id/restore',
+  requireRole('SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const updated = await caseRepository.restore(req.params.id, {
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-D2 — POST /api/cases/:id/devops-link
+ *
+ * Mevcut TFS work item'ı vakaya bağlar (çoklu/array). Yetki: case-write
+ * (PATCH /:id ile aynı kapı — requireActor + allowedCompanyIds; explicit
+ * requireRole yok). Arşivli case için assertCaseInScope otomatik 409.
+ *
+ * Body: { workItemRef: number | string }  // id veya TFS URL
+ * Dönen: güncel Case (devops array customFields'te).
+ *
+ * Hatalar:
+ *   400 devops_workitem_ref_invalid — id/URL parse edilemedi
+ *   404 (tfs_not_found) — TFS'te yok
+ *   502 (tfs_auth_error / tfs_network_error / tfs_timeout) — TFS down
+ *   409 case_archived_readonly — arşivli vaka
+ */
+router.post(
+  '/:id/devops-link',
+  asyncRoute(async (req, res) => {
+    const { workItemRef } = req.body ?? {};
+    const actor = requireActor(req);
+    const updated = await caseRepository.linkDevops(req.params.id, {
+      workItemRef,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-D2 — DELETE /api/cases/:id/devops-link/:workItemId
+ *
+ * Bağlı TFS work item'ı array'den kaldırır + audit (DevopsUnlinked).
+ * Idempotent: zaten yoksa sessizce 200 döner.
+ */
+router.delete(
+  '/:id/devops-link/:workItemId',
+  asyncRoute(async (req, res) => {
+    const actor = requireActor(req);
+    const updated = await caseRepository.unlinkDevops(req.params.id, {
+      workItemId: req.params.workItemId,
+      actor,
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
+ * PR-D2 — GET /api/cases/:id/devops-items
+ *
+ * Bağlı TFS work item'larının CANLI değerlerini batch çek (UI render
+ * öncesi tazeleme). TFS erişilemezse snapshot fallback + `stale: true`.
+ *
+ * Read endpoint — assertCaseInScopeForRead: SystemAdmin arşivli case için
+ * 200, diğer roller 404.
+ *
+ * Dönen: { items: Array<entry>, stale: boolean, error?: {...} }
+ */
+router.get(
+  '/:id/devops-items',
+  asyncRoute(async (req, res) => {
+    const result = await caseRepository.listDevopsLive(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (result === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(result);
   }),
 );
 
@@ -461,7 +706,7 @@ router.get(
   requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     // Scope verify via existing get (404/403 mantığı reuse).
-    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const out = await customerMatchRepository.suggestCustomerMatches({
       caseId: req.params.id,
@@ -622,7 +867,7 @@ router.get(
 router.get(
   '/:id/customer-context',
   asyncRoute(async (req, res) => {
-    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+    const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const context = await accountRepository.getCaseCustomerContext({
       accountId: caseRow.accountId,
@@ -667,7 +912,7 @@ router.get(
 router.get(
   '/:id/watchers',
   asyncRoute(async (req, res) => {
-    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -695,7 +940,7 @@ router.post(
       const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(role);
       let assignedOwner = false;
       if (!elevated && req.user.personId) {
-        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+        const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
         if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
         assignedOwner = c.assignedPersonId === req.user.personId;
       }
@@ -751,7 +996,7 @@ router.delete(
 router.get(
   '/:id/links',
   asyncRoute(async (req, res) => {
-    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds);
+    const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
   }),
@@ -794,7 +1039,7 @@ router.delete(
   asyncRoute(async (req, res) => {
     const elevated = ['Supervisor', 'Admin', 'SystemAdmin'].includes(req.user.role);
     if (!elevated) {
-      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds);
+      const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
       if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
       if (!req.user.personId || c.assignedPersonId !== req.user.personId) {
         return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
@@ -820,6 +1065,7 @@ router.get(
     const list = await caseRepository.listTransfers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -916,6 +1162,7 @@ router.get(
       req.params.id,
       req.params.noteId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (replies === null) return res.status(404).json({ error: 'Not bulunamadı' });
     res.json({ value: replies });
@@ -1016,6 +1263,7 @@ router.get(
     const users = await caseRepository.listMentionableUsers(
       req.params.id,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (users === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: users });
@@ -1030,7 +1278,7 @@ router.post(
   '/:id/mentions/seen',
   asyncRoute(async (req, res) => {
     // Önce case scope check (allowedCompanyIds), sonra updateMany.
-    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds))) {
+    if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role))) {
       return res.status(404).json({ error: 'Vaka bulunamadı' });
     }
     const result = await mentionRepo.markCaseAsSeen(
@@ -1233,6 +1481,7 @@ router.get(
       req.params.id,
       req.params.fileId,
       req.user.allowedCompanyIds,
+      req.user.role,
     );
     if (!result) return res.status(404).json({ error: 'Dosya bulunamadı' });
     res.json(result);

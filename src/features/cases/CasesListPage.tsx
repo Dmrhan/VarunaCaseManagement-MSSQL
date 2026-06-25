@@ -15,6 +15,7 @@ import {
   Filter,
   Flag,
   Inbox,
+  Layers,
   Link as LinkIcon,
   Plus,
   RotateCw,
@@ -102,7 +103,9 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 // Açık (default): aktif statüler, snoozed gizli (BE filter).
 // Later: GET /api/cases/snoozed (me) — assignedPersonId = current user.
 // Kapalı: status IN (Çözüldü, İptalEdildi).
-type InboxTab = 'open' | 'later' | 'closed';
+// Genel #45 — "Tümü" tab'ı eklendi. Default opt-in; ilk sırada görünür ama
+// açılışta hâlâ 'open' (mevcut davranış korunur).
+type InboxTab = 'all' | 'open' | 'later' | 'closed';
 const OPEN_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
 const CLOSED_STATUSES: CaseStatus[] = ['Çözüldü', 'İptalEdildi'];
 
@@ -184,7 +187,8 @@ const STATUS_LABELS_SHORT: Record<CaseStatus, string> = {
   'Açık':                'Açık',
   'İncelemede':          'İncelemede',
   '3rdPartyBekleniyor':  '3.Parti',
-  'Eskalasyon':          'Eskalasyon',
+  // LBD A9 — display rename (enum identifier 'Eskalasyon' korunur)
+  'Eskalasyon':          'Eskale Edildi',
   'Çözüldü':             'Çözüldü',
   'YenidenAcildi':       'Yeniden',
   'İptalEdildi':         'İptal',
@@ -348,6 +352,14 @@ export function CasesListPage({
         'Ertelenmiş vakalar yüklenemedi',
       );
       setAllFiltered(data?.value ?? []);
+    } else if (inboxTab === 'all') {
+      // Genel #45 — "Tümü": statü filtresi YOK; tüm statülerdeki vakalar.
+      // Erişim kapsamı (allowedCompanyIds + rol guard) backend tarafında zaten
+      // korunur. Filtre chip seçimi varsa onu uygula (kullanıcı isterse
+      // Tümü içinde de statü daraltabilir).
+      const effectiveStatuses = filters.statuses?.length ? filters.statuses : undefined;
+      const { items } = await caseService.list({ ...filters, statuses: effectiveStatuses });
+      setAllFiltered(items);
     } else {
       // Açık/Kapalı — chip seçimi varsa onu, yoksa tab default statüsünü kullan.
       const tabDefault = inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES;
@@ -380,6 +392,7 @@ export function CasesListPage({
     filters.teamScope,
     filters.slaViolation,
     filters.resolvedToday,
+    filters.includeArchived,
   ]);
 
   const stats = useMemo(() => {
@@ -819,7 +832,7 @@ export function CasesListPage({
                 setInboxTab('open');
                 setQuickFilter(null);
               }),
-              tile('team.escalation', 'Eskalasyon', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
+              tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
                 setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
                 setInboxTab('open');
                 setQuickFilter(null);
@@ -954,8 +967,14 @@ export function CasesListPage({
       )}
 
       <Card>
-        {/* Inbox sekmeleri — Açık / Later / Kapalı */}
+        {/* Inbox sekmeleri — Tümü / Açık / Ertelendi / Kapalı (Genel #45) */}
         <div className="flex items-center gap-1 border-b border-slate-200 px-3 pt-2">
+          <InboxTabButton
+            label="Tümü"
+            icon={<Layers size={13} />}
+            active={inboxTab === 'all'}
+            onClick={() => setInboxTab('all')}
+          />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
@@ -1151,6 +1170,28 @@ export function CasesListPage({
                       />
                     </div>
                   </FilterPanelSection>
+
+                  {/* PR-SD — Arşivlenenleri göster: yalnız SystemAdmin. Backend
+                      includeArchived rol guard'ı her durumda enforce eder; UI
+                      sadece chip görünürlüğünü kapatır. */}
+                  {user?.role === 'SystemAdmin' && (
+                    <FilterPanelSection label="Arşiv">
+                      <label className="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-ndark-text">
+                        <input
+                          type="checkbox"
+                          checked={filters.includeArchived === true}
+                          onChange={(e) =>
+                            setFilters((f) => ({
+                              ...f,
+                              includeArchived: e.target.checked || undefined,
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Arşivlenenleri göster
+                      </label>
+                    </FilterPanelSection>
+                  )}
 
                   <div className="flex items-center justify-between border-t border-slate-200 pt-3 dark:border-ndark-border">
                     {hasActiveFilters ? (

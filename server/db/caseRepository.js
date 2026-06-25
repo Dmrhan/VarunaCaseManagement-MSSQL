@@ -9,6 +9,7 @@ import {
   emitGenericNotification,
 } from './actionItemRepository.js';
 import { ActorRequiredError } from '../lib/actor.js';
+import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
 
 /**
@@ -118,6 +119,9 @@ const CASE_INCLUDE = {
   // sayisi: Related/Parent A->B yonu + Duplicate symmetric'in A->B satiri.
   // Detay sayfasi tam listeyi LinksTab'de gosterir; bu yalniz chip icin.
   _count: { select: { outgoingLinks: true } },
+  // PR-SD — Arşiv banner için kim arşivledi adı (audit JOIN; PII guard
+  // sadece display name).
+  archivedByUser: { select: { id: true, fullName: true } },
 };
 
 // İzin verilen reaksiyon emojileri — UI + BFF whitelist.
@@ -131,7 +135,7 @@ export const NOTE_REACTION_EMOJIS = ['thumbs_up', 'eyes', 'check', 'important', 
 //  - callLog'lardaki enum'ları da TR'ye çevir
 function shape(c) {
   if (!c) return null;
-  const { attachments, callLogs, _count, ...rest } = c;
+  const { attachments, callLogs, _count, archivedByUser, ...rest } = c;
   const baseShape = fromDb(rest);
   return {
     ...baseShape,
@@ -139,6 +143,8 @@ function shape(c) {
     callLogs: (callLogs ?? []).map((cl) => fromDb(cl)),
     // _count.outgoingLinks → linkCount (frontend için tek flat number).
     linkCount: _count?.outgoingLinks ?? 0,
+    // PR-SD — Arşiv banner için flat display name (UI JOIN gerekmez).
+    archivedByUserName: archivedByUser?.fullName ?? null,
   };
 }
 
@@ -735,6 +741,108 @@ function buildSmartTicketTransferMerge(prev, transferInput, contextFields) {
 //   - version + capturedAt server-side stamp. Raw KB persist EDİLMEZ
 //     (yalnız iki normalized string + meta).
 const SMART_TICKET_AI_DRAFTS_VERSION = 1;
+/**
+ * PR-D2 — customFields.devops array read/write helper'ları.
+ *
+ * Case.customFields Prisma'da NVarChar(Max) (JSON string olabilir VEYA
+ * smart-ticket merge fonksiyonlarındaki gibi object olarak elden geçmiş
+ * olabilir). İki durumu da güvenli ele al: parse fail → boş object.
+ *
+ * writeDevopsArray her zaman JSON string döndürür (Prisma'ya yazılır).
+ */
+function readDevopsArray(customFieldsRaw) {
+  if (!customFieldsRaw) return [];
+  let obj;
+  if (typeof customFieldsRaw === 'string') {
+    try {
+      obj = JSON.parse(customFieldsRaw);
+    } catch {
+      return [];
+    }
+  } else if (typeof customFieldsRaw === 'object') {
+    obj = customFieldsRaw;
+  } else {
+    return [];
+  }
+  const arr = obj?.devops;
+  return Array.isArray(arr) ? arr : [];
+}
+
+function writeDevopsArray(customFieldsRaw, devopsArr) {
+  let obj = {};
+  if (customFieldsRaw) {
+    if (typeof customFieldsRaw === 'string') {
+      try {
+        obj = JSON.parse(customFieldsRaw);
+      } catch {
+        obj = {};
+      }
+    } else if (typeof customFieldsRaw === 'object') {
+      obj = { ...customFieldsRaw };
+    }
+  }
+  obj.devops = devopsArr;
+  return JSON.stringify(obj);
+}
+
+/**
+ * Fix 2 (Codex P2 pre-main) — Atomik devops array mutate (optimistic
+ * concurrency control + retry).
+ *
+ * Sorun: linkDevops/unlinkDevops naïve read-modify-write race condition'a
+ * açıktı. İki eşzamanlı POST /devops-link:
+ *   Tx A read arr=[]
+ *   Tx B read arr=[]
+ *   Tx A write arr=[X]
+ *   Tx B write arr=[Y]   ← X kaybedildi
+ *
+ * Çözüm: `updateMany(where: { id, updatedAt })` optimistic guard. Prisma
+ * @updatedAt directive update'lerde otomatik yeni timestamp set eder;
+ * concurrent write timestamp eşleşmesi nedeniyle count=0 döner → retry.
+ *
+ * Aktivite (CaseActivity) successful update sonrası ayrı satır — append-only
+ * audit, race-relevant değil.
+ *
+ * @param {string} caseId
+ * @param {(arr: Array<object>) => { nextArr: Array<object>, op: 'append'|'remove'|'noop', target?: object }} mutate
+ *   Mevcut array → next array dönüştürücüsü.
+ * @returns {Promise<{ ok: true, op: string, target?: object } | null>}
+ *   - null: case bulunamadı
+ *   - { ok: true, op: 'noop' }: idempotent (zaten istenen state)
+ *   - { ok: true, op: 'append'|'remove', target }: değişiklik kaydedildi
+ *
+ * Throws CaseValidationError(409, 'devops_concurrent_update') retry tükenirse.
+ */
+const DEVOPS_MUTATE_MAX_RETRIES = 5;
+async function atomicMutateDevopsArray(caseId, mutate) {
+  for (let attempt = 0; attempt < DEVOPS_MUTATE_MAX_RETRIES; attempt += 1) {
+    const current = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true, updatedAt: true },
+    });
+    if (!current) return null;
+    const arr = readDevopsArray(current.customFields);
+    const result = mutate(arr);
+    if (result.op === 'noop') {
+      return { ok: true, op: 'noop' };
+    }
+    const next = writeDevopsArray(current.customFields, result.nextArr);
+    const updated = await prisma.case.updateMany({
+      where: { id: caseId, updatedAt: current.updatedAt },
+      data: { customFields: next },
+    });
+    if (updated.count === 1) {
+      return { ok: true, op: result.op, target: result.target };
+    }
+    // Race lost — exponential-ish backoff (10/35/85/185/385 ms ortalama)
+    await new Promise((r) => setTimeout(r, 10 + attempt * 25));
+  }
+  throw new CaseValidationError(
+    'Eşzamanlı değişiklik nedeniyle DevOps bağlantısı güncellenemedi. Lütfen tekrar deneyin.',
+    { status: 409, code: 'devops_concurrent_update' },
+  );
+}
+
 function buildSmartTicketAiDraftsMerge(prev, drafts) {
   if (!drafts || typeof drafts !== 'object') return null;
   const engineering =
@@ -770,14 +878,53 @@ function buildSmartTicketAiDraftsMerge(prev, drafts) {
   };
 }
 
-async function assertCaseInScope(caseId, allowedCompanyIds) {
+/**
+ * PR-SD (Codex P2 round-4) — Read path scope guard. Read endpoint'leri
+ * için kullanılır; arşivli case yalnız SystemAdmin'e açıktır, diğer roller
+ * null alır (route 404 yansıtır). Bu helper write semantiği taşımaz —
+ * arşivli case write için assertCaseInScope (default flags) kullanılır
+ * ve 409 case_archived_readonly döner.
+ *
+ * actorRole null/undefined → SystemAdmin değil sayılır (defansif: legacy
+ * caller arşivli case'e erişim alamasın).
+ */
+async function assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole = null) {
   const found = await prisma.case.findUnique({
     where: { id: caseId },
-    select: { id: true, companyId: true },
+    select: { id: true, companyId: true, isArchived: true },
   });
   if (!found) return null;
   if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
     throw new CaseAccessError();
+  }
+  // Arşivli case → sadece SystemAdmin görür; diğer roller (Agent/Admin/...)
+  // null alır → route 404 yansıtır (ana case GET /:id rol guard'ı ile
+  // tutarlı; Codex P2 round-4).
+  if (found.isArchived && actorRole !== 'SystemAdmin') {
+    return null;
+  }
+  return found.companyId;
+}
+
+async function assertCaseInScope(caseId, allowedCompanyIds, { allowArchived = false } = {}) {
+  const found = await prisma.case.findUnique({
+    where: { id: caseId },
+    select: { id: true, companyId: true, isArchived: true },
+  });
+  if (!found) return null;
+  if (allowedCompanyIds && !allowedCompanyIds.includes(found.companyId)) {
+    throw new CaseAccessError();
+  }
+  // PR-SD (Codex P2) — Arşivli vaka tüm write path'lerde READ-ONLY.
+  // SystemAdmin bile transfer/transition/note/file/checklist/solution-step
+  // yapamaz. Önce restore (POST /:id/restore) edilmeli. allowArchived flag
+  // sadece archive()/restore() helper'larının kendileri için (idempotent
+  // davranışı korumak amacıyla).
+  if (found.isArchived && !allowArchived) {
+    throw new CaseValidationError(
+      'Arşivli vakaya yazılamaz. Önce SystemAdmin tarafından restore edilmeli.',
+      { status: 409, code: 'case_archived_readonly' },
+    );
   }
   return found.companyId;
 }
@@ -816,6 +963,23 @@ function buildTodayRange() {
 function notSnoozedClause() {
   return { OR: [{ snoozeUntil: null }, { snoozeUntil: { lte: new Date() } }] };
 }
+
+// Vaka Etiket Doğrulama Ekranı — alan bazlı (per-field) model. Her giriş
+// CaseTaggingReview'daki `${prefix}${tag}{Original,Verdict,Corrected}*`
+// kolon ailesini, Case.customFields.smartTicket(.closure) içindeki kaynak
+// alanı ve TaxonomyDef.taxonomyType değerini birbirine bağlar — tek yerden
+// değişsin diye repository + route + (frontend'de ayrıca) tekrarlanır.
+const TAGGING_FIELD_DEFS = [
+  { prefix: 'opening', tag: 'Platform', customField: 'platform', taxonomyType: 'platform' },
+  { prefix: 'opening', tag: 'BusinessProcess', customField: 'businessProcess', taxonomyType: 'businessProcess' },
+  { prefix: 'opening', tag: 'OperationType', customField: 'operationType', taxonomyType: 'operationType' },
+  { prefix: 'opening', tag: 'AffectedObject', customField: 'affectedObject', taxonomyType: 'affectedObject' },
+  { prefix: 'opening', tag: 'Impact', customField: 'impact', taxonomyType: 'impact' },
+  { prefix: 'closing', tag: 'RootCauseGroup', customField: 'rootCauseGroup', taxonomyType: 'rootCauseGroup' },
+  { prefix: 'closing', tag: 'RootCauseDetail', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' },
+  { prefix: 'closing', tag: 'ResolutionType', customField: 'resolutionType', taxonomyType: 'resolutionType' },
+  { prefix: 'closing', tag: 'PermanentPrevention', customField: 'permanentPrevention', taxonomyType: 'permanentPrevention' },
+];
 
 export const caseRepository = {
   /**
@@ -969,12 +1133,15 @@ export const caseRepository = {
     return { items: items.map(shape), total };
   },
 
-  async get(id, allowedCompanyIds) {
+  async get(id, allowedCompanyIds, actorRole) {
     const c = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
     if (!c) return null;
     if (allowedCompanyIds && !allowedCompanyIds.includes(c.companyId)) {
       throw new CaseAccessError();
     }
+    // PR-SD — Arşivli vaka direct URL: yalnız SystemAdmin görür. Diğer
+    // roller için 404 davranışı (null döner → route 404 yansıtır).
+    if (c.isArchived && actorRole !== 'SystemAdmin') return null;
     return shape(c);
   },
 
@@ -1167,6 +1334,10 @@ export const caseRepository = {
         assignedTeamName: finalAssignedTeamName,
         assignedPersonId: m.assignedPersonId,
         assignedPersonName: m.assignedPersonName,
+        // Vaka Sahibi — vakayı açan kullanıcı (creator). Atamadan bağımsız,
+        // bu alan yalnız create()'te set edilir, claim/atama/devirde değişmez.
+        createdByUserId: actor.userId,
+        createdByName: actor.displayName,
         // WR-A5 / PM-03 — Cascade person → team → L1.
         supportLevel: resolvedSupportLevel,
         // ProactiveTracking
@@ -1214,6 +1385,18 @@ export const caseRepository = {
       },
       include: CASE_INCLUDE,
     });
+
+    await notifyAssignmentTargets({
+      caseId: created.id,
+      companyId: created.companyId,
+      assignedPersonId: created.assignedPersonId,
+      assignedTeamId: created.assignedTeamId,
+      actorUserId: actorUserIdOf(actor),
+      message: `${created.caseNumber} oluşturuldu ve atandı.`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+
     return shape(created);
   },
 
@@ -1222,6 +1405,20 @@ export const caseRepository = {
     // stamp atılır (post-migration audit FK doldurulur). Caller pass
     // etmezse NULL kalır (legacy davranış — backwards-compat).
     assertActor(actor, 'caseRepository.update');
+    // PR-SD (Codex P1) — Arşiv alanları generic PATCH ile YAZILAMAZ. SystemAdmin
+    // bile generic update üzerinden arşivleyemez; tek doğru yol POST /:id/archive
+    // ve /:id/restore (rol guard + audit + idempotency garantili). Bu guard
+    // olmadan herhangi bir authenticated user vakayı arşivleyebilirdi.
+    const ARCHIVE_FIELDS = ['isArchived', 'archivedAt', 'archivedByUserId', 'archiveReason'];
+    for (const field of ARCHIVE_FIELDS) {
+      if (field in patch) {
+        throw new CaseValidationError(
+          `Arşiv alanı (${field}) generic PATCH ile değiştirilemez. ` +
+            'POST /api/cases/:id/archive veya /:id/restore kullanılmalı.',
+          { status: 400, code: 'archive_field_immutable' },
+        );
+      }
+    }
     // WR-A5 / PM-03 — D-A5.1: Case.supportLevel patch sadece Supervisor/CSM/
     // Admin/SystemAdmin. Agent/Backoffice yetkisi yok — 403'e map'lenir.
     if ('supportLevel' in patch && actorRole) {
@@ -1482,6 +1679,22 @@ export const caseRepository = {
       });
     }
 
+    const assignmentChanged = historyEntries.some((h) =>
+      ['assignedPersonId', 'assignedTeamId', 'assignedPersonName', 'assignedTeamName'].includes(h.fieldName ?? ''),
+    );
+    if (assignmentChanged) {
+      await notifyAssignmentTargets({
+        caseId: id,
+        companyId,
+        assignedPersonId: updated.assignedPersonId,
+        assignedTeamId: updated.assignedTeamId,
+        actorUserId: actorUserIdOf(actorObject),
+        message: `${updated.caseNumber}'de atama değişti.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
+
     return shape(updated);
   },
 
@@ -1599,11 +1812,396 @@ export const caseRepository = {
       kind: 'assignment',
     });
 
+    await notifyAssignmentTargets({
+      caseId,
+      companyId,
+      assignedPersonId: user.personId,
+      assignedTeamId,
+      actorUserId: typeof user?.id === 'string' ? user.id : null,
+      message: `Vaka üstlenildi: ${assignedPersonName}`,
+      eventType: 'watcher_update',
+      kind: 'assignment',
+    });
+
     const updated = await prisma.case.findUnique({
       where: { id: caseId },
       include: CASE_INCLUDE,
     });
     return shape(updated);
+  },
+
+  /**
+   * PR-SD — Vakayı arşivle (SystemAdmin-only). Hard delete YOK; tüm child
+   * kayıtlar intact, sadece UI listelerinden default exclude'la gizlenir.
+   * Status enum dokunulmaz — archive orthogonal bayrak. Reason zorunlu
+   * (route layer 3+ char validate eder; defansif olarak burada da kontrol).
+   *
+   * Audit: CaseActivity actionType='Archived', note=reason, actor.
+   * Watcher bildirimi YOK (operasyonel olmayan event).
+   */
+  async archive(id, { reason, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.archive');
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (trimmedReason.length < 3) {
+      throw new CaseValidationError(
+        'Arşiv sebebi gerekli (en az 3 karakter).',
+        { status: 400, code: 'archive_reason_required' },
+      );
+    }
+    // allowArchived: true — assertCaseInScope arşivli case'leri throw eder
+    // (Codex P2 write guard), ama archive() kendisi idempotent: zaten arşivli
+    // case'i tekrar arşivlemek throw değil, current state döndürmek demek.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (before.isArchived) {
+      // Idempotent: zaten arşivli — current state'i döndür (UI'da double-click
+      // edilirse 409 yerine sessizce success).
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: true,
+          archivedAt: new Date(),
+          archivedByUserId: actor.userId ?? null,
+          archiveReason: trimmedReason,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Archived',
+          action: 'Vaka arşivlendi',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: trimmedReason,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-SD — Arşivli vakayı geri yükle (SystemAdmin-only). Status enum
+   * dokunulmaz. Audit: CaseActivity actionType='Restored', actor.
+   */
+  async restore(id, { actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.restore');
+    // allowArchived: true — restore zaten arşivli case'i çevirmek için var.
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
+    if (!companyId) return null;
+
+    const before = await prisma.case.findUnique({
+      where: { id },
+      select: { isArchived: true },
+    });
+    if (!before) return null;
+    if (!before.isArchived) {
+      // Idempotent: zaten arşivli değil.
+      const current = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+      return shape(current);
+    }
+
+    await prisma.$transaction([
+      prisma.case.update({
+        where: { id },
+        data: {
+          isArchived: false,
+          archivedAt: null,
+          archivedByUserId: null,
+          archiveReason: null,
+        },
+      }),
+      prisma.caseActivity.create({
+        data: {
+          caseId: id,
+          companyId,
+          actionType: 'Restored',
+          action: 'Vaka arşivden çıkarıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await prisma.case.findUnique({ where: { id }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Azure DevOps / TFS work item bağla.
+   *
+   * Saklama: Case.customFields.devops = Array<DevopsLinkEntry>.
+   * Her entry SADECE devopsClient.normalizeWorkItem çıktısının 16 allowlist
+   * alanı + bağlama meta'sı (linkedAt, linkedBy{Id,Name}, lastSyncedAt) içerir.
+   * Description/ReproSteps/History HİÇBİR YERDE saklanmaz (devopsClient
+   * allowlist guard'ı zaten engeller).
+   *
+   * Davranış:
+   *  - workItemRef (id veya TFS URL) → numeric id'ye parse
+   *  - devopsClient.getWorkItem(id) ile canlı doğrula
+   *  - aynı id zaten array'de varsa idempotent: mevcut hali döndür (yeniden ekleme yok)
+   *  - değilse normalize snapshot + meta'yı array'e push
+   *  - CaseActivity: 'DevopsLinked' (note = `#<id> bağlandı: <title>`)
+   *
+   * Arşivli vaka guard'ı: assertCaseInScope (write semantiği) otomatik
+   * 409 case_archived_readonly döner — arşivli vakaya link atılamaz.
+   */
+  async linkDevops(caseId, { workItemRef, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.linkDevops');
+    const workItemId = parseWorkItemId(workItemRef);
+    if (!workItemId) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id veya TFS URL gerekli.',
+        { status: 400, code: 'devops_workitem_ref_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // TFS'ten canlı çek + normalize (allowlist guard devopsClient'ta).
+    // Fix 1 + Fix 2: request-level allowlist (?fields=) + race-safe write
+    // helper'ı. Önce dedup için pre-check yaparız (TFS çağrısını boşa
+    // harcamamak için), sonra atomic mutate içinde tekrar dedup
+    // (race-safe).
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const existingArr = readDevopsArray(fresh.customFields);
+    if (existingArr.some((entry) => entry?.id === workItemId)) {
+      // Idempotent: zaten bağlı, güncel state'i döndür.
+      const c = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+      return shape(c);
+    }
+
+    // Faz 2.1 — per-tenant config (DB-first, env fallback). companyId
+    // assertCaseInScope tarafından döndürüldü.
+    const tfs = await devopsClient.getWorkItem(workItemId, { companyId });
+    if (!tfs.ok) {
+      const status = tfs.error.code === 'tfs_not_found' ? 404
+        : tfs.error.code === 'tfs_auth_error' ? 502
+          : tfs.error.code === 'tfs_integration_disabled' ? 503
+            : tfs.error.status ?? 502;
+      throw new CaseValidationError(
+        tfs.error.message,
+        { status, code: tfs.error.code },
+      );
+    }
+    const snapshot = tfs.data.normalized;
+    if (!snapshot || !snapshot.id) {
+      throw new CaseValidationError(
+        'TFS work item normalize edilemedi.',
+        { status: 502, code: 'devops_normalize_failed' },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const entry = {
+      ...snapshot,                       // 16 allowlist alanı + url + id
+      linkedAt: now,
+      linkedByUserId: actor.userId ?? null,
+      linkedByUserName: actor.displayName,
+      lastSyncedAt: now,
+    };
+
+    // Fix 2 — atomic mutate (race-safe). Helper içinde dedup tekrar
+    // kontrol edilir: concurrent link gelirse op='noop' veya
+    // updateMany count=0 → retry.
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      if (arr.some((e) => e?.id === workItemId)) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return { nextArr: [...arr, entry], op: 'append', target: entry };
+    });
+    if (!mutateResult) return null;
+
+    // Activity log — sadece gerçek append durumunda (noop = zaten bağlıydı).
+    if (mutateResult.op === 'append') {
+      const noteText = `#${workItemId} bağlandı${snapshot.title ? `: ${snapshot.title}` : ''}`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsLinked',
+          action: 'DevOps work item bağlandı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      });
+    }
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'ı kaldır (array'den çıkar).
+   *
+   * Idempotent: aranan id array'de yoksa mevcut state'i döndürür (silent).
+   * CaseActivity 'DevopsUnlinked' kayıt atar.
+   * Arşivli vaka guard'ı assertCaseInScope ile otomatik 409.
+   */
+  async unlinkDevops(caseId, { workItemId, actor, allowedCompanyIds }) {
+    assertActor(actor, 'caseRepository.unlinkDevops');
+    const id = parseWorkItemId(workItemId);
+    if (!id) {
+      throw new CaseValidationError(
+        'Geçerli bir work item id gerekli.',
+        { status: 400, code: 'devops_workitem_id_invalid' },
+      );
+    }
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+
+    // Fix 2 — atomic mutate (race-safe).
+    const mutateResult = await atomicMutateDevopsArray(caseId, (arr) => {
+      const target = arr.find((entry) => entry?.id === id);
+      if (!target) {
+        return { nextArr: arr, op: 'noop' };
+      }
+      return {
+        nextArr: arr.filter((entry) => entry?.id !== id),
+        op: 'remove',
+        target,
+      };
+    });
+    if (!mutateResult) return null;
+
+    if (mutateResult.op === 'remove') {
+      const noteText = `#${id} kaldırıldı${mutateResult.target?.title ? `: ${mutateResult.target.title}` : ''}`;
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          actionType: 'DevopsUnlinked',
+          action: 'DevOps work item kaldırıldı',
+          actor: actor.displayName,
+          actorUserId: actor.userId ?? null,
+          note: noteText,
+          at: new Date(),
+        },
+      });
+    }
+
+    const updated = await prisma.case.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+    return shape(updated);
+  },
+
+  /**
+   * PR-D2 — Bağlı DevOps work item'larının CANLI değerlerini çek.
+   *
+   * customFields.devops array'indeki id'leri batch ile TFS'ten sorgular.
+   * TFS erişilemezse saklı snapshot'a düşer (fallback) + her item'a stale
+   * meta'sı ekler.
+   *
+   * Read endpoint olduğu için assertCaseInScopeForRead (SystemAdmin arşivli
+   * case için 200; diğer roller arşivli case'te 404 — soft-archive guard
+   * otomatik).
+   *
+   * Dönen:
+   *   { items: Array<entry>, stale: boolean, error?: { code, message } }
+   *   stale=true → TFS down, snapshot fallback gösteriliyor.
+   */
+  async listDevopsLive(caseId, allowedCompanyIds, actorRole) {
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
+    if (!companyId) return null;
+
+    const fresh = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true },
+    });
+    if (!fresh) return null;
+    const stored = readDevopsArray(fresh.customFields);
+    if (stored.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    const ids = stored.map((e) => e?.id).filter((n) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) {
+      return { items: [], stale: false };
+    }
+
+    // Fix 3 (Codex P2 pre-main) — Chunk batch fetch + try/catch fallback.
+    //   - TFS REST batch limiti 200; biz 100 chunk'larız (güvenli marj).
+    //   - Tüm chunk'ları paralel çek (Promise.all).
+    //   - Herhangi BİR chunk fail → tüm response stale fallback (snapshot
+    //     döner, _stale:true her item'da, error meta'sı).
+    //   - Hiçbir senaryoda 500 atılmaz — try/catch tüm live path'i sarar.
+    const DEVOPS_LIVE_CHUNK = 100;
+    let liveList = [];
+    let stale = false;
+    let liveError = null;
+    try {
+      const chunks = [];
+      for (let i = 0; i < ids.length; i += DEVOPS_LIVE_CHUNK) {
+        chunks.push(ids.slice(i, i + DEVOPS_LIVE_CHUNK));
+      }
+      // Faz 2.1 — per-tenant config (DB-first, env fallback).
+      const results = await Promise.all(
+        chunks.map((c) => devopsClient.getWorkItems(c, { companyId })),
+      );
+      const firstFail = results.find((r) => !r.ok);
+      if (firstFail) {
+        stale = true;
+        liveError = { code: firstFail.error.code, message: firstFail.error.message };
+      } else {
+        liveList = results.flatMap((r) => (Array.isArray(r.data?.normalized) ? r.data.normalized : []));
+      }
+    } catch (err) {
+      // Bilinmeyen runtime hata (devopsClient throw, fetch internal vs.)
+      // — snapshot fallback'a düş, 500 yansıtma.
+      stale = true;
+      liveError = {
+        code: 'devops_live_unexpected_error',
+        message: err?.message ?? 'DevOps canlı çek başarısız.',
+      };
+    }
+
+    if (stale) {
+      return {
+        items: stored.map((entry) => ({ ...entry, _stale: true })),
+        stale: true,
+        error: liveError ?? { code: 'devops_live_unknown', message: 'TFS canlı çek başarısız.' },
+      };
+    }
+
+    const liveById = new Map(liveList.map((n) => [n.id, n]));
+    const now = new Date().toISOString();
+    // Live ile snapshot meta'sını birleştir: live alanları + linked* + lastSyncedAt
+    const items = stored.map((entry) => {
+      const live = liveById.get(entry?.id);
+      if (live) {
+        return {
+          ...live,                       // 16 allowlist alanı (canlı)
+          linkedAt: entry?.linkedAt ?? null,
+          linkedByUserId: entry?.linkedByUserId ?? null,
+          linkedByUserName: entry?.linkedByUserName ?? null,
+          lastSyncedAt: now,
+        };
+      }
+      // Live çağrı 200 döndü ama bu id batch response'da yok (TFS rare):
+      // snapshot'a düş + stale.
+      return { ...entry, _stale: true };
+    });
+    return { items, stale: false };
   },
 
   /**
@@ -1747,8 +2345,10 @@ export const caseRepository = {
    * Auth: vaka scope + parent note aynı vakaya ait olmalı.
    * Sıralama: createdAt ASC — kronolojik thread.
    */
-  async listReplies(caseId, noteId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listReplies(caseId, noteId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path; arşivli case SystemAdmin'e
+    // açık, diğer roller null/404.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const parent = await prisma.caseNote.findUnique({
@@ -2054,8 +2654,9 @@ export const caseRepository = {
    * personId yoksa (Person'a bağlanmamış User) liste'de görünmez — atama
    * hedefi olamadığı için mention'da da anlamsız.
    */
-  async listMentionableUsers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listMentionableUsers(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const users = await prisma.user.findMany({
@@ -2323,8 +2924,10 @@ export const caseRepository = {
   },
 
   /** Download için kısa ömürlü token'lı URL üret (local disk; Faz 4). */
-  async getDownloadUrl(caseId, fileId, allowedCompanyIds) {
-    if (!(await assertCaseInScope(caseId, allowedCompanyIds))) return null;
+  async getDownloadUrl(caseId, fileId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path; arşivli case dosyaları
+    // SystemAdmin için erişilebilir kalmalı, diğer roller 404.
+    if (!(await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
     const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName);
@@ -2414,10 +3017,13 @@ export const caseRepository = {
       return { error: 'Toplu işlemde kapatma (Çözüldü/İptalEdildi) yapılamaz.' };
     }
 
+    const bulkTouchesAssignment =
+      filtered.assignedPersonId !== undefined || filtered.assignedTeamId !== undefined;
+
     // Cross-tenant validation: tüm vakaları tek query'de çek, scope'a bak.
     const cases = await prisma.case.findMany({
       where: { id: { in: caseIds } },
-      select: { id: true, companyId: true },
+      select: { id: true, companyId: true, assignedPersonId: true, assignedTeamId: true },
     });
     if (cases.length !== caseIds.length) {
       const foundIds = new Set(cases.map((c) => c.id));
@@ -2494,6 +3100,28 @@ export const caseRepository = {
           where: { id: c.id },
           data: { ...dataPatch, history: { create: historyEntries } },
         });
+
+        if (bulkTouchesAssignment) {
+          const finalAssignedPersonId =
+            filtered.assignedPersonId !== undefined ? filtered.assignedPersonId : c.assignedPersonId;
+          const finalAssignedTeamId =
+            filtered.assignedTeamId !== undefined ? filtered.assignedTeamId : c.assignedTeamId;
+          const assignmentChanged =
+            finalAssignedPersonId !== c.assignedPersonId || finalAssignedTeamId !== c.assignedTeamId;
+          if (assignmentChanged) {
+            await notifyAssignmentTargets({
+              caseId: c.id,
+              companyId: c.companyId,
+              assignedPersonId: finalAssignedPersonId,
+              assignedTeamId: finalAssignedTeamId,
+              actorUserId: actorUserIdOf(actorObject),
+              message: 'Toplu işlemle atama değişti.',
+              eventType: 'watcher_update',
+              kind: 'assignment',
+            });
+          }
+        }
+
         updated++;
       } catch (e) {
         failed++;
@@ -2875,6 +3503,18 @@ export const caseRepository = {
       kind: 'transfer',
     });
 
+    await notifyAssignmentTargets({
+      caseId: id,
+      companyId,
+      assignedPersonId: person?.id ?? null,
+      assignedTeamId: input.toTeamId,
+      actorUserId: input.transferredBy,
+      message: `${c.caseNumber ?? id} — Vaka aktarıldı: ${fromTeamName} → ${team.name}`,
+      eventType: 'transfer',
+      kind: 'transfer_assignee',
+      extraPayload: { fromTeam: fromTeamName, toTeam: team.name },
+    });
+
     // Race-safe: post-increment değerini DB'den oku — pre-computed
     // (c.transferCount + 1) eş zamanlı transfer'lerde supervisor uyarı
     // eşiğini atlatabilir.
@@ -2893,8 +3533,9 @@ export const caseRepository = {
    * Bir vakanın tüm aktarım geçmişi — UI için takım/kişi adları enrich edilir.
    * En yeni en üstte. allowedCompanyIds scope'lu.
    */
-  async listTransfers(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async listTransfers(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
 
     const rows = await prisma.caseTransfer.findMany({
@@ -3208,6 +3849,114 @@ export const caseRepository = {
       companyId,
       excludeCaseId: null,
       caseIdForResponse: null,
+    });
+  },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — verilen caseId listesi için review
+   * kayıtlarını Map<caseId, review> olarak döner. Çağıran (route layer)
+   * caseId listesini zaten allowedCompanyIds ile scope'lanmış bir
+   * caseRepository.list() sonucundan türetir — burada tekrar companyId
+   * kontrolü yapılmaz.
+   */
+  async getTaggingReviewsByCaseIds(caseIds) {
+    if (!caseIds?.length) return new Map();
+    const rows = await prisma.caseTaggingReview.findMany({
+      where: { caseId: { in: caseIds } },
+    });
+    return new Map(rows.map((r) => [r.caseId, r]));
+  },
+
+  /**
+   * Vaka Etiket Doğrulama Ekranı — tek vakanın review kaydını upsert eder.
+   * Alan bazlı model: 9 etiketin her biri kendi Verdict + CorrectedCode'unu
+   * taşır (bkz. TAGGING_FIELD_DEFS). Original{Code,Label} snapshot alanları
+   * SADECE create'te Case.customFields'tan kopyalanır, update'te asla
+   * dokunulmaz — bilgi bankası veri seti vaka arşivlenip silinse bile
+   * bağımsız kalmalı. correctedCode her zaman kendi taxonomyType'ına karşı
+   * tek bir batched sorguda doğrulanır; correctedLabel client'tan asla
+   * okunmaz, TaxonomyDef'ten server-side resolve edilir.
+   * reviewerId/reviewerName/reviewedAt route layer'da req.user'dan stamplenir
+   * ve buraya actor üzerinden geçirilir — client body'den asla okunmaz.
+   * caseId @unique → son yazan kazanır, concurrency token yok (QAScoreLog
+   * ile aynı kabul edilebilir risk).
+   */
+  async upsertTaggingReview(id, input, allowedCompanyIds, actor) {
+    const companyId = await assertCaseInScope(id, allowedCompanyIds, { allowArchived: true });
+    if (!companyId) return null;
+
+    const VALID_VERDICTS = ['Dogru', 'Yanlis', 'Belirsiz'];
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const v = input[verdictKey];
+      if (v !== undefined && v !== null && !VALID_VERDICTS.includes(v)) {
+        return { error: 'invalid_input', message: `Geçersiz ${verdictKey}. Beklenen: ${VALID_VERDICTS.join(' | ')}.` };
+      }
+    }
+
+    // correctedCode → kendi taxonomyType'ına karşı tek batched sorgu.
+    const correctedEntries = TAGGING_FIELD_DEFS
+      .map((def) => ({ def, code: input[`${def.prefix}${def.tag}CorrectedCode`] }))
+      .filter((e) => e.code !== undefined && e.code !== null && e.code !== '');
+
+    if (correctedEntries.length) {
+      const rows = await prisma.taxonomyDef.findMany({
+        where: {
+          companyId,
+          isActive: true,
+          OR: correctedEntries.map((e) => ({ taxonomyType: e.def.taxonomyType, code: e.code })),
+        },
+        select: { taxonomyType: true, code: true, label: true },
+      });
+      const found = new Map(rows.map((r) => [`${r.taxonomyType}::${r.code}`, r.label]));
+      for (const e of correctedEntries) {
+        const label = found.get(`${e.def.taxonomyType}::${e.code}`);
+        if (!label) {
+          return {
+            error: 'invalid_input',
+            message: `Geçersiz doğru etiket kodu: ${e.def.prefix}${e.def.tag} = "${e.code}" (taxonomyType: ${e.def.taxonomyType}).`,
+          };
+        }
+        e.label = label;
+      }
+    }
+    const correctedByDef = new Map(correctedEntries.map((e) => [e.def, e]));
+
+    const data = {
+      note: typeof input.note === 'string' ? input.note.trim() || null : null,
+      reviewerId: actor.userId,
+      reviewerName: actor.displayName,
+      reviewedAt: new Date(),
+    };
+    for (const def of TAGGING_FIELD_DEFS) {
+      const verdictKey = `${def.prefix}${def.tag}Verdict`;
+      const codeKey = `${def.prefix}${def.tag}CorrectedCode`;
+      const labelKey = `${def.prefix}${def.tag}CorrectedLabel`;
+      if (verdictKey in input) data[verdictKey] = input[verdictKey] ?? null;
+      if (codeKey in input) {
+        const entry = correctedByDef.get(def);
+        data[codeKey] = entry ? entry.code : null;
+        data[labelKey] = entry ? entry.label : null;
+      }
+    }
+
+    const existing = await prisma.caseTaggingReview.findUnique({ where: { caseId: id } });
+    if (existing) {
+      return prisma.caseTaggingReview.update({ where: { caseId: id }, data });
+    }
+
+    const caseRow = await prisma.case.findUnique({ where: { id }, select: { customFields: true } });
+    const smartTicket = caseRow?.customFields?.smartTicket ?? {};
+    const closure = smartTicket?.closure ?? {};
+    const originalData = {};
+    for (const def of TAGGING_FIELD_DEFS) {
+      const src = def.prefix === 'opening' ? smartTicket : closure;
+      originalData[`${def.prefix}${def.tag}OriginalCode`] = src?.[def.customField] ?? null;
+      originalData[`${def.prefix}${def.tag}OriginalLabel`] = src?.[`${def.customField}Label`] ?? null;
+    }
+
+    return prisma.caseTaggingReview.create({
+      data: { caseId: id, companyId, ...originalData, ...data },
     });
   },
 };
@@ -3544,13 +4293,130 @@ async function notifyWatchers({ caseId, companyId, message, kind }) {
 }
 
 /**
+ * notifyAssignmentTargets — atanan kişi / hedef takım üyelerine bildirim
+ * yazar. Watcher olmayan hedeflere gider; actor ve mevcut watcher'lar hariç
+ * tutulur (notifyWatchers ile çift bildirim olmasın).
+ *
+ * Hata olursa ana akışı durdurmaz — sessiz warn.
+ */
+async function notifyAssignmentTargets({
+  caseId,
+  companyId,
+  assignedPersonId,
+  assignedTeamId,
+  actorUserId,
+  message,
+  eventType,
+  kind,
+  extraPayload = {},
+}) {
+  try {
+    const normalizeEmail = (value) =>
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+    const personEmails = new Set();
+
+    if (assignedPersonId) {
+      const assignedPerson = await prisma.person.findUnique({
+        where: { id: assignedPersonId },
+        select: { email: true },
+      });
+      const assignedEmail = normalizeEmail(assignedPerson?.email);
+      if (assignedEmail) personEmails.add(assignedEmail);
+    }
+
+    if (assignedTeamId) {
+      const teamMembers = await prisma.person.findMany({
+        where: { teamId: assignedTeamId, isActive: true },
+        select: { id: true, email: true },
+      });
+      for (const member of teamMembers) {
+        const email = normalizeEmail(member.email);
+        if (email) personEmails.add(email);
+      }
+    }
+
+    if (personEmails.size === 0) return;
+
+    const users = await prisma.user.findMany({
+      where: {
+        email: { in: [...personEmails] },
+        isActive: true,
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { id: true, email: true },
+    });
+    if (users.length === 0) return;
+
+    const resolvedEmails = new Set(
+      users.map((u) => normalizeEmail(u.email)).filter(Boolean),
+    );
+    const unresolvedCount = [...personEmails].filter(
+      (email) => !resolvedEmails.has(email),
+    ).length;
+    if (unresolvedCount > 0) {
+      console.warn('[notifyAssignmentTargets] unresolved email targets', {
+        caseId,
+        count: unresolvedCount,
+      });
+    }
+
+    const watchers = await prisma.caseWatcher.findMany({
+      where: { caseId },
+      select: { userId: true },
+    });
+    const watcherUserIds = new Set(watchers.map((w) => w.userId));
+
+    const recipients = new Set();
+    for (const user of users) {
+      if (!user.id) continue;
+      if (actorUserId && user.id === actorUserId) continue;
+      if (watcherUserIds.has(user.id)) continue;
+      recipients.add(user.id);
+    }
+    if (recipients.size === 0) return;
+
+    const payload = { message, kind, ...extraPayload };
+    await prisma.caseNotification.createMany({
+      data: [...recipients].map((userId) => ({
+        caseId,
+        companyId,
+        eventType,
+        channel: 'InApp',
+        recipient: userId,
+        payload,
+      })),
+    });
+
+    const caseSnapshot = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { caseNumber: true, title: true },
+    });
+    for (const userId of recipients) {
+      void emitGenericNotification({
+        caseId,
+        companyId,
+        eventType,
+        recipientUserId: userId,
+        payload,
+        caseNumber: caseSnapshot?.caseNumber,
+        caseTitle: caseSnapshot?.title,
+      });
+    }
+  } catch (err) {
+    console.warn('[notifyAssignmentTargets]', err?.message ?? err);
+  }
+}
+
+/**
  * Watcher repository — vaka takipçileri (FAZ 2 Collab).
  * Multi-tenant scope: vakanın companyId'si allowedCompanyIds'de olmalı.
  * Çapraz tenant watcher imkânsız.
  */
 export const watcherRepo = {
-  async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async list(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
     const rows = await prisma.caseWatcher.findMany({
       where: { caseId },
@@ -3777,8 +4643,9 @@ const LINK_TYPE_TR = {
 };
 
 export const linkRepo = {
-  async list(caseId, allowedCompanyIds) {
-    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+  async list(caseId, allowedCompanyIds, actorRole = null) {
+    // PR-SD (Codex P2 round-4) — Read path.
+    const companyId = await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole);
     if (!companyId) return null;
     const rows = await prisma.caseLink.findMany({
       where: { caseId },
@@ -4101,6 +4968,14 @@ function buildWhere(f, allowedCompanyIds) {
   // hiçbir şey görmez).
   if (allowedCompanyIds) {
     andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
+  // PR-SD — Soft archive default exclude. SystemAdmin'in UI'dan açık seçimi
+  // ile includeArchived: true override eder. Diğer query path'lerinde (KPI,
+  // report, AI count'ları vb.) DEFAULT EXCLUDE yok — bu PR sadece liste
+  // temizliği için minimum scope (1-2 arşivli vaka KPI sayımında tolere
+  // edilebilir).
+  if (!f.includeArchived) {
+    andClauses.push({ isArchived: false });
   }
   // Default: snooze aktif vakalar (snoozeUntil > now) listede gizli — "Later"
   // sekmesi ayrı endpoint kullanıyor. includeSnoozed flag ile override edilir.

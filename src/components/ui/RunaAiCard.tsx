@@ -49,6 +49,20 @@ interface RunaAiAction {
   disabled?: boolean;
 }
 
+/**
+ * RUNA AI Faz 3 — risk seviyesi rozet renkleri.
+ * Düşük=slate, Orta=amber, Yüksek=orange, Kritik=red. Diğer ve null:
+ * hiç render edilmez.
+ */
+type RiskLevel = 'Düşük' | 'Orta' | 'Yüksek' | 'Kritik';
+
+const RISK_STYLE: Record<RiskLevel, { bg: string; text: string }> = {
+  'Düşük':  { bg: '#F1F5F9', text: '#475569' },
+  'Orta':   { bg: '#FEF3C7', text: '#92400E' },
+  'Yüksek': { bg: '#FFEDD5', text: '#C2410C' },
+  'Kritik': { bg: '#FEE2E2', text: '#B91C1C' },
+};
+
 interface RunaAiCardProps {
   title: string;
   body: string;
@@ -58,6 +72,16 @@ interface RunaAiCardProps {
   secondaryAction?: RunaAiAction;
   dangerAction?: RunaAiAction;
   className?: string;
+  /**
+   * RUNA AI Faz 3 — supervisor-summary çıktısının persist edilen alanı.
+   * Verilirse renkli rozet olarak gösterilir; null/boşsa hiç render edilmez.
+   */
+  riskLevel?: RiskLevel | null;
+  /**
+   * RUNA AI Faz 3 — supervisor-summary keyPoints listesi. Body'den ayrı,
+   * ul/li olarak gösterilir. Boş array veya null → hiç render edilmez.
+   */
+  keyPoints?: string[] | null;
 }
 
 const cardStyle: CSSProperties = {
@@ -138,8 +162,15 @@ export function RunaAiCard({
   secondaryAction,
   dangerAction,
   className,
+  riskLevel,
+  keyPoints,
 }: RunaAiCardProps) {
   const hasActions = !!(primaryAction || secondaryAction || dangerAction);
+  const safeRisk: RiskLevel | null =
+    riskLevel && (riskLevel in RISK_STYLE) ? (riskLevel as RiskLevel) : null;
+  const safeKeyPoints = Array.isArray(keyPoints)
+    ? keyPoints.filter((k) => typeof k === 'string' && k.trim().length > 0)
+    : [];
 
   return (
     <div style={cardStyle} className={className}>
@@ -163,12 +194,51 @@ export function RunaAiCard({
               color: RUNA.bodyText,
               fontSize: 12,
               lineHeight: 1.6,
-              marginBottom: badges && badges.length > 0 ? 10 : 0,
+              marginBottom:
+                safeRisk || safeKeyPoints.length > 0 || (badges && badges.length > 0) ? 8 : 0,
               whiteSpace: 'pre-wrap',
             }}
           >
             {body}
           </div>
+
+          {/* RUNA AI Faz 3 — risk rozeti + anahtar noktalar */}
+          {safeRisk && (
+            <div style={{ marginBottom: safeKeyPoints.length > 0 || (badges && badges.length > 0) ? 8 : 0 }}>
+              <span
+                style={{
+                  background: RISK_STYLE[safeRisk].bg,
+                  color: RISK_STYLE[safeRisk].text,
+                  fontSize: 10,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontWeight: 600,
+                  letterSpacing: '0.02em',
+                }}
+              >
+                Risk · {safeRisk}
+              </span>
+            </div>
+          )}
+
+          {safeKeyPoints.length > 0 && (
+            <ul
+              style={{
+                margin: 0,
+                marginBottom: badges && badges.length > 0 ? 10 : 0,
+                paddingLeft: 16,
+                color: RUNA.bodyText,
+                fontSize: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              {safeKeyPoints.map((p, i) => (
+                <li key={i} style={{ marginBottom: 2 }}>
+                  {p}
+                </li>
+              ))}
+            </ul>
+          )}
 
           {badges && badges.length > 0 && (
             <div

@@ -19,6 +19,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings2,
+  ShieldCheck,
   Star,
   Sun,
 } from 'lucide-react';
@@ -61,6 +62,8 @@ import { AdminLayout, type AdminView, isAdminView } from './features/admin/Admin
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
 import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSourcesPage';
 import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
+import { AdminExternalDevOpsPage } from './features/admin/AdminExternalDevOpsPage';
+import { AdminExternalMailPage } from './features/admin/AdminExternalMailPage';
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -75,8 +78,9 @@ import { canReadAccounts } from './services/accountService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
 import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT } from './contexts/SoftphoneContext';
+import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'root-cause-report' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -300,6 +304,11 @@ export default function App() {
   }
 
   const isDetail = view === 'case-detail';
+  // Etiket Doğrulama ekranı kendi içinde sol sabit/sağ kayan iki panelli scroll
+  // yapısı kullanıyor; bunun çalışması için sayfa kendisi değil, panel'lerin
+  // kendi overflow-auto container'ları scroll olmalı. Bu yüzden case-detail ile
+  // aynı yükseklik-sınırlı (h-screen + overflow-hidden main) düzeni kullanır.
+  const isFixedHeight = isDetail || view === 'tagging-review';
 
   // Admin view → AdminLayout. Ana app sidebar/header'dan tamamen ayrış.
   if (isAdminView(view)) {
@@ -321,6 +330,8 @@ export default function App() {
         {view === 'admin-fields' && <AdminFieldsPage />}
         {view === 'admin-knowledge' && <AdminKnowledgeSourcesPage />}
         {view === 'admin-external-kb' && <AdminExternalKbPage />}
+        {view === 'admin-external-devops' && <AdminExternalDevOpsPage />}
+        {view === 'admin-external-mail' && <AdminExternalMailPage />}
         {view === 'admin-data-import' && <AdminDataImportPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
@@ -333,7 +344,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isDetail ? 'h-screen' : 'min-h-screen'}`}>
+    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />
@@ -454,7 +465,7 @@ export default function App() {
       {changePasswordOpen && <ChangePasswordModal onClose={() => setChangePasswordOpen(false)} />}
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
-      <div className={`flex flex-1 ${isDetail ? 'overflow-hidden' : ''}`}>
+      <div className={`flex flex-1 ${isFixedHeight ? 'overflow-hidden' : ''}`}>
         <aside
           onMouseEnter={() => setSidebarHovered(true)}
           onMouseLeave={() => setSidebarHovered(false)}
@@ -761,6 +772,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin */}
+            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('tagging-review')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'tagging-review'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Vaka Etiket Doğrulama Ekranı"
+              >
+                <ShieldCheck size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Etiket Doğrulama</span>}
+              </button>
+            )}
+
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
             {user?.role === 'SystemAdmin' && (
               <button
@@ -779,13 +809,18 @@ export default function App() {
 
         </aside>
 
-        <main className={isDetail ? 'flex flex-1 flex-col overflow-hidden' : 'min-w-0 flex-1 px-6 py-6'}>
+        <main className={isFixedHeight ? 'flex flex-1 flex-col overflow-hidden' : 'min-w-0 flex-1 px-6 py-6'}>
           {view === 'my-home' && (
             <MyHomePage
               onSelectCase={openCase}
               onShowCases={() => setView('cases')}
               onShowCalendar={() => setView('my-calendar')}
               onShowPatterns={() => setView('analytics-patterns')}
+              onOpenSmartTicket={
+                featureFlags.smartTicketIntakeEnabled
+                  ? () => setView('smart-ticket-new')
+                  : undefined
+              }
             />
           )}
           {(view === 'cases' || (isDetail && caseDetailOrigin === 'cases')) && (
@@ -828,6 +863,7 @@ export default function App() {
               <RootCauseReportPage onSelectCase={openCase} />
             </div>
           )}
+          {view === 'tagging-review' && <CaseTaggingReviewPage onSelectCase={openCase} />}
           {view === 'my-calendar' && <MyCalendarPage onSelectCase={openCase} />}
           {view === 'watching' && <WatcherInboxPage onSelectCase={openCase} />}
           {view === 'kb-viewer' && <KnowledgeBasePage />}

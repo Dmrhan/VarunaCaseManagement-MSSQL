@@ -26,7 +26,7 @@ const router = Router();
 router.use(verifyJwt);
 
 const LIST_ROLES = ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
-const DETAIL_READ_ROLES = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
+const DETAIL_READ_ROLES = ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'];
 const WRITE_ROLES = ['Admin', 'SystemAdmin'];
 
 function asyncRoute(handler) {
