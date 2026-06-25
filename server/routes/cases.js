@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { prisma } from '../db/client.js';
 import { verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
   solutionStepRepository,
@@ -13,6 +14,13 @@ import { accountRepository } from '../db/accountRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
+import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
+import {
+  AuthorizationRuntimeError,
+  assertDenyOnlyResourceAccess,
+  buildCurrentAuthorizationUser,
+  resolveAuthorizationTeamId,
+} from '../lib/authorizationRuntime.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
 import { generateActionSummary } from '../lib/actionSummaryAi.js';
@@ -157,10 +165,38 @@ function asyncRoute(handler) {
       if (err instanceof SolutionStepError) {
         return res.status(err.status ?? 400).json({ error: err.code ?? 'solution_step_error', message: err.message });
       }
+      if (err instanceof AuthorizationRuntimeError) {
+        return res.status(err.status ?? 403).json({ error: err.code ?? 'authorization_forbidden', message: err.message });
+      }
       console.error('[cases]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
     }
   };
+}
+
+function isAuthorizationResourceEnforcementEnabled() {
+  return process.env.AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED === 'true';
+}
+
+async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  if (!c) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, c.companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    c.companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertDenyOnlyResourceAccess({
+    resourceKey,
+    action,
+    user: policyUser,
+    overrides,
+    baselineAllowed,
+  });
 }
 
 /**
@@ -1137,6 +1173,7 @@ router.post(
 router.post(
   '/:id/notes',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'create' });
     // Actor identity hardening (audit 2026-06-18): note authorship'i tamamen
     // server-side req.user üzerinden yazılır; body.authorName / body.authorId
     // sessizce yok sayılır (client spoof attempt).
@@ -1179,6 +1216,7 @@ router.get(
 router.post(
   '/:id/notes/:noteId/reply',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'create' });
     // Actor identity hardening (audit 2026-06-18): reply authorship'i tamamen
     // server-side req.user üzerinden yazılır; body.authorName / body.authorId
     // sessizce yok sayılır.
@@ -1212,6 +1250,7 @@ router.post(
 router.delete(
   '/:id/notes/:noteId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'delete' });
     const result = await caseRepository.deleteNote(
       req.params.id,
       req.params.noteId,
@@ -1439,6 +1478,7 @@ router.patch(
 router.post(
   '/:id/files/upload-url',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'create' });
     // PR-4 — Upload two-step user binding: token'a actor.userId gömülür,
     // finalize endpoint'i mismatch'i 400 ile reddeder.
     const actor = requireActor(req);
@@ -1461,6 +1501,7 @@ router.post(
 router.post(
   '/:id/files/finalize',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'create' });
     // PR-1 — body.uploadedBy YUTULUR; uploadedBy actor.displayName ile yazılır.
     const actor = requireActor(req);
     const result = await caseRepository.finalizeUpload(
@@ -1495,6 +1536,7 @@ router.get(
 router.delete(
   '/:id/files/:fileId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'delete' });
     const updated = await caseRepository.removeFile(
       req.params.id,
       req.params.fileId,
