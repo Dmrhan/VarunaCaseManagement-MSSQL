@@ -5,6 +5,9 @@ import { ToastProvider } from './components/ui/Toast';
 import { LookupGate } from './components/LookupGate';
 import { AuthGate } from './components/AuthGate';
 import { AuthProvider } from './services/AuthContext';
+import { SoftphoneProvider } from './contexts/SoftphoneContext';
+import { SoftphoneWidget } from './components/softphone/SoftphoneWidget';
+import { IncomingCallBanner } from './components/softphone/IncomingCallBanner';
 import './index.css';
 
 // Faz 3 (local auth): Supabase invite/recovery hash tespiti kaldırıldı.
@@ -16,9 +19,13 @@ createRoot(document.getElementById('root')!).render(
     <ToastProvider>
       <AuthProvider>
         <AuthGate>
-          <LookupGate>
-            <App />
-          </LookupGate>
+          <SoftphoneProvider>
+            <LookupGate>
+              <App />
+            </LookupGate>
+            <IncomingCallBanner />
+            <SoftphoneWidget />
+          </SoftphoneProvider>
         </AuthGate>
       </AuthProvider>
     </ToastProvider>

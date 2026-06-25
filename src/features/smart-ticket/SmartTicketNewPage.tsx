@@ -192,6 +192,8 @@ export function SmartTicketNewPage({
   onCreated,
   onCancel,
   onOpenExistingCase,
+  initialAccountId,
+  initialAccountName,
 }: {
   /**
    * Kullanıcı bilinçli olarak Case Detail'e gitmek isterse caller bunu
@@ -207,6 +209,9 @@ export function SmartTicketNewPage({
    * Verilmezse satırlar bilgi amaçlı, tıklatılabilir değil.
    */
   onOpenExistingCase?: (caseId: string) => void;
+  /** Gelen çağrı screen pop'u: müşteri ön-seçili açılır (callerId eşleşmesi). */
+  initialAccountId?: string | null;
+  initialAccountName?: string | null;
 }) {
   const companies = useMemo(() => lookupService.companies(), []);
   const defaultCompanyId = companies[0]?.id ?? '';
@@ -214,6 +219,13 @@ export function SmartTicketNewPage({
   const [form, setForm] = useState<SmartTicketFormState>(() => emptyForm(defaultCompanyId));
   const [stage, setStage] = useState<Stage>('opening');
   const [createdCase, setCreatedCase] = useState<Case | null>(null);
+
+  // Gelen çağrı screen pop'u: müşteri ön-seçili gelirse form'a uygula (boşsa).
+  useEffect(() => {
+    if (initialAccountId) {
+      setForm((f) => (f.accountId ? f : { ...f, accountId: initialAccountId, accountName: initialAccountName ?? '' }));
+    }
+  }, [initialAccountId, initialAccountName]);
 
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === form.companyId) ?? null,
