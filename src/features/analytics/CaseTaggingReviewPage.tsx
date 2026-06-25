@@ -173,7 +173,7 @@ const TOTAL_WIDTH = Object.values(COL_WIDTHS).reduce((a, b) => a + b, 0);
 // Header sınıf sabitleri
 const HDR = 'flex items-center px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted';
 
-const FILTER_KEY = 'varuna:tagging-review-filters';
+const FILTER_KEY = 'varuna:tagging-review-filters-v2';
 
 function loadSavedFilters() {
   try {
