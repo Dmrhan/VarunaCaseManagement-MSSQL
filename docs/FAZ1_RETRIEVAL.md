@@ -1,35 +1,42 @@
-# Faz 1 — Kapanışa Retrieval (dynamic few-shot)
+# Faz 1 — Kapanışa Retrieval (ölçüldü: naive retrieval YARAMADI)
 
-En yüksek kaldıraç: `suggestClose`'a, geçmiş **benzer çözülmüş vakaları** (kök
-nedenleriyle) getirip dinamik few-shot olarak ver. Ölçtüğümüz ince-taneli
-kök-neden ıskalarını (örn. "XSLT şablon eksik" vs "Belge dizaynı eksik") prompt
-çözemiyor (kanıtlandı); **retrieval çözer** — benzer vaka örneğiyle.
+Hedef: `suggestClose`'a benzer çözülmüş vakaları few-shot vererek kapanış
+doğruluğunu artırmak. **ÖLÇTÜK — naive haliyle KÖTÜLEŞTİRDİ. Prod'a bağlanmadı.**
 
-## Durum
-- ✅ **Kod hazır** (`suggestClose`): mevcut `searchSimilarByText` (e5 + sqlite-vec)
-  ile top-3 benzer çözülmüş vaka → `getTicket` ile kök-neden/çözüm → few-shot.
-- 🚩 **Feature-flag arkasında, default KAPALI** (`CLOSE_RETRIEVAL=1`). Flag kapalıyken
-  davranış **birebir aynı** (regresyon yok — doğrulandı). Graceful: embeddings yok/hata
-  → sessizce retrieval'sız devam.
-- Few-shot **değişken bölüme** (TICKET BAĞLAMI sonrası) eklenir → **prompt caching bozulmaz.**
+## Mimari (güvenli, inert)
+`suggestClose` artık `closeExamples?: string` alır — **corpus-agnostik**: retrieval'ı
+ÇAĞIRAN (route/eval) yapıp biçimlenmiş few-shot'u geçer. Few-shot değişken bölüme
+(TICKET BAĞLAMI sonrası) eklenir → **prompt caching bozulmaz.**
+- **Prod'da hiçbir çağıran `closeExamples` beslemiyor → INERT, sıfır risk** (eski davranış).
+- `embed`/`embedBatch` bundle'dan export edildi (validation için).
 
-## Açmak için (SUNUCUDA, eval-gated)
-```bash
-# 1) Embeddings dolu olmalı (sürekli — aşağı bak)
-# 2) Flag aç + ölç (golden set CaseTaggingReview'dan):
-CLOSE_RETRIEVAL=1 node --env-file=.env scripts/eval-smart-ticket.mjs
-# 3) Kapanış puanı flag KAPALI'ya göre ARTTIYSA prod'a CLOSE_RETRIEVAL=1 ver. Artmadıysa kapalı bırak.
+## ÖLÇÜM — naive retrieval (446 Varuna corpus, 18 golden vaka)
 ```
-**Disiplin:** önce/sonra ölçmeden açma. Harness önce/sonra farkını gösterir.
+Retrieval KAPALI: %83 (60/72)   ← baseline
+Retrieval AÇIK  : %50 (36/72)   ← top-3 benzer vaka, etiketleriyle few-shot
+→ −33 PUAN. KÖTÜLEŞTİRDİ.
+```
+**Neden:** model, çekilen "benzer" vakaların etiketlerine **demir atıyor (anchoring)**.
+Açıklama-benzerliği ≠ kök-neden-benzerliği → yüzeysel benzer ama farklı kök nedenli
+vakaları kopyalıyor. Bu, roadmap'in "naive sert retrieval felaket (DBpedia 0.95→0.45)"
+öngörüsünün **birebir doğrulanması.**
 
-## Sürekli otomatik embedding (önkoşul — sunucu)
-Retrieval ancak corpus tazeyse işe yarar. **Sunucuda sürekli embedding** gerekir:
-- Çözülen her vaka + **düzeltilen her vaka (CaseTaggingReview)** embed corpus'una girmeli
-  (`ticketsNeedingEmbedding` → `embed` → `upsertEmbeddings` mevcut).
-- **Cron/zamanlanmış** koş (örn. 15 dk'da bir) → yeni çözümler + düzeltmeler otomatik embed.
-- Böylece döngü kapanır: **düzeltme → embed → retrieval → AI bir dahaki sefere doğru.**
-  (Düzeltilen vakaları corpus'a beslemek = retrieval'ın feedback'ten öğrenmesi.)
+## Çalıştırma (validation harness — varyant ölçmek için)
+```bash
+node --env-file=.env scripts/validate-faz1-retrieval.mjs
+# 474 çözülmüş vakayı embed eder, golden set'e karşı retrieval AÇIK/KAPALI ölçer.
+```
 
-## Sıradaki (eval-gated, sample ~50+ olunca)
-- Reranker ekle (retrieve-then-rerank — IBM deseni: R@3 ↑).
-- Düzeltilen vakaları embed corpus'una öncelikli besle (yüksek-kalite sinyal).
+## Sıradaki — denenecek varyantlar (eval-gated, corpus zaten embed'li)
+1. **Rerank + eşik:** sadece çok yüksek benzerlikteki örnekleri ver; alakasızı ele
+   (roadmap'in "retrieve-then-rerank"i). Naive'i kurtaracaksa bu.
+2. **Etiketsiz sunum:** benzer sorunları göster, etiketlerini "cevap" gibi verme → anchoring ↓.
+3. **Top-1 + güven eşiği:** tek, en yakın + yüksek güven varsa.
+
+**KURAL:** her varyant validation harness'ında ölçülmeden prod'a bağlanmaz.
+Naive felaketini eval yakaladı; bu disiplin korunacak.
+
+## Sürekli embedding (varyant işe yararsa, sunucu önkoşulu)
+Corpus = Varuna `Case` (status="Cozuldu", `customFields.smartTicket.closure` etiketli,
+474 vaka). Bir varyant kazanırsa: bu vakaları + yeni çözülen/düzeltilenleri **cron'la
+sürekli embed** et → retrieval tazelenir, döngü kapanır.

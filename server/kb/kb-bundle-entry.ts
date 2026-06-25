@@ -9,6 +9,7 @@ export { ask } from "./src/lib/kb/ask";
 export { retrieve } from "./src/lib/kb/retrieve";
 export { kbStats, getKbDb, isVecAvailable } from "./src/lib/kb/db";
 export { embedPendingChunks } from "./src/lib/kb/embedder";
+export { embed, embedBatch } from "./src/lib/gemini";
 export { categorize } from "./src/lib/cc/categorizer";
 export { categorizeV2, suggestClose } from "./src/lib/cc/categorizer-v2";
 export { runAnalysis, AnalyzeBodySchema } from "./src/lib/ticket";
