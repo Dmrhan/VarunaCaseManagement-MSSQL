@@ -88,6 +88,7 @@ export const MENU_REGISTRY = Object.freeze([
   { key: 'admin.knowledgeSources', label: 'Bilgi Kaynakları', viewKey: 'admin-knowledge', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.externalKb', label: 'Bilgi Bankası Entegrasyonu', viewKey: 'admin-external-kb', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.externalDevOps', label: 'DevOps / TFS Entegrasyonu', viewKey: 'admin-external-devops', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
+  { key: 'admin.externalMail', label: 'Mail Entegrasyonu', viewKey: 'admin-external-mail', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.dataImport', label: 'Veri Aktarım Stüdyosu', viewKey: 'admin-data-import', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.resolutionApproval', label: 'Çözüm Onayı Politikaları', viewKey: 'admin-resolution-approval', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
   { key: 'admin.notificationTemplates', label: 'Bildirim Şablonları', viewKey: 'admin-notification-templates', group: 'admin.configuration', defaultRoles: ['Admin', 'SystemAdmin'] },
