@@ -258,6 +258,9 @@ export type SuggestCloseInput = {
   open_urun?: string | null;
   open_is_sureci?: string | null;
   open_islem_tipi?: string | null;
+  // FAZ 1 retrieval — çağıran corpus'tan benzer çözülmüş vakaları biçimlenmiş
+  // few-shot bloğu olarak geçer (boşsa retrieval'sız). Kaynak-bağımsız.
+  closeExamples?: string;
 };
 
 export async function suggestClose(
@@ -267,6 +270,13 @@ export async function suggestClose(
   if (input.open_urun) ctxLines.push(`Açılış · Ürün: ${input.open_urun}`);
   if (input.open_is_sureci) ctxLines.push(`Açılış · İş Süreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`Açılış · İşlem Tipi: ${input.open_islem_tipi}`);
+
+  // FAZ 1 — Kapanışa retrieval: benzer çözülmüş vakaları few-shot olarak ver.
+  // Çağıran (route/eval) corpus'tan retrieval yapıp input.closeExamples geçer →
+  // suggestClose corpus-agnostik kalır (kaynak bağımsız). Değişken → cache'li
+  // öneğe DEĞİL, TICKET BAĞLAMI sonrasına eklenir (caching bozulmaz). Boşsa
+  // eski davranış (regresyon yok).
+  const retrievalBlock = input.closeExamples || "";
 
   // Tek prompt'u ORİJİNALLE BİREBİR kur, sonra cache sınırından slice ile böl.
   // cachePrefix = "TICKET BAĞLAMI:" öncesi (kapanış taksonomileri + few-shot —
@@ -294,6 +304,7 @@ export async function suggestClose(
     "TICKET BAĞLAMI:",
     ctxLines.join("\n") || "(açılış sınıflandırması yok)",
     "",
+    ...(retrievalBlock ? [retrievalBlock, ""] : []),
     `Sorun açıklaması: ${input.description.slice(0, 2000)}`,
     "",
     `Çözüm taslağı (ajan yazdı): ${input.resolution.slice(0, 3000)}`,

@@ -72,9 +72,12 @@ import { ResolutionApprovalPoliciesPage } from './features/admin/ResolutionAppro
 import { NotificationTemplatesPage } from './features/admin/NotificationTemplatesPage';
 import { NotificationRulesPage } from './features/admin/NotificationRulesPage';
 import { NotificationDispatchesPage } from './features/admin/NotificationDispatchesPage';
+import { AdminAuthorizationPoliciesPage } from './features/admin/AdminAuthorizationPoliciesPage';
 import { AccountsListPage } from './features/accounts/AccountsListPage';
 import { AccountDetailPage } from './features/accounts/AccountDetailPage';
 import { canReadAccounts } from './services/accountService';
+import { authorizationService } from './services/authorizationService';
+import type { EffectiveMenuAccess } from './services/authorizationService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
 import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT } from './contexts/SoftphoneContext';
@@ -130,6 +133,8 @@ export default function App() {
   const [activePatternCount, setActivePatternCount] = useState(0);
   // Bugün için takvim olay sayısı — sidebar Takvimim badge'i.
   const [todayCalendarCount, setTodayCalendarCount] = useState(0);
+  const [effectiveMenuAccess, setEffectiveMenuAccess] = useState<EffectiveMenuAccess | null>(null);
+  const [effectiveMenuFailed, setEffectiveMenuFailed] = useState(false);
 
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -156,6 +161,31 @@ export default function App() {
   const { user, signOut } = useAuth();
 
   useHotkey('?', () => setHelpOpen(true));
+
+  useEffect(() => {
+    if (!user || !featureFlags.authorizationMenuEnforcementEnabled) {
+      setEffectiveMenuAccess(null);
+      setEffectiveMenuFailed(false);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const result = await authorizationService.effectiveMenus();
+        if (!alive) return;
+        setEffectiveMenuAccess(result);
+        setEffectiveMenuFailed(false);
+      } catch {
+        // Fail-open: policy endpoint arızası kullanıcıyı menüsüz bırakmasın.
+        if (!alive) return;
+        setEffectiveMenuAccess(null);
+        setEffectiveMenuFailed(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
 
   // Default landing — kullanıcı yüklendiğinde rol bazlı ilk view.
   // Tek sefer çalışır (initialRedirectDone), sonraki manuel nav'ı override etmez.
@@ -288,10 +318,41 @@ export default function App() {
 
   // Sidebar nav item'ı tıklanınca herhangi bir alt-state'i temizle
   function handleNavSelect(key: View) {
+    if (!canShowView(key, true)) return;
     setView(key);
     setSelectedCaseId(null);
     setSelectedAccountId(null);
   }
+
+  function canShowView(key: View | string, fallback: boolean): boolean {
+    if (!featureFlags.authorizationMenuEnforcementEnabled || effectiveMenuFailed) return fallback;
+    if (!effectiveMenuAccess) return fallback;
+    const menu = effectiveMenuAccess.menus.find((m) => m.viewKey === key);
+    // MVP runtime enforcement is deny-only until backend resource guards honor
+    // authorization allow grants. Policies can hide legacy-visible menus, but
+    // cannot open pages whose APIs still reject the user's role.
+    return menu ? fallback && menu.allowed : fallback;
+  }
+
+  const showMyHome = !!user && canShowView('my-home', ['Agent', 'Supervisor', 'Backoffice', 'CSM'].includes(user.role));
+  const showAccounts = canShowView('accounts', canReadAccounts(user?.role));
+  const showCalendar = !!user && canShowView('my-calendar', true);
+  const showWatching = !!user && canShowView('watching', true);
+  const showKbViewer = !!user && canShowView('kb-viewer', true);
+  const showAiUsage = !!user && canShowView('analytics-ai-usage', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showQaScores = !!user && canShowView('analytics-qa-scores', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showPatterns = !!user && canShowView('analytics-patterns', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showCaseReportStudio = !!user && canShowView('case-report-studio', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showRootCauseReport = !!user && canShowView('root-cause-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showTaggingReview = !!user && canShowView('tagging-review', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  const showReportsSection = sidebarExpanded && (
+    showAiUsage ||
+    showQaScores ||
+    showPatterns ||
+    showCaseReportStudio ||
+    showRootCauseReport ||
+    showTaggingReview
+  );
 
   function openAccount(id: string) {
     setSelectedAccountId(id);
@@ -339,6 +400,7 @@ export default function App() {
         {view === 'admin-notification-templates' && <NotificationTemplatesPage />}
         {view === 'admin-notification-rules' && <NotificationRulesPage />}
         {view === 'admin-notification-dispatches' && <NotificationDispatchesPage />}
+        {view === 'admin-authorization-policies' && <AdminAuthorizationPoliciesPage />}
       </AdminLayout>
     );
   }
@@ -498,7 +560,7 @@ export default function App() {
               Anasayfa — Agent/Supervisor/Backoffice/CSM için kişisel landing.
               Admin/SystemAdmin görmüyor (onlar 'cases' default'unda kalır).
             */}
-            {user && ['Agent', 'Supervisor', 'Backoffice', 'CSM'].includes(user.role) && (
+            {showMyHome && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('my-home')}
@@ -516,7 +578,7 @@ export default function App() {
               </button>
             )}
 
-            {NAV.map((item) => {
+            {NAV.filter((item) => canShowView(item.key, item.available)).map((item) => {
               const active = view === item.key || (isDetail && item.key === 'cases');
               return (
                 <button
@@ -551,7 +613,7 @@ export default function App() {
               Müşteriler — Account 360 Phase B. Agent ve Backoffice rolleri görmez.
               Detail view (`account-detail`) seçili olduğunda da bu sidebar item aktif kalır.
             */}
-            {canReadAccounts(user?.role) && (
+            {showAccounts && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('accounts')}
@@ -570,95 +632,101 @@ export default function App() {
             )}
 
             {/* ÇALIŞMA ALANIM — kişisel ekranlar (Takvimim). Tüm rollere açık. */}
-            {user && (
+            {user && (showCalendar || showWatching || showKbViewer) && (
               <>
                 {sidebarExpanded && (
                   <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
                     Çalışma Alanım
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleNavSelect('my-calendar')}
-                  className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
-                  } ${
-                    view === 'my-calendar'
-                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
-                  }`}
-                  title={
-                    todayCalendarCount > 0
-                      ? `Takvimim (${todayCalendarCount} bugün)`
-                      : 'Takvimim'
-                  }
-                >
-                  <span className="relative">
-                    <Calendar size={16} />
-                    {todayCalendarCount > 0 && !sidebarExpanded && (
-                      <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
-                        {todayCalendarCount > 9 ? '9+' : todayCalendarCount}
-                      </span>
-                    )}
-                  </span>
-                  {sidebarExpanded && (
-                    <>
-                      <span className="flex-1 text-left">Takvimim</span>
-                      {todayCalendarCount > 0 && (
-                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
-                          {todayCalendarCount > 99 ? '99+' : todayCalendarCount}
+                {showCalendar && (
+                  <button
+                    type="button"
+                    onClick={() => handleNavSelect('my-calendar')}
+                    className={`relative flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                      sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                    } ${
+                      view === 'my-calendar'
+                        ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                        : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                    }`}
+                    title={
+                      todayCalendarCount > 0
+                        ? `Takvimim (${todayCalendarCount} bugün)`
+                        : 'Takvimim'
+                    }
+                  >
+                    <span className="relative">
+                      <Calendar size={16} />
+                      {todayCalendarCount > 0 && !sidebarExpanded && (
+                        <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-white dark:ring-ndark-card">
+                          {todayCalendarCount > 9 ? '9+' : todayCalendarCount}
                         </span>
                       )}
-                    </>
-                  )}
-                </button>
+                    </span>
+                    {sidebarExpanded && (
+                      <>
+                        <span className="flex-1 text-left">Takvimim</span>
+                        {todayCalendarCount > 0 && (
+                          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">
+                            {todayCalendarCount > 99 ? '99+' : todayCalendarCount}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {/* İzleyici Inbox — FAZ 2 Collab + Smoke Audit Phase 5c.
                     Tüm rollere açık (sadece kullanıcının kendi izlediği vakalar). */}
-                <button
-                  type="button"
-                  onClick={() => handleNavSelect('watching')}
-                  className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
-                  } ${
-                    view === 'watching'
-                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
-                  }`}
-                  title="İzleyici Inbox"
-                >
-                  <Eye size={16} />
-                  {sidebarExpanded && <span className="flex-1 text-left">İzleyici Inbox</span>}
-                </button>
+                {showWatching && (
+                  <button
+                    type="button"
+                    onClick={() => handleNavSelect('watching')}
+                    className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                      sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                    } ${
+                      view === 'watching'
+                        ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                        : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                    }`}
+                    title="İzleyici Inbox"
+                  >
+                    <Eye size={16} />
+                    {sidebarExpanded && <span className="flex-1 text-left">İzleyici Inbox</span>}
+                  </button>
+                )}
 
                 {/* WR-KB2 — Bilgi Bankası bağımsız test ekranı. Tüm rollere açık. */}
-                <button
-                  type="button"
-                  onClick={() => handleNavSelect('kb-viewer')}
-                  className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
-                    sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
-                  } ${
-                    view === 'kb-viewer'
-                      ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                      : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
-                  }`}
-                  title="Bilgi Bankası"
-                >
-                  <BookOpen size={16} />
-                  {sidebarExpanded && <span className="flex-1 text-left">Bilgi Bankası</span>}
-                </button>
+                {showKbViewer && (
+                  <button
+                    type="button"
+                    onClick={() => handleNavSelect('kb-viewer')}
+                    className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                      sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                    } ${
+                      view === 'kb-viewer'
+                        ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                        : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                    }`}
+                    title="Bilgi Bankası"
+                  >
+                    <BookOpen size={16} />
+                    {sidebarExpanded && <span className="flex-1 text-left">Bilgi Bankası</span>}
+                  </button>
+                )}
               </>
             )}
 
             {/* Vaka Raporları — bölüm başlığı (Supervisor / Admin / SystemAdmin) */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && sidebarExpanded && (
+            {showReportsSection && (
               <div className="mt-3 px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
                 Vaka Raporları
               </div>
             )}
 
             {/* AI Kullanım Panosu — Supervisor / Admin / SystemAdmin */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showAiUsage && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('analytics-ai-usage')}
@@ -677,7 +745,7 @@ export default function App() {
             )}
 
             {/* QA Skorları — Supervisor / Admin / SystemAdmin */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showQaScores && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('analytics-qa-scores')}
@@ -696,7 +764,7 @@ export default function App() {
             )}
 
             {/* Örüntü Alarmları — Supervisor / Admin / SystemAdmin (active count badge) */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showPatterns && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('analytics-patterns')}
@@ -735,7 +803,7 @@ export default function App() {
             )}
 
             {/* Vaka Rapor Stüdyosu — Supervisor / Admin / SystemAdmin */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showCaseReportStudio && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('case-report-studio')}
@@ -754,7 +822,7 @@ export default function App() {
             )}
 
             {/* Kök Neden Analiz Raporu — Supervisor / Admin / SystemAdmin */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showRootCauseReport && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('root-cause-report')}
@@ -773,7 +841,7 @@ export default function App() {
             )}
 
             {/* Vaka Etiket Doğrulama Ekranı — Supervisor / Admin / SystemAdmin */}
-            {user && ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role) && (
+            {showTaggingReview && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('tagging-review')}
@@ -792,7 +860,7 @@ export default function App() {
             )}
 
             {/* Yönetim girişi — yalnızca SystemAdmin görür */}
-            {user?.role === 'SystemAdmin' && (
+            {user?.role === 'SystemAdmin' && canShowView('admin-categories', true) && (
               <button
                 type="button"
                 onClick={() => handleNavSelect('admin-categories')}

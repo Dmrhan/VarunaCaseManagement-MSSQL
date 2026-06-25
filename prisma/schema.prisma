@@ -106,6 +106,8 @@ model User {
   /// PR-5 — Case actor FK back-relations
   caseActivities            CaseActivity[]      @relation("CaseActivityActor")
   caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
+  authorizationPoliciesCreated AuthorizationPolicy[] @relation("AuthorizationPolicyCreatedBy")
+  authorizationPoliciesUpdated AuthorizationPolicy[] @relation("AuthorizationPolicyUpdatedBy")
   /// PR-SD — Soft archive actor FK back-relation
   casesArchived             Case[]              @relation("CaseArchivedBy")
   /// Vaka Sahibi — vakayı açan kullanıcı (creator) FK back-relation
@@ -163,6 +165,8 @@ model Company {
   externalDevOpsSetting      ExternalDevOpsSetting?
   /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
   externalMailSetting        ExternalMailSetting?
+  /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemeleri.
+  learnedSenderAccounts      LearnedSenderAccount[]
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -180,6 +184,11 @@ model Company {
   solutionSteps              CaseSolutionStep[]
   /// Phase 4 — tenant-scoped kayıtlı rapor görünümleri.
   reportViews                ReportView[]
+  /// Authorization Management — tenant-scoped policy rows for menu,
+  /// resource CRUD, field policy, and security filters. Enforcement is
+  /// not wired by the initial migration; admin UI/runtime phases consume
+  /// this table later.
+  authorizationPolicies       AuthorizationPolicy[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -395,6 +404,51 @@ model ExternalMailSetting {
   @@index([companyId, enabled])
 }
 
+/// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemesi.
+///
+/// Manuel link sırasında insan onaylı bir eşleme oluşturulur:
+///   "Bu sender email, bu account'a aittir."
+/// Sonraki inbound mail aynı gönderenden geldiğinde:
+///   - Kişisel adres (isRoleAddress=false) → 'learned' reason ile OTOMATİK BAĞLA
+///   - Rol adres (info@/support@/sales@/...) → 'learned' reason ile SADECE ÖNERİ
+///
+/// Tek MANUEL linkAccount çağrıları öğrenir (route layer'da source='manual');
+/// intake AUTO-link çağrıları öğrenmez (redundant).
+///
+/// Self-correction: yeni manuel link OVERWRITE eder (en güncel insan
+/// kararı kazanır). companyId + senderEmail @unique → bir şirkette bir
+/// gönderen = bir eşleme.
+///
+/// Tenant izolasyon: companyId scope; aynı senderEmail farklı şirkette
+/// farklı account'a bağlanabilir.
+///
+/// Spec: docs/MAIL_INTEGRATION.md M2.3 (varsa) / PR feature/mail-learned-sender-m2-3
+model LearnedSenderAccount {
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  companyId       String   @db.NVarChar(450)
+  /// Normalize edilmiş (trim + lowercase) gönderen e-posta.
+  senderEmail     String   @db.NVarChar(320)
+  accountId       String   @db.NVarChar(450)
+  /// Rol adresi mi (info@, support@, sales@ vb.)? Auto-link tetiklemesi
+  /// için kişisel adresler (isRoleAddress=false) yetkili; rol adresleri
+  /// yalnız öneri üretir.
+  isRoleAddress   Boolean  @default(false)
+  /// Hangi kaynaktan öğrenildi. M2.3'te sabit 'manual_link'; ileride
+  /// 'admin_explicit' gibi değerler eklenebilir.
+  source          String   @default("manual_link") @db.NVarChar(50)
+  /// Manuel linki yapan user (audit).
+  createdByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([companyId, senderEmail])
+  @@index([companyId])
+  @@index([accountId])
+}
+
 // CaseAccount — müşteri kaydı (Varuna CRM gelene kadar lokal)
 // Phase A: Account global kimlik. Şirkete özel alanlar (Univera kodu, paket,
 // kontrat) AccountCompany tablosunda tutulur. Account.companyId legacy alandır
@@ -461,6 +515,8 @@ model Account {
   contacts  AccountContact[]
   /// WR-A3 / PM-02 — country-agnostic address book. Account silindiğinde cascade.
   addresses Address[]
+  /// Mail M2.3 — Bu account'a öğrenilmiş sender eşlemeleri.
+  learnedSenderAccounts LearnedSenderAccount[]
 
   @@index([companyId])
   @@index([name])
@@ -2210,10 +2266,16 @@ model NotificationDispatch {
   /// Required at API layer when transitioning to mode=Manual / state=Sent.
   deliveryNote      String?   @db.NVarChar(Max)
 
-  /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
-  dispatchedAt  DateTime?
-  failureReason String?   @db.NVarChar(Max)
-  attempts      Int       @default(0)
+  /// Phase 4 active delivery fields. M4 (mail outbound) → dispatchedAt
+  /// = sent timestamp; providerMessageId = mailProvider'ın döndürdüğü
+  /// SMTP Message-ID (round-trip threading için).
+  dispatchedAt      DateTime?
+  failureReason     String?   @db.NVarChar(Max)
+  attempts          Int       @default(0)
+  /// M4 — mailProvider sendMail başarısı sonrası dolar. Round-trip
+  /// threading için (önceki dispatch'in providerMessageId'si
+  /// In-Reply-To/References header'ına geçer).
+  providerMessageId String?   @db.NVarChar(Max)
 
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
@@ -2340,4 +2402,61 @@ model ReportView {
   @@unique([companyId, ownerId, name])
   @@index([companyId, ownerId])
   @@index([companyId, isShared])
+}
+
+/// Authorization Management — tenant-scoped policy rows.
+///
+/// MVP persistence foundation only: no runtime enforcement is wired by this
+/// migration. `server/lib/authorizationRegistry.js` defines the static
+/// vocabulary; `server/lib/authorizationPolicy.js` consumes policy-shaped
+/// override rows. This table persists those overrides for later Admin UI and
+/// runtime phases.
+///
+/// target:
+///   - "menu"           → menuKey/viewKey + effect
+///   - "resource"       → resourceKey + action + effect
+///   - "field"          → scope + resourceKey + fieldKey + action + effect
+///   - "securityFilter" → resourceKey + filterJson
+///
+/// principalType:
+///   - "systemRole" | "companyRole" | "team" | "user"
+///
+/// JSON is stored as NVARCHAR(MAX) for MSSQL provider compatibility.
+model AuthorizationPolicy {
+  id            String  @id @default(cuid()) @db.NVarChar(450)
+  companyId     String  @db.NVarChar(450)
+  target        String  @db.NVarChar(50)
+  principalType String  @db.NVarChar(50)
+  principalKey  String  @db.NVarChar(450)
+  effect        String  @db.NVarChar(20)
+
+  menuKey     String? @db.NVarChar(150)
+  viewKey     String? @db.NVarChar(150)
+  resourceKey String? @db.NVarChar(150)
+  action      String? @db.NVarChar(50)
+  scope       String? @db.NVarChar(100)
+  fieldKey    String? @db.NVarChar(150)
+
+  /// Security filter DSL JSON, validated in app-layer by
+  /// validateSecurityFilterExpression().
+  filterJson String? @db.NVarChar(Max) // json
+
+  priority Int     @default(100)
+  isActive Boolean @default(true)
+  notes    String? @db.NVarChar(Max)
+
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  createdBy User?   @relation("AuthorizationPolicyCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy User?   @relation("AuthorizationPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([companyId, target, isActive])
+  @@index([companyId, principalType, principalKey])
+  @@index([companyId, resourceKey, action])
+  @@index([companyId, scope, fieldKey])
+  @@index([companyId, menuKey])
 }

@@ -1084,12 +1084,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
           </div>
         </main>
 
-        {/* Right panel — RUNA AI + type-specific summary (her vakada görünür) */}
-        <RightPanel
-          item={item}
-          offeredSolutions={offeredSolutions}
-          onCaseUpdated={(updated) => setItem(updated)}
-        />
+        {/* Right panel — RUNA AI + type-specific summary (Agent rolünde gizli) */}
+        {user?.role !== 'Agent' && (
+          <RightPanel
+            item={item}
+            offeredSolutions={offeredSolutions}
+            onCaseUpdated={(updated) => setItem(updated)}
+          />
+        )}
 
       </div>
 
@@ -3232,6 +3234,21 @@ function DetailTab({
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
       <SmartTicketMetaSection item={item} />
 
+      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
+          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
+          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
+          Boş durumda worded empty. */}
+      <PreviousCasesSection
+        previousCases={previousCases}
+        currentCaseId={item.id}
+        onSelectPrevious={onSelectPrevious}
+      />
+
+      {/* PR-D3 — Azure DevOps İş Öğeleri.
+          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
+          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
+      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
+
       {/* Adım-2 #5 — "Müşteri & Sınıflandırma" → "Sınıflandırma":
           Şirket/Müşteri sol panelde zaten var (duplikasyon kaldırıldı).
           Cila-4 #2 — "operable" structured variant: hafif başlık şeridi +
@@ -3470,16 +3487,6 @@ function DetailTab({
         );
       })()}
 
-      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
-          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
-          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
-          Boş durumda worded empty. */}
-      <PreviousCasesSection
-        previousCases={previousCases}
-        currentCaseId={item.id}
-        onSelectPrevious={onSelectPrevious}
-      />
-
       {/* Atama & eskalasyon — sol panelden bağımsız, inline-edit'li alanlar.
           Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
           sıkı ızgara). Sol panel okuma özeti; merkez edit. */}
@@ -3632,11 +3639,6 @@ function DetailTab({
           );
         })()}
       </Section>
-
-      {/* PR-D3 — Azure DevOps İş Öğeleri.
-          Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
-          için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
-      <DevOpsSection caseId={item.id} canWrite={canWriteCase} />
 
       {/* FAZ 4 — Kontrol Listesi (3-tuple template'inden snapshot, vaka açılırken yüklenir) */}
       {item.checklistItems && item.checklistItems.length > 0 && (
