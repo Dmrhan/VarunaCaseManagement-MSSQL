@@ -727,16 +727,16 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                   : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
               </div>
               {/* Açılış Özeti */}
-              <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
-                {openingCount > 0
-                  ? <span className="font-medium text-brand-600 dark:text-ndark-link">{openingCount}/{OPENING_DEFS.length}</span>
-                  : <span className="text-slate-400">—</span>}
+              <div className="px-3 py-2 text-xs">
+                <span className={openingCount > 0 ? 'font-medium text-brand-600 dark:text-ndark-link' : 'text-slate-400'}>
+                  {openingCount}/{OPENING_DEFS.length}
+                </span>
               </div>
               {/* Kapanış Özeti */}
-              <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
-                {closingCount > 0
-                  ? <span className="font-medium text-brand-600 dark:text-ndark-link">{closingCount}/{CLOSING_DEFS.length}</span>
-                  : <span className="text-slate-400">—</span>}
+              <div className="px-3 py-2 text-xs">
+                <span className={closingCount > 0 ? 'font-medium text-brand-600 dark:text-ndark-link' : 'text-slate-400'}>
+                  {closingCount}/{CLOSING_DEFS.length}
+                </span>
               </div>
               {/* Kontrol Eden */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
