@@ -188,7 +188,7 @@ function loadSavedFilters() {
 export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPageProps) {
   const [dateFrom, setDateFrom] = useState(() => loadSavedFilters()?.dateFrom ?? '');
   const [dateTo, setDateTo]     = useState(() => loadSavedFilters()?.dateTo ?? '');
-  const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? []);
+  const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
   const pageSize = 25;
