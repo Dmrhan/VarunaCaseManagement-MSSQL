@@ -35,10 +35,124 @@
  * (ESM .js, wrapped response, custom error class, throw etmez).
  */
 
+import { randomUUID } from 'node:crypto';
 import { caseRepository } from '../db/caseRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
+import { saveObject } from '../db/storage.js';
+import { isAcceptedUpload } from './uploadWhitelist.js';
 
 const RAW_SOURCE = 'inbound-mail-intake';
+
+// M2.1 — Mail ekleri için boyut sınırı. Mevcut HTTP upload limiti
+// (server/routes/cases.js:72 express.raw limit '25mb') ile uyumlu.
+const MAIL_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+// M2.1 — Sistem-tetikli upload aktörü. CaseAttachment.uploadedBy string
+// alanına yazılır; uploadedByUserId NULL (User FK yok — intake bir kullanıcı
+// değil).
+const SYSTEM_UPLOADER = 'E-posta';
+
+/**
+ * M2.1 — Sistem-tetikli düşük seviye disk-yazma + caseAttachment.create.
+ *
+ * Tarayıcı upload akışı (caseRepository.finalizeUpload + signed token)
+ * kullanıcı kimliği bağlıdır; gelen mail SİSTEM tetikli olduğu için
+ * direkt storage.saveObject + caseAttachment satırı.
+ *
+ * - attachmentId cuid değil randomUUID (storage.js buildPath sadece string
+ *   bekler, format-agnostic).
+ * - safeName storage.buildPath içinde otomatik normalize ediliyor
+ *   (regex non-word → '_').
+ * - uploadedBy='E-posta', uploadedByUserId=null (User FK yok).
+ * - CaseHistory 'Dosya yüklendi' (FileUploaded) actor=SYSTEM_UPLOADER.
+ *
+ * Wrapped şekilde { ok, attachmentId, fileName, size } veya { ok:false, error }
+ * döner. Caller intake throw etmez — stored/skipped counts'a yansır.
+ */
+async function writeCaseFile({ caseId, companyId, filename, contentType, content, prisma }) {
+  const attachmentId = randomUUID();
+  // buildPath storage.js internal; orada safeName + caseId path normalize.
+  // saveObject mkdir + writeFile yapar.
+  const relPath = `cases/${caseId}/${attachmentId}-${(filename ?? 'unnamed').replace(/[^\w.\-]+/g, '_').slice(0, 120)}`;
+  await saveObject(relPath, content);
+  const row = await prisma.caseAttachment.create({
+    data: {
+      id: attachmentId,
+      caseId,
+      companyId,
+      fileName: filename ?? 'unnamed',
+      fileSize: content.length,
+      mimeType: contentType ?? 'application/octet-stream',
+      fileUrl: relPath,
+      uploadedBy: SYSTEM_UPLOADER,
+      uploadedByUserId: null,
+    },
+  });
+  // CaseActivity 'Dosya yüklendi' — finalizeUpload deseni
+  // (caseRepository.js:~2920; "history" relation Case.history → CaseActivity model).
+  await prisma.caseActivity.create({
+    data: {
+      caseId,
+      companyId,
+      action: 'Dosya yüklendi',
+      actionType: 'FileUploaded',
+      fieldName: 'files',
+      toValue: row.fileName,
+      actor: SYSTEM_UPLOADER,
+      actorUserId: null,
+    },
+  });
+  return { attachmentId, fileName: row.fileName, size: row.fileSize };
+}
+
+/**
+ * M2.1 — Tüm parsed.attachments'i (ek + inline/cid) vakaya bağla.
+ *
+ * Filter: isAcceptedUpload(mime, name) — mevcut allowlist (forge-safe).
+ * Boyut: MAIL_ATTACHMENT_MAX_BYTES (25mb HTTP limitiyle uyumlu).
+ * Hata: tek bir ek fail → atla + skipped'a düş (intake DÜŞÜRÜLMEZ).
+ *
+ * @returns {Promise<{ stored: number, skipped: Array<{filename: string|null, reason: string}> }>}
+ */
+async function persistAttachmentsForCase({ caseId, companyId, attachments, prisma }) {
+  const stored = [];
+  const skipped = [];
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return { stored: 0, skipped: [] };
+  }
+  for (const a of attachments) {
+    const filename = a?.filename ?? null;
+    const contentType = a?.contentType ?? null;
+    const content = a?.content;
+    if (!content || !Buffer.isBuffer(content) || content.length === 0) {
+      skipped.push({ filename, reason: 'empty_content' });
+      continue;
+    }
+    if (content.length > MAIL_ATTACHMENT_MAX_BYTES) {
+      skipped.push({ filename, reason: 'too_large' });
+      continue;
+    }
+    if (!isAcceptedUpload(contentType, filename ?? '')) {
+      skipped.push({ filename, reason: 'mime_not_accepted' });
+      continue;
+    }
+    try {
+      const saved = await writeCaseFile({
+        caseId,
+        companyId,
+        filename,
+        contentType,
+        content,
+        prisma,
+      });
+      stored.push(saved);
+    } catch (err) {
+      // Disk/DB write fail → atla + skipped (intake düşürülmez)
+      skipped.push({ filename, reason: 'write_failed' });
+    }
+  }
+  return { stored: stored.length, skipped };
+}
 
 // Subject'te [VK-xxx] token ararız. Case caseNumber pattern (caseRepository.js:1154):
 //   const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
@@ -218,12 +332,21 @@ export async function intakeInboundEmail({
           actor,
         );
 
+        // M2.1 — Ekleri ve inline/cid görselleri vakaya bağla.
+        const attachmentsResult = await persistAttachmentsForCase({
+          caseId: existing.id,
+          companyId,
+          attachments: parsed.attachments ?? [],
+          prisma,
+        });
+
         return {
           ok: true,
           caseId: existing.id,
           action: 'appended',
           match: { confidence: null, accountId: null, reasons: [] },
           token,
+          attachments: attachmentsResult,
           meta: { intakedAt, rawSource: RAW_SOURCE },
         };
       }
@@ -361,12 +484,27 @@ export async function intakeInboundEmail({
     // Engine hata verirse vaka yine açık kalır. Mail düşürülmez.
   }
 
+  // M2.1 — Ekleri ve inline/cid görselleri yeni vakaya bağla.
+  let attachmentsResult = { stored: 0, skipped: [] };
+  try {
+    const { prisma } = await import('../db/client.js');
+    attachmentsResult = await persistAttachmentsForCase({
+      caseId: created.id,
+      companyId,
+      attachments: parsed.attachments ?? [],
+      prisma,
+    });
+  } catch {
+    // Ek persistence fail → vaka yine açık. Mail düşürülmez.
+  }
+
   return {
     ok: true,
     caseId: created.id,
     action: 'created',
     match,
     token: null,
+    attachments: attachmentsResult,
     meta: { intakedAt, rawSource: RAW_SOURCE },
   };
 }

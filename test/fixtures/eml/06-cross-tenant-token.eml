@@ -1,0 +1,14 @@
+From: "Karışık Gönderici" <unknown.tenant.sender@otherorg-test.local>
+To: support-b@varuna.com
+Subject: Re: [VK-__CASE_NUMBER_OF_A__] B tenant'a yanlış token ile gelen mail
+Date: Wed, 25 Jun 2026 14:30:00 +0300
+Message-ID: <inbound-test-cross-tenant-1@otherorg-test.local>
+Content-Type: text/plain; charset=UTF-8
+
+Bu mail Tenant B'nin support adresine geldi. Konuda Tenant A'nın
+vaka numarası ([VK-...]) var. Sistemden beklenen davranış:
+
+- B intake'i bu token'ı kendi companyId'sinde aratır → bulamaz
+  (token A'da kayıtlı)
+- Fall through: yeni vaka açar (B tenant'ında)
+- A tenant'ının vakası ETKİLENMEZ
