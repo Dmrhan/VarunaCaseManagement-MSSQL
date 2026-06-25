@@ -175,6 +175,13 @@ const HDR = 'flex items-center px-3 py-2 text-xs font-medium uppercase tracking-
 
 const FILTER_KEY = 'varuna:tagging-review-filters-v2';
 
+function formatUtcDateTime(value?: string | null): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
 function loadSavedFilters() {
   try {
     const raw = localStorage.getItem(FILTER_KEY);
@@ -196,6 +203,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const teams = lookupService.teams();
 
   const [loading, setLoading]   = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [items, setItems]       = useState<Case[]>([]);
   const [total, setTotal]       = useState(0);
   const [reviews, setReviews]   = useState<Map<string, CaseTaggingReview>>(new Map());
@@ -223,6 +231,55 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     setReviews(result.reviews);
     setDrafts(new Map(result.items.map((c) => [c.id, draftFromReview(result.reviews.get(c.id))])));
     setLoading(false);
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const { items, reviews } = await caseService.exportTaggingReviews({
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        statuses: statuses.length ? statuses : undefined,
+        teamId: teamId || undefined,
+      });
+
+      const VERDICT_TR: Record<string, string> = { Dogru: 'Doğru', Yanlis: 'Yanlış', Belirsiz: 'Belirsiz' };
+
+      const rows = items.map((c) => {
+        const r = reviews.get(c.id);
+        const row: Record<string, string> = {
+          'Vaka No':              c.caseNumber,
+          'Statü':                c.status,
+          'Vaka Açılış':          formatUtcDateTime(c.createdAt),
+          'Müşteri':              c.accountName ?? '',
+          'Şirket':               c.companyName ?? '',
+          'Değerlendiren':        r?.reviewerName ?? '',
+          'Değerlendirme Tarihi': formatUtcDateTime(r?.reviewedAt),
+          'Not':                  r?.note ?? '',
+        };
+        for (const def of TAG_DEFS) {
+          const key    = tagKey(def);
+          const prefix = def.prefix === 'opening' ? 'Ac' : 'Ka';
+          const verdictRaw = r?.[verdictField(def)] as string | null;
+          const labelRaw   = r?.[`${key}CorrectedLabel` as keyof CaseTaggingReview] as string | null;
+          row[`${prefix}:${def.label} Kontrol`]      = verdictRaw ? (VERDICT_TR[verdictRaw] ?? verdictRaw) : '';
+          row[`${prefix}:${def.label} Doğru Etiket`] = labelRaw ?? '';
+        }
+        row['Son Güncelleme'] = formatUtcDateTime(r?.reviewedAt);
+        return row;
+      });
+
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Etiket Doğrulama');
+      const date = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `Etiket_Dogrulama_${date}.xlsx`);
+    } catch {
+      toast({ type: 'error', message: 'Excel export başarısız.' });
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -333,6 +390,14 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
             onClick={() => { setPage(1); void fetchPage(1); }}
           >
             {loading ? 'Yükleniyor…' : 'Filtrele'}
+          </Button>
+          <Button
+            variant="outline"
+            leftIcon={exporting ? <Loader2 size={13} className="animate-spin" /> : undefined}
+            disabled={exporting || loading}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? 'Aktarılıyor…' : "Excel'e Aktar"}
           </Button>
         </div>
       </div>
