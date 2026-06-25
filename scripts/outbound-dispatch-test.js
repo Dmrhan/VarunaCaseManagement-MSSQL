@@ -33,6 +33,7 @@ import {
   emitEvent,
   applyCaseTokenToSubject,
   buildDispatchMessageId,
+  isLikelyEmail,
 } from '../server/db/notificationRepository.js';
 
 const TENANT = '__m4-outbound-test__';
@@ -304,6 +305,89 @@ async function runScenarioD({ accountId }) {
   return c.id;
 }
 
+async function runScenarioF({ accountId }) {
+  // Codex P1 fix — phone fallback senaryosu.
+  // AccountCompany.preferredResponseChannel='phone' + responsePhone set →
+  // resolveCustomerCommunication() audienceIdentifier=phone döndürür,
+  // ama dispatch.channel=rule.channel=Email (snapshot). Eski davranış:
+  // executor SMTP'ye phone number ile gönderim dener → Failed.
+  // Yeni davranış: isLikelyEmail(audienceIdentifier) FALSE → executor
+  // ÇAĞRILMAZ, state=Pending kalır → needsAction (operatör müdahalesi).
+  console.log('\n=== Senaryo (f) Codex P1: phone fallback → executor ÇAĞRILMAZ ===');
+  await prisma.accountCompany.updateMany({
+    where: { accountId, companyId: TENANT },
+    data: {
+      preferredResponseChannel: 'phone',
+      responsePhone: '+905551234567',
+      allowCustomerNotifications: true,
+    },
+  });
+  const c = await createTestCase({ accountId, accountName: 'M4 Outbound Customer (Test)', suffix: 'F' });
+  await emitEvent({ event: 'case_closed', caseId: c.id });
+  const dispatch = await prisma.notificationDispatch.findFirst({
+    where: { caseId: c.id, event: 'case_closed' },
+  });
+  expectTruthy('Dispatch oluştu', dispatch);
+  if (dispatch) {
+    expect('channel=Email (snapshot)', dispatch.channel, 'Email');
+    expect('audienceIdentifier email DEĞİL (phone)',
+      isLikelyEmail(dispatch.audienceIdentifier), false);
+    expect('state=Pending (executor SKIP)', dispatch.state, 'Pending');
+    expect('attempts=0 (executor SKIP)', dispatch.attempts, 0);
+    // Operatör müdahale akışı: communicationState=Pending olmalı
+    const caseRow = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { communicationState: true },
+    });
+    expect('Case.communicationState=Pending (needsAction)',
+      caseRow?.communicationState, 'Pending');
+  }
+  // Restore
+  await prisma.accountCompany.updateMany({
+    where: { accountId, companyId: TENANT },
+    data: {
+      preferredResponseChannel: null,
+      responsePhone: null,
+    },
+  });
+  return c.id;
+}
+
+async function runScenarioG({ accountId }) {
+  // Codex P2 fix — created array'i in-place mutate doğrulaması.
+  // Senaryo (a)'da executor çağrıldı, Failed (network bloklu) döndü.
+  // Eski kod: created array'de dispatch.state hâlâ 'Pending', needsAction
+  // hatalı şekilde true → Case.communicationState='Pending'.
+  // Yeni kod: dispatch.state in-place 'Failed' olarak güncellendi,
+  // needsAction false, Case.communicationState 'Pending' SET EDİLMEMELİ.
+  //
+  // NOT: VPN açıkken outbound 587 bloklu → executor Failed dönüyor.
+  // Bu senaryo Failed path için yansıtmayı assert eder. Network açık
+  // olsa Sent dönerdi — needsAction yine false olur.
+  console.log('\n=== Senaryo (g) Codex P2: created array in-place mutate (Case.communicationState yansıtması) ===');
+  const c = await createTestCase({ accountId, accountName: 'M4 Outbound Customer (Test)', suffix: 'G' });
+  await emitEvent({ event: 'case_closed', caseId: c.id });
+  const dispatch = await prisma.notificationDispatch.findFirst({
+    where: { caseId: c.id, event: 'case_closed' },
+  });
+  expectTruthy('Dispatch oluştu', dispatch);
+  if (dispatch) {
+    expect('mode=Active', dispatch.mode, 'Active');
+    expectTruthy('state Pending\'den çıktı (Sent veya Failed)',
+      dispatch.state !== 'Pending');
+    // Codex P2: created in-place mutate sonrası Case.communicationState
+    // — state=Pending DEĞİLSE needsAction false → set edilmemeli.
+    const caseRow = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { communicationState: true },
+    });
+    // null veya 'Pending' DEĞİL (eski kodda her durumda 'Pending' set edilirdi)
+    expectTruthy('Case.communicationState !== "Pending" (created in-place güncel)',
+      caseRow?.communicationState !== 'Pending');
+  }
+  return c.id;
+}
+
 function runScenarioE() {
   console.log('\n=== Senaryo (e): Round-trip — subject token M2 parser ile eşleşir ===');
   // M2 parser pattern (server/lib/inboundMailIntake.js:46):
@@ -333,6 +417,8 @@ function runScenarioE() {
     createdCaseIds.push(await runScenarioB(ctx));
     createdCaseIds.push(await runScenarioC(ctx));
     createdCaseIds.push(await runScenarioD(ctx));
+    createdCaseIds.push(await runScenarioF(ctx)); // Codex P1
+    createdCaseIds.push(await runScenarioG(ctx)); // Codex P2
     runScenarioE();
   } catch (err) {
     console.error('\n[test] BEKLENMEYEN HATA:', err.message);

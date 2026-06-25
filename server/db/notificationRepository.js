@@ -894,6 +894,35 @@ export function buildDispatchMessageId(dispatchId, fallbackDomain = 'varuna.loca
 }
 
 /**
+ * M4 — Codex P1 fix.
+ *
+ * audienceIdentifier'ın email adresi olup olmadığını basit ama defansif
+ * kontrol et. resolveCustomerCommunication() müşterinin tercih kanalı
+ * 'phone' ise phone number, 'no_channel_available' ise 'manual' string'i
+ * audienceIdentifier'a yazabilir. Bu durumlarda dispatch.channel hâlâ
+ * rule.channel=Email; executor'ı çağırsak SMTP'ye telefon numarası gönderir
+ * veya 'manual' string'i ile sendMail çağırır → Failed.
+ *
+ * Bu durumda operatör müdahale akışı korunmalı (state=Pending kalır,
+ * needsAction true, communicationState='Pending').
+ *
+ * Yaklaşım: minimal RFC-5322 alt kümesi.
+ *   - Tek '@' içerir
+ *   - '@' öncesi+sonrası whitespace yok
+ *   - '@' sonrası en az bir '.' içerir
+ *   - Uzunluk pratik sınır
+ */
+export function isLikelyEmail(value) {
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (!s || s.length > 320) return false;
+  // sentinel literals (resolveCustomerCommunication döndürebilir)
+  if (s === 'manual' || s === 'phone' || s === 'unresolved') return false;
+  // Whitespace, @ sayısı, domain part'ta . var mı
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+/**
  * M4 — Customer-facing Active email dispatch'i gerçekten gönder.
  *
  * KURALLAR:
@@ -1106,16 +1135,42 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
           // Idempotency / rate-limit / opt-out kontrolleri yukarıda
           // uygulanmış (state=Suppressed olanlar bu blok'a girmez —
           // dispatch.state==='Pending' guard'ı).
+          //
+          // Codex P1 fix — audienceIdentifier'ın email olduğunu da doğrula.
+          // resolveCustomerCommunication() müşteri tercihi 'phone' ise
+          // phone number, 'no_channel_available' ise 'manual' yazabilir;
+          // bu durumda executor SMTP'ye geçersiz to ile gider → Failed,
+          // operatörün manuel müdahale akışı kaybolur. Email değilse
+          // state=Pending kalır → needsAction true → operatör kuyruğa düşer.
           if (
             dispatch.mode === 'Active'
             && dispatch.channel === 'Email'
             && dispatch.state === 'Pending'
+            && isLikelyEmail(dispatch.audienceIdentifier)
           ) {
-            await executeOutboundEmailDispatch(dispatch, caseRow).catch((execErr) => {
-              // Executor wrapped olarak {ok:false} döndürür; throw etmez.
-              // Yine de defansif: caller'a yansıma yok.
+            try {
+              const execResult = await executeOutboundEmailDispatch(dispatch, caseRow);
+              // Codex P2 fix — created array'deki dispatch object'i Phase 2
+              // emit'den dönen ham (Pending) hâli; executor DB row'unu Sent/
+              // Failed'a güncelledi ama created stale. needsAction
+              // calculation aşağıda created.some(d.state==='Pending'...)
+              // ile çalışır → eski Pending görür → Case.communicationState
+              // YANLIŞ 'Pending' set eder. In-place mutate ile created'i
+              // güncel state ile yansıtıyoruz.
+              if (execResult?.ok) {
+                dispatch.state = 'Sent';
+                dispatch.dispatchedAt = new Date();
+                dispatch.providerMessageId = execResult.providerMessageId ?? null;
+              } else {
+                dispatch.state = 'Failed';
+                dispatch.failureReason = execResult?.error?.message ?? 'send_failed';
+              }
+              dispatch.attempts = (dispatch.attempts ?? 0) + 1;
+            } catch (execErr) {
+              // Executor wrapped olarak {ok:false} döndürür; throw etmez
+              // ama defansif: caller'a yansıma yok.
               console.error('[notification:emit] outbound executor unexpected', execErr?.message);
-            });
+            }
           }
         } catch (err) {
           // P2002 = unique violation on idempotencyKey → suppressed dedup.
