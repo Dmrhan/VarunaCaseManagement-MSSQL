@@ -2210,10 +2210,16 @@ model NotificationDispatch {
   /// Required at API layer when transitioning to mode=Manual / state=Sent.
   deliveryNote      String?   @db.NVarChar(Max)
 
-  /// Phase 4 active delivery fields (unused in Phase 2 but reserved).
-  dispatchedAt  DateTime?
-  failureReason String?   @db.NVarChar(Max)
-  attempts      Int       @default(0)
+  /// Phase 4 active delivery fields. M4 (mail outbound) → dispatchedAt
+  /// = sent timestamp; providerMessageId = mailProvider'ın döndürdüğü
+  /// SMTP Message-ID (round-trip threading için).
+  dispatchedAt      DateTime?
+  failureReason     String?   @db.NVarChar(Max)
+  attempts          Int       @default(0)
+  /// M4 — mailProvider sendMail başarısı sonrası dolar. Round-trip
+  /// threading için (önceki dispatch'in providerMessageId'si
+  /// In-Reply-To/References header'ına geçer).
+  providerMessageId String?   @db.NVarChar(Max)
 
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
