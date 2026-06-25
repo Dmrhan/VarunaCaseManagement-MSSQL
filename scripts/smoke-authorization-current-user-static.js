@@ -65,7 +65,9 @@ expect('4.3 App calls effectiveMenus behind feature flag', /authorizationService
 expect('4.4 App uses authorization menu feature flag', /featureFlags\.authorizationMenuEnforcementEnabled/.test(appTsx), true);
 expect('4.5 App keeps fail-open behavior on endpoint failure', /Fail-open[\s\S]*setEffectiveMenuFailed\(true\)/.test(appTsx), true);
 expect('4.6 canShowView checks effectiveMenuFailed', /function canShowView[\s\S]*effectiveMenuFailed/.test(appTsx), true);
-expect('4.7 canShowView checks effective menu allowed flag', /menu \? menu\.allowed : fallback/.test(appTsx), true);
+expect('4.7 canShowView checks effective menu allowed flag in deny-only mode',
+  /menu \? fallback && menu\.allowed : fallback/.test(appTsx),
+  true);
 expect('4.8 handleNavSelect blocks hidden menu keys', /function handleNavSelect[\s\S]*canShowView\(key, true\)/.test(appTsx), true);
 expect('4.9 NAV list is filtered by canShowView', /NAV\.filter\(\(item\) => canShowView\(item\.key, item\.available\)\)\.map/.test(appTsx), true);
 expect('4.10 Workspace buttons are policy-gated', /showCalendar[\s\S]*showWatching[\s\S]*showKbViewer/.test(appTsx), true);
@@ -73,6 +75,9 @@ expect('4.11 Report buttons are policy-gated', /showReportsSection[\s\S]*showAiU
 expect('4.12 canShowView does not short-circuit default-denied menus before policy result',
   /function canShowView[\s\S]*if \(!fallback\) return false/.test(appTsx),
   false);
+expect('4.13 canShowView cannot widen access beyond legacy role fallback',
+  /cannot open pages whose APIs still reject the user's role/.test(appTsx),
+  true);
 
 expect('5.1 feature flag registered', /authorizationMenuEnforcementEnabled/.test(read('src/config/featureFlags.ts')), true);
 expect('5.2 smoke script registered', pkg.scripts['smoke:authorization-current-user'], 'node scripts/smoke-authorization-current-user-static.js');
