@@ -789,6 +789,11 @@ export default function App() {
               onShowCases={() => setView('cases')}
               onShowCalendar={() => setView('my-calendar')}
               onShowPatterns={() => setView('analytics-patterns')}
+              onOpenSmartTicket={
+                featureFlags.smartTicketIntakeEnabled
+                  ? () => setView('smart-ticket-new')
+                  : undefined
+              }
             />
           )}
           {(view === 'cases' || (isDetail && caseDetailOrigin === 'cases')) && (
