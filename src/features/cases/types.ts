@@ -59,6 +59,8 @@ export interface CaseCompany {
   projectsEnabled?: boolean;
   /** WR-A4 / PM-04: accountId varken vaka açarken proje zorunlu mu? Default false. */
   projectsRequired?: boolean;
+  /** true ise Smart Ticket'ta vaka açmadan önce KB analizi zorunlu. Default false. */
+  requireKbAnalysis?: boolean;
 }
 
 export interface CaseThirdParty {
