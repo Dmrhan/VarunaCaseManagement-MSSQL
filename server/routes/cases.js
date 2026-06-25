@@ -367,6 +367,34 @@ router.get(
 );
 
 /**
+ * GET /api/cases/tagging-review/export
+ * Sayfalama olmadan tüm filtreli kayıtları döner — Excel export için.
+ */
+router.get(
+  '/tagging-review/export',
+  requireRole('Supervisor', 'Admin', 'SystemAdmin'),
+  asyncRoute(async (req, res) => {
+    const f = req.query;
+    const filters = {
+      statuses: f.statuses ? f.statuses.split(',') : undefined,
+      dateFrom: f.dateFrom,
+      dateTo: f.dateTo,
+      teamId: f.teamId || undefined,
+    };
+    const { items } = await caseRepository.list({
+      filters,
+      pagination: { page: 1, pageSize: 5000 },
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
+    res.json({
+      value: items,
+      reviews: Object.fromEntries(reviewMap),
+    });
+  }),
+);
+
+/**
  * GET /api/cases/tagging-review?dateFrom&dateTo&statuses&page&pageSize
  *
  * Vaka Etiket Doğrulama Ekranı — Supervisor/Admin/SystemAdmin.
