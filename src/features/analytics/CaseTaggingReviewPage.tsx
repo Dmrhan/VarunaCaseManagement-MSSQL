@@ -662,8 +662,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       {/* Ana tablo */}
       <div className="min-h-0 flex-1 overflow-auto rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
-        <div className="sticky top-0 z-10 grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_120px_120px_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
-          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Açılış Özeti', 'Kapanış Özeti', ''].map((h) => (
+        <div className="sticky top-0 z-10 grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_110px_110px_150px_80px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Açılış Özeti', 'Kapanış Özeti', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
             </div>
@@ -693,7 +693,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_120px_120px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[140px_90px_120px_160px_140px_1fr_1fr_110px_110px_150px_80px] items-center border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
@@ -749,6 +749,24 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                   : closingCount > 0
                     ? <span className="font-medium text-brand-600 dark:text-ndark-link">{closingCount}/{CLOSING_DEFS.length}</span>
                     : <span className="text-slate-400">0/{CLOSING_DEFS.length}</span>}
+              </div>
+              {/* Kontrol Eden */}
+              <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
+                {review?.reviewerName ? (
+                  <>
+                    <div className="truncate font-medium" title={review.reviewerName}>{review.reviewerName}</div>
+                    {review.reviewedAt && (
+                      <div className="text-slate-400 dark:text-ndark-dim">
+                        {new Date(review.reviewedAt).toLocaleString('tr-TR', {
+                          day: '2-digit', month: '2-digit', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )}
               </div>
               {/* Aksiyon */}
               <div className="px-3 py-2">
