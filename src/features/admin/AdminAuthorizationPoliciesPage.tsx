@@ -19,10 +19,11 @@ import {
   type AuthorizationPrincipalType,
 } from '@/services/adminService';
 import { AdminListLayout } from './AdminListLayout';
+import { AUTHORIZATION_POLICIES_HELP } from './helpContents';
 
 const POLICY_TARGETS: { value: AuthorizationPolicyTarget; label: string }[] = [
   { value: 'menu', label: 'Menü' },
-  { value: 'resource', label: 'Kaynak CRUD' },
+  { value: 'resource', label: 'Kayıt İşlemleri' },
   { value: 'field', label: 'Alan Yetkisi' },
   { value: 'securityFilter', label: 'Güvenlik Filtresi' },
 ];
@@ -55,11 +56,8 @@ const DEFAULT_FILTER_JSON = `{
 }`;
 
 /**
- * Authorization Management MVP-0.
- *
- * Bu ekran policy tanımlarını yönetir; Case/Account/Report runtime enforcement
- * bu PR'ın kapsamı değildir. Böylece eski Varuna'daki yetkilendirme matrisini
- * güvenli şekilde inventory + admin CRUD seviyesinde taşımaya başlarız.
+ * Bu ekran eski Varuna'daki yetkilendirme matrisini menü, kayıt işlemi, alan ve
+ * güvenlik filtresi düzeyinde yönetmek için kullanılır.
  */
 export function AdminAuthorizationPoliciesPage() {
   const companies = useMemo(() => lookupService.companies(), []);
@@ -134,7 +132,7 @@ export function AdminAuthorizationPoliciesPage() {
       await refresh();
       toast({
         type: 'success',
-        message: result.item.isActive ? 'Policy aktif edildi.' : 'Policy pasifleştirildi.',
+        message: result.item.isActive ? 'Yetki kuralı aktif edildi.' : 'Yetki kuralı pasifleştirildi.',
         duration: 2000,
       });
     } else {
@@ -165,13 +163,15 @@ export function AdminAuthorizationPoliciesPage() {
     return (
       <AdminListLayout
         title="Yetkilendirme Yönetimi"
-        description="Menü, CRUD, alan ve güvenlik filtresi policy tanımları."
+        description="Menü görünürlüğü, kayıt işlemleri, alan zorunluluğu ve kayıt erişim kuralları."
+        helpTitle={AUTHORIZATION_POLICIES_HELP.title}
+        helpSections={AUTHORIZATION_POLICIES_HELP.sections}
       >
         <CardBody>
           <EmptyState
             icon={<ShieldCheck size={22} />}
             title="Şirket seçilmedi"
-            description="Policy yönetimi için önce bir şirket seçin."
+            description="Yetki kuralı yönetimi için önce bir şirket seçin."
           />
         </CardBody>
       </AdminListLayout>
@@ -182,16 +182,18 @@ export function AdminAuthorizationPoliciesPage() {
     <>
       <AdminListLayout
         title="Yetkilendirme Yönetimi"
-        description="Kullanıcı/rol/takım bazında menü, CRUD, alan zorunluluğu ve güvenlik filtresi tanımları. Bu faz tanım yönetimidir; runtime enforcement ayrı fazda bağlanacaktır."
+        description="Kullanıcı, rol ve takım bazında menü görünürlüğünü yönetin; kayıt işlemi, alan ve kayıt erişim kurallarını önizleyip kontrollü devreye alın."
         count={filtered.length}
-        searchPlaceholder="Principal, kaynak, aksiyon veya nota göre ara…"
+        searchPlaceholder="Kime uygulanır, kaynak, işlem veya nota göre ara…"
         searchValue={search}
         onSearchChange={setSearch}
         onAdd={() => setEditor({ mode: 'create' })}
-        addLabel="Yeni Policy"
+        addLabel="Yeni Yetki Kuralı"
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        helpTitle={AUTHORIZATION_POLICIES_HELP.title}
+        helpSections={AUTHORIZATION_POLICIES_HELP.sections}
         filters={
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-52">
@@ -203,7 +205,7 @@ export function AdminAuthorizationPoliciesPage() {
               />
             </div>
             <div className="w-48">
-              <Field label="Policy Tipi">
+              <Field label="Kural Tipi">
                 <Select
                   value={target}
                   onChange={(e) => setTarget(e.target.value as AuthorizationPolicyTarget | '')}
@@ -250,16 +252,16 @@ export function AdminAuthorizationPoliciesPage() {
           <CardBody>
             <EmptyState
               icon={<ShieldCheck size={22} />}
-              title={search ? 'Aramaya uyan policy yok' : 'Henüz policy yok'}
+              title={search ? 'Aramaya uyan yetki kuralı yok' : 'Henüz yetki kuralı yok'}
               description={
                 search
                   ? 'Farklı bir arama deneyin.'
-                  : 'İlk menü, CRUD, alan veya güvenlik filtresi policy tanımını oluşturun.'
+                  : 'İlk menü, kayıt işlemi, alan veya güvenlik filtresi yetki kuralını oluşturun.'
               }
               action={
                 !search ? (
                   <Button size="sm" onClick={() => setEditor({ mode: 'create' })}>
-                    Yeni Policy
+                    Yeni Yetki Kuralı
                   </Button>
                 ) : undefined
               }
@@ -270,8 +272,8 @@ export function AdminAuthorizationPoliciesPage() {
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <Th>Policy</Th>
-                  <Th>Principal</Th>
+                  <Th>Kural</Th>
+                  <Th>Kime Uygulanır?</Th>
                   <Th>Etki</Th>
                   <Th>Hedef</Th>
                   <Th align="right">Öncelik</Th>
@@ -387,11 +389,12 @@ function EffectivePreviewPanel({
             Etkili Yetki Önizlemesi
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Kayıtlı aktif policy'ler bu principal için nasıl sonuç üretir? Bu panel sadece analiz amaçlıdır.
+            Kayıtlı aktif yetki kuralları seçilen rol, takım veya kullanıcı için nasıl sonuç üretir?
+            Bu panel kontrol amaçlıdır.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Principal Tipi" className="w-44">
+          <Field label="Kime uygulanır?" className="w-44">
             <Select
               value={principalType}
               onChange={(e) => onPrincipalTypeChange(e.target.value as AuthorizationPrincipalType)}
@@ -403,7 +406,7 @@ function EffectivePreviewPanel({
               ))}
             </Select>
           </Field>
-          <Field label="Principal Key" className="w-56">
+          <Field label="Hedef Değer" className="w-56">
             <TextInput
               value={principalKey}
               onChange={(e) => onPrincipalKeyChange(e.target.value)}
@@ -434,8 +437,8 @@ function EffectivePreviewPanel({
             <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
               <Metric label="Menü açık" value={preview.summary.menuAllowed} tint="emerald" />
               <Metric label="Menü kapalı" value={preview.summary.menuDenied} tint="rose" />
-              <Metric label="CRUD izin" value={preview.summary.resourceAllowed} tint="emerald" />
-              <Metric label="CRUD engel" value={preview.summary.resourceDenied} tint="amber" />
+              <Metric label="İşlem izni" value={preview.summary.resourceAllowed} tint="emerald" />
+              <Metric label="İşlem engeli" value={preview.summary.resourceDenied} tint="amber" />
             </div>
             <div className="mt-2">
               <Badge tint={preview.summary.securityFilterCount > 0 ? 'violet' : 'slate'}>
@@ -459,7 +462,7 @@ function EffectivePreviewPanel({
           <div className="rounded-md border border-slate-200 bg-white p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Override Etkileri</div>
             {resourceHighlights.length === 0 ? (
-              <div className="mt-2 text-xs text-slate-500">Resource override etkisi yok.</div>
+              <div className="mt-2 text-xs text-slate-500">Kayıt işlemleri için özel izin veya engel yok.</div>
             ) : (
               <div className="mt-2 space-y-1">
                 {resourceHighlights.map((r) => (
@@ -503,7 +506,7 @@ function PolicyTargetSummary({ row }: { row: AuthorizationPolicy }) {
     return (
       <SummaryLine
         icon={<KeyRound size={13} />}
-        title={`${row.scope ?? 'scope'} · ${row.fieldKey ?? 'field'}`}
+        title={`${row.scope ?? 'bölüm yok'} · ${row.fieldKey ?? 'alan yok'}`}
         detail={row.action ?? 'Alan aksiyonu yok'}
       />
     );
@@ -600,7 +603,7 @@ function AuthorizationPolicyModal({
     setSubmitting(false);
 
     if (!result) {
-      setError('Policy bulunamadı.');
+      setError('Yetki kuralı bulunamadı.');
       return;
     }
     if (!result.ok) {
@@ -611,7 +614,7 @@ function AuthorizationPolicyModal({
     onClose();
     toast({
       type: 'success',
-      message: mode === 'create' ? 'Policy oluşturuldu.' : 'Policy güncellendi.',
+      message: mode === 'create' ? 'Yetki kuralı oluşturuldu.' : 'Yetki kuralı güncellendi.',
       duration: 2500,
     });
   }
@@ -623,7 +626,7 @@ function AuthorizationPolicyModal({
       open={open}
       onClose={onClose}
       size="lg"
-      title={mode === 'create' ? 'Yeni Yetkilendirme Policy' : 'Yetkilendirme Policy Düzenle'}
+      title={mode === 'create' ? 'Yeni Yetki Kuralı' : 'Yetki Kuralını Düzenle'}
       footer={
         <div className="flex items-center justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
@@ -640,7 +643,7 @@ function AuthorizationPolicyModal({
           <TextInput value={form.companyId} disabled />
         </Field>
 
-        <Field label="Policy Tipi" required>
+        <Field label="Kural Tipi" required>
           <Select
             value={form.target}
             onChange={(e) => patch(resetTargetSpecific(e.target.value as AuthorizationPolicyTarget))}
@@ -653,7 +656,7 @@ function AuthorizationPolicyModal({
           </Select>
         </Field>
 
-        <Field label="Principal Tipi" required>
+        <Field label="Kime Uygulanır?" required>
           <Select
             value={form.principalType}
             onChange={(e) => patch({ principalType: e.target.value as AuthorizationPrincipalType })}
@@ -667,9 +670,9 @@ function AuthorizationPolicyModal({
         </Field>
 
         <Field
-          label="Principal Key"
+          label="Hedef Değer"
           required
-          hint="Örn. Agent, UNIVERA:Supervisor, team-id veya user-id."
+          hint="Sistem rolünde rol adı; şirket rolünde companyId:rol; takım ve kullanıcıda ilgili kayıt ID'si. Örn. Agent, COMP-UNIVERA:Supervisor."
         >
           <TextInput
             autoFocus
@@ -701,10 +704,10 @@ function AuthorizationPolicyModal({
 
         {form.target === 'menu' && (
           <>
-            <Field label="View Key" required hint="Örn. cases, admin-users, smart-ticket-new">
+            <Field label="Ekran Anahtarı" required hint="Hangi sayfa/menü kontrol edilecek? Örn. cases, admin-users, smart-ticket-new">
               <TextInput value={form.viewKey ?? ''} onChange={(e) => patch({ viewKey: e.target.value })} />
             </Field>
-            <Field label="Menu Key" hint="Boş bırakılırsa backend viewKey'den çözer.">
+            <Field label="Menü Anahtarı" hint="Genellikle boş bırakılır; sistem ekran anahtarından çözer.">
               <TextInput value={form.menuKey ?? ''} onChange={(e) => patch({ menuKey: e.target.value })} />
             </Field>
           </>
@@ -712,13 +715,13 @@ function AuthorizationPolicyModal({
 
         {form.target === 'resource' && (
           <>
-            <Field label="Resource Key" required hint="Örn. case, case.note, account">
+            <Field label="Kayıt/Kaynak Anahtarı" required hint="Hangi kayıt türü? Örn. case, case.note, account">
               <TextInput
                 value={form.resourceKey ?? ''}
                 onChange={(e) => patch({ resourceKey: e.target.value })}
               />
             </Field>
-            <Field label="Aksiyon" required hint="create/read/update/delete/transfer/close/export…">
+            <Field label="İşlem" required hint="Ne yapabilir? create/read/update/delete/transfer/close/export…">
               <TextInput value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })} />
             </Field>
           </>
@@ -726,16 +729,16 @@ function AuthorizationPolicyModal({
 
         {form.target === 'field' && (
           <>
-            <Field label="Scope" required hint="Örn. case.close, smartTicket.stage3Transfer">
+            <Field label="Ekran/Bölüm" required hint="Alan hangi form veya bölümde? Örn. case.close, smartTicket.stage3Transfer">
               <TextInput value={form.scope ?? ''} onChange={(e) => patch({ scope: e.target.value })} />
             </Field>
-            <Field label="Field Key" required hint="Örn. resolutionNote, priority">
+            <Field label="Alan Anahtarı" required hint="Kontrol edilecek alan. Örn. resolutionNote, priority">
               <TextInput value={form.fieldKey ?? ''} onChange={(e) => patch({ fieldKey: e.target.value })} />
             </Field>
-            <Field label="Aksiyon" required hint="visible/readable/editable/required/masked">
+            <Field label="Alan Davranışı" required hint="visible/readable/editable/required/masked">
               <TextInput value={form.action ?? ''} onChange={(e) => patch({ action: e.target.value })} />
             </Field>
-            <Field label="Resource Key" hint="Genellikle case.">
+            <Field label="Kayıt/Kaynak Anahtarı" hint="Genellikle case.">
               <TextInput
                 value={form.resourceKey ?? ''}
                 onChange={(e) => patch({ resourceKey: e.target.value })}
@@ -746,7 +749,7 @@ function AuthorizationPolicyModal({
 
         {form.target === 'securityFilter' && (
           <>
-            <Field label="Resource Key" required hint="Örn. case, account">
+            <Field label="Kayıt/Kaynak Anahtarı" required hint="Hangi kayıtlar filtrelenecek? Örn. case, account">
               <TextInput
                 value={form.resourceKey ?? ''}
                 onChange={(e) => patch({ resourceKey: e.target.value })}
@@ -766,7 +769,7 @@ function AuthorizationPolicyModal({
           <TextArea
             value={form.notes ?? ''}
             onChange={(e) => patch({ notes: e.target.value })}
-            placeholder="Bu policy neden var, hangi ekip/akış için tanımlandı?"
+            placeholder="Bu yetki kuralı neden var, hangi ekip veya akış için tanımlandı?"
           />
         </Field>
 
@@ -841,7 +844,7 @@ function buildPayload(
     isActive: form.isActive ?? true,
   };
 
-  if (!payload.principalKey) return { error: 'Principal Key zorunlu.' };
+  if (!payload.principalKey) return { error: 'Hedef Değer zorunlu.' };
 
   if (payload.target === 'securityFilter') {
     try {
