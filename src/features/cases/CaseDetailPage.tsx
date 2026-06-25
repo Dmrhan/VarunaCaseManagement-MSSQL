@@ -3234,6 +3234,16 @@ function DetailTab({
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
       <SmartTicketMetaSection item={item} />
 
+      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
+          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
+          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
+          Boş durumda worded empty. */}
+      <PreviousCasesSection
+        previousCases={previousCases}
+        currentCaseId={item.id}
+        onSelectPrevious={onSelectPrevious}
+      />
+
       {/* PR-D3 — Azure DevOps İş Öğeleri.
           Backend ALLOWLIST guard'lı (16 alan). Read role-gate ile arşivli case
           için SystemAdmin görür, diğer roller 404. Bağla/Kaldır case-write. */}
@@ -3476,16 +3486,6 @@ function DetailTab({
           </Section>
         );
       })()}
-
-      {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
-          previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
-          Mevcut vaka filtrelendi; en yeni üstte (resolvedAt ?? updatedAt DESC).
-          Boş durumda worded empty. */}
-      <PreviousCasesSection
-        previousCases={previousCases}
-        currentCaseId={item.id}
-        onSelectPrevious={onSelectPrevious}
-      />
 
       {/* Atama & eskalasyon — sol panelden bağımsız, inline-edit'li alanlar.
           Cila-4 #2 — structured variant (hafif başlık şeridi + bg-white +
