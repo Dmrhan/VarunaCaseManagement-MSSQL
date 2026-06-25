@@ -25,6 +25,8 @@
  */
 
 import { prisma } from './client.js';
+// M4 — Mail outbound send executor.
+import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 
 // ─────────────────────────────────────────────────────────────────
 // Errors
@@ -59,7 +61,12 @@ const ALLOWED_EVENTS = [
 ];
 
 const ALLOWED_CHANNELS = ['InApp', 'Email', 'ManualTask']; // Webhook = Phase 4
-const ALLOWED_MODES = ['LogOnly', 'Manual']; // Active = Phase 4 (blocked at API)
+// M4 — Active artık serbest (mail outbound dispatch). Yalnız channel=Email
+// + audience=customer_primary_contact path'i mailProvider.sendMail çağırır;
+// diğer (Active + InApp / Active + ManualTask) kombinasyonları için Phase
+// 4'te ek executor'lar gelecek. ALLOWED_MODES'a 'Active' eklendi; mode=Active
+// engeli (mode_active_not_allowed) kaldırıldı (bkz. createRule).
+const ALLOWED_MODES = ['LogOnly', 'Manual', 'Active'];
 
 const ALLOWED_AUDIENCE_TYPES = [
   'assignee',
@@ -405,12 +412,10 @@ function validateChannelAndMode({ channel, mode }) {
   if (!ALLOWED_CHANNELS.includes(channel)) {
     throw new NotificationValidationError(`channel geçersiz: ${channel}`, { code: 'channel_invalid' });
   }
-  if (mode === 'Active') {
-    throw new NotificationValidationError(
-      'mode=Active Phase 4 ile birlikte gelecek; şu an LogOnly veya Manual seçebilirsin.',
-      { code: 'mode_active_not_allowed' },
-    );
-  }
+  // M4 — mode=Active artık serbest. Yalnız channel=Email +
+  // audience=customer_primary_contact path'i gerçekten gönderim yapar
+  // (mailProvider.sendMail). Active + InApp / ManualTask hâlâ Phase 4
+  // executor bekler — emitEvent içinde state=Pending kalır.
   if (!ALLOWED_MODES.includes(mode)) {
     throw new NotificationValidationError(`mode geçersiz: ${mode}`, { code: 'mode_invalid' });
   }
@@ -853,6 +858,158 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
  * @param {Object} [args.approvalContext] — { resolutionSummary?,
  *   customerMessageDraft?, rejectionReason?, approverName? }
  */
+/**
+ * M4 — Customer-facing email dispatch için subject'e [VK-<caseNumber>]
+ * round-trip token'ı ekler. Token zaten varsa dokunmaz.
+ *
+ * Format M2 inboundMailIntake.js:46 ile birebir uyumlu:
+ *   SUBJECT_CASE_TOKEN_RE = /\[(VK-[0-9A-Z]+)\]/i
+ *
+ * Token sayesinde müşteri yanıt mailini gönderdiğinde, M2 inbound intake
+ * subject'ten caseNumber'ı yakalar → mevcut vakaya CaseNote olarak iliştirir.
+ * Round-trip kapanmış olur.
+ */
+export function applyCaseTokenToSubject(subject, caseNumber) {
+  const safeSubject = String(subject ?? '').trim() || '(konusuz)';
+  const safeNumber = String(caseNumber ?? '').trim();
+  if (!safeNumber) return safeSubject;
+  const token = `[${safeNumber}]`;
+  // Mevcut subject'te zaten token varsa dokunma.
+  if (safeSubject.includes(token)) return safeSubject;
+  // M2 regex'ine uygun format: subject başında [VK-xxx] prefix.
+  return `${token} ${safeSubject}`;
+}
+
+/**
+ * M4 — Customer-facing dispatch için tutarlı Message-ID üret.
+ *
+ * Format: "<varuna-{dispatchId}@{tenantDomain}>"
+ * tenantDomain örnek: "univera.com.tr" (companyId'den türetilebilir veya
+ * SMTP from address'inden domain part). Şu an basit fallback: company.id
+ * kısa hash + sabit suffix; gerçek SMTP server bunu accept eder ama
+ * domain hizalı olması nice-to-have'dır.
+ */
+export function buildDispatchMessageId(dispatchId, fallbackDomain = 'varuna.local') {
+  return `<varuna-${dispatchId}@${fallbackDomain}>`;
+}
+
+/**
+ * M4 — Codex P1 fix.
+ *
+ * audienceIdentifier'ın email adresi olup olmadığını basit ama defansif
+ * kontrol et. resolveCustomerCommunication() müşterinin tercih kanalı
+ * 'phone' ise phone number, 'no_channel_available' ise 'manual' string'i
+ * audienceIdentifier'a yazabilir. Bu durumlarda dispatch.channel hâlâ
+ * rule.channel=Email; executor'ı çağırsak SMTP'ye telefon numarası gönderir
+ * veya 'manual' string'i ile sendMail çağırır → Failed.
+ *
+ * Bu durumda operatör müdahale akışı korunmalı (state=Pending kalır,
+ * needsAction true, communicationState='Pending').
+ *
+ * Yaklaşım: minimal RFC-5322 alt kümesi.
+ *   - Tek '@' içerir
+ *   - '@' öncesi+sonrası whitespace yok
+ *   - '@' sonrası en az bir '.' içerir
+ *   - Uzunluk pratik sınır
+ */
+export function isLikelyEmail(value) {
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (!s || s.length > 320) return false;
+  // sentinel literals (resolveCustomerCommunication döndürebilir)
+  if (s === 'manual' || s === 'phone' || s === 'unresolved') return false;
+  // Whitespace, @ sayısı, domain part'ta . var mı
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+/**
+ * M4 — Customer-facing Active email dispatch'i gerçekten gönder.
+ *
+ * KURALLAR:
+ *  - SADECE mode=Active + channel=Email + state=Pending.
+ *  - Idempotency / rate-limit / opt-out kontrolleri dispatch.create
+ *    öncesi `emitEvent` içinde uygulanır; bu executor onları TEKRAR
+ *    KONTROL ETMEZ — sadece "state=Pending olarak insert edilmiş" durumda
+ *    çağrılır.
+ *  - LogOnly / Manual → BU FONKSIYON ÇAĞRILMAZ (caller mode kontrol eder).
+ *  - Customer-facing (audienceType='customer_primary_contact') için
+ *    subject'e [VK-<caseNumber>] token + Message-ID üretilir
+ *    (round-trip threading).
+ *  - Önceki sent dispatch'in providerMessageId'si varsa
+ *    In-Reply-To/References header'larına geçer (zincirleme thread).
+ *  - Başarı → state=Sent + dispatchedAt + providerMessageId; hata →
+ *    state=Failed + failureReason. attempts++ her iki yolda da.
+ *  - mailProvider.sendMail companyId-aware (M5 per-tenant config).
+ *
+ * Throw etmez; başarı/başarısızlık state geçişiyle yansıtılır.
+ *
+ * @returns {Promise<{ ok: boolean, providerMessageId?: string, error?: object }>}
+ */
+async function executeOutboundEmailDispatch(dispatch, caseRow) {
+  const isCustomerFacing = dispatch.audienceType === 'customer_primary_contact';
+
+  // Subject token (sadece customer-facing'e)
+  const finalSubject = isCustomerFacing
+    ? applyCaseTokenToSubject(dispatch.snapshotSubject, caseRow.caseNumber)
+    : dispatch.snapshotSubject;
+
+  // Message-ID üret (customer-facing için zorunlu — round-trip threading)
+  const headers = {};
+  if (isCustomerFacing) {
+    const newMessageId = buildDispatchMessageId(dispatch.id);
+    headers['Message-ID'] = newMessageId;
+
+    // Threading: aynı vakanın önceki sent dispatch'inin providerMessageId'si
+    // varsa In-Reply-To + References ekle (en yeni Sent dispatch).
+    const prev = await prisma.notificationDispatch.findFirst({
+      where: {
+        caseId: dispatch.caseId,
+        state: 'Sent',
+        providerMessageId: { not: null },
+        id: { not: dispatch.id },
+      },
+      orderBy: { dispatchedAt: 'desc' },
+      select: { providerMessageId: true },
+    });
+    if (prev?.providerMessageId) {
+      headers['In-Reply-To'] = prev.providerMessageId;
+      headers['References'] = prev.providerMessageId;
+    }
+  }
+
+  const result = await mailProviderSendMail(
+    {
+      to: dispatch.audienceIdentifier,
+      subject: finalSubject,
+      text: dispatch.snapshotBody,
+      headers,
+    },
+    { companyId: dispatch.companyId },
+  );
+
+  if (result.ok) {
+    await prisma.notificationDispatch.update({
+      where: { id: dispatch.id },
+      data: {
+        state: 'Sent',
+        dispatchedAt: new Date(),
+        providerMessageId: result.messageId ?? null,
+        attempts: { increment: 1 },
+      },
+    });
+    return { ok: true, providerMessageId: result.messageId ?? null };
+  }
+  await prisma.notificationDispatch.update({
+    where: { id: dispatch.id },
+    data: {
+      state: 'Failed',
+      failureReason: result.error?.message ?? 'send_failed',
+      attempts: { increment: 1 },
+    },
+  });
+  return { ok: false, error: result.error };
+}
+
 export async function emitEvent({ event, caseId, approvalContext = null }) {
   try {
     if (!ALLOWED_EVENTS.includes(event)) return [];
@@ -973,6 +1130,48 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
             },
           });
           created.push(dispatch);
+
+          // M4 — Active + Email + Pending dispatch'lerini gerçekten gönder.
+          // Idempotency / rate-limit / opt-out kontrolleri yukarıda
+          // uygulanmış (state=Suppressed olanlar bu blok'a girmez —
+          // dispatch.state==='Pending' guard'ı).
+          //
+          // Codex P1 fix — audienceIdentifier'ın email olduğunu da doğrula.
+          // resolveCustomerCommunication() müşteri tercihi 'phone' ise
+          // phone number, 'no_channel_available' ise 'manual' yazabilir;
+          // bu durumda executor SMTP'ye geçersiz to ile gider → Failed,
+          // operatörün manuel müdahale akışı kaybolur. Email değilse
+          // state=Pending kalır → needsAction true → operatör kuyruğa düşer.
+          if (
+            dispatch.mode === 'Active'
+            && dispatch.channel === 'Email'
+            && dispatch.state === 'Pending'
+            && isLikelyEmail(dispatch.audienceIdentifier)
+          ) {
+            try {
+              const execResult = await executeOutboundEmailDispatch(dispatch, caseRow);
+              // Codex P2 fix — created array'deki dispatch object'i Phase 2
+              // emit'den dönen ham (Pending) hâli; executor DB row'unu Sent/
+              // Failed'a güncelledi ama created stale. needsAction
+              // calculation aşağıda created.some(d.state==='Pending'...)
+              // ile çalışır → eski Pending görür → Case.communicationState
+              // YANLIŞ 'Pending' set eder. In-place mutate ile created'i
+              // güncel state ile yansıtıyoruz.
+              if (execResult?.ok) {
+                dispatch.state = 'Sent';
+                dispatch.dispatchedAt = new Date();
+                dispatch.providerMessageId = execResult.providerMessageId ?? null;
+              } else {
+                dispatch.state = 'Failed';
+                dispatch.failureReason = execResult?.error?.message ?? 'send_failed';
+              }
+              dispatch.attempts = (dispatch.attempts ?? 0) + 1;
+            } catch (execErr) {
+              // Executor wrapped olarak {ok:false} döndürür; throw etmez
+              // ama defansif: caller'a yansıma yok.
+              console.error('[notification:emit] outbound executor unexpected', execErr?.message);
+            }
+          }
         } catch (err) {
           // P2002 = unique violation on idempotencyKey → suppressed dedup.
           if (err?.code === 'P2002') {

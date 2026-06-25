@@ -10,6 +10,7 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "mail:probe": "node --env-file-if-exists=.env scripts/mail-probe.js",
     "mail:inbound-test": "node --env-file-if-exists=.env scripts/inbound-mail-test.js",
+    "mail:outbound-test": "node --env-file-if-exists=.env scripts/outbound-dispatch-test.js",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "postinstall": "prisma generate",
