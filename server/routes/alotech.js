@@ -3,6 +3,11 @@ import { verifyJwt } from '../db/auth.js';
 import { getSessionKey, getCachedSession } from '../integrations/alotech/session.js';
 import { click2Call } from '../integrations/alotech/click2.js';
 import { v1Fetch } from '../integrations/alotech/v1.js';
+import { isAlotechConfigured, logAlotechConfigOnce } from '../integrations/alotech/config.js';
+
+// Boot anında BİR KEZ log (eksik env varsa); route handler'ı tarafından
+// (lazy) ilk istekte tetiklenir → server.js'ye dokunmadan tek yerde durur.
+logAlotechConfigOnce();
 
 /**
  * AloTech entegrasyon router'ı — /api/integrations/alotech
@@ -14,6 +19,22 @@ import { v1Fetch } from '../integrations/alotech/v1.js';
  * kadar test için ALOTECH_DEV_AGENT_EMAIL env fallback'i kullanılır.
  */
 const router = Router();
+
+// Graceful degrade: ALOTECH_* env'ler yoksa 500 ATMA;
+// tüm endpoint'ler { configured: false } döner → frontend widget'ı poll'u
+// durdurur + toast göstermez. Tek yerde guard; her endpoint başına ekstra
+// kod gerekmez. configured=true iken davranış AYNEN korunur.
+//
+// NOT: Bu guard verifyJwt'tan ÖNCE çalışır — disabled response'unda
+// hiçbir AloTech data açığa çıkmaz; sadece bir flag. Auth katmanı
+// gereksiz yere agent başına 401 üretmiyor; widget tek seferde "disable"
+// kararı verebilsin.
+router.use((req, res, next) => {
+  if (isAlotechConfigured()) return next();
+  // 200 → apiFetch hata akışına girmez; client { configured: false } okur.
+  return res.json({ configured: false });
+});
+
 router.use(verifyJwt);
 
 const HOST = process.env.ALOTECH_TENANT || ''; // param-univera.alo-tech.com

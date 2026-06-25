@@ -46,7 +46,8 @@
     "smoke:admin-create-phase5c": "node --env-file=.env scripts/smoke-admin-create-phase5c.js",
     "smoke:account-id-standard": "node --env-file=.env scripts/smoke-account-id-standardization.js",
     "smoke:account-phone-slots-import": "node --env-file=.env scripts/smoke-account-phone-slots-import.js",
-    "smoke:import-integrity": "node --env-file=.env scripts/smoke-import-integrity-phone-tax.js"
+    "smoke:import-integrity": "node --env-file=.env scripts/smoke-import-integrity-phone-tax.js",
+    "smoke:alotech-graceful": "node scripts/smoke-alotech-graceful-degrade.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

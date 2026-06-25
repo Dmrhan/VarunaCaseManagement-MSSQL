@@ -37,6 +37,9 @@ export function SoftphoneWidget() {
 
   // E-posta girilmemişse widget'ı GÖSTER (agent girsin). Girilmiş + idle ise gizle.
   if (status === 'idle' && agentEmail) return null;
+  // Backend AloTech env'leri eksik (configured:false) → widget sessizce
+  // gizli; agent zorunlu olmayan entegrasyonla karşılaşmaz.
+  if (status === 'disabled') return null;
 
   const isEmbedded = mode === 'embedded';
   const needsEmail = !agentEmail || editingEmail;

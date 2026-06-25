@@ -94,9 +94,23 @@ export interface AgentStatus {
   agentName: string | null;
 }
 
+// Backend graceful degrade — env'ler eksikse `{ configured: false }`.
+// Frontend bu shape'i type olarak görebilsin (poll durdurma + sessiz disable).
+export interface AlotechDisabledResponse { configured: false }
+
+export function isAlotechDisabled(
+  r: unknown,
+): r is AlotechDisabledResponse {
+  return !!r && typeof r === 'object' && (r as any).configured === false;
+}
+
 /** Giriş yapan agent'ın AloTech müsaitlik durumu. */
-export async function fetchAgentStatus(): Promise<AgentStatus | undefined> {
-  return apiFetch<AgentStatus>('/api/integrations/alotech/agent-status', { headers: alotechHeaders() }, 'Agent durumu');
+export async function fetchAgentStatus(): Promise<AgentStatus | AlotechDisabledResponse | undefined> {
+  return apiFetch<AgentStatus | AlotechDisabledResponse>(
+    '/api/integrations/alotech/agent-status',
+    { headers: alotechHeaders() },
+    'Agent durumu',
+  );
 }
 
 /** Geçerli agent durumları (AloTech v1). */
@@ -133,7 +147,9 @@ export interface ActiveCallInfo {
 }
 
 /** Agent'ın o anki aktif/çalan çağrıları + gerçek müsaitlik durumu (polling). */
-export async function fetchActiveCall(): Promise<{ calls: ActiveCallInfo[]; agentStatus: string | null } | undefined> {
+export async function fetchActiveCall(): Promise<
+  { calls: ActiveCallInfo[]; agentStatus: string | null } | AlotechDisabledResponse | undefined
+> {
   return apiFetch('/api/integrations/alotech/active-call', { headers: alotechHeaders() }, 'Aktif çağrı');
 }
 
@@ -147,13 +163,17 @@ export async function hangupCall(): Promise<{ ok: boolean } | undefined> {
 }
 
 /** Backend'den giriş yapan kullanıcının AloTech session key'ini alır. */
-export async function fetchSoftphoneSession(): Promise<SoftphoneSession> {
-  const data = await apiFetch<SoftphoneSession>(
+export async function fetchSoftphoneSession(): Promise<SoftphoneSession | AlotechDisabledResponse> {
+  const data = await apiFetch<SoftphoneSession | AlotechDisabledResponse>(
     '/api/integrations/alotech/session',
     { headers: alotechHeaders() },
     'Softphone oturumu',
   );
-  if (!data?.session) throw new Error('AloTech session alınamadı');
+  // Backend env eksik → disabled (caller status='disabled' set eder).
+  if (isAlotechDisabled(data)) return data;
+  if (!data || !(data as SoftphoneSession).session) {
+    throw new Error('AloTech session alınamadı');
+  }
   return data;
 }
 
