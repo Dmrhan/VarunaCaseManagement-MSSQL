@@ -14,6 +14,7 @@ import smartTicketRouter from './routes/smartTicket.js';
 import importsRouter from './routes/imports.js';
 import approvalsRouter from './routes/approvals.js';
 import actionCenterRouter from './routes/action-center.js';
+import authorizationRouter from './routes/authorization.js';
 import kbV1Router from './routes/kbV1.js';
 import reportsRouter from './routes/reports.js';
 import reportViewsRouter from './routes/reportViews.js';
@@ -99,6 +100,7 @@ app.use('/api/external-kb', externalKbRouter);
 app.use('/api/smart-ticket', smartTicketRouter);
 app.use('/api/approvals', approvalsRouter);
 app.use('/api/action-center', actionCenterRouter);
+app.use('/api/authorization', authorizationRouter);
 // Faz KB — ticket-analiz'in KB/RAG çekirdeği in-process (Bearer API key auth;
 // ExternalKbSetting.baseUrl bu sürecin kendisine işaret eder).
 app.use('/api/v1', kbV1Router);
