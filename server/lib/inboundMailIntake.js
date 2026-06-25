@@ -208,16 +208,83 @@ function extractCaseTokenFromSubject(subject) {
 /**
  * Mail metnini case description'a normalize et. text > html (M2'de basit;
  * M4 daha gelişmiş HTML→text dönüşümü ve sanitization).
+ *
+ * M2.2 (3) — Signature/footer + quoted reply blokları ayıkla. Temiz gövde
+ * hem case açıklamasına hem de eşleştirme motoruna gider — signature
+ * telefonu/email'i gürültü olarak match etmesin diye.
  */
 function buildDescription(parsed) {
   const text = parsed?.text?.trim();
-  if (text) return text;
+  if (text) return stripSignatureAndQuotes(text);
   // M2 minimum HTML stripping — gerçek HTML→text M4'te (daha güvenli lib).
   const html = parsed?.html?.trim();
   if (html) {
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const stripped = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return stripSignatureAndQuotes(stripped);
   }
   return '(boş gövde)';
+}
+
+/**
+ * M2.2 (3) — Signature/footer + quoted reply strip.
+ *
+ * Kuralları (defensive; yanlış pozitif minimal tutuluyor):
+ *   - RFC 3676 imza ayıracı: "-- \n" (tire-tire-boşluk-newline) → sonrası
+ *     KESİLİR (imza bloğu).
+ *   - Common reply markers ile başlayan satırdan itibaren KESİLİR:
+ *       "On <date>, <person> wrote:" (TR/EN)
+ *       "----- Original Message -----"
+ *       "From: ...", "Sent: ...", "Subject: ..." inline alıntı header'ları
+ *       "<isim> şu tarihte yazdı:"
+ *   - "> " ile başlayan satırlar (mail quote prefix) ATILIR.
+ *
+ * Çıktı: temiz gövde. Boş kalırsa orijinal kısaltılmış parça döner
+ * (gövde tamamen quote'tan oluşuyorsa görsel bilgi kaybı yok).
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function stripSignatureAndQuotes(raw) {
+  if (!raw || typeof raw !== 'string') return raw ?? '';
+
+  // 1) RFC 3676 imza ayıracı: "\n-- \n" veya satır olarak "-- "
+  // Çoklu sürüm: bazı client'lar trailing whitespace eklemez; her ikisini destekle.
+  const sigPatterns = [
+    /\n--\s*\n[\s\S]*$/,    // multi-line signature blok
+    /\n--\s*$/,             // signature ayıracı dosya sonunda
+  ];
+  let cleaned = raw;
+  for (const re of sigPatterns) {
+    cleaned = cleaned.replace(re, '');
+  }
+
+  // 2) Reply marker'larından itibaren kes
+  const replyMarkers = [
+    /\n\s*-+\s*Original Message\s*-+/i,
+    /\n\s*On\s+.{1,80}\s+wrote:\s*$/im,
+    /\n\s*.{1,80}\s+şu tarihte\s+.{1,30}\s+yazdı:/i,
+    /\n\s*From:\s+.{1,200}\nSent:\s+/i, // inline forwarded header
+  ];
+  for (const re of replyMarkers) {
+    const m = cleaned.match(re);
+    if (m && m.index !== undefined) {
+      cleaned = cleaned.slice(0, m.index);
+      break;
+    }
+  }
+
+  // 3) Satır satır: "> " ile başlayanları at (quote prefix)
+  cleaned = cleaned
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*>+\s/.test(line))
+    .join('\n');
+
+  const trimmed = cleaned.trim();
+  if (trimmed.length === 0) {
+    // Tamamen quoted'sa orijinalin başını döndür (kayıp önle)
+    return raw.trim().slice(0, 500);
+  }
+  return trimmed;
 }
 
 /**
