@@ -387,6 +387,7 @@ router.get(
       statuses: f.statuses ? f.statuses.split(',') : undefined,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
+      teamId: f.teamId || undefined,
     };
     const HARD_MAX_PAGE_SIZE = 200;
     const requestedPageSize = Number(f.pageSize ?? 25);
