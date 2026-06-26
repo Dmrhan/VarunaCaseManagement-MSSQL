@@ -426,10 +426,11 @@ async function runScenario3(refCaseNumber) {
   expect('action=appended', intakeRes.action, 'appended');
   expect(`token = ${refCaseNumber}`, intakeRes.token, refCaseNumber);
 
-  // CaseNote oluştu mu?
+  // M6.1 — Inbound artık CaseNote'a değil CaseEmail'a yazılır. Eski test
+  // CaseNote sayısı bekliyordu; yeni davranış CaseEmail.
   if (intakeRes.caseId) {
-    const noteCount = await prisma.caseNote.count({ where: { caseId: intakeRes.caseId } });
-    expectTruthy(`CaseNote en az 1 (count=${noteCount})`, noteCount >= 1);
+    const emailCount = await prisma.caseEmail.count({ where: { caseId: intakeRes.caseId } });
+    expectTruthy(`CaseEmail en az 1 (M6.1 reply count=${emailCount})`, emailCount >= 1);
   }
 }
 

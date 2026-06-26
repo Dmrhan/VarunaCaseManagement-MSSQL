@@ -22,6 +22,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  AtSign,
   FileText,
   History as HistoryIcon,
   Inbox,
@@ -74,6 +75,7 @@ import { TransferModal } from './components/TransferModal';
 import { SnoozeModal } from './components/SnoozeModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
 import { NoteAvatar, NotesTab } from './components/CaseNotes';
+import { CommunicationTab } from './components/CommunicationTab';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
@@ -131,6 +133,9 @@ type TabKey =
   | 'files'
   | 'callLogs'
   | 'links'
+  // M6.1 — Vaka İçi E-Posta thread sekmesi (gelen + giden + otomatik
+  // dispatch mailleri). Composer M6.2'de eklenir.
+  | 'communication'
   // WR-Smart-Ticket UX fix 1 — "Çözüm Adımları" artık Detay body'sinde
   // değil, kendi tab'inde. TÜM vakalar için görünür (Smart Ticket gate yok);
   // L2/L3 ve normal vakalar için ikincil troubleshooting yüzeyi.
@@ -1045,6 +1050,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               label="Bağlantılar"
               onClick={() => setTab('links')}
             />
+            <TabButton
+              active={tab === 'communication'}
+              icon={<AtSign size={14} />}
+              label="İletişim"
+              onClick={() => setTab('communication')}
+            />
             {(item.caseType === 'ProactiveTracking' || item.caseType === 'Churn') && (
               <TabButton
                 active={tab === 'callLogs'}
@@ -1111,6 +1122,9 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
             )}
             {tab === 'links' && (
               <LinksTab item={item} onShowCase={navigateToCase} />
+            )}
+            {tab === 'communication' && (
+              <CommunicationTab caseId={item.id} />
             )}
             {tab === 'callLogs' && (
               <CallLogsTab
