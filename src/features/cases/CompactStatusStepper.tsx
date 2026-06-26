@@ -277,14 +277,22 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
           const isCurrent = target === item.status;
           const isAllowed = allowed.includes(target);
           // 4 GÖRSEL DURUM — kullanıcı dilinde net ayrılır:
-          //   • PAST       (geçmiş)        → idx < currentIdx, lineer geçmiş
+          //   • PAST       (geçmiş)        → lineer geçmiş VE allowed DEĞİL
           //   • CURRENT    (mevcut)        → item.status (BURADASIN)
           //   • REACHABLE  (ulaşılabilir)  → STATUS_TRANSITIONS allowed
           //   • LOCKED     (ulaşılamaz)    → diğer hepsi
           // Etiket dili: PAST/CURRENT/LOCKED → durum adı (STATUS_NOUN_LABEL)
           //              REACHABLE         → aksiyon fiili (STATUS_ACTION_LABEL)
-          const isPast = idx < currentIdx;
+          //
+          // Codex review fix — REACHABLE > PAST öncelik. Allowed
+          // back-transition'larda hedef idx < currentIdx olabilir (örn:
+          // Eskalasyon → İncelemede, 3rdPartyBekleniyor → İncelemede,
+          // YenidenAcildi → İncelemede). Önce isPast yeşil ✓ + LOCKED
+          // semantik çıkarıyordu → tıklanabilir geri-dönüş CTA "tamamlanmış"
+          // gibi görünüyordu. Doğru: allowed back-transition REACHABLE
+          // kalmalı; sadece allowed DEĞİL olan geçmiş düğümler PAST sayılır.
           const interactive = isAllowed && !isCurrent;
+          const isPast = idx < currentIdx && !isAllowed;
           const isBusy = directSubmitting === target;
           const needsReason = STATUS_REQUIRES_REASON[target];
           const actionLabel = STATUS_ACTION_LABEL[target];
