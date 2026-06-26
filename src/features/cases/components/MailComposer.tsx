@@ -76,7 +76,35 @@ export function MailComposer({
   const [showCc, setShowCc] = useState(cc.length > 0);
   const [showBcc, setShowBcc] = useState(bcc.length > 0);
   const [subject, setSubject] = useState<string>(initialReplyContext?.subject ?? '');
-  const [bodyHtml, setBodyHtml] = useState<string>(initialSignatureHtml ? `<p></p>${initialSignatureHtml}` : '<p></p>');
+  // Composer açıldıktan SONRA gelen imza için (slow network):
+  // useState initializer prop güncellenince yeniden çağrılmaz; o yüzden
+  // baseline body'yi ref'te tutarız ve effect ile imza bir kez append edilir.
+  // Kullanıcı yazmaya başladıysa (body baseline'dan değiştiyse) ASLA
+  // dokunmayız — composer içeriğini ezmemek için.
+  // Codex review fix (M6.2b): late-arriving signature.
+  const initialBaselineBodyRef = useRef<string>(
+    initialSignatureHtml ? `<p></p>${initialSignatureHtml}` : '<p></p>',
+  );
+  const [bodyHtml, setBodyHtml] = useState<string>(initialBaselineBodyRef.current);
+  const signatureAppendedRef = useRef<boolean>(!!initialSignatureHtml);
+
+  useEffect(() => {
+    if (signatureAppendedRef.current) return;
+    if (!initialSignatureHtml) return;
+    setBodyHtml((cur) => {
+      // Body hala baseline ('<p></p>') durumunda mı? → append güvenli.
+      if (cur === initialBaselineBodyRef.current) {
+        const next = `<p></p>${initialSignatureHtml}`;
+        initialBaselineBodyRef.current = next;
+        signatureAppendedRef.current = true;
+        return next;
+      }
+      // Kullanıcı yazmaya başlamış — dokunma. Yine de "yine deneme" diye
+      // flag set et.
+      signatureAppendedRef.current = true;
+      return cur;
+    });
+  }, [initialSignatureHtml]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
