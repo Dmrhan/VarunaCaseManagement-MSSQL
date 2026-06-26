@@ -55,17 +55,17 @@ const ENFORCEMENT_STATUS: Record<
   resource: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Kayıt işlemi kuralları seçili vaka notu/dosya API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı guard olarak çalışır.',
+    description: 'Kayıt işlemi kuralları seçili vaka notu/dosya API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı kontrol olarak çalışır.',
   },
   field: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Alan kuralları case.close required kontrolünde ve Case Detail Detay sekmesinde VITE_AUTHORIZATION_FIELD_UI_ENFORCEMENT_ENABLED=true iken visible/readable/editable/masked pilotu olarak çalışır.',
+    description: 'Alan kuralları kapanışta zorunlu alan kontrolünde ve Case Detail Detay sekmesinde VITE_AUTHORIZATION_FIELD_UI_ENFORCEMENT_ENABLED=true iken görünürlük/okunurluk/düzenleme/maskeleme pilotu olarak çalışır.',
   },
   securityFilter: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Güvenlik filtresi kuralları vaka listeleme uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken daraltıcı kayıt filtresi olarak pilot çalışır.',
+    description: 'Güvenlik filtresi kuralları vaka listeleme uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken kayıt kapsamını daraltan pilot filtre olarak çalışır.',
   },
 };
 
@@ -750,16 +750,16 @@ function EnforcementStatusNotice() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">Uygulama durumu:</span>
         <Badge tint="emerald">Menü canlı</Badge>
-        <Badge tint="violet">CRUD pilot</Badge>
-        <Badge tint="violet">Alan zorunluluğu pilot</Badge>
+        <Badge tint="violet">Kayıt işlemi pilot</Badge>
+        <Badge tint="violet">Alan yetkisi pilot</Badge>
         <Badge tint="violet">Güvenlik filtresi pilot</Badge>
       </div>
       <p className="mt-1 text-amber-800">
-        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi kuralları seçili
-        vaka notu/dosya uçlarında flag ile pilot çalışır. Alan zorunluluğu case.close kapsamındaki seçili kapanış
-        alanlarında flag ile pilot çalışır; Case Detail Detay sekmesinde görünürlük/maskeleme/editlenebilirlik ayrı
-        frontend flag ile pilot uygulanır. Güvenlik filtresi kuralları vaka listesi ve etiket doğrulama liste/export
-        uçlarında flag ile daraltıcı kayıt filtresi olarak pilot çalışır.
+        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır ve mevcut rol yetkilerini daraltır.
+        Kayıt işlemi kuralları seçili vaka notu/dosya uçlarında flag ile pilot çalışır. Alan yetkisi kuralları
+        kapanışta zorunlu alan kontrolünde ve Case Detail Detay sekmesinde görünürlük/maskeleme/düzenleme pilotunda
+        kullanılır. Güvenlik filtresi kuralları vaka listesi ve etiket doğrulama liste/export uçlarında flag ile
+        daraltıcı kayıt filtresi olarak pilot çalışır.
       </p>
     </div>
   );

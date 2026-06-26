@@ -89,7 +89,7 @@ expect('4.2 allow policy cannot widen baseline-denied attachment delete', explai
   baselineAllowed: false,
 }).reason, 'baseline_denied');
 
-expect('5.1 admin page marks CRUD pilot', /CRUD pilot/.test(adminPage), true);
+expect('5.1 admin page marks resource action pilot', /Kayıt işlemi pilot/.test(adminPage), true);
 expect('5.2 admin page documents selected note/file pilot endpoints', /vaka notu\/dosya uçlarında flag ile pilot çalışır/.test(adminPage), true);
 expect('5.3 resource enforcement env documented', /AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('5.4 env docs state allow cannot widen', /Policy allow mevcut role\/backend guard'larını GENİŞLETMEZ/.test(envExample), true);

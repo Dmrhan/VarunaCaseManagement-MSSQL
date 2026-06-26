@@ -123,8 +123,8 @@ expect('3.6 close candidates include Smart Ticket closure fields', /rootCauseGro
 expect('3.7 cancel candidates include cancellationReason', /nextStatus === 'İptal Edildi'[\s\S]*cancellationReason/.test(casesRoute), true);
 expect('3.8 field pilot uses case.close scope', /scope: 'case\.close'/.test(casesRoute), true);
 
-expect('4.1 admin page marks field as pilot', /Alan zorunluluğu pilot/.test(adminPage), true);
-expect('4.2 admin page documents case.close pilot', /case\.close kapsamındaki seçili kapanış/.test(adminPage), true);
+expect('4.1 admin page marks field authorization as pilot', /Alan yetkisi pilot/.test(adminPage), true);
+expect('4.2 admin page documents close required-field pilot', /kapanışta zorunlu alan kontrolünde/.test(adminPage), true);
 expect('4.3 env documents field enforcement flag', /AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('4.4 env documents close field candidates', /resolutionNote, cancellationReason ve Smart Ticket closure alanları/.test(envExample), true);
 expect('4.5 smoke script registered', pkg.scripts['smoke:authorization-field-enforcement'], 'node scripts/smoke-authorization-field-enforcement-pilot-static.js');
