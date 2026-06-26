@@ -167,6 +167,7 @@ export async function filterAccountCompanyIdsByResourcePolicy(req, {
   throwIfEmpty = true,
 }) {
   const allowedCompanyIds = allowedCompanyIdsFor(req);
+  if (!isAuthorizationResourceEnforcementEnabled()) return allowedCompanyIds;
   const companyIds = await accountPolicyCompanyIds(accountId, allowedCompanyIds);
   if (companyIds.length === 0) {
     throw new AuthorizationRuntimeError('Müşteri bulunamadı.', 404, 'account_not_found');

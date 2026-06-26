@@ -136,6 +136,7 @@ expect('6.4 shared route guard supports account-scoped policy checks', /export a
 expect('6.5 account helper treats shared account defensively', /Legacy shared account[\s\S]*for \(const companyId of allowedCompanyIds\)/.test(routeGuards), true);
 expect('6.6 account helper does not return after first permitted tenant', /let deniedCount = 0[\s\S]*deniedCount \+= 1[\s\S]*if \(deniedCount > 0\)/.test(routeGuards), true);
 expect('6.7 account helper exposes policy-scoped account company ids', /export async function filterAccountCompanyIdsByResourcePolicy/.test(routeGuards), true);
+expect('6.8 account scoped helper no-ops before account lookup when flag disabled', /export async function filterAccountCompanyIdsByResourcePolicy[\s\S]*const allowedCompanyIds = allowedCompanyIdsFor\(req\);\s*if \(!isAuthorizationResourceEnforcementEnabled\(\)\) return allowedCompanyIds;\s*const companyIds = await accountPolicyCompanyIds/.test(routeGuards), true);
 
 expect('7.1 accounts route imports authz route guards', /authorizationRouteGuards/.test(accountsRoute), true);
 expect('7.2 account list keeps explicit company filter policy-scoped', /filterAllowedCompanyIdsByResourcePolicy\(req, \{\s*resourceKey: 'account',\s*action: 'read',\s*throwIfEmpty: true,\s*companyIds: \[companyId\]/.test(accountsRoute), true);
