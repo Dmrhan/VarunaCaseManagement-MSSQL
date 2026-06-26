@@ -83,6 +83,7 @@ import { NoteAvatar, NotesTab } from './components/CaseNotes';
 const CommunicationTab = lazy(() =>
   import('./components/CommunicationTab').then((m) => ({ default: m.CommunicationTab })),
 );
+import { LazyTabBoundary } from './components/LazyTabBoundary';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
@@ -1131,16 +1132,22 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <LinksTab item={item} onShowCase={navigateToCase} />
             )}
             {tab === 'communication' && (
-              <Suspense
-                fallback={
-                  <div className="space-y-2 p-4">
-                    <div className="h-6 w-2/5 animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
-                    <div className="h-32 w-full animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
-                  </div>
-                }
-              >
-                <CommunicationTab item={item} />
-              </Suspense>
+              // Codex review fix — LazyTabBoundary lazy chunk REJECT'ini
+              // yakalar (network fail / stale index.js sonrası kaldırılmış
+              // chunk request'i). Aksi halde hata yukarı fırlar ve case
+              // sayfasını çökertir (uygulamada üst error boundary yok).
+              <LazyTabBoundary label="İletişim sekmesi yüklenemedi.">
+                <Suspense
+                  fallback={
+                    <div className="space-y-2 p-4">
+                      <div className="h-6 w-2/5 animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
+                      <div className="h-32 w-full animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
+                    </div>
+                  }
+                >
+                  <CommunicationTab item={item} />
+                </Suspense>
+              </LazyTabBoundary>
             )}
             {tab === 'callLogs' && (
               <CallLogsTab
