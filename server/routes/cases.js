@@ -1,7 +1,9 @@
 import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { caseEmailRepository } from '../db/caseEmailRepository.js';
+import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { prisma } from '../db/client.js';
-import { verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
+import { signStorageToken, verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
   solutionStepRepository,
   SolutionStepError,
@@ -2069,6 +2071,136 @@ router.post(
       req.user.allowedCompanyIds,
     );
     res.json(result);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// Mail M6.1 — Vaka İçi E-Posta thread (read-only)
+//
+// Plan referansı: docs/M6-email-in-case-plan.md Bölüm 9 (route'lar).
+// SCOPE: caseRepository.get ile önce vaka erişim/varlık doğrulanır,
+// sonra caseEmailRepository scope-aware listForCase. Composer (M6.2)
+// ayrı PR.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/cases/:id/emails — vakanın CaseEmail thread'i.
+ * Response: { items: CaseEmail[] }
+ *
+ * Codex review fix — assertCaseSecurityFilterAccess güvenlik filtresi
+ * (AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken) UYGULANIR.
+ * Aksi halde kullanıcı allowedCompanyIds içinde olan ama security
+ * filter ile gizlenen vakanın mail içeriklerini /api/cases/:id/emails
+ * üzerinden okuyabilir (vaka detayı 403/404 dönerken thread sızar).
+ */
+router.get(
+  '/:id/emails',
+  asyncRoute(async (req, res) => {
+    // Scope + varlık kontrolü (assertCaseInScopeForRead patterni reuse).
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // Codex P1 — Security filter access guard (mevcut case detay
+    // route'ları ile aynı patern).
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const items = await caseEmailRepository.listForCase(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json({ items });
+  }),
+);
+
+/**
+ * GET /api/cases/:id/emails/:emailId/attachments/:attachmentId/download
+ * — Mail eki indirme — short-lived signed token döner. Token tüketim
+ * /:id/files/:fileId/raw deseniyle uyumlu (signStorageToken / 60sn).
+ *
+ * Codex review fix — Attachment-case binding + security filter check.
+ * Önce: att.caseId req.params.id farklı olsa bile token att.caseId'ye
+ * yazılıyordu → kullanıcı kendi erişim sahibi olduğu bir vaka ID'sini
+ * URL'e koyup başka vakanın eki için token üretebiliyordu.
+ * Şimdi: att.caseId === req.params.id zorunlu + security filter check
+ * doğru caseId üzerinden.
+ */
+router.get(
+  '/:id/emails/:emailId/attachments/:attachmentId/download',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // Codex P1 — security filter guard (caseDetay rotalarıyla aynı).
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const att = await caseEmailRepository.getAttachmentForRaw(
+      req.params.emailId,
+      req.params.attachmentId,
+      { allowedCompanyIds: req.user.allowedCompanyIds },
+    );
+    if (!att) return res.status(404).json({ error: 'Ek bulunamadı' });
+    // Codex P1 — URL'deki :id ile gerçek attachment'ın caseId'si
+    // EŞLEŞMELİ. Aksi halde başka vakanın eki için token mintlenebilir
+    // (cross-case leak). Mismatch → 404.
+    if (att.caseId !== req.params.id) {
+      return res.status(404).json({ error: 'Ek bulunamadı' });
+    }
+    // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
+    // ile aynı şema; M6.2'de composer için ortak indirme path'i.
+    const token = signStorageToken(
+      {
+        typ: 'download',
+        caseId: att.caseId,
+        fileId: att.id,
+        path: att.storageKey,
+        fileName: att.fileName,
+      },
+      60,
+    );
+    res.json({
+      url: `/api/cases/${att.caseId}/files/${att.id}/raw?token=${encodeURIComponent(token)}`,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      fileSize: att.fileSize,
+    });
+  }),
+);
+
+/**
+ * Mail M5-extension — GET /api/cases/:id/from-aliases
+ *
+ * Composer (M6.2) From dropdown lookup. Vaka companyId scope'unda aktif
+ * FromAlias listesi döner. Mevcut M6.1 /:id/emails desenleriyle aynı
+ * scope guard (caseRepository.get + assertCaseSecurityFilterAccess).
+ *
+ * Response: { items: [{ id, address, displayName, isDefault }, ...] }
+ *
+ * Default seçilen ilk satır; composer dropdown 1 satırsa otomatik gizli
+ * + seçili (M6.2 davranışı).
+ */
+router.get(
+  '/:id/from-aliases',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const items = await externalMailFromAliasRepo.listActive(c.companyId);
+    // Composer dropdown'a sade response — admin alanlarını filtrele.
+    res.json({
+      items: items.map((a) => ({
+        id: a.id,
+        address: a.address,
+        displayName: a.displayName,
+        isDefault: a.isDefault,
+      })),
+    });
   }),
 );
 

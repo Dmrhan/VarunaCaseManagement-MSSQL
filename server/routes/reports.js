@@ -16,6 +16,8 @@ import { Router } from 'express';
 import * as XLSX from 'xlsx';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { prisma } from '../db/client.js';
+import { AuthorizationRuntimeError } from '../lib/authorizationRuntime.js';
+import { filterAllowedCompanyIdsByResourcePolicy } from '../lib/authorizationRouteGuards.js';
 import {
   REPORT_COLUMNS,
   REPORT_COLUMN_CATEGORIES,
@@ -96,13 +98,31 @@ async function loadAggregatesIfNeeded(columns, items) {
 const PREVIEW_MAX_PAGE_SIZE = 200;
 const EXPORT_MAX_ROWS = 5000;
 
+function handleAuthorizationRuntimeError(res, err) {
+  if (err instanceof AuthorizationRuntimeError) {
+    res.status(err.status ?? 403).json({
+      error: err.code ?? 'authorization_forbidden',
+      message: err.message,
+    });
+    return true;
+  }
+  return false;
+}
+
 /**
  * GET /api/reports/cases/columns
  * Tüm kolonları ve kategori etiketlerini döner. Yetkisiz column gizleme
  * (Phase 2'de privacyTag === 'pii' role gate) henüz yok — Phase 1 kolonları
  * KVKK güvenli alt küme (customerContact* ve Account VKN/TCKN/phone hariç).
  */
-router.get('/cases/columns', (req, res) => {
+router.get('/cases/columns', async (req, res) => {
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/columns]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   // Phase 2D — PII kolonları rol yetkisi olmayan kullanıcıya HİÇ
   // listelenmez (UI'da görünmez). Tenant scope zaten allowedCompanyIds ile
   // garanti edildi; bu ek katman rapor üreten kişinin "bilmek gereği" ile
@@ -129,6 +149,13 @@ router.get('/cases/columns', (req, res) => {
  */
 router.post('/cases/preview', async (req, res) => {
   const body = req.body ?? {};
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/preview][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   const requestedIds = Array.isArray(body.columns) ? body.columns : [];
   if (requestedIds.length === 0) {
     return res.status(400).json({
@@ -165,7 +192,7 @@ router.post('/cases/preview', async (req, res) => {
     });
   }
 
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -221,6 +248,13 @@ router.post('/cases/preview', async (req, res) => {
  */
 router.post('/cases/export', async (req, res) => {
   const body = req.body ?? {};
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/export][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   const requestedIds = Array.isArray(body.columns) ? body.columns : [];
   if (requestedIds.length === 0) {
     return res.status(400).json({ error: 'columns_required', message: 'En az bir kolon seçilmeli.' });
@@ -247,7 +281,7 @@ router.post('/cases/export', async (req, res) => {
     });
   }
 
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     // Boş scope → boş Excel üret. Kullanıcıya "izinli şirket yok" sinyali
@@ -315,6 +349,13 @@ const PIVOT_MAX_ROWS = 5000;
 
 router.post('/cases/pivot', async (req, res) => {
   const body = req.body ?? {};
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/pivot][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   const rowColumnId = typeof body.rowColumnId === 'string' ? body.rowColumnId : '';
   const colColumnId = typeof body.colColumnId === 'string' ? body.colColumnId : '';
   const measure = body.measure ?? {};
@@ -378,7 +419,7 @@ router.post('/cases/pivot', async (req, res) => {
     });
   }
 
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -483,6 +524,13 @@ const DRILL_DEFAULT_COLUMNS = [
 
 router.post('/cases/pivot/drill', async (req, res) => {
   const body = req.body ?? {};
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/pivot/drill][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   const rowColumnId = typeof body.rowColumnId === 'string' ? body.rowColumnId : '';
   const colColumnId = typeof body.colColumnId === 'string' ? body.colColumnId : '';
   const rowValue = typeof body.rowValue === 'string' ? body.rowValue : '';
@@ -512,7 +560,7 @@ router.post('/cases/pivot/drill', async (req, res) => {
     });
   }
 
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'read' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return res.json({
@@ -569,6 +617,13 @@ router.post('/cases/pivot/drill', async (req, res) => {
 // satırı. Sheet "Bilgi": timestamp + pivot config + filtre özeti.
 
 router.post('/cases/pivot/export', async (req, res) => {
+  try {
+    await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export', throwIfEmpty: true });
+  } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
+    console.error('[reports/cases/pivot/export][authz]', err);
+    return res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
+  }
   // pivot endpoint'iyle aynı validation; daha sade dupe etmek yerine bir
   // alt-route helper'ı çıkarmadık (Phase 3.2 minimal; ileride refactor edilebilir).
   const body = req.body ?? {};
@@ -609,7 +664,7 @@ router.post('/cases/pivot/export', async (req, res) => {
       forbiddenIds: roleCheck.forbidden,
     });
   }
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
+  const allowed = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.caseStudio', action: 'export' });
   const { where, scopeValid } = buildReportWhere(body.filters, allowed);
   if (!scopeValid) {
     return sendPivotXlsx(res, { row: rowCol, col: colCol, measure: { fn: measureFn, columnLabel: measureCol?.label }, piv: { rowLabels: [], colLabels: [], matrix: {}, rowTotals: {}, colTotals: {}, grandTotal: 0 } }, body.filters);

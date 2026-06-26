@@ -37,9 +37,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { caseRepository } from '../db/caseRepository.js';
+import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { saveObject } from '../db/storage.js';
 import { isAcceptedUpload } from './uploadWhitelist.js';
+import { sanitizeIncomingEmailHtml } from './htmlSanitizer.js';
 
 const RAW_SOURCE = 'inbound-mail-intake';
 
@@ -402,55 +404,73 @@ export async function intakeInboundEmail({
   // ─── A) THREAD eşleşmesi (subject token) ─────────────────────────
   const token = extractCaseTokenFromSubject(parsed.subject);
   if (token) {
-    // Mevcut vakaya not olarak ekle — caseNumber ile lookup.
+    // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
-      // caseNumber → case bul (lightweight; raw Prisma değil repo helper'ı
-      // ararız ama olmadığından inline lookup).
       const { prisma } = await import('../db/client.js');
       const existing = await prisma.case.findFirst({
         where: { caseNumber: token, companyId },
-        select: { id: true },
+        select: { id: true, status: true, caseNumber: true },
       });
       if (existing) {
-        const noteContent = [
-          `**E-posta yanıtı — ${parsed.from.email}**`,
-          parsed.subject ? `Konu: ${parsed.subject}` : null,
-          '',
-          buildDescription(parsed),
-        ].filter(Boolean).join('\n');
+        // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
+        // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç
+        // (otomatik link YOK; ilişkilendirme mevcut LinksTab ile manuel).
+        // Terminal statüler DB enum (ASCII): 'Cozuldu' + 'IptalEdildi'.
+        // (Prisma `existing.status` ham DB değeri döner — fromDb çağrısı
+        // burada yapılmaz.)
+        // ROLLBACK FLAG (R1): M6_K3_NEW_TICKET_ON_TERMINAL=false → eski
+        // davranışa dön (terminal vakaya da append). Default açık (true).
+        const TERMINAL_STATUSES_DB = new Set(['Cozuldu', 'IptalEdildi']);
+        const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false';
 
-        await caseRepository.addNote(
-          existing.id,
-          {
-            content: noteContent,
-            // Codex P2 fix — NoteVisibility enum PascalCase ('Internal'|'Customer').
-            // lowercase 'internal' UI'de `!== 'Internal'` ile customer-görünür sayılır.
-            visibility: 'Internal',
-            // mailparser çıktısından author ad
-            authorName: parsed.from.name || parsed.from.email,
-          },
-          allowedCompanyIds,
-          null, // mentionedBy — sistem intake için yok
-          actor,
-        );
+        if (TERMINAL_STATUSES_DB.has(existing.status) && k3Enabled) {
+          // Terminal vakaya yanıt: token EŞLEŞTİ ama vaka kapalı →
+          // YENİ vaka açma akışına düş (aşağıda B akışı çalışır).
+          // Eski vakayla ilişkilendirme YOK — LinksTab'tan agent manuel.
+          // (existing kayıtsayar değil; aşağı düşeriz.)
+        } else {
+          // Açık/Çalışan vakaya append (eski davranış + CaseEmail'a taşıma).
+          const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || buildDescription(parsed));
+          const inboundEmail = await caseEmailRepository.appendInbound({
+            caseId: existing.id,
+            companyId,
+            from: { address: parsed.from.email, name: parsed.from.name ?? null },
+            to: (parsed.to ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+            cc: (parsed.cc ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+            subject: parsed.subject ?? '',
+            bodyHtml: sanitizedHtml,
+            bodyText: parsed.text ?? null,
+            messageId: parsed.messageId ?? null,
+            inReplyTo: parsed.inReplyTo ?? null,
+            refs: Array.isArray(parsed.references)
+              ? parsed.references.join(' ')
+              : (parsed.references ?? null),
+            receivedAt: parsed.date instanceof Date ? parsed.date : new Date(),
+            rawSize: typeof parsed.rawSize === 'number' ? parsed.rawSize : null,
+          });
 
-        // M2.1 — Ekleri ve inline/cid görselleri vakaya bağla.
-        const attachmentsResult = await persistAttachmentsForCase({
-          caseId: existing.id,
-          companyId,
-          attachments: parsed.attachments ?? [],
-          prisma,
-        });
+          // M2.1 — Ekleri ve inline/cid görselleri vakaya bağla.
+          // M6.1 not: CaseAttachment'a yazımı şimdilik koruyoruz (Files
+          // tab'ında erişilebilir kalır); CaseEmailAttachment ayrı yazımı
+          // composer (M6.2) sırasında devreye girer.
+          const attachmentsResult = await persistAttachmentsForCase({
+            caseId: existing.id,
+            companyId,
+            attachments: parsed.attachments ?? [],
+            prisma,
+          });
 
-        return {
-          ok: true,
-          caseId: existing.id,
-          action: 'appended',
-          match: { confidence: null, accountId: null, reasons: [] },
-          token,
-          attachments: attachmentsResult,
-          meta: { intakedAt, rawSource: RAW_SOURCE },
-        };
+          return {
+            ok: true,
+            caseId: existing.id,
+            action: inboundEmail.deduped ? 'appended_deduped' : 'appended',
+            match: { confidence: null, accountId: null, reasons: [] },
+            token,
+            attachments: attachmentsResult,
+            caseEmail: { id: inboundEmail.id, deduped: inboundEmail.deduped },
+            meta: { intakedAt, rawSource: RAW_SOURCE },
+          };
+        }
       }
       // Token var ama eşleşen vaka yok — fall through: yeni vaka aç.
     } catch (err) {
@@ -615,13 +635,44 @@ export async function intakeInboundEmail({
     // Ek persistence fail → vaka yine açık. Mail düşürülmez.
   }
 
+  // M6.1 — Yeni vakanın ilk inbound CaseEmail satırı. Vaka description'a
+  // yazılan ham metnin yanında, "İletişim" tab'ında thread'in başı olarak
+  // bu satır gösterilir. K3 OVERRIDE akışında da bu yol işler (terminal
+  // vakaya gelen yanıt YENİ vaka açar; ilk CaseEmail satırı burada yazılır).
+  // Hata kapsanır; vaka yine açık kalır (Mail düşürülmez).
+  let firstEmail = { id: null, deduped: false };
+  try {
+    const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || description);
+    firstEmail = await caseEmailRepository.appendInbound({
+      caseId: created.id,
+      companyId,
+      from: { address: parsed.from.email, name: parsed.from.name ?? null },
+      to: (parsed.to ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+      cc: (parsed.cc ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+      subject: parsed.subject ?? '',
+      bodyHtml: sanitizedHtml,
+      bodyText: parsed.text ?? null,
+      messageId: parsed.messageId ?? null,
+      inReplyTo: parsed.inReplyTo ?? null,
+      refs: Array.isArray(parsed.references)
+        ? parsed.references.join(' ')
+        : (parsed.references ?? null),
+      receivedAt: parsed.date instanceof Date ? parsed.date : new Date(),
+      rawSize: typeof parsed.rawSize === 'number' ? parsed.rawSize : null,
+    });
+  } catch (err) {
+    // CaseEmail yazımı fail → vaka açık kalır. Loglanır; ek bilgi yok.
+    console.warn('[inbound] caseEmail.appendInbound failed', err?.message ?? err);
+  }
+
   return {
     ok: true,
     caseId: created.id,
     action: 'created',
     match,
-    token: null,
+    token: token ?? null,
     attachments: attachmentsResult,
+    caseEmail: firstEmail,
     meta: { intakedAt, rawSource: RAW_SOURCE },
   };
 }

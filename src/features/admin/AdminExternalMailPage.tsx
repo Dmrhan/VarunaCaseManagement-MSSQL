@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Mail, Save, Info, Lock, CheckCircle2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AtSign, CheckCircle2, Info, Lock, Mail, Plus, Save, Star, Trash2 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/Field';
@@ -10,6 +10,7 @@ import {
   adminService,
   type ExternalMailSetting,
   type ExternalMailSettingInput,
+  type FromAliasItem,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
 
@@ -468,7 +469,195 @@ export function AdminExternalMailPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* M5-extension — Per-company From alias yönetimi */}
+      {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
     </div>
+  );
+}
+
+/**
+ * Mail M5-extension — Per-company FromAlias yönetim component'i.
+ *
+ * AdminExternalMailPage'in alt bölümünde, ana ExternalMailSetting kartından
+ * sonra render edilir. Mevcut tek `fromAddress` field'ı LEGACY/VARSAYILAN
+ * konumda kalır; composer (M6.2) dropdown'u BU listeden beslenir.
+ *
+ * REUSE: adminService.externalMailSettings.aliases CRUD; Card/Button/Field
+ * mevcut design system desenleriyle aynı.
+ */
+function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fallbackFrom: string }) {
+  const [items, setItems] = useState<FromAliasItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newAddress, setNewAddress] = useState('');
+  const [newDisplay, setNewDisplay] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const out = await adminService.externalMailSettings.aliases.list(companyId);
+    setItems(out);
+    setLoading(false);
+  }, [companyId]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  async function handleAdd() {
+    const addr = newAddress.trim();
+    if (!addr) return;
+    setBusy(true);
+    const r = await adminService.externalMailSettings.aliases.create(companyId, {
+      address: addr,
+      displayName: newDisplay.trim() || null,
+      isActive: true,
+      isDefault: items.length === 0, // ilk eklenen otomatik default
+    });
+    setBusy(false);
+    if (r) {
+      toast({ type: 'success', message: 'Adres eklendi.' });
+      setNewAddress('');
+      setNewDisplay('');
+      void reload();
+    }
+  }
+
+  async function handleToggleActive(item: FromAliasItem) {
+    setBusy(true);
+    const r = await adminService.externalMailSettings.aliases.update(companyId, item.id, {
+      isActive: !item.isActive,
+    });
+    setBusy(false);
+    if (r) void reload();
+  }
+
+  async function handleSetDefault(item: FromAliasItem) {
+    if (!item.isActive) {
+      toast({ type: 'warn', message: 'Önce adresi aktif yap.' });
+      return;
+    }
+    setBusy(true);
+    const ok = await adminService.externalMailSettings.aliases.setDefault(companyId, item.id);
+    setBusy(false);
+    if (ok) {
+      toast({ type: 'success', message: 'Varsayılan güncellendi.' });
+      void reload();
+    }
+  }
+
+  async function handleRemove(item: FromAliasItem) {
+    if (!window.confirm(`"${item.address}" adresini silmek istiyor musun?`)) return;
+    setBusy(true);
+    const ok = await adminService.externalMailSettings.aliases.remove(companyId, item.id);
+    setBusy(false);
+    if (ok) void reload();
+  }
+
+  return (
+    <Card>
+      <CardBody>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800 dark:text-ndark-text">
+              <AtSign size={16} />
+              Gönderen Adresleri (From)
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+              Composer'da agent'ın seçebileceği gönderen adres listesi. Varsayılan (★) composer açılışında ön-seçili gelir.
+            </p>
+          </div>
+        </div>
+
+        {/* Ekleme */}
+        <div className="grid grid-cols-1 gap-3 rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 dark:border-ndark-border dark:bg-ndark-card sm:grid-cols-3">
+          <Field label="Adres" required>
+            <TextInput
+              value={newAddress}
+              onChange={(e) => setNewAddress(e.target.value)}
+              placeholder='örn. support@univera.com.tr'
+            />
+          </Field>
+          <Field label="Görünen ad (ops.)" hint="Composer dropdown'da gösterilir">
+            <TextInput
+              value={newDisplay}
+              onChange={(e) => setNewDisplay(e.target.value)}
+              placeholder="Destek"
+            />
+          </Field>
+          <div className="flex items-end">
+            <Button
+              type="button"
+              onClick={() => void handleAdd()}
+              disabled={busy || !newAddress.trim()}
+              variant="primary"
+              leftIcon={<Plus size={14} />}
+            >
+              Ekle
+            </Button>
+          </div>
+        </div>
+
+        {/* Liste */}
+        <div className="mt-4">
+          {loading ? (
+            <Skeleton className="h-20 w-full" />
+          ) : items.length === 0 ? (
+            <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+              Henüz adres tanımlı değil.
+              {fallbackFrom && (
+                <span className="ml-1">
+                  Mevcut "From" alanındaki <code className="rounded bg-slate-200 px-1 dark:bg-ndark-bg">{fallbackFrom}</code> kayıt edilince burada listelenir.
+                </span>
+              )}
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 dark:divide-ndark-border dark:border-ndark-border">
+              {items.map((it) => (
+                <li key={it.id} className="flex items-center gap-3 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSetDefault(it)}
+                    disabled={busy || it.isDefault}
+                    title={it.isDefault ? 'Varsayılan' : 'Varsayılan yap'}
+                    className={`shrink-0 ${it.isDefault ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
+                    aria-label={it.isDefault ? 'Varsayılan adres' : 'Varsayılan yap'}
+                  >
+                    <Star size={16} fill={it.isDefault ? 'currentColor' : 'none'} />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                      {it.displayName ? `${it.displayName} <${it.address}>` : it.address}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-ndark-muted">
+                      {it.isActive ? 'Aktif' : 'Pasif'}
+                      {it.isDefault && <span className="ml-2 text-amber-600">· Varsayılan</span>}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={it.isActive ? 'ghost' : 'primary'}
+                    onClick={() => void handleToggleActive(it)}
+                    disabled={busy}
+                  >
+                    {it.isActive ? 'Pasifleştir' : 'Aktifleştir'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => void handleRemove(it)}
+                    disabled={busy}
+                    leftIcon={<Trash2 size={14} />}
+                    title="Sil"
+                  >
+                    Sil
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 

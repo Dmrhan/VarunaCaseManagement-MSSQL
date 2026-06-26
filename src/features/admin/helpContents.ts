@@ -770,7 +770,7 @@ export const AUTHORIZATION_POLICIES_HELP: HelpContent = {
         'Yetkilendirme modülleri aşamalı devreye alınmıştır. Menü kuralları kullanıcı arayüzünde canlıdır ama güvenli modda çalışır: kullanıcının rolüyle zaten görebildiği menüler daraltılabilir; rolünün normalde açamadığı bir ekran sadece menü kuralıyla açılamaz. Kayıt işlemi, alan davranışı ve güvenlik filtresi kuralları ise seçili akışlarda pilot olarak çalışır.',
       example: `Canlı / pilot özet:
 Menü              → Canlı, daraltıcı: görünen menüyü kapatabilir
-Kayıt İşlemleri   → Pilot: vaka ana işlemleri, çözüm adımı, not, dosya, izleyici, bağlantı ve toplu güncellemede çalışır
+Kayıt İşlemleri   → Pilot: vaka ana işlemleri, çözüm adımı, not, dosya, izleyici, bağlantı, toplu güncelleme, müşteri ve rapor işlemlerinde çalışır
 Alan Yetkisi      → Pilot: kapanış alanları + Case Detail Detay sekmesindeki seçili alanlarda çalışır
 Güvenlik Filtresi → Pilot: vaka listesi/KPI, müşteri geçmişi-açık vaka yardımcı listeleri, vaka detayı, detay yardımcı uçları ve etiket doğrulama liste/export akışlarında çalışır`,
       tip:
@@ -838,6 +838,9 @@ case.watcher  → Vaka izleyicisi
 case.link     → Vaka bağlantısı / DevOps bağlantısı
 account       → Müşteri
 report.caseStudio → Rapor Stüdyosu
+report.view  → Kayıtlı rapor görünümü
+account.contact → Müşteri kontağı
+account.project → Müşteri projesi
 
 İşlem örnekleri:
 create        → oluştur
@@ -848,7 +851,7 @@ transfer      → devret
 close         → kapat
 export        → dışa aktar`,
       tip:
-        'Business olarak düşünürken "Kayıt/Kaynak = hangi kayıt?", "İşlem = bu kayıtla ne yapacak?" diye okuyun. Bu kurallar bugün seçili vaka ana işlemleri, çözüm adımları, vaka notu, dosya, izleyici, vaka/DevOps bağlantısı ve toplu güncelleme işlemlerinde pilot kontrol olarak çalışır; kapsam genişledikçe aynı ekrandan yönetilmeye devam eder.',
+        'Business olarak düşünürken "Kayıt/Kaynak = hangi kayıt?", "İşlem = bu kayıtla ne yapacak?" diye okuyun. Bu kurallar bugün seçili vaka ana işlemleri, çözüm adımları, vaka notu, dosya, izleyici, vaka/DevOps bağlantısı, toplu güncelleme, müşteri kartı/kontak/proje ve rapor stüdyosu/kayıtlı görünüm işlemlerinde pilot kontrol olarak çalışır; kapsam genişledikçe aynı ekrandan yönetilmeye devam eder.',
     },
     {
       heading: 'Alan yetkisi ve zorunluluk',

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { getAccessToken, logout as authLogout } from './authClient';
 // WR-H2 — Logout sırasında client cache temizlenir (cross-user PII leak önlenir).
 import { clearClientCache } from './clientCache';
+import { clearBootstrap } from './lookupBootstrap';
 
 /**
  * AuthContext — local JWT oturumu + DB kullanıcı bilgisi (rol dahil). (Faz 3)
@@ -97,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     // WR-H2 — Logout client cache'i temizle; sonraki kullanıcı önceki PII'ye dokunmasın.
     clearClientCache();
+    clearBootstrap();
     await authLogout();
     setState({ status: 'unauthenticated', user: null, error: null });
   }
