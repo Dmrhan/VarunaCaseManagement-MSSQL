@@ -10,6 +10,7 @@ import {
   chooseAuthorizationPrincipal,
   resolveAuthorizationCompany,
   resolveAuthorizationTeamId,
+  resolveFieldStatesForUser,
 } from '../lib/authorizationRuntime.js';
 
 const router = Router();
@@ -83,6 +84,39 @@ router.get('/effective-menus', async (req, res) => {
     }
     console.error('[authorization] effective-menus', err);
     return res.status(500).json({ error: 'internal', message: 'Yetki menüleri hesaplanamadı.' });
+  }
+});
+
+router.get('/field-states', async (req, res) => {
+  try {
+    const companyId = resolveRequestedCompany(req);
+    const teamId = await resolveTeamId(req.user);
+    const fields = typeof req.query.fields === 'string'
+      ? req.query.fields.split(',').map((x) => x.trim()).filter(Boolean)
+      : [];
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : '';
+    const resourceKey = typeof req.query.resourceKey === 'string' ? req.query.resourceKey : 'case';
+    const overrides = await authorizationPolicyRepository.listOverrides(
+      companyId,
+      req.user.allowedCompanyIds,
+    );
+    const items = resolveFieldStatesForUser({
+      scope,
+      resourceKey,
+      fields,
+      user: buildCurrentAuthorizationUser(req.user, companyId, teamId),
+      overrides,
+    });
+    res.json({ companyId, scope, resourceKey, fields: items });
+  } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({
+        error: err.code ?? 'authorization_error',
+        message: err.message,
+      });
+    }
+    console.error('[authorization] field-states', err);
+    return res.status(500).json({ error: 'internal', message: 'Alan yetkileri hesaplanamadı.' });
   }
 });
 

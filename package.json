@@ -41,6 +41,7 @@
     "smoke:authorization-resource-runtime": "node scripts/smoke-authorization-resource-runtime-static.js",
     "smoke:authorization-resource-enforcement": "node scripts/smoke-authorization-resource-enforcement-pilot-static.js",
     "smoke:authorization-field-enforcement": "node scripts/smoke-authorization-field-enforcement-pilot-static.js",
+    "smoke:authorization-field-ui": "node scripts/smoke-authorization-field-ui-pilot-static.js",
     "smoke:authorization-security-filter": "node scripts/smoke-authorization-security-filter-compiler-static.js",
     "smoke:authorization-security-filter-enforcement": "node scripts/smoke-authorization-security-filter-enforcement-pilot-static.js",
     "smoke:codex-205-fixes": "node scripts/smoke-codex-205-fixes-static.js",
