@@ -2085,6 +2085,12 @@ router.post(
 /**
  * GET /api/cases/:id/emails — vakanın CaseEmail thread'i.
  * Response: { items: CaseEmail[] }
+ *
+ * Codex review fix — assertCaseSecurityFilterAccess güvenlik filtresi
+ * (AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken) UYGULANIR.
+ * Aksi halde kullanıcı allowedCompanyIds içinde olan ama security
+ * filter ile gizlenen vakanın mail içeriklerini /api/cases/:id/emails
+ * üzerinden okuyabilir (vaka detayı 403/404 dönerken thread sızar).
  */
 router.get(
   '/:id/emails',
@@ -2096,6 +2102,9 @@ router.get(
       req.user.role,
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // Codex P1 — Security filter access guard (mevcut case detay
+    // route'ları ile aynı patern).
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
     const items = await caseEmailRepository.listForCase(req.params.id, {
       allowedCompanyIds: req.user.allowedCompanyIds,
     });
@@ -2107,6 +2116,13 @@ router.get(
  * GET /api/cases/:id/emails/:emailId/attachments/:attachmentId/download
  * — Mail eki indirme — short-lived signed token döner. Token tüketim
  * /:id/files/:fileId/raw deseniyle uyumlu (signStorageToken / 60sn).
+ *
+ * Codex review fix — Attachment-case binding + security filter check.
+ * Önce: att.caseId req.params.id farklı olsa bile token att.caseId'ye
+ * yazılıyordu → kullanıcı kendi erişim sahibi olduğu bir vaka ID'sini
+ * URL'e koyup başka vakanın eki için token üretebiliyordu.
+ * Şimdi: att.caseId === req.params.id zorunlu + security filter check
+ * doğru caseId üzerinden.
  */
 router.get(
   '/:id/emails/:emailId/attachments/:attachmentId/download',
@@ -2117,12 +2133,20 @@ router.get(
       req.user.role,
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    // Codex P1 — security filter guard (caseDetay rotalarıyla aynı).
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
     const att = await caseEmailRepository.getAttachmentForRaw(
       req.params.emailId,
       req.params.attachmentId,
       { allowedCompanyIds: req.user.allowedCompanyIds },
     );
     if (!att) return res.status(404).json({ error: 'Ek bulunamadı' });
+    // Codex P1 — URL'deki :id ile gerçek attachment'ın caseId'si
+    // EŞLEŞMELİ. Aksi halde başka vakanın eki için token mintlenebilir
+    // (cross-case leak). Mismatch → 404.
+    if (att.caseId !== req.params.id) {
+      return res.status(404).json({ error: 'Ek bulunamadı' });
+    }
     // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
     // ile aynı şema; M6.2'de composer için ortak indirme path'i.
     const token = signStorageToken(
