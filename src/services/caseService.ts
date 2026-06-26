@@ -395,6 +395,8 @@ export const caseService = {
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
+      if (pagination.sortBy)  params.set('sortBy',  pagination.sortBy);
+      if (pagination.sortDir) params.set('sortDir', pagination.sortDir);
     }
     const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
       `${API_BASE}?${params.toString()}`,

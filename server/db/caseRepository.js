@@ -1111,25 +1111,38 @@ export const caseRepository = {
     return { mode: 'unknown' };
   },
 
-  async list({ filters, pagination, allowedCompanyIds } = {}) {
+  async list({ filters, pagination, sortBy, sortDir, allowedCompanyIds } = {}) {
     const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
     const total = await prisma.case.count({ where });
 
-    const orderBy = { createdAt: 'desc' };
+    // Desteklenen sort alanları → Prisma kolon adı. Bilinmeyen değer updatedAt'e düşer.
+    const SORT_FIELD_MAP = {
+      updatedAt:   'updatedAt',
+      createdAt:   'createdAt',
+      sla:         'slaResolutionDueAt',
+      caseNumber:  'caseNumber',
+      title:       'title',
+      accountName: 'accountName',
+      assignment:  'assignedPersonName',
+      priority:    'priority',
+      status:      'status',
+      caseType:    'caseType',
+    };
+    const field = SORT_FIELD_MAP[sortBy] ?? 'updatedAt';
+    const dir   = sortDir === 'asc' ? 'asc' : 'desc';
+    // İki kademeli sıralama: seçili alan + updatedAt (sayfalama kararlılığı için).
+    const orderBy = field === 'updatedAt'
+      ? [{ updatedAt: dir }]
+      : [{ [field]: dir }, { updatedAt: 'desc' }];
 
-    let items;
-    if (pagination) {
-      const skip = (pagination.page - 1) * pagination.pageSize;
-      items = await prisma.case.findMany({
-        where,
-        include: CASE_INCLUDE,
-        orderBy,
-        skip,
-        take: pagination.pageSize,
-      });
-    } else {
-      items = await prisma.case.findMany({ where, include: CASE_INCLUDE, orderBy });
-    }
+    const skip = (pagination.page - 1) * pagination.pageSize;
+    const items = await prisma.case.findMany({
+      where,
+      include: CASE_INCLUDE,
+      orderBy,
+      skip,
+      take: pagination.pageSize,
+    });
     return { items: items.map(shape), total };
   },
 

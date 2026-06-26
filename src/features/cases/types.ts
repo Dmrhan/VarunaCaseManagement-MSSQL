@@ -892,6 +892,8 @@ export type CaseStatsResponse =
 export interface CaseListPagination {
   page: number;       // 1-based
   pageSize: number;
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
 }
 
 export const CASE_STATUSES: CaseStatus[] = [
