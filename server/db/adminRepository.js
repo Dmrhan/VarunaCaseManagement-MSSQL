@@ -49,29 +49,25 @@ class AdminError extends Error {
 // ─────────────────────────────────────────────────────────────────
 export const thirdPartyRepo = {
   async list(companyId) {
-    const where = companyId ? { companyId } : {};
-    return prisma.thirdParty.findMany({ where, orderBy: { name: 'asc' } });
+    return prisma.thirdParty.findMany({ orderBy: { name: 'asc' } });
   },
   async create(input) {
-    const companyId = input.companyId ?? null;
     const exists = await prisma.thirdParty.findFirst({
-      where: { name: { equals: input.name.trim() }, companyId },
+      where: { name: { equals: input.name.trim() } },
     });
-    if (exists) throw new AdminError('Aynı isimde 3. parti bu şirkette zaten mevcut.');
+    if (exists) throw new AdminError('Aynı isimde 3. parti zaten mevcut.');
     return prisma.thirdParty.create({
       data: {
         name: input.name.trim(),
         description: input.description?.trim() || null,
         isActive: input.isActive ?? true,
-        companyId,
       },
     });
   },
   async update(id, patch) {
     if (patch.name) {
-      const current = await prisma.thirdParty.findUnique({ where: { id }, select: { companyId: true } });
       const dup = await prisma.thirdParty.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim() }, companyId: current?.companyId ?? null },
+        where: { id: { not: id }, name: { equals: patch.name.trim() } },
       });
       if (dup) throw new AdminError('Aynı isimde başka 3. parti var.');
     }
