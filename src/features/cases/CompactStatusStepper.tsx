@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
+import { StatusPill } from '@/components/ui/StatusPill';
 import { caseService } from '@/services/caseService';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import {
@@ -228,11 +229,26 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
   const currentIdx = NODE_ORDER.indexOf(item.status);
 
   return (
+    // Üst sarmalayıcı:
+    //   - pt-3 → stepper üst kenara yapışmasın (kullanıcı talebi #1: nefes
+    //     payı)
+    //   - relative → sağ üstte mutlak konumlu StatusPill (kullanıcı talebi
+    //     #2: mevcut durum sağ üstte renk-kodlu rozet)
+    //   - pr-... → pill'in stepper'a binmemesi için sağdan padding
     <div
-      className={`flex ${wideConnectors ? 'w-full' : ''}`}
+      className={`relative pt-3 pr-2 sm:pr-28 ${wideConnectors ? 'w-full' : ''}`}
       role="group"
       aria-label={`Vaka statü adımları — şu an ${CASE_STATUS_LABELS[item.status]}`}
     >
+      {/* Sağ üst MEVCUT DURUM rozeti — REUSE: src/components/ui/StatusPill.tsx.
+          Dropdown kalktığından bu köşe boştu; mevcut durumun rengi orada
+          tek bakışta görünür. Stepper'daki aktif düğüm büyük halo'su
+          KALIR; pill onu tamamlar (sticky/dar yerleşimlerde başlık seviyesinde
+          okunabilir kalır). */}
+      <div className="absolute right-2 top-2 z-10">
+        <StatusPill status={item.status} />
+      </div>
+
       {/* TEK 7-DÜĞÜMLÜ STEPPER — 3-faz omurgasının görsel stili (daire +
           bağlantı çizgisi + ikon + alt etiket) AYNI; ama 3 faz yerine 7
           DURUM düğümü. Pill satırı + 3-faz çizgisi KALDIRILDI.

@@ -134,6 +134,17 @@ function expectNotContains(name, content, needle) {
   expectContains('caseService.transitionStatus reason\'sız direct path',
     src, 'caseService.transitionStatus(item.id, target, {})');
 
+  console.log('\n=== Üst boşluk + sağ üst StatusPill (yeni) ===');
+  expectContains('Üst container pt-3 (nefes payı)', src, 'pt-3 pr-2');
+  expectContains('relative container (pill mutlak konum için)',
+    src, 'className={`relative pt-3 pr-2');
+  expectContains('StatusPill import (reuse, yeni pill yazılmadı)',
+    src, "import { StatusPill } from '@/components/ui/StatusPill'");
+  expectContains('Sağ üst <StatusPill status={item.status} /> render',
+    src, '<StatusPill status={item.status} />');
+  expectContains('Pill mutlak konum: absolute right-2 top-2 z-10',
+    src, 'absolute right-2 top-2 z-10');
+
   console.log('\n=== types.ts dokunulmadı (DB enum sabit) ===');
   const types = await readFile('src/features/cases/types.ts', 'utf8');
   expectContains('STATUS_TRANSITIONS hâlâ types.ts içinde', types, 'STATUS_TRANSITIONS: Record<CaseStatus, CaseStatus[]>');
