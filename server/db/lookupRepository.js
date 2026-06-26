@@ -209,8 +209,13 @@ async function bootstrapInner(allowedCompanyIds) {
             : { isActive: true },
           orderBy: { name: 'asc' },
         }),
-        // ThirdParty + DocumentType: şirket-agnostik (system-wide kayıtlar) — filtrelenmez.
-        prisma.thirdParty.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
+        // ThirdParty: şirket-kapsamlı + global (null) kayıtlar dahil.
+        prisma.thirdParty.findMany({
+          where: allowedCompanyIds
+            ? { isActive: true, OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }] }
+            : { isActive: true },
+          orderBy: { name: 'asc' },
+        }),
         prisma.documentType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
         // CategoryDef: companyId nullable (null = sistem geneli) — null'lar dahil.
         prisma.categoryDef.findMany({

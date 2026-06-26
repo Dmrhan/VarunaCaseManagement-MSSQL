@@ -34,6 +34,7 @@ export interface ThirdPartyInput {
   name: string;
   description?: string;
   isActive: boolean;
+  companyId?: string;
 }
 
 export interface DocumentTypeInput {
@@ -471,8 +472,16 @@ function crud<T, I>(path: string) {
 export const adminService = {
   thirdParties: {
     ...crud<CaseThirdParty, ThirdPartyInput>('third-parties'),
+    async listByCompany(companyId: string): Promise<CaseThirdParty[]> {
+      const data = await apiFetch<{ value: CaseThirdParty[] }>(
+        `${ADMIN_BASE}/third-parties?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'Liste yüklenemedi',
+      );
+      if (!data) throw new Error('Liste yüklenemedi');
+      return data.value ?? [];
+    },
     usage(_id: string): UsageInfo {
-      // Yaklaşık sayım — kesin sonuç BFF'in remove handler'ında. Stale olabilir.
       return { count: 0 };
     },
   },
