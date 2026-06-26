@@ -134,7 +134,15 @@ export function CommunicationTab({ item }: Props) {
             </div>
           )}
 
-          <MailThread ref={threadRef} caseId={item.id} />
+          <MailThread
+            ref={threadRef}
+            caseId={item.id}
+            // M6.3a — satır "Yanıtla" tıklanınca composer'ı reply-context
+            // ile aç. (Email parametresi şu an reply-context endpoint'i
+            // son inbound'u baz aldığı için ignore; ileride email-specific
+            // reply için backend `?inReplyTo=` parametresi eklenebilir.)
+            onReply={() => void openReply()}
+          />
 
           {composerOpen && (
             <MailComposer

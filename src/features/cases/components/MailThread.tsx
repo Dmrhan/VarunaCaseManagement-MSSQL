@@ -20,9 +20,12 @@ export interface MailThreadHandle {
 
 interface Props {
   caseId: string;
+  /** M6.3a — Satır "Yanıtla" tıklanınca composer'ı açar (parent
+   *  composer'ı reply-context ile yükler). */
+  onReply?: (email: CaseEmailItem) => void;
 }
 
-export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThread({ caseId }, ref) {
+export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThread({ caseId, onReply }, ref) {
   const [items, setItems] = useState<CaseEmailItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const lastItemRef = useRef<HTMLLIElement | null>(null);
@@ -75,7 +78,15 @@ export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThrea
         const isLast = idx === items.length - 1;
         return (
           <li key={email.id} ref={isLast ? lastItemRef : undefined}>
-            <MailMessageCard email={email} caseId={caseId} />
+            <MailMessageCard
+              email={email}
+              caseId={caseId}
+              onReply={onReply}
+              // M6.3a — son inbound mail varsayılan açık (n4b yaklaşık);
+              // diğerleri katlı. Composer açıkken zaten parent kullanıcı
+              // odaklanıyor; default expand çok agresif olmasın.
+              defaultExpanded={isLast && email.direction === 'inbound'}
+            />
           </li>
         );
       })}
