@@ -1,16 +1,35 @@
--- ThirdParty tablosuna companyId kolonu ekle
-ALTER TABLE [ThirdParty] ADD [companyId] NVARCHAR(450) NULL;
+-- companyId kolonu yoksa ekle (ilk denemede eklenmiş olabilir)
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.ThirdParty') AND name = 'companyId'
+)
+    ALTER TABLE [dbo].[ThirdParty] ADD [companyId] NVARCHAR(450) NULL;
 
--- Eski UNIQUE index'i kaldır (name üzerindeki)
-DROP INDEX IF EXISTS [ThirdParty_name_key] ON [ThirdParty];
+-- Eski UNIQUE CONSTRAINT varsa kaldır
+IF EXISTS (
+    SELECT 1 FROM sys.key_constraints
+    WHERE name = 'ThirdParty_name_key' AND parent_object_id = OBJECT_ID('dbo.ThirdParty')
+)
+    ALTER TABLE [dbo].[ThirdParty] DROP CONSTRAINT [ThirdParty_name_key];
 
--- Yeni composite UNIQUE index ekle (name + companyId)
-CREATE UNIQUE INDEX [ThirdParty_name_companyId_key] ON [ThirdParty]([name], [companyId]) WHERE [companyId] IS NOT NULL;
+-- Eski UNIQUE INDEX varsa kaldır (constraint değil index olarak oluşturulmuşsa)
+IF EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'ThirdParty_name_key' AND object_id = OBJECT_ID('dbo.ThirdParty')
+)
+    DROP INDEX [ThirdParty_name_key] ON [dbo].[ThirdParty];
 
--- NULL companyId için unique (geriye dönük compat: global tanımlar)
-CREATE UNIQUE INDEX [ThirdParty_name_null_company_key] ON [ThirdParty]([name]) WHERE [companyId] IS NULL;
+-- Yeni composite UNIQUE index yoksa ekle
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'ThirdParty_name_companyId_key' AND object_id = OBJECT_ID('dbo.ThirdParty')
+)
+    CREATE UNIQUE INDEX [ThirdParty_name_companyId_key] ON [dbo].[ThirdParty]([name], [companyId]);
 
--- FK constraint ekle
-ALTER TABLE [ThirdParty] ADD CONSTRAINT [ThirdParty_companyId_fkey]
-  FOREIGN KEY ([companyId]) REFERENCES [Company]([id])
-  ON DELETE SET NULL ON UPDATE CASCADE;
+-- FK constraint yoksa ekle
+IF NOT EXISTS (
+    SELECT 1 FROM sys.foreign_keys
+    WHERE name = 'ThirdParty_companyId_fkey' AND parent_object_id = OBJECT_ID('dbo.ThirdParty')
+)
+    ALTER TABLE [dbo].[ThirdParty] ADD CONSTRAINT [ThirdParty_companyId_fkey]
+        FOREIGN KEY ([companyId]) REFERENCES [dbo].[Company]([id]);
