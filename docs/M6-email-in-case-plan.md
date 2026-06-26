@@ -1,9 +1,25 @@
 # M6 — Vaka İçi E-Posta İstemcisi (Plan)
 
-> **Statü**: PLAN (kod yok)
-> **Hazırlık tarihi**: 2026-06-26
+> **Statü**: PLAN (kod yok) — n4b parite revizyonu
+> **Hazırlık tarihi**: 2026-06-26 (n4b parite revizyonu)
 > **Bağımlı milestone'lar**: M1 (send) · M2/M2.1 (intake) · M2.2/M2.3 (match) · M3 (IMAP) · M4 (dispatch + threading) · M5 (per-tenant config) — **hepsi prod'da** (release #205, 2026-06-25)
 > **Kapsam**: Case Detail içinde **İletişim/E-Posta** sekmesi. Vaka kapanana kadar gelen + giden + otomatik mailleri TEK thread olarak göster; agent vaka içinden mail yaz/gönder. Composer: From/To/Cc/Bcc, **rich-text**, ek, imza.
+
+---
+
+## 0. n4b Parite Kuralı (öncelikli)
+
+> Memory: `feedback_n4b_email_parity.md` — next4biz'de ne varsa AYNEN; sadeleştirme/ekleme yapma; belirsizse SOR (kullanıcı n4b doğruluk kaynağı); destek ekibi alışkanlığı bozulmasın.
+
+**Bu plan REVİZYON sonrası şu kurallara bağlı**:
+1. Aşağıdaki **AÇIK KARARLAR** (K1–K7) artık "önerim + flag" değil; her biri **n4b davranışını bire-bir kopyalama sorusudur**. Cevap geldikten sonra plan o yönde sabitlenir.
+2. Tasarım/UX kararları (visibility toggle var mı, From dropdown nasıl, footer çiftlenmesi nasıl önleniyor, vs.) **n4b davranışı + screenshot referansı** üzerinden onaylanır.
+3. Plan'da "önerim" geçen yerler **n4b'de ne ise o** ile değişir; benim önerilerim sadece **default fallback** (n4b'de hiç olmayan yan-uç edge case'ler için).
+4. Implementation sırasında her PR'da **n4b parite check** smoke'u: ekran-davranış kıyaslı.
+
+**Kapsamı bozar mı?**: Hayır. M6.1 (model + read-only thread) ve M6.2 (composer + send) **n4b bağımsız temel altyapı** içerir; n4b davranış kararları yalnızca UI mikro-kararları (toggle pozisyonu, etiket dili, default visibility, vs.) ve K1-K7'yi etkiler.
+
+**Belirsizlik kuralı**: n4b'de bir davranış belirsizse plan'da o noktaya `[N4B-SOR: ...]` etiketi konur; implementation öncesi cevap beklenir.
 
 ---
 
@@ -340,6 +356,7 @@ htmlSanitize(inboundHtmlBody, { ... });
 - Thread UI tüm 3 source'u (`imap_intake`, `manual_send`, `notification_dispatch`) doğru render ediyor
 - M2.3 learned sender 25/25 hala yeşil
 - Phase D 8/8 hala yeşil
+- **n4b parite check**: tab adı + thread render (mesaj başlığı / yön ikonu / zaman damgası / source rozeti) n4b ile bire-bir kıyas → screenshot diff
 
 ### M6.2 — Composer + send + rich-text + ek + basit imza
 **Çıktı**: Agent vaka içinden mail yazıp gönderebiliyor; ek ve rich-text destekli; tenant-imza otomatik.
@@ -364,6 +381,8 @@ htmlSanitize(inboundHtmlBody, { ... });
 - Sanitize: `<script>alert(1)</script>` filtreleniyor, görsel `<b>kalın</b>` korunuyor
 - AccountContact.email öneri listesi geliyor
 - M2.3 + Phase D regression yeşil
+- **n4b parite check**: composer (From/To/Cc/Bcc layout + toolbar + ek dropzone + Gönder butonu + imza yerleşimi) n4b ile screenshot diff
+- **n4b parite check**: gönderilen mail subject/body/imza HTML formatı n4b'nin gönderdiği örnek bir maille kıyas
 
 ### M6.3 — Yönetim: per-agent imza · From dropdown · iletişim takip
 **Çıktı**: Agent imzasını yönetir; tenant çoklu mailbox seçer; "dönüş yapıldı mı" sinyalleri ve şablonlar.
@@ -386,59 +405,89 @@ htmlSanitize(inboundHtmlBody, { ... });
 - Per-agent imza override tenant'tan üstte
 - From dropdown 2+ adres → seçilen adres ile gönderim
 - pendingCustomerReply state'i intake/send döngüsüyle senkron
+- **n4b parite check**: imza yönetim ekranı + From dropdown + şablon seçim + "Yanıt bekliyor" rozeti — her biri n4b ile screenshot diff
 
 ---
 
-## 7. AÇIK KARARLAR (kullanıcı onayı)
+## 7. AÇIK KARARLAR — n4b parite soruları
 
-> Her karara bir **öneri** + **flag** koyduk. Onayla → plan sabitlenir, kod yazılır.
+> n4b parite kuralı gereği bu kararlarda **benim önerim yok**. Her madde için kullanıcının **n4b davranışını bire-bir aktarması** ve plan'ı o yönde sabitlemesi beklenir. Belirsizse `[N4B-SOR]`.
+>
+> Her karara: **n4b'de ne var?** → kullanıcı cevabı → plan sabit. Yan-bilgiler (mevcut M5/Case alanları, default fallback) sadece **referans** olarak verilmiştir.
 
-### K1. Çoklu From / mailbox gerekli mi?
-- **M5 mevcut**: `ExternalMailSetting.fromAddress` tek değer.
-- **Senaryo**: Bir tenant'ın 2+ giden adresi olabilir (info@, support@, sales@).
-- **Öneri**: M6.2'de TEK from (M5 reuse), M6.3'te çoklu (`ExternalMailSettingFromAlias` 1:N + composer dropdown).
-- **Flag**: `M6_MULTI_FROM=true` opsiyonel; default kapalı.
-- **Kullanıcı?** [_] Tek mailbox (M6.2'de yeterli) [_] Çoklu mailbox (M6.3'te eklensin)
+### K1. Çoklu From / mailbox
+- **Soru**: n4b'de agent mail yazarken **"Gönderen" alanı dropdown mı, sabit tek adres mi?**
+  - Eğer dropdown → kaç adres? Hangi seviyede tanımlanıyor (tenant / takım / agent)?
+  - Eğer sabit → hangi kaynağa bağlı (tenant default mailbox)?
+- **Bizdeki yan-bilgi**: M5'te `ExternalMailSetting.fromAddress` **tek değer**. Çoklu için `ExternalMailSettingFromAlias` 1:N gerekecek.
+- **Default fallback** (n4b cevabı belirsizse): M6.2'de tek (M5 reuse), M6.3'te çoklu opsiyonel.
+- **Kullanıcı cevabı**: `[N4B-SOR: From dropdown screenshot / akış]`
 
-### K2. İç-mail (agent-to-agent) — visibility 'Internal' mi?
-- **Senaryo**: Agent vaka için BCC ile başka agent'a mail atmak isteyebilir; veya tamamen internal bir BCC trail.
-- **Öneri**: `CaseEmail.visibility` field zaten modelde var. M6.2'de composer'da "Müşteriye Görünür / İç" toggle (NotesTab'daki Internal/Customer paterni reuse). Internal mail'ler thread'de gri arka planla render edilir; customer rolüne (gelecek müşteri portal'ı) hiç dönmez.
-- **Flag**: yok — model field default value.
-- **Kullanıcı?** [_] Internal toggle olsun [_] Yalnız Customer (M6.2 sade)
+### K2. İç-mail (agent-to-agent) görünürlüğü
+- **Soru**: n4b'de **"İç Mail / Customer Mail"** ayrımı VAR MI?
+  - Varsa → composer'da nasıl gözüküyor (toggle / radio / ayrı buton)?
+  - Varsa → iç mail thread'de nasıl render ediliyor (renk / rozet / ayrı bölüm)?
+  - Yoksa → tüm gönderimler customer kabul ediliyor, BCC ile agent ekleniyor mu?
+- **Bizdeki yan-bilgi**: NotesTab Internal/Customer toggle var; bu paterni reuse etmek bizim için ucuz.
+- **Default fallback**: `CaseEmail.visibility` field model'de zaten var, n4b'de yoksa sadece 'Customer' default kalır.
+- **Kullanıcı cevabı**: `[N4B-SOR: Iç-mail UX davranışı + screenshot]`
 
-### K3. Kapalı vakaya müşteri yanıtı → otomatik reopen?
-- **Senaryo**: Çözüldü/İptal vaka var; müşteri `[VK-]` token'la yanıt yolluyor. Mevcut intake davranışı: not olarak ekleniyor, status değişmez.
-- **Öneri**: M6.1'de mevcut davranışı koru (CaseEmail append olur, status durumu bozulmaz). M6.3'te opsiyonel: Çözüldü→YenidenAcildi auto-reopen (flag-gated). Sebep: yanlış yanıtla otomatik reopen rahatsız edebilir; supervisor'lar manuel reopen tercih edebilir.
-- **Flag**: `M6_AUTO_REOPEN_ON_CUSTOMER_REPLY=false` (M6.3 ekleyince).
-- **Kullanıcı?** [_] Manuel reopen (M6.3'te flag eklensin, default kapalı) [_] Otomatik reopen (Çözüldü→YnAç) [_] Hiç ekleme
+### K3. Kapalı vakaya müşteri yanıtı
+- **Soru**: n4b'de **kapalı vakaya müşteri yanıt yazınca ne oluyor?**
+  - Otomatik reopen (Çözüldü→YnAç) mı?
+  - Yeni vaka mı açılıyor?
+  - Sadece thread'e ek not olarak mı düşüyor (status değişmez)?
+  - Reopen ise hangi statüye? (YnAç vs İncelemede vs Açık)
+- **Bizdeki yan-bilgi**: Şu an intake `[VK-]` token'lı yanıtı mevcut vakaya not olarak ekliyor; status değişmez.
+- **Default fallback**: Mevcut davranış (manuel reopen).
+- **Kullanıcı cevabı**: `[N4B-SOR: Kapalı vakaya yanıt akışı]`
 
-### K4. "Dönüş yapıldı mı" + iletişim takip alanları
-- **Öneri**: M6.1 migration'da:
-  - `Case.lastEmailAt DateTime?` — son inbound/outbound email zamanı
-  - `Case.pendingCustomerReply Boolean @default(false)` — outbound sonrası true, inbound sonrası false
-- **UI**: Case list/board'da "Yanıt bekliyor" rozeti (M6.3). Filter param: `?pendingCustomerReply=true`.
-- **Kullanıcı?** [_] Ekle (M6.1) [_] M6.3'te ekle [_] Hiç ekleme
+### K4. İletişim takip alanları (Case-level)
+- **Soru**: n4b'de **"Müşteriye dönüş yapıldı mı / yanıt bekliyor"** sinyali listede/board'da var mı?
+  - Varsa → Case modelinde ne tutuluyor (boolean / timestamp / kompleks state)?
+  - Listede nasıl gözüküyor (rozet / kolon / filtre)?
+  - SLA ile entegre mi (yanıt süresi)?
+- **Bizdeki yan-bilgi**: M6.1 migration'da `Case.lastEmailAt` + `Case.pendingCustomerReply` adayım. Eklemek ucuz, eklenmemesi gelecekte refactor.
+- **Default fallback**: Ekle (M6.1), UI M6.3'te kullan.
+- **Kullanıcı cevabı**: `[N4B-SOR: Case list/board "yanıt bekliyor" UI/data]`
 
-### K5. Çok kanallı (Web/SMS/çağrı) iskelet mi, sadece e-posta mı?
-- **Öneri**: Sadece e-posta. CallLogs zaten ayrı tab; "iletişim" sekmesi M6'da e-postaya odaklanır. Gelecek "Tüm İletişim" tab'ı (e-posta + SMS + çağrı) M7+ kapsamı.
-- **Risk**: Bugün `'communication'` ismi seçilirse, gelecekte "Tüm" anlamına gelir mi? Alternatif: `'email'` tab key.
-- **Kullanıcı?** [_] `'communication'` tab (gelecek için yer) [_] `'email'` tab (net)
+### K5. Tab ismi / kapsamı
+- **Soru**: n4b'de **"İletişim" sekmesi nasıl adlandırılmış**?
+  - "E-Posta" / "İletişim" / "Mesajlar" / başka?
+  - Sadece mail mi içeriyor, yoksa SMS/çağrı/web chat birlikte mi?
+- **Bizdeki yan-bilgi**: CallLogs zaten ayrı tab; `'communication'` ismi gelecek için yer açar.
+- **Default fallback**: Adı + kapsamı n4b'den birebir kopyala.
+- **Kullanıcı cevabı**: `[N4B-SOR: Tab adı + içeriği]`
 
-### K6. Mevcut iletişim-override alanları zincir
-- **TEYİT (koddan)**: `AccountCompany.preferredResponseChannel + responseEmail` (schema.prisma:563), `Case.communicationChannelOverride` (:1232), `Case.customerContactEmail` (:1256) — **HEPSİ VAR**.
-- **Müşteri-adres fallback zinciri** (composer To prefill):
-  1. `Case.customerContactEmail` (intake-set — M2 alanı)
+### K6. Müşteri-adres fallback zinciri (composer To prefill)
+- **Soru**: n4b'de **composer "Kime" alanı default ne ile dolu** geliyor?
+  - Müşterinin ana iletişim e-postası mı? Vakanın requester'ı mı? Açıkçası boş mu?
+  - Override mekanizması var mı?
+- **TEYİT (koddan)**: `AccountCompany.preferredResponseChannel + responseEmail` (`schema.prisma:563`), `Case.communicationChannelOverride` (`:1232`), `Case.customerContactEmail` (`:1256`) — **HEPSİ VAR**.
+- **Bizdeki yan-bilgi fallback zinciri** (referans):
+  1. `Case.customerContactEmail` (intake-set, M2 alanı)
   2. `AccountCompany.responseEmail` (per-tenant-account override)
   3. `Account.email`
   4. `AccountContact[isPrimary].email`
   5. `AccountContact[*].email` (uyarı, manuel seçim)
-- **Öneri**: M6.2'de bu zincir kullanılır. Composer'da seçili adres yanında "kaynak: customerContactEmail" küçük rozeti.
-- **Kullanıcı?** [_] Bu zincir [_] Farklı sıra (belirt)
+- **Default fallback**: Yukarıdaki zincir; n4b'de farklı sıra varsa o uygulanır.
+- **Kullanıcı cevabı**: `[N4B-SOR: "Kime" prefill davranışı]`
 
-### K7. CKEditor zorunluluğu (referans ekran)
-- **TEYİT**: package.json'da WYSIWYG yok. **TipTap önerisi** yukarıda (5.1).
-- **Alternatif**: CKEditor5 — kullanım hakkı için lisans sorulmalı (LGPL/GPL/Commercial).
-- **Kullanıcı?** [_] TipTap (önerilen) [_] CKEditor5 [_] Karar verirken aç (POC)
+### K7. Rich-text editörü
+- **Soru**: n4b'de **hangi editor kullanılıyor**?
+  - Önceki konuşmadan: referans ekranda "CKEditor sınıfı" görülmüş → muhtemelen CKEditor 4/5.
+  - Hangi versiyon? Hangi feature setlerle (mention, image, table)?
+  - Müşteriye gönderilen mail HTML'i nasıl sanitize ediliyor?
+  - İmza HTML olarak nasıl saklanıyor (mock-up var mı)?
+- **Bizdeki yan-bilgi karşılaştırma** (eğer n4b CKEditor sabitlemezse fallback):
+  | Kriter | TipTap | CKEditor5 | Quill | Lexical |
+  |---|---|---|---|---|
+  | Bundle (gz, core) | ~50–80KB | ~250KB+ | ~45KB | ~80KB |
+  | React native | ✓ | wrapper | 3rd party | ✓ |
+  | @mention | ✓ olgun | ✓ | (3rd) | (custom) |
+  | Lisans | MIT | LGPL/GPL/Commercial | BSD | MIT |
+- **Default fallback**: n4b CKEditor ise CKEditor; aksi belirtilirse TipTap (lisans + bundle).
+- **Kullanıcı cevabı**: `[N4B-SOR: Editor identifikasyonu + sanitize/imza davranışı]`
 
 ---
 
@@ -504,10 +553,17 @@ htmlSanitize(inboundHtmlBody, { ... });
 
 ## Özet
 
+- **n4b parite kuralı**: tüm UX/davranış kararları next4biz'i bire-bir kopyalar; benim önerilerim sadece edge case fallback
 - **Yeni model**: `CaseEmail` + `CaseEmailAttachment` (mail'e özgü metadata)
 - **Intake taşıması**: `inboundMailIntake.js` artık not değil CaseEmail yazar
 - **Notification dispatch**: paralel CaseEmail satırı (dispatchId linkli)
-- **Rich-text**: TipTap (önerilen) + sanitize-html
-- **3 faz**: M6.1 read-only thread → M6.2 composer + send + ek → M6.3 imza/from/şablon/iletişim takip
+- **Rich-text**: n4b'de hangi editor varsa o (CKEditor şüphesi yüksek); TipTap fallback
+- **3 faz**: M6.1 read-only thread → M6.2 composer + send + ek → M6.3 imza/from/şablon/iletişim takip — her fazda **n4b parite check** smoke'u
 - **REUSE-first**: M1-M5 mail altyapısı, Case Detail tab sistemi, NotesTab UX, storage/upload, scope guards
-- **7 açık karar** kullanıcı onayı bekliyor (K1-K7)
+- **7 açık karar (K1-K7)**: artık öneri değil, n4b davranışını bire-bir aktarma soruları. Cevap geldikten sonra plan sabit; belirsiz noktalar `[N4B-SOR]` etiketli, implementation öncesi kullanıcıdan netleştirme bekler
+
+## Sıradaki
+
+1. Kullanıcı K1-K7 sorularını n4b davranışı + screenshot/akış ile yanıtlasın
+2. Plan sabitlenir → M6.1 implementation PR'ı (model + intake + read-only thread)
+3. Her fazın sonunda n4b screenshot diff PR'a iliştirilir
