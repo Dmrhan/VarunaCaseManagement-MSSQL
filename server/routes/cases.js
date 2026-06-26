@@ -227,12 +227,65 @@ async function buildCaseListSecurityWhere(req) {
   return { OR: scopedClauses };
 }
 
+async function assertCaseSecurityFilterAccess(req, {
+  caseId = req.params.id,
+  companyId = null,
+} = {}) {
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return null;
+  const allowedCompanyIds = Array.isArray(req.user?.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  if (!caseId || allowedCompanyIds.length === 0) return null;
+
+  let targetCompanyId = companyId;
+  if (!targetCompanyId) {
+    const row = await prisma.case.findFirst({
+      where: { id: caseId, companyId: { in: allowedCompanyIds } },
+      select: { companyId: true },
+    });
+    if (!row) {
+      throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+    }
+    targetCompanyId = row.companyId;
+  }
+
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, targetCompanyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    targetCompanyId,
+    req.user.allowedCompanyIds,
+  );
+  const compiled = compileSecurityFilterOverrides({
+    resourceKey: 'case',
+    user: policyUser,
+    overrides,
+  });
+  if (!hasWhereClause(compiled)) return null;
+
+  const visible = await prisma.case.findFirst({
+    where: {
+      id: caseId,
+      companyId: targetCompanyId,
+      AND: [compiled],
+    },
+    select: { id: true },
+  });
+  if (!visible) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  return null;
+}
+
 async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
-  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
   const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
   if (!c) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
+  await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+  if (!resourceEnabled) return null;
   const teamId = await resolveAuthorizationTeamId(prisma, req.user);
   const policyUser = buildCurrentAuthorizationUser(req.user, c.companyId, teamId);
   const overrides = await authorizationPolicyRepository.listOverrides(
@@ -727,6 +780,7 @@ router.get(
     // yalnız SystemAdmin görür; diğer roller 404 alır.
     const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
     // WR-ACTION-CENTER Phase 1 — auto-InProgress: flip user's Pending
     // ActionItems for this case to InProgress, stamp firstSeenAt.
     // Fire-and-forget; case detail must never block on action-center write.
@@ -894,6 +948,7 @@ router.delete(
 router.get(
   '/:id/devops-items',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await caseRepository.listDevopsLive(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -954,6 +1009,7 @@ router.get(
     // Scope verify via existing get (404/403 mantığı reuse).
     const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: found.companyId });
     const out = await customerMatchRepository.suggestCustomerMatches({
       caseId: req.params.id,
       allowedCompanyIds: req.user.allowedCompanyIds,
@@ -1101,6 +1157,7 @@ router.post(
 router.get(
   '/:id/customer-pulse',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const pulse = await caseRepository.getCustomerPulse(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -1123,6 +1180,7 @@ router.get(
 router.get(
   '/:id/customer-context',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const context = await accountRepository.getCaseCustomerContext({
@@ -1168,6 +1226,7 @@ router.get(
 router.get(
   '/:id/watchers',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -1254,6 +1313,7 @@ router.delete(
 router.get(
   '/:id/links',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -1322,6 +1382,7 @@ router.delete(
 router.get(
   '/:id/transfers',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await caseRepository.listTransfers(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -1343,6 +1404,7 @@ router.get(
 router.post(
   '/:id/transfer-brief',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const body = req.body ?? {};
     const result = await generateTransferBrief({
       caseId: req.params.id,
@@ -1374,6 +1436,7 @@ router.post(
 router.post(
   '/:id/action-summary',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await generateActionSummary({
       caseId: req.params.id,
       userId: req.user.id,
@@ -1419,6 +1482,7 @@ router.post(
 router.get(
   '/:id/notes/:noteId/replies',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const replies = await caseRepository.listReplies(
       req.params.id,
       req.params.noteId,
@@ -1499,6 +1563,7 @@ router.delete(
 router.post(
   '/:id/notes/:noteId/reactions',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const emoji = req.body?.emoji;
     if (typeof emoji !== 'string' || !emoji) {
       return res.status(400).json({ error: 'emoji zorunlu' });
@@ -1523,6 +1588,7 @@ router.post(
 router.get(
   '/:id/mentionable-users',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const users = await caseRepository.listMentionableUsers(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -1540,6 +1606,7 @@ router.get(
 router.post(
   '/:id/mentions/seen',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     // Önce case scope check (allowedCompanyIds), sonra updateMany.
     if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role))) {
       return res.status(404).json({ error: 'Vaka bulunamadı' });
@@ -1747,6 +1814,7 @@ router.post(
 router.get(
   '/:id/files/:fileId/download',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await caseRepository.getDownloadUrl(
       req.params.id,
       req.params.fileId,

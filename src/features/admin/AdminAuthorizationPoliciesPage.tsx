@@ -65,7 +65,7 @@ const ENFORCEMENT_STATUS: Record<
   securityFilter: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Güvenlik filtresi kuralları vaka listeleme uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken kayıt kapsamını daraltan pilot filtre olarak çalışır.',
+    description: 'Güvenlik filtresi kuralları vaka listeleme, tekil vaka okuma/yazma ve vaka detay yardımcı uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken kayıt kapsamını daraltan pilot filtre olarak çalışır.',
   },
 };
 
