@@ -2419,20 +2419,37 @@ router.get(
 
     if (!setting) {
       // Olası mismatch: admin başka companyId'ye kaydetti. Allowed company
-      // kümesi içinde başka setting var mı diye sayalım (sadece sayısı,
-      // companyId listesini sızdırmıyoruz — privacy).
-      let otherEnabledCount = null;
+      // kümesi içinde başka setting'i olan şirketlerin LİSTESİ
+      // (companyId + name + enabled). Kullanıcı zaten bu şirketlere
+      // yetkili — privacy sınırı: allowedCompanyIds dışına ÇIKMAZ.
+      // İki "UNIVERA" aynı isim/farklı ID mi yoksa tek kayıt mı görmek için.
+      let settingCompanies = null;
       if (debugRequested && Array.isArray(req.user.allowedCompanyIds)) {
-        otherEnabledCount = await prisma.externalMailSetting.count({
+        const settingsRows = await prisma.externalMailSetting.findMany({
           where: {
             companyId: { in: req.user.allowedCompanyIds, not: c.companyId },
-            enabled: true,
           },
+          select: { companyId: true, enabled: true, fromAddress: true },
         });
+        // Şirket adlarını ayrı sorguda al (denormalize yok)
+        const companyMap = new Map();
+        if (settingsRows.length) {
+          const companies = await prisma.company.findMany({
+            where: { id: { in: settingsRows.map((s) => s.companyId) } },
+            select: { id: true, name: true },
+          });
+          for (const co of companies) companyMap.set(co.id, co.name);
+        }
+        settingCompanies = settingsRows.map((s) => ({
+          companyId: s.companyId,
+          name: companyMap.get(s.companyId) ?? null,
+          enabled: s.enabled,
+          hasFromAddress: !!s.fromAddress,
+        }));
       }
       return res.json(withDebug(
         { configured: false, reason: 'no-setting' },
-        { otherAllowedCompaniesWithEnabledSetting: otherEnabledCount },
+        { settingCompanies },
       ));
     }
     if (!setting.enabled) {

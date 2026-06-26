@@ -205,16 +205,58 @@ export function CommunicationTab({ item }: Props) {
                         <p>aliasActiveCount: {configDebug.aliasActiveCount}</p>
                       </>
                     )}
-                    {missingReason === 'no-setting' &&
-                      typeof configDebug.otherAllowedCompaniesWithEnabledSetting === 'number' && (
-                        <p className="mt-1 font-sans text-amber-800">
-                          ⚠ Bu vakanın <b>{configDebug.caseCompanyId}</b> companyId'sinde
-                          ExternalMailSetting YOK; ama yetkili olduğunuz BAŞKA{' '}
-                          <b>{configDebug.otherAllowedCompaniesWithEnabledSetting}</b>{' '}
-                          şirkette enabled setting VAR. Admin'de hangi şirket için
-                          kaydettiğinizi doğrulayın.
+                    {missingReason === 'no-setting' && Array.isArray(configDebug.settingCompanies) && (
+                      <div className="mt-2">
+                        <p className="font-sans text-amber-800">
+                          ⚠ Bu vakanın{' '}
+                          <b>{configDebug.caseCompanyId}</b> companyId'sinde
+                          ExternalMailSetting YOK.
+                          {configDebug.settingCompanies.length > 0
+                            ? ' Yetkili olduğunuz başka şirketlerde setting var:'
+                            : ' Yetkili olduğunuz başka şirketlerde de setting yok.'}
                         </p>
-                      )}
+                        {configDebug.settingCompanies.length > 0 && (
+                          <table className="mt-1 w-full border-collapse text-[10px]">
+                            <thead>
+                              <tr className="border-b border-amber-300 text-left">
+                                <th className="px-1 py-0.5">name</th>
+                                <th className="px-1 py-0.5">companyId</th>
+                                <th className="px-1 py-0.5">enabled</th>
+                                <th className="px-1 py-0.5">from?</th>
+                                <th className="px-1 py-0.5">match?</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {configDebug.settingCompanies.map((s) => {
+                                const sameName =
+                                  configDebug.caseCompanyName &&
+                                  s.name &&
+                                  s.name.trim().toLowerCase() ===
+                                    configDebug.caseCompanyName.trim().toLowerCase();
+                                return (
+                                  <tr
+                                    key={s.companyId}
+                                    className={
+                                      sameName
+                                        ? 'bg-rose-100 dark:bg-rose-900/40'
+                                        : ''
+                                    }
+                                  >
+                                    <td className="px-1 py-0.5">{s.name ?? '—'}</td>
+                                    <td className="px-1 py-0.5">{s.companyId}</td>
+                                    <td className="px-1 py-0.5">{String(s.enabled)}</td>
+                                    <td className="px-1 py-0.5">{String(s.hasFromAddress)}</td>
+                                    <td className="px-1 py-0.5">
+                                      {sameName ? '🔥 aynı isim, farklı ID' : ''}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

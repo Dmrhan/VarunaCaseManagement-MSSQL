@@ -196,6 +196,13 @@ export type EmailConfigReason =
   | 'has-alias'
   | 'fallback-from-address';
 
+export interface EmailConfigDebugSettingCompany {
+  companyId: string;
+  name: string | null;
+  enabled: boolean;
+  hasFromAddress: boolean;
+}
+
 export interface EmailConfigDebug {
   caseCompanyId: string;
   caseCompanyName: string | null;
@@ -204,7 +211,12 @@ export interface EmailConfigDebug {
   settingFromAddress: string | null;
   aliasActiveCount: number;
   fallbackUsed?: boolean;
-  otherAllowedCompaniesWithEnabledSetting?: number | null;
+  /**
+   * no-setting reason'ında: kullanıcının yetkili olduğu (allowedCompanyIds)
+   * + setting'i olan başka şirketlerin listesi. Aynı isim/farklı ID
+   * teşhisi için.
+   */
+  settingCompanies?: EmailConfigDebugSettingCompany[] | null;
 }
 
 export interface EmailConfig {
