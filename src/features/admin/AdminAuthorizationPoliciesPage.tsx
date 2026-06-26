@@ -656,6 +656,7 @@ export function AdminAuthorizationPoliciesPage() {
                   <Th>Hedef</Th>
                   <Th>Uygulama</Th>
                   <Th align="right">Öncelik</Th>
+                  <Th>Son Değişiklik</Th>
                   <Th>Durum</Th>
                   <Th align="right">Aksiyon</Th>
                 </tr>
@@ -690,6 +691,14 @@ export function AdminAuthorizationPoliciesPage() {
                       <EnforcementBadge target={row.target} />
                     </Td>
                     <Td align="right" className="text-slate-600">{row.priority}</Td>
+                    <Td>
+                      <div className="text-xs font-medium text-slate-700">
+                        {formatPolicyActor(row.updatedBy) || formatPolicyActor(row.createdBy) || '—'}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {formatPolicyDate(row.updatedAt ?? row.createdAt)}
+                      </div>
+                    </Td>
                     <Td>
                       {row.isActive ? <Badge tint="emerald">Aktif</Badge> : <Badge tint="slate">Pasif</Badge>}
                     </Td>
@@ -1111,6 +1120,19 @@ function formatPrincipalLabel(
 ): string {
   const options = buildPrincipalOptions(principalType, companyId, companies, teams, persons, users);
   return options.find((option) => option.value === principalKey)?.label ?? principalKey;
+}
+
+function formatPolicyActor(actor?: { fullName?: string | null; email?: string | null } | null): string {
+  return actor?.fullName || actor?.email || '';
+}
+
+function formatPolicyDate(iso?: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('tr-TR');
+  } catch {
+    return '—';
+  }
 }
 
 function AuthorizationPolicyModal({

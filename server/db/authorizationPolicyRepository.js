@@ -44,6 +44,10 @@ export const authorizationPolicyRepository = {
     };
     return prisma.authorizationPolicy.findMany({
       where,
+      include: {
+        createdBy: { select: { id: true, fullName: true, email: true } },
+        updatedBy: { select: { id: true, fullName: true, email: true } },
+      },
       orderBy: [
         { companyId: 'asc' },
         { target: 'asc' },

@@ -326,6 +326,8 @@ export interface AuthorizationPolicy {
   notes: string | null;
   createdByUserId?: string | null;
   updatedByUserId?: string | null;
+  createdBy?: { id: string; fullName?: string | null; email?: string | null } | null;
+  updatedBy?: { id: string; fullName?: string | null; email?: string | null } | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1250,8 +1252,9 @@ export const adminService = {
     },
   },
 
-  // Authorization Management — policy CRUD only. Runtime enforcement is a
-  // later PR; this UI/API layer stores definitions for review and UAT.
+  // Authorization Management — policy CRUD + active runtime pilot coverage.
+  // Runtime enforcement is intentionally deny-only: policies can narrow
+  // existing role access, but they do not widen backend route gates.
   authorizationPolicies: {
     async list(filter: AuthorizationPolicyListFilter): Promise<AuthorizationPolicy[]> {
       const qs = new URLSearchParams();
