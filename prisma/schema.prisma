@@ -1012,6 +1012,7 @@ model ThirdParty {
   description String?  @db.NVarChar(Max)
   isActive    Boolean  @default(true)
   companyId   String?  @db.NVarChar(450)
+  pausesSla   Boolean  @default(true)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 

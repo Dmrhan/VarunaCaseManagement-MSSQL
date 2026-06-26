@@ -69,6 +69,7 @@ export interface CaseThirdParty {
   description?: string;
   isActive: boolean;
   companyId?: string;
+  pausesSla?: boolean;
 }
 
 export interface CaseDocumentType {

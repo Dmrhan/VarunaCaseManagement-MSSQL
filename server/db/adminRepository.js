@@ -64,6 +64,7 @@ export const thirdPartyRepo = {
         description: input.description?.trim() || null,
         isActive: input.isActive ?? true,
         companyId,
+        pausesSla: input.pausesSla !== false, // default true; undefined → true
       },
     });
   },
@@ -81,6 +82,7 @@ export const thirdPartyRepo = {
         ...(patch.name !== undefined && { name: patch.name.trim() }),
         ...(patch.description !== undefined && { description: patch.description?.trim() || null }),
         ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+        ...(patch.pausesSla !== undefined && { pausesSla: patch.pausesSla }),
       },
     });
   },

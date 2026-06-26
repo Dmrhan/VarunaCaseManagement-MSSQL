@@ -35,6 +35,7 @@ export interface ThirdPartyInput {
   description?: string;
   isActive: boolean;
   companyId?: string;
+  pausesSla?: boolean;
 }
 
 export interface DocumentTypeInput {
