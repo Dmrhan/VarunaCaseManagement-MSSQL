@@ -2327,7 +2327,10 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
-    const items = await externalMailFromAliasRepo.listActive(c.companyId);
+    // M6.3-realign — FromAlias hiç tanımlı değilse ExternalMailSetting.fromAddress
+    // fallback ile sentetik tek alias döndür. validateOutboundFrom aynı
+    // fallback'i kullanıyor → gönderim tutarlı.
+    const items = await externalMailFromAliasRepo.listActiveWithSettingFallback(c.companyId);
     // Composer dropdown'a sade response — admin alanlarını filtrele.
     res.json({
       items: items.map((a) => ({
