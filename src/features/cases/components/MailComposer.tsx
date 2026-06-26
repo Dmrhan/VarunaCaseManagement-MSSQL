@@ -170,7 +170,10 @@ export function MailComposer({
   }, [item.id]);
 
   const selectedAlias = aliases.find((a) => a.id === fromId) ?? null;
-  const hideFromDropdown = aliases.length <= 1;
+  // Codex fix — From dropdown HER ZAMAN görünür (n4b paritesi). "Tek
+  // alias ise gizle" mantığı KALDIRILDI; agent gönderen adresini her
+  // zaman görsün.
+  const noAliasesConfigured = aliases.length === 0;
 
   async function handleAttach(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -280,9 +283,18 @@ export function MailComposer({
           </div>
         </Field>
 
-        {/* From */}
-        {!hideFromDropdown ? (
-          <Field label="Kimden">
+        {/* From — Codex fix: HER ZAMAN görünür (n4b paritesi). Boş ise net
+            uyarı + Send pasif. */}
+        <Field label="Kimden">
+          {noAliasesConfigured ? (
+            <div
+              className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+              role="alert"
+            >
+              Bu şirkette gönderen adresi tanımlı değil — Admin → Mail
+              Entegrasyonu'ndan ekleyin.
+            </div>
+          ) : (
             <select
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
@@ -296,14 +308,8 @@ export function MailComposer({
                 </option>
               ))}
             </select>
-          </Field>
-        ) : selectedAlias ? (
-          <Field label="Kimden">
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
-              {selectedAlias.displayName ? `${selectedAlias.displayName} <${selectedAlias.address}>` : selectedAlias.address}
-            </div>
-          </Field>
-        ) : null}
+          )}
+        </Field>
 
         {/* To/Cc/Bcc — n4b: 3'ü de görünür */}
         <ContactPicker

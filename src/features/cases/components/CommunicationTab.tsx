@@ -44,6 +44,13 @@ export function CommunicationTab({ item }: Props) {
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
   const [forwardCtx, setForwardCtx] = useState<ForwardContext | null>(null);
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
+  // Codex fix — Reply/Forward konu prefill: composer açıkken mode değişirse
+  // (örn. reply açıkken forward'a geç) initialReplyContext/initialForwardContext
+  // prop değişiyor ama composer'ın internal state'i (subject vs.) ilk
+  // mount'ta sabitlendiği için yenilenmiyordu. composeKey her openX'te
+  // değişir → composer remount → useState initializer subject'i yeni
+  // ctx.subject ile doldurur.
+  const [composeKey, setComposeKey] = useState(0);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -62,6 +69,7 @@ export function CommunicationTab({ item }: Props) {
     setReplyCtx(ctx ?? null);
     setForwardCtx(null);
     setComposerOpen(true);
+    setComposeKey((k) => k + 1);
   }, [item.id]);
 
   const openForward = useCallback(async (email: CaseEmailItem) => {
@@ -69,12 +77,14 @@ export function CommunicationTab({ item }: Props) {
     setForwardCtx(ctx ?? null);
     setReplyCtx(null);
     setComposerOpen(true);
+    setComposeKey((k) => k + 1);
   }, [item.id]);
 
   const openNew = useCallback(() => {
     setReplyCtx(null);
     setForwardCtx(null);
     setComposerOpen(true);
+    setComposeKey((k) => k + 1);
   }, []);
 
   const handleSent = useCallback(() => {
@@ -130,6 +140,7 @@ export function CommunicationTab({ item }: Props) {
           {composerOpen ? (
             // M6.3-realign — TAM EKRAN composer; thread'i değiştirir.
             <MailComposer
+              key={composeKey}
               item={item}
               initialReplyContext={replyCtx}
               initialForwardContext={forwardCtx}
