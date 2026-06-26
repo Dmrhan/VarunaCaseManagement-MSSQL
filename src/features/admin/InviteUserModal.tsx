@@ -206,14 +206,13 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
           </select>
         </Field>
 
-        <Field label="Şirket" required hint="Kullanıcı hangi şirkete bağlansın?">
-          <CompanySelector
-            value={companyId}
-            onChange={(id) => { setCompanyId(id); setTeamId(''); }}
-            required
-            disabled={submitting}
-          />
-        </Field>
+        <CompanySelector
+          value={companyId}
+          onChange={(id) => { setCompanyId(id); setTeamId(''); }}
+          required
+          disabled={submitting}
+          hint="Kullanıcı hangi şirkete bağlansın?"
+        />
 
         {teamOptions.length > 0 && (
           <Field label="Takım" hint="Opsiyonel — seçilirse kişi kaydı bu takıma bağlanır.">
