@@ -24,6 +24,7 @@ import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { devopsClient } from '../lib/devopsClient.js';
 import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
+import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
@@ -1071,6 +1072,116 @@ router.post('/external-mail-settings/:companyId/poll', asyncRoute(async (req, re
     stats: result.stats,
     meta: result.meta,
   });
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Mail M5-extension (K1) — Per-company FromAlias yönetimi.
+//
+// REUSE: assertCompanyAdmin guard + asyncRoute + requireActor patternleri.
+// Admin UI (AdminExternalMailPage) bu endpoint'leri çağırır. Composer
+// dropdown (M6.2) public lookup endpoint'inden besleniyor (case.js).
+//
+// Plan referansı: docs/M6-email-in-case-plan.md Bölüm 4.4.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /external-mail-settings/:companyId/from-aliases — Admin liste.
+ * Response: ExternalMailSettingFromAlias[] (sortOrder asc).
+ */
+router.get('/external-mail-settings/:companyId/from-aliases', asyncRoute(async (req, res) => {
+  const { companyId } = req.params;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const items = await externalMailFromAliasRepo.list(companyId);
+  res.json({ items });
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/from-aliases — yeni alias.
+ * Body: { address, displayName?, isDefault?, isActive?, sortOrder? }
+ */
+router.post('/external-mail-settings/:companyId/from-aliases', asyncRoute(async (req, res) => {
+  const { companyId } = req.params;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+  // Setting FK opsiyonel — ExternalMailSetting varsa otomatik bağla.
+  let externalMailSettingId = null;
+  try {
+    const ems = await externalMailSettingRepo.getByCompany(companyId);
+    if (ems?.id) externalMailSettingId = ems.id;
+  } catch { /* sessiz */ }
+  const result = await externalMailFromAliasRepo.upsert(
+    companyId,
+    { ...(req.body ?? {}), externalMailSettingId },
+    actor.userId ?? null,
+  );
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'address_already_exists' ? 409
+      : code === 'address_invalid' ? 400
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json(result.alias);
+}));
+
+/**
+ * PATCH /external-mail-settings/:companyId/from-aliases/:aliasId — düzenle.
+ * Body üzerinden alias güncellenir.
+ */
+router.patch('/external-mail-settings/:companyId/from-aliases/:aliasId', asyncRoute(async (req, res) => {
+  const { companyId, aliasId } = req.params;
+  if (!companyId || !aliasId) throw new AdminError('companyId+aliasId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+  const result = await externalMailFromAliasRepo.upsert(
+    companyId,
+    { ...(req.body ?? {}), id: aliasId },
+    actor.userId ?? null,
+  );
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'not_found' ? 404
+      : code === 'address_already_exists' ? 409
+      : code === 'address_invalid' ? 400
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json(result.alias);
+}));
+
+/**
+ * DELETE /external-mail-settings/:companyId/from-aliases/:aliasId — sil.
+ */
+router.delete('/external-mail-settings/:companyId/from-aliases/:aliasId', asyncRoute(async (req, res) => {
+  const { companyId, aliasId } = req.params;
+  if (!companyId || !aliasId) throw new AdminError('companyId+aliasId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const result = await externalMailFromAliasRepo.remove(companyId, aliasId);
+  if (!result.ok) {
+    return res.status(result.code === 'not_found' ? 404 : 400).json({ error: result.code });
+  }
+  res.json({ ok: true });
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/from-aliases/:aliasId/set-default
+ * — Default alias değişimi (diğerleri otomatik false).
+ */
+router.post('/external-mail-settings/:companyId/from-aliases/:aliasId/set-default', asyncRoute(async (req, res) => {
+  const { companyId, aliasId } = req.params;
+  if (!companyId || !aliasId) throw new AdminError('companyId+aliasId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const result = await externalMailFromAliasRepo.setDefault(companyId, aliasId);
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'not_found' ? 404
+      : code === 'inactive' ? 409
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json({ ok: true });
 }));
 
 // ─────────────────────────────────────────────────────────────────
