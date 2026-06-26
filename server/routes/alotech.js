@@ -18,6 +18,19 @@ router.use(verifyJwt);
 
 const HOST = process.env.ALOTECH_TENANT || ''; // param-univera.alo-tech.com
 
+/** AloTech ortam değişkenleri tanımlı mı (TENANT + app_token/secret_key). */
+function alotechConfigured() {
+  return Boolean(process.env.ALOTECH_TENANT && (process.env.ALOTECH_APP_TOKEN || process.env.ALOTECH_SECRET_KEY));
+}
+
+// AloTech env tanımlı DEĞİLSE softphone'u sessizce kapat: 500 fırlatmak yerine
+// tüm endpoint'ler { configured:false } döner; frontend bununla widget'ı gizler
+// ve polling yapmaz. Böylece env eklenmemiş ortamda hiçbir kullanıcı etkilenmez.
+router.use((req, res, next) => {
+  if (!alotechConfigured()) return res.json({ configured: false });
+  next();
+});
+
 /**
  * İstekteki AloTech agent e-postasını çöz.
  * Eşleştirme User tablosunda DEĞİL — agent kendi AloTech e-postasını softphone

@@ -92,6 +92,7 @@ export interface AgentStatus {
   agentEmail: string;
   status: string | null;
   agentName: string | null;
+  configured?: boolean; // backend: AloTech env tanımlı değilse false
 }
 
 /** Giriş yapan agent'ın AloTech müsaitlik durumu. */
@@ -133,7 +134,7 @@ export interface ActiveCallInfo {
 }
 
 /** Agent'ın o anki aktif/çalan çağrıları + gerçek müsaitlik durumu (polling). */
-export async function fetchActiveCall(): Promise<{ calls: ActiveCallInfo[]; agentStatus: string | null } | undefined> {
+export async function fetchActiveCall(): Promise<{ calls: ActiveCallInfo[]; agentStatus: string | null; configured?: boolean } | undefined> {
   return apiFetch('/api/integrations/alotech/active-call', { headers: alotechHeaders() }, 'Aktif çağrı');
 }
 

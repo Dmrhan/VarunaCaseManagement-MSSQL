@@ -41,6 +41,7 @@ export interface IncomingCall {
 interface SoftphoneState {
   mode: 'embedded' | 'click2call';
   status: SoftphoneStatus;
+  disabled: boolean; // AloTech env tanımlı değil → softphone tamamen kapalı
   agentEmail: string | null;
   agentStatus: string | null;
   error: string | null;
@@ -67,6 +68,7 @@ export const SOFTPHONE_ANSWERED_EVENT = 'varuna:softphone-answered';
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [status, setStatus] = useState<SoftphoneStatus>('idle');
+  const [disabled, setDisabled] = useState(false);
   const [agentEmail, setAgentEmail] = useState<string | null>(() => getAlotechEmail());
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +96,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setStatus('connecting');
     setError(null);
     try {
+      // Config + ilk durum kontrolü (her iki modda): AloTech env tanımlı değilse
+      // backend { configured:false } döner → softphone'u tamamen kapat (sessiz).
+      const s = await fetchAgentStatus();
+      if (s?.configured === false) { setDisabled(true); setStatus('idle'); startedRef.current = false; return; }
       if (isEmbedded) {
         const sess = await fetchSoftphoneSession();
         setAgentEmail(sess.agentEmail);
@@ -103,7 +109,6 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         });
         setStatus('ready');
       } else {
-        const s = await fetchAgentStatus();
         if (!s) throw new Error('AloTech agent bilgisi alınamadı');
         setAgentEmail(s.agentEmail);
         setAgentStatus(s.status);
@@ -165,6 +170,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       const r = await fetchActiveCall().catch(() => undefined);
       if (!alive) return;
+      if (r?.configured === false) { setDisabled(true); setStatus('idle'); return; } // env yok → kapat
       if (r && 'agentStatus' in r) {
         // Çağrı yanıtlandığında (talking) → screen pop event (callerId ile, bir kez).
         if (r.agentStatus === 'talking' && lastAnsweredKey.current !== (lastInbound.current?.key ?? null)) {
@@ -288,7 +294,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const value: SoftphoneState = {
     mode: MODE,
-    status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
+    status, disabled, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
     connect, refreshStatus, dialNumber, answerCall, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;

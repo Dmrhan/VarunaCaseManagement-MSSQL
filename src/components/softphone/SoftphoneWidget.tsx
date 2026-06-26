@@ -22,7 +22,7 @@ const STATUS_TR: Record<string, string> = {
 const CALL_STATE_TR: Record<string, string> = { active: 'Görüşmede', hold: 'Beklemede', ringing: 'Çalıyor' };
 
 export function SoftphoneWidget() {
-  const { mode, status, agentStatus, agentEmail, error, activeCall, muted, dialNumber, endCall, toggleMute, toggleHold, changeStatus, saveAgentEmail } = useSoftphone();
+  const { mode, status, disabled, agentStatus, agentEmail, error, activeCall, muted, dialNumber, endCall, toggleMute, toggleHold, changeStatus, saveAgentEmail } = useSoftphone();
   const [open, setOpen] = useState(false);
   const [dialInput, setDialInput] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -35,6 +35,8 @@ export function SoftphoneWidget() {
     return () => clearInterval(t);
   }, [activeCall]);
 
+  // AloTech env tanımlı değil → softphone tamamen gizli (kimse etkilenmesin).
+  if (disabled) return null;
   // E-posta girilmemişse widget'ı GÖSTER (agent girsin). Girilmiş + idle ise gizle.
   if (status === 'idle' && agentEmail) return null;
 
