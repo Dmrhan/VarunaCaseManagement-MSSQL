@@ -772,7 +772,7 @@ export const AUTHORIZATION_POLICIES_HELP: HelpContent = {
 Menü              → Canlı, daraltıcı: görünen menüyü kapatabilir
 Kayıt İşlemleri   → Pilot: vaka ana işlemleri, çözüm adımı, not, dosya, izleyici, bağlantı ve toplu güncellemede çalışır
 Alan Yetkisi      → Pilot: kapanış alanları + Case Detail Detay sekmesindeki seçili alanlarda çalışır
-Güvenlik Filtresi → Pilot: vaka listesi, vaka detayı, detay yardımcı uçları ve etiket doğrulama liste/export akışlarında çalışır`,
+Güvenlik Filtresi → Pilot: vaka listesi/KPI, müşteri geçmişi-açık vaka yardımcı listeleri, vaka detayı, detay yardımcı uçları ve etiket doğrulama liste/export akışlarında çalışır`,
       tip:
         'Bir sayfayı göstermek tek başına yeterli değildir; o sayfanın API tarafındaki rol ve kayıt işlem kuralları da uyumlu olmalıdır. Bu yüzden menü ile kayıt işlemi kurallarını birlikte düşünün.',
     },

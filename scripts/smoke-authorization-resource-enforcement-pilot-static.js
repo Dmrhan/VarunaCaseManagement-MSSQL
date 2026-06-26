@@ -69,7 +69,9 @@ expect('3.19 AI suggested step import guarded', /assertCaseResourcePolicy\(req, 
 expect('3.20 company resource helper validates allowed company', /function assertCompanyResourcePolicy[\s\S]*company_forbidden/.test(casesRoute), true);
 expect('3.21 terminal transition maps to close', /function transitionResourceAction[\s\S]*'Çözüldü'[\s\S]*'İptal Edildi'[\s\S]*'close'/.test(casesRoute), true);
 expect('3.22 bulk update has dedicated resource helper', /async function assertBulkCaseResourcePolicy/.test(casesRoute), true);
-expect('3.23 bulk assignment checks assign action', /function bulkResourceActions[\s\S]*assignedPersonId[\s\S]*assignedTeamId[\s\S]*actions\.add\('assign'\)/.test(casesRoute), true);
+expect('3.23 bulk assignment checks assign action', /function bulkResourceActions[\s\S]*const hasAssignment[\s\S]*assignedPersonId[\s\S]*assignedTeamId[\s\S]*if \(hasAssignment\) actions\.add\('assign'\)/.test(casesRoute), true);
+expect('3.23b bulk update action only comes from priority/status', /function bulkResourceActions[\s\S]*const hasGeneralUpdate[\s\S]*updates\.priority[\s\S]*updates\.status[\s\S]*if \(hasGeneralUpdate\) actions\.add\('update'\)/.test(casesRoute), true);
+expect('3.23c pure assignment does not seed update action', /const actions = new Set\(\)[\s\S]*if \(hasGeneralUpdate\) actions\.add\('update'\)[\s\S]*if \(hasAssignment\) actions\.add\('assign'\)/.test(casesRoute), true);
 expect('3.24 bulk update guarded before repository call', /assertBulkCaseResourcePolicy\(req,[\s\S]*caseRepository\.bulkUpdate/.test(casesRoute), true);
 expect('3.25 devops link guarded as case.link create', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'create' \}\)[\s\S]*caseRepository\.linkDevops/.test(casesRoute), true);
 expect('3.26 devops unlink guarded as case.link delete', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'delete' \}\)[\s\S]*caseRepository\.unlinkDevops/.test(casesRoute), true);
