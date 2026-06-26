@@ -55,7 +55,7 @@ const ENFORCEMENT_STATUS: Record<
   resource: {
     label: 'Pilot',
     tint: 'violet',
-    description: 'Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu ve dosya API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı kontrol olarak çalışır.',
+    description: 'Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu, dosya, izleyici, bağlantı ve toplu güncelleme API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı kontrol olarak çalışır.',
   },
   field: {
     label: 'Pilot',
@@ -756,7 +756,7 @@ function EnforcementStatusNotice() {
       </div>
       <p className="mt-1 text-amber-800">
         Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır ve mevcut rol yetkilerini daraltır.
-        Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu ve dosya uçlarında flag ile pilot
+        Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu, dosya, izleyici, bağlantı ve toplu güncelleme uçlarında flag ile pilot
         çalışır. Alan yetkisi kuralları kapanışta zorunlu alan kontrolünde ve Case Detail Detay sekmesinde
         görünürlük/maskeleme/düzenleme pilotunda kullanılır. Güvenlik filtresi kuralları vaka listesi ve etiket
         doğrulama liste/export uçlarında flag ile daraltıcı kayıt filtresi olarak pilot çalışır.
