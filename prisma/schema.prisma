@@ -189,6 +189,8 @@ model Company {
   /// not wired by the initial migration; admin UI/runtime phases consume
   /// this table later.
   authorizationPolicies       AuthorizationPolicy[]
+  /// ThirdParty — şirket kapsamlı 3. parti listesi.
+  thirdParties                ThirdParty[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -1007,13 +1009,17 @@ model Person {
 
 model ThirdParty {
   id          String   @id @default(cuid()) @db.NVarChar(450)
-  name        String   @unique @db.NVarChar(200)
+  name        String   @db.NVarChar(200)
   description String?  @db.NVarChar(Max)
   isActive    Boolean  @default(true)
+  companyId   String?  @db.NVarChar(450)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
-  cases Case[]
+  company Company? @relation(fields: [companyId], references: [id])
+  cases   Case[]
+
+  @@unique([name, companyId])
 }
 
 model DocumentType {

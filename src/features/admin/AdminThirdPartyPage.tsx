@@ -11,6 +11,7 @@ import { adminService, type ThirdPartyInput } from '@/services/adminService';
 import type { CaseThirdParty } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { THIRD_PARTY_HELP } from './helpContents';
+import { lookupService } from '@/services/caseService';
 
 export function AdminThirdPartyPage() {
   const [items, setItems] = useState<CaseThirdParty[]>([]);
@@ -19,19 +20,24 @@ export function AdminThirdPartyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  const companies = useMemo(() => lookupService.companies(), []);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await adminService.thirdParties.list());
+      const list = selectedCompanyId
+        ? await adminService.thirdParties.listByCompany(selectedCompanyId)
+        : await adminService.thirdParties.list();
+      setItems(list);
     } catch (e) {
       setError((e as Error).message ?? 'Bilinmeyen hata');
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { void refresh(); }, [selectedCompanyId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -90,6 +96,19 @@ export function AdminThirdPartyPage() {
         error={error}
         onRetry={() => void refresh()}
       >
+        {/* Şirket filtresi */}
+        <div className="mb-3">
+          <select
+            value={selectedCompanyId}
+            onChange={(e) => setSelectedCompanyId(e.target.value)}
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          >
+            <option value="">Tüm şirketler</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
         {filtered.length === 0 ? (
           <CardBody>
             <EmptyState
@@ -117,6 +136,7 @@ export function AdminThirdPartyPage() {
                   <Th>İsim</Th>
                   <Th>Açıklama</Th>
                   <Th>Durum</Th>
+                  <Th>Şirket</Th>
                   <Th align="right">Kullanım</Th>
                   <Th align="right">Aksiyon</Th>
                 </tr>
@@ -137,6 +157,11 @@ export function AdminThirdPartyPage() {
                         ) : (
                           <Badge tint="slate">Pasif</Badge>
                         )}
+                      </Td>
+                      <Td>
+                        {it.companyId
+                          ? (companies.find((c) => c.id === it.companyId)?.name ?? it.companyId)
+                          : <span className="text-slate-400 text-xs">Sistem geneli</span>}
                       </Td>
                       <Td align="right">
                         {usage > 0 ? (
@@ -190,6 +215,8 @@ export function AdminThirdPartyPage() {
         open={editor !== null}
         mode={editor?.mode ?? 'create'}
         editingId={editor?.mode === 'edit' ? editor.id : null}
+        defaultCompanyId={selectedCompanyId || undefined}
+        companies={companies}
         onClose={() => setEditor(null)}
         onSaved={refresh}
       />
@@ -205,16 +232,20 @@ function ThirdPartyEditModal({
   open,
   mode,
   editingId,
+  defaultCompanyId,
+  companies,
   onClose,
   onSaved,
 }: {
   open: boolean;
   mode: 'create' | 'edit';
   editingId: string | null;
+  defaultCompanyId?: string;
+  companies: { id: string; name: string }[];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true });
+  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -226,13 +257,13 @@ function ThirdPartyEditModal({
       void (async () => {
         const item = await adminService.thirdParties.get(editingId);
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive });
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId });
         }
       })();
     } else {
-      setForm({ name: '', description: '', isActive: true });
+      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined });
     }
-  }, [open, mode, editingId]);
+  }, [open, mode, editingId, defaultCompanyId]);
 
   async function handleSave() {
     setSubmitting(true);
@@ -241,6 +272,7 @@ function ThirdPartyEditModal({
       name: form.name.trim(),
       description: form.description?.trim() || undefined,
       isActive: form.isActive,
+      companyId: form.companyId || undefined,
     };
 
     const r =
@@ -324,6 +356,29 @@ function ThirdPartyEditModal({
           />
           Aktif — yeni vaka geçişlerinde dropdown'da görünür
         </label>
+
+        {mode === 'edit' ? (
+          <Field label="Şirket" hint="Düzenleme modunda şirket değiştirilemez">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-600">
+              {form.companyId
+                ? (companies.find((c) => c.id === form.companyId)?.name ?? form.companyId)
+                : 'Sistem geneli'}
+            </div>
+          </Field>
+        ) : (
+          <Field label="Şirket" hint="Boş bırakılırsa sistem geneli olur">
+            <select
+              value={form.companyId ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value || undefined }))}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">Sistem geneli</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         {error && (
           <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">

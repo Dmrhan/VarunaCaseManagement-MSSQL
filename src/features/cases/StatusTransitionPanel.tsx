@@ -186,7 +186,10 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const [kbSuggestion, setKbSuggestion] = useState<SuggestClosureResponse | null>(null);
   const [kbSuggestionError, setKbSuggestionError] = useState<string | null>(null);
 
-  const thirdParties = useMemo(() => lookupService.thirdParties(), []);
+  const thirdParties = useMemo(
+    () => lookupService.thirdParties().filter((tp) => !tp.companyId || tp.companyId === item.companyId),
+    [item.companyId],
+  );
 
   // Vaka değişince akış sıfırlanır.
   // Codex PR-1e review P2 fix — Panel reuse (örn. L1WorkbenchPanel başka
