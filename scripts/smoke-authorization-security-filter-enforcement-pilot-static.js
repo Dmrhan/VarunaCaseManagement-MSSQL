@@ -131,11 +131,21 @@ expect('2.18 resource policy does not disable security-filter writes', /const re
 expect('2.19 solution steps read enforces security filter', /\/:id\/solution-steps[\s\S]*await assertCaseSecurityFilterAccess\(req\)[\s\S]*solutionStepRepository\.list/.test(casesRoute), true);
 expect('2.20 link list filters linked target metadata', /async function filterVisibleLinkedCases[\s\S]*isCaseVisibleBySecurityFilter\(req, \{ caseId: linkedCaseId \}\)/.test(casesRoute), true);
 expect('2.21 link route returns only visible links', /const visibleLinks = await filterVisibleLinkedCases\(req, list\)[\s\S]*res\.json\(\{ value: visibleLinks \}\)/.test(casesRoute), true);
+expect('2.22 stats endpoint passes securityWhere', /\/stats[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*caseRepository\.getStats\(\{ user: req\.user, securityWhere \}\)/.test(casesRoute), true);
+expect('2.23 duplicate-check passes securityWhere', /\/duplicate-check[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*caseRepository\.findOpenCaseFor\([\s\S]*securityWhere/.test(casesRoute), true);
+expect('2.24 snoozed list passes securityWhere', /\/snoozed[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*caseRepository\.listSnoozedForUser\([\s\S]*securityWhere/.test(casesRoute), true);
+expect('2.25 watching list passes securityWhere', /\/watching[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*watcherRepo\.listForUser\([\s\S]*securityWhere/.test(casesRoute), true);
+expect('2.26 by-account list passes securityWhere', /\/by-account'[\s\S]*caseRepository\.findByAccount\([\s\S]*await buildCaseListSecurityWhere\(req\)/.test(casesRoute), true);
+expect('2.27 by-account count passes securityWhere', /\/by-account\/count'[\s\S]*caseRepository\.countByAccount\([\s\S]*await buildCaseListSecurityWhere\(req\)/.test(casesRoute), true);
 
 expect('3.1 repository list accepts securityWhere', /async list\(\{[^}]*filters[^}]*pagination[^}]*allowedCompanyIds[^}]*securityWhere[^}]*\} = \{\}\)/.test(repo), true);
 expect('3.2 buildWhere accepts securityWhere param', /function buildWhere\(f, allowedCompanyIds, securityWhere = null\)/.test(repo), true);
 expect('3.3 securityWhere is ANDed with baseline tenant scope', /andClauses\.push\(securityWhere\)/.test(repo), true);
 expect('3.4 repository still uses one where for count and findMany', /const total = await prisma\.case\.count\(\{ where \}\)[\s\S]*prisma\.case\.findMany\(\{[\s\S]*where/s.test(repo), true);
+expect('3.5 repository stats accepts securityWhere', /async getStats\(\{ user, securityWhere = null \}\)/.test(repo), true);
+expect('3.6 repository helper merges securityWhere into scoped queries', /function mergeSecurityWhere[\s\S]*next\.AND = \[\.\.\.existingAnd, securityWhere\]/.test(repo), true);
+expect('3.7 by-account helpers accept securityWhere', /async findByAccount\(accountId, options = \{\}, allowedCompanyIds, securityWhere = null\)[\s\S]*async countByAccount\(accountId, options = \{\}, allowedCompanyIds, securityWhere = null\)/.test(repo), true);
+expect('3.8 watcher inbox filters visible cases', /async listForUser\(userId, allowedCompanyIds, securityWhere = null\)[\s\S]*mergeSecurityWhere\(\{ id: \{ in: items\.map/.test(repo), true);
 
 expect('4.1 runtime exports compileSecurityFilterOverrides', /export function compileSecurityFilterOverrides/.test(runtime), true);
 expect('4.2 runtime compiles deny filters as NOT', /if \(override\.effect === 'deny'\) return \{ NOT: compiled \}/.test(runtime), true);
@@ -145,7 +155,7 @@ expect('4.5 runtime preserves user.personId for compiler tokens', /personId: use
 
 expect('5.1 env documents security filter flag', /AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('5.2 env docs say enforcement narrows scope', /DARALTAN ek\s+#\s+where koşulu/.test(envExample), true);
-expect('5.3 env docs list pilot endpoints', /GET \/api\/cases, tagging-review list\/export, GET \/api\/cases\/:id/.test(envExample), true);
+expect('5.3 env docs list pilot endpoints', /vaka listesi\/KPI\/yardımcı listeler/.test(envExample), true);
 expect('5.4 smoke script registered', pkg.scripts['smoke:authorization-security-filter-enforcement'], 'node scripts/smoke-authorization-security-filter-enforcement-pilot-static.js');
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);

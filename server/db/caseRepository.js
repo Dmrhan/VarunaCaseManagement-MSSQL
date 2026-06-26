@@ -1017,7 +1017,7 @@ export const caseRepository = {
    * default "hide snoozed" rule (which is a list-presentation default,
    * not a counting default).
    */
-  async getStats({ user }) {
+  async getStats({ user, securityWhere = null }) {
     const allowedCompanyIds = user?.allowedCompanyIds ?? [];
     if (!Array.isArray(allowedCompanyIds) || allowedCompanyIds.length === 0) {
       return { mode: 'empty' };
@@ -1025,6 +1025,7 @@ export const caseRepository = {
     const scope = { companyId: { in: allowedCompanyIds } };
     const todayRange = buildTodayRange();
     const role = user.role;
+    const scoped = (where) => mergeSecurityWhere(where, securityWhere);
 
     if (['Agent', 'Backoffice', 'CSM'].includes(role)) {
       if (!user.personId) {
@@ -1035,19 +1036,19 @@ export const caseRepository = {
       const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine] = await Promise.all([
         // assignedToMe: open + not snoozed (matches list default)
         prisma.case.count({
-          where: { ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] },
+          where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
         }),
         // slaRiskMine: open + not snoozed + slaViolation
         prisma.case.count({
-          where: { ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+          where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
         }),
         // resolvedToday: snooze irrelevant — case zaten Cozuldu
         prisma.case.count({
-          where: { ...scope, assignedPersonId: personId, resolvedAt: todayRange },
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
-          where: { ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } },
+          where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
       ]);
       return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine };
@@ -1070,16 +1071,16 @@ export const caseRepository = {
       const notSnoozed = notSnoozedClause();
       const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday] = await Promise.all([
         prisma.case.count({
-          where: { ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] },
+          where: scoped({ ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: { ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+          where: scoped({ ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: { ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] },
+          where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: { ...scope, ...teamFilter, resolvedAt: todayRange },
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange }),
         }),
       ]);
       return {
@@ -1096,14 +1097,14 @@ export const caseRepository = {
     if (role === 'Admin' || role === 'SystemAdmin') {
       const notSnoozed = notSnoozedClause();
       const [totalOpen, slaViolation, critical, resolvedToday] = await Promise.all([
-        prisma.case.count({ where: { ...scope, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] } }),
+        prisma.case.count({ where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({
-          where: { ...scope, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] },
+          where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: { ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] },
+          where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: { ...scope, resolvedAt: todayRange } }),
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange }) }),
       ]);
       return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday };
     }
@@ -3183,14 +3184,14 @@ export const caseRepository = {
     return { updated, failed, errors };
   },
 
-  async findOpenCaseFor(accountId, caseType, allowedCompanyIds) {
+  async findOpenCaseFor(accountId, caseType, allowedCompanyIds, securityWhere = null) {
     const where = {
       accountId,
       caseType,
       status: { notIn: ['Cozuldu', 'IptalEdildi'] },
     };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
-    const found = await prisma.case.findFirst({ where, include: CASE_INCLUDE });
+    const found = await prisma.case.findFirst({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
     return shape(found);
   },
 
@@ -3737,7 +3738,7 @@ export const caseRepository = {
    *
    * Multi-tenant: allowedCompanyIds verildiyse sadece o şirketlerin vakaları.
    */
-  async listSnoozedForUser(personId, allowedCompanyIds) {
+  async listSnoozedForUser(personId, allowedCompanyIds, securityWhere = null) {
     if (!personId) return { items: [], total: 0 };
     const where = {
       assignedPersonId: personId,
@@ -3745,7 +3746,7 @@ export const caseRepository = {
     };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     const rows = await prisma.case.findMany({
-      where,
+      where: mergeSecurityWhere(where, securityWhere),
       include: CASE_INCLUDE,
     });
     const now = Date.now();
@@ -3805,7 +3806,7 @@ export const caseRepository = {
     return { woken: woken.length, ids: woken };
   },
 
-  async findByAccount(accountId, options = {}, allowedCompanyIds) {
+  async findByAccount(accountId, options = {}, allowedCompanyIds, securityWhere = null) {
     const where = { accountId };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     if (options.excludeId) where.NOT = { id: options.excludeId };
@@ -3814,7 +3815,7 @@ export const caseRepository = {
     if (options.statusNotIn) {
       where.status = { ...(where.status ?? {}), notIn: mapStatuses(options.statusNotIn) };
     }
-    const items = await prisma.case.findMany({ where, include: CASE_INCLUDE });
+    const items = await prisma.case.findMany({ where: mergeSecurityWhere(where, securityWhere), include: CASE_INCLUDE });
     return items.map(shape);
   },
 
@@ -3826,7 +3827,7 @@ export const caseRepository = {
    *
    * Aynı filtre semantiği: excludeId, statusIn, statusNotIn.
    */
-  async countByAccount(accountId, options = {}, allowedCompanyIds) {
+  async countByAccount(accountId, options = {}, allowedCompanyIds, securityWhere = null) {
     const where = { accountId };
     if (allowedCompanyIds) where.companyId = { in: allowedCompanyIds };
     if (options.excludeId) where.NOT = { id: options.excludeId };
@@ -3835,7 +3836,7 @@ export const caseRepository = {
     if (options.statusNotIn) {
       where.status = { ...(where.status ?? {}), notIn: mapStatuses(options.statusNotIn) };
     }
-    return prisma.case.count({ where });
+    return prisma.case.count({ where: mergeSecurityWhere(where, securityWhere) });
   },
 
   /**
@@ -4643,7 +4644,7 @@ export const watcherRepo = {
   },
 
   /** Kullanıcının izlediği aktif vakalar — Watcher Inbox (ileri faz) için. */
-  async listForUser(userId, allowedCompanyIds) {
+  async listForUser(userId, allowedCompanyIds, securityWhere = null) {
     if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) return [];
     const rows = await prisma.caseWatcher.findMany({
       where: { userId, companyId: { in: allowedCompanyIds } },
@@ -4667,12 +4668,25 @@ export const watcherRepo = {
         },
       },
     });
-    return rows
+    let items = rows
       .filter((r) => r.case)
       .map((r) => ({
         ...shape(r.case),
         addedAt: r.addedAt,
       }));
+    if (
+      securityWhere &&
+      typeof securityWhere === 'object' &&
+      !Array.isArray(securityWhere) &&
+      Object.keys(securityWhere).length > 0
+    ) {
+      const visibleIds = new Set((await prisma.case.findMany({
+        where: mergeSecurityWhere({ id: { in: items.map((item) => item.id) } }, securityWhere),
+        select: { id: true },
+      })).map((row) => row.id));
+      items = items.filter((item) => visibleIds.has(item.id));
+    }
+    return items;
   },
 };
 
@@ -5079,4 +5093,24 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   // WR-A4 — Project-bazlı vaka filtresi.
   if (f.accountProjectId) where.accountProjectId = f.accountProjectId;
   return where;
+}
+
+function mergeSecurityWhere(where, securityWhere = null) {
+  if (
+    !securityWhere ||
+    typeof securityWhere !== 'object' ||
+    Array.isArray(securityWhere) ||
+    Object.keys(securityWhere).length === 0
+  ) {
+    return where;
+  }
+
+  const next = { ...where };
+  const existingAnd = Array.isArray(where?.AND)
+    ? where.AND
+    : where?.AND
+      ? [where.AND]
+      : [];
+  next.AND = [...existingAnd, securityWhere];
+  return next;
 }

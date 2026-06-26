@@ -563,7 +563,8 @@ router.get(
 router.get(
   '/stats',
   asyncRoute(async (req, res) => {
-    const stats = await caseRepository.getStats({ user: req.user });
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const stats = await caseRepository.getStats({ user: req.user, securityWhere });
     res.json(stats);
   }),
 );
@@ -576,7 +577,13 @@ router.get(
     if (!accountId || !caseType) {
       return res.status(400).json({ error: 'accountId ve caseType gerekli' });
     }
-    const found = await caseRepository.findOpenCaseFor(accountId, caseType, req.user.allowedCompanyIds);
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const found = await caseRepository.findOpenCaseFor(
+      accountId,
+      caseType,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
     res.json({ case: found });
   }),
 );
@@ -589,9 +596,11 @@ router.get(
 router.get(
   '/snoozed',
   asyncRoute(async (req, res) => {
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.listSnoozedForUser(
       req.user.personId,
       req.user.allowedCompanyIds,
+      securityWhere,
     );
     res.json({ value: items, '@odata.count': total });
   }),
@@ -604,7 +613,12 @@ router.get(
 router.get(
   '/watching',
   asyncRoute(async (req, res) => {
-    const items = await watcherRepo.listForUser(req.user.id, req.user.allowedCompanyIds);
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const items = await watcherRepo.listForUser(
+      req.user.id,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
     res.json({ value: items, '@odata.count': items.length });
   }),
 );
@@ -648,6 +662,7 @@ router.get(
         statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
       },
       req.user.allowedCompanyIds,
+      await buildCaseListSecurityWhere(req),
     );
     res.json({ value: cases });
   }),
@@ -670,6 +685,7 @@ router.get(
         statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
       },
       req.user.allowedCompanyIds,
+      await buildCaseListSecurityWhere(req),
     );
     res.json({ count });
   }),
