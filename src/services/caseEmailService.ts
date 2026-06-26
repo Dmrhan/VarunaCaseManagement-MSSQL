@@ -56,10 +56,12 @@ export interface CaseEmailItem {
  * Kronolojik (eskiden yeniye).
  */
 export async function listEmails(caseId: string): Promise<CaseEmailItem[]> {
+  // silent — mail entegrasyonu yapılandırılmamış şirketlerde 404/403
+  // dönebilir; toast yağmuru olmasın, sessiz boş liste.
   const out = await apiFetch<{ items: CaseEmailItem[] }>(
     `/api/cases/${encodeURIComponent(caseId)}/emails`,
     undefined,
-    'E-posta thread\'i',
+    { silent: true },
   );
   return Array.isArray(out?.items) ? out!.items : [];
 }
@@ -76,7 +78,9 @@ export async function getAttachmentDownload(
   return apiFetch(
     `/api/cases/${encodeURIComponent(caseId)}/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
     undefined,
-    'Ek indirme',
+    // silent — cid rewrite her görsel için çağrılır; başarısız olanlar
+    // placeholder'a düşer, toast yağmuru olmasın.
+    { silent: true },
   );
 }
 
@@ -97,7 +101,7 @@ export async function getFromAliases(caseId: string): Promise<FromAliasOption[]>
   const out = await apiFetch<{ items: FromAliasOption[] }>(
     `/api/cases/${encodeURIComponent(caseId)}/from-aliases`,
     undefined,
-    'Gönderen adresleri',
+    { silent: true },
   );
   return Array.isArray(out?.items) ? out!.items : [];
 }
@@ -120,7 +124,7 @@ export async function getReplyContext(caseId: string): Promise<ReplyContext | un
   return apiFetch<ReplyContext>(
     `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context`,
     undefined,
-    'Yanıt bağlamı',
+    { silent: true },
   );
 }
 
@@ -181,7 +185,7 @@ export async function getForwardContext(caseId: string, emailId: string): Promis
   return apiFetch<ForwardContext>(
     `/api/cases/${encodeURIComponent(caseId)}/emails/${encodeURIComponent(emailId)}/forward-context`,
     undefined,
-    'İletme bağlamı',
+    { silent: true },
   );
 }
 
@@ -193,7 +197,7 @@ export async function getEmailSignature(caseId: string): Promise<string | null> 
   const r = await apiFetch<{ signatureHtml: string | null }>(
     `/api/cases/${encodeURIComponent(caseId)}/email-signature`,
     undefined,
-    'İmza',
+    { silent: true },
   );
   return r?.signatureHtml ?? null;
 }

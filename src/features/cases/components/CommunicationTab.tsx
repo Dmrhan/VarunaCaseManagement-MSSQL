@@ -11,11 +11,11 @@
  *  - Satır ikonları: Görüntüle / Yanıtla (reply-all) / İlet (forward).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AtSign, Globe, MessageSquare, Phone, Plus } from 'lucide-react';
+import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailThread, type MailThreadHandle } from './MailThread';
 import { MailComposer } from './MailComposer';
 import { Button } from '@/components/ui/Button';
-import { caseEmailService, type CaseEmailItem, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { caseEmailService, type CaseEmailItem, type FromAliasOption, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -51,13 +51,34 @@ export function CommunicationTab({ item }: Props) {
   // değişir → composer remount → useState initializer subject'i yeni
   // ctx.subject ile doldurur.
   const [composeKey, setComposeKey] = useState(0);
+  // M6.3-realign — config-yok hali. mailConfigState:
+  //   'loading'   → aliases fetch'i bekleniyor (ilk render)
+  //   'configured'→ 1+ alias var, normal akış
+  //   'missing'   → 0 alias, "Mail entegrasyonu yapılandırılmamış" banner
+  const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
+  // Cached aliases — composer'da getFromAliases tekrar çağrılır ama
+  // CommunicationTab da config-yok kararı için bir kez kontrol eder.
+  const [_aliases, setAliases] = useState<FromAliasOption[]>([]);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
+  // İmzayı sessizce yükle (silent fetch — config-yok şirketlerde 404 →
+  // toast yok, null döner).
   useEffect(() => {
     let alive = true;
     void caseEmailService.getEmailSignature(item.id).then((s) => {
       if (alive) setSignatureHtml(s);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  // M6.3-realign — alias listesini ilk render'da getir → config-yok kararı
+  useEffect(() => {
+    let alive = true;
+    void caseEmailService.getFromAliases(item.id).then((items) => {
+      if (!alive) return;
+      setAliases(items);
+      setMailConfigState(items.length > 0 ? 'configured' : 'missing');
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -135,7 +156,36 @@ export function CommunicationTab({ item }: Props) {
         })}
       </div>
 
-      {channel === 'email' && (
+      {channel === 'email' && mailConfigState === 'loading' && (
+        <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">
+          Yükleniyor…
+        </div>
+      )}
+
+      {channel === 'email' && mailConfigState === 'missing' && (
+        // M6.3-realign — config-yok hali. Toast yağmuru YOK; tek temiz
+        // banner. Şirkette FromAlias tanımlı değil (mail entegrasyonu
+        // composer'ı besleyecek alias listesi yok).
+        <div
+          className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+          role="status"
+        >
+          <Info size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">
+              "{item.companyName}" için mail entegrasyonu yapılandırılmamış.
+            </p>
+            <p className="mt-1 text-xs">
+              Bu vakada e-posta gönderimi/alımı için Admin → Yönetim Paneli →
+              <b> Mail Entegrasyonu</b> → ilgili şirket → <b>From Alias</b>
+              bölümünden bir gönderen adresi ekleyin. Düzenleme tamamlanınca
+              bu sekme otomatik aktifleşir.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {channel === 'email' && mailConfigState === 'configured' && (
         <>
           {composerOpen ? (
             // M6.3-realign — TAM EKRAN composer; thread'i değiştirir.
