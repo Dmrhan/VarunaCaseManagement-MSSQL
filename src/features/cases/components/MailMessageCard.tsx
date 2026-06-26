@@ -101,6 +101,27 @@ export function MailMessageCard({
     if (!root) return html;
 
     const imgs = Array.from(root.querySelectorAll('img'));
+    // M6.3a fix — diagnostic log: hangi cid'ler ve hangi CaseEmailAttachment
+    // contentId'leri var? Eski mail (CaseEmailAttachment yok) ve gerçek
+    // bug arasında ayrım yapmak için development'ta görünür.
+    if (typeof window !== 'undefined' && (import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+      const bodyCids = imgs
+        .map((i) => (i.getAttribute('src') ?? '').trim())
+        .filter((s) => s.toLowerCase().startsWith('cid:'));
+      const attCids = email.attachments.map((a) => ({
+        id: a.id, cid: a.contentId, inline: a.isInline, fileName: a.fileName,
+      }));
+      // eslint-disable-next-line no-console
+      console.warn('[MailMessageCard] cid diagnostic', {
+        emailId: email.id,
+        bodyCidImgs: bodyCids,
+        attachmentsContentIds: attCids,
+        hasCaseEmailAttachments: attCids.length > 0,
+      });
+    }
+    // Eski mail (CaseEmailAttachment hiç yok) flag — bu durumda cid: img'ler
+    // için placeholder mesajı "Eski mail" diye açıklayalım.
+    const isOldMailNoEmailAtt = email.attachments.length === 0;
     const cidJobs: Array<Promise<void>> = [];
     for (const img of imgs) {
       const src = (img.getAttribute('src') ?? '').trim();
@@ -110,8 +131,10 @@ export function MailMessageCard({
       const match = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
       if (!match) {
         const placeholder = doc.createElement('span');
-        placeholder.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
-        placeholder.textContent = `🖼 ${img.getAttribute('alt') || 'görsel'}`;
+        placeholder.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
+        placeholder.textContent = isOldMailNoEmailAtt
+          ? `🖼 Eski mail — inline görsel desteklenmiyor`
+          : `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
         img.replaceWith(placeholder);
         continue;
       }

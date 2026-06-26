@@ -288,11 +288,18 @@ export function MailComposer({
         <Field label="Kimden">
           {noAliasesConfigured ? (
             <div
-              className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
               role="alert"
             >
-              Bu şirkette gönderen adresi tanımlı değil — Admin → Mail
-              Entegrasyonu'ndan ekleyin.
+              <p className="font-medium">
+                "{item.companyName}" için gönderen e-posta adresi tanımlı değil.
+              </p>
+              <p className="mt-1 text-xs">
+                Admin → Yönetim Paneli → <b>Mail Entegrasyonu</b> →
+                ilgili şirket → <b>From Alias</b> bölümünden bir gönderen
+                adresi ekleyin (SMTP/IMAP credentials ayrı; "From Alias" listesi
+                composer'ı besler).
+              </p>
             </div>
           ) : (
             <select
@@ -359,7 +366,13 @@ export function MailComposer({
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             disabled={submitting}
-            placeholder={`Re: [${item.caseNumber}] ...`}
+            placeholder={
+              mode === 'reply'
+                ? `Re: [${item.caseNumber}] ...`
+                : mode === 'forward'
+                  ? `Fwd: ...`
+                  : `Konu yazın`
+            }
           />
         </Field>
 
