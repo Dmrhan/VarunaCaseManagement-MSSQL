@@ -752,7 +752,17 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
           )}
 
           {pending === '3rdPartyBekleniyor' && (
-            <Field label="Beklenen 3. Parti" required hint="Bu süreçte SLA sayacı duraklatılır.">
+            <Field
+              label="Beklenen 3. Parti"
+              required
+              hint={
+                thirdPartyId
+                  ? (thirdParties.find((tp) => tp.id === thirdPartyId)?.pausesSla !== false
+                    ? 'Bu 3. parti beklenirken SLA durur.'
+                    : 'Bu 3. parti beklenirken SLA işlemeye devam eder.')
+                  : 'Seçim yapıldığında SLA davranışı gösterilir.'
+              }
+            >
               <Select value={thirdPartyId} onChange={(e) => setThirdPartyId(e.target.value)}>
                 <option value="">Seçin…</option>
                 {thirdParties.map((tp) => (

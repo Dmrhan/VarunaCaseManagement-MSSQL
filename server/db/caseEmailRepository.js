@@ -185,12 +185,30 @@ async function appendInbound(params) {
       select: { id: true },
     });
 
-    // K4 türetim: inbound geldi → lastEmailInboundAt + pendingCustomerReply=true
+    // K4 türetim (Codex review fix — MONOTONIC):
+    //   - lastEmailInboundAt yalnız MAX(mevcut, gelen).
+    //   - pendingCustomerReply = (effectiveInbound > effectiveOutbound)
+    //     yani son inbound, son outbound'dan SONRAYSA yanıt bekliyor.
+    // Önceki davranış (koşulsuz=true) backfill / out-of-order inbound'da
+    // state'i geriye gönderiyordu (eski inbound geldikten sonra "yanıt
+    // bekleniyor" hatalı şekilde set edilebiliyordu).
+    const c = await tx.case.findUnique({
+      where: { id: caseId },
+      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true },
+    });
+    const prevIn = c?.lastEmailInboundAt ?? null;
+    const prevOut = c?.lastEmailOutboundAt ?? null;
+    const effectiveIn = !prevIn || receivedAtFinal.getTime() > prevIn.getTime()
+      ? receivedAtFinal
+      : prevIn;
+    const pending = !prevOut || effectiveIn.getTime() > prevOut.getTime();
     await tx.case.update({
       where: { id: caseId },
       data: {
-        lastEmailInboundAt: receivedAtFinal,
-        pendingCustomerReply: true,
+        ...(prevIn && prevIn.getTime() >= receivedAtFinal.getTime()
+          ? {}
+          : { lastEmailInboundAt: receivedAtFinal }),
+        pendingCustomerReply: pending,
       },
     });
 
@@ -278,12 +296,27 @@ async function appendOutbound(params) {
       select: { id: true },
     });
 
-    // K4 türetim: outbound gitti → lastEmailOutboundAt + pendingCustomerReply=false
+    // K4 türetim (Codex review fix — MONOTONIC, simetrik):
+    //   - lastEmailOutboundAt yalnız MAX(mevcut, giden).
+    //   - pendingCustomerReply = (effectiveInbound > effectiveOutbound)
+    //     son outbound, son inbound'dan sonraysa yanıt beklenmez.
+    const c = await tx.case.findUnique({
+      where: { id: caseId },
+      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true },
+    });
+    const prevIn = c?.lastEmailInboundAt ?? null;
+    const prevOut = c?.lastEmailOutboundAt ?? null;
+    const effectiveOut = !prevOut || sentAtFinal.getTime() > prevOut.getTime()
+      ? sentAtFinal
+      : prevOut;
+    const pending = !!prevIn && prevIn.getTime() > effectiveOut.getTime();
     await tx.case.update({
       where: { id: caseId },
       data: {
-        lastEmailOutboundAt: sentAtFinal,
-        pendingCustomerReply: false,
+        ...(prevOut && prevOut.getTime() >= sentAtFinal.getTime()
+          ? {}
+          : { lastEmailOutboundAt: sentAtFinal }),
+        pendingCustomerReply: pending,
       },
     });
 
@@ -311,15 +344,25 @@ async function listForCase(caseId, { allowedCompanyIds } = {}) {
       caseId,
       ...(whereCompanyId ? { companyId: whereCompanyId } : {}),
     },
-    orderBy: [
-      // receivedAt veya sentAt asıl sıralama referansı; createdAt fallback
-      { createdAt: 'asc' },
-    ],
     include: {
       attachments: {
         select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true },
       },
     },
+  });
+  // Codex review fix — ASIL sıra coalesce(receivedAt, sentAt); createdAt
+  // yalnız tie-breaker. Prisma orderBy native COALESCE desteklemiyor +
+  // MSSQL nullable order tutarlı değil; app-layer sort kullanırız.
+  // İstek küçük (vaka thread'i); maliyet ihmal edilebilir.
+  const tsKey = (r) => {
+    const eff = r.receivedAt ?? r.sentAt ?? r.createdAt;
+    return eff instanceof Date ? eff.getTime() : new Date(eff).getTime();
+  };
+  rows.sort((a, b) => {
+    const ka = tsKey(a);
+    const kb = tsKey(b);
+    if (ka !== kb) return ka - kb;
+    return (new Date(a.createdAt).getTime()) - (new Date(b.createdAt).getTime());
   });
   return rows.map(shape);
 }

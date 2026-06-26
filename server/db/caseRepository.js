@@ -3245,9 +3245,27 @@ export const caseRepository = {
     let nextPausedDurationMin = prev.slaPausedDurationMin;
     let nextThirdPartyWaitMin = prev.slaThirdPartyWaitMin;
     let nextResolutionDueAt = prev.slaResolutionDueAt;
+    let resolvedThirdPartyId = prev.thirdPartyId;
+    let resolvedThirdPartyName = prev.thirdPartyName;
 
     if (enteringPause) {
-      nextSlaPausedAt = new Date();
+      if (payload.thirdPartyId) {
+        const tp = await prisma.thirdParty.findUnique({
+          where: { id: payload.thirdPartyId },
+          select: { id: true, name: true, companyId: true, pausesSla: true },
+        });
+        if (!tp || tp.companyId !== companyId) {
+          throw new CaseValidationError('Seçilen 3. parti bu şirkete ait değil.', { status: 400, code: 'invalid_third_party' });
+        }
+        resolvedThirdPartyId = tp.id;
+        resolvedThirdPartyName = tp.name;
+        if (tp.pausesSla) {
+          nextSlaPausedAt = new Date();
+        }
+      } else {
+        // thirdPartyId yoksa geri uyumluluk: SLA dursun.
+        nextSlaPausedAt = new Date();
+      }
     } else if (leavingPause && prev.slaPausedAt) {
       const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
       nextPausedDurationMin += pausedMin;
@@ -3310,8 +3328,8 @@ export const caseRepository = {
         status: dbNext,
         resolutionNote: payload.resolutionNote ?? prev.resolutionNote,
         cancellationReason: payload.cancellationReason ?? prev.cancellationReason,
-        thirdPartyId: enteringPause ? payload.thirdPartyId ?? prev.thirdPartyId : prev.thirdPartyId,
-        thirdPartyName: enteringPause ? payload.thirdPartyName ?? prev.thirdPartyName : prev.thirdPartyName,
+        thirdPartyId: enteringPause ? resolvedThirdPartyId : prev.thirdPartyId,
+        thirdPartyName: enteringPause ? resolvedThirdPartyName : prev.thirdPartyName,
         escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,

@@ -121,26 +121,42 @@ async function validateOutboundFrom(companyId, address) {
 async function upsert(companyId, draft, actorUserId = null) {
   if (!companyId) return { ok: false, code: 'company_missing' };
   if (!draft || typeof draft !== 'object') return { ok: false, code: 'draft_missing' };
-  const address = normalizeAddress(draft.address);
-  if (!address) return { ok: false, code: 'address_invalid' };
-  const displayName = typeof draft.displayName === 'string'
-    ? draft.displayName.trim() || null
-    : null;
-  const isActive = draft.isActive !== undefined ? !!draft.isActive : true;
-  const isDefault = !!draft.isDefault;
-  const sortOrder = typeof draft.sortOrder === 'number' && Number.isFinite(draft.sortOrder)
+
+  // Codex review fix — address zorunluluğu YALNIZ create'te.
+  // Update (toggle isActive vb. partial) için draft.address yoksa mevcut
+  // satırın address'ini koru. Önceden upsert tüm güncellemelerde
+  // address_invalid atıyordu → admin UI'da aktif/pasif toggle 400 alıyordu.
+  const isUpdate = !!draft.id;
+  let address = null;
+  if (draft.address !== undefined && draft.address !== null) {
+    address = normalizeAddress(draft.address);
+    if (!address) return { ok: false, code: 'address_invalid' };
+  } else if (!isUpdate) {
+    // Create + address yok → invalid.
+    return { ok: false, code: 'address_invalid' };
+  }
+  const displayName = draft.displayName !== undefined
+    ? (typeof draft.displayName === 'string' ? draft.displayName.trim() || null : null)
+    : undefined; // undefined → değişiklik yok
+  const isActive = draft.isActive !== undefined ? !!draft.isActive : undefined;
+  const isDefault = draft.isDefault !== undefined ? !!draft.isDefault : undefined;
+  const sortOrder = draft.sortOrder !== undefined && Number.isFinite(draft.sortOrder)
     ? Math.max(0, Math.floor(draft.sortOrder))
-    : 100;
+    : undefined;
 
   // setting FK — varsa o tenant'ın ExternalMailSetting'i ile eşleşmeli.
-  let externalMailSettingId = null;
-  if (typeof draft.externalMailSettingId === 'string' && draft.externalMailSettingId) {
-    const ems = await prisma.externalMailSetting.findUnique({
-      where: { id: draft.externalMailSettingId },
-      select: { companyId: true },
-    });
-    if (!ems || ems.companyId !== companyId) return { ok: false, code: 'setting_scope_mismatch' };
-    externalMailSettingId = draft.externalMailSettingId;
+  let externalMailSettingId; // undefined → değişiklik yok
+  if (draft.externalMailSettingId !== undefined) {
+    if (typeof draft.externalMailSettingId === 'string' && draft.externalMailSettingId) {
+      const ems = await prisma.externalMailSetting.findUnique({
+        where: { id: draft.externalMailSettingId },
+        select: { companyId: true },
+      });
+      if (!ems || ems.companyId !== companyId) return { ok: false, code: 'setting_scope_mismatch' };
+      externalMailSettingId = draft.externalMailSettingId;
+    } else {
+      externalMailSettingId = null;
+    }
   }
 
   // setDefault otomatiği — yeni satır default true ise diğerlerini false yap
@@ -148,22 +164,22 @@ async function upsert(companyId, draft, actorUserId = null) {
   const result = await prisma.$transaction(async (tx) => {
     // upsert için ya id ile update ya address ile create.
     let row;
-    if (draft.id) {
+    if (isUpdate) {
       const existing = await tx.externalMailSettingFromAlias.findUnique({ where: { id: draft.id } });
       if (!existing || existing.companyId !== companyId) {
         return { ok: false, code: 'not_found' };
       }
+      // Partial update — sadece açıkça verilen alanları yaz.
+      const updateData = { updatedByUserId: actorUserId };
+      if (address !== null) updateData.address = address;
+      if (displayName !== undefined) updateData.displayName = displayName;
+      if (isActive !== undefined) updateData.isActive = isActive;
+      if (isDefault !== undefined) updateData.isDefault = isDefault;
+      if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+      if (externalMailSettingId !== undefined) updateData.externalMailSettingId = externalMailSettingId;
       row = await tx.externalMailSettingFromAlias.update({
         where: { id: draft.id },
-        data: {
-          address,
-          displayName,
-          isActive,
-          isDefault,
-          sortOrder,
-          externalMailSettingId,
-          updatedByUserId: actorUserId,
-        },
+        data: updateData,
       });
     } else {
       // address unique scope: companyId + address.
@@ -177,11 +193,11 @@ async function upsert(companyId, draft, actorUserId = null) {
         data: {
           companyId,
           address,
-          displayName,
-          isActive,
-          isDefault,
-          sortOrder,
-          externalMailSettingId,
+          displayName: displayName ?? null,
+          isActive: isActive !== undefined ? isActive : true,
+          isDefault: isDefault !== undefined ? isDefault : false,
+          sortOrder: sortOrder ?? 100,
+          externalMailSettingId: externalMailSettingId ?? null,
           createdByUserId: actorUserId,
           updatedByUserId: actorUserId,
         },

@@ -412,12 +412,16 @@ model ExternalMailSetting {
   /// SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). Secret
   /// DEĞİL, plain saklanır.
   username         String?   @db.NVarChar(256)
+  /// M6.2a — Per-tenant default mail imzası (sanitize-html ile temizlenmiş
+  /// HTML). M6.2b composer gövdeye otomatik append eder; agent silebilir.
+  /// Per-agent override M6.3'te (User.signatureHtml).
+  signatureHtml    String?   @db.NVarChar(Max)
   createdByUserId  String?   @db.NVarChar(450)
   updatedByUserId  String?   @db.NVarChar(450)
   createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime  @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company     Company                        @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   /// M5-extension — Per-company çoklu gönderen adresi alias'ları.
   fromAliases ExternalMailSettingFromAlias[]
 
@@ -439,30 +443,30 @@ model ExternalMailSetting {
 /// inbound/SMTP'si YOK (tek mailbox, çoklu adres). Sırlar
 /// ExternalMailSetting'te kalır; FromAlias yalnız adres/display/default.
 model ExternalMailSettingFromAlias {
-  id               String   @id @default(cuid()) @db.NVarChar(450)
-  companyId        String   @db.NVarChar(450)
+  id                    String   @id @default(cuid()) @db.NVarChar(450)
+  companyId             String   @db.NVarChar(450)
   /// FK convenience — birebir ExternalMailSetting.id'yle eşleşir; ama
   /// composer lookup companyId üzerinden filtreler, bu yüzden companyId
   /// indeksi tutarız. setting silindiyse cascade.
-  externalMailSettingId String? @db.NVarChar(450)
+  externalMailSettingId String?  @db.NVarChar(450)
   /// RFC 5322 mailbox. Normalize: trim; case-sensitive saklanır ama
   /// @@unique key normalize değil (basit); uygulama katmanında trim+
   /// lowercase karşılaştırma. Format: "Display Name <addr@host>" veya
   /// sade "addr@host". MSSQL key length sınırı için NVarChar(450).
-  address          String   @db.NVarChar(450)
+  address               String   @db.NVarChar(450)
   /// Composer dropdown'da gösterilen etiket. Boş ise address kullanılır.
-  displayName      String?  @db.NVarChar(Max)
+  displayName           String?  @db.NVarChar(Max)
   /// Default alias — composer açılışında ön-seçili; tenant başına 1 satır
   /// true olmalı (uygulama katmanı zorlar). null'sa ilk aktif alias
   /// default kabul.
-  isDefault        Boolean  @default(false)
-  isActive         Boolean  @default(true)
+  isDefault             Boolean  @default(false)
+  isActive              Boolean  @default(true)
   /// UI sıralaması.
-  sortOrder        Int      @default(100)
-  createdByUserId  String?  @db.NVarChar(450)
-  updatedByUserId  String?  @db.NVarChar(450)
-  createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt        DateTime @updatedAt
+  sortOrder             Int      @default(100)
+  createdByUserId       String?  @db.NVarChar(450)
+  updatedByUserId       String?  @db.NVarChar(450)
+  createdAt             DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt             DateTime @updatedAt
 
   company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   /// MSSQL multi-cascade engelleme — Company zaten cascade; setting
@@ -1083,6 +1087,7 @@ model ThirdParty {
   description String?  @db.NVarChar(Max)
   isActive    Boolean  @default(true)
   companyId   String?  @db.NVarChar(450)
+  pausesSla   Boolean  @default(true)
   createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt   DateTime @updatedAt
 
