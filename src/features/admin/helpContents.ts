@@ -770,9 +770,9 @@ export const AUTHORIZATION_POLICIES_HELP: HelpContent = {
         'Yetkilendirme modülleri aşamalı devreye alınmıştır. Menü kuralları kullanıcı arayüzünde canlıdır ama güvenli modda çalışır: kullanıcının rolüyle zaten görebildiği menüler daraltılabilir; rolünün normalde açamadığı bir ekran sadece menü kuralıyla açılamaz. Kayıt işlemi, alan davranışı ve güvenlik filtresi kuralları ise seçili akışlarda pilot olarak çalışır.',
       example: `Canlı / pilot özet:
 Menü              → Canlı, daraltıcı: görünen menüyü kapatabilir
-Kayıt İşlemleri   → Pilot: seçili vaka ana işlemleri, çözüm adımı, not ve dosya işlemlerinde çalışır
+Kayıt İşlemleri   → Pilot: vaka ana işlemleri, çözüm adımı, not, dosya, izleyici, bağlantı ve toplu güncellemede çalışır
 Alan Yetkisi      → Pilot: kapanış alanları + Case Detail Detay sekmesindeki seçili alanlarda çalışır
-Güvenlik Filtresi → Pilot: vaka listesi ve etiket doğrulama liste/export akışlarında çalışır`,
+Güvenlik Filtresi → Pilot: vaka listesi, vaka detayı, detay yardımcı uçları ve etiket doğrulama liste/export akışlarında çalışır`,
       tip:
         'Bir sayfayı göstermek tek başına yeterli değildir; o sayfanın API tarafındaki rol ve kayıt işlem kuralları da uyumlu olmalıdır. Bu yüzden menü ile kayıt işlemi kurallarını birlikte düşünün.',
     },
@@ -833,8 +833,11 @@ Kübra Şahin için "Raporlar izinli" priority 200
 case          → Vaka
 case.note     → Vaka notu
 case.attachment → Vaka dosyası
+case.solutionStep → Çözüm adımı
+case.watcher  → Vaka izleyicisi
+case.link     → Vaka bağlantısı / DevOps bağlantısı
 account       → Müşteri
-report        → Rapor
+report.caseStudio → Rapor Stüdyosu
 
 İşlem örnekleri:
 create        → oluştur
@@ -845,7 +848,7 @@ transfer      → devret
 close         → kapat
 export        → dışa aktar`,
       tip:
-        'Business olarak düşünürken "Kayıt/Kaynak = hangi kayıt?", "İşlem = bu kayıtla ne yapacak?" diye okuyun. Bu kurallar bugün seçili vaka ana işlemleri, çözüm adımları, vaka notu ve dosya işlemlerinde pilot kontrol olarak çalışır; kapsam genişledikçe aynı ekrandan yönetilmeye devam eder.',
+        'Business olarak düşünürken "Kayıt/Kaynak = hangi kayıt?", "İşlem = bu kayıtla ne yapacak?" diye okuyun. Bu kurallar bugün seçili vaka ana işlemleri, çözüm adımları, vaka notu, dosya, izleyici, vaka/DevOps bağlantısı ve toplu güncelleme işlemlerinde pilot kontrol olarak çalışır; kapsam genişledikçe aynı ekrandan yönetilmeye devam eder.',
     },
     {
       heading: 'Alan yetkisi ve zorunluluk',
@@ -864,14 +867,14 @@ export        → dışa aktar`,
     {
       heading: 'Güvenlik filtresi ne işe yarar?',
       content:
-        'Güvenlik filtresi, kullanıcının kayıtların tamamını değil sadece belirli kısmını görmesini sağlar. Örneğin kullanıcı yalnız kendisine atanmış vakaları, takım yalnız kendi takımına atanmış vakaları görebilir. Sık kullanılan filtreler "Hazır Filtre" listesinden seçilir; JSON alanı otomatik dolar.',
+        'Güvenlik filtresi, kullanıcının kayıtların tamamını değil sadece belirli kısmını görmesini sağlar. Örneğin kullanıcı yalnız kendisine atanmış vakaları, takım yalnız kendi takımına atanmış vakaları görebilir. Sık kullanılan filtreler "Hazır Filtre" listesinden seçilir; JSON alanı otomatik dolar. Bu filtreler artık sadece listede değil, vaka detayına doğrudan linkle gidildiğinde ve vaka detayındaki not/dosya/bağlantı gibi yardımcı işlemlerde de dikkate alınır.',
       example: `Hazır filtre örnekleri:
 - Yetkili olduğu şirket kayıtları
 - Bana atanmış kayıtlar
 - Takımıma atanmış kayıtlar
 - Şirket + bana veya takımıma atanmış`,
       tip:
-        'Güvenlik filtresi güçlü ama hassas bir alandır. Mümkünse hazır filtreleri kullanın. JSON alanını elle değiştirecekseniz önce Etkili Yetki Önizlemesi ve gerçek kullanıcı testi yapın; yanlış filtre fazla kayıt gösterebilir veya kullanıcıya hiçbir kayıt göstermeyebilir.',
+        'Güvenlik filtresi güçlü ama hassas bir alandır. Mümkünse hazır filtreleri kullanın. JSON alanını elle değiştirecekseniz önce Etkili Yetki Önizlemesi ve gerçek kullanıcı testi yapın; yanlış filtre fazla kayıt gösterebilir veya kullanıcıya hiçbir kayıt göstermeyebilir. Filtre dışı kalan vaka, doğrudan URL ile açılsa bile kullanıcıya bulunamadı gibi davranır.',
     },
     {
       heading: 'Etkili Yetki Önizlemesi',
