@@ -248,6 +248,40 @@ async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllo
   });
 }
 
+async function assertCompanyResourcePolicy(req, {
+  companyId,
+  resourceKey,
+  action,
+  baselineAllowed = true,
+}) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!companyId || typeof companyId !== 'string') {
+    throw new AuthorizationRuntimeError('Şirket bilgisi gerekli.', 400, 'company_required');
+  }
+  if (!Array.isArray(req.user.allowedCompanyIds) || !req.user.allowedCompanyIds.includes(companyId)) {
+    throw new AuthorizationRuntimeError('Bu şirket için yetkin yok.', 403, 'company_forbidden');
+  }
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertDenyOnlyResourceAccess({
+    resourceKey,
+    action,
+    user: policyUser,
+    overrides,
+    baselineAllowed,
+  });
+}
+
+function transitionResourceAction(nextStatus) {
+  return nextStatus === 'Çözüldü' || nextStatus === 'İptal Edildi'
+    ? 'close'
+    : 'update';
+}
+
 function closeFieldCandidatesFor(nextStatus) {
   if (nextStatus === 'Çözüldü') {
     return [
@@ -653,6 +687,11 @@ router.post(
     if (body.companyId && !req.user.allowedCompanyIds.includes(body.companyId)) {
       return res.status(403).json({ error: 'forbidden', message: 'Bu şirkette vaka oluşturma yetkin yok.' });
     }
+    await assertCompanyResourcePolicy(req, {
+      companyId: body.companyId,
+      resourceKey: 'case',
+      action: 'create',
+    });
     // PR-1 — Server-authoritative actor: body.createdBy YUTULUR.
     // requireActor 401 fırlatır (eksik auth → asyncRoute JSON'a çevirir).
     const actor = requireActor(req);
@@ -665,6 +704,7 @@ router.post(
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-5 follow-up — actor object pass'lensin ki historyEntries actorUserId
     // stamp atılsın (post-migration audit FK doldurulur).
     const actorObj = requireActor(req);
@@ -696,6 +736,7 @@ router.post(
   '/:id/archive',
   requireRole('SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'archive' });
     const { reason } = req.body ?? {};
     const actor = requireActor(req);
     const updated = await caseRepository.archive(req.params.id, {
@@ -719,6 +760,7 @@ router.post(
   '/:id/restore',
   requireRole('SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'restore' });
     const actor = requireActor(req);
     const updated = await caseRepository.restore(req.params.id, {
       actor,
@@ -822,6 +864,7 @@ router.post(
   '/:id/claim',
   requireRole('Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'assign' });
     const updated = await caseRepository.claim({
       caseId: req.params.id,
       user: req.user,
@@ -879,6 +922,7 @@ router.patch(
   '/:id/link-account',
   requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { accountId } = req.body ?? {};
     if (!accountId || typeof accountId !== 'string') {
       return res.status(400).json({ error: 'validation_error', message: 'accountId zorunlu.' });
@@ -906,6 +950,10 @@ router.post(
   asyncRoute(async (req, res) => {
     const { nextStatus, ...payload } = req.body ?? {};
     if (!nextStatus) return res.status(400).json({ error: 'nextStatus gerekli' });
+    await assertCaseResourcePolicy(req, {
+      resourceKey: 'case',
+      action: transitionResourceAction(nextStatus),
+    });
     await assertCaseCloseRequiredFields(req, { nextStatus, payload });
     const actorObj = requireActor(req); // PR-5 follow-up
     const updated = await caseRepository.transitionStatus(
@@ -936,6 +984,7 @@ router.post(
 router.post(
   '/:id/transfer',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'transfer' });
     const body = req.body ?? {};
     const result = await caseRepository.transferCase(
       req.params.id,
@@ -1496,6 +1545,7 @@ router.post(
 router.post(
   '/:id/call-logs',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-1 — body.callerId YUTULUR; actor.userId callerId olarak yazılır.
     const actor = requireActor(req);
     const result = await caseRepository.addCallLog(
@@ -1513,6 +1563,7 @@ router.post(
 router.post(
   '/:id/activity',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-1 — body.actor YUTULUR; activity actor'u req.user'dan.
     const actor = requireActor(req);
     const updated = await caseRepository.addActivity(
@@ -1533,6 +1584,7 @@ router.post(
 router.post(
   '/:id/snooze',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { snoozeUntil, snoozeReason } = req.body ?? {};
     if (!snoozeUntil || !snoozeReason) {
       return res.status(400).json({ error: 'snoozeUntil ve snoozeReason gerekli' });
@@ -1553,6 +1605,7 @@ router.post(
 router.delete(
   '/:id/snooze',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const result = await caseRepository.unsnoozeCase(
       req.params.id,
       req.user.fullName,
@@ -1567,6 +1620,7 @@ router.delete(
 router.patch(
   '/:id/checklist/:itemId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { checked } = req.body ?? {};
     const updated = await caseRepository.toggleChecklistItem(
       req.params.id,
@@ -1680,6 +1734,7 @@ router.get(
 router.post(
   '/:id/solution-steps',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'create' });
     const item = await solutionStepRepository.createManual(
       req.params.id,
       req.body ?? {},
@@ -1693,6 +1748,7 @@ router.post(
 router.patch(
   '/:id/solution-steps/:stepId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'update' });
     // ID-based: stepId'nin case'i URL'deki :id ile aynı olmalı (cross-case
     // mutation engellemek için defansif kontrol). Repository step'i fetch
     // ederken companyId scope'u zaten doğrular; burada caseId tutarlılığını
@@ -1716,6 +1772,7 @@ router.patch(
 router.post(
   '/:id/solution-steps/:stepId/status',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'update' });
     const body = req.body ?? {};
     if (typeof body.status !== 'string') {
       return res.status(400).json({ error: 'status_required', message: 'status gerekli.' });
@@ -1742,6 +1799,7 @@ router.post(
 router.post(
   '/:id/solution-steps/import-ai-suggested',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'create' });
     // 1) Case scope + companyId al (repository de aynı kontrolü yapar).
     const items = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
     // 2) External KB analyze cevabını al.
