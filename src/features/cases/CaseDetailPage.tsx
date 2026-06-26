@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -75,7 +75,15 @@ import { TransferModal } from './components/TransferModal';
 import { SnoozeModal } from './components/SnoozeModal';
 import { MentionTextarea, type MentionTextareaHandle } from './components/MentionTextarea';
 import { NoteAvatar, NotesTab } from './components/CaseNotes';
-import { CommunicationTab } from './components/CommunicationTab';
+// M6.2c — İletişim sekmesi lazy-load. TipTap + MailComposer +
+// RichTextEditor + DOMPurify ağır bağımlılıklarını main bundle dışına
+// taşır (~600 KB gzip → İletişim açılınca yüklenir).
+// React.lazy + Suspense standart deseni: kontrat değişmez (item: Case
+// prop'u aynen); statik named export'tan default export'a wrap.
+const CommunicationTab = lazy(() =>
+  import('./components/CommunicationTab').then((m) => ({ default: m.CommunicationTab })),
+);
+import { LazyTabBoundary } from './components/LazyTabBoundary';
 import { FilesTab } from './components/CaseFiles';
 import { CustomerPulsePanel } from './components/CustomerPulsePanel';
 import { CaseTitleEditable } from './components/CaseTitleEditable';
@@ -1124,7 +1132,22 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <LinksTab item={item} onShowCase={navigateToCase} />
             )}
             {tab === 'communication' && (
-              <CommunicationTab item={item} />
+              // Codex review fix — LazyTabBoundary lazy chunk REJECT'ini
+              // yakalar (network fail / stale index.js sonrası kaldırılmış
+              // chunk request'i). Aksi halde hata yukarı fırlar ve case
+              // sayfasını çökertir (uygulamada üst error boundary yok).
+              <LazyTabBoundary label="İletişim sekmesi yüklenemedi.">
+                <Suspense
+                  fallback={
+                    <div className="space-y-2 p-4">
+                      <div className="h-6 w-2/5 animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
+                      <div className="h-32 w-full animate-pulse rounded bg-slate-100 dark:bg-ndark-card" />
+                    </div>
+                  }
+                >
+                  <CommunicationTab item={item} />
+                </Suspense>
+              </LazyTabBoundary>
             )}
             {tab === 'callLogs' && (
               <CallLogsTab
