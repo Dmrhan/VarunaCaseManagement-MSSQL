@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Mail, UserPlus, AlertTriangle, Sparkles, KeyRound, User } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +7,7 @@ import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
 import { adminService } from '@/services/adminService';
 import type { AdminUser, CompanyRole } from '@/services/adminService';
+import { lookupService } from '@/services/caseService';
 
 interface InviteUserModalProps {
   open: boolean;
@@ -56,7 +57,13 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
   const [role, setRole] = useState<AdminUser['role']>('Agent');
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companyRole, setCompanyRole] = useState<CompanyRole>('Agent');
+  const [teamId, setTeamId] = useState<string>('');
   const [password, setPassword] = useState('');
+
+  const teamOptions = useMemo(
+    () => companyId ? lookupService.teams().filter((t) => t.companyId === companyId) : [],
+    [companyId],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +73,7 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
     setRole('Agent');
     setCompanyId(null);
     setCompanyRole('Agent');
+    setTeamId('');
     setPassword('');
     setError(null);
     setSubmitting(false);
@@ -100,6 +108,7 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
       companyId,
       companyRole,
       password,
+      teamId: teamId || undefined,
     });
     setSubmitting(false);
     if (result.ok) {
@@ -197,14 +206,29 @@ export function InviteUserModal({ open, onClose, onInvited }: InviteUserModalPro
           </select>
         </Field>
 
-        <Field label="Şirket" required hint="Kullanıcı hangi şirkete bağlansın?">
-          <CompanySelector
-            value={companyId}
-            onChange={(id) => setCompanyId(id)}
-            required
-            disabled={submitting}
-          />
-        </Field>
+        <CompanySelector
+          value={companyId}
+          onChange={(id) => { setCompanyId(id); setTeamId(''); }}
+          required
+          disabled={submitting}
+          hint="Kullanıcı hangi şirkete bağlansın?"
+        />
+
+        {teamOptions.length > 0 && (
+          <Field label="Takım" hint="Opsiyonel — seçilirse kişi kaydı bu takıma bağlanır.">
+            <select
+              value={teamId}
+              onChange={(e) => setTeamId(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-text"
+            >
+              <option value="">— Takım seçme</option>
+              {teamOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         <Field label="Şirketteki Rol" required hint="Bu şirket içindeki erişim seviyesi.">
           <select
