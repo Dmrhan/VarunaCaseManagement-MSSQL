@@ -227,25 +227,24 @@ async function buildCaseListSecurityWhere(req) {
   return { OR: scopedClauses };
 }
 
-async function assertCaseSecurityFilterAccess(req, {
+async function isCaseVisibleBySecurityFilter(req, {
   caseId = req.params.id,
   companyId = null,
 } = {}) {
-  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return null;
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return true;
   const allowedCompanyIds = Array.isArray(req.user?.allowedCompanyIds)
     ? req.user.allowedCompanyIds
     : [];
-  if (!caseId || allowedCompanyIds.length === 0) return null;
+  if (!caseId || allowedCompanyIds.length === 0) return true;
 
   let targetCompanyId = companyId;
+  if (targetCompanyId && !allowedCompanyIds.includes(targetCompanyId)) return false;
   if (!targetCompanyId) {
     const row = await prisma.case.findFirst({
       where: { id: caseId, companyId: { in: allowedCompanyIds } },
       select: { companyId: true },
     });
-    if (!row) {
-      throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
-    }
+    if (!row) return false;
     targetCompanyId = row.companyId;
   }
 
@@ -260,7 +259,7 @@ async function assertCaseSecurityFilterAccess(req, {
     user: policyUser,
     overrides,
   });
-  if (!hasWhereClause(compiled)) return null;
+  if (!hasWhereClause(compiled)) return true;
 
   const visible = await prisma.case.findFirst({
     where: {
@@ -270,10 +269,33 @@ async function assertCaseSecurityFilterAccess(req, {
     },
     select: { id: true },
   });
+  return Boolean(visible);
+}
+
+async function assertCaseSecurityFilterAccess(req, {
+  caseId = req.params.id,
+  companyId = null,
+} = {}) {
+  const visible = await isCaseVisibleBySecurityFilter(req, { caseId, companyId });
   if (!visible) {
     throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
   }
   return null;
+}
+
+async function filterVisibleLinkedCases(req, links) {
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return links;
+  const visibleLinks = [];
+  for (const link of links ?? []) {
+    const linkedCaseId = link?.linkedCase?.id;
+    if (!linkedCaseId) {
+      visibleLinks.push(link);
+      continue;
+    }
+    const visible = await isCaseVisibleBySecurityFilter(req, { caseId: linkedCaseId });
+    if (visible) visibleLinks.push(link);
+  }
+  return visibleLinks;
 }
 
 async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
@@ -334,20 +356,16 @@ function hasBulkUpdateValue(value) {
 }
 
 function bulkResourceActions(updates = {}) {
-  const hasUpdate =
+  const hasAssignment =
     hasBulkUpdateValue(updates.assignedPersonId) ||
-    hasBulkUpdateValue(updates.assignedTeamId) ||
+    hasBulkUpdateValue(updates.assignedTeamId);
+  const hasGeneralUpdate =
     hasBulkUpdateValue(updates.priority) ||
     hasBulkUpdateValue(updates.status);
-  if (!hasUpdate) return [];
 
-  const actions = new Set(['update']);
-  if (
-    hasBulkUpdateValue(updates.assignedPersonId) ||
-    hasBulkUpdateValue(updates.assignedTeamId)
-  ) {
-    actions.add('assign');
-  }
+  const actions = new Set();
+  if (hasGeneralUpdate) actions.add('update');
+  if (hasAssignment) actions.add('assign');
   return Array.from(actions);
 }
 
@@ -545,7 +563,8 @@ router.get(
 router.get(
   '/stats',
   asyncRoute(async (req, res) => {
-    const stats = await caseRepository.getStats({ user: req.user });
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const stats = await caseRepository.getStats({ user: req.user, securityWhere });
     res.json(stats);
   }),
 );
@@ -558,7 +577,13 @@ router.get(
     if (!accountId || !caseType) {
       return res.status(400).json({ error: 'accountId ve caseType gerekli' });
     }
-    const found = await caseRepository.findOpenCaseFor(accountId, caseType, req.user.allowedCompanyIds);
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const found = await caseRepository.findOpenCaseFor(
+      accountId,
+      caseType,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
     res.json({ case: found });
   }),
 );
@@ -571,9 +596,11 @@ router.get(
 router.get(
   '/snoozed',
   asyncRoute(async (req, res) => {
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.listSnoozedForUser(
       req.user.personId,
       req.user.allowedCompanyIds,
+      securityWhere,
     );
     res.json({ value: items, '@odata.count': total });
   }),
@@ -586,7 +613,12 @@ router.get(
 router.get(
   '/watching',
   asyncRoute(async (req, res) => {
-    const items = await watcherRepo.listForUser(req.user.id, req.user.allowedCompanyIds);
+    const securityWhere = await buildCaseListSecurityWhere(req);
+    const items = await watcherRepo.listForUser(
+      req.user.id,
+      req.user.allowedCompanyIds,
+      securityWhere,
+    );
     res.json({ value: items, '@odata.count': items.length });
   }),
 );
@@ -630,6 +662,7 @@ router.get(
         statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
       },
       req.user.allowedCompanyIds,
+      await buildCaseListSecurityWhere(req),
     );
     res.json({ value: cases });
   }),
@@ -652,6 +685,7 @@ router.get(
         statusNotIn: statusNotIn ? statusNotIn.split(',') : undefined,
       },
       req.user.allowedCompanyIds,
+      await buildCaseListSecurityWhere(req),
     );
     res.json({ count });
   }),
@@ -1323,7 +1357,8 @@ router.get(
     await assertCaseSecurityFilterAccess(req);
     const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
-    res.json({ value: list });
+    const visibleLinks = await filterVisibleLinkedCases(req, list);
+    res.json({ value: visibleLinks });
   }),
 );
 
@@ -1863,6 +1898,7 @@ router.delete(
 router.get(
   '/:id/solution-steps',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const items = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
     res.json({ value: items });
   }),
