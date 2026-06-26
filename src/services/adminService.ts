@@ -757,6 +757,7 @@ export const adminService = {
       companyId: string;
       companyRole: CompanyRole;
       password: string;
+      teamId?: string;
     }): Promise<AdminResult<{ userId: string; email: string; message: string }>> {
       const item = await apiFetch<{
         success: boolean;

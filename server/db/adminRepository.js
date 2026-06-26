@@ -906,7 +906,18 @@ export const userRepo = {
     const fullName = String(input.fullName ?? '').trim() || email.split('@')[0];
     const passwordHash = await bcrypt.hash(password, 12);
 
+    const teamId = input.teamId ? String(input.teamId) : null;
+
     const created = await prisma.$transaction(async (tx) => {
+      const person = await tx.person.create({
+        data: {
+          name: fullName,
+          teamId: teamId || null,
+          isActive: true,
+          isTeamLead: false,
+          supportLevel: 'L1',
+        },
+      });
       const user = await tx.user.create({
         data: {
           email,
@@ -916,6 +927,7 @@ export const userRepo = {
           passwordHash,
           mustChangePassword: true,
           passwordUpdatedAt: new Date(),
+          personId: person.id,
         },
       });
       await tx.userCompany.create({
