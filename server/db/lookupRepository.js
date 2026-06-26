@@ -209,11 +209,9 @@ async function bootstrapInner(allowedCompanyIds) {
             : { isActive: true },
           orderBy: { name: 'asc' },
         }),
-        // ThirdParty + DocumentType: şirket-agnostik (system-wide kayıtlar) — filtrelenmez.
+        // ThirdParty: migration uygulanana kadar companyId filtresi yok; migration sonrası şirket-kapsamlı filtrelenecek.
         prisma.thirdParty.findMany({
-          where: allowedCompanyIds
-            ? { isActive: true, OR: [{ companyId: { in: allowedCompanyIds } }, { companyId: null }] }
-            : { isActive: true },
+          where: { isActive: true },
           orderBy: { name: 'asc' },
         }),
         prisma.documentType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
