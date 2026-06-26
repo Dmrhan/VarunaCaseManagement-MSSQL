@@ -86,32 +86,34 @@ model User {
   createdAt          DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt          DateTime  @updatedAt
 
-  companies                 UserCompany[]
-  reminders                 CaseReminder[]
+  companies                    UserCompany[]
+  reminders                    CaseReminder[]
   /// Phase 4 — kullanıcının kaydettiği rapor görünümleri (private/shared).
-  reportViews               ReportView[]
+  reportViews                  ReportView[]
   /// PR-3 — admin audit attribution (6 model × 2 = 12 reverse relation).
-  teamsCreated              Team[]              @relation("TeamCreatedBy")
-  teamsUpdated              Team[]              @relation("TeamUpdatedBy")
-  categoriesCreated         CategoryDef[]       @relation("CategoryDefCreatedBy")
-  categoriesUpdated         CategoryDef[]       @relation("CategoryDefUpdatedBy")
-  slaPoliciesCreated        SLAPolicy[]         @relation("SLAPolicyCreatedBy")
-  slaPoliciesUpdated        SLAPolicy[]         @relation("SLAPolicyUpdatedBy")
-  fieldDefinitionsCreated   FieldDefinition[]   @relation("FieldDefinitionCreatedBy")
-  fieldDefinitionsUpdated   FieldDefinition[]   @relation("FieldDefinitionUpdatedBy")
-  taxonomyDefsCreated       TaxonomyDef[]       @relation("TaxonomyDefCreatedBy")
-  taxonomyDefsUpdated       TaxonomyDef[]       @relation("TaxonomyDefUpdatedBy")
-  checklistTemplatesCreated ChecklistTemplate[] @relation("ChecklistTemplateCreatedBy")
-  checklistTemplatesUpdated ChecklistTemplate[] @relation("ChecklistTemplateUpdatedBy")
+  teamsCreated                 Team[]                @relation("TeamCreatedBy")
+  teamsUpdated                 Team[]                @relation("TeamUpdatedBy")
+  categoriesCreated            CategoryDef[]         @relation("CategoryDefCreatedBy")
+  categoriesUpdated            CategoryDef[]         @relation("CategoryDefUpdatedBy")
+  slaPoliciesCreated           SLAPolicy[]           @relation("SLAPolicyCreatedBy")
+  slaPoliciesUpdated           SLAPolicy[]           @relation("SLAPolicyUpdatedBy")
+  fieldDefinitionsCreated      FieldDefinition[]     @relation("FieldDefinitionCreatedBy")
+  fieldDefinitionsUpdated      FieldDefinition[]     @relation("FieldDefinitionUpdatedBy")
+  taxonomyDefsCreated          TaxonomyDef[]         @relation("TaxonomyDefCreatedBy")
+  taxonomyDefsUpdated          TaxonomyDef[]         @relation("TaxonomyDefUpdatedBy")
+  checklistTemplatesCreated    ChecklistTemplate[]   @relation("ChecklistTemplateCreatedBy")
+  checklistTemplatesUpdated    ChecklistTemplate[]   @relation("ChecklistTemplateUpdatedBy")
   /// PR-5 — Case actor FK back-relations
-  caseActivities            CaseActivity[]      @relation("CaseActivityActor")
-  caseAttachmentsAsUploader CaseAttachment[]    @relation("CaseAttachmentUploadedBy")
+  caseActivities               CaseActivity[]        @relation("CaseActivityActor")
+  caseAttachmentsAsUploader    CaseAttachment[]      @relation("CaseAttachmentUploadedBy")
   authorizationPoliciesCreated AuthorizationPolicy[] @relation("AuthorizationPolicyCreatedBy")
   authorizationPoliciesUpdated AuthorizationPolicy[] @relation("AuthorizationPolicyUpdatedBy")
   /// PR-SD — Soft archive actor FK back-relation
-  casesArchived             Case[]              @relation("CaseArchivedBy")
+  casesArchived                Case[]                @relation("CaseArchivedBy")
   /// Vaka Sahibi — vakayı açan kullanıcı (creator) FK back-relation
-  casesCreated              Case[]              @relation("CaseCreatedBy")
+  casesCreated                 Case[]                @relation("CaseCreatedBy")
+  /// Mail M6.2 — Agent composer'dan gönderilen mail audit'i (sentByUserId).
+  caseEmailsSent               CaseEmail[]           @relation("CaseEmailSentBy")
 }
 
 // User ↔ Company N:M köprü. Bir kullanıcı birden çok şirkete erişebilir
@@ -167,6 +169,8 @@ model Company {
   externalMailSetting        ExternalMailSetting?
   /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemeleri.
   learnedSenderAccounts      LearnedSenderAccount[]
+  /// Mail M6.1 — Tenant-scoped vaka mailleri.
+  caseEmails                 CaseEmail[]
   /// WR-A8 — Data Integration Studio: import job geçmişi.
   importJobs                 ImportJob[]
   /// WR-D4 Phase 1 — tenant-scoped resolution approval policies.
@@ -188,8 +192,8 @@ model Company {
   /// resource CRUD, field policy, and security filters. Enforcement is
   /// not wired by the initial migration; admin UI/runtime phases consume
   /// this table later.
-  authorizationPolicies       AuthorizationPolicy[]
-  thirdParties                ThirdParty[]
+  authorizationPolicies      AuthorizationPolicy[]
+  thirdParties               ThirdParty[]
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -321,29 +325,29 @@ model ExternalKbSetting {
 /// üçlüsü ve patSetAt timestamp tutulur. GET response'unda hiçbir
 /// ciphertext alanı DÖNMEZ; sadece patIsSet boolean + patSetAt.
 model ExternalDevOpsSetting {
-  id               String    @id @default(cuid()) @db.NVarChar(450)
-  companyId        String    @unique @db.NVarChar(450)
-  enabled          Boolean   @default(false)
-  baseUrl          String?   @db.NVarChar(Max)
-  apiVersion       String?   @db.NVarChar(50)
-  timeoutMs        Int       @default(15000)
+  id              String    @id @default(cuid()) @db.NVarChar(450)
+  companyId       String    @unique @db.NVarChar(450)
+  enabled         Boolean   @default(false)
+  baseUrl         String?   @db.NVarChar(Max)
+  apiVersion      String?   @db.NVarChar(50)
+  timeoutMs       Int       @default(15000)
   /// Faz 2.1 follow-up — Basic auth kullanıcı adı (örn. "DOMAIN\user").
   /// On-prem TFS user+secret bekliyor; cloud Azure DevOps yalnız PAT
   /// kabul ettiğinden username nullable. Username SECRET DEĞİL, plain
   /// saklanır; PAT/parola hâlâ AES-256-GCM şifreli kalır.
-  username         String?   @db.NVarChar(256)
+  username        String?   @db.NVarChar(256)
   /// AES-256-GCM ciphertext (base64). null → PAT henüz set edilmedi.
-  patCiphertext    String?   @db.NVarChar(Max)
+  patCiphertext   String?   @db.NVarChar(Max)
   /// 12-byte IV (base64). ciphertext ile aynı set/clear semantiği.
-  patIv            String?   @db.NVarChar(Max)
+  patIv           String?   @db.NVarChar(Max)
   /// 16-byte GCM authTag (base64).
-  patAuthTag       String?   @db.NVarChar(Max)
+  patAuthTag      String?   @db.NVarChar(Max)
   /// PAT'in en son set edildiği zaman (rotation tracking).
-  patSetAt         DateTime?
-  createdByUserId  String?   @db.NVarChar(450)
-  updatedByUserId  String?   @db.NVarChar(450)
-  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
-  updatedAt        DateTime  @updatedAt
+  patSetAt        DateTime?
+  createdByUserId String?   @db.NVarChar(450)
+  updatedByUserId String?   @db.NVarChar(450)
+  createdAt       DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime  @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -510,12 +514,12 @@ model Account {
   createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt        DateTime @updatedAt
 
-  company   Company?         @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  cases     Case[]
-  companies AccountCompany[]
-  contacts  AccountContact[]
+  company               Company?               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cases                 Case[]
+  companies             AccountCompany[]
+  contacts              AccountContact[]
   /// WR-A3 / PM-02 — country-agnostic address book. Account silindiğinde cascade.
-  addresses Address[]
+  addresses             Address[]
   /// Mail M2.3 — Bu account'a öğrenilmiş sender eşlemeleri.
   learnedSenderAccounts LearnedSenderAccount[]
 
@@ -1356,6 +1360,24 @@ model Case {
   /// WR-Smart-Ticket Phase 2a — L1 agent çözüm adımları (manual + AI önerisi).
   solutionSteps          CaseSolutionStep[]
 
+  // Mail M6.1 — İletişim takip alanları (K4).
+  // Türetim caseEmailRepository.append* + caseRepository.transitionStatus
+  // terminal geçişi içinde. UI: thread sort + "yanıt bekliyor" rozeti
+  // (M6.3'te list/board üzerine).
+  /// Son inbound mail zamanı (CaseEmail.receivedAt referans).
+  lastEmailInboundAt   DateTime?
+  /// Son outbound mail zamanı (CaseEmail.sentAt referans).
+  lastEmailOutboundAt  DateTime?
+  /// Müşteri yanıt bekliyor mu? Türetim:
+  ///   - inbound → true
+  ///   - outbound → false
+  ///   - transitionStatus(terminal) → false
+  pendingCustomerReply Boolean   @default(false)
+
+  /// Mail M6.1 — Vakaya ait CaseEmail satırları (gelen + giden +
+  /// otomatik dispatch). MailThread bu listeden beslenir.
+  caseEmails CaseEmail[]
+
   @@index([accountId])
   @@index([accountProjectId])
   @@index([companyId])
@@ -1382,6 +1404,8 @@ model Case {
   // WR-A7b — Catalog filter / report path'leri için.
   @@index([companyId, productId])
   @@index([companyId, packageId])
+  /// M6.1 — "Yanıt bekliyor" filtresi (M6.3 list/board) için.
+  @@index([companyId, pendingCustomerReply])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı
@@ -1873,11 +1897,11 @@ model CaseTaggingReview {
   caseId    String @unique @db.NVarChar(450)
   companyId String @db.NVarChar(450)
 
-  openingPlatformOriginalCode    String? @db.NVarChar(255)
-  openingPlatformOriginalLabel   String? @db.NVarChar(Max)
-  openingPlatformVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
-  openingPlatformCorrectedCode   String? @db.NVarChar(255)
-  openingPlatformCorrectedLabel  String? @db.NVarChar(Max)
+  openingPlatformOriginalCode   String? @db.NVarChar(255)
+  openingPlatformOriginalLabel  String? @db.NVarChar(Max)
+  openingPlatformVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingPlatformCorrectedCode  String? @db.NVarChar(255)
+  openingPlatformCorrectedLabel String? @db.NVarChar(Max)
 
   openingBusinessProcessOriginalCode   String? @db.NVarChar(255)
   openingBusinessProcessOriginalLabel  String? @db.NVarChar(Max)
@@ -1897,11 +1921,11 @@ model CaseTaggingReview {
   openingAffectedObjectCorrectedCode  String? @db.NVarChar(255)
   openingAffectedObjectCorrectedLabel String? @db.NVarChar(Max)
 
-  openingImpactOriginalCode    String? @db.NVarChar(255)
-  openingImpactOriginalLabel   String? @db.NVarChar(Max)
-  openingImpactVerdict         String? @db.NVarChar(50) // enum:TaggingVerdict
-  openingImpactCorrectedCode   String? @db.NVarChar(255)
-  openingImpactCorrectedLabel  String? @db.NVarChar(Max)
+  openingImpactOriginalCode   String? @db.NVarChar(255)
+  openingImpactOriginalLabel  String? @db.NVarChar(Max)
+  openingImpactVerdict        String? @db.NVarChar(50) // enum:TaggingVerdict
+  openingImpactCorrectedCode  String? @db.NVarChar(255)
+  openingImpactCorrectedLabel String? @db.NVarChar(Max)
 
   closingRootCauseGroupOriginalCode   String? @db.NVarChar(255)
   closingRootCauseGroupOriginalLabel  String? @db.NVarChar(Max)
@@ -2285,15 +2309,134 @@ model NotificationDispatch {
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
-  case     Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  company  Company               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  rule     NotificationRule?     @relation(fields: [ruleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  template NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  case       Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rule       NotificationRule?     @relation(fields: [ruleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  template   NotificationTemplate? @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// M6.1 — Active+email dispatch'lerin paralel CaseEmail satırı (varsa).
+  caseEmails CaseEmail[]
 
   @@unique([idempotencyKey], map: "NotificationDispatch_idempotencyKey_unique")
   @@index([caseId, createdAt(sort: Desc)])
   @@index([companyId, event, createdAt(sort: Desc)])
   @@index([companyId, state])
+}
+
+/// Mail M6.1 — Vaka İçi E-Posta thread satırı.
+///
+/// Bu model tek bir mail'i (gelen ya da giden) saklar. Vaka kapanana
+/// kadar müşteri ile karşılıklı mailleşme bu satırlar üzerinde sürer;
+/// Case Detail "İletişim" sekmesindeki MailThread bu modelden beslenir.
+///
+/// Plan referansı: docs/M6-email-in-case-plan.md Bölüm 4.
+///
+/// KAYNAKLAR (source):
+///  - 'imap_intake'         → IMAP polling (M3) sonrası inbound parse
+///  - 'manual_send'         → Agent composer (M6.2)
+///  - 'notification_dispatch' → M4 outbound dispatch (paralel kayıt)
+///
+/// Dedup: @@unique([companyId, messageId]) — IMAP retry idempotency +
+/// outbound double-send guard. messageId nullable çünkü intake parse
+/// her zaman başaramayabilir; dedup-without-id durumu manuel kabul.
+model CaseEmail {
+  id        String @id @default(cuid()) @db.NVarChar(450)
+  caseId    String @db.NVarChar(450)
+  companyId String @db.NVarChar(450)
+
+  /// 'inbound' | 'outbound'
+  direction String @db.NVarChar(20)
+
+  /// 'imap_intake' | 'manual_send' | 'notification_dispatch'
+  source String @db.NVarChar(50)
+
+  /// Gönderici RFC 5322 mailbox adresi.
+  fromAddress String  @db.NVarChar(320)
+  /// İsim parçası — opsiyonel display.
+  fromName    String? @db.NVarChar(Max)
+
+  /// Alıcılar — JSON-as-string array. Format: [{"address":"...","name":"..."}].
+  /// MSSQL'de JSON native değil; string olarak tutarız (NotificationDispatch
+  /// snapshotBody paterniyle hizalı). Parse app-layer.
+  toAddresses  String  @db.NVarChar(Max)
+  ccAddresses  String? @db.NVarChar(Max)
+  bccAddresses String? @db.NVarChar(Max)
+
+  subject  String  @db.NVarChar(Max)
+  bodyHtml String  @db.NVarChar(Max)
+  /// Düz metin türevi (search/preview/a11y). Outbound'da composer'dan,
+  /// inbound'da parsedMail.text'ten doldurulur.
+  bodyText String? @db.NVarChar(Max)
+
+  /// RFC 5322 Message-ID — `<...@host>`. Outbound üretilir, inbound parse.
+  messageId String? @db.NVarChar(998)
+  /// Threading: bu mailin yanıt verdiği Message-ID (RFC 5322 In-Reply-To).
+  inReplyTo String? @db.NVarChar(998)
+  /// References zinciri (boşluk-ayrılı). Parsing app-layer.
+  refs      String? @db.NVarChar(Max)
+
+  /// source='notification_dispatch' için ilgili dispatch FK'ı; paralel
+  /// kaydı M4 dispatch ile linkler.
+  dispatchId String? @db.NVarChar(450)
+
+  /// 'Customer' | 'Internal'. Plan K2 kararı: composer'dan iç/dış toggle
+  /// kaldırıldı; field model'de KALIR (gelecek için yer). Şu an
+  /// inbound + outbound = 'Customer'. Notlar tab'ı içsel iletişim için
+  /// dokunulmaz kalır.
+  visibility String @default("Customer") @db.NVarChar(50)
+
+  /// Agent gönderiminde (M6.2) Varuna user — audit. Inbound + dispatch
+  /// için null.
+  sentByUserId String? @db.NVarChar(450)
+
+  /// IMAP polling sırasında ham boyut (telemetri/debug).
+  rawSize Int?
+
+  /// Envelope ham JSON-as-string (opsiyonel debug).
+  headersJson String? @db.NVarChar(Max)
+
+  sentAt     DateTime? // outbound
+  receivedAt DateTime? // inbound
+  createdAt  DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt  DateTime  @updatedAt
+
+  case        Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company     Company               @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sentBy      User?                 @relation("CaseEmailSentBy", fields: [sentByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  dispatch    NotificationDispatch? @relation(fields: [dispatchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  attachments CaseEmailAttachment[]
+
+  @@unique([companyId, messageId])
+  @@index([caseId, sentAt])
+  @@index([caseId, receivedAt])
+  @@index([caseId, createdAt])
+  @@index([companyId, direction])
+  @@index([dispatchId])
+}
+
+/// Mail M6.1 — CaseEmail eki. Mail eklerini Case "Dosyalar" tab'ından
+/// AYRI tutarız çünkü mail eki orijinal CID/inline metadata'sını korur
+/// (HTML body'de cid: referansı bu satırla eşlenir).
+///
+/// Storage: depolama yolu writeCaseFile/storage.js ile aynı (storageKey
+/// burada saklanır); CaseAttachment tablosu DOKUNULMAZ.
+model CaseEmailAttachment {
+  id         String   @id @default(cuid()) @db.NVarChar(450)
+  emailId    String   @db.NVarChar(450)
+  /// Storage anahtarı — server/db/storage.js yazımı sonrası dönen relative
+  /// path veya object key.
+  storageKey String   @db.NVarChar(Max)
+  fileName   String   @db.NVarChar(Max)
+  mimeType   String   @db.NVarChar(255)
+  fileSize   Int
+  /// RFC 2392 cid: referansı — HTML body sanitizasyonu sırasında allowlist.
+  contentId  String?  @db.NVarChar(Max)
+  /// HTML body içinde inline kullanılıyor mu? (cid:foo@bar görsel)
+  isInline   Boolean  @default(false)
+  createdAt  DateTime @default(dbgenerated("sysutcdatetime()"))
+
+  email CaseEmail @relation(fields: [emailId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([emailId])
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2428,12 +2571,12 @@ model ReportView {
 ///
 /// JSON is stored as NVARCHAR(MAX) for MSSQL provider compatibility.
 model AuthorizationPolicy {
-  id            String  @id @default(cuid()) @db.NVarChar(450)
-  companyId     String  @db.NVarChar(450)
-  target        String  @db.NVarChar(50)
-  principalType String  @db.NVarChar(50)
-  principalKey  String  @db.NVarChar(450)
-  effect        String  @db.NVarChar(20)
+  id            String @id @default(cuid()) @db.NVarChar(450)
+  companyId     String @db.NVarChar(450)
+  target        String @db.NVarChar(50)
+  principalType String @db.NVarChar(50)
+  principalKey  String @db.NVarChar(450)
+  effect        String @db.NVarChar(20)
 
   menuKey     String? @db.NVarChar(150)
   viewKey     String? @db.NVarChar(150)

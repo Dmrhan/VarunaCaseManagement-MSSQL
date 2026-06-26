@@ -28,6 +28,20 @@ import { prisma } from './client.js';
 // M4 — Mail outbound send executor.
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 
+/**
+ * Minimal HTML escape — M6.1 paralel CaseEmail için plain-text bodyHtml
+ * wrap'inde kullanılır. sanitize-html zaten render katmanında ek koruma.
+ */
+function escapeHtml(s) {
+  if (typeof s !== 'string') return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Errors
 // ─────────────────────────────────────────────────────────────────
@@ -988,15 +1002,57 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
   );
 
   if (result.ok) {
+    const dispatchedAt = new Date();
     await prisma.notificationDispatch.update({
       where: { id: dispatch.id },
       data: {
         state: 'Sent',
-        dispatchedAt: new Date(),
+        dispatchedAt,
         providerMessageId: result.messageId ?? null,
         attempts: { increment: 1 },
       },
     });
+
+    // M6.1 — Paralel CaseEmail satırı (source='notification_dispatch').
+    // Dispatch'in mail thread'de görünmesi için. messageId aynı ise
+    // appendOutbound dedup yapar (companyId+messageId unique).
+    // Hata kapsanır: dispatch zaten 'Sent' işaretlendi, mail teslim oldu;
+    // CaseEmail kaydı fail olsa bile dispatch'i bozmayız.
+    try {
+      const { caseEmailRepository } = await import('./caseEmailRepository.js');
+      // From: tenant ExternalMailSetting.fromAddress (M5). mailProvider'ın
+      // gönderdiği gerçek from'u burada bilmediğimiz için settings'ten
+      // alırız (best-effort).
+      let fromAddress = null;
+      try {
+        const mailSetting = await prisma.externalMailSetting.findUnique({
+          where: { companyId: dispatch.companyId },
+          select: { fromAddress: true },
+        });
+        fromAddress = mailSetting?.fromAddress ?? null;
+      } catch { /* sessiz */ }
+
+      await caseEmailRepository.appendOutbound({
+        caseId: dispatch.caseId,
+        companyId: dispatch.companyId,
+        from: { address: fromAddress ?? 'unknown@local', name: null },
+        to: [{ address: dispatch.audienceIdentifier, name: null }],
+        subject: finalSubject,
+        // Notification dispatch şu an text-only; bodyHtml plain'i wrap eder.
+        bodyHtml: `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(dispatch.snapshotBody ?? '')}</pre>`,
+        bodyText: dispatch.snapshotBody ?? '',
+        messageId: result.messageId ?? null,
+        inReplyTo: headers?.['In-Reply-To'] ?? null,
+        refs: headers?.References ?? null,
+        sentAt: dispatchedAt,
+        source: 'notification_dispatch',
+        dispatchId: dispatch.id,
+      });
+    } catch (err) {
+      console.warn('[notif:executeOutboundEmailDispatch] caseEmail append failed',
+        err?.message ?? err);
+    }
+
     return { ok: true, providerMessageId: result.messageId ?? null };
   }
   await prisma.notificationDispatch.update({

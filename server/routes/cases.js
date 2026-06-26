@@ -1,7 +1,8 @@
 import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { prisma } from '../db/client.js';
-import { verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
+import { signStorageToken, verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
   solutionStepRepository,
   SolutionStepError,
@@ -2069,6 +2070,77 @@ router.post(
       req.user.allowedCompanyIds,
     );
     res.json(result);
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────
+// Mail M6.1 — Vaka İçi E-Posta thread (read-only)
+//
+// Plan referansı: docs/M6-email-in-case-plan.md Bölüm 9 (route'lar).
+// SCOPE: caseRepository.get ile önce vaka erişim/varlık doğrulanır,
+// sonra caseEmailRepository scope-aware listForCase. Composer (M6.2)
+// ayrı PR.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/cases/:id/emails — vakanın CaseEmail thread'i.
+ * Response: { items: CaseEmail[] }
+ */
+router.get(
+  '/:id/emails',
+  asyncRoute(async (req, res) => {
+    // Scope + varlık kontrolü (assertCaseInScopeForRead patterni reuse).
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    const items = await caseEmailRepository.listForCase(req.params.id, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+    res.json({ items });
+  }),
+);
+
+/**
+ * GET /api/cases/:id/emails/:emailId/attachments/:attachmentId/download
+ * — Mail eki indirme — short-lived signed token döner. Token tüketim
+ * /:id/files/:fileId/raw deseniyle uyumlu (signStorageToken / 60sn).
+ */
+router.get(
+  '/:id/emails/:emailId/attachments/:attachmentId/download',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    const att = await caseEmailRepository.getAttachmentForRaw(
+      req.params.emailId,
+      req.params.attachmentId,
+      { allowedCompanyIds: req.user.allowedCompanyIds },
+    );
+    if (!att) return res.status(404).json({ error: 'Ek bulunamadı' });
+    // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
+    // ile aynı şema; M6.2'de composer için ortak indirme path'i.
+    const token = signStorageToken(
+      {
+        typ: 'download',
+        caseId: att.caseId,
+        fileId: att.id,
+        path: att.storageKey,
+        fileName: att.fileName,
+      },
+      60,
+    );
+    res.json({
+      url: `/api/cases/${att.caseId}/files/${att.id}/raw?token=${encodeURIComponent(token)}`,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      fileSize: att.fileSize,
+    });
   }),
 );
 
