@@ -204,6 +204,47 @@ async function senaryoMissingRecipients(caseId) {
   expect('code = recipients_missing', r.code, 'recipients_missing');
 }
 
+async function senaryoAttachmentPersistence(caseId) {
+  console.log('\n=== Codex fix — CaseEmailAttachment persistence ===');
+  // Mevcut CaseAttachment satırı oluştur (storage path olarak gerçek
+  // dosya gerekmez; statObject smoke içinde mock atmadık → bypass için
+  // gerçek bir dosya kaydedelim).
+  const { saveObject } = await import('../server/db/storage.js');
+  const buf = Buffer.from('test ek içeriği');
+  const relPath = `cases/${caseId}/m6-2a-attach.txt`;
+  await saveObject(relPath, buf);
+  const att = await prisma.caseAttachment.create({
+    data: {
+      caseId,
+      companyId: TENANT,
+      fileName: 'test-ek.txt',
+      fileSize: buf.length,
+      mimeType: 'text/plain',
+      fileUrl: relPath,
+      uploadedBy: 'M6.2a Bot',
+    },
+  });
+
+  const r = await caseEmailSender.sendCaseEmail({
+    caseId,
+    fromAddress: ALIAS_ADDR,
+    to: [{ address: 'müşteri@firm.local' }],
+    subject: 'Ek testi',
+    bodyHtml: '<p>Ek</p>',
+    attachments: [att.id],
+    actor: SYSTEM_ACTOR,
+  }, { sendFn: mailStub });
+  expect('send ok', r.ok, true);
+  // CaseEmailAttachment satırı yazıldı mı?
+  const emailAttachments = await prisma.caseEmailAttachment.findMany({
+    where: { emailId: r.emailId },
+  });
+  expect('1 CaseEmailAttachment yazıldı', emailAttachments.length, 1);
+  expect('fileName korundu', emailAttachments[0]?.fileName, 'test-ek.txt');
+  expect('mimeType korundu', emailAttachments[0]?.mimeType, 'text/plain');
+  expect('storageKey set', emailAttachments[0]?.storageKey, relPath);
+}
+
 (async () => {
   let caseRow = null;
   try {
@@ -217,6 +258,7 @@ async function senaryoMissingRecipients(caseId) {
     await senaryo2Send(caseId, caseRow.caseNumber);
     await senaryo3ReplyContext(caseId);
     await senaryoMissingRecipients(caseId);
+    await senaryoAttachmentPersistence(caseId);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

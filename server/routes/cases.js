@@ -2154,6 +2154,14 @@ router.post(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    // Codex review fix (M6.2a P1) — WRITE resource policy gate.
+    // Sadece security-filter READ check yapılıyordu; vakayı görebilen ama
+    // not/ek/mutate DENY'lı kullanıcı buradan müşteriye mail atabiliyordu.
+    // assertCaseResourcePolicy 'case.note' + 'create' semantik yakın
+    // (composer outbound mail thread'e satır yazar — not eklemeyle aynı
+    // izin sınıfı). AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED kapalıyken
+    // bypass; açık iken zorlu.
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'create' });
     const actor = requireActor(req);
     const body = req.body ?? {};
     const result = await caseEmailSender.sendCaseEmail({

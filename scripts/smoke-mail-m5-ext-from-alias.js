@@ -146,6 +146,32 @@ async function senaryo6() {
   expect('overlong reject', _internal.normalizeAddress(long), null);
 }
 
+async function senaryo7Toggle() {
+  console.log('\n=== (7) Codex fix — partial update toggle (address create-only zorunlu) ===');
+  // Mevcut alias toggle: address göndermeden sadece isActive değiştir
+  const list = await externalMailFromAliasRepo.list(TENANT_A);
+  const target = list.find((a) => a.address === 'support@a.local');
+  if (!target) { fail++; console.log('  ✗ Setup fail — support@a.local yok'); return; }
+  const toggleOff = await externalMailFromAliasRepo.upsert(TENANT_A, {
+    id: target.id,
+    isActive: false,
+  });
+  expect('toggle off ok', toggleOff.ok, true);
+  expect('address korundu', toggleOff.alias?.address, 'support@a.local');
+  expect('isActive=false', toggleOff.alias?.isActive, false);
+  const toggleOn = await externalMailFromAliasRepo.upsert(TENANT_A, {
+    id: target.id,
+    isActive: true,
+  });
+  expect('toggle on ok', toggleOn.ok, true);
+  expect('isActive=true', toggleOn.alias?.isActive, true);
+
+  // Create + address eksikliği → address_invalid kalsın
+  const r = await externalMailFromAliasRepo.upsert(TENANT_A, { isActive: true });
+  expect('create + address eksik → address_invalid', r.ok, false);
+  expect('code = address_invalid', r.code, 'address_invalid');
+}
+
 (async () => {
   try {
     await setup();
@@ -155,6 +181,7 @@ async function senaryo6() {
     await senaryo4();
     await senaryo5();
     await senaryo6();
+    await senaryo7Toggle();
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
