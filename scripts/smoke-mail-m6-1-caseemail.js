@@ -232,6 +232,51 @@ async function senaryoSanitize() {
   expectTruthy('<a> target="_blank"', out.includes('target="_blank"'));
 }
 
+async function senaryoK4Monotonic() {
+  console.log('\n=== Codex fix — K4 monotonic (out-of-order safe) ===');
+  // Yeni vaka aç
+  const r = await inbound({
+    from: 'monotonic@firm.local',
+    subject: 'K4 monotonic',
+    body: 'İlk inbound',
+  });
+  const caseId = r.caseId;
+
+  // Manuel olarak Case'i yeni outbound zamanlamış gibi yap (gelecek
+  // tarih) — sonra eski inbound geldiğinde pending false kalmalı,
+  // lastEmailInboundAt regress etmemeli.
+  const future = new Date(Date.now() + 60_000);
+  await prisma.case.update({
+    where: { id: caseId },
+    data: {
+      lastEmailOutboundAt: future,
+      pendingCustomerReply: false,
+    },
+  });
+  // Out-of-order inbound (eski receivedAt) — repo bunu kabul edip K4'ü
+  // bozmamalı.
+  await import('../server/db/caseEmailRepository.js').then(async ({ caseEmailRepository }) => {
+    await caseEmailRepository.appendInbound({
+      caseId,
+      companyId: TENANT,
+      from: { address: 'monotonic@firm.local', name: null },
+      to: [{ address: 'support@var.local', name: null }],
+      subject: 'eski inbound',
+      bodyHtml: '<p>eski</p>',
+      receivedAt: new Date(Date.now() - 120_000), // eski
+      messageId: '<old-' + Date.now() + '@m6test>',
+    });
+  });
+  const after = await prisma.case.findUnique({
+    where: { id: caseId },
+    select: { lastEmailOutboundAt: true, pendingCustomerReply: true },
+  });
+  expect('pendingCustomerReply=false (eski inbound, daha yeni outbound)',
+    after.pendingCustomerReply, false);
+  expect('lastEmailOutboundAt regress yok',
+    after.lastEmailOutboundAt?.getTime(), future.getTime());
+}
+
 (async () => {
   try {
     await setup();
@@ -240,6 +285,7 @@ async function senaryoSanitize() {
     await senaryoC();
     await senaryoD();
     await senaryoSanitize();
+    await senaryoK4Monotonic();
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

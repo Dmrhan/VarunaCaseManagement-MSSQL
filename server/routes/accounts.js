@@ -166,12 +166,32 @@ router.patch(
 
 /* ---------- Phase C1 — AccountCompany mutations ---------- */
 
-/** POST /api/accounts/:id/companies — yeni şirket ilişkisi */
+/** POST /api/accounts/:id/companies — yeni şirket ilişkisi
+ *
+ * Codex review fix (2b936c7 P1) — HEDEF companyId policy check.
+ * assertAccountResourcePolicy account'un MEVCUT şirketleri üzerinden çalışır;
+ * yeni eklenen companyId (req.body.companyId) için policy kontrolü yoktu →
+ * AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken kullanıcı izinsiz
+ * tenant'a account-company ilişkisi ekleyebiliyordu.
+ *
+ * Düzeltme: addCompanyRelation öncesi req.body.companyId için
+ * assertCompanyResourcePolicy çağrısı; eksikse 400, izinsizse 403.
+ */
 router.post(
   '/:id/companies',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    const targetCompanyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
+    if (!targetCompanyId) {
+      return res.status(400).json({ error: 'validation_error', message: 'companyId zorunlu.' });
+    }
     await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
+    // Codex P1 — HEDEF tenant policy check (deny-only enforcement).
+    await assertCompanyResourcePolicy(req, {
+      companyId: targetCompanyId,
+      resourceKey: 'account',
+      action: 'create',
+    });
     const updated = await accountRepository.addCompanyRelation({
       accountId: req.params.id,
       data: req.body,

@@ -80,7 +80,9 @@ function normalizeRecipients(list) {
  * (cross-case ek bağlama engellenir).
  */
 async function loadAttachmentsForCase(caseId, attachmentIds) {
-  if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) return { ok: true, items: [] };
+  if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) {
+    return { ok: true, items: [], rows: [] };
+  }
   const rows = await prisma.caseAttachment.findMany({
     where: { id: { in: attachmentIds }, caseId },
     select: {
@@ -98,8 +100,6 @@ async function loadAttachmentsForCase(caseId, attachmentIds) {
   }
   const items = [];
   for (const r of rows) {
-    // storage path local relative path olarak tutuluyor; statObject ile
-    // var olup olmadığını kontrol.
     if (!r.fileUrl) {
       return { ok: false, code: 'attachment_no_path', meta: { id: r.id } };
     }
@@ -113,7 +113,9 @@ async function loadAttachmentsForCase(caseId, attachmentIds) {
       contentType: r.mimeType,
     });
   }
-  return { ok: true, items };
+  // rows döner — appendOutbound sonrası CaseEmailAttachment yazımı için
+  // (Codex review fix: thread'de ek görünür + indirilebilir).
+  return { ok: true, items, rows };
 }
 
 /**
@@ -246,7 +248,7 @@ async function sendCaseEmail(params, opts = {}) {
   // appendOutbound için ürettiğimizi tercih ederiz (round-trip için
   // tutarlı).
 
-  // ─── 8. DB satırı + K4 atomic ───
+  // ─── 8. DB satırı + K4 atomic + CaseEmailAttachment persistence ───
   let emailRecord;
   try {
     emailRecord = await caseEmailRepository.appendOutbound({
@@ -270,6 +272,32 @@ async function sendCaseEmail(params, opts = {}) {
     // Mail gönderildi ama DB persist fail oldu — round-trip için
     // hata loglanır; UI yine başarı sayar (mail teslim oldu).
     console.warn('[sender] appendOutbound failed after send', err?.message ?? err);
+  }
+
+  // Codex review fix — CaseEmailAttachment satırlarını oluştur. Daha
+  // önce yalnız outbound CaseEmail yazılıyor, attachments thread'de
+  // GÖRÜNMÜYORDU + download route'tan ulaşılamıyordu. Mail gönderildi,
+  // CaseEmail var ama CaseEmailAttachment yok → UI ek listesi BOŞ.
+  // M2.1 paterniyle aynı: CaseAttachment.fileUrl storage path olarak
+  // reuse edilir; cid/inline metadata composer için şimdilik default
+  // (false / null).
+  if (emailRecord?.id && Array.isArray(att.rows) && att.rows.length) {
+    try {
+      await prisma.caseEmailAttachment.createMany({
+        data: att.rows.map((r) => ({
+          emailId: emailRecord.id,
+          storageKey: r.fileUrl,
+          fileName: r.fileName,
+          mimeType: r.mimeType,
+          fileSize: r.fileSize,
+          contentId: null,
+          isInline: false,
+        })),
+      });
+    } catch (err) {
+      console.warn('[sender] caseEmailAttachment persistence failed',
+        err?.message ?? err);
+    }
   }
 
   return {
