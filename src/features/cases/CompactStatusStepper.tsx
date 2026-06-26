@@ -33,9 +33,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Ban,
-  Check,
   CheckCircle2,
-  Flag,
   Inbox,
   PauseCircle,
   RotateCw,
@@ -48,14 +46,10 @@ import { caseService } from '@/services/caseService';
 import { StatusTransitionPanel } from './StatusTransitionPanel';
 import {
   CASE_STATUS_LABELS,
-  CASE_STATUS_PHASES,
-  CASE_STATUS_PHASE_LABELS,
-  CASE_STATUS_PHASE_MAP,
   STATUS_REQUIRES_REASON,
   STATUS_TRANSITIONS,
   type Case,
   type CaseStatus,
-  type CaseStatusPhase,
 } from './types';
 
 interface CompactStatusStepperProps {
@@ -153,21 +147,13 @@ const STATUS_VISUAL: Record<
   },
 };
 
-const PHASE_ORDER: Record<CaseStatusPhase, number> = {
-  open: 0,
-  in_progress: 1,
-  result: 2,
-};
-
-// Cila-3 (madde #4) — STATUS_VERB_LABELS map'i kaldırıldı. Menü etiketleri
-// artık doğrudan CASE_STATUS_LABELS (statü adı) kullanır: "Çözüldü",
-// "3. Parti Bekliyor", "Eskale Edildi", "İptal Edildi". Sol renkli dot
-// hedef geçişi sinyal verir; etiket sade ve PR-C A9 ile tutarlı.
+// 3-faz omurga + pill satırı KALDIRILDI (refactor: 7 daire-düğüm stepper).
+// CASE_STATUS_PHASES / CASE_STATUS_PHASE_LABELS / CASE_STATUS_PHASE_MAP
+// types.ts'de DURUR (başka kullanıcıları olabilir); bu component artık
+// kullanmıyor.
 
 export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
-  const currentPhase = CASE_STATUS_PHASE_MAP[item.status];
-  const currentPhaseIdx = PHASE_ORDER[currentPhase];
   const allowed = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
 
   // Reason gerekmeyen geçişler için direkt API; gerekenlerde modal.
@@ -200,189 +186,141 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
     }
   }
 
-  // Aktif faz görsel meta — alt-statüden çözülür (ek kriter 1).
-  const activeVisual = STATUS_VISUAL[item.status];
-  const subStatusNote = activeVisual.subStatusNote;
+  // 7 durumun lineer sırası — eski 3-faz omurganın görsel mantığında
+  // "tamamlanan/current/sonraki" anlamı için. Kanonik sıra
+  // CASE_STATUS_LABELS map'ten gelir (Açık → … → İptal Edildi).
+  const NODE_ORDER = Object.keys(CASE_STATUS_LABELS) as CaseStatus[];
+  const currentIdx = NODE_ORDER.indexOf(item.status);
 
   return (
-    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${wideConnectors ? 'w-full' : ''}`}>
-      {/* Faz rayı — nokta + 1px hairline. Kutu/dolu pill yok.
-          wideConnectors=true → ray content band genişliğine yayılır (progress bar). */}
-      <div
-        className={`flex flex-col ${wideConnectors ? 'flex-1' : ''}`}
-        role="group"
-        aria-label={`Vaka statü adımları — şu an ${CASE_STATUS_LABELS[item.status]}`}
-      >
-        <div className={`flex items-center ${wideConnectors ? 'w-full' : ''}`}>
-          {CASE_STATUS_PHASES.map((phase, idx) => {
-            const isCurrent = phase === currentPhase;
-            const isCompleted = idx < currentPhaseIdx;
+    <div
+      className={`flex ${wideConnectors ? 'w-full' : ''}`}
+      role="group"
+      aria-label={`Vaka statü adımları — şu an ${CASE_STATUS_LABELS[item.status]}`}
+    >
+      {/* TEK 7-DÜĞÜMLÜ STEPPER — 3-faz omurgasının görsel stili (daire +
+          bağlantı çizgisi + ikon + alt etiket) AYNI; ama 3 faz yerine 7
+          DURUM düğümü. Pill satırı + 3-faz çizgisi KALDIRILDI.
 
-            // Cila-2 — gerçek process göstergesi: dolu node + ikon + halo.
-            // Tamamlanan → bg-emerald-500 dolu + beyaz Check
-            // Aktif      → activeVisual.dotColor dolu + statünün kendi ikonu
-            //              (beyaz) + ring-4 ring-{color}/30 halo (öne çıkar)
-            // Gelecek    → border-2 border-slate-300 bg-white + sönük Flag ikonu
-            // Yön B renk mantığı: aktif node rengi alt-statüden gelir.
-            const nodeBase = 'flex h-7 w-7 items-center justify-center rounded-full transition';
-            const nodeCls = isCompleted
-              ? `${nodeBase} bg-emerald-500 text-white`
-              : isCurrent
-                ? `${nodeBase} ${activeVisual.dotColor} text-white ring-4 ${activeVisual.ringColor}`
-                : `${nodeBase} border-2 border-slate-300 bg-white text-slate-300`;
+          Gating:
+            • current  → ring-4 + dolu STATUS_VISUAL.dotColor, tıklanamaz
+            • allowed  → border-2 renkli + beyaz zemin, hover dolu + cursor-pointer
+            • disallowed → sönük gri border, opacity-60, cursor-not-allowed
+            • completed (idx < currentIdx) → görsel kalıtım: solgun, ama
+              connector çizgisi yeşil değil (7-state'te lineer "tamamlandı"
+              anlamı zayıf; bağlantı çizgileri pasif/gri kalır).
 
-            // Kalın ray (~4px) — Cila-2.
-            const connectorClass =
-              idx === 0
-                ? 'hidden'
-                : isCompleted || (isCurrent && idx > 0)
-                  ? 'bg-emerald-400'
-                  : 'bg-slate-200';
-
-            return (
-              <div key={phase} className={`flex items-center ${wideConnectors && idx > 0 ? 'flex-1' : ''}`}>
-                {idx > 0 && (
-                  <span
-                    className={`block h-1 rounded-full ${wideConnectors ? 'flex-1 min-w-[60px]' : 'w-10'} ${connectorClass}`}
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="flex flex-col items-center gap-1 px-1.5">
-                  <span
-                    className={nodeCls}
-                    title={
-                      isCurrent
-                        ? CASE_STATUS_LABELS[item.status]
-                        : isCompleted
-                          ? `${CASE_STATUS_PHASE_LABELS[phase]} — tamamlandı`
-                          : CASE_STATUS_PHASE_LABELS[phase]
-                    }
-                    aria-label={
-                      isCurrent
-                        ? `${CASE_STATUS_PHASE_LABELS[phase]} — ${CASE_STATUS_LABELS[item.status]}`
-                        : isCompleted
-                          ? `${CASE_STATUS_PHASE_LABELS[phase]} (tamamlandı)`
-                          : CASE_STATUS_PHASE_LABELS[phase]
-                    }
-                  >
-                    {/* Cila-2 — node içinde ikon (renk + ikon birlikte, erişilebilirlik):
-                        tamamlanan=Check, aktif=statünün kendi ikonu, gelecek=Flag (sönük) */}
-                    {isCompleted ? (
-                      <Check size={14} strokeWidth={3} aria-hidden="true" />
-                    ) : isCurrent ? (
-                      activeVisual.iconLg ?? activeVisual.icon
-                    ) : (
-                      <Flag size={12} strokeWidth={2} aria-hidden="true" />
-                    )}
-                  </span>
-                  <span
-                    className={`text-[11px] leading-none ${
-                      isCurrent
-                        ? 'font-medium text-slate-900 dark:text-ndark-text'
-                        : isCompleted
-                          ? 'text-slate-500 dark:text-ndark-muted'
-                          : 'text-slate-400 dark:text-ndark-muted'
-                    }`}
-                  >
-                    {CASE_STATUS_PHASE_LABELS[phase]}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {/* Alt-durum notu — aktif fazın altında küçük sönük metin.
-            Renk + ikon/metin birlikte: nokta rengi + bu metin tek başına da
-            okunabilir bilgi taşır. */}
-        {subStatusNote && (
-          <div className="mt-0.5 flex justify-center">
-            <span
-              className="inline-flex items-center gap-1 text-[10px] text-slate-500 dark:text-ndark-muted"
-              title={CASE_STATUS_LABELS[item.status]}
-            >
-              {activeVisual.icon}
-              {subStatusNote}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* 7-state TIKLANIR stepper — "Durumu değiştir" dropdown'ı YERİNE.
-          Her statü bir chip; mevcut duruma göre GATING:
-            • aktif    → ring + dolu, tıklanamaz
-            • izinli   → renkli border + hover, tıklanır
-            • izinsiz  → gri/sönük, disabled (allowed listede değil = veri
-              bütünlüğü; eski dropdown'da zaten gösterilmiyordu)
-          Allowed-transition + reason zorunluluğu MEVCUT matrislerden okunur
+          Allowed-transition + reason zorunluluğu MEVCUT matrislerden
           (STATUS_TRANSITIONS + STATUS_REQUIRES_REASON, types.ts).
+
           Tıklayınca handleClick mevcut akışı tetikler — reason'lı geçişler
           StatusTransitionPanel modal'ına gider, reason'sız geçişler doğrudan
-          caseService.transitionStatus. Bu satır wrap eder; dar ekranda
-          alt satıra düşer. */}
-      <ul
-        className="flex flex-wrap items-center gap-1.5"
-        role="group"
-        aria-label="Statü değiştir"
-      >
-        {(Object.keys(CASE_STATUS_LABELS) as CaseStatus[]).map((target) => {
+          caseService.transitionStatus.
+
+          Dar ekran: container overflow-x-auto; düğümler shrink-0; mobilde
+          yatay scroll. flex-1 connector ile büyük ekranda 7 düğüm yatayda
+          eşit yayılır. */}
+      <ol className="flex w-full min-w-0 items-start overflow-x-auto">
+        {NODE_ORDER.map((target, idx) => {
           const v = STATUS_VISUAL[target];
           const isCurrent = target === item.status;
           const isAllowed = allowed.includes(target);
+          const isCompleted = idx < currentIdx;
           const isBusy = directSubmitting === target;
           const needsReason = STATUS_REQUIRES_REASON[target];
+          const interactive = isAllowed && !isCurrent;
 
-          // Mevcut = ring + dolu (renk-kodlu). İzinli = renkli border +
-          // beyaz zemin, hover'da chipBg. İzinsiz = sönük gri (CTA değil;
-          // okunabilir kalır → kullanıcı eksiksiz haritayı görür).
-          const stateCls = isCurrent
-            ? `${v.dotColor} text-white ring-2 ${v.ringColor} cursor-default`
-            : isAllowed
-              ? `bg-white border ${v.chipText} border-current hover:${v.chipBg} dark:bg-ndark-card`
-              : 'bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed dark:bg-ndark-card dark:text-ndark-muted dark:border-ndark-border opacity-60';
+          // Daire düğümün rengi — STATUS_VISUAL.dotColor MEVCUT renk meta
+          // (İncelemede=amber, Eskalasyon=rose, Çözüldü=emerald, vs.).
+          const nodeBase = 'flex h-7 w-7 items-center justify-center rounded-full transition';
+          const nodeCls = isCurrent
+            ? `${nodeBase} ${v.dotColor} text-white ring-4 ${v.ringColor}`
+            : interactive
+              ? `${nodeBase} ${v.dotColor} text-white opacity-90 hover:opacity-100 hover:ring-4 hover:${v.ringColor} cursor-pointer`
+              : isCompleted
+                ? `${nodeBase} border-2 border-slate-300 bg-white text-slate-400 dark:bg-ndark-card dark:border-ndark-border`
+                : `${nodeBase} border-2 border-dashed border-slate-300 bg-slate-50 text-slate-300 dark:bg-ndark-card dark:border-ndark-border opacity-60`;
+
+          // Bağlantı çizgisi (connector) — düğümün SOLUNDAKİ çizgi.
+          // İlk düğümün solunda yok. 7-state'te lineer "tamamlandı" anlamı
+          // zayıf; bağlantı çizgileri kararlı slate; mevcut'a kadar olanlar
+          // hafif yeşil tonla (geçmiş hissi) — opsiyonel ama 3-faz omurgayı
+          // çağrıştırır.
+          const connectorClass = idx <= currentIdx
+            ? 'bg-emerald-300/70'
+            : 'bg-slate-200 dark:bg-ndark-border';
 
           const ariaTitle = isCurrent
             ? `${CASE_STATUS_LABELS[target]} — mevcut durum`
-            : isAllowed
+            : interactive
               ? needsReason
                 ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
                 : `${CASE_STATUS_LABELS[target]} olarak işaretle`
               : `${CASE_STATUS_LABELS[target]} — bu durumdan geçilemez`;
 
           return (
-            <li key={target}>
+            <li
+              key={target}
+              className={`flex shrink-0 items-start ${idx > 0 ? 'flex-1 min-w-[80px]' : 'min-w-[68px]'}`}
+              aria-current={isCurrent ? 'step' : undefined}
+            >
+              {/* Soldaki bağlantı çizgisi — düğümün ÜST yarısı hizasında
+                  (mt-3 ≈ daire merkez yüksekliği). İlk düğümde yok. */}
+              {idx > 0 && (
+                <span
+                  aria-hidden="true"
+                  className={`mt-3 h-1 flex-1 rounded-full ${connectorClass}`}
+                />
+              )}
+
+              {/* Düğüm — daire + altında etiket. Düğüm tıklanır button
+                  içinde; etiket görsel olarak altta ama buton içinde
+                  (tek hit-area). */}
               <button
                 type="button"
                 onClick={() => {
-                  if (!isAllowed || isCurrent) return;
+                  if (!interactive) return;
                   handleClick(target);
                 }}
-                disabled={!isAllowed || isCurrent || !!directSubmitting}
-                aria-current={isCurrent ? 'step' : undefined}
-                aria-disabled={!isAllowed || isCurrent}
+                disabled={!interactive || !!directSubmitting}
+                aria-disabled={!interactive}
                 title={ariaTitle}
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium leading-none transition ${stateCls} disabled:cursor-not-allowed`}
+                className={`flex shrink-0 flex-col items-center gap-1 px-1.5 transition disabled:cursor-not-allowed ${interactive ? '' : 'cursor-default'}`}
               >
-                <span aria-hidden="true" className="flex h-3 w-3 items-center justify-center">
-                  {v.icon}
+                <span className={nodeCls}>
+                  {isBusy ? (
+                    <span aria-hidden="true" className="animate-pulse text-[10px]">…</span>
+                  ) : isCurrent ? (
+                    v.iconLg ?? v.icon
+                  ) : (
+                    v.icon
+                  )}
                 </span>
-                <span>{CASE_STATUS_LABELS[target]}</span>
-                {isAllowed && needsReason && !isCurrent && (
-                  <span
-                    aria-label="Gerekçe gerekir"
-                    title="Gerekçe penceresi açılır"
-                    className="-mr-0.5 inline-flex items-center"
-                  >
-                    <AlertTriangle size={10} aria-hidden="true" />
-                  </span>
-                )}
-                {isBusy && (
-                  <span aria-hidden="true" className="ml-0.5 animate-pulse">…</span>
-                )}
+                <span
+                  className={`text-center text-[11px] leading-tight ${
+                    isCurrent
+                      ? 'font-semibold text-slate-900 dark:text-ndark-text'
+                      : interactive
+                        ? 'font-medium text-slate-700 dark:text-ndark-text'
+                        : 'text-slate-400 dark:text-ndark-muted'
+                  }`}
+                >
+                  {CASE_STATUS_LABELS[target]}
+                  {interactive && needsReason && (
+                    <span
+                      aria-label="Gerekçe gerekir"
+                      title="Gerekçe penceresi açılır"
+                      className="ml-0.5 inline-flex translate-y-[-1px] items-center text-slate-400"
+                    >
+                      <AlertTriangle size={9} aria-hidden="true" />
+                    </span>
+                  )}
+                </span>
               </button>
             </li>
           );
         })}
-      </ul>
+      </ol>
 
       {/* Reason zorunlu hedef için modal — StatusTransitionPanel'i bütün halinde
           reuse eder; preselect initialPending ile akış doğrudan reason fazına gider. */}
