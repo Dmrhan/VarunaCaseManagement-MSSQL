@@ -1294,7 +1294,7 @@ export function SmartTicketNewPage({
         const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
         updated = await caseService.update(createdCase.id, {
           assignedPersonId: transferToPersonId || null,
-          assignedPersonName: targetPerson?.name ?? '',
+          assignedPersonName: targetPerson?.name ?? null,
         });
       } else {
         // Farklı takıma devir — mevcut transferCase akışı
