@@ -15,7 +15,7 @@ import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailThread, type MailThreadHandle } from './MailThread';
 import { MailComposer } from './MailComposer';
 import { Button } from '@/components/ui/Button';
-import { caseEmailService, type CaseEmailItem, type FromAliasOption, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -56,9 +56,8 @@ export function CommunicationTab({ item }: Props) {
   //   'configured'→ 1+ alias var, normal akış
   //   'missing'   → 0 alias, "Mail entegrasyonu yapılandırılmamış" banner
   const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
-  // Cached aliases — composer'da getFromAliases tekrar çağrılır ama
-  // CommunicationTab da config-yok kararı için bir kez kontrol eder.
-  const [_aliases, setAliases] = useState<FromAliasOption[]>([]);
+  // Debug/log için reason (banner'da development modunda gösterilebilir)
+  const [missingReason, setMissingReason] = useState<EmailConfigReason | null>(null);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -72,13 +71,17 @@ export function CommunicationTab({ item }: Props) {
     return () => { alive = false; };
   }, [item.id]);
 
-  // M6.3-realign — alias listesini ilk render'da getir → config-yok kararı
+  // M6.3-realign (revize) — dedicated email-config endpoint'i.
+  // configured kararı backend'de listActiveWithSettingFallback'e dayanır
+  // → composer dropdown ile aynı kaynak. UNIVERA gibi config TAM +
+  // manuel FromAlias YOK senaryosunda configured=true döner
+  // (reason='fallback-from-address').
   useEffect(() => {
     let alive = true;
-    void caseEmailService.getFromAliases(item.id).then((items) => {
+    void caseEmailService.getEmailConfig(item.id).then((cfg) => {
       if (!alive) return;
-      setAliases(items);
-      setMailConfigState(items.length > 0 ? 'configured' : 'missing');
+      setMailConfigState(cfg.configured ? 'configured' : 'missing');
+      setMissingReason(cfg.configured ? null : cfg.reason);
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -164,8 +167,7 @@ export function CommunicationTab({ item }: Props) {
 
       {channel === 'email' && mailConfigState === 'missing' && (
         // M6.3-realign — config-yok hali. Toast yağmuru YOK; tek temiz
-        // banner. Şirkette FromAlias tanımlı değil (mail entegrasyonu
-        // composer'ı besleyecek alias listesi yok).
+        // banner. Mesaj backend'in döndürdüğü reason'a göre hassaslaşır.
         <div
           className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
           role="status"
@@ -173,14 +175,21 @@ export function CommunicationTab({ item }: Props) {
           <Info size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
           <div>
             <p className="font-medium">
-              "{item.companyName}" için mail entegrasyonu yapılandırılmamış.
+              {missingReason === 'disabled'
+                ? `"${item.companyName}" için mail entegrasyonu kapalı.`
+                : `"${item.companyName}" için mail entegrasyonu yapılandırılmamış.`}
             </p>
             <p className="mt-1 text-xs">
-              Bu vakada e-posta gönderimi/alımı için Admin → Yönetim Paneli →
-              <b> Mail Entegrasyonu</b> → ilgili şirket → <b>From Alias</b>
-              bölümünden bir gönderen adresi ekleyin. Düzenleme tamamlanınca
-              bu sekme otomatik aktifleşir.
+              Admin → Yönetim Paneli → <b>Mail Entegrasyonu</b> → ilgili
+              şirket → SMTP/IMAP credentials + gönderen adresi (From) tanımlı
+              olmalı. Düzenleme tamamlanınca bu sekme otomatik aktifleşir.
             </p>
+            {/* Development modunda reason ipucu */}
+            {(import.meta as { env?: { DEV?: boolean } }).env?.DEV && missingReason && (
+              <p className="mt-1 text-[10px] opacity-60">
+                debug: reason={missingReason}
+              </p>
+            )}
           </div>
         </div>
       )}

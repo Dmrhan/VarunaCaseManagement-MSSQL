@@ -189,6 +189,39 @@ export async function getForwardContext(caseId: string, emailId: string): Promis
   );
 }
 
+export type EmailConfigReason =
+  | 'no-setting'
+  | 'disabled'
+  | 'no-from'
+  | 'has-alias'
+  | 'fallback-from-address';
+
+export interface EmailConfig {
+  configured: boolean;
+  reason: EmailConfigReason;
+}
+
+/**
+ * GET /api/cases/:caseId/email-config — İletişim sekmesi "yapılandırılmış mı?"
+ * dedicated kararı. CommunicationTab banner state'i bu yanıta dayanır.
+ *
+ * KONTRAT TUTARLILIĞI: backend `listActiveWithSettingFallback` çağırır →
+ * composer dropdown ile AYNI kaynaktan beslenir. UNIVERA gibi config TAM
+ * + manuel FromAlias YOK senaryosunda configured=true (reason
+ * 'fallback-from-address') döner.
+ *
+ * Silent fetch — hata durumunda configured=false varsayımı banner gösterir;
+ * toast YOK.
+ */
+export async function getEmailConfig(caseId: string): Promise<EmailConfig> {
+  const out = await apiFetch<EmailConfig>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-config`,
+    undefined,
+    { silent: true },
+  );
+  return out ?? { configured: false, reason: 'no-setting' };
+}
+
 /**
  * GET /api/cases/:caseId/email-signature — composer açılışında tenant
  * default imzasını gövdeye append etmek için.
@@ -210,4 +243,5 @@ export const caseEmailService = {
   getForwardContext,
   sendEmail,
   getEmailSignature,
+  getEmailConfig,
 };

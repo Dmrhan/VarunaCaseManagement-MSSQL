@@ -2344,6 +2344,67 @@ router.get(
 );
 
 /**
+ * Mail M6.3-realign — GET /api/cases/:id/email-config
+ *
+ * İletişim sekmesi açılışında "yapılandırılmış mı?" kararı için tek
+ * dedicated endpoint. CommunicationTab banner state'i bu yanıta dayanır.
+ *
+ * Response: { configured: boolean, reason: 'no-setting' | 'disabled'
+ *   | 'no-from' | 'has-alias' | 'fallback-from-address' }
+ *
+ * Kontrat (kullanıcı talebi, ALTERNATİF — daha sağlam):
+ *   configured = ExternalMailSetting var + enabled === true +
+ *     (FromAlias 1+ VEYA ExternalMailSetting.fromAddress dolu)
+ *   reason:
+ *     - 'no-setting'              → ExternalMailSetting kaydı yok
+ *     - 'disabled'                → kayıt var ama enabled=false
+ *     - 'no-from'                 → enabled ama ne alias ne fromAddress
+ *     - 'has-alias'               → FromAlias satır(lar)ı var
+ *     - 'fallback-from-address'   → alias yok, fromAddress üzerinden fallback
+ *
+ * KONTRAT TUTARLILIĞI: configured kararı için
+ * listActiveWithSettingFallback (composer dropdown ile aynı helper)
+ * kullanılır → composer'a sunulan ALİAS LİSTESİ ile config-detection
+ * AYNI kaynaktan beslenir. Composer dropdown 1+ alias döndürürse banner
+ * GÖRÜNMEZ (tek doğruluk kaynağı).
+ *
+ * Scope guard: caseRepository.get + assertCaseSecurityFilterAccess.
+ */
+router.get(
+  '/:id/email-config',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const setting = await prisma.externalMailSetting.findUnique({
+      where: { companyId: c.companyId },
+      select: { enabled: true, fromAddress: true },
+    });
+    if (!setting) {
+      return res.json({ configured: false, reason: 'no-setting' });
+    }
+    if (!setting.enabled) {
+      return res.json({ configured: false, reason: 'disabled' });
+    }
+    // composer dropdown ile AYNI kaynak (fallback dahil)
+    const items = await externalMailFromAliasRepo.listActiveWithSettingFallback(c.companyId);
+    if (items.length === 0) {
+      return res.json({ configured: false, reason: 'no-from' });
+    }
+    // Reason: gerçek alias mı, fallback mi
+    const isFallback = items.length === 1 && items[0].id === 'setting-fallback';
+    res.json({
+      configured: true,
+      reason: isFallback ? 'fallback-from-address' : 'has-alias',
+    });
+  }),
+);
+
+/**
  * Mail M6.2b — GET /api/cases/:id/email-signature
  *
  * Composer için tenant default imzası (ExternalMailSetting.signatureHtml).

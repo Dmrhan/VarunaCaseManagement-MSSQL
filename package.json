@@ -60,7 +60,8 @@
     "smoke:third-party-global": "node --env-file-if-exists=.env scripts/smoke-third-party-global-allow.js",
     "smoke:mail-m6-3a": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3a-cid-attachment.js",
     "smoke:mail-m6-3-fwd": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-forward-context.js",
-    "smoke:mail-m6-3-fallback": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-from-alias-fallback.js"
+    "smoke:mail-m6-3-fallback": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-from-alias-fallback.js",
+    "smoke:mail-m6-3-cfg": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-email-config.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
