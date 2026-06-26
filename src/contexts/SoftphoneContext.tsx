@@ -11,6 +11,7 @@ import {
   fetchSoftphoneSession, startSoftphone, onAwjsEvent, AWJS_EVENTS,
   dial as awjsDial, answer as awjsAnswer, hangup as awjsHangup, hold as awjsHold, unhold as awjsUnhold, toggleMute as awjsToggleMute,
   getAlotechEmail, setAlotechEmail,
+  isAlotechDisabled,
   type AgentStatusValue,
 } from '../services/softphoneService';
 
@@ -18,7 +19,9 @@ const MODE = (((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_MODE as string) 
   ? 'embedded' : 'click2call';
 const isEmbedded = MODE === 'embedded';
 
-export type SoftphoneStatus = 'idle' | 'connecting' | 'ready' | 'error';
+// 'disabled' — backend AloTech env'leri eksik (configured:false). Widget
+// sessizce gizlenir, poll durur, toast spam'i bitmiş olur.
+export type SoftphoneStatus = 'idle' | 'connecting' | 'ready' | 'error' | 'disabled';
 export type CallStatus = 'ringing' | 'active' | 'hold';
 
 export interface ActiveCall {
@@ -82,12 +85,17 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const refreshStatus = useCallback(async () => {
     try {
       const s = await fetchAgentStatus();
+      // Backend env eksik → softphone'u kalıcı 'disabled' moduna al; poll
+      // useEffect'leri status !== 'ready' guard'ı ile zaten devre dışı kalır.
+      if (isAlotechDisabled(s)) { setStatus('disabled'); return; }
       if (s) { setAgentEmail(s.agentEmail); setAgentStatus(s.status); }
     } catch { /* sessiz */ }
   }, []);
 
   const connect = useCallback(async () => {
     if (startedRef.current) return;
+    // 'disabled' = backend env eksik → tekrar deneme.
+    if (status === 'disabled') return;
     // Agent AloTech e-postası girilmemişse bağlanma — widget'tan girilmesi beklenir.
     if (!getAlotechEmail()) { setStatus('idle'); return; }
     startedRef.current = true;
@@ -96,6 +104,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     try {
       if (isEmbedded) {
         const sess = await fetchSoftphoneSession();
+        if (isAlotechDisabled(sess)) {
+          startedRef.current = false;
+          setStatus('disabled');
+          return;
+        }
         setAgentEmail(sess.agentEmail);
         await startSoftphone(sess, {
           onLogout: () => { setStatus('idle'); startedRef.current = false; },
@@ -104,6 +117,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         setStatus('ready');
       } else {
         const s = await fetchAgentStatus();
+        // Backend env eksik → sessiz disabled (toast YOK).
+        if (isAlotechDisabled(s)) {
+          startedRef.current = false;
+          setStatus('disabled');
+          return;
+        }
         if (!s) throw new Error('AloTech agent bilgisi alınamadı');
         setAgentEmail(s.agentEmail);
         setAgentStatus(s.status);
@@ -114,7 +133,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       setStatus('error');
       setError(err?.message ?? 'AloTech bağlantısı kurulamadı');
     }
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     if (user && status === 'idle' && getAlotechEmail()) void connect();
@@ -165,6 +184,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       const r = await fetchActiveCall().catch(() => undefined);
       if (!alive) return;
+      // Backend env eksik → disabled'a düş + sonraki poll'leri durdur.
+      // (alive=false; useEffect cleanup interval'ı temizler.)
+      if (isAlotechDisabled(r)) {
+        alive = false;
+        setStatus('disabled');
+        return;
+      }
       if (r && 'agentStatus' in r) {
         // Çağrı yanıtlandığında (talking) → screen pop event (callerId ile, bir kez).
         if (r.agentStatus === 'talking' && lastAnsweredKey.current !== (lastInbound.current?.key ?? null)) {

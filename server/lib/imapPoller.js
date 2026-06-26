@@ -226,8 +226,15 @@ export async function pollMailbox(companyId) {
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // UNSEEN search
-      const uids = await client.search({ seen: false });
+      // UNSEEN search — { uid: true } ZORUNLU.
+      //
+      // Codex #205 P1 (kritik) — search default'u SEQUENCE numarası döndürür;
+      // mailbox dolu/silme/expunge sonrası sequence ≠ UID olur. Aşağıda
+      // fetchOne(uid, { uid: true }) ve messageFlagsAdd(uid, ..., { uid: true })
+      // UID modunda çalışıyor → search da UID modunda olmalı. Aksi halde
+      // yanlış mesaj `\Seen` işaretlenir, işlenen mail UNSEEN kalır → her
+      // poll'de DUPLICATE vaka açılır.
+      const uids = await client.search({ seen: false }, { uid: true });
       const limited = (uids ?? []).slice(0, MAX_MESSAGES_PER_POLL);
       stats.fetched = limited.length;
 
@@ -237,10 +244,16 @@ export async function pollMailbox(companyId) {
         let qKey = null;
         try {
           // Önce minimal fetch ile message-id'yi al; quarantine kontrolü.
-          const headerFetch = await client.fetchOne(uid, {
-            uid: true,
-            source: true,
-          });
+          //
+          // Codex #205 P1 follow-up (kritik) — ImapFlow.fetchOne signature:
+          //   fetchOne(range, query, options)
+          // UID modu **3. argüman** (options). Önceki kullanım:
+          //   fetchOne(uid, { uid: true, source: true })
+          // burada query objesindeki `uid: true` SILENTLY IGNORE oluyor →
+          // range default sequence number gibi yorumlanıyor → UID modunda
+          // gelen search sonucuyla uyuşmaz → yanlış/eksik mesaj fetch'i +
+          // doğru UID `\Seen` işaretlenir → kaybolan ya da yanlış intake.
+          const headerFetch = await client.fetchOne(uid, { source: true }, { uid: true });
           if (!headerFetch || !headerFetch.source) {
             stats.skipped += 1;
             continue;

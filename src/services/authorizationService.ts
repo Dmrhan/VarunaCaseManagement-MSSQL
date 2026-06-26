@@ -56,6 +56,26 @@ export interface EffectiveMenuAccess {
   }>;
 }
 
+export interface AuthorizationFieldState {
+  visible: boolean;
+  readable: boolean;
+  editable: boolean;
+  required: boolean;
+  masked: boolean;
+}
+
+export interface AuthorizationFieldStateItem {
+  fieldKey: string;
+  state: AuthorizationFieldState;
+}
+
+export interface EffectiveFieldStates {
+  companyId: string;
+  scope: string;
+  resourceKey: string;
+  fields: AuthorizationFieldStateItem[];
+}
+
 export const authorizationService = {
   /**
    * Static policy vocabulary used by admin selector UIs. This is read-only and
@@ -90,6 +110,26 @@ export const authorizationService = {
       'Yetki menüleri alınamadı',
     );
     if (!data) throw new Error('Yetki menüleri alınamadı');
+    return data;
+  },
+
+  async fieldStates(input: {
+    companyId?: string;
+    scope: string;
+    resourceKey?: string;
+    fields: string[];
+  }): Promise<EffectiveFieldStates> {
+    const qs = new URLSearchParams();
+    if (input.companyId) qs.set('companyId', input.companyId);
+    qs.set('scope', input.scope);
+    qs.set('resourceKey', input.resourceKey ?? 'case');
+    qs.set('fields', input.fields.join(','));
+    const data = await apiFetch<EffectiveFieldStates>(
+      `/api/authorization/field-states?${qs}`,
+      undefined,
+      'Alan yetkileri alınamadı',
+    );
+    if (!data) throw new Error('Alan yetkileri alınamadı');
     return data;
   },
 };

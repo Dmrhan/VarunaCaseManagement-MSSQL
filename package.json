@@ -37,13 +37,23 @@
     "smoke:authorization-persistence": "node scripts/smoke-authorization-persistence-static.js",
     "smoke:authorization-admin-ui": "node scripts/smoke-authorization-admin-ui-static.js",
     "smoke:authorization-current-user": "node scripts/smoke-authorization-current-user-static.js",
+    "smoke:authorization-menu-enforcement": "node scripts/smoke-authorization-menu-enforcement-static.js",
+    "smoke:authorization-resource-runtime": "node scripts/smoke-authorization-resource-runtime-static.js",
+    "smoke:authorization-resource-enforcement": "node scripts/smoke-authorization-resource-enforcement-pilot-static.js",
+    "smoke:authorization-field-enforcement": "node scripts/smoke-authorization-field-enforcement-pilot-static.js",
+    "smoke:authorization-field-ui": "node scripts/smoke-authorization-field-ui-pilot-static.js",
+    "smoke:authorization-security-filter": "node scripts/smoke-authorization-security-filter-compiler-static.js",
+    "smoke:authorization-security-filter-enforcement": "node scripts/smoke-authorization-security-filter-enforcement-pilot-static.js",
+    "smoke:codex-205-fixes": "node scripts/smoke-codex-205-fixes-static.js",
     "smoke:release": "node --env-file=.env scripts/smoke-release-regression.js",
     "smoke:pr5-static-guards": "node scripts/smoke-pr5-static-guards.js",
     "smoke:account-tckn-search": "node --env-file=.env scripts/smoke-account-tckn-search.js",
     "smoke:admin-create-phase5c": "node --env-file=.env scripts/smoke-admin-create-phase5c.js",
     "smoke:account-id-standard": "node --env-file=.env scripts/smoke-account-id-standardization.js",
     "smoke:account-phone-slots-import": "node --env-file=.env scripts/smoke-account-phone-slots-import.js",
-    "smoke:import-integrity": "node --env-file=.env scripts/smoke-import-integrity-phone-tax.js"
+    "smoke:import-integrity": "node --env-file=.env scripts/smoke-import-integrity-phone-tax.js",
+    "smoke:alotech-graceful": "node scripts/smoke-alotech-graceful-degrade.js",
+    "smoke:status-bar-7state": "node scripts/smoke-status-bar-clickable-7state-static.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

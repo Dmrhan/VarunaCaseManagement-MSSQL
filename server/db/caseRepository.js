@@ -1111,25 +1111,38 @@ export const caseRepository = {
     return { mode: 'unknown' };
   },
 
-  async list({ filters, pagination, allowedCompanyIds } = {}) {
+  async list({ filters, pagination, sortBy, sortDir, allowedCompanyIds } = {}) {
     const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
     const total = await prisma.case.count({ where });
 
-    const orderBy = { createdAt: 'desc' };
+    // Desteklenen sort alanları → Prisma kolon adı. Bilinmeyen değer updatedAt'e düşer.
+    const SORT_FIELD_MAP = {
+      updatedAt:   'updatedAt',
+      createdAt:   'createdAt',
+      sla:         'slaResolutionDueAt',
+      caseNumber:  'caseNumber',
+      title:       'title',
+      accountName: 'accountName',
+      assignment:  'assignedPersonName',
+      priority:    'priority',
+      status:      'status',
+      caseType:    'caseType',
+    };
+    const field = SORT_FIELD_MAP[sortBy] ?? 'updatedAt';
+    const dir   = sortDir === 'asc' ? 'asc' : 'desc';
+    // İki kademeli sıralama: seçili alan + updatedAt (sayfalama kararlılığı için).
+    const orderBy = field === 'updatedAt'
+      ? [{ updatedAt: dir }]
+      : [{ [field]: dir }, { updatedAt: 'desc' }];
 
-    let items;
-    if (pagination) {
-      const skip = (pagination.page - 1) * pagination.pageSize;
-      items = await prisma.case.findMany({
-        where,
-        include: CASE_INCLUDE,
-        orderBy,
-        skip,
-        take: pagination.pageSize,
-      });
-    } else {
-      items = await prisma.case.findMany({ where, include: CASE_INCLUDE, orderBy });
-    }
+    const skip = (pagination.page - 1) * pagination.pageSize;
+    const items = await prisma.case.findMany({
+      where,
+      include: CASE_INCLUDE,
+      orderBy,
+      skip,
+      take: pagination.pageSize,
+    });
     return { items: items.map(shape), total };
   },
 
@@ -1298,13 +1311,22 @@ export const caseRepository = {
       customerCompanyName: m.customerCompanyName,
     });
 
+    // Smart Ticket self-assign: açan kişinin personId'si varsa vaka İncelemede
+    // başlar ve takıma atama bildirimi gitmez.
+    const isSmartTicketCreate =
+      m.customFields &&
+      typeof m.customFields === 'object' &&
+      m.customFields.smartTicket &&
+      typeof m.customFields.smartTicket === 'object';
+    const isSmartTicketSelfAssigned = isSmartTicketCreate && !!m.assignedPersonId;
+
     const created = await prisma.case.create({
       data: {
         caseNumber,
         title: m.title,
         description: m.description,
         caseType: m.caseType,
-        status: 'Acik',
+        status: isSmartTicketSelfAssigned ? 'Incelemede' : 'Acik',
         priority: m.priority,
         origin: m.origin,
         originDescription: m.originDescription,
@@ -1386,16 +1408,18 @@ export const caseRepository = {
       include: CASE_INCLUDE,
     });
 
-    await notifyAssignmentTargets({
-      caseId: created.id,
-      companyId: created.companyId,
-      assignedPersonId: created.assignedPersonId,
-      assignedTeamId: created.assignedTeamId,
-      actorUserId: actorUserIdOf(actor),
-      message: `${created.caseNumber} oluşturuldu ve atandı.`,
-      eventType: 'watcher_update',
-      kind: 'assignment',
-    });
+    if (!isSmartTicketSelfAssigned) {
+      await notifyAssignmentTargets({
+        caseId: created.id,
+        companyId: created.companyId,
+        assignedPersonId: created.assignedPersonId,
+        assignedTeamId: created.assignedTeamId,
+        actorUserId: actorUserIdOf(actor),
+        message: `${created.caseNumber} oluşturuldu ve atandı.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
 
     return shape(created);
   },
@@ -4986,7 +5010,7 @@ function pickRestoreStatus(previous, current) {
   return 'Acik';
 }
 
-function buildWhere(f, allowedCompanyIds) {
+function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (!f) f = {};
   const where = {};
   const andClauses = [];
@@ -4996,6 +5020,14 @@ function buildWhere(f, allowedCompanyIds) {
   // hiçbir şey görmez).
   if (allowedCompanyIds) {
     andClauses.push({ companyId: { in: allowedCompanyIds } });
+  }
+  if (
+    securityWhere &&
+    typeof securityWhere === 'object' &&
+    !Array.isArray(securityWhere) &&
+    Object.keys(securityWhere).length > 0
+  ) {
+    andClauses.push(securityWhere);
   }
   // PR-SD — Soft archive default exclude. SystemAdmin'in UI'dan açık seçimi
   // ile includeArchived: true override eder. Diğer query path'lerinde (KPI,

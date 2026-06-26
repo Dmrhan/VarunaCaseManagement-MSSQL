@@ -67,4 +67,10 @@ export const featureFlags = {
    * UAT'ta açıkça bu flag ile test edilir.
    */
   authorizationMenuEnforcementEnabled: readFlag('VITE_AUTHORIZATION_MENU_ENFORCEMENT_ENABLED', false),
+  /**
+   * Authorization Management — Case Detail field visible/readable/editable/masked
+   * pilot. Default false: field policies can be modeled safely; UI masking/hide
+   * behavior is enabled explicitly during UAT.
+   */
+  authorizationFieldUiEnforcementEnabled: readFlag('VITE_AUTHORIZATION_FIELD_UI_ENFORCEMENT_ENABLED', false),
 };

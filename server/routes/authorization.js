@@ -4,6 +4,14 @@ import { verifyJwt } from '../db/auth.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
 import { getAuthorizationRegistry } from '../lib/authorizationRegistry.js';
+import {
+  buildAuthorizationPrincipalCandidates,
+  buildCurrentAuthorizationUser,
+  chooseAuthorizationPrincipal,
+  resolveAuthorizationCompany,
+  resolveAuthorizationTeamId,
+  resolveFieldStatesForUser,
+} from '../lib/authorizationRuntime.js';
 
 const router = Router();
 
@@ -14,31 +22,14 @@ router.get('/registry', (_req, res) => {
 });
 
 function resolveRequestedCompany(req) {
-  const requested = typeof req.query.companyId === 'string' ? req.query.companyId.trim() : '';
-  const allowed = Array.isArray(req.user?.allowedCompanyIds) ? req.user.allowedCompanyIds : [];
-  const companyId = requested || allowed[0] || '';
-  if (!companyId) {
-    const err = new Error('Yetkili şirket bulunamadı.');
-    err.status = 403;
-    err.code = 'company_scope_empty';
-    throw err;
-  }
-  if (!allowed.includes(companyId)) {
-    const err = new Error('Bu şirket için yetkin yok.');
-    err.status = 403;
-    err.code = 'company_forbidden';
-    throw err;
-  }
-  return companyId;
+  return resolveAuthorizationCompany(
+    req.user,
+    typeof req.query.companyId === 'string' ? req.query.companyId : '',
+  );
 }
 
 async function resolveTeamId(user) {
-  if (!user?.personId) return null;
-  const person = await prisma.person.findUnique({
-    where: { id: user.personId },
-    select: { teamId: true },
-  });
-  return person?.teamId ?? null;
+  return resolveAuthorizationTeamId(prisma, user);
 }
 
 function getServerFeatureFlags() {
@@ -49,43 +40,8 @@ function getServerFeatureFlags() {
   };
 }
 
-function buildPrincipalCandidates(user, companyId, teamId) {
-  const candidates = [
-    { type: 'systemRole', key: user.role, label: `Sistem rolü: ${user.role}` },
-    { type: 'user', key: user.id, label: `Kullanıcı: ${user.fullName ?? user.email ?? user.id}` },
-  ];
-  const companyRole = user.companyRoles?.find((r) => r.companyId === companyId);
-  if (companyRole) {
-    candidates.push({
-      type: 'companyRole',
-      key: `${companyRole.companyId}:${companyRole.role}`,
-      label: `Şirket rolü: ${companyRole.role}`,
-    });
-  }
-  if (teamId) {
-    candidates.push({ type: 'team', key: teamId, label: `Takım: ${teamId}` });
-  }
-  return candidates;
-}
-
 function choosePrincipal(user, companyId, teamId, requestedType) {
-  const candidates = buildPrincipalCandidates(user, companyId, teamId);
-  if (requestedType) {
-    const found = candidates.find((c) => c.type === requestedType);
-    if (found) return found;
-  }
-  return { type: 'user', key: user.id, label: 'Geçerli kullanıcı (tüm principal kuralları)' };
-}
-
-function buildCurrentPolicyUser(user, companyId, teamId) {
-  const companyRole = user.companyRoles?.find((r) => r.companyId === companyId);
-  return {
-    id: user.id,
-    role: user.role,
-    teamId: teamId ?? null,
-    companyRoles: companyRole ? [`${companyRole.companyId}:${companyRole.role}`] : [],
-    allowedCompanyIds: Array.isArray(user.allowedCompanyIds) ? user.allowedCompanyIds : [],
-  };
+  return chooseAuthorizationPrincipal(user, companyId, teamId, requestedType);
 }
 
 router.get('/effective-menus', async (req, res) => {
@@ -107,7 +63,7 @@ router.get('/effective-menus', async (req, res) => {
       companyId,
       ...(requestedPrincipalType
         ? { principalType: principal.type, principalKey: principal.key }
-        : { user: buildCurrentPolicyUser(req.user, companyId, teamId) }),
+        : { user: buildCurrentAuthorizationUser(req.user, companyId, teamId) }),
       overrides,
       featureFlags: getServerFeatureFlags(),
     });
@@ -115,7 +71,7 @@ router.get('/effective-menus', async (req, res) => {
     res.json({
       companyId,
       principal,
-      candidates: buildPrincipalCandidates(req.user, companyId, teamId),
+      candidates: buildAuthorizationPrincipalCandidates(req.user, companyId, teamId),
       summary: preview.summary,
       menus: preview.menus,
     });
@@ -128,6 +84,39 @@ router.get('/effective-menus', async (req, res) => {
     }
     console.error('[authorization] effective-menus', err);
     return res.status(500).json({ error: 'internal', message: 'Yetki menüleri hesaplanamadı.' });
+  }
+});
+
+router.get('/field-states', async (req, res) => {
+  try {
+    const companyId = resolveRequestedCompany(req);
+    const teamId = await resolveTeamId(req.user);
+    const fields = typeof req.query.fields === 'string'
+      ? req.query.fields.split(',').map((x) => x.trim()).filter(Boolean)
+      : [];
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : '';
+    const resourceKey = typeof req.query.resourceKey === 'string' ? req.query.resourceKey : 'case';
+    const overrides = await authorizationPolicyRepository.listOverrides(
+      companyId,
+      req.user.allowedCompanyIds,
+    );
+    const items = resolveFieldStatesForUser({
+      scope,
+      resourceKey,
+      fields,
+      user: buildCurrentAuthorizationUser(req.user, companyId, teamId),
+      overrides,
+    });
+    res.json({ companyId, scope, resourceKey, fields: items });
+  } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({
+        error: err.code ?? 'authorization_error',
+        message: err.message,
+      });
+    }
+    console.error('[authorization] field-states', err);
+    return res.status(500).json({ error: 'internal', message: 'Alan yetkileri hesaplanamadı.' });
   }
 });
 
