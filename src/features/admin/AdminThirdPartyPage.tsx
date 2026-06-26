@@ -11,6 +11,7 @@ import { adminService, type ThirdPartyInput } from '@/services/adminService';
 import type { CaseThirdParty } from '@/features/cases/types';
 import { AdminListLayout } from './AdminListLayout';
 import { THIRD_PARTY_HELP } from './helpContents';
+import { CompanySelector } from '@/components/ui/CompanySelector';
 import { lookupService } from '@/services/caseService';
 
 export function AdminThirdPartyPage() {
@@ -95,20 +96,17 @@ export function AdminThirdPartyPage() {
         loading={loading}
         error={error}
         onRetry={() => void refresh()}
+        filters={
+          <div className="w-56">
+            <CompanySelector
+              label="Şirket Filtresi"
+              value={selectedCompanyId}
+              onChange={(v) => setSelectedCompanyId(v ?? '')}
+              allowAll
+            />
+          </div>
+        }
       >
-        {/* Şirket filtresi */}
-        <div className="mb-3">
-          <select
-            value={selectedCompanyId}
-            onChange={(e) => setSelectedCompanyId(e.target.value)}
-            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            <option value="">Tüm şirketler</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
         {filtered.length === 0 ? (
           <CardBody>
             <EmptyState
