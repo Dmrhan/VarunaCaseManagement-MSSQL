@@ -1,37 +1,56 @@
 /**
- * Mail M6.1 — Vaka thread mail listesi.
+ * Mail M6.1 + M6.2b — Vaka thread mail listesi.
  *
  * Plan referansı: docs/M6-email-in-case-plan.md Bölüm 9.
  *
- * Mailler kronolojik (eskiden yeniye) gösterilir. Boş durumda EmptyState.
+ * Mailler kronolojik (eskiden yeniye) gösterilir. Composer'dan gönderim
+ * sonrası parent `ref.refresh({scrollToLast: true})` ile yeniler + son
+ * mesaja scroll-into-view (kenar durum: uzun thread).
  *
  * REUSE: NotesTab stack düzeni; vertical space-y, scrollable container.
  */
-import { useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Inbox } from 'lucide-react';
-import { caseEmailService, type CaseEmailItem } from '../../../services/caseEmailService';
+import { caseEmailService, type CaseEmailItem } from '@/services/caseEmailService';
 import { MailMessageCard } from './MailMessageCard';
+
+export interface MailThreadHandle {
+  refresh: (opts?: { scrollToLast?: boolean }) => Promise<void>;
+}
 
 interface Props {
   caseId: string;
 }
 
-export function MailThread({ caseId }: Props) {
+export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThread({ caseId }, ref) {
   const [items, setItems] = useState<CaseEmailItem[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastItemRef = useRef<HTMLLIElement | null>(null);
+  const pendingScrollRef = useRef(false);
 
-  useEffect(() => {
-    let alive = true;
+  const load = useCallback(async (opts?: { scrollToLast?: boolean }) => {
     setLoading(true);
-    void caseEmailService.listEmails(caseId).then((rows) => {
-      if (!alive) return;
-      setItems(rows);
-      setLoading(false);
-    });
-    return () => { alive = false; };
+    const rows = await caseEmailService.listEmails(caseId);
+    setItems(rows);
+    setLoading(false);
+    if (opts?.scrollToLast) pendingScrollRef.current = true;
   }, [caseId]);
 
-  if (loading) {
+  useEffect(() => { void load(); }, [load]);
+
+  useImperativeHandle(ref, () => ({
+    refresh: (opts) => load(opts),
+  }), [load]);
+
+  // Items yüklendikten sonra scrollIntoView (DOM hazır olunca)
+  useEffect(() => {
+    if (pendingScrollRef.current && lastItemRef.current) {
+      lastItemRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      pendingScrollRef.current = false;
+    }
+  }, [items]);
+
+  if (loading && !items) {
     return (
       <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">
         Yükleniyor…
@@ -46,20 +65,20 @@ export function MailThread({ caseId }: Props) {
         <p className="text-sm text-slate-600 dark:text-ndark-muted">
           Bu vakaya henüz e-posta gelmedi ya da gönderilmedi.
         </p>
-        <p className="text-xs text-slate-500 dark:text-ndark-muted">
-          Yanıt yazma özelliği yakında aktif olacak (M6.2).
-        </p>
       </div>
     );
   }
 
   return (
     <ol className="space-y-3" aria-label="E-posta thread">
-      {items.map((email) => (
-        <li key={email.id}>
-          <MailMessageCard email={email} caseId={caseId} />
-        </li>
-      ))}
+      {items.map((email, idx) => {
+        const isLast = idx === items.length - 1;
+        return (
+          <li key={email.id} ref={isLast ? lastItemRef : undefined}>
+            <MailMessageCard email={email} caseId={caseId} />
+          </li>
+        );
+      })}
     </ol>
   );
-}
+});

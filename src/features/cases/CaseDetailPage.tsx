@@ -1124,7 +1124,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <LinksTab item={item} onShowCase={navigateToCase} />
             )}
             {tab === 'communication' && (
-              <CommunicationTab caseId={item.id} />
+              <CommunicationTab item={item} />
             )}
             {tab === 'callLogs' && (
               <CallLogsTab

@@ -80,7 +80,106 @@ export async function getAttachmentDownload(
   );
 }
 
+// ─── M6.2b composer için lookup endpoint'leri ───
+
+export interface FromAliasOption {
+  id: string;
+  address: string;
+  displayName: string | null;
+  isDefault: boolean;
+}
+
+/**
+ * GET /api/cases/:caseId/from-aliases — composer From dropdown beslemesi
+ * (M5-extension lookup endpoint). Sadece aktif alias'lar.
+ */
+export async function getFromAliases(caseId: string): Promise<FromAliasOption[]> {
+  const out = await apiFetch<{ items: FromAliasOption[] }>(
+    `/api/cases/${encodeURIComponent(caseId)}/from-aliases`,
+    undefined,
+    'Gönderen adresleri',
+  );
+  return Array.isArray(out?.items) ? out!.items : [];
+}
+
+export interface ReplyContext {
+  caseNumber: string | null;
+  to: CaseEmailAddress[];
+  cc: CaseEmailAddress[];
+  bcc: CaseEmailAddress[];
+  subject: string;
+  inReplyTo: string | null;
+}
+
+/**
+ * GET /api/cases/:caseId/emails/reply-context — composer "Yanıtla" prefill
+ * (M6.2a backend). Vakanın son inbound CaseEmail'ından çıkarılır; tenant
+ * alias adresleri loop koruması için filtrelenmiştir.
+ */
+export async function getReplyContext(caseId: string): Promise<ReplyContext | undefined> {
+  return apiFetch<ReplyContext>(
+    `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context`,
+    undefined,
+    'Yanıt bağlamı',
+  );
+}
+
+export interface SendEmailDraft {
+  fromAddress: string;
+  to: CaseEmailAddress[];
+  cc?: CaseEmailAddress[];
+  bcc?: CaseEmailAddress[];
+  subject: string;
+  bodyHtml: string;
+  bodyText?: string;
+  /** CaseAttachment.id[] — composer attachments uploader'dan toplanır. */
+  attachments?: string[];
+}
+
+export interface SendEmailResult {
+  ok: true;
+  emailId: string;
+  messageId: string;
+  previewUrl: string | null;
+}
+
+/**
+ * POST /api/cases/:caseId/emails — composer gönderim (M6.2a backend).
+ * Hata yakalanır: apiFetch toast'ı zaten gösterir, undefined döner.
+ */
+export async function sendEmail(
+  caseId: string,
+  draft: SendEmailDraft,
+): Promise<SendEmailResult | undefined> {
+  return apiFetch<SendEmailResult>(
+    `/api/cases/${encodeURIComponent(caseId)}/emails`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    },
+    'E-posta gönderimi',
+  );
+}
+
+/**
+ * GET /api/cases/:caseId/email-signature — composer açılışında tenant
+ * default imzasını gövdeye append etmek için.
+ */
+export async function getEmailSignature(caseId: string): Promise<string | null> {
+  const r = await apiFetch<{ signatureHtml: string | null }>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-signature`,
+    undefined,
+    'İmza',
+  );
+  return r?.signatureHtml ?? null;
+}
+
 export const caseEmailService = {
   listEmails,
   getAttachmentDownload,
+  getFromAliases,
+  getReplyContext,
+  sendEmail,
+  getEmailSignature,
 };
