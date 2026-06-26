@@ -162,6 +162,29 @@ export async function sendEmail(
   );
 }
 
+export interface ForwardContext {
+  caseNumber: string | null;
+  to: CaseEmailAddress[];
+  cc: CaseEmailAddress[];
+  bcc: CaseEmailAddress[];
+  subject: string;
+  /** Composer gövdesinin SONUNA eklenen alıntılı orijinal mesaj (HTML). */
+  quotedBodyHtml: string;
+  inReplyTo: string | null;
+}
+
+/**
+ * GET /api/cases/:caseId/emails/:emailId/forward-context — composer "İlet"
+ * prefill (M6.3-realign).
+ */
+export async function getForwardContext(caseId: string, emailId: string): Promise<ForwardContext | undefined> {
+  return apiFetch<ForwardContext>(
+    `/api/cases/${encodeURIComponent(caseId)}/emails/${encodeURIComponent(emailId)}/forward-context`,
+    undefined,
+    'İletme bağlamı',
+  );
+}
+
 /**
  * GET /api/cases/:caseId/email-signature — composer açılışında tenant
  * default imzasını gövdeye append etmek için.
@@ -180,6 +203,7 @@ export const caseEmailService = {
   getAttachmentDownload,
   getFromAliases,
   getReplyContext,
+  getForwardContext,
   sendEmail,
   getEmailSignature,
 };

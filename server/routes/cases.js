@@ -2223,6 +2223,33 @@ router.get(
 );
 
 /**
+ * Mail M6.3-realign — GET /api/cases/:id/emails/:emailId/forward-context
+ *
+ * Composer "İlet" akışı için prefill (subject 'Fwd:' + alıntılı body).
+ * Alıcılar boş — agent manuel ekler.
+ *
+ * Scope guard: caseRepository.get + assertCaseSecurityFilterAccess + emailId
+ * caseId match (buildForwardContext companyId/case binding check).
+ */
+router.get(
+  '/:id/emails/:emailId/forward-context',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const ctx = await caseEmailSender.buildForwardContext(req.params.id, req.params.emailId, {
+      companyId: c.companyId,
+    });
+    if (!ctx) return res.status(404).json({ error: 'Mail bulunamadı' });
+    res.json(ctx);
+  }),
+);
+
+/**
  * GET /api/cases/:id/emails/:emailId/attachments/:attachmentId/download
  * — Mail eki indirme — short-lived signed token döner. Token tüketim
  * /:id/files/:fileId/raw deseniyle uyumlu (signStorageToken / 60sn).

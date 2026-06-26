@@ -44,6 +44,17 @@ export interface MailComposerProps {
   item: Case;
   /** "Yanıtla" tıklanmışsa reply-context'ten doldurulur; yoksa boş. */
   initialReplyContext?: ReplyContext | null;
+  /**
+   * M6.3-realign — "İlet" akışı için forward prefill. Verildiyse:
+   *  - subject = "Fwd: ..."
+   *  - alıcılar boş (agent manuel ekler)
+   *  - quotedBodyHtml gövde sonuna alıntı olarak eklenir
+   */
+  initialForwardContext?: {
+    caseNumber: string | null;
+    subject: string;
+    quotedBodyHtml: string;
+  } | null;
   /** Tenant default imza HTML — composer açılınca gövde sonuna append. */
   initialSignatureHtml?: string | null;
   /** Composer'dan inbound/outbound CaseEmail oluşunca thread refresh. */
@@ -63,6 +74,7 @@ type ContactPickerValue = { address: string; name: string | null };
 export function MailComposer({
   item,
   initialReplyContext = null,
+  initialForwardContext = null,
   initialSignatureHtml = null,
   onSent,
   onCancel,
@@ -73,17 +85,38 @@ export function MailComposer({
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
   const [cc, setCc] = useState<ContactPickerValue[]>(initialReplyContext?.cc ?? []);
   const [bcc, setBcc] = useState<ContactPickerValue[]>(initialReplyContext?.bcc ?? []);
-  const [showCc, setShowCc] = useState(cc.length > 0);
-  const [showBcc, setShowBcc] = useState(bcc.length > 0);
-  const [subject, setSubject] = useState<string>(initialReplyContext?.subject ?? '');
+  // M6.3-realign — Cc/Bcc her zaman görünür (n4b spec). Setter
+  // gerekmiyor; sadece downstream handleSubmit kullanımına string
+  // kalsın diye sabit readonly.
+  const showCc = true;
+  const showBcc = true;
+  // Önizleme modu
+  const [previewing, setPreviewing] = useState(false);
+  // İmza/Şablon dropdown — şimdilik sadece "tenant default" + "yok"
+  // Per-agent imza ve şablon yönetimi M6.3b'de bu listeye eklenir.
+  const [signatureSelection, setSignatureSelection] = useState<'none' | 'tenant'>(
+    initialSignatureHtml ? 'tenant' : 'none',
+  );
+  const [subject, setSubject] = useState<string>(
+    initialReplyContext?.subject ?? initialForwardContext?.subject ?? '',
+  );
   // Composer açıldıktan SONRA gelen imza için (slow network):
   // useState initializer prop güncellenince yeniden çağrılmaz; o yüzden
   // baseline body'yi ref'te tutarız ve effect ile imza bir kez append edilir.
   // Kullanıcı yazmaya başladıysa (body baseline'dan değiştiyse) ASLA
   // dokunmayız — composer içeriğini ezmemek için.
   // Codex review fix (M6.2b): late-arriving signature.
+  // M6.3-realign — forward bağlamı baseline body'sinin sonuna alıntı
+  // ekler. İmza varsa imzanın altında olur (alıntı doğal sırayla
+  // gözüksün diye sırayla append). Forward+imza birlikte olduğunda da
+  // doğru çalışır.
   const initialBaselineBodyRef = useRef<string>(
-    initialSignatureHtml ? `<p></p>${initialSignatureHtml}` : '<p></p>',
+    (() => {
+      let html = '<p></p>';
+      if (initialSignatureHtml) html += initialSignatureHtml;
+      if (initialForwardContext?.quotedBodyHtml) html += initialForwardContext.quotedBodyHtml;
+      return html;
+    })(),
   );
   const [bodyHtml, setBodyHtml] = useState<string>(initialBaselineBodyRef.current);
   const signatureAppendedRef = useRef<boolean>(!!initialSignatureHtml);
@@ -204,118 +237,200 @@ export function MailComposer({
     }
   }, [attachments, bcc, bodyHtml, cc, item.id, onSent, selectedAlias, showBcc, showCc, subject, to, toast]);
 
+  // Önizleme: DOMPurify ile sanitize edilmiş bodyHtml
+  const previewHtml = useMemo(() => {
+    return DOMPurify.sanitize(bodyHtml, {
+      USE_PROFILES: { html: true },
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
+      FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
+    });
+  }, [bodyHtml]);
+
+  const mode = initialForwardContext
+    ? 'forward'
+    : initialReplyContext
+      ? 'reply'
+      : 'new';
+  const title = mode === 'reply'
+    ? 'E-Postayı Yanıtla'
+    : mode === 'forward'
+      ? 'E-Postayı İlet'
+      : 'Yeni E-posta';
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-ndark-border dark:bg-ndark-card">
-      {/* From */}
-      {!hideFromDropdown && (
-        <Field label="Gönderen">
+    // M6.3-realign — TAM EKRAN composer. Parent (CommunicationTab)
+    // composer açıkken thread'i gizler; bu container thread alanını
+    // doldurur.
+    <div className="rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h3>
+        {item.caseNumber && (
+          <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
+            [{item.caseNumber}]
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-3 p-3">
+        {/* Müşteri (read-only — vaka context'i) */}
+        <Field label="Müşteri">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
+            {item.accountName || item.customerCompanyName || item.customerContactName || item.customerContactEmail || '—'}
+          </div>
+        </Field>
+
+        {/* From */}
+        {!hideFromDropdown ? (
+          <Field label="Kimden">
+            <select
+              value={fromId}
+              onChange={(e) => setFromId(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+            >
+              {aliases.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.displayName ? `${a.displayName} <${a.address}>` : a.address}
+                  {a.isDefault ? ' (varsayılan)' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : selectedAlias ? (
+          <Field label="Kimden">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
+              {selectedAlias.displayName ? `${selectedAlias.displayName} <${selectedAlias.address}>` : selectedAlias.address}
+            </div>
+          </Field>
+        ) : null}
+
+        {/* To/Cc/Bcc — n4b: 3'ü de görünür */}
+        <ContactPicker
+          label="Kime"
+          values={to}
+          onChange={setTo}
+          suggestions={suggestions}
+          disabled={submitting}
+        />
+        <ContactPicker
+          label="Kopya (Cc)"
+          values={cc}
+          onChange={setCc}
+          suggestions={suggestions}
+          disabled={submitting}
+        />
+        <ContactPicker
+          label="Gizli Kopya (Bcc)"
+          values={bcc}
+          onChange={setBcc}
+          suggestions={suggestions}
+          disabled={submitting}
+        />
+        {/* Visibility toggles geri uyumluluk için sessizce mantıkta;
+            UI'da herzaman görünür. */}
+        <input type="hidden" value={showCc ? '1' : '0'} onChange={() => undefined} />
+        <input type="hidden" value={showBcc ? '1' : '0'} onChange={() => undefined} />
+
+        {/* Mail Şablonu / İmza */}
+        <Field label="Mail Şablonu / İmza Seçiniz">
           <select
-            value={fromId}
-            onChange={(e) => setFromId(e.target.value)}
+            value={signatureSelection}
+            onChange={(e) => setSignatureSelection(e.target.value as 'none' | 'tenant')}
             disabled={submitting}
             className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
           >
-            {aliases.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.displayName ? `${a.displayName} <${a.address}>` : a.address}
-                {a.isDefault ? ' (varsayılan)' : ''}
-              </option>
-            ))}
+            <option value="none">İmzasız</option>
+            <option value="tenant" disabled={!initialSignatureHtml}>
+              {initialSignatureHtml ? 'Şirket varsayılan imzası' : 'Şirket varsayılan imzası (tanımlı değil)'}
+            </option>
           </select>
         </Field>
-      )}
-      {hideFromDropdown && selectedAlias && (
-        <p className="mb-2 text-xs text-slate-500 dark:text-ndark-muted">
-          Gönderen: <span className="font-medium text-slate-700 dark:text-ndark-text">
-            {selectedAlias.displayName ? `${selectedAlias.displayName} <${selectedAlias.address}>` : selectedAlias.address}
-          </span>
-        </p>
-      )}
 
-      {/* To/Cc/Bcc */}
-      <div className="space-y-2">
-        <div className="flex items-start gap-2">
-          <div className="flex-1">
-            <ContactPicker
-              label="Kime"
-              values={to}
-              onChange={setTo}
-              suggestions={suggestions}
-              disabled={submitting}
-            />
-          </div>
-          <div className="mt-5 flex gap-1 text-xs">
-            {!showCc && <button type="button" className="text-brand-600 hover:underline" onClick={() => setShowCc(true)}>+Cc</button>}
-            {!showBcc && <button type="button" className="text-brand-600 hover:underline" onClick={() => setShowBcc(true)}>+Bcc</button>}
-          </div>
-        </div>
-        {showCc && (
-          <ContactPicker label="Cc" values={cc} onChange={setCc} suggestions={suggestions} disabled={submitting} />
-        )}
-        {showBcc && (
-          <ContactPicker label="Bcc" values={bcc} onChange={setBcc} suggestions={suggestions} disabled={submitting} />
-        )}
-      </div>
+        {/* Subject */}
+        <Field label="Konu">
+          <TextInput
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            disabled={submitting}
+            placeholder={`Re: [${item.caseNumber}] ...`}
+          />
+        </Field>
 
-      {/* Subject */}
-      <Field label="Konu" className="mt-2">
-        <TextInput
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          disabled={submitting}
-          placeholder={`Re: [${item.caseNumber}] ...`}
-        />
-      </Field>
-
-      {/* Editor */}
-      <div className="mt-2">
-        <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-ndark-muted">Mesaj</label>
-        <RichTextEditor value={bodyHtml} onChange={setBodyHtml} disabled={submitting} />
-      </div>
-
-      {/* Attachments */}
-      <div className="mt-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => void handleAttach(e.target.files)}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            leftIcon={<Paperclip size={13} />}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={submitting || uploading}
+        {/* Attachments */}
+        <Field label="Eklentiler">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => void handleAttach(e.target.files)}
+          />
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50/40 p-2 dark:border-ndark-border dark:bg-ndark-bg/40"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); void handleAttach(e.dataTransfer.files); }}
           >
-            {uploading ? 'Yükleniyor…' : 'Ek ekle'}
-          </Button>
-          {attachments.map((a) => (
-            <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
-              <Paperclip size={11} />
-              {a.fileName}
-              <button
-                type="button"
-                onClick={() => removeAttachment(a.id)}
-                className="text-slate-400 hover:text-rose-500"
-                title="Kaldır"
-              >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
+            <Button
+              type="button"
+              variant="outline"
+              leftIcon={<Paperclip size={13} />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={submitting || uploading}
+            >
+              {uploading ? 'Yükleniyor…' : 'Dosya Ekle'}
+            </Button>
+            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">veya sürükle-bırak</span>
+            {attachments.map((a) => (
+              <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
+                <Paperclip size={11} />
+                {a.fileName}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(a.id)}
+                  className="text-slate-400 hover:text-rose-500"
+                  title="Kaldır"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        </Field>
+
+        {/* Editor / Preview */}
+        <Field label="Metin">
+          {previewing ? (
+            <div className="rounded-md border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
+              <div className="border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
+                Önizleme (sanitize edilmiş)
+              </div>
+              <div
+                className="prose prose-sm max-w-none px-3 py-2 dark:prose-invert"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            </div>
+          ) : (
+            <RichTextEditor value={bodyHtml} onChange={setBodyHtml} disabled={submitting} />
+          )}
+        </Field>
       </div>
 
       {/* Footer */}
-      <div className="mt-3 flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 dark:border-ndark-border">
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
             Vazgeç
           </Button>
         )}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setPreviewing((v) => !v)}
+          disabled={submitting}
+        >
+          {previewing ? 'Düzenle' : 'Önizleme'}
+        </Button>
         <Button
           type="button"
           variant="primary"

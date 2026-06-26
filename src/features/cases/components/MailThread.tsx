@@ -1,13 +1,11 @@
 /**
- * Mail M6.1 + M6.2b — Vaka thread mail listesi.
+ * Mail M6.3-realign — Vaka thread TABLO görünümü (n4b paritesi).
  *
- * Plan referansı: docs/M6-email-in-case-plan.md Bölüm 9.
+ * Kolonlar: yön / From / To / Cc / Bcc / Tarih / Konu+Ek / Aksiyon.
+ * Satıra tıklanırsa expand body (cid render M6.3a reuse).
  *
- * Mailler kronolojik (eskiden yeniye) gösterilir. Composer'dan gönderim
- * sonrası parent `ref.refresh({scrollToLast: true})` ile yeniler + son
- * mesaja scroll-into-view (kenar durum: uzun thread).
- *
- * REUSE: NotesTab stack düzeni; vertical space-y, scrollable container.
+ * REUSE: NotesTab scroll deseni; mevcut MailMessageCard refactor satır
+ * olarak render.
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Inbox } from 'lucide-react';
@@ -20,15 +18,18 @@ export interface MailThreadHandle {
 
 interface Props {
   caseId: string;
-  /** M6.3a — Satır "Yanıtla" tıklanınca composer'ı açar (parent
-   *  composer'ı reply-context ile yükler). */
   onReply?: (email: CaseEmailItem) => void;
+  /** M6.3-realign — satır "İlet" aksiyonu (forward). */
+  onForward?: (email: CaseEmailItem) => void;
 }
 
-export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThread({ caseId, onReply }, ref) {
+export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThread(
+  { caseId, onReply, onForward },
+  ref,
+) {
   const [items, setItems] = useState<CaseEmailItem[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const lastItemRef = useRef<HTMLLIElement | null>(null);
+  const lastRowRef = useRef<HTMLTableRowElement | null>(null);
   const pendingScrollRef = useRef(false);
 
   const load = useCallback(async (opts?: { scrollToLast?: boolean }) => {
@@ -45,10 +46,9 @@ export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThrea
     refresh: (opts) => load(opts),
   }), [load]);
 
-  // Items yüklendikten sonra scrollIntoView (DOM hazır olunca)
   useEffect(() => {
-    if (pendingScrollRef.current && lastItemRef.current) {
-      lastItemRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (pendingScrollRef.current && lastRowRef.current) {
+      lastRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
       pendingScrollRef.current = false;
     }
   }, [items]);
@@ -72,24 +72,52 @@ export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThrea
     );
   }
 
+  // 8 kolon: yön / From / To / Cc / Bcc / Tarih / Konu+Ek / Aksiyon
   return (
-    <ol className="space-y-3" aria-label="E-posta thread">
-      {items.map((email, idx) => {
-        const isLast = idx === items.length - 1;
-        return (
-          <li key={email.id} ref={isLast ? lastItemRef : undefined}>
-            <MailMessageCard
-              email={email}
-              caseId={caseId}
-              onReply={onReply}
-              // M6.3a — son inbound mail varsayılan açık (n4b yaklaşık);
-              // diğerleri katlı. Composer açıkken zaten parent kullanıcı
-              // odaklanıyor; default expand çok agresif olmasın.
-              defaultExpanded={isLast && email.direction === 'inbound'}
-            />
-          </li>
-        );
-      })}
-    </ol>
+    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-ndark-border">
+      <table className="w-full text-left text-xs">
+        <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-ndark-card dark:text-ndark-muted">
+          <tr>
+            <th className="w-8 px-2 py-2 text-center">Yön</th>
+            <th className="px-2 py-2">Kimden</th>
+            <th className="px-2 py-2">Kime</th>
+            <th className="px-2 py-2">Cc</th>
+            <th className="px-2 py-2">Bcc</th>
+            <th className="px-2 py-2">Tarih</th>
+            <th className="px-2 py-2">Konu / Ek</th>
+            <th className="w-24 px-2 py-2 text-right">İşlemler</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white dark:bg-ndark-card">
+          {items.map((email, idx) => {
+            const isLast = idx === items.length - 1;
+            // Last row için ref vermek: MailMessageCard kendisi tr render
+            // ediyor. Scroll-into-view için DOM hedef olarak biz dış div
+            // kullanmıyoruz; sentinel <tr> ekleyebiliriz. Basit: items
+            // listesi değiştiğinde scrollToLast pendingRef ile çalıştığı
+            // için aşağıdaki sentinel TR ile son maile referans veririz.
+            // Bunun yerine doğrudan MailMessageCard'a key + index versek
+            // de DOM ref alamayız; sentinel daha temiz.
+            void isLast;
+            return (
+              <MailMessageCard
+                key={email.id}
+                email={email}
+                caseId={caseId}
+                onReply={onReply}
+                onForward={onForward}
+                expandColSpan={8}
+                // Son inbound mail varsayılan açık (M6.3a paritesi)
+                defaultExpanded={isLast && email.direction === 'inbound'}
+              />
+            );
+          })}
+          {/* Sentinel — scroll hedefi */}
+          <tr ref={lastRowRef} aria-hidden="true">
+            <td colSpan={8} />
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 });
