@@ -13,7 +13,7 @@
 
 **next4biz (n4b) PARİTESİ** — n4b'de ne varsa AYNEN; sadeleştirme/ekleme/çıkarma yapma. Belirsiz davranış n4b'den teyit edilir (kullanıcı n4b doğruluk kaynağı). Destek ekibinin alışkanlığı bozulmaz.
 
-Aşağıdaki **Kararlar (final)** bölümü 7 kararın **kilitlenmiş hâlidir**. K3 altında tek açık alt-soru (`K3-link`) var; implementation öncesi kullanıcı n4b davranışını teyit edecek.
+Aşağıdaki **Kararlar (final)** bölümü 7 kararın **kilitlenmiş hâlidir** — açık alt-soru kalmadı.
 
 ---
 
@@ -23,25 +23,17 @@ Aşağıdaki **Kararlar (final)** bölümü 7 kararın **kilitlenmiş hâlidir**
 |---|-------|-------|
 | **K1** | **From** | **ÇOKLU adres (dropdown)**. M5'i `ExternalMailSetting.fromAddress` (tek) → **çoklu mailbox/alias'a genişlet**. Dropdown bunu besler. |
 | **K2** | **İç/dış toggle** | **YOK**. Composer SADECE müşteriye gönderim (visibility='Customer' sabit). İç yorum/iletişim **Notlar sekmesinde** kalır (mevcut NotesTab Internal/Customer paterni dokunulmaz). |
-| **K3** | **Kapalı vakaya müşteri yanıtı** | **YENİ TICKET** (mevcuda iliştirme YAPMA). Mevcut M2.1 davranışı OVERRIDE edilir. Yeni kural: inbound thread-match → vaka **Açık/İncelemede/3rdParty/Eskalasyon/YenidenAcildi** ise iliştir; **Çözüldü/İptal Edildi** (terminal) ise **YENİ vaka aç**. |
-| **K3-link** | **Yeni ticket eski ticket'a link'lensin mi?** | **ÖNERİ: EVET** (önceki-ticket referansı). **AÇIK** — n4b'den teyit edilecek; cevap geldikten sonra `Case.parentCaseId` (veya benzer FK) konur. |
+| **K3** | **Kapalı vakaya müşteri yanıtı** | Kapalı/terminal vakaya müşteri yanıtı → **YENİ vaka**; **otomatik link YOK**; ilişkilendirme **mevcut Bağlantılar (Vaka Bağla) ile MANUEL** (reuse, yeni kod yok). Mevcut M2.1 davranışı OVERRIDE edilir. Inbound thread-match → vaka **Açık/İncelemede/3rdParty/Eskalasyon/YenidenAcildi** ise iliştir; **Çözüldü/İptal Edildi** (terminal) ise **YENİ vaka aç** (parent referansı YOK). |
 | **K4** | **İletişim takip alanları** | **EKLE (M6.1 migration)**: `Case.lastEmailInboundAt` + `Case.lastEmailOutboundAt` + `Case.pendingCustomerReply Boolean @default(false)`. Müşteri yanıt bekliyor = en son inbound var VE sonrasında outbound yok. |
 | **K5** | **Tab adı / kapsam** | Tab key `'communication'`, görünen ad **"İletişim"**. **ÇOK-KANAL iskelet**: alt-bölümler Web · E-Posta · SMS · Gelen Aramalar. Şimdilik E-Posta dolu, diğerleri **placeholder** (boş state, "yakında" rozeti). |
 | **K6** | **Yanıtla** | **REPLY-ALL**. To = (orijinal inbound'un From) + (önceki To); Cc = (önceki Cc). Bizim agent adresimiz To/Cc'den filtrelenir (dup engelleme). |
 | **K7** | **Editor** | **TipTap** (kilit). MIT, ~50-80KB gz, React-native, mention extension olgun. Toolbar yetenekleri (bold/italic/underline/list/link/quote/image-url) + **sanitize-html** korunur (in/out iki yön). |
 
-### K3 — açık alt-soru: `K3-link`
+### K3 — ilişkilendirme (kapandı)
 
-Mevcut kapalı vakaya `[VK-]` tokenlı müşteri yanıtı gelirse → **yeni vaka açılır** (kilitli). Yeni vakanın eskisine **referansı/link'i** olmalı mı?
+Yeni vakanın eskisine bağlantısı **mevcut Vaka Bağlantıları (Vaka Bağla) özelliğiyle manuel** kurulur. Agent gerek gördükçe `Bağlantılar` sekmesinden eski VK numarasını bağlar. **M6 kapsamında yeni link mantığı YAZILMAZ** — `Case.parentCaseId` veya benzeri yeni FK eklenmez.
 
-- **Önerimiz**: EVET (`Case.parentCaseId String?` + UI'da "Önceki vaka: VK-XXX" rozeti)
-- **n4b'den teyit edilecek**:
-  - n4b'de kapalı vakaya yanıt sonrası açılan yeni ticket eskisine link'li mi?
-  - Link iki yönlü mü, tek yönlü mü (child→parent)?
-  - "Önceki ticket" görsel olarak nerede?
-  - Eskisinin durumu (Çözüldü/İptal) yeniden tetiklenir mi? (önerimiz: hayır)
-
-> **Implementation öncesi M6.1 PR'ı bu cevabı bekler**. M6.1 model'de FK alanı opsiyonel olarak EKLEYECEĞİZ (geri-dönüşsüz refactor yapmayalım); UI/auto-link davranışı n4b cevabına göre sonradan açılır.
+> Reuse: mevcut `LinksTab` + `case_links` veri katmanı + Vaka Bağla picker.
 
 ---
 
@@ -80,7 +72,7 @@ Case Detail
         │   └── Gelen Arama  ← placeholder (CallLogs tab'ı zaten var; bu link/önizleme olur)
         └── E-Posta panel
             ├── (üst) MailThread
-            │   ├── ThreadHeader (Konu, katılımcılar, son aktivite, "Önceki vaka: VK-XXX" — K3-link onaylanırsa)
+            │   ├── ThreadHeader (Konu, katılımcılar, son aktivite)
             │   ├── MailMessageCard × N (yön ikonu + from/to/cc/bcc + body + ekler + zaman + source rozeti)
             │   └── EmptyState
             └── (alt, sticky) MailComposer
@@ -99,7 +91,7 @@ Case Detail
    - `[VK-xxx]` token / In-Reply-To match → vaka bulunur
    - **Vaka durumu kontrol** (K3 yeni davranış):
      - **Açık/İncelemede/3rdParty/Eskalasyon/YenidenAcildi** → mevcut vakaya `CaseEmail.appendInbound` (eski davranış sürer; eski-adı "addNote" akışı kaldırıldı)
-     - **Çözüldü/İptal Edildi** (terminal) → **YENİ vaka aç** (`caseRepository.create`) + ilk inbound CaseEmail satırı + (K3-link onaylanırsa) `parentCaseId = eski.id`
+     - **Çözüldü/İptal Edildi** (terminal) → **YENİ vaka aç** (`caseRepository.create`) + ilk inbound CaseEmail satırı. **Otomatik link YOK** — eski vakayla ilişkilendirme `LinksTab`'tan agent manuel kurar.
 2. Agent vaka içinden composer'da Yanıt → `caseEmailService.send` → backend `caseEmailSender.prepareOutgoing(draft)`:
    - K6 reply-all prefill — composer açılışında
    - K1 seçilen From alias
@@ -216,7 +208,7 @@ model CaseEmailAttachment {
 }
 ```
 
-### 4.3. `Case` model'e K4 + K3-link alanları (migration 16)
+### 4.3. `Case` model'e K4 alanları (migration 16)
 
 ```prisma
 model Case {
@@ -232,16 +224,11 @@ model Case {
   /// caseRepository.transitionStatus terminal'e geçince false yapılır.
   pendingCustomerReply Boolean @default(false)
 
-  /// K3-link (önerilen, AÇIK) — yeni ticket eskisini referans alır.
-  /// Implementation öncesi n4b teyit; field hazır, UI ON/OFF n4b'ye göre.
-  parentCaseId String? @db.NVarChar(450)
-  parentCase   Case?   @relation("CaseParent", fields: [parentCaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  childCases   Case[]  @relation("CaseParent")
-
   @@index([pendingCustomerReply])
-  @@index([parentCaseId])
 }
 ```
+
+> **K3 kapalı → yeni vaka** akışında parent/child link **YAZILMAZ**. Eski vakayla ilişkilendirme `LinksTab` (Vaka Bağla) ile MANUEL.
 
 ### 4.4. M5 genişlemesi (K1) — `ExternalMailSettingFromAlias`
 
@@ -275,7 +262,7 @@ model ExternalMailSettingFromAlias {
 
 | # | Migration | İçerik |
 |---|-----------|--------|
-| **16** | `_case_email` (M6.1) | CaseEmail + CaseEmailAttachment + Case'e K4 + K3-link alanları + index'ler |
+| **16** | `_case_email` (M6.1) | CaseEmail + CaseEmailAttachment + Case'e K4 alanları + index'ler |
 | **17** | `_external_mail_from_alias` (M5-extension; M6.2 öncesi) | ExternalMailSettingFromAlias tablosu + backfill (mevcut `fromAddress` → default alias) |
 
 Hepsi additive, breaking change yok.
@@ -291,7 +278,7 @@ Hepsi additive, breaking change yok.
 **M6.1 yeni akış**:
 1. `[VK-]` token / In-Reply-To → vaka bul
 2. **Token bulundu** AND **vaka.status terminal değil** (`Çözüldü`, `İptalEdildi` HARİÇ) → `caseEmailRepository.appendInbound(caseId, ...)`
-3. **Token bulundu** AND **vaka.status terminal** → **YENİ vaka aç** (`caseRepository.create`) + `parentCaseId = bulunan.id` (K3-link onaylanırsa) + ilk `caseEmailRepository.appendInbound(yeniCaseId, ...)`
+3. **Token bulundu** AND **vaka.status terminal** → **YENİ vaka aç** (`caseRepository.create`) + ilk `caseEmailRepository.appendInbound(yeniCaseId, ...)`. **Otomatik link YOK** — eski vakayla ilişkilendirme gerekiyorsa agent `LinksTab`'ten manuel bağlar.
 4. **Token yok** → mevcut "yeni vaka" akışı (intake'in M2.3 learned sender + auto-link kısımları aynen)
 
 **K4 yan-etkileri**:
@@ -304,9 +291,9 @@ Hepsi additive, breaking change yok.
 
 **Smoke** (M6.1):
 - (a) Açık vakaya `[VK-]` yanıt → CaseEmail append
-- (b) Çözüldü vakaya `[VK-]` yanıt → YENİ vaka açıldı + parentCaseId set
-- (c) İptal vakaya `[VK-]` yanıt → YENİ vaka açıldı
-- (d) Token yok + bilinmeyen gönderen → mevcut M2 davranışı (yeni vaka, parentCaseId YOK)
+- (b) Çözüldü vakaya `[VK-]` yanıt → YENİ vaka açıldı (parent link YOK)
+- (c) İptal vakaya `[VK-]` yanıt → YENİ vaka açıldı (parent link YOK)
+- (d) Token yok + bilinmeyen gönderen → mevcut M2 davranışı (yeni vaka)
 - (e) M2.3 learned sender 25/25 yeşil kalır
 
 ---
@@ -397,6 +384,7 @@ const SAFE_SCHEMES = ['http','https','mailto','cid'];
 | `assertCaseInScope` | tüm CaseEmail route'larında |
 | AccountContact.email + Account.email | ContactPicker veri kaynağı (K6 expand sonrası) |
 | `Case.customerContactEmail` + `AccountCompany.responseEmail` | yeni vaka açılırsa (K3) müşteri-adres prefill zinciri |
+| `LinksTab` + mevcut Vaka Bağla picker / case_links veri katmanı | K3 sonrası agent eski vakayı manuel ilişkilendirir (yeni link kodu YOK) |
 
 ---
 
@@ -425,7 +413,6 @@ const SAFE_SCHEMES = ['http','https','mailto','cid'];
 | `src/features/cases/components/MailComposer.tsx` | K1 From dropdown + K6 reply-all + RichTextEditor + AttachmentUploader |
 | `src/features/cases/components/ContactPicker.tsx` | To/Cc/Bcc combobox |
 | `src/features/cases/components/RichTextEditor.tsx` | TipTap wrapper |
-| `src/features/cases/components/ParentCaseBadge.tsx` | K3-link onaylanırsa "Önceki vaka: VK-XXX" rozeti |
 | `src/services/caseEmailService.ts` | apiFetch wrapper'lar |
 | `src/services/externalMailAliasService.ts` | From dropdown veri |
 
@@ -438,14 +425,13 @@ const SAFE_SCHEMES = ['http','https','mailto','cid'];
 **Çıktı**: CaseEmail model + migration; intake K3 override; "İletişim" sekmesi (e-posta panel read-only); takip alanları (K4)
 
 **Kapsam**:
-- Prisma model: `CaseEmail` + `CaseEmailAttachment` + `Case.lastEmailInboundAt/lastEmailOutboundAt/pendingCustomerReply/parentCaseId` + migration `00000000000016_case_email`
+- Prisma model: `CaseEmail` + `CaseEmailAttachment` + `Case.lastEmailInboundAt/lastEmailOutboundAt/pendingCustomerReply` + migration `00000000000016_case_email`
 - `caseEmailRepository.append*` + K4 türetimi
-- `inboundMailIntake.js` taşıması + **K3 override** (terminal→yeni vaka, parentCaseId set)
+- `inboundMailIntake.js` taşıması + **K3 override** (terminal→yeni vaka; parent link YOK, ilişkilendirme manuel)
 - `notificationRepository.executeOutboundEmailDispatch` sonrası paralel CaseEmail
 - `caseRepository.transitionStatus` terminal geçişinde `pendingCustomerReply=false`
 - Backend route: `GET /api/cases/:id/emails` + raw attachment
 - Frontend: TabKey'e `'communication'`, `<CommunicationTab>` + `<ChannelTabs>` (K5 iskelet — sadece E-Posta dolu), `<MailThread>` + `<MailMessageCard>` (sanitize-html ile read-only render)
-- (K3-link onaylanırsa) `<ParentCaseBadge>` render
 
 **Bağımlılık**: yok
 
@@ -548,8 +534,8 @@ const SAFE_SCHEMES = ['http','https','mailto','cid'];
 
 | # | Risk | Mitigasyon |
 |---|------|------------|
-| R1 | **K3 prod inbound davranış değişikliği** — kapalı vakaya yanıtın yeni ticket açması destek ekibinde kafa karışıklığı yaratabilir | M6.1 deploy öncesi destek ekibine duyuru + (K3-link onaylanırsa) UI rozeti net. Roll-back: env flag `M6_K3_NEW_TICKET_ON_TERMINAL=false` → eski davranışa dön |
-| R2 | **Thread bütünlüğü** — yeni ticket eskisine bağlıysa kullanıcı "neresi devam ediyor?" karışabilir | parentCaseId iki yönlü UI: eskisinde "Devam vaka: VK-Y", yenisinde "Önceki vaka: VK-X" |
+| R1 | **K3 prod inbound davranış değişikliği** — kapalı vakaya yanıtın yeni ticket açması destek ekibinde kafa karışıklığı yaratabilir | M6.1 deploy öncesi destek ekibine duyuru + ilişkilendirme yönergesi (LinksTab'tan manuel). Roll-back: env flag `M6_K3_NEW_TICKET_ON_TERMINAL=false` → eski davranışa dön |
+| R2 | **Thread bütünlüğü** — yeni ticket eskisinden bağımsız açılınca destek ekibi "bu daha önce nereye bağlandı?" karışabilir | İlişkilendirme **manuel** (mevcut `LinksTab` / Vaka Bağla); destek ekibi gerek gördükçe bağlar. Otomatik link YOK. |
 | R3 | M2.3 learned sender + K3 etkileşimi | Yeni vakaya M2.3 auto-link uygulanır (engine durumdan bağımsız); smoke'la doğrula |
 | R4 | Eski "not olarak mail" geçmişi thread'de yok | Cut-over kabul; "Vaka geçmişi (eski not)" toggle ile notlar görünür |
 | R5 | XSS — sanitize edilmemiş HTML | sanitize-html zorunlu; sanitize smoke |
@@ -594,22 +580,21 @@ const SAFE_SCHEMES = ['http','https','mailto','cid'];
 | Bölüm | Değişiklik |
 |-------|-----------|
 | **0** | Yeni "Temel İlke — n4b Paritesi" bölümü |
-| **1** | Eski "Açık Kararlar" → **"Kararlar (final)"** tablosu (K1-K7 kilit + K3-link açık alt-soru) |
+| **1** | Eski "Açık Kararlar" → **"Kararlar (final)"** tablosu (K1-K7 kilit, açık alt-soru yok) |
 | **3 Mimari** | K5 çok-kanal iskelet (Web/E-Posta/SMS/Gelen Arama); E-Posta dolu, diğerleri placeholder. Composer'dan iç/dış toggle kaldırıldı (K2) |
-| **4 Veri modeli** | Case'e K4 alanları (`lastEmailInboundAt/lastEmailOutboundAt/pendingCustomerReply`) + K3-link `parentCaseId` (FK) + yeni `ExternalMailSettingFromAlias` (K1 multi-from) |
-| **5 Inbound akış** | K3 OVERRIDE detayı: terminal → yeni vaka + parentCaseId; K4 yan-etkileri |
+| **4 Veri modeli** | Case'e K4 alanları (`lastEmailInboundAt/lastEmailOutboundAt/pendingCustomerReply`) + yeni `ExternalMailSettingFromAlias` (K1 multi-from). **`parentCaseId` YOK** — K3 sonrası ilişkilendirme `LinksTab` ile manuel. |
+| **5 Inbound akış** | K3 OVERRIDE detayı: terminal → yeni vaka (otomatik link YOK, ilişkilendirme manuel); K4 yan-etkileri |
 | **6 Composer** | K1 From dropdown + K6 reply-all prefill (agent adres filtresi); subject token korunumu |
 | **7 Editor** | K7 TipTap kesinleşti; sanitize-html iki yönlü |
 | **10 Faz planı** | **3 faz + 1 ara PR**: M6.1 → **M5-extension (FromAlias)** → M6.2 → M6.3 |
 | **12 Riskler** | R1 (K3 davranış değişikliği) + R2 (thread bütünlüğü) + R9 (backfill) + R10 (reply-all yanlış kişi) + R12 (K4 senkronizasyon) eklendi |
-| **K3-link** | TEK AÇIK ALT-SORU — n4b'den teyit edilecek; field hazır, UI/auto-link n4b cevabına göre |
+| **K3 ilişkilendirme** | KAPANDI: yeni vaka eskisine **manuel** bağlanır (`LinksTab` reuse, yeni kod yok); plan'dan `parentCaseId` ve "K3-link" alt-sorusu kaldırıldı |
 
 ---
 
 ## Sıradaki
 
-1. **K3-link** sorusu kullanıcıdan teyit (n4b davranışı)
-2. **M6.1 prompt'una** geç: CaseEmail model + K3 intake değişikliği + K4 alanları + İletişim sekmesi (read-only) — tek PR
-3. M6.1 merged → **M5-extension PR** (FromAlias backfill)
-4. M5-extension merged → **M6.2 prompt** (composer + send + reply-all + rich-text + sanitize + imza)
-5. M6.2 merged → M6.3 yönetim katmanı
+1. **M6.1 prompt'una** geç: CaseEmail model + K3 intake değişikliği + K4 alanları + İletişim sekmesi (read-only) — tek PR
+2. M6.1 merged → **M5-extension PR** (FromAlias backfill)
+3. M5-extension merged → **M6.2 prompt** (composer + send + reply-all + rich-text + sanitize + imza)
+4. M6.2 merged → M6.3 yönetim katmanı
