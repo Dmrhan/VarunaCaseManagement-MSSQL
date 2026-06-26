@@ -531,6 +531,7 @@ router.get(
       'accountName', 'assignment', 'priority', 'status', 'caseType'];
     const sortBy  = VALID_SORT_KEYS.includes(f.sortBy)  ? f.sortBy  : 'updatedAt';
     const sortDir = f.sortDir === 'asc' ? 'asc' : 'desc';
+    const securityWhere = await buildCaseListSecurityWhere(req);
 
     const { items, total } = await caseRepository.list({
       filters,
