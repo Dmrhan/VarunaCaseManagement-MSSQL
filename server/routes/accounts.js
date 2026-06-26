@@ -5,6 +5,14 @@ import {
   AccountAccessError,
   AccountValidationError,
 } from '../db/accountRepository.js';
+import {
+  AuthorizationRuntimeError,
+} from '../lib/authorizationRuntime.js';
+import {
+  assertAccountResourcePolicy,
+  assertCompanyResourcePolicy,
+  filterAllowedCompanyIdsByResourcePolicy,
+} from '../lib/authorizationRouteGuards.js';
 
 /**
  * /api/accounts route.
@@ -42,6 +50,11 @@ function asyncRoute(handler) {
           .status(err.status ?? 400)
           .json({ error: err.code ?? 'validation_error', message: err.message });
       }
+      if (err instanceof AuthorizationRuntimeError) {
+        return res
+          .status(err.status ?? 403)
+          .json({ error: err.code ?? 'authorization_forbidden', message: err.message });
+      }
       // VKN gibi hassas alanları log'a almamak için sadece message + code basıyoruz.
       console.error('[accounts]', err?.code ?? err?.name ?? 'error', err?.message);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
@@ -64,6 +77,12 @@ router.get(
   requireRole(...LIST_ROLES),
   asyncRoute(async (req, res) => {
     const { search, companyId, status, page, limit } = req.query;
+    if (typeof companyId === 'string' && companyId) {
+      await assertCompanyResourcePolicy(req, { companyId, resourceKey: 'account', action: 'read' });
+    }
+    const scopedAllowedCompanyIds = typeof companyId === 'string' && companyId
+      ? req.user.allowedCompanyIds
+      : await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'account', action: 'read' });
     // C2 recents revalidation: ?ids=a,b,c — explicit id filter combined with
     // tenant scope. The repo drops out-of-scope ids via buildScopeWhere so a
     // stale localStorage cache cannot surface forbidden accounts.
@@ -79,7 +98,7 @@ router.get(
       ids: rawIds ? parsedIds : undefined,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
-      allowedCompanyIds: req.user.allowedCompanyIds,
+      allowedCompanyIds: scopedAllowedCompanyIds,
     });
     res.json(result);
   }),
@@ -94,6 +113,7 @@ router.get(
   '/:id',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
     const account = await accountRepository.getAccount(req.params.id, {
       allowedCompanyIds: req.user.allowedCompanyIds,
     });
@@ -109,6 +129,12 @@ router.post(
   '/',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    const companies = Array.isArray(req.body?.companies) ? req.body.companies : [];
+    for (const c of companies) {
+      if (typeof c?.companyId === 'string' && c.companyId) {
+        await assertCompanyResourcePolicy(req, { companyId: c.companyId, resourceKey: 'account', action: 'create' });
+      }
+    }
     const created = await accountRepository.createAccount({ data: req.body, user: req.user });
     res.status(201).json(created);
   }),
@@ -119,6 +145,7 @@ router.patch(
   '/:id',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.updateAccount({
       accountId: req.params.id,
       data: req.body,
@@ -138,6 +165,7 @@ router.post(
   '/:id/companies',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.addCompanyRelation({
       accountId: req.params.id,
       data: req.body,
@@ -155,6 +183,7 @@ router.patch(
   '/:id/companies/:accountCompanyId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.updateCompanyRelation({
       accountId: req.params.id,
       accountCompanyId: req.params.accountCompanyId,
@@ -173,6 +202,7 @@ router.delete(
   '/:id/companies/:accountCompanyId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.removeCompanyRelation({
       accountId: req.params.id,
       accountCompanyId: req.params.accountCompanyId,
@@ -192,6 +222,7 @@ router.post(
   '/:id/contacts',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.contact', action: 'create' });
     const updated = await accountRepository.addContact({
       accountId: req.params.id,
       data: req.body,
@@ -209,6 +240,7 @@ router.patch(
   '/:id/contacts/:contactId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.contact', action: 'update' });
     const updated = await accountRepository.updateContact({
       accountId: req.params.id,
       contactId: req.params.contactId,
@@ -227,6 +259,7 @@ router.delete(
   '/:id/contacts/:contactId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.contact', action: 'delete' });
     const updated = await accountRepository.removeContact({
       accountId: req.params.id,
       contactId: req.params.contactId,
@@ -246,6 +279,7 @@ router.get(
   '/:id/products',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
     const out = await accountRepository.listProducts({
       accountId: req.params.id,
       companyId: typeof req.query.companyId === 'string' ? req.query.companyId : undefined,
@@ -260,6 +294,7 @@ router.post(
   '/:id/products',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const created = await accountRepository.addProduct({
       accountId: req.params.id,
       data: req.body,
@@ -278,6 +313,7 @@ router.patch(
   '/:id/products/:productId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.updateProduct({
       accountId: req.params.id,
       productId: req.params.productId,
@@ -299,6 +335,7 @@ router.delete(
   '/:id/products/:productId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const result = await accountRepository.removeProduct({
       accountId: req.params.id,
       productId: req.params.productId,
@@ -324,6 +361,7 @@ router.post(
   '/:id/companies/:accountCompanyId/projects',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.project', action: 'create' });
     const created = await accountRepository.addProject({
       accountId: req.params.id,
       accountCompanyId: req.params.accountCompanyId,
@@ -342,6 +380,7 @@ router.patch(
   '/:id/projects/:projectId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.project', action: 'update' });
     const updated = await accountRepository.updateProject({
       accountId: req.params.id,
       projectId: req.params.projectId,
@@ -361,6 +400,7 @@ router.delete(
   '/:id/projects/:projectId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, resourceKey: 'account.project', action: 'delete' });
     const result = await accountRepository.removeProject({
       accountId: req.params.id,
       projectId: req.params.projectId,
@@ -385,6 +425,7 @@ router.get(
   '/:id/addresses',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
     const detail = await accountRepository.getAccount(req.params.id, {
       allowedCompanyIds: req.user.allowedCompanyIds,
     });
@@ -401,6 +442,7 @@ router.post(
   '/:id/addresses',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const created = await accountRepository.addAddress({
       accountId: req.params.id,
       data: req.body,
@@ -415,6 +457,7 @@ router.patch(
   '/:id/addresses/:addressId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const updated = await accountRepository.updateAddress({
       accountId: req.params.id,
       addressId: req.params.addressId,
@@ -431,6 +474,7 @@ router.delete(
   '/:id/addresses/:addressId',
   requireRole(...WRITE_ROLES),
   asyncRoute(async (req, res) => {
+    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'update' });
     const result = await accountRepository.removeAddress({
       accountId: req.params.id,
       addressId: req.params.addressId,

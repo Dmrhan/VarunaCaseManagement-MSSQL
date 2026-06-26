@@ -21,6 +21,11 @@
 import { Router } from 'express';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { prisma } from '../db/client.js';
+import { AuthorizationRuntimeError } from '../lib/authorizationRuntime.js';
+import {
+  assertCompanyResourcePolicy,
+  filterAllowedCompanyIdsByResourcePolicy,
+} from '../lib/authorizationRouteGuards.js';
 import {
   validateReportViewPayload,
   serializeForDb,
@@ -45,6 +50,17 @@ function badRequest(res, message, extra) {
   return res.status(400).json({ error: 'bad_request', message, ...(extra || {}) });
 }
 
+function handleAuthorizationRuntimeError(res, err) {
+  if (err instanceof AuthorizationRuntimeError) {
+    res.status(err.status ?? 403).json({
+      error: err.code ?? 'authorization_forbidden',
+      message: err.message,
+    });
+    return true;
+  }
+  return false;
+}
+
 /**
  * GET /api/reports/views
  *
@@ -62,9 +78,11 @@ router.get('/', async (req, res) => {
   if (allowedCompanyIds.length === 0) return res.json({ views: [] });
 
   try {
+    const visibleCompanyIds = await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'report.view', action: 'read' });
+    if (visibleCompanyIds.length === 0) return res.json({ views: [] });
     const rows = await prisma.reportView.findMany({
       where: {
-        companyId: { in: allowedCompanyIds },
+        companyId: { in: visibleCompanyIds },
         OR: [
           { ownerId: userId },
           { isShared: true },
@@ -81,6 +99,7 @@ router.get('/', async (req, res) => {
       .map((v) => filterViewForRole(v, role, userId));
     return res.json({ views });
   } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reportViews][list]', err);
     return res.status(500).json({ error: 'list_failed' });
   }
@@ -109,6 +128,7 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    await assertCompanyResourcePolicy(req, { companyId: v.view.companyId, resourceKey: 'report.view', action: 'create' });
     const created = await prisma.reportView.create({
       data: {
         ...serializeForDb(v.view),
@@ -117,6 +137,7 @@ router.post('/', async (req, res) => {
     });
     return res.status(201).json({ view: parseFromDb(created) });
   } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
     // Prisma unique constraint violation (P2002)
     if (err && err.code === 'P2002') {
       return res.status(409).json({
@@ -148,10 +169,12 @@ router.get('/:id', async (req, res) => {
       },
     });
     if (!row) return res.status(404).json({ error: 'not_found' });
+    await assertCompanyResourcePolicy(req, { companyId: row.companyId, resourceKey: 'report.view', action: 'read' });
     // Codex P2 — Role gate bypass fix (list endpoint ile aynı semantik).
     const view = filterViewForRole(parseFromDb(row), role, userId);
     return res.json({ view });
   } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reportViews][get]', err);
     return res.status(500).json({ error: 'get_failed' });
   }
@@ -178,6 +201,7 @@ router.patch('/:id', async (req, res) => {
       where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
+    await assertCompanyResourcePolicy(req, { companyId: existing.companyId, resourceKey: 'report.view', action: 'update' });
 
     // Payload merge: gönderilen alanlar override, gönderilmeyenler korunur.
     // Validation için MERGE edilmiş payload'ı oluştur (full validation).
@@ -202,6 +226,7 @@ router.patch('/:id', async (req, res) => {
     });
     return res.json({ view: parseFromDb(updated) });
   } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
     if (err && err.code === 'P2002') {
       return res.status(409).json({
         error: 'duplicate_name',
@@ -228,10 +253,12 @@ router.delete('/:id', async (req, res) => {
       where: { id: req.params.id, ownerId: userId, companyId: { in: allowedCompanyIds } },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
+    await assertCompanyResourcePolicy(req, { companyId: existing.companyId, resourceKey: 'report.view', action: 'delete' });
 
     await prisma.reportView.delete({ where: { id: req.params.id } });
     return res.json({ ok: true });
   } catch (err) {
+    if (handleAuthorizationRuntimeError(res, err)) return;
     console.error('[reportViews][delete]', err);
     return res.status(500).json({ error: 'delete_failed' });
   }

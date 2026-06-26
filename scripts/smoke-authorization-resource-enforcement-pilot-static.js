@@ -30,8 +30,15 @@ function countNeedle(content, needle) {
 }
 
 const casesRoute = read('server/routes/cases.js');
+const accountsRoute = read('server/routes/accounts.js');
+const reportsRoute = read('server/routes/reports.js');
+const reportViewsRoute = read('server/routes/reportViews.js');
+const routeGuards = read('server/lib/authorizationRouteGuards.js');
+const authzRepo = read('server/db/authorizationPolicyRepository.js');
 const adminPage = read('src/features/admin/AdminAuthorizationPoliciesPage.tsx');
+const adminService = read('src/services/adminService.ts');
 const envExample = read('.env.example');
+const helpContents = read('src/features/admin/helpContents.ts');
 const pkg = JSON.parse(read('package.json'));
 
 expect('1.1 cases route imports authorization repository', /authorizationPolicyRepository/.test(casesRoute), true);
@@ -121,6 +128,44 @@ expect('5.2 admin page documents expanded case operation pilot endpoints', /vaka
 expect('5.3 resource enforcement env documented', /AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('5.4 env docs state allow cannot widen', /Policy allow mevcut role\/backend guard'larını GENİŞLETMEZ/.test(envExample), true);
 expect('5.5 smoke script registered', pkg.scripts['smoke:authorization-resource-enforcement'], 'node scripts/smoke-authorization-resource-enforcement-pilot-static.js');
+
+expect('6.1 shared route guard exports resource feature flag', /export function isAuthorizationResourceEnforcementEnabled/.test(routeGuards), true);
+expect('6.2 shared route guard enforces company resource policy', /export async function assertCompanyResourcePolicy/.test(routeGuards), true);
+expect('6.3 shared route guard supports company subset filtering', /export async function filterAllowedCompanyIdsByResourcePolicy/.test(routeGuards), true);
+expect('6.4 shared route guard supports account-scoped policy checks', /export async function assertAccountResourcePolicy/.test(routeGuards), true);
+expect('6.5 account helper treats shared account defensively', /Legacy shared account[\s\S]*for \(const companyId of allowedCompanyIds\)/.test(routeGuards), true);
+
+expect('7.1 accounts route imports authz route guards', /authorizationRouteGuards/.test(accountsRoute), true);
+expect('7.2 account list checks company-scoped read or filtered company subset', /assertCompanyResourcePolicy\(req, \{ companyId, resourceKey: 'account', action: 'read' \}\)[\s\S]*filterAllowedCompanyIdsByResourcePolicy\(req, \{ resourceKey: 'account', action: 'read' \}\)/.test(accountsRoute), true);
+expect('7.3 account detail guarded by account read', /assertAccountResourcePolicy\(req, \{ accountId: req\.params\.id, action: 'read' \}\)[\s\S]*accountRepository\.getAccount/.test(accountsRoute), true);
+expect('7.4 account create checks each target company', /req\.body\?\.companies[\s\S]*resourceKey: 'account', action: 'create'/.test(accountsRoute), true);
+expect('7.5 account update guarded', /assertAccountResourcePolicy\(req, \{ accountId: req\.params\.id, action: 'update' \}\)[\s\S]*accountRepository\.updateAccount/.test(accountsRoute), true);
+expect('7.6 contact create/update/delete guarded with account.contact', /resourceKey: 'account\.contact', action: 'create'[\s\S]*resourceKey: 'account\.contact', action: 'update'[\s\S]*resourceKey: 'account\.contact', action: 'delete'/.test(accountsRoute), true);
+expect('7.7 project create/update/delete guarded with account.project', /resourceKey: 'account\.project', action: 'create'[\s\S]*resourceKey: 'account\.project', action: 'update'[\s\S]*resourceKey: 'account\.project', action: 'delete'/.test(accountsRoute), true);
+expect('7.8 account route maps AuthorizationRuntimeError', /err instanceof AuthorizationRuntimeError/.test(accountsRoute), true);
+
+expect('8.1 reports route imports shared guard', /authorizationRouteGuards/.test(reportsRoute), true);
+expect('8.2 columns endpoint guarded as report read', /\/cases\/columns'[\s\S]*resourceKey: 'report\.caseStudio', action: 'read', throwIfEmpty: true/.test(reportsRoute), true);
+expect('8.3 preview endpoint guarded as report read with subset filter', /\/cases\/preview'[\s\S]*resourceKey: 'report\.caseStudio', action: 'read', throwIfEmpty: true[\s\S]*filterAllowedCompanyIdsByResourcePolicy\(req, \{ resourceKey: 'report\.caseStudio', action: 'read' \}\)/.test(reportsRoute), true);
+expect('8.4 export endpoint guarded as report export with subset filter', /\/cases\/export'[\s\S]*resourceKey: 'report\.caseStudio', action: 'export', throwIfEmpty: true[\s\S]*filterAllowedCompanyIdsByResourcePolicy\(req, \{ resourceKey: 'report\.caseStudio', action: 'export' \}\)/.test(reportsRoute), true);
+expect('8.5 pivot read endpoints guarded', /\/cases\/pivot'[\s\S]*resourceKey: 'report\.caseStudio', action: 'read'[\s\S]*\/cases\/pivot\/drill'[\s\S]*resourceKey: 'report\.caseStudio', action: 'read'/.test(reportsRoute), true);
+expect('8.6 pivot export guarded as report export', /\/cases\/pivot\/export'[\s\S]*resourceKey: 'report\.caseStudio', action: 'export'/.test(reportsRoute), true);
+expect('8.7 reports route maps AuthorizationRuntimeError', /function handleAuthorizationRuntimeError/.test(reportsRoute), true);
+
+expect('9.1 report views route imports shared guard', /authorizationRouteGuards/.test(reportViewsRoute), true);
+expect('9.2 report view list filters visible companies by read policy', /router\.get\('\/'[\s\S]*filterAllowedCompanyIdsByResourcePolicy\(req, \{ resourceKey: 'report\.view', action: 'read' \}\)[\s\S]*companyId: \{ in: visibleCompanyIds \}/.test(reportViewsRoute), true);
+expect('9.3 report view create guarded as create', /router\.post\('\/'[\s\S]*resourceKey: 'report\.view', action: 'create'/.test(reportViewsRoute), true);
+expect('9.4 report view get guarded as read after row lookup', /router\.get\('\/:id'[\s\S]*resourceKey: 'report\.view', action: 'read'/.test(reportViewsRoute), true);
+expect('9.5 report view update/delete guarded', /resourceKey: 'report\.view', action: 'update'[\s\S]*resourceKey: 'report\.view', action: 'delete'/.test(reportViewsRoute), true);
+expect('9.6 report views route maps AuthorizationRuntimeError', /handleAuthorizationRuntimeError\(res, err\)/.test(reportViewsRoute), true);
+
+expect('10.1 policy repository includes createdBy relation', /createdBy: \{ select: \{ id: true, fullName: true, email: true \} \}/.test(authzRepo), true);
+expect('10.2 policy repository includes updatedBy relation', /updatedBy: \{ select: \{ id: true, fullName: true, email: true \} \}/.test(authzRepo), true);
+expect('10.3 admin service exposes createdBy actor', /createdBy\?: \{ id: string; fullName\?: string \| null; email\?: string \| null \}/.test(adminService), true);
+expect('10.4 admin UI has Son Değişiklik column', /<Th>Son Değişiklik<\/Th>/.test(adminPage), true);
+expect('10.5 admin UI formats policy actor', /function formatPolicyActor/.test(adminPage), true);
+expect('10.6 help mentions account/report resource pilot', /müşteri kartı\/kontak\/proje ve rapor stüdyosu\/kayıtlı görünüm/.test(helpContents), true);
+expect('10.7 env docs mention account and report resources', /müşteri\/kontak\/proje ve rapor\/kayıtlı görünüm/.test(envExample), true);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);
