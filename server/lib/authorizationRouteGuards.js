@@ -68,12 +68,16 @@ export async function filterAllowedCompanyIdsByResourcePolicy(req, {
   action,
   baselineAllowed = true,
   throwIfEmpty = false,
+  companyIds,
 } = {}) {
   const allowedCompanyIds = allowedCompanyIdsFor(req);
-  if (!isAuthorizationResourceEnforcementEnabled()) return allowedCompanyIds;
+  const requestedCompanyIds = Array.isArray(companyIds)
+    ? companyIds.filter((id) => typeof id === 'string' && allowedCompanyIds.includes(id))
+    : allowedCompanyIds;
+  if (!isAuthorizationResourceEnforcementEnabled()) return requestedCompanyIds;
 
   const permitted = [];
-  for (const companyId of allowedCompanyIds) {
+  for (const companyId of requestedCompanyIds) {
     try {
       await assertCompanyResourcePolicy(req, {
         companyId,
@@ -87,7 +91,7 @@ export async function filterAllowedCompanyIdsByResourcePolicy(req, {
       // tenant narrows that tenant out instead of blocking unrelated tenants.
     }
   }
-  if (throwIfEmpty && permitted.length === 0 && allowedCompanyIds.length > 0) {
+  if (throwIfEmpty && permitted.length === 0 && requestedCompanyIds.length > 0) {
     throw new AuthorizationRuntimeError('Bu işlem için yetkin yok.', 403, 'baseline_denied');
   }
   return permitted;
@@ -135,6 +139,7 @@ export async function assertAccountResourcePolicy(req, {
   }
 
   let lastError = null;
+  let deniedCount = 0;
   for (const companyId of companyIds) {
     try {
       await assertCompanyResourcePolicy(req, {
@@ -143,10 +148,35 @@ export async function assertAccountResourcePolicy(req, {
         action,
         baselineAllowed,
       });
-      return null;
     } catch (err) {
+      deniedCount += 1;
       lastError = err;
     }
   }
-  throw lastError ?? new AuthorizationRuntimeError('Bu işlem için yetkin yok.');
+  if (deniedCount > 0) {
+    throw lastError ?? new AuthorizationRuntimeError('Bu işlem için yetkin yok.');
+  }
+  return null;
+}
+
+export async function filterAccountCompanyIdsByResourcePolicy(req, {
+  accountId,
+  resourceKey = 'account',
+  action,
+  baselineAllowed = true,
+  throwIfEmpty = true,
+}) {
+  const allowedCompanyIds = allowedCompanyIdsFor(req);
+  if (!isAuthorizationResourceEnforcementEnabled()) return allowedCompanyIds;
+  const companyIds = await accountPolicyCompanyIds(accountId, allowedCompanyIds);
+  if (companyIds.length === 0) {
+    throw new AuthorizationRuntimeError('Müşteri bulunamadı.', 404, 'account_not_found');
+  }
+  return filterAllowedCompanyIdsByResourcePolicy(req, {
+    resourceKey,
+    action,
+    baselineAllowed,
+    throwIfEmpty,
+    companyIds,
+  });
 }

@@ -134,15 +134,20 @@ expect('6.2 shared route guard enforces company resource policy', /export async 
 expect('6.3 shared route guard supports company subset filtering', /export async function filterAllowedCompanyIdsByResourcePolicy/.test(routeGuards), true);
 expect('6.4 shared route guard supports account-scoped policy checks', /export async function assertAccountResourcePolicy/.test(routeGuards), true);
 expect('6.5 account helper treats shared account defensively', /Legacy shared account[\s\S]*for \(const companyId of allowedCompanyIds\)/.test(routeGuards), true);
+expect('6.6 account helper does not return after first permitted tenant', /let deniedCount = 0[\s\S]*deniedCount \+= 1[\s\S]*if \(deniedCount > 0\)/.test(routeGuards), true);
+expect('6.7 account helper exposes policy-scoped account company ids', /export async function filterAccountCompanyIdsByResourcePolicy/.test(routeGuards), true);
+expect('6.8 account scoped helper no-ops before account lookup when flag disabled', /export async function filterAccountCompanyIdsByResourcePolicy[\s\S]*const allowedCompanyIds = allowedCompanyIdsFor\(req\);\s*if \(!isAuthorizationResourceEnforcementEnabled\(\)\) return allowedCompanyIds;\s*const companyIds = await accountPolicyCompanyIds/.test(routeGuards), true);
 
 expect('7.1 accounts route imports authz route guards', /authorizationRouteGuards/.test(accountsRoute), true);
-expect('7.2 account list checks company-scoped read or filtered company subset', /assertCompanyResourcePolicy\(req, \{ companyId, resourceKey: 'account', action: 'read' \}\)[\s\S]*filterAllowedCompanyIdsByResourcePolicy\(req, \{ resourceKey: 'account', action: 'read' \}\)/.test(accountsRoute), true);
-expect('7.3 account detail guarded by account read', /assertAccountResourcePolicy\(req, \{ accountId: req\.params\.id, action: 'read' \}\)[\s\S]*accountRepository\.getAccount/.test(accountsRoute), true);
+expect('7.2 account list keeps explicit company filter policy-scoped', /filterAllowedCompanyIdsByResourcePolicy\(req, \{\s*resourceKey: 'account',\s*action: 'read',\s*throwIfEmpty: true,\s*companyIds: \[companyId\]/.test(accountsRoute), true);
+expect('7.3 account detail uses policy-scoped company ids for response', /filterAccountCompanyIdsByResourcePolicy\(req, \{\s*accountId: req\.params\.id,\s*action: 'read'[\s\S]*allowedCompanyIds: scopedAllowedCompanyIds/.test(accountsRoute), true);
 expect('7.4 account create checks each target company', /req\.body\?\.companies[\s\S]*resourceKey: 'account', action: 'create'/.test(accountsRoute), true);
 expect('7.5 account update guarded', /assertAccountResourcePolicy\(req, \{ accountId: req\.params\.id, action: 'update' \}\)[\s\S]*accountRepository\.updateAccount/.test(accountsRoute), true);
 expect('7.6 contact create/update/delete guarded with account.contact', /resourceKey: 'account\.contact', action: 'create'[\s\S]*resourceKey: 'account\.contact', action: 'update'[\s\S]*resourceKey: 'account\.contact', action: 'delete'/.test(accountsRoute), true);
 expect('7.7 project create/update/delete guarded with account.project', /resourceKey: 'account\.project', action: 'create'[\s\S]*resourceKey: 'account\.project', action: 'update'[\s\S]*resourceKey: 'account\.project', action: 'delete'/.test(accountsRoute), true);
 expect('7.8 account route maps AuthorizationRuntimeError', /err instanceof AuthorizationRuntimeError/.test(accountsRoute), true);
+expect('7.9 account products read uses policy-scoped user companies', /listProducts\(\{[\s\S]*user: \{ \.\.\.req\.user, allowedCompanyIds: scopedAllowedCompanyIds \}/.test(accountsRoute), true);
+expect('7.10 account addresses read uses policy-scoped company ids', /\/:id\/addresses'[\s\S]*filterAccountCompanyIdsByResourcePolicy[\s\S]*allowedCompanyIds: scopedAllowedCompanyIds/.test(accountsRoute), true);
 
 expect('8.1 reports route imports shared guard', /authorizationRouteGuards/.test(reportsRoute), true);
 expect('8.2 columns endpoint guarded as report read', /\/cases\/columns'[\s\S]*resourceKey: 'report\.caseStudio', action: 'read', throwIfEmpty: true/.test(reportsRoute), true);
