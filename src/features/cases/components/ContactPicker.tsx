@@ -1,0 +1,185 @@
+/**
+ * Mail M6.2b — ContactPicker (To/Cc/Bcc chip + typeahead + manuel).
+ *
+ * Plan referansı: docs/M6-email-in-case-plan.md Bölüm 9.
+ *
+ * Davranış:
+ *  - Chip input: girilen adresler chip olarak listelenir; X ile kaldırılır
+ *  - Enter / virgül / boşluk → mevcut typing'i chip yapar
+ *  - Backspace boş input'ta → son chip silinir
+ *  - "Seçiniz" buton — hızlı autocomplete (AccountContact'ler vakanın
+ *    accountId'sinden) (M6.2b kapsamında düz manuel; öneri listesi
+ *    M6.3'te geliştirilebilir — şimdilik suggestions prop'u alıyor).
+ *  - Format: RFC 5322 mailbox; "Name <addr>" veya sade "addr".
+ *  - Validation: en az bir "@" zorunlu (basit; backend RFC tam kontrol
+ *    yapacaktır).
+ */
+import { useCallback, useRef, useState } from 'react';
+import { ChevronDown, X } from 'lucide-react';
+
+export interface ContactPickerValue {
+  address: string;
+  name: string | null;
+}
+
+interface Suggestion {
+  email: string;
+  name?: string | null;
+}
+
+interface Props {
+  label: string;
+  values: ContactPickerValue[];
+  onChange: (next: ContactPickerValue[]) => void;
+  /** Vakanın AccountContact + Account.email kaynaklı öneriler. */
+  suggestions?: Suggestion[];
+  disabled?: boolean;
+}
+
+function isLikelyEmail(s: string): boolean {
+  return /@/.test(s);
+}
+
+/**
+ * "Name <addr>" veya "addr" string'inden ContactPickerValue üretir.
+ * Geçersiz → null.
+ */
+function parseEntry(raw: string): ContactPickerValue | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const m = s.match(/^(.*?)\s*<([^>]+)>$/);
+  if (m) {
+    const addr = m[2].trim();
+    if (!isLikelyEmail(addr)) return null;
+    const name = m[1].replace(/^["']|["']$/g, '').trim() || null;
+    return { address: addr, name };
+  }
+  if (!isLikelyEmail(s)) return null;
+  return { address: s, name: null };
+}
+
+export function ContactPicker({ label, values, onChange, suggestions = [], disabled }: Props) {
+  const [text, setText] = useState('');
+  const [openSug, setOpenSug] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commit = useCallback((raw: string) => {
+    const parsed = parseEntry(raw);
+    if (!parsed) return false;
+    // Duplicate engelle
+    if (values.some((v) => v.address.toLowerCase() === parsed.address.toLowerCase())) {
+      setText('');
+      return true;
+    }
+    onChange([...values, parsed]);
+    setText('');
+    return true;
+  }, [onChange, values]);
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+      const trimmed = text.trim();
+      if (trimmed && commit(trimmed)) {
+        e.preventDefault();
+      }
+    } else if (e.key === 'Backspace' && !text && values.length > 0) {
+      e.preventDefault();
+      onChange(values.slice(0, -1));
+    }
+  };
+
+  const filteredSuggestions = suggestions.filter((s) => {
+    if (!s.email) return false;
+    if (values.some((v) => v.address.toLowerCase() === s.email.toLowerCase())) return false;
+    if (!text.trim()) return true;
+    return s.email.toLowerCase().includes(text.toLowerCase())
+      || (s.name?.toLowerCase().includes(text.toLowerCase()) ?? false);
+  });
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-ndark-muted">{label}</label>
+      <div
+        className={`flex flex-wrap items-center gap-1 rounded-md border px-2 py-1.5 transition focus-within:border-brand-400 ${
+          disabled
+            ? 'border-slate-200 bg-slate-50 opacity-60 dark:border-ndark-border dark:bg-ndark-card'
+            : 'border-slate-300 bg-white dark:border-ndark-border dark:bg-ndark-card'
+        }`}
+        onClick={() => inputRef.current?.focus()}
+      >
+        {values.map((v, i) => (
+          <span
+            key={`${v.address}-${i}`}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text"
+          >
+            <span className="max-w-[180px] truncate" title={v.address}>
+              {v.name ? `${v.name} <${v.address}>` : v.address}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(values.filter((_, idx) => idx !== i));
+              }}
+              className="text-slate-400 hover:text-rose-500"
+              title="Kaldır"
+              aria-label="Adresi kaldır"
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setOpenSug(true);
+          }}
+          onKeyDown={onKey}
+          onBlur={() => {
+            // Blur'da pending text'i commit et
+            if (text.trim()) commit(text);
+            setTimeout(() => setOpenSug(false), 150);
+          }}
+          onFocus={() => setOpenSug(true)}
+          disabled={disabled}
+          placeholder={values.length === 0 ? 'Seçiniz veya yazın' : ''}
+          className="min-w-[140px] flex-1 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none dark:text-ndark-text dark:placeholder-ndark-muted"
+        />
+        {suggestions.length > 0 && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setOpenSug((v) => !v); inputRef.current?.focus(); }}
+            disabled={disabled}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-ndark-text"
+            title="Önerileri göster"
+          >
+            <ChevronDown size={14} />
+          </button>
+        )}
+      </div>
+      {openSug && filteredSuggestions.length > 0 && (
+        <ul className="mt-1 max-h-44 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-sm shadow-sm dark:border-ndark-border dark:bg-ndark-card">
+          {filteredSuggestions.slice(0, 8).map((s) => (
+            <li key={s.email}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange([...values, { address: s.email, name: s.name ?? null }]);
+                  setText('');
+                }}
+                className="block w-full truncate px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-ndark-bg"
+              >
+                <span className="font-medium text-slate-800 dark:text-ndark-text">{s.name ?? s.email}</span>
+                {s.name && <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">&lt;{s.email}&gt;</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

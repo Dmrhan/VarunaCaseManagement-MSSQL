@@ -2313,4 +2313,33 @@ router.get(
   }),
 );
 
+/**
+ * Mail M6.2b — GET /api/cases/:id/email-signature
+ *
+ * Composer için tenant default imzası (ExternalMailSetting.signatureHtml).
+ * Composer açılışında gövde sonuna append. Per-agent override M6.3'te.
+ *
+ * Response: { signatureHtml: string | null }
+ *
+ * Scope guard: caseRepository.get + assertCaseSecurityFilterAccess
+ * (composer çağrıyı vaka context'inde yapar; M6.1 patern reuse).
+ */
+router.get(
+  '/:id/email-signature',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const ems = await prisma.externalMailSetting.findUnique({
+      where: { companyId: c.companyId },
+      select: { signatureHtml: true },
+    });
+    res.json({ signatureHtml: ems?.signatureHtml ?? null });
+  }),
+);
+
 export default router;

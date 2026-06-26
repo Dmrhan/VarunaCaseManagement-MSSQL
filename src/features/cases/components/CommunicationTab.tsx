@@ -1,18 +1,22 @@
 /**
- * Mail M6.1 — Case Detail "İletişim" sekmesi.
+ * Mail M6.1 + M6.2b — Case Detail "İletişim" sekmesi.
  *
  * Plan referansı: docs/M6-email-in-case-plan.md Bölüm 3 (mimari).
  *
  * Yapı:
  *  - Üstte ÇOK-KANAL iskelet (K5): Web / E-Posta / SMS / Gelen Aramalar.
- *    Şimdilik E-Posta DOLU; diğerleri placeholder ("Yakında" rozet).
- *  - E-Posta panel: <MailThread> read-only.
- *
- * Composer (M6.2) bu component'in alt bölümüne eklenecek.
+ *  - E-Posta panel: <MailThread> (read-only) + "Yanıtla" / "Yeni e-posta"
+ *    butonları + <MailComposer> (M6.2b).
+ *  - Composer açıldığında alta sticky panel; gönderim sonrası kapanır +
+ *    thread reload.
  */
-import { useState } from 'react';
-import { AtSign, Globe, MessageSquare, Phone } from 'lucide-react';
-import { MailThread } from './MailThread';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AtSign, Globe, MessageSquare, Phone, Plus, Reply } from 'lucide-react';
+import { MailThread, type MailThreadHandle } from './MailThread';
+import { MailComposer } from './MailComposer';
+import { Button } from '@/components/ui/Button';
+import { caseEmailService, type ReplyContext } from '@/services/caseEmailService';
+import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
 
@@ -31,12 +35,44 @@ const CHANNELS: ChannelConfig[] = [
 ];
 
 interface Props {
-  caseId: string;
+  item: Case;
 }
 
-export function CommunicationTab({ caseId }: Props) {
+export function CommunicationTab({ item }: Props) {
   const [channel, setChannel] = useState<Channel>('email');
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
+  const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
+  const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
+
+  // İmzayı bir kez yükle
+  useEffect(() => {
+    let alive = true;
+    void caseEmailService.getEmailSignature(item.id).then((s) => {
+      if (alive) setSignatureHtml(s);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  const openReply = useCallback(async () => {
+    // Reply-context yükle; boşsa manuel mod
+    const ctx = await caseEmailService.getReplyContext(item.id);
+    setReplyCtx(ctx ?? null);
+    setComposerOpen(true);
+  }, [item.id]);
+
+  const openNew = useCallback(() => {
+    setReplyCtx(null);
+    setComposerOpen(true);
+  }, []);
+
+  const handleSent = useCallback(() => {
+    setComposerOpen(false);
+    setReplyCtx(null);
+    // Thread'i yeniden yükle + son maile scroll
+    threadRef.current?.refresh({ scrollToLast: true });
+  }, []);
 
   return (
     <div className="space-y-3">
@@ -74,7 +110,43 @@ export function CommunicationTab({ caseId }: Props) {
         })}
       </div>
 
-      {channel === 'email' && <MailThread caseId={caseId} />}
+      {channel === 'email' && (
+        <>
+          {/* Compose toolbar */}
+          {!composerOpen && (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                leftIcon={<Reply size={13} />}
+                onClick={() => void openReply()}
+              >
+                Yanıtla
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                leftIcon={<Plus size={13} />}
+                onClick={openNew}
+              >
+                Yeni e-posta
+              </Button>
+            </div>
+          )}
+
+          <MailThread ref={threadRef} caseId={item.id} />
+
+          {composerOpen && (
+            <MailComposer
+              item={item}
+              initialReplyContext={replyCtx}
+              initialSignatureHtml={signatureHtml}
+              onSent={handleSent}
+              onCancel={() => { setComposerOpen(false); setReplyCtx(null); }}
+            />
+          )}
+        </>
+      )}
 
       {channel !== 'email' && (
         <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-ndark-border dark:bg-ndark-card">
