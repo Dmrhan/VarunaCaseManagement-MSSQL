@@ -819,7 +819,7 @@ export const caseService = {
   // Spec section 15 — CaseActivity her değişiklik: field_name, old_value, new_value
   async update(
     id: string,
-    patch: Partial<Case>,
+    patch: Omit<Partial<Case>, 'assignedPersonId' | 'assignedPersonName'> & { assignedPersonId?: string | null; assignedPersonName?: string | null },
     actor = 'Mock User',
   ): Promise<Case | undefined> {
     if (USE_MOCK) {
@@ -852,7 +852,9 @@ export const caseService = {
       });
       const updated: Case = {
         ...prev,
-        ...patch,
+        ...(patch as Partial<Case>),
+        ...(patch.assignedPersonId === null ? { assignedPersonId: undefined } : {}),
+        ...(patch.assignedPersonName === null ? { assignedPersonName: undefined } : {}),
         updatedAt: nowIso(),
         history: [...prev.history, ...historyAdds],
       };

@@ -1288,11 +1288,12 @@ export function SmartTicketNewPage({
       // duplicate yazmaz).
       const priorityChanged = transferPriority !== createdCase.priority;
       let updated: Case | null | undefined;
-      if (isSameTeam && transferToPersonId) {
-        // Aynı takım içi belirli kişiye aktarım — update endpoint kullan
+      if (isSameTeam) {
+        // Aynı takım: kişi seçildiyse belirli kişiye, boşsa havuza ata.
+        // transferCase değil update kullan — backend same_team guard var.
         const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
         updated = await caseService.update(createdCase.id, {
-          assignedPersonId: transferToPersonId,
+          assignedPersonId: transferToPersonId || null,
           assignedPersonName: targetPerson?.name ?? '',
         });
       } else {
