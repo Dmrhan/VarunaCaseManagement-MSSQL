@@ -56,7 +56,8 @@
     "smoke:status-bar-7state": "node scripts/smoke-status-bar-clickable-7state-static.js",
     "smoke:mail-m6-1": "node --env-file-if-exists=.env scripts/smoke-mail-m6-1-caseemail.js",
     "smoke:mail-m5-ext": "node --env-file-if-exists=.env scripts/smoke-mail-m5-ext-from-alias.js",
-    "smoke:mail-m6-2a": "node --env-file-if-exists=.env scripts/smoke-mail-m6-2a-sender.js"
+    "smoke:mail-m6-2a": "node --env-file-if-exists=.env scripts/smoke-mail-m6-2a-sender.js",
+    "smoke:third-party-global": "node --env-file-if-exists=.env scripts/smoke-third-party-global-allow.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
