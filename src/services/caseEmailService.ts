@@ -196,9 +196,22 @@ export type EmailConfigReason =
   | 'has-alias'
   | 'fallback-from-address';
 
+export interface EmailConfigDebug {
+  caseCompanyId: string;
+  caseCompanyName: string | null;
+  settingExists: boolean;
+  settingEnabled: boolean | null;
+  settingFromAddress: string | null;
+  aliasActiveCount: number;
+  fallbackUsed?: boolean;
+  otherAllowedCompaniesWithEnabledSetting?: number | null;
+}
+
 export interface EmailConfig {
   configured: boolean;
   reason: EmailConfigReason;
+  /** Sadece DEV modunda + ?debug=1 ile dolu döner. Üretimde undefined. */
+  debug?: EmailConfigDebug;
 }
 
 /**
@@ -214,8 +227,13 @@ export interface EmailConfig {
  * toast YOK.
  */
 export async function getEmailConfig(caseId: string): Promise<EmailConfig> {
+  // DEV modunda backend'den debug payload iste — admin'in setting'i hangi
+  // companyId'ye yazdığı vs vakanın companyId'si mismatch teşhisi için.
+  // Üretimde DEV flag false → debug parametresi boş.
+  const isDev = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+  const qs = isDev ? '?debug=1' : '';
   const out = await apiFetch<EmailConfig>(
-    `/api/cases/${encodeURIComponent(caseId)}/email-config`,
+    `/api/cases/${encodeURIComponent(caseId)}/email-config${qs}`,
     undefined,
     { silent: true },
   );

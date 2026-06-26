@@ -15,7 +15,7 @@ import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailThread, type MailThreadHandle } from './MailThread';
 import { MailComposer } from './MailComposer';
 import { Button } from '@/components/ui/Button';
-import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { caseEmailService, type CaseEmailItem, type EmailConfigDebug, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -58,6 +58,7 @@ export function CommunicationTab({ item }: Props) {
   const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
   // Debug/log için reason (banner'da development modunda gösterilebilir)
   const [missingReason, setMissingReason] = useState<EmailConfigReason | null>(null);
+  const [configDebug, setConfigDebug] = useState<EmailConfigDebug | null>(null);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -82,6 +83,7 @@ export function CommunicationTab({ item }: Props) {
       if (!alive) return;
       setMailConfigState(cfg.configured ? 'configured' : 'missing');
       setMissingReason(cfg.configured ? null : cfg.reason);
+      setConfigDebug(cfg.debug ?? null);
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -184,11 +186,38 @@ export function CommunicationTab({ item }: Props) {
               şirket → SMTP/IMAP credentials + gönderen adresi (From) tanımlı
               olmalı. Düzenleme tamamlanınca bu sekme otomatik aktifleşir.
             </p>
-            {/* Development modunda reason ipucu */}
+            {/* Development modunda detaylı teşhis payload'ı — admin'in
+                hangi companyId'ye kaydettiği vs vakanın companyId'si
+                mismatch'ini görmek için */}
             {(import.meta as { env?: { DEV?: boolean } }).env?.DEV && missingReason && (
-              <p className="mt-1 text-[10px] opacity-60">
-                debug: reason={missingReason}
-              </p>
+              <div className="mt-2 rounded border border-amber-200 bg-amber-100 p-2 font-mono text-[10px] leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-900/40">
+                <p className="font-sans font-semibold">[teşhis]</p>
+                <p>reason: <b>{missingReason}</b></p>
+                {configDebug && (
+                  <>
+                    <p>caseCompanyId: <b>{configDebug.caseCompanyId}</b></p>
+                    <p>caseCompanyName: {configDebug.caseCompanyName ?? '—'}</p>
+                    <p>settingExists: <b>{String(configDebug.settingExists)}</b></p>
+                    {configDebug.settingExists && (
+                      <>
+                        <p>settingEnabled: {String(configDebug.settingEnabled)}</p>
+                        <p>settingFromAddress: {configDebug.settingFromAddress || '(boş)'}</p>
+                        <p>aliasActiveCount: {configDebug.aliasActiveCount}</p>
+                      </>
+                    )}
+                    {missingReason === 'no-setting' &&
+                      typeof configDebug.otherAllowedCompaniesWithEnabledSetting === 'number' && (
+                        <p className="mt-1 font-sans text-amber-800">
+                          ⚠ Bu vakanın <b>{configDebug.caseCompanyId}</b> companyId'sinde
+                          ExternalMailSetting YOK; ama yetkili olduğunuz BAŞKA{' '}
+                          <b>{configDebug.otherAllowedCompaniesWithEnabledSetting}</b>{' '}
+                          şirkette enabled setting VAR. Admin'de hangi şirket için
+                          kaydettiğinizi doğrulayın.
+                        </p>
+                      )}
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>

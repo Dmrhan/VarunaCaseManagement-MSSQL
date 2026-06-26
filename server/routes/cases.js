@@ -2380,27 +2380,75 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+
+    // M6.3-realign teşhis — ?debug=1 ile DEV/non-prod ortamlarda
+    // ExternalMailSetting lookup'ının sonucunu detaylı döndür. Admin'in
+    // hangi companyId için kaydettiği vs vakanın companyId'si mismatch
+    // teşhisi için (no-setting reason'ında en sık görülen hata).
+    // Üretimde sızıntı olmasın diye process.env.NODE_ENV !== 'production'
+    // ek koruması.
+    const debugRequested = req.query?.debug === '1' && process.env.NODE_ENV !== 'production';
+
     const setting = await prisma.externalMailSetting.findUnique({
       where: { companyId: c.companyId },
       select: { enabled: true, fromAddress: true },
     });
+    // Manuel alias sayısı (debug için)
+    let aliasCount = 0;
+    if (debugRequested) {
+      aliasCount = await prisma.externalMailSettingFromAlias.count({
+        where: { companyId: c.companyId, isActive: true },
+      });
+    }
+
+    function withDebug(body, extra = {}) {
+      if (!debugRequested) return body;
+      return {
+        ...body,
+        debug: {
+          caseCompanyId: c.companyId,
+          caseCompanyName: c.companyName,
+          settingExists: !!setting,
+          settingEnabled: setting?.enabled ?? null,
+          settingFromAddress: setting?.fromAddress ?? null,
+          aliasActiveCount: aliasCount,
+          ...extra,
+        },
+      };
+    }
+
     if (!setting) {
-      return res.json({ configured: false, reason: 'no-setting' });
+      // Olası mismatch: admin başka companyId'ye kaydetti. Allowed company
+      // kümesi içinde başka setting var mı diye sayalım (sadece sayısı,
+      // companyId listesini sızdırmıyoruz — privacy).
+      let otherEnabledCount = null;
+      if (debugRequested && Array.isArray(req.user.allowedCompanyIds)) {
+        otherEnabledCount = await prisma.externalMailSetting.count({
+          where: {
+            companyId: { in: req.user.allowedCompanyIds, not: c.companyId },
+            enabled: true,
+          },
+        });
+      }
+      return res.json(withDebug(
+        { configured: false, reason: 'no-setting' },
+        { otherAllowedCompaniesWithEnabledSetting: otherEnabledCount },
+      ));
     }
     if (!setting.enabled) {
-      return res.json({ configured: false, reason: 'disabled' });
+      return res.json(withDebug({ configured: false, reason: 'disabled' }));
     }
     // composer dropdown ile AYNI kaynak (fallback dahil)
     const items = await externalMailFromAliasRepo.listActiveWithSettingFallback(c.companyId);
     if (items.length === 0) {
-      return res.json({ configured: false, reason: 'no-from' });
+      return res.json(withDebug({ configured: false, reason: 'no-from' }));
     }
     // Reason: gerçek alias mı, fallback mi
     const isFallback = items.length === 1 && items[0].id === 'setting-fallback';
-    res.json({
+    res.json(withDebug({
       configured: true,
       reason: isFallback ? 'fallback-from-address' : 'has-alias',
-    });
+    }, { fallbackUsed: isFallback }));
   }),
 );
 
