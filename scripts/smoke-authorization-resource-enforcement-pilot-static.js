@@ -68,6 +68,15 @@ expect('3.18 solution step status guarded', /assertCaseResourcePolicy\(req, \{ r
 expect('3.19 AI suggested step import guarded', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.solutionStep', action: 'create' \}\)[\s\S]*solutionStepRepository\.importAiSuggested/.test(casesRoute), true);
 expect('3.20 company resource helper validates allowed company', /function assertCompanyResourcePolicy[\s\S]*company_forbidden/.test(casesRoute), true);
 expect('3.21 terminal transition maps to close', /function transitionResourceAction[\s\S]*'Çözüldü'[\s\S]*'İptal Edildi'[\s\S]*'close'/.test(casesRoute), true);
+expect('3.22 bulk update has dedicated resource helper', /async function assertBulkCaseResourcePolicy/.test(casesRoute), true);
+expect('3.23 bulk assignment checks assign action', /function bulkResourceActions[\s\S]*assignedPersonId[\s\S]*assignedTeamId[\s\S]*actions\.add\('assign'\)/.test(casesRoute), true);
+expect('3.24 bulk update guarded before repository call', /assertBulkCaseResourcePolicy\(req,[\s\S]*caseRepository\.bulkUpdate/.test(casesRoute), true);
+expect('3.25 devops link guarded as case.link create', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'create' \}\)[\s\S]*caseRepository\.linkDevops/.test(casesRoute), true);
+expect('3.26 devops unlink guarded as case.link delete', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'delete' \}\)[\s\S]*caseRepository\.unlinkDevops/.test(casesRoute), true);
+expect('3.27 watcher add guarded', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.watcher', action: 'create' \}\)[\s\S]*watcherRepo\.add/.test(casesRoute), true);
+expect('3.28 watcher remove guarded', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.watcher', action: 'delete' \}\)[\s\S]*watcherRepo\.remove/.test(casesRoute), true);
+expect('3.29 linked case add guarded', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'create' \}\)[\s\S]*linkRepo\.add/.test(casesRoute), true);
+expect('3.30 linked case remove guarded', /assertCaseResourcePolicy\(req, \{ resourceKey: 'case\.link', action: 'delete' \}\)[\s\S]*linkRepo\.remove/.test(casesRoute), true);
 
 const agent = {
   id: 'user-agent',
@@ -106,7 +115,7 @@ expect('4.2 allow policy cannot widen baseline-denied attachment delete', explai
 }).reason, 'baseline_denied');
 
 expect('5.1 admin page marks resource action pilot', /Kayıt işlemi pilot/.test(adminPage), true);
-expect('5.2 admin page documents expanded case operation pilot endpoints', /vaka ana işlemleri, çözüm adımı, vaka notu ve dosya uçlarında flag ile pilot/.test(adminPage), true);
+expect('5.2 admin page documents expanded case operation pilot endpoints', /vaka ana işlemleri, çözüm adımı, vaka notu, dosya, izleyici, bağlantı ve toplu güncelleme uçlarında flag ile pilot/.test(adminPage), true);
 expect('5.3 resource enforcement env documented', /AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=false/.test(envExample), true);
 expect('5.4 env docs state allow cannot widen', /Policy allow mevcut role\/backend guard'larını GENİŞLETMEZ/.test(envExample), true);
 expect('5.5 smoke script registered', pkg.scripts['smoke:authorization-resource-enforcement'], 'node scripts/smoke-authorization-resource-enforcement-pilot-static.js');

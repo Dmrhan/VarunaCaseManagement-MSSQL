@@ -276,6 +276,58 @@ async function assertCompanyResourcePolicy(req, {
   });
 }
 
+function hasBulkUpdateValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function bulkResourceActions(updates = {}) {
+  const hasUpdate =
+    hasBulkUpdateValue(updates.assignedPersonId) ||
+    hasBulkUpdateValue(updates.assignedTeamId) ||
+    hasBulkUpdateValue(updates.priority) ||
+    hasBulkUpdateValue(updates.status);
+  if (!hasUpdate) return [];
+
+  const actions = new Set(['update']);
+  if (
+    hasBulkUpdateValue(updates.assignedPersonId) ||
+    hasBulkUpdateValue(updates.assignedTeamId)
+  ) {
+    actions.add('assign');
+  }
+  return Array.from(actions);
+}
+
+async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: {
+      id: { in: caseIds },
+      companyId: { in: allowedCompanyIds },
+    },
+    select: { companyId: true },
+  });
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  const actions = bulkResourceActions(updates);
+  if (actions.length === 0) return null;
+
+  for (const companyId of companyIds) {
+    for (const action of actions) {
+      await assertCompanyResourcePolicy(req, {
+        companyId,
+        resourceKey: 'case',
+        action,
+      });
+    }
+  }
+  return null;
+}
+
 function transitionResourceAction(nextStatus) {
   return nextStatus === 'Çözüldü' || nextStatus === 'İptal Edildi'
     ? 'close'
@@ -489,6 +541,10 @@ router.post(
   asyncRoute(async (req, res) => {
     const body = req.body ?? {};
     const actorObj = requireActor(req); // PR-5 follow-up
+    await assertBulkCaseResourcePolicy(req, {
+      caseIds: body.caseIds,
+      updates: body.updates ?? {},
+    });
     const result = await caseRepository.bulkUpdate(
       { caseIds: body.caseIds, updates: body.updates ?? {} },
       req.user.fullName,
@@ -792,6 +848,7 @@ router.post(
   asyncRoute(async (req, res) => {
     const { workItemRef } = req.body ?? {};
     const actor = requireActor(req);
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'create' });
     const updated = await caseRepository.linkDevops(req.params.id, {
       workItemRef,
       actor,
@@ -812,6 +869,7 @@ router.delete(
   '/:id/devops-link/:workItemId',
   asyncRoute(async (req, res) => {
     const actor = requireActor(req);
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'delete' });
     const updated = await caseRepository.unlinkDevops(req.params.id, {
       workItemId: req.params.workItemId,
       actor,
@@ -1146,6 +1204,7 @@ router.post(
         return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı izleyici yapma yetkin yok.' });
       }
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.watcher', action: 'create' });
     const result = await watcherRepo.add({
       caseId: req.params.id,
       userId: targetUserId,
@@ -1173,6 +1232,7 @@ router.delete(
     if (!isSelf && !elevated) {
       return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı çıkarma yetkin yok.' });
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.watcher', action: 'delete' });
     const result = await watcherRepo.remove({
       caseId: req.params.id,
       userId: targetUserId,
@@ -1210,6 +1270,7 @@ router.post(
   '/:id/links',
   asyncRoute(async (req, res) => {
     const { linkedCaseId, linkType } = req.body ?? {};
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'create' });
     const result = await linkRepo.add({
       caseId: req.params.id,
       linkedCaseId,
@@ -1243,6 +1304,7 @@ router.delete(
         return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
       }
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'delete' });
     const result = await linkRepo.remove({
       caseId: req.params.id,
       linkId: req.params.linkId,
