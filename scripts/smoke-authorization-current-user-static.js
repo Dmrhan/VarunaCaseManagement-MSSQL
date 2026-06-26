@@ -30,6 +30,7 @@ const routePath = 'server/routes/authorization.js';
 const servicePath = 'src/services/authorizationService.ts';
 const route = read(routePath);
 const service = read(servicePath);
+const runtime = read('server/lib/authorizationRuntime.js');
 const app = read('server/app.js');
 const appTsx = read('src/App.tsx');
 const pkg = JSON.parse(read('package.json'));
@@ -40,14 +41,14 @@ expect('1.3 route exposes effective-menus endpoint', /router\.get\('\/effective-
 expect('1.3b route exposes read-only registry endpoint', /router\.get\('\/registry'/.test(route), true);
 expect('1.3c route returns static authorization registry', /getAuthorizationRegistry/.test(route), true);
 expect('1.4 route resolves allowed company scope', /resolveRequestedCompany/.test(route), true);
-expect('1.5 route rejects out-of-scope company', /company_forbidden/.test(route), true);
-expect('1.6 route resolves teamId from Person', /prisma\.person\.findUnique/.test(route), true);
+expect('1.5 route rejects out-of-scope company', /company_forbidden/.test(runtime), true);
+expect('1.6 route resolves teamId from Person', /prismaClient\.person\.findUnique/.test(runtime), true);
 expect('1.7 route loads active policy overrides', /authorizationPolicyRepository\.listOverrides/.test(route), true);
 expect('1.8 route uses effective preview builder', /buildAuthorizationEffectivePreview/.test(route), true);
 expect('1.9 route returns menus only, not full field matrix', /menus: preview\.menus/.test(route), true);
-expect('1.10 route builds current policy user for all principal types', /function buildCurrentPolicyUser/.test(route), true);
+expect('1.10 route builds current policy user for all principal types', /buildCurrentAuthorizationUser/.test(route), true);
 expect('1.11 route uses current user context when principalType is absent',
-  /requestedPrincipalType[\s\S]*\? \{ principalType: principal\.type, principalKey: principal\.key \}[\s\S]*: \{ user: buildCurrentPolicyUser/.test(route),
+  /requestedPrincipalType[\s\S]*\? \{ principalType: principal\.type, principalKey: principal\.key \}[\s\S]*: \{ user: buildCurrentAuthorizationUser/.test(route),
   true);
 expect('1.12 route still supports explicit single-principal preview',
   /requestedPrincipalType[\s\S]*principalType: principal\.type/.test(route),
@@ -85,6 +86,7 @@ expect('4.13 canShowView cannot widen access beyond legacy role fallback',
 
 expect('5.1 feature flag registered', /authorizationMenuEnforcementEnabled/.test(read('src/config/featureFlags.ts')), true);
 expect('5.2 smoke script registered', pkg.scripts['smoke:authorization-current-user'], 'node scripts/smoke-authorization-current-user-static.js');
+expect('5.3 resource runtime smoke script registered', pkg.scripts['smoke:authorization-resource-runtime'], 'node scripts/smoke-authorization-resource-runtime-static.js');
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
 if (fail > 0) process.exit(1);

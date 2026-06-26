@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
+import { prisma } from '../db/client.js';
 import { verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
   solutionStepRepository,
@@ -13,6 +14,15 @@ import { accountRepository } from '../db/accountRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
+import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
+import {
+  AuthorizationRuntimeError,
+  assertRequiredFieldsPresent,
+  assertDenyOnlyResourceAccess,
+  buildCurrentAuthorizationUser,
+  compileSecurityFilterOverrides,
+  resolveAuthorizationTeamId,
+} from '../lib/authorizationRuntime.js';
 import { runSnoozeWakeup } from '../cron/snoozeWakeup.js';
 import { triggerTransferRootCause, generateTransferBrief } from '../lib/transferAi.js';
 import { generateActionSummary } from '../lib/actionSummaryAi.js';
@@ -157,10 +167,278 @@ function asyncRoute(handler) {
       if (err instanceof SolutionStepError) {
         return res.status(err.status ?? 400).json({ error: err.code ?? 'solution_step_error', message: err.message });
       }
+      if (err instanceof AuthorizationRuntimeError) {
+        return res.status(err.status ?? 403).json({ error: err.code ?? 'authorization_forbidden', message: err.message });
+      }
       console.error('[cases]', err);
       res.status(500).json({ error: 'internal', message: err?.message ?? 'Sunucu hatası' });
     }
   };
+}
+
+function isAuthorizationResourceEnforcementEnabled() {
+  return process.env.AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED === 'true';
+}
+
+function isAuthorizationFieldEnforcementEnabled() {
+  return process.env.AUTHORIZATION_FIELD_ENFORCEMENT_ENABLED === 'true';
+}
+
+function isAuthorizationSecurityFilterEnforcementEnabled() {
+  return process.env.AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED === 'true';
+}
+
+function hasWhereClause(where) {
+  return where && typeof where === 'object' && !Array.isArray(where) && Object.keys(where).length > 0;
+}
+
+async function buildCaseListSecurityWhere(req) {
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return null;
+  const allowedCompanyIds = Array.isArray(req.user?.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  if (allowedCompanyIds.length === 0) return null;
+
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const scopedClauses = [];
+  let hasAnySecurityFilter = false;
+
+  for (const companyId of allowedCompanyIds) {
+    const policyUser = buildCurrentAuthorizationUser(req.user, companyId, teamId);
+    const overrides = await authorizationPolicyRepository.listOverrides(
+      companyId,
+      req.user.allowedCompanyIds,
+    );
+    const compiled = compileSecurityFilterOverrides({
+      resourceKey: 'case',
+      user: policyUser,
+      overrides,
+    });
+    if (hasWhereClause(compiled)) {
+      hasAnySecurityFilter = true;
+      scopedClauses.push({ AND: [{ companyId }, compiled] });
+    } else {
+      scopedClauses.push({ companyId });
+    }
+  }
+
+  if (!hasAnySecurityFilter) return null;
+  if (scopedClauses.length === 1) return scopedClauses[0];
+  return { OR: scopedClauses };
+}
+
+async function assertCaseSecurityFilterAccess(req, {
+  caseId = req.params.id,
+  companyId = null,
+} = {}) {
+  if (!isAuthorizationSecurityFilterEnforcementEnabled()) return null;
+  const allowedCompanyIds = Array.isArray(req.user?.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  if (!caseId || allowedCompanyIds.length === 0) return null;
+
+  let targetCompanyId = companyId;
+  if (!targetCompanyId) {
+    const row = await prisma.case.findFirst({
+      where: { id: caseId, companyId: { in: allowedCompanyIds } },
+      select: { companyId: true },
+    });
+    if (!row) {
+      throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+    }
+    targetCompanyId = row.companyId;
+  }
+
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, targetCompanyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    targetCompanyId,
+    req.user.allowedCompanyIds,
+  );
+  const compiled = compileSecurityFilterOverrides({
+    resourceKey: 'case',
+    user: policyUser,
+    overrides,
+  });
+  if (!hasWhereClause(compiled)) return null;
+
+  const visible = await prisma.case.findFirst({
+    where: {
+      id: caseId,
+      companyId: targetCompanyId,
+      AND: [compiled],
+    },
+    select: { id: true },
+  });
+  if (!visible) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  return null;
+}
+
+async function assertCaseResourcePolicy(req, { resourceKey, action, baselineAllowed = true }) {
+  const resourceEnabled = isAuthorizationResourceEnforcementEnabled();
+  const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled();
+  if (!resourceEnabled && !securityFilterEnabled) return null;
+  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  if (!c) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+  if (!resourceEnabled) return null;
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, c.companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    c.companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertDenyOnlyResourceAccess({
+    resourceKey,
+    action,
+    user: policyUser,
+    overrides,
+    baselineAllowed,
+  });
+}
+
+async function assertCompanyResourcePolicy(req, {
+  companyId,
+  resourceKey,
+  action,
+  baselineAllowed = true,
+}) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!companyId || typeof companyId !== 'string') {
+    throw new AuthorizationRuntimeError('Şirket bilgisi gerekli.', 400, 'company_required');
+  }
+  if (!Array.isArray(req.user.allowedCompanyIds) || !req.user.allowedCompanyIds.includes(companyId)) {
+    throw new AuthorizationRuntimeError('Bu şirket için yetkin yok.', 403, 'company_forbidden');
+  }
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertDenyOnlyResourceAccess({
+    resourceKey,
+    action,
+    user: policyUser,
+    overrides,
+    baselineAllowed,
+  });
+}
+
+function hasBulkUpdateValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function bulkResourceActions(updates = {}) {
+  const hasUpdate =
+    hasBulkUpdateValue(updates.assignedPersonId) ||
+    hasBulkUpdateValue(updates.assignedTeamId) ||
+    hasBulkUpdateValue(updates.priority) ||
+    hasBulkUpdateValue(updates.status);
+  if (!hasUpdate) return [];
+
+  const actions = new Set(['update']);
+  if (
+    hasBulkUpdateValue(updates.assignedPersonId) ||
+    hasBulkUpdateValue(updates.assignedTeamId)
+  ) {
+    actions.add('assign');
+  }
+  return Array.from(actions);
+}
+
+async function assertBulkCaseResourcePolicy(req, { caseIds, updates }) {
+  if (!isAuthorizationResourceEnforcementEnabled()) return null;
+  if (!Array.isArray(caseIds) || caseIds.length === 0) return null;
+
+  const allowedCompanyIds = Array.isArray(req.user.allowedCompanyIds)
+    ? req.user.allowedCompanyIds
+    : [];
+  const cases = await prisma.case.findMany({
+    where: {
+      id: { in: caseIds },
+      companyId: { in: allowedCompanyIds },
+    },
+    select: { companyId: true },
+  });
+  const companyIds = Array.from(new Set(cases.map((c) => c.companyId).filter(Boolean)));
+  const actions = bulkResourceActions(updates);
+  if (actions.length === 0) return null;
+
+  for (const companyId of companyIds) {
+    for (const action of actions) {
+      await assertCompanyResourcePolicy(req, {
+        companyId,
+        resourceKey: 'case',
+        action,
+      });
+    }
+  }
+  return null;
+}
+
+function transitionResourceAction(nextStatus) {
+  return nextStatus === 'Çözüldü' || nextStatus === 'İptal Edildi'
+    ? 'close'
+    : 'update';
+}
+
+function closeFieldCandidatesFor(nextStatus) {
+  if (nextStatus === 'Çözüldü') {
+    return [
+      'resolutionNote',
+      'rootCauseGroup',
+      'rootCauseDetail',
+      'resolutionType',
+      'permanentPrevention',
+    ];
+  }
+  if (nextStatus === 'İptal Edildi') {
+    return ['cancellationReason'];
+  }
+  return [];
+}
+
+function closeFieldValuesFrom(payload) {
+  const closure = payload?.smartTicketClosure && typeof payload.smartTicketClosure === 'object'
+    ? payload.smartTicketClosure
+    : {};
+  return {
+    resolutionNote: payload?.resolutionNote,
+    cancellationReason: payload?.cancellationReason,
+    rootCauseGroup: closure.rootCauseGroup,
+    rootCauseDetail: closure.rootCauseDetail,
+    resolutionType: closure.resolutionType,
+    permanentPrevention: closure.permanentPrevention,
+  };
+}
+
+async function assertCaseCloseRequiredFields(req, { nextStatus, payload }) {
+  if (!isAuthorizationFieldEnforcementEnabled()) return null;
+  const fields = closeFieldCandidatesFor(nextStatus);
+  if (fields.length === 0) return null;
+  const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
+  if (!c) {
+    throw new AuthorizationRuntimeError('Vaka bulunamadı.', 404, 'case_not_found');
+  }
+  const teamId = await resolveAuthorizationTeamId(prisma, req.user);
+  const policyUser = buildCurrentAuthorizationUser(req.user, c.companyId, teamId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    c.companyId,
+    req.user.allowedCompanyIds,
+  );
+  return assertRequiredFieldsPresent({
+    scope: 'case.close',
+    resourceKey: 'case',
+    fields,
+    values: closeFieldValuesFrom(payload),
+    user: policyUser,
+    overrides,
+  });
 }
 
 /**
@@ -242,6 +520,7 @@ router.get(
       sortBy,
       sortDir,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     res.json({ value: items, '@odata.count': total });
   }),
@@ -322,6 +601,10 @@ router.post(
   asyncRoute(async (req, res) => {
     const body = req.body ?? {};
     const actorObj = requireActor(req); // PR-5 follow-up
+    await assertBulkCaseResourcePolicy(req, {
+      caseIds: body.caseIds,
+      updates: body.updates ?? {},
+    });
     const result = await caseRepository.bulkUpdate(
       { caseIds: body.caseIds, updates: body.updates ?? {} },
       req.user.fullName,
@@ -389,10 +672,12 @@ router.get(
       dateTo: f.dateTo,
       teamId: f.teamId || undefined,
     };
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items } = await caseRepository.list({
       filters,
       pagination: { page: 1, pageSize: 5000 },
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
     res.json({
@@ -434,10 +719,12 @@ router.get(
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
 
+    const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
       allowedCompanyIds: req.user.allowedCompanyIds,
+      securityWhere,
     });
     const reviewMap = await caseRepository.getTaggingReviewsByCaseIds(items.map((c) => c.id));
     res.json({
@@ -500,6 +787,7 @@ router.get(
     // yalnız SystemAdmin görür; diğer roller 404 alır.
     const c = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı', id: req.params.id });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
     // WR-ACTION-CENTER Phase 1 — auto-InProgress: flip user's Pending
     // ActionItems for this case to InProgress, stamp firstSeenAt.
     // Fire-and-forget; case detail must never block on action-center write.
@@ -516,6 +804,11 @@ router.post(
     if (body.companyId && !req.user.allowedCompanyIds.includes(body.companyId)) {
       return res.status(403).json({ error: 'forbidden', message: 'Bu şirkette vaka oluşturma yetkin yok.' });
     }
+    await assertCompanyResourcePolicy(req, {
+      companyId: body.companyId,
+      resourceKey: 'case',
+      action: 'create',
+    });
     // PR-1 — Server-authoritative actor: body.createdBy YUTULUR.
     // requireActor 401 fırlatır (eksik auth → asyncRoute JSON'a çevirir).
     const actor = requireActor(req);
@@ -528,6 +821,7 @@ router.post(
 router.patch(
   '/:id',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-5 follow-up — actor object pass'lensin ki historyEntries actorUserId
     // stamp atılsın (post-migration audit FK doldurulur).
     const actorObj = requireActor(req);
@@ -559,6 +853,7 @@ router.post(
   '/:id/archive',
   requireRole('SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'archive' });
     const { reason } = req.body ?? {};
     const actor = requireActor(req);
     const updated = await caseRepository.archive(req.params.id, {
@@ -582,6 +877,7 @@ router.post(
   '/:id/restore',
   requireRole('SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'restore' });
     const actor = requireActor(req);
     const updated = await caseRepository.restore(req.params.id, {
       actor,
@@ -613,6 +909,7 @@ router.post(
   asyncRoute(async (req, res) => {
     const { workItemRef } = req.body ?? {};
     const actor = requireActor(req);
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'create' });
     const updated = await caseRepository.linkDevops(req.params.id, {
       workItemRef,
       actor,
@@ -633,6 +930,7 @@ router.delete(
   '/:id/devops-link/:workItemId',
   asyncRoute(async (req, res) => {
     const actor = requireActor(req);
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'delete' });
     const updated = await caseRepository.unlinkDevops(req.params.id, {
       workItemId: req.params.workItemId,
       actor,
@@ -657,6 +955,7 @@ router.delete(
 router.get(
   '/:id/devops-items',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await caseRepository.listDevopsLive(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -685,6 +984,7 @@ router.post(
   '/:id/claim',
   requireRole('Agent', 'Backoffice', 'CSM', 'Supervisor', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'assign' });
     const updated = await caseRepository.claim({
       caseId: req.params.id,
       user: req.user,
@@ -716,6 +1016,7 @@ router.get(
     // Scope verify via existing get (404/403 mantığı reuse).
     const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!found) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: found.companyId });
     const out = await customerMatchRepository.suggestCustomerMatches({
       caseId: req.params.id,
       allowedCompanyIds: req.user.allowedCompanyIds,
@@ -742,6 +1043,7 @@ router.patch(
   '/:id/link-account',
   requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { accountId } = req.body ?? {};
     if (!accountId || typeof accountId !== 'string') {
       return res.status(400).json({ error: 'validation_error', message: 'accountId zorunlu.' });
@@ -769,6 +1071,11 @@ router.post(
   asyncRoute(async (req, res) => {
     const { nextStatus, ...payload } = req.body ?? {};
     if (!nextStatus) return res.status(400).json({ error: 'nextStatus gerekli' });
+    await assertCaseResourcePolicy(req, {
+      resourceKey: 'case',
+      action: transitionResourceAction(nextStatus),
+    });
+    await assertCaseCloseRequiredFields(req, { nextStatus, payload });
     const actorObj = requireActor(req); // PR-5 follow-up
     const updated = await caseRepository.transitionStatus(
       req.params.id,
@@ -798,6 +1105,7 @@ router.post(
 router.post(
   '/:id/transfer',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'transfer' });
     const body = req.body ?? {};
     const result = await caseRepository.transferCase(
       req.params.id,
@@ -856,6 +1164,7 @@ router.post(
 router.get(
   '/:id/customer-pulse',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const pulse = await caseRepository.getCustomerPulse(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -878,6 +1187,7 @@ router.get(
 router.get(
   '/:id/customer-context',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const caseRow = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (!caseRow) return res.status(404).json({ error: 'Vaka bulunamadı' });
     const context = await accountRepository.getCaseCustomerContext({
@@ -923,6 +1233,7 @@ router.get(
 router.get(
   '/:id/watchers',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await watcherRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -959,6 +1270,7 @@ router.post(
         return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı izleyici yapma yetkin yok.' });
       }
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.watcher', action: 'create' });
     const result = await watcherRepo.add({
       caseId: req.params.id,
       userId: targetUserId,
@@ -986,6 +1298,7 @@ router.delete(
     if (!isSelf && !elevated) {
       return res.status(403).json({ error: 'forbidden', message: 'Başka kullanıcıyı çıkarma yetkin yok.' });
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.watcher', action: 'delete' });
     const result = await watcherRepo.remove({
       caseId: req.params.id,
       userId: targetUserId,
@@ -1007,6 +1320,7 @@ router.delete(
 router.get(
   '/:id/links',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await linkRepo.list(req.params.id, req.user.allowedCompanyIds, req.user.role);
     if (list === null) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json({ value: list });
@@ -1023,6 +1337,7 @@ router.post(
   '/:id/links',
   asyncRoute(async (req, res) => {
     const { linkedCaseId, linkType } = req.body ?? {};
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'create' });
     const result = await linkRepo.add({
       caseId: req.params.id,
       linkedCaseId,
@@ -1056,6 +1371,7 @@ router.delete(
         return res.status(403).json({ error: 'forbidden', message: 'Bağlantı kaldırma yetkin yok.' });
       }
     }
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.link', action: 'delete' });
     const result = await linkRepo.remove({
       caseId: req.params.id,
       linkId: req.params.linkId,
@@ -1073,6 +1389,7 @@ router.delete(
 router.get(
   '/:id/transfers',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const list = await caseRepository.listTransfers(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -1094,6 +1411,7 @@ router.get(
 router.post(
   '/:id/transfer-brief',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const body = req.body ?? {};
     const result = await generateTransferBrief({
       caseId: req.params.id,
@@ -1125,6 +1443,7 @@ router.post(
 router.post(
   '/:id/action-summary',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await generateActionSummary({
       caseId: req.params.id,
       userId: req.user.id,
@@ -1145,6 +1464,7 @@ router.post(
 router.post(
   '/:id/notes',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'create' });
     // Actor identity hardening (audit 2026-06-18): note authorship'i tamamen
     // server-side req.user üzerinden yazılır; body.authorName / body.authorId
     // sessizce yok sayılır (client spoof attempt).
@@ -1169,6 +1489,7 @@ router.post(
 router.get(
   '/:id/notes/:noteId/replies',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const replies = await caseRepository.listReplies(
       req.params.id,
       req.params.noteId,
@@ -1187,6 +1508,7 @@ router.get(
 router.post(
   '/:id/notes/:noteId/reply',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'create' });
     // Actor identity hardening (audit 2026-06-18): reply authorship'i tamamen
     // server-side req.user üzerinden yazılır; body.authorName / body.authorId
     // sessizce yok sayılır.
@@ -1220,6 +1542,7 @@ router.post(
 router.delete(
   '/:id/notes/:noteId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.note', action: 'delete' });
     const result = await caseRepository.deleteNote(
       req.params.id,
       req.params.noteId,
@@ -1247,6 +1570,7 @@ router.delete(
 router.post(
   '/:id/notes/:noteId/reactions',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const emoji = req.body?.emoji;
     if (typeof emoji !== 'string' || !emoji) {
       return res.status(400).json({ error: 'emoji zorunlu' });
@@ -1271,6 +1595,7 @@ router.post(
 router.get(
   '/:id/mentionable-users',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const users = await caseRepository.listMentionableUsers(
       req.params.id,
       req.user.allowedCompanyIds,
@@ -1288,6 +1613,7 @@ router.get(
 router.post(
   '/:id/mentions/seen',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     // Önce case scope check (allowedCompanyIds), sonra updateMany.
     if (!(await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role))) {
       return res.status(404).json({ error: 'Vaka bulunamadı' });
@@ -1355,6 +1681,7 @@ router.post(
 router.post(
   '/:id/call-logs',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-1 — body.callerId YUTULUR; actor.userId callerId olarak yazılır.
     const actor = requireActor(req);
     const result = await caseRepository.addCallLog(
@@ -1372,6 +1699,7 @@ router.post(
 router.post(
   '/:id/activity',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     // PR-1 — body.actor YUTULUR; activity actor'u req.user'dan.
     const actor = requireActor(req);
     const updated = await caseRepository.addActivity(
@@ -1392,6 +1720,7 @@ router.post(
 router.post(
   '/:id/snooze',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { snoozeUntil, snoozeReason } = req.body ?? {};
     if (!snoozeUntil || !snoozeReason) {
       return res.status(400).json({ error: 'snoozeUntil ve snoozeReason gerekli' });
@@ -1412,6 +1741,7 @@ router.post(
 router.delete(
   '/:id/snooze',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const result = await caseRepository.unsnoozeCase(
       req.params.id,
       req.user.fullName,
@@ -1426,6 +1756,7 @@ router.delete(
 router.patch(
   '/:id/checklist/:itemId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { checked } = req.body ?? {};
     const updated = await caseRepository.toggleChecklistItem(
       req.params.id,
@@ -1447,6 +1778,7 @@ router.patch(
 router.post(
   '/:id/files/upload-url',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'create' });
     // PR-4 — Upload two-step user binding: token'a actor.userId gömülür,
     // finalize endpoint'i mismatch'i 400 ile reddeder.
     const actor = requireActor(req);
@@ -1469,6 +1801,7 @@ router.post(
 router.post(
   '/:id/files/finalize',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'create' });
     // PR-1 — body.uploadedBy YUTULUR; uploadedBy actor.displayName ile yazılır.
     const actor = requireActor(req);
     const result = await caseRepository.finalizeUpload(
@@ -1488,6 +1821,7 @@ router.post(
 router.get(
   '/:id/files/:fileId/download',
   asyncRoute(async (req, res) => {
+    await assertCaseSecurityFilterAccess(req);
     const result = await caseRepository.getDownloadUrl(
       req.params.id,
       req.params.fileId,
@@ -1503,6 +1837,7 @@ router.get(
 router.delete(
   '/:id/files/:fileId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.attachment', action: 'delete' });
     const updated = await caseRepository.removeFile(
       req.params.id,
       req.params.fileId,
@@ -1536,6 +1871,7 @@ router.get(
 router.post(
   '/:id/solution-steps',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'create' });
     const item = await solutionStepRepository.createManual(
       req.params.id,
       req.body ?? {},
@@ -1549,6 +1885,7 @@ router.post(
 router.patch(
   '/:id/solution-steps/:stepId',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'update' });
     // ID-based: stepId'nin case'i URL'deki :id ile aynı olmalı (cross-case
     // mutation engellemek için defansif kontrol). Repository step'i fetch
     // ederken companyId scope'u zaten doğrular; burada caseId tutarlılığını
@@ -1572,6 +1909,7 @@ router.patch(
 router.post(
   '/:id/solution-steps/:stepId/status',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'update' });
     const body = req.body ?? {};
     if (typeof body.status !== 'string') {
       return res.status(400).json({ error: 'status_required', message: 'status gerekli.' });
@@ -1598,6 +1936,7 @@ router.post(
 router.post(
   '/:id/solution-steps/import-ai-suggested',
   asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case.solutionStep', action: 'create' });
     // 1) Case scope + companyId al (repository de aynı kontrolü yapar).
     const items = await solutionStepRepository.list(req.params.id, req.user.allowedCompanyIds);
     // 2) External KB analyze cevabını al.

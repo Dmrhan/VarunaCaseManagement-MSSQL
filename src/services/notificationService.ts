@@ -138,7 +138,9 @@ export interface RuleCreateInput {
   audience: AudienceRow[];
   templateId: string;
   channel: DispatchChannel;
-  mode?: 'LogOnly' | 'Manual';
+  // Codex #205 P2a — Active dahil; backend NotificationRule.mode round-trip
+  // tip darlığı yüzünden Active editörden Kaydet'le LogOnly'ye düşüyordu.
+  mode?: DispatchMode;
   suppressDuplicateWithinMinutes?: number | null;
   rateLimitPerHour?: number | null;
   isActive?: boolean;

@@ -45,9 +45,14 @@ const CHANNEL_OPTIONS: { value: DispatchChannel; label: string }[] = [
   { value: 'ManualTask', label: 'Manuel Görev (operatör halleder)' },
 ];
 
+// Codex #205 P2a — 'Active' editor seçeneklerine eklendi.
+// Önceki tip 'LogOnly' | 'Manual' idi → backend'in döndürdüğü Active kural
+// editor açılınca sessizce LogOnly'ye düşüyor + Kaydet'te downgrade
+// ediliyordu. Şimdi Active round-trip (init + save + UI seçim).
 const MODE_OPTIONS = [
   { value: 'LogOnly' as const, label: 'LogOnly — sadece audit' },
   { value: 'Manual' as const, label: 'Manual — operatör onaylar' },
+  { value: 'Active' as const, label: 'Active — otomatik gönderim' },
 ];
 
 interface EditorState {
@@ -248,8 +253,13 @@ function RuleEditor({
   );
   const [templateId, setTemplateId] = useState(initial?.templateId ?? '');
   const [channel, setChannel] = useState<DispatchChannel>(initial?.channel ?? 'InApp');
-  const [ruleMode, setRuleMode] = useState<'LogOnly' | 'Manual'>(
-    (initial?.mode === 'Manual' ? 'Manual' : 'LogOnly') as 'LogOnly' | 'Manual',
+  // Codex #205 P2a — init: backend'in döndürdüğü mode tipini KORU.
+  // 'LogOnly' | 'Manual' | 'Active' arasında valid bir değer varsa direkt
+  // kullan; geçersiz/eksik ise LogOnly default.
+  const [ruleMode, setRuleMode] = useState<'LogOnly' | 'Manual' | 'Active'>(
+    (initial?.mode === 'Manual' || initial?.mode === 'Active')
+      ? initial.mode
+      : 'LogOnly',
   );
   const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 100));
   const [suppressMin, setSuppressMin] = useState(initial?.suppressDuplicateWithinMinutes?.toString() ?? '');
@@ -376,7 +386,7 @@ function RuleEditor({
           </Select>
         </Field>
         <Field label="Mode" required>
-          <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as 'LogOnly' | 'Manual')}>
+          <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as 'LogOnly' | 'Manual' | 'Active')}>
             {MODE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}

@@ -92,6 +92,37 @@ console.log('\n── Codex P2: backend create resolves Person.teamId ───�
     personLookups, 1);
 }
 
+console.log('\n── 7) Backend: Smart Ticket self-assign → Incelemede + bildirim yok ──');
+{
+  const repoSrc = readFileSync(path.join(REPO_ROOT, 'server/db/caseRepository.js'), 'utf8');
+
+  // 7.1 — isSmartTicketCreate sabiti tanımlı
+  expect('7.1 isSmartTicketCreate sabiti create() içinde',
+    /const isSmartTicketCreate =\s*\n?\s*m\.customFields &&/.test(repoSrc), true);
+
+  // 7.2 — isSmartTicketSelfAssigned sabiti tanımlı
+  expect('7.2 isSmartTicketSelfAssigned sabiti create() içinde',
+    /const isSmartTicketSelfAssigned = isSmartTicketCreate && !!m\.assignedPersonId/.test(repoSrc), true);
+
+  // 7.3 — status koşullu: self-assigned ise Incelemede, değilse Acik
+  expect('7.3 status: isSmartTicketSelfAssigned ? Incelemede : Acik',
+    /status:\s*isSmartTicketSelfAssigned \? 'Incelemede' : 'Acik'/.test(repoSrc), true);
+
+  // 7.4 — notifyAssignmentTargets create'te !isSmartTicketSelfAssigned guard'lı
+  expect('7.4 notifyAssignmentTargets create\'te self-assign guard\'lı',
+    /if \(!isSmartTicketSelfAssigned\)\s*\{[\s\S]{0,400}notifyAssignmentTargets\(/.test(repoSrc), true);
+
+  // 7.5 — Klasik vaka davranışı korundu: guard sadece create'teki ilk notify'ı etkiler
+  // (transitionStatus/update içindeki notifyAssignmentTargets'lar guard'sız)
+  const createBlockStart = repoSrc.indexOf('async create(input, actor)');
+  const createBlockEnd = repoSrc.indexOf('\n  async ', createBlockStart + 50);
+  const createBlock = createBlockEnd > createBlockStart
+    ? repoSrc.slice(createBlockStart, createBlockEnd)
+    : repoSrc.slice(createBlockStart);
+  expect('7.5 create bloğunda guard sayısı = 1',
+    (createBlock.match(/if \(!isSmartTicketSelfAssigned\)/g) || []).length, 1);
+}
+
 console.log('');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail > 0 ? 1 : 0);

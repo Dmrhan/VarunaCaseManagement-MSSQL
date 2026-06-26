@@ -373,10 +373,31 @@ export default function App() {
 
   // Admin view → AdminLayout. Ana app sidebar/header'dan tamamen ayrış.
   if (isAdminView(view)) {
+    // Codex #205 P2b — Admin alt-menüye policy uygula.
+    // Flag KAPALIYKEN davranış değişmez (canShowView true döner).
+    // SELF-LOCKOUT guard: SystemAdmin için 'admin-authorization-policies'
+    // her zaman erişilebilir — yanlış policy ile kendini kilitleyip düzeltemez
+    // duruma düşmesin.
+    const canShowAdminView = (key: string): boolean => {
+      if (
+        user?.role === 'SystemAdmin'
+        && key === 'admin-authorization-policies'
+      ) return true;
+      return canShowView(key, true);
+    };
+    if (!canShowAdminView(view)) {
+      // Aktif view artık deny → AdminLayout'tan ana akışa düş.
+      setView('cases');
+      return null;
+    }
     return (
       <AdminLayout
         view={view}
-        onSelectView={(v) => setView(v)}
+        onSelectView={(v) => {
+          if (!canShowAdminView(v)) return;
+          setView(v);
+        }}
+        canShowAdminView={canShowAdminView}
         onExit={() => setView('cases')}
       >
         {view === 'admin-categories' && <AdminCategoriesPage />}

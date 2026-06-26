@@ -53,19 +53,19 @@ const ENFORCEMENT_STATUS: Record<
     description: 'Menü görünürlüğü, feature flag açık olduğunda uygulama navigasyonunda dikkate alınır.',
   },
   resource: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Kayıt işlemi kuralları şu an tanım ve önizleme amaçlıdır; API guard bağlantısı ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu, dosya, izleyici, bağlantı ve toplu güncelleme API uçlarında AUTHORIZATION_RESOURCE_ENFORCEMENT_ENABLED=true iken daraltıcı kontrol olarak çalışır.',
   },
   field: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Alan kuralları şu an tanım ve önizleme amaçlıdır; form bazlı enforcement ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Alan kuralları kapanışta zorunlu alan kontrolünde ve Case Detail Detay sekmesinde VITE_AUTHORIZATION_FIELD_UI_ENFORCEMENT_ENABLED=true iken görünürlük/okunurluk/düzenleme/maskeleme pilotu olarak çalışır.',
   },
   securityFilter: {
-    label: 'Önizleme',
-    tint: 'amber',
-    description: 'Güvenlik filtresi kuralları şu an tanım ve önizleme amaçlıdır; kayıt sorgularına bağlama ayrı fazdır.',
+    label: 'Pilot',
+    tint: 'violet',
+    description: 'Güvenlik filtresi kuralları vaka listeleme, tekil vaka okuma/yazma ve vaka detay yardımcı uçlarında AUTHORIZATION_SECURITY_FILTER_ENFORCEMENT_ENABLED=true iken kayıt kapsamını daraltan pilot filtre olarak çalışır.',
   },
 };
 
@@ -750,12 +750,16 @@ function EnforcementStatusNotice() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">Uygulama durumu:</span>
         <Badge tint="emerald">Menü canlı</Badge>
-        <Badge tint="amber">CRUD / Alan / Güvenlik filtresi önizleme</Badge>
+        <Badge tint="violet">Kayıt işlemi pilot</Badge>
+        <Badge tint="violet">Alan yetkisi pilot</Badge>
+        <Badge tint="violet">Güvenlik filtresi pilot</Badge>
       </div>
       <p className="mt-1 text-amber-800">
-        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır. Kayıt işlemi, alan zorunluluğu
-        ve güvenlik filtresi kuralları bu fazda tanım ve kontrol amaçlıdır; ilgili ekran/API guard bağlantıları
-        ayrı fazlarda devreye alınacaktır.
+        Menü görünürlüğü feature flag açık olduğunda uygulamada dikkate alınır ve mevcut rol yetkilerini daraltır.
+        Kayıt işlemi kuralları seçili vaka ana işlemleri, çözüm adımı, vaka notu, dosya, izleyici, bağlantı ve toplu güncelleme uçlarında flag ile pilot
+        çalışır. Alan yetkisi kuralları kapanışta zorunlu alan kontrolünde ve Case Detail Detay sekmesinde
+        görünürlük/maskeleme/düzenleme pilotunda kullanılır. Güvenlik filtresi kuralları vaka listesi ve etiket
+        doğrulama liste/export uçlarında flag ile daraltıcı kayıt filtresi olarak pilot çalışır.
       </p>
     </div>
   );

@@ -135,11 +135,16 @@ export function AdminLayout({
   view,
   onSelectView,
   onExit,
+  canShowAdminView,
   children,
 }: {
   view: AdminView;
   onSelectView: (v: AdminView) => void;
   onExit: () => void;
+  // Codex #205 P2b — App.tsx'in policy resolver'ı; SystemAdmin self-lockout
+  // guard'ı CALLER tarafında uygulanır. Prop verilmezse alt-menü tamamı
+  // görünür (flag kapalı varsayılan davranışı + geriye dönük uyumluluk).
+  canShowAdminView?: (key: AdminView) => boolean;
   children: ReactNode;
 }) {
   const { user } = useAuth();
@@ -196,13 +201,20 @@ export function AdminLayout({
       <div className="flex flex-1 overflow-hidden">
         {/* Sol nav — gruplu */}
         <aside className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-3 py-4 dark:border-ndark-border dark:bg-ndark-card">
-          {NAV.map((group, gi) => (
+          {NAV.map((group, gi) => {
+            // Codex #205 P2b — deny'lı alt-menü öğelerini gizle. Grup tamamen
+            // gizliyse başlığı da render etme.
+            const visibleItems = group.items.filter((it) =>
+              canShowAdminView ? canShowAdminView(it.key) : true,
+            );
+            if (visibleItems.length === 0) return null;
+            return (
             <div key={group.label} className={gi > 0 ? 'mt-5' : ''}>
               <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-ndark-dim">
                 {group.label}
               </div>
               <ul className="space-y-0.5">
-                {group.items.map((item) => {
+                {visibleItems.map((item) => {
                   const active = view === item.key;
                   return (
                     <li key={item.key}>
@@ -225,7 +237,8 @@ export function AdminLayout({
                 })}
               </ul>
             </div>
-          ))}
+            );
+          })}
         </aside>
 
         <main className="flex-1 overflow-y-auto px-6 py-6">{children}</main>

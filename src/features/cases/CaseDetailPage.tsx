@@ -37,7 +37,6 @@ import {
   Box,
   Boxes,
   Flame,
-  Gauge,
   Layers,
   Package,
   Settings2,
@@ -90,8 +89,13 @@ import {
 } from '@/services/caseService';
 import { aiService, aiErrorMessage, type ChurnConversion } from '@/services/aiService';
 import { accountService, type CaseCustomerContext } from '@/services/accountService';
+import {
+  authorizationService,
+  type AuthorizationFieldState,
+} from '@/services/authorizationService';
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
+import { featureFlags } from '@/config/featureFlags';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
@@ -107,7 +111,6 @@ import {
   OFFER_OUTCOMES,
   PRODUCT_USAGES,
   RESPONSE_LEVELS,
-  SUPPORT_LEVELS,
   SUPPORT_LEVEL_LABELS,
   USAGE_CHANGE_ALERTS,
   type CallDisposition,
@@ -132,6 +135,27 @@ type TabKey =
   // değil, kendi tab'inde. TÜM vakalar için görünür (Smart Ticket gate yok);
   // L2/L3 ve normal vakalar için ikincil troubleshooting yüzeyi.
   | 'solution-steps';
+
+const CASE_DETAIL_AUTHZ_FIELDS = [
+  'description',
+  'resolutionNote',
+  'category',
+  'subCategory',
+  'requestType',
+  'origin',
+  'priority',
+  'smartTicketMeta',
+] as const;
+
+type FieldStateMap = Record<string, AuthorizationFieldState>;
+
+const DEFAULT_AUTHZ_FIELD_STATE: AuthorizationFieldState = {
+  visible: true,
+  readable: true,
+  editable: true,
+  required: false,
+  masked: false,
+};
 
 interface CaseDetailPageProps {
   caseId: string;
@@ -184,6 +208,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
   const [drafts, setDrafts] = useState<Partial<Case>>({});
   const [editingField, setEditingField] = useState<string | null>(null);
   const [savingDrafts, setSavingDrafts] = useState(false);
+  const [fieldStates, setFieldStates] = useState<FieldStateMap>({});
 
   // Status transition artık StatusTransitionPanel içinde (header popover kaldırıldı)
 
@@ -255,6 +280,30 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
       alive = false;
     };
   }, [activeId]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!featureFlags.authorizationFieldUiEnforcementEnabled || !item?.companyId) {
+      setFieldStates({});
+      return () => {
+        alive = false;
+      };
+    }
+    void authorizationService.fieldStates({
+      companyId: item.companyId,
+      scope: 'case.detail',
+      resourceKey: 'case',
+      fields: [...CASE_DETAIL_AUTHZ_FIELDS],
+    }).then((result) => {
+      if (!alive) return;
+      setFieldStates(Object.fromEntries(result.fields.map((f) => [f.fieldKey, f.state])));
+    }).catch(() => {
+      if (alive) setFieldStates({});
+    });
+    return () => {
+      alive = false;
+    };
+  }, [item?.companyId, item?.id]);
 
   // WR-A7b — Vakanın companyId/accountId'sine bağlı catalog lookup.
   useEffect(() => {
@@ -1030,6 +1079,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                 onSelectPrevious={navigateToCase}
                 drafts={drafts}
                 editingField={editingField}
+                fieldStates={fieldStates}
                 onStartEdit={(f) => setEditingField(f)}
                 onCancelEdit={cancelEdit}
                 onCommitDraft={commitDraft}
@@ -3067,6 +3117,7 @@ function DetailTab({
   onSelectPrevious,
   drafts,
   editingField,
+  fieldStates,
   onStartEdit,
   onCancelEdit,
   onCommitDraft,
@@ -3090,6 +3141,7 @@ function DetailTab({
   onSelectPrevious: (id: string) => void;
   drafts: Partial<Case>;
   editingField: string | null;
+  fieldStates: FieldStateMap;
   onStartEdit: (field: string) => void;
   onCancelEdit: () => void;
   onCommitDraft: (field: keyof Case, value: unknown) => void;
@@ -3112,6 +3164,15 @@ function DetailTab({
   // Aktif değer = pending draft varsa onu göster, yoksa item değeri
   const v = <K extends keyof Case>(key: K): Case[K] =>
     (drafts[key] !== undefined ? drafts[key] : item[key]) as Case[K];
+  const fieldState = (fieldKey: string) => fieldStates[fieldKey] ?? DEFAULT_AUTHZ_FIELD_STATE;
+  const canShowField = (fieldKey: string) => fieldState(fieldKey).visible !== false;
+  const canReadField = (fieldKey: string) => fieldState(fieldKey).readable !== false;
+  const canEditField = (fieldKey: string) => fieldState(fieldKey).editable !== false;
+  const isMaskedField = (fieldKey: string) => fieldState(fieldKey).masked === true;
+  const maskedDisplay = <span className="text-slate-400">••••••</span>;
+  const displayValue = (fieldKey: string, node: React.ReactNode) => (
+    canReadField(fieldKey) ? (isMaskedField(fieldKey) ? maskedDisplay : node) : maskedDisplay
+  );
 
   // Atama & eskalasyon kartı — Sınıflandırma kartındakiyle aynı iki katmanlı
   // kompakt tasarım. İkincil katman varsayılan kapalı; içindeki bir alan
@@ -3173,19 +3234,22 @@ function DetailTab({
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
           Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
 
-      <Section title="Açıklama">
-        <InlineEdit
-          fieldKey="description"
-          type="textarea"
-          value={v('description') ?? ''}
-          editing={editingField === 'description'}
-          isDraft={drafts.description !== undefined}
-          onStart={() => onStartEdit('description')}
-          onCommit={(val) => onCommitDraft('description', val)}
-          onCancel={onCancelEdit}
-          renderDisplay={(val) => <ExpandableDescription text={String(val ?? '—')} />}
-        />
-      </Section>
+      {canShowField('description') && (
+        <Section title="Açıklama">
+          <InlineEdit
+            fieldKey="description"
+            type="textarea"
+            value={v('description') ?? ''}
+            editing={editingField === 'description'}
+            isDraft={drafts.description !== undefined}
+            onStart={() => onStartEdit('description')}
+            onCommit={(val) => onCommitDraft('description', val)}
+            onCancel={onCancelEdit}
+            disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
+            renderDisplay={(val) => displayValue('description', <ExpandableDescription text={String(val ?? '—')} />)}
+          />
+        </Section>
+      )}
 
       {/* Devir Notu — en son "Devret" aktarımının notu, Açıklama'nın hemen
           altında. Hiç devir yapılmamışsa veya not boşsa render edilmez. */}
@@ -3215,14 +3279,16 @@ function DetailTab({
       {/* Adım-2 — Çözüm Notu Açıklama'nın hemen ALTINDA (problem → çözüm).
           Yeni stil: emerald sol-şerit + nötr arka plan (PR-B sakin dili).
           Boşsa render edilmez. */}
-      {item.resolutionNote && (
+      {item.resolutionNote && canShowField('resolutionNote') && (
         <Section title="Çözüm Notu">
           <div className="rounded-md bg-slate-50/60 px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200 border-l-2 border-emerald-400 dark:bg-ndark-bg/30 dark:text-ndark-text dark:ring-ndark-border">
             <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
               <CheckCircle2 size={11} />
               Çözüm
             </div>
-            <p className="whitespace-pre-wrap">{item.resolutionNote}</p>
+            <p className="whitespace-pre-wrap">
+              {displayValue('resolutionNote', item.resolutionNote)}
+            </p>
           </div>
         </Section>
       )}
@@ -3232,7 +3298,9 @@ function DetailTab({
           klasik vakalarda null döner. L1 Devir Özeti kartı (Çözüm Adımları
           sekmesinde) farklı bir tab'da gösterir; Detay sekmesindeki bu
           panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
-      <SmartTicketMetaSection item={item} />
+      {canShowField('smartTicketMeta') && canReadField('smartTicketMeta') && !isMaskedField('smartTicketMeta') && (
+        <SmartTicketMetaSection item={item} />
+      )}
 
       {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
           previousCases mevcut findByAccount fetch'inden gelir (yeni istek yok).
@@ -3255,7 +3323,7 @@ function DetailTab({
           bg-white içerik + hairline çerçeve + sıkı ızgara. */}
       {(() => {
         const primaryClassificationItems = [
-          { label: 'Kategori', icon: Layers, node: (
+          { fieldKey: 'category', label: 'Kategori', icon: Layers, node: (
             <InlineEdit
               fieldKey="category"
               type="select"
@@ -3265,10 +3333,12 @@ function DetailTab({
               onStart={() => onStartEdit('category')}
               onCommit={(val) => onCommitDraft('category', val)}
               onCancel={onCancelEdit}
+              disabled={!canEditField('category') || !canReadField('category') || isMaskedField('category')}
               options={categories.map((c) => ({ value: c.category, label: c.category }))}
+              renderDisplay={(val) => displayValue('category', <span className="text-sm text-slate-800">{String(val || '—')}</span>)}
             />
           )},
-          { label: 'Alt Kategori', icon: Box, node: (
+          { fieldKey: 'subCategory', label: 'Alt Kategori', icon: Box, node: (
             <InlineEdit
               fieldKey="subCategory"
               type="select"
@@ -3279,10 +3349,11 @@ function DetailTab({
               onCommit={(val) => onCommitDraft('subCategory', val)}
               onCancel={onCancelEdit}
               options={[{ value: '', label: '— Seçin —' }, ...subCategoryOptions.map((s) => ({ value: s, label: s }))]}
-              disabled={!activeCategory}
+              disabled={!activeCategory || !canEditField('subCategory') || !canReadField('subCategory') || isMaskedField('subCategory')}
+              renderDisplay={(val) => displayValue('subCategory', <span className="text-sm text-slate-800">{String(val || '—')}</span>)}
             />
           )},
-          { label: 'Talep Türü', icon: ListChecks, node: (
+          { fieldKey: 'requestType', label: 'Talep Türü', icon: ListChecks, node: (
             <InlineEdit
               fieldKey="requestType"
               type="select"
@@ -3292,10 +3363,12 @@ function DetailTab({
               onStart={() => onStartEdit('requestType')}
               onCommit={(val) => onCommitDraft('requestType', val)}
               onCancel={onCancelEdit}
+              disabled={!canEditField('requestType') || !canReadField('requestType') || isMaskedField('requestType')}
               options={CASE_REQUEST_TYPES.map((r) => ({ value: r, label: r }))}
+              renderDisplay={(val) => displayValue('requestType', <span className="text-sm text-slate-800">{String(val || '—')}</span>)}
             />
           )},
-          { label: 'Origin', icon: Workflow, node: (
+          { fieldKey: 'origin', label: 'Origin', icon: Workflow, node: (
             <InlineEdit
               fieldKey="origin"
               type="select"
@@ -3305,10 +3378,12 @@ function DetailTab({
               onStart={() => onStartEdit('origin')}
               onCommit={(val) => onCommitDraft('origin', val)}
               onCancel={onCancelEdit}
+              disabled={!canEditField('origin') || !canReadField('origin') || isMaskedField('origin')}
               options={CASE_ORIGINS.map((o) => ({ value: o, label: o }))}
+              renderDisplay={(val) => displayValue('origin', <span className="text-sm text-slate-800">{String(val || '—')}</span>)}
             />
           )},
-        ];
+        ].filter((i) => canShowField(i.fieldKey));
 
         // WR-A7b — Catalog Paket/Ürün inline edit; renderDisplay'in kullandığı
         // aynı id/name çözümlemesi burada da reuse edilir.
@@ -3510,27 +3585,6 @@ function DetailTab({
                 renderDisplay={() => (
                   <span className="text-sm text-slate-800">
                     {ESCALATION_LEVEL_LABELS[(drafts.escalationLevel as EscalationLevel | undefined) ?? item.escalationLevel]}
-                  </span>
-                )}
-              />
-            )},
-            // WR-A5 / PM-03 — Destek seviyesi. Inline edit Supervisor+ (BFF guard
-            // 403 verir; UI gating role bazlı zaten yok — backend response toast
-            // gösterir). Phase 1 foundation; SLA/routing entegrasyonu Phase 2.
-            { label: 'Destek Seviyesi', icon: Gauge, node: (
-              <InlineEdit
-                fieldKey="supportLevel"
-                type="select"
-                value={(v('supportLevel') as string | undefined) ?? 'L1'}
-                editing={editingField === 'supportLevel'}
-                isDraft={drafts.supportLevel !== undefined}
-                onStart={() => onStartEdit('supportLevel')}
-                onCommit={(val) => onCommitDraft('supportLevel', val)}
-                onCancel={onCancelEdit}
-                options={SUPPORT_LEVELS.map((l) => ({ value: l, label: SUPPORT_LEVEL_LABELS[l] }))}
-                renderDisplay={() => (
-                  <span className="text-sm text-slate-800">
-                    {SUPPORT_LEVEL_LABELS[((drafts.supportLevel as SupportLevel | undefined) ?? item.supportLevel ?? 'L1') as SupportLevel]}
                   </span>
                 )}
               />

@@ -121,7 +121,31 @@ function mountSystemCrud(path, repo) {
   }));
 }
 
-mountSystemCrud('third-parties',     thirdPartyRepo);
+// ─────────────────────────────────────────────────────────────────
+// Third Parties — şirket kapsamlı (SystemAdmin tüm şirketleri yönetir)
+// ─────────────────────────────────────────────────────────────────
+router.get('/third-parties', asyncRoute(async (req, res) => {
+  requireSystemAdminOnly(req);
+  const companyId = req.query.companyId || undefined;
+  const items = await thirdPartyRepo.list(companyId);
+  res.json({ value: items });
+}));
+router.post('/third-parties', asyncRoute(async (req, res) => {
+  requireSystemAdminOnly(req);
+  const item = await thirdPartyRepo.create(req.body ?? {});
+  res.status(201).json(item);
+}));
+router.patch('/third-parties/:id', asyncRoute(async (req, res) => {
+  requireSystemAdminOnly(req);
+  const item = await thirdPartyRepo.update(req.params.id, req.body ?? {});
+  res.json(item);
+}));
+router.delete('/third-parties/:id', asyncRoute(async (req, res) => {
+  requireSystemAdminOnly(req);
+  const result = await thirdPartyRepo.remove(req.params.id);
+  res.json(result);
+}));
+
 mountSystemCrud('document-types',    documentTypeRepo);
 mountSystemCrud('persons',           personRepo);
 mountSystemCrud('offered-solutions', offeredSolutionRepo);

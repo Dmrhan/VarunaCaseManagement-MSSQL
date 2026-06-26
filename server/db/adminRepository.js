@@ -48,26 +48,30 @@ class AdminError extends Error {
 // Third Parties
 // ─────────────────────────────────────────────────────────────────
 export const thirdPartyRepo = {
-  async list() {
-    return prisma.thirdParty.findMany({ orderBy: { name: 'asc' } });
+  async list(companyId) {
+    const where = companyId ? { companyId } : {};
+    return prisma.thirdParty.findMany({ where, orderBy: { name: 'asc' } });
   },
   async create(input) {
+    const companyId = input.companyId ?? null;
     const exists = await prisma.thirdParty.findFirst({
-      where: { name: { equals: input.name.trim() } },
+      where: { name: { equals: input.name.trim() }, companyId },
     });
-    if (exists) throw new AdminError('Aynı isimde 3. parti zaten mevcut.');
+    if (exists) throw new AdminError('Aynı isimde 3. parti bu şirkette zaten mevcut.');
     return prisma.thirdParty.create({
       data: {
         name: input.name.trim(),
         description: input.description?.trim() || null,
         isActive: input.isActive ?? true,
+        companyId,
       },
     });
   },
   async update(id, patch) {
     if (patch.name) {
+      const current = await prisma.thirdParty.findUnique({ where: { id }, select: { companyId: true } });
       const dup = await prisma.thirdParty.findFirst({
-        where: { id: { not: id }, name: { equals: patch.name.trim() } },
+        where: { id: { not: id }, name: { equals: patch.name.trim() }, companyId: current?.companyId ?? null },
       });
       if (dup) throw new AdminError('Aynı isimde başka 3. parti var.');
     }
@@ -83,7 +87,6 @@ export const thirdPartyRepo = {
   async remove(id) {
     const usage = await prisma.case.count({ where: { thirdPartyId: id } });
     if (usage > 0) {
-      // Veriye bağlı: pasifleştir
       return prisma.thirdParty.update({ where: { id }, data: { isActive: false } });
     }
     await prisma.thirdParty.delete({ where: { id } });
@@ -906,7 +909,18 @@ export const userRepo = {
     const fullName = String(input.fullName ?? '').trim() || email.split('@')[0];
     const passwordHash = await bcrypt.hash(password, 12);
 
+    const teamId = input.teamId ? String(input.teamId) : null;
+
     const created = await prisma.$transaction(async (tx) => {
+      const person = await tx.person.create({
+        data: {
+          name: fullName,
+          teamId: teamId || null,
+          isActive: true,
+          isTeamLead: false,
+          supportLevel: 'L1',
+        },
+      });
       const user = await tx.user.create({
         data: {
           email,
@@ -916,6 +930,7 @@ export const userRepo = {
           passwordHash,
           mustChangePassword: true,
           passwordUpdatedAt: new Date(),
+          personId: person.id,
         },
       });
       await tx.userCompany.create({
