@@ -4646,8 +4646,19 @@ export const watcherRepo = {
   /** Kullanıcının izlediği aktif vakalar — Watcher Inbox (ileri faz) için. */
   async listForUser(userId, allowedCompanyIds, securityWhere = null) {
     if (!userId || !allowedCompanyIds || allowedCompanyIds.length === 0) return [];
+    const where = { userId, companyId: { in: allowedCompanyIds } };
+    if (
+      securityWhere &&
+      typeof securityWhere === 'object' &&
+      !Array.isArray(securityWhere) &&
+      Object.keys(securityWhere).length > 0
+    ) {
+      // Security filter must be part of the initial relation query so `take`
+      // caps visible watched cases, not the unfiltered watcher rows.
+      where.case = { is: securityWhere };
+    }
     const rows = await prisma.caseWatcher.findMany({
-      where: { userId, companyId: { in: allowedCompanyIds } },
+      where,
       orderBy: { addedAt: 'desc' },
       take: 200,
       select: {
@@ -4668,25 +4679,12 @@ export const watcherRepo = {
         },
       },
     });
-    let items = rows
+    return rows
       .filter((r) => r.case)
       .map((r) => ({
         ...shape(r.case),
         addedAt: r.addedAt,
       }));
-    if (
-      securityWhere &&
-      typeof securityWhere === 'object' &&
-      !Array.isArray(securityWhere) &&
-      Object.keys(securityWhere).length > 0
-    ) {
-      const visibleIds = new Set((await prisma.case.findMany({
-        where: mergeSecurityWhere({ id: { in: items.map((item) => item.id) } }, securityWhere),
-        select: { id: true },
-      })).map((row) => row.id));
-      items = items.filter((item) => visibleIds.has(item.id));
-    }
-    return items;
   },
 };
 
