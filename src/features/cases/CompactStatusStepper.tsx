@@ -1,24 +1,33 @@
 /**
- * CompactStatusStepper — Vaka Detay sticky header'da 3-fazlı renk-kodlu çizgi.
+ * CompactStatusStepper — Vaka Detay sticky header'da 3-fazlı omurga +
+ * 7 statünün TIKLANIR stepper'ı.
  *
  * Görev: Statü panelini geniş 7 kartlık alandan tek satır kompakt görsele
  * indirgemek. Statü enum'una / allowed-transition kurallarına / reason zorunluluğuna
  * DOKUNULMAZ — yalnız görsel/sunum katmanı.
  *
  * Davranış:
- *  - 3 faz omurgası (Açık → İşlemde → Sonuç).
- *  - Aktif düğüm rengi alt-durumdan gelir (Eskalasyon=mercan, 3.parti=gri,
- *    normal İşlemde=amber, Çözüldü=yeşil, İptal=gri, YenidenAcildi=mor, Açık=mavi).
- *  - Tamamlanan omurga + bağlantı çizgisi yeşil + check ikonu.
- *  - Aksiyon satırı: o anki statüden geçerli geçişlerin en sık 2'si açık buton;
- *    geri kalanlar "⋯" taşma menüsünde. Butonlar hedef statünün rengini taşır.
- *  - Geçişlerden reason zorunlu olanlar (Çözüldü/İptal/Eskalasyon/3.parti)
+ *  - Üstte 3 faz omurgası (Açık → İşlemde → Sonuç) — eskisi gibi.
+ *  - ALTINDA 7 STATÜ CHIP DIZISI: Açık · İncelemede · 3. Parti Bekliyor ·
+ *    Eskale Edildi · Çözüldü · Yeniden Açıldı · İptal Edildi.
+ *  - Her chip MEVCUT STATÜYE GÖRE gate'lenir:
+ *      • aktif (item.status === target)        → ring + dolu, tıklanamaz
+ *      • izinli (STATUS_TRANSITIONS[item.status].includes(target))
+ *                                              → renkli, tıklanır, hover
+ *      • izinsiz                               → gri/sönük, disabled
+ *  - Reason gerektiren geçişler (Çözüldü/İptal/Eskalasyon/3.parti)
  *    StatusTransitionPanel'i modal içinde initialPending preselect ile açar.
- *    Reason gerektirmeyenler (Açık→İncelemede, 3.parti→İncelemede, …) doğrudan
+ *    Reason gerektirmeyenler (Açık→İncelemede, 3.parti→İncelemede,
+ *    Eskalasyon→İncelemede, Yeniden Açıldı→İncelemede) doğrudan
  *    caseService.transitionStatus çağırır.
+ *  - "Durumu değiştir ▾" dropdown'ı KALDIRILDI — tüm geçişler tıklanır
+ *    chip'lerden yapılır.
  *
- * Reason/closure logic yeniden YAZILMAZ — mevcut StatusTransitionPanel modal
- * içinde bütün halinde reuse edilir.
+ * Reason/closure/allowed-transition/rol logic yeniden YAZILMAZ —
+ *  - STATUS_TRANSITIONS (types.ts) izin matrisi
+ *  - STATUS_REQUIRES_REASON (types.ts) reason zorunluluk matrisi
+ *  - StatusTransitionPanel mevcut reason/closure/checklist modal'ı
+ * bütün halinde reuse edilir.
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import {
@@ -26,7 +35,6 @@ import {
   Ban,
   Check,
   CheckCircle2,
-  ChevronDown,
   Flag,
   Inbox,
   PauseCircle,
@@ -34,7 +42,6 @@ import {
   Search as SearchIcon,
   TrendingUp,
 } from 'lucide-react';
-import { Popover } from '@/components/ui/Popover';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { caseService } from '@/services/caseService';
@@ -300,91 +307,82 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
         )}
       </div>
 
-      {/* Dikey hairline — faz rayı / işlem ayrımı */}
-      {allowed.length > 0 && (
-        <span
-          aria-hidden="true"
-          className="hidden h-6 border-l border-slate-200 sm:block dark:border-ndark-border"
-        />
-      )}
+      {/* 7-state TIKLANIR stepper — "Durumu değiştir" dropdown'ı YERİNE.
+          Her statü bir chip; mevcut duruma göre GATING:
+            • aktif    → ring + dolu, tıklanamaz
+            • izinli   → renkli border + hover, tıklanır
+            • izinsiz  → gri/sönük, disabled (allowed listede değil = veri
+              bütünlüğü; eski dropdown'da zaten gösterilmiyordu)
+          Allowed-transition + reason zorunluluğu MEVCUT matrislerden okunur
+          (STATUS_TRANSITIONS + STATUS_REQUIRES_REASON, types.ts).
+          Tıklayınca handleClick mevcut akışı tetikler — reason'lı geçişler
+          StatusTransitionPanel modal'ına gider, reason'sız geçişler doğrudan
+          caseService.transitionStatus. Bu satır wrap eder; dar ekranda
+          alt satıra düşer. */}
+      <ul
+        className="flex flex-wrap items-center gap-1.5"
+        role="group"
+        aria-label="Statü değiştir"
+      >
+        {(Object.keys(CASE_STATUS_LABELS) as CaseStatus[]).map((target) => {
+          const v = STATUS_VISUAL[target];
+          const isCurrent = target === item.status;
+          const isAllowed = allowed.includes(target);
+          const isBusy = directSubmitting === target;
+          const needsReason = STATUS_REQUIRES_REASON[target];
 
-      {/* Tek işlem kontrolü — "Durumu değiştir ▾" ghost link.
-          Şekil/anlam ayrımı: durum = nokta+etiket (faz rayı); işlem = SÖNÜK
-          link (border yok). Renkli statü diline karışmaz; menü içindeki
-          hedeflerde sadece küçük dot hedef rengini taşır. */}
-      {allowed.length > 0 && (
-        <Popover
-          trigger={({ open, toggle }) => (
-            <button
-              type="button"
-              onClick={toggle}
-              disabled={!!directSubmitting}
-              className={`inline-flex items-center gap-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                open
-                  ? 'text-slate-900 dark:text-ndark-text'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-ndark-muted dark:hover:text-ndark-text'
-              }`}
-              title="Statü değiştir"
-              aria-label="Durumu değiştir"
-              aria-haspopup="menu"
-              aria-expanded={open}
-            >
-              Durumu değiştir
-              <ChevronDown size={12} />
-              {directSubmitting && <span className="ml-0.5 animate-pulse">…</span>}
-            </button>
-          )}
-          align="start"
-          width={260}
-          minWidth={260}
-          usePortal
-          nowrap
-        >
-          {({ close }) => (
-            <ul className="py-1" role="menu" aria-label="Geçerli geçişler">
-              {allowed.map((target) => {
-                const v = STATUS_VISUAL[target];
-                return (
-                  <li key={target} role="none">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        close();
-                        handleClick(target);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-ndark-text dark:hover:bg-ndark-card"
-                      title={
-                        STATUS_REQUIRES_REASON[target]
-                          ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
-                          : `${CASE_STATUS_LABELS[target]} olarak işaretle`
-                      }
-                    >
-                      {/* Küçük renkli nokta — hedef statü rengi ipucu */}
-                      <span
-                        className={`flex h-2 w-2 shrink-0 rounded-full ${v.dotColor}`}
-                        aria-hidden="true"
-                      />
-                      {/* Cila-3 (madde #4) — etiket = statü adı (CASE_STATUS_LABELS),
-                          fiil değil. Sade + PR-C A9 ile tutarlı ("Eskale Edildi"). */}
-                      <span className="flex-1 font-medium">{CASE_STATUS_LABELS[target]}</span>
-                      {STATUS_REQUIRES_REASON[target] && (
-                        <span
-                          className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-slate-400"
-                          aria-label="Gerekçe gerekir"
-                        >
-                          <AlertTriangle size={10} aria-hidden="true" />
-                          gerekçe
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Popover>
-      )}
+          // Mevcut = ring + dolu (renk-kodlu). İzinli = renkli border +
+          // beyaz zemin, hover'da chipBg. İzinsiz = sönük gri (CTA değil;
+          // okunabilir kalır → kullanıcı eksiksiz haritayı görür).
+          const stateCls = isCurrent
+            ? `${v.dotColor} text-white ring-2 ${v.ringColor} cursor-default`
+            : isAllowed
+              ? `bg-white border ${v.chipText} border-current hover:${v.chipBg} dark:bg-ndark-card`
+              : 'bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed dark:bg-ndark-card dark:text-ndark-muted dark:border-ndark-border opacity-60';
+
+          const ariaTitle = isCurrent
+            ? `${CASE_STATUS_LABELS[target]} — mevcut durum`
+            : isAllowed
+              ? needsReason
+                ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
+                : `${CASE_STATUS_LABELS[target]} olarak işaretle`
+              : `${CASE_STATUS_LABELS[target]} — bu durumdan geçilemez`;
+
+          return (
+            <li key={target}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isAllowed || isCurrent) return;
+                  handleClick(target);
+                }}
+                disabled={!isAllowed || isCurrent || !!directSubmitting}
+                aria-current={isCurrent ? 'step' : undefined}
+                aria-disabled={!isAllowed || isCurrent}
+                title={ariaTitle}
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium leading-none transition ${stateCls} disabled:cursor-not-allowed`}
+              >
+                <span aria-hidden="true" className="flex h-3 w-3 items-center justify-center">
+                  {v.icon}
+                </span>
+                <span>{CASE_STATUS_LABELS[target]}</span>
+                {isAllowed && needsReason && !isCurrent && (
+                  <span
+                    aria-label="Gerekçe gerekir"
+                    title="Gerekçe penceresi açılır"
+                    className="-mr-0.5 inline-flex items-center"
+                  >
+                    <AlertTriangle size={10} aria-hidden="true" />
+                  </span>
+                )}
+                {isBusy && (
+                  <span aria-hidden="true" className="ml-0.5 animate-pulse">…</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
 
       {/* Reason zorunlu hedef için modal — StatusTransitionPanel'i bütün halinde
           reuse eder; preselect initialPending ile akış doğrudan reason fazına gider. */}

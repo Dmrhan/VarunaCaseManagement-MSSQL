@@ -52,7 +52,8 @@
     "smoke:account-id-standard": "node --env-file=.env scripts/smoke-account-id-standardization.js",
     "smoke:account-phone-slots-import": "node --env-file=.env scripts/smoke-account-phone-slots-import.js",
     "smoke:import-integrity": "node --env-file=.env scripts/smoke-import-integrity-phone-tax.js",
-    "smoke:alotech-graceful": "node scripts/smoke-alotech-graceful-degrade.js"
+    "smoke:alotech-graceful": "node scripts/smoke-alotech-graceful-degrade.js",
+    "smoke:status-bar-7state": "node scripts/smoke-status-bar-clickable-7state-static.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
