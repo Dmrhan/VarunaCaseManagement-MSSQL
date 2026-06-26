@@ -47,8 +47,8 @@ function expectNotContains(name, content, needle) {
     src, 'const NODE_ORDER = Object.keys(CASE_STATUS_LABELS) as CaseStatus[]');
   expectContains('Tek <ol> 7 düğüm konteyneri',
     src, '<ol');
-  expectContains('Daire düğüm boyutu h-7 w-7 rounded-full (3-faz omurga stili)',
-    src, 'h-7 w-7 items-center justify-center rounded-full');
+  expectContains('Daire düğüm (default h-7 w-7, current h-9 w-9)',
+    src, 'h-7 w-7 ${v.dotColor}');
   expectContains('Yatay bağlantı çizgisi (connector h-1 flex-1)',
     src, 'h-1 flex-1 rounded-full');
   expectContains('Alt etiket (text-[11px])',
@@ -73,22 +73,57 @@ function expectNotContains(name, content, needle) {
   expectContains('aria-current="step" mevcut için (li üzerinde)',
     src, "aria-current={isCurrent ? 'step' : undefined}");
 
-  console.log('\n=== Görsel renk-kodu + STATUS_VISUAL reuse ===');
-  expectContains('current = dotColor + ring-4 (3-faz stilinde aktif düğüm)',
-    src, '${v.dotColor} text-white ring-4 ${v.ringColor}');
-  expectContains('allowed (interactive) = dotColor dolu + hover ring',
+  console.log('\n=== 4 görsel durum (PAST/CURRENT/REACHABLE/LOCKED) ===');
+  expectContains('isPast (idx < currentIdx)', src, 'const isPast = idx < currentIdx;');
+  expectContains('PAST → emerald-500 dolu + Check ikonu',
+    src, 'bg-emerald-500 text-white');
+  expectContains('PAST için Check ikon render',
+    src, '<Check size={14}');
+  expectContains('CURRENT daha BÜYÜK (h-9 w-9 + shadow-sm)',
+    src, 'h-9 w-9 ${v.dotColor} text-white ring-4 ${v.ringColor} shadow-sm');
+  expectContains('REACHABLE = dotColor dolu + hover ring',
     src, 'hover:${v.ringColor}');
-  expectContains('disallowed = dashed border + opacity-60',
+  expectContains('LOCKED = dashed border + opacity-60',
     src, 'border-dashed border-slate-300');
-  expectContains('Connector renk (mevcut-öncesi = emerald hafif tonu)',
+  expectContains('PAST connector emerald-400 (daha doygun)',
     src, "idx <= currentIdx");
   expectContains('Reason ikonu yalnız interactive + needsReason için',
     src, 'interactive && needsReason');
 
+  console.log('\n=== Aksiyon vs Durum etiket dili ===');
+  expectContains('STATUS_NOUN_LABEL map (durum adı)',
+    src, 'const STATUS_NOUN_LABEL: Record<CaseStatus, string>');
+  expectContains('STATUS_ACTION_LABEL map (aksiyon fiili)',
+    src, 'const STATUS_ACTION_LABEL: Record<CaseStatus, string | null>');
+  expectContains('Aksiyon: "İncelemeye al"',
+    src, "'İncelemede':          'İncelemeye al'");
+  expectContains('Aksiyon: "3rd Partiye gönder"',
+    src, "'3rdPartyBekleniyor':  '3rd Partiye gönder'");
+  expectContains('Aksiyon: "Eskale et"',
+    src, "'Eskalasyon':          'Eskale et'");
+  expectContains('Aksiyon: "Çöz"',
+    src, "'Çözüldü':             'Çöz'");
+  expectContains('Aksiyon: "Yeniden aç"',
+    src, "'YenidenAcildi':       'Yeniden aç'");
+  expectContains('Aksiyon: "İptal et"',
+    src, "'İptalEdildi':         'İptal et'");
+  expectContains('Açık için aksiyon yok (null — başlangıç)',
+    src, "'Açık':                null");
+  expectContains('Durum adı: "3rd Partide"',
+    src, "'3rdPartyBekleniyor':  '3rd Partide'");
+  expectContains('Durum adı: "Eskale edildi" (küçük e)',
+    src, "'Eskalasyon':          'Eskale edildi'");
+  expectContains('Durum adı: "Yeniden açıldı" (küçük a)',
+    src, "'YenidenAcildi':       'Yeniden açıldı'");
+  expectContains('Durum adı: "İptal edildi" (küçük e)',
+    src, "'İptalEdildi':         'İptal edildi'");
+  expectContains('displayLabel = interactive ? action : noun',
+    src, 'interactive && actionLabel');
+
   console.log('\n=== Responsive (dar ekran) ===');
   expectContains('overflow-x-auto', src, 'overflow-x-auto');
-  expectContains('flex-1 min-w-[80px] sonraki düğümlerde',
-    src, 'flex-1 min-w-[80px]');
+  expectContains('flex-1 min-w-[88px] sonraki düğümlerde (4-state için biraz daha geniş)',
+    src, 'flex-1 min-w-[88px]');
   expectContains('shrink-0 düğüm container\'larında',
     src, 'shrink-0');
 

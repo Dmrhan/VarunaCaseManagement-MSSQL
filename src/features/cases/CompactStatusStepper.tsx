@@ -33,6 +33,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Ban,
+  Check,
   CheckCircle2,
   Inbox,
   PauseCircle,
@@ -152,6 +153,40 @@ const STATUS_VISUAL: Record<
 // types.ts'de DURUR (başka kullanıcıları olabilir); bu component artık
 // kullanmıyor.
 
+/**
+ * Component LOKAL etiket map'leri — kullanıcı dilinde "DURUM" (ad) vs
+ * "AKSİYON" (fiil) ayrımı. CASE_STATUS_LABELS (types.ts) DOKUNULMAZ;
+ * burada parallel görüntü dilidir. DB değerleri / enum identifier'lar
+ * korunur.
+ *
+ * Davranış:
+ *   - GEÇMİŞ / MEVCUT düğüm → DURUM adı (nerede olunduğu): "İncelemede"
+ *   - ULAŞILABİLİR hedef düğüm → AKSİYON fiili (tıklayınca ne olacak):
+ *     "İncelemeye al"
+ *   - ULAŞILAMAZ düğüm → DURUM adı (sönük)
+ *
+ * Açık başlangıçtır; aksiyonu yoktur (Açık'a geri dönülmez).
+ */
+const STATUS_NOUN_LABEL: Record<CaseStatus, string> = {
+  'Açık':                'Açık',
+  'İncelemede':          'İncelemede',
+  '3rdPartyBekleniyor':  '3rd Partide',
+  'Eskalasyon':          'Eskale edildi',
+  'Çözüldü':             'Çözüldü',
+  'YenidenAcildi':       'Yeniden açıldı',
+  'İptalEdildi':         'İptal edildi',
+};
+
+const STATUS_ACTION_LABEL: Record<CaseStatus, string | null> = {
+  'Açık':                null, // başlangıç — aksiyon yok
+  'İncelemede':          'İncelemeye al',
+  '3rdPartyBekleniyor':  '3rd Partiye gönder',
+  'Eskalasyon':          'Eskale et',
+  'Çözüldü':             'Çöz',
+  'YenidenAcildi':       'Yeniden aç',
+  'İptalEdildi':         'İptal et',
+};
+
 export function CompactStatusStepper({ item, onApplied, wideConnectors = false }: CompactStatusStepperProps) {
   const { toast } = useToast();
   const allowed = useMemo(() => STATUS_TRANSITIONS[item.status], [item.status]);
@@ -175,7 +210,7 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
         toast({
           type: 'info',
           title: 'Statü güncellendi',
-          message: `${updated.caseNumber} → ${CASE_STATUS_LABELS[target]}`,
+          message: `${updated.caseNumber} → ${STATUS_NOUN_LABEL[target]}`,
         });
         onApplied(updated);
       } else {
@@ -225,51 +260,70 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
           const v = STATUS_VISUAL[target];
           const isCurrent = target === item.status;
           const isAllowed = allowed.includes(target);
-          const isCompleted = idx < currentIdx;
+          // 4 GÖRSEL DURUM — kullanıcı dilinde net ayrılır:
+          //   • PAST       (geçmiş)        → idx < currentIdx, lineer geçmiş
+          //   • CURRENT    (mevcut)        → item.status (BURADASIN)
+          //   • REACHABLE  (ulaşılabilir)  → STATUS_TRANSITIONS allowed
+          //   • LOCKED     (ulaşılamaz)    → diğer hepsi
+          // Etiket dili: PAST/CURRENT/LOCKED → durum adı (STATUS_NOUN_LABEL)
+          //              REACHABLE         → aksiyon fiili (STATUS_ACTION_LABEL)
+          const isPast = idx < currentIdx;
+          const interactive = isAllowed && !isCurrent;
           const isBusy = directSubmitting === target;
           const needsReason = STATUS_REQUIRES_REASON[target];
-          const interactive = isAllowed && !isCurrent;
+          const actionLabel = STATUS_ACTION_LABEL[target];
+          // Ulaşılabilir hedefin aksiyon fiili olmazsa (Açık başlangıç) durum
+          // adına düş; pratikte interactive Açık olmaz (allowed listesinde
+          // Açık yok). Defensive.
+          const displayLabel = interactive && actionLabel
+            ? actionLabel
+            : STATUS_NOUN_LABEL[target];
 
-          // Daire düğümün rengi — STATUS_VISUAL.dotColor MEVCUT renk meta
-          // (İncelemede=amber, Eskalasyon=rose, Çözüldü=emerald, vs.).
-          const nodeBase = 'flex h-7 w-7 items-center justify-center rounded-full transition';
+          // Daire stilleri — 4 durum × görsel ayrım:
+          //   PAST      → emerald dolu + beyaz Check; "bu durumdan geçildi"
+          //   CURRENT   → STATUS_VISUAL.dotColor + ring-4 + iconLg + scale
+          //               (daha büyük halo); "BURADASIN"
+          //   REACHABLE → dotColor dolu + opacity-90 + hover ring; canlı CTA
+          //   LOCKED    → dashed gri + slate-50 + opacity-60; pasif
+          const nodeBase = 'flex items-center justify-center rounded-full transition';
           const nodeCls = isCurrent
-            ? `${nodeBase} ${v.dotColor} text-white ring-4 ${v.ringColor}`
-            : interactive
-              ? `${nodeBase} ${v.dotColor} text-white opacity-90 hover:opacity-100 hover:ring-4 hover:${v.ringColor} cursor-pointer`
-              : isCompleted
-                ? `${nodeBase} border-2 border-slate-300 bg-white text-slate-400 dark:bg-ndark-card dark:border-ndark-border`
-                : `${nodeBase} border-2 border-dashed border-slate-300 bg-slate-50 text-slate-300 dark:bg-ndark-card dark:border-ndark-border opacity-60`;
+            ? `${nodeBase} h-9 w-9 ${v.dotColor} text-white ring-4 ${v.ringColor} shadow-sm`
+            : isPast
+              ? `${nodeBase} h-7 w-7 bg-emerald-500 text-white`
+              : interactive
+                ? `${nodeBase} h-7 w-7 ${v.dotColor} text-white opacity-90 hover:opacity-100 hover:ring-4 hover:${v.ringColor} cursor-pointer`
+                : `${nodeBase} h-7 w-7 border-2 border-dashed border-slate-300 bg-slate-50 text-slate-300 dark:bg-ndark-card dark:border-ndark-border opacity-60`;
 
           // Bağlantı çizgisi (connector) — düğümün SOLUNDAKİ çizgi.
-          // İlk düğümün solunda yok. 7-state'te lineer "tamamlandı" anlamı
-          // zayıf; bağlantı çizgileri kararlı slate; mevcut'a kadar olanlar
-          // hafif yeşil tonla (geçmiş hissi) — opsiyonel ama 3-faz omurgayı
-          // çağrıştırır.
+          // PAST düğüme kadar olan connector'lar yeşil (akış); diğerleri slate.
           const connectorClass = idx <= currentIdx
-            ? 'bg-emerald-300/70'
+            ? 'bg-emerald-400'
             : 'bg-slate-200 dark:bg-ndark-border';
 
+          // aria-label/title — durum adı + (var ise) aksiyon ipucu
           const ariaTitle = isCurrent
-            ? `${CASE_STATUS_LABELS[target]} — mevcut durum`
-            : interactive
-              ? needsReason
-                ? `${CASE_STATUS_LABELS[target]} — gerekçe penceresi açılır`
-                : `${CASE_STATUS_LABELS[target]} olarak işaretle`
-              : `${CASE_STATUS_LABELS[target]} — bu durumdan geçilemez`;
+            ? `${STATUS_NOUN_LABEL[target]} — şu an buradasın`
+            : isPast
+              ? `${STATUS_NOUN_LABEL[target]} — bu durumdan geçildi`
+              : interactive
+                ? needsReason
+                  ? `${actionLabel ?? STATUS_NOUN_LABEL[target]} — gerekçe penceresi açılır`
+                  : actionLabel ?? STATUS_NOUN_LABEL[target]
+                : `${STATUS_NOUN_LABEL[target]} — bu durumdan geçilemez`;
 
           return (
             <li
               key={target}
-              className={`flex shrink-0 items-start ${idx > 0 ? 'flex-1 min-w-[80px]' : 'min-w-[68px]'}`}
+              className={`flex shrink-0 items-start ${idx > 0 ? 'flex-1 min-w-[88px]' : 'min-w-[72px]'}`}
               aria-current={isCurrent ? 'step' : undefined}
             >
-              {/* Soldaki bağlantı çizgisi — düğümün ÜST yarısı hizasında
-                  (mt-3 ≈ daire merkez yüksekliği). İlk düğümde yok. */}
+              {/* Soldaki bağlantı çizgisi — düğümün ÜST yarısı hizasında.
+                  current büyük (h-9) olduğunda merkez hizası daha aşağıda;
+                  mt-4 ile orta noktayı çoğunluk için yakalar. */}
               {idx > 0 && (
                 <span
                   aria-hidden="true"
-                  className={`mt-3 h-1 flex-1 rounded-full ${connectorClass}`}
+                  className={`mt-3.5 h-1 flex-1 rounded-full ${connectorClass}`}
                 />
               )}
 
@@ -290,7 +344,11 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
                 <span className={nodeCls}>
                   {isBusy ? (
                     <span aria-hidden="true" className="animate-pulse text-[10px]">…</span>
+                  ) : isPast ? (
+                    // PAST → beyaz Check (kullanıcı isteği: "yeşil daire + ✓")
+                    <Check size={14} strokeWidth={3} aria-hidden="true" />
                   ) : isCurrent ? (
+                    // CURRENT → daha büyük iconLg
                     v.iconLg ?? v.icon
                   ) : (
                     v.icon
@@ -299,13 +357,15 @@ export function CompactStatusStepper({ item, onApplied, wideConnectors = false }
                 <span
                   className={`text-center text-[11px] leading-tight ${
                     isCurrent
-                      ? 'font-semibold text-slate-900 dark:text-ndark-text'
-                      : interactive
-                        ? 'font-medium text-slate-700 dark:text-ndark-text'
-                        : 'text-slate-400 dark:text-ndark-muted'
+                      ? 'font-bold text-slate-900 dark:text-ndark-text'
+                      : isPast
+                        ? 'font-medium text-emerald-700 dark:text-emerald-300'
+                        : interactive
+                          ? `font-semibold ${v.chipText}`
+                          : 'text-slate-400 dark:text-ndark-muted'
                   }`}
                 >
-                  {CASE_STATUS_LABELS[target]}
+                  {displayLabel}
                   {interactive && needsReason && (
                     <span
                       aria-label="Gerekçe gerekir"
