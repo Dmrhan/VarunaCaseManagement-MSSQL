@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
+import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
 import { prisma } from '../db/client.js';
 import { signStorageToken, verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
@@ -2164,6 +2165,41 @@ router.get(
       fileName: att.fileName,
       mimeType: att.mimeType,
       fileSize: att.fileSize,
+    });
+  }),
+);
+
+/**
+ * Mail M5-extension — GET /api/cases/:id/from-aliases
+ *
+ * Composer (M6.2) From dropdown lookup. Vaka companyId scope'unda aktif
+ * FromAlias listesi döner. Mevcut M6.1 /:id/emails desenleriyle aynı
+ * scope guard (caseRepository.get + assertCaseSecurityFilterAccess).
+ *
+ * Response: { items: [{ id, address, displayName, isDefault }, ...] }
+ *
+ * Default seçilen ilk satır; composer dropdown 1 satırsa otomatik gizli
+ * + seçili (M6.2 davranışı).
+ */
+router.get(
+  '/:id/from-aliases',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const items = await externalMailFromAliasRepo.listActive(c.companyId);
+    // Composer dropdown'a sade response — admin alanlarını filtrele.
+    res.json({
+      items: items.map((a) => ({
+        id: a.id,
+        address: a.address,
+        displayName: a.displayName,
+        isDefault: a.isDefault,
+      })),
     });
   }),
 );

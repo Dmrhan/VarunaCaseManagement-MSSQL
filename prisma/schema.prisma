@@ -167,6 +167,8 @@ model Company {
   externalDevOpsSetting      ExternalDevOpsSetting?
   /// Mail M5 — Per-tenant SMTP/IMAP entegrasyon ayarları.
   externalMailSetting        ExternalMailSetting?
+  /// Mail M5-extension — Per-company çoklu gönderen adresi alias'ları.
+  externalMailFromAliases    ExternalMailSettingFromAlias[]
   /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemeleri.
   learnedSenderAccounts      LearnedSenderAccount[]
   /// Mail M6.1 — Tenant-scoped vaka mailleri.
@@ -374,6 +376,17 @@ model ExternalMailSetting {
   companyId        String    @unique @db.NVarChar(450)
   enabled          Boolean   @default(false)
   /// Giden mail için "From" adresi (örn. "Varuna <no-reply@univera.com.tr>").
+  ///
+  /// M5-extension (K1) — Bu alan LEGACY / VARSAYILAN konumuna düştü.
+  /// Çoklu gönderen adresi artık ExternalMailSettingFromAlias 1:N ile
+  /// modellenir. Backfill migration 17: bu değer dolu olan tenant için
+  /// bir FromAlias(isDefault=true) satırı oluşturulur. Composer (M6.2)
+  /// dropdown'u sadece FromAlias listesinden beslenir; gönderim
+  /// validation'ı seçilen from'un AKTİF alias'lardan biri olmasını
+  /// zorlar.
+  /// Geri uyumluluk: backend tarafından okuyan eski kod (notification
+  /// dispatch paralel CaseEmail vs.) çalışmaya devam eder; ilk default
+  /// alias bu değeri yansıtır.
   fromAddress      String?   @db.NVarChar(Max)
   /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
   inboundAddress   String?   @db.NVarChar(Max)
@@ -405,8 +418,62 @@ model ExternalMailSetting {
   updatedAt        DateTime  @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// M5-extension — Per-company çoklu gönderen adresi alias'ları.
+  fromAliases ExternalMailSettingFromAlias[]
 
   @@index([companyId, enabled])
+}
+
+/// Mail M5-extension (K1) — Per-company çoklu "From" adresi alias'ı.
+///
+/// Plan referansı: docs/M6-email-in-case-plan.md Bölüm 4.4.
+///
+/// Composer (M6.2) dropdown'u bu listeden beslenir. Validation: agent'ın
+/// seçtiği From değeri o şirketin AKTİF alias'larından biri olmalı; aksi
+/// halde gönderim reddedilir (spoof önleme).
+///
+/// Backfill (migration 17): mevcut ExternalMailSetting.fromAddress dolu
+/// her tenant için bir alias(isDefault=true, isActive=true) yazılır.
+///
+/// NOT: Bu model SADECE çoklu GÖNDEREN ADRESİ. Her alias'ın kendi
+/// inbound/SMTP'si YOK (tek mailbox, çoklu adres). Sırlar
+/// ExternalMailSetting'te kalır; FromAlias yalnız adres/display/default.
+model ExternalMailSettingFromAlias {
+  id               String   @id @default(cuid()) @db.NVarChar(450)
+  companyId        String   @db.NVarChar(450)
+  /// FK convenience — birebir ExternalMailSetting.id'yle eşleşir; ama
+  /// composer lookup companyId üzerinden filtreler, bu yüzden companyId
+  /// indeksi tutarız. setting silindiyse cascade.
+  externalMailSettingId String? @db.NVarChar(450)
+  /// RFC 5322 mailbox. Normalize: trim; case-sensitive saklanır ama
+  /// @@unique key normalize değil (basit); uygulama katmanında trim+
+  /// lowercase karşılaştırma. Format: "Display Name <addr@host>" veya
+  /// sade "addr@host". MSSQL key length sınırı için NVarChar(450).
+  address          String   @db.NVarChar(450)
+  /// Composer dropdown'da gösterilen etiket. Boş ise address kullanılır.
+  displayName      String?  @db.NVarChar(Max)
+  /// Default alias — composer açılışında ön-seçili; tenant başına 1 satır
+  /// true olmalı (uygulama katmanı zorlar). null'sa ilk aktif alias
+  /// default kabul.
+  isDefault        Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  /// UI sıralaması.
+  sortOrder        Int      @default(100)
+  createdByUserId  String?  @db.NVarChar(450)
+  updatedByUserId  String?  @db.NVarChar(450)
+  createdAt        DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt        DateTime @updatedAt
+
+  company Company              @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// MSSQL multi-cascade engelleme — Company zaten cascade; setting
+  /// silinirse alias'lar companyId üzerinden hala scope'da kalır.
+  setting ExternalMailSetting? @relation(fields: [externalMailSettingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Per-tenant adres unique. Aynı tenant'ta aynı adresi iki kez ekleme.
+  @@unique([companyId, address])
+  @@index([companyId, isActive])
+  @@index([companyId, isDefault])
+  @@index([externalMailSettingId])
 }
 
 /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemesi.

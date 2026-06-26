@@ -1197,6 +1197,59 @@ export const adminService = {
         'Mail bağlantı testi başarısız',
       );
     },
+    // Mail M5-extension — Per-company FromAlias CRUD (admin).
+    aliases: {
+      async list(companyId: string): Promise<FromAliasItem[]> {
+        const out = await apiFetch<{ items: FromAliasItem[] }>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/from-aliases`,
+          undefined,
+          'Gönderen adresleri yüklenemedi',
+        );
+        return out?.items ?? [];
+      },
+      async create(companyId: string, draft: FromAliasDraft): Promise<FromAliasItem | undefined> {
+        return apiFetch<FromAliasItem>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/from-aliases`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(draft),
+          },
+          'Adres eklenemedi',
+        );
+      },
+      async update(
+        companyId: string,
+        aliasId: string,
+        draft: FromAliasDraft,
+      ): Promise<FromAliasItem | undefined> {
+        return apiFetch<FromAliasItem>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/from-aliases/${encodeURIComponent(aliasId)}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(draft),
+          },
+          'Adres güncellenemedi',
+        );
+      },
+      async remove(companyId: string, aliasId: string): Promise<boolean> {
+        const out = await apiFetch<{ ok: boolean }>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/from-aliases/${encodeURIComponent(aliasId)}`,
+          { method: 'DELETE' },
+          'Adres silinemedi',
+        );
+        return !!out?.ok;
+      },
+      async setDefault(companyId: string, aliasId: string): Promise<boolean> {
+        const out = await apiFetch<{ ok: boolean }>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/from-aliases/${encodeURIComponent(aliasId)}/set-default`,
+          { method: 'POST' },
+          'Varsayılan ayarlanamadı',
+        );
+        return !!out?.ok;
+      },
+    },
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -1581,4 +1634,26 @@ export interface ExternalMailTestResult {
   previewUrl?: string | null;
   meta?: { transport?: string; source?: 'db' | 'env' };
   error?: { code: string; message: string; status?: number };
+}
+
+// Mail M5-extension — Per-company FromAlias.
+export interface FromAliasItem {
+  id: string;
+  companyId: string;
+  externalMailSettingId: string | null;
+  address: string;
+  displayName: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FromAliasDraft {
+  address?: string;
+  displayName?: string | null;
+  isDefault?: boolean;
+  isActive?: boolean;
+  sortOrder?: number;
 }
