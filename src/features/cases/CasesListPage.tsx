@@ -125,53 +125,9 @@ type SortKey =
   | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
-const TYPE_ORDER: Record<string, number> = { GeneralSupport: 0, ProactiveTracking: 1, Churn: 2 };
-const STATUS_ORDER: Record<string, number> = {
-  'Açık': 0,
-  'İncelemede': 1,
-  '3rdPartyBekleniyor': 2,
-  'Eskalasyon': 3,
-  'Çözüldü': 4,
-  'YenidenAcildi': 5,
-  'İptalEdildi': 6,
-};
-// Spec: Critical → High → Medium → Low (kritik önce)
-const PRIORITY_ORDER: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
-function compareCases(a: Case, b: Case, key: SortKey): number {
-  switch (key) {
-    case 'caseNumber':
-      return a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true });
-    case 'title':
-      return a.title.localeCompare(b.title, 'tr');
-    case 'accountName':
-      return a.accountName.localeCompare(b.accountName, 'tr');
-    case 'caseType':
-      return (TYPE_ORDER[a.caseType] ?? 99) - (TYPE_ORDER[b.caseType] ?? 99);
-    case 'status':
-      return (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
-    case 'priority':
-      return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-    case 'assignment': {
-      // Atanmamışlar her durumda en sona — desc'te de sonda kalır
-      const av = a.assignedPersonName ?? a.assignedTeamName ?? '';
-      const bv = b.assignedPersonName ?? b.assignedTeamName ?? '';
-      if (!av && !bv) return 0;
-      if (!av) return 1;
-      if (!bv) return -1;
-      return av.localeCompare(bv, 'tr');
-    }
-    case 'sla': {
-      const av = a.slaResolutionDueAt ? new Date(a.slaResolutionDueAt).getTime() : Infinity;
-      const bv = b.slaResolutionDueAt ? new Date(b.slaResolutionDueAt).getTime() : Infinity;
-      return av - bv;
-    }
-    case 'createdAt':
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    case 'updatedAt':
-      return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-  }
-}
+
+
 
 const SORT_DROPDOWN_OPTIONS: Array<{ key: SortKey; dir: SortDir; label: string }> = [
   { key: 'updatedAt', dir: 'desc', label: 'Son Güncelleme (yeni → eski)' },
@@ -247,6 +203,7 @@ export function CasesListPage({
   } | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [serverTotal, setServerTotal] = useState(0);
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickPrefillAccount, setQuickPrefillAccount] = useState<string | null>(null);
   // Bulk select state — Set<string> performans için (kontrol O(1)).
@@ -340,39 +297,38 @@ export function CasesListPage({
     [filters.teamId, personsAll],
   );
 
-  const load = async () => {
+  // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
+  const load = async (targetPage?: number) => {
+    const p = targetPage ?? page;
     setLoading(true);
-    // Filtre/tab değişikliği veya manuel refresh — selection temizlensin.
     setSelected(new Set());
     if (inboxTab === 'later') {
-      // Later sekmesi — kullanıcının ertelediği aktif vakalar.
       const data = await apiFetch<{ value: Case[]; '@odata.count': number }>(
         '/api/cases/snoozed',
         undefined,
         'Ertelenmiş vakalar yüklenemedi',
       );
-      setAllFiltered(data?.value ?? []);
-    } else if (inboxTab === 'all') {
-      // Genel #45 — "Tümü": statü filtresi YOK; tüm statülerdeki vakalar.
-      // Erişim kapsamı (allowedCompanyIds + rol guard) backend tarafında zaten
-      // korunur. Filtre chip seçimi varsa onu uygula (kullanıcı isterse
-      // Tümü içinde de statü daraltabilir).
-      const effectiveStatuses = filters.statuses?.length ? filters.statuses : undefined;
-      const { items } = await caseService.list({ ...filters, statuses: effectiveStatuses });
+      const items = data?.value ?? [];
       setAllFiltered(items);
+      setServerTotal(data?.['@odata.count'] ?? items.length);
     } else {
-      // Açık/Kapalı — chip seçimi varsa onu, yoksa tab default statüsünü kullan.
-      const tabDefault = inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES;
-      const effectiveStatuses = filters.statuses?.length ? filters.statuses : tabDefault;
-      const { items } = await caseService.list({ ...filters, statuses: effectiveStatuses });
+      const effectiveStatuses = inboxTab === 'all'
+        ? (filters.statuses?.length ? filters.statuses : undefined)
+        : (filters.statuses?.length ? filters.statuses : inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES);
+      const { items, total } = await caseService.list(
+        { ...filters, statuses: effectiveStatuses },
+        { page: p, pageSize, sortBy: sortKey, sortDir },
+      );
       setAllFiltered(items);
+      setServerTotal(total);
     }
     setLoading(false);
   };
 
+  // Filtre veya sekme değişince → ilk sayfaya sıfırla ve yeniden yükle.
   useEffect(() => {
-    void load();
-    setPage(1); // filtre değişince ilk sayfaya dön
+    setPage(1);
+    void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     inboxTab,
@@ -384,9 +340,6 @@ export function CasesListPage({
     filters.personId,
     filters.dateFrom,
     filters.dateTo,
-    // KPI tile intents + Phase D — bu flag'ler yalnızca client click ile değişir
-    // ama load() URL params'a ekliyor. Deps'te olmayınca tile click sonrası
-    // fetch tetiklenmiyordu; eklendi (#145 follow-up fix).
     filters.customerMatchPending,
     filters.assignedToMe,
     filters.teamScope,
@@ -395,8 +348,14 @@ export function CasesListPage({
     filters.includeArchived,
   ]);
 
+  // Sayfa / pageSize / sıralama değişince → yeniden yükle (filtre değişikliği hariç).
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, sortKey, sortDir]);
+
   const stats = useMemo(() => {
-    const total = allFiltered.length;
+    const total = serverTotal;
     const open = allFiltered.filter((c) => c.status !== 'Çözüldü' && c.status !== 'İptalEdildi').length;
     const slaBreach = allFiltered.filter((c) => c.slaViolation).length;
     const critical = allFiltered.filter((c) => c.priority === 'Critical').length;
@@ -470,55 +429,30 @@ export function CasesListPage({
         ? 'sla'
         : 'ok';
 
-  // Sıralama — kolon başlığı tıklaması ve dropdown ile senkronize.
-  // "Ertelendi" sekmesinde BE zaten "expired önce, snoozeUntil ASC" sırasını
-  // verdiği için frontend sort'u devre dışı (kullanıcı kafa karışıklığı olmasın).
+  // Server-side pagination + sort: allFiltered zaten o sayfanın kayıtları.
+  // Client-side post-filter: sadece AI örüntü alarmı overlay'i.
   const sortedFiltered = useMemo(() => {
-    // Örüntü alarmından gelen filter — sadece o caseId'ler kalır.
-    let base = allFiltered;
-    if (patternCasesFilter?.caseIds?.length) {
-      const allowed = new Set(patternCasesFilter.caseIds);
-      base = base.filter((c) => allowed.has(c.id));
-    }
-    // KPI tıklamasıyla aktive olan client-side filtre — backend filter'a ek katman.
-    if (quickFilter === 'slaRisk') {
-      base = base.filter((c) => c.slaViolation);
-    } else if (quickFilter === 'resolvedToday') {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const startMs = startOfDay.getTime();
-      base = base.filter((c) => c.status === 'Çözüldü' && new Date(c.updatedAt).getTime() >= startMs);
-    }
-    if (inboxTab === 'later') return base;
-    const arr = [...base];
-    arr.sort((a, b) => {
-      const cmp = compareCases(a, b, sortKey);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return arr;
-  }, [allFiltered, sortKey, sortDir, inboxTab, patternCasesFilter, quickFilter]);
+    if (!patternCasesFilter?.caseIds?.length) return allFiltered;
+    const allowed = new Set(patternCasesFilter.caseIds);
+    return allFiltered.filter((c) => allowed.has(c.id));
+  }, [allFiltered, patternCasesFilter]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
-      // Aynı kolona tıkla → yön değiş (asc ↔ desc)
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
-      // Yeni kolon → varsayılan yön (tarih kolonları için desc daha mantıklı)
       setSortKey(key);
       setSortDir(key === 'updatedAt' || key === 'createdAt' ? 'desc' : 'asc');
     }
     setPage(1);
   }
 
-  // Pagination — client-side slice (FAZ 0; FAZ 2'de service pagination gerçek BFF üzerinden gelir)
-  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / pageSize));
+  // Server pagination: sayfayı backend kesiyor, client'ta dilim yok.
+  const totalPages = Math.max(1, Math.ceil(serverTotal / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pageItems = useMemo(
-    () => sortedFiltered.slice((safePage - 1) * pageSize, safePage * pageSize),
-    [sortedFiltered, safePage, pageSize],
-  );
-  const startIdx = sortedFiltered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIdx = Math.min(safePage * pageSize, sortedFiltered.length);
+  const pageItems = sortedFiltered;
+  const startIdx = serverTotal === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const endIdx = Math.min(safePage * pageSize, serverTotal);
 
   const hasActiveFilters =
     Boolean(filters.search) ||
@@ -1243,7 +1177,7 @@ export function CasesListPage({
             </div>
 
             <Badge tint="slate" icon={<Filter size={12} />}>
-              {allFiltered.length} sonuç
+              {serverTotal} sonuç
             </Badge>
           </div>
         </div>
@@ -1282,7 +1216,7 @@ export function CasesListPage({
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border/60">
               {loading &&
                 Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)}
-              {!loading && allFiltered.length === 0 && (
+              {!loading && serverTotal === 0 && (
                 <tr>
                   <td colSpan={11} className="px-4">
                     {hasActiveFilters ? (
@@ -1455,11 +1389,11 @@ export function CasesListPage({
         </div>
 
         {/* Pagination footer */}
-        {!loading && allFiltered.length > 0 && (
+        {!loading && serverTotal > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-2.5 text-sm">
             <div className="flex items-center gap-2 text-xs text-slate-600">
               <span>
-                {startIdx}–{endIdx} / {allFiltered.length}
+                {startIdx}–{endIdx} / {serverTotal}
               </span>
               <span className="text-slate-400">·</span>
               <span>Sayfa başına:</span>

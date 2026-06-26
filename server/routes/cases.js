@@ -496,10 +496,9 @@ router.get(
       // query param gönderse bile sessizce ignore edilir (sızıntı yok).
       includeArchived: f.includeArchived === 'true' && req.user.role === 'SystemAdmin' ? true : undefined,
     };
-    // WR-H1 — Defansif large-query guard (AGENTIC_PLANNING_PROTOCOL §③ #6).
-    // pageSize her zaman [1, 200] içine clamp edilir; pagination object'i her zaman
-    // üretilir (undefined yok) ki route hiçbir senaryoda unbounded findMany tetiklemesin.
-    // accountRepository.listAccounts ile aynı clamp pattern'i (cap 100 → 200; cases entity bigger).
+    // WR-H1 — Defansif large-query guard.
+    // pageSize [1, 200] aralığına clamp edilir; pagination her zaman üretilir
+    // (unbounded findMany engellenir). Frontend sayfa başına istediği kadar istek atar.
     const HARD_MAX_PAGE_SIZE = 200;
     const requestedPageSize = Number(f.pageSize ?? 25);
     const safePageSize = Math.min(
@@ -508,10 +507,18 @@ router.get(
     );
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
-    const securityWhere = await buildCaseListSecurityWhere(req);
+
+    // Sort params — frontend'in kolon başlığı tıklamalarından gelir.
+    const VALID_SORT_KEYS = ['updatedAt', 'createdAt', 'sla', 'caseNumber', 'title',
+      'accountName', 'assignment', 'priority', 'status', 'caseType'];
+    const sortBy  = VALID_SORT_KEYS.includes(f.sortBy)  ? f.sortBy  : 'updatedAt';
+    const sortDir = f.sortDir === 'asc' ? 'asc' : 'desc';
+
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
+      sortBy,
+      sortDir,
       allowedCompanyIds: req.user.allowedCompanyIds,
       securityWhere,
     });
