@@ -159,16 +159,29 @@ export function MailMessageCard({ email, caseId, onReply, defaultExpanded = fals
     return root.innerHTML;
   }, [caseId, cidMap, email.bodyHtml, email.id]);
 
-  // Expand toggle olduğunda cid rewrite çalıştır — bir kez cache'li.
+  // Codex review fix — Cache KALDIRILDI. cid rewrite signStorageToken
+  // (60sn TTL) ile URL üretiyor; mail kapatılıp 60sn sonra tekrar
+  // açılırsa cache'lenmiş URL stale → görsel 401. Her expand'de
+  // yeniden rewrite + URL üret (token yenilenir).
+  // Performans: az görsel için ihmal edilebilir; download endpoint
+  // hızlı.
   useEffect(() => {
-    if (!expanded) return;
-    if (renderedHtml !== null) return;
+    if (!expanded) {
+      // Katlama → rendered HTML drop; bir sonraki expand fresh URL üretir
+      setRenderedHtml(null);
+      setRewriteBusy(false);
+      return;
+    }
+    let alive = true;
     setRewriteBusy(true);
+    setRenderedHtml(null);
     void processBodyHtml().then((html) => {
+      if (!alive) return;
       setRenderedHtml(html);
       setRewriteBusy(false);
     });
-  }, [expanded, processBodyHtml, renderedHtml]);
+    return () => { alive = false; };
+  }, [expanded, processBodyHtml]);
 
   async function handleDownloadAttachment(attachmentId: string) {
     const r = await caseEmailService.getAttachmentDownload(caseId, email.id, attachmentId);

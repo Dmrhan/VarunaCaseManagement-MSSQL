@@ -65,7 +65,7 @@ async function cleanup() {
 }
 
 // Multipart MIME ile cid:image içeren mail kur (1x1 PNG)
-async function inboundWithCid() {
+async function inboundWithCid(messageId = '<cid-test-stable@m6-3a.local>') {
   // 1x1 transparent PNG (base64)
   const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
   const eml = [
@@ -73,7 +73,7 @@ async function inboundWithCid() {
     'To: support@varuna.com',
     'Subject: cid test',
     'Date: Sat, 27 Jun 2026 09:00:00 +0300',
-    'Message-ID: <cid-test-' + Date.now() + '@m6-3a.local>',
+    'Message-ID: ' + messageId,
     'MIME-Version: 1.0',
     'Content-Type: multipart/related; boundary="boundary-cid"',
     '',
@@ -123,6 +123,17 @@ async function inboundWithCid() {
     expect('contentId logo123 içerir', ea.contentId.includes('logo123'), true);
     expect('isInline=true', ea.isInline, true);
     expect('fileName = logo.png', ea.fileName, 'logo.png');
+
+    console.log('\n=== (Codex fix) Aynı messageId → dedupe → ek YAZILMAZ ===');
+    // Aynı eml'i tekrar intake et → appendInbound dedupe ediyor; ek tablosu
+    // değişmemeli.
+    const beforeCount = await prisma.caseEmailAttachment.count({ where: { email: { companyId: TENANT } } });
+    const r2 = await inboundWithCid();
+    expect('intake ok', r2.ok, true);
+    // Aynı mesaj id ile tekrar intake → deduped akış (eski email satırı)
+    const afterCount = await prisma.caseEmailAttachment.count({ where: { email: { companyId: TENANT } } });
+    expect('CaseEmailAttachment count değişmedi (dedupe → ek yazılmaz)',
+      afterCount, beforeCount);
 
     console.log('\n=== (2) Sanitizer: img izinli, script/iframe drop ===');
     const out = sanitizeIncomingEmailHtml(

@@ -484,13 +484,23 @@ export async function intakeInboundEmail({
           // CaseAttachment'a yazım korunur (Files tab'ında erişilebilir);
           // CaseEmailAttachment satırı da yazılır (emailId varsa) → cid
           // rewrite render zamanı bunlarla eşlenir.
-          const attachmentsResult = await persistAttachmentsForCase({
-            caseId: existing.id,
-            companyId,
-            attachments: parsed.attachments ?? [],
-            prisma,
-            emailId: inboundEmail.id,
-          });
+          //
+          // Codex review fix — deduped ise ek YAZMA. appendInbound
+          // companyId+messageId @@unique ile dedupe ediyor; bu durumda
+          // inboundEmail.id ESKİ satırın id'si olabilir → yeni storage
+          // path'leri eski thread'e bağlamak yanlış (mükerrer/çapraz
+          // veri). Aynı şekilde CaseAttachment yazımı da gereksiz
+          // (önceki intake'te yazıldı).
+          let attachmentsResult = { stored: 0, skipped: [], note: 'deduped_skipped' };
+          if (!inboundEmail.deduped) {
+            attachmentsResult = await persistAttachmentsForCase({
+              caseId: existing.id,
+              companyId,
+              attachments: parsed.attachments ?? [],
+              prisma,
+              emailId: inboundEmail.id,
+            });
+          }
 
           return {
             ok: true,
@@ -690,16 +700,25 @@ export async function intakeInboundEmail({
   // M2.1 + M6.3a — Ekleri ve inline/cid görselleri yeni vakaya bağla.
   // emailId varsa CaseEmailAttachment satırları da yazılır (cid render
   // için kritik).
+  //
+  // Codex review fix — firstEmail.deduped ise ek YAZMA. appendInbound
+  // companyId+messageId @@unique ile dedupe ettiyse firstEmail.id ESKİ
+  // satırın id'si (başka vakaya bağlı) olabilir → yeni vaka'nın
+  // storage path'lerini eski email'e bağlamak yanlış.
   let attachmentsResult = { stored: 0, skipped: [] };
   try {
     const { prisma } = await import('../db/client.js');
-    attachmentsResult = await persistAttachmentsForCase({
-      caseId: created.id,
-      companyId,
-      attachments: parsed.attachments ?? [],
-      prisma,
-      emailId: firstEmail.id,
-    });
+    if (firstEmail.deduped) {
+      attachmentsResult = { stored: 0, skipped: [], note: 'deduped_skipped' };
+    } else {
+      attachmentsResult = await persistAttachmentsForCase({
+        caseId: created.id,
+        companyId,
+        attachments: parsed.attachments ?? [],
+        prisma,
+        emailId: firstEmail.id,
+      });
+    }
   } catch {
     // Ek persistence fail → vaka yine açık. Mail düşürülmez.
   }
