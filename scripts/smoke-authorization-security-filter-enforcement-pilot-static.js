@@ -145,7 +145,8 @@ expect('3.4 repository still uses one where for count and findMany', /const tota
 expect('3.5 repository stats accepts securityWhere', /async getStats\(\{ user, securityWhere = null \}\)/.test(repo), true);
 expect('3.6 repository helper merges securityWhere into scoped queries', /function mergeSecurityWhere[\s\S]*next\.AND = \[\.\.\.existingAnd, securityWhere\]/.test(repo), true);
 expect('3.7 by-account helpers accept securityWhere', /async findByAccount\(accountId, options = \{\}, allowedCompanyIds, securityWhere = null\)[\s\S]*async countByAccount\(accountId, options = \{\}, allowedCompanyIds, securityWhere = null\)/.test(repo), true);
-expect('3.8 watcher inbox filters visible cases', /async listForUser\(userId, allowedCompanyIds, securityWhere = null\)[\s\S]*mergeSecurityWhere\(\{ id: \{ in: items\.map/.test(repo), true);
+expect('3.8 watcher inbox applies security filter before take cap', /async listForUser\(userId, allowedCompanyIds, securityWhere = null\)[\s\S]*where\.case = \{ is: securityWhere \}[\s\S]*prisma\.caseWatcher\.findMany\(\{[\s\S]*where,[\s\S]*take: 200/.test(repo), true);
+expect('3.9 watcher inbox has no post-cap case visibility query', /async listForUser\(userId, allowedCompanyIds, securityWhere = null\)[\s\S]*prisma\.case\.findMany\(\{[\s\S]*items\.map/.test(repo), false);
 
 expect('4.1 runtime exports compileSecurityFilterOverrides', /export function compileSecurityFilterOverrides/.test(runtime), true);
 expect('4.2 runtime compiles deny filters as NOT', /if \(override\.effect === 'deny'\) return \{ NOT: compiled \}/.test(runtime), true);
