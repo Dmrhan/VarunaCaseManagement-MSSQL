@@ -243,7 +243,7 @@ function ThirdPartyEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId });
+  const [form, setForm] = useState<ThirdPartyInput>({ name: '', description: '', isActive: true, companyId: defaultCompanyId, pausesSla: true });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
@@ -255,11 +255,11 @@ function ThirdPartyEditModal({
       void (async () => {
         const item = await adminService.thirdParties.get(editingId);
         if (item) {
-          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId });
+          setForm({ name: item.name, description: item.description ?? '', isActive: item.isActive, companyId: item.companyId, pausesSla: item.pausesSla !== false });
         }
       })();
     } else {
-      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined });
+      setForm({ name: '', description: '', isActive: true, companyId: defaultCompanyId || undefined, pausesSla: true });
     }
   }, [open, mode, editingId, defaultCompanyId]);
 
@@ -271,6 +271,7 @@ function ThirdPartyEditModal({
       description: form.description?.trim() || undefined,
       isActive: form.isActive,
       companyId: form.companyId || undefined,
+      pausesSla: form.pausesSla !== false,
     };
 
     const r =
@@ -377,6 +378,16 @@ function ThirdPartyEditModal({
             </select>
           </Field>
         )}
+
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.pausesSla !== false}
+            onChange={(e) => setForm((f) => ({ ...f, pausesSla: e.target.checked }))}
+            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+          />
+          Beklenirken SLA dursun
+        </label>
 
         {error && (
           <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
