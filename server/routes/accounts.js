@@ -11,6 +11,7 @@ import {
 import {
   assertAccountResourcePolicy,
   assertCompanyResourcePolicy,
+  filterAccountCompanyIdsByResourcePolicy,
   filterAllowedCompanyIdsByResourcePolicy,
 } from '../lib/authorizationRouteGuards.js';
 
@@ -77,11 +78,13 @@ router.get(
   requireRole(...LIST_ROLES),
   asyncRoute(async (req, res) => {
     const { search, companyId, status, page, limit } = req.query;
-    if (typeof companyId === 'string' && companyId) {
-      await assertCompanyResourcePolicy(req, { companyId, resourceKey: 'account', action: 'read' });
-    }
     const scopedAllowedCompanyIds = typeof companyId === 'string' && companyId
-      ? req.user.allowedCompanyIds
+      ? await filterAllowedCompanyIdsByResourcePolicy(req, {
+          resourceKey: 'account',
+          action: 'read',
+          throwIfEmpty: true,
+          companyIds: [companyId],
+        })
       : await filterAllowedCompanyIdsByResourcePolicy(req, { resourceKey: 'account', action: 'read' });
     // C2 recents revalidation: ?ids=a,b,c — explicit id filter combined with
     // tenant scope. The repo drops out-of-scope ids via buildScopeWhere so a
@@ -113,9 +116,12 @@ router.get(
   '/:id',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
-    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
+    const scopedAllowedCompanyIds = await filterAccountCompanyIdsByResourcePolicy(req, {
+      accountId: req.params.id,
+      action: 'read',
+    });
     const account = await accountRepository.getAccount(req.params.id, {
-      allowedCompanyIds: req.user.allowedCompanyIds,
+      allowedCompanyIds: scopedAllowedCompanyIds,
     });
     if (!account) {
       return res.status(404).json({ error: 'not_found', message: 'Müşteri bulunamadı.' });
@@ -279,11 +285,14 @@ router.get(
   '/:id/products',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
-    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
+    const scopedAllowedCompanyIds = await filterAccountCompanyIdsByResourcePolicy(req, {
+      accountId: req.params.id,
+      action: 'read',
+    });
     const out = await accountRepository.listProducts({
       accountId: req.params.id,
       companyId: typeof req.query.companyId === 'string' ? req.query.companyId : undefined,
-      user: req.user,
+      user: { ...req.user, allowedCompanyIds: scopedAllowedCompanyIds },
     });
     res.json(out);
   }),
@@ -425,9 +434,12 @@ router.get(
   '/:id/addresses',
   requireRole(...DETAIL_READ_ROLES),
   asyncRoute(async (req, res) => {
-    await assertAccountResourcePolicy(req, { accountId: req.params.id, action: 'read' });
+    const scopedAllowedCompanyIds = await filterAccountCompanyIdsByResourcePolicy(req, {
+      accountId: req.params.id,
+      action: 'read',
+    });
     const detail = await accountRepository.getAccount(req.params.id, {
-      allowedCompanyIds: req.user.allowedCompanyIds,
+      allowedCompanyIds: scopedAllowedCompanyIds,
     });
     if (!detail) return res.status(404).json({ error: 'not_found', message: 'Müşteri bulunamadı.' });
     res.json({ value: detail.addresses ?? [] });
