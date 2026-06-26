@@ -1111,8 +1111,8 @@ export const caseRepository = {
     return { mode: 'unknown' };
   },
 
-  async list({ filters, pagination, sortBy, sortDir, allowedCompanyIds } = {}) {
-    const where = buildWhere(toDbFilters(filters), allowedCompanyIds);
+  async list({ filters, pagination, sortBy, sortDir, allowedCompanyIds, securityWhere } = {}) {
+    const where = buildWhere(toDbFilters(filters), allowedCompanyIds, securityWhere);
     const total = await prisma.case.count({ where });
 
     // Desteklenen sort alanları → Prisma kolon adı. Bilinmeyen değer updatedAt'e düşer.

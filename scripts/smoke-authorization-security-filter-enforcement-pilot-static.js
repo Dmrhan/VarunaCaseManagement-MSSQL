@@ -122,13 +122,17 @@ expect('2.10 main case list passes securityWhere to repository', /const security
 expect('2.11 tagging export passes securityWhere', /tagging-review\/export[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*securityWhere/s.test(casesRoute), true);
 expect('2.12 tagging-review list passes securityWhere', /GET \/api\/cases\/tagging-review[\s\S]*const securityWhere = await buildCaseListSecurityWhere\(req\)[\s\S]*securityWhere/s.test(casesRoute), true);
 expect('2.13 route has direct case security-filter helper', /async function assertCaseSecurityFilterAccess/.test(casesRoute), true);
-expect('2.14 direct helper checks record with compiled where', /assertCaseSecurityFilterAccess[\s\S]*compileSecurityFilterOverrides[\s\S]*prisma\.case\.findFirst\(\{[\s\S]*AND: \[compiled\]/.test(casesRoute), true);
+expect('2.14 direct helper checks record with compiled where', /async function isCaseVisibleBySecurityFilter[\s\S]*compileSecurityFilterOverrides[\s\S]*prisma\.case\.findFirst\(\{[\s\S]*AND: \[compiled\]/.test(casesRoute), true);
+expect('2.14b assert helper throws when visibility helper denies', /async function assertCaseSecurityFilterAccess[\s\S]*isCaseVisibleBySecurityFilter\(req, \{ caseId, companyId \}\)[\s\S]*throw new AuthorizationRuntimeError/.test(casesRoute), true);
 expect('2.15 resource policy enforces security filter before writes', /async function assertCaseResourcePolicy[\s\S]*await assertCaseSecurityFilterAccess\(req, \{ caseId: req\.params\.id, companyId: c\.companyId \}\)/.test(casesRoute), true);
 expect('2.16 case detail enforces security filter before response', /GET \/api\/cases\/:id[\s\S]*await assertCaseSecurityFilterAccess\(req, \{ caseId: req\.params\.id, companyId: c\.companyId \}\)[\s\S]*res\.json\(c\)/.test(casesRoute), true);
 expect('2.17 detail helper endpoints enforce security filter', (casesRoute.match(/await assertCaseSecurityFilterAccess\(req\);/g) ?? []).length >= 10, true);
 expect('2.18 resource policy does not disable security-filter writes', /const resourceEnabled = isAuthorizationResourceEnforcementEnabled\(\)[\s\S]*const securityFilterEnabled = isAuthorizationSecurityFilterEnforcementEnabled\(\)[\s\S]*if \(!resourceEnabled && !securityFilterEnabled\) return null[\s\S]*if \(!resourceEnabled\) return null/.test(casesRoute), true);
+expect('2.19 solution steps read enforces security filter', /\/:id\/solution-steps[\s\S]*await assertCaseSecurityFilterAccess\(req\)[\s\S]*solutionStepRepository\.list/.test(casesRoute), true);
+expect('2.20 link list filters linked target metadata', /async function filterVisibleLinkedCases[\s\S]*isCaseVisibleBySecurityFilter\(req, \{ caseId: linkedCaseId \}\)/.test(casesRoute), true);
+expect('2.21 link route returns only visible links', /const visibleLinks = await filterVisibleLinkedCases\(req, list\)[\s\S]*res\.json\(\{ value: visibleLinks \}\)/.test(casesRoute), true);
 
-expect('3.1 repository list accepts securityWhere', /async list\(\{ filters, pagination, allowedCompanyIds, securityWhere \} = \{\}\)/.test(repo), true);
+expect('3.1 repository list accepts securityWhere', /async list\(\{[^}]*filters[^}]*pagination[^}]*allowedCompanyIds[^}]*securityWhere[^}]*\} = \{\}\)/.test(repo), true);
 expect('3.2 buildWhere accepts securityWhere param', /function buildWhere\(f, allowedCompanyIds, securityWhere = null\)/.test(repo), true);
 expect('3.3 securityWhere is ANDed with baseline tenant scope', /andClauses\.push\(securityWhere\)/.test(repo), true);
 expect('3.4 repository still uses one where for count and findMany', /const total = await prisma\.case\.count\(\{ where \}\)[\s\S]*prisma\.case\.findMany\(\{[\s\S]*where/s.test(repo), true);
