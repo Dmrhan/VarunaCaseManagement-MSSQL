@@ -475,6 +475,14 @@ function CaseListPanel({ title, caseIds, caseMap, onSelectCase, onClose }: CaseP
                         {c.title}
                       </p>
                     )}
+                    {c && (() => {
+                      const pp = extractClosure(c).permanentPrevention;
+                      return pp !== UNSPECIFIED ? (
+                        <span className="mt-1 inline-block rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                          {pp}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                 </button>
               </li>
