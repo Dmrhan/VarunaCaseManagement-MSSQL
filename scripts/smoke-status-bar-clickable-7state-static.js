@@ -74,7 +74,13 @@ function expectNotContains(name, content, needle) {
     src, "aria-current={isCurrent ? 'step' : undefined}");
 
   console.log('\n=== 4 görsel durum (PAST/CURRENT/REACHABLE/LOCKED) ===');
-  expectContains('isPast (idx < currentIdx)', src, 'const isPast = idx < currentIdx;');
+  // Codex review fix — isPast tanımı: idx < currentIdx VE !isAllowed.
+  // Allowed back-transition (Eskalasyon → İncelemede vb.) PAST sayılmaz,
+  // REACHABLE kalır (CTA tıklanabilir, "tamamlanmış" görünmez).
+  expectContains('isPast tanımı: idx < currentIdx && !isAllowed (back-transition öncelik)',
+    src, 'const isPast = idx < currentIdx && !isAllowed;');
+  expectContains('interactive isPast\'tan ÖNCE türetilir (REACHABLE > PAST)',
+    src, 'const interactive = isAllowed && !isCurrent;\n          const isPast');
   expectContains('PAST → emerald-500 dolu + Check ikonu',
     src, 'bg-emerald-500 text-white');
   expectContains('PAST için Check ikon render',
