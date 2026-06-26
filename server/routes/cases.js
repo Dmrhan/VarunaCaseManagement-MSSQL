@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { caseRepository, mentionRepo, watcherRepo, linkRepo, reactionRepo, notificationRepo, CaseAccessError, CaseValidationError } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
+import { caseEmailSender } from '../lib/caseEmailSender.js';
 import { prisma } from '../db/client.js';
 import { signStorageToken, verifyStorageToken, saveObject, statObject, createObjectStream } from '../db/storage.js';
 import {
@@ -2110,6 +2111,106 @@ router.get(
       allowedCompanyIds: req.user.allowedCompanyIds,
     });
     res.json({ items });
+  }),
+);
+
+/**
+ * Mail M6.2a — POST /api/cases/:id/emails
+ *
+ * Agent composer'dan gönderim (M6.2b UI). Sender backend:
+ *  - validateOutboundFrom (M5-ext) — spoof önleme
+ *  - sanitize (M6.1 htmlSanitizer)
+ *  - threading: subject token + Message-ID + In-Reply-To/References
+ *  - mailProvider.sendMail (M5 per-tenant)
+ *  - başarı → CaseEmail(outbound, source='manual_send') + K4 update
+ *
+ * Body: {
+ *   fromAddress: string,    // M5-ext alias adres
+ *   to: [{ address, name? }, ...],
+ *   cc?, bcc?: aynı şekil,
+ *   subject: string,
+ *   bodyHtml: string,
+ *   bodyText?: string,
+ *   attachments?: string[]  // CaseAttachment.id[]
+ * }
+ *
+ * Response:
+ *   200 { ok: true, emailId, messageId, previewUrl? }
+ *   400 { ok: false, code }
+ *   403/404 (scope/case fail)
+ *
+ * SCOPE: caseRepository.get + assertCaseSecurityFilterAccess (M6.1 ile
+ * aynı patern). Agent role guard yok — herhangi authenticated user
+ * vakaya yazabilir; assertCaseSecurityFilterAccess yetki filtresini
+ * uygular.
+ */
+router.post(
+  '/:id/emails',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const actor = requireActor(req);
+    const body = req.body ?? {};
+    const result = await caseEmailSender.sendCaseEmail({
+      caseId: req.params.id,
+      fromAddress: body.fromAddress,
+      to: body.to,
+      cc: body.cc,
+      bcc: body.bcc,
+      subject: body.subject,
+      bodyHtml: body.bodyHtml,
+      bodyText: body.bodyText,
+      attachments: body.attachments,
+      actor: { userId: actor.userId ?? null, fullName: req.user.fullName },
+    });
+    if (!result.ok) {
+      const status =
+        result.code === 'from_invalid' ? 400
+        : result.code === 'recipients_missing' ? 400
+        : result.code === 'case_not_found' ? 404
+        : result.code === 'attachment_scope_mismatch' ? 400
+        : result.code === 'attachment_missing' ? 404
+        : 502;
+      return res.status(status).json({ ok: false, code: result.code, message: result.message ?? null });
+    }
+    res.json({
+      ok: true,
+      emailId: result.emailId,
+      messageId: result.messageId,
+      previewUrl: result.previewUrl,
+    });
+  }),
+);
+
+/**
+ * Mail M6.2a — GET /api/cases/:id/emails/reply-context
+ *
+ * Composer prefill verisi (K6 reply-all). Vakanın son inbound
+ * CaseEmail'ından çıkarılır:
+ *  - To = [inbound.from] + inbound.to (tenant alias filtresi)
+ *  - Cc = inbound.cc (alias filtresi)
+ *  - Subject = "Re: " + token korunmuş subject
+ *  - inReplyTo = inbound.messageId
+ *
+ * Composer "Yanıtla" tıklanınca bu endpoint'i çağırır, alanları doldurur.
+ */
+router.get(
+  '/:id/emails/reply-context',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const ctx = await caseEmailSender.buildReplyContext(req.params.id);
+    res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null });
   }),
 );
 

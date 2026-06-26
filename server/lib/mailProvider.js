@@ -206,12 +206,20 @@ async function buildTransport(config) {
  */
 export async function sendMail({
   to,
+  cc,
+  bcc,
   subject,
   text,
   html,
   from,
   replyTo,
   headers,
+  /**
+   * M6.2a — Ek listesi. nodemailer Attachment format'ı:
+   *   [{ filename, content: Buffer|stream, contentType?, cid? }]
+   * caseEmailSender CaseAttachment satırlarını okuyup buraya gönderir.
+   */
+  attachments,
 } = {}, opts = {}) {
   const proxiedAt = new Date().toISOString();
 
@@ -265,11 +273,14 @@ export async function sendMail({
     const info = await transport.sendMail({
       from: from || config.from,
       to,
+      cc,
+      bcc,
       subject,
       text,
       html,
       replyTo,
       headers,
+      attachments,
     });
 
     // Ethereal için preview URL — bu URL'i browser'da açınca gönderilen
