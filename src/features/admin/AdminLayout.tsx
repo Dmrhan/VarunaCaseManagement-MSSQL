@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Network,
   Package,
+  KeyRound,
   Settings2,
   Shield,
   ShieldCheck,
@@ -53,6 +54,7 @@ export type AdminView =
   | 'admin-notification-templates'
   | 'admin-notification-rules'
   | 'admin-notification-dispatches'
+  | 'admin-authorization-policies'
   | 'admin-taxonomy-defs';
 
 export const ADMIN_VIEWS: AdminView[] = [
@@ -76,6 +78,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-notification-templates',
   'admin-notification-rules',
   'admin-notification-dispatches',
+  'admin-authorization-policies',
   'admin-taxonomy-defs',
 ];
 
@@ -116,6 +119,7 @@ const NAV: NavGroup[] = [
       { key: 'admin-notification-templates',  label: 'Bildirim Şablonları',        icon: <MessageSquare size={14} /> },
       { key: 'admin-notification-rules',      label: 'Bildirim Kuralları',          icon: <Bell size={14} /> },
       { key: 'admin-notification-dispatches', label: 'Bildirim Kayıtları',          icon: <History size={14} /> },
+      { key: 'admin-authorization-policies',  label: 'Yetkilendirme Yönetimi',      icon: <KeyRound size={14} /> },
     ],
   },
   {

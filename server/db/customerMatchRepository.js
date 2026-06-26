@@ -16,6 +16,10 @@
  */
 
 import { prisma } from './client.js';
+// Codex P2 fix (M2.2) — TAM eşleşme için kanonik form gerekir.
+// Mevcut helper'ı REUSE et (tek formatta yazılmamış kullanıcı girdileriyle
+// E.164 saklı DB kayıtları arasında uyumsuzluk yapmamak için).
+import { normalizePhoneE164 } from '../utils/accountValidation.js';
 
 // ─────────────────────────────────────────────────────────────────
 // Signal extraction (case → tokens)
@@ -31,8 +35,23 @@ const NAME_STOP = new Set([
   'müşterisiz', 'musterisiz', 'vaka', 'bilinmiyor', 'bilinmeyen',
 ]);
 
+/**
+ * Codex P2 fix (M2.2) — Phone canonicalization for exact-match comparison.
+ *
+ * normalizePhoneE164 (server/utils/accountValidation.js:177): TR yaygın
+ * formatları E.164'e çevirir:
+ *   "0532 555 12 34" → "+905325551234"
+ *   "5325551234"     → "+905325551234"
+ *   "+905325551234"  → "+905325551234"
+ *
+ * Tanınmayan format → null (skip — yanlış eşleşme önlenir).
+ * Eski naive normalize ('+'/'0' prefix korurdu) yerine kanonik form
+ * üretir; account.phone (raw display) veya account.phoneE164 (kanonik)
+ * fark etmez, AccountCompany.responsePhone vs. her input aynı form'da
+ * karşılaştırılır.
+ */
 function normalizePhone(s) {
-  return (s ?? '').replace(/[\s()\-+]/g, '');
+  return normalizePhoneE164(s);
 }
 function normalizeEmail(s) {
   return (s ?? '').trim().toLowerCase();
@@ -48,6 +67,42 @@ function maskEmail(e) {
   const [local, domain] = e.split('@');
   const head = local.slice(0, Math.min(2, local.length));
   return `${head}***@${domain}`;
+}
+
+/**
+ * M2.2 (5) — Public/ücretsiz email domain blocklist (büyük harf duyarsız).
+ * Bu domain'ler farklı müşterilerce paylaşıldığından "aynı domain" sinyali
+ * discriminator DEĞİL — domain önerisi üretmezler.
+ */
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'yahoo.com',
+  'icloud.com',
+  'me.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'yandex.com',
+]);
+
+/**
+ * M2.2 (4) — Placeholder telefon eşiği. Bir telefon numarası aday havuzunda
+ * bu sayıdan fazla farklı hesapta görünüyorsa = discriminator değil
+ * (örn. demo numaraları, "0555 555 5555"). Reason sayılmaz.
+ */
+const PLACEHOLDER_PHONE_THRESHOLD = 3;
+
+/**
+ * Email'in domain part'ını döndürür (lower, "@" yoksa null).
+ */
+function emailDomain(email) {
+  if (!email || typeof email !== 'string') return null;
+  const at = email.lastIndexOf('@');
+  return at > 0 ? email.slice(at + 1).toLowerCase() : null;
 }
 
 function normalizeTokens(text) {
@@ -74,11 +129,26 @@ function extractSignalsFromCase(c) {
   }
   const text = textParts.join(' \n ');
 
-  // Text-extracted signals (low-confidence; free-text regex tabanlı)
-  const textPhones = Array.from(text.matchAll(PHONE_RX))
-    .map((m) => normalizePhone(m[0]))
-    .filter((p) => p.length >= 7);
-  const textEmails = Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
+  // M2.2 (2/3) — Inbound (origin='Eposta') vakalarında structured gönderen
+  // (customerContactEmail/customerContactName + customerCompanyName) esas
+  // sinyaller; gövdeden phone/email KAZIMAZ. Mail imza/footer ve quoted
+  // bloklar gürültü olur (M2.2 (3) inbound parser stripleyebilir ama
+  // savunmacı kural: inbound'da text regex'lerini kapat).
+  //
+  // Manuel Phase D vakaları (origin='Telefon', 'Web' vs.) eski davranışla
+  // gövdeden de kazımaya devam eder — regresyon yok.
+  const isInbound = c.origin === 'Eposta';
+
+  // Text-extracted signals (low-confidence; free-text regex tabanlı).
+  // Inbound'da boş bırak.
+  const textPhones = isInbound
+    ? []
+    : Array.from(text.matchAll(PHONE_RX))
+        .map((m) => normalizePhone(m[0]))
+        .filter((p) => p && p.length >= 7); // Codex P2: null guard
+  const textEmails = isInbound
+    ? []
+    : Array.from(text.matchAll(EMAIL_RX)).map((m) => normalizeEmail(m[0]));
   const fiveDigit = Array.from(text.matchAll(FIVE_DIGIT_RX)).map((m) => m[0]);
 
   // Phase D Step 2 — Requester intake fields (high-confidence; Agent explicit).
@@ -87,6 +157,8 @@ function extractSignalsFromCase(c) {
   const requesterEmail = c.customerContactEmail ? normalizeEmail(c.customerContactEmail) : null;
   const requesterCompany = c.customerCompanyName ?? '';
   const requesterContactName = c.customerContactName ?? '';
+  // M2.2 (5) — domain önerisi için gönderen email domain'i.
+  const requesterEmailDomain = requesterEmail ? emailDomain(requesterEmail) : null;
 
   const phones = [...new Set([...(requesterPhone ? [requesterPhone] : []), ...textPhones])];
   const emails = [...new Set([...(requesterEmail ? [requesterEmail] : []), ...textEmails])];
@@ -105,8 +177,10 @@ function extractSignalsFromCase(c) {
     contactNameTokens,
     requesterPhone,
     requesterEmail,
+    requesterEmailDomain,
     requesterCompany,
     rawText: text,
+    isInbound,
   };
 }
 
@@ -171,34 +245,80 @@ function tokenOverlap(aTokens, bTokens) {
   return hit;
 }
 
-function scoreCandidate(account, signals) {
+function scoreCandidate(account, signals, ctx = {}) {
   /** @type {Array<{ type: string; label: string; valueMasked: string | null }>} */
   const reasons = [];
   let score = 0;
 
-  // Phone — Account.phone + Contact.phone. Phase D Step 2: requester phone
-  // (Agent'ın explicit girdiği) yüksek-öncelik kabul edilir. Tek bir reason
-  // ekleriz; double-count yok.
+  // M2.2 (1) — Telefon eşleşmesi YALNIZ tam (normalized) eşitlikle. Eski
+  // gevşek `ap.endsWith(p.slice(-7))` suffix kuralı KALDIRILDI; rastgele
+  // numara collision'ları (örn. son 7 hane çakışması) artık eşleşmez.
+  //
+  // M2.2 (4) — Placeholder telefon filtresi. ctx.placeholderPhones set'i
+  // verildiyse, bu numara aday havuzunda >threshold hesapla eşleşiyor =
+  // discriminator değil → reason SAYILMAZ.
   const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
     .filter(Boolean)
-    .map(normalizePhone);
+    .map(normalizePhone)
+    .filter(Boolean); // tanınmayan format → null elenir
+  const placeholderPhones = ctx.placeholderPhones ?? null;
   for (const p of signals.phones) {
-    if (accountPhones.some((ap) => ap === p || ap.endsWith(p.slice(-7)))) {
+    if (!p) continue;
+    if (placeholderPhones && placeholderPhones.has(p)) continue; // discriminator değil
+    if (accountPhones.some((ap) => ap === p)) {
       score += 50;
       reasons.push({ type: 'phone', label: 'Telefon eşleşti', valueMasked: maskPhone(p) });
       break;
     }
   }
 
-  // Email — Account.email + Contact.email
+  // M2.2 (2) — Skor hiyerarşisi: email exact >> phone exact > domain > name.
+  // Email TEK auto-link tetikleyicisidir (intake katmanı). 50 → 80 yükseltildi
+  // ki eşleştiğinde diğer reason'larla birlikte listeyi domine etsin
+  // (sıralama tie-breaker'ında üstte kalır).
   const accountEmails = [account.email, ...account.contacts.map((c) => c.email)]
     .filter(Boolean)
     .map(normalizeEmail);
+  let emailMatched = false;
   for (const e of signals.emails) {
     if (accountEmails.includes(e)) {
-      score += 50;
+      score += 80;
       reasons.push({ type: 'email', label: 'E-posta eşleşti', valueMasked: maskEmail(e) });
+      emailMatched = true;
       break;
+    }
+  }
+
+  // M2.3 — Öğrenilen sender eşlemesi (yalnız inbound; ctx.learnedAccountId
+  // suggestCustomerMatches'te getByEmail ile çözüldü). 'learned' reason
+  // exact-email ile EŞİT/üstün güç → +80 puan. Intake katmanı 'learned'
+  // reason'ı auto-link tetikleyicisi olarak da kullanır (kişisel adres ise).
+  if (ctx.learnedAccountId && ctx.learnedAccountId === account.id) {
+    score += 80;
+    reasons.push({
+      type: 'learned',
+      label: 'Önceki vakadan öğrenildi',
+      valueMasked: signals.requesterEmail ? maskEmail(signals.requesterEmail) : null,
+    });
+  }
+
+  // M2.2 (5) — Domain önerisi (yalnız evrensel, exact email YOKsa devreye girer).
+  // Gönderen email'inin domain'i (signals.requesterEmailDomain) aday hesabın
+  // Account.email VEYA Contact.email domain'leriyle eşleşiyorsa → 'domain' reason.
+  // Public/ücretsiz domain'ler (gmail/outlook/...) blocklist ile filtrelenir.
+  // ASLA auto-link tetikleyicisi DEĞİL — yalnız öneri.
+  if (!emailMatched && signals.requesterEmailDomain) {
+    const d = signals.requesterEmailDomain;
+    if (!PUBLIC_EMAIL_DOMAINS.has(d)) {
+      const candidateDomains = accountEmails.map(emailDomain).filter(Boolean);
+      if (candidateDomains.includes(d)) {
+        score += 25;
+        reasons.push({
+          type: 'domain',
+          label: 'Aynı e-posta domaini',
+          valueMasked: `@${d}`,
+        });
+      }
     }
   }
 
@@ -317,6 +437,8 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
       accountId: true,
       accountName: true,
       customerMatchPending: true,
+      // M2.2 — inbound (origin='Eposta') vakalarda gövde-kazımayı kapat.
+      origin: true,
       // Phase D Step 2 — Agent intake'inde alınan başvuran bilgileri,
       // extractSignalsFromCase'in yüksek-öncelik sinyalleri.
       customerContactName: true,
@@ -343,9 +465,57 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   const signals = extractSignalsFromCase(c);
   const candidates = await fetchCandidateAccounts(c.companyId);
 
+  // M2.3 — Inbound için öğrenilen sender eşlemesi.
+  // YALNIZ c.origin='Eposta' VE customerContactEmail dolu iken devreye girer.
+  // learnedAccountId aday havuzunda mevcut + aktif olmalı; aksi halde
+  // null kalır → scoreCandidate'e ctx.learnedAccountId YOK gibi gelir.
+  let learnedAccountId = null;
+  let learnedIsRoleAddress = false;
+  if (signals.isInbound && signals.requesterEmail) {
+    try {
+      const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
+      const learned = await learnedSenderAccountRepo.getByEmail(c.companyId, signals.requesterEmail);
+      if (learned && candidates.some((a) => a.id === learned.accountId)) {
+        learnedAccountId = learned.accountId;
+        learnedIsRoleAddress = learned.isRoleAddress;
+      }
+    } catch (err) {
+      // Defensive: log + devam. learned'siz fallback davranış.
+      console.warn('[suggestCustomerMatches] learned lookup fail',
+        err?.message ?? err);
+    }
+  }
+
+  // M2.2 (4) — Placeholder telefon filtresi: aday havuzunda bir signal
+  // telefon PLACEHOLDER_PHONE_THRESHOLD'dan fazla farklı hesapla eşleşiyorsa
+  // discriminator değildir. Burada bir kez hesaplayıp scoreCandidate'a
+  // ctx olarak geçeriz (ekstra DB sorgusu yok — zaten yüklü candidate set).
+  const placeholderPhones = new Set();
+  if (signals.phones.length > 0) {
+    for (const p of signals.phones) {
+      if (!p) continue; // Codex P2: null normalize sonucu atla
+      let hits = 0;
+      for (const a of candidates) {
+        const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
+          .filter(Boolean)
+          .map(normalizePhone)
+          .filter(Boolean);
+        if (ap.includes(p)) {
+          hits += 1;
+          if (hits > PLACEHOLDER_PHONE_THRESHOLD) {
+            placeholderPhones.add(p);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const scoreCtx = { placeholderPhones, learnedAccountId };
+
   const scored = candidates
     .map((a) => {
-      const { score, confidence, reasons } = scoreCandidate(a, signals);
+      const { score, confidence, reasons } = scoreCandidate(a, signals, scoreCtx);
       return { account: a, score, confidence, reasons };
     })
     .filter((s) => s.score > 0)
@@ -379,7 +549,17 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
     };
   });
 
-  return { suggestions, generatedAt: new Date().toISOString() };
+  // M2.3 — Intake auto-link kararı için learned info açıkça döndürülür.
+  // null → öğrenilmiş eşleme yok / aday değil; obj varsa kişisel/rol bilgi.
+  const learnedMeta = learnedAccountId
+    ? { accountId: learnedAccountId, isRoleAddress: learnedIsRoleAddress }
+    : null;
+
+  return {
+    suggestions,
+    generatedAt: new Date().toISOString(),
+    learned: learnedMeta,
+  };
 }
 
 export const customerMatchRepository = {

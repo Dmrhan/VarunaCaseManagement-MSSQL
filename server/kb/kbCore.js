@@ -1209,6 +1209,9 @@ async function ask(query, opts = {}) {
   };
 }
 
+// server/kb/kb-bundle-entry.ts
+init_gemini();
+
 // server/kb/src/lib/cc/categorizer.ts
 init_gemini();
 import { z as z3 } from "zod";
@@ -1735,6 +1738,7 @@ async function suggestClose(input) {
   if (input.open_urun) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \xDCr\xFCn: ${input.open_urun}`);
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
+  const retrievalBlock = input.closeExamples || "";
   const fullPrompt = [
     "K\xD6K NEDEN GRUBU (biri):",
     getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
@@ -1754,6 +1758,7 @@ async function suggestClose(input) {
     "TICKET BA\u011ELAMI:",
     ctxLines.join("\n") || "(a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131rmas\u0131 yok)",
     "",
+    ...retrievalBlock ? [retrievalBlock, ""] : [],
     `Sorun a\xE7\u0131klamas\u0131: ${input.description.slice(0, 2e3)}`,
     "",
     `\xC7\xF6z\xFCm tasla\u011F\u0131 (ajan yazd\u0131): ${input.resolution.slice(0, 3e3)}`,
@@ -3465,6 +3470,8 @@ export {
   ask,
   categorize,
   categorizeV2,
+  embed,
+  embedBatch,
   embedPendingChunks,
   env,
   getKbDb,

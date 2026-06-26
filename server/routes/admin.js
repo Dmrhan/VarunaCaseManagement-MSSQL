@@ -21,11 +21,14 @@ import {
 } from '../db/adminRepository.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
+import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
 import { devopsClient } from '../lib/devopsClient.js';
 import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
+import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
+import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
 
 const router = Router();
 
@@ -256,6 +259,83 @@ router.delete('/field-definitions/:id', asyncRoute(async (req, res) => {
   if (cur) assertCompanyAdmin(req, cur.companyId);
   const actor = requireActor(req);
   const item = await fieldDefinitionRepo.remove(req.params.id, actor);
+  res.json(item);
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Authorization Policies — foundation only; runtime enforcement is not
+// wired here. Admin UI will use these endpoints to manage menu/resource/
+// field/security-filter rows per company.
+// ─────────────────────────────────────────────────────────────────
+router.get('/authorization-policies', asyncRoute(async (req, res) => {
+  const companyId = req.query.companyId;
+  if (!companyId) throw new AdminError('companyId query parametresi gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const items = await authorizationPolicyRepository.list(
+    {
+      companyId,
+      target: req.query.target,
+      ...(req.query.isActive !== undefined && { isActive: req.query.isActive === 'true' || req.query.isActive === '1' }),
+    },
+    req.user.allowedCompanyIds,
+  );
+  res.json({ value: items });
+}));
+
+router.post('/authorization-policies', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.create(body, req.user.allowedCompanyIds, actor);
+  res.status(201).json(item);
+}));
+
+router.post('/authorization-policies/effective-preview', asyncRoute(async (req, res) => {
+  const body = req.body ?? {};
+  assertCompanyAdmin(req, body.companyId);
+  const overrides = await authorizationPolicyRepository.listOverrides(
+    body.companyId,
+    req.user.allowedCompanyIds,
+  );
+  const preview = buildAuthorizationEffectivePreview({
+    companyId: body.companyId,
+    principalType: body.principalType,
+    principalKey: body.principalKey,
+    featureFlags: body.featureFlags ?? {},
+    overrides,
+  });
+  res.json(preview);
+}));
+
+async function assertAuthorizationPolicyCompanyAdmin(req, id) {
+  const row = await authorizationPolicyRepository.getById(
+    id,
+    req.user.allowedCompanyIds,
+  );
+  assertCompanyAdmin(req, row.companyId);
+  return row;
+}
+
+router.patch('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  await assertAuthorizationPolicyCompanyAdmin(req, req.params.id);
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.update(
+    req.params.id,
+    req.body ?? {},
+    req.user.allowedCompanyIds,
+    actor,
+  );
+  res.json(item);
+}));
+
+router.delete('/authorization-policies/:id', asyncRoute(async (req, res) => {
+  await assertAuthorizationPolicyCompanyAdmin(req, req.params.id);
+  const actor = requireActor(req);
+  const item = await authorizationPolicyRepository.remove(
+    req.params.id,
+    req.user.allowedCompanyIds,
+    actor,
+  );
   res.json(item);
 }));
 
@@ -934,6 +1014,38 @@ router.post('/external-mail-settings/:companyId/test', asyncRoute(async (req, re
       transport: result.meta?.transport,
       source: result.meta?.source,
     },
+  });
+}));
+
+/**
+ * Mail M3 — POST /external-mail-settings/:companyId/poll
+ *
+ * IMAP polling'i manuel tetikler (SystemAdmin guard — DevOps test rotası
+ * deseni). Cron seam (interval) ek olarak; bu endpoint debug / acil
+ * tetik için.
+ *
+ * Dönen: { ok, stats: { fetched, intaken, skipped, failed }, error? }
+ * Secret/raw mesaj response'a inmez; sadece sayım istatistikleri.
+ */
+router.post('/external-mail-settings/:companyId/poll', asyncRoute(async (req, res) => {
+  const companyId = req.params.companyId;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  // SystemAdmin guard (DevOps test endpoint'inden farklı — IMAP polling
+  // tüm tenant kapsamlı kaynak tüketir, SystemAdmin yetkisi şart).
+  requireSystemAdminOnly(req);
+
+  const result = await imapPollMailbox(companyId);
+  if (!result.ok) {
+    return res.json({
+      ok: false,
+      stats: result.stats,
+      error: result.error,
+    });
+  }
+  return res.json({
+    ok: true,
+    stats: result.stats,
+    meta: result.meta,
   });
 }));
 
