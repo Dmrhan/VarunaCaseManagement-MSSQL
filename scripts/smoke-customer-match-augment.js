@@ -306,6 +306,139 @@ async function mkAccountWithEmail({ name, email, baseTs }) {
     expectTruthy('contact phoneE164 → target önerilir',
       rContact.suggestions.some((s) => s.accountId === contactTarget.id));
 
+    console.log('\n=== (3f) Codex P2 round 2: placeholder phone (>THRESHOLD) → augment KOYMAZ ===');
+    // 4 account aynı phoneE164='+905555555555' (PLACEHOLDER_PHONE_THRESHOLD=3 + 1)
+    // Cap'siz augment hepsini havuza dolduruyordu; weak signal sızıntısı
+    // riski vardı. Yeni guard: take=THRESHOLD+1 → > THRESHOLD ise drop.
+    await reset();
+    await prisma.company.upsert({
+      where: { id: TENANT }, update: {},
+      create: { id: TENANT, name: TENANT_NAME, isActive: true },
+    });
+    // 500 noise (top dilim doldur)
+    const noiseData3 = [];
+    const baseEarly3 = new Date('2026-01-01T00:00:00Z');
+    for (let i = 0; i < 500; i++) {
+      const ts = new Date(baseEarly3.getTime() + i * 1000);
+      noiseData3.push({
+        companyId: TENANT, name: `Noise ${i}`, email: null, phone: null,
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: noiseData3 });
+    // 4 account aynı placeholder phoneE164 (top 500 DIŞINDA — createdAt geç)
+    const phData = [];
+    const baseLate = new Date('2026-12-31T23:00:00Z');
+    for (let i = 0; i < 4; i++) {
+      const ts = new Date(baseLate.getTime() + i * 1000);
+      phData.push({
+        companyId: TENANT, name: `Placeholder Acct ${i}`,
+        phoneE164: '+905555555555',
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: phData });
+
+    const cPh = await mkCase('VK-CMA-PH', {
+      contactName: 'Placeholder Test',
+      phone: '+905555555555',
+    });
+    const rPh = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cPh.id, allowedCompanyIds: [TENANT], limit: 10,
+    });
+    // 4 placeholder account top 500 DIŞINDA + augment ATTI → öneride YOK
+    const phRows = await prisma.account.findMany({
+      where: { companyId: TENANT, phoneE164: '+905555555555' },
+      select: { id: true },
+    });
+    expect('placeholder phone 4 hesap DB\'de', phRows.length, 4);
+    const phIds = new Set(phRows.map((a) => a.id));
+    const phInSuggestions = (rPh.suggestions ?? []).filter((s) => phIds.has(s.accountId));
+    expect('placeholder hesaplar öneride YOK (augment guard)',
+      phInSuggestions.length, 0);
+
+    console.log('\n=== (3g) 3 hesap (≤THRESHOLD) aynı phoneE164 → augment et ===');
+    await reset();
+    await prisma.company.upsert({
+      where: { id: TENANT }, update: {},
+      create: { id: TENANT, name: TENANT_NAME, isActive: true },
+    });
+    // 500 noise (önceden olduğu gibi)
+    const noiseData4 = [];
+    for (let i = 0; i < 500; i++) {
+      const ts = new Date(baseEarly3.getTime() + i * 1000);
+      noiseData4.push({
+        companyId: TENANT, name: `Noise ${i}`, email: null, phone: null,
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: noiseData4 });
+    // 3 account aynı phoneE164 (THRESHOLD ile EŞIT — augment et)
+    const ph3Data = [];
+    for (let i = 0; i < 3; i++) {
+      const ts = new Date(baseLate.getTime() + i * 1000);
+      ph3Data.push({
+        companyId: TENANT, name: `Below Threshold ${i}`,
+        phoneE164: '+905324443322',
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: ph3Data });
+    const cPh3 = await mkCase('VK-CMA-PH3', {
+      contactName: 'Below Threshold',
+      phone: '+905324443322',
+    });
+    const rPh3 = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cPh3.id, allowedCompanyIds: [TENANT], limit: 10,
+    });
+    const ph3Rows = await prisma.account.findMany({
+      where: { companyId: TENANT, phoneE164: '+905324443322' },
+      select: { id: true },
+    });
+    const ph3Ids = new Set(ph3Rows.map((a) => a.id));
+    const ph3InSuggestions = (rPh3.suggestions ?? []).filter((s) => ph3Ids.has(s.accountId));
+    expect('3 hesap (≤THRESHOLD) öneride VAR (augment et)',
+      ph3InSuggestions.length, 3);
+
+    console.log('\n=== (3h) BİLİNEN SINIR — phoneE164=NULL + raw display + top 500 dışı → augment KAÇIRIR ===');
+    // Legacy account: phoneE164 NULL, display phone raw boşluklu format,
+    // top 500 dışında (createdAt geç). Augment query phoneE164/phone OR'u
+    // raw'ı yakalamaz. Belgelenen sınır — kod yorumu + bu smoke ile
+    // kanıtlı. Operasyonel çözüm: phoneE164 backfill migration (ayrı PR).
+    await reset();
+    await prisma.company.upsert({
+      where: { id: TENANT }, update: {},
+      create: { id: TENANT, name: TENANT_NAME, isActive: true },
+    });
+    const noiseData5 = [];
+    for (let i = 0; i < 500; i++) {
+      const ts = new Date(baseEarly3.getTime() + i * 1000);
+      noiseData5.push({
+        companyId: TENANT, name: `Noise ${i}`, email: null, phone: null,
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: noiseData5 });
+    const legacyTs = new Date('2026-12-31T23:30:00Z');
+    const legacyTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Legacy Raw Phone Target',
+        phone: '+90 532 444 5599', // display raw, boşluklu
+        phoneE164: null,           // legacy: normalize YOK
+        isActive: true, createdAt: legacyTs, updatedAt: legacyTs,
+      },
+    });
+    const cLegacy = await mkCase('VK-CMA-LEGACY', {
+      contactName: 'Legacy Test',
+      phone: '+905324445599', // normalize signal
+    });
+    const rLegacy = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cLegacy.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    const legacySugg = rLegacy.suggestions.find((s) => s.accountId === legacyTarget.id);
+    expect('BİLİNEN SINIR: legacy raw + phoneE164=NULL + top 500 dışı → öneride YOK',
+      legacySugg, undefined);
+
     console.log('\n=== (4) Küçük tenant regression — 10 hesap, augment etkisiz ===');
     await reset();
     await prisma.company.upsert({
