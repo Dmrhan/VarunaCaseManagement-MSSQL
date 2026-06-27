@@ -1,21 +1,21 @@
 /**
- * Mail M6.1 + M6.2b — Case Detail "İletişim" sekmesi.
+ * Mail M6.1 + M6.2b + M6.3-realign — Case Detail "İletişim" sekmesi.
  *
- * Plan referansı: docs/M6-email-in-case-plan.md Bölüm 3 (mimari).
- *
- * Yapı:
- *  - Üstte ÇOK-KANAL iskelet (K5): Web / E-Posta / SMS / Gelen Aramalar.
- *  - E-Posta panel: <MailThread> (read-only) + "Yanıtla" / "Yeni e-posta"
- *    butonları + <MailComposer> (M6.2b).
- *  - Composer açıldığında alta sticky panel; gönderim sonrası kapanır +
- *    thread reload.
+ * n4b paritesi (M6.3-realign):
+ *  - E-Posta sekmesi = TABLO (yön / from / to / cc / bcc / tarih /
+ *    konu+ek / aksiyonlar).
+ *  - Üstte SADECE "+ Yeni e-posta" — "Yanıtla" KALDIRILDI (satır içi
+ *    aksiyona taşındı).
+ *  - Composer = TAM EKRAN: thread'in yerini alır; Vazgeç ile thread'e
+ *    döner.
+ *  - Satır ikonları: Görüntüle / Yanıtla (reply-all) / İlet (forward).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AtSign, Globe, MessageSquare, Phone, Plus, Reply } from 'lucide-react';
+import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailThread, type MailThreadHandle } from './MailThread';
 import { MailComposer } from './MailComposer';
 import { Button } from '@/components/ui/Button';
-import { caseEmailService, type ReplyContext } from '@/services/caseEmailService';
+import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -42,11 +42,27 @@ export function CommunicationTab({ item }: Props) {
   const [channel, setChannel] = useState<Channel>('email');
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
+  const [forwardCtx, setForwardCtx] = useState<ForwardContext | null>(null);
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
+  // Codex fix — Reply/Forward konu prefill: composer açıkken mode değişirse
+  // (örn. reply açıkken forward'a geç) initialReplyContext/initialForwardContext
+  // prop değişiyor ama composer'ın internal state'i (subject vs.) ilk
+  // mount'ta sabitlendiği için yenilenmiyordu. composeKey her openX'te
+  // değişir → composer remount → useState initializer subject'i yeni
+  // ctx.subject ile doldurur.
+  const [composeKey, setComposeKey] = useState(0);
+  // M6.3-realign — config-yok hali. mailConfigState:
+  //   'loading'   → aliases fetch'i bekleniyor (ilk render)
+  //   'configured'→ 1+ alias var, normal akış
+  //   'missing'   → 0 alias, "Mail entegrasyonu yapılandırılmamış" banner
+  const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
+  // Banner mesajını "kapalı" vs "yapılandırılmamış" ayırt etmek için reason'ı tutuyoruz
+  const [missingReason, setMissingReason] = useState<EmailConfigReason | null>(null);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
-  // İmzayı bir kez yükle
+  // İmzayı sessizce yükle (silent fetch — config-yok şirketlerde 404 →
+  // toast yok, null döner).
   useEffect(() => {
     let alive = true;
     void caseEmailService.getEmailSignature(item.id).then((s) => {
@@ -55,29 +71,62 @@ export function CommunicationTab({ item }: Props) {
     return () => { alive = false; };
   }, [item.id]);
 
-  const openReply = useCallback(async () => {
-    // Reply-context yükle; boşsa manuel mod
+  // M6.3-realign (revize) — dedicated email-config endpoint'i.
+  // configured kararı backend'de listActiveWithSettingFallback'e dayanır
+  // → composer dropdown ile aynı kaynak. UNIVERA gibi config TAM +
+  // manuel FromAlias YOK senaryosunda configured=true döner
+  // (reason='fallback-from-address').
+  useEffect(() => {
+    let alive = true;
+    void caseEmailService.getEmailConfig(item.id).then((cfg) => {
+      if (!alive) return;
+      setMailConfigState(cfg.configured ? 'configured' : 'missing');
+      setMissingReason(cfg.configured ? null : cfg.reason);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  const openReply = useCallback(async (_email?: CaseEmailItem) => {
+    // reply-context backend son inbound'u baz alıyor. Email-specific
+    // reply için ileride backend `?inReplyTo=` parametresi eklenebilir.
     const ctx = await caseEmailService.getReplyContext(item.id);
     setReplyCtx(ctx ?? null);
+    setForwardCtx(null);
     setComposerOpen(true);
+    setComposeKey((k) => k + 1);
+  }, [item.id]);
+
+  const openForward = useCallback(async (email: CaseEmailItem) => {
+    const ctx = await caseEmailService.getForwardContext(item.id, email.id);
+    setForwardCtx(ctx ?? null);
+    setReplyCtx(null);
+    setComposerOpen(true);
+    setComposeKey((k) => k + 1);
   }, [item.id]);
 
   const openNew = useCallback(() => {
     setReplyCtx(null);
+    setForwardCtx(null);
     setComposerOpen(true);
+    setComposeKey((k) => k + 1);
   }, []);
 
   const handleSent = useCallback(() => {
     setComposerOpen(false);
     setReplyCtx(null);
-    // Thread'i yeniden yükle + son maile scroll
+    setForwardCtx(null);
     threadRef.current?.refresh({ scrollToLast: true });
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    setComposerOpen(false);
+    setReplyCtx(null);
+    setForwardCtx(null);
   }, []);
 
   return (
     <div className="space-y-3">
-      {/* K5 iskelet — çok-kanal tab. E-Posta dışındakiler disabled
-          ("Yakında" rozet). */}
+      {/* K5 iskelet — çok-kanal tab. E-Posta dışındakiler disabled. */}
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
         {CHANNELS.map((c) => {
           const isActive = c.key === channel;
@@ -110,48 +159,69 @@ export function CommunicationTab({ item }: Props) {
         })}
       </div>
 
-      {channel === 'email' && (
+      {channel === 'email' && mailConfigState === 'loading' && (
+        <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">
+          Yükleniyor…
+        </div>
+      )}
+
+      {channel === 'email' && mailConfigState === 'missing' && (
+        // M6.3-realign — config-yok hali. Toast yağmuru YOK; tek temiz
+        // banner. Mesaj backend'in döndürdüğü reason'a göre hassaslaşır.
+        <div
+          className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+          role="status"
+        >
+          <Info size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="font-medium">
+              {missingReason === 'disabled'
+                ? `"${item.companyName}" için mail entegrasyonu kapalı.`
+                : `"${item.companyName}" için mail entegrasyonu yapılandırılmamış.`}
+            </p>
+            <p className="mt-1 text-xs">
+              Admin → Yönetim Paneli → <b>Mail Entegrasyonu</b> → ilgili
+              şirket → SMTP/IMAP credentials + gönderen adresi (From) tanımlı
+              olmalı. Düzenleme tamamlanınca bu sekme otomatik aktifleşir.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {channel === 'email' && mailConfigState === 'configured' && (
         <>
-          {/* Compose toolbar */}
-          {!composerOpen && (
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                leftIcon={<Reply size={13} />}
-                onClick={() => void openReply()}
-              >
-                Yanıtla
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                leftIcon={<Plus size={13} />}
-                onClick={openNew}
-              >
-                Yeni e-posta
-              </Button>
-            </div>
-          )}
-
-          <MailThread
-            ref={threadRef}
-            caseId={item.id}
-            // M6.3a — satır "Yanıtla" tıklanınca composer'ı reply-context
-            // ile aç. (Email parametresi şu an reply-context endpoint'i
-            // son inbound'u baz aldığı için ignore; ileride email-specific
-            // reply için backend `?inReplyTo=` parametresi eklenebilir.)
-            onReply={() => void openReply()}
-          />
-
-          {composerOpen && (
+          {composerOpen ? (
+            // M6.3-realign — TAM EKRAN composer; thread'i değiştirir.
             <MailComposer
+              key={composeKey}
               item={item}
               initialReplyContext={replyCtx}
+              initialForwardContext={forwardCtx}
               initialSignatureHtml={signatureHtml}
               onSent={handleSent}
-              onCancel={() => { setComposerOpen(false); setReplyCtx(null); }}
+              onCancel={handleCancel}
             />
+          ) : (
+            <>
+              {/* Toolbar — n4b paritesi: sadece "+ Yeni e-posta". */}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="primary"
+                  leftIcon={<Plus size={13} />}
+                  onClick={openNew}
+                >
+                  Yeni e-posta
+                </Button>
+              </div>
+
+              <MailThread
+                ref={threadRef}
+                caseId={item.id}
+                onReply={(email) => void openReply(email)}
+                onForward={(email) => void openForward(email)}
+              />
+            </>
           )}
         </>
       )}
