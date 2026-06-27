@@ -120,9 +120,16 @@ export interface ReplyContext {
  * (M6.2a backend). Vakanın son inbound CaseEmail'ından çıkarılır; tenant
  * alias adresleri loop koruması için filtrelenmiştir.
  */
-export async function getReplyContext(caseId: string): Promise<ReplyContext | undefined> {
+export async function getReplyContext(
+  caseId: string,
+  emailId?: string,
+): Promise<ReplyContext | undefined> {
+  // Codex P2 fix — satır içi "Yanıtla" verili emailId ile çağrılır;
+  // backend o mail satırını baz alır. Param yoksa son inbound (üst
+  // toolbar davranışı).
+  const qs = emailId ? `?emailId=${encodeURIComponent(emailId)}` : '';
   return apiFetch<ReplyContext>(
-    `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context`,
+    `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context${qs}`,
     undefined,
     { silent: true },
   );
@@ -138,6 +145,13 @@ export interface SendEmailDraft {
   bodyText?: string;
   /** CaseAttachment.id[] — composer attachments uploader'dan toplanır. */
   attachments?: string[];
+  /**
+   * Codex P2 fix — Reply parent (Message-ID).
+   * Satır içi "Yanıtla" → reply-context'in inReplyTo'su composer'dan
+   * draft'a aktarılır → backend threading bu mail satırını parent
+   * kabul eder. Yoksa: backend son inbound fallback.
+   */
+  inReplyTo?: string | null;
 }
 
 export interface SendEmailResult {
