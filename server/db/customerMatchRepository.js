@@ -325,6 +325,16 @@ async function fetchHighSignalAccounts(companyId, signals) {
   // (b) Exact phone — Codex P2 fix: phoneE164 normalize kolonları + slot
   // 2/3 + contact phoneE164. Account.phone display raw legacy back-compat.
   //
+  // BİLİNEN SINIR (Codex P2 round 3 — belgelendi, smoke 3h):
+  //   phoneE164 NULL + display phone raw (boşluklu "+90 532 ..." veya
+  //   sade "5333...") olan LEGACY kayıtlar augment query'sinden geçmez:
+  //   { phone: p } satırı normalize signal'i raw'la karşılaştırır → miss.
+  //   scoreCandidate aday havuza alındığında normalize edip eşleşmeyi
+  //   kurardı ama bu kayıtlar HAVUZA ALINMIYOR.
+  //   prod ampirik: %99 phoneE164 dolu (WR-A2) → %1 etki sınırı.
+  //   Operasyonel çözüm: backfill migration (ayrı PR) — phoneE164 NULL
+  //   tüm kayıtlar için runtime normalize ile populate et.
+  //
   // PLACEHOLDER PHONE GUARD (Codex P2 round 2):
   // Paylaşılan santral/demo numara phoneE164'da N>THRESHOLD account'a
   // denk gelebilir. Cap'siz augment HEPSINI havuza dolduruyor; sonra

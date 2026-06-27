@@ -400,6 +400,45 @@ async function mkAccountWithEmail({ name, email, baseTs }) {
     expect('3 hesap (≤THRESHOLD) öneride VAR (augment et)',
       ph3InSuggestions.length, 3);
 
+    console.log('\n=== (3h) BİLİNEN SINIR — phoneE164=NULL + raw display + top 500 dışı → augment KAÇIRIR ===');
+    // Legacy account: phoneE164 NULL, display phone raw boşluklu format,
+    // top 500 dışında (createdAt geç). Augment query phoneE164/phone OR'u
+    // raw'ı yakalamaz. Belgelenen sınır — kod yorumu + bu smoke ile
+    // kanıtlı. Operasyonel çözüm: phoneE164 backfill migration (ayrı PR).
+    await reset();
+    await prisma.company.upsert({
+      where: { id: TENANT }, update: {},
+      create: { id: TENANT, name: TENANT_NAME, isActive: true },
+    });
+    const noiseData5 = [];
+    for (let i = 0; i < 500; i++) {
+      const ts = new Date(baseEarly3.getTime() + i * 1000);
+      noiseData5.push({
+        companyId: TENANT, name: `Noise ${i}`, email: null, phone: null,
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: noiseData5 });
+    const legacyTs = new Date('2026-12-31T23:30:00Z');
+    const legacyTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Legacy Raw Phone Target',
+        phone: '+90 532 444 5599', // display raw, boşluklu
+        phoneE164: null,           // legacy: normalize YOK
+        isActive: true, createdAt: legacyTs, updatedAt: legacyTs,
+      },
+    });
+    const cLegacy = await mkCase('VK-CMA-LEGACY', {
+      contactName: 'Legacy Test',
+      phone: '+905324445599', // normalize signal
+    });
+    const rLegacy = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cLegacy.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    const legacySugg = rLegacy.suggestions.find((s) => s.accountId === legacyTarget.id);
+    expect('BİLİNEN SINIR: legacy raw + phoneE164=NULL + top 500 dışı → öneride YOK',
+      legacySugg, undefined);
+
     console.log('\n=== (4) Küçük tenant regression — 10 hesap, augment etkisiz ===');
     await reset();
     await prisma.company.upsert({
