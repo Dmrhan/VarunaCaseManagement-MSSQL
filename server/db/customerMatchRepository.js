@@ -322,46 +322,64 @@ async function fetchHighSignalAccounts(companyId, signals) {
     );
   }
 
-  // (b) Exact phone — Codex P2 fix (ampirik): WR-A2 normalize kolonları
-  // kullan. Account.phoneE164 + phone2E164 + phone3E164 (3 slot, hepsi
-  // indeksli) ve AccountContact.phoneE164. Account.phone display raw
-  // saklı; signals.phones zaten E.164 → normalize kolonla eşleştirilir.
-  // Geri uyumluluk: phoneE164 boş eski kayıtlar için phone (raw) IN
-  // sorgusunu da OR'a ekle — düşük maliyet, false-negatif engelleyici.
+  // (b) Exact phone — Codex P2 fix: phoneE164 normalize kolonları + slot
+  // 2/3 + contact phoneE164. Account.phone display raw legacy back-compat.
+  //
+  // PLACEHOLDER PHONE GUARD (Codex P2 round 2):
+  // Paylaşılan santral/demo numara phoneE164'da N>THRESHOLD account'a
+  // denk gelebilir. Cap'siz augment HEPSINI havuza dolduruyor; sonra
+  // placeholderPhones filtresi phone score'unu bastırsa da bu hesaplar
+  // havuzda KALIYOR ve weak signal (name/product) ile öneriye SIZABILIYOR.
+  //
+  // Çözüm: her phone için ayrı query, take = THRESHOLD+1.
+  // Sonuç > THRESHOLD → placeholder, augment'a KOYMA (zaten phone
+  // discriminator değil; weak signal sızıntısı engellenir).
+  // ≤ THRESHOLD → gerçek match, augment et.
   if (signals.phones?.length) {
-    tasks.push(
-      prisma.account.findMany({
-        where: {
-          AND: [
-            where,
-            {
-              OR: [
-                { phoneE164: { in: signals.phones } },
-                { phone2E164: { in: signals.phones } },
-                { phone3E164: { in: signals.phones } },
-                // legacy backward compat — phoneE164 null kayıtlar
-                { phone: { in: signals.phones } },
-                {
-                  contacts: {
-                    some: {
-                      isActive: true,
-                      OR: [
-                        { phoneE164: { in: signals.phones } },
-                        { phone: { in: signals.phones } },
-                      ],
+    for (const p of signals.phones) {
+      if (!p) continue;
+      tasks.push(
+        prisma.account.findMany({
+          where: {
+            AND: [
+              where,
+              {
+                OR: [
+                  { phoneE164: p },
+                  { phone2E164: p },
+                  { phone3E164: p },
+                  // legacy backward compat — phoneE164 null kayıtlar
+                  { phone: p },
+                  {
+                    contacts: {
+                      some: {
+                        isActive: true,
+                        OR: [
+                          { phoneE164: p },
+                          { phone: p },
+                        ],
+                      },
                     },
                   },
-                },
-              ],
-            },
-          ],
-        },
-        select,
-      }).catch((err) => {
-        console.warn('[customerMatch] high-signal phone lookup fail', err?.message ?? err);
-        return [];
-      }),
-    );
+                ],
+              },
+            ],
+          },
+          select,
+          // PLACEHOLDER_PHONE_THRESHOLD + 1: discriminator olup olmadığını
+          // tek query ile anlamak için (ek count query'si yok).
+          take: PLACEHOLDER_PHONE_THRESHOLD + 1,
+        }).then((rows) => {
+          // > THRESHOLD → placeholder; augment'a koyma (weak signal
+          // sızıntısı engellenir)
+          if (rows.length > PLACEHOLDER_PHONE_THRESHOLD) return [];
+          return rows;
+        }).catch((err) => {
+          console.warn('[customerMatch] high-signal phone lookup fail', err?.message ?? err);
+          return [];
+        }),
+      );
+    }
   }
 
   // (c) External customer code — AccountCompany.externalCustomerCode scope'lu
