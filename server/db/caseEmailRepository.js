@@ -249,6 +249,18 @@ async function appendOutbound(params) {
     caseId, companyId, from, to, cc, bcc, subject,
     bodyHtml, bodyText, messageId, inReplyTo, refs,
     sentAt, source, sentByUserId, dispatchId, headersJson,
+    // Codex P2 fix — explicit reply parent'ın inbound receivedAt'i.
+    // SADECE composer agent'ın TIKLADIĞI satır için set edilir (sender
+    // explicit yolda). Fallback yolda (UI emailId vermedi) null gelir
+    // → eski simetrik mantık.
+    //
+    // Bu değer iki kullanım:
+    //   1) Pending state hesabı: agent eski mail'e cevap verdiyse son
+    //      inbound hâlâ cevapsız olabilir.
+    //   2) lastEmailOutboundAt advance kontrolü: eski mail'e cevap
+    //      timestamp'i K4 mantığını "poison" etmemeli (yeni inbound
+    //      backfill'de yanlış pending=false yaratırdı).
+    replyToInboundReceivedAt,
   } = params;
 
   if (!caseId || !companyId || !from?.address) {
@@ -309,13 +321,43 @@ async function appendOutbound(params) {
     const effectiveOut = !prevOut || sentAtFinal.getTime() > prevOut.getTime()
       ? sentAtFinal
       : prevOut;
-    const pending = !!prevIn && prevIn.getTime() > effectiveOut.getTime();
+
+    // Codex P2 fix — "Eski mail'e cevap" semantiği:
+    //   Agent ESKİ bir inbound'a cevap verdiyse bu outbound son inbound'u
+    //   CEVAPLAMAZ. Hem pending state hesabını hem
+    //   lastEmailOutboundAt advance'ini buna göre kur:
+    //     - isOldReply = replyToInboundReceivedAt < prevIn
+    //
+    //   1) Pending: bu outbound son inbound için sayılmaz →
+    //      effectiveOutForPending = prevOut (önceki cevap var mıydı?)
+    //   2) lastEmailOutboundAt: advance ETME → ileride yeni inbound
+    //      backfill'de appendInbound pending hesabı bu outbound'u son
+    //      cevap sanmaz (poison engelleme).
+    //
+    //   Agent en YENİ inbound'a cevap (veya replyTo null = fallback yolda
+    //   "son inbound'a cevap" varsayımı) → eski simetrik mantık.
+    const isOldReply =
+      replyToInboundReceivedAt instanceof Date
+      && prevIn
+      && replyToInboundReceivedAt.getTime() < prevIn.getTime();
+
+    const effectiveOutForPending = isOldReply ? prevOut : effectiveOut;
+    const pending = !!prevIn && (
+      !effectiveOutForPending
+      || prevIn.getTime() > effectiveOutForPending.getTime()
+    );
+
+    // lastEmailOutboundAt advance kararı:
+    //   - isOldReply → advance ETME (timestamp prevOut'ta kalır)
+    //   - değilse → MAX(prevOut, sentAtFinal) (mevcut monotonic davranış)
+    const advanceOutbound =
+      !isOldReply
+      && (!prevOut || prevOut.getTime() < sentAtFinal.getTime());
+
     await tx.case.update({
       where: { id: caseId },
       data: {
-        ...(prevOut && prevOut.getTime() >= sentAtFinal.getTime()
-          ? {}
-          : { lastEmailOutboundAt: sentAtFinal }),
+        ...(advanceOutbound ? { lastEmailOutboundAt: sentAtFinal } : {}),
         pendingCustomerReply: pending,
       },
     });

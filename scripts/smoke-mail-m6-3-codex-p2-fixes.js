@@ -201,6 +201,114 @@ async function mkInbound(c, fromAddress, subject, receivedAt, toAddresses = []) 
       recipients.includes('musteri@dis.com'), true);
     expect('baska@firm.com to listesinde VAR',
       recipients.includes('baska@firm.com'), true);
+
+    // ─────────────────────────────────────────────────────────────────
+    //  PENDING STATE — eski mail'e cevap + lastEmailOutboundAt poison
+    // ─────────────────────────────────────────────────────────────────
+    console.log('\n=== (P2-1c) pending — eski mail\'e cevap, YENİ cevapsız → pending TRUE ===');
+    // c case'inde eOld + eNew var; ek setting tarafından alias kaydedildi
+    // (P2-3 setup). State'i sıfırla.
+    await prisma.case.update({
+      where: { id: c.id },
+      data: {
+        pendingCustomerReply: true,
+        lastEmailInboundAt: new Date('2026-06-26T10:00:00Z'),
+        lastEmailOutboundAt: null,
+      },
+    });
+    const stubSend2 = async (m) => ({ ok: true, messageId: m.headers['Message-ID'], previewUrl: null });
+
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'csmtest@univera.com.tr',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: ESKI',
+        bodyHtml: '<p>cevap</p>',
+        inReplyTo: eOldRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+    const cAfterOld = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true, lastEmailOutboundAt: true },
+    });
+    expect('eski mail\'e cevap, yeni cevapsız → pending TRUE',
+      cAfterOld.pendingCustomerReply, true);
+    expect('lastEmailOutboundAt advance ETMEDİ (poison koruma)',
+      cAfterOld.lastEmailOutboundAt, null);
+
+    console.log('\n=== (P2-1d) pending — YENİ inbound\'a cevap → pending FALSE ===');
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'csmtest@univera.com.tr',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: YENI',
+        bodyHtml: '<p>cevap</p>',
+        inReplyTo: eNewRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+    const cAfterNew = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true, lastEmailOutboundAt: true },
+    });
+    expect('yeni mail\'e cevap → pending FALSE',
+      cAfterNew.pendingCustomerReply, false);
+    expectTruthy('lastEmailOutboundAt advance edildi',
+      cAfterNew.lastEmailOutboundAt && cAfterNew.lastEmailOutboundAt > new Date('2026-06-26T10:00:00Z'));
+
+    console.log('\n=== (P2-1e) pending — yeni ZATEN cevaplı, eski mail\'e ek cevap → pending FALSE (reopen YOK) ===');
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'csmtest@univera.com.tr',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: ESKI ek',
+        bodyHtml: '<p>cevap</p>',
+        inReplyTo: eOldRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+    const cAfterReopen = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true },
+    });
+    expect('yeni cevaplı + eski mail\'e ek cevap → pending FALSE (reopen YOK)',
+      cAfterReopen.pendingCustomerReply, false);
+
+    console.log('\n=== (P2-1f) fallback yol (UI emailId vermedi) → eski simetrik mantık ===');
+    // Sıfırla: pending=true, only inbound stamp
+    await prisma.case.update({
+      where: { id: c.id },
+      data: {
+        pendingCustomerReply: true,
+        lastEmailInboundAt: new Date('2026-06-26T10:00:00Z'),
+        lastEmailOutboundAt: null,
+      },
+    });
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'csmtest@univera.com.tr',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: thread',
+        bodyHtml: '<p>cevap</p>',
+        // inReplyTo VERİLMEDİ → fallback yol; pending eski simetrik
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+    const cAfterFallback = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true },
+    });
+    expect('fallback yol → pending FALSE (eski simetrik mantık)',
+      cAfterFallback.pendingCustomerReply, false);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
