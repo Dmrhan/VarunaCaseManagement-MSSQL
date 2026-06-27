@@ -210,13 +210,24 @@ async function sendCaseEmail(params, opts = {}) {
   // yeni mail'i parent gösterir).
   const newMessageId = buildSenderMessageId();
   let parent = null;
+  // Codex P2 fix — explicit reply parent receivedAt'i SADECE explicit
+  // yolda set; fallback yolda null. Sebep: findThreadParentMessageId
+  // messageId IS NOT NULL filter'ı uyguluyor; son inbound messageId'siz
+  // ise daha eski bir inbound'a düşebilir → o eski receivedAt'i K4
+  // pending hesabına pas edersek isOldReply yanlış tetiklenir.
+  // UI explicit emailId pas etmediğinde "tüm thread'e cevap"
+  // varsayımıyla eski simetrik mantık doğru çalışır.
+  let explicitReplyInboundReceivedAt = null;
   if (typeof inReplyTo === 'string' && inReplyTo.trim()) {
     const explicit = await prisma.caseEmail.findFirst({
       where: { caseId, messageId: inReplyTo.trim() },
-      select: { messageId: true, refs: true },
+      select: { messageId: true, refs: true, receivedAt: true, direction: true },
     });
     if (explicit?.messageId) {
       parent = { parentMessageId: explicit.messageId, refs: explicit.refs };
+      if (explicit.direction === 'inbound') {
+        explicitReplyInboundReceivedAt = explicit.receivedAt;
+      }
     }
     // Eğer composer'ın gönderdiği inReplyTo bu vakadaki bir CaseEmail
     // değilse (cross-case / silinmiş / outbound-only id) → fallback
@@ -224,6 +235,8 @@ async function sendCaseEmail(params, opts = {}) {
   }
   if (!parent) {
     parent = await findThreadParentMessageId(caseId);
+    // Fallback yolda explicitReplyInboundReceivedAt null kalır → pending
+    // hesabı eski simetrik mantığa düşer.
   }
   const headers = { 'Message-ID': newMessageId };
   if (parent?.parentMessageId) {
@@ -292,6 +305,11 @@ async function sendCaseEmail(params, opts = {}) {
       sentAt: new Date(),
       source: 'manual_send',
       sentByUserId: actor?.userId ?? null,
+      // Codex P2 fix — explicit reply parent'ın inbound receivedAt'i.
+      // Sadece agent'ın tıkladığı satır için set; fallback yolda null.
+      // appendOutbound bunu kullanarak "eski mail'e cevap" senaryosunda
+      // pending state'i ve lastEmailOutboundAt advance'ini doğru kurar.
+      replyToInboundReceivedAt: explicitReplyInboundReceivedAt,
     });
   } catch (err) {
     // Mail gönderildi ama DB persist fail oldu — round-trip için
