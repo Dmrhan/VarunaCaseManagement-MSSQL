@@ -314,13 +314,22 @@ async function appendOutbound(params) {
     //     son outbound, son inbound'dan sonraysa yanıt beklenmez.
     const c = await tx.case.findUnique({
       where: { id: caseId },
-      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true },
+      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true, status: true },
     });
     const prevIn = c?.lastEmailInboundAt ?? null;
     const prevOut = c?.lastEmailOutboundAt ?? null;
     const effectiveOut = !prevOut || sentAtFinal.getTime() > prevOut.getTime()
       ? sentAtFinal
       : prevOut;
+    // Codex P2 fix — terminal (Çözüldü/İptal) statüde pending HÂLÂ false
+    // tutulmalı. transitionStatus terminal'e geçişte pending=false yapar
+    // ama mail timestamps kalır; agent kapalı vakaya satır içi reply
+    // gönderirse (POST /:id/emails closed-case reject etmez) isOldReply
+    // hesabı stale prevIn/prevOut'tan pending=true üretebilirdi → kapalı
+    // vaka "yanıt bekliyor" gibi görünürdü. Bu kontrolün eski (replyTo
+    // yok) yolu da kapsaması için isOldReply check'inden BAĞIMSIZ.
+    const TERMINAL = new Set(['Cozuldu', 'IptalEdildi']);
+    const isTerminal = TERMINAL.has(c?.status);
 
     // Codex P2 fix — "Eski mail'e cevap" semantiği:
     //   Agent ESKİ bir inbound'a cevap verdiyse bu outbound son inbound'u
@@ -342,7 +351,11 @@ async function appendOutbound(params) {
       && replyToInboundReceivedAt.getTime() < prevIn.getTime();
 
     const effectiveOutForPending = isOldReply ? prevOut : effectiveOut;
-    const pending = !!prevIn && (
+    // Terminal vakalarda hesaplama ne çıkarırsa çıksın pending=false
+    // (kapalı vaka asla "yanıt bekliyor" konumuna geri dönmez; reopen
+    // sadece transitionStatus üzerinden müşteri yeni inbound göndererek
+    // veya agent statüyü açarak olabilir).
+    const pending = !isTerminal && !!prevIn && (
       !effectiveOutForPending
       || prevIn.getTime() > effectiveOutForPending.getTime()
     );

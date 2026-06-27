@@ -309,6 +309,47 @@ async function mkInbound(c, fromAddress, subject, receivedAt, toAddresses = []) 
     });
     expect('fallback yol → pending FALSE (eski simetrik mantık)',
       cAfterFallback.pendingCustomerReply, false);
+
+    console.log('\n=== (P2-1g) terminal (Cozuldu) vakada eski mail\'e cevap → pending FALSE (reopen YOK) ===');
+    // State'i kur: case Cozuldu, yeni inbound cevapsız (prevIn > prevOut)
+    // Eski simetrik mantık pending=true verirdi; terminal guard buna izin
+    // vermemeli.
+    await prisma.case.update({
+      where: { id: c.id },
+      data: {
+        status: 'Cozuldu',
+        pendingCustomerReply: false, // transitionStatus zaten temizler
+        lastEmailInboundAt: new Date('2026-06-26T10:00:00Z'),
+        lastEmailOutboundAt: null, // yeni inbound cevapsız
+      },
+    });
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'csmtest@univera.com.tr',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: terminal',
+        bodyHtml: '<p>cevap</p>',
+        inReplyTo: eOldRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+    const cAfterTerminal = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true, status: true },
+    });
+    expect('terminal vakada agent\'ın eski mail cevabı → pending FALSE',
+      cAfterTerminal.pendingCustomerReply, false);
+    expect('status hâlâ Cozuldu', cAfterTerminal.status, 'Cozuldu');
+
+    console.log('\n=== (P2-1h) terminal vakada YENİ inbound geldi → pending HÂLÂ FALSE (intake taraf) ===');
+    // appendInbound'un da terminal kontrolü olmalı mı? Şu an YOK.
+    // Bu sadece appendOutbound fix'i. Kullanıcı isterse appendInbound da
+    // ayrı fix konusu (mevcut davranış: yeni inbound terminal vakaya
+    // pending=true yazar → K3 override / intake kararı ayrı katman).
+    // Bu testte yalnız appendOutbound terminal guard'ı doğrulanır.
+    console.log('  ℹ (kapsam dışı — intake K3 override ayrı katman)');
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
