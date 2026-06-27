@@ -2174,6 +2174,10 @@ router.post(
       bodyHtml: body.bodyHtml,
       bodyText: body.bodyText,
       attachments: body.attachments,
+      // Codex P2 fix — composer'ın seçtiği reply parent messageId.
+      // Satır içi Yanıtla → reply-context'in inReplyTo'sunu draft taşır;
+      // backend threading bu satıra göre kurar. Yoksa son inbound.
+      inReplyTo: typeof body.inReplyTo === 'string' ? body.inReplyTo : null,
       actor: { userId: actor.userId ?? null, fullName: req.user.fullName },
     });
     if (!result.ok) {

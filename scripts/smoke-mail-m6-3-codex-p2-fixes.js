@@ -108,10 +108,81 @@ async function mkInbound(c, fromAddress, subject, receivedAt, toAddresses = []) 
     expect('cross-case emailId → fallback yeni inbound', ctxCross?.subject, 'Re: YENI MAIL');
     void eNew;
 
+    console.log('\n=== (P2-1b) sendCaseEmail inReplyTo → threading O satıra göre ===');
+    // ESKİ mail'in messageId'sini al
+    const eOldRow = await prisma.caseEmail.findUnique({ where: { id: eOld.id }, select: { messageId: true } });
+    const eNewRow = await prisma.caseEmail.findUnique({ where: { id: eNew.id }, select: { messageId: true } });
+    expectTruthy('eOld.messageId truthy', !!eOldRow?.messageId);
+    expectTruthy('eNew.messageId truthy', !!eNewRow?.messageId);
+
+    // Test için sahte alias kayıt (sender için)
+    await prisma.externalMailSetting.upsert({
+      where: { companyId: TENANT },
+      update: {},
+      create: { companyId: TENANT, enabled: true, fromAddress: 'sender@local.test' },
+    });
+
+    let capturedHeaders = null;
+    const stubSend = async (mailOpts) => {
+      capturedHeaders = mailOpts.headers;
+      return { ok: true, messageId: mailOpts.headers?.['Message-ID'] ?? 'stub-mid', previewUrl: null };
+    };
+
+    // sendCaseEmail w/ inReplyTo=eOld.messageId → threading eOld'a göre
+    const send1 = await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'sender@local.test',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: ESKI MAIL',
+        bodyHtml: '<p>yanıt</p>',
+        inReplyTo: eOldRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend },
+    );
+    expect('send ok', send1.ok, true);
+    expect('In-Reply-To = eOld.messageId', capturedHeaders?.['In-Reply-To'], eOldRow.messageId);
+
+    // sendCaseEmail inReplyTo YOK → eski davranış (son inbound = eNew)
+    capturedHeaders = null;
+    const send2 = await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'sender@local.test',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: son inbound',
+        bodyHtml: '<p>yanıt</p>',
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend },
+    );
+    expect('send ok (no inReplyTo)', send2.ok, true);
+    expect('In-Reply-To = eNew.messageId (fallback)', capturedHeaders?.['In-Reply-To'], eNewRow.messageId);
+
+    // sendCaseEmail inReplyTo bilinmeyen → fallback son inbound
+    capturedHeaders = null;
+    const send3 = await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'sender@local.test',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: hayalet',
+        bodyHtml: '<p>yanıt</p>',
+        inReplyTo: '<nonexistent@local>',
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend },
+    );
+    expect('send ok (unknown inReplyTo)', send3.ok, true);
+    expect('In-Reply-To = eNew (fallback son inbound)', capturedHeaders?.['In-Reply-To'], eNewRow.messageId);
+
     console.log('\n=== (P2-3) Fallback alias loop koruması ===');
     // FromAlias YOK + ExternalMailSetting.fromAddress dolu → fallback adresi
-    await prisma.externalMailSetting.create({
-      data: { companyId: TENANT, enabled: true, fromAddress: 'csmtest@univera.com.tr' },
+    await prisma.externalMailSetting.upsert({
+      where: { companyId: TENANT },
+      update: { fromAddress: 'csmtest@univera.com.tr', enabled: true },
+      create: { companyId: TENANT, enabled: true, fromAddress: 'csmtest@univera.com.tr' },
     });
     // Bir inbound mail to'da bu fallback adresi var olsun (sanki tenant
     // kendi adresini cc'lemiş)
