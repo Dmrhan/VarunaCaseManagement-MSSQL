@@ -233,6 +233,10 @@ export function MailComposer({
         subject,
         bodyHtml: safeBody,
         attachments: attachments.map((a) => a.id),
+        // Codex P2 fix — satır içi Yanıtla'da composer'a reply-context'in
+        // inReplyTo'su geldi; threading o satıra göre kurulsun.
+        // Forward/Yeni mail durumunda null (eski davranış — backend son inbound).
+        inReplyTo: initialReplyContext?.inReplyTo ?? null,
       });
       if (r?.ok) {
         toast({ type: 'success', title: 'Mail gönderildi', message: r.previewUrl ? 'Önizleme URL\'i log\'da.' : '' });

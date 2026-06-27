@@ -163,6 +163,11 @@ async function sendCaseEmail(params, opts = {}) {
   const {
     caseId, fromAddress, to, cc, bcc, subject, bodyHtml, bodyText,
     attachments, actor,
+    // Codex P2 fix — composer'ın seçtiği reply parent. Satır içi
+    // "Yanıtla" reply-context'le agent'ın tıkladığı mail'in messageId'sini
+    // taşır. Verilirse threading bu satıra göre kurulur; yoksa son
+    // inbound fallback (eski davranış).
+    inReplyTo,
   } = params ?? {};
 
   if (!caseId || !fromAddress) {
@@ -198,8 +203,28 @@ async function sendCaseEmail(params, opts = {}) {
   const finalSubject = applyCaseTokenToSubject(subject ?? '', caseRow.caseNumber);
 
   // ─── 4. Threading ───
+  // Codex P2 fix — composer'ın seçtiği reply parent (inReplyTo) varsa
+  // ONU kullan; yoksa eski davranış (son inbound). Agent eski satıra
+  // Reply tıkladıysa header'lar O satırı doğru gösterir; aksi halde
+  // outbound thread breakage olur (UI'da eski mail prefill ama header
+  // yeni mail'i parent gösterir).
   const newMessageId = buildSenderMessageId();
-  const parent = await findThreadParentMessageId(caseId);
+  let parent = null;
+  if (typeof inReplyTo === 'string' && inReplyTo.trim()) {
+    const explicit = await prisma.caseEmail.findFirst({
+      where: { caseId, messageId: inReplyTo.trim() },
+      select: { messageId: true, refs: true },
+    });
+    if (explicit?.messageId) {
+      parent = { parentMessageId: explicit.messageId, refs: explicit.refs };
+    }
+    // Eğer composer'ın gönderdiği inReplyTo bu vakadaki bir CaseEmail
+    // değilse (cross-case / silinmiş / outbound-only id) → fallback
+    // son inbound. UI bozulmasın; security açığı yok (DB scope check).
+  }
+  if (!parent) {
+    parent = await findThreadParentMessageId(caseId);
+  }
   const headers = { 'Message-ID': newMessageId };
   if (parent?.parentMessageId) {
     headers['In-Reply-To'] = parent.parentMessageId;

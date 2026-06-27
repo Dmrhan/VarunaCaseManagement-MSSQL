@@ -145,6 +145,13 @@ export interface SendEmailDraft {
   bodyText?: string;
   /** CaseAttachment.id[] — composer attachments uploader'dan toplanır. */
   attachments?: string[];
+  /**
+   * Codex P2 fix — Reply parent (Message-ID).
+   * Satır içi "Yanıtla" → reply-context'in inReplyTo'su composer'dan
+   * draft'a aktarılır → backend threading bu mail satırını parent
+   * kabul eder. Yoksa: backend son inbound fallback.
+   */
+  inReplyTo?: string | null;
 }
 
 export interface SendEmailResult {
