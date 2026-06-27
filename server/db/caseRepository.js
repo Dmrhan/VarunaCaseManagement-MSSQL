@@ -3254,7 +3254,14 @@ export const caseRepository = {
           where: { id: payload.thirdPartyId },
           select: { id: true, name: true, companyId: true, pausesSla: true },
         });
-        if (!tp || tp.companyId !== companyId) {
+        // Codex P2 fix — Global (companyId=null) 3. partiler tüm
+        // şirketler için kullanılabilir; admin UI bunları oluşturuyor +
+        // bootstrap listeliyor. Reddetme YALNIZ:
+        //   * tp yok
+        //   * tp.companyId BAŞKA bir şirkete bağlı (cross-tenant)
+        // tp.companyId === null → kabul; pausesSla davranışı global için
+        // de aynen uygulanır.
+        if (!tp || (tp.companyId !== null && tp.companyId !== companyId)) {
           throw new CaseValidationError('Seçilen 3. parti bu şirkete ait değil.', { status: 400, code: 'invalid_third_party' });
         }
         resolvedThirdPartyId = tp.id;

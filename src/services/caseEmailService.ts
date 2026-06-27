@@ -56,10 +56,12 @@ export interface CaseEmailItem {
  * Kronolojik (eskiden yeniye).
  */
 export async function listEmails(caseId: string): Promise<CaseEmailItem[]> {
+  // silent — mail entegrasyonu yapılandırılmamış şirketlerde 404/403
+  // dönebilir; toast yağmuru olmasın, sessiz boş liste.
   const out = await apiFetch<{ items: CaseEmailItem[] }>(
     `/api/cases/${encodeURIComponent(caseId)}/emails`,
     undefined,
-    'E-posta thread\'i',
+    { silent: true },
   );
   return Array.isArray(out?.items) ? out!.items : [];
 }
@@ -76,7 +78,9 @@ export async function getAttachmentDownload(
   return apiFetch(
     `/api/cases/${encodeURIComponent(caseId)}/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
     undefined,
-    'Ek indirme',
+    // silent — cid rewrite her görsel için çağrılır; başarısız olanlar
+    // placeholder'a düşer, toast yağmuru olmasın.
+    { silent: true },
   );
 }
 
@@ -97,7 +101,7 @@ export async function getFromAliases(caseId: string): Promise<FromAliasOption[]>
   const out = await apiFetch<{ items: FromAliasOption[] }>(
     `/api/cases/${encodeURIComponent(caseId)}/from-aliases`,
     undefined,
-    'Gönderen adresleri',
+    { silent: true },
   );
   return Array.isArray(out?.items) ? out!.items : [];
 }
@@ -120,7 +124,7 @@ export async function getReplyContext(caseId: string): Promise<ReplyContext | un
   return apiFetch<ReplyContext>(
     `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context`,
     undefined,
-    'Yanıt bağlamı',
+    { silent: true },
   );
 }
 
@@ -162,6 +166,62 @@ export async function sendEmail(
   );
 }
 
+export interface ForwardContext {
+  caseNumber: string | null;
+  to: CaseEmailAddress[];
+  cc: CaseEmailAddress[];
+  bcc: CaseEmailAddress[];
+  subject: string;
+  /** Composer gövdesinin SONUNA eklenen alıntılı orijinal mesaj (HTML). */
+  quotedBodyHtml: string;
+  inReplyTo: string | null;
+}
+
+/**
+ * GET /api/cases/:caseId/emails/:emailId/forward-context — composer "İlet"
+ * prefill (M6.3-realign).
+ */
+export async function getForwardContext(caseId: string, emailId: string): Promise<ForwardContext | undefined> {
+  return apiFetch<ForwardContext>(
+    `/api/cases/${encodeURIComponent(caseId)}/emails/${encodeURIComponent(emailId)}/forward-context`,
+    undefined,
+    { silent: true },
+  );
+}
+
+export type EmailConfigReason =
+  | 'no-setting'
+  | 'disabled'
+  | 'no-from'
+  | 'has-alias'
+  | 'fallback-from-address';
+
+export interface EmailConfig {
+  configured: boolean;
+  reason: EmailConfigReason;
+}
+
+/**
+ * GET /api/cases/:caseId/email-config — İletişim sekmesi "yapılandırılmış mı?"
+ * dedicated kararı. CommunicationTab banner state'i bu yanıta dayanır.
+ *
+ * KONTRAT TUTARLILIĞI: backend `listActiveWithSettingFallback` çağırır →
+ * composer dropdown ile AYNI kaynaktan beslenir. UNIVERA gibi config TAM
+ * + manuel FromAlias YOK senaryosunda configured=true (reason
+ * 'fallback-from-address') döner.
+ *
+ * Silent fetch — hata durumunda configured=false varsayımı banner gösterir;
+ * toast YOK.
+ */
+export async function getEmailConfig(caseId: string): Promise<EmailConfig> {
+  const out = await apiFetch<EmailConfig>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-config`,
+    undefined,
+    { silent: true },
+  );
+  return out ?? { configured: false, reason: 'no-setting' };
+}
+
 /**
  * GET /api/cases/:caseId/email-signature — composer açılışında tenant
  * default imzasını gövdeye append etmek için.
@@ -170,7 +230,7 @@ export async function getEmailSignature(caseId: string): Promise<string | null> 
   const r = await apiFetch<{ signatureHtml: string | null }>(
     `/api/cases/${encodeURIComponent(caseId)}/email-signature`,
     undefined,
-    'İmza',
+    { silent: true },
   );
   return r?.signatureHtml ?? null;
 }
@@ -180,6 +240,8 @@ export const caseEmailService = {
   getAttachmentDownload,
   getFromAliases,
   getReplyContext,
+  getForwardContext,
   sendEmail,
   getEmailSignature,
+  getEmailConfig,
 };

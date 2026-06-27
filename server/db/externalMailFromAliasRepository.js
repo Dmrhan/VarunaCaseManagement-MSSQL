@@ -73,6 +73,65 @@ async function listActive(companyId) {
   return rows.map(shape);
 }
 
+/**
+ * M6.3-realign — listActive + ExternalMailSetting.fromAddress fallback.
+ *
+ * Kullanım yeri: composer dropdown (GET /:id/from-aliases) ve gönderim
+ * validation (validateOutboundFrom).
+ *
+ * Kural:
+ *   1. FromAlias satır(lar)ı varsa → listActive sonucu (hiç değişiklik yok)
+ *   2. Hiç yoksa AMA ExternalMailSetting.fromAddress dolu ise →
+ *      sentetik tek alias döndürülür (id='setting-fallback', isDefault=true)
+ *   3. Hiçbiri yoksa → boş liste
+ *
+ * Sentetik alias'ın id'si DB'de YOK; sadece UI dropdown'da görünür ve
+ * gönderim validation'ında "fromAddress eşleşiyor" sinyali olarak kullanılır.
+ * Backfill migration 17 ile tenant'lar normalleştirildiğinde bu fallback
+ * yolu doğal olarak devre dışı kalır.
+ *
+ * displayName parse: fromAddress "Display <email@dom.com>" formatında
+ * gelirse Display ve email ayrıştırılır; aksi halde sadece email.
+ */
+async function listActiveWithSettingFallback(companyId) {
+  if (!companyId) return [];
+  const aliasRows = await prisma.externalMailSettingFromAlias.findMany({
+    where: { companyId, isActive: true },
+    orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+  });
+  if (aliasRows.length > 0) return aliasRows.map(shape);
+
+  // Fallback: ExternalMailSetting.fromAddress
+  const setting = await prisma.externalMailSetting.findUnique({
+    where: { companyId },
+    select: { fromAddress: true, enabled: true },
+  });
+  if (!setting?.fromAddress) return [];
+  const raw = setting.fromAddress.trim();
+  if (!raw) return [];
+
+  // "Display <email>" formatını ayrıştır
+  const angleMatch = raw.match(/^(.*)<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$/);
+  let displayName = null;
+  let address = raw;
+  if (angleMatch) {
+    displayName = angleMatch[1].trim().replace(/^"|"$/g, '').trim() || null;
+    address = angleMatch[2].trim();
+  }
+  return [
+    {
+      id: 'setting-fallback',
+      companyId,
+      address,
+      displayName,
+      isDefault: true,
+      isActive: true,
+      sortOrder: 0,
+      externalMailSettingId: null,
+    },
+  ];
+}
+
 async function findById(companyId, id) {
   if (!companyId || !id) return null;
   const row = await prisma.externalMailSettingFromAlias.findUnique({ where: { id } });
@@ -101,11 +160,12 @@ async function validateOutboundFrom(companyId, address) {
   const norm = normalizeAddress(address);
   if (!norm) return { ok: false, code: 'address_invalid' };
   const targetKey = compareKey(norm);
-  const rows = await prisma.externalMailSettingFromAlias.findMany({
-    where: { companyId, isActive: true },
-    select: { id: true, address: true, displayName: true, isDefault: true },
-  });
-  const match = rows.find((r) => compareKey(r.address) === targetKey);
+  // M6.3-realign — fromAddress fallback ile uyumlu: FromAlias yoksa
+  // ExternalMailSetting.fromAddress'i de geçerli sayalım (composer
+  // dropdown listActiveWithSettingFallback üzerinden bu adresi
+  // sunuyorsa gönderim de kabul etmeli).
+  const aliases = await listActiveWithSettingFallback(companyId);
+  const match = aliases.find((r) => compareKey(r.address) === targetKey);
   if (!match) return { ok: false, code: 'address_not_allowed' };
   return { ok: true, alias: match };
 }
@@ -246,6 +306,7 @@ async function setDefault(companyId, id) {
 export const externalMailFromAliasRepo = {
   list,
   listActive,
+  listActiveWithSettingFallback,
   findById,
   findByAddress,
   validateOutboundFrom,

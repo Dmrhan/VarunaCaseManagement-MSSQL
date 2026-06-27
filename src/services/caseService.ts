@@ -160,11 +160,30 @@ const uid = (prefix: string) =>
  * zaten uyarıldı — UI ek aksiyon yapmaya gerek duymaz, sadece state'ini
  * geri almasın.
  */
+export interface ApiFetchOptions {
+  /**
+   * M6.3-realign — silent=true: hata durumunda toast GÖSTERİLMEZ.
+   * Caller graceful fallback yapacaksa (örn. config-yok hali) bu opsiyonu
+   * geçer; UI sessizce undefined alır + kendi mesajını kurabilir.
+   * 401 davranışı korunur (oturum eventi her durumda dispatch edilir).
+   */
+  silent?: boolean;
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   init?: RequestInit,
-  errorContext = 'İşlem',
+  errorContext: string | ApiFetchOptions = 'İşlem',
+  options?: ApiFetchOptions,
 ): Promise<T | undefined> {
+  // Geri uyumluluk: errorContext bir string ise eski API; obje ise yeni API.
+  const ctx = typeof errorContext === 'string' ? errorContext : 'İşlem';
+  const opts: ApiFetchOptions =
+    typeof errorContext === 'object' && errorContext !== null
+      ? errorContext
+      : (options ?? {});
+  const silent = !!opts.silent;
+
   // Auth: aktif local oturumdan access token'ı çek, Authorization header'a ekle
   const token = await getAccessToken();
   const headers = new Headers(init?.headers);
@@ -177,12 +196,14 @@ export async function apiFetch<T = unknown>(
   try {
     r = await fetch(path, finalInit);
   } catch (err) {
-    notify({
-      type: 'error',
-      title: `${errorContext} başarısız`,
-      message: 'Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.',
-      duration: 5000,
-    });
+    if (!silent) {
+      notify({
+        type: 'error',
+        title: `${ctx} başarısız`,
+        message: 'Sunucuya ulaşılamadı. İnternet bağlantını kontrol et.',
+        duration: 5000,
+      });
+    }
     console.error('[apiFetch] network', path, err);
     return undefined;
   }
@@ -217,12 +238,14 @@ export async function apiFetch<T = unknown>(
           ? `Dosya dry-run için çok büyük (sunucu sınırı ~${limitMb} MB). Dosyayı daha küçük parçalara bölüp yeniden deneyin.`
           : 'Dosya dry-run için çok büyük. Dosyayı daha küçük parçalara bölüp yeniden deneyin.');
     }
-    notify({
-      type: 'error',
-      title: `${errorContext} başarısız (${r.status})`,
-      message: displayMessage,
-      duration: 6000,
-    });
+    if (!silent) {
+      notify({
+        type: 'error',
+        title: `${ctx} başarısız (${r.status})`,
+        message: displayMessage,
+        duration: 6000,
+      });
+    }
     console.error('[apiFetch]', r.status, path, serverMessage);
     return undefined;
   }

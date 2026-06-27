@@ -411,9 +411,106 @@ async function buildReplyContext(caseId) {
   };
 }
 
+/**
+ * M6.3-realign — Forward context. Belirli bir CaseEmail referans alıp
+ * "İlet" composer akışı için prefill üretir.
+ *
+ *  - subject: "Fwd: <baseSubject>" (token korunur — composer subject
+ *    sanity check yapar)
+ *  - to/cc/bcc: BOŞ — agent forward'da alıcı manuel girer
+ *  - quotedBodyHtml: "----- İletilen mesaj -----" header + orijinal
+ *    gövde (referans HTML; client composer gövdesinin sonuna ekler)
+ *
+ * GUARD: caller (route) önce scope check yapar; bu fonksiyon yalnız
+ * DB'den emailRow'u companyId match ile alır.
+ */
+async function buildForwardContext(caseId, emailId, { companyId } = {}) {
+  if (!caseId || !emailId) return null;
+  const caseRow = await prisma.case.findUnique({
+    where: { id: caseId },
+    select: { id: true, companyId: true, caseNumber: true },
+  });
+  if (!caseRow) return null;
+  if (companyId && caseRow.companyId !== companyId) return null;
+
+  const ref = await prisma.caseEmail.findUnique({
+    where: { id: emailId },
+    select: {
+      caseId: true,
+      companyId: true,
+      fromAddress: true,
+      fromName: true,
+      toAddresses: true,
+      ccAddresses: true,
+      subject: true,
+      bodyHtml: true,
+      sentAt: true,
+      receivedAt: true,
+    },
+  });
+  if (!ref) return null;
+  // Cross-case binding guard — emailId yanlış case'e ait olabilir
+  if (ref.caseId !== caseId) return null;
+  if (ref.companyId !== caseRow.companyId) return null;
+
+  function parse(s) {
+    if (!s || typeof s !== 'string') return [];
+    try {
+      const arr = JSON.parse(s);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+  function joinAddresses(arr) {
+    return arr.map((a) => (a?.name ? `${a.name} <${a.address}>` : a?.address)).filter(Boolean).join(', ');
+  }
+
+  const baseSubject = ref.subject ?? '';
+  const subject = /^(re:|fwd?:)\s*/i.test(baseSubject) ? baseSubject : `Fwd: ${baseSubject}`;
+  const ts = ref.sentAt ?? ref.receivedAt;
+  const headerLines = [
+    '---------- İletilen mesaj ----------',
+    `Kimden: ${ref.fromName ? `${ref.fromName} <${ref.fromAddress}>` : ref.fromAddress}`,
+    ts ? `Tarih: ${new Date(ts).toLocaleString('tr-TR')}` : null,
+    ref.subject ? `Konu: ${ref.subject}` : null,
+    `Kime: ${joinAddresses(parse(ref.toAddresses))}`,
+    parse(ref.ccAddresses).length ? `Cc: ${joinAddresses(parse(ref.ccAddresses))}` : null,
+  ].filter(Boolean);
+  const quotedBodyHtml = [
+    '<br><br>',
+    '<div style="border-top:1px solid #ccc;margin-top:12px;padding-top:8px">',
+    headerLines.map((l) => `<div>${escapeHtml(l)}</div>`).join(''),
+    '<br>',
+    ref.bodyHtml ?? '',
+    '</div>',
+  ].join('');
+
+  return {
+    caseNumber: caseRow.caseNumber,
+    to: [],
+    cc: [],
+    bcc: [],
+    subject,
+    quotedBodyHtml,
+    inReplyTo: null,
+  };
+}
+
+function escapeHtml(s) {
+  if (typeof s !== 'string') return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export const caseEmailSender = {
   sendCaseEmail,
   buildReplyContext,
+  buildForwardContext,
 };
 
 export const _internal = {
