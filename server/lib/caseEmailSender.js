@@ -126,12 +126,17 @@ async function findThreadParentMessageId(caseId) {
   const last = await prisma.caseEmail.findFirst({
     where: { caseId, direction: 'inbound', messageId: { not: null } },
     orderBy: { receivedAt: 'desc' },
-    select: { messageId: true, refs: true },
+    select: { messageId: true, refs: true, receivedAt: true },
   });
   if (!last) return null;
   return {
     parentMessageId: last.messageId,
     refs: last.refs,
+    // Codex P2 fix — appendOutbound pending hesabı için. Fallback
+    // yolda parent ZATEN son inbound olduğu için pending mantığı
+    // explicit yolla aynı sonuç verir (prevIn === parent.receivedAt
+    // → prevIn > parent.receivedAt = false → pending=false).
+    receivedAt: last.receivedAt,
   };
 }
 
@@ -213,10 +218,17 @@ async function sendCaseEmail(params, opts = {}) {
   if (typeof inReplyTo === 'string' && inReplyTo.trim()) {
     const explicit = await prisma.caseEmail.findFirst({
       where: { caseId, messageId: inReplyTo.trim() },
-      select: { messageId: true, refs: true },
+      select: { messageId: true, refs: true, receivedAt: true, direction: true },
     });
     if (explicit?.messageId) {
-      parent = { parentMessageId: explicit.messageId, refs: explicit.refs };
+      // Codex P2 fix — explicit parent'ın receivedAt'i appendOutbound'a
+      // pas edilecek; yeni inbound varken eski mail'e cevap pending'i
+      // yanlış temizlemesin diye.
+      parent = {
+        parentMessageId: explicit.messageId,
+        refs: explicit.refs,
+        receivedAt: explicit.direction === 'inbound' ? explicit.receivedAt : null,
+      };
     }
     // Eğer composer'ın gönderdiği inReplyTo bu vakadaki bir CaseEmail
     // değilse (cross-case / silinmiş / outbound-only id) → fallback
@@ -292,6 +304,10 @@ async function sendCaseEmail(params, opts = {}) {
       sentAt: new Date(),
       source: 'manual_send',
       sentByUserId: actor?.userId ?? null,
+      // Codex P2 fix — agent eski mail'e cevap verdiyse YENİ inbound
+      // hâlâ pending kalsın. parent.receivedAt explicit yolda agent'ın
+      // tıkladığı mail; fallback yolda son inbound.
+      replyToInboundReceivedAt: parent?.receivedAt ?? null,
     });
   } catch (err) {
     // Mail gönderildi ama DB persist fail oldu — round-trip için

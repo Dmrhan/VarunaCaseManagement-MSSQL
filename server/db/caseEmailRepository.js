@@ -249,6 +249,12 @@ async function appendOutbound(params) {
     caseId, companyId, from, to, cc, bcc, subject,
     bodyHtml, bodyText, messageId, inReplyTo, refs,
     sentAt, source, sentByUserId, dispatchId, headersJson,
+    // Codex P2 fix — explicit reply parent'ın receivedAt'i. M6.3 satır
+    // içi Yanıtla sayesinde agent ESKİ inbound'a cevap verebilir; bu
+    // durumda son inbound YENİ inbound hâlâ "cevap bekleniyor" olmalı.
+    // Verilmemişse eski simetrik mantık (sender son inbound'a cevap
+    // verdi varsayılır).
+    replyToInboundReceivedAt,
   } = params;
 
   if (!caseId || !companyId || !from?.address) {
@@ -309,7 +315,18 @@ async function appendOutbound(params) {
     const effectiveOut = !prevOut || sentAtFinal.getTime() > prevOut.getTime()
       ? sentAtFinal
       : prevOut;
-    const pending = !!prevIn && prevIn.getTime() > effectiveOut.getTime();
+    // Codex P2 fix — pending kararı:
+    //   - replyToInboundReceivedAt VERİLDİ → agent o satıra cevap verdi.
+    //     SON inbound (prevIn) o satırdan SONRAYSA hâlâ cevap bekleniyor
+    //     → pending=TRUE. Aynı/eski ise (en güncele cevap verdi) → false.
+    //   - VERİLMEDİ → eski simetrik mantık (sender son inbound'a cevap
+    //     veriyor varsayılır; out > in ise pending=false).
+    let pending;
+    if (replyToInboundReceivedAt instanceof Date && prevIn) {
+      pending = prevIn.getTime() > replyToInboundReceivedAt.getTime();
+    } else {
+      pending = !!prevIn && prevIn.getTime() > effectiveOut.getTime();
+    }
     await tx.case.update({
       where: { id: caseId },
       data: {
