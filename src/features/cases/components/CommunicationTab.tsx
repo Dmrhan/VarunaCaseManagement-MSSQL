@@ -86,10 +86,12 @@ export function CommunicationTab({ item }: Props) {
     return () => { alive = false; };
   }, [item.id]);
 
-  const openReply = useCallback(async (_email?: CaseEmailItem) => {
-    // reply-context backend son inbound'u baz alıyor. Email-specific
-    // reply için ileride backend `?inReplyTo=` parametresi eklenebilir.
-    const ctx = await caseEmailService.getReplyContext(item.id);
+  const openReply = useCallback(async (email?: CaseEmailItem) => {
+    // Codex P2 fix — satır içi "Yanıtla" agent'ın tıkladığı maili
+    // pass eder; backend o satırı baz alır (eski thread'de aşağıdaki
+    // mail seçilmişse o ön-doldurulur). Üst toolbar/diğer akışlardan
+    // çağrı email'siz gelirse: son inbound (eski davranış).
+    const ctx = await caseEmailService.getReplyContext(item.id, email?.id);
     setReplyCtx(ctx ?? null);
     setForwardCtx(null);
     setComposerOpen(true);

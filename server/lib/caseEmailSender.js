@@ -329,7 +329,7 @@ async function sendCaseEmail(params, opts = {}) {
  * göstermek mantıklı değil (agent karşı tarafa cevap yazıyor); sadece
  * inbound referans alınır.
  */
-async function buildReplyContext(caseId) {
+async function buildReplyContext(caseId, { emailId } = {}) {
   if (!caseId) return null;
   const caseRow = await prisma.case.findUnique({
     where: { id: caseId },
@@ -337,21 +337,52 @@ async function buildReplyContext(caseId) {
   });
   if (!caseRow) return null;
 
-  const lastInbound = await prisma.caseEmail.findFirst({
-    where: { caseId, direction: 'inbound' },
-    orderBy: { receivedAt: 'desc' },
-    select: {
-      fromAddress: true,
-      fromName: true,
-      toAddresses: true,
-      ccAddresses: true,
-      subject: true,
-      messageId: true,
-    },
-  });
+  // Codex P2 fix — emailId verilmişse O satırı kaynak al; yoksa son inbound.
+  // Satır içi "Yanıtla" tıklandığında agent'ın seçtiği mail referans olur;
+  // üst toolbar "Yanıtla" çağrısında (eski akış) emailId yok → davranış aynı.
+  let lastInbound;
+  if (emailId) {
+    lastInbound = await prisma.caseEmail.findFirst({
+      where: { id: emailId, caseId, direction: 'inbound' },
+      select: {
+        fromAddress: true,
+        fromName: true,
+        toAddresses: true,
+        ccAddresses: true,
+        subject: true,
+        messageId: true,
+      },
+    });
+    // Yanlış emailId / outbound / cross-case → null fallback yerine son
+    // inbound'a düş (UX: agent yine de Reply alabilsin).
+    if (!lastInbound) {
+      lastInbound = await prisma.caseEmail.findFirst({
+        where: { caseId, direction: 'inbound' },
+        orderBy: { receivedAt: 'desc' },
+        select: {
+          fromAddress: true, fromName: true, toAddresses: true,
+          ccAddresses: true, subject: true, messageId: true,
+        },
+      });
+    }
+  } else {
+    lastInbound = await prisma.caseEmail.findFirst({
+      where: { caseId, direction: 'inbound' },
+      orderBy: { receivedAt: 'desc' },
+      select: {
+        fromAddress: true, fromName: true, toAddresses: true,
+        ccAddresses: true, subject: true, messageId: true,
+      },
+    });
+  }
 
-  // Tenant alias adresleri (loop koruması)
-  const aliases = await externalMailFromAliasRepo.listActive(caseRow.companyId);
+  // Tenant alias adresleri (loop koruması).
+  // Codex P2 fix — `listActive` yerine `listActiveWithSettingFallback`:
+  // FromAlias hiç tanımlı değil + ExternalMailSetting.fromAddress fallback'i
+  // kullanılan tenant'larda kendi fallback adresi loop set'inden DIŞARIDA
+  // kalıyordu → reply-all kendi mailbox'ına yanıt gönderebilirdi.
+  // Composer dropdown ile aynı kaynak.
+  const aliases = await externalMailFromAliasRepo.listActiveWithSettingFallback(caseRow.companyId);
   const aliasKeys = new Set(aliases.map((a) => a.address.trim().toLowerCase()));
 
   // Adresleri parse — caseEmailRepository serialize JSON-as-string

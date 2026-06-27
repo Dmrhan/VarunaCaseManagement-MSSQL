@@ -125,9 +125,14 @@ export function MailComposer({
     if (signatureAppendedRef.current) return;
     if (!initialSignatureHtml) return;
     setBodyHtml((cur) => {
-      // Body hala baseline ('<p></p>') durumunda mı? → append güvenli.
+      // Body hala baseline durumunda mı? → append güvenli.
       if (cur === initialBaselineBodyRef.current) {
-        const next = `<p></p>${initialSignatureHtml}`;
+        // Codex P2 fix — forward quotedBodyHtml KORUNMALI. Eski kod
+        // `<p></p>${signature}` ile baseline'ı eziyor, slow-signature-fetch
+        // path'inde forward alıntı kayboluyordu. İmzayı `<p></p>` ile
+        // alıntı arasına injekt et (forward yoksa zaten quoted=''):
+        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+        const next = `<p></p>${initialSignatureHtml}${quoted}`;
         initialBaselineBodyRef.current = next;
         signatureAppendedRef.current = true;
         return next;
@@ -137,7 +142,7 @@ export function MailComposer({
       signatureAppendedRef.current = true;
       return cur;
     });
-  }, [initialSignatureHtml]);
+  }, [initialSignatureHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);

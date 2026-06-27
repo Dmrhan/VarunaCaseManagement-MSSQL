@@ -2217,7 +2217,11 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
-    const ctx = await caseEmailSender.buildReplyContext(req.params.id);
+    // Codex P2 fix — satır içi "Yanıtla" emailId pass eder; backend o
+    // satırı baz alır. Param yoksa eski davranış (son inbound).
+    const emailIdRaw = req.query?.emailId;
+    const emailId = typeof emailIdRaw === 'string' && emailIdRaw ? emailIdRaw : undefined;
+    const ctx = await caseEmailSender.buildReplyContext(req.params.id, { emailId });
     res.json(ctx ?? { caseNumber: null, to: [], cc: [], bcc: [], subject: '', inReplyTo: null });
   }),
 );

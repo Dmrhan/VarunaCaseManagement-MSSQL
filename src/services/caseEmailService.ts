@@ -120,9 +120,16 @@ export interface ReplyContext {
  * (M6.2a backend). Vakanın son inbound CaseEmail'ından çıkarılır; tenant
  * alias adresleri loop koruması için filtrelenmiştir.
  */
-export async function getReplyContext(caseId: string): Promise<ReplyContext | undefined> {
+export async function getReplyContext(
+  caseId: string,
+  emailId?: string,
+): Promise<ReplyContext | undefined> {
+  // Codex P2 fix — satır içi "Yanıtla" verili emailId ile çağrılır;
+  // backend o mail satırını baz alır. Param yoksa son inbound (üst
+  // toolbar davranışı).
+  const qs = emailId ? `?emailId=${encodeURIComponent(emailId)}` : '';
   return apiFetch<ReplyContext>(
-    `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context`,
+    `/api/cases/${encodeURIComponent(caseId)}/emails/reply-context${qs}`,
     undefined,
     { silent: true },
   );
