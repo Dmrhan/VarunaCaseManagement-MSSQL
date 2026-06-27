@@ -316,17 +316,25 @@ async function appendOutbound(params) {
       ? sentAtFinal
       : prevOut;
     // Codex P2 fix — pending kararı:
-    //   - replyToInboundReceivedAt VERİLDİ → agent o satıra cevap verdi.
-    //     SON inbound (prevIn) o satırdan SONRAYSA hâlâ cevap bekleniyor
-    //     → pending=TRUE. Aynı/eski ise (en güncele cevap verdi) → false.
-    //   - VERİLMEDİ → eski simetrik mantık (sender son inbound'a cevap
-    //     veriyor varsayılır; out > in ise pending=false).
-    let pending;
-    if (replyToInboundReceivedAt instanceof Date && prevIn) {
-      pending = prevIn.getTime() > replyToInboundReceivedAt.getTime();
-    } else {
-      pending = !!prevIn && prevIn.getTime() > effectiveOut.getTime();
-    }
+    //   Temel kural: pending = SON inbound HENÜZ cevaplanmadıysa.
+    //   Bu outbound son inbound'u cevapladı sayılır mı?
+    //     - Agent SON inbound'a cevap verdi (explicit parent === prevIn,
+    //       veya explicit parent verilmedi → fallback yolda zaten son
+    //       inbound varsayılır) → bu outbound DAHİL effectiveOut.
+    //     - Agent ESKİ inbound'a cevap verdi (explicit parent < prevIn)
+    //       → bu outbound son inbound için SAYILMAZ; effectiveOut yerine
+    //       prevOut karşılaştırılır (önceki cevap var mıydı?). Önceki
+    //       cevap son inbound'dan SONRAYSA pending=false (zaten
+    //       cevaplanmış); yoksa pending=true (hâlâ bekliyor).
+    const isOldReply =
+      replyToInboundReceivedAt instanceof Date
+      && prevIn
+      && replyToInboundReceivedAt.getTime() < prevIn.getTime();
+    const effectiveOutForPending = isOldReply ? prevOut : effectiveOut;
+    const pending = !!prevIn && (
+      !effectiveOutForPending
+      || prevIn.getTime() > effectiveOutForPending.getTime()
+    );
     await tx.case.update({
       where: { id: caseId },
       data: {

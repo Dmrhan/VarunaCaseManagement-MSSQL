@@ -238,6 +238,40 @@ async function mkInbound(c, fromAddress, subject, receivedAt, toAddresses = []) 
     expect('yeni inbound\'a cevap → pending FALSE (en yeni mail\'e cevap verildi)',
       cAfter2.pendingCustomerReply, false);
 
+    console.log('\n=== (P2-1d) Codex follow-up: yeni inbound ZATEN cevaplanmış, agent eski mail\'e cevap → pending FALSE kalır ===');
+    // State: prevIn = eNew (2026-06-26), prevOut = bir önceki outbound
+    // (2026-06-27 > prevIn) → pending zaten false.
+    // Agent şimdi ESKİ mail'e cevap verir → pending FALSE KALMALI
+    // (yeni inbound cevaplandı; eski mail'e ek cevap yeniyi reopen
+    // etmez).
+    const cBefore = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { lastEmailInboundAt: true, lastEmailOutboundAt: true, pendingCustomerReply: true },
+    });
+    expect('precondition: pending=false (yeni cevaplandı)', cBefore.pendingCustomerReply, false);
+    expectTruthy('precondition: prevOut > prevIn', cBefore.lastEmailOutboundAt > cBefore.lastEmailInboundAt);
+
+    // Şimdi eski mail'e cevap
+    await caseEmailSender.sendCaseEmail(
+      {
+        caseId: c.id,
+        fromAddress: 'sender@local.test',
+        to: [{ address: 'rec@dis.com' }],
+        subject: 'Re: ESKI - ek',
+        bodyHtml: '<p>eski mail\'e ek cevap</p>',
+        inReplyTo: eOldRow.messageId,
+        actor: { userId: null, fullName: 'Smoke' },
+      },
+      { sendFn: stubSend2 },
+    );
+
+    const cAfter3 = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: { pendingCustomerReply: true },
+    });
+    expect('yeni zaten cevaplı + eski mail\'e cevap → pending FALSE (reopen YOK)',
+      cAfter3.pendingCustomerReply, false);
+
     console.log('\n=== (P2-3) Fallback alias loop koruması ===');
     // FromAlias YOK + ExternalMailSetting.fromAddress dolu → fallback adresi
     await prisma.externalMailSetting.upsert({
