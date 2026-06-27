@@ -233,30 +233,78 @@ async function mkAccountWithEmail({ name, email, baseTs }) {
     expectTruthy('phone-augment: "Telefon eşleşti" reason VAR',
       phoneSugg?.reasons?.some((r) => r.label === 'Telefon eşleşti'));
 
-    console.log('\n=== (3c) BİLİNEN SINIR — DB raw format (boşluklu/eksik prefix) → augment KAÇIRIR ===');
-    // DB'de RAW format (boşluklu, normalize değil); signals normalize.
-    // Phone augment query (phone: { in: [normalized] }) raw'ı yakalamaz.
-    // Bu davranış kodda + PR body'sinde belgelenir.
+    console.log('\n=== (3c) Codex P2 fix: DB raw + phoneE164 normalize → augment YAKALAR ===');
+    // DB'de raw display format (boşluklu); phoneE164 normalize.
+    // signals.phones normalize → phoneE164 IN sorgusu hit.
     const rawPhoneTs = new Date('2026-12-31T23:59:30Z');
     const rawTarget = await prisma.account.create({
       data: {
-        companyId: TENANT, name: 'Raw Phone Target',
-        phone: '+90 532 444 5599', // boşluklu raw — normalize sonrası +905324445599
+        companyId: TENANT, name: 'Raw+E164 Target',
+        phone: '+90 532 444 5599',       // display raw
+        phoneE164: '+905324445599',      // WR-A2 normalize
         isActive: true, createdAt: rawPhoneTs, updatedAt: rawPhoneTs,
       },
     });
     const cRaw = await mkCase('VK-CMA-RAW', {
       contactName: 'Raw Phone Test',
-      phone: '+905324445599', // normalize sinyali
+      phone: '+905324445599',
     });
     const rRaw = await customerMatchRepository.suggestCustomerMatches({
       caseId: cRaw.id, allowedCompanyIds: [TENANT], limit: 5,
     });
-    // BİLİNEN SINIR: DB raw → phone augment query miss
-    // (rawTarget 500 dilim dışında ve normalize format DB'de yok)
+    expectTruthy('raw-display + phoneE164 normalize → target önerilir',
+      rRaw.suggestions.some((s) => s.accountId === rawTarget.id));
     const rawSugg = rRaw.suggestions.find((s) => s.accountId === rawTarget.id);
-    expect('BİLİNEN SINIR: raw-format target önerilemez (phone augment kaçırır)',
-      rawSugg, undefined);
+    expectTruthy('"Telefon eşleşti" reason VAR (E164 yolu)',
+      rawSugg?.reasons?.some((r) => r.label === 'Telefon eşleşti'));
+
+    console.log('\n=== (3d) Slot phone2E164 → augment yakalar ===');
+    const slotTs = new Date('2026-12-31T23:59:40Z');
+    const slotTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Slot Phone Target',
+        phone: '+90 212 000 0001',
+        phoneE164: '+902120000001',
+        phone2: '+90 532 999 8877',
+        phone2E164: '+905329998877', // sinyalin yakalanacağı slot
+        isActive: true, createdAt: slotTs, updatedAt: slotTs,
+      },
+    });
+    const cSlot = await mkCase('VK-CMA-SLOT', {
+      contactName: 'Slot Test',
+      phone: '+905329998877',
+    });
+    const rSlot = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cSlot.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    expectTruthy('slot phone2E164 → target önerilir',
+      rSlot.suggestions.some((s) => s.accountId === slotTarget.id));
+
+    console.log('\n=== (3e) Contact phoneE164 → augment yakalar ===');
+    const contactTs = new Date('2026-12-31T23:59:50Z');
+    const contactTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Contact Phone Target',
+        isActive: true, createdAt: contactTs, updatedAt: contactTs,
+        contacts: {
+          create: {
+            fullName: 'Test Kişi',
+            phone: '+90 533 111 2233',
+            phoneE164: '+905331112233',
+            isActive: true,
+          },
+        },
+      },
+    });
+    const cContact = await mkCase('VK-CMA-CONTACT', {
+      contactName: 'Contact Test',
+      phone: '+905331112233',
+    });
+    const rContact = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cContact.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    expectTruthy('contact phoneE164 → target önerilir',
+      rContact.suggestions.some((s) => s.accountId === contactTarget.id));
 
     console.log('\n=== (4) Küçük tenant regression — 10 hesap, augment etkisiz ===');
     await reset();

@@ -196,7 +196,16 @@ function extractSignalsFromCase(c) {
 const CANDIDATE_SELECT = {
   id: true,
   name: true,
+  // WR-A2 3-slot telefon — scoreCandidate hepsini normalize edip
+  // signals.phones ile karşılaştırır. Display raw + E164 normalize
+  // hibrid: phoneE164 dolu ise zaten normalize; null ise display
+  // (phone) normalizePhone'dan geçer.
   phone: true,
+  phoneE164: true,
+  phone2: true,
+  phone2E164: true,
+  phone3: true,
+  phone3E164: true,
   email: true,
   vkn: true,
   companyId: true,
@@ -223,7 +232,7 @@ const CANDIDATE_SELECT = {
   },
   contacts: {
     where: { isActive: true },
-    select: { fullName: true, phone: true, email: true },
+    select: { fullName: true, phone: true, phoneE164: true, email: true },
     take: 20,
   },
 };
@@ -313,14 +322,12 @@ async function fetchHighSignalAccounts(companyId, signals) {
     );
   }
 
-  // (b) Exact phone — normalize edilmiş.
-  // BİLİNEN SINIR: signals.phones normalizePhone çıktısı tek format
-  // ('+9053...'); Account.phone DB'de raw saklı ('+90 532...', '5333...')
-  // → IN sorgusu raw'ı KAÇIRIR (smoke senaryo 3c ile kanıtlandı).
-  // Normalize formatta saklı kayıtlar yakalanır (senaryo 3b).
-  // Email/learned/external-code primary path; phone yolu opportunistic.
-  // Tam kapsam için Account.phoneNormalized indeksli kolon migration'ı
-  // gerek (kapsam dışı; ayrı PR).
+  // (b) Exact phone — Codex P2 fix (ampirik): WR-A2 normalize kolonları
+  // kullan. Account.phoneE164 + phone2E164 + phone3E164 (3 slot, hepsi
+  // indeksli) ve AccountContact.phoneE164. Account.phone display raw
+  // saklı; signals.phones zaten E.164 → normalize kolonla eşleştirilir.
+  // Geri uyumluluk: phoneE164 boş eski kayıtlar için phone (raw) IN
+  // sorgusunu da OR'a ekle — düşük maliyet, false-negatif engelleyici.
   if (signals.phones?.length) {
     tasks.push(
       prisma.account.findMany({
@@ -329,8 +336,22 @@ async function fetchHighSignalAccounts(companyId, signals) {
             where,
             {
               OR: [
+                { phoneE164: { in: signals.phones } },
+                { phone2E164: { in: signals.phones } },
+                { phone3E164: { in: signals.phones } },
+                // legacy backward compat — phoneE164 null kayıtlar
                 { phone: { in: signals.phones } },
-                { contacts: { some: { phone: { in: signals.phones }, isActive: true } } },
+                {
+                  contacts: {
+                    some: {
+                      isActive: true,
+                      OR: [
+                        { phoneE164: { in: signals.phones } },
+                        { phone: { in: signals.phones } },
+                      ],
+                    },
+                  },
+                },
               ],
             },
           ],
@@ -422,7 +443,14 @@ function scoreCandidate(account, signals, ctx = {}) {
   // M2.2 (4) — Placeholder telefon filtresi. ctx.placeholderPhones set'i
   // verildiyse, bu numara aday havuzunda >threshold hesapla eşleşiyor =
   // discriminator değil → reason SAYILMAZ.
-  const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
+  // WR-A2 — 3-slot phone + her slot için E164 normalize varyantı + contact
+  // phone/phoneE164. phoneE164 zaten normalize; phone (display raw)
+  // normalizePhone'dan geçer (legacy back-compat: phoneE164 null kayıtlar).
+  const accountPhones = [
+    account.phone, account.phone2, account.phone3,
+    account.phoneE164, account.phone2E164, account.phone3E164,
+    ...account.contacts.flatMap((c) => [c.phone, c.phoneE164]),
+  ]
     .filter(Boolean)
     .map(normalizePhone)
     .filter(Boolean); // tanınmayan format → null elenir
@@ -674,7 +702,12 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
       if (!p) continue; // Codex P2: null normalize sonucu atla
       let hits = 0;
       for (const a of augmentedCandidates) {
-        const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
+        // scoreCandidate ile aynı toplama mantığı — slot 1/2/3 + E164 + contacts.
+        const ap = [
+          a.phone, a.phone2, a.phone3,
+          a.phoneE164, a.phone2E164, a.phone3E164,
+          ...a.contacts.flatMap((c) => [c.phone, c.phoneE164]),
+        ]
           .filter(Boolean)
           .map(normalizePhone)
           .filter(Boolean);
