@@ -34,6 +34,10 @@ export function RichTextEditor({ value, onChange, placeholder, disabled }: Props
       StarterKit.configure({
         // Heading composer'da gereksiz — n4b paritesi.
         heading: false,
+        // StarterKit v3+ dahili Link extension sunuyor; bizim özelleştirilmiş
+        // Link.configure'umuzla çakışmaması için kapatıyoruz
+        // ("Duplicate extension names ['link']" warn'ı).
+        link: false,
       }),
       Link.configure({
         autolink: true,

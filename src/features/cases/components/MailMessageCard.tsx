@@ -101,24 +101,6 @@ export function MailMessageCard({
     if (!root) return html;
 
     const imgs = Array.from(root.querySelectorAll('img'));
-    // M6.3a fix — diagnostic log: hangi cid'ler ve hangi CaseEmailAttachment
-    // contentId'leri var? Eski mail (CaseEmailAttachment yok) ve gerçek
-    // bug arasında ayrım yapmak için development'ta görünür.
-    if (typeof window !== 'undefined' && (import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
-      const bodyCids = imgs
-        .map((i) => (i.getAttribute('src') ?? '').trim())
-        .filter((s) => s.toLowerCase().startsWith('cid:'));
-      const attCids = email.attachments.map((a) => ({
-        id: a.id, cid: a.contentId, inline: a.isInline, fileName: a.fileName,
-      }));
-      // eslint-disable-next-line no-console
-      console.warn('[MailMessageCard] cid diagnostic', {
-        emailId: email.id,
-        bodyCidImgs: bodyCids,
-        attachmentsContentIds: attCids,
-        hasCaseEmailAttachments: attCids.length > 0,
-      });
-    }
     // Eski mail (CaseEmailAttachment hiç yok) flag — bu durumda cid: img'ler
     // için placeholder mesajı "Eski mail" diye açıklayalım.
     const isOldMailNoEmailAtt = email.attachments.length === 0;

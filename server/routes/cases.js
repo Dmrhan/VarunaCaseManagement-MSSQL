@@ -2380,92 +2380,26 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
-
-    // M6.3-realign teşhis — ?debug=1 ile DEV/non-prod ortamlarda
-    // ExternalMailSetting lookup'ının sonucunu detaylı döndür. Admin'in
-    // hangi companyId için kaydettiği vs vakanın companyId'si mismatch
-    // teşhisi için (no-setting reason'ında en sık görülen hata).
-    // Üretimde sızıntı olmasın diye process.env.NODE_ENV !== 'production'
-    // ek koruması.
-    const debugRequested = req.query?.debug === '1' && process.env.NODE_ENV !== 'production';
-
     const setting = await prisma.externalMailSetting.findUnique({
       where: { companyId: c.companyId },
-      select: { enabled: true, fromAddress: true },
+      select: { enabled: true },
     });
-    // Manuel alias sayısı (debug için)
-    let aliasCount = 0;
-    if (debugRequested) {
-      aliasCount = await prisma.externalMailSettingFromAlias.count({
-        where: { companyId: c.companyId, isActive: true },
-      });
-    }
-
-    function withDebug(body, extra = {}) {
-      if (!debugRequested) return body;
-      return {
-        ...body,
-        debug: {
-          caseCompanyId: c.companyId,
-          caseCompanyName: c.companyName,
-          settingExists: !!setting,
-          settingEnabled: setting?.enabled ?? null,
-          settingFromAddress: setting?.fromAddress ?? null,
-          aliasActiveCount: aliasCount,
-          ...extra,
-        },
-      };
-    }
-
     if (!setting) {
-      // Olası mismatch: admin başka companyId'ye kaydetti. Allowed company
-      // kümesi içinde başka setting'i olan şirketlerin LİSTESİ
-      // (companyId + name + enabled). Kullanıcı zaten bu şirketlere
-      // yetkili — privacy sınırı: allowedCompanyIds dışına ÇIKMAZ.
-      // İki "UNIVERA" aynı isim/farklı ID mi yoksa tek kayıt mı görmek için.
-      let settingCompanies = null;
-      if (debugRequested && Array.isArray(req.user.allowedCompanyIds)) {
-        const settingsRows = await prisma.externalMailSetting.findMany({
-          where: {
-            companyId: { in: req.user.allowedCompanyIds, not: c.companyId },
-          },
-          select: { companyId: true, enabled: true, fromAddress: true },
-        });
-        // Şirket adlarını ayrı sorguda al (denormalize yok)
-        const companyMap = new Map();
-        if (settingsRows.length) {
-          const companies = await prisma.company.findMany({
-            where: { id: { in: settingsRows.map((s) => s.companyId) } },
-            select: { id: true, name: true },
-          });
-          for (const co of companies) companyMap.set(co.id, co.name);
-        }
-        settingCompanies = settingsRows.map((s) => ({
-          companyId: s.companyId,
-          name: companyMap.get(s.companyId) ?? null,
-          enabled: s.enabled,
-          hasFromAddress: !!s.fromAddress,
-        }));
-      }
-      return res.json(withDebug(
-        { configured: false, reason: 'no-setting' },
-        { settingCompanies },
-      ));
+      return res.json({ configured: false, reason: 'no-setting' });
     }
     if (!setting.enabled) {
-      return res.json(withDebug({ configured: false, reason: 'disabled' }));
+      return res.json({ configured: false, reason: 'disabled' });
     }
     // composer dropdown ile AYNI kaynak (fallback dahil)
     const items = await externalMailFromAliasRepo.listActiveWithSettingFallback(c.companyId);
     if (items.length === 0) {
-      return res.json(withDebug({ configured: false, reason: 'no-from' }));
+      return res.json({ configured: false, reason: 'no-from' });
     }
-    // Reason: gerçek alias mı, fallback mi
     const isFallback = items.length === 1 && items[0].id === 'setting-fallback';
-    res.json(withDebug({
+    res.json({
       configured: true,
       reason: isFallback ? 'fallback-from-address' : 'has-alias',
-    }, { fallbackUsed: isFallback }));
+    });
   }),
 );
 

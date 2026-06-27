@@ -15,7 +15,7 @@ import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailThread, type MailThreadHandle } from './MailThread';
 import { MailComposer } from './MailComposer';
 import { Button } from '@/components/ui/Button';
-import { caseEmailService, type CaseEmailItem, type EmailConfigDebug, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -56,9 +56,8 @@ export function CommunicationTab({ item }: Props) {
   //   'configured'→ 1+ alias var, normal akış
   //   'missing'   → 0 alias, "Mail entegrasyonu yapılandırılmamış" banner
   const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
-  // Debug/log için reason (banner'da development modunda gösterilebilir)
+  // Banner mesajını "kapalı" vs "yapılandırılmamış" ayırt etmek için reason'ı tutuyoruz
   const [missingReason, setMissingReason] = useState<EmailConfigReason | null>(null);
-  const [configDebug, setConfigDebug] = useState<EmailConfigDebug | null>(null);
   const threadRef = useRef<MailThreadHandle>(null);
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -83,7 +82,6 @@ export function CommunicationTab({ item }: Props) {
       if (!alive) return;
       setMailConfigState(cfg.configured ? 'configured' : 'missing');
       setMissingReason(cfg.configured ? null : cfg.reason);
-      setConfigDebug(cfg.debug ?? null);
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -186,81 +184,6 @@ export function CommunicationTab({ item }: Props) {
               şirket → SMTP/IMAP credentials + gönderen adresi (From) tanımlı
               olmalı. Düzenleme tamamlanınca bu sekme otomatik aktifleşir.
             </p>
-            {/* Development modunda detaylı teşhis payload'ı — admin'in
-                hangi companyId'ye kaydettiği vs vakanın companyId'si
-                mismatch'ini görmek için */}
-            {(import.meta as { env?: { DEV?: boolean } }).env?.DEV && missingReason && (
-              <div className="mt-2 rounded border border-amber-200 bg-amber-100 p-2 font-mono text-[10px] leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-900/40">
-                <p className="font-sans font-semibold">[teşhis]</p>
-                <p>reason: <b>{missingReason}</b></p>
-                {configDebug && (
-                  <>
-                    <p>caseCompanyId: <b>{configDebug.caseCompanyId}</b></p>
-                    <p>caseCompanyName: {configDebug.caseCompanyName ?? '—'}</p>
-                    <p>settingExists: <b>{String(configDebug.settingExists)}</b></p>
-                    {configDebug.settingExists && (
-                      <>
-                        <p>settingEnabled: {String(configDebug.settingEnabled)}</p>
-                        <p>settingFromAddress: {configDebug.settingFromAddress || '(boş)'}</p>
-                        <p>aliasActiveCount: {configDebug.aliasActiveCount}</p>
-                      </>
-                    )}
-                    {missingReason === 'no-setting' && Array.isArray(configDebug.settingCompanies) && (
-                      <div className="mt-2">
-                        <p className="font-sans text-amber-800">
-                          ⚠ Bu vakanın{' '}
-                          <b>{configDebug.caseCompanyId}</b> companyId'sinde
-                          ExternalMailSetting YOK.
-                          {configDebug.settingCompanies.length > 0
-                            ? ' Yetkili olduğunuz başka şirketlerde setting var:'
-                            : ' Yetkili olduğunuz başka şirketlerde de setting yok.'}
-                        </p>
-                        {configDebug.settingCompanies.length > 0 && (
-                          <table className="mt-1 w-full border-collapse text-[10px]">
-                            <thead>
-                              <tr className="border-b border-amber-300 text-left">
-                                <th className="px-1 py-0.5">name</th>
-                                <th className="px-1 py-0.5">companyId</th>
-                                <th className="px-1 py-0.5">enabled</th>
-                                <th className="px-1 py-0.5">from?</th>
-                                <th className="px-1 py-0.5">match?</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {configDebug.settingCompanies.map((s) => {
-                                const sameName =
-                                  configDebug.caseCompanyName &&
-                                  s.name &&
-                                  s.name.trim().toLowerCase() ===
-                                    configDebug.caseCompanyName.trim().toLowerCase();
-                                return (
-                                  <tr
-                                    key={s.companyId}
-                                    className={
-                                      sameName
-                                        ? 'bg-rose-100 dark:bg-rose-900/40'
-                                        : ''
-                                    }
-                                  >
-                                    <td className="px-1 py-0.5">{s.name ?? '—'}</td>
-                                    <td className="px-1 py-0.5">{s.companyId}</td>
-                                    <td className="px-1 py-0.5">{String(s.enabled)}</td>
-                                    <td className="px-1 py-0.5">{String(s.hasFromAddress)}</td>
-                                    <td className="px-1 py-0.5">
-                                      {sameName ? '🔥 aynı isim, farklı ID' : ''}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </div>
       )}
