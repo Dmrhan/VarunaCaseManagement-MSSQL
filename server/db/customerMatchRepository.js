@@ -188,51 +188,265 @@ function extractSignalsFromCase(c) {
 // Candidate account lookup (scope by case.companyId)
 // ─────────────────────────────────────────────────────────────────
 
-async function fetchCandidateAccounts(companyId) {
-  return prisma.account.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { companies: { some: { companyId } } },
-        { companyId },
-        { companyId: null },
-      ],
-    },
+/**
+ * scoreCandidate'in beklediği account shape — fetchCandidateAccounts +
+ * fetchHighSignalAccounts AYNI select kullanır ki dedupe edilmiş Map
+ * birleştirmesi sorunsuz olsun.
+ */
+const CANDIDATE_SELECT = {
+  id: true,
+  name: true,
+  // WR-A2 3-slot telefon — scoreCandidate hepsini normalize edip
+  // signals.phones ile karşılaştırır. Display raw + E164 normalize
+  // hibrid: phoneE164 dolu ise zaten normalize; null ise display
+  // (phone) normalizePhone'dan geçer.
+  phone: true,
+  phoneE164: true,
+  phone2: true,
+  phone2E164: true,
+  phone3: true,
+  phone3E164: true,
+  email: true,
+  vkn: true,
+  companyId: true,
+  companies: {
+    // companies select'inde companyId filtre dış değişken — fonksiyon
+    // sarmalında verilir.
     select: {
       id: true,
-      name: true,
-      phone: true,
-      email: true,
-      vkn: true,
       companyId: true,
-      companies: {
-        where: { companyId },
+      externalCustomerCode: true,
+      packageName: true,
+      company: {
         select: {
-          id: true,
-          companyId: true,
-          externalCustomerCode: true,
-          packageName: true,
-          company: {
-            select: {
-              name: true,
-              settings: { select: { primaryColor: true } },
-            },
-          },
-          products: {
-            where: { isActive: true },
-            select: { productName: true, productCode: true },
-            take: 20,
-          },
+          name: true,
+          settings: { select: { primaryColor: true } },
         },
       },
-      contacts: {
+      products: {
         where: { isActive: true },
-        select: { fullName: true, phone: true, email: true },
+        select: { productName: true, productCode: true },
         take: 20,
       },
     },
+  },
+  contacts: {
+    where: { isActive: true },
+    select: { fullName: true, phone: true, phoneE164: true, email: true },
+    take: 20,
+  },
+};
+
+function buildCandidateSelect(companyId) {
+  // companies.where dinamik (companyId), select sabit.
+  return {
+    ...CANDIDATE_SELECT,
+    companies: {
+      ...CANDIDATE_SELECT.companies,
+      where: { companyId },
+    },
+  };
+}
+
+/**
+ * Mevcut scope guard: 3 katmanlı OR (companies.some + denormalized
+ * companyId + global null). fetchHighSignalAccounts da AYNI scope'u
+ * uygular.
+ */
+function buildScopeWhere(companyId) {
+  return {
+    isActive: true,
+    OR: [
+      { companies: { some: { companyId } } },
+      { companyId },
+      { companyId: null },
+    ],
+  };
+}
+
+async function fetchCandidateAccounts(companyId) {
+  return prisma.account.findMany({
+    where: buildScopeWhere(companyId),
+    select: buildCandidateSelect(companyId),
     take: 500,
+    // Deterministic cap — 500'lük dilimin tekrar üretilebilir olması için.
+    // Account.id cuid (chronological prefix) → insert sırasıyla doğal
+    // sıralama; createdAt asc denendi ama MSSQL'de aynı ms timestamp'i
+    // paylaşan kayıtlarda relation'lı select'in sonucu non-deterministic
+    // sonuçlar üretiyordu (regression smoke:mail-match scenarioD).
+    orderBy: { id: 'asc' },
   });
+}
+
+/**
+ * High-signal aday garantisi (Plan onaylı):
+ *   - Exact email (account.email VEYA contacts.email)
+ *   - Exact phone (account.phone VEYA contacts.phone — normalize edilmiş)
+ *   - External customer code (AccountCompany.externalCustomerCode)
+ *   - Learned sender (learnedSenderAccountRepo.getByEmail → account)
+ *
+ * Cap YOK; tipik hit kümesi 1-10 satır. fetchCandidateAccounts ile aynı
+ * scope guard + aynı select shape (dedupe Map güvenli).
+ *
+ * Hata durumlarında defansif: tek sorgu fail → boş dizi (silent fallback);
+ * diğer sinyaller etkilenmez. signals empty → erken return ([]).
+ */
+async function fetchHighSignalAccounts(companyId, signals) {
+  if (!companyId || !signals) return [];
+
+  const where = buildScopeWhere(companyId);
+  const select = buildCandidateSelect(companyId);
+
+  const tasks = [];
+
+  // (a) Exact email — account.email OR contacts.email
+  if (signals.emails?.length) {
+    tasks.push(
+      prisma.account.findMany({
+        where: {
+          AND: [
+            where,
+            {
+              OR: [
+                { email: { in: signals.emails } },
+                { contacts: { some: { email: { in: signals.emails }, isActive: true } } },
+              ],
+            },
+          ],
+        },
+        select,
+      }).catch((err) => {
+        console.warn('[customerMatch] high-signal email lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  // (b) Exact phone — Codex P2 fix: phoneE164 normalize kolonları + slot
+  // 2/3 + contact phoneE164. Account.phone display raw legacy back-compat.
+  //
+  // BİLİNEN SINIR (Codex P2 round 3 — belgelendi, smoke 3h):
+  //   phoneE164 NULL + display phone raw (boşluklu "+90 532 ..." veya
+  //   sade "5333...") olan LEGACY kayıtlar augment query'sinden geçmez:
+  //   { phone: p } satırı normalize signal'i raw'la karşılaştırır → miss.
+  //   scoreCandidate aday havuza alındığında normalize edip eşleşmeyi
+  //   kurardı ama bu kayıtlar HAVUZA ALINMIYOR.
+  //   prod ampirik: %99 phoneE164 dolu (WR-A2) → %1 etki sınırı.
+  //   Operasyonel çözüm: backfill migration (ayrı PR) — phoneE164 NULL
+  //   tüm kayıtlar için runtime normalize ile populate et.
+  //
+  // PLACEHOLDER PHONE GUARD (Codex P2 round 2):
+  // Paylaşılan santral/demo numara phoneE164'da N>THRESHOLD account'a
+  // denk gelebilir. Cap'siz augment HEPSINI havuza dolduruyor; sonra
+  // placeholderPhones filtresi phone score'unu bastırsa da bu hesaplar
+  // havuzda KALIYOR ve weak signal (name/product) ile öneriye SIZABILIYOR.
+  //
+  // Çözüm: her phone için ayrı query, take = THRESHOLD+1.
+  // Sonuç > THRESHOLD → placeholder, augment'a KOYMA (zaten phone
+  // discriminator değil; weak signal sızıntısı engellenir).
+  // ≤ THRESHOLD → gerçek match, augment et.
+  if (signals.phones?.length) {
+    for (const p of signals.phones) {
+      if (!p) continue;
+      tasks.push(
+        prisma.account.findMany({
+          where: {
+            AND: [
+              where,
+              {
+                OR: [
+                  { phoneE164: p },
+                  { phone2E164: p },
+                  { phone3E164: p },
+                  // legacy backward compat — phoneE164 null kayıtlar
+                  { phone: p },
+                  {
+                    contacts: {
+                      some: {
+                        isActive: true,
+                        OR: [
+                          { phoneE164: p },
+                          { phone: p },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          select,
+          // PLACEHOLDER_PHONE_THRESHOLD + 1: discriminator olup olmadığını
+          // tek query ile anlamak için (ek count query'si yok).
+          take: PLACEHOLDER_PHONE_THRESHOLD + 1,
+        }).then((rows) => {
+          // > THRESHOLD → placeholder; augment'a koyma (weak signal
+          // sızıntısı engellenir)
+          if (rows.length > PLACEHOLDER_PHONE_THRESHOLD) return [];
+          return rows;
+        }).catch((err) => {
+          console.warn('[customerMatch] high-signal phone lookup fail', err?.message ?? err);
+          return [];
+        }),
+      );
+    }
+  }
+
+  // (c) External customer code — AccountCompany.externalCustomerCode scope'lu
+  if (signals.externalCodes?.length) {
+    tasks.push(
+      (async () => {
+        const links = await prisma.accountCompany.findMany({
+          where: {
+            companyId,
+            externalCustomerCode: { in: signals.externalCodes },
+          },
+          select: { accountId: true },
+        });
+        if (!links.length) return [];
+        return prisma.account.findMany({
+          where: {
+            AND: [where, { id: { in: links.map((l) => l.accountId) } }],
+          },
+          select,
+        });
+      })().catch((err) => {
+        console.warn('[customerMatch] high-signal external-code lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  // (d) Learned sender — inbound + requesterEmail varsa
+  if (signals.isInbound && signals.requesterEmail) {
+    tasks.push(
+      (async () => {
+        const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
+        const learned = await learnedSenderAccountRepo.getByEmail(companyId, signals.requesterEmail);
+        if (!learned?.accountId) return [];
+        return prisma.account.findMany({
+          where: {
+            AND: [where, { id: learned.accountId }],
+          },
+          select,
+        });
+      })().catch((err) => {
+        console.warn('[customerMatch] high-signal learned lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  if (!tasks.length) return [];
+  const results = await Promise.all(tasks);
+  // Dedupe by id — aynı account birden çok sinyali tetikleyebilir.
+  const map = new Map();
+  for (const arr of results) {
+    for (const a of arr) {
+      if (!map.has(a.id)) map.set(a.id, a);
+    }
+  }
+  return Array.from(map.values());
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -257,7 +471,14 @@ function scoreCandidate(account, signals, ctx = {}) {
   // M2.2 (4) — Placeholder telefon filtresi. ctx.placeholderPhones set'i
   // verildiyse, bu numara aday havuzunda >threshold hesapla eşleşiyor =
   // discriminator değil → reason SAYILMAZ.
-  const accountPhones = [account.phone, ...account.contacts.map((c) => c.phone)]
+  // WR-A2 — 3-slot phone + her slot için E164 normalize varyantı + contact
+  // phone/phoneE164. phoneE164 zaten normalize; phone (display raw)
+  // normalizePhone'dan geçer (legacy back-compat: phoneE164 null kayıtlar).
+  const accountPhones = [
+    account.phone, account.phone2, account.phone3,
+    account.phoneE164, account.phone2E164, account.phone3E164,
+    ...account.contacts.flatMap((c) => [c.phone, c.phoneE164]),
+  ]
     .filter(Boolean)
     .map(normalizePhone)
     .filter(Boolean); // tanınmayan format → null elenir
@@ -463,19 +684,33 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   }
 
   const signals = extractSignalsFromCase(c);
+
+  // Aday havuzu: deterministik top 500 (createdAt asc + id asc) +
+  // yüksek-sinyal augment (cap'siz).
+  // KÖK SEBEP fix: 500 cap'i exact-email/learned hedefini havuz dışında
+  // bırakabiliyordu. fetchHighSignalAccounts emin olur ki bu yüksek
+  // güvenli sinyalleri taşıyan hesaplar HER ZAMAN havuzda.
   const candidates = await fetchCandidateAccounts(c.companyId);
+  const highSignal = await fetchHighSignalAccounts(c.companyId, signals);
+
+  // Dedupe — candidates priority; augment yalnız yeni id'ler ekler.
+  const candidateMap = new Map(candidates.map((a) => [a.id, a]));
+  for (const a of highSignal) {
+    if (!candidateMap.has(a.id)) candidateMap.set(a.id, a);
+  }
+  const augmentedCandidates = Array.from(candidateMap.values());
 
   // M2.3 — Inbound için öğrenilen sender eşlemesi.
   // YALNIZ c.origin='Eposta' VE customerContactEmail dolu iken devreye girer.
-  // learnedAccountId aday havuzunda mevcut + aktif olmalı; aksi halde
-  // null kalır → scoreCandidate'e ctx.learnedAccountId YOK gibi gelir.
+  // Plan onaylı: learned guard augment SONRA çalışır — fetchHighSignalAccounts
+  // learned account'u zorunlu havuza ekledi; guard sadece defansif.
   let learnedAccountId = null;
   let learnedIsRoleAddress = false;
   if (signals.isInbound && signals.requesterEmail) {
     try {
       const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
       const learned = await learnedSenderAccountRepo.getByEmail(c.companyId, signals.requesterEmail);
-      if (learned && candidates.some((a) => a.id === learned.accountId)) {
+      if (learned && augmentedCandidates.some((a) => a.id === learned.accountId)) {
         learnedAccountId = learned.accountId;
         learnedIsRoleAddress = learned.isRoleAddress;
       }
@@ -488,15 +723,19 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
 
   // M2.2 (4) — Placeholder telefon filtresi: aday havuzunda bir signal
   // telefon PLACEHOLDER_PHONE_THRESHOLD'dan fazla farklı hesapla eşleşiyorsa
-  // discriminator değildir. Burada bir kez hesaplayıp scoreCandidate'a
-  // ctx olarak geçeriz (ekstra DB sorgusu yok — zaten yüklü candidate set).
+  // discriminator değildir. Augment edilmiş havuz üzerinden hesapla.
   const placeholderPhones = new Set();
   if (signals.phones.length > 0) {
     for (const p of signals.phones) {
       if (!p) continue; // Codex P2: null normalize sonucu atla
       let hits = 0;
-      for (const a of candidates) {
-        const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
+      for (const a of augmentedCandidates) {
+        // scoreCandidate ile aynı toplama mantığı — slot 1/2/3 + E164 + contacts.
+        const ap = [
+          a.phone, a.phone2, a.phone3,
+          a.phoneE164, a.phone2E164, a.phone3E164,
+          ...a.contacts.flatMap((c) => [c.phone, c.phoneE164]),
+        ]
           .filter(Boolean)
           .map(normalizePhone)
           .filter(Boolean);
@@ -513,7 +752,7 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
 
   const scoreCtx = { placeholderPhones, learnedAccountId };
 
-  const scored = candidates
+  const scored = augmentedCandidates
     .map((a) => {
       const { score, confidence, reasons } = scoreCandidate(a, signals, scoreCtx);
       return { account: a, score, confidence, reasons };
