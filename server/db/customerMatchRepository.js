@@ -313,7 +313,14 @@ async function fetchHighSignalAccounts(companyId, signals) {
     );
   }
 
-  // (b) Exact phone — normalize edilmiş; DB raw ise miss kalır (silent).
+  // (b) Exact phone — normalize edilmiş.
+  // BİLİNEN SINIR: signals.phones normalizePhone çıktısı tek format
+  // ('+9053...'); Account.phone DB'de raw saklı ('+90 532...', '5333...')
+  // → IN sorgusu raw'ı KAÇIRIR (smoke senaryo 3c ile kanıtlandı).
+  // Normalize formatta saklı kayıtlar yakalanır (senaryo 3b).
+  // Email/learned/external-code primary path; phone yolu opportunistic.
+  // Tam kapsam için Account.phoneNormalized indeksli kolon migration'ı
+  // gerek (kapsam dışı; ayrı PR).
   if (signals.phones?.length) {
     tasks.push(
       prisma.account.findMany({

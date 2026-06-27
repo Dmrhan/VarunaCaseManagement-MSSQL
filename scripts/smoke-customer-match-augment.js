@@ -193,6 +193,71 @@ async function mkAccountWithEmail({ name, email, baseTs }) {
     expectTruthy('externalCode reason VAR',
       targetSugg3?.reasons?.some((r) => r.type === 'externalCode'));
 
+    console.log('\n=== (3b) Phone exact augment — DB normalize formatta saklı → yakalar ===');
+    await reset();
+    await prisma.company.upsert({
+      where: { id: TENANT }, update: {},
+      create: { id: TENANT, name: TENANT_NAME, isActive: true },
+    });
+    // 500 noise
+    const noiseData2 = [];
+    const baseEarly2 = new Date('2026-01-01T00:00:00Z');
+    for (let i = 0; i < 500; i++) {
+      const ts = new Date(baseEarly2.getTime() + i * 1000);
+      noiseData2.push({
+        companyId: TENANT, name: `Noise ${i}`, email: null, phone: null,
+        isActive: true, createdAt: ts, updatedAt: ts,
+      });
+    }
+    await prisma.account.createMany({ data: noiseData2 });
+    // Hedef: DB'de NORMALIZE format ('+905324445500'); requester aynı sinyali yollar
+    const phoneTargetTs = new Date('2026-12-31T23:59:00Z');
+    const phoneTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Phone Match Target',
+        phone: '+905324445500', // normalizePhone çıktısıyla uyumlu
+        isActive: true, createdAt: phoneTargetTs, updatedAt: phoneTargetTs,
+      },
+    });
+    const cPhone = await mkCase('VK-CMA-PH', {
+      contactName: 'Phone Test',
+      phone: '+905324445500', // signals.requesterPhone → normalize aynı
+    });
+    const rPhone = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cPhone.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    expectTruthy('phone-augment: suggestion var', rPhone?.suggestions?.length > 0);
+    expectTruthy('phone-augment: target listede',
+      rPhone.suggestions.some((s) => s.accountId === phoneTarget.id));
+    const phoneSugg = rPhone.suggestions.find((s) => s.accountId === phoneTarget.id);
+    expectTruthy('phone-augment: "Telefon eşleşti" reason VAR',
+      phoneSugg?.reasons?.some((r) => r.label === 'Telefon eşleşti'));
+
+    console.log('\n=== (3c) BİLİNEN SINIR — DB raw format (boşluklu/eksik prefix) → augment KAÇIRIR ===');
+    // DB'de RAW format (boşluklu, normalize değil); signals normalize.
+    // Phone augment query (phone: { in: [normalized] }) raw'ı yakalamaz.
+    // Bu davranış kodda + PR body'sinde belgelenir.
+    const rawPhoneTs = new Date('2026-12-31T23:59:30Z');
+    const rawTarget = await prisma.account.create({
+      data: {
+        companyId: TENANT, name: 'Raw Phone Target',
+        phone: '+90 532 444 5599', // boşluklu raw — normalize sonrası +905324445599
+        isActive: true, createdAt: rawPhoneTs, updatedAt: rawPhoneTs,
+      },
+    });
+    const cRaw = await mkCase('VK-CMA-RAW', {
+      contactName: 'Raw Phone Test',
+      phone: '+905324445599', // normalize sinyali
+    });
+    const rRaw = await customerMatchRepository.suggestCustomerMatches({
+      caseId: cRaw.id, allowedCompanyIds: [TENANT], limit: 5,
+    });
+    // BİLİNEN SINIR: DB raw → phone augment query miss
+    // (rawTarget 500 dilim dışında ve normalize format DB'de yok)
+    const rawSugg = rRaw.suggestions.find((s) => s.accountId === rawTarget.id);
+    expect('BİLİNEN SINIR: raw-format target önerilemez (phone augment kaçırır)',
+      rawSugg, undefined);
+
     console.log('\n=== (4) Küçük tenant regression — 10 hesap, augment etkisiz ===');
     await reset();
     await prisma.company.upsert({
