@@ -62,7 +62,8 @@
     "smoke:mail-m6-3-fwd": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-forward-context.js",
     "smoke:mail-m6-3-fallback": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-from-alias-fallback.js",
     "smoke:mail-m6-3-cfg": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-email-config.js",
-    "smoke:mail-m6-3-codex-p2": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-codex-p2-fixes.js"
+    "smoke:mail-m6-3-codex-p2": "node --env-file-if-exists=.env scripts/smoke-mail-m6-3-codex-p2-fixes.js",
+    "smoke:customer-match-augment": "node --env-file-if-exists=.env scripts/smoke-customer-match-augment.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

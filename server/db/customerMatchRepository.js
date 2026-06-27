@@ -188,51 +188,209 @@ function extractSignalsFromCase(c) {
 // Candidate account lookup (scope by case.companyId)
 // ─────────────────────────────────────────────────────────────────
 
-async function fetchCandidateAccounts(companyId) {
-  return prisma.account.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { companies: { some: { companyId } } },
-        { companyId },
-        { companyId: null },
-      ],
-    },
+/**
+ * scoreCandidate'in beklediği account shape — fetchCandidateAccounts +
+ * fetchHighSignalAccounts AYNI select kullanır ki dedupe edilmiş Map
+ * birleştirmesi sorunsuz olsun.
+ */
+const CANDIDATE_SELECT = {
+  id: true,
+  name: true,
+  phone: true,
+  email: true,
+  vkn: true,
+  companyId: true,
+  companies: {
+    // companies select'inde companyId filtre dış değişken — fonksiyon
+    // sarmalında verilir.
     select: {
       id: true,
-      name: true,
-      phone: true,
-      email: true,
-      vkn: true,
       companyId: true,
-      companies: {
-        where: { companyId },
+      externalCustomerCode: true,
+      packageName: true,
+      company: {
         select: {
-          id: true,
-          companyId: true,
-          externalCustomerCode: true,
-          packageName: true,
-          company: {
-            select: {
-              name: true,
-              settings: { select: { primaryColor: true } },
-            },
-          },
-          products: {
-            where: { isActive: true },
-            select: { productName: true, productCode: true },
-            take: 20,
-          },
+          name: true,
+          settings: { select: { primaryColor: true } },
         },
       },
-      contacts: {
+      products: {
         where: { isActive: true },
-        select: { fullName: true, phone: true, email: true },
+        select: { productName: true, productCode: true },
         take: 20,
       },
     },
+  },
+  contacts: {
+    where: { isActive: true },
+    select: { fullName: true, phone: true, email: true },
+    take: 20,
+  },
+};
+
+function buildCandidateSelect(companyId) {
+  // companies.where dinamik (companyId), select sabit.
+  return {
+    ...CANDIDATE_SELECT,
+    companies: {
+      ...CANDIDATE_SELECT.companies,
+      where: { companyId },
+    },
+  };
+}
+
+/**
+ * Mevcut scope guard: 3 katmanlı OR (companies.some + denormalized
+ * companyId + global null). fetchHighSignalAccounts da AYNI scope'u
+ * uygular.
+ */
+function buildScopeWhere(companyId) {
+  return {
+    isActive: true,
+    OR: [
+      { companies: { some: { companyId } } },
+      { companyId },
+      { companyId: null },
+    ],
+  };
+}
+
+async function fetchCandidateAccounts(companyId) {
+  return prisma.account.findMany({
+    where: buildScopeWhere(companyId),
+    select: buildCandidateSelect(companyId),
     take: 500,
+    // Deterministic cap — 500'lük dilimin tekrar üretilebilir olması için.
+    // Account.id cuid (chronological prefix) → insert sırasıyla doğal
+    // sıralama; createdAt asc denendi ama MSSQL'de aynı ms timestamp'i
+    // paylaşan kayıtlarda relation'lı select'in sonucu non-deterministic
+    // sonuçlar üretiyordu (regression smoke:mail-match scenarioD).
+    orderBy: { id: 'asc' },
   });
+}
+
+/**
+ * High-signal aday garantisi (Plan onaylı):
+ *   - Exact email (account.email VEYA contacts.email)
+ *   - Exact phone (account.phone VEYA contacts.phone — normalize edilmiş)
+ *   - External customer code (AccountCompany.externalCustomerCode)
+ *   - Learned sender (learnedSenderAccountRepo.getByEmail → account)
+ *
+ * Cap YOK; tipik hit kümesi 1-10 satır. fetchCandidateAccounts ile aynı
+ * scope guard + aynı select shape (dedupe Map güvenli).
+ *
+ * Hata durumlarında defansif: tek sorgu fail → boş dizi (silent fallback);
+ * diğer sinyaller etkilenmez. signals empty → erken return ([]).
+ */
+async function fetchHighSignalAccounts(companyId, signals) {
+  if (!companyId || !signals) return [];
+
+  const where = buildScopeWhere(companyId);
+  const select = buildCandidateSelect(companyId);
+
+  const tasks = [];
+
+  // (a) Exact email — account.email OR contacts.email
+  if (signals.emails?.length) {
+    tasks.push(
+      prisma.account.findMany({
+        where: {
+          AND: [
+            where,
+            {
+              OR: [
+                { email: { in: signals.emails } },
+                { contacts: { some: { email: { in: signals.emails }, isActive: true } } },
+              ],
+            },
+          ],
+        },
+        select,
+      }).catch((err) => {
+        console.warn('[customerMatch] high-signal email lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  // (b) Exact phone — normalize edilmiş; DB raw ise miss kalır (silent).
+  if (signals.phones?.length) {
+    tasks.push(
+      prisma.account.findMany({
+        where: {
+          AND: [
+            where,
+            {
+              OR: [
+                { phone: { in: signals.phones } },
+                { contacts: { some: { phone: { in: signals.phones }, isActive: true } } },
+              ],
+            },
+          ],
+        },
+        select,
+      }).catch((err) => {
+        console.warn('[customerMatch] high-signal phone lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  // (c) External customer code — AccountCompany.externalCustomerCode scope'lu
+  if (signals.externalCodes?.length) {
+    tasks.push(
+      (async () => {
+        const links = await prisma.accountCompany.findMany({
+          where: {
+            companyId,
+            externalCustomerCode: { in: signals.externalCodes },
+          },
+          select: { accountId: true },
+        });
+        if (!links.length) return [];
+        return prisma.account.findMany({
+          where: {
+            AND: [where, { id: { in: links.map((l) => l.accountId) } }],
+          },
+          select,
+        });
+      })().catch((err) => {
+        console.warn('[customerMatch] high-signal external-code lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  // (d) Learned sender — inbound + requesterEmail varsa
+  if (signals.isInbound && signals.requesterEmail) {
+    tasks.push(
+      (async () => {
+        const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
+        const learned = await learnedSenderAccountRepo.getByEmail(companyId, signals.requesterEmail);
+        if (!learned?.accountId) return [];
+        return prisma.account.findMany({
+          where: {
+            AND: [where, { id: learned.accountId }],
+          },
+          select,
+        });
+      })().catch((err) => {
+        console.warn('[customerMatch] high-signal learned lookup fail', err?.message ?? err);
+        return [];
+      }),
+    );
+  }
+
+  if (!tasks.length) return [];
+  const results = await Promise.all(tasks);
+  // Dedupe by id — aynı account birden çok sinyali tetikleyebilir.
+  const map = new Map();
+  for (const arr of results) {
+    for (const a of arr) {
+      if (!map.has(a.id)) map.set(a.id, a);
+    }
+  }
+  return Array.from(map.values());
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -463,19 +621,33 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
   }
 
   const signals = extractSignalsFromCase(c);
+
+  // Aday havuzu: deterministik top 500 (createdAt asc + id asc) +
+  // yüksek-sinyal augment (cap'siz).
+  // KÖK SEBEP fix: 500 cap'i exact-email/learned hedefini havuz dışında
+  // bırakabiliyordu. fetchHighSignalAccounts emin olur ki bu yüksek
+  // güvenli sinyalleri taşıyan hesaplar HER ZAMAN havuzda.
   const candidates = await fetchCandidateAccounts(c.companyId);
+  const highSignal = await fetchHighSignalAccounts(c.companyId, signals);
+
+  // Dedupe — candidates priority; augment yalnız yeni id'ler ekler.
+  const candidateMap = new Map(candidates.map((a) => [a.id, a]));
+  for (const a of highSignal) {
+    if (!candidateMap.has(a.id)) candidateMap.set(a.id, a);
+  }
+  const augmentedCandidates = Array.from(candidateMap.values());
 
   // M2.3 — Inbound için öğrenilen sender eşlemesi.
   // YALNIZ c.origin='Eposta' VE customerContactEmail dolu iken devreye girer.
-  // learnedAccountId aday havuzunda mevcut + aktif olmalı; aksi halde
-  // null kalır → scoreCandidate'e ctx.learnedAccountId YOK gibi gelir.
+  // Plan onaylı: learned guard augment SONRA çalışır — fetchHighSignalAccounts
+  // learned account'u zorunlu havuza ekledi; guard sadece defansif.
   let learnedAccountId = null;
   let learnedIsRoleAddress = false;
   if (signals.isInbound && signals.requesterEmail) {
     try {
       const { learnedSenderAccountRepo } = await import('./learnedSenderAccountRepository.js');
       const learned = await learnedSenderAccountRepo.getByEmail(c.companyId, signals.requesterEmail);
-      if (learned && candidates.some((a) => a.id === learned.accountId)) {
+      if (learned && augmentedCandidates.some((a) => a.id === learned.accountId)) {
         learnedAccountId = learned.accountId;
         learnedIsRoleAddress = learned.isRoleAddress;
       }
@@ -488,14 +660,13 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
 
   // M2.2 (4) — Placeholder telefon filtresi: aday havuzunda bir signal
   // telefon PLACEHOLDER_PHONE_THRESHOLD'dan fazla farklı hesapla eşleşiyorsa
-  // discriminator değildir. Burada bir kez hesaplayıp scoreCandidate'a
-  // ctx olarak geçeriz (ekstra DB sorgusu yok — zaten yüklü candidate set).
+  // discriminator değildir. Augment edilmiş havuz üzerinden hesapla.
   const placeholderPhones = new Set();
   if (signals.phones.length > 0) {
     for (const p of signals.phones) {
       if (!p) continue; // Codex P2: null normalize sonucu atla
       let hits = 0;
-      for (const a of candidates) {
+      for (const a of augmentedCandidates) {
         const ap = [a.phone, ...a.contacts.map((c) => c.phone)]
           .filter(Boolean)
           .map(normalizePhone)
@@ -513,7 +684,7 @@ export async function suggestCustomerMatches({ caseId, allowedCompanyIds, limit 
 
   const scoreCtx = { placeholderPhones, learnedAccountId };
 
-  const scored = candidates
+  const scored = augmentedCandidates
     .map((a) => {
       const { score, confidence, reasons } = scoreCandidate(a, signals, scoreCtx);
       return { account: a, score, confidence, reasons };
