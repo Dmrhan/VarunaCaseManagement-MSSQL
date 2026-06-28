@@ -202,6 +202,7 @@ export function MailComposer({
     if (oldSig === newSig) return; // ilk render veya aynı seçim
     setBodyHtml((cur) => {
       let next = cur;
+      let newSigInsertHandled = false;
       if (oldSig) {
         // 1) Sonu imzayla bitiyor mu? (forward + quoted YOK durumu)
         if (next.endsWith(oldSig)) {
@@ -211,6 +212,19 @@ export function MailComposer({
           const prefix = `<p></p>${oldSig}`;
           if (next.startsWith(prefix)) {
             next = '<p></p>' + next.slice(prefix.length);
+          } else if (next.includes(oldSig)) {
+            // 3) Codex P2 fix — Template insert sonrası imza ortada
+            //    kalabiliyor (insertTemplateBody template'i imzanın
+            //    ÖNCESİNE ekler):
+            //      `<p></p>TEMPLATEoldSig` veya
+            //      `<p></p>TEMPLATEoldSigQUOTED`
+            //    İmzanın ilk occurrence'ını strip + aynı pozisyona yeni
+            //    imzayı koy. Quote'a dokunmadan.
+            const i = next.indexOf(oldSig);
+            const before = next.slice(0, i);
+            const after = next.slice(i + oldSig.length);
+            next = before + (newSig ?? '') + after;
+            newSigInsertHandled = true;
           } else {
             // Agent body'yi çok değiştirdi — silent skip.
             currentSignatureHtmlRef.current = newSig;
@@ -218,7 +232,7 @@ export function MailComposer({
           }
         }
       }
-      if (newSig) {
+      if (newSig && !newSigInsertHandled) {
         // forward bağlamı varsa quoted body'nin BAŞINA imza enjekte et.
         const quoted = initialForwardContext?.quotedBodyHtml ?? '';
         if (quoted && next.endsWith(quoted)) {
