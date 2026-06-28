@@ -262,6 +262,72 @@ export function MailComposer({
     return () => { alive = false; };
   }, [item.id]);
 
+  // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
+  const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  // Subject replace + missing placeholder confirm modal state
+  // Codex P2 fix — missing.length > 0 ise agent uyarısı + onay
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    id: string;
+    subject: string | null;
+    bodyHtml: string;
+    missing: string[];
+    needsSubjectChoice: boolean;
+  } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void caseEmailService.listEmailTemplates(item.id).then((items) => {
+      if (alive) setTemplates(items);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  // Template seçimi: render + insert.
+  // Codex P2 fix — missing placeholder VAR ise agent'a uyarı modalı
+  // (bilinmeyen {{var}} → boş render → agent farkında olmadan eksik
+  // değişkenle mail gönderebilirdi).
+  // Subject mevcut + farklı VAR ise replace confirm.
+  // İki kondisyon birleşik modal'da gösterilir.
+  async function applyTemplate(templateId: string) {
+    if (!templateId) return;
+    setTemplateBusy(true);
+    try {
+      const rendered = await caseEmailService.renderEmailTemplate(item.id, templateId);
+      if (!rendered) return; // apiFetch toast attı; silent skip
+      const hasSubject = typeof rendered.subject === 'string' && rendered.subject.trim();
+      const hasMissing = (rendered.missing?.length ?? 0) > 0;
+      const needsSubjectChoice = !!hasSubject && !!subject && subject !== rendered.subject;
+      if (needsSubjectChoice || hasMissing) {
+        // Modal: subject onay VE/VEYA missing uyarısı.
+        setPendingTemplate({
+          id: templateId,
+          subject: rendered.subject,
+          bodyHtml: rendered.bodyHtml,
+          missing: rendered.missing ?? [],
+          needsSubjectChoice,
+        });
+        return;
+      }
+      // Doğrudan uygula.
+      if (hasSubject) setSubject(rendered.subject!);
+      // Body insert — cursor pozisyonu yerine basit append (TipTap state
+      // composer'ın internal'ında; v1 append; v2 cursor için TipTap
+      // editor ref gerek).
+      setBodyHtml((cur) => cur + rendered.bodyHtml);
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
+  function confirmTemplate(replaceSubject: boolean) {
+    if (!pendingTemplate) return;
+    if (replaceSubject && pendingTemplate.subject) {
+      setSubject(pendingTemplate.subject);
+    }
+    setBodyHtml((cur) => cur + pendingTemplate.bodyHtml);
+    setPendingTemplate(null);
+  }
+
   const selectedAlias = aliases.find((a) => a.id === fromId) ?? null;
   // Codex fix — From dropdown HER ZAMAN görünür (n4b paritesi). "Tek
   // alias ise gizle" mantığı KALDIRILDI; agent gönderen adresini her
@@ -468,11 +534,24 @@ export function MailComposer({
           </Field>
           <Field label="Mail Şablonu">
             <select
-              disabled
-              className="w-full rounded-md border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm text-slate-400 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
-              title="Mail şablonları Faz 3'te gelir"
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id) void applyTemplate(id);
+                e.target.value = ''; // her seçim sonrası placeholder'a dön
+              }}
+              disabled={submitting || templateBusy || templates.length === 0}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+              title={templates.length === 0 ? 'Bu şirkette mail şablonu tanımlı değil' : 'Şablonu seç → metin/konu otomatik eklenir'}
             >
-              <option>Şablon yok</option>
+              <option value="">
+                {templates.length === 0 ? 'Şablon yok' : 'Şablon seçin…'}
+              </option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.category ? `[${t.category}] ${t.name}` : t.name}
+                </option>
+              ))}
             </select>
           </Field>
         </div>
@@ -578,6 +657,75 @@ export function MailComposer({
           {submitting ? 'Gönderiliyor…' : 'Gönder'}
         </Button>
       </div>
+
+      {/* M6.3b Faz 3 — Şablon uygulama onay modalı.
+          n4b S11 endüstri parite: subject replace onayı.
+          Codex P2 fix: missing placeholder uyarısı. */}
+      {pendingTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPendingTemplate(null)}>
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl dark:bg-ndark-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-ndark-text">
+              Şablon uygulanacak
+            </h3>
+
+            {/* Missing placeholder uyarısı — agent farkında olmadan eksik
+                değişkenle mail göndermesin (Codex P2 fix). */}
+            {pendingTemplate.missing.length > 0 && (
+              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+                <p className="font-semibold">⚠ Bilinmeyen değişkenler boş bırakıldı:</p>
+                <p className="mt-1 font-mono">
+                  {pendingTemplate.missing.map((m) => `{{${m}}}`).join(', ')}
+                </p>
+                <p className="mt-1 text-[10px] opacity-80">
+                  Şablonu uyguladıktan sonra metinde boşluk varsa kontrol edin.
+                </p>
+              </div>
+            )}
+
+            {pendingTemplate.needsSubjectChoice && (
+              <>
+                <p className="mb-2 text-xs text-slate-600 dark:text-ndark-muted">
+                  Mevcut konu: <span className="font-mono">{subject}</span>
+                  <br />
+                  Şablon konusu: <span className="font-mono">{pendingTemplate.subject}</span>
+                </p>
+                <p className="mb-3 text-xs text-slate-500">
+                  "Konuyu koru" seçerseniz konu değişmez; şablon metni yine eklenir.
+                </p>
+              </>
+            )}
+
+            {!pendingTemplate.needsSubjectChoice && pendingTemplate.missing.length > 0 && (
+              <p className="mb-3 text-xs text-slate-500">
+                Devam etmek istiyor musunuz?
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setPendingTemplate(null)}>
+                Vazgeç
+              </Button>
+              {pendingTemplate.needsSubjectChoice ? (
+                <>
+                  <Button type="button" variant="outline" onClick={() => confirmTemplate(false)}>
+                    Konuyu koru
+                  </Button>
+                  <Button type="button" variant="primary" onClick={() => confirmTemplate(true)}>
+                    Konuyu değiştir
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" variant="primary" onClick={() => confirmTemplate(false)}>
+                  Yine de uygula
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

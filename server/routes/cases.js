@@ -2419,6 +2419,71 @@ router.get(
 );
 
 /**
+ * Mail M6.3b Faz 3 — GET /api/cases/:id/email-templates
+ *
+ * Composer "Mail Şablonu" dropdown beslemesi. Aktif template'ler döner.
+ * Scope: caseRepository.get + assertCaseSecurityFilterAccess (M5-ext desen).
+ */
+router.get(
+  '/:id/email-templates',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+    const { caseEmailTemplateRepo } = await import('../db/caseEmailTemplateRepository.js');
+    const items = await caseEmailTemplateRepo.listActive(c.companyId);
+    res.json({
+      items: items.map((t) => ({
+        id: t.id,
+        name: t.name,
+        category: t.category,
+        subject: t.subject,
+        bodyHtml: t.bodyHtml,
+        variables: t.variables,
+      })),
+    });
+  }),
+);
+
+/**
+ * Mail M6.3b Faz 3 — POST /api/cases/:id/email-templates/:templateId/render
+ *
+ * Composer'ın seçtiği template'i vaka context'i ile interpolate eder.
+ * Response: { subject: string | null, bodyHtml, missing: string[] }
+ */
+router.post(
+  '/:id/email-templates/:templateId/render',
+  asyncRoute(async (req, res) => {
+    const c = await caseRepository.get(
+      req.params.id,
+      req.user.allowedCompanyIds,
+      req.user.role,
+    );
+    if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
+
+    const { caseEmailTemplateRepo } = await import('../db/caseEmailTemplateRepository.js');
+    const tpl = await caseEmailTemplateRepo.getById(c.companyId, req.params.templateId);
+    if (!tpl || !tpl.isActive) return res.status(404).json({ error: 'Şablon bulunamadı' });
+
+    const caseRow = await prisma.case.findUnique({
+      where: { id: c.id },
+      select: {
+        caseNumber: true, title: true, accountName: true,
+        customerContactName: true, customerContactEmail: true,
+      },
+    });
+    const { renderTemplate } = await import('../lib/emailTemplateRender.js');
+    const out = renderTemplate(tpl, caseRow, { fullName: req.user.fullName ?? '' });
+    res.json(out);
+  }),
+);
+
+/**
  * Mail M6.2b — GET /api/cases/:id/email-signature
  *
  * Composer için tenant default imzası (ExternalMailSetting.signatureHtml).

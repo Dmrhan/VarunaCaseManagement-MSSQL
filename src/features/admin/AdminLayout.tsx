@@ -47,6 +47,7 @@ export type AdminView =
   | 'admin-external-kb'
   | 'admin-external-devops'
   | 'admin-external-mail'
+  | 'admin-email-templates'
   | 'admin-data-import'
   | 'admin-companies'
   | 'admin-users'
@@ -71,6 +72,7 @@ export const ADMIN_VIEWS: AdminView[] = [
   'admin-external-kb',
   'admin-external-devops',
   'admin-external-mail',
+  'admin-email-templates',
   'admin-data-import',
   'admin-companies',
   'admin-users',
@@ -114,6 +116,7 @@ const NAV: NavGroup[] = [
       { key: 'admin-external-kb',         label: 'Bilgi Bankası Entegrasyonu', icon: <BookOpen size={14} /> },
       { key: 'admin-external-devops',     label: 'DevOps / TFS Entegrasyonu',  icon: <GitBranch size={14} /> },
       { key: 'admin-external-mail',       label: 'Mail Entegrasyonu',          icon: <Mail size={14} /> },
+      { key: 'admin-email-templates',     label: 'Mail Şablonları',            icon: <Mail size={14} /> },
       { key: 'admin-data-import',         label: 'Veri Aktarım Stüdyosu',     icon: <Database size={14} /> },
       { key: 'admin-resolution-approval',     label: 'Çözüm Onayı Politikaları',  icon: <ShieldCheck size={14} /> },
       { key: 'admin-notification-templates',  label: 'Bildirim Şablonları',        icon: <MessageSquare size={14} /> },

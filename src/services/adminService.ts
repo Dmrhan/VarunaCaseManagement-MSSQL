@@ -1254,6 +1254,59 @@ export const adminService = {
   },
 
   // ─────────────────────────────────────────────────────────────────
+  // Mail M6.3b Faz 3 — CaseEmailTemplate admin CRUD.
+  // Per-tenant, assertCompanyAdmin scope.
+  // ─────────────────────────────────────────────────────────────────
+  caseEmailTemplates: {
+    async list(companyId: string) {
+      const out = await apiFetch<{ items: CaseEmailTemplateRow[] }>(
+        `${ADMIN_BASE}/case-email-templates?companyId=${encodeURIComponent(companyId)}`,
+        undefined,
+        'Şablonlar yüklenemedi',
+      );
+      return out?.items ?? [];
+    },
+    async create(companyId: string, draft: CaseEmailTemplateDraft) {
+      return apiFetch<CaseEmailTemplateRow>(
+        `${ADMIN_BASE}/case-email-templates`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...draft, companyId }),
+        },
+        'Şablon oluşturulamadı',
+      );
+    },
+    async update(companyId: string, id: string, draft: Partial<CaseEmailTemplateDraft>) {
+      return apiFetch<CaseEmailTemplateRow>(
+        `${ADMIN_BASE}/case-email-templates/${encodeURIComponent(id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...draft, companyId }),
+        },
+        'Şablon güncellenemedi',
+      );
+    },
+    async remove(companyId: string, id: string) {
+      const out = await apiFetch<{ ok: boolean }>(
+        `${ADMIN_BASE}/case-email-templates/${encodeURIComponent(id)}?companyId=${encodeURIComponent(companyId)}`,
+        { method: 'DELETE' },
+        'Şablon silinemedi',
+      );
+      return !!out?.ok;
+    },
+    async preview(companyId: string, id: string, caseId?: string) {
+      const qs = `companyId=${encodeURIComponent(companyId)}${caseId ? `&caseId=${encodeURIComponent(caseId)}` : ''}`;
+      return apiFetch<{ subject: string | null; bodyHtml: string; missing: string[] }>(
+        `${ADMIN_BASE}/case-email-templates/${encodeURIComponent(id)}/preview?${qs}`,
+        { method: 'POST' },
+        'Önizleme başarısız',
+      );
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────
   // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
   // ─────────────────────────────────────────────────────────────────
   taxonomyDefs: {
@@ -1657,4 +1710,29 @@ export interface FromAliasDraft {
   isDefault?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+}
+
+// M6.3b Faz 3 — CaseEmailTemplate types
+export interface CaseEmailTemplateRow {
+  id: string;
+  companyId: string;
+  name: string;
+  category: string | null;
+  subject: string | null;
+  bodyHtml: string;
+  variables: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+}
+
+export interface CaseEmailTemplateDraft {
+  name?: string;
+  category?: string | null;
+  subject?: string | null;
+  bodyHtml?: string;
+  variables?: string;
+  isActive?: boolean;
 }

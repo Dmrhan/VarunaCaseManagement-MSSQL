@@ -186,6 +186,8 @@ model Company {
   notificationRules          NotificationRule[]
   notificationTemplates      NotificationTemplate[]
   notificationDispatches     NotificationDispatch[]
+  /// Mail M6.3b Faz 3 — Per-tenant agent composer email template'leri.
+  caseEmailTemplates         CaseEmailTemplate[]
   /// WR-Smart-Ticket Phase 1a — tenant-scoped generic taxonomy
   /// (Platform / İş Süreci / İşlem Tipi / Etkilenen Nesne / Etki / Kök
   /// Neden Grubu / Detay / Çözüm Tipi / Kalıcı Önlem). Global entries
@@ -483,6 +485,56 @@ model ExternalMailSettingFromAlias {
   @@index([companyId, isActive])
   @@index([companyId, isDefault])
   @@index([externalMailSettingId])
+}
+
+/// Mail M6.3b Faz 3 — Agent composer "Mail Şablonu" dropdown'unu
+/// besleyen yeniden kullanılabilir email gövde şablonları.
+///
+/// Plan referansı: M6.3b plan §Faz 3 — n4b parite + endüstri araştırması
+/// (Zendesk macros, Freshdesk canned responses, Gmail templates).
+///
+/// NotificationTemplate (model 2288) ile AYRIDIR:
+///   - NotificationTemplate = sistem rule-driven dispatch (key='approval_pending_to_lead')
+///   - CaseEmailTemplate = agent self-service taslaklar (manuel insert)
+///   Semantik ayrı; admin UI'da iki ayrı sekme.
+///
+/// Composer akışı:
+///   1. Agent composer'da "Mail Şablonu" dropdown'undan seçer
+///   2. Subject opsiyonel; varsa "Mevcut subject'i değiştir?" modal onay
+///   3. bodyHtml TipTap insertContent ile cursor pozisyonuna eklenir
+///   4. Placeholder render: backend POST /api/cases/:id/email-templates/:id/preview
+///      Mustache benzeri {{varName}} interpolation, requiredVariables
+///      whitelist (6 sistem placeholder v1: case.number/case.title/
+///      account.name/requester.name/requester.email/agent.fullName).
+///
+/// Per-tenant — companyId scope. Faz 3 v1: admin only create.
+model CaseEmailTemplate {
+  id          String   @id @default(cuid()) @db.NVarChar(450)
+  companyId   String   @db.NVarChar(450)
+  /// Template adı (display + dropdown). Per-tenant unique.
+  name        String   @db.NVarChar(255)
+  /// Opsiyonel kategori (admin organize için). Free-form string;
+  /// klasör hiyerarşi v2.
+  category    String?  @db.NVarChar(100)
+  /// Subject template — opsiyonel. Verilirse composer subject'i replace
+  /// confirm modal'la değiştirir.
+  subject     String?  @db.NVarChar(Max)
+  /// Body template — zorunlu. Sanitize-html allowlist (M6.1) save öncesi.
+  bodyHtml    String   @db.NVarChar(Max)
+  /// Declared placeholder whitelist — Backend preview engine'i bu listede
+  /// olmayan {{vars}} için warning verir. JSON string; ileride yapılandırılabilir.
+  variables   String   @db.NVarChar(Max)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt   DateTime @updatedAt
+  createdByUserId String? @db.NVarChar(450)
+  updatedByUserId String? @db.NVarChar(450)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Per-tenant ad unique — composer dropdown'unda aynı adlı template iki kez olmasın.
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
 }
 
 /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemesi.
