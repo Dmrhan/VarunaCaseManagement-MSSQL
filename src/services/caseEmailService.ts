@@ -8,7 +8,7 @@
  * REUSE: caseService apiFetch deseni — toast/error handling otomatik.
  */
 
-import { apiFetch } from './caseService';
+import { apiFetch, invalidateCaseDetail } from './caseService';
 
 export interface CaseEmailAddress {
   address: string;
@@ -169,7 +169,7 @@ export async function sendEmail(
   caseId: string,
   draft: SendEmailDraft,
 ): Promise<SendEmailResult | undefined> {
-  return apiFetch<SendEmailResult>(
+  const result = await apiFetch<SendEmailResult>(
     `/api/cases/${encodeURIComponent(caseId)}/emails`,
     {
       method: 'POST',
@@ -178,6 +178,12 @@ export async function sendEmail(
     },
     'E-posta gönderimi',
   );
+  // Codex P2 fix (M6.3b Faz 1) — Send başarılı: WR-H2 case detail
+  // cache'i invalidate. Aksi halde 30sn TTL içinde caseService.get
+  // stale (pendingCustomerReply=true) döner; header badge stale kalır.
+  // Diğer mutation'larla parite (caseService.ts line 842/898/932/...).
+  if (result) invalidateCaseDetail(caseId);
+  return result;
 }
 
 export interface ForwardContext {
