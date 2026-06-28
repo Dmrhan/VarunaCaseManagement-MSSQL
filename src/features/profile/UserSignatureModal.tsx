@@ -26,28 +26,49 @@ export function UserSignatureModal({ open, onClose }: Props) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [html, setHtml] = useState<string>('');
+  // Codex P2 fix — load failure preserve: undefined → loadFailed.
+  // Aksi halde mevcut imzası olan kullanıcıda load fail → modal boş
+  // gösterir → save → backend null kaydeder → MEVCUT İMZA SİLİNİR.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
+  const loadSignature = () => {
     let alive = true;
     setLoading(true);
+    setLoadFailed(false);
     void userSignatureService.getMySignature().then((s) => {
       if (!alive) return;
-      setHtml(s ?? '');
+      if (s === undefined) {
+        // fetch fail — apiFetch zaten toast attı; editor'ı düzenleme dışı tut.
+        setLoadFailed(true);
+        setHtml('');
+      } else {
+        setHtml(s ?? '');
+      }
       setLoading(false);
     });
     return () => { alive = false; };
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    return loadSignature();
+    // open değişiminde re-load. loadSignature stable kapsam.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
 
   async function handleSave() {
+    if (loadFailed) return; // Codex P2 — yüklenemeyen imzayı yanlışlıkla silme.
     setSaving(true);
     try {
-      // Boş HTML (sadece tag, metin yok) → null (kaldır).
-      const trimmed = html.replace(/<[^>]+>/g, '').trim();
-      const next = trimmed ? html : null;
+      // Codex P2 fix — image-only signature (logo) "boş" SAYILMAZ.
+      // sanitize-html allowlist <img> izinli; strip-tags sonrası metin
+      // yok ama <img> varsa imza geçerli.
+      const textOnly = html.replace(/<[^>]+>/g, '').trim();
+      const hasImg = /<img\b/i.test(html);
+      const next = (textOnly || hasImg) ? html : null;
       const saved = await userSignatureService.updateMySignature(next);
       if (saved !== undefined) {
         toast({ type: 'success', title: 'İmza kaydedildi', message: 'Mail yanıtlarında otomatik kullanılabilir.' });
@@ -59,6 +80,7 @@ export function UserSignatureModal({ open, onClose }: Props) {
   }
 
   async function handleClear() {
+    if (loadFailed) return; // Codex P2 — yüklenemeyen durumda clear de yanıltıcı.
     setSaving(true);
     try {
       const saved = await userSignatureService.updateMySignature(null);
@@ -101,6 +123,21 @@ export function UserSignatureModal({ open, onClose }: Props) {
           </p>
           {loading ? (
             <div className="py-8 text-center text-xs text-slate-400">Yükleniyor…</div>
+          ) : loadFailed ? (
+            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-200">
+              <p className="mb-2 font-medium">İmza yüklenemedi</p>
+              <p className="text-xs">
+                Mevcut imzanız okunamadı. Bu durumda kaydetmek mevcut imzanızı yanlışlıkla
+                silebilir; önce yeniden yüklemeyi deneyin.
+              </p>
+              <button
+                type="button"
+                onClick={loadSignature}
+                className="mt-2 rounded bg-rose-100 px-3 py-1 text-xs font-medium text-rose-800 hover:bg-rose-200 dark:bg-rose-900/60 dark:text-rose-100 dark:hover:bg-rose-900"
+              >
+                Tekrar dene
+              </button>
+            </div>
           ) : (
             <RichTextEditor
               value={html}
@@ -112,10 +149,10 @@ export function UserSignatureModal({ open, onClose }: Props) {
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-ndark-border">
-          <Button type="button" variant="ghost" onClick={handleClear} disabled={saving || loading}>
+          <Button type="button" variant="ghost" onClick={handleClear} disabled={saving || loading || loadFailed}>
             İmzayı Kaldır
           </Button>
-          <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving || loading}>
+          <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving || loading || loadFailed}>
             {saving ? 'Kaydediliyor…' : 'Kaydet'}
           </Button>
         </div>
