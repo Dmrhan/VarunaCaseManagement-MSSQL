@@ -1155,7 +1155,17 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                     </div>
                   }
                 >
-                  <CommunicationTab item={item} />
+                  <CommunicationTab
+                    item={item}
+                    onCaseShouldRefresh={() => {
+                      // Codex P2 fix (M6.3b Faz 1) — Send sonrası header
+                      // badge (pendingCustomerReply) ve K4 timestamp'leri
+                      // tazelensin.
+                      void caseService.get(item.id).then((c) => {
+                        if (c) setItem(c);
+                      });
+                    }}
+                  />
                 </Suspense>
               </LazyTabBoundary>
             )}
