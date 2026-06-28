@@ -329,6 +329,7 @@ function SlaEditModal({
             resolutionHours: p.resolutionHours,
             description: p.description ?? '',
             isActive: p.isActive,
+            priority: p.priority ?? null,
           });
         }
       } else {
