@@ -80,17 +80,35 @@ function expect(name, actual, expected) {
     const v3c = buildTemplateVars({ caseRow: {}, approval: null });
     expect('ikisi de YOK → boş string', v3c['resolution.customerMessage'], '');
 
-    // (3d) approval.customerMessageDraft boş ama resolutionNote dolu
-    //      → fallback resolutionNote (boş string truthy değil; ?? semantiği)
-    //      DİKKAT: ?? null/undefined için fallback yapar; boş string '' truthy
-    //      sayılır → boş string returns. Bu kasıtlı (approval'da kasıtlı
-    //      boş bırakıldıysa fallback yapma).
+    // (3d) approval VAR + customerMessageDraft boş + resolutionNote dolu
+    //      → boş string (Codex P2 fix: reopen senaryosunda eski
+    //      resolutionNote SIZAMAZ; approval cycle'da approval kaynağı
+    //      sıkı; admin kasıtlı boş bıraktıysa boş kalır)
     const v3d = buildTemplateVars({
-      caseRow: { resolutionNote: 'NOTE-Y' },
+      caseRow: { resolutionNote: 'ESKI NOTE (reopen senaryo)' },
       approval: { customerMessageDraft: '' },
     });
-    expect('approval boş string → boş string return (kasıtlı)',
+    expect('approval VAR + draft boş → resolutionNote SIZMAZ (Codex P2)',
       v3d['resolution.customerMessage'], '');
+
+    // (3e) approval VAR + customerMessageDraft null + resolutionNote dolu
+    //      → boş string (Codex P2 fix: aynı reopen koruma)
+    const v3e = buildTemplateVars({
+      caseRow: { resolutionNote: 'ESKI NOTE' },
+      approval: { customerMessageDraft: null },
+    });
+    expect('approval VAR + draft null → resolutionNote SIZMAZ',
+      v3e['resolution.customerMessage'], '');
+
+    // (3f) approval VAR + customerMessageDraft tanımsız + resolutionNote dolu
+    //      → boş string (approval cycle aktif, customerMessageDraft alanı
+    //      tanımsız bile olsa eski note sızamaz)
+    const v3f = buildTemplateVars({
+      caseRow: { resolutionNote: 'ESKI NOTE' },
+      approval: { resolutionSummary: 'summary olmadan draft' },
+    });
+    expect('approval VAR + draft undefined → resolutionNote SIZMAZ',
+      v3f['resolution.customerMessage'], '');
 
     console.log('\n=== (4) Tüm placeholder geri uyumlu ===');
     const full = buildTemplateVars({

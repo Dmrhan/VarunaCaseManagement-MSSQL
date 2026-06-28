@@ -288,14 +288,29 @@ export function buildTemplateVars({ caseRow, approval }) {
     'assignee.name': caseRow?.assignedPersonName ?? '',
     'team.name': caseRow?.assignedTeamName ?? '',
     'resolution.summary': approval?.resolutionSummary ?? '',
-    // M4.1 follow-up — resolutionNote fallback.
-    // approval?.customerMessageDraft yalnız ResolutionApproval cycle'ında
-    // dolar; basit "Çözüldü" akışında YOKtur. Agent Case.resolutionNote'u
-    // doldurur → müşteri mailindeki {{resolution.customerMessage}} BOŞ
-    // çıkıyordu. Fallback: approval > resolutionNote.
-    'resolution.customerMessage': approval?.customerMessageDraft
-      ?? caseRow?.resolutionNote
-      ?? '',
+    // M4.1 follow-up — resolution.customerMessage fallback.
+    //
+    // Codex P2 fix — fallback YALNIZ approval-less basit-kapanış
+    // akışında. Sebep:
+    //   1. Vaka kapatıldı → resolutionNote dolduruldu → mail gitti
+    //   2. Vaka YenidenAcildi (reopen) → transitionStatus resolutionNote'u
+    //      KORUR (silmez)
+    //   3. Yeni approval cycle başladı; customerMessageDraft boş/null
+    //   4. ESKİ kod (`approval?.draft ?? caseRow.resolutionNote`):
+    //      resolution_submitted event render edilince ESKİ kapanış
+    //      mesajı sızar → admin'in yeni cycle için kasıtlı boş bıraktığı
+    //      alanın yerine geçer
+    //
+    // Yeni semantik:
+    //   approval VAR  → sıkı approval.customerMessageDraft (boş ise boş)
+    //   approval YOK → caseRow.resolutionNote fallback (M4.1 fix path)
+    //
+    // approval truthiness'ı = ResolutionApproval cycle'da olduğumuzu
+    // gösterir (emitEvent caller'ı bunu set eder; basit case_closed
+    // path'inde approval=null).
+    'resolution.customerMessage': approval
+      ? (approval.customerMessageDraft ?? '')
+      : (caseRow?.resolutionNote ?? ''),
     'approval.rejectionReason': approval?.rejectionReason ?? '',
     'approval.approverName': approval?.approverName ?? '',
     // M4.1 FAZ B — requester audience template değişkenleri
