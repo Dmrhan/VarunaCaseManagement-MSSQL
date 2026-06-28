@@ -12,8 +12,8 @@
  * REUSE: AdminExternalMailPage company picker + form deseni.
  */
 import { useEffect, useMemo, useState } from 'react';
-import DOMPurify from 'dompurify';
 import { FileText, Plus, Trash2, Eye, Pencil, Save, X } from 'lucide-react';
+import { sanitizeMailHtml } from '@/lib/sanitizeMailHtml';
 import { Button } from '@/components/ui/Button';
 import { Field, TextArea, TextInput } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -288,17 +288,10 @@ export function AdminEmailTemplatesPage() {
             <label className="text-[10px] font-medium text-slate-500">Gövde</label>
             <div
               className="prose prose-sm max-w-none rounded border border-slate-200 bg-slate-50 p-2 text-xs dark:prose-invert"
-              // Compose-Signature F4 — Defense-in-depth: DOMPurify sarmal
-              // (MailMessageCard ile aynı pattern). Backend admin route
-              // sanitize-html save öncesi uygular ama render path'inde
-              // ikinci kat koruma standart.
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(preview.bodyHtml, {
-                  USE_PROFILES: { html: true },
-                  ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
-                  FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
-                }),
-              }}
+              // Compose-Signature F4 — Defense-in-depth: paylaşılan
+              // sanitizeMailHtml (backend allowlist'iyle birebir hizalı).
+              // Codex P2 fix: tablo attrs (border, cellpadding, ...) preserve.
+              dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(preview.bodyHtml) }}
             />
           </div>
         </div>

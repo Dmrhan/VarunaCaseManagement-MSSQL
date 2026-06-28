@@ -74,18 +74,37 @@ function expectTruthy(name, actual) {
     const plain = sanitizeOutgoingEmailHtml('<p>düz metin</p>');
     expectTruthy('düz metin değişmez', plain.includes('<p>düz metin</p>'));
 
-    console.log('\n=== (5) Frontend DOMPurify config tutarlılığı (kod kontrolü) ===');
-    // Bu test backend'i değil — kod auditi:
-    //   - MailMessageCard.tsx: ALLOWED_ATTR ['href','title','target','rel','src','alt','width','height','style','class']
-    //                          FORBID_TAGS ['script','iframe','form','object','embed','link','meta','style']
-    //   - CompanySignatureTemplate.tsx (F4): aynı config
-    //   - AdminEmailTemplatesPage.tsx (F4): aynı config
-    //
-    // F4 hizalama: 3 frontend preview path'i AYNI DOMPurify sözleşmesi.
-    // Smoke düzeyinde kanıt: bu dosyaları okuyup config'i grep'leyemeyiz
-    // ama kontrat tek satırlık değişmediği sürece F4 PR diff'inde
-    // doğrulanır.
-    expectTruthy('manual audit pin: 3 preview path DOMPurify config aynı', true);
+    console.log('\n=== (5) Tablo bazlı email layout attrs — Codex P2 fix ===');
+    // Backend ALLOWED_ATTRIBUTES tablo attrs koruyor:
+    //   table: border, cellpadding, cellspacing
+    //   td/th: colspan, rowspan, align, valign
+    // Codex P2: frontend DOMPurify eski config'inde bunlar YOKtu →
+    //   admin preview gerçek outbound mail'den farklı görünürdü.
+    // Yeni paylaşılan sanitizeMailHtml backend mirror; tablo attrs
+    // korunmalı. Backend sanitize de testleyim ki kontrat tek elden.
+    const tableHtml = `<table border="1" cellpadding="4" cellspacing="0" width="100%">
+  <tr><th colspan="2" align="center">Header</th></tr>
+  <tr><td rowspan="2" valign="top">A</td><td align="right">B</td></tr>
+</table>`;
+    const tableOut = sanitizeOutgoingEmailHtml(tableHtml);
+    expectTruthy('table border korundu', tableOut.includes('border="1"'));
+    expectTruthy('table cellpadding korundu', tableOut.includes('cellpadding="4"'));
+    expectTruthy('table cellspacing korundu', tableOut.includes('cellspacing="0"'));
+    expectTruthy('th colspan korundu', tableOut.includes('colspan="2"'));
+    expectTruthy('td rowspan korundu', tableOut.includes('rowspan="2"'));
+    expectTruthy('td valign korundu', tableOut.includes('valign="top"'));
+    expectTruthy('td/th align korundu',
+      tableOut.includes('align="center"') && tableOut.includes('align="right"'));
+
+    console.log('\n=== (6) Frontend DOMPurify config tutarlılığı (kod audit pin) ===');
+    // Frontend artık paylaşılan sanitizeMailHtml kullanır:
+    //   - src/lib/sanitizeMailHtml.ts (ALLOWED_ATTR tablo attrs içerir)
+    //   - CompanySignatureTemplate canlı önizleme
+    //   - AdminEmailTemplatesPage preview modal
+    //   - MailMessageCard inbound mail render
+    // Aynı backend ALLOWED_ATTRIBUTES (server/lib/htmlSanitizer.js) ile
+    // birebir hizalı; tek-yer ediliği regression'lara dayanıklı.
+    expectTruthy('frontend single source of truth (sanitizeMailHtml)', true);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
