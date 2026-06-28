@@ -631,6 +631,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
     ? items
     : items.filter((c) => getReviewProgress(reviews.get(c.id)).status === progressFilter);
 
+  // Doğrulama filtresi aktifken sayfalama displayItems'a göre hesaplanır.
+  const effectiveTotal      = progressFilter === 'all' ? total : displayItems.length;
+  const effectiveTotalPages = progressFilter === 'all' ? totalPages : Math.max(1, Math.ceil(displayItems.length / pageSize));
+
   const modalCase   = modalCaseId ? items.find((c) => c.id === modalCaseId) : undefined;
   const modalDraft  = modalCaseId ? (drafts.get(modalCaseId) ?? draftFromReview(reviews.get(modalCaseId))) : undefined;
   const modalReview = modalCaseId ? reviews.get(modalCaseId) : undefined;
@@ -712,7 +716,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <button
                   key={opt.value}
                   type="button"
-                  onClick={() => setProgressFilter(opt.value)}
+                  onClick={() => { setProgressFilter(opt.value); setPage(1); }}
                   className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
                     progressFilter === opt.value
                       ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
@@ -854,24 +858,27 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
       {/* Sayfalama */}
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-ndark-muted">
-        <span>{total} vaka</span>
+        <span>
+          {effectiveTotal} vaka
+          {progressFilter !== 'all' && <span className="ml-1 text-slate-400">(bu sayfada)</span>}
+        </span>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="outline"
             leftIcon={<ChevronLeft size={12} />}
-            disabled={page <= 1 || loading}
+            disabled={page <= 1 || loading || progressFilter !== 'all'}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             Önceki
           </Button>
-          <span>Sayfa <strong>{page}</strong> / {totalPages}</span>
+          <span>Sayfa <strong>{page}</strong> / {effectiveTotalPages}</span>
           <Button
             size="sm"
             variant="outline"
             rightIcon={<ChevronRight size={12} />}
-            disabled={page >= totalPages || loading}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= effectiveTotalPages || loading || progressFilter !== 'all'}
+            onClick={() => setPage((p) => Math.min(effectiveTotalPages, p + 1))}
           >
             Sonraki
           </Button>
