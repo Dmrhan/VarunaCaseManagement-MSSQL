@@ -72,7 +72,8 @@
     "smoke:cs-f2-render": "node --env-file-if-exists=.env scripts/smoke-compose-signature-f2-render.js",
     "smoke:cs-f3-composer": "node --env-file-if-exists=.env scripts/smoke-compose-signature-f3-composer.js",
     "smoke:cs-f4-sanitize": "node --env-file-if-exists=.env scripts/smoke-compose-signature-f4-sanitize.js",
-    "smoke:m4-1-render-followup": "node --env-file-if-exists=.env scripts/smoke-m4-1-render-followup.js"
+    "smoke:m4-1-render-followup": "node --env-file-if-exists=.env scripts/smoke-m4-1-render-followup.js",
+    "smoke:admin-users-person-title": "node --env-file-if-exists=.env scripts/smoke-admin-users-person-title.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -188,6 +188,12 @@ export interface AdminUser {
   role: 'Agent' | 'Backoffice' | 'Supervisor' | 'CSM' | 'Admin' | 'SystemAdmin';
   isActive: boolean;
   personId: string | null;
+  /**
+   * Compose-Signature F1 IA rework — bağlı Person'ın iş unvanı (mail
+   * imzasında {{agent.title}} render kaynağı). Person yoksa null;
+   * Kullanıcılar ekranında bu durumda title field disabled gösterilir.
+   */
+  personTitle: string | null;
   assignments: UserAssignment[];
 }
 
@@ -868,6 +874,23 @@ export const adminService = {
           role: item.role,
         },
       };
+    },
+
+    /**
+     * Compose-Signature F1 IA rework —
+     * PATCH /admin/users/:id/title  body: { title: string | null }
+     *
+     * Bağlı Person'ın iş unvanını günceller. Person yoksa 409 → caller
+     * UI'da disabled gösterir (sunucudan gelmez).
+     */
+    async setTitle(userId: string, title: string | null): Promise<AdminResult<{ personId: string; title: string | null }>> {
+      const item = await apiFetch<{ personId: string; title: string | null }>(
+        `${ADMIN_BASE}/users/${userId}/title`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) },
+        'Unvan güncellenemedi',
+      );
+      if (!item) return { ok: false, error: 'Sunucu hatası' };
+      return { ok: true, item };
     },
   },
 

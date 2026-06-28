@@ -718,13 +718,20 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
                         </Td>
                         <Td align="right">
                           <div className="flex items-center justify-end gap-1">
+                            {/* Compose-Signature F1 IA rework — Düzenle butonu
+                                eskiden 14px Pencil-only ikondu, satır sonunda
+                                tıklanabilirliği düşüktü. Şimdi label'lı buton
+                                (ikon + "Düzenle") — yardımsız tanınır + tıklama
+                                hedefi büyük. AdminUsersPage'deki "Unvan" + diğer
+                                aksiyon butonlarıyla aynı paterne hizalı. */}
                             <button
                               type="button"
                               onClick={() => setPersonEditor({ mode: 'edit', id: p.id })}
-                              className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                              title="Düzenle"
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-800 dark:border-ndark-border dark:text-ndark-text dark:hover:bg-ndark-bg"
+                              title="Kişiyi düzenle"
                             >
-                              <Pencil size={14} />
+                              <Pencil size={12} />
+                              <span>Düzenle</span>
                             </button>
                             <MoveToTeamButton
                               currentTeamId={team.id}
