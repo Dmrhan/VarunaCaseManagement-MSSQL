@@ -11,6 +11,7 @@ import {
 import { ActorRequiredError } from '../lib/actor.js';
 import { devopsClient, parseWorkItemId } from '../lib/devopsClient.js';
 import crypto from 'node:crypto';
+import { resolveSlaPolicy } from '../lib/sla/slaPolicyResolver.js';
 
 /**
  * PR-1 (Codex P1) + PR-2 — defansif throw helper.
@@ -1332,6 +1333,24 @@ export const caseRepository = {
       typeof m.customFields.smartTicket === 'object';
     const isSmartTicketSelfAssigned = isSmartTicketCreate && !!m.assignedPersonId;
 
+    // SLA politika çözümleyici — esnek eşleşme (null = wildcard).
+    const slaMatch = await resolveSlaPolicy({
+      companyId: m.companyId,
+      productGroup: m.productGroup ?? null,
+      categoryName: m.category ?? null,
+      subCategoryName: m.subCategory ?? null,
+      requestType: m.requestType ?? null,
+      priority: m.priority ?? null,
+    });
+    const slaCreatedAt = new Date();
+    const slaResponseDueAt = slaMatch
+      ? new Date(slaCreatedAt.getTime() + slaMatch.responseHours * 3600000)
+      : null;
+    const slaResolutionDueAt = slaMatch
+      ? new Date(slaCreatedAt.getTime() + slaMatch.resolutionHours * 3600000)
+      : null;
+    const slaResolutionStartedAt = m.assignedPersonId ? slaCreatedAt : null;
+
     const created = await prisma.case.create({
       data: {
         caseNumber,
@@ -1395,6 +1414,10 @@ export const caseRepository = {
         aiRejectReason: m.aiRejectReason,
         // Custom Fields (şirket FieldDefinition'larına göre dinamik)
         customFields: m.customFields ?? undefined,
+        // SLA — politika çözümleyiciden
+        slaResponseDueAt,
+        slaResolutionDueAt,
+        slaResolutionStartedAt,
         // Açılış log'u — Smart Ticket akışıyla açıldıysa note alanına suffix
         // konur. L2 personası Activity tab'da vakanın Smart Ticket'tan
         // geldiğini ayırt edebilsin.
@@ -1793,7 +1816,7 @@ export const caseRepository = {
     // ama explicit 400 vs 409 ayrımı için ön bakış.
     const current = await prisma.case.findUnique({
       where: { id: caseId },
-      select: { status: true, assignedPersonId: true, companyId: true },
+      select: { status: true, assignedPersonId: true, companyId: true, slaResolutionStartedAt: true },
     });
     if (!current) return null;
     if (current.status === 'Cozuldu' || current.status === 'IptalEdildi') {
@@ -1825,6 +1848,7 @@ export const caseRepository = {
     const assignedTeamName = person.team?.name ?? null;
 
     // Atomic — race-safe.
+    const claimNow = new Date();
     const result = await prisma.case.updateMany({
       where: {
         id: caseId,
@@ -1837,7 +1861,11 @@ export const caseRepository = {
         ...(assignedTeamId
           ? { assignedTeamId, assignedTeamName }
           : {}),
-        updatedAt: new Date(),
+        // İlk üstlenme → çözüm SLA saati başlar (daha önce set edilmemişse).
+        // updateMany koşulda slaResolutionStartedAt: null filtresi eklenemez —
+        // findUnique'teki current.slaResolutionStartedAt NULL ise set et.
+        ...(current.slaResolutionStartedAt === null ? { slaResolutionStartedAt: claimNow } : {}),
+        updatedAt: claimNow,
       },
     });
 
@@ -3320,6 +3348,11 @@ export const caseRepository = {
       nextSlaPausedAt = null;
     }
 
+    // Yanıt SLA karşılandı mı? İncelemede'ye ilk geçişte slaResponseMetAt stamp'la.
+    const enteringIncelemede = dbNext === 'Incelemede' && prev.status !== 'Incelemede';
+    const nextSlaResponseMetAt =
+      enteringIncelemede && !prev.slaResponseMetAt ? new Date() : prev.slaResponseMetAt;
+
     const enteringEscalation = dbNext === 'Eskalasyon';
     const leavingEscalation  = prev.status === 'Eskalasyon' && !enteringEscalation;
     const newEscalationLevel = enteringEscalation
@@ -3380,6 +3413,7 @@ export const caseRepository = {
         slaPausedDurationMin: nextPausedDurationMin,
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
+        slaResponseMetAt: nextSlaResponseMetAt,
         resolvedAt: dbNext === 'Cozuldu' ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
         // OTOMATİK false. Müşteri yanıtı bekleyen bir vaka kapanırsa

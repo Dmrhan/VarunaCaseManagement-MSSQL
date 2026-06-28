@@ -165,10 +165,11 @@ export interface SlaPolicy {
   id: string;
   companyId: string;
   companyName: string;
-  productGroup: string;
-  categoryName: string;
-  subCategoryName: string;
-  requestType: CaseRequestType;
+  productGroup: string | null;
+  categoryName: string | null;
+  subCategoryName: string | null;
+  requestType: CaseRequestType | null;
+  priority: CasePriority | null;
   responseHours: number;
   resolutionHours: number;
   description?: string;
@@ -474,6 +475,8 @@ export interface Case {
   slaPausedAt?: string;
   slaPausedDurationMin: number;
   slaThirdPartyWaitMin: number;
+  slaResponseMetAt?: string | null;
+  slaResolutionStartedAt?: string | null;
 
   // Phase D — Müşteri eşleştirme bekleyen flag.
   // true ise vaka accountId NULL açıldı, Supervisor/Admin eşleştirme kuyruğunda

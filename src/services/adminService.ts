@@ -17,6 +17,7 @@ import type {
   CaseChecklistTemplate,
   CaseDocumentType,
   CasePerson,
+  CasePriority,
   CaseRequestType,
   CaseTeam,
   CaseThirdParty,
@@ -90,10 +91,11 @@ export interface SubCategoryInput {
 export interface SlaPolicyInput {
   companyId: string;
   companyName: string;
-  productGroup: string;
-  categoryName: string;
-  subCategoryName: string;
-  requestType: CaseRequestType;
+  productGroup: string | null;
+  categoryName: string | null;
+  subCategoryName: string | null;
+  requestType: CaseRequestType | null;
+  priority: CasePriority | null;
   responseHours: number;
   resolutionHours: number;
   description?: string;
