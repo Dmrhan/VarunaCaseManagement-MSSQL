@@ -72,6 +72,13 @@ const ALLOWED_EVENTS = [
   'resolution_rejected',
   'case_closed',
   'case_reopened',
+  // M4.1 — müşteri bildirim event'leri (FAZ B):
+  //   case_created     → mail intake'le açılan vakalarda ACK
+  //                      (origin='Eposta' guard caseRepository.create'te)
+  //   status_changed   → close/reopen DIŞI statü geçişlerinde müşteri bilgilendirme
+  //                      (close/reopen kendi event'lerini tetiklemeye devam eder)
+  'case_created',
+  'status_changed',
 ];
 
 const ALLOWED_CHANNELS = ['InApp', 'Email', 'ManualTask']; // Webhook = Phase 4
@@ -89,6 +96,11 @@ const ALLOWED_AUDIENCE_TYPES = [
   'admin',
   'customer_primary_contact',
   'static_email',
+  // M4.1 FAZ B — requester audience:
+  //   case.customerContactEmail (mail göndereni). Mail intake senaryosunda
+  //   primary contact'tan DAHA DOĞRU: ACK'ı yanıtlayan kişi yanıtı alır.
+  //   Opt-out: AccountCompany.allowCustomerNotifications (semantik tutarlılık).
+  'requester',
 ];
 
 const CONDITION_KEYS = ['category', 'subCategory', 'priority', 'supportLevel', 'teamId'];
@@ -202,7 +214,13 @@ const VAR_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
 /**
  * Render a template body with a flat variable map. Unknown variables
- * are replaced with `[X eksik]` and reported via `missing` array.
+ * are replaced with empty string and reported via `missing` array.
+ *
+ * M4.1 FAZ B — ürün kararı: empty = empty (M6.3b CaseEmailTemplate render
+ * engine ile hizalı). Eskiden `[X eksik]` marker basıyordu; bu marker
+ * müşteriye giden mail'de çirkin görünüyordu. Artık boş render edilir;
+ * eksik liste `missing[]` üzerinden dispatch log'a yazılır (admin
+ * Bildirim Kayıtları'nda template editör görür).
  *
  * Returns { rendered, missing: string[] }.
  */
@@ -213,7 +231,7 @@ export function renderTemplate(text, vars) {
     const value = vars[key];
     if (value == null || value === '') {
       if (!missing.includes(key)) missing.push(key);
-      return `[${key} eksik]`;
+      return '';
     }
     return String(value);
   });
@@ -839,6 +857,56 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
         display: '',
       };
     }
+    case 'requester': {
+      // M4.1 FAZ B — Mail intake'le açılan vakalarda mail göndereni.
+      // case.customerContactEmail = inbound mail'in From adresi (M2 intake'te
+      // doldurulur). Mail yokken (manuel veya origin!=Eposta) skip.
+      //
+      // Opt-out: AccountCompany.allowCustomerNotifications — semantik
+      // tutarlılık (requester de bir müşteri kişisidir).
+      const email = (caseRow?.customerContactEmail ?? '').trim();
+      const display = caseRow?.customerContactName ?? '';
+
+      // Opt-out kontrol — accountId varsa (mail intake'te eşleştirildiyse).
+      if (caseRow?.accountId) {
+        const ac = await prisma.accountCompany.findUnique({
+          where: { accountId_companyId: { accountId: caseRow.accountId, companyId: caseRow.companyId } },
+          select: { allowCustomerNotifications: true },
+        });
+        if (ac && ac.allowCustomerNotifications === false) {
+          return {
+            audienceType: 'requester',
+            audienceIdentifier: 'opted_out',
+            display,
+            suppressionReason: 'customer_opted_out',
+            resolvedChannel: 'email',
+            resolutionSource: 'account_company',
+          };
+        }
+      }
+
+      if (!email) {
+        // customerContactEmail YOK → mail intake değil (manuel/portal) veya
+        // intake'te email yakalanamadı. Dispatch keepPending — operatör elle.
+        return {
+          audienceType: 'requester',
+          audienceIdentifier: 'manual',
+          display,
+          suppressionReason: 'no_channel_available',
+          keepPending: true,
+          resolvedChannel: 'manual',
+          resolutionSource: 'none',
+        };
+      }
+
+      return {
+        audienceType: 'requester',
+        audienceIdentifier: email,
+        display,
+        resolvedChannel: 'email',
+        resolutionSource: 'case_override',
+      };
+    }
     default:
       return { audienceType: row.type, audienceIdentifier: 'unresolved', display: '' };
   }
@@ -960,7 +1028,20 @@ export function isLikelyEmail(value) {
  * @returns {Promise<{ ok: boolean, providerMessageId?: string, error?: object }>}
  */
 async function executeOutboundEmailDispatch(dispatch, caseRow) {
-  const isCustomerFacing = dispatch.audienceType === 'customer_primary_contact';
+  // Codex P2 fix — Customer-facing audience whitelist genişledi.
+  // M4.1 FAZ B 'requester' audience type'ı eklendi; mevcut
+  // customer_primary_contact path'inden YARARLANMALI:
+  //   - [VK-XXX] subject token (round-trip threading için inboundMailIntake
+  //     bunu parse eder)
+  //   - Message-ID + In-Reply-To header threading
+  //   - CaseEmail appendOutbound (İletişim sekmesinde görünür)
+  // Aksi halde müşteri ACK'a reply yazınca intake parse edemez ve mail
+  // İletişim thread'inde GÖRÜNMEZ.
+  const CUSTOMER_FACING_AUDIENCES = new Set([
+    'customer_primary_contact',
+    'requester',
+  ]);
+  const isCustomerFacing = CUSTOMER_FACING_AUDIENCES.has(dispatch.audienceType);
 
   // Subject token (sadece customer-facing'e)
   const finalSubject = isCustomerFacing

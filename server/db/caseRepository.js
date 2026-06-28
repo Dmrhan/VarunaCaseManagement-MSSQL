@@ -1422,6 +1422,22 @@ export const caseRepository = {
       });
     }
 
+    // M4.1 FAZ B — case_created event emission BURADA YAPILMIYOR.
+    //
+    // Codex P1 fix — emit'i inboundMailIntake.js'e taşıdık (account
+    // match BİTTİKTEN sonra). Sebep:
+    //   - inboundMailIntake önce caseRepository.create() ile accountId=null
+    //     ham vaka yaratır, SONRA customerMatch + linkAccount yapar.
+    //   - Emit burada fire etseydi: accountId henüz set edilmemiş →
+    //     requester resolver opt-out kontrolünü skip ederdi → opt-out olan
+    //     müşteriye ACK gönderilirdi (cross-tenant bypass tarzı kırılım).
+    //   - intake match sonrası emit → resolver caseRow'u re-fetch eder
+    //     (notificationRepository:1140) → accountId set'liyse opt-out
+    //     gate uygulanır.
+    //
+    // UI/portal/API açılışlarında ACK semantiği yok (kullanıcı UI teyit
+    // görür); intake olmayan path'lerde emit zaten beklenmiyor.
+
     return shape(created);
   },
 
@@ -3369,6 +3385,13 @@ export const caseRepository = {
       void emitNotificationEvent({ event: 'case_closed', caseId: id });
     } else if (dbNext === 'YenidenAcildi' && prev.status !== 'YenidenAcildi') {
       void emitNotificationEvent({ event: 'case_reopened', caseId: id });
+    } else if (dbNext !== prev.status) {
+      // M4.1 FAZ B — status_changed event (close/reopen DIŞI geçişler).
+      // KARDEŞ DESEN: yukarıdaki case_closed/reopened emit'leri.
+      // Terminal guard: close/reopen kendi event'lerini zaten yukarıda
+      // fire etti; bu else-if dalı sadece ara statü geçişlerinde çalışır
+      // (örn. YeniTalep→Inceleniyor, Inceleniyor→Beklemede).
+      void emitNotificationEvent({ event: 'status_changed', caseId: id });
     }
 
     return shape(updated);
