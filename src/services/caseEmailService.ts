@@ -281,6 +281,43 @@ export async function getEmailSignature(caseId: string): Promise<string | null> 
   return bundle.signatureHtml;
 }
 
+// ─── M6.3b Faz 3 — Composer "Mail Şablonu" dropdown ───
+
+export interface CaseEmailTemplateItem {
+  id: string;
+  name: string;
+  category: string | null;
+  subject: string | null;
+  bodyHtml: string;
+  variables: string; // JSON string
+}
+
+export interface RenderedTemplate {
+  subject: string | null;
+  bodyHtml: string;
+  missing: string[]; // bilinmeyen placeholder'lar
+}
+
+export async function listEmailTemplates(caseId: string): Promise<CaseEmailTemplateItem[]> {
+  const out = await apiFetch<{ items: CaseEmailTemplateItem[] }>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-templates`,
+    undefined,
+    { silent: true },
+  );
+  return Array.isArray(out?.items) ? out!.items : [];
+}
+
+export async function renderEmailTemplate(
+  caseId: string,
+  templateId: string,
+): Promise<RenderedTemplate | undefined> {
+  return apiFetch<RenderedTemplate>(
+    `/api/cases/${encodeURIComponent(caseId)}/email-templates/${encodeURIComponent(templateId)}/render`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    'Şablon önizleme',
+  );
+}
+
 export const caseEmailService = {
   listEmails,
   getAttachmentDownload,
@@ -291,4 +328,6 @@ export const caseEmailService = {
   getEmailSignature,
   getEmailSignatureBundle,
   getEmailConfig,
+  listEmailTemplates,
+  renderEmailTemplate,
 };
