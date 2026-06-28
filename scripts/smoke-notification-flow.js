@@ -237,29 +237,27 @@ async function run() {
     }
     record('5. createRule match-all without isMatchAll → 400', r5, r5msg);
 
-    // ─── 6) mode='Active' blocked ───
-    let r6 = false;
-    let r6msg = '';
-    try {
-      await createRule({
-        data: {
-          companyId: company.id,
-          name: `${PREFIX}-rule-active`,
-          event: 'case_closed',
-          conditions: { priority: 'High' },
-          audience: [{ type: 'assignee' }],
-          templateId: tpl.id,
-          channel: 'Email',
-          mode: 'Active',
-        },
-        user: { id: adminUser.id },
-        allowedCompanyIds,
-      });
-    } catch (e) {
-      r6 = e instanceof NotificationValidationError && e.code === 'mode_active_not_allowed';
-      r6msg = e.code;
-    }
-    record('6. createRule mode=Active → 400', r6, r6msg);
+    // ─── 6) mode='Active' allowed (M4'ten beri) ───
+    // M4'ten önce mode=Active block edilirdi (Phase 2). M4 dispatch
+    // executor'ı çalışınca Active serbest bırakıldı (notificationRepository
+    // ALLOWED_MODES + createRule mode_active_not_allowed kaldırıldı).
+    // Bu test güncellendi: artık hata atmamalı.
+    const ruleActive = await createRule({
+      data: {
+        companyId: company.id,
+        name: `${PREFIX}-rule-active`,
+        event: 'case_closed',
+        conditions: { priority: 'High' },
+        audience: [{ type: 'assignee' }],
+        templateId: tpl.id,
+        channel: 'Email',
+        mode: 'Active',
+      },
+      user: { id: adminUser.id },
+      allowedCompanyIds,
+    });
+    created.rules.push(ruleActive.id);
+    record('6. createRule mode=Active accepted (M4)', !!ruleActive.id && ruleActive.mode === 'Active');
 
     // ─── 7) Invalid event ───
     let r7 = false;
@@ -301,10 +299,12 @@ async function run() {
       'Hi {{case.number}} — {{ghost}}',
       { 'case.number': 'VK-1' },
     );
+    // M4.1 FAZ B — empty marker → empty string (M6.3b parite).
+    // missing[] hala raporlar; rendered metin "Hi VK-1 — " olur.
     record(
-      '9. renderTemplate flags missing var',
-      r9body.includes('[ghost eksik]') && r9missing.includes('ghost'),
-      `missing=${r9missing.join(',')}`,
+      '9. renderTemplate flags missing var (empty marker → empty string)',
+      r9body === 'Hi VK-1 — ' && r9missing.includes('ghost'),
+      `body="${r9body}" missing=${r9missing.join(',')}`,
     );
 
     // ─── Setup: case for emission tests ───

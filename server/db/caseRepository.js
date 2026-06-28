@@ -1422,6 +1422,16 @@ export const caseRepository = {
       });
     }
 
+    // M4.1 FAZ B — case_created event emission (fire-and-forget).
+    // KARDEŞ DESEN: case_closed/reopened emit (caseRepository:3369-71).
+    // ORIGIN GUARD: yalnız mail intake'le açılan vakalarda (origin='Eposta').
+    // Sebep: UI/portal/API'den açılan vakalarda kullanıcı zaten UI'da
+    // teyit görür; ACK maili tekrar fire etmek gürültü olur. (Kullanıcı
+    // kararı 2026-06-28, AskUserQuestion).
+    if (created.origin === 'Eposta') {
+      void emitNotificationEvent({ event: 'case_created', caseId: created.id });
+    }
+
     return shape(created);
   },
 
@@ -3369,6 +3379,13 @@ export const caseRepository = {
       void emitNotificationEvent({ event: 'case_closed', caseId: id });
     } else if (dbNext === 'YenidenAcildi' && prev.status !== 'YenidenAcildi') {
       void emitNotificationEvent({ event: 'case_reopened', caseId: id });
+    } else if (dbNext !== prev.status) {
+      // M4.1 FAZ B — status_changed event (close/reopen DIŞI geçişler).
+      // KARDEŞ DESEN: yukarıdaki case_closed/reopened emit'leri.
+      // Terminal guard: close/reopen kendi event'lerini zaten yukarıda
+      // fire etti; bu else-if dalı sadece ara statü geçişlerinde çalışır
+      // (örn. YeniTalep→Inceleniyor, Inceleniyor→Beklemede).
+      void emitNotificationEvent({ event: 'status_changed', caseId: id });
     }
 
     return shape(updated);
