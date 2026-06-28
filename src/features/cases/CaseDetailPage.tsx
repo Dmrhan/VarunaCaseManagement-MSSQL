@@ -56,6 +56,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
+import { PendingReplyBadge } from './components/PendingReplyBadge';
 import { Modal } from '@/components/ui/Modal';
 import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
@@ -711,6 +712,15 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <span className="font-mono text-slate-700">{item.caseNumber}</span>
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
+              {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (detay header).
+                  Codex review fix — duration kaynağı lastEmailInboundAt. */}
+              {item.pendingCustomerReply && (
+                <PendingReplyBadge
+                  pending={item.pendingCustomerReply}
+                  lastEmailInboundAt={item.lastEmailInboundAt}
+                  size="sm"
+                />
+              )}
             </nav>
             <CaseTitleEditable item={item} onUpdated={setItem} />
             {/* Statü bandı LBD-Move ile header'dan içerik alanına taşındı —

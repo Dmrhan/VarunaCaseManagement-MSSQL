@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Select, TextInput } from '@/components/ui/Field';
 import { CaseTypeBadge, PriorityBadge, StatusPill } from '@/components/ui/StatusPill';
+import { PendingReplyBadge } from './components/PendingReplyBadge';
 import { Badge } from '@/components/ui/Badge';
 import { Popover } from '@/components/ui/Popover';
 import { cn } from '@/components/ui/cn';
@@ -162,6 +163,8 @@ const initialFilters: CaseFilters = {
   // Phase D + KPI intent flag'leri — reset durumunda false/undefined kalmalı
   // ki "Tümünü Temizle" sonrası yan etkili filtre aktif görünmesin.
   customerMatchPending: undefined,
+  // M6.3b Faz 1 — "Yanıt bekliyor" filtresi.
+  pendingCustomerReply: undefined,
   assignedToMe: false,
   teamScope: false,
   slaViolation: false,
@@ -341,6 +344,7 @@ export function CasesListPage({
     filters.dateFrom,
     filters.dateTo,
     filters.customerMatchPending,
+    filters.pendingCustomerReply,
     filters.assignedToMe,
     filters.teamScope,
     filters.slaViolation,
@@ -464,6 +468,7 @@ export function CasesListPage({
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo) ||
     Boolean(filters.customerMatchPending) ||
+    Boolean(filters.pendingCustomerReply) ||
     Boolean(filters.assignedToMe) ||
     Boolean(filters.teamScope) ||
     Boolean(filters.slaViolation) ||
@@ -480,6 +485,7 @@ export function CasesListPage({
     (filters.dateFrom ? 1 : 0) +
     (filters.dateTo ? 1 : 0) +
     (filters.customerMatchPending ? 1 : 0) +
+    (filters.pendingCustomerReply ? 1 : 0) +
     (filters.assignedToMe ? 1 : 0) +
     (filters.teamScope ? 1 : 0) +
     (filters.slaViolation ? 1 : 0) +
@@ -1032,6 +1038,24 @@ export function CasesListPage({
                     </FilterPanelSection>
                   )}
 
+                  {/* M6.3b Faz 1 — "Yanıt bekliyor" filtre (tüm roller). */}
+                  <FilterPanelSection label="E-posta">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-ndark-text">
+                      <input
+                        type="checkbox"
+                        checked={filters.pendingCustomerReply === true}
+                        onChange={(e) =>
+                          setFilters((f) => ({
+                            ...f,
+                            pendingCustomerReply: e.target.checked ? true : undefined,
+                          }))
+                        }
+                        className="h-4 w-4 cursor-pointer accent-brand-600"
+                      />
+                      <span>Yalnız müşteri yanıtı bekleyenler</span>
+                    </label>
+                  </FilterPanelSection>
+
                   <FilterPanelSection label="Öncelik">
                     <div className="grid grid-cols-2 gap-1.5">
                       {CASE_PRIORITIES.map((p) => (
@@ -1317,6 +1341,18 @@ export function CasesListPage({
                         >
                           ⚠ Müşteri yok
                         </span>
+                      )}
+                      {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (compact).
+                          Codex review fix — duration kaynağı lastEmailInboundAt
+                          (müşterinin bekleyen mail'i), outbound DEĞİL. */}
+                      {c.pendingCustomerReply && (
+                        <div className="mt-1">
+                          <PendingReplyBadge
+                            pending={c.pendingCustomerReply}
+                            lastEmailInboundAt={c.lastEmailInboundAt}
+                            size="sm"
+                          />
+                        </div>
                       )}
                       {snoozeMeta?.snoozeUntil && (
                         <div

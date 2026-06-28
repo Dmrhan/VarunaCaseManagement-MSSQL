@@ -5112,6 +5112,10 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   // Phase D — Müşteri eşleştirme bekleyen vakalar filter.
   if (f.customerMatchPending === true) where.customerMatchPending = true;
   if (f.customerMatchPending === false) where.customerMatchPending = false;
+  // M6.3b Faz 1 — "Yanıt bekliyor" (Case.pendingCustomerReply K4 state).
+  // @@index([companyId, pendingCustomerReply]) ile DB-side hızlı.
+  if (f.pendingCustomerReply === true) where.pendingCustomerReply = true;
+  if (f.pendingCustomerReply === false) where.pendingCustomerReply = false;
   // KPI tile click intents — sayım ve liste tek truth source kullansın diye:
   if (f.slaViolation === true) where.slaViolation = true;
   if (f.resolvedToday === true) {
