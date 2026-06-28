@@ -19,6 +19,7 @@ import {
   thirdPartyRepo,
   userRepo,
 } from '../db/adminRepository.js';
+import { prisma } from '../db/client.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
@@ -601,20 +602,28 @@ router.patch('/users/:id/system-role', asyncRoute(async (req, res) => {
  */
 router.patch('/users/:id/title', asyncRoute(async (req, res) => {
   const userId = req.params.id;
-  // Yetki: hedef kullanıcının şirketlerinden EN AZ BİRİNDE caller admin olmalı
-  // (SystemAdmin tümünü görür; assertCompanyAdmin SystemAdmin'i her zaman geçer).
+  // Codex P1 fix — prisma modül-level import (üst kısımda). Önceki
+  // sürümde dynamic import yoktu → ReferenceError fırlatıyordu.
   const target = await prisma.user.findUnique({
     where: { id: userId },
     select: { companies: { where: { isActive: true }, select: { companyId: true } } },
   });
   if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
-  // En az bir company match → assertCompanyAdmin (M5-ext desen birebir)
-  const callerCompanyIds = (req.user.companyRoles ?? []).map((r) => r.companyId);
-  const isSystemAdmin = req.user.role === 'SystemAdmin';
-  const sharesCompany = isSystemAdmin
-    || target.companies.some((tc) => callerCompanyIds.includes(tc.companyId));
-  if (!sharesCompany) {
-    throw new AdminError('Bu kullanıcı için yetkin yok.', 403);
+  // Codex P2 fix — Yetki: hedef kullanıcının şirketlerinden EN AZ BİRİNDE
+  // caller'ın per-company rolü Admin VEYA SystemAdmin OLMALI. Önceki
+  // kontrol yalnız companyId match arıyordu → caller'ın o şirkette Agent
+  // veya Supervisor olması başkasının Person.title'ını değiştirmesine
+  // izin veriyordu. assertCompanyAdmin role kontrolü ile birebir hizalı.
+  if (req.user.role !== 'SystemAdmin') {
+    const adminCompanyIds = new Set(
+      (req.user.companyRoles ?? [])
+        .filter((r) => r.role === 'Admin' || r.role === 'SystemAdmin')
+        .map((r) => r.companyId),
+    );
+    const hasAdminAccess = target.companies.some((tc) => adminCompanyIds.has(tc.companyId));
+    if (!hasAdminAccess) {
+      throw new AdminError('Bu kullanıcı için admin yetkin yok.', 403);
+    }
   }
   const result = await userRepo.setPersonTitle(userId, req.body?.title);
   res.json(result);

@@ -139,6 +139,36 @@ async function setup() {
     const pa = await personRepo.list();
     const personA = pa.find((p) => p.id === PERSON_A);
     expect('personRepo.list Person.title = A Title', personA?.title, 'A Title');
+
+    console.log('\n=== (7) Codex P2 fix — yetki guard mantığı ===');
+    // admin.js route'undaki yeni kontrol birebir simüle:
+    //   SystemAdmin                  → her zaman geçer
+    //   role Admin + companyId match → geçer
+    //   role Agent/Supervisor + match → BLOCK (P2 fix)
+    //   companyId match yok          → BLOCK
+    function authGuard(callerRole, companyRoles, targetCompanyIds) {
+      if (callerRole === 'SystemAdmin') return { ok: true };
+      const adminCompanyIds = new Set(
+        (companyRoles ?? [])
+          .filter((r) => r.role === 'Admin' || r.role === 'SystemAdmin')
+          .map((r) => r.companyId),
+      );
+      const hasAdminAccess = targetCompanyIds.some((id) => adminCompanyIds.has(id));
+      return hasAdminAccess ? { ok: true } : { ok: false, status: 403 };
+    }
+
+    expect('SystemAdmin → geçer',
+      authGuard('SystemAdmin', [], [COMP]).ok, true);
+    expect('Admin role + companyId match → geçer',
+      authGuard('Admin', [{ companyId: COMP, role: 'Admin' }], [COMP]).ok, true);
+    expect('Agent + companyId match → BLOCK (P2 fix)',
+      authGuard('Admin', [{ companyId: COMP, role: 'Agent' }], [COMP]).ok, false);
+    expect('Supervisor + companyId match → BLOCK (P2 fix)',
+      authGuard('Admin', [{ companyId: COMP, role: 'Supervisor' }], [COMP]).ok, false);
+    expect('companyId match yok → BLOCK',
+      authGuard('Admin', [{ companyId: 'OTHER', role: 'Admin' }], [COMP]).ok, false);
+    expect('caller companyRoles boş → BLOCK',
+      authGuard('Admin', [], [COMP]).ok, false);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
