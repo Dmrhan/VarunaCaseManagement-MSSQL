@@ -172,7 +172,13 @@ export function MailMessageCard({
   }, [renderedHtml]);
 
   const ts = isInbound ? email.receivedAt : email.sentAt;
-  const dirIcon = isInbound ? <ArrowDown size={14} className="text-rose-500" /> : <ArrowUp size={14} className="text-emerald-500" />;
+  // Polish — yön oku renk kodu:
+  //   Gelen (inbound)  = sky/mavi (giriş tonu — müşteriden geliyor)
+  //   Giden (outbound) = emerald/yeşil (çıkış tonu — agent'tan gidiyor)
+  // Hover state aynı renk ailesiyle eşlendi (görsel tutarlılık).
+  const dirIcon = isInbound
+    ? <ArrowDown size={14} className="text-sky-500" />
+    : <ArrowUp size={14} className="text-emerald-500" />;
 
   // Tek mail = iki tr: header satırı + (expand'lı) detay satırı
   return (
@@ -180,8 +186,8 @@ export function MailMessageCard({
       <tr
         className={`border-t ${
           isInbound
-            ? 'border-rose-50 hover:bg-rose-50/30 dark:border-ndark-border dark:hover:bg-ndark-bg/40'
-            : 'border-slate-100 hover:bg-emerald-50/30 dark:border-ndark-border dark:hover:bg-ndark-bg/40'
+            ? 'border-sky-50 hover:bg-sky-50/40 dark:border-ndark-border dark:hover:bg-ndark-bg/40'
+            : 'border-emerald-50 hover:bg-emerald-50/40 dark:border-ndark-border dark:hover:bg-ndark-bg/40'
         } text-xs`}
       >
         <td className="w-8 px-2 py-2 text-center align-top">
