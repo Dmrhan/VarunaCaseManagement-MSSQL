@@ -3,6 +3,7 @@ import { useHotkey } from '@/lib/useHotkey';
 import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -17,6 +18,7 @@ import {
   Inbox,
   Layers,
   Link as LinkIcon,
+  Minus,
   Plus,
   RotateCw,
   Search,
@@ -70,6 +72,26 @@ const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
 // KPI tıklamasıyla aktive olan client-side display filtresi.
 // 'slaRisk': slaViolation = true | 'resolvedToday': updatedAt bugün ve status 'Çözüldü'
 type QuickFilter = 'slaRisk' | 'resolvedToday' | null;
+
+// Kuyruk hızlı filtresi — tablo üstü chip'ler; mevcut filtrelerle birlikte çalışır,
+// client-side mevcut sayfa kapsamında uygular (server pagination korunur).
+type QuickQueueFilter = 'all' | 'unassigned' | 'critical';
+
+// Öncelik çipi için renk + label yapılandırması.
+const PRIORITY_CHIP_CFG: Record<CasePriority, { label: string; cls: string }> = {
+  Critical: { label: 'Kritik', cls: 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/40' },
+  High:     { label: 'Yüksek', cls: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/40' },
+  Medium:   { label: 'Orta',   cls: 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900/40' },
+  Low:      { label: 'Düşük',  cls: 'bg-slate-50 text-slate-500 ring-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:ring-slate-700' },
+};
+
+// Sol kenar öncelik şeridi renkleri (3px border-l).
+const PRIORITY_STRIPE: Record<CasePriority, string> = {
+  Critical: 'border-l-red-500 dark:border-l-red-600',
+  High:     'border-l-amber-400 dark:border-l-amber-500',
+  Medium:   'border-l-blue-400 dark:border-l-blue-500',
+  Low:      'border-l-slate-200 dark:border-l-slate-600',
+};
 
 // Bulk status'te kapatma yasak — backend de reddediyor, UI baştan göstermesin.
 const BULK_STATUSES: CaseStatus[] = ['Açık', 'İncelemede', '3rdPartyBekleniyor', 'Eskalasyon', 'YenidenAcildi'];
@@ -180,8 +202,8 @@ export function CasesListPage({
   onOpenSmartTicket,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [sortKey, setSortKey] = useState<SortKey>('priority');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
   const [inboxTab, setInboxTab] = useState<InboxTab>('open');
@@ -212,6 +234,8 @@ export function CasesListPage({
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   // KPI tıklamasıyla aktive olan client-side filtre (sortedFiltered'de uygulanır).
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(null);
+  // Kuyruk hızlı filtresi — chip'ler (Tümü / Atanmamış / Kritik).
+  const [quickQueueFilter, setQuickQueueFilter] = useState<QuickQueueFilter>('all');
   // Role-aware KPI stats — backend tek truth source (/api/cases/stats).
   // Önceki "personalStats + client-computed Supervisor stats" yapısı bırakıldı:
   // her rol için sayım artık server tarafında, scope korunarak hesaplanıyor.
@@ -359,8 +383,9 @@ export function CasesListPage({
     const open = allFiltered.filter((c) => c.status !== 'Çözüldü' && c.status !== 'İptalEdildi').length;
     const slaBreach = allFiltered.filter((c) => c.slaViolation).length;
     const critical = allFiltered.filter((c) => c.priority === 'Critical').length;
-    return { total, open, slaBreach, critical };
-  }, [allFiltered]);
+    const unassigned = allFiltered.filter((c) => !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status)).length;
+    return { total, open, slaBreach, critical, unassigned };
+  }, [allFiltered, serverTotal]);
 
   // Role-aware KPI fetch — backend mod seçer (personal/team/operations).
   // Yenile butonu ve bulk action sonrası tetiklenir; tab/filtre değiştiğinde
@@ -430,12 +455,36 @@ export function CasesListPage({
         : 'ok';
 
   // Server-side pagination + sort: allFiltered zaten o sayfanın kayıtları.
-  // Client-side post-filter: sadece AI örüntü alarmı overlay'i.
+  // Client-side post-filter: AI örüntü alarmı overlay'i + kuyruk hızlı filtreleri.
+  // NOT: quickQueueFilter yalnız mevcut sayfayı etkiler; cross-page coverage backend'e bağımlı.
   const sortedFiltered = useMemo(() => {
-    if (!patternCasesFilter?.caseIds?.length) return allFiltered;
-    const allowed = new Set(patternCasesFilter.caseIds);
-    return allFiltered.filter((c) => allowed.has(c.id));
-  }, [allFiltered, patternCasesFilter]);
+    let result = allFiltered;
+
+    if (patternCasesFilter?.caseIds?.length) {
+      const allowed = new Set(patternCasesFilter.caseIds);
+      result = result.filter((c) => allowed.has(c.id));
+    }
+
+    if (quickQueueFilter === 'unassigned') {
+      result = result.filter((c) => !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status));
+    } else if (quickQueueFilter === 'critical') {
+      result = result.filter((c) => c.priority === 'Critical');
+    }
+
+    // Öncelik sıralamasında secondary sort: aynı öncelikte createdAt asc
+    // (en uzun bekleyen üstte). Cross-page sıralama backend sort'a bağlı.
+    if (sortKey === 'priority') {
+      const ORDER: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+      result = [...result].sort((a, b) => {
+        const pa = ORDER[a.priority] ?? 4;
+        const pb = ORDER[b.priority] ?? 4;
+        if (pa !== pb) return sortDir === 'asc' ? pa - pb : pb - pa;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+    }
+
+    return result;
+  }, [allFiltered, patternCasesFilter, quickQueueFilter, sortKey, sortDir]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -1176,6 +1225,38 @@ export function CasesListPage({
               </Select>
             </div>
 
+            {/* Hızlı kuyruk filtreleri — mevcut sayfayı client-side filtreler */}
+            <div className="flex items-center gap-1">
+              {(
+                [
+                  { key: 'all' as const,        label: 'Tümü',       count: null },
+                  { key: 'unassigned' as const, label: 'Atanmamış',  count: stats.unassigned },
+                  { key: 'critical' as const,   label: 'Kritik',     count: stats.critical },
+                ] satisfies { key: QuickQueueFilter; label: string; count: number | null }[]
+              ).map(({ key, label, count }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setQuickQueueFilter(key)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+                    quickQueueFilter === key
+                      ? key === 'critical'
+                        ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300'
+                        : key === 'unassigned'
+                        ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
+                        : 'border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:bg-ndark-bg',
+                  )}
+                >
+                  {label}
+                  {count !== null && count > 0 && (
+                    <span className="rounded-full bg-current/10 px-1 text-[10px] tabular-nums">{count}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
             <Badge tint="slate" icon={<Filter size={12} />}>
               {serverTotal} sonuç
             </Badge>
@@ -1255,11 +1336,14 @@ export function CasesListPage({
                     : null;
                   const expired = Boolean(snoozeMeta?.expired);
                   const isSelected = selected.has(c.id);
-                  // Öncelik: expired (amber) > selected (brand) > default brand-50 hover
+                  const isUnassignedOpen = !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
+                  // Öncelik: expired (amber) > selected (brand) > atanmamış (slate) > default hover
                   const rowBg = expired
                     ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40'
                     : isSelected
                     ? 'bg-brand-50/60 hover:bg-brand-50 dark:bg-brand-950/30'
+                    : isUnassignedOpen
+                    ? 'bg-slate-50/80 hover:bg-slate-100 dark:bg-slate-800/20 dark:hover:bg-slate-800/40'
                     : 'hover:bg-brand-50 dark:hover:bg-brand-950/20';
                   return (
                   <tr
@@ -1267,7 +1351,7 @@ export function CasesListPage({
                     onClick={() => onSelectCase(c.id)}
                     className={`cursor-pointer text-sm ${rowBg}`}
                   >
-                    <Td className="w-10">
+                    <Td className={cn('w-10 border-l-[3px]', PRIORITY_STRIPE[c.priority as CasePriority] ?? 'border-l-slate-200 dark:border-l-slate-600')}>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -1277,7 +1361,12 @@ export function CasesListPage({
                         aria-label={`${c.caseNumber} seç`}
                       />
                     </Td>
-                    <Td className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{c.caseNumber}</Td>
+                    <Td className="font-mono text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-600 dark:text-ndark-muted">{c.caseNumber}</span>
+                        <PriorityChip priority={c.priority as CasePriority} />
+                      </div>
+                    </Td>
                     <Td className="max-w-[360px]">
                       <div className="flex items-center gap-1.5">
                         <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
@@ -1341,24 +1430,34 @@ export function CasesListPage({
                     </Td>
                     <Td className="text-slate-700 dark:text-ndark-text">
                       {/* WR-C1 review fix — Claim eligibility person-only (assignedPersonId IS NULL).
-                          Team-assigned ama person-assigned olmayan vakalarda da "Üstlen" gösterilmeli;
-                          backend bunu kabul ediyor. Render sırası:
+                          Render sırası:
                             1) atanmış kişi varsa adını göster
-                            2) yoksa claim eligible mı → "Üstlen" butonu
-                            3) yoksa atanmış takım varsa takım adını fallback olarak göster
-                            4) yoksa dash. */}
+                            2) claim eligible → Üstlen butonu + bekleme çipi
+                            3) atanmamış açık ama claim yetkisi yok → takım + bekleme çipi
+                            4) atanmış takım → takım adı
+                            5) yoksa dash. */}
                       {c.assignedPersonName ? (
                         c.assignedPersonName
                       ) : canClaimCase(c) ? (
-                        <button
-                          type="button"
-                          onClick={(e) => handleClaim(e, c.id)}
-                          disabled={claimingId === c.id}
-                          className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
-                          title="Bu vakayı üstlen"
-                        >
-                          {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
-                        </button>
+                        <div className="flex flex-col items-start gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleClaim(e, c.id)}
+                            disabled={claimingId === c.id}
+                            className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+                            title="Bu vakayı üstlen"
+                          >
+                            {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
+                          </button>
+                          <WaitingChip createdAt={c.createdAt} />
+                        </div>
+                      ) : isUnassignedOpen ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-xs text-slate-500 dark:text-ndark-muted">
+                            {c.assignedTeamName ?? '—'}
+                          </span>
+                          <WaitingChip createdAt={c.createdAt} />
+                        </div>
                       ) : c.assignedTeamName ? (
                         c.assignedTeamName
                       ) : (
@@ -1542,6 +1641,56 @@ function SortableTh({
 
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={`whitespace-nowrap px-3 py-2 ${className ?? ''}`}>{children}</td>;
+}
+
+// Vaka no hücresinde satır içi öncelik çipi — ikon + label, renge güvenilmez.
+function PriorityChip({ priority }: { priority: CasePriority }) {
+  const cfg = PRIORITY_CHIP_CFG[priority];
+  if (!cfg) return null;
+  const Icon =
+    priority === 'Critical' ? AlertTriangle
+    : priority === 'High'   ? ArrowUp
+    : priority === 'Medium' ? Minus
+    : ArrowDown;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
+        cfg.cls,
+      )}
+    >
+      <Icon size={9} />
+      {cfg.label}
+    </span>
+  );
+}
+
+// Bekleme süresi çipi — atanmamış açık vakalarda "Atanan" hücresinde görünür.
+// 60 dakikayı geçince kırmızı tona geçer.
+function formatWait(createdAt: string): string {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+  if (mins < 60) return `${mins} dk`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h} sa ${m} dk` : `${h} sa`;
+}
+
+function WaitingChip({ createdAt }: { createdAt: string }) {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+  const isLong = mins >= 60;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
+        isLong
+          ? 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/40'
+          : 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/40',
+      )}
+    >
+      <Clock size={9} />
+      {formatWait(createdAt)}
+    </span>
+  );
 }
 
 // Snooze rozetleri için TR-özel relative format. formatRelative'i kullanmadık
