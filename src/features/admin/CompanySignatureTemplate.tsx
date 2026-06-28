@@ -20,11 +20,11 @@
  * Lazy loaded — TipTap ağır (~133 KB chunk); main bundle'a girmesin.
  */
 import { useEffect, useMemo, useState } from 'react';
-import DOMPurify from 'dompurify';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { RichTextEditor } from '@/features/cases/components/RichTextEditor';
+import { sanitizeMailHtml } from '@/lib/sanitizeMailHtml';
 import { adminService } from '@/services/adminService';
 
 export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
@@ -113,22 +113,13 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
   }
 
   // Compose-Signature F4 — Defense-in-depth: canlı önizleme path'i
-  // DOMPurify sarmal (MailMessageCard ile aynı pattern).
-  // Backend M6.1 sanitize-html save öncesi zaten temizler ama editör
-  // henüz kaydedilmemiş raw HTML render edilir → admin kendi şablonunda
-  // bir hata/typo (örn. <script> yazsa) preview'da çalıştırılmasın.
-  //
-  // ALLOWED_ATTR/FORBID_TAGS: MailMessageCard preview ile aynı seti
-  // tutalım (tutarlılık).
+  // DOMPurify sarmal (paylaşılan sanitizeMailHtml; backend sanitize-html
+  // allowlist'iyle birebir hizalı — Codex P2 fix: tablo attrs preserve).
   const safePreviewHtml = useMemo(() => {
     const rendered = html
       .replaceAll('{{agent.name}}', SAMPLE_NAME)
       .replaceAll('{{agent.title}}', SAMPLE_TITLE);
-    return DOMPurify.sanitize(rendered, {
-      USE_PROFILES: { html: true },
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
-      FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
-    });
+    return sanitizeMailHtml(rendered);
   }, [html]);
 
   const isEmpty = !html.trim();
