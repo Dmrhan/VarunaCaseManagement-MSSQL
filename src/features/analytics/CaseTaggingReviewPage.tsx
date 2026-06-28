@@ -31,7 +31,7 @@ const STATUS_LABELS_SHORT: Record<CaseStatus, string> = {
   'İptalEdildi': 'İptal',
 };
 
-type TaggingSortKey = 'caseNumber' | 'status' | 'createdAt' | 'accountName' | 'companyName' | 'updatedAt';
+type TaggingSortKey = 'caseNumber' | 'status' | 'createdAt' | 'accountName' | 'companyName' | 'updatedAt' | 'reviewer';
 type SortDir = 'asc' | 'desc';
 
 const VERDICT_LABELS: Record<TaggingVerdict, string> = {
@@ -721,11 +721,13 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           <SortableTh label="Vaka Açılış" sk="createdAt"   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
           <SortableTh label="Müşteri"     sk="accountName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
           <SortableTh label="Şirket"      sk="companyName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-          {['Açıklama', 'Çözüm Notu', 'İlerleme', 'Kontrol Eden', ''].map((h) => (
+          {['Açıklama', 'Çözüm Notu', 'İlerleme'].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
             </div>
           ))}
+          <SortableTh label="Kontrol Eden" sk="reviewer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted" />
         </div>
 
         {loading && (

@@ -764,7 +764,7 @@ router.get(
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
 
-    const ALLOWED_SORT = ['caseNumber','status','createdAt','accountName','companyName','updatedAt'];
+    const ALLOWED_SORT = ['caseNumber','status','createdAt','accountName','companyName','updatedAt','reviewer','reviewedAt'];
     const sortBy  = ALLOWED_SORT.includes(f.sortBy) ? f.sortBy : 'createdAt';
     const sortDir = f.sortDir === 'asc' ? 'asc' : 'desc';
 

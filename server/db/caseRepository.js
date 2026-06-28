@@ -1130,12 +1130,22 @@ export const caseRepository = {
       status:      'status',
       caseType:    'caseType',
     };
-    const field = SORT_FIELD_MAP[sortBy] ?? 'updatedAt';
-    const dir   = sortDir === 'asc' ? 'asc' : 'desc';
-    // İki kademeli sıralama: seçili alan + updatedAt (sayfalama kararlılığı için).
-    const orderBy = field === 'updatedAt'
-      ? [{ updatedAt: dir }]
-      : [{ [field]: dir }, { updatedAt: 'desc' }];
+    const dir = sortDir === 'asc' ? 'asc' : 'desc';
+    // İlişkili tablo sort'ları (taggingReview one-to-one).
+    const RELATION_SORT = {
+      reviewer:   { taggingReview: { reviewerName: dir } },
+      reviewedAt: { taggingReview: { reviewedAt:   dir } },
+    };
+    let orderBy;
+    if (RELATION_SORT[sortBy]) {
+      orderBy = [RELATION_SORT[sortBy], { updatedAt: 'desc' }];
+    } else {
+      const field = SORT_FIELD_MAP[sortBy] ?? 'updatedAt';
+      // İki kademeli sıralama: seçili alan + updatedAt (sayfalama kararlılığı için).
+      orderBy = field === 'updatedAt'
+        ? [{ updatedAt: dir }]
+        : [{ [field]: dir }, { updatedAt: 'desc' }];
+    }
 
     const skip = (pagination.page - 1) * pagination.pageSize;
     const items = await prisma.case.findMany({
