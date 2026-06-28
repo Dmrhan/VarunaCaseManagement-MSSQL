@@ -19,6 +19,7 @@ import {
   thirdPartyRepo,
   userRepo,
 } from '../db/adminRepository.js';
+import { prisma } from '../db/client.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { externalDevOpsSettingRepo } from '../db/externalDevOpsSettingRepository.js';
 import { authorizationPolicyRepository } from '../db/authorizationPolicyRepository.js';
@@ -583,6 +584,48 @@ router.post('/users/:id/reset-password', asyncRoute(async (req, res) => {
 router.patch('/users/:id/system-role', asyncRoute(async (req, res) => {
   const role = req.body?.role;
   const result = await userRepo.updateSystemRole(req.params.id, role, req.user);
+  res.json(result);
+}));
+
+/**
+ * Compose-Signature F1 IA rework —
+ * PATCH /api/admin/users/:id/title  body: { title: string | null }
+ *
+ * Bağlı Person'ın title'ını günceller (mail imzasında {{agent.title}}
+ * placeholder render kaynağı). Person'ı olmayan user'larda 409.
+ *
+ * Guards:
+ *  - assertCompanyAdmin: hedef kullanıcının atandığı şirketlerden en az
+ *    BİRİNDE caller Admin/SystemAdmin olmalı. Person paylaşılan kaynak
+ *    olduğu için bu kontrol "kart yönetim yetkisi" semantiğini tutar.
+ *  - Empty string / null → title temizleme
+ */
+router.patch('/users/:id/title', asyncRoute(async (req, res) => {
+  const userId = req.params.id;
+  // Codex P1 fix — prisma modül-level import (üst kısımda). Önceki
+  // sürümde dynamic import yoktu → ReferenceError fırlatıyordu.
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { companies: { where: { isActive: true }, select: { companyId: true } } },
+  });
+  if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+  // Codex P2 fix — Yetki: hedef kullanıcının şirketlerinden EN AZ BİRİNDE
+  // caller'ın per-company rolü Admin VEYA SystemAdmin OLMALI. Önceki
+  // kontrol yalnız companyId match arıyordu → caller'ın o şirkette Agent
+  // veya Supervisor olması başkasının Person.title'ını değiştirmesine
+  // izin veriyordu. assertCompanyAdmin role kontrolü ile birebir hizalı.
+  if (req.user.role !== 'SystemAdmin') {
+    const adminCompanyIds = new Set(
+      (req.user.companyRoles ?? [])
+        .filter((r) => r.role === 'Admin' || r.role === 'SystemAdmin')
+        .map((r) => r.companyId),
+    );
+    const hasAdminAccess = target.companies.some((tc) => adminCompanyIds.has(tc.companyId));
+    if (!hasAdminAccess) {
+      throw new AdminError('Bu kullanıcı için admin yetkin yok.', 403);
+    }
+  }
+  const result = await userRepo.setPersonTitle(userId, req.body?.title);
   res.json(result);
 }));
 

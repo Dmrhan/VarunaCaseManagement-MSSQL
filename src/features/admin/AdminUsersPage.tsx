@@ -4,7 +4,7 @@ import { CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
-import { Field, Select } from '@/components/ui/Field';
+import { Field, Select, TextInput } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
@@ -64,6 +64,10 @@ export function AdminUsersPage() {
   const [systemRoleTarget, setSystemRoleTarget] = useState<AdminUser | null>(null);
   const [newSystemRole, setNewSystemRole] = useState<AdminUser['role']>('Agent');
   const [systemRoleBusy, setSystemRoleBusy] = useState(false);
+  /** Compose-Signature F1 IA rework — Person.title düzenleme. */
+  const [titleTarget, setTitleTarget] = useState<AdminUser | null>(null);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [titleBusy, setTitleBusy] = useState(false);
 
   function generateTempPassword(): string {
     const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -74,6 +78,30 @@ export function AdminUsersPage() {
     let pw = pick(upper) + pick(lower) + pick(digits) + pick('!@#$%');
     for (let i = 0; i < 8; i++) pw += pick(all);
     return pw;
+  }
+
+  /**
+   * Compose-Signature F1 IA rework — Person.title düzenleme handler.
+   * Boş bırakılırsa null gönderilir (server temizler).
+   */
+  async function handleSetTitle() {
+    if (!titleTarget) return;
+    setTitleBusy(true);
+    const value = titleDraft.trim() ? titleDraft.trim() : null;
+    const r = await adminService.users.setTitle(titleTarget.id, value);
+    setTitleBusy(false);
+    if (r.ok) {
+      toast({
+        type: 'success',
+        title: 'Unvan kaydedildi',
+        message: r.item.title ?? 'Unvan temizlendi',
+      });
+      setTitleTarget(null);
+      setTitleDraft('');
+      await refresh();
+    } else {
+      toast({ type: 'error', message: r.error });
+    }
   }
 
   async function handleResetPassword() {
@@ -207,6 +235,14 @@ export function AdminUsersPage() {
                             <Badge tint="amber" className="font-normal">Davet bekliyor</Badge>
                           )}
                         </div>
+                        {/* Compose-Signature F1 IA rework — Person.title subtext.
+                            Bağlı Person varsa unvan göster (mail imzasında otomatik
+                            kullanılır); Person yoksa (SystemAdmin gibi) hiç gösterme. */}
+                        {u.personId && (
+                          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-ndark-muted">
+                            {u.personTitle ?? <span className="italic">unvan tanımsız</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700 dark:text-ndark-text">
                         <span className="inline-flex items-center gap-1 text-xs">
@@ -270,6 +306,23 @@ export function AdminUsersPage() {
                               title="Geçici şifre ata (kullanıcı ilk girişte değiştirir)"
                             >
                               Şifre Sıfırla
+                            </Button>
+                          )}
+                          {/* Compose-Signature F1 IA rework — Unvan düzenleme.
+                              Yalnız bağlı Person olan ve aktif kullanıcılarda görünür;
+                              SystemAdmin gibi Person'sız user'larda yok. */}
+                          {u.personId && !isReadOnly && u.isActive && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={<Pencil size={12} />}
+                              onClick={() => {
+                                setTitleTarget(u);
+                                setTitleDraft(u.personTitle ?? '');
+                              }}
+                              title="Mail imzasında görünen iş unvanını düzenle"
+                            >
+                              Unvan
                             </Button>
                           )}
                           {/* Sistem rolünü değiştir — yalnız SystemAdmin yetkili.
@@ -473,6 +526,52 @@ export function AdminUsersPage() {
                 JWT'siyle uygulamaya tekrar girebilir.
               </p>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Compose-Signature F1 IA rework — Unvan düzenleme modalı. */}
+      {titleTarget && (
+        <Modal
+          open
+          onClose={() => (titleBusy ? null : setTitleTarget(null))}
+          size="sm"
+          title="Unvan Düzenle"
+          footer={(
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setTitleTarget(null)}
+                disabled={titleBusy}
+              >
+                Vazgeç
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void handleSetTitle()}
+                disabled={titleBusy || titleDraft.trim() === (titleTarget.personTitle ?? '').trim()}
+              >
+                {titleBusy ? 'Kaydediliyor…' : 'Kaydet'}
+              </Button>
+            </div>
+          )}
+        >
+          <div className="space-y-3 px-5 py-4 text-sm">
+            <p className="text-slate-600 dark:text-ndark-muted">
+              <strong>{titleTarget.fullName || titleTarget.email}</strong> kullanıcısı için unvan.
+            </p>
+            <Field
+              label="Unvan"
+              hint="Giden mail imzalarında otomatik görünür (örn. 'Ürün Direktörü'). Boş bırakırsanız imzada yalnız ad gözükür."
+            >
+              <TextInput
+                placeholder="Örn. Ürün Direktörü"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                autoFocus
+              />
+            </Field>
           </div>
         </Modal>
       )}
