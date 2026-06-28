@@ -2439,11 +2439,29 @@ router.get(
     );
     if (!c) return res.status(404).json({ error: 'Vaka bulunamadı' });
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
-    const ems = await prisma.externalMailSetting.findUnique({
-      where: { companyId: c.companyId },
-      select: { signatureHtml: true },
+    // Mail M6.3b Faz 2 — Per-agent imza eklendi. Response genişletildi:
+    //   { tenantHtml, agentHtml, signatureHtml? (deprecated geri uyumlu) }
+    // Fallback chain (composer): agent > tenant > none.
+    // signatureHtml eski caller'lar için: agent > tenant'ı düzleştirir.
+    const [ems, user] = await Promise.all([
+      prisma.externalMailSetting.findUnique({
+        where: { companyId: c.companyId },
+        select: { signatureHtml: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { signatureHtml: true },
+      }),
+    ]);
+    const tenantHtml = ems?.signatureHtml ?? null;
+    const agentHtml = user?.signatureHtml ?? null;
+    res.json({
+      tenantHtml,
+      agentHtml,
+      // Deprecated — yeni client'lar tenantHtml/agentHtml ayrı okur.
+      // Eski client'lar için fallback (agent > tenant) düzleştirme.
+      signatureHtml: agentHtml ?? tenantHtml,
     });
-    res.json({ signatureHtml: ems?.signatureHtml ?? null });
   }),
 );
 

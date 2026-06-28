@@ -141,6 +141,47 @@ router.get('/me', verifyJwt, (req, res) => {
 });
 
 /**
+ * Mail M6.3b Faz 2 — Per-agent imza self-service endpoint'leri.
+ *
+ *  GET   /api/auth/me/signature     → { signatureHtml: string | null }
+ *  PATCH /api/auth/me/signature     → body { signatureHtml: string | null }
+ *
+ * Guard:
+ *  - verifyJwt (kardeş /me ile parite)
+ *  - actor = req.user (self-service; admin başkasının imzasını
+ *    değiştiremez; admin profil endpoint'i ileride ayrı eklenir)
+ *
+ * Save öncesi:
+ *  - sanitize-html allowlist (M6.1 deseni — sanitizeOutgoingEmailHtml).
+ *    XSS engelleme + tutarlı render path.
+ *  - null/empty → signatureHtml=NULL set (kaldır).
+ *
+ * Response: güncel signatureHtml + sade payload (token rotate YOK —
+ * password change'den farklı).
+ */
+router.get('/me/signature', verifyJwt, async (req, res) => {
+  const u = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { signatureHtml: true },
+  });
+  res.json({ signatureHtml: u?.signatureHtml ?? null });
+});
+
+router.patch('/me/signature', verifyJwt, async (req, res) => {
+  const raw = req.body?.signatureHtml;
+  let next = null;
+  if (typeof raw === 'string' && raw.trim()) {
+    const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
+    next = sanitizeOutgoingEmailHtml(raw);
+  }
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { signatureHtml: next },
+  });
+  res.json({ signatureHtml: next });
+});
+
+/**
  * POST /api/auth/change-password (auth gerekli)
  * Body: { currentPassword, newPassword }
  *

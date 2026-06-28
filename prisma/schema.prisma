@@ -83,6 +83,11 @@ model User {
   /// Admin'in atadığı geçici şifreyle ilk girişte zorunlu değişim bayrağı
   mustChangePassword Boolean   @default(false)
   passwordUpdatedAt  DateTime?
+  /// M6.3b Faz 2 — Per-agent imza HTML. NULL → agent imzası yok,
+  /// composer fallback chain (agent > tenant > none) tenant default'una
+  /// düşer. Save öncesi sanitize-html allowlist (M6.1 deseni).
+  /// Sıfır PII; sadece agent görsel kimliği. Self-service: PATCH /api/me/signature.
+  signatureHtml      String?   @db.NVarChar(Max)
   createdAt          DateTime  @default(dbgenerated("sysutcdatetime()"))
   updatedAt          DateTime  @updatedAt
 
