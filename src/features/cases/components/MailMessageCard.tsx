@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, Download, Eye, Paperclip, Reply } from 'lucide-react';
-import DOMPurify from 'dompurify';
+import { sanitizeMailHtml } from '@/lib/sanitizeMailHtml';
 import type { CaseEmailItem } from '../../../services/caseEmailService';
 import { caseEmailService } from '../../../services/caseEmailService';
 
@@ -166,11 +166,9 @@ export function MailMessageCard({
 
   const safeHtml = useMemo(() => {
     if (renderedHtml === null) return '';
-    return DOMPurify.sanitize(renderedHtml, {
-      USE_PROFILES: { html: true },
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
-      FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
-    });
+    // Compose-Signature F4 Codex P2 — paylaşılan sanitizeMailHtml
+    // (backend allowlist mirror; tablo attrs preserve).
+    return sanitizeMailHtml(renderedHtml);
   }, [renderedHtml]);
 
   const ts = isInbound ? email.receivedAt : email.sentAt;

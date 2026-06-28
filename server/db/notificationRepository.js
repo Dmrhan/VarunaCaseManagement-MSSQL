@@ -229,10 +229,20 @@ const VAR_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
  * eksik liste `missing[]` üzerinden dispatch log'a yazılır (admin
  * Bildirim Kayıtları'nda template editör görür).
  *
+ * @param {string} text
+ * @param {Object<string,string>} vars
+ * @param {Object} [opts]
+ * @param {boolean} [opts.htmlEscape=false] — true ise yerleştirilen value
+ *   HTML escape edilir. Compose-Signature F2 Codex P2 fix: composedHtml
+ *   render'ında Person.name/title plain text güvensiz; HTML context'e
+ *   girmeden önce escape şart. Subject/plain text render için default false.
+ *   Notification dispatch'lerde mevcut çağrılar değişmedi (geri uyumlu).
+ *
  * Returns { rendered, missing: string[] }.
  */
-export function renderTemplate(text, vars) {
+export function renderTemplate(text, vars, opts = {}) {
   if (text == null) return { rendered: '', missing: [] };
+  const htmlEscape = !!opts.htmlEscape;
   const missing = [];
   const rendered = String(text).replace(VAR_RE, (_, key) => {
     const value = vars[key];
@@ -240,7 +250,8 @@ export function renderTemplate(text, vars) {
       if (!missing.includes(key)) missing.push(key);
       return '';
     }
-    return String(value);
+    const raw = String(value);
+    return htmlEscape ? escapeHtml(raw) : raw;
   });
   return { rendered, missing };
 }

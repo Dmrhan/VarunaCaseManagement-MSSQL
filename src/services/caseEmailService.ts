@@ -247,13 +247,20 @@ export async function getEmailConfig(caseId: string): Promise<EmailConfig> {
  * default imzasını gövdeye append etmek için.
  */
 export interface EmailSignatureBundle {
-  /** Tenant default imza (ExternalMailSetting.signatureHtml). */
+  /** Tenant ham şablonu (ExternalMailSetting.signatureHtml). */
   tenantHtml: string | null;
-  /** Per-agent imza (User.signatureHtml — M6.3b Faz 2). */
+  /** Per-agent override imza (User.signatureHtml — M6.3b Faz 2). */
   agentHtml: string | null;
   /**
-   * Deprecated — eski caller'lar için fallback (agent > tenant)
-   * düzleştirme. Yeni caller'lar tenantHtml/agentHtml ayrı oku.
+   * Compose-Signature F2 — Tenant şablonu Person bilgileriyle render
+   * edildikten sonraki "effective" şirket imzası. Composer'ın varsayılan
+   * "İmzam" davranışı: override (agentHtml) > composedHtml > none.
+   */
+  composedHtml: string | null;
+  /**
+   * Deprecated — eski caller'lar için fallback
+   * (agentHtml > composedHtml > tenantHtml) düzleştirme.
+   * Yeni caller'lar agentHtml/composedHtml ayrı oku.
    */
   signatureHtml: string | null;
 }
@@ -272,7 +279,7 @@ export async function getEmailSignatureBundle(caseId: string): Promise<EmailSign
     undefined,
     { silent: true },
   );
-  return r ?? { tenantHtml: null, agentHtml: null, signatureHtml: null };
+  return r ?? { tenantHtml: null, agentHtml: null, composedHtml: null, signatureHtml: null };
 }
 
 /** Geri uyumlu (eski imzayla) — yeni composer doğrudan bundle alır. */

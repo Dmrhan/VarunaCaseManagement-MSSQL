@@ -63,6 +63,12 @@ export interface PersonInput {
   supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
   /** WR-B1 — Takım lideri bayrağı. Default false. */
   isTeamLead?: boolean;
+  /**
+   * Compose-Signature F1 — Kişinin iş unvanı (örn. "Ürün Direktörü").
+   * Şirket imza şablonundaki {{agent.title}} placeholder'ından render
+   * edilir. Boş bırakılırsa imzada title satırı boş çıkar.
+   */
+  title?: string | null;
 }
 
 export interface CategoryInput {
@@ -1654,6 +1660,12 @@ export interface ExternalMailSetting {
   authMode: 'password' | 'oauth2';
   /** SMTP/IMAP kullanıcı adı (genelde inboundAddress ile aynı). */
   username: string | null;
+  /**
+   * Compose-Signature F2 — Şirket imza şablonu (placeholder'lı HTML).
+   * `{{agent.name}}` + `{{agent.title}}` Mustache placeholder'larıyla
+   * mail dispatch anında User → Person üzerinden render edilir.
+   */
+  signatureHtml: string | null;
   /** Secret şifreli olarak DB'de var mı? */
   secretIsSet: boolean;
   /** Secret'in en son set edildiği zaman (ISO). */
@@ -1675,6 +1687,8 @@ export interface ExternalMailSettingInput {
   imapPort?: number | null;
   authMode?: 'password' | 'oauth2';
   username?: string | null;
+  /** Compose-Signature F2 — Şirket imza şablonu (sanitize-html backend). */
+  signatureHtml?: string | null;
   /**
    * Yalnız yeni secret set/rotate ederken gönderilir. Undefined → mevcut
    * secret'a dokunulmaz. Server tarafta AES-256-GCM ile şifrelenir.

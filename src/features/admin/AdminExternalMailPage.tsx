@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { AtSign, CheckCircle2, Info, Lock, Mail, Plus, Save, Star, Trash2 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
+
+// Compose-Signature F2 — Lazy load şirket imza şablonu editörü (TipTap
+// ağır chunk'ı main bundle'a girmesin).
+const CompanySignatureTemplate = lazy(() =>
+  import('./CompanySignatureTemplate').then((m) => ({ default: m.CompanySignatureTemplate })),
+);
 import { Button } from '@/components/ui/Button';
 import { Field, TextInput } from '@/components/ui/Field';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -472,6 +478,13 @@ export function AdminExternalMailPage() {
 
       {/* M5-extension — Per-company From alias yönetimi */}
       {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
+
+      {/* Compose-Signature F2 — Şirket imza şablonu (lazy load) */}
+      {companyId && (
+        <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
+          <CompanySignatureTemplate companyId={companyId} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -660,5 +673,6 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
     </Card>
   );
 }
+
 
 export default AdminExternalMailPage;
