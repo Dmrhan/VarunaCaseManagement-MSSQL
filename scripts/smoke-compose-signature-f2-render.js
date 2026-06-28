@@ -150,6 +150,34 @@ async function setup() {
     await externalMailSettingRepo.upsert(COMP, { signatureHtml: null });
     const t8 = await externalMailSettingRepo.getByCompany(COMP);
     expect('tenantHtml null', t8.signatureHtml, null);
+
+    console.log('\n=== (9) HTML escape — Codex P2 fix (Person.name/title XSS) ===');
+    // Person.name/title plain text saklanır; HTML context'e interpolate
+    // edilirken htmlEscape ZORUNLU. Aksi halde "<b>Lead</b>" gibi bir
+    // title gerçek markup'a dönüşür → composedHtml XSS surface.
+    const tpl9 = '<p>{{agent.name}} - {{agent.title}}</p>';
+    const out9 = renderTemplate(
+      tpl9,
+      {
+        'agent.name': '<script>alert(1)</script>',
+        'agent.title': '<b>Lead</b>',
+      },
+      { htmlEscape: true },
+    );
+    expectTruthy('agent.name <script> escape',
+      out9.rendered.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+    expectTruthy('agent.title <b> escape',
+      out9.rendered.includes('&lt;b&gt;Lead&lt;/b&gt;'));
+    expectTruthy('raw <script> YOK', !out9.rendered.includes('<script>'));
+    expectTruthy('raw <b>Lead</b> YOK', !out9.rendered.includes('<b>Lead</b>'));
+
+    // Geri uyumluluk: htmlEscape opsiyonu yoksa eski davranış (escape YOK)
+    const out9b = renderTemplate(tpl9, {
+      'agent.name': '<b>X</b>',
+      'agent.title': 'Y',
+    });
+    expectTruthy('opts yoksa eski davranış (geri uyumlu)',
+      out9b.rendered.includes('<b>X</b>'));
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

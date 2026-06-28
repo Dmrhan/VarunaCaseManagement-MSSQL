@@ -31,22 +31,40 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [initialHtml, setInitialHtml] = useState<string>('');
+  // Codex P2 fix — load failure preserve (M6.3b UserSignatureModal paterni).
+  // get() undefined dönerse mevcut şablonun üstüne yazılma riskine karşı
+  // editor düzenleme dışı + retry banner. Aksi halde transient network
+  // hatasında editor blank açılır → save → mevcut şablonu siler.
+  const [loadFailed, setLoadFailed] = useState(false);
   const { toast } = useToast();
 
   const SAMPLE_NAME = 'Demirhan İşbakan';
   const SAMPLE_TITLE = 'Ürün Direktörü';
 
-  useEffect(() => {
+  function loadTemplate() {
     let cancelled = false;
     setLoading(true);
+    setLoadFailed(false);
     void adminService.externalMailSettings.get(companyId).then((s) => {
       if (cancelled) return;
-      const init = s?.signatureHtml ?? '';
-      setHtml(init);
-      setInitialHtml(init);
+      if (s === undefined) {
+        // fetch fail — apiFetch zaten toast attı; editor'ı düzenleme dışı tut.
+        setLoadFailed(true);
+        setHtml('');
+        setInitialHtml('');
+      } else {
+        const init = s?.signatureHtml ?? '';
+        setHtml(init);
+        setInitialHtml(init);
+      }
       setLoading(false);
     });
     return () => { cancelled = true; };
+  }
+
+  useEffect(() => {
+    return loadTemplate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
   const dirty = html !== initialHtml;
@@ -56,19 +74,28 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
   }
 
   async function handleSave() {
+    if (loadFailed) return; // Codex P2 — yüklenemeyen şablonu yanlışlıkla silme.
     setBusy(true);
-    const r = await adminService.externalMailSettings.save(companyId, { signatureHtml: html || null });
+    // Codex P2 fix — TipTap boş çıktıda "<p></p>" döndürür → `html || null`
+    // truthy sayar ve "boş ama configured" şablon kaydeder. M6.3b
+    // UserSignatureModal paterni: strip-tags + image presence kontrolü;
+    // sadece metinsiz ve görselsiz ise null geç (gerçek clear).
+    const textOnly = html.replace(/<[^>]+>/g, '').trim();
+    const hasImg = /<img\b/i.test(html);
+    const payload = (textOnly || hasImg) ? html : null;
+    const r = await adminService.externalMailSettings.save(companyId, { signatureHtml: payload });
     setBusy(false);
     if (r.ok) {
       toast({ type: 'success', title: 'Şirket imza şablonu kaydedildi', message: '' });
-      setInitialHtml(html);
+      setInitialHtml(payload ?? '');
+      if (payload === null) setHtml('');
     } else {
       toast({ type: 'error', title: 'Kaydedilemedi', message: r.error });
     }
   }
 
   async function handleReset() {
-    if (!dirty) return;
+    if (!dirty || loadFailed) return;
     if (!confirm('Yapılan değişiklikler kaybolacak. Devam edilsin mi?')) return;
     setHtml(initialHtml);
   }
@@ -103,6 +130,23 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
       <CardBody>
         {loading ? (
           <p className="text-sm text-slate-400">Yükleniyor…</p>
+        ) : loadFailed ? (
+          // Codex P2 fix — load fail banner. Editor düzenleme dışı; save
+          // disable. Aksi halde transient hata mevcut şablonu siler.
+          <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-900/30 dark:text-rose-200">
+            <p className="mb-2 font-medium">Şablon yüklenemedi</p>
+            <p className="mb-3 text-xs">
+              Mevcut şirket imzanız okunamadı. Bu durumda kaydetmek mevcut
+              şablonu yanlışlıkla silebilir; önce yeniden yüklemeyi deneyin.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => loadTemplate()}
+            >
+              Tekrar Dene
+            </Button>
+          </div>
         ) : (
           <div className="space-y-3">
             <div className="rounded-md border border-slate-200 bg-slate-50 p-2 dark:border-ndark-border dark:bg-ndark-bg">
@@ -162,10 +206,10 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
             </div>
 
             <div className="flex items-center justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => void handleReset()} disabled={!dirty || busy}>
+              <Button type="button" variant="ghost" onClick={() => void handleReset()} disabled={!dirty || busy || loadFailed}>
                 Vazgeç
               </Button>
-              <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={!dirty || busy}>
+              <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={!dirty || busy || loadFailed}>
                 {busy ? 'Kaydediliyor…' : 'Kaydet'}
               </Button>
             </div>

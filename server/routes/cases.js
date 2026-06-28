@@ -2541,10 +2541,18 @@ router.get(
         if (person?.title) agentTitle = person.title;
       }
       const { renderTemplate } = await import('../db/notificationRepository.js');
-      const out = renderTemplate(tenantHtml, {
-        'agent.name': agentName,
-        'agent.title': agentTitle,
-      });
+      // Codex P2 fix — Person.name/title plain text saklanır (HTML değil).
+      // tenantHtml HTML context; placeholder values escape edilmeden
+      // interpolate edilirse "<b>Lead</b>" gibi bir title gerçek markup'a
+      // dönüşür (XSS surface). htmlEscape: true ZORUNLU.
+      const out = renderTemplate(
+        tenantHtml,
+        {
+          'agent.name': agentName,
+          'agent.title': agentTitle,
+        },
+        { htmlEscape: true },
+      );
       composedHtml = out.rendered || null;
     }
 
