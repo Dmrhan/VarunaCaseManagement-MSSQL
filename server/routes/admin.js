@@ -586,6 +586,40 @@ router.patch('/users/:id/system-role', asyncRoute(async (req, res) => {
   res.json(result);
 }));
 
+/**
+ * Compose-Signature F1 IA rework —
+ * PATCH /api/admin/users/:id/title  body: { title: string | null }
+ *
+ * Bağlı Person'ın title'ını günceller (mail imzasında {{agent.title}}
+ * placeholder render kaynağı). Person'ı olmayan user'larda 409.
+ *
+ * Guards:
+ *  - assertCompanyAdmin: hedef kullanıcının atandığı şirketlerden en az
+ *    BİRİNDE caller Admin/SystemAdmin olmalı. Person paylaşılan kaynak
+ *    olduğu için bu kontrol "kart yönetim yetkisi" semantiğini tutar.
+ *  - Empty string / null → title temizleme
+ */
+router.patch('/users/:id/title', asyncRoute(async (req, res) => {
+  const userId = req.params.id;
+  // Yetki: hedef kullanıcının şirketlerinden EN AZ BİRİNDE caller admin olmalı
+  // (SystemAdmin tümünü görür; assertCompanyAdmin SystemAdmin'i her zaman geçer).
+  const target = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { companies: { where: { isActive: true }, select: { companyId: true } } },
+  });
+  if (!target) throw new AdminError('Kullanıcı bulunamadı.', 404);
+  // En az bir company match → assertCompanyAdmin (M5-ext desen birebir)
+  const callerCompanyIds = (req.user.companyRoles ?? []).map((r) => r.companyId);
+  const isSystemAdmin = req.user.role === 'SystemAdmin';
+  const sharesCompany = isSystemAdmin
+    || target.companies.some((tc) => callerCompanyIds.includes(tc.companyId));
+  if (!sharesCompany) {
+    throw new AdminError('Bu kullanıcı için yetkin yok.', 403);
+  }
+  const result = await userRepo.setPersonTitle(userId, req.body?.title);
+  res.json(result);
+}));
+
 router.patch('/users/:id/reactivate', asyncRoute(async (req, res) => {
   const target = await userRepo.list(
     req.user.role === 'SystemAdmin' ? undefined : req.user.allowedCompanyIds,

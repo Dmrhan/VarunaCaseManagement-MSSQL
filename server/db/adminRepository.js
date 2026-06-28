@@ -783,6 +783,18 @@ export const userRepo = {
         },
       },
     });
+    // Compose-Signature F1 IA rework — bağlı Person'ların title'larını
+    // tek toplu query ile çek (schema'da User→Person @relation tanımlı
+    // değil; manual join). personId'si olmayan user'lar null kalır.
+    const personIds = users.map((u) => u.personId).filter(Boolean);
+    const persons = personIds.length
+      ? await prisma.person.findMany({
+          where: { id: { in: personIds } },
+          select: { id: true, title: true },
+        })
+      : [];
+    const titleByPersonId = new Map(persons.map((p) => [p.id, p.title]));
+
     return users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -790,6 +802,10 @@ export const userRepo = {
       role: u.role,
       isActive: u.isActive,
       personId: u.personId,
+      // Compose-Signature F1 IA rework — bağlı Person'ın unvanı (mail
+      // imzasında {{agent.title}} placeholder render kaynağı). Person
+      // yoksa null; UI bu durumda title edit'i disabled gösterir.
+      personTitle: u.personId ? (titleByPersonId.get(u.personId) ?? null) : null,
       assignments: u.companies.map((uc) => ({
         companyId: uc.companyId,
         companyName: uc.company.name,
@@ -1014,6 +1030,36 @@ export const userRepo = {
    * Frontend `app:unauthenticated` event'i ile oturumu yerel olarak kapatir.
    * UserCompany kayitlarinda dokunma yapmaz (kasitli — yetki cascaded fakat veri korunur).
    *
+   * Compose-Signature F1 IA rework — Kullanıcılar ekranından Person.title
+   * düzenleme. Person'ı olmayan user (SystemAdmin gibi) için 409 döner;
+   * route layer ve UI bu durumda field'ı disabled gösterir.
+   *
+   * Boş string / null → title temizleme semantiği (personRepo.update ile
+   * tutarlı).
+   */
+  async setPersonTitle(userId, title) {
+    if (!userId) throw new AdminError('userId gerekli.', 400);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { personId: true },
+    });
+    if (!user) throw new AdminError('Kullanıcı bulunamadı.', 404);
+    if (!user.personId) {
+      throw new AdminError(
+        'Bu kullanıcının kart sahibi bir Person kaydı yok (örn. SystemAdmin). Unvan düzenlenemez.',
+        409,
+      );
+    }
+    const trimmed = typeof title === 'string' && title.trim() ? title.trim() : null;
+    const person = await prisma.person.update({
+      where: { id: user.personId },
+      data: { title: trimmed },
+      select: { id: true, title: true },
+    });
+    return { personId: person.id, title: person.title };
+  },
+
+  /**
    * Guards:
    *  - Kendini pasiflestiremezsin
    *  - SystemAdmin kullanicilari Admin pasiflestiremez (sadece SystemAdmin)
