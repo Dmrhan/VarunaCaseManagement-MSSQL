@@ -39,6 +39,7 @@ import { randomUUID } from 'node:crypto';
 import { caseRepository } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
+import { emitEvent as emitNotificationEvent } from '../db/notificationRepository.js';
 import { saveObject } from '../db/storage.js';
 import { isAcceptedUpload } from './uploadWhitelist.js';
 import { sanitizeIncomingEmailHtml } from './htmlSanitizer.js';
@@ -722,6 +723,19 @@ export async function intakeInboundEmail({
   } catch {
     // Ek persistence fail → vaka yine açık. Mail düşürülmez.
   }
+
+  // M4.1 FAZ B — case_created event emission (Codex P1 fix konumu).
+  //
+  // Mail intake yeni vaka açtı (created) + customerMatch + linkAccount
+  // BİTTİ. Bu noktada Case.accountId ya set'li (linkAccount başarılı) ya
+  // da null (müşterisiz vaka — Supervisor sırasında). İkisi de OK:
+  //   - accountId set → requester resolver opt-out gate uygular
+  //   - accountId null → resolver email kullanır + opt-out skip
+  //                      (henüz tanımlı müşteri yok, makul)
+  //
+  // KARDEŞ DESEN: caseRepository.update'teki case_closed/reopened +
+  // status_changed emit'i (fire-and-forget void). Burada da aynı.
+  void emitNotificationEvent({ event: 'case_created', caseId: created.id });
 
   return {
     ok: true,

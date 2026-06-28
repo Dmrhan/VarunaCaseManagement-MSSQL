@@ -66,7 +66,8 @@
     "smoke:customer-match-augment": "node --env-file-if-exists=.env scripts/smoke-customer-match-augment.js",
     "smoke:m6-3b-pending": "node --env-file-if-exists=.env scripts/smoke-m6-3b-pending-reply-badge.js",
     "smoke:m6-3b-signature": "node --env-file-if-exists=.env scripts/smoke-m6-3b-user-signature.js",
-    "smoke:m6-3b-template": "node --env-file-if-exists=.env scripts/smoke-m6-3b-email-template.js"
+    "smoke:m6-3b-template": "node --env-file-if-exists=.env scripts/smoke-m6-3b-email-template.js",
+    "smoke:m4-1-customer-notif": "node --env-file-if-exists=.env scripts/smoke-m4-1-customer-notifications.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
