@@ -100,12 +100,6 @@ function getReviewProgress(review?: CaseTaggingReview | null): ReviewProgress {
   return { completedCount, totalCount, status, label };
 }
 
-const PROGRESS_FILTER_OPTIONS: { value: ReviewStatus | 'all'; label: string }[] = [
-  { value: 'all',          label: 'Tümü' },
-  { value: 'not_started',  label: 'Başlanmadı' },
-  { value: 'in_progress',  label: 'Devam ediyor' },
-  { value: 'completed',    label: 'Tamamlandı' },
-];
 
 function ProgressCell({ progress }: { progress: ReviewProgress }) {
   const { completedCount, totalCount, status, label } = progress;
@@ -457,7 +451,6 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
-  const [progressFilter, setProgressFilter] = useState<ReviewStatus | 'all'>('all');
   const pageSize = 25;
 
   const teams = lookupService.teams();
@@ -627,14 +620,6 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const displayItems = progressFilter === 'all'
-    ? items
-    : items.filter((c) => getReviewProgress(reviews.get(c.id)).status === progressFilter);
-
-  // Doğrulama filtresi aktifken sayfalama displayItems'a göre hesaplanır.
-  const effectiveTotal      = progressFilter === 'all' ? total : displayItems.length;
-  const effectiveTotalPages = progressFilter === 'all' ? totalPages : Math.max(1, Math.ceil(displayItems.length / pageSize));
-
   const modalCase   = modalCaseId ? items.find((c) => c.id === modalCaseId) : undefined;
   const modalDraft  = modalCaseId ? (drafts.get(modalCaseId) ?? draftFromReview(reviews.get(modalCaseId))) : undefined;
   const modalReview = modalCaseId ? reviews.get(modalCaseId) : undefined;
@@ -688,45 +673,25 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         </div>
       </div>
 
-      {/* Statü + Doğrulama filtreleri */}
+      {/* Statü filtreleri */}
       <Card>
         <CardBody>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
-              {CASE_STATUSES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleStatus(s)}
-                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                    statuses.includes(s)
-                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
-                  }`}
-                >
-                  {STATUS_LABELS_SHORT[s]}
-                </button>
-              ))}
-            </div>
-            <div className="h-4 w-px bg-slate-200 dark:bg-ndark-border" />
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Doğrulama:</span>
-              {PROGRESS_FILTER_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => { setProgressFilter(opt.value); setPage(1); }}
-                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                    progressFilter === opt.value
-                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
+            {CASE_STATUSES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleStatus(s)}
+                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                  statuses.includes(s)
+                    ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
+                }`}
+              >
+                {STATUS_LABELS_SHORT[s]}
+              </button>
+            ))}
           </div>
         </CardBody>
       </Card>
@@ -754,7 +719,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           </div>
         )}
 
-        {!loading && displayItems.map((c) => {
+        {!loading && items.map((c) => {
           const review  = reviews.get(c.id);
           const progress = getReviewProgress(review);
           const actionLabel =
@@ -858,27 +823,24 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
       {/* Sayfalama */}
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-ndark-muted">
-        <span>
-          {effectiveTotal} vaka
-          {progressFilter !== 'all' && <span className="ml-1 text-slate-400">(bu sayfada)</span>}
-        </span>
+        <span>{total} vaka</span>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="outline"
             leftIcon={<ChevronLeft size={12} />}
-            disabled={page <= 1 || loading || progressFilter !== 'all'}
+            disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             Önceki
           </Button>
-          <span>Sayfa <strong>{page}</strong> / {effectiveTotalPages}</span>
+          <span>Sayfa <strong>{page}</strong> / {totalPages}</span>
           <Button
             size="sm"
             variant="outline"
             rightIcon={<ChevronRight size={12} />}
-            disabled={page >= effectiveTotalPages || loading || progressFilter !== 'all'}
-            onClick={() => setPage((p) => Math.min(effectiveTotalPages, p + 1))}
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
             Sonraki
           </Button>
