@@ -107,7 +107,7 @@ import {
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { featureFlags } from '@/config/featureFlags';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative, formatRemaining } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
   CALL_OUTCOMES,
@@ -1570,7 +1570,7 @@ function LeftPanel({
                 </div>
               ) : (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Yanıta {formatRelative(item.slaResponseDueAt)}
+                  Yanıta {formatRemaining(item.slaResponseDueAt)}
                 </div>
               )
             )}
@@ -1587,7 +1587,7 @@ function LeftPanel({
                 </div>
               ) : item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !item.slaPausedAt ? (
                 <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
-                  Çözüme {formatRelative(item.slaResolutionDueAt)}
+                  Çözüme {formatRemaining(item.slaResolutionDueAt)}
                 </div>
               ) : null
             )}
