@@ -169,6 +169,45 @@ async function setup() {
       authGuard('Admin', [{ companyId: 'OTHER', role: 'Admin' }], [COMP]).ok, false);
     expect('caller companyRoles boş → BLOCK',
       authGuard('Admin', [], [COMP]).ok, false);
+
+    console.log('\n=== (8) Codex P2 round 2 — body validation (missing key) ===');
+    // Route-level validation mantığını simüle:
+    //   - title key yok → 400
+    //   - title null → OK (explicit clear)
+    //   - title string → OK
+    //   - title number/object → 400 (type guard)
+    function validateBody(body) {
+      const b = body ?? {};
+      if (!Object.prototype.hasOwnProperty.call(b, 'title')) {
+        return { ok: false, code: 'missing_title', status: 400 };
+      }
+      const title = b.title;
+      if (title !== null && typeof title !== 'string') {
+        return { ok: false, code: 'invalid_title_type', status: 400 };
+      }
+      return { ok: true, title };
+    }
+
+    expect('body={} (missing key) → 400',
+      validateBody({}).code, 'missing_title');
+    expect('body undefined (missing key) → 400',
+      validateBody(undefined).code, 'missing_title');
+    expect('body={title: null} (explicit clear) → OK',
+      validateBody({ title: null }).ok, true);
+    expect('body={title: "x"} → OK',
+      validateBody({ title: 'x' }).ok, true);
+    expect('body={title: ""} → OK (repo null normalize)',
+      validateBody({ title: '' }).ok, true);
+    expect('body={title: 123} (number) → 400',
+      validateBody({ title: 123 }).code, 'invalid_title_type');
+    expect('body={title: {}} (object) → 400',
+      validateBody({ title: {} }).code, 'invalid_title_type');
+    // body={title: undefined} JS obje düzeyinde: hasOwn=true ama type guard
+    // undefined'i string/null değil sayar → invalid_title_type döner.
+    // (Gerçek HTTP'de JSON serialize undefined'i düşürür → server'a {}
+    // ulaşır → missing_title döner. İki kontrol da 400.)
+    expect('body={title: undefined} → 400 (invalid type)',
+      validateBody({ title: undefined }).code, 'invalid_title_type');
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

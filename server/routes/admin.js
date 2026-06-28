@@ -602,6 +602,20 @@ router.patch('/users/:id/system-role', asyncRoute(async (req, res) => {
  */
 router.patch('/users/:id/title', asyncRoute(async (req, res) => {
   const userId = req.params.id;
+  // Codex P2 round 2 fix — body validation SIDE-EFFECT'TEN ÖNCE.
+  // Önceki kontrol `req.body?.title` undefined olduğunda setPersonTitle'ı
+  // çağırıyordu; repo normalize non-string/empty'i null'a düşürdüğü için
+  // `{}` body sessizce title'ı SİLİYORDU. Explicit clear semantiği
+  // null OLMALI; missing key 400 dönmeli.
+  const body = req.body ?? {};
+  if (!Object.prototype.hasOwnProperty.call(body, 'title')) {
+    throw new AdminError('title alanı gerekli (string veya null).', 400);
+  }
+  const title = body.title;
+  if (title !== null && typeof title !== 'string') {
+    throw new AdminError('title string veya null olmalı.', 400);
+  }
+
   // Codex P1 fix — prisma modül-level import (üst kısımda). Önceki
   // sürümde dynamic import yoktu → ReferenceError fırlatıyordu.
   const target = await prisma.user.findUnique({
@@ -625,7 +639,7 @@ router.patch('/users/:id/title', asyncRoute(async (req, res) => {
       throw new AdminError('Bu kullanıcı için admin yetkin yok.', 403);
     }
   }
-  const result = await userRepo.setPersonTitle(userId, req.body?.title);
+  const result = await userRepo.setPersonTitle(userId, title);
   res.json(result);
 }));
 
