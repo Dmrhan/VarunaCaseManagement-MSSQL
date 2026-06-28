@@ -117,6 +117,30 @@ async function setup() {
 
     const noBody = await caseEmailTemplateRepo.upsert(TENANT_A, { name: 'X', bodyHtml: '' });
     expect('body boş → body_required', noBody.code, 'body_required');
+
+    console.log('\n=== (6) HTML escape — Codex P2 fix (placeholder XSS) ===');
+    // BodyHtml placeholder ESCAPE OLMALI — case/contact alanları HTML
+    // içerebilir; aksi halde composer'a gerçek markup girer.
+    const malicious = renderTemplate(
+      { subject: '{{case.title}}', bodyHtml: '<p>Sayın {{requester.name}},</p>' },
+      {
+        caseNumber: 'VK-XSS',
+        title: '<script>alert(1)</script>',
+        accountName: 'Acme',
+        customerContactName: '<a href="evil">Click</a>',
+        customerContactEmail: 'a@b.com',
+      },
+      { fullName: 'Agent' },
+    );
+    // Subject text-only — escape YOK (subject input plain text):
+    expect('subject text-only (escape yok)', malicious.subject, '<script>alert(1)</script>');
+    // Body HTML — escape VAR (composer TipTap context):
+    expectTruthy('body XSS escape (markup düz string)',
+      malicious.bodyHtml.includes('&lt;a href=&quot;evil&quot;&gt;Click&lt;/a&gt;'));
+    expectTruthy('body raw <a> YOK',
+      !malicious.bodyHtml.includes('<a href="evil">'));
+    expectTruthy('body raw <script> YOK (case.title body\'de değil ama check)',
+      !malicious.bodyHtml.includes('<script>'));
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);

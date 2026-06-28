@@ -202,6 +202,7 @@ export function MailComposer({
     if (oldSig === newSig) return; // ilk render veya aynı seçim
     setBodyHtml((cur) => {
       let next = cur;
+      let newSigInsertHandled = false;
       if (oldSig) {
         // 1) Sonu imzayla bitiyor mu? (forward + quoted YOK durumu)
         if (next.endsWith(oldSig)) {
@@ -211,6 +212,19 @@ export function MailComposer({
           const prefix = `<p></p>${oldSig}`;
           if (next.startsWith(prefix)) {
             next = '<p></p>' + next.slice(prefix.length);
+          } else if (next.includes(oldSig)) {
+            // 3) Codex P2 fix — Template insert sonrası imza ortada
+            //    kalabiliyor (insertTemplateBody template'i imzanın
+            //    ÖNCESİNE ekler):
+            //      `<p></p>TEMPLATEoldSig` veya
+            //      `<p></p>TEMPLATEoldSigQUOTED`
+            //    İmzanın ilk occurrence'ını strip + aynı pozisyona yeni
+            //    imzayı koy. Quote'a dokunmadan.
+            const i = next.indexOf(oldSig);
+            const before = next.slice(0, i);
+            const after = next.slice(i + oldSig.length);
+            next = before + (newSig ?? '') + after;
+            newSigInsertHandled = true;
           } else {
             // Agent body'yi çok değiştirdi — silent skip.
             currentSignatureHtmlRef.current = newSig;
@@ -218,7 +232,7 @@ export function MailComposer({
           }
         }
       }
-      if (newSig) {
+      if (newSig && !newSigInsertHandled) {
         // forward bağlamı varsa quoted body'nin BAŞINA imza enjekte et.
         const quoted = initialForwardContext?.quotedBodyHtml ?? '';
         if (quoted && next.endsWith(quoted)) {
@@ -283,9 +297,7 @@ export function MailComposer({
   }, [item.id]);
 
   // Template seçimi: render + insert.
-  // Codex P2 fix — missing placeholder VAR ise agent'a uyarı modalı
-  // (bilinmeyen {{var}} → boş render → agent farkında olmadan eksik
-  // değişkenle mail gönderebilirdi).
+  // Codex P2 fix — missing placeholder VAR ise agent'a uyarı modalı.
   // Subject mevcut + farklı VAR ise replace confirm.
   // İki kondisyon birleşik modal'da gösterilir.
   async function applyTemplate(templateId: string) {
@@ -310,13 +322,43 @@ export function MailComposer({
       }
       // Doğrudan uygula.
       if (hasSubject) setSubject(rendered.subject!);
-      // Body insert — cursor pozisyonu yerine basit append (TipTap state
-      // composer'ın internal'ında; v1 append; v2 cursor için TipTap
-      // editor ref gerek).
-      setBodyHtml((cur) => cur + rendered.bodyHtml);
+      insertTemplateBody(rendered.bodyHtml);
     } finally {
       setTemplateBusy(false);
     }
+  }
+
+  // Codex P2 fix — Template insert pozisyonu.
+  //
+  // Eskiden `cur + rendered.bodyHtml` ile en sona ekleniyordu. Composer
+  // baseline body'sinin formu:
+  //   `<p></p>${signatureHtml}${quotedBodyHtml}`
+  // İmza ve/veya forward quote VAR iken sona eklemek:
+  //   `<p></p>` + imza + quote + TEMPLATE ← yanlış sıra; agent mailin
+  //   sonunda template, üstünde imza ve forward quote görür.
+  //
+  // Doğru sıralama (n4b parite / Gmail):
+  //   TEMPLATE → İMZA → QUOTE
+  //
+  // Strateji: cur içinde signature ve/veya quote izini ara, onların
+  // ÖNCESİNE inject et. Hiçbiri yoksa (kullanıcı tüm baseline'ı silmişse)
+  // sona append.
+  function insertTemplateBody(bodyHtml: string) {
+    setBodyHtml((cur) => {
+      const sig = currentSignatureHtmlRef.current ?? '';
+      const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+      // 1. Önce signature varsa onun başlangıcını bul
+      if (sig && cur.includes(sig)) {
+        const i = cur.indexOf(sig);
+        return cur.slice(0, i) + bodyHtml + cur.slice(i);
+      }
+      // 2. Signature yoksa ama forward quote varsa onun başlangıcını bul
+      if (quoted && cur.endsWith(quoted)) {
+        return cur.slice(0, cur.length - quoted.length) + bodyHtml + quoted;
+      }
+      // 3. Hiçbiri yok → sona append (kullanıcı baseline'ı silmiş; v1)
+      return cur + bodyHtml;
+    });
   }
 
   function confirmTemplate(replaceSubject: boolean) {
@@ -324,7 +366,7 @@ export function MailComposer({
     if (replaceSubject && pendingTemplate.subject) {
       setSubject(pendingTemplate.subject);
     }
-    setBodyHtml((cur) => cur + pendingTemplate.bodyHtml);
+    insertTemplateBody(pendingTemplate.bodyHtml);
     setPendingTemplate(null);
   }
 
