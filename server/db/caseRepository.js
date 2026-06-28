@@ -1124,6 +1124,7 @@ export const caseRepository = {
       caseNumber:  'caseNumber',
       title:       'title',
       accountName: 'accountName',
+      companyName: 'companyName',
       assignment:  'assignedPersonName',
       priority:    'priority',
       status:      'status',

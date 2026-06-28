@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, ChevronLeft, ChevronRight, Eye, Filter, Loader2, ShieldCheck, Tag } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Filter, Loader2, ShieldCheck, Tag } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -30,6 +30,9 @@ const STATUS_LABELS_SHORT: Record<CaseStatus, string> = {
   'YenidenAcildi': 'Yeniden',
   'İptalEdildi': 'İptal',
 };
+
+type TaggingSortKey = 'caseNumber' | 'status' | 'createdAt' | 'accountName' | 'companyName' | 'updatedAt';
+type SortDir = 'asc' | 'desc';
 
 const VERDICT_LABELS: Record<TaggingVerdict, string> = {
   Dogru: 'Doğru',
@@ -451,7 +454,19 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
+  const [sortKey, setSortKey]   = useState<TaggingSortKey>('createdAt');
+  const [sortDir, setSortDir]   = useState<SortDir>('desc');
   const pageSize = 25;
+
+  function toggleSort(key: TaggingSortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'createdAt' || key === 'updatedAt' ? 'desc' : 'asc');
+    }
+    setPage(1);
+  }
 
   const teams = lookupService.teams();
 
@@ -478,6 +493,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         teamId: teamId || undefined,
       },
       { page: pageOverride ?? page, pageSize },
+      { sortBy: sortKey, sortDir },
     );
     setItems(result.items);
     setTotal(result.total);
@@ -544,7 +560,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   useEffect(() => {
     void fetchPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, sortKey, sortDir]);
 
   useEffect(() => {
     const missing = Array.from(new Set(items.map((c) => c.companyId))).filter((id) => !taxonomiesByCompany.has(id));
@@ -700,7 +716,12 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
         <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_120px_130px_110px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
-          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'İlerleme', 'Kontrol Eden', ''].map((h) => (
+          <SortableTh label="Vaka No"     sk="caseNumber"  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          <SortableTh label="Statü"       sk="status"      sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          <SortableTh label="Vaka Açılış" sk="createdAt"   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          <SortableTh label="Müşteri"     sk="accountName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          <SortableTh label="Şirket"      sk="companyName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+          {['Açıklama', 'Çözüm Notu', 'İlerleme', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
             </div>
@@ -859,6 +880,35 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           onSave={() => saveRow(modalCase.id)}
           onClose={() => setModalCaseId(null)}
         />
+      )}
+    </div>
+  );
+}
+
+function SortableTh({
+  label, sk, sortKey, sortDir, onSort,
+}: {
+  label: string;
+  sk: TaggingSortKey;
+  sortKey: TaggingSortKey;
+  sortDir: SortDir;
+  onSort: (key: TaggingSortKey) => void;
+}) {
+  const isActive = sortKey === sk;
+  return (
+    <div
+      onClick={() => onSort(sk)}
+      className={`group flex cursor-pointer select-none items-center gap-1 px-3 py-2 text-xs font-medium uppercase tracking-wide transition-colors ${
+        isActive ? 'text-brand-700' : 'text-slate-500 hover:text-slate-700 dark:text-ndark-muted'
+      }`}
+    >
+      <span>{label}</span>
+      {isActive ? (
+        sortDir === 'asc'
+          ? <ArrowUp size={10} className="text-brand-600" />
+          : <ArrowDown size={10} className="text-brand-600" />
+      ) : (
+        <ArrowUpDown size={10} className="text-slate-300 group-hover:text-slate-400" />
       )}
     </div>
   );

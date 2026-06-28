@@ -764,10 +764,16 @@ router.get(
     const safePage = Math.max(1, Number(f.page) || 1);
     const pagination = { page: safePage, pageSize: safePageSize };
 
+    const ALLOWED_SORT = ['caseNumber','status','createdAt','accountName','companyName','updatedAt'];
+    const sortBy  = ALLOWED_SORT.includes(f.sortBy) ? f.sortBy : 'createdAt';
+    const sortDir = f.sortDir === 'asc' ? 'asc' : 'desc';
+
     const securityWhere = await buildCaseListSecurityWhere(req);
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
+      sortBy,
+      sortDir,
       allowedCompanyIds: req.user.allowedCompanyIds,
       securityWhere,
     });
