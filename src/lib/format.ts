@@ -14,6 +14,18 @@ export function formatDateTime(iso?: string): string {
   }
 }
 
+/** Gelecekteki bir deadline için "N gün kaldı" / "N sa kaldı" / "N dk kaldı" döner. */
+export function formatRemaining(iso?: string): string {
+  if (!iso) return '—';
+  const diffMs = new Date(iso).getTime() - Date.now();
+  if (diffMs <= 0) return 'süre doldu';
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 60) return `${minutes} dk kaldı`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} sa kaldı`;
+  return `${Math.round(hours / 24)} gün kaldı`;
+}
+
 export function formatRelative(iso?: string): string {
   if (!iso) return '—';
   const d = new Date(iso).getTime();

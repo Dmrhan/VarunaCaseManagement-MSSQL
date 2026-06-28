@@ -321,15 +321,15 @@ function SlaEditModal({
           setForm({
             companyId: p.companyId,
             companyName: p.companyName,
-            productGroup: p.productGroup,
-            categoryName: p.categoryName,
-            subCategoryName: p.subCategoryName,
-            requestType: p.requestType,
-            priority: p.priority,
+            productGroup: (p.productGroup as string | null) ?? '',
+            categoryName: (p.categoryName as string | null) ?? '',
+            subCategoryName: (p.subCategoryName as string | null) ?? '',
+            requestType: p.requestType ?? 'Talep',
             responseHours: p.responseHours,
             resolutionHours: p.resolutionHours,
             description: p.description ?? '',
             isActive: p.isActive,
+            priority: p.priority ?? null,
           });
         }
       } else {
@@ -367,9 +367,9 @@ function SlaEditModal({
     setError(null);
     const trimmed: SlaPolicyInput = {
       ...form,
-      productGroup: form.productGroup?.trim() || null,
-      categoryName: form.categoryName?.trim() || null,
-      subCategoryName: form.subCategoryName?.trim() || null,
+      productGroup: (form.productGroup ?? '').trim(),
+      categoryName: (form.categoryName ?? '').trim(),
+      subCategoryName: (form.subCategoryName ?? '').trim(),
       description: form.description?.trim() || undefined,
     };
 
@@ -401,6 +401,9 @@ function SlaEditModal({
 
   const canSubmit =
     !!form.companyId &&
+    !!(form.productGroup ?? '').trim() &&
+    !!(form.categoryName ?? '').trim() &&
+    !!(form.subCategoryName ?? '').trim() &&
     form.responseHours > 0 &&
     form.resolutionHours > 0 &&
     !submitting;
