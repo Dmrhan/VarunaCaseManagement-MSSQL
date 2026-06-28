@@ -118,11 +118,17 @@ export function MailComposer({
   const [signatureSelection, setSignatureSelection] = useState<'agent' | 'tenant' | 'none'>(
     initialSignatureChoice,
   );
+  // Seçimden HTML'e map — initial + dropdown değişimi için.
+  const resolveSignatureHtml = (sel: 'agent' | 'tenant' | 'none'): string | null => {
+    if (sel === 'agent') return agentHtml;
+    if (sel === 'tenant') return tenantHtml;
+    return null;
+  };
   // initial baseline body için seçili imzanın HTML'i.
-  const initialSelectedSignatureHtml =
-    initialSignatureChoice === 'agent' ? agentHtml
-    : initialSignatureChoice === 'tenant' ? tenantHtml
-    : null;
+  const initialSelectedSignatureHtml = resolveSignatureHtml(initialSignatureChoice);
+  // Codex P2 fix — body'de o an "etkin" imzayı takip et. Dropdown değişiminde
+  // body'deki ESKİ imzayı yeni seçimle SWAP edebilelim diye ref'te tut.
+  const currentSignatureHtmlRef = useRef<string | null>(initialSelectedSignatureHtml);
   const [subject, setSubject] = useState<string>(
     initialReplyContext?.subject ?? initialForwardContext?.subject ?? '',
   );
@@ -165,6 +171,51 @@ export function MailComposer({
       return cur;
     });
   }, [initialSelectedSignatureHtml, initialForwardContext]);
+
+  // Codex P2 fix — Dropdown değişimi: body'deki ESKİ imzayı yeni seçimle
+  // SWAP et. Aksi halde agent "İmzasız" seçse bile başlangıç imzası
+  // gönderilirdi (select sadece UI state'iydi).
+  //
+  // Strateji: body bir önceki etkin imza ile bitiyorsa (forward case'inde
+  // imzanın altına quoted eklenir; bu durumda quoted'tan ÖNCEKİ kısımda
+  // imza var) — basitlik için kontrol body'nin "<p></p>${oldSig}" prefix'i
+  // veya endsWith(oldSig) durumunu sırayla dener. Bulamazsa (agent body'yi
+  // yoğun değiştirdiyse) silent skip — agent isterse manuel düzenler.
+  useEffect(() => {
+    const oldSig = currentSignatureHtmlRef.current;
+    const newSig = resolveSignatureHtml(signatureSelection);
+    if (oldSig === newSig) return; // ilk render veya aynı seçim
+    setBodyHtml((cur) => {
+      let next = cur;
+      if (oldSig) {
+        // 1) Sonu imzayla bitiyor mu? (forward + quoted YOK durumu)
+        if (next.endsWith(oldSig)) {
+          next = next.slice(0, -oldSig.length);
+        } else {
+          // 2) `<p></p>${oldSig}${rest}` paterni (forward + quoted VAR)
+          const prefix = `<p></p>${oldSig}`;
+          if (next.startsWith(prefix)) {
+            next = '<p></p>' + next.slice(prefix.length);
+          } else {
+            // Agent body'yi çok değiştirdi — silent skip.
+            currentSignatureHtmlRef.current = newSig;
+            return cur;
+          }
+        }
+      }
+      if (newSig) {
+        // forward bağlamı varsa quoted body'nin BAŞINA imza enjekte et.
+        const quoted = initialForwardContext?.quotedBodyHtml ?? '';
+        if (quoted && next.endsWith(quoted)) {
+          next = next.slice(0, -quoted.length) + newSig + quoted;
+        } else {
+          next = next + newSig;
+        }
+      }
+      currentSignatureHtmlRef.current = newSig;
+      return next;
+    });
+  }, [signatureSelection, agentHtml, tenantHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
