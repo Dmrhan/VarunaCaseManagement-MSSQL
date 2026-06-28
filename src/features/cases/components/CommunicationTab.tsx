@@ -169,15 +169,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
               }`}
               aria-current={isActive ? 'page' : undefined}
               aria-label={c.enabled ? c.label : `${c.label} (yakında)`}
-              title={c.enabled ? c.label : `${c.label} — yakında`}
+              // Polish — inline "Yakında" badge KALDIRILDI; bilgi
+              // tooltip'te (title) korunur. Pasif sekmeler muted + disabled
+              // (zaten cursor-not-allowed) görsel olarak yeterince ayrışır.
+              title={c.enabled ? c.label : `${c.label} — Yakında`}
             >
               {c.icon}
               <span>{c.label}</span>
-              {!c.enabled && (
-                <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-px text-[9px] uppercase tracking-wide text-slate-500 dark:bg-ndark-card dark:text-ndark-muted">
-                  Yakında
-                </span>
-              )}
             </button>
           );
         })}

@@ -62,11 +62,12 @@ export const MailThread = forwardRef<MailThreadHandle, Props>(function MailThrea
   }
 
   if (!items || items.length === 0) {
+    // Polish — sade empty state. Tablo iskeleti yerine ortalı temiz mesaj.
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-ndark-border dark:bg-ndark-card">
-        <Inbox size={24} className="text-slate-400" aria-hidden="true" />
-        <p className="text-sm text-slate-600 dark:text-ndark-muted">
-          Bu vakaya henüz e-posta gelmedi ya da gönderilmedi.
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 py-12 text-center dark:border-ndark-border dark:bg-ndark-card">
+        <Inbox size={28} className="text-slate-400" aria-hidden="true" />
+        <p className="text-sm font-medium text-slate-600 dark:text-ndark-muted">
+          Henüz e-posta yok
         </p>
       </div>
     );
