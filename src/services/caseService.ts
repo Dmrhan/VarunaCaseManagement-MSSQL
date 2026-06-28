@@ -408,6 +408,10 @@ export const caseService = {
     if (filters?.customerMatchPending !== undefined) {
       params.set('customerMatchPending', String(filters.customerMatchPending));
     }
+    // M6.3b Faz 1 — "Yanıt bekliyor" filtresi (tüm roller).
+    if (filters?.pendingCustomerReply !== undefined) {
+      params.set('pendingCustomerReply', String(filters.pendingCustomerReply));
+    }
     // KPI tile click intents — server-side resolve edilir.
     if (filters?.assignedToMe) params.set('assignedToMe', 'true');
     if (filters?.teamScope) params.set('teamScope', 'true');

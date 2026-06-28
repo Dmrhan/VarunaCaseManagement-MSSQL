@@ -499,6 +499,12 @@ router.get(
       if (sup?.teamId) teamId = sup.teamId;
     }
 
+    // M6.3b Faz 1 — "Yanıt bekliyor" filtresi (tüm roller; pendingCustomerReply
+    // K4 türetilmiş state, sızıntı yok).
+    let pendingCustomerReply;
+    if (f.pendingCustomerReply === 'true') pendingCustomerReply = true;
+    else if (f.pendingCustomerReply === 'false') pendingCustomerReply = false;
+
     const filters = {
       search: f.search,
       statuses: f.statuses ? f.statuses.split(',') : undefined,
@@ -509,6 +515,7 @@ router.get(
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
       customerMatchPending,
+      pendingCustomerReply,
       slaViolation: f.slaViolation === 'true' ? true : undefined,
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
       // WR-A4 — Proje filtresi.
