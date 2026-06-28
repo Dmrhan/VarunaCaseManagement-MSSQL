@@ -3628,7 +3628,7 @@ function DetailTab({
           const assignedPersonName = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
 
           const primaryAssignmentItems = [
-            { label: 'Eskalasyon', icon: AlertTriangle, node: (
+            ...(item.status === 'Eskalasyon' ? [{ label: 'Eskalasyon', icon: AlertTriangle, node: (
               <InlineEdit
                 fieldKey="escalationLevel"
                 type="select"
@@ -3638,14 +3638,14 @@ function DetailTab({
                 onStart={() => onStartEdit('escalationLevel')}
                 onCommit={(val) => onCommitDraft('escalationLevel', val)}
                 onCancel={onCancelEdit}
-                options={ESCALATION_LEVELS.map((l) => ({ value: l, label: ESCALATION_LEVEL_LABELS[l] }))}
+                options={ESCALATION_LEVELS.filter((l) => l !== 'Yok').map((l) => ({ value: l, label: ESCALATION_LEVEL_LABELS[l] }))}
                 renderDisplay={() => (
                   <span className="text-sm text-slate-800">
                     {ESCALATION_LEVEL_LABELS[(drafts.escalationLevel as EscalationLevel | undefined) ?? item.escalationLevel]}
                   </span>
                 )}
               />
-            )},
+            )}] : []),
             { label: 'Vaka Sahibi', icon: UserCheck, node: (
               <span className="block cursor-default text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
             )},

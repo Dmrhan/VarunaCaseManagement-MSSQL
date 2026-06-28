@@ -1500,6 +1500,14 @@ export const caseRepository = {
     const before = await prisma.case.findUnique({ where: { id } });
     if (!before) return null;
 
+    // Eskalasyon seviyesi yalnızca vaka "Eskalasyon" statüsündeyken değiştirilebilir.
+    if ('escalationLevel' in patch && before.status !== 'Eskalasyon') {
+      throw new CaseValidationError(
+        'Eskalasyon seviyesi yalnızca vaka "Eskalasyon" statüsündeyken değiştirilebilir.',
+        { status: 400, code: 'escalation_level_immutable' },
+      );
+    }
+
     // Vaka adı (title) edit guard'ı — yetki + statü + length.
     //   Yetki: assignedPersonId === actorPersonId  OR  role ∈ Supervisor/Admin/SystemAdmin
     //   Statü: sadece açık vakalarda (Cozuldu/IptalEdildi'de yasak)
@@ -3302,8 +3310,11 @@ export const caseRepository = {
     }
 
     const enteringEscalation = dbNext === 'Eskalasyon';
+    const leavingEscalation  = prev.status === 'Eskalasyon' && !enteringEscalation;
     const newEscalationLevel = enteringEscalation
       ? toDb({ escalationLevel: payload.escalationLevel }).escalationLevel ?? prev.escalationLevel
+      : leavingEscalation
+      ? 'Yok'
       : prev.escalationLevel;
 
     // PR-5 follow-up — actorObject pass'lendiyse actorUserId stamp, yoksa NULL.
