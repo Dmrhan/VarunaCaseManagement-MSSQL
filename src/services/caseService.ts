@@ -444,6 +444,7 @@ export const caseService = {
   async listTaggingReviews(
     filters?: { dateFrom?: string; dateTo?: string; statuses?: CaseStatus[]; teamId?: string },
     pagination?: CaseListPagination,
+    sort?: { sortBy?: string; sortDir?: 'asc' | 'desc' },
   ): Promise<{ items: Case[]; total: number; reviews: Map<string, CaseTaggingReview> }> {
     if (USE_MOCK) {
       return { items: [], total: 0, reviews: new Map() };
@@ -457,6 +458,8 @@ export const caseService = {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));
     }
+    if (sort?.sortBy) params.set('sortBy', sort.sortBy);
+    if (sort?.sortDir) params.set('sortDir', sort.sortDir);
     const data = await apiFetch<{
       value: Case[];
       '@odata.count': number;
