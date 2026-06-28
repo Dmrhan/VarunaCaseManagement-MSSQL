@@ -1289,11 +1289,12 @@ export function SmartTicketNewPage({
       const priorityChanged = transferPriority !== createdCase.priority;
       let updated: Case | null | undefined;
       if (isSameTeam) {
-        // Aynı takım içi kişi değişimi — update endpoint kullan
+        // Aynı takım: kişi seçildiyse belirli kişiye, boşsa havuza ata.
+        // transferCase değil update kullan — backend same_team guard var.
         const targetPerson = transferPersonOptions.find((p) => p.id === transferToPersonId);
         updated = await caseService.update(createdCase.id, {
-          assignedPersonId: transferToPersonId,
-          assignedPersonName: targetPerson?.name ?? '',
+          assignedPersonId: transferToPersonId || null,
+          assignedPersonName: targetPerson?.name ?? null,
         });
       } else {
         // Farklı takıma devir — mevcut transferCase akışı
@@ -2497,12 +2498,10 @@ function Stage3Transfer({
   // ve composedSummary fallback metin olarak gönderilir → L1 context kaybı.
   // Loading bitene kadar submit'i kilitle; success path'te composer ve
   // metadata dolu olarak gönderilir.
-  const isSameTeamForHint = transferToTeamId === createdCase?.assignedTeamId;
   const isSameTeam = transferToTeamId !== '' && transferToTeamId === createdCase?.assignedTeamId;
   const canSubmit =
     transferToTeamId !== '' &&
     transferNote.trim().length > 0 &&
-    !(isSameTeam && !transferToPersonId) &&
     !transferring &&
     !transferBriefLoading;
   const noTeamsAtAll = teamOptions.all.length === 0;
@@ -2587,9 +2586,7 @@ function Stage3Transfer({
                 ? 'Önce takım seç.'
                 : personOptions.length === 0
                   ? 'Bu takımın aktif kişi kaydı yok.'
-                  : isSameTeamForHint
-                    ? 'Aynı takım içinde aktarım için hedef kişi zorunludur.'
-                    : 'Boş bırakılırsa takıma genel atanır.'
+                  : 'Boş bırakılırsa takım havuzuna atanır.'
             }
           >
             <Select
