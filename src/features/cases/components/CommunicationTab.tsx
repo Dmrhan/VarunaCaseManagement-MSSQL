@@ -36,9 +36,17 @@ const CHANNELS: ChannelConfig[] = [
 
 interface Props {
   item: Case;
+  /**
+   * Codex P2 fix (M6.3b Faz 1) — Send sonrası parent Case yeniden
+   * çekilmeli. Backend appendOutbound K4 mantığını günceller
+   * (pendingCustomerReply=false yapar), ama header badge stale item'dan
+   * render edildiği için reload olmadan kaybolmaz. Parent caseService.get
+   * + setItem yapsın diye callback.
+   */
+  onCaseShouldRefresh?: () => void;
 }
 
-export function CommunicationTab({ item }: Props) {
+export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const [channel, setChannel] = useState<Channel>('email');
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
@@ -118,7 +126,12 @@ export function CommunicationTab({ item }: Props) {
     setReplyCtx(null);
     setForwardCtx(null);
     threadRef.current?.refresh({ scrollToLast: true });
-  }, []);
+    // Codex P2 fix (M6.3b Faz 1) — parent Case re-fetch:
+    // appendOutbound K4 pendingCustomerReply=false yapar; header
+    // badge (CaseDetailPage) stale item'dan render edildiği için
+    // reload olmadan kaybolmaz.
+    onCaseShouldRefresh?.();
+  }, [onCaseShouldRefresh]);
 
   const handleCancel = useCallback(() => {
     setComposerOpen(false);
