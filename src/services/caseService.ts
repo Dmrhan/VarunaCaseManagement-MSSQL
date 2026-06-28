@@ -116,8 +116,12 @@ function caseDetailCacheKey(id: string): string {
 /**
  * WR-H2 — Vaka mutation'larından sonra çağrılır. Hem case detail hem
  * customer-context (aynı id prefix'li tüm GET key'ler) drop'lanır.
+ *
+ * EXPORT: caseEmailService.sendEmail dahil cross-service mutation'lar
+ * stale cache'i invalidate edebilsin (M6.3b Faz 1 Codex P2 fix — send
+ * sonrası pendingCustomerReply badge stale kalıyordu).
  */
-function invalidateCaseDetail(id: string): void {
+export function invalidateCaseDetail(id: string): void {
   invalidateCachePrefix(caseDetailCacheKey(id));
 }
 
