@@ -5,6 +5,10 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Globe,
+  Mail,
+  MessageSquare,
+  Phone,
   ArrowUpDown,
   Check,
   CheckCircle2,
@@ -74,6 +78,15 @@ type QuickFilter = 'slaRisk' | 'resolvedToday' | null;
 // Kuyruk hızlı filtresi — tablo üstü chip'ler; mevcut filtrelerle birlikte çalışır,
 // client-side mevcut sayfa kapsamında uygular (server pagination korunur).
 type QuickQueueFilter = 'all' | 'unassigned' | 'critical';
+
+// Kaynak kolonu ikon + renk yapılandırması.
+const ORIGIN_CFG: Record<string, { icon: React.ReactNode; bg: string; color: string }> = {
+  'Telefon': { icon: <Phone   size={14} />, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-700 dark:text-emerald-400' },
+  'E-posta': { icon: <Mail    size={14} />, bg: 'bg-blue-100 dark:bg-blue-900/30',       color: 'text-blue-700 dark:text-blue-400' },
+  'Web':     { icon: <Globe   size={14} />, bg: 'bg-indigo-100 dark:bg-indigo-900/30',   color: 'text-indigo-700 dark:text-indigo-400' },
+  'Chatbot': { icon: <MessageSquare size={14} />, bg: 'bg-violet-100 dark:bg-violet-900/30', color: 'text-violet-700 dark:text-violet-400' },
+  'Diğer':   { icon: <Phone   size={14} />, bg: 'bg-slate-100 dark:bg-slate-800',        color: 'text-slate-500 dark:text-slate-400' },
+};
 
 // Sol kenar öncelik şeridi renkleri (3px border-l).
 const PRIORITY_STRIPE: Record<CasePriority, string> = {
@@ -1275,6 +1288,7 @@ export function CasesListPage({
                 <SortableTh label="Vaka No"        sortKey="caseNumber"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Başlık / Müşteri" sortKey="title"     currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Tip"            sortKey="caseType"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">Kaynak</th>
                 <SortableTh label="Statü"          sortKey="status"      currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Öncelik"        sortKey="priority"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Atama"          sortKey="assignment"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
@@ -1383,14 +1397,6 @@ export function CasesListPage({
                           📁 <span className="truncate">{c.accountProjectName}</span>
                         </span>
                       )}
-                      {c.origin && (
-                        <span
-                          className="mt-1 inline-flex w-fit items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-ndark-card dark:text-ndark-muted"
-                          title={c.originDescription ?? undefined}
-                        >
-                          {c.origin}
-                        </span>
-                      )}
                       {/* Phase D — Müşteri eşleştirilmemiş vakalar için amber rozet (tüm roller görür). */}
                       {c.customerMatchPending && (
                         <span
@@ -1414,6 +1420,20 @@ export function CasesListPage({
                     </Td>
                     <Td>
                       <CaseTypeBadge type={c.caseType} />
+                    </Td>
+                    <Td>
+                      {(() => {
+                        const cfg = ORIGIN_CFG[c.origin ?? ''];
+                        if (!cfg) return <span className="text-slate-400 dark:text-ndark-muted">—</span>;
+                        return (
+                          <span
+                            title={c.originDescription ?? c.origin}
+                            className={cn('inline-flex h-7 w-7 items-center justify-center rounded-full', cfg.bg, cfg.color)}
+                          >
+                            {cfg.icon}
+                          </span>
+                        );
+                      })()}
                     </Td>
                     <Td>
                       <StatusPill status={c.status} />
