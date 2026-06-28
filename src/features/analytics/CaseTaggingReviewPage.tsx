@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Loader2, ShieldCheck, Tag } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Eye, Filter, Loader2, ShieldCheck, Tag } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -72,6 +72,62 @@ function verdictField(def: TagDef): keyof CaseTaggingReview {
 
 function correctedCodeField(def: TagDef): keyof CaseTaggingReview {
   return `${tagKey(def)}CorrectedCode` as keyof CaseTaggingReview;
+}
+
+// ── İlerleme hesabı ─────────────────────────────────────────────────────────
+
+type ReviewStatus = 'not_started' | 'in_progress' | 'completed';
+
+interface ReviewProgress {
+  completedCount: number;
+  totalCount: number;
+  status: ReviewStatus;
+  label: string;
+}
+
+function getReviewProgress(review?: CaseTaggingReview | null): ReviewProgress {
+  const totalCount = TAG_DEFS.length; // 9
+  if (!review) return { completedCount: 0, totalCount, status: 'not_started', label: 'Başlanmadı' };
+  const completedCount = TAG_DEFS.filter(
+    (def) => !!(review[verdictField(def)] as string | null),
+  ).length;
+  const status: ReviewStatus =
+    completedCount === 0 ? 'not_started' :
+    completedCount === totalCount ? 'completed' : 'in_progress';
+  const label =
+    status === 'not_started' ? 'Başlanmadı' :
+    status === 'in_progress' ? 'Devam ediyor' : 'Tamamlandı';
+  return { completedCount, totalCount, status, label };
+}
+
+const PROGRESS_FILTER_OPTIONS: { value: ReviewStatus | 'all'; label: string }[] = [
+  { value: 'all',          label: 'Tümü' },
+  { value: 'not_started',  label: 'Başlanmadı' },
+  { value: 'in_progress',  label: 'Devam ediyor' },
+  { value: 'completed',    label: 'Tamamlandı' },
+];
+
+function ProgressCell({ progress }: { progress: ReviewProgress }) {
+  const { completedCount, totalCount, status, label } = progress;
+  const pct = Math.round((completedCount / totalCount) * 100);
+  const badgeClass =
+    status === 'completed' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
+    status === 'in_progress' ? 'bg-amber-50 text-amber-700 ring-amber-200' :
+    'bg-slate-50 text-slate-500 ring-slate-200';
+  const barClass =
+    status === 'completed' ? 'bg-emerald-500' :
+    status === 'in_progress' ? 'bg-amber-400' : 'bg-slate-200';
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="font-mono text-xs text-slate-700">{completedCount}/{totalCount}</span>
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ${badgeClass}`}>{label}</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-ndark-border">
+        <div className={`h-1.5 rounded-full transition-all ${barClass}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
 function originalLabel(c: Case, def: TagDef): string | null {
@@ -401,6 +457,7 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
   const [statuses, setStatuses] = useState<CaseStatus[]>(() => loadSavedFilters()?.statuses ?? ['Çözüldü']);
   const [teamId, setTeamId]     = useState(() => loadSavedFilters()?.teamId ?? '');
   const [page, setPage]         = useState(1);
+  const [progressFilter, setProgressFilter] = useState<ReviewStatus | 'all'>('all');
   const pageSize = 25;
 
   const teams = lookupService.teams();
@@ -570,6 +627,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  const displayItems = progressFilter === 'all'
+    ? items
+    : items.filter((c) => getReviewProgress(reviews.get(c.id)).status === progressFilter);
+
   const modalCase   = modalCaseId ? items.find((c) => c.id === modalCaseId) : undefined;
   const modalDraft  = modalCaseId ? (drafts.get(modalCaseId) ?? draftFromReview(reviews.get(modalCaseId))) : undefined;
   const modalReview = modalCaseId ? reviews.get(modalCaseId) : undefined;
@@ -623,25 +684,45 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
         </div>
       </div>
 
-      {/* Statü filtreleri */}
+      {/* Statü + Doğrulama filtreleri */}
       <Card>
         <CardBody>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
-            {CASE_STATUSES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => toggleStatus(s)}
-                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  statuses.includes(s)
-                    ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
-                }`}
-              >
-                {STATUS_LABELS_SHORT[s]}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
+              {CASE_STATUSES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleStatus(s)}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    statuses.includes(s)
+                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
+                  }`}
+                >
+                  {STATUS_LABELS_SHORT[s]}
+                </button>
+              ))}
+            </div>
+            <div className="h-4 w-px bg-slate-200 dark:bg-ndark-border" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-medium text-slate-500 dark:text-ndark-muted">Doğrulama:</span>
+              {PROGRESS_FILTER_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setProgressFilter(opt.value)}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    progressFilter === opt.value
+                      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-ndark-border dark:text-ndark-muted'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -649,8 +730,8 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
       {/* Ana tablo */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-md border border-slate-200 dark:border-ndark-border">
         {/* Başlık */}
-        <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_130px_110px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
-          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'Kontrol Eden', ''].map((h) => (
+        <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_120px_130px_110px] border-b border-slate-200 bg-slate-50 dark:border-ndark-border dark:bg-ndark-card">
+          {['Vaka No', 'Statü', 'Vaka Açılış', 'Müşteri', 'Şirket', 'Açıklama', 'Çözüm Notu', 'İlerleme', 'Kontrol Eden', ''].map((h) => (
             <div key={h} className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
               {h}
             </div>
@@ -669,13 +750,20 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
           </div>
         )}
 
-        {!loading && items.map((c) => {
-          const review = reviews.get(c.id);
+        {!loading && displayItems.map((c) => {
+          const review  = reviews.get(c.id);
+          const progress = getReviewProgress(review);
+          const actionLabel =
+            progress.status === 'not_started' ? 'Doğrula' :
+            progress.status === 'in_progress' ? 'Devam et' : 'Gözden geçir';
+          const actionIcon =
+            progress.status === 'not_started' ? <Tag size={11} /> :
+            progress.status === 'in_progress' ? <ArrowRight size={11} /> : <Eye size={11} />;
 
           return (
             <div
               key={c.id}
-              className="grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_130px_110px] items-start border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
+              className="grid grid-cols-[minmax(0,2fr)_90px_110px_minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,2fr)_minmax(0,2fr)_120px_130px_110px] items-start border-b border-slate-100 hover:bg-slate-50/50 dark:border-ndark-border dark:hover:bg-ndark-card/60"
             >
               {/* Vaka No */}
               <div className="px-3 py-2">
@@ -720,19 +808,29 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                   ? <ExpandableCell text={c.resolutionNote} />
                   : <span className="text-slate-400 dark:text-ndark-dim">—</span>}
               </div>
+              {/* İlerleme */}
+              <div className="px-3 py-2">
+                <ProgressCell progress={progress} />
+              </div>
               {/* Kontrol Eden */}
               <div className="px-3 py-2 text-xs text-slate-600 dark:text-ndark-muted">
                 {review?.reviewerName ? (
                   <>
                     <div className="truncate font-medium" title={review.reviewerName}>{review.reviewerName}</div>
-                    {review.reviewedAt && (
-                      <div className="text-slate-400 dark:text-ndark-dim">
-                        {new Date(review.reviewedAt).toLocaleString('tr-TR', {
+                    <div className="text-slate-400 dark:text-ndark-dim">
+                      {progress.status === 'completed' ? 'Tamamlandı' : `${progress.completedCount}/${progress.totalCount}`}
+                      {review.reviewedAt && (
+                        <> · {new Date(review.reviewedAt).toLocaleString('tr-TR', {
                           day: '2-digit', month: '2-digit', year: 'numeric',
                           hour: '2-digit', minute: '2-digit',
-                        })}
-                      </div>
-                    )}
+                        })}</>
+                      )}
+                    </div>
+                  </>
+                ) : progress.completedCount > 0 ? (
+                  <>
+                    <div className="text-slate-400">—</div>
+                    <div className="text-slate-400">{progress.completedCount}/{progress.totalCount}</div>
                   </>
                 ) : (
                   <span className="text-slate-400">—</span>
@@ -743,10 +841,10 @@ export function CaseTaggingReviewPage({ onSelectCase }: CaseTaggingReviewPagePro
                 <Button
                   size="sm"
                   variant="outline"
-                  leftIcon={<Tag size={11} />}
+                  leftIcon={actionIcon}
                   onClick={() => openModal(c.id)}
                 >
-                  Doğrula
+                  {actionLabel}
                 </Button>
               </div>
             </div>
