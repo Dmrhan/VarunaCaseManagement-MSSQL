@@ -164,13 +164,28 @@ export function MailComposer({
         const next = `<p></p>${initialSelectedSignatureHtml}${quoted}`;
         initialBaselineBodyRef.current = next;
         signatureAppendedRef.current = true;
+        // Codex P2 fix — late-loaded signature tracking:
+        //   (a) currentSignatureHtmlRef body'ye eklenen yeni imzayla
+        //       güncellenmeli. Aksi halde dropdown swap effect oldSig=null
+        //       sanar → strip yapmaz → ikinci imza ekler → "İmzasız"
+        //       seçimi de orijinal imzayı silemez.
+        //   (b) signatureSelection state'i body ile senkron olmalı.
+        //       İlk render'da prop'lar null'du → 'none' state. Async
+        //       fetch sonrası body'ye imza eklendi → dropdown da
+        //       fallback chain'e ('agent' veya 'tenant') güncellensin
+        //       ki agent dropdown'da 'İmzasız' görürken body'de imza
+        //       olmasın (yanıltıcı UI).
+        currentSignatureHtmlRef.current = initialSelectedSignatureHtml;
+        setSignatureSelection(initialSignatureChoice);
         return next;
       }
-      // Kullanıcı yazmaya başlamış — dokunma.
+      // Kullanıcı yazmaya başlamış — dokunma. currentSignatureHtmlRef
+      // null kalır (body'ye imza koyamadık); sonraki swap effect'te
+      // oldSig=null → strip yok, sadece newSig inject (tek imza).
       signatureAppendedRef.current = true;
       return cur;
     });
-  }, [initialSelectedSignatureHtml, initialForwardContext]);
+  }, [initialSelectedSignatureHtml, initialSignatureChoice, initialForwardContext]);
 
   // Codex P2 fix — Dropdown değişimi: body'deki ESKİ imzayı yeni seçimle
   // SWAP et. Aksi halde agent "İmzasız" seçse bile başlangıç imzası
