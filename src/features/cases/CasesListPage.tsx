@@ -1398,6 +1398,14 @@ export function CasesListPage({
                           📁 <span className="truncate">{c.accountProjectName}</span>
                         </span>
                       )}
+                      {c.origin && (
+                        <span
+                          className="mt-1 inline-flex w-fit items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-ndark-card dark:text-ndark-muted"
+                          title={c.originDescription ?? undefined}
+                        >
+                          {c.origin}
+                        </span>
+                      )}
                       {/* Phase D — Müşteri eşleştirilmemiş vakalar için amber rozet (tüm roller görür). */}
                       {c.customerMatchPending && (
                         <span
@@ -1439,25 +1447,15 @@ export function CasesListPage({
                       {c.assignedPersonName ? (
                         c.assignedPersonName
                       ) : canClaimCase(c) ? (
-                        <div className="flex flex-col items-start gap-1">
-                          <button
-                            type="button"
-                            onClick={(e) => handleClaim(e, c.id)}
-                            disabled={claimingId === c.id}
-                            className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
-                            title="Bu vakayı üstlen"
-                          >
-                            {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
-                          </button>
-                          <WaitingChip createdAt={c.createdAt} />
-                        </div>
-                      ) : isUnassignedOpen ? (
-                        <div className="flex flex-col items-start gap-1">
-                          <span className="text-xs text-slate-500 dark:text-ndark-muted">
-                            {c.assignedTeamName ?? '—'}
-                          </span>
-                          <WaitingChip createdAt={c.createdAt} />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleClaim(e, c.id)}
+                          disabled={claimingId === c.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+                          title="Bu vakayı üstlen"
+                        >
+                          {claimingId === c.id ? 'Üstleniliyor…' : 'Üstlen'}
+                        </button>
                       ) : c.assignedTeamName ? (
                         c.assignedTeamName
                       ) : (
@@ -1661,34 +1659,6 @@ function PriorityChip({ priority }: { priority: CasePriority }) {
     >
       <Icon size={9} />
       {cfg.label}
-    </span>
-  );
-}
-
-// Bekleme süresi çipi — atanmamış açık vakalarda "Atanan" hücresinde görünür.
-// 60 dakikayı geçince kırmızı tona geçer.
-function formatWait(createdAt: string): string {
-  const mins = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
-  if (mins < 60) return `${mins} dk`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m > 0 ? `${h} sa ${m} dk` : `${h} sa`;
-}
-
-function WaitingChip({ createdAt }: { createdAt: string }) {
-  const mins = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
-  const isLong = mins >= 60;
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
-        isLong
-          ? 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/40'
-          : 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/40',
-      )}
-    >
-      <Clock size={9} />
-      {formatWait(createdAt)}
     </span>
   );
 }
