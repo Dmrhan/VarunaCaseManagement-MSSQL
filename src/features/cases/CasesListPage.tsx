@@ -3,7 +3,6 @@ import { useHotkey } from '@/lib/useHotkey';
 import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
-  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -18,7 +17,6 @@ import {
   Inbox,
   Layers,
   Link as LinkIcon,
-  Minus,
   Plus,
   RotateCw,
   Search,
@@ -76,14 +74,6 @@ type QuickFilter = 'slaRisk' | 'resolvedToday' | null;
 // Kuyruk hızlı filtresi — tablo üstü chip'ler; mevcut filtrelerle birlikte çalışır,
 // client-side mevcut sayfa kapsamında uygular (server pagination korunur).
 type QuickQueueFilter = 'all' | 'unassigned' | 'critical';
-
-// Öncelik çipi için renk + label yapılandırması.
-const PRIORITY_CHIP_CFG: Record<CasePriority, { label: string; cls: string }> = {
-  Critical: { label: 'Kritik', cls: 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/40' },
-  High:     { label: 'Yüksek', cls: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:ring-amber-900/40' },
-  Medium:   { label: 'Orta',   cls: 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:ring-blue-900/40' },
-  Low:      { label: 'Düşük',  cls: 'bg-slate-50 text-slate-500 ring-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:ring-slate-700' },
-};
 
 // Sol kenar öncelik şeridi renkleri (3px border-l).
 const PRIORITY_STRIPE: Record<CasePriority, string> = {
@@ -1361,12 +1351,7 @@ export function CasesListPage({
                         aria-label={`${c.caseNumber} seç`}
                       />
                     </Td>
-                    <Td className="font-mono text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-600 dark:text-ndark-muted">{c.caseNumber}</span>
-                        <PriorityChip priority={c.priority as CasePriority} />
-                      </div>
-                    </Td>
+                    <Td className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{c.caseNumber}</Td>
                     <Td className="max-w-[360px]">
                       <div className="flex items-center gap-1.5">
                         <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
@@ -1639,28 +1624,6 @@ function SortableTh({
 
 function Td({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={`whitespace-nowrap px-3 py-2 ${className ?? ''}`}>{children}</td>;
-}
-
-// Vaka no hücresinde satır içi öncelik çipi — ikon + label, renge güvenilmez.
-function PriorityChip({ priority }: { priority: CasePriority }) {
-  const cfg = PRIORITY_CHIP_CFG[priority];
-  if (!cfg) return null;
-  const Icon =
-    priority === 'Critical' ? AlertTriangle
-    : priority === 'High'   ? ArrowUp
-    : priority === 'Medium' ? Minus
-    : ArrowDown;
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
-        cfg.cls,
-      )}
-    >
-      <Icon size={9} />
-      {cfg.label}
-    </span>
-  );
 }
 
 // Snooze rozetleri için TR-özel relative format. formatRelative'i kullanmadık
