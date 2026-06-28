@@ -265,8 +265,15 @@ export function MailComposer({
   // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
   const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
   const [templateBusy, setTemplateBusy] = useState(false);
-  // Subject replace confirm modal state
-  const [pendingTemplate, setPendingTemplate] = useState<{ id: string; subject: string | null; bodyHtml: string } | null>(null);
+  // Subject replace + missing placeholder confirm modal state
+  // Codex P2 fix — missing.length > 0 ise agent uyarısı + onay
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    id: string;
+    subject: string | null;
+    bodyHtml: string;
+    missing: string[];
+    needsSubjectChoice: boolean;
+  } | null>(null);
   useEffect(() => {
     let alive = true;
     void caseEmailService.listEmailTemplates(item.id).then((items) => {
@@ -275,8 +282,12 @@ export function MailComposer({
     return () => { alive = false; };
   }, [item.id]);
 
-  // Template seçimi: render + insert. Subject varsa modal onay.
-  // Codex P2 deseni: hata durumunda (render undefined) silent skip.
+  // Template seçimi: render + insert.
+  // Codex P2 fix — missing placeholder VAR ise agent'a uyarı modalı
+  // (bilinmeyen {{var}} → boş render → agent farkında olmadan eksik
+  // değişkenle mail gönderebilirdi).
+  // Subject mevcut + farklı VAR ise replace confirm.
+  // İki kondisyon birleşik modal'da gösterilir.
   async function applyTemplate(templateId: string) {
     if (!templateId) return;
     setTemplateBusy(true);
@@ -284,9 +295,17 @@ export function MailComposer({
       const rendered = await caseEmailService.renderEmailTemplate(item.id, templateId);
       if (!rendered) return; // apiFetch toast attı; silent skip
       const hasSubject = typeof rendered.subject === 'string' && rendered.subject.trim();
-      if (hasSubject && subject && subject !== rendered.subject) {
-        // Subject zaten dolu + farklı → onay modal'ı.
-        setPendingTemplate({ id: templateId, subject: rendered.subject, bodyHtml: rendered.bodyHtml });
+      const hasMissing = (rendered.missing?.length ?? 0) > 0;
+      const needsSubjectChoice = !!hasSubject && !!subject && subject !== rendered.subject;
+      if (needsSubjectChoice || hasMissing) {
+        // Modal: subject onay VE/VEYA missing uyarısı.
+        setPendingTemplate({
+          id: templateId,
+          subject: rendered.subject,
+          bodyHtml: rendered.bodyHtml,
+          missing: rendered.missing ?? [],
+          needsSubjectChoice,
+        });
         return;
       }
       // Doğrudan uygula.
@@ -639,8 +658,9 @@ export function MailComposer({
         </Button>
       </div>
 
-      {/* M6.3b Faz 3 — Subject replace confirm modal.
-          n4b S11 endüstri parite: cursor insert + subject replace onayı. */}
+      {/* M6.3b Faz 3 — Şablon uygulama onay modalı.
+          n4b S11 endüstri parite: subject replace onayı.
+          Codex P2 fix: missing placeholder uyarısı. */}
       {pendingTemplate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPendingTemplate(null)}>
           <div
@@ -648,26 +668,60 @@ export function MailComposer({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-ndark-text">
-              Konu değiştirilsin mi?
+              Şablon uygulanacak
             </h3>
-            <p className="mb-3 text-xs text-slate-600 dark:text-ndark-muted">
-              Mevcut konu: <span className="font-mono">{subject}</span>
-              <br />
-              Şablon konusu: <span className="font-mono">{pendingTemplate.subject}</span>
-            </p>
-            <p className="mb-3 text-xs text-slate-500">
-              Hayır seçerseniz konu korunur; şablon metni yine eklenir.
-            </p>
+
+            {/* Missing placeholder uyarısı — agent farkında olmadan eksik
+                değişkenle mail göndermesin (Codex P2 fix). */}
+            {pendingTemplate.missing.length > 0 && (
+              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+                <p className="font-semibold">⚠ Bilinmeyen değişkenler boş bırakıldı:</p>
+                <p className="mt-1 font-mono">
+                  {pendingTemplate.missing.map((m) => `{{${m}}}`).join(', ')}
+                </p>
+                <p className="mt-1 text-[10px] opacity-80">
+                  Şablonu uyguladıktan sonra metinde boşluk varsa kontrol edin.
+                </p>
+              </div>
+            )}
+
+            {pendingTemplate.needsSubjectChoice && (
+              <>
+                <p className="mb-2 text-xs text-slate-600 dark:text-ndark-muted">
+                  Mevcut konu: <span className="font-mono">{subject}</span>
+                  <br />
+                  Şablon konusu: <span className="font-mono">{pendingTemplate.subject}</span>
+                </p>
+                <p className="mb-3 text-xs text-slate-500">
+                  "Konuyu koru" seçerseniz konu değişmez; şablon metni yine eklenir.
+                </p>
+              </>
+            )}
+
+            {!pendingTemplate.needsSubjectChoice && pendingTemplate.missing.length > 0 && (
+              <p className="mb-3 text-xs text-slate-500">
+                Devam etmek istiyor musunuz?
+              </p>
+            )}
+
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setPendingTemplate(null)}>
                 Vazgeç
               </Button>
-              <Button type="button" variant="outline" onClick={() => confirmTemplate(false)}>
-                Hayır, konuyu koru
-              </Button>
-              <Button type="button" variant="primary" onClick={() => confirmTemplate(true)}>
-                Evet, değiştir
-              </Button>
+              {pendingTemplate.needsSubjectChoice ? (
+                <>
+                  <Button type="button" variant="outline" onClick={() => confirmTemplate(false)}>
+                    Konuyu koru
+                  </Button>
+                  <Button type="button" variant="primary" onClick={() => confirmTemplate(true)}>
+                    Konuyu değiştir
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" variant="primary" onClick={() => confirmTemplate(false)}>
+                  Yine de uygula
+                </Button>
+              )}
             </div>
           </div>
         </div>

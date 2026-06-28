@@ -1315,11 +1315,17 @@ router.post('/case-email-templates/:id/preview', asyncRoute(async (req, res) => 
 
   // Preview için opsiyonel case context — eğer caseId verildiyse fetch et;
   // yoksa boş şablon değerleriyle render (admin preview).
+  //
+  // Codex P1 fix — caseRow lookup template'in companyId'sine scope'lu
+  // OLMALI. Eski kod findUnique({ id: caseId }) global okuyordu →
+  // şirket A admin'i, şirket B vaka id'sini biliyorsa title/accountName/
+  // requesterContact alanlarını preview response'unda görebilirdi
+  // (cross-tenant veri sızıntısı).
   const { prisma } = await import('../db/client.js');
   let caseRow = null;
   if (caseId) {
-    caseRow = await prisma.case.findUnique({
-      where: { id: caseId },
+    caseRow = await prisma.case.findFirst({
+      where: { id: caseId, companyId },
       select: {
         caseNumber: true, title: true, accountName: true,
         customerContactName: true, customerContactEmail: true,
