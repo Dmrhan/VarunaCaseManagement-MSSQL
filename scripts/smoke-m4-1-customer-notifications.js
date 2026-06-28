@@ -213,6 +213,33 @@ async function setup() {
     const d4 = await emitEvent({ event: 'status_changed', caseId: CASE_OK });
     expectTruthy('status_changed dispatch oluştu', Array.isArray(d4) && d4.length > 0);
     expect('status_changed audienceType = requester', d4[0]?.audienceType, 'requester');
+
+    console.log('\n=== (8) requester.* placeholder (Codex P2 fix) ===');
+    // (8a) Template create requester.name + requester.email kabul etmeli
+    const tplR = await createTemplate({
+      data: {
+        companyId: COMP,
+        key: `${PREFIX}_req`,
+        name: 'Requester ACK',
+        subjectTemplate: 'Sayın {{requester.name}}',
+        bodyTemplate: 'Mail: {{requester.email}}, vaka: {{case.number}}',
+        requiredVariables: ['requester.name', 'requester.email', 'case.number'],
+      },
+      user,
+      allowedCompanyIds: allowed,
+    });
+    expectTruthy('requester.* requiredVariables kabul edildi', !!tplR.id);
+
+    // (8b) renderTemplate doğrudan placeholder doldurmalı
+    const caseRowR = await prisma.case.findUnique({ where: { id: CASE_OK } });
+    const { buildTemplateVars } = await import('../server/db/notificationRepository.js');
+    const vars = buildTemplateVars({ caseRow: caseRowR, approval: null });
+    expect('requester.name = customerContactName', vars['requester.name'], 'Mail Sender');
+    expect('requester.email = customerContactEmail', vars['requester.email'], 'sender@test.com');
+
+    const renderOut = renderTemplate('Sayın {{requester.name}}, {{requester.email}}', vars);
+    expect('requester.name render', renderOut.rendered, 'Sayın Mail Sender, sender@test.com');
+    expectTruthy('missing[] boş', renderOut.missing.length === 0);
   } catch (err) {
     console.error('\n[test] HATA:', err.message);
     console.error(err.stack);
