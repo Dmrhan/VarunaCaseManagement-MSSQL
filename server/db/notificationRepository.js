@@ -27,6 +27,11 @@
 import { prisma } from './client.js';
 // M4 — Mail outbound send executor.
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
+// M4.1 follow-up — Case enum → Türkçe label çevirisi (müşteri-yüzlü
+// mail render'ında ham "ThirdPartyWaiting" / "Medium" yerine
+// "3. Parti Bekleniyor" / "Orta" yazılsın diye). Aynı kontrat caseReport
+// tarafında kullanılır; tek doğruluk kaynağı.
+import { STATUS_LABELS, PRIORITY_LABELS } from '../lib/caseReport/formatters.js';
 
 /**
  * Minimal HTML escape — M6.1 paralel CaseEmail için plain-text bodyHtml
@@ -262,12 +267,20 @@ export function renderTemplate(text, vars, opts = {}) {
  * without a policy).
  */
 export function buildTemplateVars({ caseRow, approval }) {
+  // M4.1 follow-up — Türkçe enum etiketleri.
+  // Case.status / Case.priority DB'de ASCII identifier saklanır
+  // (Acik, ThirdPartyWaiting, Medium, High vb.). Müşteri-yüzlü mailde
+  // ham enum'u göstermek çirkin — formatters.js'in tek doğruluk
+  // tablosundan Türkçe label'a çeviriyoruz. Bilinmeyen değer fallback
+  // ham string (placeholder render empty marker'a düşmesin diye).
+  const rawStatus = caseRow?.status ?? '';
+  const rawPriority = caseRow?.priority ?? '';
   return {
     'case.number': caseRow?.caseNumber ?? '',
     'case.title': caseRow?.title ?? '',
     'case.description': (caseRow?.description ?? '').slice(0, 500),
-    'case.priority': caseRow?.priority ?? '',
-    'case.status': caseRow?.status ?? '',
+    'case.priority': PRIORITY_LABELS[rawPriority] ?? rawPriority,
+    'case.status': STATUS_LABELS[rawStatus] ?? rawStatus,
     'case.category': caseRow?.category ?? '',
     'case.subCategory': caseRow?.subCategory ?? '',
     'account.name': caseRow?.accountName ?? '',
@@ -275,7 +288,29 @@ export function buildTemplateVars({ caseRow, approval }) {
     'assignee.name': caseRow?.assignedPersonName ?? '',
     'team.name': caseRow?.assignedTeamName ?? '',
     'resolution.summary': approval?.resolutionSummary ?? '',
-    'resolution.customerMessage': approval?.customerMessageDraft ?? '',
+    // M4.1 follow-up — resolution.customerMessage fallback.
+    //
+    // Codex P2 fix — fallback YALNIZ approval-less basit-kapanış
+    // akışında. Sebep:
+    //   1. Vaka kapatıldı → resolutionNote dolduruldu → mail gitti
+    //   2. Vaka YenidenAcildi (reopen) → transitionStatus resolutionNote'u
+    //      KORUR (silmez)
+    //   3. Yeni approval cycle başladı; customerMessageDraft boş/null
+    //   4. ESKİ kod (`approval?.draft ?? caseRow.resolutionNote`):
+    //      resolution_submitted event render edilince ESKİ kapanış
+    //      mesajı sızar → admin'in yeni cycle için kasıtlı boş bıraktığı
+    //      alanın yerine geçer
+    //
+    // Yeni semantik:
+    //   approval VAR  → sıkı approval.customerMessageDraft (boş ise boş)
+    //   approval YOK → caseRow.resolutionNote fallback (M4.1 fix path)
+    //
+    // approval truthiness'ı = ResolutionApproval cycle'da olduğumuzu
+    // gösterir (emitEvent caller'ı bunu set eder; basit case_closed
+    // path'inde approval=null).
+    'resolution.customerMessage': approval
+      ? (approval.customerMessageDraft ?? '')
+      : (caseRow?.resolutionNote ?? ''),
     'approval.rejectionReason': approval?.rejectionReason ?? '',
     'approval.approverName': approval?.approverName ?? '',
     // M4.1 FAZ B — requester audience template değişkenleri
