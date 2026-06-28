@@ -1127,6 +1127,12 @@ model Person {
   /// WR-A5 / PM-03 — Kişinin destek seviyesi. Case create cascade kaynağı.
   /// Default L1; rol-bazlı seed dağılımı (Agent L1, team lead L2, Admin Expert).
   supportLevel String   @default("L1") @db.NVarChar(50) // enum:SupportLevel
+  /// Compose-Signature F1 — Kişinin iş unvanı (örn. "Ürün Direktörü",
+  /// "Destek Mühendisi"). Şirket imza şablonundaki {{agent.title}}
+  /// placeholder'ı buradan render edilir. Mail outbound'da User.personId
+  /// üzerinden join'lenir; SystemAdmin gibi Person'sız user'larda boş
+  /// render edilir.
+  title        String?  @db.NVarChar(255)
   createdAt    DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt    DateTime @updatedAt
 

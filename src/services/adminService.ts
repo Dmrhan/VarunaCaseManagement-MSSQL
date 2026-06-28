@@ -63,6 +63,12 @@ export interface PersonInput {
   supportLevel?: 'L1' | 'L2' | 'L3' | 'Expert';
   /** WR-B1 — Takım lideri bayrağı. Default false. */
   isTeamLead?: boolean;
+  /**
+   * Compose-Signature F1 — Kişinin iş unvanı (örn. "Ürün Direktörü").
+   * Şirket imza şablonundaki {{agent.title}} placeholder'ından render
+   * edilir. Boş bırakılırsa imzada title satırı boş çıkar.
+   */
+  title?: string | null;
 }
 
 export interface CategoryInput {

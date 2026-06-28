@@ -317,6 +317,11 @@ export const personRepo = {
         // WR-A5 / B1
         ...(supportLevel !== undefined && { supportLevel }),
         ...(input.isTeamLead !== undefined && { isTeamLead: !!input.isTeamLead }),
+        // Compose-Signature F1 — opsiyonel title
+        ...(input.title !== undefined && {
+          title: typeof input.title === 'string' && input.title.trim()
+            ? input.title.trim() : null,
+        }),
       },
     });
   },
@@ -361,6 +366,11 @@ export const personRepo = {
         // WR-A5 / B1
         ...(supportLevel !== undefined && { supportLevel }),
         ...(patch.isTeamLead !== undefined && { isTeamLead: !!patch.isTeamLead }),
+        // Compose-Signature F1 — opsiyonel title; boş string → null (temizleme)
+        ...(patch.title !== undefined && {
+          title: typeof patch.title === 'string' && patch.title.trim()
+            ? patch.title.trim() : null,
+        }),
       },
     });
   },
