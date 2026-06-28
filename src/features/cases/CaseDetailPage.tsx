@@ -4327,6 +4327,7 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
 
   // Parts: sönük metin parçaları; boş alanlar atlanır (graceful empty).
   const parts: Array<{ key: string; node: React.ReactNode }> = [];
+  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
   if (responseMin != null) parts.push({ key: 'response', node: <>Müdahale {fmt(responseMin)}</> });
   if (resolutionMin != null) parts.push({ key: 'resolution', node: <>Çözüm {fmt(resolutionMin)}</> });
   parts.push({
@@ -4340,7 +4341,6 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
   if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
     parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
   }
-  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
   parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
   if (item.resolvedAt) {
     parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });
