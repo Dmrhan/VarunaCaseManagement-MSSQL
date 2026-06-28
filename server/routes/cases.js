@@ -543,8 +543,6 @@ router.get(
     const sortDir = f.sortDir === 'asc' ? 'asc' : 'desc';
     const securityWhere = await buildCaseListSecurityWhere(req);
 
-    const securityWhere = await buildCaseListSecurityWhere(req);
-
     const { items, total } = await caseRepository.list({
       filters,
       pagination,
