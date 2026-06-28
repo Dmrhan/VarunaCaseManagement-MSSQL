@@ -46,17 +46,44 @@ export function buildPlaceholderValues(caseRow, actor) {
 }
 
 /**
+ * HTML special char escape — Codex P2 fix.
+ *
+ * Bağlam: bodyHtml template'i admin save'de sanitize edilir ama placeholder
+ * değerleri sonradan (runtime) interpolate edilir. Eğer Case.title /
+ * customerContactName / accountName gibi alanlarda `<a>` / `<img>` /
+ * `<script>` benzeri HTML varsa (inbound mail subject, vCard, vs.) bu
+ * markup composer'a "gerçek HTML" olarak girer → giden mail bozulur veya
+ * istem dışı içerik gönderilir.
+ *
+ * Eskiden plaintext kabul edilen string'leri HTML context'e koymadan ÖNCE
+ * 5-char escape (en konservatif allowlist).
+ */
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Template metnindeki {{varName}} ifadelerini değiştirir.
  * Bilinmeyen var → empty string + missing[] listesinde toplanır.
  *
+ * @param {Object} opts
+ * @param {boolean} [opts.htmlEscape=false] — true ise yerleştirilen value
+ *   HTML escape edilir. Subject (plain text) için false; bodyHtml için true.
  * @returns { text, missing: string[] }
  */
-export function renderPlaceholders(template, values) {
+export function renderPlaceholders(template, values, opts = {}) {
   if (typeof template !== 'string') return { text: '', missing: [] };
+  const htmlEscape = !!opts.htmlEscape;
   const missing = [];
   const text = template.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9._]*)\s*\}\}/g, (_, key) => {
     if (Object.prototype.hasOwnProperty.call(values, key)) {
-      return String(values[key] ?? '');
+      const raw = String(values[key] ?? '');
+      return htmlEscape ? escapeHtml(raw) : raw;
     }
     missing.push(key);
     return '';
@@ -66,14 +93,21 @@ export function renderPlaceholders(template, values) {
 
 /**
  * Composer preview entry point — subject + bodyHtml render.
+ *
+ * Subject: text-only (composer subject input plain text alanı). Escape YOK
+ * (kullanıcı görürse bile mail header'a giderken zaten encoded).
+ *
+ * BodyHtml: TipTap rich text alanına gider → HTML context. Placeholder
+ * value'ları ESCAPE et (XSS-style markup injection korunsun).
+ *
  * @returns { subject, bodyHtml, missing: string[] }
  */
 export function renderTemplate(template, caseRow, actor) {
   const values = buildPlaceholderValues(caseRow, actor);
   const subjOut = template?.subject
-    ? renderPlaceholders(template.subject, values)
+    ? renderPlaceholders(template.subject, values, { htmlEscape: false })
     : { text: null, missing: [] };
-  const bodyOut = renderPlaceholders(template?.bodyHtml ?? '', values);
+  const bodyOut = renderPlaceholders(template?.bodyHtml ?? '', values, { htmlEscape: true });
   return {
     subject: subjOut.text,
     bodyHtml: bodyOut.text,
