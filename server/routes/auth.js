@@ -160,25 +160,40 @@ router.get('/me', verifyJwt, (req, res) => {
  * password change'den farklı).
  */
 router.get('/me/signature', verifyJwt, async (req, res) => {
-  const u = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: { signatureHtml: true },
-  });
-  res.json({ signatureHtml: u?.signatureHtml ?? null });
+  // Codex P2 fix — async handler try/catch. Express 4 promise rejection
+  // unhandled bırakırsa request asılı kalır; auth.js'deki diğer
+  // handler'larla (login/refresh/change-password) parite.
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { signatureHtml: true },
+    });
+    res.json({ signatureHtml: u?.signatureHtml ?? null });
+  } catch (err) {
+    console.error('[auth] me/signature get', err);
+    return res.status(500).json({ error: 'signature_error', message: 'İmza okuma hatası.' });
+  }
 });
 
 router.patch('/me/signature', verifyJwt, async (req, res) => {
-  const raw = req.body?.signatureHtml;
-  let next = null;
-  if (typeof raw === 'string' && raw.trim()) {
-    const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
-    next = sanitizeOutgoingEmailHtml(raw);
+  // Codex P2 fix — async handler try/catch (DB outage / migration eksik
+  // gibi durumlarda 500 JSON döner; request asılı kalmaz).
+  try {
+    const raw = req.body?.signatureHtml;
+    let next = null;
+    if (typeof raw === 'string' && raw.trim()) {
+      const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
+      next = sanitizeOutgoingEmailHtml(raw);
+    }
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { signatureHtml: next },
+    });
+    res.json({ signatureHtml: next });
+  } catch (err) {
+    console.error('[auth] me/signature patch', err);
+    return res.status(500).json({ error: 'signature_error', message: 'İmza güncelleme hatası.' });
   }
-  await prisma.user.update({
-    where: { id: req.user.id },
-    data: { signatureHtml: next },
-  });
-  res.json({ signatureHtml: next });
 });
 
 /**

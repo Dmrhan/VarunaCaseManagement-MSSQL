@@ -13,21 +13,34 @@ import { apiFetch } from './caseService';
 
 const ENDPOINT = '/api/auth/me/signature';
 
-/** Mevcut imzayı çek. */
-export async function getMySignature(): Promise<string | null> {
+/**
+ * Mevcut imzayı çek.
+ * undefined → fetch fail (network/server error; apiFetch toast atar).
+ * null     → backend imza tanımlı değil (kullanıcı henüz set etmedi).
+ * string   → mevcut imza HTML.
+ *
+ * Codex P2 fix — failure signal'i null'a coalesce ETME; caller
+ * (UserSignatureModal) `result === undefined` ile fail durumunu
+ * "henüz imza yok" durumundan ayırt eder.
+ */
+export async function getMySignature(): Promise<string | null | undefined> {
   const r = await apiFetch<{ signatureHtml: string | null }>(
     ENDPOINT,
     undefined,
     'İmza',
   );
-  return r?.signatureHtml ?? null;
+  if (r === undefined) return undefined; // fetch fail — caller success göstermesin
+  return r.signatureHtml ?? null;
 }
 
 /**
  * İmzayı set et veya kaldır (null/empty → kaldır).
  * Backend sanitize-html allowlist uygular.
+ * undefined → fetch fail (network/server error).
  */
-export async function updateMySignature(signatureHtml: string | null): Promise<string | null> {
+export async function updateMySignature(
+  signatureHtml: string | null,
+): Promise<string | null | undefined> {
   const r = await apiFetch<{ signatureHtml: string | null }>(
     ENDPOINT,
     {
@@ -37,7 +50,8 @@ export async function updateMySignature(signatureHtml: string | null): Promise<s
     },
     'İmza güncelle',
   );
-  return r?.signatureHtml ?? null;
+  if (r === undefined) return undefined; // Codex P2 fix — fail preserve
+  return r.signatureHtml ?? null;
 }
 
 export const userSignatureService = {
