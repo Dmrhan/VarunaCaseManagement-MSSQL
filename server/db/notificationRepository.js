@@ -266,7 +266,7 @@ export function renderTemplate(text, vars, opts = {}) {
  * optional — null for events that don't carry one (e.g. case_closed
  * without a policy).
  */
-export function buildTemplateVars({ caseRow, approval }) {
+export function buildTemplateVars({ caseRow, approval, event }) {
   // M4.1 follow-up — Türkçe enum etiketleri.
   // Case.status / Case.priority DB'de ASCII identifier saklanır
   // (Acik, ThirdPartyWaiting, Medium, High vb.). Müşteri-yüzlü mailde
@@ -290,27 +290,28 @@ export function buildTemplateVars({ caseRow, approval }) {
     'resolution.summary': approval?.resolutionSummary ?? '',
     // M4.1 follow-up — resolution.customerMessage fallback.
     //
-    // Codex P2 fix — fallback YALNIZ approval-less basit-kapanış
-    // akışında. Sebep:
-    //   1. Vaka kapatıldı → resolutionNote dolduruldu → mail gitti
-    //   2. Vaka YenidenAcildi (reopen) → transitionStatus resolutionNote'u
-    //      KORUR (silmez)
-    //   3. Yeni approval cycle başladı; customerMessageDraft boş/null
-    //   4. ESKİ kod (`approval?.draft ?? caseRow.resolutionNote`):
-    //      resolution_submitted event render edilince ESKİ kapanış
-    //      mesajı sızar → admin'in yeni cycle için kasıtlı boş bıraktığı
-    //      alanın yerine geçer
+    // Codex P2 round 3 fix — fallback YALNIZ:
+    //   - approval cycle'da DEĞİL (approval=null), VE
+    //   - event === 'case_closed' (basit-kapanış path'i), VE/VEYA
+    //   - event undefined (admin preview/debug — sample case'in
+    //     resolutionNote'unu göstermek beklenir)
     //
-    // Yeni semantik:
-    //   approval VAR  → sıkı approval.customerMessageDraft (boş ise boş)
-    //   approval YOK → caseRow.resolutionNote fallback (M4.1 fix path)
+    // Gerekçe: caseRepository.transitionStatus reopen'da resolutionNote'u
+    // KORUR (silmez; agent eski çözümü referans alsın diye kasıtlı).
+    // Eski fallback (`approval ? draft : resolutionNote`) approval-less
+    // tüm event'lerde aktifti → case_reopened / case_created /
+    // status_changed gibi event'lerde de ESKİ kapanış mesajı
+    // {{resolution.customerMessage}} placeholder'ından sızıyordu.
     //
-    // approval truthiness'ı = ResolutionApproval cycle'da olduğumuzu
-    // gösterir (emitEvent caller'ı bunu set eder; basit case_closed
-    // path'inde approval=null).
+    // Event gate (closeFallback değişkeniyle):
+    //   case_closed                              → fallback AKTİF (FAZ A bug fix)
+    //   case_reopened / case_created /
+    //     status_changed (yeni approval-less)    → fallback PASİF (sızıntı koruma)
+    //   resolution_*                             → approval objesi var; fallback'e gitmez
+    //   undefined (admin preview)                → fallback AKTİF (admin debug)
     'resolution.customerMessage': approval
       ? (approval.customerMessageDraft ?? '')
-      : (caseRow?.resolutionNote ?? ''),
+      : ((!event || event === 'case_closed') ? (caseRow?.resolutionNote ?? '') : ''),
     'approval.rejectionReason': approval?.rejectionReason ?? '',
     'approval.approverName': approval?.approverName ?? '',
     // M4.1 FAZ B — requester audience template değişkenleri
@@ -1254,8 +1255,12 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
           approval: approvalContext,
         });
 
-        // Render snapshot
-        const vars = buildTemplateVars({ caseRow, approval: approvalContext });
+        // Render snapshot — Codex P2 round 3: event'i geçiriyoruz ki
+        // buildTemplateVars resolution.customerMessage fallback'ini
+        // case_closed dışı approval-less event'lerde devre dışı bıraksın
+        // (eski resolutionNote case_reopened/created/status_changed
+        // template'lerine sızmasın).
+        const vars = buildTemplateVars({ caseRow, approval: approvalContext, event });
         const { rendered: snapshotSubject } = renderTemplate(rule.template.subjectTemplate, vars);
         const { rendered: snapshotBody } = renderTemplate(rule.template.bodyTemplate, vars);
 

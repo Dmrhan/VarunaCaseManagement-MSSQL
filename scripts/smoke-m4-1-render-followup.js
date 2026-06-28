@@ -110,6 +110,54 @@ function expect(name, actual, expected) {
     expect('approval VAR + draft undefined → resolutionNote SIZMAZ',
       v3f['resolution.customerMessage'], '');
 
+    console.log('\n=== (3-event) Codex P2 round 3 — event gate ===');
+
+    // (3g) event='case_closed' + approval-less + resolutionNote → fallback aktif
+    const v3g = buildTemplateVars({
+      caseRow: { resolutionNote: 'Çözüm notu' },
+      approval: null,
+      event: 'case_closed',
+    });
+    expect('event=case_closed → resolutionNote fallback (FAZ A bug fix)',
+      v3g['resolution.customerMessage'], 'Çözüm notu');
+
+    // (3h) event='case_reopened' + approval-less + resolutionNote → BOŞ
+    //      Codex P2 round 3 koruma — reopen'da eski note sızmaz
+    const v3h = buildTemplateVars({
+      caseRow: { resolutionNote: 'ESKI Çözüm notu' },
+      approval: null,
+      event: 'case_reopened',
+    });
+    expect('event=case_reopened → resolutionNote SIZMAZ (Codex P2 round 3)',
+      v3h['resolution.customerMessage'], '');
+
+    // (3i) event='case_created' + approval-less + resolutionNote → BOŞ
+    const v3i = buildTemplateVars({
+      caseRow: { resolutionNote: 'ESKI Çözüm notu' },
+      approval: null,
+      event: 'case_created',
+    });
+    expect('event=case_created → resolutionNote SIZMAZ',
+      v3i['resolution.customerMessage'], '');
+
+    // (3j) event='status_changed' + approval-less + resolutionNote → BOŞ
+    const v3j = buildTemplateVars({
+      caseRow: { resolutionNote: 'ESKI Çözüm notu' },
+      approval: null,
+      event: 'status_changed',
+    });
+    expect('event=status_changed → resolutionNote SIZMAZ',
+      v3j['resolution.customerMessage'], '');
+
+    // (3k) event=undefined (admin preview) + resolutionNote → fallback aktif
+    const v3k = buildTemplateVars({
+      caseRow: { resolutionNote: 'Admin preview notu' },
+      approval: null,
+      // event YOK = previewTemplate akışı
+    });
+    expect('event=undefined (admin preview) → resolutionNote fallback (debug)',
+      v3k['resolution.customerMessage'], 'Admin preview notu');
+
     console.log('\n=== (4) Tüm placeholder geri uyumlu ===');
     const full = buildTemplateVars({
       caseRow: {
