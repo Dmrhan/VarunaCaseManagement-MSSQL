@@ -121,6 +121,13 @@ const ALLOWED_VARIABLE_PATHS = [
   'resolution.customerMessage',
   'approval.rejectionReason',
   'approval.approverName',
+  // M4.1 FAZ B — requester audience için template placeholder'lar.
+  // Codex P2 fix: requester audience eklendi ama placeholder'lar yoktu →
+  // {{requester.name}} kullanan T1/T2 şablonları whitelist tarafından
+  // reddediliyordu, boş string render ediliyordu.
+  // M6.3b CaseEmailTemplate engine'iyle aynı pattern (parite).
+  'requester.name',
+  'requester.email',
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -260,6 +267,10 @@ export function buildTemplateVars({ caseRow, approval }) {
     'resolution.customerMessage': approval?.customerMessageDraft ?? '',
     'approval.rejectionReason': approval?.rejectionReason ?? '',
     'approval.approverName': approval?.approverName ?? '',
+    // M4.1 FAZ B — requester audience template değişkenleri
+    // (Case.customerContact*; M6.3b CaseEmailTemplate ile aynı kaynaklar).
+    'requester.name': caseRow?.customerContactName ?? '',
+    'requester.email': caseRow?.customerContactEmail ?? '',
   };
 }
 
