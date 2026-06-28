@@ -54,6 +54,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   // M6.3b Faz 2 — composer artık tenant + agent imza ayrı alır.
   const [tenantSignatureHtml, setTenantSignatureHtml] = useState<string | null>(null);
   const [agentSignatureHtml, setAgentSignatureHtml] = useState<string | null>(null);
+  // Compose-Signature F3 — Tenant şablonu Person.name + Person.title ile
+  // render edilmiş "effective" şirket imzası. Composer dropdown'unda
+  // "İmzam" varsayılanı override (agent) yoksa bunu kullanır.
+  const [composedSignatureHtml, setComposedSignatureHtml] = useState<string | null>(null);
   // Codex fix — Reply/Forward konu prefill: composer açıkken mode değişirse
   // (örn. reply açıkken forward'a geç) initialReplyContext/initialForwardContext
   // prop değişiyor ama composer'ın internal state'i (subject vs.) ilk
@@ -79,6 +83,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
       if (!alive) return;
       setTenantSignatureHtml(b.tenantHtml);
       setAgentSignatureHtml(b.agentHtml);
+      setComposedSignatureHtml(b.composedHtml);
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -218,6 +223,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
               initialForwardContext={forwardCtx}
               initialTenantSignatureHtml={tenantSignatureHtml}
               initialAgentSignatureHtml={agentSignatureHtml}
+              initialComposedSignatureHtml={composedSignatureHtml}
               onSent={handleSent}
               onCancel={handleCancel}
             />

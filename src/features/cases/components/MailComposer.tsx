@@ -61,10 +61,21 @@ export interface MailComposerProps {
    *   verilirse tenant olarak yorumlanır (agent null).
    */
   initialSignatureHtml?: string | null;
-  /** M6.3b Faz 2 — Tenant default imza (ExternalMailSetting.signatureHtml). */
+  /**
+   * @deprecated Compose-Signature F3 — Yerine initialComposedSignatureHtml.
+   * Eski caller'lar tenant ham şablonu geçirebiliyordu; composer artık
+   * "kompoze edilmiş" effective imzayı kullanır. Verilirse composedHtml'in
+   * fallback'i olarak yorumlanır (geri uyum).
+   */
   initialTenantSignatureHtml?: string | null;
-  /** M6.3b Faz 2 — Per-agent imza (User.signatureHtml). */
+  /** M6.3b Faz 2 — Per-agent override imza (User.signatureHtml). */
   initialAgentSignatureHtml?: string | null;
+  /**
+   * Compose-Signature F3 — Tenant şablonunun Person bilgileriyle render
+   * edilmiş hali (composedHtml). agentHtml override yoksa composer
+   * "İmzam" varsayılan olarak bunu kullanır.
+   */
+  initialComposedSignatureHtml?: string | null;
   /** Composer'dan inbound/outbound CaseEmail oluşunca thread refresh. */
   onSent?: () => void;
   /** Vazgeç butonu. */
@@ -86,6 +97,7 @@ export function MailComposer({
   initialSignatureHtml = null,
   initialTenantSignatureHtml = null,
   initialAgentSignatureHtml = null,
+  initialComposedSignatureHtml = null,
   onSent,
   onCancel,
 }: MailComposerProps) {
@@ -102,26 +114,36 @@ export function MailComposer({
   const showBcc = true;
   // Önizleme modu
   const [previewing, setPreviewing] = useState(false);
-  // M6.3b Faz 2 — fallback chain: agent > tenant > none.
-  // Geri uyumluluk: eski caller initialSignatureHtml verirse tenant
-  // olarak yorumla (agent null).
-  const tenantHtml = initialTenantSignatureHtml ?? initialSignatureHtml ?? null;
+  // Compose-Signature F3 — Kompoze imza fallback chain:
+  //   effectiveHtml = override (agentHtml) ?? composed (companyTemplate +
+  //     Person.name + Person.title) ?? legacy tenantHtml ?? none
+  //
+  // Composer dropdown sadeleşti: "İmzam" = effective; "İmzasız" = none.
+  // Eski "tenant raw" seçeneği KALDIRILDI — composed zaten şirket
+  // bloğunu içerir; admin kontrolü dışında ikinci bir "ham tenant"
+  // göstermek kafa karıştırıcıydı.
+  //
+  // Geri uyumluluk: eski caller initialSignatureHtml veya
+  // initialTenantSignatureHtml verirse composed yoksa fallback olarak
+  // kullanılır (legacy behavior).
   const agentHtml = initialAgentSignatureHtml ?? null;
-  // İmza dropdown — n4b S2/S5/S6 endüstri parite.
-  //   Otomatik insert: default fallback (agent > tenant)
-  //   Composer toggle: 'agent' | 'tenant' | 'none'
-  const initialSignatureChoice: 'agent' | 'tenant' | 'none' = agentHtml
-    ? 'agent'
-    : tenantHtml
-      ? 'tenant'
-      : 'none';
-  const [signatureSelection, setSignatureSelection] = useState<'agent' | 'tenant' | 'none'>(
+  const composedHtml = initialComposedSignatureHtml
+    ?? initialTenantSignatureHtml
+    ?? initialSignatureHtml
+    ?? null;
+  // Effective: composer "İmzam" seçeneğine eklediğimiz HTML.
+  const effectiveSignatureHtml = agentHtml ?? composedHtml;
+
+  // İmza dropdown — n4b S2/S5/S6 endüstri parite. 2 opsiyon:
+  //   'mine' = effectiveSignatureHtml (override ?? composed)
+  //   'none' = yok
+  const initialSignatureChoice: 'mine' | 'none' = effectiveSignatureHtml ? 'mine' : 'none';
+  const [signatureSelection, setSignatureSelection] = useState<'mine' | 'none'>(
     initialSignatureChoice,
   );
   // Seçimden HTML'e map — initial + dropdown değişimi için.
-  const resolveSignatureHtml = (sel: 'agent' | 'tenant' | 'none'): string | null => {
-    if (sel === 'agent') return agentHtml;
-    if (sel === 'tenant') return tenantHtml;
+  const resolveSignatureHtml = (sel: 'mine' | 'none'): string | null => {
+    if (sel === 'mine') return effectiveSignatureHtml;
     return null;
   };
   // initial baseline body için seçili imzanın HTML'i.
@@ -244,7 +266,7 @@ export function MailComposer({
       currentSignatureHtmlRef.current = newSig;
       return next;
     });
-  }, [signatureSelection, agentHtml, tenantHtml, initialForwardContext]);
+  }, [signatureSelection, agentHtml, composedHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -550,27 +572,30 @@ export function MailComposer({
         <input type="hidden" value={showCc ? '1' : '0'} onChange={() => undefined} />
         <input type="hidden" value={showBcc ? '1' : '0'} onChange={() => undefined} />
 
-        {/* M6.3b Faz 2 — İmza + Şablon AYRI dropdown (n4b S6).
-            n4b S2 endüstri parite: otomatik insert (fallback chain).
-            Agent değiştirebilir: 'Kişisel imzam' / 'Şirket varsayılan' /
-            'İmzasız'. Faz 3'te Mail Şablonu ayrı dropdown'la gelir.
-            Selection değişimi composer açıkken canlı baseline rewrite
-            mantığı şu an YOK — initial seçim baseline'a injekt edilir;
-            agent değiştirirse baseline'ı manuel düzenler (basit v1). */}
+        {/* Compose-Signature F3 — Kompoze imza, 2-opsiyon dropdown.
+            "İmzam" = override (User.signatureHtml) ?? composedHtml
+            (şirket şablonu + Person.name + Person.title).
+            "İmzasız" = imzayı gönderme.
+            Tenant raw seçeneği KALDIRILDI (composed zaten şirket bloğunu
+            içerir; ikinci yer kafa karıştırırdı). */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="İmza">
             <select
               value={signatureSelection}
-              onChange={(e) => setSignatureSelection(e.target.value as 'none' | 'tenant' | 'agent')}
+              onChange={(e) => setSignatureSelection(e.target.value as 'none' | 'mine')}
               disabled={submitting}
               className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+              title={
+                agentHtml
+                  ? 'Kişisel imza override\'ınız (Mail İmzam menüsünden)'
+                  : composedHtml
+                    ? 'Şirket şablonu + adınız/unvanınız (Person kartından)'
+                    : 'İmza tanımlı değil'
+              }
             >
               <option value="none">İmzasız</option>
-              <option value="agent" disabled={!agentHtml}>
-                {agentHtml ? 'Kişisel imzam' : 'Kişisel imzam (tanımlı değil)'}
-              </option>
-              <option value="tenant" disabled={!tenantHtml}>
-                {tenantHtml ? 'Şirket varsayılan imzası' : 'Şirket varsayılan imzası (tanımlı değil)'}
+              <option value="mine" disabled={!effectiveSignatureHtml}>
+                {effectiveSignatureHtml ? 'İmzam' : 'İmzam (tanımlı değil)'}
               </option>
             </select>
           </Field>
