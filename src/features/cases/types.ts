@@ -112,6 +112,9 @@ export interface CasePerson {
   isTeamLead?: boolean;
   /** WR-A5 — Kişinin destek seviyesi. */
   supportLevel?: SupportLevel;
+  /** Compose-Signature F1 — Kişinin iş unvanı; imza şablonunda
+   *  {{agent.title}} placeholder'ından render edilir. */
+  title?: string | null;
 }
 
 export interface CaseSubCategoryDef {

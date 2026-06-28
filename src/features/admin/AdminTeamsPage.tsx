@@ -842,6 +842,7 @@ function PersonEditModal({
     isActive: true,
     supportLevel: 'L1',
     isTeamLead: false,
+    title: '',
   });
   const [teams, setTeams] = useState<CaseTeam[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -867,6 +868,7 @@ function PersonEditModal({
             isActive: p.isActive,
             supportLevel: p.supportLevel ?? 'L1',
             isTeamLead: !!p.isTeamLead,
+            title: p.title ?? '',
           });
         }
       } else {
@@ -877,6 +879,7 @@ function PersonEditModal({
           isActive: true,
           supportLevel: 'L1',
           isTeamLead: false,
+          title: '',
         });
       }
     })();
@@ -896,6 +899,8 @@ function PersonEditModal({
       isActive: form.isActive,
       supportLevel: form.supportLevel ?? 'L1',
       isTeamLead: !!form.isTeamLead,
+      // Compose-Signature F1 — boş bırakılırsa null (server temizler)
+      title: (form.title ?? '').trim() || null,
     };
 
     const r =
@@ -970,6 +975,17 @@ function PersonEditModal({
             placeholder="ad.soyad@param.com.tr"
             value={form.email ?? ''}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+          />
+        </Field>
+
+        <Field
+          label="Unvan"
+          hint="Giden mail imzalarınızda otomatik görünür (örn. 'Ürün Direktörü', 'Destek Mühendisi'). Boş bırakılırsa imzada yalnız ad gözükür."
+        >
+          <TextInput
+            placeholder="Örn. Ürün Direktörü"
+            value={form.title ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           />
         </Field>
 
