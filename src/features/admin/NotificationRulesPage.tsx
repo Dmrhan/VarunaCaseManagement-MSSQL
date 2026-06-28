@@ -28,6 +28,9 @@ const EVENT_OPTIONS: { value: NotificationEvent; label: string }[] = [
   { value: 'resolution_rejected', label: 'Çözüm reddedildi' },
   { value: 'case_closed', label: 'Vaka kapatıldı' },
   { value: 'case_reopened', label: 'Vaka yeniden açıldı' },
+  // M4.1 FAZ B — müşteri bildirim event'leri
+  { value: 'case_created', label: 'Vaka oluşturuldu (mail intake)' },
+  { value: 'status_changed', label: 'Durum değişti' },
 ];
 
 const AUDIENCE_TYPES: { value: AudienceType; label: string; needsTarget?: boolean }[] = [
@@ -36,6 +39,9 @@ const AUDIENCE_TYPES: { value: AudienceType; label: string; needsTarget?: boolea
   { value: 'supervisor', label: 'Süpervizör' },
   { value: 'admin', label: 'Admin' },
   { value: 'customer_primary_contact', label: 'Müşteri (birincil kontak)' },
+  // M4.1 FAZ B — requester (mail göndereni; intake senaryosunda
+  // primary contact'tan daha doğru)
+  { value: 'requester', label: 'Talep eden (mail göndereni)' },
   { value: 'static_email', label: 'Sabit e-posta', needsTarget: true },
 ];
 

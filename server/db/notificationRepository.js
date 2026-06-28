@@ -1028,7 +1028,20 @@ export function isLikelyEmail(value) {
  * @returns {Promise<{ ok: boolean, providerMessageId?: string, error?: object }>}
  */
 async function executeOutboundEmailDispatch(dispatch, caseRow) {
-  const isCustomerFacing = dispatch.audienceType === 'customer_primary_contact';
+  // Codex P2 fix — Customer-facing audience whitelist genişledi.
+  // M4.1 FAZ B 'requester' audience type'ı eklendi; mevcut
+  // customer_primary_contact path'inden YARARLANMALI:
+  //   - [VK-XXX] subject token (round-trip threading için inboundMailIntake
+  //     bunu parse eder)
+  //   - Message-ID + In-Reply-To header threading
+  //   - CaseEmail appendOutbound (İletişim sekmesinde görünür)
+  // Aksi halde müşteri ACK'a reply yazınca intake parse edemez ve mail
+  // İletişim thread'inde GÖRÜNMEZ.
+  const CUSTOMER_FACING_AUDIENCES = new Set([
+    'customer_primary_contact',
+    'requester',
+  ]);
+  const isCustomerFacing = CUSTOMER_FACING_AUDIENCES.has(dispatch.audienceType);
 
   // Subject token (sadece customer-facing'e)
   const finalSubject = isCustomerFacing

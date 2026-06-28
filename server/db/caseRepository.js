@@ -1422,15 +1422,21 @@ export const caseRepository = {
       });
     }
 
-    // M4.1 FAZ B — case_created event emission (fire-and-forget).
-    // KARDEŞ DESEN: case_closed/reopened emit (caseRepository:3369-71).
-    // ORIGIN GUARD: yalnız mail intake'le açılan vakalarda (origin='Eposta').
-    // Sebep: UI/portal/API'den açılan vakalarda kullanıcı zaten UI'da
-    // teyit görür; ACK maili tekrar fire etmek gürültü olur. (Kullanıcı
-    // kararı 2026-06-28, AskUserQuestion).
-    if (created.origin === 'Eposta') {
-      void emitNotificationEvent({ event: 'case_created', caseId: created.id });
-    }
+    // M4.1 FAZ B — case_created event emission BURADA YAPILMIYOR.
+    //
+    // Codex P1 fix — emit'i inboundMailIntake.js'e taşıdık (account
+    // match BİTTİKTEN sonra). Sebep:
+    //   - inboundMailIntake önce caseRepository.create() ile accountId=null
+    //     ham vaka yaratır, SONRA customerMatch + linkAccount yapar.
+    //   - Emit burada fire etseydi: accountId henüz set edilmemiş →
+    //     requester resolver opt-out kontrolünü skip ederdi → opt-out olan
+    //     müşteriye ACK gönderilirdi (cross-tenant bypass tarzı kırılım).
+    //   - intake match sonrası emit → resolver caseRow'u re-fetch eder
+    //     (notificationRepository:1140) → accountId set'liyse opt-out
+    //     gate uygulanır.
+    //
+    // UI/portal/API açılışlarında ACK semantiği yok (kullanıcı UI teyit
+    // görür); intake olmayan path'lerde emit zaten beklenmiyor.
 
     return shape(created);
   },

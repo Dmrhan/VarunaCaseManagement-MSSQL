@@ -22,7 +22,10 @@ export type NotificationEvent =
   | 'resolution_approved'
   | 'resolution_rejected'
   | 'case_closed'
-  | 'case_reopened';
+  | 'case_reopened'
+  // M4.1 FAZ B — müşteri bildirim event'leri
+  | 'case_created'
+  | 'status_changed';
 
 export type AudienceType =
   | 'assignee'
@@ -30,6 +33,8 @@ export type AudienceType =
   | 'supervisor'
   | 'admin'
   | 'customer_primary_contact'
+  // M4.1 FAZ B — talep eden (mail göndereni)
+  | 'requester'
   | 'static_email';
 
 export interface AudienceRow {
