@@ -1204,15 +1204,19 @@ model OfferedSolutionDef {
   caseOffers CaseOfferedSolution[]
 }
 
-// SLAPolicy — 5-tuple eşleşme: company + productGroup + category + subCategory + requestType
+// SLAPolicy — esnek eşleşme: companyId zorunlu; diğer alanlar null = wildcard.
+// Null alan herhangi bir case değeriyle eşleşir. Birden fazla politika eşleşirse
+// non-null alan sayısı (özgüllük puanı) en yüksek olan seçilir.
+// MSSQL NULL uniqueness: DB UNIQUE index yerine uygulama katmanında duplicate kontrolü.
 model SLAPolicy {
   id              String   @id @default(cuid()) @db.NVarChar(450)
   companyId       String   @db.NVarChar(450)
   companyName     String   @db.NVarChar(Max)
-  productGroup    String   @db.NVarChar(200)
-  categoryName    String   @db.NVarChar(255)
-  subCategoryName String   @db.NVarChar(255)
-  requestType     String   @db.NVarChar(50) // enum:CaseRequestType
+  productGroup    String?  @db.NVarChar(200)
+  categoryName    String?  @db.NVarChar(255)
+  subCategoryName String?  @db.NVarChar(255)
+  requestType     String?  @db.NVarChar(50) // enum:CaseRequestType
+  priority        String?  @db.NVarChar(50) // enum:CasePriority (Low/Medium/High/Critical)
   responseHours   Int
   resolutionHours Int
   description     String?  @db.NVarChar(Max)
@@ -1227,7 +1231,7 @@ model SLAPolicy {
   createdBy User?   @relation("SLAPolicyCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   updatedBy User?   @relation("SLAPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([companyId, productGroup, categoryName, subCategoryName, requestType])
+  @@index([companyId])
 }
 
 // ChecklistTemplate — items snapshot olarak Case.checklistItems'a kopyalanır
@@ -1374,12 +1378,14 @@ model Case {
   communicationChannelOverride String? @db.NVarChar(255)
 
   // SLA
-  slaResponseDueAt     DateTime?
-  slaResolutionDueAt   DateTime?
-  slaViolation         Boolean   @default(false)
-  slaPausedAt          DateTime?
-  slaPausedDurationMin Int       @default(0)
-  slaThirdPartyWaitMin Int       @default(0)
+  slaResponseDueAt      DateTime?
+  slaResolutionDueAt    DateTime?
+  slaViolation          Boolean   @default(false)
+  slaPausedAt           DateTime?
+  slaPausedDurationMin  Int       @default(0)
+  slaThirdPartyWaitMin  Int       @default(0)
+  slaResponseMetAt      DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
+  slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 
   // Phase D — Müşteri Eşleştirme: accountId NULL ile açılan vakalar bu flag
   // ile işaretlenir. Supervisor/Admin "Müşteri Eşleştirilmemiş" kuyruğunda

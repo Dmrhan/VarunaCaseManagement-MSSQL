@@ -515,17 +515,19 @@ export const slaPolicyRepo = {
     const dup = await prisma.sLAPolicy.findFirst({
       where: {
         companyId: safeInput.companyId,
-        productGroup: safeInput.productGroup,
-        categoryName: safeInput.categoryName,
-        subCategoryName: safeInput.subCategoryName,
-        requestType: toDb({ requestType: safeInput.requestType }).requestType,
+        productGroup: safeInput.productGroup ?? null,
+        categoryName: safeInput.categoryName ?? null,
+        subCategoryName: safeInput.subCategoryName ?? null,
+        requestType: toDb({ requestType: safeInput.requestType }).requestType ?? null,
+        priority: safeInput.priority ?? null,
       },
     });
-    if (dup) throw new AdminError('Aynı 5-tuple eşleşmesinde başka kural zaten var.');
+    if (dup) throw new AdminError('Aynı tuple eşleşmesinde başka kural zaten var.');
     const created = await prisma.sLAPolicy.create({
       data: {
         ...safeInput,
-        requestType: toDb({ requestType: safeInput.requestType }).requestType,
+        requestType: toDb({ requestType: safeInput.requestType }).requestType ?? null,
+        priority: safeInput.priority ?? null,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       },
@@ -539,19 +541,20 @@ export const slaPolicyRepo = {
     // 5-tuple değişiyorsa duplicate kontrolü
     if (
       patch.companyId || patch.productGroup || patch.categoryName ||
-      patch.subCategoryName || patch.requestType
+      patch.subCategoryName || patch.requestType || 'priority' in patch
     ) {
       const cur = await prisma.sLAPolicy.findUnique({ where: { id } });
       if (!cur) throw new AdminError('Kural bulunamadı.');
       const tuple = {
         companyId: patch.companyId ?? cur.companyId,
-        productGroup: patch.productGroup ?? cur.productGroup,
-        categoryName: patch.categoryName ?? cur.categoryName,
-        subCategoryName: patch.subCategoryName ?? cur.subCategoryName,
-        requestType: dbPatch.requestType ?? cur.requestType,
+        productGroup: 'productGroup' in patch ? (patch.productGroup ?? null) : cur.productGroup,
+        categoryName: 'categoryName' in patch ? (patch.categoryName ?? null) : cur.categoryName,
+        subCategoryName: 'subCategoryName' in patch ? (patch.subCategoryName ?? null) : cur.subCategoryName,
+        requestType: dbPatch.requestType !== undefined ? (dbPatch.requestType ?? null) : cur.requestType,
+        priority: 'priority' in patch ? (patch.priority ?? null) : cur.priority,
       };
       const dup = await prisma.sLAPolicy.findFirst({ where: { id: { not: id }, ...tuple } });
-      if (dup) throw new AdminError('Aynı 5-tuple eşleşmesinde başka kural var.');
+      if (dup) throw new AdminError('Aynı tuple eşleşmesinde başka kural var.');
     }
     const updated = await prisma.sLAPolicy.update({
       where: { id },
