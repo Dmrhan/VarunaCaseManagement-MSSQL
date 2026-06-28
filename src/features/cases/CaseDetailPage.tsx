@@ -4334,7 +4334,7 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
     key: 'fcr',
     node: <>İlk temas {fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : <span className="italic text-slate-400">henüz</span>}</>,
   });
-  parts.push({ key: 'reopen', node: <>Y.açılma {reopened ? 'Var' : 'Yok'}</> });
+  if (reopened) parts.push({ key: 'reopen', node: <>Y.açılma Var</> });
   if (item.slaResponseDueAt) {
     parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
   }
