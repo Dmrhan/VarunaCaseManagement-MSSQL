@@ -19,7 +19,8 @@
  *
  * Lazy loaded — TipTap ağır (~133 KB chunk); main bundle'a girmesin.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -111,9 +112,24 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
     setHtml(example);
   }
 
-  const previewHtml = html
-    .replaceAll('{{agent.name}}', SAMPLE_NAME)
-    .replaceAll('{{agent.title}}', SAMPLE_TITLE);
+  // Compose-Signature F4 — Defense-in-depth: canlı önizleme path'i
+  // DOMPurify sarmal (MailMessageCard ile aynı pattern).
+  // Backend M6.1 sanitize-html save öncesi zaten temizler ama editör
+  // henüz kaydedilmemiş raw HTML render edilir → admin kendi şablonunda
+  // bir hata/typo (örn. <script> yazsa) preview'da çalıştırılmasın.
+  //
+  // ALLOWED_ATTR/FORBID_TAGS: MailMessageCard preview ile aynı seti
+  // tutalım (tutarlılık).
+  const safePreviewHtml = useMemo(() => {
+    const rendered = html
+      .replaceAll('{{agent.name}}', SAMPLE_NAME)
+      .replaceAll('{{agent.title}}', SAMPLE_TITLE);
+    return DOMPurify.sanitize(rendered, {
+      USE_PROFILES: { html: true },
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
+      FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
+    });
+  }, [html]);
 
   const isEmpty = !html.trim();
 
@@ -200,7 +216,7 @@ export function CompanySignatureTemplate({ companyId }: { companyId: string }) {
                   </span>
                 </label>
                 <div className="prose prose-sm max-w-none rounded-md border border-slate-200 bg-white p-3 text-sm dark:prose-invert dark:border-ndark-border dark:bg-ndark-card"
-                  dangerouslySetInnerHTML={{ __html: previewHtml || '<p class="text-slate-400">Önizleme burada görünür.</p>' }}
+                  dangerouslySetInnerHTML={{ __html: safePreviewHtml || '<p class="text-slate-400">Önizleme burada görünür.</p>' }}
                 />
               </div>
             </div>
