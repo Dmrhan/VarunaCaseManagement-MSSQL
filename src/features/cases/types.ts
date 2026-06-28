@@ -477,6 +477,18 @@ export interface Case {
   // görür ve PATCH /api/cases/:id/link-account ile bağlar.
   customerMatchPending: boolean;
 
+  /**
+   * M6.3b Faz 1 — "Yanıt bekliyor" rozeti için K4 türetilmiş state.
+   * appendInbound/appendOutbound monotonic mantığı + transitionStatus
+   * terminal guard + isOldReply matris (M6.3 Codex P2 zinciri).
+   * Liste/detay render badge için; manuel override YOK.
+   */
+  pendingCustomerReply?: boolean;
+  /** Son OUTBOUND mail timestamp (ISO). Badge tooltip duration için. */
+  lastEmailOutboundAt?: string | null;
+  /** Son INBOUND mail timestamp (ISO). */
+  lastEmailInboundAt?: string | null;
+
   // Phase D Step 2 — opsiyonel başvuran bilgileri (müşterisiz vaka intake'i).
   customerContactName?: string | null;
   customerContactPhone?: string | null;
@@ -870,6 +882,8 @@ export interface CaseFilters {
   dateTo?: string;                  // ISO date
   // Phase D — yalnız Supervisor+ rolleri görür; backend ignore eder Agent için.
   customerMatchPending?: boolean;
+  /** M6.3b Faz 1 — "Yanıt bekliyor" filtresi (tüm roller). */
+  pendingCustomerReply?: boolean;
   // KPI tile click intents — server-side resolve edilir.
   assignedToMe?: boolean;     // personId → req.user.personId
   teamScope?: boolean;        // teamId → Supervisor'ın Person.teamId'si (server resolve)
