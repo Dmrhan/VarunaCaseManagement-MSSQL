@@ -17,7 +17,17 @@
  * `null` / `undefined` daima '' (boş string) döner — Excel'de boş hücre.
  */
 
-const STATUS_LABELS = {
+/**
+ * Backend tarafı Türkçe label tablosu. Şu an iki tüketici var:
+ *   - caseReport applyFormat (Excel/PDF output)
+ *   - notificationRepository buildTemplateVars (M4.1 müşteri-yüzlü mail render)
+ *
+ * Frontend tarafındaki CASE_STATUS_LABELS / CASE_PRIORITY_LABELS
+ * (src/features/cases/types.ts) ile değer eşittir; kontrat tek doğruluk
+ * kaynağı olarak burada (server-side enum çevirisi reporting + notification
+ * paylaşımı için).
+ */
+export const STATUS_LABELS = {
   Acik: 'Açık',
   Incelemede: 'İncelemede',
   ThirdPartyWaiting: '3. Parti Bekleniyor',
@@ -27,14 +37,14 @@ const STATUS_LABELS = {
   IptalEdildi: 'İptal Edildi',
 };
 
-const PRIORITY_LABELS = {
+export const PRIORITY_LABELS = {
   Low: 'Düşük',
   Medium: 'Orta',
   High: 'Yüksek',
   Critical: 'Kritik',
 };
 
-const CASE_TYPE_LABELS = {
+export const CASE_TYPE_LABELS = {
   GeneralSupport: 'Genel Destek',
   ProactiveTracking: 'Proaktif Takip',
   Churn: 'Churn (İptal)',
