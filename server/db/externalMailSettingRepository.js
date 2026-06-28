@@ -50,6 +50,10 @@ const SELECTABLE_PUBLIC = {
   authMode: true,
   // username SECRET DEĞİL (secret şifreli; username plain).
   username: true,
+  // Compose-Signature F2 — şirket imza şablonu (placeholder'lı HTML).
+  // Composer ve dispatch render anında {{agent.name}} + {{agent.title}}
+  // Mustache placeholder'larıyla User → Person üzerinden interpolate edilir.
+  signatureHtml: true,
   secretSetAt: true,
   createdByUserId: true,
   updatedByUserId: true,
@@ -75,6 +79,7 @@ function defaultShape(companyId) {
     imapPort: 993,
     authMode: 'password',
     username: null,
+    signatureHtml: null,
     secretIsSet: false,
     secretSetAt: null,
     createdByUserId: null,
@@ -141,6 +146,17 @@ function validatePatch(patch) {
       throw new AdminError('secret en az 4 karakter olmalı.', 400);
     }
   }
+  // Compose-Signature F2 — signatureHtml validation
+  if (patch.signatureHtml !== undefined && patch.signatureHtml !== null) {
+    if (typeof patch.signatureHtml !== 'string') {
+      throw new AdminError('signatureHtml string olmalı.', 400);
+    }
+    // Defansif üst sınır — mail provider'lar HTML body için tipik 100KB
+    // bant; imza tek başına bunun küçük bir parçası olmalı.
+    if (patch.signatureHtml.length > 50_000) {
+      throw new AdminError('signatureHtml en fazla 50.000 karakter olabilir.', 400);
+    }
+  }
 }
 
 /**
@@ -161,6 +177,7 @@ function shapeForPublic(row, companyId) {
     imapPort: row.imapPort ?? null,
     authMode: row.authMode ?? 'password',
     username: row.username ?? null,
+    signatureHtml: row.signatureHtml ?? null,
     secretIsSet: row.secretSetAt !== null && row.secretSetAt !== undefined,
     secretSetAt: row.secretSetAt ?? null,
     createdByUserId: row.createdByUserId ?? null,
@@ -288,6 +305,18 @@ export const externalMailSettingRepo = {
     if (patch.imapPort !== undefined) data.imapPort = patch.imapPort === null ? null : Number(patch.imapPort);
     if (patch.authMode !== undefined) data.authMode = String(patch.authMode);
     if (patch.username !== undefined) data.username = normalizeOptionalText(patch.username);
+
+    // Compose-Signature F2 — şirket imza şablonu.
+    // sanitize-html M6.1 allowlist save öncesi (XSS koruma; admin akışı
+    // M6.3b CaseEmailTemplate ile aynı pattern).
+    if (patch.signatureHtml !== undefined) {
+      if (patch.signatureHtml === null || patch.signatureHtml === '') {
+        data.signatureHtml = null;
+      } else {
+        const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
+        data.signatureHtml = sanitizeOutgoingEmailHtml(patch.signatureHtml);
+      }
+    }
 
     // Secret encrypt: yalnız body'de varsa.
     if (typeof patch.secret === 'string' && patch.secret.trim().length > 0) {

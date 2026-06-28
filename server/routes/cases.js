@@ -2506,8 +2506,11 @@ router.get(
     await assertCaseSecurityFilterAccess(req, { caseId: req.params.id, companyId: c.companyId });
     // Mail M6.3b Faz 2 — Per-agent imza eklendi. Response genişletildi:
     //   { tenantHtml, agentHtml, signatureHtml? (deprecated geri uyumlu) }
-    // Fallback chain (composer): agent > tenant > none.
-    // signatureHtml eski caller'lar için: agent > tenant'ı düzleştirir.
+    // Compose-Signature F2 — composedHtml eklendi (şirket şablonu + Person
+    // bilgileriyle render). Fallback chain (composer):
+    //   override (agentHtml) > composedHtml > none
+    // tenantHtml ham şablon, geri uyum için tutuldu.
+    // signatureHtml flatten (eski client'lar): agent > composed > tenant.
     const [ems, user] = await Promise.all([
       prisma.externalMailSetting.findUnique({
         where: { companyId: c.companyId },
@@ -2515,17 +2518,43 @@ router.get(
       }),
       prisma.user.findUnique({
         where: { id: req.user.id },
-        select: { signatureHtml: true },
+        select: { signatureHtml: true, personId: true, fullName: true },
       }),
     ]);
     const tenantHtml = ems?.signatureHtml ?? null;
     const agentHtml = user?.signatureHtml ?? null;
+
+    // Compose-Signature F2 — Şirket şablonunu Person bilgileriyle render et.
+    // Mustache reuse: notificationRepository.renderTemplate.
+    // Person yoksa (SystemAdmin gibi) {{agent.title}} boş; {{agent.name}}
+    // User.fullName fallback (Person.name yoksa kullanıcının ekran adı).
+    let composedHtml = null;
+    if (tenantHtml) {
+      let agentName = user?.fullName ?? '';
+      let agentTitle = '';
+      if (user?.personId) {
+        const person = await prisma.person.findUnique({
+          where: { id: user.personId },
+          select: { name: true, title: true },
+        });
+        if (person?.name) agentName = person.name;
+        if (person?.title) agentTitle = person.title;
+      }
+      const { renderTemplate } = await import('../db/notificationRepository.js');
+      const out = renderTemplate(tenantHtml, {
+        'agent.name': agentName,
+        'agent.title': agentTitle,
+      });
+      composedHtml = out.rendered || null;
+    }
+
     res.json({
       tenantHtml,
       agentHtml,
-      // Deprecated — yeni client'lar tenantHtml/agentHtml ayrı okur.
-      // Eski client'lar için fallback (agent > tenant) düzleştirme.
-      signatureHtml: agentHtml ?? tenantHtml,
+      composedHtml,
+      // Deprecated — yeni client'lar agentHtml/composedHtml ayrı okur.
+      // Eski caller'lar için fallback (agent > composed > tenant).
+      signatureHtml: agentHtml ?? composedHtml ?? tenantHtml,
     });
   }),
 );
