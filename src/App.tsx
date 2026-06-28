@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   FileSpreadsheet,
   LogOut,
+  Mail,
   Network,
   Moon,
   PanelLeftClose,
@@ -57,6 +58,11 @@ import { useHotkey } from './lib/useHotkey';
 import { useTheme } from './lib/useTheme';
 import { useAuth } from './services/AuthContext';
 import { ChangePasswordModal } from './features/auth/SetPasswordPage';
+// M6.3b Faz 2 — TipTap RichTextEditor reuse ettiği için lazy (main
+// bundle'ı 588→724 KB şişiriyordu).
+const UserSignatureModal = lazy(() =>
+  import('./features/profile/UserSignatureModal').then((m) => ({ default: m.UserSignatureModal })),
+);
 
 import { AdminLayout, type AdminView, isAdminView } from './features/admin/AdminLayout';
 import { AdminFieldsPage } from './features/admin/AdminFieldsPage';
@@ -117,6 +123,8 @@ export default function App() {
   const [patternCasesFilter, setPatternCasesFilter] = useState<{ caseIds: string[]; label: string } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  // M6.3b Faz 2 — Per-agent imza self-service modal
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [gPressed, setGPressed] = useState(false);
   // Sidebar otomatik gizleme: default dar (icon-only), hover ile genişler.
   // Pin (sabitleme) açıkken hover'dan bağımsız genişler — ayrı state, türetilmiş `sidebarExpanded`.
@@ -518,6 +526,15 @@ export default function App() {
                         {user.role}
                       </div>
                     </div>
+                    {/* M6.3b Faz 2 — Mail İmzam (self-service) */}
+                    <button
+                      type="button"
+                      onClick={() => { close(); setSignatureModalOpen(true); }}
+                      className="flex items-center gap-2 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-ndark-text dark:hover:bg-ndark-card"
+                    >
+                      <Mail size={14} className="text-slate-500 dark:text-ndark-muted" />
+                      Mail İmzam
+                    </button>
                     {/* Şifre Değiştir */}
                     <button
                       type="button"
@@ -546,6 +563,11 @@ export default function App() {
       </header>
 
       {changePasswordOpen && <ChangePasswordModal onClose={() => setChangePasswordOpen(false)} />}
+      {signatureModalOpen && (
+        <Suspense fallback={null}>
+          <UserSignatureModal open={signatureModalOpen} onClose={() => setSignatureModalOpen(false)} />
+        </Suspense>
+      )}
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <div className={`flex flex-1 ${isFixedHeight ? 'overflow-hidden' : ''}`}>

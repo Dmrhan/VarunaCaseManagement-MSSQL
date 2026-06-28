@@ -55,8 +55,16 @@ export interface MailComposerProps {
     subject: string;
     quotedBodyHtml: string;
   } | null;
-  /** Tenant default imza HTML — composer açılınca gövde sonuna append. */
+  /**
+   * @deprecated M6.3b Faz 2 — Yerine initialTenantSignatureHtml +
+   *   initialAgentSignatureHtml. Geri uyumluluk için kalır;
+   *   verilirse tenant olarak yorumlanır (agent null).
+   */
   initialSignatureHtml?: string | null;
+  /** M6.3b Faz 2 — Tenant default imza (ExternalMailSetting.signatureHtml). */
+  initialTenantSignatureHtml?: string | null;
+  /** M6.3b Faz 2 — Per-agent imza (User.signatureHtml). */
+  initialAgentSignatureHtml?: string | null;
   /** Composer'dan inbound/outbound CaseEmail oluşunca thread refresh. */
   onSent?: () => void;
   /** Vazgeç butonu. */
@@ -76,6 +84,8 @@ export function MailComposer({
   initialReplyContext = null,
   initialForwardContext = null,
   initialSignatureHtml = null,
+  initialTenantSignatureHtml = null,
+  initialAgentSignatureHtml = null,
   onSent,
   onCancel,
 }: MailComposerProps) {
@@ -92,11 +102,27 @@ export function MailComposer({
   const showBcc = true;
   // Önizleme modu
   const [previewing, setPreviewing] = useState(false);
-  // İmza/Şablon dropdown — şimdilik sadece "tenant default" + "yok"
-  // Per-agent imza ve şablon yönetimi M6.3b'de bu listeye eklenir.
-  const [signatureSelection, setSignatureSelection] = useState<'none' | 'tenant'>(
-    initialSignatureHtml ? 'tenant' : 'none',
+  // M6.3b Faz 2 — fallback chain: agent > tenant > none.
+  // Geri uyumluluk: eski caller initialSignatureHtml verirse tenant
+  // olarak yorumla (agent null).
+  const tenantHtml = initialTenantSignatureHtml ?? initialSignatureHtml ?? null;
+  const agentHtml = initialAgentSignatureHtml ?? null;
+  // İmza dropdown — n4b S2/S5/S6 endüstri parite.
+  //   Otomatik insert: default fallback (agent > tenant)
+  //   Composer toggle: 'agent' | 'tenant' | 'none'
+  const initialSignatureChoice: 'agent' | 'tenant' | 'none' = agentHtml
+    ? 'agent'
+    : tenantHtml
+      ? 'tenant'
+      : 'none';
+  const [signatureSelection, setSignatureSelection] = useState<'agent' | 'tenant' | 'none'>(
+    initialSignatureChoice,
   );
+  // initial baseline body için seçili imzanın HTML'i.
+  const initialSelectedSignatureHtml =
+    initialSignatureChoice === 'agent' ? agentHtml
+    : initialSignatureChoice === 'tenant' ? tenantHtml
+    : null;
   const [subject, setSubject] = useState<string>(
     initialReplyContext?.subject ?? initialForwardContext?.subject ?? '',
   );
@@ -113,36 +139,32 @@ export function MailComposer({
   const initialBaselineBodyRef = useRef<string>(
     (() => {
       let html = '<p></p>';
-      if (initialSignatureHtml) html += initialSignatureHtml;
+      if (initialSelectedSignatureHtml) html += initialSelectedSignatureHtml;
       if (initialForwardContext?.quotedBodyHtml) html += initialForwardContext.quotedBodyHtml;
       return html;
     })(),
   );
   const [bodyHtml, setBodyHtml] = useState<string>(initialBaselineBodyRef.current);
-  const signatureAppendedRef = useRef<boolean>(!!initialSignatureHtml);
+  const signatureAppendedRef = useRef<boolean>(!!initialSelectedSignatureHtml);
 
   useEffect(() => {
     if (signatureAppendedRef.current) return;
-    if (!initialSignatureHtml) return;
+    if (!initialSelectedSignatureHtml) return;
     setBodyHtml((cur) => {
       // Body hala baseline durumunda mı? → append güvenli.
       if (cur === initialBaselineBodyRef.current) {
-        // Codex P2 fix — forward quotedBodyHtml KORUNMALI. Eski kod
-        // `<p></p>${signature}` ile baseline'ı eziyor, slow-signature-fetch
-        // path'inde forward alıntı kayboluyordu. İmzayı `<p></p>` ile
-        // alıntı arasına injekt et (forward yoksa zaten quoted=''):
+        // Codex P2 fix — forward quotedBodyHtml KORUNMALI.
         const quoted = initialForwardContext?.quotedBodyHtml ?? '';
-        const next = `<p></p>${initialSignatureHtml}${quoted}`;
+        const next = `<p></p>${initialSelectedSignatureHtml}${quoted}`;
         initialBaselineBodyRef.current = next;
         signatureAppendedRef.current = true;
         return next;
       }
-      // Kullanıcı yazmaya başlamış — dokunma. Yine de "yine deneme" diye
-      // flag set et.
+      // Kullanıcı yazmaya başlamış — dokunma.
       signatureAppendedRef.current = true;
       return cur;
     });
-  }, [initialSignatureHtml, initialForwardContext]);
+  }, [initialSelectedSignatureHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -354,20 +376,40 @@ export function MailComposer({
         <input type="hidden" value={showCc ? '1' : '0'} onChange={() => undefined} />
         <input type="hidden" value={showBcc ? '1' : '0'} onChange={() => undefined} />
 
-        {/* Mail Şablonu / İmza */}
-        <Field label="Mail Şablonu / İmza Seçiniz">
-          <select
-            value={signatureSelection}
-            onChange={(e) => setSignatureSelection(e.target.value as 'none' | 'tenant')}
-            disabled={submitting}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-          >
-            <option value="none">İmzasız</option>
-            <option value="tenant" disabled={!initialSignatureHtml}>
-              {initialSignatureHtml ? 'Şirket varsayılan imzası' : 'Şirket varsayılan imzası (tanımlı değil)'}
-            </option>
-          </select>
-        </Field>
+        {/* M6.3b Faz 2 — İmza + Şablon AYRI dropdown (n4b S6).
+            n4b S2 endüstri parite: otomatik insert (fallback chain).
+            Agent değiştirebilir: 'Kişisel imzam' / 'Şirket varsayılan' /
+            'İmzasız'. Faz 3'te Mail Şablonu ayrı dropdown'la gelir.
+            Selection değişimi composer açıkken canlı baseline rewrite
+            mantığı şu an YOK — initial seçim baseline'a injekt edilir;
+            agent değiştirirse baseline'ı manuel düzenler (basit v1). */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Field label="İmza">
+            <select
+              value={signatureSelection}
+              onChange={(e) => setSignatureSelection(e.target.value as 'none' | 'tenant' | 'agent')}
+              disabled={submitting}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+            >
+              <option value="none">İmzasız</option>
+              <option value="agent" disabled={!agentHtml}>
+                {agentHtml ? 'Kişisel imzam' : 'Kişisel imzam (tanımlı değil)'}
+              </option>
+              <option value="tenant" disabled={!tenantHtml}>
+                {tenantHtml ? 'Şirket varsayılan imzası' : 'Şirket varsayılan imzası (tanımlı değil)'}
+              </option>
+            </select>
+          </Field>
+          <Field label="Mail Şablonu">
+            <select
+              disabled
+              className="w-full rounded-md border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm text-slate-400 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
+              title="Mail şablonları Faz 3'te gelir"
+            >
+              <option>Şablon yok</option>
+            </select>
+          </Field>
+        </div>
 
         {/* Subject */}
         <Field label="Konu">

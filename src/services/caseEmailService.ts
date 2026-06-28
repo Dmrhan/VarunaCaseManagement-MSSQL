@@ -246,13 +246,39 @@ export async function getEmailConfig(caseId: string): Promise<EmailConfig> {
  * GET /api/cases/:caseId/email-signature — composer açılışında tenant
  * default imzasını gövdeye append etmek için.
  */
-export async function getEmailSignature(caseId: string): Promise<string | null> {
-  const r = await apiFetch<{ signatureHtml: string | null }>(
+export interface EmailSignatureBundle {
+  /** Tenant default imza (ExternalMailSetting.signatureHtml). */
+  tenantHtml: string | null;
+  /** Per-agent imza (User.signatureHtml — M6.3b Faz 2). */
+  agentHtml: string | null;
+  /**
+   * Deprecated — eski caller'lar için fallback (agent > tenant)
+   * düzleştirme. Yeni caller'lar tenantHtml/agentHtml ayrı oku.
+   */
+  signatureHtml: string | null;
+}
+
+/**
+ * M6.3b Faz 2 — composer açılışında imza bundle. Composer fallback
+ * chain: agentHtml > tenantHtml > none.
+ *
+ * Geri uyumluluk: eski caller `getEmailSignature(caseId)` string | null
+ * imzasıyla çağırırsa, yeni bundle'dan `signatureHtml`'i düz olarak
+ * döndürür (agent > tenant fallback).
+ */
+export async function getEmailSignatureBundle(caseId: string): Promise<EmailSignatureBundle> {
+  const r = await apiFetch<EmailSignatureBundle>(
     `/api/cases/${encodeURIComponent(caseId)}/email-signature`,
     undefined,
     { silent: true },
   );
-  return r?.signatureHtml ?? null;
+  return r ?? { tenantHtml: null, agentHtml: null, signatureHtml: null };
+}
+
+/** Geri uyumlu (eski imzayla) — yeni composer doğrudan bundle alır. */
+export async function getEmailSignature(caseId: string): Promise<string | null> {
+  const bundle = await getEmailSignatureBundle(caseId);
+  return bundle.signatureHtml;
 }
 
 export const caseEmailService = {
@@ -263,5 +289,6 @@ export const caseEmailService = {
   getForwardContext,
   sendEmail,
   getEmailSignature,
+  getEmailSignatureBundle,
   getEmailConfig,
 };

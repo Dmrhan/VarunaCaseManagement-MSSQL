@@ -51,7 +51,9 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
   const [forwardCtx, setForwardCtx] = useState<ForwardContext | null>(null);
-  const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
+  // M6.3b Faz 2 — composer artık tenant + agent imza ayrı alır.
+  const [tenantSignatureHtml, setTenantSignatureHtml] = useState<string | null>(null);
+  const [agentSignatureHtml, setAgentSignatureHtml] = useState<string | null>(null);
   // Codex fix — Reply/Forward konu prefill: composer açıkken mode değişirse
   // (örn. reply açıkken forward'a geç) initialReplyContext/initialForwardContext
   // prop değişiyor ama composer'ın internal state'i (subject vs.) ilk
@@ -70,11 +72,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
   // İmzayı sessizce yükle (silent fetch — config-yok şirketlerde 404 →
-  // toast yok, null döner).
+  // toast yok, null döner). M6.3b Faz 2: bundle (tenant + agent).
   useEffect(() => {
     let alive = true;
-    void caseEmailService.getEmailSignature(item.id).then((s) => {
-      if (alive) setSignatureHtml(s);
+    void caseEmailService.getEmailSignatureBundle(item.id).then((b) => {
+      if (!alive) return;
+      setTenantSignatureHtml(b.tenantHtml);
+      setAgentSignatureHtml(b.agentHtml);
     });
     return () => { alive = false; };
   }, [item.id]);
@@ -212,7 +216,8 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
               item={item}
               initialReplyContext={replyCtx}
               initialForwardContext={forwardCtx}
-              initialSignatureHtml={signatureHtml}
+              initialTenantSignatureHtml={tenantSignatureHtml}
+              initialAgentSignatureHtml={agentSignatureHtml}
               onSent={handleSent}
               onCancel={handleCancel}
             />
