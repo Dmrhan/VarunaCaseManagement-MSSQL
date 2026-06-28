@@ -1553,26 +1553,57 @@ function LeftPanel({
       <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} metricsLayout="summary" />
 
       <PanelSection title="SLA Durumu" icon={<Clock size={12} />}>
-        <div className="space-y-1.5 text-xs">
-          <SlaRow label="Yanıt SLA" value={item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'} />
-          <SlaRow
-            label="Çözüm SLA"
-            value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'}
-          />
-          {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-            <div className="rounded-md bg-blue-50 px-2 py-1 text-[11px] text-blue-800 ring-1 ring-blue-200">
-              Çözüme {formatRelative(item.slaResolutionDueAt)}
-            </div>
-          )}
-          {item.slaViolation && (
-            <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
-              <ShieldAlert size={11} className="mr-1 inline" />
-              SLA İhlali aktif
-            </div>
-          )}
-          {item.slaPausedAt && (
-            <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
-              SLA duraklatıldı ({formatRelative(item.slaPausedAt)})
+        <div className="space-y-2 text-xs">
+          {/* Yanıt SLA */}
+          <div className="space-y-1">
+            <SlaRow label="Yanıt SLA" value={item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'} />
+            {item.slaResponseDueAt && (
+              item.status !== 'Açık' ? (
+                <div className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-800 ring-1 ring-emerald-200">
+                  <CheckCircle2 size={11} className="mr-1 inline" />
+                  Yanıt verildi
+                </div>
+              ) : new Date(item.slaResponseDueAt) < new Date() ? (
+                <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
+                  <ShieldAlert size={11} className="mr-1 inline" />
+                  Yanıt SLA aşıldı — {formatRelative(item.slaResponseDueAt)}
+                </div>
+              ) : (
+                <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                  Yanıta {formatRelative(item.slaResponseDueAt)}
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Çözüm SLA */}
+          <div className="space-y-1">
+            <SlaRow label="Çözüm SLA" value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'} />
+            {item.slaResolutionDueAt && (
+              item.slaViolation ? (
+                <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
+                  <ShieldAlert size={11} className="mr-1 inline" />
+                  SLA İhlali — {formatRelative(item.slaResolutionDueAt)}
+                </div>
+              ) : item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !item.slaPausedAt ? (
+                <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                  Çözüme {formatRelative(item.slaResolutionDueAt)}
+                </div>
+              ) : null
+            )}
+          </div>
+
+          {/* Duraklatma */}
+          {(item.slaPausedAt || item.slaPausedDurationMin > 0) && (
+            <div className="space-y-1">
+              {item.slaPausedDurationMin > 0 && (
+                <SlaRow label="Duraklatma" value={`${item.slaPausedDurationMin} dk`} />
+              )}
+              {item.slaPausedAt && (
+                <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
+                  Şu an duraklıyor — {formatRelative(item.slaPausedAt)}
+                </div>
+              )}
             </div>
           )}
         </div>
