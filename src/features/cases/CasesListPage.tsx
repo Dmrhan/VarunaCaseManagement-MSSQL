@@ -80,12 +80,12 @@ type QuickFilter = 'slaRisk' | 'resolvedToday' | null;
 type QuickQueueFilter = 'all' | 'unassigned' | 'critical';
 
 // Kaynak kolonu ikon + renk yapılandırması.
-const ORIGIN_CFG: Record<string, { icon: React.ReactNode; bg: string; color: string }> = {
-  'Telefon': { icon: <Phone   size={14} />, bg: 'bg-emerald-100 dark:bg-emerald-900/30', color: 'text-emerald-700 dark:text-emerald-400' },
-  'E-posta': { icon: <Mail    size={14} />, bg: 'bg-blue-100 dark:bg-blue-900/30',       color: 'text-blue-700 dark:text-blue-400' },
-  'Web':     { icon: <Globe   size={14} />, bg: 'bg-indigo-100 dark:bg-indigo-900/30',   color: 'text-indigo-700 dark:text-indigo-400' },
-  'Chatbot': { icon: <MessageSquare size={14} />, bg: 'bg-violet-100 dark:bg-violet-900/30', color: 'text-violet-700 dark:text-violet-400' },
-  'Diğer':   { icon: <Phone   size={14} />, bg: 'bg-slate-100 dark:bg-slate-800',        color: 'text-slate-500 dark:text-slate-400' },
+const ORIGIN_CFG: Record<string, { icon: React.ReactNode }> = {
+  'Telefon': { icon: <Phone         size={14} /> },
+  'E-posta': { icon: <Mail          size={14} /> },
+  'Web':     { icon: <Globe         size={14} /> },
+  'Chatbot': { icon: <MessageSquare size={14} /> },
+  'Diğer':   { icon: <Phone         size={14} /> },
 };
 
 // Sol kenar öncelik şeridi renkleri (3px border-l).
@@ -1428,7 +1428,7 @@ export function CasesListPage({
                         return (
                           <span
                             title={c.originDescription ?? c.origin}
-                            className={cn('inline-flex h-7 w-7 items-center justify-center rounded-full', cfg.bg, cfg.color)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
                           >
                             {cfg.icon}
                           </span>
