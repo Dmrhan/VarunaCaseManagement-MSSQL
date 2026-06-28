@@ -1342,12 +1342,14 @@ export function CasesListPage({
                           ⚠ Müşteri yok
                         </span>
                       )}
-                      {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (compact). */}
+                      {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (compact).
+                          Codex review fix — duration kaynağı lastEmailInboundAt
+                          (müşterinin bekleyen mail'i), outbound DEĞİL. */}
                       {c.pendingCustomerReply && (
                         <div className="mt-1">
                           <PendingReplyBadge
                             pending={c.pendingCustomerReply}
-                            lastEmailOutboundAt={c.lastEmailOutboundAt}
+                            lastEmailInboundAt={c.lastEmailInboundAt}
                             size="sm"
                           />
                         </div>

@@ -1,10 +1,20 @@
 /**
  * M6.3b Faz 1 — "Yanıt bekliyor" rozeti.
  *
+ * SEMANTİK (Codex review fix):
+ *   pendingCustomerReply=true durumu = son inbound > son outbound
+ *   = "müşteri yeni mail attı, agent henüz cevap vermedi"
+ *   → AGENT'IN cevap vermesi BEKLENİYOR.
+ *
+ * Bu nedenle badge yaşı (tooltip duration) MÜŞTERİNİN BEKLEYEN
+ * mail'inin yaşı olmalı — yani lastEmailInboundAt. lastEmailOutboundAt
+ * (agent'ın eski cevabı) yanıltıcı: 10 gün önce mail attıysak ve
+ * müşteri bugün yanıt verdiyse "10 gün önce" göstermek yanlış.
+ *
  * Endüstri araştırması (Zendesk/Freshdesk/Freshservice/BoldDesk):
  *  - Renk: amber/sarı (waiting) — kırmızı/urgency DEĞİL
  *  - İkon: ⏳ (saat) — bekleyiş sinyali
- *  - Tooltip: ne zaman ve kaç gün önce gönderildi
+ *  - Tooltip: müşterinin yanıtladığından bu yana geçen süre
  *
  * State kaynağı: Case.pendingCustomerReply (K4 türetilmiş, transitionStatus
  * terminal guard + M6.3 Codex P2 zinciri matrisi). Manuel override YOK.
@@ -19,8 +29,12 @@ import { Clock } from 'lucide-react';
 
 interface Props {
   pending: boolean | undefined;
-  /** Son outbound timestamp (ISO) — tooltip duration için. */
-  lastEmailOutboundAt?: string | null;
+  /**
+   * Müşterinin bekleyen mail'inin timestamp'i (ISO). Tooltip duration
+   * BU değerden hesaplanır — agent'ın eski outbound'undan DEĞİL.
+   * Codex review fix: pending durumunun semantik kaynağı son inbound.
+   */
+  lastEmailInboundAt?: string | null;
   /** Compact varyant — liste satırı için. Default false (detay header). */
   size?: 'sm' | 'md';
 }
@@ -42,13 +56,13 @@ function formatDuration(hours: number | null): string {
   return days === 1 ? '1 gün önce' : `${days} gün önce`;
 }
 
-export function PendingReplyBadge({ pending, lastEmailOutboundAt, size = 'md' }: Props) {
+export function PendingReplyBadge({ pending, lastEmailInboundAt, size = 'md' }: Props) {
   if (!pending) return null;
-  const hours = durationHours(lastEmailOutboundAt);
+  const hours = durationHours(lastEmailInboundAt);
   const durationText = formatDuration(hours);
-  const tooltip = lastEmailOutboundAt
-    ? `Müşteri yanıtı bekleniyor — son cevap ${durationText}`
-    : 'Müşteri yanıtı bekleniyor';
+  const tooltip = lastEmailInboundAt
+    ? `Müşteri ${durationText} yanıt verdi — agent cevabı bekleniyor`
+    : 'Müşteri yanıtı geldi — agent cevabı bekleniyor';
 
   const sizeClass = size === 'sm'
     ? 'px-1.5 py-0.5 text-[10px]'

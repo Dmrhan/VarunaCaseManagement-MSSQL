@@ -712,11 +712,12 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               <span className="font-mono text-slate-700">{item.caseNumber}</span>
               <span className="text-slate-400">—</span>
               <span className="truncate text-slate-600">{item.accountName}</span>
-              {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (detay header). */}
+              {/* M6.3b Faz 1 — "Yanıt bekliyor" rozeti (detay header).
+                  Codex review fix — duration kaynağı lastEmailInboundAt. */}
               {item.pendingCustomerReply && (
                 <PendingReplyBadge
                   pending={item.pendingCustomerReply}
-                  lastEmailOutboundAt={item.lastEmailOutboundAt}
+                  lastEmailInboundAt={item.lastEmailInboundAt}
                   size="sm"
                 />
               )}
