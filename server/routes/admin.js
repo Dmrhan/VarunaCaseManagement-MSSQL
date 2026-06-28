@@ -25,6 +25,7 @@ import { authorizationPolicyRepository } from '../db/authorizationPolicyReposito
 import { devopsClient } from '../lib/devopsClient.js';
 import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
+import { caseEmailTemplateRepo } from '../db/caseEmailTemplateRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
@@ -1184,6 +1185,152 @@ router.post('/external-mail-settings/:companyId/from-aliases/:aliasId/set-defaul
   res.json({ ok: true });
 }));
 
+// ─────────────────────────────────────────────────────────────────
+// Mail M6.3b Faz 3 — CaseEmailTemplate admin CRUD.
+// Per-tenant; assertCompanyAdmin scope kontrolü her uçta (M5-ext desen).
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /case-email-templates?companyId=... — admin list (active + inactive).
+ */
+router.get('/case-email-templates', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const items = await caseEmailTemplateRepo.list(companyId);
+  res.json({ items });
+}));
+
+/**
+ * POST /case-email-templates — yeni template.
+ * Body: { companyId, name, category?, subject?, bodyHtml, variables?, isActive? }
+ */
+router.post('/case-email-templates', asyncRoute(async (req, res) => {
+  const companyId = typeof req.body?.companyId === 'string' ? req.body.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+
+  // bodyHtml sanitize (M6.1 deseni — agent insert eder, ileride sanitize-html'den geçer).
+  let bodyHtml = typeof req.body?.bodyHtml === 'string' ? req.body.bodyHtml : '';
+  if (bodyHtml) {
+    const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
+    bodyHtml = sanitizeOutgoingEmailHtml(bodyHtml);
+  }
+
+  const draft = {
+    name: req.body?.name,
+    category: req.body?.category,
+    subject: req.body?.subject,
+    bodyHtml,
+    variables: req.body?.variables,
+    isActive: req.body?.isActive,
+  };
+  const result = await caseEmailTemplateRepo.upsert(companyId, draft, actor.userId ?? null);
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'name_already_exists' ? 409
+      : code === 'name_required' || code === 'body_required' || code === 'name_too_long' ? 400
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.status(201).json(result.template);
+}));
+
+/**
+ * GET /case-email-templates/:id?companyId=... — admin read tek satır.
+ */
+router.get('/case-email-templates/:id', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const tpl = await caseEmailTemplateRepo.getById(companyId, req.params.id);
+  if (!tpl) return res.status(404).json({ error: 'not_found' });
+  res.json(tpl);
+}));
+
+/**
+ * PATCH /case-email-templates/:id — düzenle.
+ * Body: { companyId, ...partial fields }
+ */
+router.patch('/case-email-templates/:id', asyncRoute(async (req, res) => {
+  const companyId = typeof req.body?.companyId === 'string' ? req.body.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+
+  let bodyHtml = req.body?.bodyHtml;
+  if (typeof bodyHtml === 'string' && bodyHtml) {
+    const { sanitizeOutgoingEmailHtml } = await import('../lib/htmlSanitizer.js');
+    bodyHtml = sanitizeOutgoingEmailHtml(bodyHtml);
+  }
+
+  const draft = {
+    id: req.params.id,
+    name: req.body?.name,
+    category: req.body?.category,
+    subject: req.body?.subject,
+    bodyHtml,
+    variables: req.body?.variables,
+    isActive: req.body?.isActive,
+  };
+  const result = await caseEmailTemplateRepo.upsert(companyId, draft, actor.userId ?? null);
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'not_found' ? 404
+      : code === 'name_already_exists' ? 409
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json(result.template);
+}));
+
+/**
+ * DELETE /case-email-templates/:id?companyId=... — sil.
+ */
+router.delete('/case-email-templates/:id', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const result = await caseEmailTemplateRepo.remove(companyId, req.params.id);
+  if (!result.ok) {
+    return res.status(result.code === 'not_found' ? 404 : 400).json({ error: result.code });
+  }
+  res.json({ ok: true });
+}));
+
+/**
+ * POST /case-email-templates/:id/preview?companyId=...&caseId=... — placeholder render.
+ * Body opsiyonel; varsa override variables.
+ * Response: { subject, bodyHtml, missing }
+ */
+router.post('/case-email-templates/:id/preview', asyncRoute(async (req, res) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId : '';
+  const caseId = typeof req.query.caseId === 'string' ? req.query.caseId : '';
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+
+  const tpl = await caseEmailTemplateRepo.getById(companyId, req.params.id);
+  if (!tpl) return res.status(404).json({ error: 'not_found' });
+
+  // Preview için opsiyonel case context — eğer caseId verildiyse fetch et;
+  // yoksa boş şablon değerleriyle render (admin preview).
+  const { prisma } = await import('../db/client.js');
+  let caseRow = null;
+  if (caseId) {
+    caseRow = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: {
+        caseNumber: true, title: true, accountName: true,
+        customerContactName: true, customerContactEmail: true,
+      },
+    });
+  }
+  const actor = requireActor(req);
+  const { renderTemplate } = await import('../lib/emailTemplateRender.js');
+  const out = renderTemplate(tpl, caseRow, { fullName: actor.fullName ?? '' });
+  res.json(out);
+}));
 // ─────────────────────────────────────────────────────────────────
 // WR-Smart-Ticket Phase 1b — TaxonomyDef admin CRUD.
 // Per-tenant. Soft delete only (DELETE → isActive=false). companyId query

@@ -262,6 +262,53 @@ export function MailComposer({
     return () => { alive = false; };
   }, [item.id]);
 
+  // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
+  const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  // Subject replace confirm modal state
+  const [pendingTemplate, setPendingTemplate] = useState<{ id: string; subject: string | null; bodyHtml: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void caseEmailService.listEmailTemplates(item.id).then((items) => {
+      if (alive) setTemplates(items);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  // Template seçimi: render + insert. Subject varsa modal onay.
+  // Codex P2 deseni: hata durumunda (render undefined) silent skip.
+  async function applyTemplate(templateId: string) {
+    if (!templateId) return;
+    setTemplateBusy(true);
+    try {
+      const rendered = await caseEmailService.renderEmailTemplate(item.id, templateId);
+      if (!rendered) return; // apiFetch toast attı; silent skip
+      const hasSubject = typeof rendered.subject === 'string' && rendered.subject.trim();
+      if (hasSubject && subject && subject !== rendered.subject) {
+        // Subject zaten dolu + farklı → onay modal'ı.
+        setPendingTemplate({ id: templateId, subject: rendered.subject, bodyHtml: rendered.bodyHtml });
+        return;
+      }
+      // Doğrudan uygula.
+      if (hasSubject) setSubject(rendered.subject!);
+      // Body insert — cursor pozisyonu yerine basit append (TipTap state
+      // composer'ın internal'ında; v1 append; v2 cursor için TipTap
+      // editor ref gerek).
+      setBodyHtml((cur) => cur + rendered.bodyHtml);
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
+  function confirmTemplate(replaceSubject: boolean) {
+    if (!pendingTemplate) return;
+    if (replaceSubject && pendingTemplate.subject) {
+      setSubject(pendingTemplate.subject);
+    }
+    setBodyHtml((cur) => cur + pendingTemplate.bodyHtml);
+    setPendingTemplate(null);
+  }
+
   const selectedAlias = aliases.find((a) => a.id === fromId) ?? null;
   // Codex fix — From dropdown HER ZAMAN görünür (n4b paritesi). "Tek
   // alias ise gizle" mantığı KALDIRILDI; agent gönderen adresini her
@@ -468,11 +515,24 @@ export function MailComposer({
           </Field>
           <Field label="Mail Şablonu">
             <select
-              disabled
-              className="w-full rounded-md border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm text-slate-400 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
-              title="Mail şablonları Faz 3'te gelir"
+              value=""
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id) void applyTemplate(id);
+                e.target.value = ''; // her seçim sonrası placeholder'a dön
+              }}
+              disabled={submitting || templateBusy || templates.length === 0}
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+              title={templates.length === 0 ? 'Bu şirkette mail şablonu tanımlı değil' : 'Şablonu seç → metin/konu otomatik eklenir'}
             >
-              <option>Şablon yok</option>
+              <option value="">
+                {templates.length === 0 ? 'Şablon yok' : 'Şablon seçin…'}
+              </option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.category ? `[${t.category}] ${t.name}` : t.name}
+                </option>
+              ))}
             </select>
           </Field>
         </div>
@@ -578,6 +638,40 @@ export function MailComposer({
           {submitting ? 'Gönderiliyor…' : 'Gönder'}
         </Button>
       </div>
+
+      {/* M6.3b Faz 3 — Subject replace confirm modal.
+          n4b S11 endüstri parite: cursor insert + subject replace onayı. */}
+      {pendingTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPendingTemplate(null)}>
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl dark:bg-ndark-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-ndark-text">
+              Konu değiştirilsin mi?
+            </h3>
+            <p className="mb-3 text-xs text-slate-600 dark:text-ndark-muted">
+              Mevcut konu: <span className="font-mono">{subject}</span>
+              <br />
+              Şablon konusu: <span className="font-mono">{pendingTemplate.subject}</span>
+            </p>
+            <p className="mb-3 text-xs text-slate-500">
+              Hayır seçerseniz konu korunur; şablon metni yine eklenir.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setPendingTemplate(null)}>
+                Vazgeç
+              </Button>
+              <Button type="button" variant="outline" onClick={() => confirmTemplate(false)}>
+                Hayır, konuyu koru
+              </Button>
+              <Button type="button" variant="primary" onClick={() => confirmTemplate(true)}>
+                Evet, değiştir
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

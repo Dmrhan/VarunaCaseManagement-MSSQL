@@ -70,6 +70,7 @@ import { AdminKnowledgeSourcesPage } from './features/admin/AdminKnowledgeSource
 import { AdminExternalKbPage } from './features/admin/AdminExternalKbPage';
 import { AdminExternalDevOpsPage } from './features/admin/AdminExternalDevOpsPage';
 import { AdminExternalMailPage } from './features/admin/AdminExternalMailPage';
+import { AdminEmailTemplatesPage } from './features/admin/AdminEmailTemplatesPage';
 import { AdminDataImportPage } from './features/admin/AdminDataImportPage';
 import { KnowledgeBasePage } from './features/kb/KnowledgeBasePage';
 import { AdminCompaniesPage } from './features/admin/AdminCompaniesPage';
@@ -422,6 +423,7 @@ export default function App() {
         {view === 'admin-external-kb' && <AdminExternalKbPage />}
         {view === 'admin-external-devops' && <AdminExternalDevOpsPage />}
         {view === 'admin-external-mail' && <AdminExternalMailPage />}
+        {view === 'admin-email-templates' && <AdminEmailTemplatesPage />}
         {view === 'admin-data-import' && <AdminDataImportPage />}
         {view === 'admin-companies' && <AdminCompaniesPage />}
         {view === 'admin-users' && <AdminUsersPage />}
