@@ -3414,7 +3414,7 @@ export const caseRepository = {
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
         slaResponseMetAt: nextSlaResponseMetAt,
-        resolvedAt: dbNext === 'Cozuldu' ? new Date() : prev.resolvedAt,
+        resolvedAt: (dbNext === 'Cozuldu' || dbNext === 'IptalEdildi') ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
         // OTOMATİK false. Müşteri yanıtı bekleyen bir vaka kapanırsa
         // "yanıt bekliyor" rozeti kalmamalı (R12 mitigation).

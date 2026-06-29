@@ -328,8 +328,9 @@ export function CasesListPage({
   );
 
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
-  const load = async (targetPage?: number) => {
+  const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
     const p = targetPage ?? page;
+    const effectiveQueueFilter = queueFilter ?? quickQueueFilter;
     setLoading(true);
     setSelected(new Set());
     if (inboxTab === 'later') {
@@ -349,8 +350,8 @@ export function CasesListPage({
         {
           ...filters,
           statuses: effectiveStatuses,
-          unassigned: quickQueueFilter === 'unassigned' ? true : undefined,
-          priorities: quickQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
+          unassigned: effectiveQueueFilter === 'unassigned' ? true : undefined,
+          priorities: effectiveQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
         },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );
@@ -363,7 +364,7 @@ export function CasesListPage({
   // Filtre veya sekme değişince → ilk sayfaya sıfırla ve yeniden yükle.
   useEffect(() => {
     setPage(1);
-    void load(1);
+    void load(1, quickQueueFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     inboxTab,
