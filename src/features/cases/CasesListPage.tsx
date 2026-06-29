@@ -804,6 +804,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, personId: me, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
               tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
                 setFilters(initialFilters);
@@ -836,6 +837,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
             ];
           }
@@ -863,6 +865,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
             ];
           }
@@ -968,25 +971,25 @@ export function CasesListPage({
             label="Tümü"
             icon={<Layers size={13} />}
             active={inboxTab === 'all'}
-            onClick={() => setInboxTab('all')}
+            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('all'); }}
           />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
             active={inboxTab === 'open'}
-            onClick={() => setInboxTab('open')}
+            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('open'); }}
           />
           <InboxTabButton
             label="Ertelendi"
             icon={<Clock3 size={13} />}
             active={inboxTab === 'later'}
-            onClick={() => setInboxTab('later')}
+            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('later'); }}
           />
           <InboxTabButton
             label="Kapalı"
             icon={<Check size={13} />}
             active={inboxTab === 'closed'}
-            onClick={() => setInboxTab('closed')}
+            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('closed'); }}
           />
         </div>
 
@@ -1255,13 +1258,13 @@ export function CasesListPage({
               </Select>
             </div>
 
-            {/* Hızlı kuyruk filtreleri — mevcut sayfayı client-side filtreler */}
+            {/* Hızlı kuyruk filtreleri — server-side, tüm kayıtlar üzerinde çalışır */}
             <div className="flex items-center gap-1">
               {(
                 [
                   { key: 'all' as const,        label: 'Tümü',       count: null },
-                  { key: 'unassigned' as const, label: 'Atanmamış',  count: stats.unassigned },
-                  { key: 'critical' as const,   label: 'Kritik',     count: stats.critical },
+                  { key: 'unassigned' as const, label: 'Atanmamış',  count: caseStats?.unassigned ?? null },
+                  { key: 'critical' as const,   label: 'Kritik',     count: caseStats?.critical ?? null },
                 ] satisfies { key: QuickQueueFilter; label: string; count: number | null }[]
               ).map(({ key, label, count }) => (
                 <button
