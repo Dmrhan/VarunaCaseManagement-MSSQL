@@ -161,7 +161,19 @@ function trimRequired(v, max, fieldName, code) {
 
 function normalizeConditions(raw) {
   if (raw == null) return {};
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
+  // Legacy fix — eski seed/admin akışı `conditions: []` (boş array) yazmış
+  // olabilir. Boş array semantiği boş object ile aynıdır ("filtre yok"),
+  // o yüzden tolere et + sessizce {} olarak normalize et. Edit→Kaydet
+  // sırasında validation fail olup R1/R2/R3 gibi mevcut rule'ları
+  // güncellenemez hale getirmesin diye.
+  //
+  // Boş olmayan array (örn. [{...}]) hala reddedilir — filtre semantiği
+  // belirsiz; admin'in hatayı görmesi gerek.
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return {};
+    throw new NotificationValidationError('conditions JSON nesne olmalı (array kabul edilmez).', { code: 'conditions_invalid' });
+  }
+  if (typeof raw !== 'object') {
     throw new NotificationValidationError('conditions JSON nesne olmalı.', { code: 'conditions_invalid' });
   }
   const out = {};
