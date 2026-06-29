@@ -107,7 +107,7 @@ import {
 import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import { useAuth } from '@/services/AuthContext';
 import { featureFlags } from '@/config/featureFlags';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative, formatRemaining } from '@/lib/format';
 import {
   CALL_DISPOSITIONS,
   CALL_OUTCOMES,
@@ -1553,26 +1553,57 @@ function LeftPanel({
       <CustomerPulsePanel source={{ kind: 'case', caseId: item.id }} metricsLayout="summary" />
 
       <PanelSection title="SLA Durumu" icon={<Clock size={12} />}>
-        <div className="space-y-1.5 text-xs">
-          <SlaRow label="Yanıt SLA" value={item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'} />
-          <SlaRow
-            label="Çözüm SLA"
-            value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'}
-          />
-          {item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt && (
-            <div className="rounded-md bg-blue-50 px-2 py-1 text-[11px] text-blue-800 ring-1 ring-blue-200">
-              Çözüme {formatRelative(item.slaResolutionDueAt)}
-            </div>
-          )}
-          {item.slaViolation && (
-            <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
-              <ShieldAlert size={11} className="mr-1 inline" />
-              SLA İhlali aktif
-            </div>
-          )}
-          {item.slaPausedAt && (
-            <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
-              SLA duraklatıldı ({formatRelative(item.slaPausedAt)})
+        <div className="space-y-2 text-xs">
+          {/* Yanıt SLA */}
+          <div className="space-y-1">
+            <SlaRow label="Yanıt SLA" value={item.slaResponseDueAt ? formatDateTime(item.slaResponseDueAt) : '—'} />
+            {item.slaResponseDueAt && (
+              item.status !== 'Açık' ? (
+                <div className="rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-800 ring-1 ring-emerald-200">
+                  <CheckCircle2 size={11} className="mr-1 inline" />
+                  Yanıt verildi
+                </div>
+              ) : new Date(item.slaResponseDueAt) < new Date() ? (
+                <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
+                  <ShieldAlert size={11} className="mr-1 inline" />
+                  Yanıt SLA aşıldı — {formatRelative(item.slaResponseDueAt)}
+                </div>
+              ) : (
+                <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                  Yanıta {formatRemaining(item.slaResponseDueAt)}
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Çözüm SLA */}
+          <div className="space-y-1">
+            <SlaRow label="Çözüm SLA" value={item.slaResolutionDueAt ? formatDateTime(item.slaResolutionDueAt) : '—'} />
+            {item.slaResolutionDueAt && (
+              item.slaViolation ? (
+                <div className="rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-800 ring-1 ring-rose-200">
+                  <ShieldAlert size={11} className="mr-1 inline" />
+                  SLA İhlali — {formatRelative(item.slaResolutionDueAt)}
+                </div>
+              ) : item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && !item.slaPausedAt ? (
+                <div className="rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                  Çözüme {formatRemaining(item.slaResolutionDueAt)}
+                </div>
+              ) : null
+            )}
+          </div>
+
+          {/* Duraklatma */}
+          {(item.slaPausedAt || item.slaPausedDurationMin > 0) && (
+            <div className="space-y-1">
+              {item.slaPausedDurationMin > 0 && (
+                <SlaRow label="Duraklatma" value={`${item.slaPausedDurationMin} dk`} />
+              )}
+              {item.slaPausedAt && (
+                <div className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">
+                  Şu an duraklıyor — {formatRelative(item.slaPausedAt)}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3628,7 +3659,7 @@ function DetailTab({
           const assignedPersonName = (drafts.assignedPersonName as string | undefined) ?? item.assignedPersonName;
 
           const primaryAssignmentItems = [
-            { label: 'Eskalasyon', icon: AlertTriangle, node: (
+            ...(item.status === 'Eskalasyon' ? [{ label: 'Eskalasyon', icon: AlertTriangle, node: (
               <InlineEdit
                 fieldKey="escalationLevel"
                 type="select"
@@ -3638,14 +3669,14 @@ function DetailTab({
                 onStart={() => onStartEdit('escalationLevel')}
                 onCommit={(val) => onCommitDraft('escalationLevel', val)}
                 onCancel={onCancelEdit}
-                options={ESCALATION_LEVELS.map((l) => ({ value: l, label: ESCALATION_LEVEL_LABELS[l] }))}
+                options={ESCALATION_LEVELS.filter((l) => l !== 'Yok').map((l) => ({ value: l, label: ESCALATION_LEVEL_LABELS[l] }))}
                 renderDisplay={() => (
                   <span className="text-sm text-slate-800">
                     {ESCALATION_LEVEL_LABELS[(drafts.escalationLevel as EscalationLevel | undefined) ?? item.escalationLevel]}
                   </span>
                 )}
               />
-            )},
+            )}] : []),
             { label: 'Vaka Sahibi', icon: UserCheck, node: (
               <span className="block cursor-default text-sm text-slate-800" title="Vakayı açan kullanıcı">{item.createdByName ?? '—'}</span>
             )},
@@ -4327,20 +4358,20 @@ function KpiSummaryStrip({ item, caseId }: { item: Case; caseId: string }) {
 
   // Parts: sönük metin parçaları; boş alanlar atlanır (graceful empty).
   const parts: Array<{ key: string; node: React.ReactNode }> = [];
+  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
   if (responseMin != null) parts.push({ key: 'response', node: <>Müdahale {fmt(responseMin)}</> });
   if (resolutionMin != null) parts.push({ key: 'resolution', node: <>Çözüm {fmt(resolutionMin)}</> });
   parts.push({
     key: 'fcr',
     node: <>İlk temas {fcr ? 'Evet' : resolutionMin != null ? 'Hayır' : <span className="italic text-slate-400">henüz</span>}</>,
   });
-  parts.push({ key: 'reopen', node: <>Y.açılma {reopened ? 'Var' : 'Yok'}</> });
+  if (reopened) parts.push({ key: 'reopen', node: <>Y.açılma Var</> });
   if (item.slaResponseDueAt) {
     parts.push({ key: 'slaResp', node: <>Yanıt SLA {formatRelative(item.slaResponseDueAt)}</> });
   }
   if (item.slaResolutionDueAt && !item.slaViolation && !item.slaPausedAt) {
     parts.push({ key: 'slaRes', node: <>Çözüm SLA {formatRelative(item.slaResolutionDueAt)}</> });
   }
-  parts.push({ key: 'opened', node: <>Açılış {formatDateTime(item.createdAt)}</> });
   parts.push({ key: 'updated', node: <>Son güncelleme {formatDateTime(item.updatedAt)}</> });
   if (item.resolvedAt) {
     parts.push({ key: 'resolved', node: <>Çözüm {formatDateTime(item.resolvedAt)}</> });

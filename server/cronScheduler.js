@@ -4,6 +4,7 @@ import { runPatternDetect } from './cron/patternDetect.js';
 import { runQaScoreBatch } from './cron/qaScoreBatch.js';
 import { runNotificationCleanup } from './cron/notificationCleanup.js';
 import { runActionItemArchive } from './cron/actionItemArchive.js';
+import { runSlaBreachSweep } from './cron/slaBreachSweep.js';
 import { startImapPollingInterval } from './lib/imapPoller.js';
 
 /**
@@ -48,6 +49,7 @@ export function startCronScheduler() {
   }
   schedule('snooze-wakeup', '*/5 * * * *', runSnoozeWakeup);
   schedule('pattern-detect', '*/15 * * * *', runPatternDetect);
+  schedule('sla-breach-sweep', '*/5 * * * *', runSlaBreachSweep);
   schedule('qa-score-batch', '0 2 * * *', runQaScoreBatch);
   schedule('notification-cleanup', '0 3 * * *', runNotificationCleanup);
   schedule('actionitem-archive', '30 3 * * *', runActionItemArchive);
@@ -55,5 +57,5 @@ export function startCronScheduler() {
   // default kapalı. imapPoller.js içinde setInterval yönetimi (manuel
   // tetik admin POST /external-mail-settings/:companyId/poll).
   startImapPollingInterval();
-  console.log('[cron] scheduler aktif: snooze 5dk, pattern 15dk, qa 02:00, cleanup 03:00, archive 03:30 (Europe/Istanbul).');
+  console.log('[cron] scheduler aktif: snooze 5dk, pattern 15dk, sla-breach 5dk, qa 02:00, cleanup 03:00, archive 03:30 (Europe/Istanbul).');
 }

@@ -14,9 +14,12 @@ import {
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
 import {
+  CASE_PRIORITIES,
+  CASE_PRIORITY_LABELS,
   CASE_REQUEST_TYPES,
   type CaseCategoryDef,
   type CaseCompany,
+  type CasePriority,
   type CaseRequestType,
   type SlaPolicy,
 } from '@/features/cases/types';
@@ -56,10 +59,11 @@ export function AdminSlaPage() {
     return arr.filter((p) =>
       [
         p.companyName,
-        p.productGroup,
-        p.categoryName,
-        p.subCategoryName,
-        p.requestType,
+        p.productGroup ?? '',
+        p.categoryName ?? '',
+        p.subCategoryName ?? '',
+        p.requestType ?? '',
+        p.priority ?? '',
         p.description ?? '',
       ]
         .join(' ')
@@ -84,7 +88,7 @@ export function AdminSlaPage() {
 
   async function handleDelete(p: SlaPolicy) {
     const usage = adminService.sla.usage(p.id).count;
-    const tuple = `${p.companyName} / ${p.productGroup} / ${p.categoryName} / ${p.subCategoryName} / ${p.requestType}`;
+    const tuple = [p.companyName, p.productGroup, p.categoryName, p.subCategoryName, p.requestType, p.priority].filter(Boolean).join(' / ');
     const msg =
       usage > 0
         ? `Bu kural ${usage} vakaya eşleşiyor (${tuple}). Silinince yeni vakalarda fallback uygulanır. Devam edilsin mi?`
@@ -155,6 +159,7 @@ export function AdminSlaPage() {
                   <Th>Kategori</Th>
                   <Th>Alt Kategori</Th>
                   <Th>Talep Türü</Th>
+                  <Th>Öncelik</Th>
                   <Th align="right">Yanıt</Th>
                   <Th align="right">Çözüm</Th>
                   <Th align="right">Eşleşen</Th>
@@ -171,11 +176,18 @@ export function AdminSlaPage() {
                         <div className="font-medium text-slate-800">{p.companyName}</div>
                         <div className="font-mono text-[10px] text-slate-400">{p.id}</div>
                       </Td>
-                      <Td className="text-slate-700">{p.productGroup}</Td>
-                      <Td className="text-slate-700">{p.categoryName}</Td>
-                      <Td className="text-slate-700">{p.subCategoryName}</Td>
+                      <Td className="text-slate-700">{p.productGroup ?? <span className="text-slate-400 text-xs italic">Tümü</span>}</Td>
+                      <Td className="text-slate-700">{p.categoryName ?? <span className="text-slate-400 text-xs italic">Tümü</span>}</Td>
+                      <Td className="text-slate-700">{p.subCategoryName ?? <span className="text-slate-400 text-xs italic">Tümü</span>}</Td>
                       <Td>
-                        <Badge tint="slate">{p.requestType}</Badge>
+                        {p.requestType
+                          ? <Badge tint="slate">{p.requestType}</Badge>
+                          : <span className="text-slate-400 text-xs italic">Tümü</span>}
+                      </Td>
+                      <Td>
+                        {p.priority
+                          ? <Badge tint="slate">{CASE_PRIORITY_LABELS[p.priority as CasePriority]}</Badge>
+                          : <span className="text-slate-400 text-xs italic">Tümü</span>}
                       </Td>
                       <Td align="right" className="font-mono text-slate-700">
                         {p.responseHours}h
@@ -258,10 +270,11 @@ export function AdminSlaPage() {
 const EMPTY_FORM: SlaPolicyInput = {
   companyId: '',
   companyName: '',
-  productGroup: '',
-  categoryName: '',
-  subCategoryName: '',
-  requestType: 'Talep',
+  productGroup: null,
+  categoryName: null,
+  subCategoryName: null,
+  requestType: null,
+  priority: null,
   responseHours: 4,
   resolutionHours: 24,
   description: '',
@@ -308,14 +321,15 @@ function SlaEditModal({
           setForm({
             companyId: p.companyId,
             companyName: p.companyName,
-            productGroup: p.productGroup,
-            categoryName: p.categoryName,
-            subCategoryName: p.subCategoryName,
-            requestType: p.requestType,
+            productGroup: (p.productGroup as string | null) ?? '',
+            categoryName: (p.categoryName as string | null) ?? '',
+            subCategoryName: (p.subCategoryName as string | null) ?? '',
+            requestType: p.requestType ?? 'Talep',
             responseHours: p.responseHours,
             resolutionHours: p.resolutionHours,
             description: p.description ?? '',
             isActive: p.isActive,
+            priority: p.priority ?? null,
           });
         }
       } else {
@@ -330,6 +344,7 @@ function SlaEditModal({
 
   // Kategori değişince alt kategoriyi sıfırla (cascade)
   const subCategories = useMemo(() => {
+    if (!form.categoryName) return [];
     const cat = categories.find((c) => c.name === form.categoryName);
     return cat?.subCategories ?? [];
   }, [categories, form.categoryName]);
@@ -339,12 +354,11 @@ function SlaEditModal({
     setForm((f) => ({ ...f, companyId, companyName: c?.name ?? '' }));
   }
 
-  function handleCategoryChange(categoryName: string) {
+  function handleCategoryChange(categoryName: string | null) {
     setForm((f) => ({
       ...f,
       categoryName,
-      // kategori değişince alt kategori geçersiz olabilir → sıfırla
-      subCategoryName: '',
+      subCategoryName: null,
     }));
   }
 
@@ -353,9 +367,9 @@ function SlaEditModal({
     setError(null);
     const trimmed: SlaPolicyInput = {
       ...form,
-      productGroup: form.productGroup.trim(),
-      categoryName: form.categoryName.trim(),
-      subCategoryName: form.subCategoryName.trim(),
+      productGroup: (form.productGroup ?? '').trim(),
+      categoryName: (form.categoryName ?? '').trim(),
+      subCategoryName: (form.subCategoryName ?? '').trim(),
       description: form.description?.trim() || undefined,
     };
 
@@ -387,9 +401,9 @@ function SlaEditModal({
 
   const canSubmit =
     !!form.companyId &&
-    !!form.productGroup.trim() &&
-    !!form.categoryName.trim() &&
-    !!form.subCategoryName.trim() &&
+    !!(form.productGroup ?? '').trim() &&
+    !!(form.categoryName ?? '').trim() &&
+    !!(form.subCategoryName ?? '').trim() &&
     form.responseHours > 0 &&
     form.resolutionHours > 0 &&
     !submitting;
@@ -413,7 +427,7 @@ function SlaEditModal({
     >
       <div className="space-y-4">
         <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600">
-          5-tuple eşleşmesi: bu beş alanın tümü vaka ile birebir uyuşunca kural devreye girer.
+          Esnek eşleşme: boş bırakılan alanlar wildcard olarak davranır (her değerle eşleşir). Daha spesifik kurallar öncelik kazanır.
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -430,12 +444,12 @@ function SlaEditModal({
           />
           {/* productGroup ve sonraki alanlar Field'ları aşağıda */}
 
-          <Field label="Ürün Grubu" required>
+          <Field label="Ürün Grubu" hint="Boş = tüm ürün grupları">
             <Select
-              value={form.productGroup}
-              onChange={(e) => setForm((f) => ({ ...f, productGroup: e.target.value }))}
+              value={form.productGroup ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, productGroup: e.target.value || null }))}
             >
-              <option value="">Ürün grubu seçin…</option>
+              <option value="">— Tümü (wildcard) —</option>
               {productGroups.map((g) => (
                 <option key={g} value={g}>
                   {g}
@@ -444,12 +458,12 @@ function SlaEditModal({
             </Select>
           </Field>
 
-          <Field label="Kategori" required>
+          <Field label="Kategori" hint="Boş = tüm kategoriler">
             <Select
-              value={form.categoryName}
-              onChange={(e) => handleCategoryChange(e.target.value)}
+              value={form.categoryName ?? ''}
+              onChange={(e) => handleCategoryChange(e.target.value || null)}
             >
-              <option value="">Kategori seçin…</option>
+              <option value="">— Tümü (wildcard) —</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.name}>
                   {c.name}
@@ -459,15 +473,13 @@ function SlaEditModal({
             </Select>
           </Field>
 
-          <Field label="Alt Kategori" required>
+          <Field label="Alt Kategori" hint="Boş = tüm alt kategoriler">
             <Select
-              value={form.subCategoryName}
-              onChange={(e) => setForm((f) => ({ ...f, subCategoryName: e.target.value }))}
+              value={form.subCategoryName ?? ''}
+              onChange={(e) => setForm((f) => ({ ...f, subCategoryName: e.target.value || null }))}
               disabled={!form.categoryName}
             >
-              <option value="">
-                {form.categoryName ? 'Alt kategori seçin…' : 'Önce kategori seçin'}
-              </option>
+              <option value="">— Tümü (wildcard) —</option>
               {subCategories.map((s) => (
                 <option key={s.id} value={s.name}>
                   {s.name}
@@ -477,16 +489,33 @@ function SlaEditModal({
             </Select>
           </Field>
 
-          <Field label="Talep Türü" required>
+          <Field label="Talep Türü" hint="Boş = tüm talep türleri">
             <Select
-              value={form.requestType}
+              value={form.requestType ?? ''}
               onChange={(e) =>
-                setForm((f) => ({ ...f, requestType: e.target.value as CaseRequestType }))
+                setForm((f) => ({ ...f, requestType: (e.target.value as CaseRequestType) || null }))
               }
             >
+              <option value="">— Tümü (wildcard) —</option>
               {CASE_REQUEST_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Öncelik" hint="Boş = tüm öncelikler">
+            <Select
+              value={form.priority ?? ''}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, priority: (e.target.value as CasePriority) || null }))
+              }
+            >
+              <option value="">— Tümü (wildcard) —</option>
+              {CASE_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {CASE_PRIORITY_LABELS[p]}
                 </option>
               ))}
             </Select>
