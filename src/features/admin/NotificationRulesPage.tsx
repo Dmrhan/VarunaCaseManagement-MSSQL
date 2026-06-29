@@ -268,6 +268,13 @@ function RuleEditor({
   const [conditions, setConditions] = useState(
     initialConditionsIsArray ? {} : (initial?.conditions ?? {}),
   );
+  // Codex P2 round 3 fix — Explicit acknowledgement.
+  // Önceki guard `!isMatchAll` koşuluna güveniyordu; ama legacy kaydın
+  // isMatchAll'u DB'den `true` gelirse form açılışında zaten geçer →
+  // kullanıcı bilmeden Kaydet'lerse mevcut filtre {} olarak silinir.
+  // Kullanıcının ACTIVE bir karar vermesi gerek: ya checkbox ile onayla,
+  // ya filtreleri yeniden gir.
+  const [userAckedLegacyReset, setUserAckedLegacyReset] = useState(false);
   const [isMatchAll, setIsMatchAll] = useState(initial?.isMatchAll ?? false);
   const [audience, setAudience] = useState<AudienceRow[]>(
     initial?.audience ?? [{ type: 'assignee' }],
@@ -364,16 +371,26 @@ function RuleEditor({
           <Button variant="ghost" onClick={onClose}>Vazgeç</Button>
           <Button
             onClick={() => void handleSave()}
-            // Codex P2 fix — Legacy "dolu array" conditions varken Kaydet
-            // bloklu. Kullanıcı yeniden filtre girerse VEYA "Tüm vakaya
-            // uygula" işaretini açıkça onaylarsa (isMatchAll=true) blok kalkar.
+            // Codex P2 round 3 fix — Legacy dolu array conditions varken
+            // Kaydet açılır KOŞULU:
+            //   - Kullanıcı filtreleri ELLE girdi (conditions[key] truthy), VEYA
+            //   - Kullanıcı checkbox ile EXPLICIT onayladı (userAckedLegacyReset)
+            // Eski guard `!isMatchAll`'a güveniyordu; DB'den isMatchAll=true
+            // geliyorsa guard pasif kalıyordu → silent overwrite. Şimdi açık
+            // bir user action gerek.
             disabled={
               saving
-              || (hasLegacyArrayConditions && !isMatchAll && Object.values(conditions).every((v) => !v))
+              || (
+                hasLegacyArrayConditions
+                && !userAckedLegacyReset
+                && Object.values(conditions).every((v) => !v)
+              )
             }
             title={
-              hasLegacyArrayConditions && !isMatchAll && Object.values(conditions).every((v) => !v)
-                ? 'Eski geçersiz filtre formatı. Önce filtreleri elle girin VEYA "Tüm vakaya uygula" seçeneğini işaretleyin.'
+              hasLegacyArrayConditions
+                && !userAckedLegacyReset
+                && Object.values(conditions).every((v) => !v)
+                ? 'Eski geçersiz filtre formatı. Önce filtreleri elle girin VEYA aşağıdaki onay kutusunu işaretleyin.'
                 : undefined
             }
           >
@@ -396,11 +413,26 @@ function RuleEditor({
           <p className="font-medium">⚠ Eski geçersiz filtre formatı</p>
           <p className="mt-1">
             Bu kuralın <code>conditions</code> alanı eski (geçersiz) bir liste
-            formatında saklanmış. Mevcut filtre kayboldu; yeniden kurmak için
-            "Tüm vakaya uygula" işaretini kaldırıp aşağıdan kategori/öncelik/
-            takım kriterini elle girin. Kaydet butonu güvenlik için bloklu —
-            önce filtreleri açıkça belirtin.
+            formatında saklanmış ve UI'da gösterilemiyor. Kaydet'lerseniz
+            mevcut filtre tamamen silinir — bu kural muhtemelen tüm vakalara
+            uygulanan bir broadcast'a dönüşür.
           </p>
+          <p className="mt-1">
+            Devam etmek için: <strong>aşağıdan kategori/öncelik/takım
+            kriterini elle girin</strong> VEYA aşağıdaki onay kutusunu
+            işaretleyin.
+          </p>
+          <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={userAckedLegacyReset}
+              onChange={(e) => setUserAckedLegacyReset(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            <span className="font-medium">
+              Eski filtreyi silmeyi ve mevcut ayarlarla kaydetmeyi onaylıyorum
+            </span>
+          </label>
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
