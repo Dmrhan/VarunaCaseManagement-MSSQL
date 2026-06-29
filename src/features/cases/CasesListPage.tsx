@@ -208,8 +208,8 @@ export function CasesListPage({
   onOpenSmartTicket,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey>('priority');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<CaseFilters>(initialFilters);
   const [inboxTab, setInboxTab] = useState<InboxTab>('open');
