@@ -1733,6 +1733,12 @@ var CloseOutput = z4.object({
   confidence: z4.number().min(0).max(1),
   reason: z4.string()
 });
+var CLOSE_CLARIFY_QUESTIONS = [
+  "Sorunun K\xD6K NEDEN\u0130 neydi? (\xF6r. yanl\u0131\u015F/eksik parametre \xB7 eksik veri/kart \xB7 yetki \xB7 entegrat\xF6r servisi \xB7 donan\u0131m/cihaz \xB7 sunucu/altyap\u0131)",
+  "\xC7\xF6z\xFCm i\xE7in tam olarak NE YAPILDI? (\xF6r. parametre de\u011Fi\u015Fikli\u011Fi \xB7 veri/kart d\xFCzeltme \xB7 script/DB g\xFCncelleme \xB7 entegrat\xF6re y\xF6nlendirme \xB7 kullan\u0131c\u0131 bilgilendirme)",
+  "Ayn\u0131 sorunun TEKRARINI \xF6nlemek i\xE7in ne gerekir? (\xF6r. e\u011Fitim/dok\xFCman \xB7 kontrol/validasyon \xB7 parametre sihirbaz\u0131 \xB7 log/izleme)"
+];
+var CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.8);
 async function suggestClose(input) {
   const ctxLines = [];
   if (input.open_urun) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \xDCr\xFCn: ${input.open_urun}`);
@@ -1763,6 +1769,7 @@ async function suggestClose(input) {
     "",
     `\xC7\xF6z\xFCm tasla\u011F\u0131 (ajan yazd\u0131): ${input.resolution.slice(0, 3e3)}`,
     "",
+    ...input.clarifyingAnswers ? [`OPERAT\xD6R EK B\u0130LG\u0130 (clarifying sorulara cevap \u2014 etiketlerken KULLAN): ${input.clarifyingAnswers.slice(0, 1500)}`, ""] : [],
     `\xC7\u0131kt\u0131 JSON \u015Femas\u0131 (sadece JSON):`,
     `{`,
     `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
@@ -1798,6 +1805,7 @@ async function suggestClose(input) {
   const kok_neden_detayi = isValidKokNedenDetay(out.kok_neden_detayi) ? out.kok_neden_detayi : null;
   const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
+  const uncertain = !input.clarifyingAnswers && (kok_neden_grubu === null || kok_neden_detayi === null || out.confidence < CLOSE_CLARIFY_THRESHOLD);
   return {
     kok_neden_grubu,
     kok_neden_detayi,
@@ -1805,6 +1813,8 @@ async function suggestClose(input) {
     kalici_onlem,
     confidence: out.confidence,
     reason: out.reason,
+    needsClarification: uncertain,
+    clarifyingQuestions: uncertain ? CLOSE_CLARIFY_QUESTIONS : [],
     modelUsed: res.modelUsed,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
@@ -1819,6 +1829,8 @@ function emptyCloseResult(res, reason) {
     kalici_onlem: null,
     confidence: 0,
     reason: `Otomatik kapan\u0131\u015F \xF6nerisi ba\u015Far\u0131s\u0131z: ${reason}`,
+    needsClarification: false,
+    clarifyingQuestions: [],
     modelUsed: res.modelUsed,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
