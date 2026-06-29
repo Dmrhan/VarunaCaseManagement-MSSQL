@@ -1111,7 +1111,7 @@ export const caseRepository = {
       }
       const personId = user.personId;
       const notSnoozed = notSnoozedClause();
-      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine] = await Promise.all([
+      const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical] = await Promise.all([
         // assignedToMe: open + not snoozed (matches list default)
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
@@ -1122,14 +1122,17 @@ export const caseRepository = {
         }),
         // resolvedToday: snooze irrelevant — case zaten Cozuldu
         prisma.case.count({
-          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange }),
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
+        // chip sayıları — scope'taki tüm atanmamış/kritik açık vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
+        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES } }) }),
       ]);
-      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine };
+      return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
     }
 
     if (role === 'Supervisor') {
@@ -1147,7 +1150,7 @@ export const caseRepository = {
         }
       }
       const notSnoozed = notSnoozedClause();
-      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday] = await Promise.all([
+      const [teamOpenCount, teamSlaRisk, teamEscalation, teamResolvedToday, unassigned, critical] = await Promise.all([
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }),
         }),
@@ -1158,8 +1161,11 @@ export const caseRepository = {
           where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange }),
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
         }),
+        // chip sayıları — scope'taki tüm atanmamış/kritik açık vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
+        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES } }) }),
       ]);
       return {
         mode: 'team',
@@ -1167,6 +1173,8 @@ export const caseRepository = {
         teamSlaRisk,
         teamEscalation,
         teamResolvedToday,
+        unassigned,
+        critical,
         // Echo back resolved teamId for client filter (so click can apply same scope).
         supervisorTeamId,
       };
@@ -1174,7 +1182,7 @@ export const caseRepository = {
 
     if (role === 'Admin' || role === 'SystemAdmin') {
       const notSnoozed = notSnoozedClause();
-      const [totalOpen, slaViolation, critical, resolvedToday] = await Promise.all([
+      const [totalOpen, slaViolation, critical, resolvedToday, unassigned] = await Promise.all([
         prisma.case.count({ where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, slaViolation: true, AND: [notSnoozed] }),
@@ -1182,9 +1190,11 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange }) }),
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }) }),
+        // chip sayısı — tüm scope'taki atanmamış açık vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
       ]);
-      return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday };
+      return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday, unassigned };
     }
 
     return { mode: 'unknown' };
@@ -3491,7 +3501,7 @@ export const caseRepository = {
         slaThirdPartyWaitMin: nextThirdPartyWaitMin,
         slaResolutionDueAt: nextResolutionDueAt,
         slaResponseMetAt: nextSlaResponseMetAt,
-        resolvedAt: dbNext === 'Cozuldu' ? new Date() : prev.resolvedAt,
+        resolvedAt: (dbNext === 'Cozuldu' || dbNext === 'IptalEdildi') ? new Date() : prev.resolvedAt,
         // M6.1 — terminal'e (Çözüldü/İptal) geçişte pendingCustomerReply
         // OTOMATİK false. Müşteri yanıtı bekleyen bir vaka kapanırsa
         // "yanıt bekliyor" rozeti kalmamalı (R12 mitigation).
@@ -5274,10 +5284,15 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (f.pendingCustomerReply === false) where.pendingCustomerReply = false;
   // KPI tile click intents — sayım ve liste tek truth source kullansın diye:
   if (f.slaViolation === true) where.slaViolation = true;
+  if (f.unassigned === true) {
+    where.assignedPersonId = null;
+    if (!where.status) where.status = { notIn: ['Cozuldu', 'IptalEdildi'] };
+  }
   if (f.resolvedToday === true) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(); end.setHours(23, 59, 59, 999);
     where.resolvedAt = { gte: start, lte: end };
+    where.status = { in: ['Cozuldu', 'IptalEdildi'] };
   }
   // WR-A4 — Project-bazlı vaka filtresi.
   if (f.accountProjectId) where.accountProjectId = f.accountProjectId;

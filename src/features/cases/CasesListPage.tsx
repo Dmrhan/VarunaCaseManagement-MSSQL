@@ -328,8 +328,9 @@ export function CasesListPage({
   );
 
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
-  const load = async (targetPage?: number) => {
+  const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
     const p = targetPage ?? page;
+    const effectiveQueueFilter = queueFilter ?? quickQueueFilter;
     setLoading(true);
     setSelected(new Set());
     if (inboxTab === 'later') {
@@ -346,7 +347,12 @@ export function CasesListPage({
         ? (filters.statuses?.length ? filters.statuses : undefined)
         : (filters.statuses?.length ? filters.statuses : inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES);
       const { items, total } = await caseService.list(
-        { ...filters, statuses: effectiveStatuses },
+        {
+          ...filters,
+          statuses: effectiveStatuses,
+          unassigned: effectiveQueueFilter === 'unassigned' ? true : undefined,
+          priorities: effectiveQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
+        },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );
       setAllFiltered(items);
@@ -358,7 +364,7 @@ export function CasesListPage({
   // Filtre veya sekme değişince → ilk sayfaya sıfırla ve yeniden yükle.
   useEffect(() => {
     setPage(1);
-    void load(1);
+    void load(1, quickQueueFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     inboxTab,
@@ -377,6 +383,7 @@ export function CasesListPage({
     filters.slaViolation,
     filters.resolvedToday,
     filters.includeArchived,
+    quickQueueFilter,
   ]);
 
   // Sayfa / pageSize / sıralama değişince → yeniden yükle (filtre değişikliği hariç).
@@ -472,11 +479,7 @@ export function CasesListPage({
       result = result.filter((c) => allowed.has(c.id));
     }
 
-    if (quickQueueFilter === 'unassigned') {
-      result = result.filter((c) => !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status));
-    } else if (quickQueueFilter === 'critical') {
-      result = result.filter((c) => c.priority === 'Critical');
-    }
+
 
     // Öncelik sıralamasında secondary sort: aynı öncelikte createdAt asc
     // (en uzun bekleyen üstte). Cross-page sıralama backend sort'a bağlı.
@@ -801,6 +804,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, personId: me, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
               tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
                 setFilters(initialFilters);
@@ -833,6 +837,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
             ];
           }
@@ -860,6 +865,7 @@ export function CasesListPage({
                 setFilters({ ...initialFilters, resolvedToday: true });
                 setInboxTab('closed');
                 setQuickFilter(null);
+                setQuickQueueFilter('all');
               }),
             ];
           }
@@ -965,25 +971,25 @@ export function CasesListPage({
             label="Tümü"
             icon={<Layers size={13} />}
             active={inboxTab === 'all'}
-            onClick={() => setInboxTab('all')}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('all'); }}
           />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
             active={inboxTab === 'open'}
-            onClick={() => setInboxTab('open')}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('open'); }}
           />
           <InboxTabButton
             label="Ertelendi"
             icon={<Clock3 size={13} />}
             active={inboxTab === 'later'}
-            onClick={() => setInboxTab('later')}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('later'); }}
           />
           <InboxTabButton
             label="Kapalı"
             icon={<Check size={13} />}
             active={inboxTab === 'closed'}
-            onClick={() => setInboxTab('closed')}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('closed'); }}
           />
         </div>
 
@@ -1252,13 +1258,13 @@ export function CasesListPage({
               </Select>
             </div>
 
-            {/* Hızlı kuyruk filtreleri — mevcut sayfayı client-side filtreler */}
+            {/* Hızlı kuyruk filtreleri — server-side, tüm kayıtlar üzerinde çalışır */}
             <div className="flex items-center gap-1">
               {(
                 [
                   { key: 'all' as const,        label: 'Tümü',       count: null },
-                  { key: 'unassigned' as const, label: 'Atanmamış',  count: stats.unassigned },
-                  { key: 'critical' as const,   label: 'Kritik',     count: stats.critical },
+                  { key: 'unassigned' as const, label: 'Atanmamış',  count: caseStats?.unassigned ?? null },
+                  { key: 'critical' as const,   label: 'Kritik',     count: caseStats?.critical ?? null },
                 ] satisfies { key: QuickQueueFilter; label: string; count: number | null }[]
               ).map(({ key, label, count }) => (
                 <button
