@@ -1045,7 +1045,7 @@ export const caseRepository = {
         }),
         // resolvedToday: snooze irrelevant — case zaten Cozuldu
         prisma.case.count({
-          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }),
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
@@ -1081,7 +1081,7 @@ export const caseRepository = {
           where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }),
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
         }),
       ]);
       return {
@@ -1105,7 +1105,7 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }) }),
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }) }),
       ]);
       return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday };
     }
@@ -5199,7 +5199,7 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (f.slaViolation === true) where.slaViolation = true;
   if (f.unassigned === true) {
     where.assignedPersonId = null;
-    if (!where.status) where.status = { notIn: ['Çözüldü', 'İptalEdildi'] };
+    if (!where.status) where.status = { notIn: ['Cozuldu', 'IptalEdildi'] };
   }
   if (f.resolvedToday === true) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
