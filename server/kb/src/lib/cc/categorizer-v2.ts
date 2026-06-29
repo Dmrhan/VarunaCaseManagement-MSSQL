@@ -245,6 +245,10 @@ const CloseOutput = z.object({
 export type CloseSuggestionResult = CloseFieldsResult & {
   confidence: number;
   reason: string;
+  // P1.2 — AI emin değilse (boş alan / düşük güven): etiket basmadan ÖNCE bunları sor.
+  // Operatör cevaplayınca suggestClose tekrar (clarifyingAnswers ile) çağrılır.
+  needsClarification: boolean;
+  clarifyingQuestions: string[];
   modelUsed: string;
   inputTokens: number;
   outputTokens: number;
@@ -261,7 +265,19 @@ export type SuggestCloseInput = {
   // FAZ 1 retrieval — çağıran corpus'tan benzer çözülmüş vakaları biçimlenmiş
   // few-shot bloğu olarak geçer (boşsa retrieval'sız). Kaynak-bağımsız.
   closeExamples?: string;
+  // P1.2 — operatörün clarifying sorulara verdiği cevap. Verilirse prompt'a eklenir
+  // (zenginleşmiş girdi → daha iyi etiket) ve tekrar soru SORULMAZ.
+  clarifyingAnswers?: string;
 };
+
+// P1.2 — Clarifying sorular. Kapanışın 4 alanını elicit eder (kök neden / çözüm / önlem).
+// CLOSE_CLARIFY_THRESHOLD ile düşük-güven eşiği ayarlanır (default 0.8).
+const CLOSE_CLARIFY_QUESTIONS = [
+  "Sorunun KÖK NEDENİ neydi? (ör. yanlış/eksik parametre · eksik veri/kart · yetki · entegratör servisi · donanım/cihaz · sunucu/altyapı)",
+  "Çözüm için tam olarak NE YAPILDI? (ör. parametre değişikliği · veri/kart düzeltme · script/DB güncelleme · entegratöre yönlendirme · kullanıcı bilgilendirme)",
+  "Aynı sorunun TEKRARINI önlemek için ne gerekir? (ör. eğitim/doküman · kontrol/validasyon · parametre sihirbazı · log/izleme)",
+];
+const CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.8);
 
 export async function suggestClose(
   input: SuggestCloseInput,
@@ -309,6 +325,9 @@ export async function suggestClose(
     "",
     `Çözüm taslağı (ajan yazdı): ${input.resolution.slice(0, 3000)}`,
     "",
+    ...(input.clarifyingAnswers
+      ? [`OPERATÖR EK BİLGİ (clarifying sorulara cevap — etiketlerken KULLAN): ${input.clarifyingAnswers.slice(0, 1500)}`, ""]
+      : []),
     `Çıktı JSON şeması (sadece JSON):`,
     `{`,
     `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
@@ -350,6 +369,15 @@ export async function suggestClose(
   const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
 
+  // P1.2 — emin değil mi? Kök neden grubu/detayı boş VEYA güven eşik altı → etiket
+  // yerine clarifying sorular. Operatör zaten cevap verdiyse (clarifyingAnswers)
+  // tekrar sorma — o turda en iyi etiketi döndür.
+  const uncertain =
+    !input.clarifyingAnswers &&
+    (kok_neden_grubu === null ||
+      kok_neden_detayi === null ||
+      out.confidence < CLOSE_CLARIFY_THRESHOLD);
+
   return {
     kok_neden_grubu,
     kok_neden_detayi,
@@ -357,6 +385,8 @@ export async function suggestClose(
     kalici_onlem,
     confidence: out.confidence,
     reason: out.reason,
+    needsClarification: uncertain,
+    clarifyingQuestions: uncertain ? CLOSE_CLARIFY_QUESTIONS : [],
     modelUsed: res.modelUsed,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
@@ -372,6 +402,8 @@ function emptyCloseResult(res: GenerateResult, reason: string): CloseSuggestionR
     kalici_onlem: null,
     confidence: 0,
     reason: `Otomatik kapanış önerisi başarısız: ${reason}`,
+    needsClarification: false,
+    clarifyingQuestions: [],
     modelUsed: res.modelUsed,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,

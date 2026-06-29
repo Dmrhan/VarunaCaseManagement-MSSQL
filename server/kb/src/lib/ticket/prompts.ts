@@ -130,7 +130,7 @@ export type PromptInputs = {
   kbChunksOther?: KbContextChunk[];
 };
 
-const RESPONSE_SCHEMA = `
+export const RESPONSE_SCHEMA = `
 Beklenen JSON şeması (alanları aynen kullan):
 
 {
@@ -280,13 +280,30 @@ function formatTaxonomy(tx: Taxonomy): string {
   ].join("\n");
 }
 
-export function buildUserPrompt(inputs: PromptInputs): string {
-  const mode = inputs.matched ? "BILDIRIM_NO" : "SERBEST_METIN";
-  const sections = [
-    `MOD: ${mode}`,
-    ``,
+/**
+ * Prompt caching öneki — her çağrıda DEĞİŞMEYEN statik blok (taksonomi +
+ * çıktı şeması). generate()'e `cachePrefix` olarak geçilir; system + bu önek
+ * cache'lenir (okuma 0.1×) → tekrarlı/ardışık analyze çağrılarında input
+ * maliyeti düşer. İçerik byte-byte aynı olmalı (loadTaxonomy() dosyadan
+ * sabit döner) ve Sonnet min ~2048 token eşiğini aşmalı (system ~1.5K +
+ * taksonomi + şema ile aşılır). Dinamik kısım buildUserPrompt'ta.
+ */
+export function buildAnalystCachePrefix(inputs: PromptInputs): string {
+  return [
     `=== Taksonomi (sadece bu listelerden değer seç) ===`,
     formatTaxonomy(inputs.taxonomy),
+    ``,
+    `=== Çıktı Şeması ===`,
+    RESPONSE_SCHEMA,
+  ].join("\n");
+}
+
+export function buildUserPrompt(inputs: PromptInputs): string {
+  const mode = inputs.matched ? "BILDIRIM_NO" : "SERBEST_METIN";
+  // NOT: Taksonomi + çıktı şeması buildAnalystCachePrefix()'e taşındı (cache
+  // edilebilir statik önek). Burada yalnız ticket'a özgü DEĞİŞKEN bağlam var.
+  const sections = [
+    `MOD: ${mode}`,
     ``,
     `=== Mevcut Bildirim Kaydı ===`,
     formatTicket(inputs.matched),
@@ -311,10 +328,9 @@ export function buildUserPrompt(inputs: PromptInputs): string {
     formatKbChunks(inputs.kbChunksOther, "DOC"),
     ``,
     `=== Görev ===`,
-    `Yukarıdaki bilgiyle yalnızca aşağıdaki JSON şemasına uygun bir yanıt üret.`,
+    `Yukarıda verilen taksonomi ve JSON şemasına uyarak, bu bilgiyle yalnızca`,
+    `o şemaya uygun bir yanıt üret.`,
     `Markdown, kod bloğu, açıklama metni EKLEME. Sadece geçerli JSON döndür.`,
-    ``,
-    RESPONSE_SCHEMA,
   );
   return sections.join("\n");
 }

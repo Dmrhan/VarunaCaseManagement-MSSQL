@@ -29,6 +29,10 @@ import {
   type SuggestClosureResponse,
 } from '@/services/caseService';
 import { aiService, aiErrorMessage } from '@/services/aiService';
+import {
+  buildClosureSuggestionTelemetry,
+  type AppliedClosureSelection,
+} from '@/services/closureTelemetry';
 import { MentionTextarea } from './components/MentionTextarea';
 
 // Mention regex — `@[Name](userId)` formatı. Bir text bunu içeriyorsa BE'nin
@@ -185,6 +189,9 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const [kbSuggesting, setKbSuggesting] = useState(false);
   const [kbSuggestion, setKbSuggestion] = useState<SuggestClosureResponse | null>(null);
   const [kbSuggestionError, setKbSuggestionError] = useState<string | null>(null);
+  // Telemetry — AI önerisinin client'a ulaştığı an (ISO). Kapanış submit'inde
+  // closureSuggestion.aiSuggested.suggestedAt'e yazılır.
+  const kbSuggestedAtRef = useRef<string | null>(null);
 
   const thirdParties = useMemo(
     () => lookupService.thirdParties().filter((tp) => !tp.companyId || tp.companyId === item.companyId),
@@ -212,6 +219,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggesting(false);
     setKbSuggestion(null);
     setKbSuggestionError(null);
+    kbSuggestedAtRef.current = null;
     // initialPending kasıtlı olarak dep değil — panel mount'unda Compact
     // Stepper'dan gelen preselect bir kez uygulanır. Sonraki kullanıcı
     // tıklamaları normal akışla pending'i değiştirir.
@@ -274,7 +282,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // atlatıyoruz.
   const kbSuggestReqIdRef = useRef(0);
 
-  async function handleKbSuggest() {
+  async function handleKbSuggest(clarifyingAnswers?: string) {
     if (kbSuggesting) return;
     if (resolutionNote.trim().length < 5) {
       setKbSuggestionError('En az 5 karakter çözüm notu yazın.');
@@ -286,12 +294,23 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     setKbSuggestionError(null);
     setKbSuggestion(null);
     try {
+      // Smart Ticket: caseId ile server-side opening context fetch + operatörün
+      // YAZDIĞI çözüm notunu resolutionOverride olarak gönder. Eski hâlde yalnız
+      // { caseId } gidiyordu → backend resolution'ı solution-step'lerden compose
+      // ediyordu; operatörün gerçek çözüm metni AI'ya ulaşmıyor, yanlış bağlamla
+      // sınıflandırılıyordu (production accuracy bug'ı). resolutionNote zaten
+      // ≥5 char guard'ından geçti → boş override gönderilmez.
       const res = isSmartTicket
-        ? await lookupService.suggestSmartTicketClosure({ caseId: targetCaseId })
+        ? await lookupService.suggestSmartTicketClosure({
+            caseId: targetCaseId,
+            resolutionOverride: resolutionNote.trim(),
+            ...(clarifyingAnswers ? { clarifyingAnswers } : {}),
+          })
         : await lookupService.suggestSmartTicketClosure({
             companyId: item.companyId,
             description: item.description,
             resolution: resolutionNote.trim(),
+            ...(clarifyingAnswers ? { clarifyingAnswers } : {}),
           });
       // Stale response guard — case değişti veya yeni request başlatıldı.
       if (reqId !== kbSuggestReqIdRef.current || item.id !== targetCaseId) {
@@ -302,9 +321,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         return;
       }
       setKbSuggestion(res);
+      kbSuggestedAtRef.current = new Date().toISOString();
       // Smart Ticket: dropdown'lara pre-fill (yalnız boş alanlar).
       // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
-      if (isSmartTicket) {
+      // P1.2 — AI emin değilse (needsClarification) pre-fill ETME; operatör
+      // soruları cevaplayınca gelen zenginleşmiş öneri pre-fill eder.
+      if (isSmartTicket && !res.needsClarification) {
         const s = res.suggestions;
         if (s.rootCauseGroup && !closureRcg) {
           setClosureRcg(s.rootCauseGroup.code);
@@ -439,6 +461,27 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       pending === 'Çözüldü' &&
       (closureRcg || closureRcd || closureRt || closurePp);
 
+    // Telemetry — Smart Ticket kapanışında AI önerisi alındıysa ai_suggested /
+    // human_applied attribution'ı persist et (prompt'a beslenmez; yalnız
+    // hata-tipi ayrımı için). Öneri yoksa eski davranış: sadece label'lar.
+    let smartTicketClosurePayload: Record<string, unknown> | undefined;
+    if (closureHasAnyField) {
+      smartTicketClosurePayload = { ...closureLabels };
+      if (kbSuggestion) {
+        const applied: AppliedClosureSelection = {
+          rootCauseGroup: { code: closureRcg || undefined, label: closureLabels.rootCauseGroupLabel },
+          rootCauseDetail: { code: closureRcd || undefined, label: closureLabels.rootCauseDetailLabel },
+          resolutionType: { code: closureRt || undefined, label: closureLabels.resolutionTypeLabel },
+          permanentPrevention: { code: closurePp || undefined, label: closureLabels.permanentPreventionLabel },
+        };
+        smartTicketClosurePayload.closureSuggestion = buildClosureSuggestionTelemetry({
+          suggestion: kbSuggestion,
+          suggestedAt: kbSuggestedAtRef.current,
+          applied,
+        });
+      }
+    }
+
     const updated = await caseService.transitionStatus(item.id, pending, {
       resolutionNote: pending === 'Çözüldü' ? resolutionNote.trim() : undefined,
       cancellationReason: pending === 'İptalEdildi' ? cancelReason.trim() : undefined,
@@ -446,7 +489,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       thirdPartyName: pending === '3rdPartyBekleniyor' ? tp?.name : undefined,
       escalationLevel: pending === 'Eskalasyon' && escalationLevel ? (escalationLevel as EscalationLevel) : undefined,
       escalationReason: pending === 'Eskalasyon' ? escalationReason.trim() : undefined,
-      smartTicketClosure: closureHasAnyField ? closureLabels : undefined,
+      smartTicketClosure: smartTicketClosurePayload,
     });
     setSubmitting(false);
     if (updated) {
@@ -642,6 +685,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                 kbSuggestionError={kbSuggestionError}
                 onSuggest={() => void handleKbSuggest()}
                 onAppendToNote={handleAppendSuggestionToNote}
+                onClarifyAnswer={(answer) => void handleKbSuggest(answer)}
               />
 
               {/* WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış alanları.
@@ -896,6 +940,7 @@ function KbClosureSuggestionPanel({
   kbSuggestionError,
   onSuggest,
   onAppendToNote,
+  onClarifyAnswer,
 }: {
   isSmartTicket: boolean;
   resolutionNote: string;
@@ -904,7 +949,11 @@ function KbClosureSuggestionPanel({
   kbSuggestionError: string | null;
   onSuggest: () => void;
   onAppendToNote: () => void;
+  /** P1.2 — operatör clarifying sorularını cevaplayınca (zenginleşmiş re-run tetikler). */
+  onClarifyAnswer: (answer: string) => void;
 }) {
+  // P1.2 — clarifying cevap metni (AI emin değilse sorulan 3 soruya).
+  const [clarifyAnswer, setClarifyAnswer] = useState('');
   const noteOk = resolutionNote.trim().length >= 5;
   const suggestionCount = kbSuggestion ? Object.keys(kbSuggestion.suggestions).length : 0;
 
@@ -944,7 +993,37 @@ function KbClosureSuggestionPanel({
           {kbSuggestionError}
         </p>
       )}
-      {kbSuggestion && (
+      {kbSuggestion?.needsClarification && kbSuggestion.clarifyingQuestions && (
+        <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 dark:border-amber-900/40 dark:bg-amber-950/30">
+          <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-200">
+            AI bu vakada emin değil — doğru etiketi seçebilmek için kısaca yanıtlayın:
+          </p>
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] leading-snug text-amber-800 dark:text-amber-300">
+            {kbSuggestion.clarifyingQuestions.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+          <textarea
+            className="mt-1.5 w-full rounded border border-amber-300 bg-white px-2 py-1 text-[12px] text-slate-800 outline-none focus:border-amber-400 dark:border-amber-900/40 dark:bg-slate-900 dark:text-slate-100"
+            rows={3}
+            value={clarifyAnswer}
+            onChange={(e) => setClarifyAnswer(e.target.value)}
+            placeholder="Kök neden, çözüm ve önlem hakkında birkaç cümle…"
+          />
+          <div className="mt-1.5 flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={kbSuggesting || clarifyAnswer.trim().length < 3}
+              leftIcon={kbSuggesting ? <Loader2 size={11} className="animate-spin" /> : undefined}
+              onClick={() => onClarifyAnswer(clarifyAnswer.trim())}
+            >
+              {kbSuggesting ? 'Gönderiliyor…' : 'Yanıtla ve etiketleri öner'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {kbSuggestion && !kbSuggestion.needsClarification && (
         <div className="mt-2 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-violet-700 dark:text-violet-300">
             <span>
