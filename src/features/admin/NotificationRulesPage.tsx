@@ -252,7 +252,29 @@ function RuleEditor({
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [event, setEvent] = useState<NotificationEvent>(initial?.event ?? 'resolution_approved');
-  const [conditions, setConditions] = useState(initial?.conditions ?? {});
+  // Legacy guard — eski seed/admin akışı `conditions: []` (boş array)
+  // veya `[{...}]` (dolu array — eski format) yazmış olabilir.
+  // Edit form key-based UI, array shape'i support edemez → boş object'e
+  // initialize ediyoruz ki kullanıcı edit ekranını AÇABILSIN.
+  //
+  // Codex P2 fix — dolu array sessizce silinmesin: hasLegacyArrayConditions
+  // flag'i ile UI'da uyarı banner göster + Kaydet'i blokla. Backend de
+  // dolu array'i reddeder ama UI'da daha erken görsel uyarı.
+  const initialConditionsIsArray = Array.isArray(initial?.conditions);
+  const initialConditionsArrayLen = initialConditionsIsArray
+    ? (initial?.conditions as unknown as unknown[]).length
+    : 0;
+  const hasLegacyArrayConditions = initialConditionsIsArray && initialConditionsArrayLen > 0;
+  const [conditions, setConditions] = useState(
+    initialConditionsIsArray ? {} : (initial?.conditions ?? {}),
+  );
+  // Codex P2 round 3 fix — Explicit acknowledgement.
+  // Önceki guard `!isMatchAll` koşuluna güveniyordu; ama legacy kaydın
+  // isMatchAll'u DB'den `true` gelirse form açılışında zaten geçer →
+  // kullanıcı bilmeden Kaydet'lerse mevcut filtre {} olarak silinir.
+  // Kullanıcının ACTIVE bir karar vermesi gerek: ya checkbox ile onayla,
+  // ya filtreleri yeniden gir.
+  const [userAckedLegacyReset, setUserAckedLegacyReset] = useState(false);
   const [isMatchAll, setIsMatchAll] = useState(initial?.isMatchAll ?? false);
   const [audience, setAudience] = useState<AudienceRow[]>(
     initial?.audience ?? [{ type: 'assignee' }],
@@ -291,6 +313,29 @@ function RuleEditor({
       else delete (next as Record<string, string>)[key];
       return next;
     });
+    // Codex P1 round 6 fix — Filtre eklendiği an isMatchAll'u KATEGORIK kapat.
+    //
+    // Backend dispatcher (notificationRepository.js:1233):
+    //   r.isMatchAll || ruleMatchesCase(...)
+    // isMatchAll=true ise filtre TAMAMEN YOK SAYILIR → silent broadcast.
+    //
+    // Round 5 sadece ack akışını yakalıyordu (`value && userAckedLegacyReset`).
+    // Ama legacy rule DB'den isMatchAll=true geliyorsa, kullanıcı ack'ı
+    // işaretlemeden direkt filtre girer:
+    //   - userAckedLegacyReset false (basmadı)
+    //   - Round 5 guard pasif
+    //   - isMatchAll=true KALIR → kaydet → broadcast bug
+    //
+    // Round 6: kategorik kural — filtre eklendi mi → isMatchAll=false.
+    // Kullanıcı niyeti net "filtre kullan"; isMatchAll=true ile çelişir.
+    // Kullanıcı broadcast isterse filtreleri temizler + "Her vakaya uygula"
+    // checkbox'ı görünür (conditionsEmpty iken render edilir) → manuel
+    // tekrar açar.
+    if (value) {
+      setIsMatchAll(false);
+      // Round 5 davranışı korunsun: filtre eklendi → ack semantiği geri al
+      if (userAckedLegacyReset) setUserAckedLegacyReset(false);
+    }
   }
 
   function addAudience() {
@@ -347,7 +392,31 @@ function RuleEditor({
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Vazgeç</Button>
-          <Button onClick={() => void handleSave()} disabled={saving}>
+          <Button
+            onClick={() => void handleSave()}
+            // Codex P2 round 3 fix — Legacy dolu array conditions varken
+            // Kaydet açılır KOŞULU:
+            //   - Kullanıcı filtreleri ELLE girdi (conditions[key] truthy), VEYA
+            //   - Kullanıcı checkbox ile EXPLICIT onayladı (userAckedLegacyReset)
+            // Eski guard `!isMatchAll`'a güveniyordu; DB'den isMatchAll=true
+            // geliyorsa guard pasif kalıyordu → silent overwrite. Şimdi açık
+            // bir user action gerek.
+            disabled={
+              saving
+              || (
+                hasLegacyArrayConditions
+                && !userAckedLegacyReset
+                && Object.values(conditions).every((v) => !v)
+              )
+            }
+            title={
+              hasLegacyArrayConditions
+                && !userAckedLegacyReset
+                && Object.values(conditions).every((v) => !v)
+                ? 'Eski geçersiz filtre formatı. Önce filtreleri elle girin VEYA aşağıdaki onay kutusunu işaretleyin.'
+                : undefined
+            }
+          >
             {saving ? 'Kaydediliyor…' : 'Kaydet'}
           </Button>
         </div>
@@ -356,6 +425,37 @@ function RuleEditor({
       {error && (
         <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
           {error}
+        </div>
+      )}
+      {/* Codex P2 fix — Legacy "dolu array" conditions uyarısı.
+          UI key-based; array shape destekleyemez. Kullanıcı edit ekranını
+          görüyor ama Kaydet'lerse mevcut filtre sessizce {} olarak silinir.
+          Açıkça uyar + Kaydet butonunu disable et (footer'da). */}
+      {hasLegacyArrayConditions && (
+        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-medium">⚠ Eski geçersiz filtre formatı</p>
+          <p className="mt-1">
+            Bu kuralın <code>conditions</code> alanı eski (geçersiz) bir liste
+            formatında saklanmış ve UI'da gösterilemiyor. Kaydet'lerseniz
+            mevcut filtre tamamen silinir — bu kural muhtemelen tüm vakalara
+            uygulanan bir broadcast'a dönüşür.
+          </p>
+          <p className="mt-1">
+            Devam etmek için: <strong>aşağıdan kategori/öncelik/takım
+            kriterini elle girin</strong> VEYA aşağıdaki onay kutusunu
+            işaretleyin.
+          </p>
+          <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={userAckedLegacyReset}
+              onChange={(e) => setUserAckedLegacyReset(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            <span className="font-medium">
+              Eski filtreyi silmeyi ve mevcut ayarlarla kaydetmeyi onaylıyorum
+            </span>
+          </label>
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
