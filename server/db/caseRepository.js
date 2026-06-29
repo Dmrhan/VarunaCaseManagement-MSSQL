@@ -5197,6 +5197,10 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (f.pendingCustomerReply === false) where.pendingCustomerReply = false;
   // KPI tile click intents — sayım ve liste tek truth source kullansın diye:
   if (f.slaViolation === true) where.slaViolation = true;
+  if (f.unassigned === true) {
+    where.assignedPersonId = null;
+    if (!where.status) where.status = { notIn: ['Çözüldü', 'İptalEdildi'] };
+  }
   if (f.resolvedToday === true) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(); end.setHours(23, 59, 59, 999);

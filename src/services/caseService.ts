@@ -421,6 +421,7 @@ export const caseService = {
     if (filters?.teamScope) params.set('teamScope', 'true');
     if (filters?.slaViolation) params.set('slaViolation', 'true');
     if (filters?.resolvedToday) params.set('resolvedToday', 'true');
+    if (filters?.unassigned) params.set('unassigned', 'true');
     // PR-SD — SystemAdmin opt-in; backend rol filtresi de uygulayacak.
     if (filters?.includeArchived) params.set('includeArchived', 'true');
     if (pagination) {

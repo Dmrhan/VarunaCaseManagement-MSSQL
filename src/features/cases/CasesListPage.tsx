@@ -346,7 +346,12 @@ export function CasesListPage({
         ? (filters.statuses?.length ? filters.statuses : undefined)
         : (filters.statuses?.length ? filters.statuses : inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES);
       const { items, total } = await caseService.list(
-        { ...filters, statuses: effectiveStatuses },
+        {
+          ...filters,
+          statuses: effectiveStatuses,
+          unassigned: quickQueueFilter === 'unassigned' ? true : undefined,
+          priorities: quickQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
+        },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );
       setAllFiltered(items);
@@ -377,6 +382,7 @@ export function CasesListPage({
     filters.slaViolation,
     filters.resolvedToday,
     filters.includeArchived,
+    quickQueueFilter,
   ]);
 
   // Sayfa / pageSize / sıralama değişince → yeniden yükle (filtre değişikliği hariç).
@@ -472,11 +478,7 @@ export function CasesListPage({
       result = result.filter((c) => allowed.has(c.id));
     }
 
-    if (quickQueueFilter === 'unassigned') {
-      result = result.filter((c) => !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status));
-    } else if (quickQueueFilter === 'critical') {
-      result = result.filter((c) => c.priority === 'Critical');
-    }
+
 
     // Öncelik sıralamasında secondary sort: aynı öncelikte createdAt asc
     // (en uzun bekleyen üstte). Cross-page sıralama backend sort'a bağlı.

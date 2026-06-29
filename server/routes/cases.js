@@ -518,6 +518,7 @@ router.get(
       pendingCustomerReply,
       slaViolation: f.slaViolation === 'true' ? true : undefined,
       resolvedToday: f.resolvedToday === 'true' ? true : undefined,
+      unassigned: f.unassigned === 'true' ? true : undefined,
       // WR-A4 — Proje filtresi.
       accountProjectId: typeof f.accountProjectId === 'string' && f.accountProjectId ? f.accountProjectId : undefined,
       // PR-SD — Arşivli vakaları dahil et: sadece SystemAdmin. Diğer roller

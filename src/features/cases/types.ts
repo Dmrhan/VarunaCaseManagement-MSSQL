@@ -895,6 +895,7 @@ export interface CaseFilters {
   teamScope?: boolean;        // teamId → Supervisor'ın Person.teamId'si (server resolve)
   slaViolation?: boolean;     // Case.slaViolation = true
   resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
+  unassigned?: boolean;       // assignedPersonId IS NULL + açık statüler
   // WR-A4 — proje bazlı filter
   accountProjectId?: string;
   // PR-SD — Soft archive. Default false (UI'da chip OFF).
