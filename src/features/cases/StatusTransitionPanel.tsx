@@ -282,7 +282,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   // atlatıyoruz.
   const kbSuggestReqIdRef = useRef(0);
 
-  async function handleKbSuggest() {
+  async function handleKbSuggest(clarifyingAnswers?: string) {
     if (kbSuggesting) return;
     if (resolutionNote.trim().length < 5) {
       setKbSuggestionError('En az 5 karakter çözüm notu yazın.');
@@ -304,11 +304,13 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         ? await lookupService.suggestSmartTicketClosure({
             caseId: targetCaseId,
             resolutionOverride: resolutionNote.trim(),
+            ...(clarifyingAnswers ? { clarifyingAnswers } : {}),
           })
         : await lookupService.suggestSmartTicketClosure({
             companyId: item.companyId,
             description: item.description,
             resolution: resolutionNote.trim(),
+            ...(clarifyingAnswers ? { clarifyingAnswers } : {}),
           });
       // Stale response guard — case değişti veya yeni request başlatıldı.
       if (reqId !== kbSuggestReqIdRef.current || item.id !== targetCaseId) {
@@ -322,7 +324,9 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       kbSuggestedAtRef.current = new Date().toISOString();
       // Smart Ticket: dropdown'lara pre-fill (yalnız boş alanlar).
       // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
-      if (isSmartTicket) {
+      // P1.2 — AI emin değilse (needsClarification) pre-fill ETME; operatör
+      // soruları cevaplayınca gelen zenginleşmiş öneri pre-fill eder.
+      if (isSmartTicket && !res.needsClarification) {
         const s = res.suggestions;
         if (s.rootCauseGroup && !closureRcg) {
           setClosureRcg(s.rootCauseGroup.code);
@@ -681,6 +685,7 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                 kbSuggestionError={kbSuggestionError}
                 onSuggest={() => void handleKbSuggest()}
                 onAppendToNote={handleAppendSuggestionToNote}
+                onClarifyAnswer={(answer) => void handleKbSuggest(answer)}
               />
 
               {/* WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış alanları.
@@ -935,6 +940,7 @@ function KbClosureSuggestionPanel({
   kbSuggestionError,
   onSuggest,
   onAppendToNote,
+  onClarifyAnswer,
 }: {
   isSmartTicket: boolean;
   resolutionNote: string;
@@ -943,7 +949,11 @@ function KbClosureSuggestionPanel({
   kbSuggestionError: string | null;
   onSuggest: () => void;
   onAppendToNote: () => void;
+  /** P1.2 — operatör clarifying sorularını cevaplayınca (zenginleşmiş re-run tetikler). */
+  onClarifyAnswer: (answer: string) => void;
 }) {
+  // P1.2 — clarifying cevap metni (AI emin değilse sorulan 3 soruya).
+  const [clarifyAnswer, setClarifyAnswer] = useState('');
   const noteOk = resolutionNote.trim().length >= 5;
   const suggestionCount = kbSuggestion ? Object.keys(kbSuggestion.suggestions).length : 0;
 
@@ -983,7 +993,37 @@ function KbClosureSuggestionPanel({
           {kbSuggestionError}
         </p>
       )}
-      {kbSuggestion && (
+      {kbSuggestion?.needsClarification && kbSuggestion.clarifyingQuestions && (
+        <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 dark:border-amber-900/40 dark:bg-amber-950/30">
+          <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-200">
+            AI bu vakada emin değil — doğru etiketi seçebilmek için kısaca yanıtlayın:
+          </p>
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] leading-snug text-amber-800 dark:text-amber-300">
+            {kbSuggestion.clarifyingQuestions.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+          <textarea
+            className="mt-1.5 w-full rounded border border-amber-300 bg-white px-2 py-1 text-[12px] text-slate-800 outline-none focus:border-amber-400 dark:border-amber-900/40 dark:bg-slate-900 dark:text-slate-100"
+            rows={3}
+            value={clarifyAnswer}
+            onChange={(e) => setClarifyAnswer(e.target.value)}
+            placeholder="Kök neden, çözüm ve önlem hakkında birkaç cümle…"
+          />
+          <div className="mt-1.5 flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={kbSuggesting || clarifyAnswer.trim().length < 3}
+              leftIcon={kbSuggesting ? <Loader2 size={11} className="animate-spin" /> : undefined}
+              onClick={() => onClarifyAnswer(clarifyAnswer.trim())}
+            >
+              {kbSuggesting ? 'Gönderiliyor…' : 'Yanıtla ve etiketleri öner'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {kbSuggestion && !kbSuggestion.needsClarification && (
         <div className="mt-2 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-violet-700 dark:text-violet-300">
             <span>

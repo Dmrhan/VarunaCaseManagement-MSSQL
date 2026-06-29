@@ -333,6 +333,18 @@ function composeResolutionFromSteps(workedStep, allSteps) {
   return lines.join('\n');
 }
 
+// P1.2 — Clarifying: AI emin değilse (kök neden grubu/detayı eşleşmedi VEYA güven
+// eşik altı) etiket basmak yerine operatöre 3 soru sorulur. Eşik env ile ayarlanır
+// (default 0.8 — kbCore P1.2 default'u ile hizalı; daha yükseği fazla soru üretir).
+// needsClarification BFF'te hesaplanır → dış KB sürümüne bağımlı değil.
+// clarifyingAnswers verilince re-run.
+const CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.8);
+const CLOSE_CLARIFY_QUESTIONS = [
+  'Bu vakanın kök nedeni tam olarak neydi? (ör. yanlış/eksik parametre, eksik yetki, ana veri/kart hatası, 3. parti/entegrasyon)',
+  'Sorun nasıl çözüldü? (ör. parametre düzeltildi, veri/kart düzeltildi, script çalıştırıldı, kullanıcıya bilgi/eğitim verildi)',
+  'Tekrarını önlemek için ne yapıldı ya da yapılmalı? (ör. kontrol/validasyon eklendi, doküman/eğitim, kalıcı düzeltme)',
+];
+
 router.post('/suggest-closure', async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -363,6 +375,16 @@ router.post('/suggest-closure', async (req, res) => {
     }
     const resolutionOverride =
       typeof resolutionOverrideRaw === 'string' ? resolutionOverrideRaw.trim() : '';
+    // P1.2 — operatörün clarifying cevabı. Verilirse re-run zenginleşir + tekrar sorulmaz.
+    const clarifyingAnswers =
+      typeof body.clarifyingAnswers === 'string' ? body.clarifyingAnswers.trim() : '';
+    // Maliyet kontrolü — analyze (drafts: customerReply + engineeringHandoff)
+    // pahalı bir RAG akışıdır (~3 Claude çağrısı, Sonnet 8k çıktı). Kapanış
+    // ETİKETLERİ (suggestClose) ucuz ve cache'li; drafts opsiyonel. Çözüm metni
+    // yazılırken her debounce'lu refresh'te drafts üretmek token israfı →
+    // frontend yalnız ilk girişte + manuel "Yenile"de includeDrafts:true gönderir.
+    // Geri uyum: alan hiç verilmezse true (eski davranış korunur).
+    const includeDrafts = body.includeDrafts !== false;
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -477,7 +499,11 @@ router.post('/suggest-closure', async (req, res) => {
       });
     }
 
-    const sgBody = { description, resolution };
+    // Clarifying cevabı varsa çözüm metnine ekle → kategorizasyon zenginleşir.
+    const kbResolution = clarifyingAnswers
+      ? `${resolution}\n\n[Operatör netleştirmesi] ${clarifyingAnswers}`
+      : resolution;
+    const sgBody = { description, resolution: kbResolution };
     if (openUrun) sgBody.open_urun = openUrun;
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
@@ -503,13 +529,18 @@ router.post('/suggest-closure', async (req, res) => {
       : resolution;
     const ANALYZE_DRAFTS_TIMEOUT_MS = 8000;
     const ANALYZE_TIMEOUT_SENTINEL = { ok: false, timedOut: true };
-    const analyzePromise = externalKbClient
-      .analyze(setting, { freeText: analyzeFreeText })
-      .catch((err) => ({ ok: false, thrown: true, error: { message: err?.message } }));
-    const analyzeBounded = Promise.race([
-      analyzePromise,
-      new Promise((resolve) => setTimeout(() => resolve(ANALYZE_TIMEOUT_SENTINEL), ANALYZE_DRAFTS_TIMEOUT_MS)),
-    ]);
+    // includeDrafts=false ise analyze HİÇ tetiklenmez → token harcaması yok.
+    // (Race-timeout yalnız beklemeyi keserdi; istek sunucuda tamamlanıp token
+    // yakardı. Burada çağrıyı tamamen atlayarak gerçek tasarruf sağlanır.)
+    const analyzeSkipped = { ok: false, skipped: true };
+    const analyzeBounded = includeDrafts
+      ? Promise.race([
+          externalKbClient
+            .analyze(setting, { freeText: analyzeFreeText })
+            .catch((err) => ({ ok: false, thrown: true, error: { message: err?.message } })),
+          new Promise((resolve) => setTimeout(() => resolve(ANALYZE_TIMEOUT_SENTINEL), ANALYZE_DRAFTS_TIMEOUT_MS)),
+        ])
+      : Promise.resolve(analyzeSkipped);
 
     const [closeSettled, analyzeSettled] = await Promise.allSettled([
       externalKbClient.suggestClose(setting, sgBody),
@@ -579,13 +610,24 @@ router.post('/suggest-closure', async (req, res) => {
     if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
     if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
 
+    // P1.2 — emin değil mi? Kök neden grubu/detayı eşleşmedi VEYA güven eşik altı →
+    // etiket yerine clarifying soru. Operatör zaten cevap verdiyse tekrar sorma.
+    const needsClarification =
+      !clarifyingAnswers &&
+      (!suggestions.rootCauseGroup ||
+        !suggestions.rootCauseDetail ||
+        (typeof upstreamMeta.confidence === 'number' &&
+          upstreamMeta.confidence < CLOSE_CLARIFY_THRESHOLD));
+
     // Stage 3 resolution-first — paralel analyze cevabından drafts'ı çıkar.
     // analyze rejected veya { ok: false } ise drafts boş kalır; suggestion'lar
     // yine de döner (kullanıcı kategorileri görür).
     let drafts;
     if (analyzeSettled.status === 'fulfilled') {
       const analyzeRaw = analyzeSettled.value;
-      if (analyzeRaw && analyzeRaw.timedOut) {
+      if (analyzeRaw && analyzeRaw.skipped) {
+        // includeDrafts:false — kasıtlı atlandı, log gürültüsü yok.
+      } else if (analyzeRaw && analyzeRaw.timedOut) {
         console.warn(
           `[smart-ticket/suggest-closure] analyze bounded timeout ${ANALYZE_DRAFTS_TIMEOUT_MS}ms (drafts skipped)`,
         );
@@ -613,6 +655,8 @@ router.post('/suggest-closure', async (req, res) => {
       suggestions,
       unmatched,
       source: 'external_kb',
+      needsClarification,
+      ...(needsClarification ? { clarifyingQuestions: CLOSE_CLARIFY_QUESTIONS } : {}),
       ...(drafts ? { drafts } : {}),
       meta: {
         usedEndpoint: 'suggest-close',

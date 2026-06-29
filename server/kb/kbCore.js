@@ -672,7 +672,11 @@ init_gemini();
 var DEFAULTS = {
   topK: 8,
   rawK: 50,
-  fusedK: 20,
+  // fusedK = LLM rerank'e giren aday sayısı. Rerank prompt'u her adayın
+  // ~600 karakterini içerir → bu sayı doğrudan rerank input maliyetidir.
+  // 20 → 12: topK (6-8) zaten daha düşük; 12 aday rerank kalitesini korur,
+  // rerank input'unu ~%40 azaltır (analyze başına 2 rerank çağrısı var).
+  fusedK: 12,
   rrfK: 60
 };
 function buildFtsQuery(text) {
@@ -2464,13 +2468,19 @@ function formatTaxonomy(tx) {
     `TfsTip adaylar\u0131          : ${tx.tfsTipler.slice(0, 8).join(" | ") || "-"}`
   ].join("\n");
 }
+function buildAnalystCachePrefix(inputs) {
+  return [
+    `=== Taksonomi (sadece bu listelerden de\u011Fer se\xE7) ===`,
+    formatTaxonomy(inputs.taxonomy),
+    ``,
+    `=== \xC7\u0131kt\u0131 \u015Eemas\u0131 ===`,
+    RESPONSE_SCHEMA
+  ].join("\n");
+}
 function buildUserPrompt(inputs) {
   const mode = inputs.matched ? "BILDIRIM_NO" : "SERBEST_METIN";
   const sections = [
     `MOD: ${mode}`,
-    ``,
-    `=== Taksonomi (sadece bu listelerden de\u011Fer se\xE7) ===`,
-    formatTaxonomy(inputs.taxonomy),
     ``,
     `=== Mevcut Bildirim Kayd\u0131 ===`,
     formatTicket(inputs.matched)
@@ -2495,10 +2505,9 @@ function buildUserPrompt(inputs) {
     formatKbChunks(inputs.kbChunksOther, "DOC"),
     ``,
     `=== G\xF6rev ===`,
-    `Yukar\u0131daki bilgiyle yaln\u0131zca a\u015Fa\u011F\u0131daki JSON \u015Femas\u0131na uygun bir yan\u0131t \xFCret.`,
-    `Markdown, kod blo\u011Fu, a\xE7\u0131klama metni EKLEME. Sadece ge\xE7erli JSON d\xF6nd\xFCr.`,
-    ``,
-    RESPONSE_SCHEMA
+    `Yukar\u0131da verilen taksonomi ve JSON \u015Femas\u0131na uyarak, bu bilgiyle yaln\u0131zca`,
+    `o \u015Femaya uygun bir yan\u0131t \xFCret.`,
+    `Markdown, kod blo\u011Fu, a\xE7\u0131klama metni EKLEME. Sadece ge\xE7erli JSON d\xF6nd\xFCr.`
   );
   return sections.join("\n");
 }
@@ -2547,12 +2556,16 @@ function extractJson4(raw) {
 }
 async function runAnalyst(inputs) {
   const userPrompt = buildUserPrompt(inputs);
+  const cachePrefix = buildAnalystCachePrefix(inputs);
   const response = await generate(SYSTEM_INSTRUCTION, userPrompt, {
     temperature: 0.2,
-    // 2.5-flash 65k destekler; analiz çıktıları (özellikle benzer kayıt
-    // sayısı yüksekken) 2k'yı aşabiliyor. 8k güvenli üst sınır.
-    maxOutputTokens: 8192,
-    responseMimeType: "application/json"
+    // Çıktı şeması: ≤6 hipotez + ≤6 adım + 2 taslak + 2 rehberlik → pratikte
+    // ~2-3k token. Output Sonnet'te en pahalı kalem ($15/M); 8192 fazla
+    // cömertti, 4096 şemayı rahat karşılar. Nadir kırpılma riskine karşı
+    // güvenli üst sınır.
+    maxOutputTokens: 4096,
+    responseMimeType: "application/json",
+    cachePrefix
   });
   const cleaned = extractJson4(response.text);
   let parsed;
