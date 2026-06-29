@@ -313,19 +313,28 @@ function RuleEditor({
       else delete (next as Record<string, string>)[key];
       return next;
     });
-    // Codex P1 round 5 fix — Legacy ack akışında filtre eklenince
-    // broadcast intent'i geri al. Round 4: ack✓ → setIsMatchAll(true) auto.
-    // Sonra kullanıcı filtre eklerse intent değişir: "broadcast değil,
-    // filtre kullanmak istiyorum". isMatchAll=true kalırsa backend
-    // dispatcher `r.isMatchAll || ruleMatchesCase()` semantiği nedeniyle
-    // filtre TAMAMEN YOK SAYILIR → silent broadcast bug.
+    // Codex P1 round 6 fix — Filtre eklendiği an isMatchAll'u KATEGORIK kapat.
     //
-    // Çözüm: filtre eklendi mi diye saatte (value truthy + ack varsa)
-    // ack'ı geri çek + isMatchAll'u kapat. Kullanıcı broadcast'a geri
-    // dönmek isterse checkbox'ı tekrar işaretleyebilir.
-    if (value && userAckedLegacyReset) {
-      setUserAckedLegacyReset(false);
+    // Backend dispatcher (notificationRepository.js:1233):
+    //   r.isMatchAll || ruleMatchesCase(...)
+    // isMatchAll=true ise filtre TAMAMEN YOK SAYILIR → silent broadcast.
+    //
+    // Round 5 sadece ack akışını yakalıyordu (`value && userAckedLegacyReset`).
+    // Ama legacy rule DB'den isMatchAll=true geliyorsa, kullanıcı ack'ı
+    // işaretlemeden direkt filtre girer:
+    //   - userAckedLegacyReset false (basmadı)
+    //   - Round 5 guard pasif
+    //   - isMatchAll=true KALIR → kaydet → broadcast bug
+    //
+    // Round 6: kategorik kural — filtre eklendi mi → isMatchAll=false.
+    // Kullanıcı niyeti net "filtre kullan"; isMatchAll=true ile çelişir.
+    // Kullanıcı broadcast isterse filtreleri temizler + "Her vakaya uygula"
+    // checkbox'ı görünür (conditionsEmpty iken render edilir) → manuel
+    // tekrar açar.
+    if (value) {
       setIsMatchAll(false);
+      // Round 5 davranışı korunsun: filtre eklendi → ack semantiği geri al
+      if (userAckedLegacyReset) setUserAckedLegacyReset(false);
     }
   }
 
