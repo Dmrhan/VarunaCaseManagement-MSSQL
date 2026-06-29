@@ -252,11 +252,21 @@ function RuleEditor({
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [event, setEvent] = useState<NotificationEvent>(initial?.event ?? 'resolution_approved');
-  // Legacy guard — eski seed/admin akışı `conditions: []` yazmış olabilir.
-  // Backend artık tolere ediyor ama edit form'unda obje semantiğine ihtiyaç
-  // var (key-based set). Array geldiyse boş objeye normalize et.
+  // Legacy guard — eski seed/admin akışı `conditions: []` (boş array)
+  // veya `[{...}]` (dolu array — eski format) yazmış olabilir.
+  // Edit form key-based UI, array shape'i support edemez → boş object'e
+  // initialize ediyoruz ki kullanıcı edit ekranını AÇABILSIN.
+  //
+  // Codex P2 fix — dolu array sessizce silinmesin: hasLegacyArrayConditions
+  // flag'i ile UI'da uyarı banner göster + Kaydet'i blokla. Backend de
+  // dolu array'i reddeder ama UI'da daha erken görsel uyarı.
+  const initialConditionsIsArray = Array.isArray(initial?.conditions);
+  const initialConditionsArrayLen = initialConditionsIsArray
+    ? (initial?.conditions as unknown as unknown[]).length
+    : 0;
+  const hasLegacyArrayConditions = initialConditionsIsArray && initialConditionsArrayLen > 0;
   const [conditions, setConditions] = useState(
-    Array.isArray(initial?.conditions) ? {} : (initial?.conditions ?? {}),
+    initialConditionsIsArray ? {} : (initial?.conditions ?? {}),
   );
   const [isMatchAll, setIsMatchAll] = useState(initial?.isMatchAll ?? false);
   const [audience, setAudience] = useState<AudienceRow[]>(
@@ -352,7 +362,21 @@ function RuleEditor({
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Vazgeç</Button>
-          <Button onClick={() => void handleSave()} disabled={saving}>
+          <Button
+            onClick={() => void handleSave()}
+            // Codex P2 fix — Legacy "dolu array" conditions varken Kaydet
+            // bloklu. Kullanıcı yeniden filtre girerse VEYA "Tüm vakaya
+            // uygula" işaretini açıkça onaylarsa (isMatchAll=true) blok kalkar.
+            disabled={
+              saving
+              || (hasLegacyArrayConditions && !isMatchAll && Object.values(conditions).every((v) => !v))
+            }
+            title={
+              hasLegacyArrayConditions && !isMatchAll && Object.values(conditions).every((v) => !v)
+                ? 'Eski geçersiz filtre formatı. Önce filtreleri elle girin VEYA "Tüm vakaya uygula" seçeneğini işaretleyin.'
+                : undefined
+            }
+          >
             {saving ? 'Kaydediliyor…' : 'Kaydet'}
           </Button>
         </div>
@@ -361,6 +385,22 @@ function RuleEditor({
       {error && (
         <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
           {error}
+        </div>
+      )}
+      {/* Codex P2 fix — Legacy "dolu array" conditions uyarısı.
+          UI key-based; array shape destekleyemez. Kullanıcı edit ekranını
+          görüyor ama Kaydet'lerse mevcut filtre sessizce {} olarak silinir.
+          Açıkça uyar + Kaydet butonunu disable et (footer'da). */}
+      {hasLegacyArrayConditions && (
+        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-medium">⚠ Eski geçersiz filtre formatı</p>
+          <p className="mt-1">
+            Bu kuralın <code>conditions</code> alanı eski (geçersiz) bir liste
+            formatında saklanmış. Mevcut filtre kayboldu; yeniden kurmak için
+            "Tüm vakaya uygula" işaretini kaldırıp aşağıdan kategori/öncelik/
+            takım kriterini elle girin. Kaydet butonu güvenlik için bloklu —
+            önce filtreleri açıkça belirtin.
+          </p>
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
