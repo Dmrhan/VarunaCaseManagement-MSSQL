@@ -252,7 +252,12 @@ function RuleEditor({
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [event, setEvent] = useState<NotificationEvent>(initial?.event ?? 'resolution_approved');
-  const [conditions, setConditions] = useState(initial?.conditions ?? {});
+  // Legacy guard — eski seed/admin akışı `conditions: []` yazmış olabilir.
+  // Backend artık tolere ediyor ama edit form'unda obje semantiğine ihtiyaç
+  // var (key-based set). Array geldiyse boş objeye normalize et.
+  const [conditions, setConditions] = useState(
+    Array.isArray(initial?.conditions) ? {} : (initial?.conditions ?? {}),
+  );
   const [isMatchAll, setIsMatchAll] = useState(initial?.isMatchAll ?? false);
   const [audience, setAudience] = useState<AudienceRow[]>(
     initial?.audience ?? [{ type: 'assignee' }],
