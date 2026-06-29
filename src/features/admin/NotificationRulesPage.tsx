@@ -414,23 +414,38 @@ function RuleEditor({
           <p className="mt-1">
             Bu kuralın <code>conditions</code> alanı eski (geçersiz) bir liste
             formatında saklanmış ve UI'da gösterilemiyor. Kaydet'lerseniz
-            mevcut filtre tamamen silinir — bu kural muhtemelen tüm vakalara
-            uygulanan bir broadcast'a dönüşür.
+            mevcut filtre tamamen silinir.
           </p>
           <p className="mt-1">
-            Devam etmek için: <strong>aşağıdan kategori/öncelik/takım
-            kriterini elle girin</strong> VEYA aşağıdaki onay kutusunu
-            işaretleyin.
+            Devam etmek için iki seçenek:
           </p>
+          <ul className="ml-4 mt-1 list-disc">
+            <li><strong>Filtre gir</strong>: aşağıdan kategori/öncelik/takım
+              kriterini elle belirt</li>
+            <li><strong>Broadcast olarak onayla</strong>: kuralı tüm
+              vakalara uygulanan bir broadcast'a dönüştür (aşağıdaki onay
+              kutusu "Her vakaya uygula"yı otomatik açar)</li>
+          </ul>
           <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={userAckedLegacyReset}
-              onChange={(e) => setUserAckedLegacyReset(e.target.checked)}
+              // Codex P2 round 4 fix — ack semantiği "broadcast onayı"
+              // olarak netleşti. handleSave aşağıda `conditionsEmpty &&
+              // !isMatchAll` reddediyordu; ack işaretle ama isMatchAll
+              // false kalırsa Kaydet tıklayınca toast hata alıyordu.
+              // Çözüm: ack=true → setIsMatchAll(true) auto-sync. Kullanıcı
+              // sonradan manuel değiştirebilir.
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setUserAckedLegacyReset(checked);
+                if (checked) setIsMatchAll(true);
+              }}
               className="h-3.5 w-3.5"
             />
             <span className="font-medium">
-              Eski filtreyi silmeyi ve mevcut ayarlarla kaydetmeyi onaylıyorum
+              Eski filtreyi silmeyi ve <em>tüm vakalara uygulanmasını</em>
+              {' '}onaylıyorum (broadcast)
             </span>
           </label>
         </div>
