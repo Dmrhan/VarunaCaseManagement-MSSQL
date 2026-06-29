@@ -971,25 +971,25 @@ export function CasesListPage({
             label="Tümü"
             icon={<Layers size={13} />}
             active={inboxTab === 'all'}
-            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('all'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('all'); }}
           />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
             active={inboxTab === 'open'}
-            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('open'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('open'); }}
           />
           <InboxTabButton
             label="Ertelendi"
             icon={<Clock3 size={13} />}
             active={inboxTab === 'later'}
-            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('later'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('later'); }}
           />
           <InboxTabButton
             label="Kapalı"
             icon={<Check size={13} />}
             active={inboxTab === 'closed'}
-            onClick={() => { setFilters((f) => ({ ...f, resolvedToday: false })); setInboxTab('closed'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('closed'); }}
           />
         </div>
 
