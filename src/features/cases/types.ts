@@ -909,8 +909,8 @@ export type CaseStatsResponse =
   | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; unassigned: number; critical: number }
   | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null; unassigned: number; critical: number }
   | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number; unassigned: number }
-  | { mode: 'empty' }
-  | { mode: 'unknown' };
+  | { mode: 'empty'; unassigned?: number; critical?: number }
+  | { mode: 'unknown'; unassigned?: number; critical?: number };
 
 export interface CaseListPagination {
   page: number;       // 1-based
