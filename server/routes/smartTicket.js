@@ -617,6 +617,11 @@ router.post('/suggest-closure', async (req, res) => {
       meta: {
         usedEndpoint: 'suggest-close',
         ...upstreamMeta,
+        // Telemetry attribution — AI'nın GERÇEKTEN sınıflandırdığı çözüm metni.
+        // resolutionOverride verildiyse o; yoksa step'lerden compose edilen.
+        // Frontend bunu closureSuggestion.aiSuggested.resolutionSeen'e yazar →
+        // "bağlam hatası mı?" ayrımını mümkün kılar (raw KB DEĞİL).
+        resolutionSeen: resolution,
         ...(selectedWorkedStepId ? { selectedWorkedStepId } : {}),
         ...(contextStepsCount > 0 ? { contextStepsCount } : {}),
         ...(drafts ? { draftsSource: 'analyze' } : {}),

@@ -41,6 +41,10 @@ import {
   type SuggestClassificationResponse,
   type SuggestClassificationField,
 } from '@/services/caseService';
+import {
+  buildClosureSuggestionTelemetry,
+  type AppliedClosureSelection,
+} from '@/services/closureTelemetry';
 import { accountService, type AccountListItem } from '@/services/accountService';
 import type { Case, CasePriority, CaseRequestType } from '@/features/cases/types';
 import {
@@ -1078,6 +1082,9 @@ export function SmartTicketNewPage({
   const closureSuggestReqIdRef = useRef(0);
   const closureSuggestRefreshQueuedRef = useRef(false);
   const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string }>({});
+  // Telemetry — kapanış önerisinin client'a ulaştığı an (ISO). Submit'te
+  // closureSuggestion.aiSuggested.suggestedAt'e yazılır.
+  const closureSuggestedAtRef = useRef<string | null>(null);
 
   // Stage 3 resolution-first: imzaya `resolutionOverride` eklendi. Verildiyse
   // backend compose-from-steps yerine bu değeri KB'ye gönderir; kategorizasyon
@@ -1120,6 +1127,7 @@ export function SmartTicketNewPage({
         return;
       }
       setClosureSuggestion(res);
+      closureSuggestedAtRef.current = new Date().toISOString();
       // Stage 3 resolution-first — bir kez başarılı refresh = persisted
       // aiDrafts fallback'i kapanır; bundan sonra KbDraftCard yalnız current
       // KB cevabından (drafts varsa) render eder.
@@ -1382,35 +1390,32 @@ export function SmartTicketNewPage({
       closurePayload.selectedWorkedStepId = suggestedWorkedStepId;
     }
     if (closureSuggestion) {
-      const appliedFields: string[] = [];
-      const perField: Record<string, { matchedBy: string; suggestedCode: string }> = {};
-      for (const key of [
-        'rootCauseGroup',
-        'rootCauseDetail',
-        'resolutionType',
-        'permanentPrevention',
-      ] as const) {
-        const s = closureSuggestion.suggestions[key];
-        if (s && closure[key] === s.code) {
-          appliedFields.push(key);
-          perField[key] = { matchedBy: s.matchedBy, suggestedCode: s.code };
-        }
-      }
-      closurePayload.closureSuggestion = {
-        source: 'external_kb',
-        appliedAt: new Date().toISOString(),
-        appliedFields,
-        perField,
-        unmatched: closureSuggestion.unmatched.map((u) => ({
-          taxonomyType: u.taxonomyType,
-          rawValue: u.rawValue,
-        })),
-        ...(closureSuggestion.meta?.confidence != null
-          ? { confidence: closureSuggestion.meta.confidence }
-          : {}),
-        ...(closureSuggestion.meta?.reason ? { reason: closureSuggestion.meta.reason } : {}),
-        ...(closureSuggestion.meta?.modelUsed ? { modelUsed: closureSuggestion.meta.modelUsed } : {}),
+      // Geriye uyumlu KÖK alanlar (source/appliedFields/perField/unmatched/
+      // confidence/reason/modelUsed) + ai_suggested / human_applied attribution.
+      // Tek kaynak: buildClosureSuggestionTelemetry (StatusTransitionPanel ile aynı).
+      const applied: AppliedClosureSelection = {
+        rootCauseGroup: {
+          code: closure.rootCauseGroup || undefined,
+          label: closurePayload.rootCauseGroupLabel as string | undefined,
+        },
+        rootCauseDetail: {
+          code: closure.rootCauseDetail || undefined,
+          label: closurePayload.rootCauseDetailLabel as string | undefined,
+        },
+        resolutionType: {
+          code: closure.resolutionType || undefined,
+          label: closurePayload.resolutionTypeLabel as string | undefined,
+        },
+        permanentPrevention: {
+          code: closure.permanentPrevention || undefined,
+          label: closurePayload.permanentPreventionLabel as string | undefined,
+        },
       };
+      closurePayload.closureSuggestion = buildClosureSuggestionTelemetry({
+        suggestion: closureSuggestion,
+        suggestedAt: closureSuggestedAtRef.current,
+        applied,
+      });
     }
 
     try {

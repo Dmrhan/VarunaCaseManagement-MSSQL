@@ -295,6 +295,26 @@ if (
   bad('27) stale response guard eksik');
 }
 
+// 28) Kapanış telemetry — ai_suggested / human_applied attribution.
+//     closureSuggestion meta buildClosureSuggestionTelemetry ile kurulur
+//     (StatusTransitionPanel ile aynı tek kaynak helper).
+if (
+  src.includes('buildClosureSuggestionTelemetry(') &&
+  /closurePayload\.closureSuggestion\s*=\s*buildClosureSuggestionTelemetry/.test(src)
+) {
+  ok('28) Kapanış telemetry (ai_suggested / human_applied) persist ediliyor');
+} else {
+  bad('28) closure telemetry (buildClosureSuggestionTelemetry) eksik');
+}
+
+// 29) resolutionOverride — Stage 3 suggest çağrısı current "Çözüm Açıklaması"nı
+//     resolutionOverride olarak gönderir (AI doğru bağlamı görür).
+if (/handleSuggestClosure\(\s*\{\s*resolutionOverride:/.test(src)) {
+  ok('29) Stage 3 suggest resolutionOverride ile çağrılıyor (doğru bağlam)');
+} else {
+  bad('29) resolutionOverride çağrısı eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
