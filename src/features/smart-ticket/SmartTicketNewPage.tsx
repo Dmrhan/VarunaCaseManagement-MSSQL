@@ -994,6 +994,8 @@ export function SmartTicketNewPage({
       if (cancelled) return;
       void handleSuggestClosure({
         resolutionOverride: effectiveResolution.trim().length > 0 ? effectiveResolution : undefined,
+        // İlk Stage 3 girişi — drafts (taslaklar) burada üretilsin.
+        includeDrafts: true,
       });
     })();
     return () => {
@@ -1081,24 +1083,35 @@ export function SmartTicketNewPage({
   //    stage hala geçerliyse yeniden tetiklenir.
   const closureSuggestReqIdRef = useRef(0);
   const closureSuggestRefreshQueuedRef = useRef(false);
-  const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string }>({});
+  const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string; includeDrafts?: boolean }>({});
   // Telemetry — kapanış önerisinin client'a ulaştığı an (ISO). Submit'te
   // closureSuggestion.aiSuggested.suggestedAt'e yazılır.
   const closureSuggestedAtRef = useRef<string | null>(null);
+  // Son başarılı taslaklar — includeDrafts:false (debounce'lu etiket refresh'i)
+  // yanıtında drafts gelmez; yazarken taslakların kaybolmaması için son iyi
+  // taslakları saklayıp yeni yanıta geri iliştiririz.
+  const lastClosureDraftsRef = useRef<
+    import('@/services/caseService').SuggestClosureResponse['drafts'] | undefined
+  >(undefined);
 
   // Stage 3 resolution-first: imzaya `resolutionOverride` eklendi. Verildiyse
   // backend compose-from-steps yerine bu değeri KB'ye gönderir; kategorizasyon
   // current "Çözüm Açıklaması" metnine göre üretilir. Önceki workedStepId-only
   // çağrı şekli geri uyumlu — eski caller'lar etkilenmez.
-  async function handleSuggestClosure(opts?: { workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string }) {
+  async function handleSuggestClosure(opts?: { workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string; includeDrafts?: boolean }) {
     if (!createdCase) return;
     const workedStepId = opts?.workedStepId;
     const resolutionOverride = opts?.resolutionOverride;
     const clarifyingAnswers = opts?.clarifyingAnswers;
+    // Drafts (customerReply + engineeringHandoff) pahalı analyze RAG akışını
+    // tetikler. Yalnız açıkça istendiğinde (ilk giriş + manuel "Yenile") true;
+    // çözüm metni yazılırken debounce'lu refresh'lerde false → token tasarrufu.
+    // Etiket önerileri (suggestClose) her durumda gelir.
+    const includeDrafts = opts?.includeDrafts === true;
     if (closureSuggesting) {
       // Pending request var → yeni isteği kuyruğa al; finally tetikler.
       closureSuggestRefreshQueuedRef.current = true;
-      closureSuggestQueuedOptsRef.current = { workedStepId, resolutionOverride, clarifyingAnswers };
+      closureSuggestQueuedOptsRef.current = { workedStepId, resolutionOverride, clarifyingAnswers, includeDrafts };
       return;
     }
     const reqId = ++closureSuggestReqIdRef.current;
@@ -1116,6 +1129,7 @@ export function SmartTicketNewPage({
         ...(clarifyingAnswers && clarifyingAnswers.trim().length > 0
           ? { clarifyingAnswers: clarifyingAnswers.trim() }
           : {}),
+        includeDrafts,
       });
       // Stale response guard — yanıt geldiğinde case değiştiyse veya
       // yeni bir request başlatıldıysa state'i uygulama.
@@ -1130,7 +1144,16 @@ export function SmartTicketNewPage({
         setClosureSuggestionError('Kapanış önerisi alınamadı.');
         return;
       }
-      setClosureSuggestion(res);
+      // Taslakları koru: yeni yanıtta drafts varsa sakla; yoksa ve bu çağrı
+      // drafts istemediyse (debounce'lu etiket refresh'i) son taslakları geri
+      // iliştir → operatör yazarken taslaklar kaybolmaz.
+      let finalRes = res;
+      if (res.drafts) {
+        lastClosureDraftsRef.current = res.drafts;
+      } else if (!includeDrafts && lastClosureDraftsRef.current) {
+        finalRes = { ...res, drafts: lastClosureDraftsRef.current };
+      }
+      setClosureSuggestion(finalRes);
       closureSuggestedAtRef.current = new Date().toISOString();
       // Stage 3 resolution-first — bir kez başarılı refresh = persisted
       // aiDrafts fallback'i kapanır; bundan sonra KbDraftCard yalnız current
@@ -1849,13 +1872,16 @@ export function SmartTicketNewPage({
                   setClosureSuggestionError(null);
                   return;
                 }
-                void handleSuggestClosure({ resolutionOverride: closure.resolutionNote });
+                // Manuel "Bilgi Bankası Önerisini Yenile" — taslaklar dahil tam öneri.
+                void handleSuggestClosure({ resolutionOverride: closure.resolutionNote, includeDrafts: true });
               }}
               onApplyAllClosureSuggestions={handleApplyAllClosureSuggestions}
               onClarifyAnswer={(answer) =>
+                // Operatör clarifying soruları cevapladı — zenginleşmiş tam öneri (taslaklar dahil).
                 void handleSuggestClosure({
                   resolutionOverride: closure.resolutionNote,
                   clarifyingAnswers: answer,
+                  includeDrafts: true,
                 })
               }
               onClose={() => void handleCloseCase()}

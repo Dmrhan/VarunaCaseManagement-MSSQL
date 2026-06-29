@@ -2693,6 +2693,12 @@ export interface SuggestClosureRequest {
   /** P1.2 — operatörün clarifying cevabı. Verilirse KB'ye çözüm metnine eklenerek
    *  gönderilir (zenginleşmiş re-run) ve tekrar soru sorulmaz. */
   clarifyingAnswers?: string;
+  /** Maliyet kontrolü — drafts (customerReply + engineeringHandoff) pahalı RAG
+   *  analyze akışını tetikler. false → yalnız kapanış ETİKETLERİ üretilir,
+   *  analyze atlanır (token tasarrufu). Çözüm metni yazılırken her debounce'lu
+   *  refresh false göndermeli; ilk giriş + manuel "Yenile" true (veya boş)
+   *  göndererek drafts ister. Verilmezse backend true varsayar (geri uyum). */
+  includeDrafts?: boolean;
 }
 
 export type SuggestClosureField =
