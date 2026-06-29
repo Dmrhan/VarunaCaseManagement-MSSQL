@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { generate } from "../gemini";
-import { SYSTEM_INSTRUCTION, buildUserPrompt, type PromptInputs } from "./prompts";
+import {
+  SYSTEM_INSTRUCTION,
+  buildUserPrompt,
+  buildAnalystCachePrefix,
+  type PromptInputs,
+} from "./prompts";
 
 /*
  * Analyst — tek Gemini çağrısı. Çıktıyı JSON olarak alır, Zod ile parse eder.
@@ -71,12 +76,18 @@ function extractJson(raw: string): string {
 
 export async function runAnalyst(inputs: PromptInputs): Promise<AnalystResult> {
   const userPrompt = buildUserPrompt(inputs);
+  // Statik önek (taksonomi + şema) cache'lenir → system + önek tekrarlı/ardışık
+  // çağrılarda 0.1× fiyatlanır; yalnız ticket bağlamı tam fiyat.
+  const cachePrefix = buildAnalystCachePrefix(inputs);
   const response = await generate(SYSTEM_INSTRUCTION, userPrompt, {
     temperature: 0.2,
-    // 2.5-flash 65k destekler; analiz çıktıları (özellikle benzer kayıt
-    // sayısı yüksekken) 2k'yı aşabiliyor. 8k güvenli üst sınır.
-    maxOutputTokens: 8192,
+    // Çıktı şeması: ≤6 hipotez + ≤6 adım + 2 taslak + 2 rehberlik → pratikte
+    // ~2-3k token. Output Sonnet'te en pahalı kalem ($15/M); 8192 fazla
+    // cömertti, 4096 şemayı rahat karşılar. Nadir kırpılma riskine karşı
+    // güvenli üst sınır.
+    maxOutputTokens: 4096,
     responseMimeType: "application/json",
+    cachePrefix,
   });
 
   const cleaned = extractJson(response.text);

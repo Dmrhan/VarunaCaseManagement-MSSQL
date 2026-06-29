@@ -215,6 +215,39 @@ if (
   bad('17) Stale guard pattern eksik');
 }
 
+// ─── resolutionOverride bağlam bug fix + kapanış telemetry ───────
+
+// 18) resolutionOverride bug fix — Smart Ticket suggest çağrısı operatörün
+//     YAZDIĞI resolutionNote'u resolutionOverride olarak gönderir. Eski hâl
+//     yalnız { caseId } gönderiyordu → backend solution-step'lerden compose
+//     ediyor, operatörün gerçek çözüm metni AI'ya ulaşmıyordu (accuracy bug).
+if (
+  /isSmartTicket[\s\S]{0,600}?suggestSmartTicketClosure\(\s*\{[\s\S]{0,200}?resolutionOverride:\s*resolutionNote\.trim\(\)/.test(src)
+) {
+  ok('18) Smart Ticket suggest resolutionOverride gönderiyor (bağlam bug fix)');
+} else {
+  bad('18) resolutionOverride gönderilmiyor (bağlam bug fix eksik)');
+}
+
+// 19) Empty override gönderilmez — resolutionOverride yalnız ≥5 char guard'dan
+//     sonra set ediliyor (handleKbSuggest başındaki <5 erken return korunmuş).
+if (/resolutionNote\.trim\(\)\.length\s*<\s*5[\s\S]{0,200}?return;/.test(src)) {
+  ok('19) Empty override koruması (handleKbSuggest <5 char erken return intact)');
+} else {
+  bad('19) <5 char guard kaldırılmış (empty override riski)');
+}
+
+// 20) Kapanış telemetry — ai_suggested / human_applied attribution. Submit'te
+//     closureSuggestion meta buildClosureSuggestionTelemetry ile kurulur.
+if (
+  src.includes('buildClosureSuggestionTelemetry(') &&
+  /\.closureSuggestion\s*=\s*buildClosureSuggestionTelemetry/.test(src)
+) {
+  ok('20) Kapanış telemetry (ai_suggested / human_applied) persist ediliyor');
+} else {
+  bad('20) closure telemetry (buildClosureSuggestionTelemetry) eksik');
+}
+
 console.log('');
 console.log('── Summary ─────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

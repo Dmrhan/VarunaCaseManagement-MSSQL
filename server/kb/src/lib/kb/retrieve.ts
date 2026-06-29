@@ -64,7 +64,11 @@ export type RetrieveOpts = {
 const DEFAULTS = {
   topK: 8,
   rawK: 50,
-  fusedK: 20,
+  // fusedK = LLM rerank'e giren aday sayısı. Rerank prompt'u her adayın
+  // ~600 karakterini içerir → bu sayı doğrudan rerank input maliyetidir.
+  // 20 → 12: topK (6-8) zaten daha düşük; 12 aday rerank kalitesini korur,
+  // rerank input'unu ~%40 azaltır (analyze başına 2 rerank çağrısı var).
+  fusedK: 12,
   rrfK: 60,
 } as const;
 

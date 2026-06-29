@@ -367,9 +367,9 @@ function SlaEditModal({
     setError(null);
     const trimmed: SlaPolicyInput = {
       ...form,
-      productGroup: (form.productGroup ?? '').trim(),
-      categoryName: (form.categoryName ?? '').trim(),
-      subCategoryName: (form.subCategoryName ?? '').trim(),
+      productGroup: (form.productGroup ?? '').trim() || null,
+      categoryName: (form.categoryName ?? '').trim() || null,
+      subCategoryName: (form.subCategoryName ?? '').trim() || null,
       description: form.description?.trim() || undefined,
     };
 
@@ -401,9 +401,6 @@ function SlaEditModal({
 
   const canSubmit =
     !!form.companyId &&
-    !!(form.productGroup ?? '').trim() &&
-    !!(form.categoryName ?? '').trim() &&
-    !!(form.subCategoryName ?? '').trim() &&
     form.responseHours > 0 &&
     form.resolutionHours > 0 &&
     !submitting;
