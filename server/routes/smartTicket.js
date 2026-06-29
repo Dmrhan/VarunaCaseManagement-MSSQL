@@ -335,9 +335,10 @@ function composeResolutionFromSteps(workedStep, allSteps) {
 
 // P1.2 — Clarifying: AI emin değilse (kök neden grubu/detayı eşleşmedi VEYA güven
 // eşik altı) etiket basmak yerine operatöre 3 soru sorulur. Eşik env ile ayarlanır
-// (default 0.9; model fazla özgüvenli olduğu için yüksek tutulur). needsClarification
-// BFF'te hesaplanır → dış KB sürümüne bağımlı değil. clarifyingAnswers verilince re-run.
-const CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.9);
+// (default 0.8 — kbCore P1.2 default'u ile hizalı; daha yükseği fazla soru üretir).
+// needsClarification BFF'te hesaplanır → dış KB sürümüne bağımlı değil.
+// clarifyingAnswers verilince re-run.
+const CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.8);
 const CLOSE_CLARIFY_QUESTIONS = [
   'Bu vakanın kök nedeni tam olarak neydi? (ör. yanlış/eksik parametre, eksik yetki, ana veri/kart hatası, 3. parti/entegrasyon)',
   'Sorun nasıl çözüldü? (ör. parametre düzeltildi, veri/kart düzeltildi, script çalıştırıldı, kullanıcıya bilgi/eğitim verildi)',
