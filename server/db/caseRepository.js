@@ -1045,7 +1045,7 @@ export const caseRepository = {
         }),
         // resolvedToday: snooze irrelevant — case zaten Cozuldu
         prisma.case.count({
-          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange }),
+          where: scoped({ ...scope, assignedPersonId: personId, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }),
         }),
         // snoozedMine: yalnız snooze-active vakalar (list /api/cases/snoozed ile aynı kontrat)
         prisma.case.count({
@@ -1081,7 +1081,7 @@ export const caseRepository = {
           where: scoped({ ...scope, ...teamFilter, status: 'Eskalasyon', AND: [notSnoozed] }),
         }),
         prisma.case.count({
-          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange }),
+          where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }),
         }),
       ]);
       return {
@@ -1105,7 +1105,7 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
-        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange }) }),
+        prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Çözüldü', 'İptalEdildi'] } }) }),
       ]);
       return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday };
     }
@@ -5205,6 +5205,7 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const end = new Date(); end.setHours(23, 59, 59, 999);
     where.resolvedAt = { gte: start, lte: end };
+    where.status = { in: ['Çözüldü', 'İptalEdildi'] };
   }
   // WR-A4 — Project-bazlı vaka filtresi.
   if (f.accountProjectId) where.accountProjectId = f.accountProjectId;
