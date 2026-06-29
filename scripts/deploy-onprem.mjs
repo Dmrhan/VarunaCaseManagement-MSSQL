@@ -168,16 +168,31 @@ log(`✓ PM2 service state: ${pm2State} (mutate safe)`);
 
 let mutateError = null;
 try {
-  log('Step 1/4: git pull');
+  log('Step 1/5: git pull');
   run('git pull');
 
-  log('Step 2/4: npm ci (install dependencies)');
+  log('Step 2/5: npm ci (install dependencies)');
   run('npm ci');
 
-  log('Step 3/4: prisma migrate deploy (schema sync)');
+  log('Step 3/5: prisma migrate deploy (schema sync)');
   run('npm run db:migrate:deploy');
 
-  log('Step 4/4: npm run build (frontend + tsc)');
+  // KRİTİK — Prisma Client'i schema ile senkronize tut.
+  // `npm ci` postinstall ile zaten generate çağırır AMA bu örtük bir
+  // davranış (package.json#postinstall). Explicit step ekledik çünkü:
+  //   1. 2026-06-29 prod tuzağı: prisma migrate deploy uygulandı ama
+  //      Client güncellenmedi → "Unknown argument: slaResolutionStartedAt"
+  //      → caseRepository.create fail → mail intake çöktü.
+  //   2. npm ci hatasız tamamlandığı halde postinstall'da silent skip
+  //      olabilir (PRISMA_SKIP_POSTINSTALL_GENERATE env var, vs.)
+  //   3. Manuel deploy (script çağırmadan git pull + migrate deploy)
+  //      yapıldığında bu adım atlanır.
+  // Bu çağrı idempotent — Client zaten güncelse no-op süreyle döner.
+  // Bkz. memory [[prisma-generate-deploy-trap]]
+  log('Step 4/5: prisma generate (Client schema senkron)');
+  run('npx prisma generate');
+
+  log('Step 5/5: npm run build (frontend + tsc)');
   run('npm run build');
 } catch (e) {
   mutateError = e;
