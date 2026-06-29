@@ -333,6 +333,17 @@ function composeResolutionFromSteps(workedStep, allSteps) {
   return lines.join('\n');
 }
 
+// P1.2 — Clarifying: AI emin değilse (kök neden grubu/detayı eşleşmedi VEYA güven
+// eşik altı) etiket basmak yerine operatöre 3 soru sorulur. Eşik env ile ayarlanır
+// (default 0.9; model fazla özgüvenli olduğu için yüksek tutulur). needsClarification
+// BFF'te hesaplanır → dış KB sürümüne bağımlı değil. clarifyingAnswers verilince re-run.
+const CLOSE_CLARIFY_THRESHOLD = Number(process.env.CLOSE_CLARIFY_THRESHOLD || 0.9);
+const CLOSE_CLARIFY_QUESTIONS = [
+  'Bu vakanın kök nedeni tam olarak neydi? (ör. yanlış/eksik parametre, eksik yetki, ana veri/kart hatası, 3. parti/entegrasyon)',
+  'Sorun nasıl çözüldü? (ör. parametre düzeltildi, veri/kart düzeltildi, script çalıştırıldı, kullanıcıya bilgi/eğitim verildi)',
+  'Tekrarını önlemek için ne yapıldı ya da yapılmalı? (ör. kontrol/validasyon eklendi, doküman/eğitim, kalıcı düzeltme)',
+];
+
 router.post('/suggest-closure', async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -363,6 +374,9 @@ router.post('/suggest-closure', async (req, res) => {
     }
     const resolutionOverride =
       typeof resolutionOverrideRaw === 'string' ? resolutionOverrideRaw.trim() : '';
+    // P1.2 — operatörün clarifying cevabı. Verilirse re-run zenginleşir + tekrar sorulmaz.
+    const clarifyingAnswers =
+      typeof body.clarifyingAnswers === 'string' ? body.clarifyingAnswers.trim() : '';
     let companyId = '';
     let description = '';
     let resolution = '';
@@ -477,7 +491,11 @@ router.post('/suggest-closure', async (req, res) => {
       });
     }
 
-    const sgBody = { description, resolution };
+    // Clarifying cevabı varsa çözüm metnine ekle → kategorizasyon zenginleşir.
+    const kbResolution = clarifyingAnswers
+      ? `${resolution}\n\n[Operatör netleştirmesi] ${clarifyingAnswers}`
+      : resolution;
+    const sgBody = { description, resolution: kbResolution };
     if (openUrun) sgBody.open_urun = openUrun;
     if (openIsSureci) sgBody.open_is_sureci = openIsSureci;
     if (openIslemTipi) sgBody.open_islem_tipi = openIslemTipi;
@@ -579,6 +597,15 @@ router.post('/suggest-closure', async (req, res) => {
     if (typeof payload.reason === 'string') upstreamMeta.reason = payload.reason;
     if (typeof payload.modelUsed === 'string') upstreamMeta.modelUsed = payload.modelUsed;
 
+    // P1.2 — emin değil mi? Kök neden grubu/detayı eşleşmedi VEYA güven eşik altı →
+    // etiket yerine clarifying soru. Operatör zaten cevap verdiyse tekrar sorma.
+    const needsClarification =
+      !clarifyingAnswers &&
+      (!suggestions.rootCauseGroup ||
+        !suggestions.rootCauseDetail ||
+        (typeof upstreamMeta.confidence === 'number' &&
+          upstreamMeta.confidence < CLOSE_CLARIFY_THRESHOLD));
+
     // Stage 3 resolution-first — paralel analyze cevabından drafts'ı çıkar.
     // analyze rejected veya { ok: false } ise drafts boş kalır; suggestion'lar
     // yine de döner (kullanıcı kategorileri görür).
@@ -613,6 +640,8 @@ router.post('/suggest-closure', async (req, res) => {
       suggestions,
       unmatched,
       source: 'external_kb',
+      needsClarification,
+      ...(needsClarification ? { clarifyingQuestions: CLOSE_CLARIFY_QUESTIONS } : {}),
       ...(drafts ? { drafts } : {}),
       meta: {
         usedEndpoint: 'suggest-close',

@@ -2690,6 +2690,9 @@ export interface SuggestClosureRequest {
   openUrun?: string;
   openIsSureci?: string;
   openIslemTipi?: string;
+  /** P1.2 — operatörün clarifying cevabı. Verilirse KB'ye çözüm metnine eklenerek
+   *  gönderilir (zenginleşmiş re-run) ve tekrar soru sorulmaz. */
+  clarifyingAnswers?: string;
 }
 
 export type SuggestClosureField =
@@ -2714,6 +2717,11 @@ export interface SuggestClosureResponse {
   suggestions: Partial<Record<SuggestClosureField, SuggestClosureItem>>;
   unmatched: SuggestClosureUnmatched[];
   source: 'external_kb';
+  /** P1.2 — AI emin değil (kök neden grubu/detayı eşleşmedi VEYA güven eşik altı).
+   *  true ise frontend etiket yerine clarifyingQuestions'ı gösterir. */
+  needsClarification?: boolean;
+  /** needsClarification iken sorulacak 3 soru (operatör cevabı clarifyingAnswers ile geri gönderilir). */
+  clarifyingQuestions?: string[];
   /** Stage 3 resolution-first — paralel analyze cevabından çıkarılan KB
    *  draft string'leri. Hem alanlar opsiyonel: analyze fail olduğunda ya da
    *  KB string boş döndüğünde drafts hiç gönderilmez (frontend persisted

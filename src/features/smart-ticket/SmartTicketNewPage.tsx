@@ -1081,7 +1081,7 @@ export function SmartTicketNewPage({
   //    stage hala geçerliyse yeniden tetiklenir.
   const closureSuggestReqIdRef = useRef(0);
   const closureSuggestRefreshQueuedRef = useRef(false);
-  const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string }>({});
+  const closureSuggestQueuedOptsRef = useRef<{ workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string }>({});
   // Telemetry — kapanış önerisinin client'a ulaştığı an (ISO). Submit'te
   // closureSuggestion.aiSuggested.suggestedAt'e yazılır.
   const closureSuggestedAtRef = useRef<string | null>(null);
@@ -1090,14 +1090,15 @@ export function SmartTicketNewPage({
   // backend compose-from-steps yerine bu değeri KB'ye gönderir; kategorizasyon
   // current "Çözüm Açıklaması" metnine göre üretilir. Önceki workedStepId-only
   // çağrı şekli geri uyumlu — eski caller'lar etkilenmez.
-  async function handleSuggestClosure(opts?: { workedStepId?: string; resolutionOverride?: string }) {
+  async function handleSuggestClosure(opts?: { workedStepId?: string; resolutionOverride?: string; clarifyingAnswers?: string }) {
     if (!createdCase) return;
     const workedStepId = opts?.workedStepId;
     const resolutionOverride = opts?.resolutionOverride;
+    const clarifyingAnswers = opts?.clarifyingAnswers;
     if (closureSuggesting) {
       // Pending request var → yeni isteği kuyruğa al; finally tetikler.
       closureSuggestRefreshQueuedRef.current = true;
-      closureSuggestQueuedOptsRef.current = { workedStepId, resolutionOverride };
+      closureSuggestQueuedOptsRef.current = { workedStepId, resolutionOverride, clarifyingAnswers };
       return;
     }
     const reqId = ++closureSuggestReqIdRef.current;
@@ -1111,6 +1112,9 @@ export function SmartTicketNewPage({
         ...(workedStepId ? { workedStepId } : {}),
         ...(resolutionOverride && resolutionOverride.trim().length > 0
           ? { resolutionOverride: resolutionOverride.trim() }
+          : {}),
+        ...(clarifyingAnswers && clarifyingAnswers.trim().length > 0
+          ? { clarifyingAnswers: clarifyingAnswers.trim() }
           : {}),
       });
       // Stale response guard — yanıt geldiğinde case değiştiyse veya
@@ -1135,16 +1139,20 @@ export function SmartTicketNewPage({
         closureRefreshedOnceRef.current = true;
         setClosureRefreshedTick((t) => t + 1);
       }
-      setClosure((c) => {
-        const next = { ...c };
-        const s = res.suggestions;
-        if (s.rootCauseGroup && !next.rootCauseGroup) next.rootCauseGroup = s.rootCauseGroup.code;
-        if (s.rootCauseDetail && !next.rootCauseDetail) next.rootCauseDetail = s.rootCauseDetail.code;
-        if (s.resolutionType && !next.resolutionType) next.resolutionType = s.resolutionType.code;
-        if (s.permanentPrevention && !next.permanentPrevention)
-          next.permanentPrevention = s.permanentPrevention.code;
-        return next;
-      });
+      // P1.2 — AI emin değilse (needsClarification) dropdown'ları pre-fill ETME;
+      // operatör soruları cevaplayınca gelen zenginleşmiş öneri pre-fill eder.
+      if (!res.needsClarification) {
+        setClosure((c) => {
+          const next = { ...c };
+          const s = res.suggestions;
+          if (s.rootCauseGroup && !next.rootCauseGroup) next.rootCauseGroup = s.rootCauseGroup.code;
+          if (s.rootCauseDetail && !next.rootCauseDetail) next.rootCauseDetail = s.rootCauseDetail.code;
+          if (s.resolutionType && !next.resolutionType) next.resolutionType = s.resolutionType.code;
+          if (s.permanentPrevention && !next.permanentPrevention)
+            next.permanentPrevention = s.permanentPrevention.code;
+          return next;
+        });
+      }
     } catch (e) {
       if (reqId === closureSuggestReqIdRef.current && createdCase.id === targetCaseId) {
         setClosureSuggestionError((e as Error)?.message ?? 'Kapanış önerisi alınamadı.');
@@ -1844,6 +1852,12 @@ export function SmartTicketNewPage({
                 void handleSuggestClosure({ resolutionOverride: closure.resolutionNote });
               }}
               onApplyAllClosureSuggestions={handleApplyAllClosureSuggestions}
+              onClarifyAnswer={(answer) =>
+                void handleSuggestClosure({
+                  resolutionOverride: closure.resolutionNote,
+                  clarifyingAnswers: answer,
+                })
+              }
               onClose={() => void handleCloseCase()}
               onBack={() => {
                 setStage('solution');
@@ -2094,6 +2108,7 @@ function Stage3Closure({
   closureFilesUploading,
   onSuggestClosure,
   onApplyAllClosureSuggestions,
+  onClarifyAnswer,
   onClose,
   onBack,
   onGoToCaseDetail,
@@ -2120,6 +2135,8 @@ function Stage3Closure({
   closureFilesUploading: boolean;
   onSuggestClosure: () => void;
   onApplyAllClosureSuggestions: () => void;
+  /** P1.2 — operatör clarifying sorularını cevaplayınca (zenginleşmiş re-run tetikler). */
+  onClarifyAnswer: (answer: string) => void;
   onClose: () => void;
   onBack: () => void;
   onGoToCaseDetail: () => void;
@@ -2136,6 +2153,8 @@ function Stage3Closure({
    *  Case Detail görünümü güncel kalsın. */
   onItemUpdated: (c: Case) => void;
 }) {
+  // P1.2 — clarifying cevap metni (AI emin değilse sorulan 3 soruya).
+  const [clarifyAnswer, setClarifyAnswer] = useState('');
   const checklistBlocked = requiredChecklistPending.length > 0;
   const canSave =
     closure.resolutionNote.trim().length > 0 &&
@@ -2214,7 +2233,36 @@ function Stage3Closure({
             {closureSuggestionError} Manuel seçim yapabilirsiniz.
           </p>
         )}
-        {closureSuggestion && (
+        {closureSuggestion?.needsClarification && closureSuggestion.clarifyingQuestions && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+            <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+              AI bu vakada emin değil — doğru etiketi seçebilmek için kısaca yanıtlayın:
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-[12px] leading-snug text-amber-800 dark:text-amber-300">
+              {closureSuggestion.clarifyingQuestions.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+            <textarea
+              className="mt-2 w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:border-amber-400 dark:border-amber-900/40 dark:bg-slate-900 dark:text-slate-100"
+              rows={3}
+              value={clarifyAnswer}
+              onChange={(e) => setClarifyAnswer(e.target.value)}
+              placeholder="Kök neden, çözüm ve önlem hakkında birkaç cümle…"
+            />
+            <div className="mt-2 flex items-center justify-end gap-2">
+              {closureSuggesting && <Loader2 size={12} className="animate-spin text-amber-700" />}
+              <Button
+                size="sm"
+                disabled={closureSuggesting || clarifyAnswer.trim().length < 3}
+                onClick={() => onClarifyAnswer(clarifyAnswer.trim())}
+              >
+                {closureSuggesting ? 'Gönderiliyor…' : 'Yanıtla ve etiketleri öner'}
+              </Button>
+            </div>
+          </div>
+        )}
+        {closureSuggestion && !closureSuggestion.needsClarification && (
           <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/30">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-violet-800 dark:text-violet-200">
