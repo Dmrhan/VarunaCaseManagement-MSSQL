@@ -313,6 +313,20 @@ function RuleEditor({
       else delete (next as Record<string, string>)[key];
       return next;
     });
+    // Codex P1 round 5 fix — Legacy ack akışında filtre eklenince
+    // broadcast intent'i geri al. Round 4: ack✓ → setIsMatchAll(true) auto.
+    // Sonra kullanıcı filtre eklerse intent değişir: "broadcast değil,
+    // filtre kullanmak istiyorum". isMatchAll=true kalırsa backend
+    // dispatcher `r.isMatchAll || ruleMatchesCase()` semantiği nedeniyle
+    // filtre TAMAMEN YOK SAYILIR → silent broadcast bug.
+    //
+    // Çözüm: filtre eklendi mi diye saatte (value truthy + ack varsa)
+    // ack'ı geri çek + isMatchAll'u kapat. Kullanıcı broadcast'a geri
+    // dönmek isterse checkbox'ı tekrar işaretleyebilir.
+    if (value && userAckedLegacyReset) {
+      setUserAckedLegacyReset(false);
+      setIsMatchAll(false);
+    }
   }
 
   function addAudience() {
