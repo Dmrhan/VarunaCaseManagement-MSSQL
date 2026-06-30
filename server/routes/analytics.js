@@ -410,7 +410,65 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
       },
     });
 
-    res.json({ ok: true, dispatchId: dispatch.id, teamId, teamName: team.name });
+    // Codex P2 round 1 — Gerçek per-user in-app notification.
+    // NotificationDispatch sadece audit/dispatch tablosuna yazıyordu;
+    // kullanıcılar bell/action-center'da görmüyordu. emitGenericNotification
+    // CaseNotification + ActionItem yazıp her takım üyesini bilgilendirir.
+    //
+    // Team members: User.person.teamId üzerinden çoklu kullanıcı.
+    // emitGenericNotification UserCompany active scope kontrolü zaten yapar.
+    const { emitGenericNotification } = await import('../db/actionItemRepository.js');
+    const members = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        person: { teamId, isActive: true },
+        companies: { some: { companyId: alert.companyId, isActive: true } },
+      },
+      select: { id: true },
+    });
+
+    // Temsili case'in caseNumber + title — payload context için
+    const representativeCase = await prisma.case.findUnique({
+      where: { id: representativeCaseId },
+      select: { caseNumber: true, title: true },
+    });
+
+    const notifyResults = [];
+    for (const member of members) {
+      try {
+        await emitGenericNotification({
+          caseId: representativeCaseId,
+          companyId: alert.companyId,
+          eventType: 'pattern_alert_team_notify',
+          recipientUserId: member.id,
+          payload: {
+            message,
+            alertId: alert.id,
+            category: alert.category,
+            caseCount: alert.caseCount,
+            triggeredBy: req.user.id,
+          },
+          caseNumber: representativeCase?.caseNumber ?? '?',
+          caseTitle: representativeCase?.title ?? alert.category,
+        });
+        notifyResults.push({ userId: member.id, ok: true });
+      } catch (notifyErr) {
+        console.warn('[analytics:patterns:notify-team] member notify fail',
+          member.id, notifyErr?.message);
+        notifyResults.push({ userId: member.id, ok: false });
+      }
+    }
+
+    const notifiedCount = notifyResults.filter((r) => r.ok).length;
+
+    res.json({
+      ok: true,
+      dispatchId: dispatch.id,
+      teamId,
+      teamName: team.name,
+      notifiedCount,
+      totalMembers: members.length,
+    });
   } catch (e) {
     console.error('[analytics:patterns:notify-team]', e);
     res.status(500).json({ error: 'internal', message: e?.message });
