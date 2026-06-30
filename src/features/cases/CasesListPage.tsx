@@ -66,8 +66,9 @@ import { Modal } from '@/components/ui/Modal';
 import { NewCaseForm } from './NewCaseForm';
 import { QuickCaseModal } from './QuickCaseModal';
 
-// Bulk action — kullanıcının açabileceği alan tipi (4 buton).
-type BulkField = 'priority' | 'status' | 'assignedPersonId' | 'assignedTeamId';
+// Bulk action — kullanıcının açabileceği alan tipi.
+// 'assign' = 2 adımlı atama modalı (takım → kişi).
+type BulkField = 'priority' | 'status' | 'assign';
 
 // Frontline = kişisel KPI'lar; Supervisor+ = global KPI'lar.
 const FRONTLINE_ROLES: UserRole[] = ['Agent', 'Backoffice', 'CSM'];
@@ -597,6 +598,27 @@ export function CasesListPage({
   }
   function clearSelection() {
     setSelected(new Set());
+  }
+
+  async function applyBulkAssign(teamId: string, personId: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0 || !personId) return;
+    setBulkSubmitting(true);
+    const result = await caseService.bulkUpdate(ids, {
+      assignedTeamId: teamId || undefined,
+      assignedPersonId: personId,
+    });
+    setBulkSubmitting(false);
+    setBulkField(null);
+    if (!result) return;
+    if (result.failed > 0) {
+      toast({ type: 'warn', title: 'Kısmi başarı', message: `${result.updated} vaka güncellendi, ${result.failed} başarısız.`, duration: 5000 });
+    } else {
+      toast({ type: 'success', message: `${result.updated} vaka güncellendi.` });
+    }
+    clearSelection();
+    void load();
+    void refreshStats();
   }
 
   async function applyBulk(field: BulkField, value: string) {
@@ -1634,12 +1656,20 @@ export function CasesListPage({
       )}
 
       {/* Bulk action modal — field bazlı seçim + onay */}
-      {bulkField && (
-        <BulkActionModal
-          field={bulkField}
+      {bulkField === 'assign' && (
+        <BulkAssignModal
           count={selected.size}
           teams={teams}
           persons={personsAll}
+          submitting={bulkSubmitting}
+          onClose={() => setBulkField(null)}
+          onApply={(teamId, personId) => void applyBulkAssign(teamId, personId)}
+        />
+      )}
+      {bulkField && bulkField !== 'assign' && (
+        <BulkActionModal
+          field={bulkField}
+          count={selected.size}
           submitting={bulkSubmitting}
           onClose={() => setBulkField(null)}
           onApply={(value) => void applyBulk(bulkField, value)}
@@ -1742,18 +1772,9 @@ function BulkActionBar({
         variant="outline"
         leftIcon={<Users2 size={12} />}
         disabled={submitting}
-        onClick={() => onAction('assignedTeamId')}
+        onClick={() => onAction('assign')}
       >
-        Takım Değiştir
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        leftIcon={<User size={12} />}
-        disabled={submitting}
-        onClick={() => onAction('assignedPersonId')}
-      >
-        Kişi Değiştir
+        Atama Yap
       </Button>
       <Button
         size="sm"
@@ -1787,30 +1808,25 @@ function BulkActionBar({
   );
 }
 
-// Bulk action modal — kullanıcı tıkladığı alana göre Select + Uygula.
-// 10'dan fazla vaka için ek confirmation gösterir.
+// Bulk action modal — öncelik/durum değişimi için tek adımlı select + onayla.
 function BulkActionModal({
   field,
   count,
-  teams,
-  persons,
   submitting,
   onClose,
   onApply,
 }: {
-  field: BulkField;
+  field: Exclude<BulkField, 'assign'>;
   count: number;
-  teams: ReturnType<typeof lookupService.teams>;
-  persons: ReturnType<typeof lookupService.persons>;
   submitting: boolean;
   onClose: () => void;
   onApply: (value: string) => void;
 }) {
   const [value, setValue] = useState<string>('');
-  const [confirmed, setConfirmed] = useState<boolean>(count <= 10); // <=10 ise direkt apply
+  const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
   const needsConfirm = count > 10 && !confirmed;
 
-  const config: Record<BulkField, { title: string; label: string; options: { value: string; label: string }[] }> = {
+  const config: Record<Exclude<BulkField, 'assign'>, { title: string; label: string; options: { value: string; label: string }[] }> = {
     priority: {
       title: 'Toplu — Öncelik Değiştir',
       label: 'Yeni öncelik',
@@ -1820,16 +1836,6 @@ function BulkActionModal({
       title: 'Toplu — Durum Değiştir',
       label: 'Yeni statü',
       options: BULK_STATUSES.map((s) => ({ value: s, label: s })),
-    },
-    assignedTeamId: {
-      title: 'Toplu — Takım Değiştir',
-      label: 'Yeni takım',
-      options: teams.map((t) => ({ value: t.id, label: t.name })),
-    },
-    assignedPersonId: {
-      title: 'Toplu — Atanan Kişi Değiştir',
-      label: 'Yeni atanan kişi',
-      options: persons.map((p) => ({ value: p.id, label: p.name })),
     },
   };
 
@@ -1860,7 +1866,6 @@ function BulkActionModal({
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
           <strong>{count}</strong> vaka üzerinde işlem yapılacak.
         </div>
-
         {needsConfirm ? (
           <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
             <div className="font-medium">Dikkat — büyük toplu işlem</div>
@@ -1883,6 +1888,103 @@ function BulkActionModal({
               ))}
             </Select>
           </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// 2 adımlı atama modalı — önce takım, sonra o takıma bağlı kişiler.
+function BulkAssignModal({
+  count,
+  teams,
+  persons,
+  submitting,
+  onClose,
+  onApply,
+}: {
+  count: number;
+  teams: ReturnType<typeof lookupService.teams>;
+  persons: ReturnType<typeof lookupService.persons>;
+  submitting: boolean;
+  onClose: () => void;
+  onApply: (teamId: string, personId: string) => void;
+}) {
+  const [teamId, setTeamId] = useState<string>('');
+  const [personId, setPersonId] = useState<string>('');
+  const [confirmed, setConfirmed] = useState<boolean>(count <= 10);
+  const needsConfirm = count > 10 && !confirmed;
+
+  const filteredPersons = teamId
+    ? persons.filter((p) => p.teamId === teamId)
+    : persons;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Toplu — Atama Yap"
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            Vazgeç
+          </Button>
+          {needsConfirm ? (
+            <Button onClick={() => setConfirmed(true)}>Anladım, devam et</Button>
+          ) : (
+            <Button onClick={() => onApply(teamId, personId)} disabled={!personId || submitting}>
+              {submitting ? 'Uygulanıyor…' : 'Uygula'}
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-4 px-5 py-4">
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
+          <strong>{count}</strong> vaka üzerinde işlem yapılacak.
+        </div>
+        {needsConfirm ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="font-medium">Dikkat — büyük toplu işlem</div>
+            <p className="mt-1 text-xs">
+              10'dan fazla vaka tek seferde değişecek. İşlem geri alınamaz; her vaka için ayrı
+              activity log yazılır. Yine de devam etmek istiyor musun?
+            </p>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+                Takım
+              </label>
+              <Select
+                value={teamId}
+                onChange={(e) => { setTeamId(e.target.value); setPersonId(''); }}
+                autoFocus
+              >
+                <option value="">— Takım seçiniz —</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-ndark-text">
+                Kişi
+              </label>
+              <Select
+                value={personId}
+                onChange={(e) => setPersonId(e.target.value)}
+                disabled={filteredPersons.length === 0}
+              >
+                <option value="">— Kişi seçiniz —</option>
+                {filteredPersons.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </div>
+          </>
         )}
       </div>
     </Modal>
