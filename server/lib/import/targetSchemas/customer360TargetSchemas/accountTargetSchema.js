@@ -10,6 +10,7 @@ import {
   asTrimmedString,
   normalizeBoolean,
   normalizeCustomerType,
+  normalizeCustomerRole,
   normalizePhoneE164,
   normalizeText,
   recordNoField,
@@ -24,7 +25,8 @@ import {
   primaryPhoneSlotFieldC360,
 } from './_shared.js';
 
-export const ACCOUNT_VERSION = '2026-06-04.account.v5';
+// Faz B-temel — version bump (customerRole field eklendi)
+export const ACCOUNT_VERSION = '2026-06-30.account.v6';
 
 export const ACCOUNT_FIELDS = [
   recordNoField({
@@ -120,6 +122,44 @@ export const ACCOUNT_FIELDS = [
       if (!s) return { ok: true, normalized: null };
       const v = normalizeCustomerType(s);
       if (v === undefined) return { ok: false, normalized: null, reason: 'Müşteri tipi bilinmiyor (Bireysel/Kurumsal/Kamu/Vakıf-STK).' };
+      return { ok: true, normalized: v };
+    },
+  },
+  {
+    // Faz B-temel (2026-06-30) — Müşteri Türü (rol). customerType ile FARKLI alan.
+    key: 'customerRole',
+    label: 'Müşteri Türü',
+    description: 'Bizimle çalışma rolü: Merkez Müşteri (ana firma), Distribütör/Bayi, Bölge Müdürlüğü, Kanal/Çözüm Ortağı, Yurt Dışı veya Stokbar. Faz B raporlamasının temeli. Boş bırakılabilir.',
+    example: 'Merkez Müşteri',
+    group: 'Kimlik',
+    type: 'enum',
+    required: false,
+    aliases: [
+      'customerrole', 'customer role',
+      'müşteri türü', 'musteri turu', 'müşteri turu', 'musteri türü',
+      'tür', 'tur', 'rol', 'role',
+      // n4b varyantları
+      'müşteri rolü', 'musteri rolu',
+    ],
+    validationHint: 'Merkez Müşteri / Distribütör / Bölge Müdürlüğü / Kanal/Çözüm Ortağı / Yurt Dışı / Stokbar',
+    normalizationHint: 'Lowercase eşleştirme; ASCII identifier veya TR label kabul.',
+    businessWarning: null,
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true,
+    warningIfMissing: null,
+    normalize(raw) {
+      const s = asTrimmedString(raw);
+      if (!s) return { ok: true, normalized: null };
+      const v = normalizeCustomerRole(s);
+      if (v === undefined) {
+        return {
+          ok: false,
+          normalized: null,
+          reason: 'Müşteri türü bilinmiyor. Beklenen: Merkez Müşteri / Distribütör/Bayi / Bölge Müdürlüğü / Kanal/Çözüm Ortağı / Yurt Dışı / Stokbar.',
+        };
+      }
       return { ok: true, normalized: v };
     },
   },

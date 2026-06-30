@@ -199,7 +199,9 @@ const ACCOUNT_SELECT = {
   phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
   phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
   primaryPhoneSlot: true,
-  email: true, customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
+  // Faz B-temel — customerRole snapshot için (rollback)
+  email: true, customerType: true, customerRole: true,
+  legalName: true, registrationNo: true, taxOffice: true, isActive: true,
 };
 const ACCOUNT_COMPANY_SELECT = {
   id: true, accountId: true, companyId: true, externalCustomerCode: true,
@@ -217,6 +219,8 @@ const ADDRESS_SELECT = {
 const PROJECT_SELECT = {
   id: true, accountCompanyId: true, code: true, name: true, status: true,
   startDate: true, endDate: true, description: true, isActive: true, sourceExternalId: true,
+  // Faz B-temel — anaFirmaAccountId snapshot için (rollback)
+  anaFirmaAccountId: true,
 };
 
 class CommitError extends Error {
@@ -391,6 +395,8 @@ function snapshotAccount(a) {
     phone3Type: a.phone3Type ?? null, phone3Extension: a.phone3Extension ?? null,
     primaryPhoneSlot: a.primaryPhoneSlot ?? null,
     email: a.email ?? null, customerType: a.customerType,
+    // Faz B-temel — customerRole snapshot (rollback için)
+    customerRole: a.customerRole ?? null,
     legalName: a.legalName ?? null, registrationNo: a.registrationNo ?? null,
     taxOffice: a.taxOffice ?? null,
     isActive: a.isActive,
@@ -434,6 +440,8 @@ function snapshotProject(p) {
     endDate: p.endDate ? new Date(p.endDate).toISOString() : null,
     description: p.description ?? null, isActive: p.isActive,
     sourceExternalId: p.sourceExternalId ?? null,
+    // Faz B-temel — Ana firma bağı snapshot (rollback için)
+    anaFirmaAccountId: p.anaFirmaAccountId ?? null,
   };
 }
 
@@ -464,6 +472,8 @@ async function writeAccount(row, normalized, prefetched = undefined) {
     if (normalized.name && normalized.name !== existing.name) patch.name = normalized.name;
     if (normalized.email !== undefined && normalized.email !== null) patch.email = normalized.email;
     if (normalized.customerType !== undefined && normalized.customerType !== null) patch.customerType = normalized.customerType;
+    // Faz B-temel — Codex P2 round 2 fix: customerRole import persist
+    if (normalized.customerRole !== undefined && normalized.customerRole !== null) patch.customerRole = normalized.customerRole;
     if (normalized.legalName !== undefined && normalized.legalName !== null) patch.legalName = normalized.legalName;
     if (normalized.registrationNo !== undefined && normalized.registrationNo !== null) patch.registrationNo = normalized.registrationNo;
     if (normalized.taxOffice !== undefined && normalized.taxOffice !== null) patch.taxOffice = normalized.taxOffice;
@@ -507,14 +517,77 @@ async function writeAccount(row, normalized, prefetched = undefined) {
         throw err;
       }
     }
-    const updated = Object.keys(patch).length > 0
-      ? await prisma.account.update({
+    // Faz B-temel — Codex P2 release-review fix: Central downgrade ana-firma
+    // cleanup (import yolu).
+    //
+    // Bulgu: writeAccount.customerRole = ... patch'i updateAccount()'taki
+    // downgrade WARN/transaction guard'ını ATLATIR. Import'tan bir Central
+    // account başka role çekildiğinde:
+    //   - patch yazılır (customerRole değişir)
+    //   - AccountProject.anaFirmaAccountId=accountId kayıtları KORUNUR
+    //   - Bu kayıtlar artık "ana_firma_not_central" rolündeki account'a
+    //     işaret eder (raporlar yetim/yanlış).
+    //
+    // Çözüm: import scenariosu interaktif ack için uygun değil (toplu
+    // commit); bu yüzden Codex önerisinin 2. ayağını uygula — aynı
+    // transaction'da bağlı projeleri NULL'la + account update.
+    //
+    // ROLLBACK CARE (Codex P2 round 2 fix): nullify edilen projelerin eski
+    // anaFirmaAccountId'lerini sideEffects ile döndür. Caller bu listeyi
+    // synthetic importJobRow'a yazsın (entityType='accountProject',
+    // beforeJson.anaFirmaAccountId=previousValue). rollbackCustomer360
+    // accountProject path'i bu alanı restore edebilsin.
+    const isCentralDowngradeImport =
+      existing.customerRole === 'Central'
+      && patch.customerRole !== undefined
+      && patch.customerRole !== 'Central';
+
+    let updated;
+    let nullifiedAnaFirmaProjects = [];
+    if (Object.keys(patch).length === 0) {
+      updated = existing;
+    } else if (isCentralDowngradeImport) {
+      // Atomic: önce etkilenen projeleri capture et + NULL'la + account update.
+      // findMany transaction'ın DIŞINDA (snapshot için); aynı microtask'ta
+      // updateMany'i etkilemez (T+1 anlık tutarsızlık ihmal — rollback için
+      // beforeJson dolu olması yeterli).
+      const affected = await prisma.accountProject.findMany({
+        where: { anaFirmaAccountId: existing.id },
+        select: { id: true, anaFirmaAccountId: true },
+      });
+      nullifiedAnaFirmaProjects = affected.map((p) => ({
+        id: p.id,
+        previousAnaFirmaAccountId: p.anaFirmaAccountId,
+      }));
+
+      const [, accountAfter] = await prisma.$transaction([
+        prisma.accountProject.updateMany({
+          where: { anaFirmaAccountId: existing.id },
+          data: { anaFirmaAccountId: null },
+        }),
+        prisma.account.update({
           where: { id: existing.id },
           data: patch,
           select: accountSelect,
-        })
-      : existing;
-    return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccount(updated) };
+        }),
+      ]);
+      updated = accountAfter;
+    } else {
+      updated = await prisma.account.update({
+        where: { id: existing.id },
+        data: patch,
+        select: accountSelect,
+      });
+    }
+    return {
+      kind: 'updated',
+      recordId: existing.id,
+      beforeJson,
+      afterJson: snapshotAccount(updated),
+      sideEffects: nullifiedAnaFirmaProjects.length > 0
+        ? { nullifiedAnaFirmaProjects }
+        : undefined,
+    };
   }
   // Create — Phase 1 standardization: Account.id `cus_<22>` formatında.
   // Slot 1/2/3 alanları ve primaryPhoneSlot da burada yazılır. Caller
@@ -546,6 +619,8 @@ async function writeAccount(row, normalized, prefetched = undefined) {
       primaryPhoneSlot,
       email: normalized.email ?? null,
       customerType: normalized.customerType ?? 'Corporate',
+      // Faz B-temel — Codex P2 round 2 fix: customerRole import persist (create path)
+      customerRole: normalized.customerRole ?? null,
       legalName: normalized.legalName ?? null,
       registrationNo: normalized.registrationNo ?? null,
       taxOffice: normalized.taxOffice ?? null,
@@ -820,6 +895,37 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
   // this accountCompanyId; in-memory match runs the same priority order.
   const projectSelect = PROJECT_SELECT;
   const code = normalized.projectCode;
+
+  // Faz B-temel — Codex P2 round 2 fix: anaFirmaKey → anaFirmaAccountId resolve.
+  //
+  // Mevcut accountKey paterni mirror:
+  //   1. anaFirmaKey set → Account.vkn match + customerRole='Central'
+  //   2. Cross-tenant guard: AccountCompany aynı tenant'a bağlı olmalı
+  //   3. Bulunamazsa SESSİZ null (warning UI tarafına; mevcut isim-eşleme
+  //      enrichment Faz B ayrı iş)
+  let resolvedAnaFirmaAccountId = null;
+  if (normalized.anaFirmaKey) {
+    // Target tenant'ı bul (AccountCompany.companyId)
+    const ac = await prisma.accountCompany.findUnique({
+      where: { id: accountCompanyId },
+      select: { companyId: true },
+    });
+    if (ac?.companyId) {
+      const anaFirma = await prisma.account.findFirst({
+        where: {
+          vkn: normalized.anaFirmaKey,
+          customerRole: 'Central',
+          companies: { some: { companyId: ac.companyId } },
+        },
+        select: { id: true },
+      });
+      if (anaFirma) {
+        resolvedAnaFirmaAccountId = anaFirma.id;
+      }
+      // bulunamazsa null bırak — mevcut accountKey paterni (warningIfMissing
+      // dry-run'da sinyal verir; commit-time sessiz null + log)
+    }
+  }
   let existing = null;
   if (Array.isArray(prefetched)) {
     if (normalized.sourceProjectId) {
@@ -854,6 +960,12 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
     if (normalized.sourceProjectId && normalized.sourceProjectId !== existing.sourceExternalId) {
       patch.sourceExternalId = normalized.sourceProjectId;
     }
+    // Faz B-temel — Codex P2 round 2 fix: anaFirmaAccountId persist (update).
+    // anaFirmaKey verildiyse VE resolve başarılıysa update; resolve null ise
+    // mevcut bağ KORUNUR (sessiz; isim-eşleme enrichment ayrı PR).
+    if (normalized.anaFirmaKey && resolvedAnaFirmaAccountId) {
+      patch.anaFirmaAccountId = resolvedAnaFirmaAccountId;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.accountProject.update({
           where: { id: existing.id },
@@ -874,6 +986,8 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
       description: normalized.description ?? null,
       isActive: normalized.isActive ?? true,
       sourceExternalId: normalized.sourceProjectId ?? null,
+      // Faz B-temel — Codex P2 round 2 fix: anaFirmaAccountId persist (create)
+      anaFirmaAccountId: resolvedAnaFirmaAccountId,
     },
     select: projectSelect,
   });
@@ -1233,6 +1347,33 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, accountId: r.recordId, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          // Faz B-temel — Codex P2 round 2 fix: Central downgrade side effect
+          // bilgi kaydı. nullifiedAnaFirmaProjects varsa her biri için
+          // synthetic importJobRow yarat (entityType='accountProject',
+          // beforeJson.anaFirmaAccountId=prev). rollbackCustomer360 bu
+          // satırları görür ve restore eder.
+          //
+          // rowNumber: account row'un rowNumber'ını paylaş (UNIQUE değil;
+          // sadece index). parentRowNumber ile audit/UI bağlantı kur.
+          // status='updated' — rollback Updated path'inden geçer.
+          if (r.sideEffects?.nullifiedAnaFirmaProjects?.length) {
+            for (const p of r.sideEffects.nullifiedAnaFirmaProjects) {
+              await prisma.importJobRow.create({
+                data: {
+                  importJobId: row.importJobId,
+                  rowNumber: row.rowNumber,
+                  action: 'update',
+                  status: 'updated',
+                  entityType: 'accountProject',
+                  parentRowNumber: row.rowNumber,
+                  recordId: p.id,
+                  beforeJson: { anaFirmaAccountId: p.previousAnaFirmaAccountId },
+                  afterJson: { anaFirmaAccountId: null },
+                  matchKey: `sideEffect:centralDowngrade:${r.recordId}`,
+                },
+              });
+            }
+          }
           row.status = r.kind;
           rememberAccount(normalized, r.recordId);
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
@@ -1574,6 +1715,15 @@ export async function rollbackCustomer360({ jobId, user }) {
             if (before.endDate !== undefined) restore.endDate = before.endDate ? new Date(before.endDate) : null;
             if (before.description !== undefined) restore.description = before.description;
             if (before.isActive !== undefined) restore.isActive = before.isActive;
+            // Faz B-temel — Codex P2 round 2 fix: Central downgrade side
+            // effect rollback. writeAccount transaction'ında NULL'lanan
+            // projeler synthetic importJobRow yazar (matchKey starts with
+            // "sideEffect:centralDowngrade:"); beforeJson.anaFirmaAccountId
+            // dolu olur. Burada restore et — proje yeniden eski ana firmaya
+            // bağlanır.
+            if (before.anaFirmaAccountId !== undefined) {
+              restore.anaFirmaAccountId = before.anaFirmaAccountId;
+            }
             if (Object.keys(restore).length > 0) {
               await prisma.accountProject.update({ where: { id: r.recordId }, data: restore });
             }
