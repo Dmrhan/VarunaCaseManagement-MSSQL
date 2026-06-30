@@ -4,7 +4,8 @@
 //               AloTech'in sayfası halleder — next4biz ile aynı yöntem. Agent çağrıyı
 //               popup'ta cevaplar; Varuna screen-pop + agent durumu + outbound (click2call) yapar.
 //  • click2call: sunucu-tetikli çaldırma + polling (screen pop). Softphone penceresi açmaz.
-// Mod: import.meta.env.VITE_ALOTECH_SOFTPHONE_MODE ('embedded' | 'click2call', default click2call).
+// Mod: VITE_ALOTECH_SOFTPHONE_MODE — 'popup' (veya geri-uyumlu 'embedded') → softphone
+//   popup; başka her şey (default) → 'click2call'.
 import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '../services/AuthContext';
 import { notify } from '../components/ui/Toast';
@@ -16,8 +17,10 @@ import {
   type AgentStatusValue,
 } from '../services/softphoneService';
 
-const MODE = (((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_MODE as string) || 'click2call') === 'embedded'
-  ? 'embedded' : 'click2call';
+// 'popup' (önerilen, net) veya geri-uyumlu 'embedded' → AloTech hosted softphone
+// popup'ı. Diğer her şey (default dahil) → click2call.
+const _SP_MODE = ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_MODE as string) || 'click2call';
+const MODE = _SP_MODE === 'popup' || _SP_MODE === 'embedded' ? 'embedded' : 'click2call';
 const isEmbedded = MODE === 'embedded';
 
 // 'disabled' — backend AloTech env'leri eksik (configured:false). Widget
