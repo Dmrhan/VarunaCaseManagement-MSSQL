@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
+import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
 import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
 import {
   deriveAnalyticsScope,
@@ -589,5 +590,107 @@ function hashResponse(payload) {
   const subset = JSON.stringify(payload.kpis ?? {});
   return crypto.createHash('sha256').update(subset).digest('hex').slice(0, 16);
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Aylık Müşteri Bülteni (Faz A — A4) endpoint
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/analytics/monthly-bulletin
+ *
+ * Body: { accountId, from (ISO), to (ISO) }
+ *
+ * Response: computeMonthlyBulletin payload (account-scoped byStatus4 +
+ * byPriority + byRequestType + byOrigin + byCategory + perAccountCompany
+ * + totals + snoozedActiveCount + meta).
+ *
+ * Yetki: Agent/Backoffice/CSM/Supervisor/Admin/SystemAdmin — overview
+ * paneli ile aynı (mevcut requireOverviewAnalytics).
+ *
+ * Cross-tenant scope leakage koruması:
+ *   - deriveAnalyticsScope req.user.allowedCompanyIds'i baz alır
+ *   - aggregator baseWhere.sql [companyId] IN scope.companyIds zorunlu
+ *   - account başka tenant'a bağlı vakalara sahipse o satırlar görünmez
+ *
+ * Privacy: response'ta customerContact* veya customerCompanyName YOK
+ * (mevcut aggregator zaten bunları döndürmez; sadece aggregate sayımlar).
+ */
+router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const body = req.body ?? {};
+
+    // 1) Validation — accountId + from/to + 90-gün cap (mevcut helper reuse)
+    if (!body.accountId || typeof body.accountId !== 'string') {
+      return res.status(400).json({ error: 'invalid_input', message: 'accountId zorunlu.' });
+    }
+    const validation = validateOverviewBody(body);
+    if (validation.error) {
+      return res.status(400).json({ error: 'invalid_input', message: validation.error });
+    }
+    const { from, to } = validation;
+
+    // 2) Scope derivation (§2.2A) — server-side
+    const scope = deriveAnalyticsScope(req.user, body);
+
+    // 3) Account scope check — accountId kullanıcının erişim alanında mı?
+    //    Account.companyId scope.companyIds içinde olmalı (cross-tenant
+    //    bülten engeli). Account birden fazla companyId'ye bağlı olabilir;
+    //    en az birinin scope'ta olması yeterli.
+    const account = await prisma.account.findUnique({
+      where: { id: body.accountId },
+      select: {
+        id: true,
+        name: true,
+        companyId: true, // legacy ana companyId
+        accountCompanies: {
+          select: { companyId: true },
+        },
+      },
+    });
+    if (!account) {
+      return res.status(404).json({ error: 'account_not_found' });
+    }
+    const accountCompanyIds = [
+      account.companyId,
+      ...account.accountCompanies.map((ac) => ac.companyId),
+    ].filter(Boolean);
+    const scopeIntersection = accountCompanyIds.filter((cid) =>
+      scope.companyIds.includes(cid),
+    );
+    if (scopeIntersection.length === 0) {
+      // Cross-tenant erişim engellendi — account'un bağlı olduğu hiç
+      // şirket kullanıcının scope'unda değil.
+      return res.status(403).json({ error: 'account_out_of_scope' });
+    }
+
+    // 4) Orchestrator çağrısı (deterministic; tüm breakdown'lar account-scoped)
+    const payload = await computeMonthlyBulletin({
+      scope,
+      accountId: body.accountId,
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
+
+    // 5) Response — account meta + payload
+    res.json({
+      ...payload,
+      account: {
+        ...payload.account,
+        name: account.name,
+      },
+      scope: {
+        kind: scope.scopeKind,
+        companyIds: scope.companyIds,
+        canExport: scope.canExport,
+        narrative: describeScope(scope),
+      },
+      durationMs: Date.now() - t0,
+    });
+  } catch (err) {
+    console.error('[analytics:monthly-bulletin]', err?.message, err?.stack);
+    res.status(500).json({ error: 'internal_error', message: err?.message ?? 'beklenmeyen hata' });
+  }
+});
 
 export default router;
