@@ -188,13 +188,19 @@ export async function startSoftphone(sess: SoftphoneSession, opts: InitOptions =
   const AJS = window.AJS;
   if (!AJS) throw new Error('AJS (ajs.js) yüklenemedi');
   // AloTech'in kendi softphone demo'sundaki init imzası (user + session + hostname).
+  // usephone:true → AJS objesinde varsayılan gelen usephone:false'u override edip
+  // tarayıcı softphone (WebRTC) modunu zorlama denemesi. (Agent AloTech profilinde
+  // softphone tanımlı değilse yine de etki etmeyebilir; kesin çözüm panel ayarı.)
   AJS.init({
     user: sess.agentEmail,
     session: sess.session,
     hostname: sess.hostname,
     inputPhoneNumber: '#AwjsPhoneNumber',
+    usephone: true,
     onLogout: opts.onLogout,
   });
+  // init bazı sürümlerde usephone'u set etmeyebilir → açıkça da işaretle.
+  try { AJS.usephone = true; if (typeof AJS.set === 'function') AJS.set('usephone', true); } catch { /* yoksay */ }
   AJS.start();
 }
 
