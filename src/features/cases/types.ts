@@ -902,6 +902,9 @@ export interface CaseFilters {
   // SystemAdmin opt-in için chip açar; diğer roller backend tarafında
   // ignore edilir (buildWhere her durumda exclude eder).
   includeArchived?: boolean;
+  // Rol bazlı varsayılan kapsam. 'off' = Supervisor/Backoffice Tümü sekmesinde
+  // havuz kaldırılır; Agent için backend tarafından ignore edilir.
+  roleDefaultView?: 'off';
 }
 
 // Role-aware KPI stats — GET /api/cases/stats response.
