@@ -35,10 +35,11 @@ export function SoftphoneWidget() {
     return () => clearInterval(t);
   }, [activeCall]);
 
-  // E-posta girilmemişse widget'ı GÖSTER (agent girsin). Girilmiş + idle ise gizle.
-  if (status === 'idle' && agentEmail) return null;
-  // Backend AloTech env'leri eksik (configured:false) → widget sessizce
-  // gizli; agent zorunlu olmayan entegrasyonla karşılaşmaz.
+  // Yalnızca AloTech env'leri eksikse (backend configured:false → 'disabled')
+  // widget gizlenir. Aksi halde her zaman görünür: e-posta yoksa giriş formu,
+  // e-posta girilince 'connecting'→durum gösterir (telefon iconu kaybolmaz).
+  // NOT: eski "idle && agentEmail → return null" kaldırıldı — e-posta girilince
+  // saveAgentEmail status'u 'connecting' yaptığı için widget kaybolmaz.
   if (status === 'disabled') return null;
 
   const isEmbedded = mode === 'embedded';
