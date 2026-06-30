@@ -71,8 +71,10 @@ const routesCode = strip(routes);
 console.log('\n── 4) P2 notify-team per-user notification ───────');
 expect('4.1 notify-team — emitGenericNotification import lazy',
   /notify-team'[\s\S]{0,4000}emitGenericNotification[\s\S]{0,300}actionItemRepository/.test(routesCode), true);
-expect('4.2 Team members lookup (User.person.teamId)',
-  /notify-team'[\s\S]{0,5000}prisma\.user\.findMany\(\{[\s\S]{0,500}person: \{ teamId, isActive: true \}/.test(routesCode), true);
+expect('4.2 Team members lookup — Person → User 2-step chain (Codex round 2)',
+  /notify-team'[\s\S]{0,5000}prisma\.person\.findMany\(\{[\s\S]{0,300}teamId, isActive: true[\s\S]{0,1500}prisma\.user\.findMany\(\{[\s\S]{0,500}personId: \{ in: teamPersonIds \}/.test(routesCode), true);
+expect('4.2b ❌ Yanlış `person: {teamId}` nested filter KULLANILMIYOR (User\'da person relation yok)',
+  !/where: \{[\s\S]{0,300}person: \{ teamId/.test(routesCode), true);
 expect('4.3 Her member için emitGenericNotification çağrısı',
   /for \(const member of members\)[\s\S]{0,500}emitGenericNotification\(\{/.test(routesCode), true);
 expect('4.4 eventType=pattern_alert_team_notify',

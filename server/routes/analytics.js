@@ -415,17 +415,32 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
     // kullanıcılar bell/action-center'da görmüyordu. emitGenericNotification
     // CaseNotification + ActionItem yazıp her takım üyesini bilgilendirir.
     //
-    // Team members: User.person.teamId üzerinden çoklu kullanıcı.
+    // Codex round 2 fix: User modelinde 'person' RELATION YOK (sadece
+    // personId scalar). Önceki `where: { person: { teamId } }` Prisma'da
+    // "unknown argument" reject ederdi → 500. Doğru yol: Person → User
+    // 2-adımlı chain.
+    //
     // emitGenericNotification UserCompany active scope kontrolü zaten yapar.
     const { emitGenericNotification } = await import('../db/actionItemRepository.js');
-    const members = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        person: { teamId, isActive: true },
-        companies: { some: { companyId: alert.companyId, isActive: true } },
-      },
+
+    // 1) Takıma bağlı aktif Person'ları çek
+    const teamPersons = await prisma.person.findMany({
+      where: { teamId, isActive: true },
       select: { id: true },
     });
+    const teamPersonIds = teamPersons.map((p) => p.id);
+
+    // 2) Bu Person'lara bağlı aktif User'ları çek (UserCompany scope)
+    const members = teamPersonIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            isActive: true,
+            personId: { in: teamPersonIds },
+            companies: { some: { companyId: alert.companyId, isActive: true } },
+          },
+          select: { id: true },
+        })
+      : [];
 
     // Temsili case'in caseNumber + title — payload context için
     const representativeCase = await prisma.case.findUnique({
