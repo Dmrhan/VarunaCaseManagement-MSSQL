@@ -1128,9 +1128,9 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
-        // chip sayıları — scope'taki tüm atanmamış/kritik açık vakalar
-        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
-        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES } }) }),
+        // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
+        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
     }
@@ -1163,9 +1163,9 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, ...teamFilter, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }),
         }),
-        // chip sayıları — scope'taki tüm atanmamış/kritik açık vakalar
-        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
-        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES } }) }),
+        // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
+        prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return {
         mode: 'team',
@@ -1191,8 +1191,8 @@ export const caseRepository = {
           where: scoped({ ...scope, status: { in: STATS_OPEN_STATUSES }, priority: 'Critical', AND: [notSnoozed] }),
         }),
         prisma.case.count({ where: scoped({ ...scope, resolvedAt: todayRange, status: { in: ['Cozuldu', 'IptalEdildi'] } }) }),
-        // chip sayısı — tüm scope'taki atanmamış açık vakalar
-        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES } }) }),
+        // chip sayısı — tüm scope'taki atanmamış açık + snooze-dışı vakalar
+        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return { mode: 'operations', totalOpen, slaViolation, critical, resolvedToday, unassigned };
     }
@@ -5286,7 +5286,7 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null) {
   if (f.slaViolation === true) where.slaViolation = true;
   if (f.unassigned === true) {
     where.assignedPersonId = null;
-    if (!where.status) where.status = { notIn: ['Cozuldu', 'IptalEdildi'] };
+    where.status = { notIn: ['Cozuldu', 'IptalEdildi'] };
   }
   if (f.resolvedToday === true) {
     const start = new Date(); start.setHours(0, 0, 0, 0);
