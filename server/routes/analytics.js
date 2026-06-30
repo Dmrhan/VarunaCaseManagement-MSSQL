@@ -663,7 +663,11 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
         id: true,
         name: true,
         companyId: true, // legacy ana companyId
-        accountCompanies: {
+        // Codex P1 fix — Account modelindeki relation adı `companies`
+        // (accountCompanies DEĞİL; o ad Company tarafında). Schema:757.
+        // Önceki adlandırma Prisma runtime'da Unknown field hatası verir
+        // ve endpoint 500 döner (PR review #335 sonrası tespit).
+        companies: {
           select: { companyId: true },
         },
       },
@@ -673,7 +677,7 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
     }
     const accountCompanyIds = [
       account.companyId,
-      ...account.accountCompanies.map((ac) => ac.companyId),
+      ...account.companies.map((ac) => ac.companyId),
     ].filter(Boolean);
     const scopeIntersection = accountCompanyIds.filter((cid) =>
       scope.companyIds.includes(cid),

@@ -517,13 +517,53 @@ async function writeAccount(row, normalized, prefetched = undefined) {
         throw err;
       }
     }
-    const updated = Object.keys(patch).length > 0
-      ? await prisma.account.update({
+    // Faz B-temel — Codex P2 release-review fix: Central downgrade ana-firma
+    // cleanup (import yolu).
+    //
+    // Bulgu: writeAccount.customerRole = ... patch'i updateAccount()'taki
+    // downgrade WARN/transaction guard'ını ATLATIR. Import'tan bir Central
+    // account başka role çekildiğinde:
+    //   - patch yazılır (customerRole değişir)
+    //   - AccountProject.anaFirmaAccountId=accountId kayıtları KORUNUR
+    //   - Bu kayıtlar artık "ana_firma_not_central" rolündeki account'a
+    //     işaret eder (raporlar yetim/yanlış).
+    //
+    // Çözüm: import scenariosu interaktif ack için uygun değil (toplu
+    // commit); bu yüzden Codex önerisinin 2. ayağını uygula — aynı
+    // transaction'da bağlı projeleri NULL'la + account update.
+    //
+    // Davranış parite: updateAccount() repo path'inde `isCentralDowngrade`
+    // transaction zaten aynı mantıkta NULL'lıyor. Import ile UI eşit
+    // semantik taşır.
+    const isCentralDowngradeImport =
+      existing.customerRole === 'Central'
+      && patch.customerRole !== undefined
+      && patch.customerRole !== 'Central';
+
+    let updated;
+    if (Object.keys(patch).length === 0) {
+      updated = existing;
+    } else if (isCentralDowngradeImport) {
+      // Atomic: bağlı projeleri NULL'la + account update
+      const [, accountAfter] = await prisma.$transaction([
+        prisma.accountProject.updateMany({
+          where: { anaFirmaAccountId: existing.id },
+          data: { anaFirmaAccountId: null },
+        }),
+        prisma.account.update({
           where: { id: existing.id },
           data: patch,
           select: accountSelect,
-        })
-      : existing;
+        }),
+      ]);
+      updated = accountAfter;
+    } else {
+      updated = await prisma.account.update({
+        where: { id: existing.id },
+        data: patch,
+        select: accountSelect,
+      });
+    }
     return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccount(updated) };
   }
   // Create — Phase 1 standardization: Account.id `cus_<22>` formatında.
