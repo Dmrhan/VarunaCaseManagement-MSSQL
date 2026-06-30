@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { AtSign, CheckCircle2, Info, Lock, Mail, Plus, Save, Star, Trash2 } from 'lucide-react';
+import { AtSign, CheckCircle2, Inbox, Info, Lock, Mail, Pencil, Plus, Save, Star, Trash2, Users } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 
 // Compose-Signature F2 — Lazy load şirket imza şablonu editörü (TipTap
@@ -17,8 +17,12 @@ import {
   type ExternalMailSetting,
   type ExternalMailSettingInput,
   type FromAliasItem,
+  type MailInboxItem,
+  type MailInboxDraft,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
+import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Field';
 
 /**
  * Mail M5 — Per-tenant SMTP/IMAP Entegrasyonu (Admin yapılandırma).
@@ -479,6 +483,9 @@ export function AdminExternalMailPage() {
       {/* M5-extension — Per-company From alias yönetimi */}
       {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
 
+      {/* Multi-Inbox A4 — Per-company gelen mailbox yönetimi (N hesap → N takım) */}
+      {companyId && <MailInboxManager companyId={companyId} />}
+
       {/* Compose-Signature F2 — Şirket imza şablonu (lazy load) */}
       {companyId && (
         <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
@@ -671,6 +678,420 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+
+/**
+ * Mail Multi-Inbox (Faz A) — Per-company gelen mailbox yönetim component'i.
+ *
+ * AdminExternalMailPage'in alt bölümünde, FromAlias (giden) kartından
+ * sonra render edilir.
+ *
+ * Mimari:
+ *  - Her satır AYRI IMAP hesabı (kendi imapHost/Port/Username/Secret)
+ *  - assignedTeamId → o inbox'a düşen mail vakaları o takıma atanır (havuz)
+ *  - Backfill ile mevcut tek-inbox tenant otomatik 'Varsayılan' kayda düşer
+ *
+ * UX:
+ *  - Modal-bazlı CRUD (alan sayısı fazla; inline form okunmaz olur)
+ *  - Secret WRITE-ONLY: yeni inbox eklerken zorunlu; mevcut inbox'ta
+ *    "Şifre Değiştir" check'i ile rotation (FromAlias paterni gibi
+ *    secretIsSet sinyali)
+ *  - Atama Takımı dropdown: lookupService.teams() — aktif takımlar
+ *    (companyId filtre admin gate ile uygulanır; backend tarafta
+ *    cross-tenant routing engellenir)
+ *
+ * Help banner: ekran kendini açıklasın — CS/destek admin'i yardımsız
+ * kullanabilsin.
+ */
+function MailInboxManager({ companyId }: { companyId: string }) {
+  const [items, setItems] = useState<MailInboxItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editor, setEditor] = useState<{ mode: 'create' | 'edit'; item?: MailInboxItem } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+
+  // Aktif takımlar — sadece bu şirkete ait olanlar dropdown'da görünsün.
+  // (Backend tarafta cross-tenant routing zaten engellenir; UX filtresi.)
+  const allTeams = useMemo(() => lookupService.teams(), []);
+  const teams = useMemo(
+    () => allTeams.filter((t) => t.companyId === companyId),
+    [allTeams, companyId],
+  );
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const out = await adminService.externalMailSettings.inboxes.list(companyId);
+    setItems(out);
+    setLoading(false);
+  }, [companyId]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  function teamName(id: string | null): string {
+    if (!id) return 'Havuz (takım atanmadı)';
+    const t = teams.find((x) => x.id === id);
+    return t?.name ?? '— bilinmeyen takım —';
+  }
+
+  async function handleToggleEnabled(item: MailInboxItem) {
+    setBusy(true);
+    const r = await adminService.externalMailSettings.inboxes.update(companyId, item.id, {
+      enabled: !item.enabled,
+    });
+    setBusy(false);
+    if (r) {
+      toast({
+        type: 'success',
+        message: r.enabled ? 'Inbox açıldı (polling aktif).' : 'Inbox kapatıldı.',
+      });
+      void reload();
+    }
+  }
+
+  async function handleRemove(item: MailInboxItem) {
+    if (!window.confirm(`"${item.address}" inbox'ını silmek istiyor musun? Bu işlem geri alınamaz.`)) return;
+    setBusy(true);
+    const ok = await adminService.externalMailSettings.inboxes.remove(companyId, item.id);
+    setBusy(false);
+    if (ok) {
+      toast({ type: 'success', message: 'Inbox silindi.' });
+      void reload();
+    }
+  }
+
+  return (
+    <Card>
+      <CardBody>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800 dark:text-ndark-text">
+              <Inbox size={16} />
+              Gelen Mail Inbox'ları
+            </h3>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
+              Birden fazla mail adresinden gelen vakaları farklı takımlara yönlendirin (örn. yazilimdestek@ → Yazılım Takımı, satis@ → Satış Takımı).
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            leftIcon={<Plus size={14} />}
+            onClick={() => setEditor({ mode: 'create' })}
+          >
+            Yeni Inbox
+          </Button>
+        </div>
+
+        {/* Help banner — ekran kendini açıklasın */}
+        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
+          <div className="flex items-start gap-2">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">Her inbox AYRI bir mail hesabıdır.</p>
+              <p className="mt-0.5">
+                yazilimdestek@univera.com.tr ve satis@univera.com.tr ayrı Gmail/Exchange hesabı olarak yapılandırılmalı; her biri için ayrı uygulama şifresi (App Password) gerekir.
+                Inbox'a atanan takım, o mail adresinden gelen vakaları havuz olarak alır — ekibinizden biri vakayı üstlenir.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Liste */}
+        {loading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : items.length === 0 ? (
+          <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
+            Henüz inbox tanımlı değil. <strong className="font-medium">Yeni Inbox</strong> ile gelen mail adresini ve hedef takımı tanımlayın.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 dark:divide-ndark-border dark:border-ndark-border">
+            {items.map((it) => (
+              <li key={it.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                    {it.displayName ? `${it.displayName} <${it.address}>` : it.address}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-ndark-muted">
+                    <span className="flex items-center gap-1">
+                      <Users size={12} /> {teamName(it.assignedTeamId)}
+                    </span>
+                    <span className={it.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}>
+                      {it.enabled ? '● Aktif (polling açık)' : '○ Pasif'}
+                    </span>
+                    <span className={it.secretIsSet ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>
+                      {it.secretIsSet ? '🔒 Şifre ayarlı' : '⚠ Şifre ayarlanmamış'}
+                    </span>
+                    {it.imapHost && (
+                      <span className="text-slate-400">IMAP: {it.imapHost}:{it.imapPort ?? '?'}</span>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant={it.enabled ? 'ghost' : 'primary'}
+                  onClick={() => void handleToggleEnabled(it)}
+                  disabled={busy}
+                >
+                  {it.enabled ? 'Kapat' : 'Aç'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  leftIcon={<Pencil size={14} />}
+                  onClick={() => setEditor({ mode: 'edit', item: it })}
+                  disabled={busy}
+                >
+                  Düzenle
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  leftIcon={<Trash2 size={14} />}
+                  onClick={() => void handleRemove(it)}
+                  disabled={busy}
+                  title="Sil"
+                >
+                  Sil
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {editor && (
+          <MailInboxEditor
+            companyId={companyId}
+            mode={editor.mode}
+            initial={editor.item}
+            teams={teams}
+            onClose={() => setEditor(null)}
+            onSaved={() => {
+              setEditor(null);
+              void reload();
+            }}
+          />
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+interface InboxEditorProps {
+  companyId: string;
+  mode: 'create' | 'edit';
+  initial?: MailInboxItem;
+  teams: ReturnType<typeof lookupService.teams>;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: InboxEditorProps) {
+  const { toast } = useToast();
+  const isEdit = mode === 'edit';
+
+  const [address, setAddress] = useState(initial?.address ?? '');
+  const [displayName, setDisplayName] = useState(initial?.displayName ?? '');
+  const [imapHost, setImapHost] = useState(initial?.imapHost ?? 'imap.gmail.com');
+  const [imapPort, setImapPort] = useState<number>(initial?.imapPort ?? 993);
+  const [imapSecure, setImapSecure] = useState<boolean>(initial?.imapSecure ?? true);
+  const [username, setUsername] = useState(initial?.username ?? '');
+  const [assignedTeamId, setAssignedTeamId] = useState<string>(initial?.assignedTeamId ?? '');
+  const [enabled, setEnabled] = useState<boolean>(initial?.enabled ?? false);
+  // Secret rotation: yeni inbox'ta zorunlu input; düzenleme modunda
+  // "Şifreyi değiştir" toggle açık değilse secret undefined gider (rotate yok).
+  const [rotateSecret, setRotateSecret] = useState<boolean>(!isEdit);
+  const [secret, setSecret] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+
+  // Username default: address ile aynı (ilk açılışta)
+  useEffect(() => {
+    if (!isEdit && address && !username) {
+      setUsername(address);
+    }
+  }, [address, username, isEdit]);
+
+  async function handleSave() {
+    const addr = address.trim();
+    if (!addr) {
+      toast({ type: 'warn', message: 'Adres zorunlu.' });
+      return;
+    }
+    if (rotateSecret && secret.trim().length < 4) {
+      toast({ type: 'warn', message: 'Şifre en az 4 karakter olmalı.' });
+      return;
+    }
+
+    const draft: MailInboxDraft = {
+      address: addr,
+      displayName: displayName.trim() || null,
+      imapHost: imapHost.trim() || null,
+      imapPort: Number(imapPort) || null,
+      imapSecure,
+      username: username.trim() || null,
+      assignedTeamId: assignedTeamId || null,
+      enabled,
+    };
+    if (rotateSecret && secret.trim()) {
+      draft.secret = secret.trim();
+    }
+
+    setSaving(true);
+    const r = isEdit && initial
+      ? await adminService.externalMailSettings.inboxes.update(companyId, initial.id, draft)
+      : await adminService.externalMailSettings.inboxes.create(companyId, draft);
+    setSaving(false);
+    if (r) {
+      toast({ type: 'success', message: isEdit ? 'Inbox güncellendi.' : 'Inbox eklendi.' });
+      onSaved();
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Inbox\'ı Düzenle' : 'Yeni Inbox'}
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>İptal</Button>
+          <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving} leftIcon={<Save size={14} />}>
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {/* Adres + Görünen Ad */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Mail adresi" required hint="Bu adrese gelen mailler vaka açacak.">
+            <TextInput
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="yazilimdestek@univera.com.tr"
+              autoFocus={!isEdit}
+            />
+          </Field>
+          <Field label="Görünen ad" hint="Admin paneli için label (ops.)">
+            <TextInput
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Yazılım Destek"
+            />
+          </Field>
+        </div>
+
+        {/* IMAP credentials */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
+            <TextInput
+              value={imapHost}
+              onChange={(e) => setImapHost(e.target.value)}
+              placeholder="imap.gmail.com"
+            />
+          </Field>
+          <Field label="Port" hint="IMAPS: 993">
+            <TextInput
+              type="number"
+              value={String(imapPort)}
+              onChange={(e) => setImapPort(Number(e.target.value))}
+              placeholder="993"
+            />
+          </Field>
+          <Field label="SSL/TLS">
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={imapSecure}
+                onChange={(e) => setImapSecure(e.target.checked)}
+              />
+              <span>Güvenli bağlantı (zorunlu)</span>
+            </label>
+          </Field>
+        </div>
+
+        {/* Auth */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Kullanıcı adı" hint="Genelde mail adresi ile aynı">
+            <TextInput
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={address || 'kullanici@univera.com.tr'}
+            />
+          </Field>
+          <div>
+            <Field
+              label={isEdit ? 'Şifre' : 'Şifre (App Password)'}
+              hint={isEdit ? 'Yeni şifre girmek için aşağıdaki seçeneği işaretle.' : 'Gmail için App Password (16 karakter)'}
+              required={!isEdit}
+            >
+              {isEdit && (
+                <label className="mb-2 flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={rotateSecret}
+                    onChange={(e) => {
+                      setRotateSecret(e.target.checked);
+                      if (!e.target.checked) setSecret('');
+                    }}
+                  />
+                  <span className="text-slate-600 dark:text-ndark-muted">
+                    Şifreyi değiştir
+                    {initial?.secretIsSet ? ' (mevcut şifre korunur)' : ' (henüz ayarlanmamış)'}
+                  </span>
+                </label>
+              )}
+              <TextInput
+                type="password"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder={isEdit && !rotateSecret ? '••••••••' : 'App Password'}
+                disabled={isEdit && !rotateSecret}
+                autoComplete="new-password"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Routing — Takım */}
+        <Field
+          label="Atama Takımı"
+          hint="Bu inbox'a düşen vakalar bu takımın havuzuna atanır. Boş bırakılırsa global havuza düşer."
+        >
+          <Select
+            value={assignedTeamId}
+            onChange={(e) => setAssignedTeamId(e.target.value)}
+          >
+            <option value="">— Takım atanmamış (global havuz) —</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </Select>
+          {teams.length === 0 && (
+            <p className="mt-1 text-xs text-amber-600">
+              Bu şirkette aktif takım yok. Önce <strong>Takımlar</strong> ekranından bir takım ekleyin.
+            </p>
+          )}
+        </Field>
+
+        {/* Enabled */}
+        <Field label="Polling durumu">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+            <span>Polling aktif (IMAP cron bu inbox'tan mail çeker)</span>
+          </label>
+          <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
+            Kapalıyken inbox tanımı durur; mevcut vakalar etkilenmez.
+          </p>
+        </Field>
+      </div>
+    </Modal>
   );
 }
 

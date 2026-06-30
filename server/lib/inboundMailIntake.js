@@ -40,9 +40,11 @@ import { caseRepository } from '../db/caseRepository.js';
 import { caseEmailRepository } from '../db/caseEmailRepository.js';
 import { customerMatchRepository } from '../db/customerMatchRepository.js';
 import { emitEvent as emitNotificationEvent } from '../db/notificationRepository.js';
+import { externalMailInboxRepo } from '../db/externalMailInboxRepository.js';
 import { saveObject } from '../db/storage.js';
 import { isAcceptedUpload } from './uploadWhitelist.js';
 import { sanitizeIncomingEmailHtml } from './htmlSanitizer.js';
+import { prisma } from '../db/client.js';
 
 const RAW_SOURCE = 'inbound-mail-intake';
 
@@ -393,6 +395,11 @@ export async function intakeInboundEmail({
   parsed,
   companyId,
   companyName,
+  // Multi-Inbox A3 — inboxId set ise vaka inbox'a bağlı assignedTeamId'ye
+  // (havuz) atanır. null/undefined ise eski davranış: takım atanmaz,
+  // global havuz. Backward compat — eski caller'lar (örn. test/integration
+  // smoke) inboxId göndermezse intake çalışmaya devam eder.
+  inboxId = null,
   actor,
 } = {}) {
   const intakedAt = new Date().toISOString();
@@ -534,6 +541,41 @@ export async function intakeInboundEmail({
   const description = buildDescription(parsed);
   const domain = extractDomain(parsed.from.email);
 
+  // Multi-Inbox A3 — inbox routing.
+  //
+  // inboxId verildiyse repo'dan çek, assignedTeamId varsa Team'in adını da
+  // resolve et. Team aktif değilse veya cross-tenant (defense-in-depth)
+  // ise routing UYGULANMAZ (vaka takımsız havuza düşer, eski davranış).
+  //
+  // Routing'i caseRepository.create input'una m.assignedTeamId/Name olarak
+  // geçiriyoruz; orada Person.teamId cascade'inin önüne geçer (caller-supplied
+  // override; bkz. caseRepository:1378-1381).
+  let routedTeamId = null;
+  let routedTeamName = null;
+  if (inboxId) {
+    try {
+      const inbox = await externalMailInboxRepo.findById(companyId, inboxId);
+      if (inbox && inbox.assignedTeamId) {
+        const team = await prisma.team.findUnique({
+          where: { id: inbox.assignedTeamId },
+          select: { name: true, companyId: true, isActive: true },
+        });
+        // Defense-in-depth — repo zaten aynı companyId kontrol ediyor ama
+        // intake katmanında tekrar doğrula (Team silinmiş/passive olabilir).
+        if (team && team.companyId === companyId && team.isActive) {
+          routedTeamId = inbox.assignedTeamId;
+          routedTeamName = team.name;
+        }
+      }
+    } catch (err) {
+      // Routing fail vakayı engellemesin — log + havuza düş.
+      console.warn(
+        `[intake] inbox routing lookup fail inboxId=${inboxId} companyId=${companyId}`,
+        err?.message,
+      );
+    }
+  }
+
   const newCaseInput = {
     title: truncate(subject, 200),
     description,
@@ -551,6 +593,11 @@ export async function intakeInboundEmail({
     category: DEFAULT_CATEGORY,
     subCategory: DEFAULT_SUBCATEGORY,
     requestType: DEFAULT_REQUEST_TYPE,
+    // Multi-Inbox A3 — inbox routing (havuz pattern; assignedPersonId YOK).
+    // null ise caseRepository.create cascade'i normal (Person.teamId fallback
+    // veya boş havuz). Set ise caller-override.
+    assignedTeamId: routedTeamId,
+    assignedTeamName: routedTeamName,
   };
 
   let created;

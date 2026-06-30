@@ -398,6 +398,17 @@ model ExternalMailSetting {
   /// alias bu değeri yansıtır.
   fromAddress      String?   @db.NVarChar(Max)
   /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
+  ///
+  /// Multi-Inbox A1 (2026-06-30) — Bu alan LEGACY / VARSAYILAN konumuna
+  /// düştü. Çoklu gelen mailbox artık ExternalMailInbox 1:N ile modellenir.
+  /// A1 backfill migration: bu değer dolu olan tenant için bir adet
+  /// ExternalMailInbox satırı oluşturulur (displayName='Varsayılan',
+  /// imapHost/port + username + secret parent'tan kopyalanır). IMAP
+  /// polling A2'de yeni tablodan okur; bu alan yalnız legacy fallback
+  /// olarak ve admin UI'da "ana inbox" görsel referansı için durur.
+  ///
+  /// Geri uyumluluk: yeni kayıtlar bu alanı doldurmayabilir; mevcut
+  /// satırlar düşürülmedi (FromAlias #17 deseninin aynısı).
   inboundAddress   String?   @db.NVarChar(Max)
   /// SMTP gönderim (M1 + M4).
   smtpHost         String?   @db.NVarChar(Max)

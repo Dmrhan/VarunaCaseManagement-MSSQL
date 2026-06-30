@@ -31,16 +31,22 @@ expect('1.3 M2 parseInboundEml REUSE',
   /import \{ parseInboundEml \} from '\.\/inboundMailParser\.js'/.test(code), true);
 expect('1.4 M2 intakeInboundEmail REUSE',
   /import \{ intakeInboundEmail \} from '\.\/inboundMailIntake\.js'/.test(code), true);
-expect('1.5 pollMailbox export',
+expect('1.5 pollMailbox export (backward-compat)',
   /export async function pollMailbox\(companyId\)/.test(code), true);
+expect('1.5b pollInbox export (A2 multi-inbox primitive)',
+  /export async function pollInbox\(inbox\)/.test(code), true);
 expect('1.6 pollAllEnabledMailboxes export',
   /export async function pollAllEnabledMailboxes\(\)/.test(code), true);
+expect('1.7 externalMailInboxRepo import (A2)',
+  /import \{ externalMailInboxRepo \} from '\.\.\/db\/externalMailInboxRepository\.js'/.test(code), true);
 
 console.log('\n── 2) Idempotency / dedup mekanizması ──────────');
 expect('2.1 PRIMARY \\Seen flag işaretlemesi (başarılı intake sonrası)',
   /client\.messageFlagsAdd\(uid, \['\\\\Seen'\], \{ uid: true \}\)/.test(code), true);
-expect('2.2 SECONDARY in-memory quarantine Map<companyId, Set<key>>',
+expect('2.2 SECONDARY in-memory quarantine Map (A2: inboxId-scope)',
   /const failedQuarantine = new Map\(\);/.test(code), true);
+expect('2.2b quarantine inboxId scope (A2: companyId yerine)',
+  /failedQuarantine\.get\(inboxId\)/.test(code) && /failedQuarantine\.set\(inboxId/.test(code), true);
 expect('2.3 maxRetry guard (3)',
   /retryCount >= 3/.test(code), true);
 expect('2.4 başarılı intake → quarantine\'den temizle (kalıcı dedup için \\Seen)',
@@ -81,15 +87,17 @@ expect('4.5 Admin POST /external-mail-settings/:companyId/poll',
 expect('4.6 SystemAdmin guard (requireSystemAdminOnly)',
   /router\.post\('\/external-mail-settings\/:companyId\/poll'[\s\S]{0,600}requireSystemAdminOnly\(req\)/.test(routeCode), true);
 
-console.log('\n── 5) Multi-tenant + secret privacy ───────────────');
-expect('5.1 pollAllEnabledMailboxes enabled=true + imapHost not null filter',
-  /enabled: true, imapHost: \{ not: null \}/.test(code), true);
-expect('5.2 M5 resolveActiveConfig per-tenant (secret decrypt orada)',
-  /repo\.resolveActiveConfig\(companyId\)/.test(code), true);
-expect('5.3 hata izolasyonu (try/catch pollMailbox in loop)',
-  /for \(const t of enabledTenants\)[\s\S]{0,500}try \{[\s\S]{0,500}pollMailbox\(t\.companyId\)/.test(code), true);
+console.log('\n── 5) Multi-tenant + secret privacy (A2 inbox-scope) ──');
+expect('5.1 listEnabled cross-tenant tüm inbox\'lar',
+  /externalMailInboxRepo\.listEnabled\(\)/.test(code), true);
+expect('5.2 getDecryptedSecret(companyId, inboxId) — A2 inbox-scope',
+  /externalMailInboxRepo\.getDecryptedSecret\(companyId, inboxId\)/.test(code), true);
+expect('5.3 hata izolasyonu (try/catch pollInbox in loop)',
+  /for \(const inbox of enabledInboxes\)[\s\S]{0,500}try \{[\s\S]{0,500}pollInbox\(inbox\)/.test(code), true);
 expect('5.4 secret düz log/response yok (auth opts.pass içinde, sızıntı yok)',
-  /pass: config\.secret/.test(code) && /console\.(log|warn|error).*config\.secret/.test(code) === false, true);
+  /pass: secret/.test(code) && /console\.(log|warn|error).*\bsecret\b/.test(code) === false, true);
+expect('5.5 backward-compat: pollMailbox(companyId) → listEnabledByCompany loop',
+  /externalMailInboxRepo\.listEnabledByCompany\(companyId\)/.test(code), true);
 
 console.log('\n── 6) Sistem actor (intake için) ────────────────');
 expect('6.1 SYSTEM_ACTOR displayName',
