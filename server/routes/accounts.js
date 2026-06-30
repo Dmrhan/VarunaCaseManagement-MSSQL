@@ -108,6 +108,56 @@ router.get(
 );
 
 /**
+ * Faz B-temel — GET /api/accounts/central?companyId=...
+ *
+ * AccountProject editor "Ana Firma" dropdown için: yalnız customerRole='Central'
+ * (Merkez Müşteri) olan account'ları döndürür.
+ *
+ * Scope: req.user.allowedCompanyIds (filterAllowedCompanyIdsByResourcePolicy)
+ *   - SystemAdmin: tüm aktif şirketler
+ *   - Diğer: user'ın allowed companyIds'i
+ *
+ * `companyId` query param: belirli bir tenant'a daraltır (project editor'da
+ * bayinin companyId'si). User'ın o tenant'a erişimi yoksa boş liste.
+ *
+ * CR zorunlu test: başka tenant'ın Central account'u ASLA gözükmesin
+ * (smoke-customer-role-cross-tenant-denial davranış testi).
+ *
+ * NOT: '/:id' route'undan ÖNCE tanımlandı; aksi halde `central` id olarak
+ * yorumlanır.
+ */
+router.get(
+  '/central',
+  requireRole(...DETAIL_READ_ROLES),
+  asyncRoute(async (req, res) => {
+    const companyIdRaw = req.query.companyId;
+    const targetCompanyId = typeof companyIdRaw === 'string' && companyIdRaw
+      ? companyIdRaw
+      : null;
+    // Defense-in-depth — kullanıcının bu companyId'ye erişim yetkisi
+    // kontrolü (cross-tenant guard). targetCompanyId yoksa user'ın tüm
+    // allowed tenant'ları kullanılır.
+    if (targetCompanyId) {
+      const scoped = await filterAllowedCompanyIdsByResourcePolicy(req, {
+        resourceKey: 'account',
+        action: 'read',
+        companyIds: [targetCompanyId],
+        throwIfEmpty: false,
+      });
+      if (!scoped.includes(targetCompanyId)) {
+        // Sessiz boş — kullanıcı bu tenant'a erişemiyor
+        return res.json({ items: [] });
+      }
+    }
+    const items = await accountRepository.listCentralAccounts({
+      user: req.user,
+      targetCompanyId,
+    });
+    res.json({ items });
+  }),
+);
+
+/**
  * GET /api/accounts/:id — full detail (notes/segment dahil)
  *
  * Agent + Backoffice 403. Detayı sadece müşteri yöneticileri görür.

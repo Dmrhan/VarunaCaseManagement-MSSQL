@@ -199,7 +199,9 @@ const ACCOUNT_SELECT = {
   phone2: true, phone2E164: true, phone2Type: true, phone2Extension: true,
   phone3: true, phone3E164: true, phone3Type: true, phone3Extension: true,
   primaryPhoneSlot: true,
-  email: true, customerType: true, legalName: true, registrationNo: true, taxOffice: true, isActive: true,
+  // Faz B-temel — customerRole snapshot için (rollback)
+  email: true, customerType: true, customerRole: true,
+  legalName: true, registrationNo: true, taxOffice: true, isActive: true,
 };
 const ACCOUNT_COMPANY_SELECT = {
   id: true, accountId: true, companyId: true, externalCustomerCode: true,
@@ -217,6 +219,8 @@ const ADDRESS_SELECT = {
 const PROJECT_SELECT = {
   id: true, accountCompanyId: true, code: true, name: true, status: true,
   startDate: true, endDate: true, description: true, isActive: true, sourceExternalId: true,
+  // Faz B-temel — anaFirmaAccountId snapshot için (rollback)
+  anaFirmaAccountId: true,
 };
 
 class CommitError extends Error {
@@ -391,6 +395,8 @@ function snapshotAccount(a) {
     phone3Type: a.phone3Type ?? null, phone3Extension: a.phone3Extension ?? null,
     primaryPhoneSlot: a.primaryPhoneSlot ?? null,
     email: a.email ?? null, customerType: a.customerType,
+    // Faz B-temel — customerRole snapshot (rollback için)
+    customerRole: a.customerRole ?? null,
     legalName: a.legalName ?? null, registrationNo: a.registrationNo ?? null,
     taxOffice: a.taxOffice ?? null,
     isActive: a.isActive,
@@ -434,6 +440,8 @@ function snapshotProject(p) {
     endDate: p.endDate ? new Date(p.endDate).toISOString() : null,
     description: p.description ?? null, isActive: p.isActive,
     sourceExternalId: p.sourceExternalId ?? null,
+    // Faz B-temel — Ana firma bağı snapshot (rollback için)
+    anaFirmaAccountId: p.anaFirmaAccountId ?? null,
   };
 }
 
@@ -464,6 +472,8 @@ async function writeAccount(row, normalized, prefetched = undefined) {
     if (normalized.name && normalized.name !== existing.name) patch.name = normalized.name;
     if (normalized.email !== undefined && normalized.email !== null) patch.email = normalized.email;
     if (normalized.customerType !== undefined && normalized.customerType !== null) patch.customerType = normalized.customerType;
+    // Faz B-temel — Codex P2 round 2 fix: customerRole import persist
+    if (normalized.customerRole !== undefined && normalized.customerRole !== null) patch.customerRole = normalized.customerRole;
     if (normalized.legalName !== undefined && normalized.legalName !== null) patch.legalName = normalized.legalName;
     if (normalized.registrationNo !== undefined && normalized.registrationNo !== null) patch.registrationNo = normalized.registrationNo;
     if (normalized.taxOffice !== undefined && normalized.taxOffice !== null) patch.taxOffice = normalized.taxOffice;
@@ -546,6 +556,8 @@ async function writeAccount(row, normalized, prefetched = undefined) {
       primaryPhoneSlot,
       email: normalized.email ?? null,
       customerType: normalized.customerType ?? 'Corporate',
+      // Faz B-temel — Codex P2 round 2 fix: customerRole import persist (create path)
+      customerRole: normalized.customerRole ?? null,
       legalName: normalized.legalName ?? null,
       registrationNo: normalized.registrationNo ?? null,
       taxOffice: normalized.taxOffice ?? null,
@@ -820,6 +832,37 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
   // this accountCompanyId; in-memory match runs the same priority order.
   const projectSelect = PROJECT_SELECT;
   const code = normalized.projectCode;
+
+  // Faz B-temel — Codex P2 round 2 fix: anaFirmaKey → anaFirmaAccountId resolve.
+  //
+  // Mevcut accountKey paterni mirror:
+  //   1. anaFirmaKey set → Account.vkn match + customerRole='Central'
+  //   2. Cross-tenant guard: AccountCompany aynı tenant'a bağlı olmalı
+  //   3. Bulunamazsa SESSİZ null (warning UI tarafına; mevcut isim-eşleme
+  //      enrichment Faz B ayrı iş)
+  let resolvedAnaFirmaAccountId = null;
+  if (normalized.anaFirmaKey) {
+    // Target tenant'ı bul (AccountCompany.companyId)
+    const ac = await prisma.accountCompany.findUnique({
+      where: { id: accountCompanyId },
+      select: { companyId: true },
+    });
+    if (ac?.companyId) {
+      const anaFirma = await prisma.account.findFirst({
+        where: {
+          vkn: normalized.anaFirmaKey,
+          customerRole: 'Central',
+          companies: { some: { companyId: ac.companyId } },
+        },
+        select: { id: true },
+      });
+      if (anaFirma) {
+        resolvedAnaFirmaAccountId = anaFirma.id;
+      }
+      // bulunamazsa null bırak — mevcut accountKey paterni (warningIfMissing
+      // dry-run'da sinyal verir; commit-time sessiz null + log)
+    }
+  }
   let existing = null;
   if (Array.isArray(prefetched)) {
     if (normalized.sourceProjectId) {
@@ -854,6 +897,12 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
     if (normalized.sourceProjectId && normalized.sourceProjectId !== existing.sourceExternalId) {
       patch.sourceExternalId = normalized.sourceProjectId;
     }
+    // Faz B-temel — Codex P2 round 2 fix: anaFirmaAccountId persist (update).
+    // anaFirmaKey verildiyse VE resolve başarılıysa update; resolve null ise
+    // mevcut bağ KORUNUR (sessiz; isim-eşleme enrichment ayrı PR).
+    if (normalized.anaFirmaKey && resolvedAnaFirmaAccountId) {
+      patch.anaFirmaAccountId = resolvedAnaFirmaAccountId;
+    }
     const updated = Object.keys(patch).length > 0
       ? await prisma.accountProject.update({
           where: { id: existing.id },
@@ -874,6 +923,8 @@ async function writeProject({ accountCompanyId, normalized, prefetched = undefin
       description: normalized.description ?? null,
       isActive: normalized.isActive ?? true,
       sourceExternalId: normalized.sourceProjectId ?? null,
+      // Faz B-temel — Codex P2 round 2 fix: anaFirmaAccountId persist (create)
+      anaFirmaAccountId: resolvedAnaFirmaAccountId,
     },
     select: projectSelect,
   });

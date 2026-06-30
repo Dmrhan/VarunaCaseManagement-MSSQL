@@ -40,6 +40,27 @@ export const M_CUSTOMER_TYPE = {
 };
 /** Geçerli Account customerType identifier'ları — validation için tek doğru kaynak. */
 export const CUSTOMER_TYPE_VALUES = ['Individual', 'Corporate', 'Government', 'NonProfit'];
+
+// Faz B-temel (2026-06-30) — Müşteri Türü (rol). customerType ile FARKLI alan.
+// 6 değer (n4b parite); ASCII normalize Prisma identifier'ları.
+export const M_CUSTOMER_ROLE = {
+  'Merkez Müşteri':     'Central',
+  'Distribütör/Bayi':   'Distributor',
+  'Bölge Müdürlüğü':    'RegionalOffice',
+  'Kanal/Çözüm Ortağı': 'ChannelPartner',
+  'Yurt Dışı':          'International',
+  'Stokbar':            'Stockbar',
+};
+/** Geçerli Account customerRole identifier'ları — validation için tek doğru kaynak. */
+export const CUSTOMER_ROLE_VALUES = [
+  'Central',
+  'Distributor',
+  'RegionalOffice',
+  'ChannelPartner',
+  'International',
+  'Stockbar',
+];
+
 export const M_FINANCIAL = {
   'Düşük': 'Dusuk', 'Orta': 'Orta', 'Yüksek': 'Yuksek', 'Kritik': 'Kritik',
 };

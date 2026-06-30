@@ -10,9 +10,12 @@ import {
   accountService,
   CUSTOMER_TYPES,
   CUSTOMER_TYPE_LABELS,
+  CUSTOMER_ROLES,
+  CUSTOMER_ROLE_LABELS,
   type AccountCompanyCreateInput,
   type AccountDetail,
   type CustomerType,
+  type CustomerRole,
 } from '@/services/accountService';
 import { lookupService } from '@/services/caseService';
 import { notify } from '@/components/ui/Toast';
@@ -70,6 +73,8 @@ export function AccountFormModal({
   const [isActive, setIsActive] = useState(true);
   // WR-A1 — Müşteri tipi + (opsiyonel) kurumsal alanlar.
   const [customerType, setCustomerType] = useState<CustomerType>('Corporate');
+  // Faz B-temel — Müşteri Türü (rol). customerType ile FARKLI alan; UI'da yan yana.
+  const [customerRole, setCustomerRole] = useState<CustomerRole | ''>('');
   const [legalName, setLegalName] = useState('');
   const [registrationNo, setRegistrationNo] = useState('');
   // Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir.
@@ -117,6 +122,7 @@ export function AccountFormModal({
       setEmail(account.email ?? '');
       setIsActive(account.isActive);
       setCustomerType(account.customerType ?? 'Corporate');
+      setCustomerRole((account.customerRole ?? '') as CustomerRole | '');
       setLegalName(account.legalName ?? '');
       setRegistrationNo(account.registrationNo ?? '');
       setTaxOffice(account.taxOffice ?? '');
@@ -129,6 +135,7 @@ export function AccountFormModal({
       setEmail('');
       setIsActive(true);
       setCustomerType('Corporate');
+      setCustomerRole('');
       setLegalName('');
       setRegistrationNo('');
       setTaxOffice('');
@@ -228,6 +235,31 @@ export function AccountFormModal({
       setSubmitting(false);
       return;
     }
+
+    // Faz B-temel — Müşteri Türü downgrade onayı (Central'dan çıkış).
+    // Backend WARN guard 409 atar (acknowledgedRoleDowngrade=false ise);
+    // UX olarak burada da eş zamanlı confirm gösterip onay flag'ini
+    // ekleyelim — backend tek-tıkta geçer.
+    let ackRoleDowngrade = false;
+    if (
+      mode === 'edit'
+      && account?.customerRole === 'Central'
+      && customerRole !== 'Central'
+    ) {
+      const newRoleLabel = customerRole ? CUSTOMER_ROLE_LABELS[customerRole] : 'Belirsiz';
+      const ok = window.confirm(
+        `"${account.name}" şu an "Merkez Müşteri" rolünde. ` +
+        `Yeni rol: "${newRoleLabel}".\n\n` +
+        `Bu müşteriyi ana firma olarak işaret eden projeler varsa, ` +
+        `o projelerin ana firma bağı KOPAR (NULL olur).\n\n` +
+        `Devam edilsin mi?`,
+      );
+      if (!ok) {
+        setSubmitting(false);
+        return;
+      }
+      ackRoleDowngrade = true;
+    }
     // Effective primary: visible iken UI'da seçili; aksi halde first non-empty.
     let effPrimary = primarySlot;
     if (effPrimary > visibleSlotCount || !visibleSlots[effPrimary - 1].phone) {
@@ -254,6 +286,7 @@ export function AccountFormModal({
         primaryPhoneSlot: e164s.length > 0 ? effPrimary : null,
         email: email.trim() || null,
         customerType,
+        customerRole: customerRole || null, // Faz B-temel
         legalName: isIndividual ? null : legalName.trim() || null,
         registrationNo: isIndividual ? null : registrationNo.trim() || null,
         taxOffice: isIndividual ? null : taxOffice.trim() || null,
@@ -289,6 +322,15 @@ export function AccountFormModal({
         // WR-A1: Bireysel seçiliyse VKN gönderilmez (alan disabled).
         vkn: isIndividual ? undefined : vkn.trim() ? vkn.trim() : undefined,
         customerType: customerType !== account.customerType ? customerType : undefined,
+        // Faz B-temel — customerRole diff: değişmediyse undefined; explicit clear için CLEAR.
+        customerRole:
+          (customerRole || null) !== (account.customerRole ?? null)
+            ? customerRole
+              ? (customerRole as CustomerRole)
+              : ('CLEAR' as const)
+            : undefined,
+        // Faz B-temel — downgrade onayı (Central → başka role).
+        acknowledgedRoleDowngrade: ackRoleDowngrade || undefined,
         legalName:
           legalName.trim() !== (account.legalName ?? '')
             ? isIndividual
@@ -367,34 +409,56 @@ export function AccountFormModal({
         </Field>
 
         {/* WR-A1 — Müşteri tipi segmented control. Bireysel'de VKN disabled olur. */}
-        <Field label="Müşteri Tipi" required>
-          <div
-            role="radiogroup"
-            aria-label="Müşteri tipi"
-            className="inline-flex flex-wrap rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs dark:border-ndark-border dark:bg-ndark-surface"
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field
+            label="Müşteri Tipi"
+            required
+            hint="Yasal/tüzel sınıf — fatura ve sözleşme tarafı."
           >
-            {CUSTOMER_TYPES.map((opt) => {
-              const active = customerType === opt;
-              return (
-                <button
-                  key={opt}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setCustomerType(opt)}
-                  className={
-                    'rounded px-3 py-1.5 transition-colors ' +
-                    (active
-                      ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-ndark-bg dark:text-ndark-text'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-ndark-muted dark:hover:text-ndark-text')
-                  }
-                >
-                  {CUSTOMER_TYPE_LABELS[opt]}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
+            <div
+              role="radiogroup"
+              aria-label="Müşteri tipi"
+              className="inline-flex flex-wrap rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs dark:border-ndark-border dark:bg-ndark-surface"
+            >
+              {CUSTOMER_TYPES.map((opt) => {
+                const active = customerType === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setCustomerType(opt)}
+                    className={
+                      'rounded px-3 py-1.5 transition-colors ' +
+                      (active
+                        ? 'bg-white font-semibold text-slate-900 shadow-sm dark:bg-ndark-bg dark:text-ndark-text'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-ndark-muted dark:hover:text-ndark-text')
+                    }
+                  >
+                    {CUSTOMER_TYPE_LABELS[opt]}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          {/* Faz B-temel — Müşteri Türü (rol/ilişki). customerType ile FARKLI alan. */}
+          <Field
+            label="Müşteri Türü"
+            hint="Bizimle çalışma rolü: ana firma (Merkez), bayisi (Distribütör), bölge ofisi vb. Faz B raporlamasının temeli."
+          >
+            <Select
+              value={customerRole}
+              onChange={(e) => setCustomerRole(e.target.value as CustomerRole | '')}
+            >
+              <option value="">— Rol seçilmemiş —</option>
+              {CUSTOMER_ROLES.map((opt) => (
+                <option key={opt} value={opt}>{CUSTOMER_ROLE_LABELS[opt]}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* Vergi Dairesi — yalnız kurumsal/kamu/vakıf-stk; VKN'den önce. */}

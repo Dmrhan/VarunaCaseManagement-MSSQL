@@ -76,6 +76,45 @@ export const CUSTOMER_TYPE_LABELS: Record<CustomerType, string> = {
 };
 
 /**
+ * Faz B-temel (2026-06-30) — Müşteri Türü (rol/ilişki sınıfı).
+ *
+ * customerType (LEGAL tip) ile FARKLI alan:
+ *   - customerType (Müşteri Tipi) = yasal sınıf (Kurumsal/Bireysel/Kamu/Vakıf)
+ *   - customerRole (Müşteri Türü) = bizimle çalışma rolü (n4b parite)
+ *
+ * API wire format: ASCII identifier. UI dropdown'da TR → ASCII map'lenir.
+ *
+ * Faz B bülteni: AccountProject.anaFirmaAccountId sadece 'Central' rolündeki
+ * account'ları referans eder. Rol değişiminde bağlı proje WARN guard'ı var
+ * (backend acknowledgedRoleDowngrade flag).
+ */
+export type CustomerRole =
+  | 'Central'
+  | 'Distributor'
+  | 'RegionalOffice'
+  | 'ChannelPartner'
+  | 'International'
+  | 'Stockbar';
+
+export const CUSTOMER_ROLES: CustomerRole[] = [
+  'Central',
+  'Distributor',
+  'RegionalOffice',
+  'ChannelPartner',
+  'International',
+  'Stockbar',
+];
+
+export const CUSTOMER_ROLE_LABELS: Record<CustomerRole, string> = {
+  Central: 'Merkez Müşteri',
+  Distributor: 'Distribütör/Bayi',
+  RegionalOffice: 'Bölge Müdürlüğü',
+  ChannelPartner: 'Kanal/Çözüm Ortağı',
+  International: 'Yurt Dışı',
+  Stockbar: 'Stokbar',
+};
+
+/**
  * Account 360 — Phase B service layer.
  *
  * Phase A BFF endpoint'leri:
@@ -137,6 +176,10 @@ export interface AccountProjectSummary {
   startDate: string | null;
   endDate: string | null;
   description: string | null;
+  /** Faz B-temel — Ana firma (Merkez Müşteri) referansı. Nullable. */
+  anaFirmaAccountId?: string | null;
+  /** Faz B-temel — Ana firma adı (display). Backend join'den gelir. */
+  anaFirmaName?: string | null;
 }
 
 export interface AccountProjectMutationInput {
@@ -147,6 +190,15 @@ export interface AccountProjectMutationInput {
   endDate?: string | null;
   description?: string | null;
   isActive?: boolean;
+  /** Faz B-temel — Ana firma seçimi. null = bağı temizle. */
+  anaFirmaAccountId?: string | null;
+}
+
+/** Faz B-temel — Central account picker response shape. */
+export interface CentralAccountRow {
+  id: string;
+  name: string;
+  vkn: string | null;
 }
 
 /** WR-A3 / PM-02 — Adres tipi (ASCII identifier; UI'da TR'ye çevrilir). */
@@ -221,6 +273,8 @@ export interface AccountListItem {
   isActive: boolean;
   /** WR-A1 / PM-01 — Müşteri tipi (default Corporate). */
   customerType: CustomerType;
+  /** Faz B-temel — Müşteri Türü (rol/ilişki sınıfı). customerType ile FARKLI alan. */
+  customerRole: CustomerRole | null;
   legalName: string | null;
   registrationNo: string | null;
   /** Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir. */
@@ -323,6 +377,8 @@ export interface AccountDetail {
   tcknMasked: string | null;
   /** WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) kurumsal alanlar. */
   customerType: CustomerType;
+  /** Faz B-temel — Müşteri Türü (rol/ilişki sınıfı). customerType ile FARKLI alan. */
+  customerRole: CustomerRole | null;
   legalName: string | null;
   registrationNo: string | null;
   /** Vergi Dairesi — kurumsal müşterilerde VKN'den önce gösterilir. */
@@ -378,6 +434,8 @@ export interface AccountCreateInput {
   email?: string | null;
   /** WR-A1 — default Corporate. */
   customerType?: CustomerType;
+  /** Faz B-temel — Müşteri Türü (rol). Nullable; boş bırakılabilir. */
+  customerRole?: CustomerRole | null;
   legalName?: string | null;
   registrationNo?: string | null;
   /** Vergi Dairesi (opsiyonel, kurumsal). */
@@ -408,6 +466,10 @@ export interface AccountUpdateInput {
   isActive?: boolean;
   /** WR-A1. */
   customerType?: CustomerType;
+  /** Faz B-temel — Müşteri Türü (rol). 'CLEAR' sentinel'i ile null'a indirilir. */
+  customerRole?: CustomerRole | 'CLEAR' | null;
+  /** Faz B-temel — Central → başka role indirme onayı (downgrade WARN guard). */
+  acknowledgedRoleDowngrade?: boolean;
   legalName?: string | null;
   registrationNo?: string | null;
   /** Vergi Dairesi (opsiyonel, kurumsal). */
@@ -548,6 +610,24 @@ export const accountService = {
       undefined,
       'Müşteri listesi',
     );
+  },
+
+  /**
+   * Faz B-temel — AccountProject editor "Ana Firma" dropdown için
+   * customerRole='Central' olan account listesi.
+   *
+   * Backend scope: req.user.allowedCompanyIds intersect targetCompanyId.
+   * User'ın bu tenant'a erişimi yoksa boş liste döner (cross-tenant
+   * davranış testi smoke).
+   */
+  async listCentral(companyId: string | null = null): Promise<CentralAccountRow[]> {
+    const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+    const r = await apiFetch<{ items: CentralAccountRow[] }>(
+      `/api/accounts/central${qs}`,
+      undefined,
+      'Ana firma listesi',
+    );
+    return r?.items ?? [];
   },
 
   async get(id: string): Promise<AccountDetail | undefined> {
