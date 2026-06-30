@@ -99,6 +99,19 @@ expect('5.4 secret düz log/response yok (auth opts.pass içinde, sızıntı yok
 expect('5.5 backward-compat: pollMailbox(companyId) → listEnabledByCompany loop',
   /externalMailInboxRepo\.listEnabledByCompany\(companyId\)/.test(code), true);
 
+// ─── Codex P1 (A2 round 1) — kill switch (parent ExternalMailSetting.enabled)
+const repoSrc = read('server/db/externalMailInboxRepository.js');
+const repoCode = strip(repoSrc);
+console.log('\n── 5b) Kill switch — Codex P1 A2 round 1 ──────');
+expect('5b.1 listEnabled — enabled tenant\'ları önce çek',
+  /prisma\.externalMailSetting\.findMany\([\s\S]{0,200}where:\s*\{\s*enabled:\s*true/.test(repoCode), true);
+expect('5b.2 listEnabled — companyId: { in: enabledCompanyIds }',
+  /companyId:\s*\{\s*in:\s*enabledCompanyIds\s*\}/.test(repoCode), true);
+expect('5b.3 listEnabledByCompany — parent enabled değilse [] dön',
+  /listEnabledByCompany[\s\S]{0,800}prisma\.externalMailSetting\.findUnique[\s\S]{0,200}setting\.enabled !== true[\s\S]{0,50}return \[\]/.test(repoCode), true);
+expect('5b.4 listEnabled — hiç enabled tenant yoksa erken [] dön',
+  /enabledTenants\.length === 0[\s\S]{0,50}return \[\]/.test(repoCode), true);
+
 console.log('\n── 6) Sistem actor (intake için) ────────────────');
 expect('6.1 SYSTEM_ACTOR displayName',
   /displayName: 'system:mail-intake-imap'/.test(code), true);

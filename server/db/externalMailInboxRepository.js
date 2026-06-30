@@ -164,10 +164,32 @@ async function list(companyId) {
 /**
  * IMAP polling cross-tenant — tüm enabled + active inbox'lar.
  * pollAllEnabledMailboxes (A2) bunu okuyacak.
+ *
+ * Codex P1 (A2 round 1) — KILL SWITCH: ExternalMailSetting.enabled=false
+ * olan tenant'ın inbox'ları (kendi enabled=true bile olsa) polling'e
+ * DAHIL EDILMEZ. M5 öncesi resolveActiveConfig bu kontrolü yapıyordu;
+ * A2 refactor'ında atlanmıştı → admin tenant'ı global kapatsa bile
+ * inbox'lar mail çekip silent vaka açardı. İki katmanlı (tenant + inbox)
+ * toggle korunur:
+ *   - Tenant kapalı → tüm inbox'lar pasif
+ *   - Tenant açık + inbox kapalı → o inbox pasif
+ *   - Tenant açık + inbox açık → polling aktif
+ *
+ * Tenant'ın hiç ExternalMailSetting kaydı olmaması da kapalı sayılır
+ * (M5 davranışı).
  */
 async function listEnabled() {
+  // Önce enabled tenant'ları çek (kill switch).
+  const enabledTenants = await prisma.externalMailSetting.findMany({
+    where: { enabled: true },
+    select: { companyId: true },
+  });
+  if (enabledTenants.length === 0) return [];
+  const enabledCompanyIds = enabledTenants.map((t) => t.companyId);
+
   const rows = await prisma.externalMailInbox.findMany({
     where: {
+      companyId: { in: enabledCompanyIds },
       enabled: true,
       isActive: true,
       imapHost: { not: null },
@@ -178,8 +200,19 @@ async function listEnabled() {
   return rows.map(shapeForPublic);
 }
 
+/**
+ * Tenant'ın enabled inbox'ları — kill switch (parent enabled) burada da
+ * uygulanır. Codex P1 (A2 round 1) — pollMailbox(companyId) BC akışında
+ * tenant global kapalıyken admin manuel poll tetiklemesi de mail çekmesin.
+ */
 async function listEnabledByCompany(companyId) {
   if (!companyId) return [];
+  const setting = await prisma.externalMailSetting.findUnique({
+    where: { companyId },
+    select: { enabled: true },
+  });
+  if (!setting || setting.enabled !== true) return [];
+
   const rows = await prisma.externalMailInbox.findMany({
     where: { companyId, enabled: true, isActive: true, imapHost: { not: null } },
     select: SELECTABLE_PUBLIC,
