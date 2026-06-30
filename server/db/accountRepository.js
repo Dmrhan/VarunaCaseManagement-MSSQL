@@ -1060,8 +1060,15 @@ export async function updateAccount({ accountId, data, user }) {
   //  3. Frontend modal: "Bu account 3 projenin ana firması; rol değişiyor →
   //     o projelerin ana firması NULL olur. Onaylıyor musun?"
   //  4. Onay → tekrar PATCH acknowledgedRoleDowngrade=true ile
-  //     Repo NULL'a düşürme YAPMAZ; bağlı projeler anaFirma=NULL hâlinde
-  //     KALIR (kullanıcı sonra manuel bağ kurar).
+  //     Repo TRANSACTION içinde:
+  //       a. AccountProject.updateMany({anaFirmaAccountId:accountId} → null)
+  //       b. Account.update(patch)
+  //     Atomik; UI wording ("bağı kopar") garanti edilir.
+  //
+  // Codex P2 round 2 fix: önceden NULL'lama yapılmıyordu → mevcut bağlar
+  // KALIYORDU + raporlar ana_firma_not_central rolündeki account'a referans
+  // veriyordu. Şimdi transaction'da düzeltildi.
+  let isCentralDowngrade = false;
   if (data?.customerRole !== undefined && data.customerRole !== 'CLEAR') {
     const cr = normalizeCustomerRole(data.customerRole);
     if (cr !== undefined && cr !== null) {
@@ -1083,6 +1090,9 @@ export async function updateAccount({ accountId, data, user }) {
             },
           );
         }
+        // Onay verildi VEYA bağlı proje yok — her halükarda transaction'da
+        // bağlar NULL'lanır (idempotent — boş query no-op).
+        isCentralDowngrade = true;
       }
     }
   }
@@ -1107,6 +1117,7 @@ export async function updateAccount({ accountId, data, user }) {
           },
         );
       }
+      isCentralDowngrade = true;
     }
   }
 
@@ -1335,7 +1346,20 @@ export async function updateAccount({ accountId, data, user }) {
   }
 
   try {
-    await prisma.account.update({ where: { id: accountId }, data: patch });
+    if (isCentralDowngrade) {
+      // Faz B-temel — Codex P2 round 2 fix: Central downgrade onaylanmış;
+      // bağlı AccountProject.anaFirmaAccountId kayıtları NULL'la +
+      // Account.update atomik. updateMany boş set ise no-op (idempotent).
+      await prisma.$transaction([
+        prisma.accountProject.updateMany({
+          where: { anaFirmaAccountId: accountId },
+          data: { anaFirmaAccountId: null },
+        }),
+        prisma.account.update({ where: { id: accountId }, data: patch }),
+      ]);
+    } else {
+      await prisma.account.update({ where: { id: accountId }, data: patch });
+    }
   } catch (err) {
     if (err?.code === 'P2002') {
       if (uniqueTargetHas(err, 'tcknHash')) {
