@@ -3567,9 +3567,7 @@ export const caseRepository = {
     if (!input.toTeamId || typeof input.toTeamId !== 'string') {
       return { error: 'invalid_input', message: 'toTeamId zorunlu.' };
     }
-    if (c.assignedTeamId === input.toTeamId) {
-      return { error: 'same_team', message: 'Vaka zaten bu takımda.' };
-    }
+
     if (!input.reason || typeof input.reason !== 'string' || !input.reason.trim()) {
       return { error: 'invalid_input', message: 'Aktarım gerekçesi zorunlu.' };
     }

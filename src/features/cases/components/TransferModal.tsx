@@ -49,10 +49,10 @@ export function TransferModal({ open, caseItem, onClose, onTransferred }: Transf
   const allPersons = useMemo(() => lookupService.persons(), []);
   const { toast } = useToast();
 
-  // Vakanın şirketine ait + mevcut takım dışındaki aktif takımlar
+  // Vakanın şirketine ait tüm aktif takımlar (mevcut takım dahil)
   const availableTeams = useMemo(
-    () => allTeams.filter((t) => t.companyId === caseItem.companyId && t.id !== caseItem.assignedTeamId),
-    [allTeams, caseItem.companyId, caseItem.assignedTeamId],
+    () => allTeams.filter((t) => t.companyId === caseItem.companyId),
+    [allTeams, caseItem.companyId],
   );
 
   // AI durumu
