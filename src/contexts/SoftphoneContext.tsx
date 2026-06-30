@@ -1,15 +1,16 @@
 // SoftphoneContext — AloTech softphone, İKİ MOD:
-//  • embedded : gömülü WebRTC (AWJS + boran WebSocket) — gerçek zamanlı, cevapla+konuş.
-//               Statik IP gerektirir; canlıda (sabit IP) test edilir.
-//  • click2call: sunucu-tetikli çaldırma + polling (screen pop). IP gerektirmez (fallback).
+//  • embedded : AloTech'in KENDİ hosted softphone'unu POPUP olarak açar
+//               (softphone.alo-tech.com/<build>/). WebRTC/SIP/register/usephone'u
+//               AloTech'in sayfası halleder — next4biz ile aynı yöntem. Agent çağrıyı
+//               popup'ta cevaplar; Varuna screen-pop + agent durumu + outbound (click2call) yapar.
+//  • click2call: sunucu-tetikli çaldırma + polling (screen pop). Softphone penceresi açmaz.
 // Mod: import.meta.env.VITE_ALOTECH_SOFTPHONE_MODE ('embedded' | 'click2call', default click2call).
 import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '../services/AuthContext';
 import { notify } from '../components/ui/Toast';
 import {
   fetchAgentStatus, callViaClick2Call, hangupCall, fetchActiveCall, setAgentStatusApi,
-  fetchSoftphoneSession, startSoftphone, onAwjsEvent, AWJS_EVENTS,
-  dial as awjsDial, answer as awjsAnswer, hangup as awjsHangup, hold as awjsHold, unhold as awjsUnhold, toggleMute as awjsToggleMute,
+  fetchSoftphoneSession, openSoftphonePopup, focusSoftphonePopup,
   getAlotechEmail, setAlotechEmail,
   isAlotechDisabled,
   type AgentStatusValue,
@@ -54,6 +55,8 @@ interface SoftphoneState {
   refreshStatus: () => Promise<void>;
   dialNumber: (number: string, opts?: { caseId?: string; name?: string }) => Promise<void>;
   answerCall: () => void;
+  /** AloTech hosted softphone popup'ını açar/öne getirir (embedded/popup mod). */
+  openSoftphone: () => void;
   endCall: () => void;
   toggleMute: () => void;
   toggleHold: () => void;
@@ -110,10 +113,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           return;
         }
         setAgentEmail(sess.agentEmail);
-        await startSoftphone(sess, {
-          onLogout: () => { setStatus('idle'); startedRef.current = false; },
-          onMediaFailed: () => notify({ type: 'error', title: 'Mikrofon erişimi', message: 'Softphone için mikrofon izni gerekli.' }),
-        });
+        // AloTech'in hosted softphone'unu popup olarak aç (session ile otomatik login
+        // denenir). Çağrı cevaplama + ses kontrolü bu pencerede yapılır.
+        openSoftphonePopup(sess);
         setStatus('ready');
       } else {
         const s = await fetchAgentStatus();
@@ -151,29 +153,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     void connect();
   }, [connect]);
 
-  // ── EMBEDDED: AWJS jQuery event'leri (gerçek zamanlı, boran WebSocket) ──
-  useEffect(() => {
-    if (!isEmbedded || status !== 'ready') return;
-    const offs: Array<() => void> = [];
-    // NOT: Gelen çağrı YAKALAMA aşağıdaki polling ile yapılır (SIP registration/IP
-    // gerektirmez). AJS _IncomingCall yalnız sabit IP'de gelir; burada ses/çağrı
-    // durumu için _Accept/_Hangup/_Connected/_Hold event'leri dinlenir.
-    offs.push(onAwjsEvent(AWJS_EVENTS.Accept, (d) => {
-      setIncomingCall((inc) => {
-        const num = d?.number ?? inc?.number ?? '';
-        setActiveCall({ number: num, direction: inc ? 'inbound' : 'outbound', status: 'active', startedAt: Date.now() });
-        // Gelen çağrı yanıtlandı → screen pop (callerId ile Akıllı Ticket).
-        if (inc) window.dispatchEvent(new CustomEvent(SOFTPHONE_ANSWERED_EVENT, { detail: { number: num } }));
-        return null;
-      });
-    }));
-    offs.push(onAwjsEvent(AWJS_EVENTS.Connected, () => setActiveCall((c) => (c ? { ...c, status: 'active' } : c))));
-    offs.push(onAwjsEvent(AWJS_EVENTS.Hangup, () => { setActiveCall(null); setIncomingCall(null); setMuted(false); }));
-    offs.push(onAwjsEvent(AWJS_EVENTS.Disconnected, () => { setActiveCall(null); setIncomingCall(null); }));
-    offs.push(onAwjsEvent(AWJS_EVENTS.Hold, () => setActiveCall((c) => (c ? { ...c, status: c.status === 'hold' ? 'active' : 'hold' } : c))));
-    offs.push(onAwjsEvent(AWJS_EVENTS.AgentStatus, (d) => { if (typeof d === 'string') setAgentStatus(d); }));
-    return () => { offs.forEach((o) => o()); };
-  }, [status]);
+  // NOT: Eski AWJS jQuery event aboneliği kaldırıldı — softphone artık ayrı bir
+  // AloTech penceresinde (popup) çalışıyor; Varuna penceresinde AJS/AWJS yok.
+  // Çağrı durumu HER İKİ modda aşağıdaki polling ile yakalanır.
 
   // ── POLLING: gelen çağrı + gerçek durum (HER İKİ MOD — IP gerektirmez).
   // Embedded modda da çalışır: gelen çağrı sunucu tarafından (callerId ile) yakalanır,
@@ -259,10 +241,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const dialNumber = useCallback(async (number: string, opts?: { caseId?: string; name?: string }) => {
     if (status !== 'ready') { notify({ type: 'error', title: 'AloTech hazır değil', message: 'Bağlantı bekleniyor.' }); return; }
     setActiveCall({ number, name: opts?.name, direction: 'outbound', status: 'ringing', startedAt: Date.now(), caseId: opts?.caseId });
-    if (isEmbedded) {
-      awjsDial(number);
-      return;
-    }
+    // Outbound her iki modda click2call ile: agent'ın kayıtlı cihazı (popup modda
+    // AloTech softphone penceresi) çalar, açınca numara bağlanır.
     try {
       await callViaClick2Call(number, { caseId: opts?.caseId });
       notify({ type: 'success', title: 'Arama başlatıldı', message: `Telefonunuz çalacak, açınca ${opts?.name || number} bağlanır.` });
@@ -272,28 +252,36 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     }
   }, [status]);
 
-  const answerCall = useCallback(() => { if (isEmbedded) awjsAnswer(); }, []);
+  // Popup modda cevaplama AloTech penceresinde yapılır — pencereyi öne getir.
+  const answerCall = useCallback(() => { if (isEmbedded) focusSoftphonePopup(); }, []);
+
+  // Softphone popup'ını aç/öne getir (kapanmışsa session ile yeniden aç).
+  const openSoftphone = useCallback(() => {
+    void (async () => {
+      if (focusSoftphonePopup()) return;
+      try {
+        const sess = await fetchSoftphoneSession();
+        openSoftphonePopup(isAlotechDisabled(sess) ? null : sess);
+      } catch {
+        openSoftphonePopup();
+      }
+    })();
+  }, []);
 
   const endCall = useCallback(() => {
     setActiveCall(null);
     setIncomingCall(null);
     setMuted(false);
-    if (isEmbedded) awjsHangup(); // ses tarafı (sabit IP'de etkili)
-    // Sunucu tarafı reddet/kapat — REST (v1 click2hang); IP gerektirmez, her iki modda çalışır.
+    // Sunucu tarafı reddet/kapat — REST (v1 click2hang). Popup modda agent
+    // pencereden de kapatabilir; bu REST her iki modda çalışır.
     void hangupCall().catch(() => {
       notify({ type: 'error', title: 'Kapatma başarısız', message: 'Çağrı AloTech tarafında sonlandırılamadı.' });
     });
   }, []);
 
-  const toggleMute = useCallback(() => { if (isEmbedded) { awjsToggleMute(); setMuted((m) => !m); } }, []);
-  const toggleHold = useCallback(() => {
-    if (!isEmbedded) return;
-    setActiveCall((c) => {
-      if (!c) return c;
-      if (c.status === 'hold') awjsUnhold(); else awjsHold();
-      return c;
-    });
-  }, []);
+  // Popup modda sustur/beklet AloTech penceresinde yapılır (Varuna no-op).
+  const toggleMute = useCallback(() => {}, []);
+  const toggleHold = useCallback(() => {}, []);
 
   const dismissIncoming = useCallback(() => {
     dismissedKey.current = lastIncomingKey.current;
@@ -315,7 +303,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const value: SoftphoneState = {
     mode: MODE,
     status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
-    connect, refreshStatus, dialNumber, answerCall, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
+    connect, refreshStatus, dialNumber, answerCall, openSoftphone, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;
 }

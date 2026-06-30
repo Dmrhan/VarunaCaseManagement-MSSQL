@@ -1,8 +1,9 @@
 // AloTech softphone widget'ı — sağ altta sabit floating panel.
-// embedded: gerçek çağrı kontrolü (mute/hold/kapat, AJS event'leriyle). click2call: çaldırma.
-// AJS Varuna içine UI render etmez; tüm UI Varuna'nındır, AJS yalnız event/ses sağlar.
+// embedded (popup): AloTech hosted softphone'unu ayrı pencerede açar; cevaplama/ses
+//   o pencerede. Varuna: agent durumu, screen-pop, outbound (click2call), "pencereyi aç".
+// click2call: çaldırma + polling.
 import { useEffect, useState } from 'react';
-import { Phone, PhoneOff, Pause, Play, Mic, MicOff, Loader2, X, Pencil, LogIn } from 'lucide-react';
+import { Phone, PhoneOff, Loader2, X, Pencil, LogIn } from 'lucide-react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
 import { AGENT_STATUSES, type AgentStatusValue } from '../../services/softphoneService';
 
@@ -22,7 +23,7 @@ const STATUS_TR: Record<string, string> = {
 const CALL_STATE_TR: Record<string, string> = { active: 'Görüşmede', hold: 'Beklemede', ringing: 'Çalıyor' };
 
 export function SoftphoneWidget() {
-  const { mode, status, agentStatus, agentEmail, error, activeCall, muted, dialNumber, endCall, toggleMute, toggleHold, changeStatus, saveAgentEmail } = useSoftphone();
+  const { mode, status, agentStatus, agentEmail, error, activeCall, dialNumber, endCall, openSoftphone, changeStatus, saveAgentEmail } = useSoftphone();
   const [open, setOpen] = useState(false);
   const [dialInput, setDialInput] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -59,9 +60,6 @@ export function SoftphoneWidget() {
 
   return (
     <>
-      {/* AJS'in numarayı okuduğu gizli input (embedded dial) */}
-      <input id="AwjsPhoneNumber" type="hidden" readOnly />
-
       <div className="fixed bottom-4 right-4 z-40">
         {open ? (
           <div className="w-72 rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
@@ -132,6 +130,16 @@ export function SoftphoneWidget() {
                 </button>
               )}
 
+              {isEmbedded && status === 'ready' && (
+                <button
+                  onClick={openSoftphone}
+                  className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300"
+                  title="AloTech softphone penceresini aç / öne getir"
+                >
+                  <Phone className="h-3.5 w-3.5" /> AloTech Softphone'u Aç
+                </button>
+              )}
+
               {activeCall ? (
                 <div className="space-y-3">
                   <div className="rounded-lg bg-slate-50 p-3 text-center dark:bg-slate-700/50">
@@ -143,23 +151,25 @@ export function SoftphoneWidget() {
                     <div className="mt-1 font-mono text-sm text-slate-600 dark:text-slate-300">{fmtDuration(now - activeCall.startedAt)}</div>
                   </div>
 
-                  {isEmbedded ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <button onClick={toggleMute} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200" title={muted ? 'Sesi aç' : 'Sustur'}>
-                        {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                  {isEmbedded && (
+                    <p className="text-center text-[11px] text-slate-400 dark:text-slate-500">
+                      Cevaplama ve ses kontrolü AloTech penceresinde.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    {isEmbedded && (
+                      <button
+                        onClick={openSoftphone}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300"
+                        title="AloTech penceresini öne getir"
+                      >
+                        <Phone className="h-4 w-4" /> Pencere
                       </button>
-                      <button onClick={toggleHold} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200" title={activeCall.status === 'hold' ? 'Devam' : 'Beklet'}>
-                        {activeCall.status === 'hold' ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
-                      </button>
-                      <button onClick={endCall} className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600" title="Kapat">
-                        <PhoneOff className="h-5 w-5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={endCall} className="flex w-full items-center justify-center gap-2 rounded-lg bg-rose-500 py-2 text-sm font-medium text-white hover:bg-rose-600">
+                    )}
+                    <button onClick={endCall} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-500 py-2 text-sm font-medium text-white hover:bg-rose-600">
                       <PhoneOff className="h-4 w-4" /> Kapat
                     </button>
-                  )}
+                  </div>
                 </div>
               ) : (
                 <div className="flex gap-2">

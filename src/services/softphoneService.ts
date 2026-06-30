@@ -177,6 +177,41 @@ export async function fetchSoftphoneSession(): Promise<SoftphoneSession | Alotec
   return data;
 }
 
+// ── POPUP MOD (önerilen) — AloTech'in KENDİ hosted softphone'unu ayrı pencerede aç ──
+// next4biz ile AYNI yöntem: softphone.alo-tech.com/<build>/ sayfası WebRTC/SIP/
+// register/usephone'u kendisi halleder. Varuna'nın ajs.js/AWJS ile yeniden kurması
+// GEREKMEZ — o yol gerçek SIP register yapmadığı için çağrı tarayıcıya hiç gelmiyor,
+// "Cevapla" cevapsıza düşüyordu. Build (ör. /mi4biz/) AloTech entegrasyon adına göre
+// değişir; Varuna'ya özel build için AloTech'ten alınmalı (VITE_ALOTECH_SOFTPHONE_URL).
+const SOFTPHONE_POPUP_URL =
+  ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_URL as string) ||
+  'https://softphone.alo-tech.com/mi4biz/';
+
+let softphoneWin: Window | null = null;
+
+/** AloTech hosted softphone popup'ını açar (açıksa öne getirir). session verilirse
+ *  otomatik login denenir; AloTech kabul etmezse agent popup'ta Tenant + kullanıcı +
+ *  şifre ile manuel girer (yine çalışır). */
+export function openSoftphonePopup(sess?: { session?: string; tenant?: string } | null): Window | null {
+  if (softphoneWin && !softphoneWin.closed) { softphoneWin.focus(); return softphoneWin; }
+  const sep = SOFTPHONE_POPUP_URL.includes('?') ? '&' : '?';
+  let url = `${SOFTPHONE_POPUP_URL}${sep}lang=tr_TR`;
+  if (sess?.session) url += `&session=${encodeURIComponent(sess.session)}`;
+  softphoneWin = window.open(
+    url,
+    'alotech-softphone',
+    'width=420,height=680,menubar=no,toolbar=no,location=no,status=no',
+  );
+  softphoneWin?.focus();
+  return softphoneWin;
+}
+
+/** Açık softphone popup'ını öne getirir (kapalıysa null döner). */
+export function focusSoftphonePopup(): Window | null {
+  if (softphoneWin && !softphoneWin.closed) { softphoneWin.focus(); return softphoneWin; }
+  return null;
+}
+
 interface InitOptions {
   onLogout?: (resp: any) => void;
   onMediaFailed?: (resp: any) => void;
