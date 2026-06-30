@@ -177,6 +177,26 @@ export async function fetchSoftphoneSession(): Promise<SoftphoneSession | Alotec
   return data;
 }
 
+// ── GÖMÜLÜ SOFTPHONE (iframe) — AloTech'in KENDİ hosted softphone'unu Varuna İÇİNE göm ──
+// next4biz ile aynı softphone (softphone.alo-tech.com/<build>/); WebRTC/SIP/register/
+// usephone'u AloTech'in sayfası halleder. Varuna'nın ajs.js/AWJS ile yeniden kurması
+// GEREKMEZ — o yol gerçek SIP register yapmadığı için çağrı tarayıcıya hiç gelmiyor,
+// "Cevapla" cevapsıza düşüyordu. Sayfa frame'lemeye izin veriyor (X-Frame-Options/CSP
+// yok) → iframe olarak gömülür. Build (ör. /mi4biz/) entegrasyon adına göre; env ile
+// değişir (Varuna'ya özel build için AloTech'ten alınmalı).
+const SOFTPHONE_URL =
+  ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_URL as string) ||
+  'https://softphone.alo-tech.com/mi4biz/';
+
+/** Gömülü softphone iframe'inin src URL'i. session verilirse otomatik login denenir
+ *  (AloTech kabul etmezse iframe'de Tenant + kullanıcı + şifre ile manuel login). */
+export function buildSoftphoneIframeUrl(sess?: { session?: string } | null): string {
+  const sep = SOFTPHONE_URL.includes('?') ? '&' : '?';
+  let url = `${SOFTPHONE_URL}${sep}lang=tr_TR`;
+  if (sess?.session) url += `&session=${encodeURIComponent(sess.session)}`;
+  return url;
+}
+
 interface InitOptions {
   onLogout?: (resp: any) => void;
   onMediaFailed?: (resp: any) => void;
