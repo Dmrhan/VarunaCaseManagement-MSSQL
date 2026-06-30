@@ -48,6 +48,42 @@ export interface QAScoresReport {
 }
 
 // Pattern alerts — Faz 1.5 Madde 5 (Bekçi rolü §5.5)
+// PR-1 (Pattern Triage) — insight enrichment shape.
+export interface PatternThreadValue {
+  id: string;
+  name: string;
+  count: number;
+  total: number;
+  dominance: number;
+}
+export interface PatternThreadKeyword {
+  word: string;
+  count: number;
+  total: number;
+  dominance: number;
+}
+export interface PatternInsight {
+  commonThread: {
+    topAnaFirma: PatternThreadValue | null;
+    topProduct: PatternThreadValue | null;
+    topKeyword: PatternThreadKeyword | null;
+  };
+  spike: {
+    value: number | null;
+    isNew: boolean;
+    baselinePerHour: number;
+    currentPerHour: number;
+  };
+  impact: {
+    distinctAccounts: number;
+    slaAtRisk: number;
+    openCount: number;
+    totalTriggerCases: number;
+    missingCases: number;
+  };
+  severity: 'critical' | 'warning' | 'info';
+}
+
 export interface PatternAlert {
   id: string;
   companyId: string;
@@ -56,9 +92,12 @@ export interface PatternAlert {
   windowMinutes: number;
   detectedAt: string;
   caseIds: string[];
-  status: 'active' | 'dismissed';
+  // PR-2 — known_issue ekleniyor (status enum string field; migration yok)
+  status: 'active' | 'dismissed' | 'known_issue';
   dismissedBy: string | null;
   dismissedAt: string | null;
+  // PR-1 — Triage enrichment (graceful: backend enrichment fail ederse null)
+  insight?: PatternInsight | null;
 }
 
 // Operations Overview — POST /api/analytics/cases/overview (Phase 1 backend, Phase 2 UI)
@@ -262,6 +301,75 @@ export const analyticsService = {
       `/api/analytics/patterns/${id}/dismiss`,
       { method: 'PATCH' },
       'Alarm kapatılamadı',
+    );
+  },
+
+  // PR-2 — 3 aksiyon endpoint'i
+  async linkPatternCases(
+    id: string,
+    body: { masterCaseId?: string } = {},
+  ): Promise<{ ok: boolean; masterCaseId: string; linkedCount: number; skipped: Array<{ caseId: string; reason: string }> } | undefined> {
+    return apiFetch(
+      `/api/analytics/patterns/${id}/link-cases`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Vakalar ana vakaya bağlanamadı',
+    );
+  },
+
+  async notifyPatternTeam(
+    id: string,
+    body: { teamId: string; message?: string },
+  ): Promise<{ ok: boolean; dispatchId: string; teamName: string } | undefined> {
+    return apiFetch(
+      `/api/analytics/patterns/${id}/notify-team`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      'Takıma bildirim gönderilemedi',
+    );
+  },
+
+  async setPatternStatus(
+    id: string,
+    status: 'active' | 'dismissed' | 'known_issue',
+  ): Promise<{ id: string; status: string } | undefined> {
+    return apiFetch(
+      `/api/analytics/patterns/${id}/status`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      },
+      'Durum güncellenemedi',
+    );
+  },
+
+  // PR-3 — AI hipotezi (lazy + cache 24h)
+  async getPatternHypothesis(
+    id: string,
+    options: { force?: boolean } = {},
+  ): Promise<{
+    ok: boolean;
+    cached: boolean;
+    hypothesis: string | null;
+    suggestedAction: string | null;
+    error?: string;
+    generatedAt?: string;
+  } | undefined> {
+    return apiFetch(
+      `/api/analytics/patterns/${id}/hypothesis`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options),
+      },
+      'AI hipotezi alınamadı',
     );
   },
 
