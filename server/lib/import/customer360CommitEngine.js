@@ -532,19 +532,34 @@ async function writeAccount(row, normalized, prefetched = undefined) {
     // commit); bu yüzden Codex önerisinin 2. ayağını uygula — aynı
     // transaction'da bağlı projeleri NULL'la + account update.
     //
-    // Davranış parite: updateAccount() repo path'inde `isCentralDowngrade`
-    // transaction zaten aynı mantıkta NULL'lıyor. Import ile UI eşit
-    // semantik taşır.
+    // ROLLBACK CARE (Codex P2 round 2 fix): nullify edilen projelerin eski
+    // anaFirmaAccountId'lerini sideEffects ile döndür. Caller bu listeyi
+    // synthetic importJobRow'a yazsın (entityType='accountProject',
+    // beforeJson.anaFirmaAccountId=previousValue). rollbackCustomer360
+    // accountProject path'i bu alanı restore edebilsin.
     const isCentralDowngradeImport =
       existing.customerRole === 'Central'
       && patch.customerRole !== undefined
       && patch.customerRole !== 'Central';
 
     let updated;
+    let nullifiedAnaFirmaProjects = [];
     if (Object.keys(patch).length === 0) {
       updated = existing;
     } else if (isCentralDowngradeImport) {
-      // Atomic: bağlı projeleri NULL'la + account update
+      // Atomic: önce etkilenen projeleri capture et + NULL'la + account update.
+      // findMany transaction'ın DIŞINDA (snapshot için); aynı microtask'ta
+      // updateMany'i etkilemez (T+1 anlık tutarsızlık ihmal — rollback için
+      // beforeJson dolu olması yeterli).
+      const affected = await prisma.accountProject.findMany({
+        where: { anaFirmaAccountId: existing.id },
+        select: { id: true, anaFirmaAccountId: true },
+      });
+      nullifiedAnaFirmaProjects = affected.map((p) => ({
+        id: p.id,
+        previousAnaFirmaAccountId: p.anaFirmaAccountId,
+      }));
+
       const [, accountAfter] = await prisma.$transaction([
         prisma.accountProject.updateMany({
           where: { anaFirmaAccountId: existing.id },
@@ -564,7 +579,15 @@ async function writeAccount(row, normalized, prefetched = undefined) {
         select: accountSelect,
       });
     }
-    return { kind: 'updated', recordId: existing.id, beforeJson, afterJson: snapshotAccount(updated) };
+    return {
+      kind: 'updated',
+      recordId: existing.id,
+      beforeJson,
+      afterJson: snapshotAccount(updated),
+      sideEffects: nullifiedAnaFirmaProjects.length > 0
+        ? { nullifiedAnaFirmaProjects }
+        : undefined,
+    };
   }
   // Create — Phase 1 standardization: Account.id `cus_<22>` formatında.
   // Slot 1/2/3 alanları ve primaryPhoneSlot da burada yazılır. Caller
@@ -1324,6 +1347,33 @@ async function processJob({ user, companyId, job, rowsByEntity, resume = false, 
             where: { id: row.id },
             data: { status: r.kind, accountId: r.recordId, recordId: r.recordId, beforeJson: r.beforeJson, afterJson: r.afterJson, updatedAt: new Date() },
           });
+          // Faz B-temel — Codex P2 round 2 fix: Central downgrade side effect
+          // bilgi kaydı. nullifiedAnaFirmaProjects varsa her biri için
+          // synthetic importJobRow yarat (entityType='accountProject',
+          // beforeJson.anaFirmaAccountId=prev). rollbackCustomer360 bu
+          // satırları görür ve restore eder.
+          //
+          // rowNumber: account row'un rowNumber'ını paylaş (UNIQUE değil;
+          // sadece index). parentRowNumber ile audit/UI bağlantı kur.
+          // status='updated' — rollback Updated path'inden geçer.
+          if (r.sideEffects?.nullifiedAnaFirmaProjects?.length) {
+            for (const p of r.sideEffects.nullifiedAnaFirmaProjects) {
+              await prisma.importJobRow.create({
+                data: {
+                  importJobId: row.importJobId,
+                  rowNumber: row.rowNumber,
+                  action: 'update',
+                  status: 'updated',
+                  entityType: 'accountProject',
+                  parentRowNumber: row.rowNumber,
+                  recordId: p.id,
+                  beforeJson: { anaFirmaAccountId: p.previousAnaFirmaAccountId },
+                  afterJson: { anaFirmaAccountId: null },
+                  matchKey: `sideEffect:centralDowngrade:${r.recordId}`,
+                },
+              });
+            }
+          }
           row.status = r.kind;
           rememberAccount(normalized, r.recordId);
           if (r.kind === 'created') eStats.created += 1; else eStats.updated += 1;
@@ -1665,6 +1715,15 @@ export async function rollbackCustomer360({ jobId, user }) {
             if (before.endDate !== undefined) restore.endDate = before.endDate ? new Date(before.endDate) : null;
             if (before.description !== undefined) restore.description = before.description;
             if (before.isActive !== undefined) restore.isActive = before.isActive;
+            // Faz B-temel — Codex P2 round 2 fix: Central downgrade side
+            // effect rollback. writeAccount transaction'ında NULL'lanan
+            // projeler synthetic importJobRow yazar (matchKey starts with
+            // "sideEffect:centralDowngrade:"); beforeJson.anaFirmaAccountId
+            // dolu olur. Burada restore et — proje yeniden eski ana firmaya
+            // bağlanır.
+            if (before.anaFirmaAccountId !== undefined) {
+              restore.anaFirmaAccountId = before.anaFirmaAccountId;
+            }
             if (Object.keys(restore).length > 0) {
               await prisma.accountProject.update({ where: { id: r.recordId }, data: restore });
             }
