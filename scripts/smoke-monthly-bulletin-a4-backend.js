@@ -136,8 +136,8 @@ expect('6.5 deriveAnalyticsScope REUSE',
   /monthly-bulletin[\s\S]{0,2000}deriveAnalyticsScope\(req\.user, body\)/.test(routesCode), true);
 
 console.log('\n── 7) Cross-tenant guard (account.companyId ∩ scope) ─');
-expect('7.1 Account lookup + accountCompanies select',
-  /monthly-bulletin[\s\S]{0,3000}prisma\.account\.findUnique[\s\S]{0,500}accountCompanies/.test(routesCode), true);
+expect('7.1 Account lookup + companies select (Codex P1 round 1: relation adı fix)',
+  /monthly-bulletin[\s\S]{0,3000}prisma\.account\.findUnique[\s\S]{0,500}companies: \{\s*select: \{ companyId: true \}/.test(routesCode), true);
 expect('7.2 accountCompanyIds ∩ scope.companyIds intersection',
   /monthly-bulletin[\s\S]{0,4000}accountCompanyIds\.filter\([\s\S]{0,200}scope\.companyIds\.includes/.test(routesCode), true);
 expect('7.3 Intersection boşsa 403 account_out_of_scope',
