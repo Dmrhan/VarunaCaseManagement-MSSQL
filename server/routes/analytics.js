@@ -410,7 +410,80 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
       },
     });
 
-    res.json({ ok: true, dispatchId: dispatch.id, teamId, teamName: team.name });
+    // Codex P2 round 1 — Gerçek per-user in-app notification.
+    // NotificationDispatch sadece audit/dispatch tablosuna yazıyordu;
+    // kullanıcılar bell/action-center'da görmüyordu. emitGenericNotification
+    // CaseNotification + ActionItem yazıp her takım üyesini bilgilendirir.
+    //
+    // Codex round 2 fix: User modelinde 'person' RELATION YOK (sadece
+    // personId scalar). Önceki `where: { person: { teamId } }` Prisma'da
+    // "unknown argument" reject ederdi → 500. Doğru yol: Person → User
+    // 2-adımlı chain.
+    //
+    // emitGenericNotification UserCompany active scope kontrolü zaten yapar.
+    const { emitGenericNotification } = await import('../db/actionItemRepository.js');
+
+    // 1) Takıma bağlı aktif Person'ları çek
+    const teamPersons = await prisma.person.findMany({
+      where: { teamId, isActive: true },
+      select: { id: true },
+    });
+    const teamPersonIds = teamPersons.map((p) => p.id);
+
+    // 2) Bu Person'lara bağlı aktif User'ları çek (UserCompany scope)
+    const members = teamPersonIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            isActive: true,
+            personId: { in: teamPersonIds },
+            companies: { some: { companyId: alert.companyId, isActive: true } },
+          },
+          select: { id: true },
+        })
+      : [];
+
+    // Temsili case'in caseNumber + title — payload context için
+    const representativeCase = await prisma.case.findUnique({
+      where: { id: representativeCaseId },
+      select: { caseNumber: true, title: true },
+    });
+
+    const notifyResults = [];
+    for (const member of members) {
+      try {
+        await emitGenericNotification({
+          caseId: representativeCaseId,
+          companyId: alert.companyId,
+          eventType: 'pattern_alert_team_notify',
+          recipientUserId: member.id,
+          payload: {
+            message,
+            alertId: alert.id,
+            category: alert.category,
+            caseCount: alert.caseCount,
+            triggeredBy: req.user.id,
+          },
+          caseNumber: representativeCase?.caseNumber ?? '?',
+          caseTitle: representativeCase?.title ?? alert.category,
+        });
+        notifyResults.push({ userId: member.id, ok: true });
+      } catch (notifyErr) {
+        console.warn('[analytics:patterns:notify-team] member notify fail',
+          member.id, notifyErr?.message);
+        notifyResults.push({ userId: member.id, ok: false });
+      }
+    }
+
+    const notifiedCount = notifyResults.filter((r) => r.ok).length;
+
+    res.json({
+      ok: true,
+      dispatchId: dispatch.id,
+      teamId,
+      teamName: team.name,
+      notifiedCount,
+      totalMembers: members.length,
+    });
   } catch (e) {
     console.error('[analytics:patterns:notify-team]', e);
     res.status(500).json({ error: 'internal', message: e?.message });
