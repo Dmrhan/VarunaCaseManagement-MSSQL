@@ -147,7 +147,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     setAlotechEmail(clean);
     setAgentEmail(clean);
     startedRef.current = false;
-    setStatus('idle');
+    setStatus('connecting'); // email girilir girilmez bağlanıyor göster (widget kaybolmasın)
     void connect();
   }, [connect]);
 

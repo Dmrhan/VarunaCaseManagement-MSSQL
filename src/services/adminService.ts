@@ -1282,6 +1282,51 @@ export const adminService = {
         return !!out?.ok;
       },
     },
+    // Mail Multi-Inbox (Faz A) — Per-company çoklu gelen mailbox CRUD.
+    inboxes: {
+      async list(companyId: string): Promise<MailInboxItem[]> {
+        const out = await apiFetch<{ items: MailInboxItem[] }>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/inboxes`,
+          undefined,
+          'Inbox listesi yüklenemedi',
+        );
+        return out?.items ?? [];
+      },
+      async create(companyId: string, draft: MailInboxDraft): Promise<MailInboxItem | undefined> {
+        return apiFetch<MailInboxItem>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/inboxes`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(draft),
+          },
+          'Inbox eklenemedi',
+        );
+      },
+      async update(
+        companyId: string,
+        inboxId: string,
+        draft: MailInboxDraft,
+      ): Promise<MailInboxItem | undefined> {
+        return apiFetch<MailInboxItem>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/inboxes/${encodeURIComponent(inboxId)}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(draft),
+          },
+          'Inbox güncellenemedi',
+        );
+      },
+      async remove(companyId: string, inboxId: string): Promise<boolean> {
+        const out = await apiFetch<{ ok: boolean }>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/inboxes/${encodeURIComponent(inboxId)}`,
+          { method: 'DELETE' },
+          'Inbox silinemedi',
+        );
+        return !!out?.ok;
+      },
+    },
   },
 
   // ─────────────────────────────────────────────────────────────────
@@ -1747,6 +1792,42 @@ export interface FromAliasDraft {
   address?: string;
   displayName?: string | null;
   isDefault?: boolean;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+// Mail Multi-Inbox (Faz A) — Per-company çoklu gelen mailbox.
+// Her satır AYRI IMAP hesabı + AYRI takım routing (havuz).
+export interface MailInboxItem {
+  id: string;
+  companyId: string;
+  address: string;
+  displayName: string | null;
+  imapHost: string | null;
+  imapPort: number | null;
+  imapSecure: boolean;
+  username: string | null;
+  secretIsSet: boolean;
+  secretSetAt: string | null;
+  assignedTeamId: string | null;
+  enabled: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailInboxDraft {
+  address?: string;
+  displayName?: string | null;
+  imapHost?: string | null;
+  imapPort?: number | null;
+  imapSecure?: boolean;
+  username?: string | null;
+  /// Secret yalnız set/rotation için body'de gönderilir; response'a düz secret DÖNMEZ.
+  secret?: string;
+  assignedTeamId?: string | null;
+  enabled?: boolean;
   isActive?: boolean;
   sortOrder?: number;
 }

@@ -895,6 +895,7 @@ export interface CaseFilters {
   teamScope?: boolean;        // teamId → Supervisor'ın Person.teamId'si (server resolve)
   slaViolation?: boolean;     // Case.slaViolation = true
   resolvedToday?: boolean;    // Case.resolvedAt today range (server tz)
+  unassigned?: boolean;       // assignedPersonId IS NULL + açık statüler
   // WR-A4 — proje bazlı filter
   accountProjectId?: string;
   // PR-SD — Soft archive. Default false (UI'da chip OFF).
@@ -905,11 +906,11 @@ export interface CaseFilters {
 
 // Role-aware KPI stats — GET /api/cases/stats response.
 export type CaseStatsResponse =
-  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number }
-  | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null }
-  | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number }
-  | { mode: 'empty' }
-  | { mode: 'unknown' };
+  | { mode: 'personal'; assignedToMe: number; slaRiskMine: number; resolvedToday: number; snoozedMine: number; unassigned: number; critical: number }
+  | { mode: 'team'; teamOpenCount: number; teamSlaRisk: number; teamEscalation: number; teamResolvedToday: number; supervisorTeamId: string | null; unassigned: number; critical: number }
+  | { mode: 'operations'; totalOpen: number; slaViolation: number; critical: number; resolvedToday: number; unassigned: number }
+  | { mode: 'empty'; unassigned?: number; critical?: number }
+  | { mode: 'unknown'; unassigned?: number; critical?: number };
 
 export interface CaseListPagination {
   page: number;       // 1-based
