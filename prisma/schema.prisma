@@ -174,6 +174,8 @@ model Company {
   externalMailSetting        ExternalMailSetting?
   /// Mail M5-extension — Per-company çoklu gönderen adresi alias'ları.
   externalMailFromAliases    ExternalMailSettingFromAlias[]
+  /// Mail Multi-Inbox (Faz A) — Per-company çoklu gelen mailbox + takım routing.
+  externalMailInboxes        ExternalMailInbox[]
   /// Mail M2.3 — Öğrenilen gönderen→müşteri eşlemeleri.
   learnedSenderAccounts      LearnedSenderAccount[]
   /// Mail M6.1 — Tenant-scoped vaka mailleri.
@@ -396,6 +398,17 @@ model ExternalMailSetting {
   /// alias bu değeri yansıtır.
   fromAddress      String?   @db.NVarChar(Max)
   /// IMAP polling hedefi (M3'te kullanılır; M5'te admin set eder).
+  ///
+  /// Multi-Inbox A1 (2026-06-30) — Bu alan LEGACY / VARSAYILAN konumuna
+  /// düştü. Çoklu gelen mailbox artık ExternalMailInbox 1:N ile modellenir.
+  /// A1 backfill migration: bu değer dolu olan tenant için bir adet
+  /// ExternalMailInbox satırı oluşturulur (displayName='Varsayılan',
+  /// imapHost/port + username + secret parent'tan kopyalanır). IMAP
+  /// polling A2'de yeni tablodan okur; bu alan yalnız legacy fallback
+  /// olarak ve admin UI'da "ana inbox" görsel referansı için durur.
+  ///
+  /// Geri uyumluluk: yeni kayıtlar bu alanı doldurmayabilir; mevcut
+  /// satırlar düşürülmedi (FromAlias #17 deseninin aynısı).
   inboundAddress   String?   @db.NVarChar(Max)
   /// SMTP gönderim (M1 + M4).
   smtpHost         String?   @db.NVarChar(Max)
@@ -487,6 +500,83 @@ model ExternalMailSettingFromAlias {
   @@index([externalMailSettingId])
 }
 
+/// Mail Multi-Inbox (Faz A) — Per-company çoklu gelen mailbox.
+///
+/// İhtiyaç: Bir tenant artık birden fazla mail adresinden gelen vakaları
+/// AYRI takımlara yönlendirebilir. Örn. UNIVERA için:
+///   - yazilimdestek@univera.com.tr → Yazılım Takımı havuzu
+///   - satis@univera.com.tr        → Satış Takımı havuzu
+///   - finans@univera.com.tr       → Finans Takımı havuzu
+///
+/// Mimari karar (2026-06-30 onaylı):
+///   1) Her inbox AYRI IMAP hesabı (kendi username/password). Tek hesap +
+///      N alias varyantı YOK; ENVELOPE/folder routing'e gerek kalmadı.
+///   2) Routing SADECE assignedTeamId — category/priority/caseType
+///      override YOK (intake DEFAULT'ları korunur).
+///   3) Atama MODELİ HAVUZ — assignedTeamId set, assignedPersonId YOK
+///      (mevcut "kimse atanmaz" pattern'in takıma hedefli hali).
+///   4) Backfill — mevcut ExternalMailSetting.inboundAddress dolu her
+///      tenant için 'default' inbox kaydı oluşturulur (eski tek-inbox
+///      davranışı kırılmaz). FromAlias migration deseninin aynısı.
+///
+/// FromAlias (giden) ile semantik AYRI ama desen aynı:
+///   - FromAlias = SMTP send dropdown (composer "From" seçimi)
+///   - ExternalMailInbox = IMAP polling kaynağı + intake routing
+///
+/// Secret cipher: M5 paterni reuse (AES-256-GCM, DEVOPS_PAT_ENC_KEY).
+model ExternalMailInbox {
+  id          String  @id @default(cuid()) @db.NVarChar(450)
+  companyId   String  @db.NVarChar(450)
+  /// Inbox adresi (örn. yazilimdestek@univera.com.tr). Per-tenant unique.
+  /// Normalize: app katmanı trim + lowercase karşılaştırma yapar.
+  address     String  @db.NVarChar(450)
+  /// Admin UI label (örn. "Yazılım Destek"). Boş ise address gösterilir.
+  displayName String? @db.NVarChar(Max)
+
+  /// IMAP credentials — her inbox kendi hesabı (mimari karar #1).
+  imapHost         String?   @db.NVarChar(Max)
+  imapPort         Int?
+  imapSecure       Boolean   @default(true)
+  /// IMAP login kullanıcı adı (genelde address ile aynı). Secret DEĞİL,
+  /// plain saklanır.
+  username         String?   @db.NVarChar(256)
+  /// AES-256-GCM ciphertext (base64). null → secret henüz set edilmedi.
+  /// 'password' modunda IMAP password (App Password).
+  secretCiphertext String?   @db.NVarChar(Max)
+  secretIv         String?   @db.NVarChar(Max)
+  secretAuthTag    String?   @db.NVarChar(Max)
+  /// Secret'in en son set edildiği zaman (rotation tracking).
+  secretSetAt      DateTime?
+
+  /// Routing hedefi — bu inbox'a düşen mailler bu takıma atanır (havuz).
+  /// null → havuz tanımsız (vakalar global havuza düşer, eski davranış).
+  assignedTeamId String? @db.NVarChar(450)
+
+  /// Polling açık mı (per-inbox toggle; ExternalMailSetting.enabled global toggle ile birlikte değerlendirilir).
+  enabled   Boolean @default(false)
+  /// Soft delete — false ise CRUD listede gizli + polling atlar.
+  isActive  Boolean @default(true)
+  /// UI sıralaması.
+  sortOrder Int     @default(100)
+
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// Team relation NO ACTION — Team silinirse inbox routing'i NULL'a
+  /// düşürülmez (MSSQL multi-cascade engelleme); manuel cleanup app
+  /// katmanında. Team delete akışı zaten Team.deletedAt soft pattern.
+  team    Team?   @relation(fields: [assignedTeamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  /// Per-tenant adres unique.
+  @@unique([companyId, address])
+  @@index([companyId, enabled])
+  @@index([companyId, isActive])
+  @@index([assignedTeamId])
+}
+
 /// Mail M6.3b Faz 3 — Agent composer "Mail Şablonu" dropdown'unu
 /// besleyen yeniden kullanılabilir email gövde şablonları.
 ///
@@ -509,26 +599,26 @@ model ExternalMailSettingFromAlias {
 ///
 /// Per-tenant — companyId scope. Faz 3 v1: admin only create.
 model CaseEmailTemplate {
-  id          String   @id @default(cuid()) @db.NVarChar(450)
-  companyId   String   @db.NVarChar(450)
+  id              String   @id @default(cuid()) @db.NVarChar(450)
+  companyId       String   @db.NVarChar(450)
   /// Template adı (display + dropdown). Per-tenant unique.
-  name        String   @db.NVarChar(255)
+  name            String   @db.NVarChar(255)
   /// Opsiyonel kategori (admin organize için). Free-form string;
   /// klasör hiyerarşi v2.
-  category    String?  @db.NVarChar(100)
+  category        String?  @db.NVarChar(100)
   /// Subject template — opsiyonel. Verilirse composer subject'i replace
   /// confirm modal'la değiştirir.
-  subject     String?  @db.NVarChar(Max)
+  subject         String?  @db.NVarChar(Max)
   /// Body template — zorunlu. Sanitize-html allowlist (M6.1) save öncesi.
-  bodyHtml    String   @db.NVarChar(Max)
+  bodyHtml        String   @db.NVarChar(Max)
   /// Declared placeholder whitelist — Backend preview engine'i bu listede
   /// olmayan {{vars}} için warning verir. JSON string; ileride yapılandırılabilir.
-  variables   String   @db.NVarChar(Max)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(dbgenerated("sysutcdatetime()"))
-  updatedAt   DateTime @updatedAt
-  createdByUserId String? @db.NVarChar(450)
-  updatedByUserId String? @db.NVarChar(450)
+  variables       String   @db.NVarChar(Max)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(dbgenerated("sysutcdatetime()"))
+  updatedAt       DateTime @updatedAt
+  createdByUserId String?  @db.NVarChar(450)
+  updatedByUserId String?  @db.NVarChar(450)
 
   company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1106,11 +1196,13 @@ model Team {
   createdAt           DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt           DateTime @updatedAt
 
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  members   Person[]
-  cases     Case[]
-  createdBy User?    @relation("TeamCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  updatedBy User?    @relation("TeamUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  members     Person[]
+  cases       Case[]
+  createdBy   User?               @relation("TeamCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  updatedBy   User?               @relation("TeamUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  /// Mail Multi-Inbox (Faz A) — Bu takıma routing edilen inbox'lar (havuz pattern).
+  mailInboxes ExternalMailInbox[]
 
   @@index([companyId])
 }
@@ -1378,13 +1470,13 @@ model Case {
   communicationChannelOverride String? @db.NVarChar(255)
 
   // SLA
-  slaResponseDueAt      DateTime?
-  slaResolutionDueAt    DateTime?
-  slaViolation          Boolean   @default(false)
-  slaPausedAt           DateTime?
-  slaPausedDurationMin  Int       @default(0)
-  slaThirdPartyWaitMin  Int       @default(0)
-  slaResponseMetAt      DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
+  slaResponseDueAt       DateTime?
+  slaResolutionDueAt     DateTime?
+  slaViolation           Boolean   @default(false)
+  slaPausedAt            DateTime?
+  slaPausedDurationMin   Int       @default(0)
+  slaThirdPartyWaitMin   Int       @default(0)
+  slaResponseMetAt       DateTime? // ilk yanıt verildiğinde (Incelemede'ye geçiş)
   slaResolutionStartedAt DateTime? // vakayı ilk üstlenen kişinin claim zamanı
 
   // Phase D — Müşteri Eşleştirme: accountId NULL ile açılan vakalar bu flag

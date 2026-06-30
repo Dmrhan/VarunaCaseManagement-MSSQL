@@ -26,6 +26,7 @@ import { authorizationPolicyRepository } from '../db/authorizationPolicyReposito
 import { devopsClient } from '../lib/devopsClient.js';
 import { externalMailSettingRepo } from '../db/externalMailSettingRepository.js';
 import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository.js';
+import { externalMailInboxRepo } from '../db/externalMailInboxRepository.js';
 import { caseEmailTemplateRepo } from '../db/caseEmailTemplateRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
 import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
@@ -1238,6 +1239,96 @@ router.post('/external-mail-settings/:companyId/from-aliases/:aliasId/set-defaul
       : code === 'inactive' ? 409
       : 400;
     return res.status(status).json({ error: code });
+  }
+  res.json({ ok: true });
+}));
+
+// ─────────────────────────────────────────────────────────────────
+// Mail Multi-Inbox (Faz A4) — ExternalMailInbox admin CRUD.
+// Per-tenant; assertCompanyAdmin scope kontrolü her uçta (FromAlias desen).
+// Routing: her inbox AYRI IMAP hesabı + AYRI takım (havuz).
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * GET /external-mail-settings/:companyId/inboxes — Admin liste.
+ * Response: ExternalMailInbox[] (sortOrder asc). secret raw alanları
+ * RESPONSE'A GİRMEZ; secretIsSet/secretSetAt sinyalleri döner.
+ */
+router.get('/external-mail-settings/:companyId/inboxes', asyncRoute(async (req, res) => {
+  const { companyId } = req.params;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const items = await externalMailInboxRepo.list(companyId);
+  res.json({ items });
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/inboxes — yeni inbox.
+ * Body: { address, displayName?, imapHost?, imapPort?, imapSecure?,
+ *         username?, secret?, assignedTeamId?, enabled?, isActive?, sortOrder? }
+ * secret yalnız ilk set/rotation amacıyla body'de geçer; encrypt edilerek
+ * ciphertext/iv/authTag persistlenir. Response'a düz secret İNMEZ.
+ */
+router.post('/external-mail-settings/:companyId/inboxes', asyncRoute(async (req, res) => {
+  const { companyId } = req.params;
+  if (!companyId) throw new AdminError('companyId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+  const result = await externalMailInboxRepo.upsert(
+    companyId,
+    req.body ?? {},
+    actor.userId ?? null,
+  );
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'address_already_exists' ? 409
+      : code === 'team_scope_mismatch' ? 403
+      : code === 'team_inactive' ? 409
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json(result.inbox);
+}));
+
+/**
+ * PATCH /external-mail-settings/:companyId/inboxes/:inboxId — düzenle.
+ * Partial update; secret body'de YOK ise dokunulmaz (rotation semantiği).
+ */
+router.patch('/external-mail-settings/:companyId/inboxes/:inboxId', asyncRoute(async (req, res) => {
+  const { companyId, inboxId } = req.params;
+  if (!companyId || !inboxId) throw new AdminError('companyId+inboxId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const actor = requireActor(req);
+  const result = await externalMailInboxRepo.upsert(
+    companyId,
+    { ...(req.body ?? {}), id: inboxId },
+    actor.userId ?? null,
+  );
+  if (!result.ok) {
+    const code = result.code;
+    const status = code === 'not_found' ? 404
+      : code === 'address_already_exists' ? 409
+      : code === 'team_scope_mismatch' ? 403
+      : code === 'team_inactive' ? 409
+      : 400;
+    return res.status(status).json({ error: code });
+  }
+  res.json(result.inbox);
+}));
+
+/**
+ * DELETE /external-mail-settings/:companyId/inboxes/:inboxId — sil.
+ * Hard delete (FromAlias paterni); inbox'a bağlı CaseEmail kayıtları YOK
+ * (CaseEmail.companyId scope üzerinden tutulur, inboxId'siz). Polling
+ * cron tick'inde otomatik düşer (listEnabled bu satırı dönmez).
+ */
+router.delete('/external-mail-settings/:companyId/inboxes/:inboxId', asyncRoute(async (req, res) => {
+  const { companyId, inboxId } = req.params;
+  if (!companyId || !inboxId) throw new AdminError('companyId+inboxId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const result = await externalMailInboxRepo.remove(companyId, inboxId);
+  if (!result.ok) {
+    return res.status(result.code === 'not_found' ? 404 : 400).json({ error: result.code });
   }
   res.json({ ok: true });
 }));
