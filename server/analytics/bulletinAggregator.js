@@ -46,20 +46,26 @@ const BUCKET_LABELS = {
 };
 
 /**
- * Snoozed-active count — Case.snoozeUntil > now sayısı.
+ * Snoozed-active vakaları status bazında sayar.
  *
- * Bekletiliyor kovasının PARÇASI. Mantık: snooze, statüden bağımsız bir
- * geçici durdurma; admin "ertele" dediyse vaka snoozeUntil'a kadar
- * Bekletiliyor görünür. unsnooze cron snoozeUntil'da vakayı geri açar.
+ * Bekletiliyor kovasının PARÇASI. Mantık: snooze statüden bağımsız bir
+ * geçici durdurma; vakanın ASIL status'ü değişmiyor (snoozeCase status'ü
+ * dokunmaz). Bu yüzden bir snoozed-Açık vakası byStatus'ta "Acik" olarak
+ * sayılır + ayrıca snoozedActive'de sayılır.
  *
- * Kullanıcı bültenine "Bekletiliyor = ThirdPartyWaiting + active snooze"
- * şeklinde yansıtılır.
+ * Codex P2 — Double-count fix: snoozed cases'leri **mevcut status
+ * kovasından düşür**, sonra Bekletiliyor'a ekle. Net 4-kova hesabı
+ * total ile uyumlu kalır.
+ *
+ * Return: { total: N, byStatus: [{key, count}] }
+ *   - total: snoozed-active toplam
+ *   - byStatus: hangi status'te kaç snoozed (build4BucketStatus düşürmek için)
  */
-async function querySnoozedActiveCount(scope, accountId, from, to) {
-  if (!scope || scope.companyIds.length === 0) return 0;
-  if (!accountId) return 0;
+async function querySnoozedActiveByStatus(scope, accountId, from, to) {
+  const empty = { total: 0, byStatus: [] };
+  if (!scope || scope.companyIds.length === 0) return empty;
+  if (!accountId) return empty;
 
-  // Açık parametre: from/to dönem + accountId + scope companyId IN list.
   const params = [];
   const companyPlaceholders = scope.companyIds.map((v) => {
     params.push(v);
@@ -72,35 +78,54 @@ async function querySnoozedActiveCount(scope, accountId, from, to) {
   params.push(to);
   const toIdx = params.length;
 
-  // Aktif snooze: snoozeUntil > now AND createdAt window içinde.
   const sql = `
-    SELECT COUNT(*) AS cnt
+    SELECT [status] AS [key], COUNT(*) AS cnt
     FROM [Case]
     WHERE [companyId] IN (${companyPlaceholders.join(', ')})
       AND [accountId] = @P${accountIdx}
       AND [createdAt] >= @P${fromIdx} AND [createdAt] < @P${toIdx}
       AND [snoozeUntil] IS NOT NULL
-      AND [snoozeUntil] > sysutcdatetime();
+      AND [snoozeUntil] > sysutcdatetime()
+    GROUP BY [status];
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...params);
-  return Number(rows?.[0]?.cnt ?? 0);
+  const byStatus = rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+  const total = byStatus.reduce((s, r) => s + r.count, 0);
+  return { total, byStatus };
 }
 
 /**
  * 7→4 status map türetimi.
  *
  * @param {Array<{key, count}>} byStatus — operationsAggregator çıktısı
- * @param {number} snoozedActive — querySnoozedActiveCount sonucu
+ * @param {{total, byStatus: Array<{key, count}>}} snoozed — querySnoozedActiveByStatus sonucu
+ *
+ * Codex P2 — Double-count fix: snoozed cases'leri **kendi status
+ * kovasından düşür** (snooze status'ü değiştirmez; byStatus'ta zaten
+ * orijinal statüde sayılmış), sonra waiting kovasına ekle. Net sonuç:
+ * 4 kova toplamı total ile UYUMLU.
  */
-function build4BucketStatus(byStatus, snoozedActive) {
+function build4BucketStatus(byStatus, snoozed) {
   const buckets = { open: 0, inProgress: 0, waiting: 0, closed: 0 };
   for (const row of byStatus ?? []) {
     const bucket = STATUS_BUCKET_MAP[row.key];
-    if (!bucket) continue; // bilinmeyen status — sessiz skip
+    if (!bucket) continue;
     buckets[bucket] += row.count;
   }
-  // Snooze waiting kovasına ekle (ThirdPartyWaiting + snooze birlikte)
-  buckets.waiting += snoozedActive;
+  // Snoozed cases'leri orijinal kovalardan düşür (double-count fix)
+  for (const row of snoozed?.byStatus ?? []) {
+    const bucket = STATUS_BUCKET_MAP[row.key];
+    if (!bucket) continue;
+    buckets[bucket] -= row.count;
+  }
+  // Tümünü waiting kovasına ekle
+  buckets.waiting += snoozed?.total ?? 0;
+
+  // Negatif guard — teorik olarak olmamalı (snooze status'ten daha çok
+  // sayılırsa bug), defansif clamp.
+  for (const k of Object.keys(buckets)) {
+    if (buckets[k] < 0) buckets[k] = 0;
+  }
 
   return [
     { key: 'open', label: BUCKET_LABELS.open, count: buckets.open },
@@ -158,11 +183,21 @@ export async function computeMonthlyBulletin({ scope, accountId, from, to }) {
     to: toDate.toISOString(),
   });
 
-  // 3) Snooze active count (Bekletiliyor kovasının parçası)
-  const snoozedActive = await querySnoozedActiveCount(scope, accountId, fromDate, toDate);
+  // 3) Snooze active — status bazında (Codex P2 double-count fix)
+  const snoozed = await querySnoozedActiveByStatus(scope, accountId, fromDate, toDate);
 
-  // 4) 7→4 status map
-  const byStatus4 = build4BucketStatus(overview.byStatus, snoozedActive);
+  // 4) 7→4 status map (snoozed cases'ler orijinal kovadan düşürülüp
+  //    waiting'e eklenir)
+  const byStatus4 = build4BucketStatus(overview.byStatus, snoozed);
+
+  // 5) byCategory shape map — Codex P2: queryByCategory
+  //    {category, subCategory, total, ...} döndürür; frontend BucketBarChart
+  //    {key, count} bekler. Burada normalize et.
+  const byCategoryNormalized = (overview.byCategory ?? []).map((r) => ({
+    key: r.category ?? 'Diğer',
+    label: r.subCategory ? `${r.category} / ${r.subCategory}` : r.category,
+    count: r.total ?? 0,
+  }));
 
   return {
     account: {
@@ -173,9 +208,9 @@ export async function computeMonthlyBulletin({ scope, accountId, from, to }) {
       byCaseType: overview.byCaseType,
       byRequestType: overview.byRequestType, // A1
       byOrigin: overview.byOrigin,           // A1
-      byCategory: overview.byCategory,
+      byCategory: byCategoryNormalized,      // Codex P2 — shape normalize
       timeSeries: overview.timeSeries,
-      snoozedActiveCount: snoozedActive,
+      snoozedActiveCount: snoozed.total,
     },
     perAccountCompany: accountAgg.perAccountCompany,
     totals: accountAgg.totals,
@@ -195,7 +230,7 @@ function emptyBulletinPayload({ accountId, from, to }) {
   return {
     account: {
       id: accountId ?? null,
-      byStatus4: build4BucketStatus([], 0),
+      byStatus4: build4BucketStatus([], { total: 0, byStatus: [] }),
       byStatusRaw: [],
       byPriority: [],
       byCaseType: [],

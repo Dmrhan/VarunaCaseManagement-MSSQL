@@ -631,7 +631,27 @@ router.post('/monthly-bulletin', requireOverviewAnalytics, async (req, res) => {
     const { from, to } = validation;
 
     // 2) Scope derivation (§2.2A) — server-side
-    const scope = deriveAnalyticsScope(req.user, body);
+    //
+    // Codex P1 — Bülten "müşteri için" bir rapor; "agent'ın baktığı vakalar"
+    // DEĞİL. deriveAnalyticsScope CSM/Agent için scopeKind='self' +
+    // personIds=[user.personId] döndürür ve buildWhereSql
+    // [assignedPersonId] IN scope.personIds filter ekler — bu durumda
+    // müşterinin BAŞKA agent'ların baktığı vakaları sızar (SILENT eksik
+    // bülten).
+    //
+    // Fix: bulletin endpoint'inde personIds + teamIds filter'ını BYPASS et.
+    // Cross-tenant koruması scope.companyIds + account.companyId ∩ scope
+    // intersection ile zaten yerinde (4-katmanlı guard).
+    //
+    // Supervisor için aynı: teamIds=[supervisedTeams] filter müşterinin
+    // başka takım vakalarını sızdırır → temizle.
+    const rawScope = deriveAnalyticsScope(req.user, body);
+    const scope = {
+      ...rawScope,
+      personIds: [],
+      teamIds: [],
+      // scopeKind sadece audit log'da kullanılır; bilgi amaçlı korunur.
+    };
 
     // 3) Account scope check — accountId kullanıcının erişim alanında mı?
     //    Account.companyId scope.companyIds içinde olmalı (cross-tenant

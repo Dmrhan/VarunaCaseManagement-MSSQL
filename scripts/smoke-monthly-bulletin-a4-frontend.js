@@ -129,6 +129,14 @@ expect('7.5 Yetki — CSM + Supervisor + Admin + SystemAdmin görür',
 expect('7.6 FileText icon import',
   /FileText,/.test(app), true);
 
+console.log('\n── 8) Codex P2 — Date drift fix (UTC+ timezone) ──');
+expect('8.1 toISOString().slice() defaultDates icinde KULLANILMIYOR',
+  !/defaultDates[\s\S]{0,800}toISOString\(\)\.slice/.test(page), true);
+expect('8.2 pad helper kullaniliyor (komponentlerden YYYY-MM-DD)',
+  /const pad = \(n: number\) => String\(n\)\.padStart\(2, '0'\)/.test(page), true);
+expect('8.3 Yil siniri (Ocak önceki ay = Aralik) handle edildi',
+  /m === 0 \? y - 1 : y[\s\S]{0,200}m === 0 \? 11 : m - 1/.test(page), true);
+
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);

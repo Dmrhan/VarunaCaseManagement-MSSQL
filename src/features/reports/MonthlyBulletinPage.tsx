@@ -98,13 +98,24 @@ export function MonthlyBulletinPage() {
   const companyName = (id: string) => companies.find((c) => c.id === id)?.name ?? id;
 
   // Default: önceki ay (bültenin doğal kullanım kalıbı: "geçen ayı raporla")
+  //
+  // Codex P2 — Date drift fix: önceki implementasyon `new Date(y, m, 1)` ile
+  // LOCAL midnight oluşturup .toISOString().slice(0, 10) yapıyordu. UTC+
+  // zaman dilimlerinde (Europe/Istanbul UTC+3) local 01.06.2026 00:00 →
+  // UTC 31.05.2026 21:00 → ISO "2026-05-31T21:00:00.000Z" → "2026-05-31".
+  // Yani bir gün ERKEN. Şimdi YYYY-MM-DD'yi komponentlerden direkt kur.
   const defaultDates = useMemo(() => {
     const now = new Date();
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1); // exclusive
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0-indexed
+    // Önceki ay başlangıcı = (y, m-1, 1); ay sonu = (y, m, 1) exclusive.
+    // Yıl sınırı: Ocak'ta (m=0) önceki ay = Aralık (m=-1 → y-1, ay=11).
+    const startY = m === 0 ? y - 1 : y;
+    const startM = m === 0 ? 11 : m - 1;
+    const pad = (n: number) => String(n).padStart(2, '0');
     return {
-      from: lastMonthStart.toISOString().slice(0, 10),
-      to: lastMonthEnd.toISOString().slice(0, 10),
+      from: `${startY}-${pad(startM + 1)}-01`,
+      to: `${y}-${pad(m + 1)}-01`, // exclusive — bu ayın 1'i
     };
   }, []);
 
