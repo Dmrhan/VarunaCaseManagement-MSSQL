@@ -237,8 +237,6 @@ export function SmartTicketNewPage({
   );
   const projectsEnabled = !!selectedCompany?.projectsEnabled;
   const projectsRequired = !!selectedCompany?.projectsRequired;
-  const kbAnalysisRequired = !!selectedCompany?.requireKbAnalysis;
-
   const [taxonomies, setTaxonomies] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
   const [taxonomiesLoading, setTaxonomiesLoading] = useState(false);
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
@@ -611,7 +609,6 @@ export function SmartTicketNewPage({
     form.title.trim().length > 0 &&
     form.description.trim().length > 0 &&
     projectRequirementSatisfied &&
-    (!kbAnalysisRequired || !!suggestion) &&
     !creating;
 
   const canSuggest =
@@ -1815,11 +1812,7 @@ export function SmartTicketNewPage({
                     onClick={() => void handleCreateAndContinue()}
                     disabled={!canCreate}
                     leftIcon={creating ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
-                    title={
-                      kbAnalysisRequired && !suggestion
-                        ? 'Devam etmek için önce Bilgi Bankası ile Analiz Et'
-                        : undefined
-                    }
+                    title={undefined}
                   >
                     {creating ? 'Açılıyor…' : 'Vaka Oluştur ve Çözüm Adımlarına Geç'}
                   </Button>
