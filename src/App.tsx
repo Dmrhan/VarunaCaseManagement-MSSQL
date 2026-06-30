@@ -13,6 +13,7 @@ import {
   KeyRound,
   LayoutDashboard,
   FileSpreadsheet,
+  FileText,
   LogOut,
   Mail,
   Network,
@@ -32,6 +33,7 @@ import { ActionCenterBell } from './features/action-center/ActionCenterBell';
 import { featureFlags } from './config/featureFlags';
 import { OperationsDashboardPage } from './features/analytics/OperationsDashboardPage';
 import { CaseReportStudioPage } from './features/reports/CaseReportStudioPage';
+import { MonthlyBulletinPage } from './features/reports/MonthlyBulletinPage';
 import { RootCauseReportPage } from './features/analytics/RootCauseReportPage';
 import { AIUsagePage } from './features/analytics/AIUsagePage';
 import { PatternsPage } from './features/analytics/PatternsPage';
@@ -93,7 +95,7 @@ import { accountService } from './services/accountService';
 import { SOFTPHONE_ANSWERED_EVENT } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
-type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
+type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
 
 interface NavItem {
   key: View;
@@ -355,6 +357,8 @@ export default function App() {
   const showQaScores = !!user && canShowView('analytics-qa-scores', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showPatterns = !!user && canShowView('analytics-patterns', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showCaseReportStudio = !!user && canShowView('case-report-studio', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
+  // Aylık Bülten — CS ekibi müşteriye gönderir; supervisor/admin/CSM görür
+  const showMonthlyBulletin = !!user && canShowView('monthly-bulletin', ['CSM', 'Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showRootCauseReport = !!user && canShowView('root-cause-report', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showTaggingReview = !!user && canShowView('tagging-review', ['Supervisor', 'Admin', 'SystemAdmin'].includes(user.role));
   const showReportsSection = sidebarExpanded && (
@@ -362,6 +366,7 @@ export default function App() {
     showQaScores ||
     showPatterns ||
     showCaseReportStudio ||
+    showMonthlyBulletin ||
     showRootCauseReport ||
     showTaggingReview
   );
@@ -873,6 +878,25 @@ export default function App() {
               </button>
             )}
 
+            {/* Aylık Müşteri Bülteni — CSM / Supervisor / Admin / SystemAdmin */}
+            {showMonthlyBulletin && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('monthly-bulletin')}
+                className={`flex w-full items-center gap-2 rounded-md text-sm transition-colors ${
+                  sidebarExpanded ? 'px-3 py-2' : 'h-10 justify-center px-0'
+                } ${
+                  view === 'monthly-bulletin'
+                    ? 'bg-brand-50 font-medium text-brand-700 dark:bg-ndark-card dark:text-ndark-link'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-ndark-text dark:hover:bg-ndark-card'
+                }`}
+                title="Aylık Müşteri Bülteni"
+              >
+                <FileText size={16} />
+                {sidebarExpanded && <span className="flex-1 text-left">Aylık Bülten</span>}
+              </button>
+            )}
+
             {/* Kök Neden Analiz Raporu — Supervisor / Admin / SystemAdmin */}
             {showRootCauseReport && (
               <button
@@ -978,6 +1002,7 @@ export default function App() {
           )}
           {view === 'analytics-qa-scores' && <QAScoresPage />}
           {view === 'case-report-studio' && <CaseReportStudioPage />}
+          {view === 'monthly-bulletin' && <MonthlyBulletinPage />}
           {(view === 'root-cause-report' || (isDetail && caseDetailOrigin === 'root-cause-report')) && (
             <div className={isDetail ? 'hidden' : 'contents'}>
               <RootCauseReportPage onSelectCase={openCase} />

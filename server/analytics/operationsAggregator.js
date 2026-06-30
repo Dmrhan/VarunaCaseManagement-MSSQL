@@ -95,6 +95,8 @@ export async function computeOperationsOverview({ scope, filters }) {
     byCompany,
     byTeam,
     byCategory,
+    byRequestType,
+    byOrigin,
     topAtRiskAccounts,
   ] = await Promise.all([
     queryOpenSnapshot(scope, filters, baseWhere),
@@ -107,6 +109,9 @@ export async function computeOperationsOverview({ scope, filters }) {
     queryByCompany(scope, filters, periodFrom, periodTo, baseWhere),
     queryByTeam(scope, filters, periodFrom, periodTo, baseWhere),
     queryByCategory(scope, filters, periodFrom, periodTo, baseWhere),
+    // Aylık Bülten Faz A — A1 yeni breakdown'lar.
+    queryByRequestType(scope, filters, periodFrom, periodTo, baseWhere),
+    queryByOrigin(scope, filters, periodFrom, periodTo, baseWhere),
     queryTopAtRiskAccounts(scope, filters, baseWhere),
   ]);
 
@@ -146,6 +151,9 @@ export async function computeOperationsOverview({ scope, filters }) {
     byCompany: scope.canCrossCompanyAgg ? byCompany : null,
     byTeam,
     byCategory,
+    // Aylık Bülten Faz A — A1 yeni breakdown'lar (Soru/Talep/Hata/Şikayet + Kanal)
+    byRequestType,
+    byOrigin,
     topAtRiskAccounts,
     durationMs: Date.now() - t0,
   };
@@ -290,6 +298,15 @@ function buildWhereSql(scope, filters) {
   if (filters.caseTypes && filters.caseTypes.length > 0) addIn('[caseType]', filters.caseTypes);
   // statuses — DB ASCII identifier saklar, app degerleri dogrudan kullanilir
   if (filters.statuses && filters.statuses.length > 0) addIn('[status]', filters.statuses);
+
+  // Aylık Bülten Faz A — A4 — opsiyonel accountId filter. Bulletin
+  // orchestrator computeOperationsOverview'u accountId filter ile çağırır;
+  // byStatus / byPriority / byRequestType / byOrigin / byCategory tek
+  // account'a kısıtlanır. Diğer endpoint'ler bu alanı göndermez → no-op.
+  if (filters.accountId && typeof filters.accountId === 'string') {
+    params.push(filters.accountId);
+    clauses.push(`[accountId] = @P${params.length}`);
+  }
 
   return { sql: clauses.join(' AND '), params };
 }
@@ -501,6 +518,123 @@ async function queryByPriority(scope, filters, from, to, baseWhere) {
   return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
 }
 
+/**
+ * Aylık Bülten Faz A — A1 — Vaka tipi (talep türü) dağılımı.
+ *
+ * Bilgi/Talep/Hata/Şikayet/Öneri (enumMap M_REQUEST). Müşteri bülteninde
+ * "Sorular kaç tane geldi, kaç şikayet" panosu için.
+ *
+ * Diğer breakdown'larla aynı pattern: createdAt window + companyId scope
+ * (baseWhere.sql) + GROUP BY. SQL injection korumalı (parameterized);
+ * key alanı raw column ismi, value alanı parametre.
+ */
+async function queryByRequestType(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return [];
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const sql = `
+    SELECT [requestType] AS [key], COUNT(*) AS cnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      AND [requestType] IS NOT NULL
+    GROUP BY [requestType]
+    ORDER BY cnt DESC;
+  `;
+  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+}
+
+/**
+ * Aylık Bülten Faz A — A1 — Kanal (origin) dağılımı.
+ *
+ * E-posta/Telefon/Web/Chatbot/Diğer (enumMap M_ORIGIN). Müşteri bülteninde
+ * "vakalar hangi kanaldan geldi" panosu için.
+ */
+async function queryByOrigin(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return [];
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const sql = `
+    SELECT [origin] AS [key], COUNT(*) AS cnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      AND [origin] IS NOT NULL
+    GROUP BY [origin]
+    ORDER BY cnt DESC;
+  `;
+  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+}
+
+/**
+ * Aylık Bülten Faz A — A2 — Per-account / per-AccountCompany aggregate.
+ *
+ * Bir müşteri (Account) bültenine veri sağlar. Account birden fazla
+ * şirkete (AccountCompany) bağlı olabilir; her şirket için ayrı satır:
+ *   - count: dönemde açılan toplam vaka
+ *   - resolvedCount: dönemde çözülen
+ *   - avgResolutionMinutes: çözülen vakaların ortalama wall-clock süresi
+ *     (mevcut avgResolutionWallClockHours paterni — paused-time düşülmez;
+ *     tutarlılık için)
+ *   - slaResolutionCompliantCount: resolvedAt ≤ slaResolutionDueAt
+ *   - slaResponseCompliantCount: slaResponseMetAt ≤ slaResponseDueAt
+ *
+ * ⚠ CROSS-TENANT SCOPE LEAKAGE KORUMASI (P0):
+ *   baseWhere.sql zaten companyId IN scope.companyIds filter'ı içerir.
+ *   Account başka companyId'lere de bağlı olabilir; AMA scope dışındaki
+ *   companyId'ler bu filter ile elenir. Yani account başka tenant'ta
+ *   vaka açmışsa o vakalar bu bültende GÖRÜNMEZ.
+ *
+ *   accountId raw column parametre ile gider (SQL injection korunma).
+ *
+ * Frontend tek-şirketli account'ta firma dağılımı bloğunu gizler
+ * (return 1 satır → blok render değil).
+ */
+async function queryByAccount(scope, filters, accountId, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return [];
+  if (!accountId || typeof accountId !== 'string') return [];
+
+  const p1 = withParam(baseWhere, accountId);
+  const p2 = withParam(p1, from);
+  const p3 = withParam(p2, to);
+  const sql = `
+    SELECT
+      [companyId]                                        AS [key],
+      COUNT(*)                                           AS cnt,
+      SUM(CASE WHEN [resolvedAt] IS NOT NULL THEN 1 ELSE 0 END) AS resolvedCnt,
+      AVG(CASE WHEN [resolvedAt] IS NOT NULL
+               THEN DATEDIFF(MINUTE, [createdAt], [resolvedAt])
+               ELSE NULL END)                             AS avgResolutionMin,
+      SUM(CASE WHEN [resolvedAt] IS NOT NULL
+                    AND [slaResolutionDueAt] IS NOT NULL
+                    AND [resolvedAt] <= [slaResolutionDueAt]
+               THEN 1 ELSE 0 END)                         AS slaResolutionCompliantCnt,
+      SUM(CASE WHEN [slaResponseMetAt] IS NOT NULL
+                    AND [slaResponseDueAt] IS NOT NULL
+                    AND [slaResponseMetAt] <= [slaResponseDueAt]
+               THEN 1 ELSE 0 END)                         AS slaResponseCompliantCnt,
+      SUM(CASE WHEN [slaResponseMetAt] IS NOT NULL THEN 1 ELSE 0 END) AS responseMetCnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [accountId] = @P${p1.idx}
+      AND [createdAt] >= @P${p2.idx} AND [createdAt] < @P${p3.idx}
+    GROUP BY [companyId]
+    ORDER BY cnt DESC;
+  `;
+  const rows = await prisma.$queryRawUnsafe(sql, ...p3.params);
+  return rows.map((r) => ({
+    companyId: r.key,
+    count: Number(r.cnt),
+    resolvedCount: Number(r.resolvedCnt),
+    avgResolutionMinutes: r.avgResolutionMin == null ? null : Number(r.avgResolutionMin),
+    slaResolutionCompliantCount: Number(r.slaResolutionCompliantCnt),
+    slaResponseCompliantCount: Number(r.slaResponseCompliantCnt),
+    responseMetCount: Number(r.responseMetCnt),
+  }));
+}
+
 async function queryByCaseType(scope, filters, from, to, baseWhere) {
   if (scope.companyIds.length === 0) return [];
   const p1 = withParam(baseWhere, from);
@@ -630,6 +764,96 @@ async function queryTopAtRiskAccounts(scope, filters, baseWhere) {
     slaBreachCount: Number(r.sla_breach_count),
     escalatedCount: Number(r.escalated_count),
   }));
+}
+
+// ---------- Aylık Bülten Faz A — public exports ----------
+
+/**
+ * Aylık Bülten A2/A3 — Account bazlı aggregate (frontend bulletin endpoint).
+ *
+ * scope: { companyIds: string[], canCrossCompanyAgg: bool }
+ * accountId: bültenin müşterisi
+ * from/to: dönem
+ *
+ * Return: queryByAccount sonucu (per-AccountCompany aggregate).
+ *
+ * Cross-tenant koruması: scope.companyIds filter baseWhere'de uygulanır;
+ * account başka tenant'a ait companyId'lerde vakaya sahipse o satırlar
+ * GÖRÜNMEZ.
+ *
+ * Bu helper aggregate() ana orchestrator'unu BYPASS eder — account-spesifik
+ * bir kesit; cross-tenant overall hesabıyla karışmaz.
+ */
+export async function computeAccountBulletinAggregate({ scope, accountId, from, to }) {
+  if (!scope || !Array.isArray(scope.companyIds) || scope.companyIds.length === 0) {
+    return { perAccountCompany: [], totals: emptyAccountTotals() };
+  }
+  if (!accountId) {
+    return { perAccountCompany: [], totals: emptyAccountTotals() };
+  }
+  const filters = { from, to };
+  const baseWhere = buildWhereSql(scope, filters);
+  const perAccountCompany = await queryByAccount(scope, filters, accountId, from, to, baseWhere);
+
+  // Totals — frontend'de "tüm AccountCompany'ler toplam" satırı için.
+  const totals = perAccountCompany.reduce((acc, row) => {
+    acc.count += row.count;
+    acc.resolvedCount += row.resolvedCount;
+    acc.slaResolutionCompliantCount += row.slaResolutionCompliantCount;
+    acc.slaResponseCompliantCount += row.slaResponseCompliantCount;
+    acc.responseMetCount += row.responseMetCount;
+    // avgResolutionMinutes weighted by resolvedCount
+    if (row.avgResolutionMinutes != null && row.resolvedCount > 0) {
+      acc._weightedSum += row.avgResolutionMinutes * row.resolvedCount;
+      acc._weightCount += row.resolvedCount;
+    }
+    return acc;
+  }, {
+    count: 0,
+    resolvedCount: 0,
+    slaResolutionCompliantCount: 0,
+    slaResponseCompliantCount: 0,
+    responseMetCount: 0,
+    _weightedSum: 0,
+    _weightCount: 0,
+  });
+  const avgResolutionMinutes = totals._weightCount > 0
+    ? totals._weightedSum / totals._weightCount
+    : null;
+  // SLA compliance % (A3 — paydaya yalnız set'li alanları al)
+  const slaResolutionCompliancePct = totals.resolvedCount > 0
+    ? (totals.slaResolutionCompliantCount / totals.resolvedCount) * 100
+    : null;
+  const slaResponseCompliancePct = totals.responseMetCount > 0
+    ? (totals.slaResponseCompliantCount / totals.responseMetCount) * 100
+    : null;
+
+  return {
+    perAccountCompany,
+    totals: {
+      count: totals.count,
+      resolvedCount: totals.resolvedCount,
+      avgResolutionMinutes,
+      slaResolutionCompliantCount: totals.slaResolutionCompliantCount,
+      slaResponseCompliantCount: totals.slaResponseCompliantCount,
+      responseMetCount: totals.responseMetCount,
+      slaResolutionCompliancePct,
+      slaResponseCompliancePct,
+    },
+  };
+}
+
+function emptyAccountTotals() {
+  return {
+    count: 0,
+    resolvedCount: 0,
+    avgResolutionMinutes: null,
+    slaResolutionCompliantCount: 0,
+    slaResponseCompliantCount: 0,
+    responseMetCount: 0,
+    slaResolutionCompliancePct: null,
+    slaResponseCompliancePct: null,
+  };
 }
 
 // ---------- yardimcilar ----------

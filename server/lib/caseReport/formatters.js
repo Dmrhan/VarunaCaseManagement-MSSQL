@@ -80,12 +80,28 @@ const CUSTOMER_TYPE_LABELS = {
 // CaseRequestType: DB'de toDb ile ASCII normalize edilmiş (Oneri/Sikayet)
 // — frontend'in TR'sine geri çevir. Hem ASCII hem TR varyantı map'liyoruz
 // (defansif: ileride farklı yoldan gelirse de doğru çalışır).
-const REQUEST_TYPE_LABELS = {
+//
+// Aylık Bülten Faz A — A1 — EXPORT'a çevrildi (önceden module-local idi).
+// Bülten "Tip" panosunda (Soru/Talep/Hata/Şikayet) frontend bu map'ten
+// TR label çeker; aynı kaynak hem report studio hem bülten için.
+export const REQUEST_TYPE_LABELS = {
   Bilgi:    'Bilgi',
   Oneri:    'Öneri',  Öneri:   'Öneri',
   Talep:    'Talep',
   Sikayet:  'Şikayet', Şikayet: 'Şikayet',
   Hata:     'Hata',
+};
+
+// CaseOrigin: enumMap M_ORIGIN (Telefon/Eposta/Web/Chatbot/Diger) →
+// frontend TR. ASCII ve TR varyantı (Eposta/E-posta) ikisi de map'li.
+//
+// Aylık Bülten Faz A — A1 yeni map. Bülten "Kanal" panosu için.
+export const ORIGIN_LABELS = {
+  Telefon:  'Telefon',
+  Eposta:   'E-posta',  'E-posta': 'E-posta',
+  Web:      'Web',
+  Chatbot:  'Chatbot',
+  Diger:    'Diğer',    Diğer:    'Diğer',
 };
 
 // CallOutcome: DB'de toDb ile ASCII normalize (MemnunDegil/Tarafsiz/
@@ -106,6 +122,7 @@ const ENUM_MAPS = {
   solutionStepSource: SOLUTION_STEP_SOURCE_LABELS,
   customerType: CUSTOMER_TYPE_LABELS,
   caseRequestType: REQUEST_TYPE_LABELS,
+  caseOrigin: ORIGIN_LABELS,
   callOutcome: CALL_OUTCOME_LABELS,
 };
 
