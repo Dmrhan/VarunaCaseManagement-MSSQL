@@ -19,7 +19,8 @@ import {
   sourceProjectIdField,
 } from './_shared.js';
 
-export const ACCOUNT_PROJECT_VERSION = '2026-06-03.accountProject.v3';
+// Faz B-temel — version bump (anaFirmaKey field eklendi)
+export const ACCOUNT_PROJECT_VERSION = '2026-06-30.accountProject.v4';
 
 export const ACCOUNT_PROJECT_FIELDS = [
   recordNoField({
@@ -44,6 +45,44 @@ export const ACCOUNT_PROJECT_FIELDS = [
     pii: false,
     createAllowed: true,
     updateAllowed: false,
+    warningIfMissing: null,
+    normalize(raw) {
+      return normalizeText(raw, { max: 80 });
+    },
+  },
+  {
+    // Faz B-temel (2026-06-30) — Ana Firma (Merkez Müşteri) bağı.
+    //
+    // Resolver paterni: accountKey ile aynı. Import sırasında bu değer
+    // VKN (veya başka unique key) ile Account.vkn eşleşmesinden Account.id
+    // çözülür. Çözümlenen Account'ın customerRole='Central' olduğunu
+    // import-worker katmanı doğrular (bu schema sadece field tanımı).
+    //
+    // Cross-tenant guard: import-worker target tenant'taki AccountCompany
+    // ile aynı tenant'a bağlı olduğunu doğrular (accountRepository'deki
+    // validateAnaFirma mantığı ile aynı).
+    //
+    // Boş bırakılabilir — mevcut projeler ana-firmasız kalır.
+    key: 'anaFirmaKey',
+    label: 'Ana Firma Anahtarı',
+    description: 'Bu projenin bağlı olduğu Ana Firma (Merkez Müşteri) Account\'unu belirleyen anahtar (genellikle VKN). Account "Müşteri Türü = Merkez Müşteri" rolünde olmalı. Boş bırakılabilir.',
+    example: '1234567890',
+    group: 'İlişki',
+    type: 'text',
+    required: false,
+    aliases: [
+      'anafirmakey', 'ana firma anahtarı', 'ana firma vkn', 'ana firma',
+      // n4b varyantları
+      'merkez müşteri', 'merkez musteri', 'merkez musteri vkn',
+      'parent customer vkn', 'main customer',
+    ],
+    validationHint: 'Müşteri Türü="Merkez Müşteri" olan bir Account.vkn eşleşmeli.',
+    normalizationHint: 'Trim; uzunluk 80 karakter.',
+    businessWarning: 'Bilinmeyen anahtar → projenin ana-firma bağı NULL olur (warning).',
+    sensitive: false,
+    pii: false,
+    createAllowed: true,
+    updateAllowed: true, // Faz B-temel — sonradan eklenebilir
     warningIfMissing: null,
     normalize(raw) {
       return normalizeText(raw, { max: 80 });

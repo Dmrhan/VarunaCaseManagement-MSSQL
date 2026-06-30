@@ -715,6 +715,26 @@ model Account {
   isActive         Boolean  @default(true)
   /// WR-A1 / PM-01 — Müşteri tipi (B2B/B2C ayırımı). Mevcut hesaplar Corporate default ile gelir.
   customerType     String   @default("Corporate") @db.NVarChar(50) // enum:CustomerType
+  /// Faz B-temel (2026-06-30) — Müşteri Türü (rol/ilişki sınıfı), Univera-FMCG iş modeli.
+  ///
+  /// customerType (LEGAL tip) ile FARKLI alan; UI'da yan yana gösterilir:
+  ///   - customerType (Müşteri Tipi)   = yasal/tüzel sınıf (Kurumsal/Bireysel/Kamu/Vakıf)
+  ///   - customerRole (Müşteri Türü)   = bizimle çalışma rolü
+  ///
+  /// 6 değer (n4b parite — ASCII normalize):
+  ///   Merkez Müşteri      → Central
+  ///   Distribütör/Bayi    → Distributor
+  ///   Bölge Müdürlüğü     → RegionalOffice
+  ///   Kanal/Çözüm Ortağı  → ChannelPartner
+  ///   Yurt Dışı           → International
+  ///   Stokbar             → Stockbar
+  ///
+  /// Nullable — mevcut Account'lar boş kalır; admin sonra doldurur.
+  ///
+  /// Faz B bülteni: AccountProject.anaFirmaAccountId yalnız customerRole='Central'
+  /// olan account'lara işaret eder. Rol değişiminde bağlı proje koruması var
+  /// (app-layer WARN; silent cascade-null YASAK).
+  customerRole     String?  @db.NVarChar(50) // enum:CustomerRole
   /// Kurumsal müşterinin tam ticari unvanı (opsiyonel). Bireysel için tipik olarak NULL.
   legalName        String?  @db.NVarChar(Max)
   /// Ticaret sicil no veya muadili (opsiyonel). Bireysel için tipik olarak NULL.
@@ -740,10 +760,15 @@ model Account {
   addresses             Address[]
   /// Mail M2.3 — Bu account'a öğrenilmiş sender eşlemeleri.
   learnedSenderAccounts LearnedSenderAccount[]
+  /// Faz B-temel — Bu Merkez Müşteri'nin (Nestlé vb.) ana firma olarak
+  /// işaret edildiği projeler (bayilerin projeleri). customerRole='Central'
+  /// olmayanlar için bu liste boş kalır.
+  anaFirmaProjects      AccountProject[]       @relation("AccountProjectAnaFirma")
 
   @@index([companyId])
   @@index([name])
   @@index([customerType])
+  @@index([customerRole])
   @@index([phoneE164])
   @@index([phone2E164])
   @@index([phone3E164])
@@ -816,30 +841,48 @@ model AccountCompany {
 /// CompanySettings.projectsEnabled flag'i (default false) tenant başına opt-in;
 /// projectsRequired (default false) Case create'te projectId'yi zorunlu yapar.
 model AccountProject {
-  id               String    @id @default(cuid()) @db.NVarChar(450)
-  accountCompanyId String    @db.NVarChar(450)
+  id                String    @id @default(cuid()) @db.NVarChar(450)
+  accountCompanyId  String    @db.NVarChar(450)
   /// Tenant-içi unique kod (AccountCompany scope'unda). Örn "ROTA-2026".
-  code             String    @db.NVarChar(255)
-  name             String    @db.NVarChar(Max)
-  status           String    @default("Active") @db.NVarChar(50) // enum:ProjectStatus
-  startDate        DateTime?
-  endDate          DateTime?
-  description      String?   @db.NVarChar(Max)
-  isActive         Boolean   @default(true)
+  code              String    @db.NVarChar(255)
+  name              String    @db.NVarChar(Max)
+  status            String    @default("Active") @db.NVarChar(50) // enum:ProjectStatus
+  startDate         DateTime?
+  endDate           DateTime?
+  description       String?   @db.NVarChar(Max)
+  isActive          Boolean   @default(true)
   /// Persistent source-of-truth id from the external ERP/CRM. Optional.
   /// Customer 360 re-imports use (accountCompanyId, sourceExternalId) to
   /// update the same Project row instead of creating a duplicate.
-  sourceExternalId String?   @db.NVarChar(450)
-  createdAt        DateTime  @default(dbgenerated("sysutcdatetime()"))
-  updatedAt        DateTime  @updatedAt
+  sourceExternalId  String?   @db.NVarChar(450)
+  /// Faz B-temel (2026-06-30) — Ana firma (Merkez Müşteri) referansı.
+  ///
+  /// Univera-FMCG iş modeli: bir bayinin (AccountCompany üzerinden) projesi,
+  /// hangi ana firmaya (Nestlé/Mondelez/JTI...) ait olduğunu BURADA YAPISAL
+  /// taşır. Nullable — mevcut projeler boş kalır.
+  ///
+  /// Sadece Account.customerRole='Central' olan account'lar burada
+  /// referans edilebilir (app-layer guard, repo'da enforce).
+  ///
+  /// Cross-tenant guard: anaFirma.accountCompanies içinde bayi'nin
+  /// accountCompany.companyId'sine eşleşen bir kayıt olmalı (aynı tenant).
+  ///
+  /// FK: Account silindiğinde NO ACTION (MSSQL multi-cascade engelleme —
+  /// Account→AccountCompany→AccountProject zaten cascade path; ek cascade
+  /// SQL'de "multiple cascade paths" hatası verir).
+  anaFirmaAccountId String?   @db.NVarChar(450)
+  createdAt         DateTime  @default(dbgenerated("sysutcdatetime()"))
+  updatedAt         DateTime  @updatedAt
 
   accountCompany AccountCompany @relation(fields: [accountCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  anaFirma       Account?       @relation("AccountProjectAnaFirma", fields: [anaFirmaAccountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   cases          Case[]
 
   @@unique([accountCompanyId, code])
   @@index([accountCompanyId])
   @@index([accountCompanyId, isActive])
   @@index([accountCompanyId, sourceExternalId])
+  @@index([anaFirmaAccountId])
 }
 
 // AccountProduct — Müşterinin bir şirketteki kullandığı ürün/servis listesi.

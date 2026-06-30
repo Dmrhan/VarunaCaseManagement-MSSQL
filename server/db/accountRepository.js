@@ -1,5 +1,5 @@
 import { prisma } from './client.js';
-import { CUSTOMER_TYPE_VALUES } from './enumMap.js';
+import { CUSTOMER_TYPE_VALUES, CUSTOMER_ROLE_VALUES } from './enumMap.js';
 // WR-A2 — Validation + privacy helpers.
 import {
   validateVkn,
@@ -76,6 +76,29 @@ function normalizeCustomerType(value) {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value !== 'string' || !CUSTOMER_TYPE_VALUES.includes(value)) {
     throw new AccountValidationError('Geçersiz müşteri tipi.', { code: 'invalid_customer_type' });
+  }
+  return value;
+}
+
+/**
+ * Faz B-temel — customerRole (Müşteri Türü) normalize.
+ *
+ * customerType ile FARKLI alan. ASCII identifier doğrudan kabul edilir
+ * (UI dropdown'da TR→ASCII map'i frontend tarafında yapılır; n4b parite).
+ *
+ * Davranış:
+ *   - undefined/null/'' → undefined (caller dokunmaz, mevcut değer korunur)
+ *   - 'CLEAR' → null (UI explicit "rolü temizle")
+ *   - 6 enum değer dışında → throw
+ *
+ * @param {string|null|undefined} value
+ * @returns {string|null|undefined}
+ */
+function normalizeCustomerRole(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === 'CLEAR') return null;
+  if (typeof value !== 'string' || !CUSTOMER_ROLE_VALUES.includes(value)) {
+    throw new AccountValidationError('Geçersiz müşteri türü (rol).', { code: 'invalid_customer_role' });
   }
   return value;
 }
@@ -170,6 +193,7 @@ function shapeAccountRow(account, { caseAggregates }) {
     isActive: account.isActive,
     // WR-A1 / PM-01 — Müşteri tipi + opsiyonel ticari unvan/sicil no.
     customerType: account.customerType,
+    customerRole: account.customerRole ?? null, // Faz B-temel
     legalName: account.legalName ?? null,
     registrationNo: account.registrationNo ?? null,
     taxOffice: account.taxOffice ?? null,
@@ -362,6 +386,7 @@ export async function listAccounts({
         isActive: true,
         // WR-A1
         customerType: true,
+        customerRole: true, // Faz B-temel
         legalName: true,
         registrationNo: true,
         taxOffice: true,
@@ -543,6 +568,9 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
               startDate: true,
               endDate: true,
               description: true,
+              // Faz B-temel — Ana firma referansı (nullable)
+              anaFirmaAccountId: true,
+              anaFirma: { select: { id: true, name: true } },
             },
             orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
           },
@@ -662,6 +690,7 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
     createdAt: account.createdAt,
     // WR-A1 / PM-01 — Müşteri tipi + (opsiyonel) ticari unvan/sicil no.
     customerType: account.customerType,
+    customerRole: account.customerRole ?? null, // Faz B-temel
     // WR-A2 — TCKN maskeli display only; tcknHash response'a girmez.
     tcknMasked: maskTcknLast4(account.tcknLast4),
     legalName: account.legalName ?? null,
@@ -725,6 +754,9 @@ export async function getAccount(accountId, { allowedCompanyIds }) {
         startDate: p.startDate,
         endDate: p.endDate,
         description: p.description ?? null,
+        // Faz B-temel — Ana firma (Merkez Müşteri) bağı
+        anaFirmaAccountId: p.anaFirmaAccountId ?? null,
+        anaFirmaName: p.anaFirma?.name ?? null,
       })),
     })),
     contacts: account.contacts,
@@ -852,6 +884,10 @@ export async function createAccount({ data, user }) {
 
   // WR-A1: customerType (default Corporate), legalName, registrationNo. TCKN burada YOK.
   const customerType = normalizeCustomerType(data?.customerType) ?? 'Corporate';
+  // Faz B-temel — customerRole (Müşteri Türü, n4b parite). Nullable;
+  // boş bırakılırsa default YOK (admin sonra doldurur). Throws if invalid.
+  const customerRoleRaw = normalizeCustomerRole(data?.customerRole);
+  const customerRole = customerRoleRaw === undefined ? null : customerRoleRaw;
   const legalName =
     typeof data?.legalName === 'string' && data.legalName.trim() ? data.legalName.trim() : null;
   const registrationNo =
@@ -955,6 +991,7 @@ export async function createAccount({ data, user }) {
         primaryPhoneSlot,
         email: data?.email ?? null,
         customerType,
+        customerRole, // Faz B-temel — Müşteri Türü (rol); nullable
         legalName,
         registrationNo,
         taxOffice,
@@ -1009,6 +1046,69 @@ export async function createAccount({ data, user }) {
 export async function updateAccount({ accountId, data, user }) {
   const scope = await assertAccountInScope(accountId, user.allowedCompanyIds);
   if (!scope) return null;
+
+  // Faz B-temel — CR karar #5: customerRole downgrade WARN guard.
+  // Bir Account 'Central' (Merkez Müşteri) iken başka role indirilirse
+  // bağlı AccountProject.anaFirmaAccountId kayıtları YETİM kalır
+  // (Faz B bültenleri hatalı). Silent cascade-null YASAK; explicit onay
+  // şart.
+  //
+  // Akış:
+  //  1. Mevcut customerRole='Central' + patch farklı role çekiyor
+  //  2. acknowledgedRoleDowngrade flag yoksa 409 atar +
+  //     impact.boundProjectCount frontend'e döner
+  //  3. Frontend modal: "Bu account 3 projenin ana firması; rol değişiyor →
+  //     o projelerin ana firması NULL olur. Onaylıyor musun?"
+  //  4. Onay → tekrar PATCH acknowledgedRoleDowngrade=true ile
+  //     Repo NULL'a düşürme YAPMAZ; bağlı projeler anaFirma=NULL hâlinde
+  //     KALIR (kullanıcı sonra manuel bağ kurar).
+  if (data?.customerRole !== undefined && data.customerRole !== 'CLEAR') {
+    const cr = normalizeCustomerRole(data.customerRole);
+    if (cr !== undefined && cr !== null) {
+      const current = await prisma.account.findUnique({
+        where: { id: accountId },
+        select: { customerRole: true },
+      });
+      if (current?.customerRole === 'Central' && cr !== 'Central') {
+        const boundProjectCount = await prisma.accountProject.count({
+          where: { anaFirmaAccountId: accountId },
+        });
+        if (boundProjectCount > 0 && !data?.acknowledgedRoleDowngrade) {
+          throw new AccountValidationError(
+            `Bu müşteri ${boundProjectCount} projenin ana firmasıdır. Rolü değiştirirseniz o projelerin ana firma bağı kopar (NULL olur). Onaylıyor musunuz?`,
+            {
+              status: 409,
+              code: 'customer_role_downgrade_requires_ack',
+              impact: { boundProjectCount },
+            },
+          );
+        }
+      }
+    }
+  }
+  // Aynı kontrol explicit clear (CLEAR sentinel) için de geçerli — Central
+  // → null da downgrade.
+  if (data?.customerRole === 'CLEAR') {
+    const current = await prisma.account.findUnique({
+      where: { id: accountId },
+      select: { customerRole: true },
+    });
+    if (current?.customerRole === 'Central') {
+      const boundProjectCount = await prisma.accountProject.count({
+        where: { anaFirmaAccountId: accountId },
+      });
+      if (boundProjectCount > 0 && !data?.acknowledgedRoleDowngrade) {
+        throw new AccountValidationError(
+          `Bu müşteri ${boundProjectCount} projenin ana firmasıdır. Rolü temizlerseniz o projelerin ana firma bağı kopar (NULL olur). Onaylıyor musunuz?`,
+          {
+            status: 409,
+            code: 'customer_role_downgrade_requires_ack',
+            impact: { boundProjectCount },
+          },
+        );
+      }
+    }
+  }
 
   const patch = {};
   if (typeof data?.name === 'string') {
@@ -1106,6 +1206,26 @@ export async function updateAccount({ accountId, data, user }) {
   if (data?.customerType !== undefined) {
     const ct = normalizeCustomerType(data.customerType);
     if (ct) patch.customerType = ct;
+  }
+  // Faz B-temel — customerRole (Müşteri Türü) PATCH.
+  // CR karar #5: Bir Central account başka role indirilirse → bağlı proje
+  // sayısını göster + EXPLICIT ONAY iste. Silent cascade-null YASAK.
+  //
+  // Bu repo katmanında SADECE alanı patch'le. Onay/WARN kontrolü çağıran
+  // route layer'da (PATCH /accounts/:id endpoint'i + frontend modal) +
+  // ekstra helper `getCustomerRoleChangeImpact` (aşağıda) yapılır.
+  //
+  // Burada defansif kontrol: eğer patch'te customerRole'ü Central'dan
+  // başka değere değiştiriyor + acknowledgedRoleDowngrade flag YOK ise
+  // 409 atar. Frontend bilerek geçer.
+  if (data?.customerRole !== undefined) {
+    const cr = normalizeCustomerRole(data.customerRole);
+    if (cr === null) {
+      // Explicit clear (CLEAR sentinel)
+      patch.customerRole = null;
+    } else if (cr !== undefined) {
+      patch.customerRole = cr;
+    }
   }
   if (data?.legalName !== undefined) {
     patch.legalName =
@@ -1992,6 +2112,66 @@ export async function removeProduct({ accountId, productId, user }) {
 const VALID_PROJECT_STATUSES = new Set(['Active', 'Passive', 'Completed', 'Cancelled']);
 
 /**
+ * Faz B-temel — AccountProject.anaFirmaAccountId guard.
+ *
+ * 3-katmanlı validation:
+ *   1. Account exists (404 not_found)
+ *   2. Account.customerRole='Central' (409 not_central — Merkez Müşteri
+ *      olmayan bir hesap ana firma seçilemez)
+ *   3. Cross-tenant scope: anaFirma'nın accountCompanies içinde proje
+ *      bayisinin (target AccountCompany'nin) companyId'sine eşleşen kayıt
+ *      olmalı (403 out_of_scope — başka tenant'ın Central account'una
+ *      bağlanamaz)
+ *
+ * Aynı tenant kontrolü için ayrı bir `targetCompanyId` parametresi
+ * verilmesi şarttır (proje hangi AccountCompany'nin altında oluşacak →
+ * onun companyId'si).
+ *
+ * @param {string} anaFirmaAccountId — Ana firma Account.id
+ * @param {string} targetCompanyId — Proje'nin AccountCompany.companyId'si
+ * @returns {Promise<{ ok: true } | { ok: false, code, status, message }>}
+ */
+async function validateAnaFirma(anaFirmaAccountId, targetCompanyId) {
+  if (!anaFirmaAccountId) return { ok: true }; // null → OK (opsiyonel)
+
+  const anaFirma = await prisma.account.findUnique({
+    where: { id: anaFirmaAccountId },
+    select: {
+      id: true,
+      customerRole: true,
+      companies: { select: { companyId: true } },
+    },
+  });
+  if (!anaFirma) {
+    return {
+      ok: false,
+      code: 'ana_firma_not_found',
+      status: 404,
+      message: 'Seçilen ana firma bulunamadı.',
+    };
+  }
+  if (anaFirma.customerRole !== 'Central') {
+    return {
+      ok: false,
+      code: 'ana_firma_not_central',
+      status: 409,
+      message: 'Seçilen hesap "Merkez Müşteri" rolünde değil; ana firma olarak seçilemez.',
+    };
+  }
+  // Cross-tenant — anaFirma aynı tenant'a bağlı olmalı.
+  const sameTenant = anaFirma.companies.some((c) => c.companyId === targetCompanyId);
+  if (!sameTenant) {
+    return {
+      ok: false,
+      code: 'ana_firma_out_of_scope',
+      status: 403,
+      message: 'Ana firma bu şirkete bağlı değil. (Cross-tenant engellendi)',
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Bir AccountProject'a yazma yetkisi: bağlı AccountCompany'nin companyId'si
  * kullanıcının yazma kapsamında olmalı (SystemAdmin tüm şirketler).
  */
@@ -2054,6 +2234,15 @@ export async function addProject({ accountId, accountCompanyId, data, user }) {
     throw new AccountValidationError('Geçersiz proje statüsü.');
   }
 
+  // Faz B-temel — anaFirmaAccountId (opsiyonel). 3-katmanlı guard.
+  const anaFirmaAccountId = data?.anaFirmaAccountId ?? null;
+  if (anaFirmaAccountId) {
+    const v = await validateAnaFirma(anaFirmaAccountId, ac.companyId);
+    if (!v.ok) {
+      throw new AccountValidationError(v.message, { status: v.status, code: v.code });
+    }
+  }
+
   try {
     const created = await prisma.accountProject.create({
       data: {
@@ -2065,6 +2254,7 @@ export async function addProject({ accountId, accountCompanyId, data, user }) {
         endDate: data?.endDate ? new Date(data.endDate) : null,
         description: data?.description ?? null,
         isActive: data?.isActive === undefined ? true : !!data.isActive,
+        anaFirmaAccountId, // Faz B-temel
       },
       select: { id: true },
     });
@@ -2116,6 +2306,28 @@ export async function updateProject({ accountId, projectId, data, user }) {
   if (data?.description !== undefined) patch.description = data.description || null;
   if (data?.isActive !== undefined) patch.isActive = !!data.isActive;
 
+  // Faz B-temel — anaFirmaAccountId PATCH.
+  // null → bağı temizle (allowed)
+  // string → 3-katmanlı guard (validateAnaFirma)
+  if (data?.anaFirmaAccountId !== undefined) {
+    if (data.anaFirmaAccountId === null || data.anaFirmaAccountId === '') {
+      patch.anaFirmaAccountId = null;
+    } else {
+      // Project'in target companyId'sini bul (loadEditableProject zaten
+      // accountCompany.companyId döndürüyor; gerekli ek lookup).
+      const projectFull = await prisma.accountProject.findUnique({
+        where: { id: projectId },
+        select: { accountCompany: { select: { companyId: true } } },
+      });
+      const targetCompanyId = projectFull?.accountCompany?.companyId;
+      const v = await validateAnaFirma(data.anaFirmaAccountId, targetCompanyId);
+      if (!v.ok) {
+        throw new AccountValidationError(v.message, { status: v.status, code: v.code });
+      }
+      patch.anaFirmaAccountId = data.anaFirmaAccountId;
+    }
+  }
+
   if (Object.keys(patch).length === 0) return { id: projectId };
 
   try {
@@ -2130,6 +2342,85 @@ export async function updateProject({ accountId, projectId, data, user }) {
     throw err;
   }
   return { id: projectId };
+}
+
+/**
+ * Faz B-temel — Listele "Merkez Müşteri" rolündeki account'lar
+ * (AccountProject editor "Ana Firma" dropdown).
+ *
+ * Cross-tenant scope guard:
+ *   - SystemAdmin: tüm şirketlerin Central account'ları
+ *   - Diğer: user.allowedCompanyIds dışındaki Central account'lar HARİÇ
+ *     (AccountCompany ilişkisi en az biri user scope'unda olmalı)
+ *
+ * @param {Object} params
+ * @param {Object} params.user — { role, allowedCompanyIds }
+ * @param {string} [params.targetCompanyId] — Belirli bir tenant filter
+ *   (proje editör için: yalnız o tenant'a bağlı Central account'lar). Boş
+ *   ise user.allowedCompanyIds'in tamamı kapsamlı.
+ * @returns {Promise<Array<{id, name, vkn}>>}
+ */
+/**
+ * Faz B-temel — listCentralAccounts SCOPE KARARI helper (pure).
+ *
+ * DB-bağımsız davranış testi için ayrı export edildi. Cross-tenant denial
+ * smoke (CR zorunlu test) bu fonksiyon üzerinden mantığı çalıştırır:
+ *   - SystemAdmin: tüm aktif şirketler (companyIdsToConsider = null)
+ *   - Diğer + targetCompanyId verildi + user erişimi YOK → DENY (deny=true)
+ *   - Diğer + targetCompanyId verildi + user erişimi var → o tek tenant
+ *   - Diğer + targetCompanyId verilmedi → allowed listesi (boşsa DENY)
+ *
+ * @returns {{ deny: true } | { deny: false, companyIdsToConsider: string[] | null }}
+ *   deny=true → caller hemen boş liste döner (cross-tenant engellendi)
+ *   companyIdsToConsider=null → SystemAdmin, filtre yok (tüm şirketler)
+ *   companyIdsToConsider=[...] → Prisma where.companies.some filter
+ */
+export function decideCentralListScope({ user, targetCompanyId = null }) {
+  const isSystemAdmin = user?.role === 'SystemAdmin';
+  const allowed = ensureArray(user?.allowedCompanyIds);
+
+  if (targetCompanyId) {
+    if (!isSystemAdmin && !allowed.includes(targetCompanyId)) {
+      // CROSS-TENANT DENY — user'ın bu tenant'a erişimi yok
+      return { deny: true };
+    }
+    return { deny: false, companyIdsToConsider: [targetCompanyId] };
+  }
+  // targetCompanyId yok
+  if (isSystemAdmin) {
+    return { deny: false, companyIdsToConsider: null }; // tüm şirketler
+  }
+  if (allowed.length === 0) {
+    return { deny: true };
+  }
+  return { deny: false, companyIdsToConsider: allowed };
+}
+
+export async function listCentralAccounts({ user, targetCompanyId = null }) {
+  const decision = decideCentralListScope({ user, targetCompanyId });
+  if (decision.deny) return [];
+
+  const where = {
+    customerRole: 'Central',
+    isActive: true,
+  };
+  if (decision.companyIdsToConsider !== null) {
+    where.companies = {
+      some: { companyId: { in: decision.companyIdsToConsider } },
+    };
+  }
+
+  const accounts = await prisma.account.findMany({
+    where,
+    select: { id: true, name: true, vkn: true },
+    orderBy: { name: 'asc' },
+    take: 500, // defansif üst sınır
+  });
+  return accounts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    vkn: a.vkn ? maskVkn(a.vkn) : null,
+  }));
 }
 
 /**
@@ -2494,6 +2785,8 @@ export const accountRepository = {
   addProject,
   updateProject,
   removeProject,
+  // Faz B-temel — AccountProject editor "Ana Firma" dropdown
+  listCentralAccounts,
   // WR-A3 / PM-02 — Address CRUD
   addAddress,
   updateAddress,

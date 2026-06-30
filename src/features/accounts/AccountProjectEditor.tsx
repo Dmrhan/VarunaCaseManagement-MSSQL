@@ -12,6 +12,7 @@ import {
   type AccountDetail,
   type AccountProjectMutationInput,
   type AccountProjectSummary,
+  type CentralAccountRow,
   type ProjectStatus,
 } from '@/services/accountService';
 
@@ -60,6 +61,10 @@ export function AccountProjectEditor({
   const [endDate, setEndDate] = useState('');
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
+  // Faz B-temel — Ana Firma (Merkez Müşteri) seçimi
+  const [anaFirmaAccountId, setAnaFirmaAccountId] = useState<string>('');
+  const [centralAccounts, setCentralAccounts] = useState<CentralAccountRow[]>([]);
+  const [centralLoading, setCentralLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -76,6 +81,7 @@ export function AccountProjectEditor({
       setEndDate(toDateInput(project.endDate));
       setDescription(project.description ?? '');
       setIsActive(project.isActive);
+      setAnaFirmaAccountId(project.anaFirmaAccountId ?? '');
     } else {
       const defaultAcId =
         visibleCompanies.length === 1 ? visibleCompanies[0].accountCompanyId : '';
@@ -87,6 +93,7 @@ export function AccountProjectEditor({
       setEndDate('');
       setDescription('');
       setIsActive(true);
+      setAnaFirmaAccountId('');
     }
   }, [open, mode, project, editAccountCompanyId, visibleCompanies]);
 
@@ -94,6 +101,24 @@ export function AccountProjectEditor({
     () => visibleCompanies.find((c) => c.accountCompanyId === accountCompanyId) ?? null,
     [visibleCompanies, accountCompanyId],
   );
+
+  // Faz B-temel — Ana Firma dropdown'unu seçilen şirketin tenant'ına göre yükle.
+  // companyId'si değişince central account listesi yenilenir (cross-tenant
+  // koruması: backend sadece user'ın bu tenant'a erişimi varsa döner).
+  useEffect(() => {
+    if (!open || !selectedCompany?.companyId) {
+      setCentralAccounts([]);
+      return;
+    }
+    let cancelled = false;
+    setCentralLoading(true);
+    accountService.listCentral(selectedCompany.companyId).then((rows) => {
+      if (cancelled) return;
+      setCentralAccounts(rows);
+      setCentralLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [open, selectedCompany?.companyId]);
 
   function validate(): boolean {
     const errs: Record<string, string> = {};
@@ -122,6 +147,7 @@ export function AccountProjectEditor({
         endDate: endDate || null,
         description: description.trim() || null,
         isActive,
+        anaFirmaAccountId: anaFirmaAccountId || null, // Faz B-temel
       };
       const result = await accountService.addProject(accountId, accountCompanyId, body);
       updated = result?.account;
@@ -135,6 +161,7 @@ export function AccountProjectEditor({
         endDate: endDate || null,
         description: description.trim() || null,
         isActive,
+        anaFirmaAccountId: anaFirmaAccountId || null, // Faz B-temel
       };
       const result = await accountService.updateProject(accountId, project.id, body);
       updated = result?.account;
@@ -269,6 +296,35 @@ export function AccountProjectEditor({
             />
           </Field>
         </div>
+
+        {/* Faz B-temel — Ana Firma (Merkez Müşteri) seçimi.
+            customerRole='Central' olan ve aynı tenant'a bağlı account'lar
+            dropdown'da listelenir. Cross-tenant koruma backend'de. */}
+        <Field
+          label="Ana Firma"
+          hint={
+            !selectedCompany
+              ? 'Önce şirket seçin.'
+              : centralLoading
+                ? 'Yükleniyor…'
+                : centralAccounts.length === 0
+                  ? 'Bu şirkette "Merkez Müşteri" rolünde account yok. Müşteri kartından rolü işaretleyin.'
+                  : 'Bu projenin bağlı olduğu ana firma (Nestlé, JTI gibi). Bayinin kendi projeleri için ana firmadır; raporlama bu bağ üzerinden çalışır.'
+          }
+        >
+          <Select
+            value={anaFirmaAccountId}
+            onChange={(e) => setAnaFirmaAccountId(e.target.value)}
+            disabled={!selectedCompany || centralLoading}
+          >
+            <option value="">— Ana firma yok / belirtilmemiş —</option>
+            {centralAccounts.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name}{row.vkn ? ` (${row.vkn})` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
         <Field label="Açıklama" hint="Opsiyonel">
           <TextArea

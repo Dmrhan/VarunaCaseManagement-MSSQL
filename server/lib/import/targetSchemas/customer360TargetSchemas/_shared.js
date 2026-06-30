@@ -9,7 +9,7 @@ import {
   validateVkn,
   normalizePhoneE164,
 } from '../../../../utils/accountValidation.js';
-import { CUSTOMER_TYPE_VALUES } from '../../../../db/enumMap.js';
+import { CUSTOMER_TYPE_VALUES, CUSTOMER_ROLE_VALUES } from '../../../../db/enumMap.js';
 
 export const PROJECT_STATUS_VALUES = ['Active', 'Passive', 'Completed', 'Cancelled'];
 export const ADDRESS_TYPE_VALUES = ['Billing', 'Shipping', 'Visit', 'Headquarters', 'Branch'];
@@ -30,6 +30,43 @@ const CUSTOMER_TYPE_LABEL_MAP = {
   vakif: 'NonProfit',
   vakıf: 'NonProfit',
   stk: 'NonProfit',
+};
+
+// Faz B-temel — customerRole (Müşteri Türü) import normalize. n4b parite 6 değer.
+// Hem ASCII identifier hem TR label (lowercase) kabul edilir (defansif).
+const CUSTOMER_ROLE_LABEL_MAP = {
+  // ASCII identifier'lar (case-insensitive)
+  central: 'Central',
+  distributor: 'Distributor',
+  regionaloffice: 'RegionalOffice',
+  channelpartner: 'ChannelPartner',
+  international: 'International',
+  stockbar: 'Stockbar',
+  // TR varyantlar
+  'merkez müşteri': 'Central',
+  'merkez musteri': 'Central',
+  merkez: 'Central',
+  'distribütör/bayi': 'Distributor',
+  'distribütor/bayi': 'Distributor',
+  'distributor/bayi': 'Distributor',
+  distribütör: 'Distributor',
+  distribütor: 'Distributor',
+  bayi: 'Distributor',
+  'bölge müdürlüğü': 'RegionalOffice',
+  'bolge müdürlüğü': 'RegionalOffice',
+  'bolge mudurlugu': 'RegionalOffice',
+  bölge: 'RegionalOffice',
+  bolge: 'RegionalOffice',
+  'kanal/çözüm ortağı': 'ChannelPartner',
+  'kanal/cozum ortagi': 'ChannelPartner',
+  'çözüm ortağı': 'ChannelPartner',
+  'cozum ortagi': 'ChannelPartner',
+  kanal: 'ChannelPartner',
+  'yurt dışı': 'International',
+  'yurt disi': 'International',
+  'yurtdışı': 'International',
+  'yurtdisi': 'International',
+  stokbar: 'Stockbar',
 };
 
 const BOOLEAN_TRUE = new Set(['true', '1', 'yes', 'y', 'evet', 'e', 'aktif', 'on']);
@@ -82,6 +119,19 @@ export function normalizeCustomerType(input) {
   const key = s.toLowerCase();
   if (CUSTOMER_TYPE_LABEL_MAP[key]) return CUSTOMER_TYPE_LABEL_MAP[key];
   if (CUSTOMER_TYPE_VALUES.includes(s)) return s;
+  return undefined;
+}
+
+/**
+ * Faz B-temel — Müşteri Türü (rol) import normalize. Aynı paterni mirror.
+ * @returns ASCII identifier | null (boş input) | undefined (bilinmeyen)
+ */
+export function normalizeCustomerRole(input) {
+  const s = asTrimmedString(input);
+  if (!s) return null;
+  const key = s.toLowerCase();
+  if (CUSTOMER_ROLE_LABEL_MAP[key]) return CUSTOMER_ROLE_LABEL_MAP[key];
+  if (CUSTOMER_ROLE_VALUES.includes(s)) return s;
   return undefined;
 }
 
