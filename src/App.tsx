@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -92,7 +92,7 @@ import { authorizationService } from './services/authorizationService';
 import type { EffectiveMenuAccess } from './services/authorizationService';
 import { SmartTicketNewPage } from './features/smart-ticket/SmartTicketNewPage';
 import { accountService } from './services/accountService';
-import { SOFTPHONE_ANSWERED_EVENT } from './contexts/SoftphoneContext';
+import { SOFTPHONE_ANSWERED_EVENT, SOFTPHONE_INCOMING_EVENT, useSoftphone } from './contexts/SoftphoneContext';
 import { CaseTaggingReviewPage } from './features/analytics/CaseTaggingReviewPage';
 
 type View = 'my-home' | 'cases' | 'dashboard' | 'analytics-ai-usage' | 'analytics-patterns' | 'analytics-qa-scores' | 'case-report-studio' | 'monthly-bulletin' | 'root-cause-report' | 'tagging-review' | 'my-calendar' | 'watching' | 'kb-viewer' | 'case-detail' | 'accounts' | 'account-detail' | 'smart-ticket-new' | AdminView;
@@ -152,27 +152,44 @@ export default function App() {
 
   const { theme, toggle: toggleTheme } = useTheme();
 
-  // Gelen çağrı YANITLANDIĞINDA: callerId → müşteri eşleştir → Akıllı Ticket (müşteri ön-seçili).
+  // Gelen çağrıda otomatik screen-pop: callerId → müşteri eşleştir → Akıllı Ticket
+  // (müşteri ön-seçili). Çağrı ÇALMAYA başladığında (inbound) OTOMATİK açılır; agent
+  // banner'daki "Vaka Aç" ile de tetikler. Aynı çağrı için tek sefer (dedup).
+  const lastPoppedCallerRef = useRef<string | null>(null);
   useEffect(() => {
-    const handler = (e: Event) => {
-      const callerId = (e as CustomEvent).detail?.number as string | undefined;
+    const popTicket = (callerId?: string) => {
+      if (!callerId || callerId === 'Bilinmeyen') return;
+      if (lastPoppedCallerRef.current === callerId) return;
+      lastPoppedCallerRef.current = callerId;
       void (async () => {
         let acc: { id: string; name: string } | null = null;
-        if (callerId) {
-          try {
-            const res = await accountService.list({ search: callerId, limit: 1 });
-            const a = res?.accounts?.[0];
-            if (a) acc = { id: a.id, name: a.name };
-          } catch { /* eşleşme yoksa müşterisiz aç */ }
-        }
+        try {
+          const res = await accountService.list({ search: callerId, limit: 1 });
+          const a = res?.accounts?.[0];
+          if (a) acc = { id: a.id, name: a.name };
+        } catch { /* eşleşme yoksa müşterisiz aç */ }
         setSmartTicketAccount(acc);
         setView('smart-ticket-new');
       })();
     };
-    window.addEventListener(SOFTPHONE_ANSWERED_EVENT, handler);
-    return () => window.removeEventListener(SOFTPHONE_ANSWERED_EVENT, handler);
+    const onIncoming = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.inbound) popTicket(d?.number as string | undefined); // yalnız gelen (inbound) çağrı
+    };
+    const onAnswered = (e: Event) => popTicket((e as CustomEvent).detail?.number as string | undefined);
+    window.addEventListener(SOFTPHONE_INCOMING_EVENT, onIncoming);
+    window.addEventListener(SOFTPHONE_ANSWERED_EVENT, onAnswered);
+    return () => {
+      window.removeEventListener(SOFTPHONE_INCOMING_EVENT, onIncoming);
+      window.removeEventListener(SOFTPHONE_ANSWERED_EVENT, onAnswered);
+    };
   }, []);
   const { user, signOut } = useAuth();
+  // Gömülü softphone (sağ-dock) açıkken ana içeriği sağdan 380px daralt →
+  // içerik panelin altında kalmaz, panelin başladığı yerde kesilir.
+  const { dockReserved, incomingCall } = useSoftphone();
+  // Çağrı bitince dedup ref sıfırlanır → aynı numara tekrar arayınca yeniden açılır.
+  useEffect(() => { if (!incomingCall) lastPoppedCallerRef.current = null; }, [incomingCall]);
 
   useHotkey('?', () => setHelpOpen(true));
 
@@ -449,7 +466,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex flex-col bg-slate-50 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'}`}>
+    <div className={`flex flex-col bg-slate-50 transition-[padding] duration-200 dark:bg-ndark-bg ${isFixedHeight ? 'h-screen' : 'min-h-screen'} ${dockReserved ? 'pr-[380px]' : ''}`}>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 dark:border-ndark-border dark:bg-ndark-card">
         <div className="flex items-center gap-3">
           <BrandLogo />

@@ -1,15 +1,13 @@
-// Gelen çağrı banner'ı — ekranın üstünde.
-// embedded (popup): "Cevapla" AloTech softphone penceresini öne getirir (cevaplama
-//   orada yapılır); "Reddet" REST ile çağrıyı kapatır. click2call: bildirim.
-// Her iki modda "Vaka Aç" → callerId ile Akıllı Ticket (müşteri ön-seçili) açar (screen pop).
-// Çağrı yanıtlanınca otomatik tetiklenir (SOFTPHONE_ANSWERED_EVENT).
-import { PhoneIncoming, PhoneOff, X, FilePlus2 } from 'lucide-react';
+// Gelen çağrı banner'ı — ekranın üstünde (screen-pop bildirimi).
+// "Vaka Aç" → callerId ile Akıllı Ticket (müşteri ön-seçili) açar. Çağrıyı cevaplama/
+// reddetme gömülü softphone panelinde (iframe) yapılır. Çağrı yanıtlanınca otomatik
+// tetiklenir (SOFTPHONE_ANSWERED_EVENT).
+import { PhoneIncoming, X, FilePlus2 } from 'lucide-react';
 import { useSoftphone, SOFTPHONE_ANSWERED_EVENT } from '../../contexts/SoftphoneContext';
 
 export function IncomingCallBanner() {
-  const { mode, incomingCall, answerCall, endCall, dismissIncoming } = useSoftphone();
+  const { incomingCall, dismissIncoming } = useSoftphone();
   if (!incomingCall) return null;
-  const isEmbedded = mode === 'embedded';
   const ringing = incomingCall.status === 'ringing';
 
   const openTicket = () => {
@@ -40,33 +38,14 @@ export function IncomingCallBanner() {
         >
           <FilePlus2 className="h-4 w-4" /> Vaka Aç
         </button>
-
-        {isEmbedded ? (
-          <>
-            <button
-              onClick={answerCall}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-              title="AloTech softphone penceresinde cevapla"
-            >
-              <PhoneIncoming className="h-4 w-4" /> Cevapla
-            </button>
-            <button
-              onClick={endCall}
-              className="flex items-center justify-center rounded-lg bg-rose-500 px-3 py-2 text-white hover:bg-rose-600"
-              title="Reddet"
-            >
-              <PhoneOff className="h-4 w-4" />
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={dismissIncoming}
-            className="rounded-lg p-2 text-slate-400 hover:bg-emerald-100 dark:hover:bg-emerald-900"
-            title="Bildirimi kapat"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          onClick={dismissIncoming}
+          className="rounded-lg p-2 text-slate-400 hover:bg-emerald-100 dark:hover:bg-emerald-900"
+          title="Bildirimi kapat"
+          aria-label="Bildirimi kapat"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );

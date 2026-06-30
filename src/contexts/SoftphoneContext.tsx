@@ -1,9 +1,9 @@
 // SoftphoneContext — AloTech softphone, İKİ MOD:
-//  • embedded : AloTech'in KENDİ hosted softphone'unu POPUP olarak açar
+//  • embedded : AloTech'in KENDİ hosted softphone'unu Varuna İÇİNE iframe olarak gömer
 //               (softphone.alo-tech.com/<build>/). WebRTC/SIP/register/usephone'u
-//               AloTech'in sayfası halleder — next4biz ile aynı yöntem. Agent çağrıyı
-//               popup'ta cevaplar; Varuna screen-pop + agent durumu + outbound (click2call) yapar.
-//  • click2call: sunucu-tetikli çaldırma + polling (screen pop). Softphone penceresi açmaz.
+//               AloTech'in sayfası halleder — agent çağrıyı gömülü panelde cevaplar.
+//               Varuna: screen-pop + agent durumu + outbound (click2call).
+//  • click2call: sunucu-tetikli çaldırma + polling (screen pop). Softphone paneli açmaz.
 // Mod: VITE_ALOTECH_SOFTPHONE_MODE — 'popup' (veya geri-uyumlu 'embedded') → softphone
 //   popup; başka her şey (default) → 'click2call'.
 import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -11,7 +11,7 @@ import { useAuth } from '../services/AuthContext';
 import { notify } from '../components/ui/Toast';
 import {
   fetchAgentStatus, callViaClick2Call, hangupCall, fetchActiveCall, setAgentStatusApi,
-  fetchSoftphoneSession, openSoftphonePopup, focusSoftphonePopup,
+  fetchSoftphoneSession, buildSoftphoneIframeUrl,
   getAlotechEmail, setAlotechEmail,
   isAlotechDisabled,
   type AgentStatusValue,
@@ -43,6 +43,8 @@ export interface IncomingCall {
   key: string;
   status: string;
   matchedName?: string;
+  /** Gelen (inbound) çağrı mı — otomatik screen-pop yalnız inbound'da tetiklenir. */
+  inbound: boolean;
 }
 
 interface SoftphoneState {
@@ -58,8 +60,13 @@ interface SoftphoneState {
   refreshStatus: () => Promise<void>;
   dialNumber: (number: string, opts?: { caseId?: string; name?: string }) => Promise<void>;
   answerCall: () => void;
-  /** AloTech hosted softphone popup'ını açar/öne getirir (embedded/popup mod). */
-  openSoftphone: () => void;
+  /** Gömülü softphone iframe'inin src URL'i (embedded mod, hazır olunca dolu). */
+  iframeUrl: string | null;
+  /** Sağ-dock panel gizli mi (kullanıcı küçülttü). */
+  panelCollapsed: boolean;
+  setPanelCollapsed: (v: boolean) => void;
+  /** Embedded panel açık → ana layout sağdan 380px boşluk ayırır (içerik örtülmez). */
+  dockReserved: boolean;
   endCall: () => void;
   toggleMute: () => void;
   toggleHold: () => void;
@@ -82,6 +89,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [muted, setMuted] = useState(false);
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const startedRef = useRef(false);
   const lastIncomingKey = useRef<string | null>(null);
   const dismissedKey = useRef<string | null>(null);
@@ -102,8 +111,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     if (startedRef.current) return;
     // 'disabled' = backend env eksik → tekrar deneme.
     if (status === 'disabled') return;
-    // Agent AloTech e-postası girilmemişse bağlanma — widget'tan girilmesi beklenir.
-    if (!getAlotechEmail()) { setStatus('idle'); return; }
+    // click2call e-posta ister (agent-status için). Embedded (iframe) gerektirmez —
+    // agent iframe'de login olur; backend session'ı ALOTECH_DEV_AGENT_EMAIL fallback'i
+    // ile alır.
+    if (!isEmbedded && !getAlotechEmail()) { setStatus('idle'); return; }
     startedRef.current = true;
     setStatus('connecting');
     setError(null);
@@ -116,9 +127,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           return;
         }
         setAgentEmail(sess.agentEmail);
-        // AloTech'in hosted softphone'unu popup olarak aç (session ile otomatik login
-        // denenir). Çağrı cevaplama + ses kontrolü bu pencerede yapılır.
-        openSoftphonePopup(sess);
+        // Gömülü softphone iframe URL'ini kur (session ile otomatik login denenir).
+        // Çağrı cevaplama + ses kontrolü gömülü panelde yapılır.
+        setIframeUrl(buildSoftphoneIframeUrl(sess));
         setStatus('ready');
       } else {
         const s = await fetchAgentStatus();
@@ -141,7 +152,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   }, [status]);
 
   useEffect(() => {
-    if (user && status === 'idle' && getAlotechEmail()) void connect();
+    // Embedded e-posta gerektirmez (iframe + dev-agent fallback); click2call ister.
+    if (user && status === 'idle' && (isEmbedded || getAlotechEmail())) void connect();
   }, [user, status, connect]);
 
   // Agent softphone'da AloTech e-postasını girer/değiştirir → kalıcı (localStorage)
@@ -196,7 +208,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         const key = src?.key || 'ringing';
         if (key !== dismissedKey.current && key !== lastIncomingKey.current) {
           lastIncomingKey.current = key;
-          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing' };
+          const call: IncomingCall = { number: src?.callerId || 'Bilinmeyen', queue: src?.queue, key, status: 'ringing', inbound: !!inbound };
           setIncomingCall(call);
           window.dispatchEvent(new CustomEvent(SOFTPHONE_INCOMING_EVENT, { detail: call }));
         }
@@ -255,21 +267,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     }
   }, [status]);
 
-  // Popup modda cevaplama AloTech penceresinde yapılır — pencereyi öne getir.
-  const answerCall = useCallback(() => { if (isEmbedded) focusSoftphonePopup(); }, []);
-
-  // Softphone popup'ını aç/öne getir (kapanmışsa session ile yeniden aç).
-  const openSoftphone = useCallback(() => {
-    void (async () => {
-      if (focusSoftphonePopup()) return;
-      try {
-        const sess = await fetchSoftphoneSession();
-        openSoftphonePopup(isAlotechDisabled(sess) ? null : sess);
-      } catch {
-        openSoftphonePopup();
-      }
-    })();
-  }, []);
+  // Gömülü modda cevaplama softphone panelinde (iframe) yapılır → no-op.
+  const answerCall = useCallback(() => {}, []);
 
   const endCall = useCallback(() => {
     setActiveCall(null);
@@ -306,7 +305,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const value: SoftphoneState = {
     mode: MODE,
     status, agentEmail, agentStatus, error, activeCall, incomingCall, muted,
-    connect, refreshStatus, dialNumber, answerCall, openSoftphone, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
+    connect, refreshStatus, dialNumber, answerCall, iframeUrl, endCall, toggleMute, toggleHold, dismissIncoming, changeStatus, saveAgentEmail,
+    panelCollapsed, setPanelCollapsed,
+    dockReserved: isEmbedded && status !== 'disabled' && !panelCollapsed,
   };
   return <SoftphoneContext.Provider value={value}>{children}</SoftphoneContext.Provider>;
 }
