@@ -237,8 +237,6 @@ export function SmartTicketNewPage({
   );
   const projectsEnabled = !!selectedCompany?.projectsEnabled;
   const projectsRequired = !!selectedCompany?.projectsRequired;
-  const kbAnalysisRequired = !!selectedCompany?.requireKbAnalysis;
-
   const [taxonomies, setTaxonomies] = useState<SmartTicketTaxonomyResponse['taxonomies'] | null>(null);
   const [taxonomiesLoading, setTaxonomiesLoading] = useState(false);
   const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
