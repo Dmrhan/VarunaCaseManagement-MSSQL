@@ -4,6 +4,8 @@ import { prisma } from '../db/client.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
+import { enrichPatternAlert } from '../lib/patternInsight.js';
+import { generatePatternHypothesis } from '../lib/patternHypothesisAi.js';
 import { FORMULA_VERSION } from '../analytics/metricFormulas.js';
 import {
   deriveAnalyticsScope,
@@ -245,7 +247,25 @@ router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
       orderBy: { detectedAt: 'desc' },
       take: 100,
     });
-    res.json({ value: items, '@odata.count': items.length });
+
+    // PR-1 — Deterministik triage enrichment.
+    // Her alarm için commonThread + spike + impact + severity hesapla.
+    // enrichPatternAlert fail olursa kart `insight=null` ile döner
+    // (graceful degrade — mevcut consumer'lar etkilenmez).
+    const allowedCompanyIds = req.user.allowedCompanyIds ?? [];
+    const enriched = await Promise.all(
+      items.map(async (alert) => {
+        try {
+          const insight = await enrichPatternAlert(alert, { allowedCompanyIds });
+          return { ...alert, insight };
+        } catch (insightErr) {
+          console.warn('[analytics:patterns] insight failed for', alert.id, insightErr?.message);
+          return { ...alert, insight: null };
+        }
+      }),
+    );
+
+    res.json({ value: enriched, '@odata.count': enriched.length });
   } catch (e) {
     console.error('[analytics:patterns]', e);
     res.status(500).json({ error: 'internal', message: e?.message });
@@ -253,8 +273,294 @@ router.get('/patterns', requireSupervisorAnalytics, async (req, res) => {
 });
 
 /**
+ * PR-2 — POST /api/analytics/patterns/:id/link-cases
+ *
+ * Tetik vakaları master vakaya bağlar. Body: { masterCaseId?: string }
+ *  - masterCaseId verilmezse caseIds[0] default master
+ *  - Diğer caseIds → linkRepo.add({ linkType: 'Parent' }) ile master'a bağlanır
+ *  - Master kendine bağlanmaz (self-link skip)
+ *  - linkRepo zaten cross-tenant + duplicate + cycle guard yapar
+ */
+router.post('/patterns/:id/link-cases', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const alert = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
+    if (!alert) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(alert.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // caseIds JSON tolerance
+    let caseIds = [];
+    try {
+      caseIds = Array.isArray(alert.caseIds) ? alert.caseIds : JSON.parse(alert.caseIds);
+    } catch {
+      caseIds = [];
+    }
+    if (!Array.isArray(caseIds) || caseIds.length === 0) {
+      return res.status(400).json({ error: 'no_case_ids', message: 'Alarm vaka listesi boş.' });
+    }
+
+    const masterCaseId = typeof req.body?.masterCaseId === 'string' && req.body.masterCaseId
+      ? req.body.masterCaseId
+      : caseIds[0];
+
+    // Master scope kontrol
+    if (!caseIds.includes(masterCaseId)) {
+      return res.status(400).json({
+        error: 'master_not_in_trigger',
+        message: 'Master vaka tetikleyen vakalardan biri olmalı.',
+      });
+    }
+
+    // Diğer caseIds'i master'a bağla
+    const { linkRepo } = await import('../db/caseRepository.js');
+    const actor = {
+      userId: req.user.id,
+      personId: null,
+      fullName: req.user.fullName ?? null,
+      email: req.user.email ?? null,
+      role: req.user.role,
+      displayName: req.user.email ?? req.user.id,
+    };
+
+    const linked = [];
+    const skipped = [];
+    for (const cid of caseIds) {
+      if (cid === masterCaseId) continue;
+      const r = await linkRepo.add({
+        caseId: cid,
+        linkedCaseId: masterCaseId,
+        linkType: 'Parent',
+        createdBy: req.user.id,
+        allowedCompanyIds: req.user.allowedCompanyIds,
+        actor,
+      });
+      if (r && !r.error) linked.push(cid);
+      else skipped.push({ caseId: cid, reason: r?.error ?? 'unknown' });
+    }
+
+    res.json({ ok: true, masterCaseId, linkedCount: linked.length, skipped });
+  } catch (e) {
+    console.error('[analytics:patterns:link-cases]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+/**
+ * PR-2 — POST /api/analytics/patterns/:id/notify-team
+ *
+ * İlgili takıma in-app bildirim. Body: { teamId, message? }
+ * NotificationDispatch.caseId zorunlu olduğu için temsili caseId=caseIds[0]
+ * (örüntü-alarmı'na özel bir caseId yok; ilk tetik vakası kullanılır).
+ *
+ * Cross-tenant: teamId aynı tenant'a bağlı olmalı.
+ */
+router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const alert = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
+    if (!alert) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(alert.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const teamId = typeof req.body?.teamId === 'string' ? req.body.teamId : null;
+    if (!teamId) {
+      return res.status(400).json({ error: 'team_id_required' });
+    }
+    // Team scope check
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true, name: true, companyId: true },
+    });
+    if (!team || team.companyId !== alert.companyId) {
+      return res.status(403).json({ error: 'team_out_of_scope' });
+    }
+
+    // caseIds tolerance — temsili caseId (ilk tetik vakası)
+    let caseIds = [];
+    try {
+      caseIds = Array.isArray(alert.caseIds) ? alert.caseIds : JSON.parse(alert.caseIds);
+    } catch { /* sessiz */ }
+    if (caseIds.length === 0) {
+      return res.status(400).json({ error: 'no_case_ids' });
+    }
+    const representativeCaseId = caseIds[0];
+
+    const message = typeof req.body?.message === 'string' && req.body.message
+      ? req.body.message.slice(0, 1000)
+      : `${alert.category} kategorisinde ${alert.caseCount} vaka örüntüsü tespit edildi (${alert.windowMinutes} dk içinde).`;
+
+    const dispatch = await prisma.notificationDispatch.create({
+      data: {
+        caseId: representativeCaseId,
+        companyId: alert.companyId,
+        event: 'status_changed', // existing enum reuse (yeni event eklemiyoruz)
+        ruleId: null,
+        ruleNameSnapshot: `Örüntü alarmı bildirimi (${alert.category})`,
+        templateId: null,
+        templateKeySnapshot: 'pattern_alert_team_notify',
+        templateVersionSnapshot: 1,
+        audienceType: 'team_lead', // mevcut audienceType enum içinde; teamId target
+        audienceIdentifier: teamId,
+        channel: 'InApp',
+        mode: 'Active',
+        state: 'Sent', // manuel agent tetik; M4 cron'a bırakma
+        snapshotSubject: `Örüntü alarmı: ${alert.category}`,
+        snapshotBody: message,
+      },
+    });
+
+    res.json({ ok: true, dispatchId: dispatch.id, teamId, teamName: team.name });
+  } catch (e) {
+    console.error('[analytics:patterns:notify-team]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+/**
+ * PR-2 — PATCH /api/analytics/patterns/:id/status
+ *
+ * Status enum genişlemesi: 'active' | 'dismissed' | 'known_issue'
+ * Body: { status: 'dismissed' | 'known_issue' | 'active' }
+ *
+ * known_issue: alarm dismiss değil — "bilinen sorun" işareti; ayrı raporlanır.
+ * Geçişler:
+ *   active → known_issue (operatör "bu bilinen sorun")
+ *   known_issue → active (re-open)
+ *   active → dismissed (kapat)
+ *   * → dismissed (her zaman OK)
+ */
+router.patch('/patterns/:id/status', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const target = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(target.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const newStatus = req.body?.status;
+    if (!['active', 'dismissed', 'known_issue'].includes(newStatus)) {
+      return res.status(400).json({ error: 'invalid_status' });
+    }
+
+    const data = { status: newStatus };
+    if (newStatus === 'dismissed') {
+      data.dismissedBy = req.user.id;
+      data.dismissedAt = new Date();
+    } else if (newStatus === 'active' || newStatus === 'known_issue') {
+      // re-open veya known_issue işaretle — dismiss alanlarını temizle
+      data.dismissedBy = null;
+      data.dismissedAt = null;
+    }
+
+    const updated = await prisma.patternAlert.update({
+      where: { id: target.id },
+      data,
+    });
+    res.json({ id: updated.id, status: updated.status });
+  } catch (e) {
+    console.error('[analytics:patterns:status]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+/**
+ * PR-3 — POST /api/analytics/patterns/:id/hypothesis
+ *
+ * RUNA-tarzı AI hipotezi üret + sakla (lazy + cache).
+ *
+ * Body: {} | { force?: boolean }
+ *  - aiHypothesis dolu + aiHypothesisAt < 24h ise cached döner
+ *  - force=true ile TTL bypass
+ *  - AI fail → 200 + { hypothesis: null } (graceful degrade)
+ *
+ * Privacy: prompt'a HAM BAŞLIK GIRMEZ; yalnız yapısal sinyaller (PR-1
+ * insight). server/lib/patternHypothesisAi.js katmanlı PII guard.
+ */
+router.post('/patterns/:id/hypothesis', requireSupervisorAnalytics, async (req, res) => {
+  try {
+    const alert = await prisma.patternAlert.findUnique({ where: { id: req.params.id } });
+    if (!alert) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    if (!req.user.allowedCompanyIds.includes(alert.companyId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const force = req.body?.force === true;
+    const TTL_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // Cache hit kontrolü — 24h içinde + force=false
+    if (
+      !force
+      && alert.aiHypothesis
+      && alert.aiHypothesisAt
+      && (now - new Date(alert.aiHypothesisAt).getTime()) < TTL_MS
+    ) {
+      try {
+        const cached = JSON.parse(alert.aiHypothesis);
+        return res.json({
+          ok: true,
+          cached: true,
+          hypothesis: cached.hypothesis ?? null,
+          suggestedAction: cached.suggestedAction ?? null,
+          generatedAt: alert.aiHypothesisAt,
+        });
+      } catch {
+        // Parse fail → re-üret (cache bozuk)
+      }
+    }
+
+    // Insight üret (AI girdisi için)
+    const insight = await enrichPatternAlert(alert, {
+      allowedCompanyIds: req.user.allowedCompanyIds,
+    });
+
+    // AI çağrısı
+    const hypothesis = await generatePatternHypothesis({
+      alert,
+      insight,
+      userId: req.user.id,
+    });
+
+    if (!hypothesis) {
+      // Graceful degrade — AI fail; null döndür (UI kart aynen çalışır)
+      return res.json({
+        ok: true,
+        cached: false,
+        hypothesis: null,
+        suggestedAction: null,
+        error: 'ai_unavailable',
+      });
+    }
+
+    // Cache yaz
+    await prisma.patternAlert.update({
+      where: { id: alert.id },
+      data: {
+        aiHypothesis: JSON.stringify(hypothesis),
+        aiHypothesisAt: new Date(),
+      },
+    });
+
+    res.json({
+      ok: true,
+      cached: false,
+      hypothesis: hypothesis.hypothesis,
+      suggestedAction: hypothesis.suggestedAction,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('[analytics:patterns:hypothesis]', e);
+    res.status(500).json({ error: 'internal', message: e?.message });
+  }
+});
+
+/**
  * PATCH /api/analytics/patterns/:id/dismiss — yönetici alarmı kapatır.
  * Yetki: companyId scope (Supervisor/Admin/SystemAdmin guard zaten router'da).
+ *
+ * NOT: Bu legacy endpoint korunur (geriye uyumluluk). Yeni UI'lar
+ * /status endpoint'ini kullanır (3 değer destekler).
  */
 router.patch('/patterns/:id/dismiss', requireSupervisorAnalytics, async (req, res) => {
   try {

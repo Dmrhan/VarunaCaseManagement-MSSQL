@@ -2037,16 +2037,25 @@ model QAScoreLog {
 // 5+ vaka varsa active alarm yarat. Yönetici dismiss eder. Read-only mode:
 // otomatik parent vaka açma yok — sadece sinyal.
 model PatternAlert {
-  id            String    @id @default(cuid()) @db.NVarChar(450)
-  companyId     String    @db.NVarChar(450)
-  category      String    @db.NVarChar(Max)
-  caseCount     Int
-  windowMinutes Int       @default(60)
-  detectedAt    DateTime  @default(dbgenerated("sysutcdatetime()"))
-  caseIds       String    @db.NVarChar(Max) // string[] — tetikleyici vaka id'leri // json
-  status        String    @default("active") @db.NVarChar(50) // enum:PatternAlertStatus
-  dismissedBy   String?   @db.NVarChar(Max) // User.id
-  dismissedAt   DateTime?
+  id             String    @id @default(cuid()) @db.NVarChar(450)
+  companyId      String    @db.NVarChar(450)
+  category       String    @db.NVarChar(Max)
+  caseCount      Int
+  windowMinutes  Int       @default(60)
+  detectedAt     DateTime  @default(dbgenerated("sysutcdatetime()"))
+  caseIds        String    @db.NVarChar(Max) // string[] — tetikleyici vaka id'leri // json
+  /// status values: 'active' | 'dismissed' | 'known_issue' (PR-2 ile 3 değer).
+  /// known_issue: bilinen sorun — dismiss değil, ayrı raporlanır.
+  status         String    @default("active") @db.NVarChar(50) // enum:PatternAlertStatus
+  dismissedBy    String?   @db.NVarChar(Max) // User.id
+  dismissedAt    DateTime?
+  /// PR-3 — RUNA-tarzı AI hipotezi (commentary-only). JSON string:
+  /// { hypothesis: string, suggestedAction: string }.
+  /// LAZY: kart açılışında veya "AI hipotezi" tıklandığında üretilir + saklanır.
+  /// Cache TTL: aiHypothesisAt < now-24h ise stale → yeniden üretilir.
+  /// AI fail durumunda null kalır; kart AI kutusu olmadan çalışır (graceful degrade).
+  aiHypothesis   String?   @db.NVarChar(Max) // json
+  aiHypothesisAt DateTime?
 
   @@index([companyId])
   @@index([companyId, detectedAt])
