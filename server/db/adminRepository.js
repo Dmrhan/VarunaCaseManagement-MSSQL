@@ -1214,6 +1214,24 @@ export const userRepo = {
 // CompanySettings.companyId @id (1-1) olduğu için Company silindiğinde manuel
 // cleanup gerekir; ama soft delete (isActive=false) FK kalır, settings kalır.
 // ─────────────────────────────────────────────────────────────────
+// Vaka numarası öneki — 2-4 BÜYÜK harf. Format validasyonu ortak helper.
+const CASE_NUMBER_PREFIX_RE = /^[A-Z]{2,4}$/;
+
+function normalizePrefix(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  return s === '' ? null : s;
+}
+
+function assertPrefixFormat(prefix) {
+  if (!CASE_NUMBER_PREFIX_RE.test(prefix)) {
+    throw new AdminError(
+      'Vaka No Öneki 2-4 büyük harf olmalı (örn. UNV, PRM).',
+      400,
+    );
+  }
+}
+
 export const companyRepo = {
   async list(allowedCompanyIds) {
     const where = allowedCompanyIds ? { id: { in: allowedCompanyIds } } : {};
@@ -1228,6 +1246,8 @@ export const companyRepo = {
       isActive: c.isActive,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
+      /// Vaka numarası öneki — 2-4 harf (örn. "UNV"). Yeni firmada zorunlu.
+      caseNumberPrefix: c.caseNumberPrefix ?? null,
       logoUrl: c.settings?.logoUrl ?? null,
       primaryColor: c.settings?.primaryColor ?? null,
       appName: c.settings?.appName ?? null,
@@ -1248,12 +1268,35 @@ export const companyRepo = {
     });
     if (dup) throw new AdminError('Bu isimde şirket zaten var.');
 
+    // Vaka No Öneki — YENİ firmada ZORUNLU. Motor prefix'siz vaka create
+    // yapamaz (PR-2). Buradan reject yapmazsak firma "havada" kalır: kaydı
+    // görünür ama vaka açılamaz.
+    const prefixNorm = normalizePrefix(input.caseNumberPrefix);
+    if (prefixNorm == null) {
+      throw new AdminError(
+        'Vaka No Öneki zorunlu (2-4 büyük harf, örn. UNV). Vaka numaraları bu önekle üretilir.',
+        400,
+      );
+    }
+    assertPrefixFormat(prefixNorm);
+    const prefixDup = await prisma.company.findFirst({
+      where: { caseNumberPrefix: prefixNorm },
+      select: { id: true, name: true },
+    });
+    if (prefixDup) {
+      throw new AdminError(
+        `Bu önek zaten "${prefixDup.name}" firmasına atanmış.`,
+        400,
+      );
+    }
+
     // Company + CompanySettings tek transaction
     const created = await prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
         data: {
           name: input.name.trim(),
           isActive: input.isActive ?? true,
+          caseNumberPrefix: prefixNorm,
         },
       });
       await tx.companySettings.create({
@@ -1287,14 +1330,51 @@ export const companyRepo = {
       if (dup) throw new AdminError('Bu isimde başka şirket var.');
     }
 
-    // Company alanları (name, isActive) + CompanySettings (branding) ayrı tablolar.
-    // Tek transaction'da güncelle.
+    // Vaka No Öneki update — 3 kural:
+    //   1) undefined → dokunma (kısmi update).
+    //   2) null/boş: SET olmuşsa BOŞALTMAK YASAK (eski vakalar önekle
+    //      tutarsız olur). Zaten NULL ise kabul (henüz set edilmedi).
+    //   3) dolu → format + benzersizlik. Aynı prefix varsa reject.
+    let normalizedPrefix;
+    if (patch.caseNumberPrefix !== undefined) {
+      normalizedPrefix = normalizePrefix(patch.caseNumberPrefix);
+      if (normalizedPrefix == null) {
+        if (target.caseNumberPrefix != null) {
+          throw new AdminError(
+            'Vaka No Öneki boşaltılamaz. Bir kez atandıktan sonra sadece değiştirilebilir.',
+            400,
+          );
+        }
+        // NULL → NULL: no-op (henüz set edilmedi, patch de boş bıraktı).
+      } else {
+        assertPrefixFormat(normalizedPrefix);
+        if (normalizedPrefix !== target.caseNumberPrefix) {
+          const prefixDup = await prisma.company.findFirst({
+            where: { id: { not: id }, caseNumberPrefix: normalizedPrefix },
+            select: { id: true, name: true },
+          });
+          if (prefixDup) {
+            throw new AdminError(
+              `Bu önek zaten "${prefixDup.name}" firmasına atanmış.`,
+              400,
+            );
+          }
+        }
+      }
+    }
+
+    // Company alanları (name, isActive, caseNumberPrefix) + CompanySettings
+    // (branding) ayrı tablolar. Tek transaction'da güncelle.
     const updated = await prisma.$transaction(async (tx) => {
       const c = await tx.company.update({
         where: { id },
         data: {
           ...(patch.name !== undefined && { name: patch.name.trim() }),
           ...(patch.isActive !== undefined && { isActive: patch.isActive }),
+          // undefined → gönderme; null → boşaltma reddi yukarıda; dolu → set.
+          ...(patch.caseNumberPrefix !== undefined
+            && normalizedPrefix != null
+            && { caseNumberPrefix: normalizedPrefix }),
         },
       });
       const hasBranding =

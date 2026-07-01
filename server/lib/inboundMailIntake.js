@@ -209,10 +209,15 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
   return { stored: stored.length, skipped };
 }
 
-// Subject'te [VK-xxx] token ararız. Case caseNumber pattern (caseRepository.js:1154):
-//   const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
-// → base36 uppercase, harf+rakam, değişken uzunluk. Token: [VK-...]
-const SUBJECT_CASE_TOKEN_RE = /\[(VK-[0-9A-Z]+)\]/i;
+// Subject'te [PREFIX-xxx] token ararız. Case caseNumber iki format:
+//   Legacy (2026-06 öncesi): `VK-${Date.now().toString(36).toUpperCase()}`
+//                            → base36 uppercase harf+rakam, değişken uzunluk.
+//   Yeni (2026-07-01+):      `${Company.caseNumberPrefix}-${caseSeq}`
+//                            → 2-4 harf prefix + tire + 7+ hane rakam.
+// Regex her ikisini kapsar: 2-4 büyük harf prefix + alfanümerik gövde.
+// Not: token = caseNumber (lookup `where: caseNumber = token`), string
+// eşleşmesi olduğu için format değişse de threading çalışır.
+const SUBJECT_CASE_TOKEN_RE = /\[([A-Z]{2,4}-[0-9A-Z]+)\]/i;
 
 // Default vaka değerleri (M2 — mail intake için). Agent sonradan değiştirir.
 const DEFAULT_CASE_TYPE = 'GeneralSupport';
