@@ -697,7 +697,7 @@ function normalizeCustomerChannel(v) {
  *   suppressionReason: null|'customer_opted_out'|'no_channel_available',
  * }>}
  */
-export async function resolveCustomerCommunication({ caseRow }) {
+export async function resolveCustomerCommunication({ caseRow, preferChannel = null }) {
   if (!caseRow || !caseRow.accountId) {
     return {
       channel: 'manual',
@@ -707,6 +707,25 @@ export async function resolveCustomerCommunication({ caseRow }) {
       suppressionReason: 'no_channel_available',
     };
   }
+
+  // 2026-07-01 — Bildirim Kuralı kanal önceliği (sistem düzeltmesi).
+  //
+  // Bulgu (üretim): R3 case_closed kuralı channel=Email olarak yapılandırılmış
+  // ama müşterinin AccountCompany.preferredResponseChannel='phone' set edildiği
+  // için resolver telefon numarası döndürüyordu; executor
+  // `isLikelyEmail("+90...")` false → Pending kalıyordu. Sonuç: yönetici
+  // "e-posta bildirimi gönder" der ama sistem müşteri tercihini öncelikli
+  // tutar, kural kanalı görmezden gelir.
+  //
+  // Kullanıcı kararı: kural kanalını öncelikli tut. Yani kural EMAIL diyorsa
+  // müşteri tercihi 'phone' olsa bile önce EMAIL adresini ara; adres yoksa
+  // Pending kalsın (operatörün elden gönderme akışı kaybolmasın —
+  // no_channel_available).
+  //
+  // `preferChannel` parametresi opsiyonel — verilmezse (eski çağrılar) mevcut
+  // müşteri-tercihi öncelikli akış korunur. resolveAudienceRow rule.channel'ı
+  // normalize edip geçirir.
+  const preferredByRule = normalizeCustomerChannel(preferChannel);
 
   const [accountCompany, primaryContact, account] = await Promise.all([
     prisma.accountCompany.findUnique({
@@ -739,13 +758,23 @@ export async function resolveCustomerCommunication({ caseRow }) {
   }
 
   // Step 1: pick the channel via the fallback chain.
+  //
+  // 2026-07-01 fix — Kural kanalı EN YÜKSEK öncelik (`preferredByRule`).
+  // Case override + AccountCompany.pref + Contact.pref + Account.fallback
+  // hepsi bu bloğun ALTINDA kalır. `preferChannel` verilmemişse eski
+  // sıralama korunur (geriye uyumluluk).
   let channel = null;
   let source = 'none';
+  if (preferredByRule) {
+    channel = preferredByRule;
+    source = 'rule_channel';
+  }
   const caseOverride = normalizeCustomerChannel(caseRow.communicationChannelOverride);
-  if (caseOverride) {
+  if (!channel && caseOverride) {
     channel = caseOverride;
     source = 'case_override';
-  } else if (accountCompany?.preferredResponseChannel) {
+  }
+  if (!channel && accountCompany?.preferredResponseChannel) {
     const v = normalizeCustomerChannel(accountCompany.preferredResponseChannel);
     if (v) {
       channel = v;
@@ -829,7 +858,7 @@ export async function resolveCustomerCommunication({ caseRow }) {
 // Audience resolution
 // ─────────────────────────────────────────────────────────────────
 
-async function resolveAudienceRow({ row, caseRow, approval }) {
+async function resolveAudienceRow({ row, caseRow, approval, ruleChannel = null }) {
   switch (row.type) {
     case 'assignee': {
       const personId = caseRow.assignedPersonId;
@@ -886,7 +915,14 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
       // Delegates the full fallback chain + opt-out gate to the helper so
       // suppression decisions (customer_opted_out, no_channel_available)
       // are made in one place and the audit row captures them.
-      const resolution = await resolveCustomerCommunication({ caseRow });
+      //
+      // 2026-07-01 fix — preferChannel: rule.channel geçir; helper kural
+      // kanalını EN YÜKSEK öncelik olarak kullanır (müşteri iletişim
+      // tercihi kural kanalını override etmez).
+      const resolution = await resolveCustomerCommunication({
+        caseRow,
+        preferChannel: ruleChannel,
+      });
       const display = resolution.contactName ?? '';
       if (resolution.suppressionReason === 'customer_opted_out') {
         return {
@@ -930,7 +966,7 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
     case 'requester': {
       // M4.1 FAZ B — Mail intake'le açılan vakalarda mail göndereni.
       // case.customerContactEmail = inbound mail'in From adresi (M2 intake'te
-      // doldurulur). Mail yokken (manuel veya origin!=Eposta) skip.
+      // doldurulur). Manuel açılan vakalarda BOŞ.
       //
       // Opt-out: AccountCompany.allowCustomerNotifications — semantik
       // tutarlılık (requester de bir müşteri kişisidir).
@@ -955,26 +991,65 @@ async function resolveAudienceRow({ row, caseRow, approval }) {
         }
       }
 
-      if (!email) {
-        // customerContactEmail YOK → mail intake değil (manuel/portal) veya
-        // intake'te email yakalanamadı. Dispatch keepPending — operatör elle.
+      if (email) {
         return {
           audienceType: 'requester',
-          audienceIdentifier: 'manual',
+          audienceIdentifier: email,
           display,
-          suppressionReason: 'no_channel_available',
-          keepPending: true,
-          resolvedChannel: 'manual',
-          resolutionSource: 'none',
+          resolvedChannel: 'email',
+          resolutionSource: 'case_override',
         };
       }
 
+      // 2026-07-01 fix — customerContactEmail boş + kural kanalı EMAIL →
+      // AccountContact.email → Account.email fallback dene.
+      //
+      // Bulgu (üretim): R2 status_changed kuralı requester audience'ında
+      // manuel açılan vakalarda "manual" sentinel'i döndürüyordu; dispatcher
+      // isLikelyEmail("manual")=false → Pending. Kullanıcı görüşü: müşterinin
+      // gerçek email adresi (Account/AccountContact seviyesinde) VAR ama
+      // sistem bakmıyordu.
+      //
+      // Fallback yalnız kural kanalı EMAIL iken uygulanır (ruleChannel !=
+      // 'Email' ise bu case zaten email göndermeye çalışmıyor). accountId
+      // yoksa fallback yapılamaz (müşteri belirsiz).
+      const ruleAsksEmail = String(ruleChannel ?? '').toLowerCase() === 'email';
+      if (ruleAsksEmail && caseRow?.accountId) {
+        const [primaryContact, account] = await Promise.all([
+          prisma.accountContact.findFirst({
+            where: { accountId: caseRow.accountId, isPrimary: true, isActive: true },
+            select: { email: true, fullName: true },
+          }),
+          prisma.account.findUnique({
+            where: { id: caseRow.accountId },
+            select: { email: true },
+          }),
+        ]);
+        const fallbackEmail =
+          (primaryContact?.email && primaryContact.email.trim())
+          || (account?.email && account.email.trim())
+          || null;
+        if (fallbackEmail) {
+          return {
+            audienceType: 'requester',
+            audienceIdentifier: fallbackEmail,
+            display: display || primaryContact?.fullName || '',
+            resolvedChannel: 'email',
+            resolutionSource: primaryContact?.email ? 'account_contact' : 'account_fallback',
+          };
+        }
+      }
+
+      // customerContactEmail YOK + fallback bulamadı → dispatch keepPending
+      // (operatör manuel gönderim akışı korunur).
       return {
         audienceType: 'requester',
-        audienceIdentifier: email,
+        audienceIdentifier: 'manual',
         display,
-        resolvedChannel: 'email',
-        resolutionSource: 'case_override',
+        suppressionReason: 'no_channel_available',
+        keepPending: true,
+        resolvedChannel: 'manual',
+        resolutionSource: 'none',
       };
     }
     default:
@@ -1260,11 +1335,17 @@ export async function emitEvent({ event, caseId, approvalContext = null }) {
 
       // Audience resolution may produce 0..N rows per rule.audience entry.
       // Phase 2 currently emits ONE dispatch per audience row.
+      //
+      // 2026-07-01 — rule.channel'ı resolver'a geçir (sistem düzeltmesi).
+      // customer_primary_contact ve requester akışlarında kural kanalı
+      // müşteri iletişim tercihinden ÖNCELIKLI. Aksi halde 'Email' kural
+      // müşteri 'phone' tercihi çakışıyor → Pending kayıp.
       for (const audienceRow of rule.audience) {
         const resolved = await resolveAudienceRow({
           row: audienceRow,
           caseRow,
           approval: approvalContext,
+          ruleChannel: rule.channel,
         });
 
         // Render snapshot — Codex P2 round 3: event'i geçiriyoruz ki
