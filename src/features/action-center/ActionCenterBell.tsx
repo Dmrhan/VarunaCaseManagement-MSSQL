@@ -50,6 +50,8 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
   const mountedRef = useRef(true);
   const seenIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
+  const onCaseOpenRef = useRef(onCaseOpen);
+  onCaseOpenRef.current = onCaseOpen;
 
   const refresh = useCallback(async () => {
     const [summaryResult, listResult] = await Promise.all([
@@ -69,12 +71,12 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
         items.forEach((item) => {
           if (!seenIdsRef.current.has(item.id)) {
             seenIdsRef.current.add(item.id);
-            buildToastForItem(item, onCaseOpen);
+            buildToastForItem(item, onCaseOpenRef.current);
           }
         });
       }
     }
-  }, [onCaseOpen]);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
