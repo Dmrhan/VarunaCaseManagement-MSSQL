@@ -61,8 +61,8 @@ expect('2.6 logAIUsage fail durumunda da yazılır (debug için)',
 
 // ─── 3) 🔒 PII GUARD — kullanıcı revision P0 ─────────────────────
 console.log('\n── 3) PII guard — kaynaktan kes (kullanıcı revision) ──');
-expect('3.1 AI girdi yapısal (kategori/topAnaFirma/topUrun/...)',
-  /structuredInput[\s\S]{0,3000}kategori:[\s\S]{0,500}topAnaFirma:[\s\S]{0,800}topUrun:[\s\S]{0,800}topAnahtarKelime:/.test(aiCode), true);
+expect('3.1 AI girdi yapısal (kategori/topAnaFirma/topUrun) — Codex round 1: topKeyword ÇIKARILDI',
+  /structuredInput[\s\S]{0,3000}kategori:[\s\S]{0,500}topAnaFirma:[\s\S]{0,800}topUrun:/.test(aiCode), true);
 expect('3.2 ❌ exampleTitles PROMPT\'A GİRMEZ',
   !/exampleTitles/.test(aiCode), true);
 expect('3.3 ❌ caseDescriptions PROMPT\'A GİRMEZ',
@@ -75,8 +75,8 @@ expect('3.6 ❌ assignedPerson* veya agent ismi PROMPT\'A GİRMEZ',
   !/assignedPerson/.test(aiCode) && !/agentName/.test(aiCode), true);
 expect('3.7 ❌ Case.title doğrudan PROMPT\'A GİRMEZ (sadece tokenize sonrası tek kelime)',
   !/case\.title/.test(aiCode) && !/c\.title/.test(aiCode), true);
-expect('3.8 ✅ topKeyword YALNIZ kelime (tek string)',
-  /topAnahtarKelime[\s\S]{0,300}kelime:/.test(aiCode), true);
+expect('3.8 ❌ topKeyword AI prompt\'undan ÇIKARILDI (Codex round 1)',
+  !/topAnahtarKelime/.test(aiCode), true);
 
 // ─── 4) Endpoint /hypothesis ─────────────────────────────────────
 const routes = read('server/routes/analytics.js');
