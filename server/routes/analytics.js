@@ -448,6 +448,39 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
       select: { caseNumber: true, title: true },
     });
 
+    // Codex round 3 fix: emitGenericNotification SADECE ActionItem yaratır;
+    // bell drawer (`/api/cases/me/notifications/unread`) `CaseNotification`
+    // tablosundan okur. Mevcut watcher_update paterni İKİSİNİ birlikte
+    // yazıyor (caseRepository.js:4512+); pattern notify de aynı deseni
+    // izlemeli. Aksi halde notifiedCount>0 raporlanır ama üyeler bell'de
+    // hiçbir şey görmez.
+    //
+    // 1) caseNotification.createMany — bell drawer için (batch, tek query)
+    // 2) emitGenericNotification — ActionItem/Aksiyonlarım için (per-user)
+    const bellPayload = {
+      message,
+      kind: 'pattern_alert_team_notify',
+      alertId: alert.id,
+      category: alert.category,
+      caseCount: alert.caseCount,
+      triggeredBy: req.user.id,
+    };
+
+    let bellCreated = 0;
+    if (members.length > 0) {
+      const created = await prisma.caseNotification.createMany({
+        data: members.map((m) => ({
+          caseId: representativeCaseId,
+          companyId: alert.companyId,
+          eventType: 'pattern_alert_team_notify',
+          channel: 'InApp',
+          recipient: m.id,
+          payload: JSON.stringify(bellPayload),
+        })),
+      });
+      bellCreated = created?.count ?? 0;
+    }
+
     const notifyResults = [];
     for (const member of members) {
       try {
@@ -456,19 +489,13 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
           companyId: alert.companyId,
           eventType: 'pattern_alert_team_notify',
           recipientUserId: member.id,
-          payload: {
-            message,
-            alertId: alert.id,
-            category: alert.category,
-            caseCount: alert.caseCount,
-            triggeredBy: req.user.id,
-          },
+          payload: bellPayload,
           caseNumber: representativeCase?.caseNumber ?? '?',
           caseTitle: representativeCase?.title ?? alert.category,
         });
         notifyResults.push({ userId: member.id, ok: true });
       } catch (notifyErr) {
-        console.warn('[analytics:patterns:notify-team] member notify fail',
+        console.warn('[analytics:patterns:notify-team] member action-item fail',
           member.id, notifyErr?.message);
         notifyResults.push({ userId: member.id, ok: false });
       }
@@ -483,6 +510,8 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
       teamName: team.name,
       notifiedCount,
       totalMembers: members.length,
+      // Codex round 3 — CaseNotification (bell drawer) sayısı da audit için
+      bellNotifiedCount: bellCreated,
     });
   } catch (e) {
     console.error('[analytics:patterns:notify-team]', e);
