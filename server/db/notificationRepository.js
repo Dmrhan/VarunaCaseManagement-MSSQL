@@ -1292,7 +1292,13 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
   return { ok: false, error: result.error };
 }
 
-export async function emitEvent({ event, caseId, approvalContext = null, targetRuleId = null }) {
+export async function emitEvent({
+  event,
+  caseId,
+  approvalContext = null,
+  targetRuleId = null,
+  audienceOverride = null,
+}) {
   try {
     if (!ALLOWED_EVENTS.includes(event)) return [];
     const caseRow = await prisma.case.findUnique({ where: { id: caseId } });
@@ -1302,7 +1308,16 @@ export async function emitEvent({ event, caseId, approvalContext = null, targetR
     // Aksi halde emitEvent aynı event için company'nin TÜM active rule'larını
     // tarar ve tek bir Pending onarımı için ilgisiz rule'ların (zaten Sent
     // olmuş müşteri mail'i dâhil) TEKRAR gönderim yapmasına yol açar
-    // (Codex P1). Idempotency window dolmuşsa bu duplicate gönderim olur.
+    // (Codex P1 round 1). Idempotency window dolmuşsa bu duplicate gönderim
+    // olur.
+    //
+    // audienceOverride — targetRuleId ile birlikte kullanılır. rule.audience
+    // JSON array; row'ların primary key'i yok. Retry sırasında bir Pending
+    // dispatch'in ait olduğu audience row'una odaklanmak için script
+    // rule.audience'ı audienceType üzerinden filtreler ve buraya geçirir.
+    // Aksi halde targetRuleId sadece rule filtreler ama aynı rule'un başka
+    // audience row'ları (ZATEN Sent olmuş assignee/team_lead) yine
+    // tetiklenir → duplicate customer email (Codex P1 round 2).
     const rules = await prisma.notificationRule.findMany({
       where: {
         companyId: caseRow.companyId,
@@ -1350,7 +1365,15 @@ export async function emitEvent({ event, caseId, approvalContext = null, targetR
       // customer_primary_contact ve requester akışlarında kural kanalı
       // müşteri iletişim tercihinden ÖNCELIKLI. Aksi halde 'Email' kural
       // müşteri 'phone' tercihi çakışıyor → Pending kayıp.
-      for (const audienceRow of rule.audience) {
+      //
+      // audienceOverride — targetRuleId ile birlikte verildiğinde bu rule
+      // için rule.audience yerine bu daraltılmış listeyi işle. Codex P1
+      // round 2 fix — retry sırasında ilgisiz audience row'ların (ör.
+      // ZATEN Sent olmuş assignee) yeniden fire etmesini engeller.
+      const audienceRows = (audienceOverride && rule.id === targetRuleId)
+        ? audienceOverride
+        : rule.audience;
+      for (const audienceRow of audienceRows) {
         const resolved = await resolveAudienceRow({
           row: audienceRow,
           caseRow,

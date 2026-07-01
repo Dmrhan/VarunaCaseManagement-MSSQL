@@ -146,6 +146,8 @@ async function main() {
     suppressed_replacement: 0,
     kept_no_replacement: 0,
     kept_no_rule_snapshot: 0,
+    kept_rule_gone: 0,
+    kept_audience_type_gone: 0,
     error: 0,
     dryRunOnly: 0,
   };
@@ -166,20 +168,45 @@ async function main() {
       continue;
     }
 
+    // Codex P1 round 2: rule.audience içinde YALNIZCA bu dispatch'in
+    // audienceType'ına denk gelen row'ları hedefle. Aksi halde aynı
+    // rule'un başka audience row'ları (ör. ZATEN Sent olmuş assignee)
+    // yeniden fire eder ve idempotency penceresi dolduysa müşteriye
+    // duplicate email gider.
+    const rule = await prisma.notificationRule.findUnique({
+      where: { id: disp.ruleId },
+      select: { id: true, isActive: true, audience: true },
+    });
+    if (!rule || !rule.isActive) {
+      console.log('   → Kayıt KORUNDU (rule silinmiş veya inactive).');
+      stats.kept_rule_gone++;
+      continue;
+    }
+    const audienceList = Array.isArray(rule.audience) ? rule.audience : [];
+    const audienceOverride = audienceList.filter((a) => a?.type === disp.audienceType);
+    if (audienceOverride.length === 0) {
+      console.log(`   → Kayıt KORUNDU (audienceType='${disp.audienceType}' artık rule.audience'da yok).`);
+      stats.kept_audience_type_gone++;
+      continue;
+    }
+
     if (args.dryRun) {
-      console.log('   [dry-run] emitEvent çağrılmayacak — bu row eligible.');
+      console.log(`   [dry-run] emitEvent çağrılmayacak — bu row eligible. ` +
+        `audienceOverride=${audienceOverride.length} row.`);
       stats.dryRunOnly++;
       continue;
     }
 
-    // 3a) Codex P1: SADECE bu ruleId için emit — case+event'in
-    //     başka rule'larına dokunmuyor.
+    // 3a) Codex P1: SADECE bu ruleId + bu audience row(lar)ı için emit.
+    //     case+event'in başka rule'larına VE aynı rule'un başka audience
+    //     row'larına dokunmuyor.
     let emitted;
     try {
       emitted = await emitEvent({
         event: disp.event,
         caseId: disp.caseId,
         targetRuleId: disp.ruleId,
+        audienceOverride,
       });
     } catch (err) {
       console.error(`   emitEvent ERROR: ${err?.message ?? err}`);
