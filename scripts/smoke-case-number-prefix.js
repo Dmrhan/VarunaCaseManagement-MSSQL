@@ -28,9 +28,11 @@ function strip(s) {
 const schema = read('prisma/schema.prisma');
 const migration = read('prisma/migrations/20260701_case_number_prefix/migration.sql');
 const adminRepo = strip(read('server/db/adminRepository.js'));
+const adminRepoRaw = read('server/db/adminRepository.js');
 const adminService = read('src/services/adminService.ts');
 const companiesPage = read('src/features/admin/AdminCompaniesPage.tsx');
 const intake = read('server/lib/inboundMailIntake.js');
+const dbClient = read('server/db/client.js');
 
 console.log('── 1) Şema (additive) ────────────────────────────');
 expect('1.1 Company.caseNumberPrefix String? @unique @db.NVarChar(4)',
@@ -128,25 +130,54 @@ expect('7.13 Liste hücresi — tanımlı prefix badge',
 expect('7.14 Liste hücresi — tanımsız uyarı (amber)',
   /amber-600[\s\S]{0,400}tanımsız/.test(companiesPage), true);
 
-console.log('\n── 8) inboundMailIntake — regex genelleştirme ──────');
-expect('8.1 SUBJECT_CASE_TOKEN_RE = /\\[([A-Z]{2,4}-[0-9A-Z]+)\\]/i',
-  /SUBJECT_CASE_TOKEN_RE = \/\\\[\(\[A-Z\]\{2,4\}-\[0-9A-Z\]\+\)\\\]\/i/.test(intake), true);
+console.log('\n── 8) inboundMailIntake — regex format-tight + try-all (Codex P2 R1) ──');
+expect('8.1 SUBJECT_CASE_TOKEN_RE tight — VK-* OR [A-Z]{2,4}-\\d{7,}',
+  /SUBJECT_CASE_TOKEN_RE = \/\\\[\(VK-\[0-9A-Z\]\+\|\[A-Z\]\{2,4\}-\\d\{7,\}\)\\\]\/gi/.test(intake), true);
+expect('8.2 extractCaseTokensFromSubject — tüm match\'ler (matchAll)',
+  /function extractCaseTokensFromSubject\([\s\S]{0,600}matchAll\(SUBJECT_CASE_TOKEN_RE\)/.test(intake), true);
+expect('8.3 extractCaseTokensFromSubject — dedupe (seen Set)',
+  /function extractCaseTokensFromSubject\([\s\S]{0,800}const seen = new Set\(\)/.test(intake), true);
+expect('8.4 intake path — for cand of tokens, find first match',
+  /for \(const cand of tokens\)[\s\S]{0,600}prisma\.case\.findFirst[\s\S]{0,400}break;/.test(intake), true);
+expect('8.5 response `token` — matched token veya first candidate',
+  /let token = tokens\[0\] \?\? null/.test(intake), true);
 
-console.log('\n── 9) Davranış simülasyonu — regex ─────────────────');
-const RE = /\[([A-Z]{2,4}-[0-9A-Z]+)\]/i;
-function extract(subject) {
-  const m = RE.exec(subject);
-  return m ? m[1].toUpperCase() : null;
+console.log('\n── 9) Davranış simülasyonu — regex tight + try-all ─');
+const RE = /\[(VK-[0-9A-Z]+|[A-Z]{2,4}-\d{7,})\]/gi;
+function extractAll(subject) {
+  if (!subject) return [];
+  const out = [];
+  const seen = new Set();
+  for (const m of subject.matchAll(RE)) {
+    const t = m[1].toUpperCase();
+    if (!seen.has(t)) { seen.add(t); out.push(t); }
+  }
+  return out;
 }
-expect('9.1 legacy VK- token → yakalar', extract('Re: [VK-M3A4B5] Sorunum'), 'VK-M3A4B5');
-expect('9.2 yeni UNV- token → yakalar', extract('Re: [UNV-1000042] Test'), 'UNV-1000042');
-expect('9.3 PRM (3 harf) token → yakalar', extract('[PRM-1000000] Fatura'), 'PRM-1000000');
-expect('9.4 DEMO (4 harf) token → yakalar', extract('[DEMO-1000123] Bakım'), 'DEMO-1000123');
-expect('9.5 X-1234 (1 harf) → yakalamaz', extract('[X-1234] Test'), null);
-expect('9.6 TOOLONG-1234 (5 harf) → yakalamaz', extract('[TOOLONG-1234] Test'), null);
-expect('9.7 küçük harf token — case-insensitive yakalar', extract('[unv-1000042] test'), 'UNV-1000042');
-expect('9.8 token yok → null', extract('Sadece konu, token yok'), null);
-expect('9.9 subject başında değil de ortada → yakalar', extract('Yeni: [UNV-1000042] var'), 'UNV-1000042');
+expect('9.1 legacy VK- token → yakalar (single)',
+  JSON.stringify(extractAll('Re: [VK-M3A4B5] Sorunum')), '["VK-M3A4B5"]');
+expect('9.2 yeni UNV-1000042 (7 hane) → yakalar',
+  JSON.stringify(extractAll('Re: [UNV-1000042] Test')), '["UNV-1000042"]');
+expect('9.3 dış ref AB-123 (kısa rakam) → yakalanmaz',
+  JSON.stringify(extractAll('[AB-123] Test')), '[]');
+expect('9.4 dış ref ABC-456 (3 rakam) → yakalanmaz',
+  JSON.stringify(extractAll('[ABC-456] Jira')), '[]');
+expect('9.5 Codex örneği — [AB-123] Re: ... [VK-MABC] → yalnız VK yakalanır',
+  JSON.stringify(extractAll('[AB-123] Re: yanıt [VK-MABC]')), '["VK-MABC"]');
+expect('9.6 çoklu geçerli — [UNV-1000001] önce, [VK-XYZ] sonra → ikisi de',
+  JSON.stringify(extractAll('[UNV-1000001] cross-ref [VK-XYZ]')), '["UNV-1000001","VK-XYZ"]');
+expect('9.7 dedupe — [UNV-1000042] iki kez → tek',
+  JSON.stringify(extractAll('[UNV-1000042] copy [UNV-1000042]')), '["UNV-1000042"]');
+expect('9.8 X-1234567 (1 harf prefix) → yakalanmaz',
+  JSON.stringify(extractAll('[X-1234567] Test')), '[]');
+expect('9.9 TOOLONG-1234567 (5 harf) → yakalanmaz',
+  JSON.stringify(extractAll('[TOOLONG-1234567] Test')), '[]');
+expect('9.10 küçük harf — case-insensitive',
+  JSON.stringify(extractAll('[unv-1000042]')), '["UNV-1000042"]');
+expect('9.11 token yok → boş array',
+  JSON.stringify(extractAll('Konusuz')), '[]');
+expect('9.12 subject ortasında — yakalanır',
+  JSON.stringify(extractAll('Yeni: [UNV-1000042] var')), '["UNV-1000042"]');
 
 console.log('\n── 10) Davranış simülasyonu — prefix validation ────');
 const PREFIX_RE = /^[A-Z]{2,4}$/;
@@ -167,6 +198,39 @@ expect('10.9 "AB-CD" (özel) → invalid', PREFIX_RE.test(normalize('AB-CD')), f
 expect('10.10 "" → null (normalize)', normalize(''), null);
 expect('10.11 "   " → null (trim)', normalize('   '), null);
 expect('10.12 null → null', normalize(null), null);
+
+console.log('\n── 11) Codex P2 R1 — prefix collision generic mesaj ──');
+expect('11.1 create — enumeration sızıntısı yok (firma adı mesajda yok)',
+  /async create[\s\S]{0,3500}Bu önek zaten kullanımda\. Farklı bir 2-4 harfli önek seç\./.test(adminRepoRaw), true);
+expect('11.2 update — enumeration sızıntısı yok',
+  /async update[\s\S]{0,4500}Bu önek zaten kullanımda\. Farklı bir 2-4 harfli önek seç\./.test(adminRepoRaw), true);
+expect('11.3 create — findFirst select sadece id (name YOK)',
+  /async create[\s\S]{0,2500}where: \{ caseNumberPrefix: prefixNorm \}[\s\S]{0,200}select: \{ id: true \}/.test(adminRepoRaw), true);
+expect('11.4 update — findFirst select sadece id (name YOK)',
+  /async update[\s\S]{0,4500}where: \{ id: \{ not: id \}, caseNumberPrefix: normalizedPrefix \}[\s\S]{0,200}select: \{ id: true \}/.test(adminRepoRaw), true);
+
+console.log('\n── 12) Codex P2 R1 — Case.caseSeq BigInt → Number ──');
+expect('12.1 resultConfig.case.caseSeq extension eklendi',
+  /resultConfig\.case = \{[\s\S]{0,500}caseSeq: \{[\s\S]{0,300}needs: \{ caseSeq: true \}/.test(dbClient), true);
+expect('12.2 caseSeq compute — null-safe + Number cast',
+  /compute: \(row\) => \(row\.caseSeq == null \? null : Number\(row\.caseSeq\)\)/.test(dbClient), true);
+expect('12.3 resultConfig.case merge (spread — JSON alanları ezmez)',
+  /resultConfig\.case = \{[\s\S]{0,100}\.\.\.\(resultConfig\.case \?\? \{\}\)/.test(dbClient), true);
+
+console.log('\n── 13) Davranış simülasyonu — BigInt → Number ─────');
+const bigVal = 1000042n;
+const nullVal = null;
+const converted = bigVal == null ? null : Number(bigVal);
+expect('13.1 BigInt 1000042n → Number 1000042', converted, 1000042);
+expect('13.2 null caseSeq (legacy) → null',
+  nullVal == null ? null : Number(nullVal), null);
+// JSON.stringify BigInt patlar; Number patlamaz — Express güvenli.
+let jsonError = null;
+try { JSON.stringify({ caseSeq: bigVal }); } catch (e) { jsonError = e.name; }
+expect('13.3 raw BigInt JSON.stringify → TypeError', jsonError, 'TypeError');
+let jsonOk = null;
+try { jsonOk = JSON.stringify({ caseSeq: converted }); } catch (e) { jsonOk = 'error'; }
+expect('13.4 converted Number JSON.stringify → OK', jsonOk, '{"caseSeq":1000042}');
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

@@ -1279,13 +1279,16 @@ export const companyRepo = {
       );
     }
     assertPrefixFormat(prefixNorm);
+    // Codex P2 (round 1) — cross-tenant enumeration sızıntısını önlemek için
+    // firma adını mesaja koymuyoruz. Kimin sahibi olduğu bilgisi hassas.
+    // create SystemAdmin-only olsa da davranışı update ile hizala (aynı repo).
     const prefixDup = await prisma.company.findFirst({
       where: { caseNumberPrefix: prefixNorm },
-      select: { id: true, name: true },
+      select: { id: true },
     });
     if (prefixDup) {
       throw new AdminError(
-        `Bu önek zaten "${prefixDup.name}" firmasına atanmış.`,
+        'Bu önek zaten kullanımda. Farklı bir 2-4 harfli önek seç.',
         400,
       );
     }
@@ -1349,13 +1352,17 @@ export const companyRepo = {
       } else {
         assertPrefixFormat(normalizedPrefix);
         if (normalizedPrefix !== target.caseNumberPrefix) {
+          // Codex P2 (round 1) — company-scoped Admin update path
+          // assertCompanyAdmin ile geçer; başka firmanın adını mesajda
+          // dönmek cross-tenant company enumeration olur. Sadece
+          // "kullanımda" bilgisi yeter.
           const prefixDup = await prisma.company.findFirst({
             where: { id: { not: id }, caseNumberPrefix: normalizedPrefix },
-            select: { id: true, name: true },
+            select: { id: true },
           });
           if (prefixDup) {
             throw new AdminError(
-              `Bu önek zaten "${prefixDup.name}" firmasına atanmış.`,
+              'Bu önek zaten kullanımda. Farklı bir 2-4 harfli önek seç.',
               400,
             );
           }
