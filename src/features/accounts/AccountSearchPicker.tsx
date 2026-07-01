@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Building2,
+  Check,
   CheckCircle2,
   Search,
   UserX,
@@ -15,7 +16,24 @@ import {
   accountService,
   validateTcknRemote,
   type AccountListItem,
+  type AccountSearchField,
 } from '@/services/accountService';
+
+const SEARCH_FIELD_CHIPS: { value: AccountSearchField; label: string }[] = [
+  { value: 'name',    label: 'Ünvan' },
+  { value: 'vkn',     label: 'VKN / TCKN' },
+  { value: 'phone',   label: 'Telefon' },
+  { value: 'code',    label: 'Müşteri kodu' },
+  { value: 'contact', label: 'Kontak' },
+];
+
+const FIELD_PLACEHOLDER: Record<AccountSearchField, string> = {
+  name:    'Müşteri ünvanı yazın…',
+  vkn:     'VKN veya TCKN yazın…',
+  phone:   'Telefon numarası yazın…',
+  code:    'Müşteri kodu yazın…',
+  contact: 'Kontak e-posta veya telefonu yazın…',
+};
 
 interface AccountSearchPickerProps {
   open: boolean;
@@ -50,6 +68,7 @@ export function AccountSearchPicker({
 }: AccountSearchPickerProps) {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
+  const [searchFields, setSearchFields] = useState<AccountSearchField[]>(['name']);
   const [items, setItems] = useState<AccountListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +83,7 @@ export function AccountSearchPicker({
     if (!open) {
       setSearch('');
       setDebounced('');
+      setSearchFields(['name']);
       setItems([]);
       setError(null);
       setTcknHint(null);
@@ -81,6 +101,20 @@ export function AccountSearchPicker({
     };
   }, [search]);
 
+  function toggleSearchField(field: AccountSearchField) {
+    setSearchFields((prev) => {
+      const has = prev.includes(field);
+      if (has && prev.length === 1) return prev;
+      return has ? prev.filter((f) => f !== field) : [...prev, field];
+    });
+  }
+
+  const searchPlaceholder = searchFields.length === 1
+    ? FIELD_PLACEHOLDER[searchFields[0]]
+    : searchFields.length === SEARCH_FIELD_CHIPS.length
+      ? 'Ünvan, VKN, telefon veya müşteri kodu yazın…'
+      : `${searchFields.map((f) => SEARCH_FIELD_CHIPS.find((c) => c.value === f)?.label ?? f).join(' / ')} içinde ara…`;
+
   const load = useCallback(async () => {
     if (!debounced) {
       setItems([]);
@@ -91,6 +125,7 @@ export function AccountSearchPicker({
     setError(null);
     const out = await accountService.list({
       search: debounced,
+      searchFields,
       companyId: companyId ?? undefined,
       page: 1,
       limit: PAGE_SIZE,
@@ -101,7 +136,7 @@ export function AccountSearchPicker({
       return;
     }
     setItems(out.accounts);
-  }, [debounced, companyId]);
+  }, [debounced, searchFields, companyId]);
 
   useEffect(() => {
     if (open) void load();
@@ -155,7 +190,7 @@ export function AccountSearchPicker({
             <TextInput
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Müşteri adı, VKN, TCKN (11 hane), telefon, e-posta veya müşteri kodu…"
+              placeholder={searchPlaceholder}
               className="pl-9 pr-9"
               autoFocus
               aria-label="Müşteri ara"
@@ -183,6 +218,26 @@ export function AccountSearchPicker({
             </div>
           )}
         </Field>
+        <div className="flex flex-wrap gap-1.5">
+          {SEARCH_FIELD_CHIPS.map((chip) => {
+            const active = searchFields.includes(chip.value);
+            return (
+              <button
+                key={chip.value}
+                type="button"
+                onClick={() => toggleSearchField(chip.value)}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                  active
+                    ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-900/20 dark:text-brand-300'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:text-ndark-text'
+                }`}
+              >
+                {active && <Check size={10} />}
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
         {allowNullSelection && (
           <Button
             type="button"

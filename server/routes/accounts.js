@@ -94,8 +94,15 @@ router.get(
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+    const VALID_SEARCH_FIELDS = new Set(['name', 'vkn', 'phone', 'code', 'contact']);
+    const rawSearchFields = typeof req.query.searchFields === 'string' ? req.query.searchFields : '';
+    const parsedSearchFields = rawSearchFields
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => VALID_SEARCH_FIELDS.has(s));
     const result = await accountRepository.listAccounts({
       search,
+      searchFields: parsedSearchFields.length > 0 ? parsedSearchFields : undefined,
       companyId,
       status,
       ids: rawIds ? parsedIds : undefined,
