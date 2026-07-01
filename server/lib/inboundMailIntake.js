@@ -209,10 +209,25 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
   return { stored: stored.length, skipped };
 }
 
-// Subject'te [VK-xxx] token ararız. Case caseNumber pattern (caseRepository.js:1154):
-//   const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
-// → base36 uppercase, harf+rakam, değişken uzunluk. Token: [VK-...]
-const SUBJECT_CASE_TOKEN_RE = /\[(VK-[0-9A-Z]+)\]/i;
+// Subject'te [PREFIX-xxx] token ararız. Case caseNumber iki format:
+//   Legacy (2026-06 öncesi): `VK-${Date.now().toString(36).toUpperCase()}`
+//                            → VK- sabit prefix + base36 uppercase harf+rakam.
+//   Yeni (2026-07-01+):      `${Company.caseNumberPrefix}-${caseSeq}`
+//                            → 2-4 harf prefix + tire + 7+ hane RAKAM (bigint).
+//
+// Codex P2 (round 1) — format-tight + try-all-candidates:
+//   Önceki genel regex `[A-Z]{2,4}-[0-9A-Z]+` şüpheli dış referansları da
+//   yakalıyordu (ör. "[AB-123] Re: ... [VK-MABC]" → önce AB-123 match, case
+//   bulunmaz, fallthrough → yeni vaka açar, gerçek yanıt kaybolur).
+//
+//   Fix iki katman:
+//     1) Regex TIGHT: legacy VK-XXX VEYA yeni 2-4 harf + 7+ hane RAKAM.
+//        Dış referansların büyük çoğunluğu bu iki desene uymaz (ör. Jira
+//        "ABC-123" 3 haneli → elenir; kısa Azure ID "AB-4567" → elenir).
+//     2) matchAll ile TÜM eşleşmeler → intake her token'ı DB'de dener,
+//        ilk resolve olan kullanılır. Bir dış referans + bir Varuna token
+//        aynı subject'te olursa yine doğru case bulunur.
+const SUBJECT_CASE_TOKEN_RE = /\[(VK-[0-9A-Z]+|[A-Z]{2,4}-\d{7,})\]/gi;
 
 // Default vaka değerleri (M2 — mail intake için). Agent sonradan değiştirir.
 const DEFAULT_CASE_TYPE = 'GeneralSupport';
@@ -233,12 +248,25 @@ function truncate(s, max) {
 }
 
 /**
- * Subject'ten [VK-xxx] token çıkar. Yoksa null.
+ * Subject'ten TÜM [PREFIX-xxx] token'larını çıkar (sıralı). Yoksa [].
+ *
+ * Codex P2 (round 1): tek match yerine tüm match'ler — çoklu bracket'lı
+ * subject'lerde (ör. dış referans + Varuna token birlikte) intake her
+ * candidate'i DB'de dener, ilk resolve olan case kullanılır.
  */
-function extractCaseTokenFromSubject(subject) {
-  if (!subject || typeof subject !== 'string') return null;
-  const m = subject.match(SUBJECT_CASE_TOKEN_RE);
-  return m ? m[1].toUpperCase() : null;
+function extractCaseTokensFromSubject(subject) {
+  if (!subject || typeof subject !== 'string') return [];
+  const out = [];
+  const seen = new Set();
+  // Regex `g` flag'li → matchAll güvenli. State paylaşımı yok.
+  for (const m of subject.matchAll(SUBJECT_CASE_TOKEN_RE)) {
+    const token = m[1].toUpperCase();
+    if (!seen.has(token)) {
+      seen.add(token);
+      out.push(token);
+    }
+  }
+  return out;
 }
 
 /**
@@ -440,16 +468,29 @@ export async function intakeInboundEmail({
 
   const allowedCompanyIds = [companyId];
 
-  // ─── A) THREAD eşleşmesi (subject token) ─────────────────────────
-  const token = extractCaseTokenFromSubject(parsed.subject);
-  if (token) {
+  // ─── A) THREAD eşleşmesi (subject token'ları) ─────────────────────
+  // Codex P2 (round 1): birden fazla token varsa (dış referans + Varuna)
+  // her birini sırayla DB'de dene, ilk resolve olan case kullanılır.
+  const tokens = extractCaseTokensFromSubject(parsed.subject);
+  // Response `token` alanı için — resolve olan token (yoksa ilk candidate).
+  let token = tokens[0] ?? null;
+  if (tokens.length > 0) {
     // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
       const { prisma } = await import('../db/client.js');
-      const existing = await prisma.case.findFirst({
-        where: { caseNumber: token, companyId },
-        select: { id: true, status: true, caseNumber: true },
-      });
+      let existing = null;
+      for (const cand of tokens) {
+        // eslint-disable-next-line no-await-in-loop
+        const row = await prisma.case.findFirst({
+          where: { caseNumber: cand, companyId },
+          select: { id: true, status: true, caseNumber: true },
+        });
+        if (row) {
+          existing = row;
+          token = cand;
+          break;
+        }
+      }
       if (existing) {
         // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
         // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç

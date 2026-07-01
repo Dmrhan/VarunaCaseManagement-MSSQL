@@ -145,6 +145,14 @@ model Company {
   id        String   @id @default(cuid()) @db.NVarChar(450)
   name      String   @unique @db.NVarChar(200)
   isActive  Boolean  @default(true)
+  /// Vaka numarası öneki — "UNV", "PRM" gibi 2-4 BÜYÜK harf. Vaka
+  /// numaralandırma sistemi bu önek + per-tenant sıralı sayı kullanır
+  /// (örn. "UNV-1000042"). Yeni firmalar create sırasında zorunlu; mevcut
+  /// firmalarda backfill sonrası NOT NULL yapılır. Global @unique — iki
+  /// firma aynı önekle vaka numarası üretemez. Bir kez set edildikten
+  /// sonra değiştirilebilir ama boşaltılamaz (eski vakalar eski önekiyle
+  /// kalır — [[project_varuna_case_number_prefix]]).
+  caseNumberPrefix String? @unique @db.NVarChar(4)
   createdAt DateTime @default(dbgenerated("sysutcdatetime()"))
   updatedAt DateTime @updatedAt
 
@@ -205,6 +213,21 @@ model Company {
   /// this table later.
   authorizationPolicies      AuthorizationPolicy[]
   thirdParties               ThirdParty[]
+  /// Per-tenant vaka numarası sayacı (1-1). Lazy-init on first case create.
+  caseNumberCounter          CaseNumberCounter?
+}
+
+/// Per-tenant vaka numarası sayacı. `lastAssignedNumber` en son atanmış N;
+/// yeni vaka create sırasında MSSQL MERGE (HOLDLOCK) ile atomik +1 →
+/// caseNumber = `${Company.caseNumberPrefix}-${N}`. Sayaç ilk vakada lazy-
+/// init olur (lastAssignedNumber=1000000 → ilk vaka bu numarayı alır).
+/// Rollback olursa gap oluşabilir (ERP normu, kabul).
+model CaseNumberCounter {
+  companyId          String   @id @db.NVarChar(450)
+  lastAssignedNumber BigInt
+  updatedAt          DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 // Şirket başına tanımlanmış custom alanlar — vakaya dinamik olarak eklenir.
@@ -1399,8 +1422,13 @@ model ChecklistTemplate {
 // ============================================================
 
 model Case {
-  id         String @id @default(cuid()) @db.NVarChar(450)
-  caseNumber String @unique @db.NVarChar(50)
+  id         String  @id @default(cuid()) @db.NVarChar(450)
+  caseNumber String  @unique @db.NVarChar(50)
+  /// Per-tenant sıralı vaka numarası (BigInt). Yeni vakalar prefix + bu
+  /// sayıyla üretilir (örn. UNV-1000042). Legacy VK-* vakalar (Date.now
+  /// base36) `caseSeq = NULL` ile kalır — dokunulmaz. @@unique per-tenant
+  /// çakışmayı önler; caseNumber global @unique zaten prefix ile tek.
+  caseSeq    BigInt?
 
   title       String @db.NVarChar(Max)
   description String @db.NVarChar(Max)
@@ -1682,6 +1710,9 @@ model Case {
   @@index([companyId, packageId])
   /// M6.1 — "Yanıt bekliyor" filtresi (M6.3 list/board) için.
   @@index([companyId, pendingCustomerReply])
+  /// Per-tenant sıralı numara benzersizlik — Case.caseSeq NULL legacy
+  /// satırlar bu index'e girmez (SQL Server @@unique NULL toleranslı).
+  @@unique([companyId, caseSeq])
 }
 
 // CaseReminder — Faz 2 §6 "Bana Hatırlat" özelliği. Kullanıcı bir vakayı

@@ -107,6 +107,22 @@ for (const [model, def] of Object.entries(JSON_FIELD_MAP)) {
   );
 }
 
+// Codex P2 (round 1) — Case.caseSeq BigInt → Number.
+// Prisma sqlserver connector BIGINT alanları JS `bigint` primitive döner.
+// Express `res.json` (`JSON.stringify`) `bigint` serialize edemez →
+// "TypeError: Do not know how to serialize a BigInt" → 500. Case.caseSeq
+// case list/detail path'lerinde `CASE_INCLUDE` üstünden döner, response'a
+// spread edilir. Extension level dönüşüm tüm read path'lerinde otomatik.
+// Güvenlik: caseSeq 1000000'dan başlar, per-tenant, 2^53'e ulaşana kadar
+// tenant başına 9,007,199,253,740,992 vaka gerekir → pratik olarak sonsuz.
+resultConfig.case = {
+  ...(resultConfig.case ?? {}),
+  caseSeq: {
+    needs: { caseSeq: true },
+    compute: (row) => (row.caseSeq == null ? null : Number(row.caseSeq)),
+  },
+};
+
 function buildClient() {
   const base = new PrismaClient({
     log: process.env.NODE_ENV === 'production' ? ['error'] : ['warn', 'error'],
