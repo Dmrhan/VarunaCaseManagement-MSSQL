@@ -39,12 +39,21 @@ export async function runPatternDetect() {
 
   const created = [];
   for (const g of triggered) {
-    // Dedupe: aynı company+category için son window içinde active alarm yoksa yarat
+    // Dedupe: aynı company+category için son window içinde aktif veya
+    // "bilinen sorun" işaretli alarm yoksa yarat.
+    //
+    // Codex P2 round 1 fix: önceden sadece 'active' kontrolü vardı.
+    // Supervisor 'known_issue' işaretlediğinde cron aynı kategoride yeni
+    // bir 'active' alarm üretiyordu → "biliniyor" işareti gürültüyü
+    // kesmiyordu (kullanıcı niyeti tam tersi).
+    //
+    // Şimdi: 'active' VEYA 'known_issue' var ise yeni alarm üretme.
+    // 'dismissed' kategoriler hâlâ tekrar tetiklenebilir (kasıtlı reset).
     const existing = await prisma.patternAlert.findFirst({
       where: {
         companyId: g.companyId,
         category: g.category,
-        status: 'active',
+        status: { in: ['active', 'known_issue'] },
         detectedAt: { gte: since },
       },
       select: { id: true },

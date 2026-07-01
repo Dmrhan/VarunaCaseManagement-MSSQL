@@ -410,7 +410,109 @@ router.post('/patterns/:id/notify-team', requireSupervisorAnalytics, async (req,
       },
     });
 
-    res.json({ ok: true, dispatchId: dispatch.id, teamId, teamName: team.name });
+    // Codex P2 round 1 — Gerçek per-user in-app notification.
+    // NotificationDispatch sadece audit/dispatch tablosuna yazıyordu;
+    // kullanıcılar bell/action-center'da görmüyordu. emitGenericNotification
+    // CaseNotification + ActionItem yazıp her takım üyesini bilgilendirir.
+    //
+    // Codex round 2 fix: User modelinde 'person' RELATION YOK (sadece
+    // personId scalar). Önceki `where: { person: { teamId } }` Prisma'da
+    // "unknown argument" reject ederdi → 500. Doğru yol: Person → User
+    // 2-adımlı chain.
+    //
+    // emitGenericNotification UserCompany active scope kontrolü zaten yapar.
+    const { emitGenericNotification } = await import('../db/actionItemRepository.js');
+
+    // 1) Takıma bağlı aktif Person'ları çek
+    const teamPersons = await prisma.person.findMany({
+      where: { teamId, isActive: true },
+      select: { id: true },
+    });
+    const teamPersonIds = teamPersons.map((p) => p.id);
+
+    // 2) Bu Person'lara bağlı aktif User'ları çek (UserCompany scope)
+    const members = teamPersonIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            isActive: true,
+            personId: { in: teamPersonIds },
+            companies: { some: { companyId: alert.companyId, isActive: true } },
+          },
+          select: { id: true },
+        })
+      : [];
+
+    // Temsili case'in caseNumber + title — payload context için
+    const representativeCase = await prisma.case.findUnique({
+      where: { id: representativeCaseId },
+      select: { caseNumber: true, title: true },
+    });
+
+    // Codex round 3 fix: emitGenericNotification SADECE ActionItem yaratır;
+    // bell drawer (`/api/cases/me/notifications/unread`) `CaseNotification`
+    // tablosundan okur. Mevcut watcher_update paterni İKİSİNİ birlikte
+    // yazıyor (caseRepository.js:4512+); pattern notify de aynı deseni
+    // izlemeli. Aksi halde notifiedCount>0 raporlanır ama üyeler bell'de
+    // hiçbir şey görmez.
+    //
+    // 1) caseNotification.createMany — bell drawer için (batch, tek query)
+    // 2) emitGenericNotification — ActionItem/Aksiyonlarım için (per-user)
+    const bellPayload = {
+      message,
+      kind: 'pattern_alert_team_notify',
+      alertId: alert.id,
+      category: alert.category,
+      caseCount: alert.caseCount,
+      triggeredBy: req.user.id,
+    };
+
+    let bellCreated = 0;
+    if (members.length > 0) {
+      const created = await prisma.caseNotification.createMany({
+        data: members.map((m) => ({
+          caseId: representativeCaseId,
+          companyId: alert.companyId,
+          eventType: 'pattern_alert_team_notify',
+          channel: 'InApp',
+          recipient: m.id,
+          payload: JSON.stringify(bellPayload),
+        })),
+      });
+      bellCreated = created?.count ?? 0;
+    }
+
+    const notifyResults = [];
+    for (const member of members) {
+      try {
+        await emitGenericNotification({
+          caseId: representativeCaseId,
+          companyId: alert.companyId,
+          eventType: 'pattern_alert_team_notify',
+          recipientUserId: member.id,
+          payload: bellPayload,
+          caseNumber: representativeCase?.caseNumber ?? '?',
+          caseTitle: representativeCase?.title ?? alert.category,
+        });
+        notifyResults.push({ userId: member.id, ok: true });
+      } catch (notifyErr) {
+        console.warn('[analytics:patterns:notify-team] member action-item fail',
+          member.id, notifyErr?.message);
+        notifyResults.push({ userId: member.id, ok: false });
+      }
+    }
+
+    const notifiedCount = notifyResults.filter((r) => r.ok).length;
+
+    res.json({
+      ok: true,
+      dispatchId: dispatch.id,
+      teamId,
+      teamName: team.name,
+      notifiedCount,
+      totalMembers: members.length,
+      // Codex round 3 — CaseNotification (bell drawer) sayısı da audit için
+      bellNotifiedCount: bellCreated,
+    });
   } catch (e) {
     console.error('[analytics:patterns:notify-team]', e);
     res.status(500).json({ error: 'internal', message: e?.message });
