@@ -408,6 +408,10 @@ function notificationKindFor(eventType) {
     case 'transfer':
       return 'watcher_event';
     case 'transfer_warning':
+    // Codex P2 round 1 — Örüntü Alarmı takım bildirimi: gerçek per-user
+    // CaseNotification yaratmak için yeni eventType. UI bell/action
+    // center bu kind'ı görür.
+    case 'pattern_alert_team_notify':
       return 'system_alert';
     default:
       return null;

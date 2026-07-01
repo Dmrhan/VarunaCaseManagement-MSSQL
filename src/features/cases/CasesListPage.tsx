@@ -347,12 +347,17 @@ export function CasesListPage({
       const effectiveStatuses = inboxTab === 'all'
         ? (filters.statuses?.length ? filters.statuses : undefined)
         : (filters.statuses?.length ? filters.statuses : inboxTab === 'open' ? OPEN_STATUSES : CLOSED_STATUSES);
+      const roleDefaultViewOff =
+        user != null &&
+        ['Supervisor', 'Backoffice'].includes(user.role) &&
+        inboxTab === 'all';
       const { items, total } = await caseService.list(
         {
           ...filters,
           statuses: effectiveStatuses,
           unassigned: effectiveQueueFilter === 'unassigned' ? true : undefined,
           priorities: effectiveQueueFilter === 'critical' ? ['Critical'] : filters.priorities,
+          roleDefaultView: roleDefaultViewOff ? 'off' : undefined,
         },
         { page: p, pageSize, sortBy: sortKey, sortDir },
       );

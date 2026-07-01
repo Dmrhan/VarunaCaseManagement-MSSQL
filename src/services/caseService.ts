@@ -424,6 +424,8 @@ export const caseService = {
     if (filters?.unassigned) params.set('unassigned', 'true');
     // PR-SD — SystemAdmin opt-in; backend rol filtresi de uygulayacak.
     if (filters?.includeArchived) params.set('includeArchived', 'true');
+    // Rol bazlı varsayılan kapsam — 'off' ise Supervisor/Backoffice havuz kaldırılır.
+    if (filters?.roleDefaultView === 'off') params.set('roleDefaultView', 'off');
     if (pagination) {
       params.set('page', String(pagination.page));
       params.set('pageSize', String(pagination.pageSize));

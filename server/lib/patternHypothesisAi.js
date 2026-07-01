@@ -16,10 +16,14 @@
  *     - impact.* (sayılar)
  *
  *   ÇIKARILDI: exampleTitles, caseDescriptions, customerContact*,
- *   customerCompanyName, agent/person isimleri, e-mail, telefon.
+ *   customerCompanyName, agent/person isimleri, e-mail, telefon,
+ *   ve **topKeyword** (Codex P1 round 1).
  *
- *   Sanitize EK SAVUNMA: topKeyword tokenize zaten stop-word filter'lı
- *   (server/lib/patternInsight.js STOP_WORDS).
+ *   ⚠ topKeyword title-derived (Case.title tokenize) — stop-word/min-length
+ *   filter çıplak ismi yakalayamaz ("Ahmet" stop-word'de değil; 3+ char;
+ *   alfabetik). Birkaç alarm başlığı aynı kişi adını içerirse "ahmet"
+ *   dominant token olur → AI'a sızar. UI'da chip kalabilir (DB'den derive,
+ *   dış servise gitmez); AI prompt'undan ÇIKARILDI.
  *
  * REUSE:
  *  - aiClient.callOpenAI({schema}) — structured JSON output
@@ -92,12 +96,10 @@ export async function generatePatternHypothesis({ alert, insight, userId = null 
           baskinlik: `${Math.round((insight.commonThread.topProduct.dominance ?? 0) * 100)}%`,
         }
       : null,
-    topAnahtarKelime: insight.commonThread?.topKeyword
-      ? {
-          kelime: insight.commonThread.topKeyword.word,
-          baskinlik: `${Math.round((insight.commonThread.topKeyword.dominance ?? 0) * 100)}%`,
-        }
-      : null,
+    // Codex P1 round 1 — topKeyword AI prompt'undan ÇIKARILDI.
+    // Sebep: title-derived; stop-word filter çıplak ismi yakalayamaz
+    // ("Ahmet" stop-word'de değil; min 3-char; alfabetik). UI chip'inde
+    // kalmaya devam (DB-derive, dış servise gitmez).
     etki: {
       etkilenenMusteri: insight.impact?.distinctAccounts ?? 0,
       slaRiskinde: insight.impact?.slaAtRisk ?? 0,
@@ -109,7 +111,14 @@ export async function generatePatternHypothesis({ alert, insight, userId = null 
 
   const startedAt = Date.now();
   try {
-    const result = await callOpenAI({
+    // Codex P1 round 1 — callOpenAI gerçek return shape:
+    //   { json, raw, tokenCount }   (schema veya expectJson modunda)
+    //   { text, tokenCount }        (raw modunda)
+    // Önceki kod `result.data ?? result.parsed ?? result` arıyordu (yanlış);
+    // her başarılı çağrıda data undefined oluyordu → hep null dönüyordu.
+    // Mevcut callers (actionSummaryAi, transferAi) `{ json, tokenCount }`
+    // destructure paterni — birebir mirror.
+    const { json, tokenCount } = await callOpenAI({
       system: SYSTEM_PROMPT,
       user: userPrompt,
       schema: HYPOTHESIS_SCHEMA,
@@ -124,20 +133,19 @@ export async function generatePatternHypothesis({ alert, insight, userId = null 
       caseId: null, // PatternAlert vaka-spesifik değil; caseId nullable bu endpoint için OK
       userId,
       responseTimeMs,
-      tokenCount: result?.tokenCount ?? null,
+      tokenCount: tokenCount ?? null,
     });
 
-    const data = result?.data ?? result?.parsed ?? result;
-    if (!data || typeof data !== 'object') return null;
+    if (!json || typeof json !== 'object') return null;
 
     // Final shape — AI'in döndürdüğünü güvenli alana al
     if (
-      typeof data.hypothesis === 'string'
-      && typeof data.suggestedAction === 'string'
+      typeof json.hypothesis === 'string'
+      && typeof json.suggestedAction === 'string'
     ) {
       return {
-        hypothesis: data.hypothesis.slice(0, 600),
-        suggestedAction: data.suggestedAction.slice(0, 400),
+        hypothesis: json.hypothesis.slice(0, 600),
+        suggestedAction: json.suggestedAction.slice(0, 400),
       };
     }
     return null;

@@ -499,6 +499,42 @@ router.get(
       if (sup?.teamId) teamId = sup.teamId;
     }
 
+    // Rol bazlı varsayılan liste kapsamı (sadece liste ekranı, güvenlik kısıtı değil).
+    // Agent: her zaman uygulanır. Supervisor/Backoffice: roleDefaultView=off gelmediği sürece uygulanır.
+    // CSM/Admin/SystemAdmin: kapsam uygulanmaz.
+    const ROLE_DEFAULT_SCOPE_OPEN = ['Acik', 'Incelemede', 'ThirdPartyWaiting', 'Eskalasyon', 'YenidenAcildi'];
+    let roleDefaultScope = null;
+    const roleDefaultViewOff = f.roleDefaultView === 'off';
+    if (req.user.role === 'Agent' && req.user.personId) {
+      roleDefaultScope = {
+        OR: [
+          { assignedPersonId: req.user.personId },
+          { createdByUserId: req.user.id },
+          { assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } },
+        ],
+      };
+    } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
+      const { prisma } = await import('../db/client.js');
+      const myPerson = await prisma.person.findUnique({
+        where: { id: req.user.personId },
+        select: { teamId: true },
+      });
+      if (myPerson?.teamId) {
+        const teamMemberIds = (
+          await prisma.person.findMany({ where: { teamId: myPerson.teamId }, select: { id: true } })
+        ).map((p) => p.id);
+        roleDefaultScope = {
+          OR: [
+            { assignedTeamId: myPerson.teamId },
+            { assignedPersonId: { in: teamMemberIds } },
+            { assignedPersonId: req.user.personId },
+            { createdByUserId: req.user.id },
+            { assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } },
+          ],
+        };
+      }
+    }
+
     // M6.3b Faz 1 — "Yanıt bekliyor" filtresi (tüm roller; pendingCustomerReply
     // K4 türetilmiş state, sızıntı yok).
     let pendingCustomerReply;
@@ -551,6 +587,7 @@ router.get(
       sortDir,
       allowedCompanyIds: req.user.allowedCompanyIds,
       securityWhere,
+      roleDefaultScope,
     });
     res.json({ value: items, '@odata.count': total });
   }),
