@@ -54,27 +54,27 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
   onCaseOpenRef.current = onCaseOpen;
 
   const refresh = useCallback(async () => {
-    const [summaryResult, listResult] = await Promise.all([
+    const [summaryResult, actionResult, fyiResult] = await Promise.all([
       actionCenterService.summary(),
-      actionCenterService.list({ state: 'Pending' }),
+      actionCenterService.list({ view: 'action', limit: 50 }),
+      actionCenterService.list({ view: 'fyi', limit: 50 }),
     ]);
     if (!mountedRef.current) return;
     if (summaryResult) setCounts(summaryResult);
-    if (listResult) {
-      const items = listResult.items;
-      if (!initializedRef.current) {
-        // İlk fetch: set'i sessizce doldur, toast gösterme
-        items.forEach((item) => seenIdsRef.current.add(item.id));
-        initializedRef.current = true;
-      } else {
-        // Sonraki fetch'ler: yeni id'ler için toast göster
-        items.forEach((item) => {
-          if (!seenIdsRef.current.has(item.id)) {
-            seenIdsRef.current.add(item.id);
-            buildToastForItem(item, onCaseOpenRef.current);
-          }
-        });
-      }
+    const items = [
+      ...(actionResult?.items ?? []),
+      ...(fyiResult?.items ?? []),
+    ];
+    if (!initializedRef.current) {
+      items.forEach((item) => seenIdsRef.current.add(item.id));
+      initializedRef.current = true;
+    } else {
+      items.forEach((item) => {
+        if (!seenIdsRef.current.has(item.id)) {
+          seenIdsRef.current.add(item.id);
+          buildToastForItem(item, onCaseOpenRef.current);
+        }
+      });
     }
   }, []);
 
