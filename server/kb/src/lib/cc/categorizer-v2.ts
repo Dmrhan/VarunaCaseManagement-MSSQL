@@ -23,7 +23,6 @@ import {
   formatGoldForPrompt,
   enforcePlatformFromHints,
   applyKeywordHints,
-  getCozumTipi,
   getKaliciOnlem,
   isValidOpenValue,
   isValidKokNedenGrubu,
@@ -299,23 +298,27 @@ export async function suggestClose(
   // her çağrıda DEĞİŞMEZ) → ayrı cache_control'lü bloğa konur. userPrompt =
   // "TICKET BAĞLAMI:"'den itibaren (değişken). slice garanti eder: cachePrefix
   // + userPrompt === fullPrompt (byte-identical; yalnız caching). ~%90 tasarruf.
+  // v4 CASCADE — grup → detay → izinli çözüm tipleri ağaç halinde sunulur.
+  // Model önce grubu, sonra YALNIZ o grubun detayını, sonra o detayın izinli
+  // çözüm tipini seçer. (Kapanış gold few-shot cold-start'ta kapalı.)
+  const cascadeBlock = getKokNedenGroups()
+    .map((g) => {
+      const dets = g.details
+        .map((d) => `    - ${d.label}   [çözüm: ${d.cozum_tipleri.join(" | ")}]`)
+        .join("\n");
+      return `■ ${g.group}\n${dets}`;
+    })
+    .join("\n\n");
   const fullPrompt = [
-    "KÖK NEDEN GRUBU (biri):",
-    getKokNedenGroups().map((g) => `  • ${g.group}`).join("\n"),
+    "KÖK NEDEN — GRUP › DETAY › İZİNLİ ÇÖZÜM TİPLERİ (CASCADE):",
+    "Kural: önce bir GRUP seç; sonra YALNIZ o grubun altındaki detaylardan birini;",
+    "sonra o detayın köşeli parantezdeki İZİNLİ çözüm tiplerinden birini. Grup dışı",
+    "detay ya da detayın izin vermediği çözüm tipi ASLA seçme.",
     "",
-    "KÖK NEDEN DETAYI (biri, gruptan bağımsız):",
-    [...new Set(getKokNedenGroups().flatMap((g) => g.details))]
-      .map((d) => `  • ${d}`)
-      .join("\n"),
+    cascadeBlock,
     "",
-    "TAKSONOMİ — ÇÖZÜM TİPİ:",
-    getCozumTipi().values.map((v) => `  • ${v}`).join("\n"),
-    "",
-    "TAKSONOMİ — KALICI ÖNLEM (opsiyonel):",
+    "TAKSONOMİ — KALICI ÖNLEM (opsiyonel, gruptan bağımsız):",
     getKaliciOnlem().values.map((v) => `  • ${v}`).join("\n"),
-    "",
-    "GERÇEK ETİKETLENMİŞ ÖRNEKLER (insan uzman doğruladı — aynı mantıkla kapanış seç):",
-    formatGoldForPrompt("close"),
     "",
     "TICKET BAĞLAMI:",
     ctxLines.join("\n") || "(açılış sınıflandırması yok)",
@@ -330,10 +333,10 @@ export async function suggestClose(
       : []),
     `Çıktı JSON şeması (sadece JSON):`,
     `{`,
-    `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
-    `  "kok_neden_detayi": string | null,  // tüm detay listesinden biri (gruptan bağımsız)`,
-    `  "cozum_tipi": string | null,        // 12 çözüm tipinden biri`,
-    `  "kalici_onlem": string | null,      // 8 kalıcı önlemden biri, opsiyonel`,
+    `  "kok_neden_grubu": string | null,   // 9 gruptan biri`,
+    `  "kok_neden_detayi": string | null,  // SEÇİLEN grubun altındaki detaylardan biri`,
+    `  "cozum_tipi": string | null,        // SEÇİLEN detayın izinli çözüm tiplerinden biri`,
+    `  "kalici_onlem": string | null,      // kalıcı önlemlerden biri, opsiyonel`,
     `  "confidence": number,`,
     `  "reason": string                    // 1 cümle gerekçe`,
     `}`,
@@ -362,11 +365,21 @@ export async function suggestClose(
   }
 
   const out = v.data;
-  // Strict — geçersizleri null'a düşür. Grup ve detay BAĞIMSIZ doğrulanır:
-  // biri geçersizse yalnız o null'lanır (detay artık gruba bağlı değil).
+  // v4 STRICT CASCADE — geçersizleri null'a düşür:
+  //  - grup geçerli değilse detay & çözüm de null (zincir kırık).
+  //  - detay YALNIZ seçilen grubun altında geçerliyse kabul.
+  //  - çözüm YALNIZ seçilen (grup, detay)'ın izinli setindeyse kabul.
   const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
-  const kok_neden_detayi = isValidKokNedenDetay(out.kok_neden_detayi) ? out.kok_neden_detayi : null;
-  const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
+  const kok_neden_detayi =
+    kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu)
+      ? out.kok_neden_detayi
+      : null;
+  const cozum_tipi =
+    kok_neden_grubu &&
+    kok_neden_detayi &&
+    isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi)
+      ? out.cozum_tipi
+      : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
 
   // P1.2 — emin değil mi? Kök neden grubu/detayı boş VEYA güven eşik altı → etiket

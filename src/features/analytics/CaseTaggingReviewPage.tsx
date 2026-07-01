@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextInput, TextArea } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
-import { caseService, lookupService, type SmartTicketTaxonomyResponse } from '@/services/caseService';
+import { caseService, lookupService, parseAllowedResolutionCodes, type SmartTicketTaxonomyItem, type SmartTicketTaxonomyResponse } from '@/services/caseService';
 import { CASE_STATUSES, type Case, type CaseStatus, type CaseTaggingReview, type TaggingVerdict } from '@/features/cases/types';
 import { formatDateTime } from '@/lib/format';
 
@@ -238,6 +238,76 @@ function TaggingModal({
 }: TaggingModalProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // CASCADE: kapanış etiketleri için seçili correctedCode'u okuyup filtreli seçenekler üret.
+  const closingCascadeOverrides: Record<string, SmartTicketTaxonomyItem[]> = (() => {
+    const allGroups    = taxonomies?.rootCauseGroup      ?? [];
+    const allDetails   = taxonomies?.rootCauseDetail     ?? [];
+    const allResolutions = taxonomies?.resolutionType    ?? [];
+
+    const rcgKey = tagKey({ prefix: 'closing', field: 'RootCauseGroup',  label: '', customField: 'rootCauseGroup',  taxonomyType: 'rootCauseGroup'  });
+    const rcdKey = tagKey({ prefix: 'closing', field: 'RootCauseDetail', label: '', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' });
+    const rtKey  = tagKey({ prefix: 'closing', field: 'ResolutionType',  label: '', customField: 'resolutionType',  taxonomyType: 'resolutionType'  });
+
+    // Seçili group correctedCode → detay filtrelemesi
+    const selectedGroupCode = draft.fields[rcgKey]?.correctedCode ?? '';
+    const selectedGroup = selectedGroupCode ? allGroups.find((g) => g.code === selectedGroupCode) : undefined;
+
+    let rcdOptions: SmartTicketTaxonomyItem[];
+    if (selectedGroup?.id) {
+      rcdOptions = allDetails.filter((d) => d.parentId === selectedGroup.id);
+    } else if (selectedGroupCode) {
+      // Grup seçili ama id yok (eski format) → boş liste
+      rcdOptions = [];
+    } else {
+      // Grup seçilmemişse boş (UX tutarlılığı)
+      rcdOptions = [];
+    }
+
+    // Seçili detail correctedCode → çözüm tipi filtrelemesi
+    const selectedDetailCode = draft.fields[rcdKey]?.correctedCode ?? '';
+    const selectedDetail = selectedDetailCode ? rcdOptions.find((d) => d.code === selectedDetailCode) : undefined;
+
+    let rtOptions: SmartTicketTaxonomyItem[];
+    if (selectedDetail) {
+      const allowed = parseAllowedResolutionCodes(selectedDetail);
+      rtOptions = allowed != null
+        ? allResolutions.filter((r) => allowed.includes(r.code))
+        : allResolutions; // null → kısıtlama yok (geri uyum)
+    } else if (selectedDetailCode) {
+      // Detay seçili ama rcdOptions içinde yok → boş
+      rtOptions = [];
+    } else {
+      rtOptions = [];
+    }
+
+    return { [rcgKey]: allGroups, [rcdKey]: rcdOptions, [rtKey]: rtOptions };
+  })();
+
+  // CASCADE RESET: grup/detay correctedCode değişince alt seçimleri temizle.
+  function handleClosingUpdateField(def: TagDef, patch: Partial<FieldDraft>) {
+    onUpdateField(def, patch);
+
+    // Yalnız correctedCode değişiminde cascade reset tetikle.
+    if (!('correctedCode' in patch)) return;
+
+    const rcgKey = tagKey({ prefix: 'closing', field: 'RootCauseGroup',  label: '', customField: 'rootCauseGroup',  taxonomyType: 'rootCauseGroup'  });
+    const rcdKey = tagKey({ prefix: 'closing', field: 'RootCauseDetail', label: '', customField: 'rootCauseDetail', taxonomyType: 'rootCauseDetail' });
+    const rtKey  = tagKey({ prefix: 'closing', field: 'ResolutionType',  label: '', customField: 'resolutionType',  taxonomyType: 'resolutionType'  });
+
+    const thisKey = tagKey(def);
+    if (thisKey === rcgKey) {
+      // Grup değişince detay ve çözüm tipini temizle.
+      const rcdDef = CLOSING_DEFS.find((d) => tagKey(d) === rcdKey);
+      const rtDef  = CLOSING_DEFS.find((d) => tagKey(d) === rtKey);
+      if (rcdDef) onUpdateField(rcdDef, { correctedCode: '' });
+      if (rtDef)  onUpdateField(rtDef,  { correctedCode: '' });
+    } else if (thisKey === rcdKey) {
+      // Detay değişince çözüm tipini temizle.
+      const rtDef = CLOSING_DEFS.find((d) => tagKey(d) === rtKey);
+      if (rtDef) onUpdateField(rtDef, { correctedCode: '' });
+    }
+  }
+
   async function handleSave() {
     // Yanlış → Doğru Etiket zorunlu
     const missing = TAG_DEFS.filter((def) => {
@@ -347,14 +417,15 @@ function TaggingModal({
             onUpdateField={onUpdateField}
           />
 
-          {/* Kapanış Etiketleri */}
+          {/* Kapanış Etiketleri — cascade: grup→detay→çözüm */}
           <TagSection
             title="Kapanış Etiketleri"
             defs={CLOSING_DEFS}
             case_={case_}
             draft={draft}
             taxonomies={taxonomies}
-            onUpdateField={onUpdateField}
+            overrideOptionsByKey={closingCascadeOverrides}
+            onUpdateField={handleClosingUpdateField}
           />
         </div>
       </div>
@@ -368,10 +439,12 @@ interface TagSectionProps {
   case_: Case;
   draft: RowDraft;
   taxonomies: SmartTicketTaxonomyResponse['taxonomies'] | undefined;
+  /** CASCADE: belirli def key'leri için filtreli seçenek listesi geçersiz kılar. */
+  overrideOptionsByKey?: Record<string, SmartTicketTaxonomyItem[]>;
   onUpdateField: (def: TagDef, patch: Partial<FieldDraft>) => void;
 }
 
-function TagSection({ title, defs, case_, draft, taxonomies, onUpdateField }: TagSectionProps) {
+function TagSection({ title, defs, case_, draft, taxonomies, overrideOptionsByKey, onUpdateField }: TagSectionProps) {
   return (
     <div className="mb-4">
       <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-ndark-text">{title}</p>
@@ -386,7 +459,8 @@ function TagSection({ title, defs, case_, draft, taxonomies, onUpdateField }: Ta
           const key             = tagKey(def);
           const field           = draft.fields[key];
           const label           = originalLabel(case_, def);
-          const options         = taxonomies?.[def.taxonomyType] ?? [];
+          // CASCADE: overrideOptionsByKey varsa onu kullan, yoksa tam liste.
+          const options = overrideOptionsByKey?.[key] ?? taxonomies?.[def.taxonomyType] ?? [];
           const correctedDisabled = field.verdict === '' || field.verdict === 'Dogru';
 
           return (

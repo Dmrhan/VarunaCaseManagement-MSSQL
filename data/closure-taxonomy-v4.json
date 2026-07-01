@@ -1,0 +1,1174 @@
+{
+  "version": "v4",
+  "source": "İş Süreçleri Kategorisi - 20260604 - DUZELTILMIS.xlsx",
+  "resolutionTypes": [
+    {
+      "code": "apk-gecisi",
+      "label": "APK Geçişi",
+      "sortOrder": 0
+    },
+    {
+      "code": "dll-gecisi",
+      "label": "DLL Geçişi",
+      "sortOrder": 1
+    },
+    {
+      "code": "dokuman-sss",
+      "label": "Doküman / SSS",
+      "sortOrder": 2
+    },
+    {
+      "code": "dis-servis-mudahalesi",
+      "label": "Dış Servis müdahalesi",
+      "sortOrder": 3
+    },
+    {
+      "code": "egitim",
+      "label": "Eğitim",
+      "sortOrder": 4
+    },
+    {
+      "code": "egitim-ve-bilgi-verilmesi",
+      "label": "Eğitim ve Bilgi Verilmesi",
+      "sortOrder": 5
+    },
+    {
+      "code": "kurulum-ve-teknik-mudahale",
+      "label": "Kurulum ve Teknik Müdahale",
+      "sortOrder": 6
+    },
+    {
+      "code": "parametre-duzeltme",
+      "label": "Parametre düzeltme",
+      "sortOrder": 7
+    },
+    {
+      "code": "script-calistirma-dbupdate",
+      "label": "Script çalıştırma (DbUpdate)",
+      "sortOrder": 8
+    },
+    {
+      "code": "sql-server-mudahalesi",
+      "label": "Sql Server Müdahalesi",
+      "sortOrder": 9
+    },
+    {
+      "code": "sunucu-server-ve-network-mudahalesi",
+      "label": "Sunucu Server ve Network Müdahalesi",
+      "sortOrder": 10
+    },
+    {
+      "code": "uygulama-menu-karti-duzeltme",
+      "label": "Uygulama Menü kartı düzeltme",
+      "sortOrder": 11
+    },
+    {
+      "code": "versiyon-gecisi",
+      "label": "Versiyon geçişi",
+      "sortOrder": 12
+    },
+    {
+      "code": "yetki-duzenleme",
+      "label": "Yetki düzenleme",
+      "sortOrder": 13
+    },
+    {
+      "code": "urun-gelistirme",
+      "label": "Ürün geliştirme",
+      "sortOrder": 14
+    }
+  ],
+  "permanentPreventions": [
+    {
+      "code": "bilgi-bankasi-yazisi-hazirlanacak",
+      "label": "Bilgi bankası yazısı hazırlanacak",
+      "sortOrder": 0
+    },
+    {
+      "code": "egitim-icerigi-hazirlanacak",
+      "label": "Eğitim içeriği hazırlanacak",
+      "sortOrder": 1
+    },
+    {
+      "code": "hata-mesaji-iyilestirilecek",
+      "label": "Hata mesajı iyileştirilecek",
+      "sortOrder": 2
+    },
+    {
+      "code": "uygulama-kontrolu-eklenecek",
+      "label": "Uygulama Kontrolü Eklenecek",
+      "sortOrder": 3
+    },
+    {
+      "code": "uygulama-logu-gelistirilecek",
+      "label": "Uygulama Logu geliştirilecek",
+      "sortOrder": 4
+    },
+    {
+      "code": "parametre-sihirbazi-yapilacak",
+      "label": "Parametre sihirbazı yapılacak",
+      "sortOrder": 5
+    },
+    {
+      "code": "self-servis-ekran-yapilacak",
+      "label": "Self-servis ekran yapılacak",
+      "sortOrder": 6
+    },
+    {
+      "code": "test-senaryosu-eklenecek",
+      "label": "Test senaryosu eklenecek",
+      "sortOrder": 7
+    },
+    {
+      "code": "monitoring-kontrol-gelistirilecek",
+      "label": "Monitoring Kontrol Geliştirilecek",
+      "sortOrder": 8
+    }
+  ],
+  "groups": [
+    {
+      "code": "altyapi-sunucu-ve-performans-kesintisi",
+      "label": "Altyapı, Sunucu ve Performans Kesintisi",
+      "sortOrder": 0,
+      "mode": "coupled",
+      "details": [
+        {
+          "code": "yavaslik-timeout-internet",
+          "label": "Yavaşlık / timeout (internet)",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi",
+            "sql-server-mudahalesi"
+          ]
+        },
+        {
+          "code": "disk-temp-yetersizligi",
+          "label": "Disk / temp yetersizliği",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "ram-kaynak-tuketimi",
+          "label": "RAM / kaynak tüketimi",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "replikasyon-durmasi",
+          "label": "Replikasyon durması",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "sql-server-mudahalesi"
+          ]
+        },
+        {
+          "code": "giris-sunucu-hatasi",
+          "label": "Giriş / sunucu hatası",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "sql-server-db-sorunu",
+          "label": "Sql Server DB sorunu",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "sql-server-mudahalesi"
+          ]
+        },
+        {
+          "code": "ssl-sertifika",
+          "label": "SSL Sertifika",
+          "sortOrder": 6,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "load-balance-sorunu",
+          "label": "Load Balance sorunu",
+          "sortOrder": 7,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "firewall",
+          "label": "Firewall",
+          "sortOrder": 8,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "klasor-yetkilendirme",
+          "label": "Klasör yetkilendirme",
+          "sortOrder": 9,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        },
+        {
+          "code": "iis-yetki",
+          "label": "IIS yetki",
+          "sortOrder": 10,
+          "allowedResolutionTypes": [
+            "sunucu-server-ve-network-mudahalesi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "dis-entegrasyon-3-parti-servis",
+      "label": "Dış Entegrasyon / 3. Parti Servis",
+      "sortOrder": 1,
+      "mode": "coupled",
+      "details": [
+        {
+          "code": "eslestirme-eksik",
+          "label": "Eşleştirme eksik",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "egitim-ve-bilgi-verilmesi",
+            "dokuman-sss"
+          ]
+        },
+        {
+          "code": "web-servis-aktarim",
+          "label": "Web servis Aktarım",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "servis-timeout",
+          "label": "Servis timeout",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "view-kaynagi-hatasi",
+          "label": "View kaynağı hatası",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "script-calistirma-dbupdate",
+            "egitim-ve-bilgi-verilmesi",
+            "parametre-duzeltme",
+            "kurulum-ve-teknik-mudahale",
+            "sql-server-mudahalesi"
+          ]
+        },
+        {
+          "code": "erp-logo-sap-vb-sorunu",
+          "label": "ERP (Logo,SAP vb.) Sorunu",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss"
+          ]
+        },
+        {
+          "code": "smart-connect-aktarim-hatasi",
+          "label": "Smart Connect Aktarım Hatası",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "odeme-sanal-pos-altyapisi",
+          "label": "Ödeme/Sanal POS Altyapısı",
+          "sortOrder": 6,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "donanim-cihaz-problemi-hardware",
+      "label": "Donanım / Cihaz Problemi (Hardware)",
+      "sortOrder": 2,
+      "mode": "coupled",
+      "details": [
+        {
+          "code": "apk-versiyon-uyumsuz",
+          "label": "APK versiyon uyumsuz",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi"
+          ]
+        },
+        {
+          "code": "cihaz-baglantisi-eslestirme",
+          "label": "Cihaz Bağlantısı / eşleştirme",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale"
+          ]
+        },
+        {
+          "code": "dosya-indirilemiyor",
+          "label": "Dosya indirilemiyor",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale"
+          ]
+        },
+        {
+          "code": "mobil-android-ve-ios-versiyon-uyumsuzlugu",
+          "label": "Mobil Android ve IOS versiyon uyumsuzluğu",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "apk-gecisi",
+            "kurulum-ve-teknik-mudahale",
+            "dokuman-sss"
+          ]
+        },
+        {
+          "code": "yazici-model-uyumsuzlugu",
+          "label": "Yazıcı Model Uyumsuzluğu",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dokuman-sss",
+            "dll-gecisi",
+            "apk-gecisi"
+          ]
+        },
+        {
+          "code": "cihaz-tarih-saat",
+          "label": "Cihaz tarih / saat",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "egitim",
+            "kurulum-ve-teknik-mudahale"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "e-belge-ve-entegrator-i-slem-hatasi",
+      "label": "E-Belge ve Entegratör İşlem Hatası",
+      "sortOrder": 3,
+      "mode": "coupled",
+      "details": [
+        {
+          "code": "e-belge-ayari-entegrator-servis-sifre-kontor",
+          "label": "E-Belge ayarı /Entegratör servis / şifre / kontör",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "egitim-ve-bilgi-verilmesi"
+          ]
+        },
+        {
+          "code": "mukellefiyet",
+          "label": "Mükellefiyet",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi"
+          ]
+        },
+        {
+          "code": "sertifika",
+          "label": "Sertifika",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi"
+          ]
+        },
+        {
+          "code": "xslt-sablon-eksik",
+          "label": "XSLT şablon eksik",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi",
+            "script-calistirma-dbupdate",
+            "parametre-duzeltme",
+            "dis-servis-mudahalesi"
+          ]
+        },
+        {
+          "code": "gi-b-schematron-hatasi",
+          "label": "GİB / Schematron hatası",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi",
+            "script-calistirma-dbupdate",
+            "parametre-duzeltme",
+            "dis-servis-mudahalesi"
+          ]
+        },
+        {
+          "code": "entegrator-kuyruk-gecikmesi",
+          "label": "Entegratör kuyruk gecikmesi",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi",
+            "script-calistirma-dbupdate",
+            "parametre-duzeltme",
+            "dis-servis-mudahalesi"
+          ]
+        },
+        {
+          "code": "entegrator-logo-sap-edm-vb",
+          "label": "Entegratör (Logo, SAP, EDM vb.)",
+          "sortOrder": 6,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi",
+            "script-calistirma-dbupdate",
+            "parametre-duzeltme",
+            "dis-servis-mudahalesi"
+          ]
+        },
+        {
+          "code": "unidox-v1-v2-gecisi",
+          "label": "Unidox V1 / V2 geçişi",
+          "sortOrder": 7,
+          "allowedResolutionTypes": [
+            "kurulum-ve-teknik-mudahale",
+            "egitim-ve-bilgi-verilmesi",
+            "script-calistirma-dbupdate",
+            "parametre-duzeltme",
+            "dis-servis-mudahalesi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "hesaplama-i-s-kurali",
+      "label": "Hesaplama / İş Kuralı",
+      "sortOrder": 4,
+      "mode": "coupled",
+      "details": [
+        {
+          "code": "i-skonto-promosyon",
+          "label": "İskonto / promosyon",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "dll-gecisi",
+            "dokuman-sss",
+            "egitim-ve-bilgi-verilmesi",
+            "dis-servis-mudahalesi",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "versiyon-gecisi",
+            "yetki-duzenleme",
+            "uygulama-menu-karti-duzeltme"
+          ]
+        },
+        {
+          "code": "fiyat",
+          "label": "Fiyat",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dll-gecisi",
+            "dokuman-sss",
+            "egitim-ve-bilgi-verilmesi",
+            "dis-servis-mudahalesi",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "versiyon-gecisi",
+            "yetki-duzenleme",
+            "uygulama-menu-karti-duzeltme"
+          ]
+        },
+        {
+          "code": "kdv-muafiyet",
+          "label": "KDV / muafiyet",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dll-gecisi",
+            "dokuman-sss",
+            "egitim-ve-bilgi-verilmesi",
+            "dis-servis-mudahalesi",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "versiyon-gecisi",
+            "yetki-duzenleme",
+            "uygulama-menu-karti-duzeltme"
+          ]
+        },
+        {
+          "code": "gecikme-kredi-limiti",
+          "label": "Gecikme / kredi limiti",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "dll-gecisi",
+            "dokuman-sss",
+            "egitim-ve-bilgi-verilmesi",
+            "dis-servis-mudahalesi",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "versiyon-gecisi",
+            "yetki-duzenleme",
+            "uygulama-menu-karti-duzeltme"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "kullanici-uygulama-kullanim-ve-i-slem-adimi-hatasi",
+      "label": "Kullanıcı Uygulama kullanım ve İşlem Adımı Hatası",
+      "sortOrder": 5,
+      "mode": "tumu",
+      "details": [
+        {
+          "code": "menu-yetkisi-eksik",
+          "label": "Menü yetkisi eksik",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "i-slem-yetkisi-eksik",
+          "label": "İşlem yetkisi eksik",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "distributor-sube-yetkisi-eksik",
+          "label": "Distribütör / şube yetkisi eksik",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "onay-yetkisi-yok",
+          "label": "Onay yetkisi yok",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "lisans-limiti-dolu",
+          "label": "Lisans limiti dolu",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "rol-kullanici-tanimsiz",
+          "label": "Rol / kullanıcı tanımsız",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "musteri-karti-eksik-hatali",
+          "label": "Müşteri kartı eksik / hatalı",
+          "sortOrder": 6,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "urun-stok-karti-eksik",
+          "label": "Ürün / stok kartı eksik",
+          "sortOrder": 7,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "fiyat-kdv-tanimi-hatali",
+          "label": "Fiyat / KDV tanımı hatalı",
+          "sortOrder": 8,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "satis-temsilcisi-tanimi-hatali",
+          "label": "Satış temsilcisi tanımı hatalı",
+          "sortOrder": 9,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "eksik-kart-iliskisi-depo-sevk-seri",
+          "label": "Eksik kart ilişkisi (depo / sevk / seri)",
+          "sortOrder": 10,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "belge-dizayni-eksik-hatali",
+          "label": "Belge dizaynı eksik / hatalı",
+          "sortOrder": 11,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "matbu-no-sira",
+          "label": "Matbu no / sıra",
+          "sortOrder": 12,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "yazici-logo-basim-ayari",
+          "label": "Yazıcı / logo basım ayarı",
+          "sortOrder": 13,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "kullanici-islem-adimi-hatasi",
+          "label": "Kullanıcı işlem adımı hatası",
+          "sortOrder": 14,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "yasal-surec-8-gun-ay-kapanisi",
+          "label": "Yasal süreç (8 gün / ay kapanışı)",
+          "sortOrder": 15,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "operatorluk-merkez-onayi-gereken-islem",
+          "label": "Operatörlük / merkez onayı gereken işlem",
+          "sortOrder": 16,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "bilgi-nasil-yapilir",
+          "label": "Bilgi / nasıl yapılır",
+          "sortOrder": 17,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "parametre-ve-konfigurasyon",
+      "label": "Parametre ve Konfigürasyon",
+      "sortOrder": 6,
+      "mode": "tumu",
+      "details": [
+        {
+          "code": "e-belge-ayari-entegrator-sifresi",
+          "label": "E-Belge ayarı / entegratör şifresi",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "aktarim-smartconnect-parametresi",
+          "label": "Aktarım (SmartConnect) parametresi",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "matbu-basim-parametresi",
+          "label": "Matbu / basım parametresi",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "st-parametresi-eksik",
+          "label": "ST parametresi eksik",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "yanlis-parametre",
+          "label": "Yanlış parametre",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "eksik-parametre",
+          "label": "Eksik parametre",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "yetki-ve-parametre-sablon",
+          "label": "Yetki ve Parametre Şablon",
+          "sortOrder": 6,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "panorama-calisma-parametreleri",
+          "label": "Panorama Çalışma parametreleri",
+          "sortOrder": 7,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "panorama-config-ayarlari",
+          "label": "Panorama Config ayarları",
+          "sortOrder": 8,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "panorama-api-ayarlari",
+          "label": "Panorama API ayarları",
+          "sortOrder": 9,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "veri-veritabani-hatasi",
+      "label": "Veri / Veritabanı Hatası",
+      "sortOrder": 7,
+      "mode": "tumu",
+      "details": [
+        {
+          "code": "bozuk-kayit-stok-tipi-belge-detayi",
+          "label": "Bozuk kayıt (stok tipi / belge detayı)",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "mukerrer-kayit",
+          "label": "Mükerrer kayıt",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "delete-i-ptal-islemi",
+          "label": "Delete / İptal işlemi",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "update-ve-insert-islemi",
+          "label": "Update ve insert işlemi",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "eksik-hatali-master-data-urun-musteri-fiyat-listesi",
+          "label": "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "sql-server-db-sorunu--veri-veritabani-hatasi",
+          "label": "Sql Server DB sorunu",
+          "sortOrder": 5,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "yazilim-hatasi",
+      "label": "Yazılım Hatası",
+      "sortOrder": 8,
+      "mode": "tumu",
+      "details": [
+        {
+          "code": "planlanmis-gorev-calismiyor",
+          "label": "Planlanmış Görev çalışmıyor.",
+          "sortOrder": 0,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "versiyon-uyumsuzlugu-fix-dll",
+          "label": "Versiyon uyumsuzluğu (Fix-DLL)",
+          "sortOrder": 1,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "validasyon-hatasi",
+          "label": "Validasyon hatası",
+          "sortOrder": 2,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "kod-hatasi",
+          "label": "Kod hatası",
+          "sortOrder": 3,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        },
+        {
+          "code": "yeni-apk-verilmesi",
+          "label": "Yeni APK verilmesi",
+          "sortOrder": 4,
+          "allowedResolutionTypes": [
+            "dis-servis-mudahalesi",
+            "dokuman-sss",
+            "parametre-duzeltme",
+            "script-calistirma-dbupdate",
+            "urun-gelistirme",
+            "uygulama-menu-karti-duzeltme",
+            "yetki-duzenleme",
+            "dll-gecisi"
+          ]
+        }
+      ]
+    }
+  ]
+}

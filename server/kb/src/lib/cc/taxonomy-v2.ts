@@ -41,9 +41,17 @@ type OpenSpec = {
   values: string[];
 };
 
+// v4 CASCADE — detay artık {label, cozum_tipleri}: her detay yalnız kendi
+// grubunun altında listelenir (grup→detay bağımlılığı) ve yalnız kabul ettiği
+// çözüm tiplerini taşır (detay→çözüm bağımlılığı).
+type CloseRootCauseDetail = {
+  label: string;
+  cozum_tipleri: string[];
+};
 type CloseRootCauseGroup = {
   group: string;
-  details: string[];
+  mode?: "coupled" | "tumu";
+  details: CloseRootCauseDetail[];
 };
 
 type CloseSpec = {
@@ -179,6 +187,10 @@ export function loadGoldExamples(): Array<Record<string, string>> {
 }
 
 export function formatGoldForPrompt(mode: "open" | "close"): string {
+  // v4 COLD-START: kapanış (close) gold örnekleri ESKİ taksonomiye göre etiketli
+  // → geçersiz. Yeni gold, etiket doğrulama ekranından birikene kadar close
+  // few-shot KAPALI. Açılış gold'u geçerli (open taksonomisi değişmedi).
+  if (mode === "close") return "";
   const gold = loadGoldExamples();
   if (!gold.length) return "";
   const byGroup: Record<string, number> = {};
@@ -361,13 +373,36 @@ export function isValidKokNedenGrubu(group: string | null): boolean {
   return getKokNedenGroups().some((g) => g.group === group);
 }
 
-export function isValidKokNedenDetay(detail: string | null): boolean {
+// v4 CASCADE — grup verilirse detay YALNIZ o grubun altında aranır (grup-kapsamlı).
+// Grup verilmezse eski davranış (tüm gruplarda ara) — geri uyum.
+export function isValidKokNedenDetay(detail: string | null, group?: string | null): boolean {
   if (detail == null) return true;
-  return getKokNedenGroups().some((g) => g.details.includes(detail));
+  const groups = getKokNedenGroups();
+  const scope = group ? groups.filter((g) => g.group === group) : groups;
+  return scope.some((g) => g.details.some((d) => d.label === detail));
 }
 
-export function isValidCozumTipi(value: string | null): boolean {
+// v4 CASCADE — (grup, detay) verilirse o detayın kabul ettiği çözüm tipleri döner;
+// yoksa tüm çözüm tipi listesi (geri uyum).
+export function getAllowedCozumTipleri(
+  group: string | null,
+  detail: string | null,
+): string[] {
+  if (!group || !detail) return getCozumTipi().values;
+  const g = getKokNedenGroups().find((x) => x.group === group);
+  const d = g?.details.find((x) => x.label === detail);
+  return d?.cozum_tipleri ?? [];
+}
+
+// v4 CASCADE — (grup, detay) verilirse çözüm o detayın izinli setinde olmalı;
+// yoksa düz liste doğrulaması (geri uyum).
+export function isValidCozumTipi(
+  value: string | null,
+  group?: string | null,
+  detail?: string | null,
+): boolean {
   if (value == null) return true;
+  if (group && detail) return getAllowedCozumTipleri(group, detail).includes(value);
   return getCozumTipi().values.includes(value);
 }
 
