@@ -167,6 +167,8 @@ router.get('/taxonomies', async (req, res) => {
     const rows = await prisma.taxonomyDef.findMany({
       where,
       select: {
+        id: true,
+        parentId: true,
         taxonomyType: true,
         code: true,
         label: true,
@@ -182,13 +184,17 @@ router.get('/taxonomies', async (req, res) => {
       if (!taxonomyTypeRaw || type === taxonomyTypeRaw) byType[type] = [];
     }
 
-    // Kapanış kategorileri bağımsız düz listeler — rootCauseDetail artık
-    // rootCauseGroup.children altına gömülmez; her tip kendi düz listesinde
-    // döner (parentId okunmaz).
+    // v4 CASCADE — id + parentId artık dönüyor: frontend grup→detay ağacını
+    // parentId ile kurar (detay.parentId === grup.id). Çözüm coupling'i
+    // detay.metadata.allowedResolutionTypes[] içinde (metadata JSON string olarak
+    // döner; tüketici parse eder). Alanlar ADDITIVE — eski düz-liste tüketiciler
+    // id/parentId'yi yok sayabilir.
     for (const r of rows) {
       const list = byType[r.taxonomyType];
       if (!list) continue; // type filter excluded
       list.push({
+        id: r.id,
+        parentId: r.parentId ?? null,
         code: r.code,
         label: r.label,
         sortOrder: r.sortOrder,

@@ -2797,10 +2797,27 @@ export interface SuggestClosureResponse {
 }
 
 export interface SmartTicketTaxonomyItem {
+  id?: string;
+  parentId?: string | null;
   code: string;
   label: string;
   sortOrder: number;
   metadata?: unknown;
+}
+
+/**
+ * Detay öğesinin metadata'sından allowedResolutionTypes code dizisini çıkarır.
+ * null dönerse kısıtlama yok — tüm çözüm tipleri gösterilir (geri uyum).
+ * Her zaman try/catch ile — bozuk JSON UI'ı çökertmemeli.
+ */
+export function parseAllowedResolutionCodes(item: { metadata?: unknown }): string[] | null {
+  if (item?.metadata == null) return null;
+  try {
+    const m = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+    return Array.isArray(m?.allowedResolutionTypes) ? (m.allowedResolutionTypes as string[]) : null;
+  } catch {
+    return null;
+  }
 }
 /**
  * @deprecated Kapanış decouple (feature/closure-taxonomy-decouple) sonrası

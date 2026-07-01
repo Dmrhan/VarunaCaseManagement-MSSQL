@@ -81,11 +81,11 @@ export async function runAnalyst(inputs: PromptInputs): Promise<AnalystResult> {
   const cachePrefix = buildAnalystCachePrefix(inputs);
   const response = await generate(SYSTEM_INSTRUCTION, userPrompt, {
     temperature: 0.2,
-    // Çıktı şeması: ≤6 hipotez + ≤6 adım + 2 taslak + 2 rehberlik → pratikte
-    // ~2-3k token. Output Sonnet'te en pahalı kalem ($15/M); 8192 fazla
-    // cömertti, 4096 şemayı rahat karşılar. Nadir kırpılma riskine karşı
-    // güvenli üst sınır.
-    maxOutputTokens: 4096,
+    // DİKKAT: 4096'ya indirmek HATAYDI — detaylı Türkçe çıktı (6 hipotez +
+    // operasyonel adımlar + 2 taslak + 2 rehberlik) 4096'yı aşınca truncate
+    // oluyor → JSON parse fail → TÜM analyze çöküyor (çözüm adımları + taslaklar
+    // gelmiyor). 8192 orijinal güvenli üst sınır; geri alındı.
+    maxOutputTokens: 8192,
     responseMimeType: "application/json",
     cachePrefix,
   });

@@ -33,6 +33,7 @@ import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
   lookupService,
+  parseAllowedResolutionCodes,
   type CaseSolutionStep,
   type SmartTicketTaxonomyItem,
   type SmartTicketRootCauseGroup,
@@ -922,18 +923,39 @@ export function SmartTicketNewPage({
 
   // ── Stage 3 closure: transitionStatus + smartTicketClosure ──────────
   const closureLists = useMemo(() => {
-    // Kapanış kategorileri bağımsız — detay listesi gruba göre filtrelenmez;
-    // tüm rootCauseDetail değerleri seçilen gruptan bağımsız seçilebilir.
+    // CASCADE v4: rcgList düz, rcdList seçili grubun altındakileri,
+    // rtList seçili detayın allowedResolutionTypes kümesiyle filtrelenir.
     const rcgList: SmartTicketTaxonomyItem[] = taxonomies?.rootCauseGroup ?? [];
-    const rcdList: SmartTicketTaxonomyItem[] = taxonomies?.rootCauseDetail ?? [];
-    const rtList: SmartTicketTaxonomyItem[] = taxonomies?.resolutionType ?? [];
+    const allDetails: SmartTicketTaxonomyItem[] = taxonomies?.rootCauseDetail ?? [];
+    const allResolutions: SmartTicketTaxonomyItem[] = taxonomies?.resolutionType ?? [];
     const ppList: SmartTicketTaxonomyItem[] = taxonomies?.permanentPrevention ?? [];
-    return { rcgList, rcdList, rtList, ppList };
-  }, [taxonomies]);
 
-  // Kapanış decouple — rootCauseDetail, rootCauseGroup'tan bağımsız olduğu
-  // için grup değişiminde detayı sıfırlamaya gerek yok (tüm detaylar her
-  // zaman geçerli). Eski "grup değişince detayı temizle" effect'i kaldırıldı.
+    // Seçili grup → id bul → detayları filtrele (parentId eşleşmesi).
+    const selectedGroup = rcgList.find((g) => g.code === closure.rootCauseGroup);
+    const rcdList: SmartTicketTaxonomyItem[] = selectedGroup?.id
+      ? allDetails.filter((d) => d.parentId === selectedGroup.id)
+      : closure.rootCauseGroup
+        ? [] // Grup seçili ama id yoksa eski format — boş göster
+        : []; // Grup seçilmemişse boş (UX: önce grup seç)
+
+    // Seçili detay → allowedResolutionTypes → rtList filtrele.
+    const selectedDetail = rcdList.find((d) => d.code === closure.rootCauseDetail);
+    let rtList: SmartTicketTaxonomyItem[];
+    if (selectedDetail) {
+      const allowed = parseAllowedResolutionCodes(selectedDetail);
+      rtList = allowed != null
+        ? allResolutions.filter((r) => allowed.includes(r.code))
+        : allResolutions; // null → kısıtlama yok (geri uyum)
+    } else {
+      rtList = []; // Detay seçilmemişse boş (UX: önce detay seç)
+    }
+
+    return { rcgList, rcdList, rtList, ppList };
+  }, [taxonomies, closure.rootCauseGroup, closure.rootCauseDetail]);
+
+  // CASCADE RESET — grup değişince detayı ve çözüm tipini temizle;
+  // detay değişince çözüm tipini temizle. onChange handler'larında yapılır
+  // (aşağıda Stage3Closure prop'ları), bu yüzden burada ayrı effect YOK.
 
   // Stage 3 resolution-first: Stage 2'deki step listesinden "Çözüm Açıklaması"
   // textarea'sı için prefill text üret. En son worked step'lerin title (+ varsa
@@ -979,20 +1001,14 @@ export function SmartTicketNewPage({
         // Step fetch başarısızsa prefill atla — kullanıcı boş textarea'ya yazar.
       }
       if (cancelled) return;
-      let effectiveResolution = '';
+      // YALNIZ çözüm açıklamasını prefill et (operatörün worked step'lerinden).
+      // ETİKETLEME/ÖNERİ BURADA YAPILMAZ — kullanıcı önce çözümü yazar/düzenler,
+      // sonra "Bilgi Bankası Önerisi Al" butonuna basınca etiketleme çalışır.
+      // (Aksi halde AI, kullanıcı çözümü onaylamadan compose edilen metne göre
+      // kategori uyduruyordu.)
       setClosure((c) => {
-        if (resolutionNoteDirtyRef.current || c.resolutionNote.trim().length > 0) {
-          effectiveResolution = c.resolutionNote;
-          return c;
-        }
-        effectiveResolution = prefillText;
+        if (resolutionNoteDirtyRef.current || c.resolutionNote.trim().length > 0) return c;
         return prefillText ? { ...c, resolutionNote: prefillText } : c;
-      });
-      if (cancelled) return;
-      void handleSuggestClosure({
-        resolutionOverride: effectiveResolution.trim().length > 0 ? effectiveResolution : undefined,
-        // İlk Stage 3 girişi — drafts (taslaklar) burada üretilsin.
-        includeDrafts: true,
       });
     })();
     return () => {
@@ -1001,47 +1017,18 @@ export function SmartTicketNewPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdCase?.id]);
 
-  // Stage 3 resolution-first: "Çözüm Açıklaması" textarea değişikliği →
-  // 1000 ms inactivity sonrası KB önerisini current değerle yenile. Kullanıcı
-  // yazmayı sürdürdükçe önceki timer iptal edilir; aşırı API çağrısı önlenir.
-  // İlk girişte useEffect'in suggestClosure çağrısıyla zaten önerek geldi —
-  // bu effect yalnız dirty=true olunca anlamlı, prefill'in tetiklediği
-  // değişimde no-op (dirty ref'i prefill set etmiyor).
-  //
-  // Codex P2 #2 fix — Empty resolution guard: user textarea'yı temizlerse
-  // (dirty + trimmed === '') KB çağrısı ATMA. Eski impl resolutionOverride'ı
-  // omit ederek fetch atıyordu → backend compose-from-steps fallback'ı
-  // tetikliyordu (stale step text üzerinden categorize/drafts üretiliyordu).
-  // Onun yerine pending state'leri temizliyoruz: closureSuggestion null,
-  // closureSuggestionError null. Backend defansif olarak resolution_override_empty
-  // 400 dönse de buraya hiç gitmeden frontend kısa devre yapsın.
+  // Çözüm Açıklaması yazmak ARTIK OTOMATİK ETİKETLEME TETİKLEMEZ.
+  // (Eski debounce'lu oto-öneri kaldırıldı — kullanıcı çözümü yazmadan AI
+  // kategori uyduruyordu.) Etiketleme yalnız "Bilgi Bankası Önerisi Al"
+  // butonuyla, kullanıcının yazdığı çözüm metnine göre çalışır.
+  // Tek istisna: kullanıcı çözümü tamamen silerse stale öneriyi temizle.
   useEffect(() => {
     if (stage !== 'closure' || !createdCase) return;
     if (!resolutionNoteDirtyRef.current) return;
-    if (resolutionDebounceRef.current != null) {
-      window.clearTimeout(resolutionDebounceRef.current);
-    }
-    const trimmed = closure.resolutionNote.trim();
-    if (trimmed.length === 0) {
-      // Empty resolution + dirty → stale suggestion'ı clear et, refetch atma.
-      // closureRefreshedOnceRef true kalır → KbDraftCard override mode'da
-      // boş object alır → drafts gizli (misleading drafts göstermeme garantisi).
+    if (closure.resolutionNote.trim().length === 0) {
       setClosureSuggestion(null);
       setClosureSuggestionError(null);
-      return;
     }
-    resolutionDebounceRef.current = window.setTimeout(() => {
-      resolutionDebounceRef.current = null;
-      void handleSuggestClosure({ resolutionOverride: closure.resolutionNote });
-    }, 1000);
-    return () => {
-      if (resolutionDebounceRef.current != null) {
-        window.clearTimeout(resolutionDebounceRef.current);
-        resolutionDebounceRef.current = null;
-      }
-    };
-    // handleSuggestClosure stable değil; effect resolutionNote'a göre tetiklenmeli.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closure.resolutionNote, stage, createdCase?.id]);
 
   // Codex PR review P1 — checklist gating. StatusTransitionPanel (mevcut
@@ -2194,9 +2181,9 @@ function Stage3Closure({
               leftIcon={<Wand2 size={11} />}
               disabled={closureSuggesting}
               onClick={onSuggestClosure}
-              title="KB üzerinden kapanış önerisini yeniden iste"
+              title="Yazdığın çözüm açıklamasına göre KB'den kapanış önerisi al"
             >
-              {closureSuggesting ? 'Öneriliyor…' : 'Bilgi Bankası Önerisini Yenile'}
+              {closureSuggesting ? 'Öneriliyor…' : 'Bilgi Bankası Önerisi Al'}
             </Button>
             <Button
               variant="ghost"
@@ -2216,8 +2203,8 @@ function Stage3Closure({
         {/* Stage 3 resolution-first — "Çözüm Açıklaması" textarea KB önerisi
             block'unun üstüne taşındı. Stage 2 worked step'ten prefill edilir;
             user edit ettiğinde dirty flag set olur ve bir daha ezilmez.
-            Voice input append davranışı korunur (her ikisi de
-            onChangeResolutionNote'tan geçer → dirty + debounced refetch). */}
+            OTOMATİK etiketleme YOK — kullanıcı çözümü yazıp "Bilgi Bankası
+            Önerisi Al" butonuna basınca etiketleme çalışır. */}
         <Field
           label={
             <span className="inline-flex items-center gap-1.5">
@@ -2355,7 +2342,15 @@ function Stage3Closure({
           >
             <Select
               value={closure.rootCauseGroup}
-              onChange={(e) => setClosure((c) => ({ ...c, rootCauseGroup: e.target.value }))}
+              onChange={(e) => {
+                const v = e.target.value;
+                // CASCADE RESET: grup değişince alt seçimleri temizle
+                setClosure((c) =>
+                  c.rootCauseGroup === v
+                    ? c
+                    : { ...c, rootCauseGroup: v, rootCauseDetail: '', resolutionType: '' },
+                );
+              }}
               disabled={closureLists.rcgList.length === 0}
             >
               <option value="">— Seçim yok —</option>
@@ -2376,7 +2371,15 @@ function Stage3Closure({
           >
             <Select
               value={closure.rootCauseDetail}
-              onChange={(e) => setClosure((c) => ({ ...c, rootCauseDetail: e.target.value }))}
+              onChange={(e) => {
+                const v = e.target.value;
+                // CASCADE RESET: detay değişince çözüm tipini temizle
+                setClosure((c) =>
+                  c.rootCauseDetail === v
+                    ? c
+                    : { ...c, rootCauseDetail: v, resolutionType: '' },
+                );
+              }}
               disabled={closureLists.rcdList.length === 0}
             >
               <option value="">— Seçim yok —</option>

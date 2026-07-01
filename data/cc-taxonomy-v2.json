@@ -330,137 +330,883 @@
   "close": {
     "kok_neden": {
       "label": "Kök Neden",
-      "description": "Kapanışta destek dili — iki seviyeli (Grup → Detay)",
+      "description": "Kök neden grubu → detay CASCADE; her detayın kabul ettiği çözüm tipleri 'cozum_tipleri' alanında.",
       "groups": [
         {
-          "group": "Yetki / Rol",
+          "group": "Altyapı, Sunucu ve Performans Kesintisi",
+          "mode": "coupled",
           "details": [
-            "Menü yetkisi eksik",
-            "İşlem yetkisi eksik",
-            "Distribütör / şube yetkisi eksik",
-            "Onay yetkisi yok",
-            "Lisans limiti dolu",
-            "Rol / kullanıcı tanımsız"
+            {
+              "label": "Yavaşlık / timeout (internet)",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi",
+                "Sql Server Müdahalesi"
+              ]
+            },
+            {
+              "label": "Disk / temp yetersizliği",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "RAM / kaynak tüketimi",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "Replikasyon durması",
+              "cozum_tipleri": [
+                "Sql Server Müdahalesi"
+              ]
+            },
+            {
+              "label": "Giriş / sunucu hatası",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "Sql Server DB sorunu",
+              "cozum_tipleri": [
+                "Sql Server Müdahalesi"
+              ]
+            },
+            {
+              "label": "SSL Sertifika",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "Load Balance sorunu",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "Firewall",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "Klasör yetkilendirme",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            },
+            {
+              "label": "IIS yetki",
+              "cozum_tipleri": [
+                "Sunucu Server ve Network Müdahalesi"
+              ]
+            }
           ]
         },
         {
-          "group": "Parametre / Konfigürasyon",
+          "group": "Dış Entegrasyon / 3. Parti Servis",
+          "mode": "coupled",
           "details": [
-            "E-Belge ayarı / entegratör şifresi",
-            "Aktarım (SmartConnect) parametresi",
-            "Matbu / basım parametresi",
-            "ST parametresi eksik",
-            "Yanlış parametre",
-            "Eksik parametre"
+            {
+              "label": "Eşleştirme eksik",
+              "cozum_tipleri": [
+                "Eğitim ve Bilgi Verilmesi",
+                "Doküman / SSS"
+              ]
+            },
+            {
+              "label": "Web servis Aktarım",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Servis timeout",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "View kaynağı hatası",
+              "cozum_tipleri": [
+                "Script çalıştırma (DbUpdate)",
+                "Eğitim ve Bilgi Verilmesi",
+                "Parametre düzeltme",
+                "Kurulum ve Teknik Müdahale",
+                "Sql Server Müdahalesi"
+              ]
+            },
+            {
+              "label": "ERP (Logo,SAP vb.) Sorunu",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS"
+              ]
+            },
+            {
+              "label": "Smart Connect Aktarım Hatası",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Ödeme/Sanal POS Altyapısı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            }
           ]
         },
         {
-          "group": "Ana Veri / Kart Tanımı",
+          "group": "Donanım / Cihaz Problemi (Hardware)",
+          "mode": "coupled",
           "details": [
-            "Müşteri kartı eksik / hatalı",
-            "Ürün / stok kartı eksik",
-            "Fiyat / KDV tanımı hatalı",
-            "Satış temsilcisi tanımı hatalı",
-            "Eksik kart ilişkisi (depo / sevk / seri)"
+            {
+              "label": "APK versiyon uyumsuz",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi"
+              ]
+            },
+            {
+              "label": "Cihaz Bağlantısı / eşleştirme",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale"
+              ]
+            },
+            {
+              "label": "Dosya indirilemiyor",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale"
+              ]
+            },
+            {
+              "label": "Mobil Android ve IOS versiyon uyumsuzluğu",
+              "cozum_tipleri": [
+                "APK Geçişi",
+                "Kurulum ve Teknik Müdahale",
+                "Doküman / SSS"
+              ]
+            },
+            {
+              "label": "Yazıcı Model Uyumsuzluğu",
+              "cozum_tipleri": [
+                "Doküman / SSS",
+                "DLL Geçişi",
+                "APK Geçişi"
+              ]
+            },
+            {
+              "label": "Cihaz tarih / saat",
+              "cozum_tipleri": [
+                "Eğitim",
+                "Kurulum ve Teknik Müdahale"
+              ]
+            }
           ]
         },
         {
-          "group": "Entegratör (3.parti)",
+          "group": "E-Belge ve Entegratör İşlem Hatası",
+          "mode": "coupled",
           "details": [
-            "Entegratör servis / şifre / kontör",
-            "Mükellefiyet / sertifika",
-            "XSLT şablon eksik",
-            "GİB / Schematron hatası",
-            "Entegratör kuyruk gecikmesi",
-            "Ödeme/Sanal POS Altyapısı",
-            "ERP (Logo, SAP vb.)",
-            "Unidox V1 / V2 geçişi"
-          ]
-        },
-        {
-          "group": "Entegrasyon / Aktarım",
-          "details": [
-            "Eşleştirme eksik",
-            "Web servis / view hatası",
-            "Servis timeout",
-            "Alan eşleşmesi hatalı"
-          ]
-        },
-        {
-          "group": "Donanım/Cihaz",
-          "details": [
-            "APK versiyon uyumsuz",
-            "Cihaz bağlantı bilgileri",
-            "Dosya indirilemiyor",
-            "Cihaz tarih / saat"
-          ]
-        },
-        {
-          "group": "Uygulama Hatası",
-          "details": [
-            "Görev çalışmıyor (object reference)",
-            "Versiyon uyumsuzluğu (Fix-DLL)",
-            "Validasyon hatası",
-            "Kod hatası"
-          ]
-        },
-        {
-          "group": "Dizayn / Matbu / Baskı",
-          "details": [
-            "Belge dizaynı eksik / hatalı",
-            "Matbu no / sıra",
-            "Yazıcı / logo basım ayarı"
+            {
+              "label": "E-Belge ayarı /Entegratör servis / şifre / kontör",
+              "cozum_tipleri": [
+                "Eğitim ve Bilgi Verilmesi"
+              ]
+            },
+            {
+              "label": "Mükellefiyet",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi"
+              ]
+            },
+            {
+              "label": "Sertifika",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi"
+              ]
+            },
+            {
+              "label": "XSLT şablon eksik",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi",
+                "Script çalıştırma (DbUpdate)",
+                "Parametre düzeltme",
+                "Dış Servis müdahalesi"
+              ]
+            },
+            {
+              "label": "GİB / Schematron hatası",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi",
+                "Script çalıştırma (DbUpdate)",
+                "Parametre düzeltme",
+                "Dış Servis müdahalesi"
+              ]
+            },
+            {
+              "label": "Entegratör kuyruk gecikmesi",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi",
+                "Script çalıştırma (DbUpdate)",
+                "Parametre düzeltme",
+                "Dış Servis müdahalesi"
+              ]
+            },
+            {
+              "label": "Entegratör (Logo, SAP, EDM vb.)",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi",
+                "Script çalıştırma (DbUpdate)",
+                "Parametre düzeltme",
+                "Dış Servis müdahalesi"
+              ]
+            },
+            {
+              "label": "Unidox V1 / V2 geçişi",
+              "cozum_tipleri": [
+                "Kurulum ve Teknik Müdahale",
+                "Eğitim ve Bilgi Verilmesi",
+                "Script çalıştırma (DbUpdate)",
+                "Parametre düzeltme",
+                "Dış Servis müdahalesi"
+              ]
+            }
           ]
         },
         {
           "group": "Hesaplama / İş Kuralı",
+          "mode": "coupled",
           "details": [
-            "İskonto / promosyon",
-            "Fiyat",
-            "KDV / muafiyet",
-            "Gecikme / kredi limiti"
+            {
+              "label": "İskonto / promosyon",
+              "cozum_tipleri": [
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Eğitim ve Bilgi Verilmesi",
+                "Dış Servis müdahalesi",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Versiyon geçişi",
+                "Yetki düzenleme",
+                "Uygulama Menü kartı düzeltme"
+              ]
+            },
+            {
+              "label": "Fiyat",
+              "cozum_tipleri": [
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Eğitim ve Bilgi Verilmesi",
+                "Dış Servis müdahalesi",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Versiyon geçişi",
+                "Yetki düzenleme",
+                "Uygulama Menü kartı düzeltme"
+              ]
+            },
+            {
+              "label": "KDV / muafiyet",
+              "cozum_tipleri": [
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Eğitim ve Bilgi Verilmesi",
+                "Dış Servis müdahalesi",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Versiyon geçişi",
+                "Yetki düzenleme",
+                "Uygulama Menü kartı düzeltme"
+              ]
+            },
+            {
+              "label": "Gecikme / kredi limiti",
+              "cozum_tipleri": [
+                "DLL Geçişi",
+                "Doküman / SSS",
+                "Eğitim ve Bilgi Verilmesi",
+                "Dış Servis müdahalesi",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Versiyon geçişi",
+                "Yetki düzenleme",
+                "Uygulama Menü kartı düzeltme"
+              ]
+            }
           ]
         },
         {
-          "group": "Sunucu / Altyapı / Performans",
+          "group": "Kullanıcı Uygulama kullanım ve İşlem Adımı Hatası",
+          "mode": "tumu",
           "details": [
-            "Yavaşlık / timeout (internet)",
-            "Disk / temp yetersizliği",
-            "RAM / kaynak tüketimi",
-            "Replikasyon durması",
-            "Giriş / sunucu hatası",
-            "Sql Server DB sorunu"
+            {
+              "label": "Menü yetkisi eksik",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "İşlem yetkisi eksik",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Distribütör / şube yetkisi eksik",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Onay yetkisi yok",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Lisans limiti dolu",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Rol / kullanıcı tanımsız",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Müşteri kartı eksik / hatalı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Ürün / stok kartı eksik",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Fiyat / KDV tanımı hatalı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Satış temsilcisi tanımı hatalı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Eksik kart ilişkisi (depo / sevk / seri)",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Belge dizaynı eksik / hatalı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Matbu no / sıra",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Yazıcı / logo basım ayarı",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Kullanıcı işlem adımı hatası",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Yasal süreç (8 gün / ay kapanışı)",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Operatörlük / merkez onayı gereken işlem",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Bilgi / nasıl yapılır",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            }
           ]
         },
         {
-          "group": "Veri Tutarsızlığı",
+          "group": "Parametre ve Konfigürasyon",
+          "mode": "tumu",
           "details": [
-            "Bozuk kayıt (stok tipi / belge detayı)",
-            "Mükerrer kayıt",
-            "Eksik ilişki",
-            "Elle müdahale / geçmiş veri"
+            {
+              "label": "E-Belge ayarı / entegratör şifresi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Aktarım (SmartConnect) parametresi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Matbu / basım parametresi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "ST parametresi eksik",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Yanlış parametre",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Eksik parametre",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Yetki ve Parametre Şablon",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Panorama Çalışma parametreleri",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Panorama Config ayarları",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Panorama API ayarları",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            }
           ]
         },
         {
           "group": "Veri / Veritabanı Hatası",
+          "mode": "tumu",
           "details": [
-            "Update ve insert işlemi",
-            "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)"
+            {
+              "label": "Bozuk kayıt (stok tipi / belge detayı)",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Mükerrer kayıt",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Delete / İptal işlemi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Update ve insert işlemi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Eksik/Hatalı Master Data (Ürün, Müşteri, Fiyat Listesi)",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Sql Server DB sorunu",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            }
           ]
         },
         {
-          "group": "Kurulum",
+          "group": "Yazılım Hatası",
+          "mode": "tumu",
           "details": [
-            "Kurulum"
+            {
+              "label": "Planlanmış Görev çalışmıyor.",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Versiyon uyumsuzluğu (Fix-DLL)",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Validasyon hatası",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Kod hatası",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            },
+            {
+              "label": "Yeni APK verilmesi",
+              "cozum_tipleri": [
+                "Dış Servis müdahalesi",
+                "Doküman / SSS",
+                "Parametre düzeltme",
+                "Script çalıştırma (DbUpdate)",
+                "Ürün geliştirme",
+                "Uygulama Menü kartı düzeltme",
+                "Yetki düzenleme",
+                "DLL Geçişi"
+              ]
+            }
           ]
-        },
-        {
-          "group": "E-belge (Gönderim)",
-          "details": []
-        },
-        {
-          "group": "Veri Tabanı İsteği",
-          "details": []
         }
       ]
     },
@@ -468,33 +1214,40 @@
       "label": "Çözüm Tipi",
       "description": "Uygulanan çözüm türü",
       "values": [
-        "Parametre düzeltme",
-        "Yetki düzenleme",
-        "Veri / kart düzeltme",
-        "Script çalıştırma (DbUpdate)",
-        "Entegratör / servis müdahalesi",
-        "Dizayn düzeltme",
-        "DLL Geçişi / Versiyon geçişi",
-        "Kullanıcı Eğitim",
+        "APK Geçişi",
+        "DLL Geçişi",
         "Doküman / SSS",
-        "Geliştirme / değişiklik talebi",
-        "Koşul Yakalanmadı"
+        "Dış Servis müdahalesi",
+        "Eğitim",
+        "Eğitim ve Bilgi Verilmesi",
+        "Kurulum ve Teknik Müdahale",
+        "Parametre düzeltme",
+        "Script çalıştırma (DbUpdate)",
+        "Sql Server Müdahalesi",
+        "Sunucu Server ve Network Müdahalesi",
+        "Uygulama Menü kartı düzeltme",
+        "Versiyon geçişi",
+        "Yetki düzenleme",
+        "Ürün geliştirme"
       ]
     },
     "kalici_onlem": {
       "label": "Kalıcı Önlem",
       "description": "Aynı sorunun tekrar etmemesi için planlanan kalıcı aksiyon (opsiyonel)",
       "values": [
+        "Bilgi bankası yazısı hazırlanacak",
+        "Eğitim içeriği hazırlanacak",
         "Hata mesajı iyileştirilecek",
-        "Kontrol / validasyon eklenecek",
+        "Uygulama Kontrolü Eklenecek",
+        "Uygulama Logu geliştirilecek",
         "Parametre sihirbazı yapılacak",
         "Self-servis ekran yapılacak",
-        "Log / izleme geliştirilecek (aktarım / e-belge)",
         "Test senaryosu eklenecek",
-        "Bilgi bankası yazısı hazırlanacak",
-        "Eğitim içeriği hazırlanacak"
+        "Monitoring Kontrol Geliştirilecek"
       ]
-    }
+    },
+    "version": "v4"
   },
-  "syncedFromDbAt": "2026-06-22T10:52:47.340Z"
+  "syncedFromDbAt": "2026-06-22T10:52:47.340Z",
+  "closureSyncedFrom": "closure-taxonomy-v4.json (İş Süreçleri Kategorisi - 20260604 - DUZELTILMIS.xlsx)"
 }
