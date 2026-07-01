@@ -1292,14 +1292,24 @@ async function executeOutboundEmailDispatch(dispatch, caseRow) {
   return { ok: false, error: result.error };
 }
 
-export async function emitEvent({ event, caseId, approvalContext = null }) {
+export async function emitEvent({ event, caseId, approvalContext = null, targetRuleId = null }) {
   try {
     if (!ALLOWED_EVENTS.includes(event)) return [];
     const caseRow = await prisma.case.findUnique({ where: { id: caseId } });
     if (!caseRow) return [];
 
+    // targetRuleId — retry akışında SADECE belirtilen rule tetiklensin.
+    // Aksi halde emitEvent aynı event için company'nin TÜM active rule'larını
+    // tarar ve tek bir Pending onarımı için ilgisiz rule'ların (zaten Sent
+    // olmuş müşteri mail'i dâhil) TEKRAR gönderim yapmasına yol açar
+    // (Codex P1). Idempotency window dolmuşsa bu duplicate gönderim olur.
     const rules = await prisma.notificationRule.findMany({
-      where: { companyId: caseRow.companyId, event, isActive: true },
+      where: {
+        companyId: caseRow.companyId,
+        event,
+        isActive: true,
+        ...(targetRuleId ? { id: targetRuleId } : {}),
+      },
       include: { template: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
