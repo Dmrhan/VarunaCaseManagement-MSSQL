@@ -17,6 +17,7 @@ data/*
 !data/cc-taxonomy-v2.json
 !data/cc-taxonomy-hints.json
 !data/cc-gold-examples.json
+!data/closure-taxonomy-v4.json
 logs/
 
 # IIS tasima paketi - binary'ler repoya girmesin (bkz. docs/IIS_DEPLOY.md)

@@ -130,6 +130,7 @@ export function AdminCompaniesPage() {
               <thead className="bg-slate-50 dark:bg-ndark-bg">
                 <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
                   <th className="px-4 py-2.5">Şirket</th>
+                  <th className="px-4 py-2.5">Vaka Öneki</th>
                   <th className="px-4 py-2.5">Renk</th>
                   <th className="px-4 py-2.5">Marka Adı</th>
                   <th className="px-4 py-2.5">Destek E-posta</th>
@@ -146,6 +147,20 @@ export function AdminCompaniesPage() {
                         <Building2 size={14} className="text-slate-400" />
                         {c.name}
                       </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      {c.caseNumberPrefix ? (
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-slate-700 dark:bg-ndark-surface dark:text-ndark-text">
+                          {c.caseNumberPrefix}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-xs text-amber-600 dark:text-amber-400"
+                          title="Vaka açma engellenir — öneki tanımla."
+                        >
+                          — tanımsız
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       {c.primaryColor ? (
@@ -253,6 +268,11 @@ function CompanyEditor({
   onSaved: (message: string) => void;
 }) {
   const [name, setName] = useState(existing?.name ?? '');
+  // Vaka No Öneki — daima uppercase; server 2-4 harf zorunluluk yapıyor.
+  const [caseNumberPrefix, setCaseNumberPrefix] = useState(
+    existing?.caseNumberPrefix ?? '',
+  );
+  const originalPrefix = existing?.caseNumberPrefix ?? null;
   const [primaryColor, setPrimaryColor] = useState(existing?.primaryColor ?? '#7C3AED');
   const [appName, setAppName] = useState(existing?.appName ?? '');
   const [logoUrl, setLogoUrl] = useState(existing?.logoUrl ?? '');
@@ -277,6 +297,33 @@ function CompanyEditor({
       toast({ type: 'error', message: 'Şirket adı boş olamaz.' });
       return;
     }
+    const prefixTrimmed = caseNumberPrefix.trim().toUpperCase();
+    if (mode === 'create' && !prefixTrimmed) {
+      toast({ type: 'error', message: 'Vaka No Öneki zorunlu (örn. UNV).' });
+      return;
+    }
+    if (prefixTrimmed && !/^[A-Z]{2,4}$/.test(prefixTrimmed)) {
+      toast({ type: 'error', message: 'Vaka No Öneki 2-4 büyük harf olmalı.' });
+      return;
+    }
+    // Mevcut prefix'i boşaltmaya çalışırsa erken hata (backend zaten 400 verir).
+    if (mode === 'edit' && originalPrefix && !prefixTrimmed) {
+      toast({
+        type: 'error',
+        message: 'Vaka No Öneki boşaltılamaz. Değiştirebilir ama silemezsin.',
+      });
+      return;
+    }
+    // Mevcut prefix değişiyorsa kullanıcı onayı — eski vakalar eski önekiyle kalır.
+    if (mode === 'edit' && originalPrefix && prefixTrimmed && prefixTrimmed !== originalPrefix) {
+      const ok = window.confirm(
+        `Vaka No Öneki "${originalPrefix}" → "${prefixTrimmed}" olarak değiştirilecek.\n\n` +
+          `⚠ Mevcut vakalar "${originalPrefix}-*" numaralarıyla kalır (rename yok).\n` +
+          `Sadece yeni açılan vakalar "${prefixTrimmed}-*" numarası alır.\n\n` +
+          `Devam edilsin mi?`,
+      );
+      if (!ok) return;
+    }
     if (primaryColor && !/^#[0-9A-Fa-f]{6}$/.test(primaryColor)) {
       toast({ type: 'error', message: 'Geçersiz renk (örn. #7C3AED).' });
       return;
@@ -288,6 +335,7 @@ function CompanyEditor({
 
     const payload: CompanyInput = {
       name: name.trim(),
+      caseNumberPrefix: prefixTrimmed || undefined,
       primaryColor: primaryColor.trim() || undefined,
       appName: appName.trim() || undefined,
       logoUrl: logoUrl.trim() || undefined,
@@ -338,6 +386,24 @@ function CompanyEditor({
             placeholder="Örn: PARAM"
             autoFocus
             required
+          />
+        </Field>
+
+        <Field
+          label={mode === 'create' ? 'Vaka No Öneki *' : 'Vaka No Öneki'}
+          hint={
+            mode === 'edit' && originalPrefix
+              ? `Şu an: ${originalPrefix}. Değiştirilirse eski vakalar eski önekiyle KALIR (yalnız yeni vakalar yeni öneki alır).`
+              : '2-4 büyük harf. Vaka numaralarında görünür — örn. "UNV" → "UNV-1000042". Firma başına benzersizdir.'
+          }
+        >
+          <TextInput
+            value={caseNumberPrefix}
+            onChange={(e) => setCaseNumberPrefix(e.target.value.toUpperCase().slice(0, 4))}
+            placeholder="Örn: UNV"
+            maxLength={4}
+            className="font-mono uppercase"
+            required={mode === 'create'}
           />
         </Field>
 

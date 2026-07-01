@@ -205,6 +205,9 @@ export interface Company {
   id: string;
   name: string;
   isActive: boolean;
+  /// Vaka numarası öneki — 2-4 harf (örn. "UNV"). Yeni firmada zorunlu.
+  /// Bir kez set edilince değiştirilebilir ama boşaltılamaz.
+  caseNumberPrefix: string | null;
   logoUrl: string | null;
   primaryColor: string | null;
   appName: string | null;
@@ -222,6 +225,9 @@ export interface Company {
 export interface CompanyInput {
   name: string;
   isActive?: boolean;
+  /// Vaka numarası öneki — create'te zorunlu (backend 400 verir); update'te
+  /// opsiyonel ama set edildikten sonra boşaltılamaz.
+  caseNumberPrefix?: string;
   logoUrl?: string;
   primaryColor?: string;
   appName?: string;

@@ -18,6 +18,7 @@ export interface ToastEntry {
   message: string;
   duration?: number;
   action?: { label: string; onClick: () => void };
+  role?: 'status' | 'alert';
 }
 
 interface ToastApi {
@@ -83,11 +84,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const STACK_CAP = 3;
+
   const toast = useCallback(
     (t: Omit<ToastEntry, 'id'>) => {
       const id = Math.random().toString(36).slice(2, 10);
       const entry: ToastEntry = { duration: 4000, ...t, id };
-      setItems((prev) => [...prev, entry]);
+      setItems((prev) => {
+        const next = [...prev, entry];
+        return next.length > STACK_CAP ? next.slice(next.length - STACK_CAP) : next;
+      });
       if (entry.duration && entry.duration > 0) {
         setTimeout(() => dismiss(id), entry.duration);
       }
@@ -127,7 +133,7 @@ function ToastCard({ entry, onClose }: { entry: ToastEntry; onClose: () => void 
 
   return (
     <div
-      role="status"
+      role={entry.role ?? 'status'}
       className={cn(
         'pointer-events-auto flex items-start gap-2 rounded-lg p-3 shadow-md ring-1 ring-inset transition-all duration-200',
         style.bg,

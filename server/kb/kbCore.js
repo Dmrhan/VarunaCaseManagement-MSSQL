@@ -1452,6 +1452,7 @@ function loadGoldExamples() {
   return goldCache;
 }
 function formatGoldForPrompt(mode) {
+  if (mode === "close") return "";
   const gold = loadGoldExamples();
   if (!gold.length) return "";
   const byGroup = {};
@@ -1561,12 +1562,21 @@ function isValidKokNedenGrubu(group) {
   if (group == null) return true;
   return getKokNedenGroups().some((g) => g.group === group);
 }
-function isValidKokNedenDetay(detail) {
+function isValidKokNedenDetay(detail, group) {
   if (detail == null) return true;
-  return getKokNedenGroups().some((g) => g.details.includes(detail));
+  const groups = getKokNedenGroups();
+  const scope = group ? groups.filter((g) => g.group === group) : groups;
+  return scope.some((g) => g.details.some((d) => d.label === detail));
 }
-function isValidCozumTipi(value) {
+function getAllowedCozumTipleri(group, detail) {
+  if (!group || !detail) return getCozumTipi().values;
+  const g = getKokNedenGroups().find((x) => x.group === group);
+  const d = g?.details.find((x) => x.label === detail);
+  return d?.cozum_tipleri ?? [];
+}
+function isValidCozumTipi(value, group, detail) {
   if (value == null) return true;
+  if (group && detail) return getAllowedCozumTipleri(group, detail).includes(value);
   return getCozumTipi().values.includes(value);
 }
 function isValidKaliciOnlem(value) {
@@ -1749,21 +1759,21 @@ async function suggestClose(input) {
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
   const retrievalBlock = input.closeExamples || "";
+  const cascadeBlock = getKokNedenGroups().map((g) => {
+    const dets = g.details.map((d) => `    - ${d.label}   [\xE7\xF6z\xFCm: ${d.cozum_tipleri.join(" | ")}]`).join("\n");
+    return `\u25A0 ${g.group}
+${dets}`;
+  }).join("\n\n");
   const fullPrompt = [
-    "K\xD6K NEDEN GRUBU (biri):",
-    getKokNedenGroups().map((g) => `  \u2022 ${g.group}`).join("\n"),
+    "K\xD6K NEDEN \u2014 GRUP \u203A DETAY \u203A \u0130Z\u0130NL\u0130 \xC7\xD6Z\xDCM T\u0130PLER\u0130 (CASCADE):",
+    "Kural: \xF6nce bir GRUP se\xE7; sonra YALNIZ o grubun alt\u0131ndaki detaylardan birini;",
+    "sonra o detay\u0131n k\xF6\u015Feli parantezdeki \u0130Z\u0130NL\u0130 \xE7\xF6z\xFCm tiplerinden birini. Grup d\u0131\u015F\u0131",
+    "detay ya da detay\u0131n izin vermedi\u011Fi \xE7\xF6z\xFCm tipi ASLA se\xE7me.",
     "",
-    "K\xD6K NEDEN DETAYI (biri, gruptan ba\u011F\u0131ms\u0131z):",
-    [...new Set(getKokNedenGroups().flatMap((g) => g.details))].map((d) => `  \u2022 ${d}`).join("\n"),
+    cascadeBlock,
     "",
-    "TAKSONOM\u0130 \u2014 \xC7\xD6Z\xDCM T\u0130P\u0130:",
-    getCozumTipi().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
-    "",
-    "TAKSONOM\u0130 \u2014 KALICI \xD6NLEM (opsiyonel):",
+    "TAKSONOM\u0130 \u2014 KALICI \xD6NLEM (opsiyonel, gruptan ba\u011F\u0131ms\u0131z):",
     getKaliciOnlem().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
-    "",
-    "GER\xC7EK ET\u0130KETLENM\u0130\u015E \xD6RNEKLER (insan uzman do\u011Frulad\u0131 \u2014 ayn\u0131 mant\u0131kla kapan\u0131\u015F se\xE7):",
-    formatGoldForPrompt("close"),
     "",
     "TICKET BA\u011ELAMI:",
     ctxLines.join("\n") || "(a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131rmas\u0131 yok)",
@@ -1776,10 +1786,10 @@ async function suggestClose(input) {
     ...input.clarifyingAnswers ? [`OPERAT\xD6R EK B\u0130LG\u0130 (clarifying sorulara cevap \u2014 etiketlerken KULLAN): ${input.clarifyingAnswers.slice(0, 1500)}`, ""] : [],
     `\xC7\u0131kt\u0131 JSON \u015Femas\u0131 (sadece JSON):`,
     `{`,
-    `  "kok_neden_grubu": string | null,   // 12 gruptan biri`,
-    `  "kok_neden_detayi": string | null,  // t\xFCm detay listesinden biri (gruptan ba\u011F\u0131ms\u0131z)`,
-    `  "cozum_tipi": string | null,        // 12 \xE7\xF6z\xFCm tipinden biri`,
-    `  "kalici_onlem": string | null,      // 8 kal\u0131c\u0131 \xF6nlemden biri, opsiyonel`,
+    `  "kok_neden_grubu": string | null,   // 9 gruptan biri`,
+    `  "kok_neden_detayi": string | null,  // SE\xC7\u0130LEN grubun alt\u0131ndaki detaylardan biri`,
+    `  "cozum_tipi": string | null,        // SE\xC7\u0130LEN detay\u0131n izinli \xE7\xF6z\xFCm tiplerinden biri`,
+    `  "kalici_onlem": string | null,      // kal\u0131c\u0131 \xF6nlemlerden biri, opsiyonel`,
     `  "confidence": number,`,
     `  "reason": string                    // 1 c\xFCmle gerek\xE7e`,
     `}`
@@ -1806,8 +1816,8 @@ async function suggestClose(input) {
   }
   const out = v.data;
   const kok_neden_grubu = isValidKokNedenGrubu(out.kok_neden_grubu) ? out.kok_neden_grubu : null;
-  const kok_neden_detayi = isValidKokNedenDetay(out.kok_neden_detayi) ? out.kok_neden_detayi : null;
-  const cozum_tipi = isValidCozumTipi(out.cozum_tipi) ? out.cozum_tipi : null;
+  const kok_neden_detayi = kok_neden_grubu && isValidKokNedenDetay(out.kok_neden_detayi, kok_neden_grubu) ? out.kok_neden_detayi : null;
+  const cozum_tipi = kok_neden_grubu && kok_neden_detayi && isValidCozumTipi(out.cozum_tipi, kok_neden_grubu, kok_neden_detayi) ? out.cozum_tipi : null;
   const kalici_onlem = isValidKaliciOnlem(out.kalici_onlem) ? out.kalici_onlem : null;
   const uncertain = !input.clarifyingAnswers && (kok_neden_grubu === null || kok_neden_detayi === null || out.confidence < CLOSE_CLARIFY_THRESHOLD);
   return {
@@ -2559,11 +2569,11 @@ async function runAnalyst(inputs) {
   const cachePrefix = buildAnalystCachePrefix(inputs);
   const response = await generate(SYSTEM_INSTRUCTION, userPrompt, {
     temperature: 0.2,
-    // Çıktı şeması: ≤6 hipotez + ≤6 adım + 2 taslak + 2 rehberlik → pratikte
-    // ~2-3k token. Output Sonnet'te en pahalı kalem ($15/M); 8192 fazla
-    // cömertti, 4096 şemayı rahat karşılar. Nadir kırpılma riskine karşı
-    // güvenli üst sınır.
-    maxOutputTokens: 4096,
+    // DİKKAT: 4096'ya indirmek HATAYDI — detaylı Türkçe çıktı (6 hipotez +
+    // operasyonel adımlar + 2 taslak + 2 rehberlik) 4096'yı aşınca truncate
+    // oluyor → JSON parse fail → TÜM analyze çöküyor (çözüm adımları + taslaklar
+    // gelmiyor). 8192 orijinal güvenli üst sınır; geri alındı.
+    maxOutputTokens: 8192,
     responseMimeType: "application/json",
     cachePrefix
   });
