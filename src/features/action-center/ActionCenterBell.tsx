@@ -4,8 +4,10 @@ import {
   actionCenterService,
   ACTION_CENTER_EVENT,
   type ActionCenterBadgeCounts,
+  type ActionItem,
 } from '@/services/actionCenterService';
 import { ActionCenterDrawer } from './ActionCenterDrawer';
+import { notify } from '@/components/ui/Toast';
 
 /**
  * WR-ACTION-CENTER Phase 1 — Header bell with two distinct counters:
@@ -18,6 +20,26 @@ import { ActionCenterDrawer } from './ActionCenterDrawer';
 
 const POLL_MS = 60000;
 
+function buildToastForItem(item: ActionItem, onCaseOpen: (caseId: string) => void) {
+  const title = item.caseNumber
+    ? `#${item.caseNumber} ${item.caseTitle ?? ''}`.trim()
+    : 'Yeni bildirim';
+
+  const isActionRequired = item.actionRequired === true;
+  const isSystemAlert = item.kind === 'system_alert';
+
+  notify({
+    type: isActionRequired ? 'error' : isSystemAlert ? 'warn' : 'info',
+    title,
+    message: item.reasonLabel,
+    duration: isActionRequired ? 0 : 5000,
+    role: isActionRequired ? 'alert' : 'status',
+    ...(item.caseId
+      ? { action: { label: 'Görüntüle', onClick: () => onCaseOpen(item.caseId!) } }
+      : {}),
+  });
+}
+
 export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) => void }) {
   const [counts, setCounts] = useState<ActionCenterBadgeCounts>({
     actionRequired: 0,
@@ -26,18 +48,34 @@ export function ActionCenterBell({ onCaseOpen }: { onCaseOpen: (caseId: string) 
   });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const mountedRef = useRef(true);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
+  const onCaseOpenRef = useRef(onCaseOpen);
+  onCaseOpenRef.current = onCaseOpen;
 
-  // Bell summary refresh — already silent-by-design:
-  //  - no loading spinner state on the bell itself,
-  //  - on a null response (network/backend failure) the previous
-  //    counts are preserved (no reset to zero),
-  //  - badge number updates instantaneously when new counts arrive,
-  //    no fade/spin animation.
-  // No further change needed for the silent-polling hotfix.
   const refresh = useCallback(async () => {
-    const r = await actionCenterService.summary();
+    const [summaryResult, actionResult, fyiResult] = await Promise.all([
+      actionCenterService.summary(),
+      actionCenterService.list({ view: 'action', limit: 50 }),
+      actionCenterService.list({ view: 'fyi', limit: 50 }),
+    ]);
     if (!mountedRef.current) return;
-    if (r) setCounts(r);
+    if (summaryResult) setCounts(summaryResult);
+    const items = [
+      ...(actionResult?.items ?? []),
+      ...(fyiResult?.items ?? []),
+    ];
+    if (!initializedRef.current) {
+      items.forEach((item) => seenIdsRef.current.add(item.id));
+      initializedRef.current = true;
+    } else {
+      items.forEach((item) => {
+        if (!seenIdsRef.current.has(item.id)) {
+          seenIdsRef.current.add(item.id);
+          buildToastForItem(item, onCaseOpenRef.current);
+        }
+      });
+    }
   }, []);
 
   useEffect(() => {
