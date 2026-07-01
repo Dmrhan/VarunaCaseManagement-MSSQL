@@ -139,6 +139,7 @@ const SUPPORTED_EVENT_TYPES = new Set([
   'note_reaction',
   'transfer',          // Phase 2C cleanup — legacy demo seed eventType.
   'transfer_warning',
+  'pattern_alert_team_notify',
 ]);
 
 const EVENT_TO_KIND = {
@@ -147,6 +148,7 @@ const EVENT_TO_KIND = {
   note_reaction: 'watcher_event',
   transfer: 'watcher_event',
   transfer_warning: 'system_alert',
+  pattern_alert_team_notify: 'system_alert',
 };
 
 // ─────────────────────────────────────────────────────────────────
