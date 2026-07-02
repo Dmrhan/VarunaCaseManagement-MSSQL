@@ -798,7 +798,7 @@ function MoveToTeamButton({
   return (
     <div className="relative inline-flex items-center">
       <Select
-        className="h-7 max-w-[120px] py-0 pl-2 pr-7 text-xs"
+        className="h-7 max-w-[160px] py-0 pl-2 pr-7 text-xs"
         defaultValue=""
         title="Başka takıma taşı"
         onChange={(e) => {
