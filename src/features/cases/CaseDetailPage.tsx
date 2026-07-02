@@ -4820,6 +4820,51 @@ function dotColorFor(h: CaseHistoryEntry): string {
   return def?.dot ?? 'bg-slate-400';
 }
 
+// Aktivite satırındaki not — karakter eşiğini aşan metin kısaltılır,
+// "Devamını göster / Gizle" toggle'ı çıkar. Ekran genişliğinden bağımsız
+// öngörülebilir davranış için satır-ölçümü değil karakter limiti kullanılır
+// (aktivite akışı kompakt kalmalı).
+const ACTIVITY_NOTE_PREVIEW_CHARS = 180;
+
+function ExpandableActivityNote({ text, className }: { text: string; className: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  const isLong = text.length > ACTIVITY_NOTE_PREVIEW_CHARS;
+  // Kelime ortasında kesmemek için eşikten geriye son boşluğa kadar kırp.
+  const preview = useMemo(() => {
+    if (!isLong) return text;
+    const slice = text.slice(0, ACTIVITY_NOTE_PREVIEW_CHARS);
+    const lastSpace = slice.lastIndexOf(' ');
+    return (lastSpace > ACTIVITY_NOTE_PREVIEW_CHARS / 2 ? slice.slice(0, lastSpace) : slice) + '…';
+  }, [text, isLong]);
+
+  return (
+    <div>
+      <p className={`whitespace-pre-wrap ${className}`}>
+        {expanded ? text : preview}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          aria-expanded={expanded}
+          className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {expanded ? 'Gizle' : 'Devamını göster'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ActivityTab({ item }: { item: Case }) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
 
@@ -4944,9 +4989,12 @@ function ActivityTab({ item }: { item: Case }) {
                   <span className="font-semibold text-slate-800 dark:text-ndark-text">{h.toValue}</span>
                 </div>
                 {h.note && (
-                  <p className="mt-1 whitespace-pre-wrap text-xs italic text-blue-800 dark:text-blue-300">
-                    {h.note}
-                  </p>
+                  <div className="mt-1">
+                    <ExpandableActivityNote
+                      text={h.note}
+                      className="text-xs italic text-blue-800 dark:text-blue-300"
+                    />
+                  </div>
                 )}
                 <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-ndark-muted">
                   <Calendar size={11} />
@@ -4985,11 +5033,15 @@ function ActivityTab({ item }: { item: Case }) {
             </div>
             {/* PR-T3 — generic note render (Smart Ticket açılış suffix dahil).
                 Backend Case create'te 'Vaka oluşturuldu' + note='Smart Ticket
-                akışıyla açıldı' yazıyor; eski UI bu alanı göstermiyordu. */}
+                akışıyla açıldı' yazıyor; eski UI bu alanı göstermiyordu.
+                NoteAdded dahil uzun notlar 3 satırda kırpılır (Devamını göster). */}
             {h.note && (
-              <p className="mt-0.5 whitespace-pre-wrap text-[11px] italic text-slate-600 dark:text-ndark-muted">
-                {h.note}
-              </p>
+              <div className="mt-0.5">
+                <ExpandableActivityNote
+                  text={h.note}
+                  className="text-[11px] italic text-slate-600 dark:text-ndark-muted"
+                />
+              </div>
             )}
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
               <Calendar size={11} />

@@ -263,9 +263,10 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy, actor })
     });
   }
 
+  // Tam içerik saklanır (kolon NVarChar(Max)) — Aktivite sekmesi uzun
+  // notları "Devamını göster / Gizle" ile kırparak gösterir.
   const cleanedPreview = (note.content ?? '')
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
-    .slice(0, 200);
+    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
   await prisma.caseActivity.create({
     data: {
       caseId: id,
