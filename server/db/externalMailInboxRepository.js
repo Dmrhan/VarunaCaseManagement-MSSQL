@@ -49,6 +49,11 @@ const SELECTABLE_PUBLIC = {
   imapHost: true,
   imapPort: true,
   imapSecure: true,
+  // FAZ B (2026-07-02) — per-inbox SMTP
+  smtpHost: true,
+  smtpPort: true,
+  smtpSecure: true,
+  fromAddress: true,
   username: true,
   secretSetAt: true, // secretIsSet = !!secretSetAt + ciphertext üzerinden türetilir
   secretCiphertext: true, // shape'te public'e dökülmez; "set mi?" sinyali için iç kullanım
@@ -86,6 +91,11 @@ function shapeForPublic(row) {
     imapHost: row.imapHost ?? null,
     imapPort: row.imapPort ?? null,
     imapSecure: row.imapSecure ?? true,
+    // FAZ B — per-inbox SMTP; NULL alanlar tenant-ortak fallback anlamına gelir.
+    smtpHost: row.smtpHost ?? null,
+    smtpPort: row.smtpPort ?? null,
+    smtpSecure: row.smtpSecure ?? null,
+    fromAddress: row.fromAddress ?? null,
     username: row.username ?? null,
     secretIsSet: !!row.secretCiphertext,
     secretSetAt: row.secretSetAt ?? null,
@@ -122,6 +132,26 @@ function validatePatch(patch, { isCreate } = { isCreate: false }) {
     const v = Number(patch.imapPort);
     if (!Number.isInteger(v) || v < PORT_MIN || v > PORT_MAX) {
       throw new AdminError(`imapPort ${PORT_MIN}-${PORT_MAX} arasında integer olmalı.`, 400);
+    }
+  }
+  // FAZ B (2026-07-02) — per-inbox SMTP validation
+  if (patch.smtpHost !== undefined && patch.smtpHost !== null) {
+    if (typeof patch.smtpHost !== 'string') {
+      throw new AdminError('smtpHost string olmalı.', 400);
+    }
+  }
+  if (patch.smtpPort !== undefined && patch.smtpPort !== null) {
+    const v = Number(patch.smtpPort);
+    if (!Number.isInteger(v) || v < PORT_MIN || v > PORT_MAX) {
+      throw new AdminError(`smtpPort ${PORT_MIN}-${PORT_MAX} arasında integer olmalı.`, 400);
+    }
+  }
+  if (patch.fromAddress !== undefined && patch.fromAddress !== null) {
+    if (typeof patch.fromAddress !== 'string') {
+      throw new AdminError('fromAddress string olmalı.', 400);
+    }
+    if (patch.fromAddress.length > 320) {
+      throw new AdminError('fromAddress en fazla 320 karakter olabilir.', 400);
     }
   }
   if (patch.username !== undefined && patch.username !== null) {
@@ -243,6 +273,95 @@ async function findByAddress(companyId, address) {
 }
 
 /**
+ * FAZ B (2026-07-02) — Per-inbox SMTP transport resolve.
+ *
+ * mailProvider.sendMail'den çağrılır. `from` payload'ındaki adres (raw
+ * "Display <email@x>" formatını da kabul) inbox.address VEYA
+ * inbox.fromAddress ile case-insensitive eşleşirse, o inbox'un SMTP
+ * config'i döndürülür (decrypt secret dahil). Eşleşme yok / SMTP eksik /
+ * secret yok → NULL döner → mailProvider tenant-ortak fallback'e düşer.
+ *
+ * Kontrat: SECRET response'a inmez — sadece internal caller (mailProvider).
+ * Log kancası: mailProvider metadata'ya "inbox" veya "tenant" source yazar.
+ *
+ * @param {string} companyId
+ * @param {string} fromRaw   payload.from ("Display <a@b>" veya "a@b")
+ * @returns {Promise<null | {
+ *   inboxId: string,
+ *   host: string, port: number, secure: boolean,
+ *   user: string, pass: string,
+ *   from: string,
+ * }>}
+ */
+async function resolveInboxSmtpByFrom(companyId, fromRaw) {
+  if (!companyId) return null;
+  const emailPart = extractEmailPart(fromRaw);
+  if (!emailPart) return null;
+  const normalized = emailPart.trim().toLowerCase();
+
+  // Aktif inbox'lar (isActive; enabled toggle SMTP için ilgisiz — polling
+  // scope'u). Case-insensitive lookup: normalize et.
+  const rows = await prisma.externalMailInbox.findMany({
+    where: { companyId, isActive: true },
+    select: {
+      id: true,
+      address: true,
+      fromAddress: true,
+      smtpHost: true,
+      smtpPort: true,
+      smtpSecure: true,
+      username: true,
+      secretCiphertext: true,
+      secretIv: true,
+      secretAuthTag: true,
+    },
+  });
+  const match = rows.find((r) => {
+    const addr = String(r.address ?? '').trim().toLowerCase();
+    if (addr === normalized) return true;
+    const fromEmail = extractEmailPart(r.fromAddress);
+    return fromEmail && fromEmail.toLowerCase() === normalized;
+  });
+  if (!match) return null;
+  if (!match.smtpHost || !match.username) return null;
+  if (!match.secretCiphertext || !match.secretIv || !match.secretAuthTag) return null;
+
+  const pass = decrypt({
+    ciphertext: match.secretCiphertext,
+    iv: match.secretIv,
+    authTag: match.secretAuthTag,
+  });
+  if (!pass) return null;
+
+  return {
+    inboxId: match.id,
+    host: match.smtpHost,
+    port: match.smtpPort || 587,
+    // smtpSecure NULL ise varsayılan false (STARTTLS); mevcut tenant-ortak
+    // davranış ile hizalı (587 default STARTTLS).
+    secure: match.smtpSecure === true,
+    user: match.username,
+    pass,
+    from: match.fromAddress || match.address,
+  };
+}
+
+/**
+ * "Display Name <email@x>" veya çıplak "email@x" formatından email kısmını
+ * çeker. Boşsa null. Case değişmez (aşağıda karşılaştırma normalize eder).
+ */
+function extractEmailPart(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  const angle = s.match(/<([^>]+)>/);
+  if (angle) return angle[1].trim();
+  // Çıplak adres — @ içeriyorsa kabul.
+  if (s.includes('@')) return s;
+  return null;
+}
+
+/**
  * IMAP polling helper — inbox.id ile raw decrypted password çek.
  *
  * @returns {Promise<string|null>}
@@ -307,6 +426,15 @@ async function upsert(companyId, draft, actorUserId = null) {
     data.imapPort = draft.imapPort === null ? null : Number(draft.imapPort);
   }
   if (draft.imapSecure !== undefined) data.imapSecure = !!draft.imapSecure;
+  // FAZ B — per-inbox SMTP
+  if (draft.smtpHost !== undefined) data.smtpHost = normalizeOptionalText(draft.smtpHost);
+  if (draft.smtpPort !== undefined) {
+    data.smtpPort = draft.smtpPort === null ? null : Number(draft.smtpPort);
+  }
+  if (draft.smtpSecure !== undefined) {
+    data.smtpSecure = draft.smtpSecure === null ? null : !!draft.smtpSecure;
+  }
+  if (draft.fromAddress !== undefined) data.fromAddress = normalizeOptionalText(draft.fromAddress);
   if (draft.username !== undefined) data.username = normalizeOptionalText(draft.username);
   if (draft.assignedTeamId !== undefined) {
     data.assignedTeamId = draft.assignedTeamId || null;
@@ -368,6 +496,14 @@ async function upsert(companyId, draft, actorUserId = null) {
     imapHost: data.imapHost ?? null,
     imapPort: data.imapPort ?? null,
     imapSecure: data.imapSecure !== undefined ? data.imapSecure : true,
+    // FAZ B — per-inbox SMTP; NULL = tenant-ortak fallback.
+    smtpHost: data.smtpHost ?? null,
+    smtpPort: data.smtpPort ?? null,
+    smtpSecure: data.smtpSecure ?? null,
+    // fromAddress default = kendi adresi (kullanıcı direktifi).
+    fromAddress: data.fromAddress !== undefined
+      ? data.fromAddress
+      : (data.displayName ? `${data.displayName} <${data.address}>` : data.address),
     username: data.username ?? null,
     secretCiphertext: data.secretCiphertext ?? null,
     secretIv: data.secretIv ?? null,
@@ -404,6 +540,7 @@ export const externalMailInboxRepo = {
   findById,
   findByAddress,
   getDecryptedSecret,
+  resolveInboxSmtpByFrom,
   upsert,
   remove,
 };

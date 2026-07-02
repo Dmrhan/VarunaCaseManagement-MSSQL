@@ -58,7 +58,7 @@ export class MailProviderError extends Error {
  * dinamik import edilir (server/db/client mailProvider boot anında
  * gerekmez).
  */
-async function resolveConfig({ companyId } = {}) {
+async function resolveConfig({ companyId, from } = {}) {
   let dbConfig = null;
   if (companyId) {
     const repo = (await import('../db/externalMailSettingRepository.js')).externalMailSettingRepo;
@@ -68,6 +68,33 @@ async function resolveConfig({ companyId } = {}) {
         'Mail entegrasyonu bu şirket için kapalı (admin tarafından devre dışı).',
         { code: 'mail_integration_disabled', status: 503 },
       );
+    }
+
+    // FAZ B (2026-07-02) — Per-inbox SMTP resolve.
+    // payload.from adresi bir inbox.address / inbox.fromAddress ile
+    // eşleşirse VE o inbox'un SMTP config'i tam ise, inbox'un
+    // credential'ıyla transport kur. Eşleşme yok / SMTP eksik → tenant-
+    // ortak fallback (aşağıdaki dbConfig yolu). Fallback yolu birebir
+    // korunur — mevcut davranış regresyonsuz.
+    if (from) {
+      const inboxRepo = (await import('../db/externalMailInboxRepository.js')).externalMailInboxRepo;
+      const inboxSmtp = await inboxRepo.resolveInboxSmtpByFrom(companyId, from);
+      if (inboxSmtp) {
+        return {
+          transport: 'smtp',
+          auth: 'password',
+          from: inboxSmtp.from,
+          smtp: {
+            host: inboxSmtp.host,
+            port: inboxSmtp.port,
+            secure: inboxSmtp.secure,
+            user: inboxSmtp.user,
+            pass: inboxSmtp.pass,
+          },
+          source: 'inbox',
+          inboxId: inboxSmtp.inboxId,
+        };
+      }
     }
   }
 
@@ -108,10 +135,12 @@ async function resolveConfig({ companyId } = {}) {
     };
   }
 
-  // Env fallback (M1)
+  // Env fallback (M1). FAZ B fix — parametre `from` ile scope çakışmasın
+  // diye `envFrom` adlandırması. Parametre from = payload'daki agent'ın
+  // seçtiği alias; envFrom = MAIL_FROM env'inden gelen default.
   const transport = (process.env.MAIL_TRANSPORT || 'ethereal').toLowerCase();
   const auth = (process.env.MAIL_AUTH || 'password').toLowerCase();
-  const from = process.env.MAIL_FROM || DEFAULT_FROM;
+  const envFrom = process.env.MAIL_FROM || DEFAULT_FROM;
 
   if (auth !== 'password') {
     throw new MailProviderError(
@@ -121,7 +150,7 @@ async function resolveConfig({ companyId } = {}) {
   }
 
   if (transport === 'ethereal') {
-    return { transport, auth, from, source: 'env' };
+    return { transport, auth, from: envFrom, source: 'env' };
   }
 
   if (transport === 'smtp') {
@@ -142,7 +171,7 @@ async function resolveConfig({ companyId } = {}) {
         { code: 'mail_smtp_creds_missing', status: 500 },
       );
     }
-    return { transport, auth, from, smtp: { host, port, secure, user, pass }, source: 'env' };
+    return { transport, auth, from: envFrom, smtp: { host, port, secure, user, pass }, source: 'env' };
   }
 
   throw new MailProviderError(
@@ -239,7 +268,10 @@ export async function sendMail({
   let config;
   try {
     // M5 — opts.companyId verildiyse per-tenant DB config; yoksa env (M1).
-    config = await resolveConfig({ companyId: opts.companyId });
+    // FAZ B — payload.from verildiyse önce per-inbox SMTP lookup; eşleşme
+    // yoksa tenant-ortak fallback (aynı yol). Log: config.source = 'inbox'
+    // veya 'db' veya 'env'.
+    config = await resolveConfig({ companyId: opts.companyId, from });
   } catch (err) {
     return {
       ok: false,
@@ -269,9 +301,20 @@ export async function sendMail({
     };
   }
 
+  // Codex P2 R1 fix — inbox source için admin'in tanımladığı fromAddress
+  // ÖNCELİKLİ. Aksi halde caseEmailSender payload'ında from her zaman dolu
+  // olduğu için (agent alias'ı) config.from ASLA kullanılmıyordu; yeni
+  // inbox.fromAddress alanı devreye giremiyordu.
+  //
+  // Semantic: source='inbox' → admin fromAddress'i (ör. "Destek <destek@x>")
+  //           tenant/env fallback → agent alias'ı (mevcut davranış — regresyonsuz)
+  const finalFrom = (config.source === 'inbox' && config.from)
+    ? config.from
+    : (from || config.from);
+
   try {
     const info = await transport.sendMail({
-      from: from || config.from,
+      from: finalFrom,
       to,
       cc,
       bcc,
@@ -295,7 +338,13 @@ export async function sendMail({
       rawSource: RAW_SOURCE,
       messageId: info?.messageId ?? null,
       previewUrl,
-      meta: { proxiedAt, transport: config.transport, source: config.source },
+      meta: {
+        proxiedAt,
+        transport: config.transport,
+        source: config.source,
+        // FAZ B — teşhis: gönderim hangi inbox'tan yapıldı ('inbox' source ise).
+        ...(config.inboxId ? { inboxId: config.inboxId } : {}),
+      },
     };
   } catch (err) {
     return {
