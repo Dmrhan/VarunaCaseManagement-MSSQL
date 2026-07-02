@@ -99,10 +99,10 @@ router.get(
       .filter((s) => s.length > 0);
     const result = await accountRepository.listAccounts({
       search,
+      searchFields: parsedSearchFields.length > 0 ? parsedSearchFields : undefined,
       companyId,
       status,
       ids: rawIds ? parsedIds : undefined,
-      searchFields: parsedSearchFields.length > 0 ? parsedSearchFields : undefined,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
       allowedCompanyIds: scopedAllowedCompanyIds,

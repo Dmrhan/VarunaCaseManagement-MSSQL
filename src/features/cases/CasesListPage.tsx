@@ -1347,6 +1347,7 @@ export function CasesListPage({
                 <SortableTh label="Tip"            sortKey="caseType"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">Kaynak</th>
                 <SortableTh label="Statü"          sortKey="status"      currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-ndark-muted">3. Parti</th>
                 <SortableTh label="Öncelik"        sortKey="priority"    currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <SortableTh label="Atama"          sortKey="assignment"  currentKey={sortKey} currentDir={sortDir} onSort={toggleSort} />
                 <th className="px-3 py-2">TAKIM</th>
@@ -1357,10 +1358,10 @@ export function CasesListPage({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-ndark-border/60">
               {loading &&
-                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={11} />)}
+                Array.from({ length: 6 }).map((_, i) => <TableRowSkeleton key={i} cols={12} />)}
               {!loading && serverTotal === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4">
+                  <td colSpan={12} className="px-4">
                     {hasActiveFilters ? (
                       <EmptyState
                         icon={<SearchX size={22} />}
@@ -1506,6 +1507,11 @@ export function CasesListPage({
                     </Td>
                     <Td>
                       <StatusPill status={c.status} />
+                    </Td>
+                    <Td className="text-xs text-slate-700 dark:text-ndark-text">
+                      {c.thirdPartyName
+                        ? <span className="truncate max-w-[120px] inline-block" title={c.thirdPartyName}>{c.thirdPartyName}</span>
+                        : <span className="text-slate-400 dark:text-ndark-muted">—</span>}
                     </Td>
                     <Td>
                       <PriorityBadge priority={c.priority} />

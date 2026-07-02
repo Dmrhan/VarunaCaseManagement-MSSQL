@@ -921,3 +921,99 @@ Alan Davranışı: Maskelensin`,
     },
   ],
 };
+
+export const MAIL_INTEGRATION_HELP: HelpContent = {
+  title: 'Mail Entegrasyonu',
+  sections: [
+    {
+      heading: 'Bu ekran ne işe yarar?',
+      content:
+        'Varuna\'nın **mail dünyasıyla konuşan** tüm ayarlarını bu ekrandan yönetirsiniz. Üç ana kutuya bölünür: (1) Gelen Mail Inbox\'ları — müşterilerin size yazdığı adresler, (2) Şirket İmza Şablonu — temsilcilerin mail sonuna eklenecek imza, (3) Gönderen Adresleri (From) — temsilcinin yanıt yazarken seçebileceği "Kimden" listesi. En altta katlanmış "Sistem Bildirim Mailleri (no-reply)" kartı — sistemin otomatik ürettiği "vaka açıldı / durum güncellendi" gibi bildirimleri hangi hesaptan göndereceğini tanımlar. Bu ekrandaki bir şeye dokunmadan önce, hangi bölümü değiştirmek istediğinizden emin olun; her bölüm farklı bir mail akışını etkiler.',
+    },
+    {
+      heading: 'GELEN MAİL — Çoklu gelen kutusu nedir?',
+      content:
+        'Bir şirkette birden fazla farklı mail adresine gelen vakaları farklı takımlara yönlendirmenizi sağlar. Örneğin **yazilimdestek@** adresine gelen vakalar Yazılım Takımı havuzuna düşer, **satis@** adresine gelenler Satış Takımına gider. Her gelen kutusu tam bağımsız bir mail hesabıdır — her biri için ayrı bir Gmail/Exchange hesabı ve o hesabın Uygulama Şifresi (App Password) gerekir. Sistem 30 saniyede bir bu hesapları otomatik tarar (mail kontrolü yapar) ve okunmamış mailleri vakaya dönüştürür.',
+      example: `Şirket: Univera
+├── yazilimdestek@univera.com.tr  →  Yazılım Takımı  (mail kontrolü açık)
+├── satis@univera.com.tr          →  Satış Takımı    (mail kontrolü açık)
+└── faturalama@univera.com.tr     →  Finans Takımı   (kapalı, hazırlık aşamasında)`,
+      warning: 'Her gelen kutusu için AYRI bir Gmail/Exchange hesabı ve AYRI bir Uygulama Şifresi gerekir. Aynı hesaptan iki gelen kutusu oluşturmayın — otomatik mail kontrolü çakışır.',
+    },
+    {
+      heading: 'GİDEN MAİL — Her gelen kutusu kendi hesabından gönderir',
+      content:
+        'Yeni sistemde (2026-07-02 sonrası), her mail hesabı HEM gelen HEM giden mail için tek Uygulama Şifresi kullanır (Gmail\'in doğal davranışı). Yani `destek@` adresine gelen bir maile temsilci yanıt yazınca, sistem yanıtı `destek@` gelen kutusunun kendi SMTP hesabından gönderir — müşteri "cagri.merkezi@\'den yanıt geldi" gibi kafa karışıklığı yaşamaz. Yeni gelen kutusu tanımlama penceresinde hem IMAP (Gelen) hem SMTP (Giden) alanları vardır; ikisi de aynı hesabın bilgilerini alır.',
+      warning: 'SMTP sunucu / port alanları boş bırakılırsa, o gelen kutusu mail gönderirken "Sistem Bildirim Mailleri (no-reply)" kartındaki ortak hesaba düşer. Normal kullanımda BOŞ BIRAKMAYIN — her gelen kutusunun kendi kimlik bilgileriyle çalışması daha temiz olur.',
+    },
+    {
+      heading: 'YENİ GELEN KUTUSU EKLERKEN — Adım adım',
+      content:
+        '(1) IT ekibinden yeni bir mail hesabı açmalarını isteyin (ör. `yazilimdestek@univera.com.tr`). (2) Gmail için: hesabın Google Workspace panelinde IMAP erişimini açtırın + o hesabın "Uygulama Şifresi" (16 karakterli özel şifre) üretmesini isteyin. (3) Bu ekranda "Yeni Inbox" düğmesine tıklayın. (4) Mail adresini yazın, "Görünen ad" alanına insan-okuyabilir bir etiket verin (ör. "Yazılım Destek"). (5) IMAP alanları: `imap.gmail.com`, port `993`, SSL açık. (6) SMTP alanları: `smtp.gmail.com`, port `587`, SSL KAPALI (STARTTLS). (7) Kullanıcı adı: mail adresinin aynısı. (8) Şifre: az önce ürettiğiniz Uygulama Şifresi. (9) Takım atayın (bu adrese gelen vakalar bu takımın havuzuna düşer). (10) "Kaydet ve Test Et" düğmesine tıklayın — hem IMAP hem SMTP yeşil çıkmalı. Sorun varsa aşağıdaki "Test butonu — Sonuçlar ne anlama gelir?" bölümüne bakın.',
+    },
+    {
+      heading: 'TEST BUTONU — Sonuçlar ne anlama gelir?',
+      content:
+        'Her gelen kutusu satırında ve "Yeni Inbox" penceresinde "Bağlantıyı test et" butonu vardır. Düğme hem IMAP (mail çekme) hem SMTP (mail gönderme) bağlantısını AYRI test eder ve iki ayrı sonuç rozeti gösterir.',
+      example: `Yeşil "IMAP: bağlandı"          → gelen kutu okunuyor, mail kontrolü hazır ✓
+Yeşil "SMTP: bağlandı"          → giden kutu hazır, mail gönderilebilir ✓
+Kırmızı "IMAP: kimlik hatası"    → kullanıcı adı ya da Uygulama Şifresi yanlış
+Kırmızı "IMAP: sunucu erişilemedi (993 açık mı?)"
+                                → IT'den 993 giden port erişimini doğrulatın
+Kırmızı "SMTP: kimlik hatası"    → Uygulama Şifresi yanlış (aynı hesabın şifresi)
+Gri "SMTP: tanımsız — sistem bildirim hesabı devrede"
+                                → SMTP alanlarını doldurmadınız, giden mail
+                                  ortak hesaptan çıkar (normal kullanımda önerilmez)`,
+    },
+    {
+      heading: 'SİSTEM BİLDİRİM MAİLLERİ (no-reply)',
+      content:
+        'En alttaki katlanmış kart, sistemin otomatik ürettiği maillerin gönderileceği hesabı tanımlar. Bunlar temsilcinin yazdığı değil, sistem tarafından tetiklenen mailler: "Vakanız açıldı", "Vakanın durumu güncellendi", "Vakanız çözüldü", aksiyon panosu uyarıları. Bir temsilci değil, sistem gönderdiği için "Kimden" adresi otomatik olarak buradan alınır. İdealde bu ayrı bir "no-reply" hesabı olmalı; şu an için mevcut sunucu ayarları kullanılıyor. Değiştirmek istediğinizde bu kartı açıp bilgileri güncelleyin — geçmiş mailler etkilenmez, o gün itibariyle sistem mailleri yeni hesaptan çıkar.',
+      warning: 'Bu kartın SMTP bilgilerini boş bırakırsanız sistem bildirim mailleri gitmez (müşteri "vakam açıldı" mail\'i almaz). Değiştirmek istediğinizde önce YENİ hesabın bilgilerini girip test edin, YEŞİL çıkarsa kaydedin.',
+    },
+    {
+      heading: 'GÖNDEREN ADRESLERİ (From) — Yanıt penceresinin listesi',
+      content:
+        'Temsilci bir vakaya yanıt yazarken üstte "Kimden" açılır listesi görür. Bu ekrandaki liste o açılır listeyi besler. Yıldızlı satır (★) yanıt penceresi açılışında ön-seçili gelen varsayılan adrestir. Bir gelen kutusu eklediğinizde o hesabın adresi otomatik olarak bu listeye eklenir, yani buraya elle bir şey eklemeniz genelde gerekmez. Nadiren, sadece gönderim yapan (`no-reply@`, `duyurular@` gibi) ama gelen mail almayan adresleri buraya elle eklersiniz.',
+      example: `Yanıt penceresinde temsilcinin gördüğü:
+Kimden: [ Varuna <csmtest@univera.com.tr>          ▾ ]
+          Yazılım Destek <yazilimdestek@univera.com.tr>
+
+★ Varsayılan → yanıt penceresi açılışında bu seçili gelir
+"Pasifleştir" → o adres açılır listeden geçici gizlenir
+"Sil" → tamamen kaldırır (mevcut mailler etkilenmez)`,
+    },
+    {
+      heading: 'ŞİRKET İMZA ŞABLONU',
+      content:
+        'Temsilci mail gönderirken sonuna otomatik eklenen kurumsal imza. HTML düzenleyiciyle serbest tasarlanır. Şablon değişkenleri ile her temsilci için özelleştirilir: `{{person.name}}` temsilcinin adına, `{{person.title}}` temsilcinin unvanına, `{{company.name}}` şirket adına dönüşür. Yanıt penceresinde temsilci isterse imzayı "İmzasız" seçeneğiyle kapatabilir. Temsilci kendi profil ekranından kişisel bir imza da tanımlayabilir; kişisel imza tanımlıysa şirket şablonu yerine o kullanılır.',
+      example: `Şirket şablonu:
+<p>Saygılarımızla,</p>
+<p><strong>{{person.name}}</strong><br>
+{{person.title}}<br>
+{{company.name}} — Destek Ekibi</p>
+
+Temsilci Ali (unvan: Yazılım Destek Uzmanı) için oluşan çıktı:
+Saygılarımızla,
+Ali Yılmaz
+Yazılım Destek Uzmanı
+Univera — Destek Ekibi`,
+    },
+    {
+      heading: 'SIKÇA KARŞILAŞILAN SORUNLAR',
+      content:
+        'Mail\'den vaka açılmıyor: IMAP yeşil mi? Test edin. Değilse IT\'den mail hesabına IMAP erişimini açtırın. Yeşilse "Entegrasyon Aktif" (genel kapatma anahtarı) açık mı bakın. — Temsilci yanıt maili gitmiyor: SMTP yeşil mi? Değilse Uygulama Şifresi\'nin SMTP tarafına da uyduğundan emin olun (Gmail\'de tek Uygulama Şifresi hem IMAP hem SMTP için geçerlidir). — Yanıt yanlış "Kimden" ile çıkıyor: Yanıt penceresinde temsilcinin doğru gönderen adresi seçtiğinden emin olun; ayrıca gelen kutusunun "From adresi" ayarı doğru mu bakın. — Sistem bildirim mailleri gitmiyor: "Sistem Bildirim Mailleri (no-reply)" kartına gidip test edin; SMTP bilgileri boşsa bildirim gönderilmez. — Test düğmesi "kimlik hatası" diyor: Uygulama Şifresi\'ni tek boşluksuz, 16 karakter olarak girdiğinizden emin olun; Gmail Uygulama Şifreleri 4x4 gruplar halinde gösterilir ama boşlukları ATLAYIN.',
+    },
+    {
+      heading: 'GÜVENLİK — Kimlik bilgileri nasıl saklanıyor?',
+      content:
+        'Uygulama Şifresi bilgileri sunucuda AES-256-GCM şifrelemeyle saklanır. Bu ekranda kaydettiğinizden sonra HİÇBİR YERDE geri gösterilmez — yeşil "Şifre ayarlı" rozetiyle sadece "girildiği tarih" görünür. Bir hesap ele geçirilirse veya bir çalışan işten ayrılırsa, mail sağlayıcı panelinden (Google Workspace, vs.) Uygulama Şifresi\'ni iptal edip yeni bir tane üretmeniz ve buraya girmeniz gerekir; Varuna içinde ayrıca bir işlem gerekmez.',
+      warning: 'Uygulama Şifresi\'ni ekranda kimseyle paylaşmayın, ekran görüntüsü almayın. Sunucu erişimli birkaç kişi hariç kimseyle Uygulama Şifresi\'nin ham halini paylaşmayın.',
+    },
+    {
+      heading: 'DEĞİŞİKLİKLERİN CANLIYA YANSIMASI',
+      content:
+        'Bu ekrandaki bir değişiklik (yeni gelen kutusu, gönderen adresi, imza şablonu) KAYDETTİĞİNİZ ANDA canlıya yansır. IMAP mail kontrolü bir sonraki 30 saniyelik turda yeni gelen kutusunu görür ve dinlemeye başlar. Yanıt penceresinde temsilci bir vakaya bir sonraki girişinde yeni gönderen adresini açılır listede görür. Sistem bildirim mailleri anında yeni ayara geçer. Sunucu güncellemesi / yeniden başlatma gerekmez.',
+    },
+  ],
+};

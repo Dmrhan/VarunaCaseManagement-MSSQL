@@ -244,6 +244,7 @@ function shapeAccountRow(account, { caseAggregates }) {
  */
 export async function listAccounts({
   search,
+  searchFields,
   companyId,
   status,
   ids,
@@ -304,7 +305,7 @@ export async function listAccounts({
     const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v } }));
     const projectNameOR = nameVariants.map((v) => ({ name: { contains: v } }));
 
-    // Chip field filter: null = tüm alanlar aktif.
+    // searchFields: belirli alanları seç; boş/undefined → tüm alanlar (geriye uyum).
     const sf = Array.isArray(searchFields) && searchFields.length > 0 ? new Set(searchFields) : null;
     const orBranches = [];
     if (!sf || sf.has('name'))    orBranches.push(...nameOR);

@@ -19,10 +19,13 @@ import {
   type FromAliasItem,
   type MailInboxItem,
   type MailInboxDraft,
+  type InboxTestResult,
 } from '@/services/adminService';
 import { lookupService } from '@/services/caseService';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Field';
+import { HelpButton, HelpDrawer } from '@/components/ui/HelpDrawer';
+import { MAIL_INTEGRATION_HELP } from './helpContents';
 
 /**
  * Mail M5 — Per-tenant SMTP/IMAP Entegrasyonu (Admin yapılandırma).
@@ -82,16 +85,19 @@ function toDraft(s: ExternalMailSetting): DraftState {
 }
 
 function toPatch(d: DraftState): ExternalMailSettingInput {
+  // 2026-07-02 go-live sadeleştirmesi:
+  // Legacy IMAP alanları (inboundAddress / imapHost / imapPort / authMode)
+  // UI'dan kaldırıldı; polling artık ExternalMailInbox satırlarını okuyor.
+  // Bu alanlar patch'e KOYULMAZ → backend
+  // externalMailSettingRepository.js:128 `patch.X !== undefined` guard'ı
+  // sayesinde mevcut değerler DOKUNULMAZ (schema'da alanlar duruyor).
   const patch: ExternalMailSettingInput = {
     enabled: d.enabled,
     fromAddress: d.fromAddress.trim() ? d.fromAddress.trim() : null,
-    inboundAddress: d.inboundAddress.trim() ? d.inboundAddress.trim() : null,
     smtpHost: d.smtpHost.trim() ? d.smtpHost.trim() : null,
     smtpPort: d.smtpPort || null,
     smtpSecure: d.smtpSecure,
-    imapHost: d.imapHost.trim() ? d.imapHost.trim() : null,
-    imapPort: d.imapPort || null,
-    authMode: d.authMode,
+    // username SMTP giden hesabı için üst kartta korundu.
     username: d.username.trim() ? d.username.trim() : null,
   };
   // Secret yalnız "Değiştir" açıldıysa ve girildiyse gönder.
@@ -99,6 +105,66 @@ function toPatch(d: DraftState): ExternalMailSettingInput {
     patch.secret = d.secretInput.trim();
   }
   return patch;
+}
+
+/**
+ * 2026-07-02 — Test sonucu Türkçe aksiyon mesajı.
+ * Admin okuduğunda ne yapacağını anlasın (help/explainability kuralı):
+ *   ok                 → Bağlantı başarılı — polling için hazır.
+ *   auth_failed        → Kullanıcı adı / App Password'ü kontrol et.
+ *   connection_failed  → Sunucu/port erişilemiyor — IT'den giden 993 iznini doğrulat.
+ *   config_incomplete  → IMAP host / kullanıcı adı / şifre eksik.
+ *   inbox_disabled     → Inbox pasif — önce aktifleştir.
+ *   inbox_invalid      → Inbox tanımı bozuk (yeniden aç).
+ *   not_found          → Inbox bulunamadı (silinmiş olabilir; listeyi yenile).
+ * Bilinmeyen kod → backend message'ı geri gönderilir.
+ */
+function formatInboxTestMessage(result: InboxTestResult): string {
+  switch (result.code) {
+    case 'ok':
+      return 'Bağlantı başarılı — otomatik mail kontrolü için hazır.';
+    case 'auth_failed':
+      return 'Kimlik doğrulama başarısız — kullanıcı adı / App Password\'ü kontrol et.';
+    case 'connection_failed':
+      return 'Sunucu/port erişilemiyor — IT\'den 993 giden erişimini doğrulat.';
+    case 'config_incomplete':
+      return 'IMAP host / kullanıcı adı / şifre eksik.';
+    case 'inbox_disabled':
+      return 'Inbox pasif — önce aktifleştir.';
+    case 'inbox_invalid':
+      return 'Inbox tanımı geçersiz.';
+    case 'not_found':
+      return 'Inbox bulunamadı — listeyi yenile.';
+    default:
+      return result.message || 'Bilinmeyen hata.';
+  }
+}
+
+/**
+ * FAZ B (2026-07-02) — Kanal başına test sonucu Türkçe mesajı.
+ * IMAP: mail çekme; SMTP: mail gönderme.
+ */
+function formatChannelTestMessage(ch: { ok: boolean; code: string; message: string; fallbackAvailable?: boolean }, channel: 'imap' | 'smtp'): string {
+  if (ch.ok) return channel === 'imap' ? 'bağlandı' : 'bağlandı';
+  if (channel === 'smtp' && ch.fallbackAvailable) {
+    return 'tanımsız — sistem bildirim hesabı devrede';
+  }
+  switch (ch.code) {
+    case 'auth_failed':
+      return channel === 'imap'
+        ? 'kimlik hatası (App Password?)'
+        : 'kimlik hatası (App Password?)';
+    case 'connection_failed':
+      return channel === 'imap'
+        ? 'sunucu erişilemedi (993 açık mı?)'
+        : 'sunucu erişilemedi (587/465 açık mı?)';
+    case 'config_incomplete':
+      return channel === 'imap'
+        ? 'host/kullanıcı/şifre eksik'
+        : 'host/kullanıcı/şifre eksik';
+    default:
+      return ch.message || 'hata';
+  }
 }
 
 function formatDate(iso: string | null): string {
@@ -123,6 +189,8 @@ export function AdminExternalMailPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // 2026-07-02 — Kullanıcı dilinde detaylı yardım drawer'ı.
+  const [helpOpen, setHelpOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -174,9 +242,7 @@ export function AdminExternalMailPage() {
     if (d.smtpPort && (d.smtpPort < PORT_MIN || d.smtpPort > PORT_MAX)) {
       e.smtpPort = `${PORT_MIN}-${PORT_MAX} arası olmalı.`;
     }
-    if (d.imapPort && (d.imapPort < PORT_MIN || d.imapPort > PORT_MAX)) {
-      e.imapPort = `${PORT_MIN}-${PORT_MAX} arası olmalı.`;
-    }
+    // 2026-07-02 — IMAP port validasyonu UI'dan kaldırıldı (alan yok).
     if (d.editingSecret && d.secretInput.trim().length > 0 && d.secretInput.trim().length < 4) {
       e.secretInput = 'Secret en az 4 karakter olmalı.';
     }
@@ -239,22 +305,22 @@ export function AdminExternalMailPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <Mail size={18} className="text-brand-600" />
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
-          Mail Entegrasyonu (SMTP/IMAP)
-        </h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Mail size={18} className="text-brand-600" />
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
+            Mail Entegrasyonu
+          </h2>
+        </div>
+        {/* 2026-07-02 — Detaylı kullanıcı dilinde yardım drawer'ı.
+            İçerik: MAIL_INTEGRATION_HELP (bu ekran ne için + multi-inbox +
+            SMTP + no-reply + adım adım yeni inbox + test sonuçları + sık
+            karşılaşılan sorunlar + güvenlik). */}
+        <HelpButton onClick={() => setHelpOpen(true)} active={helpOpen} />
       </div>
 
-      <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
-        <Info size={14} className="mt-0.5 shrink-0" />
-        <span>
-          Per-tenant SMTP gönderim + IMAP gelen mailbox tanımları. Secret
-          (SMTP parola / OAuth2 refresh_token) burada <strong>şifreli</strong>{' '}
-          saklanır (AES-256-GCM) ve hiçbir GET response'unda görünmez. Aktif
-          değilse mail entegrasyonu çalışmaz (env'e düşmez).
-        </span>
-      </div>
+      {/* Ekran başındaki bilgi bandı KALDIRILDI (2026-07-02) — aynı içerik
+          Yardım drawer'ında (sağ üst "Yardım" butonu) detaylı mevcut. */}
 
       {manageable.length > 1 && (
         <Card>
@@ -276,6 +342,30 @@ export function AdminExternalMailPage() {
         </Card>
       )}
 
+      {/* FAZ B (2026-07-02) — Layout swap: Multi-Inbox sayfa merkezi, SMTP
+          fallback kart en altta collapse. Her inbox artık kendi SMTP+IMAP
+          kredisiyle çalışır; tenant-ortak SMTP yalnız SMTP'si tanımsız
+          inbox'lar için fallback. */}
+      {companyId && <MailInboxManager companyId={companyId} />}
+
+      {/* Compose-Signature F2 — Şirket imza şablonu (lazy) — Multi-Inbox'ın altında,
+          agent'ın sık kullandığı yer. */}
+      {companyId && (
+        <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
+          <CompanySignatureTemplate companyId={companyId} />
+        </Suspense>
+      )}
+
+      {/* From alias yönetimi — composer dropdown beslemesi. Multi-Inbox
+          adresleri otomatik köprülenir; bu kart nadir manuel ekleme için. */}
+      {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
+
+      {/* Sistem Bildirim Mailleri (no-reply). Collapse şeklinde; nadiren
+          değiştirilir. FAZ B sonrası composer mailleri her inbox'un kendi
+          SMTP'siyle gider; buradaki hesap SİSTEM ürettiği otomatik
+          bildirimleri (vaka açıldı / durum güncellendi / çözüldü /
+          aksiyon uyarıları) gönderir. Ayrıca SMTP'si tanımsız kalan
+          inbox'lar için güvenlik ağı görevi de görür. */}
       <Card>
         <CardBody>
           {showSkeleton ? (
@@ -286,8 +376,27 @@ export function AdminExternalMailPage() {
               <Skeleton height={14} width="60%" />
             </div>
           ) : (
-            <div className="space-y-5">
-              <Field label="Entegrasyon Aktif" hint="Kapalıyken mail entegrasyonu çalışmaz.">
+            <details className="space-y-5" open={false}>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-ndark-text">
+                Sistem Bildirim Mailleri (no-reply)
+                <span className="ml-2 text-[11px] font-normal text-slate-500 dark:text-ndark-muted">
+                  (vaka açıldı / durum güncellendi / çözüldü bildirimlerini bu hesap gönderir)
+                </span>
+              </summary>
+              <div className="mt-3 flex items-center gap-2 border-b border-slate-200 pb-2 dark:border-ndark-border">
+                <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
+                  Temsilcinin yanıt penceresinden gönderdiği mailler her gelen kutusunun kendi SMTP'siyle
+                  gider; bu kart <strong>sistemin ürettiği otomatik bildirim maillerini</strong>
+                  gönderen hesabı tanımlar. İdealde ayrı bir "no-reply" hesabı; şu anki
+                  hesabı istediğin zaman değiştirebilirsin. Boş bırakılırsa sistem
+                  bildirimleri hata verir.
+                </span>
+              </div>
+
+              <Field
+                label="Entegrasyon Aktif"
+                hint="Genel kapatma anahtarı — kapalıyken TÜM gelen kutularının otomatik mail kontrolü ve mail gönderimi durur."
+              >
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -301,28 +410,16 @@ export function AdminExternalMailPage() {
                 </label>
               </Field>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field
-                  label="From Address (gönderen)"
-                  hint='ör: "Varuna <no-reply@univera.com.tr>"'
-                >
-                  <TextInput
-                    value={draft.fromAddress}
-                    onChange={(e) => update('fromAddress', e.target.value)}
-                    placeholder="Varuna <no-reply@univera.com.tr>"
-                  />
-                </Field>
-                <Field
-                  label="Inbound Address (gelen mailbox)"
-                  hint="IMAP polling hedefi (M3'te kullanılır)"
-                >
-                  <TextInput
-                    value={draft.inboundAddress}
-                    onChange={(e) => update('inboundAddress', e.target.value)}
-                    placeholder="support@univera.com.tr"
-                  />
-                </Field>
-              </div>
+              <Field
+                label="From Address (gönderen)"
+                hint='ör: "Varuna <no-reply@univera.com.tr>"'
+              >
+                <TextInput
+                  value={draft.fromAddress}
+                  onChange={(e) => update('fromAddress', e.target.value)}
+                  placeholder="Varuna <no-reply@univera.com.tr>"
+                />
+              </Field>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="SMTP Host" hint="Giden mail sunucusu" error={errors.smtpHost}>
@@ -353,38 +450,10 @@ export function AdminExternalMailPage() {
                     </span>
                   </label>
                 </Field>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="IMAP Host" hint="Gelen mailbox sunucusu (M3'te)">
-                  <TextInput
-                    value={draft.imapHost}
-                    onChange={(e) => update('imapHost', e.target.value)}
-                    placeholder="imap.gmail.com"
-                  />
-                </Field>
-                <Field label="IMAP Port" hint="993 (SSL standart)" error={errors.imapPort}>
-                  <TextInput
-                    type="number"
-                    value={String(draft.imapPort)}
-                    onChange={(e) => update('imapPort', Number(e.target.value))}
-                    placeholder="993"
-                  />
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Auth Mode" hint="M5'te yalnız 'password'; oauth2 sonraki PR'da">
-                  <select
-                    className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm dark:bg-ndark-bg dark:border-ndark-border"
-                    value={draft.authMode}
-                    onChange={(e) => update('authMode', e.target.value as 'password' | 'oauth2')}
-                  >
-                    <option value="password">Password (SMTP App Password)</option>
-                    <option value="oauth2">OAuth2 (M3+)</option>
-                  </select>
-                </Field>
-                <Field label="Kullanıcı Adı" hint="SMTP/IMAP user (genelde inbound adres)">
+                <Field
+                  label="SMTP Kullanıcı Adı"
+                  hint="Giden SMTP hesabının kullanıcı adı (genelde From adresi)"
+                >
                   <TextInput
                     value={draft.username}
                     onChange={(e) => update('username', e.target.value)}
@@ -392,6 +461,19 @@ export function AdminExternalMailPage() {
                     autoComplete="off"
                   />
                 </Field>
+              </div>
+
+              {/* 2026-07-02 — Gelen mail (IMAP) ayarları artık aşağıdaki
+                  "Gelen Mail Inbox'ları" bölümünden yönetiliyor. Legacy
+                  ExternalMailSetting.inboundAddress / imapHost / imapPort /
+                  authMode alanları polling'de KULLANILMIYOR (imapPoller
+                  yalnız ExternalMailInbox okuyor). Bu alanlar payload'a
+                  gönderilmez → mevcut update endpoint'i alan gelmeyince
+                  satırı korur (upsert semantik). Schema'da alanlar kalır. */}
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted">
+                <span className="font-medium">Gelen mail (IMAP) tanımları</span> artık
+                aşağıdaki <strong>Gelen Mail Inbox'ları</strong> bölümünden
+                yönetilir — her adres ayrı satır (Multi-Inbox v1).
               </div>
 
               {/* Secret — WRITE-ONLY widget */}
@@ -475,23 +557,21 @@ export function AdminExternalMailPage() {
                   {testing ? 'Test ediliyor…' : 'Bağlantıyı test et'}
                 </Button>
               </div>
-            </div>
+            </details>
           )}
         </CardBody>
       </Card>
+      {/* NOT: Multi-Inbox / Signature / FromAlias kartları yukarı taşındı (FAZ B layout swap). */}
 
-      {/* M5-extension — Per-company From alias yönetimi */}
-      {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
-
-      {/* Multi-Inbox A4 — Per-company gelen mailbox yönetimi (N hesap → N takım) */}
-      {companyId && <MailInboxManager companyId={companyId} />}
-
-      {/* Compose-Signature F2 — Şirket imza şablonu (lazy load) */}
-      {companyId && (
-        <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
-          <CompanySignatureTemplate companyId={companyId} />
-        </Suspense>
-      )}
+      {/* 2026-07-02 — Detaylı yardım drawer'ı (kullanıcı dilinde, admin/CS
+          ekibi için). Trigger: sayfa header'ındaki "Yardım" butonu. */}
+      <HelpDrawer
+        open={helpOpen}
+        title={MAIL_INTEGRATION_HELP.title}
+        sections={MAIL_INTEGRATION_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+        overlayOnly
+      />
     </div>
   );
 }
@@ -583,7 +663,7 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
               Gönderen Adresleri (From)
             </h3>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
-              Composer'da agent'ın seçebileceği gönderen adres listesi. Varsayılan (★) composer açılışında ön-seçili gelir.
+              Yanıt penceresinde temsilcinin seçebileceği gönderen adres listesi. Varsayılan (★) yanıt penceresi açılışında ön-seçili gelir.
             </p>
           </div>
         </div>
@@ -597,7 +677,7 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
               placeholder='örn. support@univera.com.tr'
             />
           </Field>
-          <Field label="Görünen ad (ops.)" hint="Composer dropdown'da gösterilir">
+          <Field label="Görünen ad (isteğe bağlı)" hint="Yanıt penceresindeki gönderen listesinde gösterilir">
             <TextInput
               value={newDisplay}
               onChange={(e) => setNewDisplay(e.target.value)}
@@ -710,6 +790,11 @@ function MailInboxManager({ companyId }: { companyId: string }) {
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<{ mode: 'create' | 'edit'; item?: MailInboxItem } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 2026-07-02 — Inbox-başına test sonucu ve pending state.
+  //   testResults[inboxId] = { ok, code, message } · yeni test yapılınca kaydolur.
+  //   testingId = testin şu an çalıştığı inbox id (buton disabled + label).
+  const [testResults, setTestResults] = useState<Record<string, InboxTestResult>>({});
+  const [testingId, setTestingId] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Aktif takımlar — sadece bu şirkete ait olanlar dropdown'da görünsün.
@@ -724,6 +809,9 @@ function MailInboxManager({ companyId }: { companyId: string }) {
     setLoading(true);
     const out = await adminService.externalMailSettings.inboxes.list(companyId);
     setItems(out);
+    // Şirket / inbox listesi değişince eski test rozetlerini bırakma —
+    // "yanıltıcı geçmiş sonuç göstermeyelim" ilkesi.
+    setTestResults({});
     setLoading(false);
   }, [companyId]);
 
@@ -744,21 +832,31 @@ function MailInboxManager({ companyId }: { companyId: string }) {
     if (r) {
       toast({
         type: 'success',
-        message: r.enabled ? 'Inbox açıldı (polling aktif).' : 'Inbox kapatıldı.',
+        message: r.enabled ? 'Gelen kutusu açıldı (otomatik mail kontrolü aktif).' : 'Gelen kutusu kapatıldı.',
       });
       void reload();
     }
   }
 
   async function handleRemove(item: MailInboxItem) {
-    if (!window.confirm(`"${item.address}" inbox'ını silmek istiyor musun? Bu işlem geri alınamaz.`)) return;
+    if (!window.confirm(`"${item.address}" gelen kutusunu silmek istiyor musun? Bu işlem geri alınamaz.`)) return;
     setBusy(true);
     const ok = await adminService.externalMailSettings.inboxes.remove(companyId, item.id);
     setBusy(false);
     if (ok) {
-      toast({ type: 'success', message: 'Inbox silindi.' });
+      toast({ type: 'success', message: 'Gelen kutusu silindi.' });
       void reload();
     }
+  }
+
+  // 2026-07-02 — Inbox-başına IMAP bağlantı testi.
+  // Backend: POST /api/admin/external-mail-settings/:companyId/inboxes/:id/test
+  // (imapPoller.testInboxConnection reuse; mail çekmez, mutate etmez).
+  async function handleTest(item: MailInboxItem) {
+    setTestingId(item.id);
+    const result = await adminService.externalMailSettings.inboxes.test(companyId, item.id);
+    setTestResults((prev) => ({ ...prev, [item.id]: result }));
+    setTestingId(null);
   }
 
   return (
@@ -785,78 +883,130 @@ function MailInboxManager({ companyId }: { companyId: string }) {
         </div>
 
         {/* Help banner — ekran kendini açıklasın */}
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-          <div className="flex items-start gap-2">
-            <Info size={14} className="mt-0.5 shrink-0" />
-            <div>
-              <p className="font-medium">Her inbox AYRI bir mail hesabıdır.</p>
-              <p className="mt-0.5">
-                yazilimdestek@univera.com.tr ve satis@univera.com.tr ayrı Gmail/Exchange hesabı olarak yapılandırılmalı; her biri için ayrı uygulama şifresi (App Password) gerekir.
-                Inbox'a atanan takım, o mail adresinden gelen vakaları havuz olarak alır — ekibinizden biri vakayı üstlenir.
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Amber bilgi bandı KALDIRILDI (2026-07-02) — aynı içerik Yardım
+            drawer'ında "Çoklu gelen kutusu nedir?" bölümünde detaylı mevcut. */}
 
         {/* Liste */}
         {loading ? (
           <Skeleton className="h-20 w-full" />
         ) : items.length === 0 ? (
           <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
-            Henüz inbox tanımlı değil. <strong className="font-medium">Yeni Inbox</strong> ile gelen mail adresini ve hedef takımı tanımlayın.
+            Henüz gelen kutusu tanımlı değil. <strong className="font-medium">Yeni Inbox</strong> düğmesiyle gelen mail adresini ve hedef takımı tanımlayın.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 dark:divide-ndark-border dark:border-ndark-border">
-            {items.map((it) => (
-              <li key={it.id} className="flex items-center gap-3 px-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
-                    {it.displayName ? `${it.displayName} <${it.address}>` : it.address}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-ndark-muted">
-                    <span className="flex items-center gap-1">
-                      <Users size={12} /> {teamName(it.assignedTeamId)}
-                    </span>
-                    <span className={it.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}>
-                      {it.enabled ? '● Aktif (polling açık)' : '○ Pasif'}
-                    </span>
-                    <span className={it.secretIsSet ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>
-                      {it.secretIsSet ? '🔒 Şifre ayarlı' : '⚠ Şifre ayarlanmamış'}
-                    </span>
-                    {it.imapHost && (
-                      <span className="text-slate-400">IMAP: {it.imapHost}:{it.imapPort ?? '?'}</span>
+            {items.map((it) => {
+              const testResult = testResults[it.id];
+              const isTesting = testingId === it.id;
+              return (
+                <li key={it.id} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-800 dark:text-ndark-text">
+                      {it.displayName ? `${it.displayName} <${it.address}>` : it.address}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-ndark-muted">
+                      <span className="flex items-center gap-1">
+                        <Users size={12} /> {teamName(it.assignedTeamId)}
+                      </span>
+                      <span className={it.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}>
+                        {it.enabled ? '● Aktif (otomatik mail kontrolü açık)' : '○ Pasif'}
+                      </span>
+                      <span className={it.secretIsSet ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>
+                        {it.secretIsSet ? '🔒 Şifre ayarlı' : '⚠ Şifre ayarlanmamış'}
+                      </span>
+                      {it.imapHost && (
+                        <span className="text-slate-400">IMAP: {it.imapHost}:{it.imapPort ?? '?'}</span>
+                      )}
+                    </div>
+                    {/* FAZ B (2026-07-02) — IMAP + SMTP ayrı rozet.
+                        Her kanal için kendi kod → mesaj eşlemesi. */}
+                    {testResult && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5" role="status">
+                        {testResult.imap && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.imap.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.imap.ok ? <CheckCircle2 size={10} /> : <Info size={10} />}
+                            <span>IMAP: {formatChannelTestMessage(testResult.imap, 'imap')}</span>
+                          </span>
+                        )}
+                        {testResult.smtp && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.smtp.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : testResult.smtp.fallbackAvailable
+                                  ? 'bg-slate-100 text-slate-700 dark:bg-ndark-surface dark:text-ndark-muted'
+                                  : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.smtp.ok
+                              ? <CheckCircle2 size={10} />
+                              : testResult.smtp.fallbackAvailable
+                                ? <Info size={10} />
+                                : <Info size={10} />}
+                            <span>SMTP: {formatChannelTestMessage(testResult.smtp, 'smtp')}</span>
+                          </span>
+                        )}
+                        {/* Kanallar yoksa (inbox_disabled / inbox_invalid vb.) toplam kod'u göster. */}
+                        {!testResult.imap && !testResult.smtp && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.ok ? <CheckCircle2 size={10} /> : <Info size={10} />}
+                            <span>{formatInboxTestMessage(testResult)}</span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
-                </div>
-                <Button
-                  type="button"
-                  variant={it.enabled ? 'ghost' : 'primary'}
-                  onClick={() => void handleToggleEnabled(it)}
-                  disabled={busy}
-                >
-                  {it.enabled ? 'Kapat' : 'Aç'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  leftIcon={<Pencil size={14} />}
-                  onClick={() => setEditor({ mode: 'edit', item: it })}
-                  disabled={busy}
-                >
-                  Düzenle
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  leftIcon={<Trash2 size={14} />}
-                  onClick={() => void handleRemove(it)}
-                  disabled={busy}
-                  title="Sil"
-                >
-                  Sil
-                </Button>
-              </li>
-            ))}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => void handleTest(it)}
+                    disabled={busy || isTesting}
+                    title="IMAP bağlantısını test eder (mail çekmez, hiçbir şey değiştirmez)."
+                  >
+                    {isTesting ? 'Test ediliyor…' : 'Bağlantıyı test et'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={it.enabled ? 'ghost' : 'primary'}
+                    onClick={() => void handleToggleEnabled(it)}
+                    disabled={busy}
+                  >
+                    {it.enabled ? 'Kapat' : 'Aç'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    leftIcon={<Pencil size={14} />}
+                    onClick={() => setEditor({ mode: 'edit', item: it })}
+                    disabled={busy}
+                  >
+                    Düzenle
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    leftIcon={<Trash2 size={14} />}
+                    onClick={() => void handleRemove(it)}
+                    disabled={busy}
+                    title="Sil"
+                  >
+                    Sil
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -896,6 +1046,13 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
   const [imapHost, setImapHost] = useState(initial?.imapHost ?? 'imap.gmail.com');
   const [imapPort, setImapPort] = useState<number>(initial?.imapPort ?? 993);
   const [imapSecure, setImapSecure] = useState<boolean>(initial?.imapSecure ?? true);
+  // FAZ B (2026-07-02) — Per-inbox SMTP alanları.
+  // Default'lar Gmail için doğru (smtp.gmail.com:587 STARTTLS). Backend
+  // upsert boş bırakılırsa NULL saklar → tenant-ortak fallback devrede.
+  const [smtpHost, setSmtpHost] = useState<string>(initial?.smtpHost ?? 'smtp.gmail.com');
+  const [smtpPort, setSmtpPort] = useState<number>(initial?.smtpPort ?? 587);
+  const [smtpSecure, setSmtpSecure] = useState<boolean>(initial?.smtpSecure === true);
+  const [fromAddress, setFromAddress] = useState<string>(initial?.fromAddress ?? '');
   const [username, setUsername] = useState(initial?.username ?? '');
   const [assignedTeamId, setAssignedTeamId] = useState<string>(initial?.assignedTeamId ?? '');
   const [enabled, setEnabled] = useState<boolean>(initial?.enabled ?? false);
@@ -904,6 +1061,14 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
   const [rotateSecret, setRotateSecret] = useState<boolean>(!isEdit);
   const [secret, setSecret] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  // 2026-07-02 — "Kaydet ve Test Et" akışı. Save başarılı → dönen id ile
+  // hemen IMAP test. Sonuç inline banner; kullanıcı "Kapat"a basınca
+  // liste refresh (onSaved).
+  const [inlineTest, setInlineTest] = useState<
+    | { status: 'idle' }
+    | { status: 'testing' }
+    | { status: 'done'; result: InboxTestResult }
+  >({ status: 'idle' });
 
   // Username default: address ile aynı (ilk açılışta)
   useEffect(() => {
@@ -912,23 +1077,34 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
     }
   }, [address, username, isEdit]);
 
-  async function handleSave() {
+  async function persistDraft(): Promise<MailInboxItem | undefined> {
     const addr = address.trim();
     if (!addr) {
       toast({ type: 'warn', message: 'Adres zorunlu.' });
-      return;
+      return undefined;
     }
     if (rotateSecret && secret.trim().length < 4) {
       toast({ type: 'warn', message: 'Şifre en az 4 karakter olmalı.' });
-      return;
+      return undefined;
     }
+    // FAZ B — fromAddress default: kullanıcı boş bıraktıysa
+    // "Display <address>" (display doluysa) veya çıplak address.
+    const trimmedDisplayName = displayName.trim();
+    const trimmedFromAddress = fromAddress.trim();
+    const finalFromAddress = trimmedFromAddress
+      || (trimmedDisplayName ? `${trimmedDisplayName} <${addr}>` : addr);
 
     const draft: MailInboxDraft = {
       address: addr,
-      displayName: displayName.trim() || null,
+      displayName: trimmedDisplayName || null,
       imapHost: imapHost.trim() || null,
       imapPort: Number(imapPort) || null,
       imapSecure,
+      // FAZ B — SMTP alanları; boş bırakılırsa NULL (tenant fallback).
+      smtpHost: smtpHost.trim() || null,
+      smtpPort: Number(smtpPort) || null,
+      smtpSecure,
+      fromAddress: finalFromAddress || null,
       username: username.trim() || null,
       assignedTeamId: assignedTeamId || null,
       enabled,
@@ -936,16 +1112,32 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
     if (rotateSecret && secret.trim()) {
       draft.secret = secret.trim();
     }
-
     setSaving(true);
     const r = isEdit && initial
       ? await adminService.externalMailSettings.inboxes.update(companyId, initial.id, draft)
       : await adminService.externalMailSettings.inboxes.create(companyId, draft);
     setSaving(false);
+    return r;
+  }
+
+  async function handleSave() {
+    const r = await persistDraft();
     if (r) {
-      toast({ type: 'success', message: isEdit ? 'Inbox güncellendi.' : 'Inbox eklendi.' });
+      toast({ type: 'success', message: isEdit ? 'Gelen kutusu güncellendi.' : 'Gelen kutusu eklendi.' });
       onSaved();
     }
+  }
+
+  // 2026-07-02 — Modal içinde tek adım "Kaydet ve Test Et".
+  // Save başarılı → hemen inbox.id ile IMAP test → sonuç inline banner.
+  // Kullanıcı "Kapat"a basınca liste refresh (onSaved).
+  async function handleSaveAndTest() {
+    const r = await persistDraft();
+    if (!r) return;
+    toast({ type: 'success', message: isEdit ? 'Inbox güncellendi.' : 'Inbox eklendi.' });
+    setInlineTest({ status: 'testing' });
+    const testRes = await adminService.externalMailSettings.inboxes.test(companyId, r.id);
+    setInlineTest({ status: 'done', result: testRes });
   }
 
   return (
@@ -955,15 +1147,67 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
       title={isEdit ? 'Inbox\'ı Düzenle' : 'Yeni Inbox'}
       size="lg"
       footer={
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>İptal</Button>
-          <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving} leftIcon={<Save size={14} />}>
-            {saving ? 'Kaydediliyor…' : 'Kaydet'}
-          </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {inlineTest.status === 'done' ? (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setInlineTest({ status: 'idle' });
+                onSaved();
+              }}
+            >
+              Kapat
+            </Button>
+          ) : (
+            <>
+              <Button type="button" variant="ghost" onClick={onClose} disabled={saving || inlineTest.status === 'testing'}>
+                İptal
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void handleSaveAndTest()}
+                disabled={saving || inlineTest.status === 'testing'}
+              >
+                {inlineTest.status === 'testing' ? 'Test ediliyor…' : 'Kaydet ve Test Et'}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => void handleSave()}
+                disabled={saving || inlineTest.status === 'testing'}
+                leftIcon={<Save size={14} />}
+              >
+                {saving ? 'Kaydediliyor…' : 'Kaydet'}
+              </Button>
+            </>
+          )}
         </div>
       }
     >
       <div className="space-y-4">
+        {/* 2026-07-02 — Inline test sonucu (Kaydet ve Test Et sonrası). */}
+        {inlineTest.status === 'done' && (
+          <div
+            className={`rounded-md px-3 py-2.5 text-sm ${
+              inlineTest.result.ok
+                ? 'border border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200'
+                : 'border border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200'
+            }`}
+            role="status"
+          >
+            <div className="flex items-start gap-2">
+              {inlineTest.result.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> : <Info size={14} className="mt-0.5 shrink-0" />}
+              <div>
+                <p className="font-medium">{formatInboxTestMessage(inlineTest.result)}</p>
+                {!inlineTest.result.ok && inlineTest.result.message && inlineTest.result.message !== formatInboxTestMessage(inlineTest.result) && (
+                  <p className="mt-0.5 text-xs opacity-80">Sunucu detayı: {inlineTest.result.message}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {/* Adres + Görünen Ad */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Mail adresi" required hint="Bu adrese gelen mailler vaka açacak.">
@@ -983,36 +1227,101 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
           </Field>
         </div>
 
-        {/* IMAP credentials */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
-            <TextInput
-              value={imapHost}
-              onChange={(e) => setImapHost(e.target.value)}
-              placeholder="imap.gmail.com"
-            />
-          </Field>
-          <Field label="Port" hint="IMAPS: 993">
-            <TextInput
-              type="number"
-              value={String(imapPort)}
-              onChange={(e) => setImapPort(Number(e.target.value))}
-              placeholder="993"
-            />
-          </Field>
-          <Field label="SSL/TLS">
-            <label className="mt-2 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={imapSecure}
-                onChange={(e) => setImapSecure(e.target.checked)}
+        {/* IMAP credentials — GELEN mail */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            GELEN MAİL (IMAP) — Bu adrese gelen mailler otomatik mail kontrolü ile çekilir
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
+              <TextInput
+                value={imapHost}
+                onChange={(e) => setImapHost(e.target.value)}
+                placeholder="imap.gmail.com"
               />
-              <span>Güvenli bağlantı (zorunlu)</span>
-            </label>
-          </Field>
+            </Field>
+            <Field label="Port" hint="IMAPS: 993">
+              <TextInput
+                type="number"
+                value={String(imapPort)}
+                onChange={(e) => setImapPort(Number(e.target.value))}
+                placeholder="993"
+              />
+            </Field>
+            <Field label="SSL/TLS">
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={imapSecure}
+                  onChange={(e) => setImapSecure(e.target.checked)}
+                />
+                <span>Güvenli bağlantı (zorunlu)</span>
+              </label>
+            </Field>
+          </div>
         </div>
 
-        {/* Auth */}
+        {/* FAZ B (2026-07-02) — GİDEN mail (SMTP) — Per-inbox tam kredi.
+            Boş bırakılırsa tenant-ortak SMTP fallback devrede
+            (mevcut inbox'lar backfill sonrası dolu; yeni inbox'lar isterse
+            tenant'a düşer). */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            GİDEN MAİL (SMTP) — Bu adresten gönderim ayrı hesapla yapılır
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="SMTP sunucusu" hint="Gmail: smtp.gmail.com">
+              <TextInput
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+                placeholder="smtp.gmail.com"
+              />
+            </Field>
+            <Field label="Port" hint="587 (STARTTLS) veya 465 (SSL)">
+              <TextInput
+                type="number"
+                value={String(smtpPort)}
+                onChange={(e) => setSmtpPort(Number(e.target.value))}
+                placeholder="587"
+              />
+            </Field>
+            <Field label="SSL/TLS">
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={smtpSecure}
+                  onChange={(e) => setSmtpSecure(e.target.checked)}
+                />
+                <span>SSL (465 için açık)</span>
+              </label>
+            </Field>
+          </div>
+          <div className="mt-3">
+            <Field
+              label="From adresi"
+              hint={
+                'Bu inbox\'tan çıkan mailler bu "From" ile gider. Boş bırakırsan '
+                + '"Görünen ad <mail adresi>" formatı otomatik uygulanır.'
+              }
+            >
+              <TextInput
+                value={fromAddress}
+                onChange={(e) => setFromAddress(e.target.value)}
+                placeholder={
+                  displayName.trim()
+                    ? `${displayName.trim()} <${address || 'adres@ornek.com'}>`
+                    : (address || 'adres@ornek.com')
+                }
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Auth — SMTP + IMAP paylaşımlı (Gmail App Password tek kredi). */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            KİMLİK BİLGİLERİ — SMTP ve IMAP paylaşımlı (tek App Password)
+          </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Kullanıcı adı" hint="Genelde mail adresi ile aynı">
             <TextInput
@@ -1024,7 +1333,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
           <div>
             <Field
               label={isEdit ? 'Şifre' : 'Şifre (App Password)'}
-              hint={isEdit ? 'Yeni şifre girmek için aşağıdaki seçeneği işaretle.' : 'Gmail için App Password (16 karakter)'}
+              hint={isEdit ? 'Yeni şifre girmek için aşağıdaki seçeneği işaretle.' : 'Gmail için App Password (16 karakter). Hem SMTP hem IMAP için kullanılır.'}
               required={!isEdit}
             >
               {isEdit && (
@@ -1054,6 +1363,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
             </Field>
           </div>
         </div>
+        </div>
 
         {/* Routing — Takım */}
         <Field
@@ -1077,17 +1387,17 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
         </Field>
 
         {/* Enabled */}
-        <Field label="Polling durumu">
+        <Field label="Otomatik mail kontrolü durumu">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-            <span>Polling aktif (IMAP cron bu inbox'tan mail çeker)</span>
+            <span>Aktif (sistem her 30 saniyede bu gelen kutusundan mail çeker)</span>
           </label>
           <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
-            Kapalıyken inbox tanımı durur; mevcut vakalar etkilenmez.
+            Kapalıyken gelen kutusu tanımı durur; mevcut vakalar etkilenmez.
           </p>
         </Field>
       </div>

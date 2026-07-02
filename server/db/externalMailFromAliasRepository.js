@@ -178,6 +178,43 @@ async function validateOutboundFrom(companyId, address) {
  * @param {string|null} actorUserId
  * @returns {Promise<{ ok: true, alias: object } | { ok: false, code: string }>}
  */
+/**
+ * FAZ B (2026-07-02) — Inbox upsert sonrası otomatik köprü.
+ *
+ * Yeni inbox kaydedilince adres composer'a görünsün diye FromAlias
+ * listesine ekler. Mevcut alias'a DOKUNMAZ (idempotent). Eğer alias
+ * zaten varsa (aynı adres) hiçbir şey yapılmaz — displayName/isDefault
+ * ellenmez.
+ *
+ * suggestedFromId reply flow'u (reply-from-inbound-recipient PR) bu
+ * alias eşleşmesini kullanır → yeni inbox kaydedilince reply From
+ * default eşleşme çalışır.
+ */
+async function ensureForInboxAddress(companyId, address, displayName, actorUserId = null) {
+  if (!companyId) return { ok: false, code: 'company_missing' };
+  const norm = normalizeAddress(address);
+  if (!norm) return { ok: false, code: 'address_invalid' };
+  const existing = await prisma.externalMailSettingFromAlias.findUnique({
+    where: { companyId_address: { companyId, address: norm } },
+    select: { id: true },
+  });
+  if (existing) return { ok: true, alreadyExisted: true };
+  const created = await prisma.externalMailSettingFromAlias.create({
+    data: {
+      companyId,
+      address: norm,
+      displayName: typeof displayName === 'string' && displayName.trim() ? displayName.trim() : null,
+      isDefault: false,
+      isActive: true,
+      sortOrder: 100,
+      createdByUserId: actorUserId,
+      updatedByUserId: actorUserId,
+    },
+    select: { id: true, address: true, displayName: true },
+  });
+  return { ok: true, alreadyExisted: false, alias: created };
+}
+
 async function upsert(companyId, draft, actorUserId = null) {
   if (!companyId) return { ok: false, code: 'company_missing' };
   if (!draft || typeof draft !== 'object') return { ok: false, code: 'draft_missing' };
@@ -311,6 +348,7 @@ export const externalMailFromAliasRepo = {
   findByAddress,
   validateOutboundFrom,
   upsert,
+  ensureForInboxAddress,
   remove,
   setDefault,
 };

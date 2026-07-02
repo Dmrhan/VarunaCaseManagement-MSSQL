@@ -137,8 +137,8 @@ export function AccountSearchPicker({
     setError(null);
     const out = await accountService.list({
       search: debounced,
-      companyId: companyId ?? undefined,
       searchFields,
+      companyId: companyId ?? undefined,
       page: 1,
       limit: PAGE_SIZE,
     });
@@ -292,8 +292,8 @@ export function AccountSearchPicker({
                 onClick={() => toggleSearchField(chip.value)}
                 className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
                   active
-                    ? 'border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-600 dark:bg-brand-900/30 dark:text-brand-300'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:border-ndark-border/80'
+                    ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-400 dark:bg-brand-900/20 dark:text-brand-300'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:text-ndark-text'
                 }`}
               >
                 {active && <Check size={10} />}
