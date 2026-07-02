@@ -51,10 +51,14 @@ expect('3.4 WHEN MATCHED — increment +1',
   /WHEN MATCHED THEN[\s\S]{0,300}lastAssignedNumber = target\.lastAssignedNumber \+ 1/.test(repo), true);
 expect('3.5 WHEN NOT MATCHED — lazy-init 1000000',
   /WHEN NOT MATCHED THEN[\s\S]{0,300}INSERT \(companyId, lastAssignedNumber\) VALUES \(source\.companyId, 1000000\)/.test(repo), true);
-expect('3.6 OUTPUT INTO @output tablo değişkeni',
-  /OUTPUT inserted\.lastAssignedNumber INTO @output/.test(repo), true);
-expect('3.7 SELECT assignedNumber FROM @output — Prisma SELECT-like',
-  /SELECT assignedNumber FROM @output/.test(repo), true);
+expect('3.6 OUTPUT clause standalone (INTO @output YASAK — Codex P1 R2)',
+  /OUTPUT inserted\.lastAssignedNumber AS assignedNumber/.test(repo)
+    && !/INTO @output/.test(repo), true);
+expect('3.7 Batch değil — tek statement (SELECT/DECLARE ayrı yok)',
+  !/DECLARE @output TABLE/.test(repo)
+    && !/SELECT assignedNumber FROM @output/.test(repo), true);
+expect('3.8 $queryRawUnsafe tek statement (semicolon-only-end)',
+  /\$queryRawUnsafe\(\s*`MERGE[\s\S]{0,1200}OUTPUT inserted\.lastAssignedNumber AS assignedNumber;`/.test(repo), true);
 
 console.log('\n── 4) Motor — caseSeq set + BigInt cast ───────────');
 expect('4.1 counterRows[0]?.assignedNumber çekimi',

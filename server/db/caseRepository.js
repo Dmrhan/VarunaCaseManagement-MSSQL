@@ -1287,22 +1287,23 @@ export const caseRepository = {
       );
     }
     const prefix = companyForPrefix.caseNumberPrefix;
-    // MERGE + OUTPUT INTO tablo değişkeni + SELECT — Prisma $queryRawUnsafe
-    // SELECT-like return bekler. HOLDLOCK aynı-ms paralel create'i serialize
-    // eder. Idempotent lazy-init: satır yoksa 1000000 INSERT, varsa +1 UPDATE.
+    // MERGE ... OUTPUT — Codex P1 (round 2) fix: TEK statement. Prisma
+    // $queryRawUnsafe **tek query** çalıştırır; önceki `DECLARE @output +
+    // MERGE INTO + SELECT` batch runtime'da parse hatası veriyordu →
+    // vaka create bloklu kalırdı. MERGE'in OUTPUT clause'ı zaten SELECT-like
+    // set döner (MSSQL standardı) — direkt return yeterli.
+    //
+    // HOLDLOCK aynı-ms paralel create'i kernel-level serialize eder.
+    // Idempotent lazy-init: satır yoksa 1000000 INSERT, varsa +1 UPDATE.
     const counterRows = await prisma.$queryRawUnsafe(
-      `
-      DECLARE @output TABLE (assignedNumber BIGINT);
-      MERGE [dbo].[CaseNumberCounter] WITH (HOLDLOCK) AS target
-      USING (VALUES (@P1)) AS source(companyId)
-        ON target.companyId = source.companyId
-      WHEN MATCHED THEN
-        UPDATE SET target.lastAssignedNumber = target.lastAssignedNumber + 1
-      WHEN NOT MATCHED THEN
-        INSERT (companyId, lastAssignedNumber) VALUES (source.companyId, 1000000)
-      OUTPUT inserted.lastAssignedNumber INTO @output;
-      SELECT assignedNumber FROM @output;
-      `,
+      `MERGE [dbo].[CaseNumberCounter] WITH (HOLDLOCK) AS target
+       USING (VALUES (@P1)) AS source(companyId)
+         ON target.companyId = source.companyId
+       WHEN MATCHED THEN
+         UPDATE SET target.lastAssignedNumber = target.lastAssignedNumber + 1
+       WHEN NOT MATCHED THEN
+         INSERT (companyId, lastAssignedNumber) VALUES (source.companyId, 1000000)
+       OUTPUT inserted.lastAssignedNumber AS assignedNumber;`,
       m.companyId,
     );
     if (!Array.isArray(counterRows) || counterRows.length === 0) {
