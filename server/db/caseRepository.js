@@ -1264,9 +1264,64 @@ export const caseRepository = {
     //        ile üretip pass eder. Eksikse defansif throw (Mock User
     //        fallback'ı geri dönmez — caller migrasyonu zorunlu).
     assertActor(actor, 'caseRepository.create');
-    const caseNumber = `VK-${Date.now().toString(36).toUpperCase()}`;
     // TR string enum'larını ASCII identifier'a çevir
     const m = toDb(input);
+
+    // PR-2 — Vaka numarası üretimi: firma-prefix + per-tenant sıralı bigint.
+    // Eski üretim `VK-${Date.now().toString(36)}` bırakıldı — aynı-ms
+    // paralel create'te @unique ihlali riski + sıralı değil + firma
+    // karışıyordu (Codex spec, 2026-07-01). Fix:
+    //   1. Company.caseNumberPrefix zorunlu — yoksa 400 (deploy gate).
+    //   2. MERGE ... OUTPUT (HOLDLOCK) atomik counter increment. Lazy-init
+    //      lastAssignedNumber=1000000 → ilk vaka bu numarayı alır.
+    //   3. caseNumber = `${prefix}-${N}`, caseSeq = N.
+    // Legacy VK-* satırlar dokunulmaz (caseSeq NULL).
+    const companyForPrefix = await prisma.company.findUnique({
+      where: { id: m.companyId },
+      select: { caseNumberPrefix: true },
+    });
+    if (!companyForPrefix?.caseNumberPrefix) {
+      throw new CaseValidationError(
+        'Bu şirket için Vaka No Öneki tanımlanmamış. SystemAdmin panelinden atayın.',
+        { status: 400, code: 'case_number_prefix_required' },
+      );
+    }
+    const prefix = companyForPrefix.caseNumberPrefix;
+    // MERGE ... OUTPUT — Codex P1 (round 2) fix: TEK statement. Prisma
+    // $queryRawUnsafe **tek query** çalıştırır; önceki `DECLARE @output +
+    // MERGE INTO + SELECT` batch runtime'da parse hatası veriyordu →
+    // vaka create bloklu kalırdı. MERGE'in OUTPUT clause'ı zaten SELECT-like
+    // set döner (MSSQL standardı) — direkt return yeterli.
+    //
+    // HOLDLOCK aynı-ms paralel create'i kernel-level serialize eder.
+    // Idempotent lazy-init: satır yoksa 1000000 INSERT, varsa +1 UPDATE.
+    const counterRows = await prisma.$queryRawUnsafe(
+      `MERGE [dbo].[CaseNumberCounter] WITH (HOLDLOCK) AS target
+       USING (VALUES (@P1)) AS source(companyId)
+         ON target.companyId = source.companyId
+       WHEN MATCHED THEN
+         UPDATE SET target.lastAssignedNumber = target.lastAssignedNumber + 1
+       WHEN NOT MATCHED THEN
+         INSERT (companyId, lastAssignedNumber) VALUES (source.companyId, 1000000)
+       OUTPUT inserted.lastAssignedNumber AS assignedNumber;`,
+      m.companyId,
+    );
+    if (!Array.isArray(counterRows) || counterRows.length === 0) {
+      throw new CaseValidationError(
+        'Vaka numarası sayacı üretilemedi (beklenmedik durum).',
+        { status: 500, code: 'case_number_counter_failed' },
+      );
+    }
+    const caseSeqBig = counterRows[0]?.assignedNumber;
+    if (caseSeqBig == null) {
+      throw new CaseValidationError(
+        'Vaka numarası sayacı NULL döndü (beklenmedik durum).',
+        { status: 500, code: 'case_number_counter_null' },
+      );
+    }
+    // BigInt → Number: 2^53 << herhangi bir tenant'ın vaka sayısı.
+    const caseSeq = Number(caseSeqBig);
+    const caseNumber = `${prefix}-${caseSeq}`;
 
     // Phase D — Müşterisiz vaka akışı:
     //   - CompanySettings.requireCustomerOnCaseCreate=true ise accountId zorunlu
@@ -1441,6 +1496,7 @@ export const caseRepository = {
     const created = await prisma.case.create({
       data: {
         caseNumber,
+        caseSeq,
         title: m.title,
         description: m.description,
         caseType: m.caseType,
@@ -5255,13 +5311,26 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   if (f.search) {
     const q = f.search.trim();
     if (q) {
-      andClauses.push({
-        OR: [
-          { title: { contains: q } },
-          { caseNumber: { contains: q } },
-          { accountName: { contains: q } },
-        ],
-      });
+      // Arama enhancement (PR-2, 2026-07-01):
+      //   - Saf rakam (ör. "1000042") → per-tenant caseSeq eşleşmesi
+      //     (BigInt cast defensive; parseInt overflow'lu numaralar için
+      //     Number sınırında güvenli). companyId scope zaten üstteki
+      //     where.companyId ile uygulanıyor → cross-tenant sızıntı yok.
+      //   - Rakam/harf karışık (ör. "UNV-1000042", "VK-M3A4B") → caseNumber
+      //     contains fallback (legacy VK-* + yeni PREFIX-N ikisini de yakalar).
+      const numericOnly = /^\d+$/.test(q);
+      const orClauses = [
+        { title: { contains: q } },
+        { caseNumber: { contains: q } },
+        { accountName: { contains: q } },
+      ];
+      if (numericOnly) {
+        const asNumber = Number(q);
+        if (Number.isSafeInteger(asNumber)) {
+          orClauses.push({ caseSeq: asNumber });
+        }
+      }
+      andClauses.push({ OR: orClauses });
     }
   }
   if (andClauses.length) where.AND = andClauses;

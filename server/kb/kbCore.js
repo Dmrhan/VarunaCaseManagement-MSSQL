@@ -1452,20 +1452,31 @@ function loadGoldExamples() {
   return goldCache;
 }
 function formatGoldForPrompt(mode) {
-  if (mode === "close") return "";
   const gold = loadGoldExamples();
   if (!gold.length) return "";
+  if (mode === "open") {
+    const byGroup2 = {};
+    const picked2 = [];
+    for (const g of gold) {
+      const k = g.kokNedenGrubu || "?";
+      byGroup2[k] = (byGroup2[k] || 0) + 1;
+      if (byGroup2[k] <= 2) picked2.push(g);
+    }
+    return picked2.map(
+      (g) => `- "${(g.sorun || "").slice(0, 110)}" => platform=${g.platform}; is_sureci=${g.isSureci}; islem_tipi=${g.islemTipi}; etkilenen_nesne=${g.etkilenenNesne}; etki=${g.etki}`
+    ).join("\n");
+  }
   const byGroup = {};
   const picked = [];
   for (const g of gold) {
-    const k = g.kokNedenGrubu || "?";
-    byGroup[k] = (byGroup[k] || 0) + 1;
-    if (byGroup[k] <= 2) picked.push(g);
-  }
-  if (mode === "open") {
-    return picked.map(
-      (g) => `- "${(g.sorun || "").slice(0, 110)}" => platform=${g.platform}; is_sureci=${g.isSureci}; islem_tipi=${g.islemTipi}; etkilenen_nesne=${g.etkilenenNesne}; etki=${g.etki}`
-    ).join("\n");
+    const grup = g.kokNedenGrubu;
+    const detay = g.kokNedenDetayi;
+    if (!grup || !isValidKokNedenGrubu(grup)) continue;
+    if (!detay || !isValidKokNedenDetay(detay, grup)) continue;
+    if (!g.cozumTipi || !isValidCozumTipi(g.cozumTipi, grup, detay)) continue;
+    if (g.kaliciOnlem && !isValidKaliciOnlem(g.kaliciOnlem)) continue;
+    byGroup[grup] = (byGroup[grup] || 0) + 1;
+    if (byGroup[grup] <= 2) picked.push(g);
   }
   return picked.map(
     (g) => `- Sorun: "${(g.sorun || "").slice(0, 90)}" \xC7\xF6z\xFCm: "${(g.cozum || "").slice(0, 90)}" => kok_neden_grubu=${g.kokNedenGrubu}; kok_neden_detayi=${g.kokNedenDetayi}; cozum_tipi=${g.cozumTipi}; kalici_onlem=${g.kaliciOnlem}`
@@ -1759,6 +1770,7 @@ async function suggestClose(input) {
   if (input.open_is_sureci) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015F S\xFCreci: ${input.open_is_sureci}`);
   if (input.open_islem_tipi) ctxLines.push(`A\xE7\u0131l\u0131\u015F \xB7 \u0130\u015Flem Tipi: ${input.open_islem_tipi}`);
   const retrievalBlock = input.closeExamples || "";
+  const closeGold = input.skipGold ? "" : formatGoldForPrompt("close");
   const cascadeBlock = getKokNedenGroups().map((g) => {
     const dets = g.details.map((d) => `    - ${d.label}   [\xE7\xF6z\xFCm: ${d.cozum_tipleri.join(" | ")}]`).join("\n");
     return `\u25A0 ${g.group}
@@ -1775,6 +1787,7 @@ ${dets}`;
     "TAKSONOM\u0130 \u2014 KALICI \xD6NLEM (opsiyonel, gruptan ba\u011F\u0131ms\u0131z):",
     getKaliciOnlem().values.map((v2) => `  \u2022 ${v2}`).join("\n"),
     "",
+    ...closeGold ? ["GER\xC7EK ET\u0130KETLENM\u0130\u015E \xD6RNEKLER (insan uzman do\u011Frulad\u0131 \u2014 ayn\u0131 mant\u0131kla kapan\u0131\u015F se\xE7):", closeGold, ""] : [],
     "TICKET BA\u011ELAMI:",
     ctxLines.join("\n") || "(a\xE7\u0131l\u0131\u015F s\u0131n\u0131fland\u0131rmas\u0131 yok)",
     "",

@@ -178,23 +178,37 @@ export async function fetchSoftphoneSession(): Promise<SoftphoneSession | Alotec
 }
 
 // ── GÖMÜLÜ SOFTPHONE (iframe) — AloTech'in KENDİ hosted softphone'unu Varuna İÇİNE göm ──
-// next4biz ile aynı softphone (softphone.alo-tech.com/<build>/); WebRTC/SIP/register/
-// usephone'u AloTech'in sayfası halleder. Varuna'nın ajs.js/AWJS ile yeniden kurması
-// GEREKMEZ — o yol gerçek SIP register yapmadığı için çağrı tarayıcıya hiç gelmiyor,
-// "Cevapla" cevapsıza düşüyordu. Sayfa frame'lemeye izin veriyor (X-Frame-Options/CSP
-// yok) → iframe olarak gömülür. Build (ör. /mi4biz/) entegrasyon adına göre; env ile
-// değişir (Varuna'ya özel build için AloTech'ten alınmalı).
+// next4biz ile aynı softphone; WebRTC/SIP/register/usephone'u AloTech'in sayfası halleder.
+// Sayfa frame'lemeye izin veriyor (X-Frame-Options/CSP yok) → iframe olarak gömülür.
+//
+// ★ KRİTİK URL FORMATI (next4biz'in canlı iframe'i incelenerek çıkarıldı):
+//   softphone.alo-tech.com/mi4biz/sso/?tenant=<TAM-HOST>&session=<key>
+// İki şart:
+//   1) /sso/ alt-yolu → SSO oto-login endpoint'i (agent manuel login yapmaz).
+//   2) tenant=<TAM-HOST> (param-univera.alo-tech.com) URL'de AÇIKÇA verilir.
+// tenant verilMEZse softphone host'u kendi türetmeye çalışıyor; cross-origin IFRAME'de
+// window.top erişimi bloklandığı için host bare `param-univera`'ya düşüyor →
+// ERR_NAME_NOT_RESOLVED → SIP register OLMUYOR (agent "Müsait" olamıyor). tenant açıkça
+// verilince window.top'a gerek kalmıyor → iframe'de register çalışıyor.
+// Base URL env ile değişir; tenant backend session'dan (ALOTECH_TENANT = tam host) gelir.
 const SOFTPHONE_URL =
   ((import.meta as any).env?.VITE_ALOTECH_SOFTPHONE_URL as string) ||
-  'https://softphone.alo-tech.com/mi4biz/';
+  'https://softphone.alo-tech.com/mi4biz/sso/';
 
-/** Gömülü softphone iframe'inin src URL'i. session verilirse otomatik login denenir
- *  (AloTech kabul etmezse iframe'de Tenant + kullanıcı + şifre ile manuel login). */
-export function buildSoftphoneIframeUrl(sess?: { session?: string } | null): string {
+/** Gömülü softphone iframe'inin src URL'i (next4biz formatı: /sso/?tenant=<host>&session=<key>).
+ *  tenant = tam host (param-univera.alo-tech.com); session = oto-login anahtarı.
+ *  (Eksik/geçersizse AloTech iframe'de Tenant + kullanıcı + şifre ile manuel login gösterir.) */
+export function buildSoftphoneIframeUrl(
+  sess?: { session?: string; hostname?: string; tenant?: string } | null,
+): string {
+  const params = new URLSearchParams();
+  const tenant = sess?.tenant || sess?.hostname; // tam host: param-univera.alo-tech.com
+  if (tenant) params.set('tenant', tenant);
+  if (sess?.session) params.set('session', sess.session);
+  const qs = params.toString();
+  if (!qs) return SOFTPHONE_URL;
   const sep = SOFTPHONE_URL.includes('?') ? '&' : '?';
-  let url = `${SOFTPHONE_URL}${sep}lang=tr_TR`;
-  if (sess?.session) url += `&session=${encodeURIComponent(sess.session)}`;
-  return url;
+  return `${SOFTPHONE_URL}${sep}${qs}`;
 }
 
 interface InitOptions {

@@ -300,7 +300,10 @@ export async function suggestClose(
   // + userPrompt === fullPrompt (byte-identical; yalnız caching). ~%90 tasarruf.
   // v4 CASCADE — grup → detay → izinli çözüm tipleri ağaç halinde sunulur.
   // Model önce grubu, sonra YALNIZ o grubun detayını, sonra o detayın izinli
-  // çözüm tipini seçer. (Kapanış gold few-shot cold-start'ta kapalı.)
+  // çözüm tipini seçer. Kapanış gold few-shot AÇIK ama v4-geçerlilik filtreli:
+  // formatGoldForPrompt("close") eski/geçersiz örnekleri eler → v4 gold
+  // (build-gold-from-reviews doğrulamalarından) birikene kadar boş, biriktikçe dolar.
+  const closeGold = input.skipGold ? "" : formatGoldForPrompt("close");
   const cascadeBlock = getKokNedenGroups()
     .map((g) => {
       const dets = g.details
@@ -320,6 +323,9 @@ export async function suggestClose(
     "TAKSONOMİ — KALICI ÖNLEM (opsiyonel, gruptan bağımsız):",
     getKaliciOnlem().values.map((v) => `  • ${v}`).join("\n"),
     "",
+    ...(closeGold
+      ? ["GERÇEK ETİKETLENMİŞ ÖRNEKLER (insan uzman doğruladı — aynı mantıkla kapanış seç):", closeGold, ""]
+      : []),
     "TICKET BAĞLAMI:",
     ctxLines.join("\n") || "(açılış sınıflandırması yok)",
     "",
