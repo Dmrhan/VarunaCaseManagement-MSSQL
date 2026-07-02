@@ -2387,10 +2387,22 @@ router.get(
  * FromAlias listesi döner. Mevcut M6.1 /:id/emails desenleriyle aynı
  * scope guard (caseRepository.get + assertCaseSecurityFilterAccess).
  *
- * Response: { items: [{ id, address, displayName, isDefault }, ...] }
+ * Response: { items: [{ id, address, displayName, isDefault }, ...],
+ *             suggestedFromId: string | null }
  *
  * Default seçilen ilk satır; composer dropdown 1 satırsa otomatik gizli
  * + seçili (M6.2 davranışı).
+ *
+ * 2026-07-02 — suggestedFromId: reply/reply-all için mailin GELDİĞİ
+ * adres. Son inbound CaseEmail'in toAddresses + ccAddresses'i aktif alias
+ * listesiyle case-insensitive kesişir; ilk eşleşen alias'ın id'si döner.
+ * Yoksa null (compose-new / inbound'suz vaka / eşleşme yok). Hesap
+ * SUNUCUDA — client'a adres-eşleme mantığı yayılmaz.
+ *
+ * KENAR: birden çok eşleşme → items sırasında ilk (deterministic);
+ *        pasif/silinmiş alias → items'ta zaten yok (listActive filter);
+ *        toAddresses BÜYÜK/küçük → trim().toLowerCase() normalize
+ *        (caseEmailSender.js:429 pattern REUSE).
  */
 router.get(
   '/:id/from-aliases',
@@ -2406,6 +2418,48 @@ router.get(
     // fallback ile sentetik tek alias döndür. validateOutboundFrom aynı
     // fallback'i kullanıyor → gönderim tutarlı.
     const items = await externalMailFromAliasRepo.listActiveWithSettingFallback(c.companyId);
+
+    // 2026-07-02 — Reply default From = mailin geldiği adres.
+    // Son inbound (varsa) toAddresses+ccAddresses parse et; aktif alias
+    // listesiyle case-insensitive kesişim; ilk match id.
+    let suggestedFromId = null;
+    if (items.length > 0) {
+      const lastInbound = await prisma.caseEmail.findFirst({
+        where: { caseId: c.id, direction: 'inbound' },
+        orderBy: { receivedAt: 'desc' },
+        select: { toAddresses: true, ccAddresses: true },
+      });
+      if (lastInbound) {
+        // caseEmailSender.js:432-440 parse pattern REUSE.
+        const parseAddresses = (s) => {
+          if (!s || typeof s !== 'string') return [];
+          try {
+            const arr = JSON.parse(s);
+            return Array.isArray(arr) ? arr : [];
+          } catch {
+            return [];
+          }
+        };
+        const inboundKeys = new Set(
+          [
+            ...parseAddresses(lastInbound.toAddresses),
+            ...parseAddresses(lastInbound.ccAddresses),
+          ]
+            .map((r) => String(r?.address ?? '').trim().toLowerCase())
+            .filter(Boolean),
+        );
+        if (inboundKeys.size > 0) {
+          for (const a of items) {
+            const key = String(a?.address ?? '').trim().toLowerCase();
+            if (key && inboundKeys.has(key)) {
+              suggestedFromId = a.id;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // Composer dropdown'a sade response — admin alanlarını filtrele.
     res.json({
       items: items.map((a) => ({
@@ -2414,6 +2468,7 @@ router.get(
         displayName: a.displayName,
         isDefault: a.isDefault,
       })),
+      suggestedFromId,
     });
   }),
 );

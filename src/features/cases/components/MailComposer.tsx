@@ -104,6 +104,10 @@ export function MailComposer({
   const { toast } = useToast();
   const [aliases, setAliases] = useState<FromAliasOption[]>([]);
   const [fromId, setFromId] = useState<string>('');
+  // 2026-07-02 — reply/reply-all default = mailin geldiği adres.
+  // Bu flag true ise From satırında agent'a kısa not gösterilir
+  // ("Mailin geldiği adres"). Agent dropdown'dan değiştirince flag false.
+  const [fromWasSuggested, setFromWasSuggested] = useState(false);
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
   const [cc, setCc] = useState<ContactPickerValue[]>(initialReplyContext?.cc ?? []);
   const [bcc, setBcc] = useState<ContactPickerValue[]>(initialReplyContext?.bcc ?? []);
@@ -286,17 +290,34 @@ export function MailComposer({
     return out;
   }, [item]);
 
-  // From alias'ları yükle
+  // From alias'ları yükle.
+  // 2026-07-02 — reply/reply-all modunda default seçim = mailin geldiği
+  // adres (backend suggestedFromId; sunucuda son inbound toAddresses+
+  // ccAddresses'i alias listesiyle case-insensitive kesiştirir).
+  // Compose-new + forward: mevcut davranış (isDefault > items[0]).
   useEffect(() => {
     let alive = true;
-    void caseEmailService.getFromAliases(item.id).then((items) => {
+    const isReplyFlow = !!initialReplyContext;
+    void caseEmailService.getFromAliases(item.id).then(({ items, suggestedFromId }) => {
       if (!alive) return;
       setAliases(items);
-      const def = items.find((a) => a.isDefault) ?? items[0] ?? null;
-      if (def) setFromId(def.id);
+      let def: FromAliasOption | null = null;
+      let bySuggestion = false;
+      if (isReplyFlow && suggestedFromId) {
+        const match = items.find((a) => a.id === suggestedFromId);
+        if (match) {
+          def = match;
+          bySuggestion = true;
+        }
+      }
+      if (!def) def = items.find((a) => a.isDefault) ?? items[0] ?? null;
+      if (def) {
+        setFromId(def.id);
+        setFromWasSuggested(bySuggestion);
+      }
     });
     return () => { alive = false; };
-  }, [item.id]);
+  }, [item.id, initialReplyContext]);
 
   // M6.3b Faz 3 — Mail Şablonu dropdown beslemesi.
   const [templates, setTemplates] = useState<import('@/services/caseEmailService').CaseEmailTemplateItem[]>([]);
@@ -529,19 +550,33 @@ export function MailComposer({
               </p>
             </div>
           ) : (
-            <select
-              value={fromId}
-              onChange={(e) => setFromId(e.target.value)}
-              disabled={submitting}
-              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
-            >
-              {aliases.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.displayName ? `${a.displayName} <${a.address}>` : a.address}
-                  {a.isDefault ? ' (varsayılan)' : ''}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                value={fromId}
+                onChange={(e) => {
+                  setFromId(e.target.value);
+                  // 2026-07-02 — agent manuel değiştirdi, öneri notu kalksın.
+                  setFromWasSuggested(false);
+                }}
+                disabled={submitting}
+                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text"
+              >
+                {aliases.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.displayName ? `${a.displayName} <${a.address}>` : a.address}
+                    {a.isDefault ? ' (varsayılan)' : ''}
+                  </option>
+                ))}
+              </select>
+              {fromWasSuggested && (
+                <p
+                  className="mt-1 text-[11px] text-slate-500 dark:text-ndark-muted"
+                  title="Son gelen mailin adres bilgisiyle otomatik eşlendi. Dropdown'dan değiştirebilirsin."
+                >
+                  ↳ Mailin geldiği adres — otomatik seçildi
+                </p>
+              )}
+            </>
           )}
         </Field>
 

@@ -96,14 +96,26 @@ export interface FromAliasOption {
 /**
  * GET /api/cases/:caseId/from-aliases — composer From dropdown beslemesi
  * (M5-extension lookup endpoint). Sadece aktif alias'lar.
+ *
+ * 2026-07-02 — suggestedFromId: son inbound mailin geldiği alias id
+ * (reply/reply-all default). Yoksa null; composer isDefault ?? items[0]
+ * fallback'ine düşer.
  */
-export async function getFromAliases(caseId: string): Promise<FromAliasOption[]> {
-  const out = await apiFetch<{ items: FromAliasOption[] }>(
+export interface FromAliasesResult {
+  items: FromAliasOption[];
+  suggestedFromId: string | null;
+}
+
+export async function getFromAliases(caseId: string): Promise<FromAliasesResult> {
+  const out = await apiFetch<{ items: FromAliasOption[]; suggestedFromId: string | null }>(
     `/api/cases/${encodeURIComponent(caseId)}/from-aliases`,
     undefined,
     { silent: true },
   );
-  return Array.isArray(out?.items) ? out!.items : [];
+  return {
+    items: Array.isArray(out?.items) ? out!.items : [],
+    suggestedFromId: out?.suggestedFromId ?? null,
+  };
 }
 
 export interface ReplyContext {
