@@ -391,8 +391,11 @@ export interface AccountDetail {
   recentCases: AccountRecentCase[];
 }
 
+export type AccountSearchField = 'name' | 'vkn' | 'phone' | 'code' | 'contact';
+
 export interface AccountListParams {
   search?: string;
+  searchFields?: AccountSearchField[];
   companyId?: string;
   status?: string;
   /**
@@ -593,7 +596,12 @@ export interface CaseCustomerContext {
 
 function buildQuery(params: AccountListParams): string {
   const usp = new URLSearchParams();
-  if (params.search && params.search.length >= 2) usp.set('search', params.search);
+  if (params.search && params.search.length >= 2) {
+    usp.set('search', params.search);
+    if (params.searchFields && params.searchFields.length > 0) {
+      usp.set('searchFields', params.searchFields.join(','));
+    }
+  }
   if (params.companyId) usp.set('companyId', params.companyId);
   if (params.status) usp.set('status', params.status);
   if (params.ids && params.ids.length > 0) usp.set('ids', params.ids.join(','));

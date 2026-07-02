@@ -239,6 +239,7 @@ function shapeAccountRow(account, { caseAggregates }) {
  */
 export async function listAccounts({
   search,
+  searchFields,
   companyId,
   status,
   ids,
@@ -297,36 +298,39 @@ export async function listAccounts({
     const nameOR = nameVariants.map((v) => ({ name: { contains: v } }));
     const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v } }));
 
-    whereAnd.push({
-      OR: [
-        ...nameOR,
-        { vkn: { startsWith: q } },
-        ...(tcknHashBranch ? [tcknHashBranch] : []),
-        // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
-        // phone1E164 mevcut, phone2E164 + phone3E164 eklendi.
-        { phoneE164: { contains: q } },
-        { phone2E164: { contains: q } },
-        { phone3E164: { contains: q } },
-        {
-          companies: {
-            some: {
-              companyId: externalCodeAcScope,
-              externalCustomerCode: { contains: q },
-            },
-          },
+    // searchFields: belirli alanları seç; boş/undefined → tüm alanlar (geriye uyum).
+    const sf = Array.isArray(searchFields) && searchFields.length > 0 ? new Set(searchFields) : null;
+    const orBranches = [];
+    if (!sf || sf.has('name'))    orBranches.push(...nameOR);
+    if (!sf || sf.has('vkn'))     orBranches.push({ vkn: { startsWith: q } }, ...(tcknHashBranch ? [tcknHashBranch] : []));
+    if (!sf || sf.has('phone'))   orBranches.push(
+      { phoneE164: { contains: q } },
+      { phone2E164: { contains: q } },
+      { phone3E164: { contains: q } },
+      { contacts: { some: { phone: { contains: q } } } },
+    );
+    if (!sf || sf.has('code'))    orBranches.push({
+      companies: {
+        some: {
+          companyId: externalCodeAcScope,
+          externalCustomerCode: { contains: q },
         },
-        {
-          contacts: {
-            some: {
-              OR: [
-                { phone: { contains: q } },
-                ...contactEmailOR,
-              ],
-            },
-          },
-        },
-      ],
+      },
     });
+    if (!sf || sf.has('contact')) orBranches.push({
+      contacts: {
+        some: {
+          OR: [
+            { phone: { contains: q } },
+            ...contactEmailOR,
+          ],
+        },
+      },
+    });
+
+    if (orBranches.length > 0) {
+      whereAnd.push({ OR: orBranches });
+    }
   }
 
   if (companyId) {
