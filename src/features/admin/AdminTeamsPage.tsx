@@ -411,7 +411,7 @@ function TeamEditModal({
     <Modal
       open={open}
       onClose={onClose}
-      size="md"
+      size="lg"
       title={mode === 'create' ? 'Yeni Takım' : 'Takımı Düzenle'}
       footer={
         <div className="flex items-center justify-end gap-2">
@@ -615,7 +615,7 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
       <Modal
         open={open}
         onClose={onClose}
-        size="lg"
+        size="2xl"
         title={`${team.name} — Üye Yönetimi`}
         footer={
           <div className="flex items-center justify-between gap-2">
@@ -798,7 +798,7 @@ function MoveToTeamButton({
   return (
     <div className="relative inline-flex items-center">
       <Select
-        className="h-7 max-w-[120px] py-0 pl-2 pr-7 text-xs"
+        className="h-8 w-[90px] py-0 pl-6 pr-6 text-xs"
         defaultValue=""
         title="Başka takıma taşı"
         onChange={(e) => {
@@ -809,10 +809,7 @@ function MoveToTeamButton({
           }
         }}
       >
-        <option value="">
-          {/* göstermelik label */}
-          ⇄ Taşı
-        </option>
+        <option value="">Taşı</option>
         {others.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}

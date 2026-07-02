@@ -506,13 +506,29 @@ router.get(
     let roleDefaultScope = null;
     const roleDefaultViewOff = f.roleDefaultView === 'off';
     if (req.user.role === 'Agent' && req.user.personId) {
-      roleDefaultScope = {
-        OR: [
-          { assignedPersonId: req.user.personId },
-          { createdByUserId: req.user.id },
-          { assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } },
-        ],
-      };
+      const { prisma: prismaCases } = await import('../db/client.js');
+      const agentPerson = await prismaCases.person.findUnique({
+        where: { id: req.user.personId },
+        select: { teamId: true, isTeamLead: true, supportLevel: true },
+      });
+      const agentTeamId = agentPerson?.teamId ?? null;
+      const canSeeTeamPool = agentPerson?.isTeamLead === true || ['L2', 'L3'].includes(agentPerson?.supportLevel ?? '');
+      const orClauses = [
+        { assignedPersonId: req.user.personId },
+        { createdByUserId: req.user.id },
+      ];
+      if (!agentTeamId) {
+        // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
+        orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      } else if (canSeeTeamPool) {
+        // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
+        orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      } else {
+        // L1 Agent with team → sadece takımsız havuz, takım havuzu görünmez
+        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      }
+      roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
       const { prisma } = await import('../db/client.js');
       const myPerson = await prisma.person.findUnique({
