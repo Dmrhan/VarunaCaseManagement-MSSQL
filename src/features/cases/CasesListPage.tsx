@@ -1580,7 +1580,7 @@ export function CasesListPage({
                   setPageSize(Number(e.target.value));
                   setPage(1);
                 }}
-                className="h-7 py-0.5 text-xs"
+                className="h-8 w-auto py-1 pr-6 text-xs"
               >
                 {PAGE_SIZE_OPTIONS.map((n) => (
                   <option key={n} value={n}>
