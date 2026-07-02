@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { X, Info, Lightbulb, AlertTriangle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Info, Lightbulb, AlertTriangle, ListTree } from 'lucide-react';
 
 export interface HelpSection {
   heading: string;
@@ -37,6 +37,10 @@ interface HelpDrawerProps {
  * Page scroll'unu engellemez.
  */
 export function HelpDrawer({ open, title, sections, onClose, overlayOnly = false }: HelpDrawerProps) {
+  // Scrollable content container ref — İçindekiler menüsü smooth scroll
+  // için ihtiyaç duyuyor (drawer içinde scroll, sayfa değil).
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -71,15 +75,81 @@ export function HelpDrawer({ open, title, sections, onClose, overlayOnly = false
         aria-label={title}
         className={asideClass}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <Info size={16} className="mt-0.5 shrink-0 text-brand-500" />
-            <div>
-              <div className="text-sm font-semibold text-slate-800">{title}</div>
-              <div className="text-[11px] text-slate-500">Yardım</div>
-            </div>
+        {/* Header — 2026-07-02 iyileştirme: sağ tarafa "İçindekiler" toggle
+            + kapat butonu. ToC 4+ bölümde otomatik önerilir. */}
+        <HelpDrawerHeader
+          title={title}
+          sections={sections}
+          onClose={onClose}
+          scrollRef={scrollRef}
+        />
+
+        {/* Scrollable content — section'lar arasında hr ayracı ve
+            id="help-section-N" ile smooth-scroll hedefleri. */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div className="divide-y divide-slate-200">
+            {sections.map((s, idx) => (
+              <SectionCard key={idx} section={s} index={idx} />
+            ))}
           </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function HelpDrawerHeader({
+  title,
+  sections,
+  onClose,
+  scrollRef,
+}: {
+  title: string;
+  sections: HelpSection[];
+  onClose: () => void;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [tocOpen, setTocOpen] = useState(false);
+  // 4+ bölümde ToC değerli; azsa aşağı direkt scroll yeterli.
+  const showTocToggle = sections.length >= 4;
+
+  function scrollToSection(idx: number) {
+    const el = scrollRef.current?.querySelector<HTMLElement>(`#help-section-${idx}`);
+    if (el && scrollRef.current) {
+      // Sadece drawer scroll container'ı içinde scroll — sayfayı kaydırma.
+      const top = el.offsetTop - 12;
+      scrollRef.current.scrollTo({ top, behavior: 'smooth' });
+    }
+    setTocOpen(false);
+  }
+
+  return (
+    <div className="border-b border-slate-200 bg-slate-50/60">
+      <div className="flex items-start justify-between gap-2 px-4 py-3">
+        <div className="flex items-start gap-2">
+          <Info size={16} className="mt-0.5 shrink-0 text-brand-500" />
+          <div>
+            <div className="text-sm font-semibold text-slate-800">{title}</div>
+            <div className="text-[11px] text-slate-500">Yardım · {sections.length} bölüm</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {showTocToggle && (
+            <button
+              type="button"
+              onClick={() => setTocOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                tocOpen
+                  ? 'bg-brand-100 text-brand-700'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+              }`}
+              aria-label="İçindekiler"
+              aria-expanded={tocOpen}
+            >
+              <ListTree size={12} />
+              <span>İçindekiler</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -89,25 +159,45 @@ export function HelpDrawer({ open, title, sections, onClose, overlayOnly = false
             <X size={14} />
           </button>
         </div>
-
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="space-y-4">
+      </div>
+      {/* Table of Contents dropdown — numaralı liste, tıklanınca smooth scroll */}
+      {tocOpen && (
+        <nav
+          aria-label="İçindekiler"
+          className="max-h-64 overflow-y-auto border-t border-slate-200 bg-white px-3 py-2"
+        >
+          <ol className="space-y-0.5">
             {sections.map((s, idx) => (
-              <SectionCard key={idx} section={s} />
+              <li key={idx}>
+                <button
+                  type="button"
+                  onClick={() => scrollToSection(idx)}
+                  className="flex w-full items-start gap-2 rounded px-2 py-1 text-left text-[12px] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <span className="mt-[1px] inline-block min-w-[1.5rem] shrink-0 text-[10px] font-mono text-slate-400">
+                    {String(idx + 1).padStart(2, '0')}
+                  </span>
+                  <span className="leading-snug">{s.heading}</span>
+                </button>
+              </li>
             ))}
-          </div>
-        </div>
-      </aside>
-    </>
+          </ol>
+        </nav>
+      )}
+    </div>
   );
 }
 
-function SectionCard({ section }: { section: HelpSection }) {
+function SectionCard({ section, index }: { section: HelpSection; index: number }) {
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-3.5">
-      <h4 className="mb-1.5 text-sm font-semibold text-slate-800">{section.heading}</h4>
-      <p className="text-[13px] leading-relaxed text-slate-600">{section.content}</p>
+    <article id={`help-section-${index}`} className="scroll-mt-2 bg-white px-4 py-4">
+      <div className="mb-3 flex items-start gap-2">
+        <span className="mt-[3px] inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[11px] font-semibold text-brand-700">
+          {index + 1}
+        </span>
+        <h3 className="text-base font-bold leading-tight text-slate-900">{section.heading}</h3>
+      </div>
+      <p className="text-[13px] leading-relaxed text-slate-700">{section.content}</p>
 
       {section.example && (
         <pre className="mt-3 whitespace-pre-wrap rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 font-mono text-[11.5px] leading-relaxed text-emerald-900">
