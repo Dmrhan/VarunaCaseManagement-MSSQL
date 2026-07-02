@@ -4,7 +4,7 @@
  * 2026-07-01 sistemsel düzeltmesi sonrası — Pending kalmış dispatch'leri
  * yeni kural kanalı önceliği + requester fallback ile TEKRAR TETİKLE.
  *
- * ═══ Mantık ═══
+ * ═══ Mantık — Codex P1+P2 sonrası (2026-07-01) ═══
  *
  * 1. Filtre: state='Pending' AND
  *       audienceIdentifier NOT LIKE '%@%'   (email değil → "manual" veya
@@ -12,16 +12,20 @@
  *    Bu tam olarak fix'in çözdüğü senaryo: email göndermek için
  *    yapılandırılmış ama identifier email olarak çözünememiş.
  *
- * 2. (caseId, event) tekilleştir — emitEvent bir case+event için TÜM
- *    aktif kuralları tarar. Aynı case'te 3 rule Pending olsa bile tek
- *    emit yeterli (yeni fix hepsini yeniden çalıştırır).
+ * 2. HER Pending row AYRI işlenir (Codex P1) — kendi ruleId'sini
+ *    `emitEvent({ targetRuleId })` ile hedefler. `emitEvent`in default
+ *    davranışı case+event için TÜM aktif rule'ları tarar; retry
+ *    sırasında bu davranış aynı case+event'te ZATEN Sent olmuş ilgisiz
+ *    rule'ların (idempotency penceresi dolduysa) TEKRAR gönderim
+ *    yapmasına yol açar — targetRuleId bunu engeller.
  *
- * 3. Eski Pending kayıtlarını `state='Suppressed', suppressionReason=
- *    'superseded_by_retry'` yap. Kayıp veri değil; audit korunur.
- *
- * 4. emitEvent({ event, caseId }) çağır → yeni resolver kural kanalını
- *    öncelikli kullanır → email adresi bulursa Sent, bulamazsa hâlâ
- *    Pending kalır (kullanıcı elden çözer).
+ * 3. Replacement kontrolü (Codex P2) — emit BOŞ dönerse (rule
+ *    disable/edit, case artık match etmiyor, event artık kabul
+ *    edilmiyor) eski Pending KORUNSUN; suppress ETME. Aksi halde
+ *    operatör kuyruğundan silinen row'un yerine hiçbir replacement
+ *    kalmaz. Emit >=1 dispatch üretmişse (Sent/Pending/Suppressed
+ *    farkı fark etmez — rule bilinçli çalıştı) eski Pending'i
+ *    `Suppressed, superseded_by_retry` yap.
  *
  * ═══ CLI kullanımı ═══
  *
@@ -113,6 +117,7 @@ async function main() {
       caseId: true,
       companyId: true,
       event: true,
+      ruleId: true,
       audienceType: true,
       audienceIdentifier: true,
       channel: true,
@@ -129,67 +134,120 @@ async function main() {
     return;
   }
 
-  // ─── 2) (caseId, event) tekilleştir ──────────────────────────
-  const pairs = new Map(); // key: caseId:event → { caseId, event, companyId, dispatchIds[], detail[] }
-  for (const d of pendings) {
-    const key = `${d.caseId}:${d.event}`;
-    if (!pairs.has(key)) {
-      pairs.set(key, {
-        caseId: d.caseId,
-        event: d.event,
-        companyId: d.companyId,
-        dispatchIds: [],
-        detail: [],
-      });
-    }
-    const pair = pairs.get(key);
-    pair.dispatchIds.push(d.id);
-    pair.detail.push({
-      id: d.id,
-      audience: `${d.audienceType}=${d.audienceIdentifier}`,
-      rule: d.ruleNameSnapshot,
-      created: d.createdAt.toISOString(),
-    });
-  }
-
-  console.log(`[retry] Tekil (case, event) çifti: ${pairs.size}`);
+  // ─── 2) HER Pending row için ayrı retry (Codex P1) ──────────
+  // Pair (caseId, event) bazlı emit YAPMIYORUZ — o davranış
+  // aynı case+event'in başka rule'larını da tetikler (idempotency
+  // penceresi dolduysa duplicate email). Bunun yerine her Pending'in
+  // kendi ruleId'sini targetRuleId olarak veriyoruz.
   console.log('');
 
-  // ─── 3) Rapor: her çift için ne yapılacak ────────────────────
+  const stats = {
+    total: pendings.length,
+    suppressed_replacement: 0,
+    kept_no_replacement: 0,
+    kept_no_rule_snapshot: 0,
+    kept_rule_gone: 0,
+    kept_audience_type_gone: 0,
+    error: 0,
+    dryRunOnly: 0,
+  };
+
   let idx = 0;
-  for (const pair of pairs.values()) {
+  for (const disp of pendings) {
     idx++;
-    console.log(`── ${idx}/${pairs.size} — case=${pair.caseId} event=${pair.event} ──`);
-    console.log(`   Bu retry ${pair.dispatchIds.length} Pending kaydını superseded_by_retry yapacak:`);
-    for (const d of pair.detail) {
-      console.log(`     · ${d.id}  ${d.audience}  rule="${d.rule}"  createdAt=${d.created}`);
-    }
-    if (args.dryRun) {
-      console.log('   [dry-run] emitEvent çağrılmayacak.');
+    console.log(`── ${idx}/${pendings.length} — dispatch=${disp.id}`);
+    console.log(`   case=${disp.caseId} event=${disp.event} ruleId=${disp.ruleId ?? '(null)'} ` +
+      `rule="${disp.ruleNameSnapshot ?? ''}"`);
+    console.log(`   audience=${disp.audienceType}=${disp.audienceIdentifier} createdAt=${disp.createdAt.toISOString()}`);
+
+    if (!disp.ruleId) {
+      // Rule ID snapshot'ı NULL — targetRuleId olmadan emit tüm rule'ları
+      // tetikler ki bu Codex P1'in tam olarak yasakladığı davranış.
+      console.log('   [skip] ruleId snapshot yok — targetRuleId olmadan retry GÜVENSİZ; KORUNDU.');
+      stats.kept_no_rule_snapshot++;
       continue;
     }
 
-    // 4a) Eski Pending'leri Suppressed'a al (audit korundu)
-    const suppressResult = await prisma.notificationDispatch.updateMany({
-      where: { id: { in: pair.dispatchIds }, state: 'Pending' },
+    // Codex P1 round 2: rule.audience içinde YALNIZCA bu dispatch'in
+    // audienceType'ına denk gelen row'ları hedefle. Aksi halde aynı
+    // rule'un başka audience row'ları (ör. ZATEN Sent olmuş assignee)
+    // yeniden fire eder ve idempotency penceresi dolduysa müşteriye
+    // duplicate email gider.
+    const rule = await prisma.notificationRule.findUnique({
+      where: { id: disp.ruleId },
+      select: { id: true, isActive: true, audience: true },
+    });
+    if (!rule || !rule.isActive) {
+      console.log('   → Kayıt KORUNDU (rule silinmiş veya inactive).');
+      stats.kept_rule_gone++;
+      continue;
+    }
+    const audienceList = Array.isArray(rule.audience) ? rule.audience : [];
+    const audienceOverride = audienceList.filter((a) => a?.type === disp.audienceType);
+    if (audienceOverride.length === 0) {
+      console.log(`   → Kayıt KORUNDU (audienceType='${disp.audienceType}' artık rule.audience'da yok).`);
+      stats.kept_audience_type_gone++;
+      continue;
+    }
+
+    if (args.dryRun) {
+      console.log(`   [dry-run] emitEvent çağrılmayacak — bu row eligible. ` +
+        `audienceOverride=${audienceOverride.length} row.`);
+      stats.dryRunOnly++;
+      continue;
+    }
+
+    // 3a) Codex P1: SADECE bu ruleId + bu audience row(lar)ı için emit.
+    //     case+event'in başka rule'larına VE aynı rule'un başka audience
+    //     row'larına dokunmuyor.
+    let emitted;
+    try {
+      emitted = await emitEvent({
+        event: disp.event,
+        caseId: disp.caseId,
+        targetRuleId: disp.ruleId,
+        audienceOverride,
+      });
+    } catch (err) {
+      console.error(`   emitEvent ERROR: ${err?.message ?? err}`);
+      stats.error++;
+      continue;
+    }
+    const summary = summarizeEmit(emitted);
+    console.log(`   emitEvent: ${JSON.stringify(summary)}`);
+
+    // 3b) Codex P2: replacement kontrolü
+    //   - emitted.length === 0 → rule kaldırılmış / case artık eşleşmiyor
+    //     / event artık kabul edilmiyor → eski Pending'i KORU (operatör
+    //     kuyruğundan sinsi silme yapma).
+    //   - emitted.length >= 1 → rule bilinçli çalıştı (Sent/Pending/
+    //     Suppressed farkı emit yaparak audit'e yazıldı) → eski Pending'i
+    //     Suppressed(superseded_by_retry) yap.
+    const emittedCount = Array.isArray(emitted) ? emitted.length : 0;
+    if (emittedCount === 0) {
+      console.log('   → Kayıt KORUNDU (emit boş — rule kaldırılmış / case artık eşleşmiyor).');
+      stats.kept_no_replacement++;
+      continue;
+    }
+
+    const upd = await prisma.notificationDispatch.updateMany({
+      where: { id: disp.id, state: 'Pending' },
       data: {
         state: 'Suppressed',
         suppressionReason: 'superseded_by_retry',
       },
     });
-    console.log(`   Suppressed: ${suppressResult.count}`);
-
-    // 4b) Yeni emit — resolver artık kural kanalını öncelikli kullanıyor
-    try {
-      const emitted = await emitEvent({ event: pair.event, caseId: pair.caseId });
-      const summary = summarizeEmit(emitted);
-      console.log(`   emitEvent: ${JSON.stringify(summary)}`);
-    } catch (err) {
-      console.error(`   emitEvent ERROR: ${err?.message ?? err}`);
+    if (upd.count > 0) {
+      console.log('   → Suppressed (replacement üretildi).');
+      stats.suppressed_replacement++;
+    } else {
+      console.log('   → Row artık Pending değil (concurrent update?) — dokunulmadı.');
     }
   }
 
   console.log('');
+  console.log('[retry] ══ Özet ══');
+  console.log(JSON.stringify(stats, null, 2));
   console.log(`[retry] Tamamlandı. ${args.dryRun ? '(dry-run — hiçbir şeye dokunulmadı)' : ''}`);
   await prisma.$disconnect();
 }
