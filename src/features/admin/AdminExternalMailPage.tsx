@@ -24,6 +24,8 @@ import {
 import { lookupService } from '@/services/caseService';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Field';
+import { HelpButton, HelpDrawer } from '@/components/ui/HelpDrawer';
+import { MAIL_INTEGRATION_HELP } from './helpContents';
 
 /**
  * Mail M5 — Per-tenant SMTP/IMAP Entegrasyonu (Admin yapılandırma).
@@ -187,6 +189,8 @@ export function AdminExternalMailPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // 2026-07-02 — Kullanıcı dilinde detaylı yardım drawer'ı.
+  const [helpOpen, setHelpOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -301,11 +305,18 @@ export function AdminExternalMailPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <Mail size={18} className="text-brand-600" />
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
-          Mail Entegrasyonu
-        </h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Mail size={18} className="text-brand-600" />
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-ndark-text">
+            Mail Entegrasyonu
+          </h2>
+        </div>
+        {/* 2026-07-02 — Detaylı kullanıcı dilinde yardım drawer'ı.
+            İçerik: MAIL_INTEGRATION_HELP (bu ekran ne için + multi-inbox +
+            SMTP + no-reply + adım adım yeni inbox + test sonuçları + sık
+            karşılaşılan sorunlar + güvenlik). */}
+        <HelpButton onClick={() => setHelpOpen(true)} active={helpOpen} />
       </div>
 
       <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
@@ -559,6 +570,15 @@ export function AdminExternalMailPage() {
         </CardBody>
       </Card>
       {/* NOT: Multi-Inbox / Signature / FromAlias kartları yukarı taşındı (FAZ B layout swap). */}
+
+      {/* 2026-07-02 — Detaylı yardım drawer'ı (kullanıcı dilinde, admin/CS
+          ekibi için). Trigger: sayfa header'ındaki "Yardım" butonu. */}
+      <HelpDrawer
+        open={helpOpen}
+        title={MAIL_INTEGRATION_HELP.title}
+        sections={MAIL_INTEGRATION_HELP.sections}
+        onClose={() => setHelpOpen(false)}
+      />
     </div>
   );
 }
