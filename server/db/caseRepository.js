@@ -2554,6 +2554,8 @@ export const caseRepository = {
     // YALNIZ source='manual' VE case.origin='Eposta' VE customerContactEmail
     // doluysa öğren. Intake'in auto-link çağrısı opts.source='auto' geçer →
     // öğrenmez (zaten exact email match'le tetiklendi, redundant).
+    // Agent/Backoffice linki route'tan source='manual_no_learn' gelir →
+    // vaka bağlanır ama öğrenilmez (yanlış eşleştirme kalıcılaşmasın).
     // Hata kapsanır: öğrenme fail olursa linkAccount başarısı bozulmaz.
     if (opts.source === 'manual') {
       try {

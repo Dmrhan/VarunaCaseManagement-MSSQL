@@ -184,8 +184,12 @@ interface CaseDetailPageProps {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
-  // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
-  const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
+  // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
+  // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
+  // beslenir; ayrım backend'de link-account route'unda yapılır.
+  const canLinkAccount =
+    !!user &&
+    ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
   // PR-SD — Soft archive yalnız SystemAdmin yetkisinde.
   const canArchive = user?.role === 'SystemAdmin';
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
