@@ -14,11 +14,13 @@
  *  - Yalnız MANUEL linkAccount öğrenir (intake'in auto-link çağrısı
  *    bunu invoke ETMEZ — caller davranışı).
  *  - Account silinirse FK cascade ile eşleme silinir.
+ *  - İç adres (tenant kullanıcısı / inbox / alias) hiçbir zaman öğrenilmez.
  *
  * Spec: feature/mail-learned-sender-m2-3.
  */
 
 import { prisma } from './client.js';
+import { isInternalAddress } from '../lib/internalAddressCache.js';
 
 const RAW_SOURCE = 'learned-sender-account';
 
@@ -70,6 +72,14 @@ export const learnedSenderAccountRepo = {
     if (!companyId || !accountId) return null;
     const norm = normalizeSenderEmail(senderEmail);
     if (!norm) return null;
+
+    // F1 — İç adres koruması: tenant çalışanı / inbox / alias adresi
+    // asla öğrenilmez (forward eden kişi yanlış müşteriyle ilişkilendirilmez).
+    const internal = await isInternalAddress(norm, companyId);
+    if (internal) {
+      console.info('[learnedSender] iç adres — upsert atlandı', norm);
+      return null;
+    }
 
     const role = opts.isRoleAddress !== undefined ? !!opts.isRoleAddress : isRoleAddress(norm);
     const data = {

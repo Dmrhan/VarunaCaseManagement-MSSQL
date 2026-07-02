@@ -43,6 +43,7 @@ import { emitEvent as emitNotificationEvent } from '../db/notificationRepository
 import { externalMailInboxRepo } from '../db/externalMailInboxRepository.js';
 import { saveObject } from '../db/storage.js';
 import { isAcceptedUpload } from './uploadWhitelist.js';
+import { isInternalAddress, getInternalAddresses } from './internalAddressCache.js';
 import { sanitizeIncomingEmailHtml } from './htmlSanitizer.js';
 import { prisma } from '../db/client.js';
 
@@ -684,6 +685,19 @@ export async function intakeInboundEmail({
         accountId: null, // doğrulama sonrası set edilir
         reasons: pick.reasons,
       };
+
+      // F1 — İç adres koruması: forward eden Univera çalışanı senderEmail'i
+      // iç adres setindeyse auto-link tamamen devre dışı kalır. Öneriler UI'da
+      // görünmeye devam eder; vaka Supervisor kuyruğuna düşer.
+      if (pick.auto) {
+        const senderIsInternal = await isInternalAddress(parsed.from.email, companyId);
+        if (senderIsInternal) {
+          console.info('[intake] iç adres — auto-link devre dışı', parsed.from.email);
+          pick.auto = false;
+          pick.triggeredBy = 'internal_address';
+        }
+      }
+
       // Codex P1 fix — Auto-link YALNIZ sender email eşleşmesinde.
       //
       // suggestCustomerMatches signals.emails'i case description'dan da
@@ -708,20 +722,41 @@ export async function intakeInboundEmail({
           // email_exact path — Codex P1 sender guard
           const senderEmail = parsed.from.email; // normalize: parser lowercased
           const { prisma } = await import('../db/client.js');
-          const account = await prisma.account.findUnique({
-            where: { id: pick.accountId },
-            select: {
-              email: true,
-              contacts: { where: { isActive: true }, select: { email: true } },
+
+          // F2 — Çakışan email koruması: aynı senderEmail birden fazla aktif
+          // Account veya aktif Contact'ta kayıtlıysa otomatik bağlama güvenli
+          // değil. Öneri sunulur, manuel doğrulama gerekir.
+          // Aynı Account içindeki çoklu kontak tek müşteri sayılır.
+          const distinctAccounts = await prisma.account.count({
+            where: {
+              isActive: true,
+              companies: { some: { companyId: { in: allowedCompanyIds } } },
+              OR: [
+                { email: senderEmail },
+                { contacts: { some: { isActive: true, email: senderEmail } } },
+              ],
             },
           });
-          const accountEmails = [
-            account?.email,
-            ...(account?.contacts ?? []).map((c) => c.email),
-          ]
-            .filter(Boolean)
-            .map((e) => String(e).trim().toLowerCase());
-          canLink = accountEmails.includes(senderEmail);
+          if (distinctAccounts > 1) {
+            console.info('[intake] çakışan email — birden fazla aktif müşteri eşleşti, auto-link devre dışı', senderEmail, distinctAccounts);
+            canLink = false;
+          } else {
+            // Tekil eşleşme — mevcut Codex P1 sender guard
+            const account = await prisma.account.findUnique({
+              where: { id: pick.accountId },
+              select: {
+                email: true,
+                contacts: { where: { isActive: true }, select: { email: true } },
+              },
+            });
+            const accountEmails = [
+              account?.email,
+              ...(account?.contacts ?? []).map((c) => c.email),
+            ]
+              .filter(Boolean)
+              .map((e) => String(e).trim().toLowerCase());
+            canLink = accountEmails.includes(senderEmail);
+          }
         }
 
         if (canLink) {
