@@ -3405,9 +3405,10 @@ function DetailTab({
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
           Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
 
-      {/* Öncelik şeridi + Açıklama — sıkı grup (space-y-2) */}
+      {/* Öncelik şeridi + Açıklama — sıkı grup (space-y-2).
+          -mt-4: tab wrapper p-6 üst padding'ini 8px'e indirir (alt boşlukla eşit). */}
       {(canShowField('priority') || canShowField('description')) && (
-        <div className="space-y-2">
+        <div className="-mt-4 space-y-2">
           {canShowField('priority') && (
             <PriorityStrip
               value={(v('priority') as CasePriority) ?? item.priority}
