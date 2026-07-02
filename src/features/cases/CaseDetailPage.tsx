@@ -3187,34 +3187,30 @@ function PriorityStrip({
   onChange: (p: CasePriority) => void;
 }) {
   return (
-    <div>
-      <h3 className="mb-1.5 text-xs font-medium text-slate-500 dark:text-ndark-muted">
-        Öncelik <span className="text-rose-500">*</span>
-      </h3>
-      <div className="flex gap-1.5">
-        {PRIORITY_CONFIG.map((p) => {
-          const isActive = value === p.value;
-          return (
-            <button
-              key={p.value}
-              type="button"
-              disabled={disabled}
-              onClick={() => { if (!disabled && !isActive) onChange(p.value); }}
-              className={[
-                'flex flex-1 items-center justify-center gap-1.5 rounded border py-1 text-xs font-medium transition-colors',
-                isActive
-                  ? `${p.activeBg} ${p.activeBorder} ${p.activeText}`
-                  : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:bg-ndark-bg',
-                disabled ? 'cursor-default opacity-60' : 'cursor-pointer',
-                isDraft && isActive ? 'ring-1 ring-offset-1 ring-brand-400' : '',
-              ].join(' ')}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden="true" />
-              {p.label}
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex gap-1.5">
+      {PRIORITY_CONFIG.map((p) => {
+        const isActive = value === p.value;
+        return (
+          <button
+            key={p.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => { if (!disabled && !isActive) onChange(p.value); }}
+            title={`Öncelik: ${p.label}`}
+            className={[
+              'flex flex-1 items-center justify-center gap-1.5 rounded border py-1 text-xs font-medium transition-colors',
+              isActive
+                ? `${p.activeBg} ${p.activeBorder} ${p.activeText}`
+                : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:bg-ndark-bg',
+              disabled ? 'cursor-default opacity-60' : 'cursor-pointer',
+              isDraft && isActive ? 'ring-1 ring-offset-1 ring-brand-400' : '',
+            ].join(' ')}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden="true" />
+            {p.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
