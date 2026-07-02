@@ -187,26 +187,42 @@ export function loadGoldExamples(): Array<Record<string, string>> {
 }
 
 export function formatGoldForPrompt(mode: "open" | "close"): string {
-  // v4 COLD-START: kapanış (close) gold örnekleri ESKİ taksonomiye göre etiketli
-  // → geçersiz. Yeni gold, etiket doğrulama ekranından birikene kadar close
-  // few-shot KAPALI. Açılış gold'u geçerli (open taksonomisi değişmedi).
-  if (mode === "close") return "";
   const gold = loadGoldExamples();
   if (!gold.length) return "";
-  const byGroup: Record<string, number> = {};
-  const picked: Array<Record<string, string>> = [];
-  for (const g of gold) {
-    const k = g.kokNedenGrubu || "?";
-    byGroup[k] = (byGroup[k] || 0) + 1;
-    if (byGroup[k] <= 2) picked.push(g);
-  }
+
   if (mode === "open") {
+    // Açılış taksonomisi değişmedi → gold örnekleri geçerli, doğrudan kullanılır.
+    const byGroup: Record<string, number> = {};
+    const picked: Array<Record<string, string>> = [];
+    for (const g of gold) {
+      const k = g.kokNedenGrubu || "?";
+      byGroup[k] = (byGroup[k] || 0) + 1;
+      if (byGroup[k] <= 2) picked.push(g);
+    }
     return picked
       .map(
         (g) =>
           `- "${(g.sorun || "").slice(0, 110)}" => platform=${g.platform}; is_sureci=${g.isSureci}; islem_tipi=${g.islemTipi}; etkilenen_nesne=${g.etkilenenNesne}; etki=${g.etki}`,
       )
       .join("\n");
+  }
+
+  // KAPANIŞ (close) — v4 GEÇERLİLİK FİLTRELİ few-shot. Mekanizma AÇIK; ancak her
+  // gold örneği GÜNCEL v4 taksonomisine karşı doğrulanır (grup + gruba-bağlı detay
+  // + detaya-bağlı çözüm + kalıcı önlem). Eski taksonomiyle etiketli örnekler
+  // geçersiz sayılıp elenir → v4 gold (build-gold-from-reviews ile doğrulamalardan)
+  // birikene kadar doğal olarak boş kalır, biriktikçe otomatik devreye girer.
+  const byGroup: Record<string, number> = {};
+  const picked: Array<Record<string, string>> = [];
+  for (const g of gold) {
+    const grup = g.kokNedenGrubu;
+    const detay = g.kokNedenDetayi;
+    if (!grup || !isValidKokNedenGrubu(grup)) continue;
+    if (!detay || !isValidKokNedenDetay(detay, grup)) continue;
+    if (!g.cozumTipi || !isValidCozumTipi(g.cozumTipi, grup, detay)) continue;
+    if (g.kaliciOnlem && !isValidKaliciOnlem(g.kaliciOnlem)) continue;
+    byGroup[grup] = (byGroup[grup] || 0) + 1;
+    if (byGroup[grup] <= 2) picked.push(g);
   }
   return picked
     .map(
