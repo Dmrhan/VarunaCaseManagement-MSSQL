@@ -3545,19 +3545,25 @@ export const caseRepository = {
 
     // Açık → başka statü: atanmamış vakayı işlemi yapan kişiye otomatik ata.
     let autoAssignData = {};
+    let autoAssignedPersonId = null;
+    let autoAssignedTeamId = null;
     if (prev.status === 'Acik' && dbNext !== 'Acik' && !prev.assignedPersonId && actorObject?.personId) {
       const actorPerson = await prisma.person.findUnique({
         where: { id: actorObject.personId },
         select: { name: true, teamId: true, team: { select: { name: true } } },
       });
       if (actorPerson) {
+        autoAssignedPersonId = actorObject.personId;
+        autoAssignedTeamId = actorPerson.teamId ?? null;
         autoAssignData = {
-          assignedPersonId: actorObject.personId,
+          assignedPersonId: autoAssignedPersonId,
           assignedPersonName: actorPerson.name ?? actor,
-          ...(actorPerson.teamId ? {
-            assignedTeamId: actorPerson.teamId,
+          ...(autoAssignedTeamId ? {
+            assignedTeamId: autoAssignedTeamId,
             assignedTeamName: actorPerson.team?.name ?? null,
           } : {}),
+          // İlk atamada çözüm SLA saatini başlat (claim() ile aynı kural).
+          ...(!prev.slaResolutionStartedAt ? { slaResolutionStartedAt: new Date() } : {}),
         };
         historyEntries.push({
           companyId,
@@ -3608,6 +3614,20 @@ export const caseRepository = {
       message: `${updated.caseNumber}: ${prevStatusTr} → ${nextStatus}`,
       kind,
     });
+
+    // Otomatik atama bildirimi — kişiye inbox'ında görünsün.
+    if (autoAssignedPersonId) {
+      await notifyAssignmentTargets({
+        caseId: id,
+        companyId,
+        assignedPersonId: autoAssignedPersonId,
+        assignedTeamId: autoAssignedTeamId,
+        actorUserId: actorUserIdOf(actorObject),
+        message: `${updated.caseNumber} otomatik olarak atandı.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
 
     // WR-D4 Phase 2 — close / reopen event emission (fire-and-forget).
     if (dbNext === 'Cozuldu' && prev.status !== 'Cozuldu') {
