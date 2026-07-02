@@ -319,16 +319,8 @@ export function AdminExternalMailPage() {
         <HelpButton onClick={() => setHelpOpen(true)} active={helpOpen} />
       </div>
 
-      <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
-        <Info size={14} className="mt-0.5 shrink-0" />
-        <span>
-          Bu şirket için <strong>giden</strong> mail (SMTP) ve <strong>gelen</strong> mail
-          hesapları (aşağıdaki "Gelen Mail Inbox'ları" listesi) tanımlanır. Şifre
-          değerleri <strong>şifrelenmiş</strong> saklanır (AES-256-GCM) ve
-          sunucudan geri okunmaz. "Entegrasyon Aktif" kapalıyken tüm hesapların
-          otomatik mail kontrolü ve mail gönderimi durur.
-        </span>
-      </div>
+      {/* Ekran başındaki bilgi bandı KALDIRILDI (2026-07-02) — aynı içerik
+          Yardım drawer'ında (sağ üst "Yardım" butonu) detaylı mevcut. */}
 
       {manageable.length > 1 && (
         <Card>
@@ -891,18 +883,8 @@ function MailInboxManager({ companyId }: { companyId: string }) {
         </div>
 
         {/* Help banner — ekran kendini açıklasın */}
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200">
-          <div className="flex items-start gap-2">
-            <Info size={14} className="mt-0.5 shrink-0" />
-            <div>
-              <p className="font-medium">Her inbox AYRI bir mail hesabıdır.</p>
-              <p className="mt-0.5">
-                yazilimdestek@univera.com.tr ve satis@univera.com.tr ayrı Gmail/Exchange hesabı olarak yapılandırılmalı; her biri için ayrı uygulama şifresi (App Password) gerekir.
-                Inbox'a atanan takım, o mail adresinden gelen vakaları havuz olarak alır — ekibinizden biri vakayı üstlenir.
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Amber bilgi bandı KALDIRILDI (2026-07-02) — aynı içerik Yardım
+            drawer'ında "Çoklu gelen kutusu nedir?" bölümünde detaylı mevcut. */}
 
         {/* Liste */}
         {loading ? (
