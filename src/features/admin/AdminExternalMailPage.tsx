@@ -578,6 +578,7 @@ export function AdminExternalMailPage() {
         title={MAIL_INTEGRATION_HELP.title}
         sections={MAIL_INTEGRATION_HELP.sections}
         onClose={() => setHelpOpen(false)}
+        overlayOnly
       />
     </div>
   );

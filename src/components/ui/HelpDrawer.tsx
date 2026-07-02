@@ -17,17 +17,26 @@ interface HelpDrawerProps {
   title: string;
   sections: HelpSection[];
   onClose: () => void;
+  /**
+   * 2026-07-02 — Her boyutta sağdan overlay davranışını zorla
+   * (lg:static akışını devre dışı bırak). Sayfa root'u flex parent
+   * DEĞİLSE bu prop kullanılmalı — aksi halde lg üzeri ekranda drawer
+   * sayfanın altında render olur (AdminListLayout dışı ekranlar için).
+   * Default: false (backward-compat AdminListLayout için).
+   */
+  overlayOnly?: boolean;
 }
 
 /**
  * Sayfa içine gömülü yardım paneli.
  * - lg ve üzeri: inline 320px sütun (çağıran flex parent'ın içinde durur)
  * - lg altı: sağdan açılan overlay (backdrop tıklanınca kapanır)
+ * - overlayOnly=true: her boyutta overlay (sağdan slide + backdrop).
  *
  * State localStorage'a yazılmaz — her ekran girişinde kapalı başlar.
  * Page scroll'unu engellemez.
  */
-export function HelpDrawer({ open, title, sections, onClose }: HelpDrawerProps) {
+export function HelpDrawer({ open, title, sections, onClose, overlayOnly = false }: HelpDrawerProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -39,11 +48,20 @@ export function HelpDrawer({ open, title, sections, onClose }: HelpDrawerProps) 
 
   if (!open) return null;
 
+  // overlayOnly=true → lg üzeri de aynı fixed overlay davranışı (parent
+  // flex olmayan sayfalarda drawer sayfa altında görünmesin).
+  const asideClass = overlayOnly
+    ? 'fixed inset-y-0 right-0 z-50 flex w-96 max-w-[90vw] flex-col border-l border-slate-200 bg-white shadow-xl'
+    : 'fixed inset-y-0 right-0 z-50 flex w-80 max-w-[90vw] flex-col border-l border-slate-200 bg-white shadow-xl lg:static lg:inset-auto lg:z-auto lg:h-[calc(100vh-3rem)] lg:w-80 lg:shrink-0 lg:self-start lg:rounded-lg lg:border lg:shadow-sm';
+  const backdropClass = overlayOnly
+    ? 'fixed inset-0 z-40 bg-slate-900/40'
+    : 'fixed inset-0 z-40 bg-slate-900/40 lg:hidden';
+
   return (
     <>
-      {/* Mobile backdrop — sadece lg altında görünür */}
+      {/* Backdrop — overlayOnly'de her zaman; default'ta sadece lg altı */}
       <div
-        className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+        className={backdropClass}
         onClick={onClose}
         aria-hidden
       />
@@ -51,7 +69,7 @@ export function HelpDrawer({ open, title, sections, onClose }: HelpDrawerProps) 
       <aside
         role="complementary"
         aria-label={title}
-        className="fixed inset-y-0 right-0 z-50 flex w-80 max-w-[90vw] flex-col border-l border-slate-200 bg-white shadow-xl lg:static lg:inset-auto lg:z-auto lg:h-[calc(100vh-3rem)] lg:w-80 lg:shrink-0 lg:self-start lg:rounded-lg lg:border lg:shadow-sm"
+        className={asideClass}
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
