@@ -248,7 +248,6 @@ export async function listAccounts({
   companyId,
   status,
   ids,
-  searchFields,
   page = 1,
   limit = 25,
   allowedCompanyIds,
