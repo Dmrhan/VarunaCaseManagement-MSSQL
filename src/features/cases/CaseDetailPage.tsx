@@ -4722,45 +4722,34 @@ function dotColorFor(h: CaseHistoryEntry): string {
   return def?.dot ?? 'bg-slate-400';
 }
 
-// Aktivite satırındaki not — uzun metinlerde 3 satırda kırp, "Devamını
-// göster / Gizle" toggle'ı ekle (ExpandableDescription'daki overflow-ölçüm
-// pattern'i: scrollHeight > clientHeight ise kırpılmış demektir).
+// Aktivite satırındaki not — karakter eşiğini aşan metin kısaltılır,
+// "Devamını göster / Gizle" toggle'ı çıkar. Ekran genişliğinden bağımsız
+// öngörülebilir davranış için satır-ölçümü değil karakter limiti kullanılır
+// (aktivite akışı kompakt kalmalı).
+const ACTIVITY_NOTE_PREVIEW_CHARS = 180;
+
 function ExpandableActivityNote({ text, className }: { text: string; className: string }) {
   const [expanded, setExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const ref = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) {
-      setIsOverflowing(false);
-      return;
-    }
-    const measure = () => {
-      if (!expanded) {
-        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
-      }
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [text, expanded]);
 
   useEffect(() => {
     setExpanded(false);
   }, [text]);
 
+  const isLong = text.length > ACTIVITY_NOTE_PREVIEW_CHARS;
+  // Kelime ortasında kesmemek için eşikten geriye son boşluğa kadar kırp.
+  const preview = useMemo(() => {
+    if (!isLong) return text;
+    const slice = text.slice(0, ACTIVITY_NOTE_PREVIEW_CHARS);
+    const lastSpace = slice.lastIndexOf(' ');
+    return (lastSpace > ACTIVITY_NOTE_PREVIEW_CHARS / 2 ? slice.slice(0, lastSpace) : slice) + '…';
+  }, [text, isLong]);
+
   return (
     <div>
-      <p
-        ref={ref}
-        className={`whitespace-pre-wrap ${className} ${!expanded ? 'line-clamp-3' : ''}`}
-      >
-        {text}
+      <p className={`whitespace-pre-wrap ${className}`}>
+        {expanded ? text : preview}
       </p>
-      {(isOverflowing || expanded) && (
+      {isLong && (
         <button
           type="button"
           onClick={(e) => {
