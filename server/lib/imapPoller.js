@@ -288,6 +288,29 @@ export async function testInboxConnection(inbox) {
   }
   const secret = await externalMailInboxRepo.getDecryptedSecret(inbox.companyId, inbox.id);
 
+  // 2026-07-02 (Codex re-run bulgusu) — Secret NULL ise ERKEN config_incomplete
+  // dön; hiçbir kanal için bağlantı denenmez. Aksi halde Promise.all iki
+  // guard'a düşer ama iki bağlantı objesi de gereksiz init edilir + response
+  // shape'i tutarlı olsun diye TEK yerden dönmek daha net.
+  if (!secret) {
+    return {
+      ok: false,
+      code: 'config_incomplete',
+      message: 'IMAP + SMTP için secret (App Password) ayarlanmamış — önce kaydet.',
+      imap: {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Secret ayarlanmamış — bağlantı denenmedi.',
+      },
+      smtp: {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Secret ayarlanmamış — bağlantı denenmedi.',
+      },
+      meta: { startedAt },
+    };
+  }
+
   // İkisini paralel çalıştır — bağımsız bağlantılar.
   const [imap, smtp] = await Promise.all([
     testImapOnly(inbox, secret),

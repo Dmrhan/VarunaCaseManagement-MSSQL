@@ -39,8 +39,8 @@ expect('1.3 authenticationFailed / AUTHENTICATIONFAILED tespiti',
   /authenticationFailed === true[\s\S]{0,300}AUTHENTICATIONFAILED/.test(poller), true);
 expect('1.4 config_incomplete — imapHost/username eksik',
   /if \(!inbox\.imapHost \|\| !inbox\.username\)[\s\S]{0,400}code: 'config_incomplete'/.test(poller), true);
-expect('1.5 config_incomplete — secret eksik',
-  /const secret = await externalMailInboxRepo\.getDecryptedSecret[\s\S]{0,300}if \(!secret\)[\s\S]{0,400}code: 'config_incomplete'/.test(poller), true);
+expect('1.5 config_incomplete — secret eksik (ERKEN guard, üst level testInboxConnection)',
+  /const secret = await externalMailInboxRepo\.getDecryptedSecret[\s\S]{0,800}if \(!secret\)[\s\S]{0,600}code: 'config_incomplete'/.test(poller), true);
 expect('1.6 inbox_disabled — isActive=false',
   /if \(inbox\.isActive === false\)[\s\S]{0,400}code: 'inbox_disabled'/.test(poller), true);
 expect('1.7 ImapFlow config — pollInbox ile aynı (host/port/secure/auth/timeout)',
@@ -95,8 +95,8 @@ expect('4.5 SMTP alanları KORUNDU (fromAddress, smtpHost, smtpPort, smtpSecure,
 console.log('\n── 5) UI üst kart — SMTP odaklı sadeleştirme ─');
 expect('5.1 "Giden Mail (SMTP)" başlığı',
   /Giden Mail \(SMTP\)/.test(page), true);
-expect('5.2 SMTP kart hint — composer yönlendirmesi',
-  /composer'daki[\s\S]{0,200}Gönderen[\s\S]{0,200}listesinden se[çç]ilir/.test(page), true);
+expect('5.2 SMTP kart hint — FAZ B fallback açıklaması (composer yönlendirmesi kaldırıldı; per-inbox SMTP artık asıl yol)',
+  /SMTP'si tanımlı olmayan inbox'lar buradan gönderir/.test(page), true);
 expect('5.3 Entegrasyon Aktif — kill switch açıklaması güncellendi',
   /Kill switch[\s\S]{0,300}T[ÜÜÙ]M inbox'lar[\s\S]{0,200}durur/.test(page), true);
 expect('5.4 Legacy IMAP açıklama satırı — aşağı yönlendirme',
@@ -125,8 +125,10 @@ expect('6.6 Test button title hint (mail çekmez, mutate etmez)',
   /IMAP ba[ğg]lant[ıi]s[ıi]n[ıi] test eder[\s\S]{0,200}mail [çc]ekmez[\s\S]{0,200}hi[çç]bir [şs]ey de[ğg]i[şs]tirmez/.test(page), true);
 expect('6.7 formatInboxTestMessage — 6 code case',
   /case 'ok':[\s\S]{0,500}case 'auth_failed':[\s\S]{0,500}case 'connection_failed':[\s\S]{0,500}case 'config_incomplete':[\s\S]{0,500}case 'inbox_disabled':[\s\S]{0,500}case 'not_found':/.test(page), true);
-expect('6.8 Test rozeti — testResult varsa görünür',
-  /\{testResult &&[\s\S]{0,1200}formatInboxTestMessage\(testResult\)/.test(page), true);
+expect('6.8 Test rozeti — testResult varsa ikili IMAP+SMTP badge shape (FAZ B)',
+  /\{testResult &&[\s\S]{0,300}testResult\.imap &&/.test(page)
+    && /testResult\.imap &&[\s\S]{0,1500}testResult\.smtp &&/.test(page)
+    && /\{!testResult\.imap && !testResult\.smtp &&[\s\S]{0,600}formatInboxTestMessage\(testResult\)/.test(page), true);
 expect('6.9 Reload sonrası testResults temizlenir (yanıltıcı geçmiş yok)',
   /const reload = useCallback\(async \(\) => \{[\s\S]{0,400}setTestResults\(\{\}\)/.test(page), true);
 
