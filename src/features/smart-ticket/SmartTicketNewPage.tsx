@@ -29,7 +29,7 @@ import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
-import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
   lookupService,
@@ -567,6 +567,19 @@ export function SmartTicketNewPage({
       ...f,
       accountId: item.id,
       accountName: item.name ?? '',
+      accountProjectId: '',
+      accountProjectName: '',
+    }));
+  }
+
+  function handleSelectAccountWithProject(item: AccountListItem, project: PickedProject | null) {
+    setAccountPickerOpen(false);
+    setForm((f) => ({
+      ...f,
+      accountId: item.id,
+      accountName: item.name ?? '',
+      accountProjectId: project?.id ?? '',
+      accountProjectName: project?.name ?? '',
     }));
   }
 
@@ -1640,44 +1653,63 @@ export function SmartTicketNewPage({
               {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
                 <Field
                   label="Proje"
-                  required={projectsEnabled && projectsRequired && !!form.accountId}
+                  required={projectsEnabled && projectsRequired && !!form.accountId && !form.accountProjectId}
                   hint={
-                    projectsEnabled && projectsRequired && !!form.accountId
-                      ? 'Bu şirket için proje zorunlu. Kod veya ad ile arayabilirsiniz.'
-                      : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
+                    form.accountProjectId
+                      ? 'Müşteri arama listesinden seçildi. Değiştirmek için müşteriyi tekrar seç.'
+                      : projectsEnabled && projectsRequired && !!form.accountId
+                        ? 'Bu şirket için proje zorunlu. Müşteri arama listesinden seçin.'
+                        : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
                   }
                 >
-                  <div className="space-y-1.5">
-                    {/* PR-6 — Search input: name veya code substring filter.
-                        Yalnız 3+ proje varsa göster (1-2 projede gereksiz). */}
-                    {projects.length >= 3 && (
-                      <TextInput
-                        value={projectFilter}
-                        onChange={(e) => setProjectFilter(e.target.value)}
-                        placeholder="Proje kodu veya adı ile ara…"
+                  {form.accountProjectId ? (
+                    // Picker'dan proje seçildi — pasif özet + temizle butonu
+                    <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/20">
+                      <span className="flex-1 truncate text-sm font-medium text-violet-800 dark:text-violet-200">
+                        {form.accountProjectName || form.accountProjectId}
+                      </span>
+                      {stage === 'opening' && (
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, accountProjectId: '', accountProjectName: '' }))}
+                          className="shrink-0 rounded p-0.5 text-violet-500 hover:text-violet-700 dark:hover:text-violet-300"
+                          title="Proje seçimini temizle"
+                        >
+                          <XIcon size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {projects.length >= 3 && (
+                        <TextInput
+                          value={projectFilter}
+                          onChange={(e) => setProjectFilter(e.target.value)}
+                          placeholder="Proje kodu veya adı ile ara…"
+                          disabled={stage !== 'opening'}
+                        />
+                      )}
+                      <Select
+                        value={form.accountProjectId}
+                        onChange={(e) => handleSelectProject(e.target.value)}
                         disabled={stage !== 'opening'}
-                      />
-                    )}
-                    <Select
-                      value={form.accountProjectId}
-                      onChange={(e) => handleSelectProject(e.target.value)}
-                      disabled={stage !== 'opening'}
-                    >
-                      <option value="">
-                        {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
-                      </option>
-                      {filteredProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.code ? `${p.code} — ${p.name}` : p.name}
+                      >
+                        <option value="">
+                          {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
                         </option>
-                      ))}
-                    </Select>
-                    {projectFilter.trim() && filteredProjects.length === 0 && (
-                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                        "{projectFilter}" için proje bulunamadı.
-                      </p>
-                    )}
-                  </div>
+                        {filteredProjects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code ? `${p.code} — ${p.name}` : p.name}
+                          </option>
+                        ))}
+                      </Select>
+                      {projectFilter.trim() && filteredProjects.length === 0 && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                          "{projectFilter}" için proje bulunamadı.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </Field>
               )}
               <Field label="Başlık" required>
@@ -2110,6 +2142,9 @@ export function SmartTicketNewPage({
         selectedAccountId={form.accountId || null}
         onClose={() => setAccountPickerOpen(false)}
         onSelect={handleSelectAccount}
+        projectsEnabled={projectsEnabled}
+        projectsRequired={projectsRequired}
+        onSelectWithProject={handleSelectAccountWithProject}
       />
 
       {/* Customer Context Drawer — Faz 1 (closed-history first).

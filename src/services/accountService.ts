@@ -127,6 +127,15 @@ export const CUSTOMER_ROLE_LABELS: Record<CustomerRole, string> = {
  * dosyada ek hata handling yok.
  */
 
+export type AccountSearchField = 'name' | 'vkn' | 'phone' | 'code' | 'contact';
+
+/** Picker inline proje listesi için minimal proje özeti. */
+export interface AccountListProjectItem {
+  id: string;
+  name: string;
+  code: string | null;
+}
+
 export interface AccountCompanyChip {
   accountCompanyId: string;
   companyId: string;
@@ -135,6 +144,8 @@ export interface AccountCompanyChip {
   companyColor: string | null;
   status: string;
   externalCustomerCode: string | null;
+  /** Picker single-step seçim için aktif projeler. */
+  projects?: AccountListProjectItem[];
 }
 
 export interface AccountProductSummary {
@@ -402,6 +413,7 @@ export interface AccountListParams {
    * empty result.
    */
   ids?: string[];
+  searchFields?: AccountSearchField[];
   page?: number;
   limit?: number;
 }
@@ -597,6 +609,7 @@ function buildQuery(params: AccountListParams): string {
   if (params.companyId) usp.set('companyId', params.companyId);
   if (params.status) usp.set('status', params.status);
   if (params.ids && params.ids.length > 0) usp.set('ids', params.ids.join(','));
+  if (params.searchFields && params.searchFields.length > 0) usp.set('searchFields', params.searchFields.join(','));
   if (params.page) usp.set('page', String(params.page));
   if (params.limit) usp.set('limit', String(params.limit));
   const qs = usp.toString();

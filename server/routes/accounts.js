@@ -78,6 +78,9 @@ router.get(
   requireRole(...LIST_ROLES),
   asyncRoute(async (req, res) => {
     const { search, companyId, status, page, limit } = req.query;
+    const VALID_SEARCH_FIELDS = new Set(['name', 'vkn', 'phone', 'code', 'contact']);
+    const rawSearchFields = typeof req.query.searchFields === 'string' ? req.query.searchFields : '';
+    const parsedSearchFields = rawSearchFields.split(',').map((s) => s.trim()).filter((s) => VALID_SEARCH_FIELDS.has(s));
     const scopedAllowedCompanyIds = typeof companyId === 'string' && companyId
       ? await filterAllowedCompanyIdsByResourcePolicy(req, {
           resourceKey: 'account',
@@ -99,6 +102,7 @@ router.get(
       companyId,
       status,
       ids: rawIds ? parsedIds : undefined,
+      searchFields: parsedSearchFields.length > 0 ? parsedSearchFields : undefined,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
       allowedCompanyIds: scopedAllowedCompanyIds,
