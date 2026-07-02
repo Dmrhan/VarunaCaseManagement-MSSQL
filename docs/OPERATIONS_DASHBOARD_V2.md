@@ -159,10 +159,14 @@ Kod:
   `bySmartTicketImpact`
 
 #### 2b. Çözüm kaynağı oranları
-Kırılım: `CaseSolutionStep.source` (enum: `ai_suggestion / kb / similar_case
-/ manual / …`) — dönemde çözülen vakaların adım kaynaklarının dağılımı.
-Türetilmiş metrik: **"KB-destekli çözüm %"** = (kb kaynak sayısı /
-toplam çözüm adımı sayısı).
+Kırılım: `CaseSolutionStep.source` (persisted enum: `ai_suggested_step /
+external_kb / similar_case / manual` — `prisma/schema.prisma:1215`) —
+dönemde çözülen vakaların adım kaynaklarının dağılımı. Türetilmiş metrik:
+**"KB-destekli çözüm %"** = (`external_kb` kaynak sayısı / toplam çözüm
+adımı sayısı). Codex round 1 (2026-07-02): spec'in ilk taslağı
+`ai_suggestion / kb` yazmıştı; **gerçek persisted değerler yukarıdaki
+gibi** — uygulama tarafında `caseRepository.js:664, 943` ve şema `///`
+yorumlarıyla doğrulandı.
 
 Kod:
 - `queryBySolutionStepSource(scope, filters, from, to, baseWhere)`
@@ -184,8 +188,13 @@ Kod:
   outboundVolume, firstResponseMedianMin }`
 
 #### 2d. Pattern alarm özeti
-- Aktif `PatternAlert.state='active'` sayısı
+- Aktif `PatternAlert.status='active'` sayısı (şema alan adı `status`,
+  `state` DEĞİL — `prisma/schema.prisma:2080`; frontend type de aynı)
 - En büyük spike (kategori adı + kaç kat; **başlık YOK**)
+
+Codex round 1 (2026-07-02): spec'in ilk taslağı `state` yazmıştı; **gerçek
+alan `status`**. Enum default `"active"`, diğer değerler `"dismissed"` +
+`"known_issue"`.
 
 Kod:
 - `queryPatternAlertSummary(scope, filters, baseWhere)`
@@ -388,6 +397,8 @@ implementasyonda düzeltilir:
 | Dashboard UI: accountId filter YOK | `OperationsDashboardPage.tsx:204-268` |
 | AccountSearchPicker mevcut (reuse target) | `src/features/cases/AccountSearchPicker.tsx` |
 | Formatters TR: CASE_REQUEST_TYPES + CASE_ORIGINS enum | `caseService.ts:64` |
+| `CaseSolutionStep.source` enum: `ai_suggested_step / external_kb / similar_case / manual` | `prisma/schema.prisma:1215` + `caseRepository.js:664, 943` |
+| `PatternAlert` alan adı `status` (state DEĞİL), default `"active"` | `prisma/schema.prisma:2080` |
 
 ---
 
