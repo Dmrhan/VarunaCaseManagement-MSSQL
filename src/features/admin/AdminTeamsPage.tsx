@@ -411,7 +411,7 @@ function TeamEditModal({
     <Modal
       open={open}
       onClose={onClose}
-      size="md"
+      size="lg"
       title={mode === 'create' ? 'Yeni Takım' : 'Takımı Düzenle'}
       footer={
         <div className="flex items-center justify-end gap-2">
