@@ -90,7 +90,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [muted, setMuted] = useState(false);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // Softphone paneli VARSAYILAN KAPALI gelir (ekran temiz) — sağ-altta "Softphone"
+  // butonu görünür, tıklanınca panel + iframe açılır. (İstenirse env/kullanıcı tercihiyle
+  // açık başlatılabilir; şimdilik kapalı.) Panel açılınca iframe mount olup register olur.
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
   const startedRef = useRef(false);
   const lastIncomingKey = useRef<string | null>(null);
   const dismissedKey = useRef<string | null>(null);
