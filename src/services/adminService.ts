@@ -1332,6 +1332,20 @@ export const adminService = {
         );
         return !!out?.ok;
       },
+      // 2026-07-02 — Inbox-başına IMAP bağlantı testi. Mail çekmez.
+      // Dönüş code'una göre UI Türkçe aksiyon mesajı gösterir.
+      async test(companyId: string, inboxId: string): Promise<InboxTestResult> {
+        const out = await apiFetch<InboxTestResult>(
+          `${ADMIN_BASE}/external-mail-settings/${encodeURIComponent(companyId)}/inboxes/${encodeURIComponent(inboxId)}/test`,
+          { method: 'POST' },
+          'Bağlantı testi başarısız',
+        );
+        return out ?? {
+          ok: false,
+          code: 'connection_failed',
+          message: 'Sunucudan yanıt alınamadı.',
+        };
+      },
     },
   },
 
@@ -1821,6 +1835,24 @@ export interface MailInboxItem {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// 2026-07-02 — Inbox-başına IMAP bağlantı testi sonuç tipi.
+// Backend imapPoller.testInboxConnection'dan gelir. Secret response'a inmez.
+export type InboxTestCode =
+  | 'ok'
+  | 'auth_failed'
+  | 'connection_failed'
+  | 'config_incomplete'
+  | 'inbox_disabled'
+  | 'inbox_invalid'
+  | 'not_found';
+
+export interface InboxTestResult {
+  ok: boolean;
+  code: InboxTestCode;
+  message: string;
+  meta?: { startedAt?: string };
 }
 
 export interface MailInboxDraft {

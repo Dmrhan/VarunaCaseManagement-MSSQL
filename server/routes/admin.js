@@ -29,7 +29,7 @@ import { externalMailFromAliasRepo } from '../db/externalMailFromAliasRepository
 import { externalMailInboxRepo } from '../db/externalMailInboxRepository.js';
 import { caseEmailTemplateRepo } from '../db/caseEmailTemplateRepository.js';
 import { sendMail as mailProviderSendMail } from '../lib/mailProvider.js';
-import { pollMailbox as imapPollMailbox } from '../lib/imapPoller.js';
+import { pollMailbox as imapPollMailbox, testInboxConnection } from '../lib/imapPoller.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { requireActor } from '../lib/actor.js';
 import { buildAuthorizationEffectivePreview } from '../lib/authorizationEffectivePreview.js';
@@ -1314,6 +1314,33 @@ router.patch('/external-mail-settings/:companyId/inboxes/:inboxId', asyncRoute(a
     return res.status(status).json({ error: code });
   }
   res.json(result.inbox);
+}));
+
+/**
+ * POST /external-mail-settings/:companyId/inboxes/:inboxId/test — 2026-07-02
+ *
+ * Multi-Inbox v1'de eksikti; go-live öncesi acil minor. Admin yeni App
+ * Password/host tanımladıktan sonra polling cron'unu beklemeden anlık
+ * doğrulama yapabilsin diye. imapPoller.testInboxConnection REUSE — mail
+ * ÇEKMEZ, hiçbir şey mutate etmez (connect + INBOX lock + logout).
+ *
+ * Dönen: { ok, code, message, meta? }
+ *   code: 'ok' | 'auth_failed' | 'connection_failed' | 'config_incomplete'
+ *       | 'inbox_disabled' | 'inbox_invalid'
+ *
+ * Secret hiçbir yerde response'a inmez; log'da da yok.
+ *
+ * Guard pariteti: assertCompanyAdmin (diğer mail-inbox endpoint'leri ile
+ * aynı desen). Scope dışı inbox → 403.
+ */
+router.post('/external-mail-settings/:companyId/inboxes/:inboxId/test', asyncRoute(async (req, res) => {
+  const { companyId, inboxId } = req.params;
+  if (!companyId || !inboxId) throw new AdminError('companyId+inboxId gerekli.', 400);
+  assertCompanyAdmin(req, companyId);
+  const inbox = await externalMailInboxRepo.findById(companyId, inboxId);
+  if (!inbox) return res.status(404).json({ ok: false, code: 'not_found', message: 'Inbox bulunamadı.' });
+  const result = await testInboxConnection(inbox);
+  res.json(result);
 }));
 
 /**

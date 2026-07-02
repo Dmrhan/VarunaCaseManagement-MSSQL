@@ -144,6 +144,123 @@ function isAutoReplyOrBounce(parsed, rawHeaders) {
  *   error?: { code, message }
  * }>}
  */
+/**
+ * IMAP hatalarını admin'e sunulacak 3 kategoriye ayır (2026-07-02):
+ *   auth_failed        → kimlik doğrulama başarısız (kullanıcı/şifre yanlış).
+ *   config_incomplete  → host/username/secret eksik.
+ *   connection_failed  → ağ / sunucu ulaşılamaz / port kapalı.
+ *
+ * ImapFlow sürüm farkı için hem `authenticationFailed`, hem sunucu response
+ * code (AUTHENTICATIONFAILED), hem de mesaj içeriği kontrol edilir.
+ */
+function classifyImapError(err) {
+  if (!err) return 'connection_failed';
+  const msg = String(err?.message ?? '').toLowerCase();
+  const code = String(err?.code ?? '').toUpperCase();
+  const respCode = String(err?.serverResponseCode ?? err?.responseCode ?? '').toUpperCase();
+  if (
+    err?.authenticationFailed === true
+    || respCode === 'AUTHENTICATIONFAILED'
+    || code === 'AUTHENTICATIONFAILED'
+    || msg.includes('invalid credentials')
+    || msg.includes('authentication failed')
+    || msg.includes('logon failed')
+    || msg.includes('login failed')
+  ) {
+    return 'auth_failed';
+  }
+  return 'connection_failed';
+}
+
+/**
+ * Multi-Inbox admin UI için tekil bağlantı testi (2026-07-02).
+ *
+ * REUSE: pollInbox ile AYNI ImapFlow config (host/port/secure/auth/timeout).
+ * FARK: mail ÇEKMEZ, hiçbir şey mutate etmez, sadece connect → INBOX lock
+ * → logout. Amaç: admin yeni App Password/host tanımladıktan sonra
+ * polling cron'unu beklemeden anlık doğrulama.
+ *
+ * Dönen: { ok, code, message, meta }
+ *   code:
+ *     'ok'                 → bağlantı ve INBOX açma başarılı.
+ *     'auth_failed'        → kimlik doğrulama başarısız.
+ *     'connection_failed'  → sunucu / port erişilemiyor.
+ *     'config_incomplete'  → host/username/secret eksik.
+ *     'inbox_disabled'     → inbox pasif (enabled=false).
+ *     'inbox_invalid'      → parametre eksik.
+ *
+ * Secret: RAM'de sadece client oluşturulurken; response'a inmez.
+ */
+export async function testInboxConnection(inbox) {
+  const startedAt = new Date().toISOString();
+  if (!inbox || !inbox.id || !inbox.companyId) {
+    return { ok: false, code: 'inbox_invalid', message: 'inbox + companyId zorunlu.', meta: { startedAt } };
+  }
+  if (inbox.isActive === false) {
+    return { ok: false, code: 'inbox_disabled', message: 'Inbox pasif — önce aktifleştir.', meta: { startedAt } };
+  }
+  if (!inbox.imapHost || !inbox.username) {
+    return {
+      ok: false,
+      code: 'config_incomplete',
+      message: 'IMAP host / kullanıcı adı / şifre eksik.',
+      meta: { startedAt },
+    };
+  }
+  const secret = await externalMailInboxRepo.getDecryptedSecret(inbox.companyId, inbox.id);
+  if (!secret) {
+    return {
+      ok: false,
+      code: 'config_incomplete',
+      message: 'IMAP host / kullanıcı adı / şifre eksik.',
+      meta: { startedAt },
+    };
+  }
+  const client = new ImapFlow({
+    host: inbox.imapHost,
+    port: inbox.imapPort || 993,
+    secure: inbox.imapSecure !== false,
+    auth: { user: inbox.username, pass: secret },
+    logger: false,
+    socketTimeout: IMAP_CONNECT_TIMEOUT_MS,
+  });
+  // pollInbox:234 pattern — 'error' listener EventEmitter crash guard.
+  client.on('error', () => {});
+  try {
+    await client.connect();
+  } catch (err) {
+    const code = classifyImapError(err);
+    try { await client.logout(); } catch {}
+    return {
+      ok: false,
+      code,
+      message: err?.message ?? 'IMAP hatası.',
+      meta: { startedAt },
+    };
+  }
+  // INBOX lock — kaynak açılmadan çıkmayalım (mail ÇEKMİYORUZ, sadece açıp
+  // kapatıyoruz; server-side "readable mailbox mı" doğrulaması).
+  try {
+    const lock = await client.getMailboxLock('INBOX');
+    lock.release();
+  } catch (err) {
+    try { await client.logout(); } catch {}
+    return {
+      ok: false,
+      code: 'connection_failed',
+      message: err?.message ?? 'INBOX açılamadı.',
+      meta: { startedAt },
+    };
+  }
+  try { await client.logout(); } catch {}
+  return {
+    ok: true,
+    code: 'ok',
+    message: 'Bağlantı başarılı — bu inbox polling için hazır.',
+    meta: { startedAt },
+  };
+}
+
 export async function pollInbox(inbox) {
   const startedAt = new Date().toISOString();
   const stats = { fetched: 0, intaken: 0, skipped: 0, failed: 0 };
