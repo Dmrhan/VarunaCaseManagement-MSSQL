@@ -357,10 +357,12 @@ export function AdminExternalMailPage() {
           adresleri otomatik köprülenir; bu kart nadir manuel ekleme için. */}
       {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
 
-      {/* Giden Mail (SMTP) — Ortak Fallback. Collapse şeklinde; sık
-          kullanılmıyor. FAZ B sonrası her inbox kendi SMTP'siyle gönderim
-          yapıyor; bu kart yalnız SMTP'si TANIMSIZ olan inbox'lar için
-          fallback sağlar. */}
+      {/* Sistem Bildirim Mailleri (no-reply). Collapse şeklinde; nadiren
+          değiştirilir. FAZ B sonrası composer mailleri her inbox'un kendi
+          SMTP'siyle gider; buradaki hesap SİSTEM ürettiği otomatik
+          bildirimleri (vaka açıldı / durum güncellendi / çözüldü /
+          aksiyon uyarıları) gönderir. Ayrıca SMTP'si tanımsız kalan
+          inbox'lar için güvenlik ağı görevi de görür. */}
       <Card>
         <CardBody>
           {showSkeleton ? (
@@ -373,15 +375,18 @@ export function AdminExternalMailPage() {
           ) : (
             <details className="space-y-5" open={false}>
               <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-ndark-text">
-                Giden Mail (SMTP) — Ortak Fallback
+                Sistem Bildirim Mailleri (no-reply)
                 <span className="ml-2 text-[11px] font-normal text-slate-500 dark:text-ndark-muted">
-                  (SMTP'si tanımlı olmayan inbox'lar buradan gönderir)
+                  (vaka açıldı / durum güncellendi / çözüldü bildirimlerini bu hesap gönderir)
                 </span>
               </summary>
               <div className="mt-3 flex items-center gap-2 border-b border-slate-200 pb-2 dark:border-ndark-border">
                 <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
-                  Her inbox kendi SMTP'siyle gönderim yapıyorsa bu kart devre dışı sayılabilir.
-                  Yeni bir inbox'un SMTP alanı boş bırakıldığında bu ayarlar devreye girer.
+                  Agent'ın composer'dan gönderdiği mailler her inbox'un kendi SMTP'siyle
+                  gider; bu kart <strong>sistemin ürettiği otomatik bildirim maillerini</strong>
+                  gönderen hesabı tanımlar. İdealde ayrı bir "no-reply" hesabı; şu anki
+                  hesabı istediğin zaman değiştirebilirsin. Boş bırakılırsa sistem
+                  bildirimleri hata verir.
                 </span>
               </div>
 

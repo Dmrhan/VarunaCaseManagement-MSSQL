@@ -180,13 +180,13 @@ expect('9.6 finalFromAddress fallback — "Display <address>" veya çıplak',
   /finalFromAddress = trimmedFromAddress[\s\S]{0,300}trimmedDisplayName \? `\$\{trimmedDisplayName\} <\$\{addr\}>` : addr/.test(page), true);
 
 console.log('\n── 10) UI — Layout swap ──────────────────────');
-expect('10.1 MailInboxManager sayfa yukarısında (SMTP kartından ÖNCE)',
-  /FAZ B[\s\S]{0,500}MailInboxManager companyId=\{companyId\}[\s\S]{0,3000}Giden Mail \(SMTP\) — Ortak Fallback/.test(page), true);
-expect('10.2 SMTP kart collapse (details/summary)',
-  /<details[\s\S]{0,600}Giden Mail \(SMTP\) — Ortak Fallback/.test(page)
+expect('10.1 MailInboxManager sayfa yukarısında (Sistem Bildirim kartından ÖNCE)',
+  /MailInboxManager companyId=\{companyId\}[\s\S]{0,4000}Sistem Bildirim Mailleri \(no-reply\)/.test(page), true);
+expect('10.2 Sistem bildirim kartı collapse (details/summary)',
+  /<details[\s\S]{0,600}Sistem Bildirim Mailleri \(no-reply\)/.test(page)
     && /<\/details>/.test(page), true);
-expect('10.3 SMTP kart hint — fallback açıklaması',
-  /SMTP'si tanımlı olmayan inbox'lar buradan gönderir/.test(page), true);
+expect('10.3 Kart hint — otomatik bildirim mailleri açıklaması',
+  /vaka açıldı \/ durum güncellendi \/ çözüldü bildirimlerini bu hesap gönderir/.test(page), true);
 
 console.log('\n── 11) UI — Test rozeti IMAP+SMTP ayrı ─────────');
 expect('11.1 testResult.imap rozet',

@@ -93,10 +93,10 @@ expect('4.5 SMTP alanları KORUNDU (fromAddress, smtpHost, smtpPort, smtpSecure,
   /fromAddress: d\.fromAddress[\s\S]{0,300}smtpHost: d\.smtpHost[\s\S]{0,100}smtpPort: d\.smtpPort[\s\S]{0,100}smtpSecure: d\.smtpSecure[\s\S]{0,100}username: d\.username/.test(page), true);
 
 console.log('\n── 5) UI üst kart — SMTP odaklı sadeleştirme ─');
-expect('5.1 "Giden Mail (SMTP)" başlığı',
-  /Giden Mail \(SMTP\)/.test(page), true);
-expect('5.2 SMTP kart hint — FAZ B fallback açıklaması (composer yönlendirmesi kaldırıldı; per-inbox SMTP artık asıl yol)',
-  /SMTP'si tanımlı olmayan inbox'lar buradan gönderir/.test(page), true);
+expect('5.1 "Sistem Bildirim Mailleri (no-reply)" başlığı (kart başlığı yeniden adlandırıldı 2026-07-02)',
+  /Sistem Bildirim Mailleri \(no-reply\)/.test(page), true);
+expect('5.2 Kart hint — otomatik bildirim mailleri açıklaması (vaka açıldı / durum güncellendi / çözüldü)',
+  /vaka açıldı \/ durum güncellendi \/ çözüldü bildirimlerini bu hesap gönderir/.test(page), true);
 expect('5.3 Entegrasyon Aktif — kill switch açıklaması güncellendi',
   /Kill switch[\s\S]{0,300}T[ÜÜÙ]M inbox'lar[\s\S]{0,200}durur/.test(page), true);
 expect('5.4 Legacy IMAP açıklama satırı — aşağı yönlendirme',

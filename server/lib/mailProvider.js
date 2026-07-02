@@ -135,10 +135,12 @@ async function resolveConfig({ companyId, from } = {}) {
     };
   }
 
-  // Env fallback (M1)
+  // Env fallback (M1). FAZ B fix — parametre `from` ile scope çakışmasın
+  // diye `envFrom` adlandırması. Parametre from = payload'daki agent'ın
+  // seçtiği alias; envFrom = MAIL_FROM env'inden gelen default.
   const transport = (process.env.MAIL_TRANSPORT || 'ethereal').toLowerCase();
   const auth = (process.env.MAIL_AUTH || 'password').toLowerCase();
-  const from = process.env.MAIL_FROM || DEFAULT_FROM;
+  const envFrom = process.env.MAIL_FROM || DEFAULT_FROM;
 
   if (auth !== 'password') {
     throw new MailProviderError(
@@ -148,7 +150,7 @@ async function resolveConfig({ companyId, from } = {}) {
   }
 
   if (transport === 'ethereal') {
-    return { transport, auth, from, source: 'env' };
+    return { transport, auth, from: envFrom, source: 'env' };
   }
 
   if (transport === 'smtp') {
@@ -169,7 +171,7 @@ async function resolveConfig({ companyId, from } = {}) {
         { code: 'mail_smtp_creds_missing', status: 500 },
       );
     }
-    return { transport, auth, from, smtp: { host, port, secure, user, pass }, source: 'env' };
+    return { transport, auth, from: envFrom, smtp: { host, port, secure, user, pass }, source: 'env' };
   }
 
   throw new MailProviderError(
