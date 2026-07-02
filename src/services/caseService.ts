@@ -2490,6 +2490,10 @@ export const lookupService = {
       supportLevel: SupportLevel;
       productGroupId: string;
     }>;
+    /// Smart Ticket Step 1 (2026-07-02) — Agent-safe ProductGroup listesi.
+    /// Admin `/api/admin/product-groups` gate'li olduğu için buradan
+    /// dönüyor. Boş gruplar da listelenir (grup-only seçim mümkün).
+    productGroups: Array<{ id: string; code: string; name: string }>;
     packageItems: Record<string, string[]>;
     suggestedPackage: string | null;
   }> {
@@ -2507,6 +2511,7 @@ export const lookupService = {
         supportLevel: SupportLevel;
         productGroupId: string;
       }>;
+      productGroups: Array<{ id: string; code: string; name: string }>;
       packageItems: Record<string, string[]>;
       suggestedPackage: string | null;
     }>(url.pathname + url.search, undefined, 'Katalog yüklenemedi');
@@ -2516,6 +2521,7 @@ export const lookupService = {
         accountId: params.accountId ?? null,
         packages: [],
         products: [],
+        productGroups: [],
         packageItems: {},
         suggestedPackage: null,
       }
