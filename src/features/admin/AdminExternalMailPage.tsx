@@ -138,6 +138,33 @@ function formatInboxTestMessage(result: InboxTestResult): string {
   }
 }
 
+/**
+ * FAZ B (2026-07-02) — Kanal başına test sonucu Türkçe mesajı.
+ * IMAP: mail çekme; SMTP: mail gönderme.
+ */
+function formatChannelTestMessage(ch: { ok: boolean; code: string; message: string; fallbackAvailable?: boolean }, channel: 'imap' | 'smtp'): string {
+  if (ch.ok) return channel === 'imap' ? 'bağlandı' : 'bağlandı';
+  if (channel === 'smtp' && ch.fallbackAvailable) {
+    return 'config yok — tenant fallback devrede';
+  }
+  switch (ch.code) {
+    case 'auth_failed':
+      return channel === 'imap'
+        ? 'kimlik hatası (App Password?)'
+        : 'kimlik hatası (App Password?)';
+    case 'connection_failed':
+      return channel === 'imap'
+        ? 'sunucu erişilemedi (993 açık mı?)'
+        : 'sunucu erişilemedi (587/465 açık mı?)';
+    case 'config_incomplete':
+      return channel === 'imap'
+        ? 'host/kullanıcı/şifre eksik'
+        : 'host/kullanıcı/şifre eksik';
+    default:
+      return ch.message || 'hata';
+  }
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   try {
@@ -312,6 +339,28 @@ export function AdminExternalMailPage() {
         </Card>
       )}
 
+      {/* FAZ B (2026-07-02) — Layout swap: Multi-Inbox sayfa merkezi, SMTP
+          fallback kart en altta collapse. Her inbox artık kendi SMTP+IMAP
+          kredisiyle çalışır; tenant-ortak SMTP yalnız SMTP'si tanımsız
+          inbox'lar için fallback. */}
+      {companyId && <MailInboxManager companyId={companyId} />}
+
+      {/* Compose-Signature F2 — Şirket imza şablonu (lazy) — Multi-Inbox'ın altında,
+          agent'ın sık kullandığı yer. */}
+      {companyId && (
+        <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
+          <CompanySignatureTemplate companyId={companyId} />
+        </Suspense>
+      )}
+
+      {/* From alias yönetimi — composer dropdown beslemesi. Multi-Inbox
+          adresleri otomatik köprülenir; bu kart nadir manuel ekleme için. */}
+      {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
+
+      {/* Giden Mail (SMTP) — Ortak Fallback. Collapse şeklinde; sık
+          kullanılmıyor. FAZ B sonrası her inbox kendi SMTP'siyle gönderim
+          yapıyor; bu kart yalnız SMTP'si TANIMSIZ olan inbox'lar için
+          fallback sağlar. */}
       <Card>
         <CardBody>
           {showSkeleton ? (
@@ -322,18 +371,17 @@ export function AdminExternalMailPage() {
               <Skeleton height={14} width="60%" />
             </div>
           ) : (
-            <div className="space-y-5">
-              {/* Üst blok başlığı — go-live sadeleştirmesi (2026-07-02).
-                  Multi-Inbox v1 sonrası gelen mail ayarları AŞAĞIDAKİ
-                  "Gelen Mail Inbox'ları" bölümünde yönetiliyor; bu kart
-                  yalnız Giden Mail (SMTP) tanımıdır. */}
-              <div className="flex items-center gap-2 border-b border-slate-200 pb-2 dark:border-ndark-border">
-                <span className="text-sm font-semibold text-slate-800 dark:text-ndark-text">
-                  Giden Mail (SMTP)
+            <details className="space-y-5" open={false}>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-ndark-text">
+                Giden Mail (SMTP) — Ortak Fallback
+                <span className="ml-2 text-[11px] font-normal text-slate-500 dark:text-ndark-muted">
+                  (SMTP'si tanımlı olmayan inbox'lar buradan gönderir)
                 </span>
+              </summary>
+              <div className="mt-3 flex items-center gap-2 border-b border-slate-200 pb-2 dark:border-ndark-border">
                 <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
-                  Tüm giden mailler bu hesaptan gönderilir; composer'daki "Gönderen"
-                  adresi aşağıdaki Gönderen Adresleri listesinden seçilir.
+                  Her inbox kendi SMTP'siyle gönderim yapıyorsa bu kart devre dışı sayılabilir.
+                  Yeni bir inbox'un SMTP alanı boş bırakıldığında bu ayarlar devreye girer.
                 </span>
               </div>
 
@@ -501,23 +549,11 @@ export function AdminExternalMailPage() {
                   {testing ? 'Test ediliyor…' : 'Bağlantıyı test et'}
                 </Button>
               </div>
-            </div>
+            </details>
           )}
         </CardBody>
       </Card>
-
-      {/* M5-extension — Per-company From alias yönetimi */}
-      {companyId && <FromAliasManager companyId={companyId} fallbackFrom={draft?.fromAddress ?? ''} />}
-
-      {/* Multi-Inbox A4 — Per-company gelen mailbox yönetimi (N hesap → N takım) */}
-      {companyId && <MailInboxManager companyId={companyId} />}
-
-      {/* Compose-Signature F2 — Şirket imza şablonu (lazy load) */}
-      {companyId && (
-        <Suspense fallback={<p className="text-sm text-slate-400">Şirket imza şablonu yükleniyor…</p>}>
-          <CompanySignatureTemplate companyId={companyId} />
-        </Suspense>
-      )}
+      {/* NOT: Multi-Inbox / Signature / FromAlias kartları yukarı taşındı (FAZ B layout swap). */}
     </div>
   );
 }
@@ -874,20 +910,53 @@ function MailInboxManager({ companyId }: { companyId: string }) {
                         <span className="text-slate-400">IMAP: {it.imapHost}:{it.imapPort ?? '?'}</span>
                       )}
                     </div>
-                    {/* 2026-07-02 — Test sonucu satır içi rozet + aksiyon mesajı.
-                        Kod'a göre self-explanatory mesaj — admin ne yapacağını
-                        anlar (App Password kontrolü / IT / config eksik). */}
+                    {/* FAZ B (2026-07-02) — IMAP + SMTP ayrı rozet.
+                        Her kanal için kendi kod → mesaj eşlemesi. */}
                     {testResult && (
-                      <div
-                        className={`mt-1.5 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium ${
-                          testResult.ok
-                            ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                            : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
-                        }`}
-                        role="status"
-                      >
-                        {testResult.ok ? <CheckCircle2 size={11} /> : <Info size={11} />}
-                        <span>{formatInboxTestMessage(testResult)}</span>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5" role="status">
+                        {testResult.imap && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.imap.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.imap.ok ? <CheckCircle2 size={10} /> : <Info size={10} />}
+                            <span>IMAP: {formatChannelTestMessage(testResult.imap, 'imap')}</span>
+                          </span>
+                        )}
+                        {testResult.smtp && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.smtp.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : testResult.smtp.fallbackAvailable
+                                  ? 'bg-slate-100 text-slate-700 dark:bg-ndark-surface dark:text-ndark-muted'
+                                  : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.smtp.ok
+                              ? <CheckCircle2 size={10} />
+                              : testResult.smtp.fallbackAvailable
+                                ? <Info size={10} />
+                                : <Info size={10} />}
+                            <span>SMTP: {formatChannelTestMessage(testResult.smtp, 'smtp')}</span>
+                          </span>
+                        )}
+                        {/* Kanallar yoksa (inbox_disabled / inbox_invalid vb.) toplam kod'u göster. */}
+                        {!testResult.imap && !testResult.smtp && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+                              testResult.ok
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                            }`}
+                          >
+                            {testResult.ok ? <CheckCircle2 size={10} /> : <Info size={10} />}
+                            <span>{formatInboxTestMessage(testResult)}</span>
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -969,6 +1038,13 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
   const [imapHost, setImapHost] = useState(initial?.imapHost ?? 'imap.gmail.com');
   const [imapPort, setImapPort] = useState<number>(initial?.imapPort ?? 993);
   const [imapSecure, setImapSecure] = useState<boolean>(initial?.imapSecure ?? true);
+  // FAZ B (2026-07-02) — Per-inbox SMTP alanları.
+  // Default'lar Gmail için doğru (smtp.gmail.com:587 STARTTLS). Backend
+  // upsert boş bırakılırsa NULL saklar → tenant-ortak fallback devrede.
+  const [smtpHost, setSmtpHost] = useState<string>(initial?.smtpHost ?? 'smtp.gmail.com');
+  const [smtpPort, setSmtpPort] = useState<number>(initial?.smtpPort ?? 587);
+  const [smtpSecure, setSmtpSecure] = useState<boolean>(initial?.smtpSecure === true);
+  const [fromAddress, setFromAddress] = useState<string>(initial?.fromAddress ?? '');
   const [username, setUsername] = useState(initial?.username ?? '');
   const [assignedTeamId, setAssignedTeamId] = useState<string>(initial?.assignedTeamId ?? '');
   const [enabled, setEnabled] = useState<boolean>(initial?.enabled ?? false);
@@ -1003,12 +1079,24 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
       toast({ type: 'warn', message: 'Şifre en az 4 karakter olmalı.' });
       return undefined;
     }
+    // FAZ B — fromAddress default: kullanıcı boş bıraktıysa
+    // "Display <address>" (display doluysa) veya çıplak address.
+    const trimmedDisplayName = displayName.trim();
+    const trimmedFromAddress = fromAddress.trim();
+    const finalFromAddress = trimmedFromAddress
+      || (trimmedDisplayName ? `${trimmedDisplayName} <${addr}>` : addr);
+
     const draft: MailInboxDraft = {
       address: addr,
-      displayName: displayName.trim() || null,
+      displayName: trimmedDisplayName || null,
       imapHost: imapHost.trim() || null,
       imapPort: Number(imapPort) || null,
       imapSecure,
+      // FAZ B — SMTP alanları; boş bırakılırsa NULL (tenant fallback).
+      smtpHost: smtpHost.trim() || null,
+      smtpPort: Number(smtpPort) || null,
+      smtpSecure,
+      fromAddress: finalFromAddress || null,
       username: username.trim() || null,
       assignedTeamId: assignedTeamId || null,
       enabled,
@@ -1131,36 +1219,101 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
           </Field>
         </div>
 
-        {/* IMAP credentials */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
-            <TextInput
-              value={imapHost}
-              onChange={(e) => setImapHost(e.target.value)}
-              placeholder="imap.gmail.com"
-            />
-          </Field>
-          <Field label="Port" hint="IMAPS: 993">
-            <TextInput
-              type="number"
-              value={String(imapPort)}
-              onChange={(e) => setImapPort(Number(e.target.value))}
-              placeholder="993"
-            />
-          </Field>
-          <Field label="SSL/TLS">
-            <label className="mt-2 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={imapSecure}
-                onChange={(e) => setImapSecure(e.target.checked)}
+        {/* IMAP credentials — GELEN mail */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            GELEN MAİL (IMAP) — Bu adrese gelen mailler polling ile çekilir
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
+              <TextInput
+                value={imapHost}
+                onChange={(e) => setImapHost(e.target.value)}
+                placeholder="imap.gmail.com"
               />
-              <span>Güvenli bağlantı (zorunlu)</span>
-            </label>
-          </Field>
+            </Field>
+            <Field label="Port" hint="IMAPS: 993">
+              <TextInput
+                type="number"
+                value={String(imapPort)}
+                onChange={(e) => setImapPort(Number(e.target.value))}
+                placeholder="993"
+              />
+            </Field>
+            <Field label="SSL/TLS">
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={imapSecure}
+                  onChange={(e) => setImapSecure(e.target.checked)}
+                />
+                <span>Güvenli bağlantı (zorunlu)</span>
+              </label>
+            </Field>
+          </div>
         </div>
 
-        {/* Auth */}
+        {/* FAZ B (2026-07-02) — GİDEN mail (SMTP) — Per-inbox tam kredi.
+            Boş bırakılırsa tenant-ortak SMTP fallback devrede
+            (mevcut inbox'lar backfill sonrası dolu; yeni inbox'lar isterse
+            tenant'a düşer). */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            GİDEN MAİL (SMTP) — Bu adresten gönderim ayrı hesapla yapılır
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="SMTP sunucusu" hint="Gmail: smtp.gmail.com">
+              <TextInput
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+                placeholder="smtp.gmail.com"
+              />
+            </Field>
+            <Field label="Port" hint="587 (STARTTLS) veya 465 (SSL)">
+              <TextInput
+                type="number"
+                value={String(smtpPort)}
+                onChange={(e) => setSmtpPort(Number(e.target.value))}
+                placeholder="587"
+              />
+            </Field>
+            <Field label="SSL/TLS">
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={smtpSecure}
+                  onChange={(e) => setSmtpSecure(e.target.checked)}
+                />
+                <span>SSL (465 için açık)</span>
+              </label>
+            </Field>
+          </div>
+          <div className="mt-3">
+            <Field
+              label="From adresi"
+              hint={
+                'Bu inbox\'tan çıkan mailler bu "From" ile gider. Boş bırakırsan '
+                + '"Görünen ad <mail adresi>" formatı otomatik uygulanır.'
+              }
+            >
+              <TextInput
+                value={fromAddress}
+                onChange={(e) => setFromAddress(e.target.value)}
+                placeholder={
+                  displayName.trim()
+                    ? `${displayName.trim()} <${address || 'adres@ornek.com'}>`
+                    : (address || 'adres@ornek.com')
+                }
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Auth — SMTP + IMAP paylaşımlı (Gmail App Password tek kredi). */}
+        <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
+          <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
+            KİMLİK BİLGİLERİ — SMTP ve IMAP paylaşımlı (tek App Password)
+          </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Kullanıcı adı" hint="Genelde mail adresi ile aynı">
             <TextInput
@@ -1172,7 +1325,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
           <div>
             <Field
               label={isEdit ? 'Şifre' : 'Şifre (App Password)'}
-              hint={isEdit ? 'Yeni şifre girmek için aşağıdaki seçeneği işaretle.' : 'Gmail için App Password (16 karakter)'}
+              hint={isEdit ? 'Yeni şifre girmek için aşağıdaki seçeneği işaretle.' : 'Gmail için App Password (16 karakter). Hem SMTP hem IMAP için kullanılır.'}
               required={!isEdit}
             >
               {isEdit && (
@@ -1201,6 +1354,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
               />
             </Field>
           </div>
+        </div>
         </div>
 
         {/* Routing — Takım */}

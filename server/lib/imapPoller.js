@@ -191,30 +191,12 @@ function classifyImapError(err) {
  *
  * Secret: RAM'de sadece client oluşturulurken; response'a inmez.
  */
-export async function testInboxConnection(inbox) {
-  const startedAt = new Date().toISOString();
-  if (!inbox || !inbox.id || !inbox.companyId) {
-    return { ok: false, code: 'inbox_invalid', message: 'inbox + companyId zorunlu.', meta: { startedAt } };
-  }
-  if (inbox.isActive === false) {
-    return { ok: false, code: 'inbox_disabled', message: 'Inbox pasif — önce aktifleştir.', meta: { startedAt } };
-  }
+async function testImapOnly(inbox, secret) {
   if (!inbox.imapHost || !inbox.username) {
-    return {
-      ok: false,
-      code: 'config_incomplete',
-      message: 'IMAP host / kullanıcı adı / şifre eksik.',
-      meta: { startedAt },
-    };
+    return { ok: false, code: 'config_incomplete', message: 'IMAP host / kullanıcı adı / şifre eksik.' };
   }
-  const secret = await externalMailInboxRepo.getDecryptedSecret(inbox.companyId, inbox.id);
   if (!secret) {
-    return {
-      ok: false,
-      code: 'config_incomplete',
-      message: 'IMAP host / kullanıcı adı / şifre eksik.',
-      meta: { startedAt },
-    };
+    return { ok: false, code: 'config_incomplete', message: 'IMAP host / kullanıcı adı / şifre eksik.' };
   }
   const client = new ImapFlow({
     host: inbox.imapHost,
@@ -224,39 +206,109 @@ export async function testInboxConnection(inbox) {
     logger: false,
     socketTimeout: IMAP_CONNECT_TIMEOUT_MS,
   });
-  // pollInbox:234 pattern — 'error' listener EventEmitter crash guard.
   client.on('error', () => {});
   try {
     await client.connect();
   } catch (err) {
     const code = classifyImapError(err);
     try { await client.logout(); } catch {}
-    return {
-      ok: false,
-      code,
-      message: err?.message ?? 'IMAP hatası.',
-      meta: { startedAt },
-    };
+    return { ok: false, code, message: err?.message ?? 'IMAP hatası.' };
   }
-  // INBOX lock — kaynak açılmadan çıkmayalım (mail ÇEKMİYORUZ, sadece açıp
-  // kapatıyoruz; server-side "readable mailbox mı" doğrulaması).
   try {
     const lock = await client.getMailboxLock('INBOX');
     lock.release();
   } catch (err) {
     try { await client.logout(); } catch {}
+    return { ok: false, code: 'connection_failed', message: err?.message ?? 'INBOX açılamadı.' };
+  }
+  try { await client.logout(); } catch {}
+  return { ok: true, code: 'ok', message: 'IMAP bağlantısı başarılı.' };
+}
+
+async function testSmtpOnly(inbox, secret) {
+  // Per-inbox SMTP dolu değilse test edilecek konfigürasyon yok.
+  if (!inbox.smtpHost || !inbox.username) {
     return {
       ok: false,
-      code: 'connection_failed',
-      message: err?.message ?? 'INBOX açılamadı.',
+      code: 'config_incomplete',
+      message: 'SMTP host / kullanıcı adı / şifre eksik. (Bu inbox tenant-ortak SMTP fallback\'e düşer.)',
+      fallbackAvailable: true,
+    };
+  }
+  if (!secret) {
+    return { ok: false, code: 'config_incomplete', message: 'SMTP şifresi (App Password) eksik.' };
+  }
+  // nodemailer lazy import — imapPoller boot'ta ihtiyaç yok.
+  const { default: nodemailer } = await import('nodemailer');
+  const transport = nodemailer.createTransport({
+    host: inbox.smtpHost,
+    port: inbox.smtpPort || 587,
+    secure: inbox.smtpSecure === true,
+    auth: { user: inbox.username, pass: secret },
+    connectionTimeout: IMAP_CONNECT_TIMEOUT_MS,
+    greetingTimeout: IMAP_CONNECT_TIMEOUT_MS,
+  });
+  try {
+    await transport.verify();
+    return { ok: true, code: 'ok', message: 'SMTP bağlantısı başarılı — gönderim için hazır.' };
+  } catch (err) {
+    const msg = String(err?.message ?? '').toLowerCase();
+    const code = String(err?.code ?? '').toUpperCase();
+    if (err?.responseCode === 535 || code === 'EAUTH' || msg.includes('authentication')
+      || msg.includes('invalid') || msg.includes('username and password')) {
+      return { ok: false, code: 'auth_failed', message: err?.message ?? 'SMTP kimlik doğrulama başarısız.' };
+    }
+    return { ok: false, code: 'connection_failed', message: err?.message ?? 'SMTP sunucu erişilemiyor.' };
+  } finally {
+    try { transport.close(); } catch {}
+  }
+}
+
+export async function testInboxConnection(inbox) {
+  const startedAt = new Date().toISOString();
+  if (!inbox || !inbox.id || !inbox.companyId) {
+    return {
+      ok: false,
+      code: 'inbox_invalid',
+      message: 'inbox + companyId zorunlu.',
+      imap: null,
+      smtp: null,
       meta: { startedAt },
     };
   }
-  try { await client.logout(); } catch {}
+  if (inbox.isActive === false) {
+    return {
+      ok: false,
+      code: 'inbox_disabled',
+      message: 'Inbox pasif — önce aktifleştir.',
+      imap: null,
+      smtp: null,
+      meta: { startedAt },
+    };
+  }
+  const secret = await externalMailInboxRepo.getDecryptedSecret(inbox.companyId, inbox.id);
+
+  // İkisini paralel çalıştır — bağımsız bağlantılar.
+  const [imap, smtp] = await Promise.all([
+    testImapOnly(inbox, secret),
+    testSmtpOnly(inbox, secret),
+  ]);
+
+  // Toplam ok: ikisi de ok VEYA SMTP config yok (fallback devrede) + IMAP ok.
+  const totalOk = imap.ok && (smtp.ok || smtp.fallbackAvailable === true);
+  const code = totalOk ? 'ok' : (imap.ok ? smtp.code : imap.code);
+  const message = totalOk
+    ? (smtp.fallbackAvailable
+        ? 'IMAP bağlantısı başarılı — SMTP tanımsız, tenant-ortak fallback devrede.'
+        : 'IMAP + SMTP bağlantısı başarılı — bu inbox tam kredi ile hazır.')
+    : (imap.ok ? `SMTP: ${smtp.message}` : `IMAP: ${imap.message}`);
+
   return {
-    ok: true,
-    code: 'ok',
-    message: 'Bağlantı başarılı — bu inbox polling için hazır.',
+    ok: totalOk,
+    code,
+    message,
+    imap,
+    smtp,
     meta: { startedAt },
   };
 }

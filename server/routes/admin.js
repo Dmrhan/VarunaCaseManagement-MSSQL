@@ -1287,6 +1287,15 @@ router.post('/external-mail-settings/:companyId/inboxes', asyncRoute(async (req,
       : 400;
     return res.status(status).json({ error: code });
   }
+  // FAZ B (2026-07-02) — FromAlias auto-bridge. Yeni inbox adresi
+  // composer dropdown'da görünsün + suggestedFromId eşleşmesi çalışsın.
+  // Mevcut alias'a DOKUNMAZ (idempotent).
+  await externalMailFromAliasRepo.ensureForInboxAddress(
+    companyId,
+    result.inbox.address,
+    result.inbox.displayName,
+    actor.userId ?? null,
+  );
   res.json(result.inbox);
 }));
 
@@ -1313,6 +1322,14 @@ router.patch('/external-mail-settings/:companyId/inboxes/:inboxId', asyncRoute(a
       : 400;
     return res.status(status).json({ error: code });
   }
+  // FAZ B — Address değişse veya yeni displayName gelirse alias köprüsü
+  // sağlansın (idempotent; mevcut alias'a dokunmaz).
+  await externalMailFromAliasRepo.ensureForInboxAddress(
+    companyId,
+    result.inbox.address,
+    result.inbox.displayName,
+    actor.userId ?? null,
+  );
   res.json(result.inbox);
 }));
 

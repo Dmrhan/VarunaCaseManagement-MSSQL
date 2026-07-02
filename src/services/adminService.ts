@@ -1816,8 +1816,8 @@ export interface FromAliasDraft {
   sortOrder?: number;
 }
 
-// Mail Multi-Inbox (Faz A) — Per-company çoklu gelen mailbox.
-// Her satır AYRI IMAP hesabı + AYRI takım routing (havuz).
+// Mail Multi-Inbox (Faz A + FAZ B 2026-07-02) — Per-company çoklu tam
+// kredili mailbox. Her satır AYRI IMAP + SMTP hesabı + AYRI takım routing.
 export interface MailInboxItem {
   id: string;
   companyId: string;
@@ -1826,6 +1826,11 @@ export interface MailInboxItem {
   imapHost: string | null;
   imapPort: number | null;
   imapSecure: boolean;
+  /// FAZ B — Per-inbox SMTP. NULL → tenant-ortak fallback.
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecure: boolean | null;
+  fromAddress: string | null;
   username: string | null;
   secretIsSet: boolean;
   secretSetAt: string | null;
@@ -1837,7 +1842,7 @@ export interface MailInboxItem {
   updatedAt: string;
 }
 
-// 2026-07-02 — Inbox-başına IMAP bağlantı testi sonuç tipi.
+// 2026-07-02 — Inbox-başına IMAP + SMTP bağlantı testi sonuç tipi.
 // Backend imapPoller.testInboxConnection'dan gelir. Secret response'a inmez.
 export type InboxTestCode =
   | 'ok'
@@ -1848,10 +1853,21 @@ export type InboxTestCode =
   | 'inbox_invalid'
   | 'not_found';
 
+// FAZ B — Kanal başına sonuç.
+export interface InboxTestChannelResult {
+  ok: boolean;
+  code: InboxTestCode;
+  message: string;
+  /** SMTP: config eksik → fallback devrede (hata değil). */
+  fallbackAvailable?: boolean;
+}
+
 export interface InboxTestResult {
   ok: boolean;
   code: InboxTestCode;
   message: string;
+  imap?: InboxTestChannelResult | null;
+  smtp?: InboxTestChannelResult | null;
   meta?: { startedAt?: string };
 }
 
@@ -1861,6 +1877,11 @@ export interface MailInboxDraft {
   imapHost?: string | null;
   imapPort?: number | null;
   imapSecure?: boolean;
+  /// FAZ B — SMTP per-inbox
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecure?: boolean | null;
+  fromAddress?: string | null;
   username?: string | null;
   /// Secret yalnız set/rotation için body'de gönderilir; response'a düz secret DÖNMEZ.
   secret?: string;

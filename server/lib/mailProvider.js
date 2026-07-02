@@ -58,7 +58,7 @@ export class MailProviderError extends Error {
  * dinamik import edilir (server/db/client mailProvider boot anında
  * gerekmez).
  */
-async function resolveConfig({ companyId } = {}) {
+async function resolveConfig({ companyId, from } = {}) {
   let dbConfig = null;
   if (companyId) {
     const repo = (await import('../db/externalMailSettingRepository.js')).externalMailSettingRepo;
@@ -68,6 +68,33 @@ async function resolveConfig({ companyId } = {}) {
         'Mail entegrasyonu bu şirket için kapalı (admin tarafından devre dışı).',
         { code: 'mail_integration_disabled', status: 503 },
       );
+    }
+
+    // FAZ B (2026-07-02) — Per-inbox SMTP resolve.
+    // payload.from adresi bir inbox.address / inbox.fromAddress ile
+    // eşleşirse VE o inbox'un SMTP config'i tam ise, inbox'un
+    // credential'ıyla transport kur. Eşleşme yok / SMTP eksik → tenant-
+    // ortak fallback (aşağıdaki dbConfig yolu). Fallback yolu birebir
+    // korunur — mevcut davranış regresyonsuz.
+    if (from) {
+      const inboxRepo = (await import('../db/externalMailInboxRepository.js')).externalMailInboxRepo;
+      const inboxSmtp = await inboxRepo.resolveInboxSmtpByFrom(companyId, from);
+      if (inboxSmtp) {
+        return {
+          transport: 'smtp',
+          auth: 'password',
+          from: inboxSmtp.from,
+          smtp: {
+            host: inboxSmtp.host,
+            port: inboxSmtp.port,
+            secure: inboxSmtp.secure,
+            user: inboxSmtp.user,
+            pass: inboxSmtp.pass,
+          },
+          source: 'inbox',
+          inboxId: inboxSmtp.inboxId,
+        };
+      }
     }
   }
 
@@ -239,7 +266,10 @@ export async function sendMail({
   let config;
   try {
     // M5 — opts.companyId verildiyse per-tenant DB config; yoksa env (M1).
-    config = await resolveConfig({ companyId: opts.companyId });
+    // FAZ B — payload.from verildiyse önce per-inbox SMTP lookup; eşleşme
+    // yoksa tenant-ortak fallback (aynı yol). Log: config.source = 'inbox'
+    // veya 'db' veya 'env'.
+    config = await resolveConfig({ companyId: opts.companyId, from });
   } catch (err) {
     return {
       ok: false,
@@ -295,7 +325,13 @@ export async function sendMail({
       rawSource: RAW_SOURCE,
       messageId: info?.messageId ?? null,
       previewUrl,
-      meta: { proxiedAt, transport: config.transport, source: config.source },
+      meta: {
+        proxiedAt,
+        transport: config.transport,
+        source: config.source,
+        // FAZ B — teşhis: gönderim hangi inbox'tan yapıldı ('inbox' source ise).
+        ...(config.inboxId ? { inboxId: config.inboxId } : {}),
+      },
     };
   } catch (err) {
     return {
