@@ -63,6 +63,15 @@ expect('2.4 BEGIN TRY/CATCH + ROLLBACK guard',
 expect('2.5 Mevcut satır SİLİNMEZ (DELETE yok, DROP yok)',
   !/DELETE FROM \[dbo\]\.\[ExternalMailInbox\]/.test(migration)
     && !/DROP TABLE \[dbo\]\.\[ExternalMailInbox\]/.test(migration), true);
+// Codex P2 R1 fix — Mevcut inbox'lar için FromAlias köprüsü backfill.
+expect('2.6 FromAlias backfill INSERT — mevcut inbox\'lar composer\'da görünsün',
+  /INSERT INTO \[dbo\]\.\[ExternalMailSettingFromAlias\][\s\S]{0,400}FROM \[dbo\]\.\[ExternalMailInbox\] i/.test(migration), true);
+expect('2.7 FromAlias backfill idempotent (NOT EXISTS — mevcut alias\'a dokunmaz)',
+  /INSERT INTO \[dbo\]\.\[ExternalMailSettingFromAlias\][\s\S]{0,1000}NOT EXISTS[\s\S]{0,300}FROM \[dbo\]\.\[ExternalMailSettingFromAlias\] a[\s\S]{0,200}a\.\[companyId\] = i\.\[companyId\][\s\S]{0,200}a\.\[address\] = i\.\[address\]/.test(migration), true);
+expect('2.8 FromAlias backfill — isDefault=0 (mevcut default\'a dokunma) + isActive=1',
+  /INSERT INTO \[dbo\]\.\[ExternalMailSettingFromAlias\][\s\S]{0,600}0,\s*\r?\n\s*1,/.test(migration), true);
+expect('2.9 FromAlias backfill — yalnız isActive inbox\'lar',
+  /FROM \[dbo\]\.\[ExternalMailInbox\] i[\s\S]{0,300}WHERE i\.\[isActive\] = 1/.test(migration), true);
 
 console.log('\n── 3) Repo — SELECTABLE + shape + upsert ───────');
 expect('3.1 SELECTABLE_PUBLIC: smtpHost/smtpPort/smtpSecure/fromAddress',
@@ -105,14 +114,23 @@ expect('5.5 sendMail resolveConfig\'e from geçirir',
   /resolveConfig\(\{ companyId: opts\.companyId, from \}\)/.test(mailProvider), true);
 expect('5.6 response meta.inboxId eklendi (teşhis)',
   /config\.inboxId \? \{ inboxId: config\.inboxId \} : \{\}/.test(mailProviderCode), true);
+// Codex P2 R1 fix — inbox.fromAddress admin ayarı honor edilsin
+expect('5.7 sendMail transport — inbox source ise config.from ÖNCELİK (admin fromAddress)',
+  /const finalFrom = \(config\.source === 'inbox' && config\.from\)\s*\?\s*config\.from\s*:\s*\(from \|\| config\.from\)/.test(mailProvider), true);
+expect('5.8 transport.sendMail from: finalFrom (payload from ezilmez tenant fallback\'te)',
+  /transport\.sendMail\(\{[\s\S]{0,200}from: finalFrom/.test(mailProviderCode), true);
 
 console.log('\n── 6) testInboxConnection — IMAP + SMTP ayrı ────');
 expect('6.1 testImapOnly ayrı fonksiyon',
   /async function testImapOnly\(inbox, secret\)/.test(pollerCode), true);
 expect('6.2 testSmtpOnly ayrı fonksiyon',
   /async function testSmtpOnly\(inbox, secret\)/.test(pollerCode), true);
-expect('6.3 SMTP config yoksa fallbackAvailable: true (hata değil)',
-  /if \(!inbox\.smtpHost \|\| !inbox\.username\)[\s\S]{0,400}fallbackAvailable: true/.test(pollerCode), true);
+expect('6.3 SMTP config yoksa — TENANT FALLBACK DOĞRULA (Codex P2 R1)',
+  /if \(!inbox\.smtpHost \|\| !inbox\.username\)[\s\S]{0,800}externalMailSettingRepository[\s\S]{0,600}resolveActiveConfig\(inbox\.companyId\)/.test(pollerCode), true);
+expect('6.3b Fallback tenant host+user+secret ve enabled=true kontrolü',
+  /if \(!cfg\)[\s\S]{0,300}cfg\.enabled === false[\s\S]{0,300}cfg\.smtpHost[\s\S]{0,300}cfg\.username[\s\S]{0,300}cfg\.secret[\s\S]{0,200}fallbackOk = true/.test(pollerCode), true);
+expect('6.3c fallbackAvailable YALNIZ fallbackOk=true iken true',
+  /if \(fallbackOk\)[\s\S]{0,400}fallbackAvailable: true[\s\S]{0,600}fallbackAvailable: false/.test(pollerCode), true);
 expect('6.4 SMTP: nodemailer.verify() ile test',
   /createTransport\(\{[\s\S]{0,400}await transport\.verify\(\)/.test(pollerCode), true);
 expect('6.5 SMTP: auth failed classification (responseCode 535 + EAUTH)',
@@ -236,20 +254,74 @@ expect('12.11 SMTP\'si NULL olan inbox — resolve NULL (fallback)',
 expect('12.12 Eşleşmeyen adres → NULL (fallback)',
   resolveSim(inboxes, 'baska@example.com'), null);
 
-console.log('\n── 13) Davranış — SMTP test fallback semantiği ─');
+console.log('\n── 13) Davranış — SMTP test fallback semantiği (Codex P2 R1) ─');
 
-function shouldFailSmtp(inbox, secret) {
-  if (!inbox.smtpHost || !inbox.username) return { code: 'config_incomplete', fallbackAvailable: true };
+// Yeni davranış — tenant fallback config'i doğrulanıyor.
+function classifyFallback(inbox, tenantCfg, secret) {
+  if (!inbox.smtpHost || !inbox.username) {
+    let fallbackOk = false;
+    let reason = null;
+    if (!tenantCfg) reason = 'tenant setting yok';
+    else if (tenantCfg.enabled === false) reason = 'tenant setting kapalı';
+    else if (!tenantCfg.smtpHost) reason = 'tenant smtpHost eksik';
+    else if (!tenantCfg.username) reason = 'tenant username eksik';
+    else if (!tenantCfg.secret) reason = 'tenant secret eksik';
+    else fallbackOk = true;
+    return { code: 'config_incomplete', fallbackAvailable: fallbackOk, reason };
+  }
   if (!secret) return { code: 'config_incomplete', fallbackAvailable: false };
-  return null; // real IMAP verify test would run
+  return null;
 }
 
-expect('13.1 SMTP host YOK → fallback devrede (hata değil)',
-  shouldFailSmtp({ smtpHost: null, username: 'x' }, 'pass')?.fallbackAvailable, true);
-expect('13.2 SMTP host VAR, secret YOK → config_incomplete (hata)',
-  shouldFailSmtp({ smtpHost: 'smtp.gmail.com', username: 'x' }, null)?.fallbackAvailable, false);
-expect('13.3 SMTP + secret dolu → null (test verify yapar)',
-  shouldFailSmtp({ smtpHost: 'smtp.gmail.com', username: 'x' }, 'pass'), null);
+const goodTenant = { enabled: true, smtpHost: 'smtp.tenant.com', username: 'user', secret: 'pass' };
+expect('13.1 inbox SMTP boş + tenant DOLU → fallbackAvailable=true',
+  classifyFallback({ smtpHost: null, username: null }, goodTenant, 'pass')?.fallbackAvailable, true);
+expect('13.2 inbox SMTP boş + tenant YOK → fallbackAvailable=false',
+  classifyFallback({ smtpHost: null, username: null }, null, 'pass')?.fallbackAvailable, false);
+expect('13.3 inbox SMTP boş + tenant enabled=false → fallbackAvailable=false',
+  classifyFallback({ smtpHost: null, username: null }, { ...goodTenant, enabled: false }, 'pass')?.fallbackAvailable, false);
+expect('13.4 inbox SMTP boş + tenant smtpHost yok → fallbackAvailable=false',
+  classifyFallback({ smtpHost: null, username: null }, { ...goodTenant, smtpHost: null }, 'pass')?.fallbackAvailable, false);
+expect('13.5 inbox SMTP boş + tenant username yok → fallbackAvailable=false',
+  classifyFallback({ smtpHost: null, username: null }, { ...goodTenant, username: null }, 'pass')?.fallbackAvailable, false);
+expect('13.6 inbox SMTP boş + tenant secret yok → fallbackAvailable=false',
+  classifyFallback({ smtpHost: null, username: null }, { ...goodTenant, secret: null }, 'pass')?.fallbackAvailable, false);
+expect('13.7 inbox SMTP dolu + secret yok → fallbackAvailable=false (kredi eksik)',
+  classifyFallback({ smtpHost: 'smtp.gmail.com', username: 'x' }, goodTenant, null)?.fallbackAvailable, false);
+expect('13.8 inbox SMTP dolu + secret dolu → null (verify çalışır)',
+  classifyFallback({ smtpHost: 'smtp.gmail.com', username: 'x' }, goodTenant, 'pass'), null);
+expect('13.9 tenant boş → reason "tenant setting yok"',
+  classifyFallback({ smtpHost: null, username: null }, null, 'pass')?.reason, 'tenant setting yok');
+expect('13.10 tenant enabled=false → reason "tenant setting kapalı"',
+  classifyFallback({ smtpHost: null, username: null }, { ...goodTenant, enabled: false }, 'pass')?.reason, 'tenant setting kapalı');
+
+console.log('\n── 15) Davranış — sendMail from override (Codex P2 R1) ─');
+
+function pickFinalFrom(config, payloadFrom) {
+  return (config.source === 'inbox' && config.from)
+    ? config.from
+    : (payloadFrom || config.from);
+}
+
+// Inbox source — admin fromAddress önceliği
+expect('15.1 inbox source + admin fromAddress dolu → admin adresi',
+  pickFinalFrom({ source: 'inbox', from: 'Destek <destek@x.com>' }, 'AgentAlias <destek@x.com>'),
+  'Destek <destek@x.com>');
+// Inbox source + admin fromAddress boş (nadir) → payload from fallback
+expect('15.2 inbox source + admin from boş → payload from fallback',
+  pickFinalFrom({ source: 'inbox', from: '' }, 'AgentAlias <destek@x.com>'),
+  'AgentAlias <destek@x.com>');
+// Tenant fallback source — mevcut davranış korunur
+expect('15.3 tenant source (db) + payload from → payload from (mevcut)',
+  pickFinalFrom({ source: 'db', from: 'Tenant Default <no-reply@x.com>' }, 'AgentAlias <destek@x.com>'),
+  'AgentAlias <destek@x.com>');
+expect('15.4 tenant source + payload from boş → tenant fromAddress',
+  pickFinalFrom({ source: 'db', from: 'Tenant Default <no-reply@x.com>' }, null),
+  'Tenant Default <no-reply@x.com>');
+// Env source
+expect('15.5 env source (dispatch/notification path) davranış aynen korunur',
+  pickFinalFrom({ source: 'env', from: 'Env <env@x.com>' }, 'Agent <a@x.com>'),
+  'Agent <a@x.com>');
 
 console.log('\n── 14) Kontrat — notification (M4.1) sender dokunulmadı ─');
 expect('14.1 caseEmailSender.js payload\'da from ve companyId geçirmeye devam',

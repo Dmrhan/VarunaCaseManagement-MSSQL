@@ -226,13 +226,38 @@ async function testImapOnly(inbox, secret) {
 }
 
 async function testSmtpOnly(inbox, secret) {
-  // Per-inbox SMTP dolu değilse test edilecek konfigürasyon yok.
+  // Per-inbox SMTP dolu değilse tenant fallback'in GERÇEKTEN gönderim
+  // yapabildiğini doğrula. Codex P2 R1 fix — önceden `fallbackAvailable:
+  // true` diyip tenant SMTP eksik olsa da admin'e "ready" göstermiş
+  // olurduk; oysa mailProvider'da gönderim yine fail eder.
   if (!inbox.smtpHost || !inbox.username) {
+    let fallbackOk = false;
+    let fallbackReason = null;
+    try {
+      const repo = (await import('../db/externalMailSettingRepository.js')).externalMailSettingRepo;
+      const cfg = await repo.resolveActiveConfig(inbox.companyId);
+      if (!cfg) fallbackReason = 'tenant setting yok';
+      else if (cfg.enabled === false) fallbackReason = 'tenant setting kapalı';
+      else if (!cfg.smtpHost) fallbackReason = 'tenant smtpHost eksik';
+      else if (!cfg.username) fallbackReason = 'tenant username eksik';
+      else if (!cfg.secret) fallbackReason = 'tenant secret eksik';
+      else fallbackOk = true;
+    } catch (err) {
+      fallbackReason = `tenant config okunamadı (${err?.message ?? 'bilinmeyen'})`;
+    }
+    if (fallbackOk) {
+      return {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Per-inbox SMTP tanımsız — tenant-ortak SMTP fallback devrede.',
+        fallbackAvailable: true,
+      };
+    }
     return {
       ok: false,
       code: 'config_incomplete',
-      message: 'SMTP host / kullanıcı adı / şifre eksik. (Bu inbox tenant-ortak SMTP fallback\'e düşer.)',
-      fallbackAvailable: true,
+      message: `Per-inbox SMTP + tenant fallback ikisi de eksik (${fallbackReason ?? 'hepsi boş'}). Gönderim yapılamaz.`,
+      fallbackAvailable: false,
     };
   }
   if (!secret) {

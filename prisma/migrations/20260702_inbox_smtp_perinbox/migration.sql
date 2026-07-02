@@ -40,6 +40,39 @@ UPDATE [dbo].[ExternalMailInbox]
      END
  WHERE fromAddress IS NULL;
 
+-- 4) FromAlias backfill (Codex P2 round 1) — Mevcut inbox adresleri
+--    composer dropdown'da görünsün + validateOutboundFrom kabul etsin.
+--    Yeni admin.js route inbox upsert'te ensureForInboxAddress çağırıyor
+--    ama BU MIGRATION ÖNCESİ oluşturulan inbox'lar (Multi-Inbox v1 satırları)
+--    hiç alias köprüsü almadı → per-inbox SMTP path'i devreye giremez.
+--    listActiveWithSettingFallback yalnız FromAlias satırlarını görüyor.
+--
+--    WHERE NOT EXISTS ile idempotent — mevcut alias'lara DOKUNMAZ (kullanıcı
+--    direktifi). isDefault=0 (mevcut default'a dokunma). isActive=1.
+--    id: NEWID() 32-char (Prisma cuid() değil ama String @id NVarChar(450)
+--    kabul eder; app tarafta okuma sorunsuz).
+INSERT INTO [dbo].[ExternalMailSettingFromAlias] (
+  [id], [companyId], [address], [displayName],
+  [isDefault], [isActive], [sortOrder], [createdAt], [updatedAt]
+)
+SELECT
+  LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 32),
+  i.[companyId],
+  i.[address],
+  i.[displayName],
+  0,
+  1,
+  100,
+  sysutcdatetime(),
+  sysutcdatetime()
+FROM [dbo].[ExternalMailInbox] i
+WHERE i.[isActive] = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM [dbo].[ExternalMailSettingFromAlias] a
+    WHERE a.[companyId] = i.[companyId]
+      AND a.[address] = i.[address]
+  );
+
 COMMIT TRAN;
 
 END TRY

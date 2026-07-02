@@ -299,9 +299,20 @@ export async function sendMail({
     };
   }
 
+  // Codex P2 R1 fix — inbox source için admin'in tanımladığı fromAddress
+  // ÖNCELİKLİ. Aksi halde caseEmailSender payload'ında from her zaman dolu
+  // olduğu için (agent alias'ı) config.from ASLA kullanılmıyordu; yeni
+  // inbox.fromAddress alanı devreye giremiyordu.
+  //
+  // Semantic: source='inbox' → admin fromAddress'i (ör. "Destek <destek@x>")
+  //           tenant/env fallback → agent alias'ı (mevcut davranış — regresyonsuz)
+  const finalFrom = (config.source === 'inbox' && config.from)
+    ? config.from
+    : (from || config.from);
+
   try {
     const info = await transport.sendMail({
-      from: from || config.from,
+      from: finalFrom,
       to,
       cc,
       bcc,
