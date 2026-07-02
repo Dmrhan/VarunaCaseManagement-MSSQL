@@ -97,8 +97,8 @@ expect('5.1 "Sistem Bildirim Mailleri (no-reply)" başlığı (kart başlığı 
   /Sistem Bildirim Mailleri \(no-reply\)/.test(page), true);
 expect('5.2 Kart hint — otomatik bildirim mailleri açıklaması (vaka açıldı / durum güncellendi / çözüldü)',
   /vaka açıldı \/ durum güncellendi \/ çözüldü bildirimlerini bu hesap gönderir/.test(page), true);
-expect('5.3 Entegrasyon Aktif — kill switch açıklaması güncellendi',
-  /Kill switch[\s\S]{0,300}T[ÜÜÙ]M inbox'lar[\s\S]{0,200}durur/.test(page), true);
+expect('5.3 Entegrasyon Aktif — genel kapatma anahtarı açıklaması (Türkçe)',
+  /Genel kapatma anahtar[ıi][\s\S]{0,300}T[ÜÜÙ]M gelen kutular[\s\S]{0,200}durur/.test(page), true);
 expect('5.4 Legacy IMAP açıklama satırı — aşağı yönlendirme',
   /Gelen mail \(IMAP\) tan[ıi]mlar[ıi][\s\S]{0,300}Gelen Mail Inbox'lar[ıi]/.test(page), true);
 expect('5.5 Inbound Address input UI\'dan kaldırıldı',

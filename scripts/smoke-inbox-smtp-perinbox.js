@@ -197,8 +197,8 @@ expect('11.3 SMTP fallbackAvailable → gri renk (hata değil)',
   /testResult\.smtp\.fallbackAvailable[\s\S]{0,400}slate/.test(page), true);
 expect('11.4 formatChannelTestMessage helper',
   /function formatChannelTestMessage\([\s\S]{0,200}channel: 'imap' \| 'smtp'/.test(page), true);
-expect('11.5 formatChannelTestMessage — fallback msg',
-  /fallbackAvailable[\s\S]{0,200}tenant fallback devrede/.test(page), true);
+expect('11.5 formatChannelTestMessage — fallback mesajı (Türkçe: sistem bildirim hesabı)',
+  /fallbackAvailable[\s\S]{0,200}sistem bildirim hesab[ıi] devrede/.test(page), true);
 
 console.log('\n── 12) Davranış — extractEmailPart + resolve simülasyon ─');
 

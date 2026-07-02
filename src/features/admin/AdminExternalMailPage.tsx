@@ -122,7 +122,7 @@ function toPatch(d: DraftState): ExternalMailSettingInput {
 function formatInboxTestMessage(result: InboxTestResult): string {
   switch (result.code) {
     case 'ok':
-      return 'Bağlantı başarılı — polling için hazır.';
+      return 'Bağlantı başarılı — otomatik mail kontrolü için hazır.';
     case 'auth_failed':
       return 'Kimlik doğrulama başarısız — kullanıcı adı / App Password\'ü kontrol et.';
     case 'connection_failed':
@@ -147,7 +147,7 @@ function formatInboxTestMessage(result: InboxTestResult): string {
 function formatChannelTestMessage(ch: { ok: boolean; code: string; message: string; fallbackAvailable?: boolean }, channel: 'imap' | 'smtp'): string {
   if (ch.ok) return channel === 'imap' ? 'bağlandı' : 'bağlandı';
   if (channel === 'smtp' && ch.fallbackAvailable) {
-    return 'config yok — tenant fallback devrede';
+    return 'tanımsız — sistem bildirim hesabı devrede';
   }
   switch (ch.code) {
     case 'auth_failed':
@@ -322,11 +322,11 @@ export function AdminExternalMailPage() {
       <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
         <Info size={14} className="mt-0.5 shrink-0" />
         <span>
-          Bu tenant için <strong>giden</strong> mail (SMTP) ve <strong>gelen</strong> mailbox'ları
-          (aşağıdaki "Gelen Mail Inbox'ları" listesi) tanımlanır. Secret
-          değerleri <strong>şifreli</strong> saklanır (AES-256-GCM) ve hiçbir
-          GET response'unda görünmez. Entegrasyon Aktif kapalıyken tüm inbox'ların
-          polling'i ve mail gönderimi durur.
+          Bu şirket için <strong>giden</strong> mail (SMTP) ve <strong>gelen</strong> mail
+          hesapları (aşağıdaki "Gelen Mail Inbox'ları" listesi) tanımlanır. Şifre
+          değerleri <strong>şifrelenmiş</strong> saklanır (AES-256-GCM) ve
+          sunucudan geri okunmaz. "Entegrasyon Aktif" kapalıyken tüm hesapların
+          otomatik mail kontrolü ve mail gönderimi durur.
         </span>
       </div>
 
@@ -393,7 +393,7 @@ export function AdminExternalMailPage() {
               </summary>
               <div className="mt-3 flex items-center gap-2 border-b border-slate-200 pb-2 dark:border-ndark-border">
                 <span className="text-[11px] text-slate-500 dark:text-ndark-muted">
-                  Agent'ın composer'dan gönderdiği mailler her inbox'un kendi SMTP'siyle
+                  Temsilcinin yanıt penceresinden gönderdiği mailler her gelen kutusunun kendi SMTP'siyle
                   gider; bu kart <strong>sistemin ürettiği otomatik bildirim maillerini</strong>
                   gönderen hesabı tanımlar. İdealde ayrı bir "no-reply" hesabı; şu anki
                   hesabı istediğin zaman değiştirebilirsin. Boş bırakılırsa sistem
@@ -403,7 +403,7 @@ export function AdminExternalMailPage() {
 
               <Field
                 label="Entegrasyon Aktif"
-                hint="Kill switch — kapalıyken TÜM inbox'ların polling'i ve mail gönderimi durur."
+                hint="Genel kapatma anahtarı — kapalıyken TÜM gelen kutularının otomatik mail kontrolü ve mail gönderimi durur."
               >
                 <label className="flex items-center gap-2">
                   <input
@@ -671,7 +671,7 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
               Gönderen Adresleri (From)
             </h3>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-ndark-muted">
-              Composer'da agent'ın seçebileceği gönderen adres listesi. Varsayılan (★) composer açılışında ön-seçili gelir.
+              Yanıt penceresinde temsilcinin seçebileceği gönderen adres listesi. Varsayılan (★) yanıt penceresi açılışında ön-seçili gelir.
             </p>
           </div>
         </div>
@@ -685,7 +685,7 @@ function FromAliasManager({ companyId, fallbackFrom }: { companyId: string; fall
               placeholder='örn. support@univera.com.tr'
             />
           </Field>
-          <Field label="Görünen ad (ops.)" hint="Composer dropdown'da gösterilir">
+          <Field label="Görünen ad (isteğe bağlı)" hint="Yanıt penceresindeki gönderen listesinde gösterilir">
             <TextInput
               value={newDisplay}
               onChange={(e) => setNewDisplay(e.target.value)}
@@ -840,19 +840,19 @@ function MailInboxManager({ companyId }: { companyId: string }) {
     if (r) {
       toast({
         type: 'success',
-        message: r.enabled ? 'Inbox açıldı (polling aktif).' : 'Inbox kapatıldı.',
+        message: r.enabled ? 'Gelen kutusu açıldı (otomatik mail kontrolü aktif).' : 'Gelen kutusu kapatıldı.',
       });
       void reload();
     }
   }
 
   async function handleRemove(item: MailInboxItem) {
-    if (!window.confirm(`"${item.address}" inbox'ını silmek istiyor musun? Bu işlem geri alınamaz.`)) return;
+    if (!window.confirm(`"${item.address}" gelen kutusunu silmek istiyor musun? Bu işlem geri alınamaz.`)) return;
     setBusy(true);
     const ok = await adminService.externalMailSettings.inboxes.remove(companyId, item.id);
     setBusy(false);
     if (ok) {
-      toast({ type: 'success', message: 'Inbox silindi.' });
+      toast({ type: 'success', message: 'Gelen kutusu silindi.' });
       void reload();
     }
   }
@@ -909,7 +909,7 @@ function MailInboxManager({ companyId }: { companyId: string }) {
           <Skeleton className="h-20 w-full" />
         ) : items.length === 0 ? (
           <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted">
-            Henüz inbox tanımlı değil. <strong className="font-medium">Yeni Inbox</strong> ile gelen mail adresini ve hedef takımı tanımlayın.
+            Henüz gelen kutusu tanımlı değil. <strong className="font-medium">Yeni Inbox</strong> düğmesiyle gelen mail adresini ve hedef takımı tanımlayın.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 dark:divide-ndark-border dark:border-ndark-border">
@@ -927,7 +927,7 @@ function MailInboxManager({ companyId }: { companyId: string }) {
                         <Users size={12} /> {teamName(it.assignedTeamId)}
                       </span>
                       <span className={it.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}>
-                        {it.enabled ? '● Aktif (polling açık)' : '○ Pasif'}
+                        {it.enabled ? '● Aktif (otomatik mail kontrolü açık)' : '○ Pasif'}
                       </span>
                       <span className={it.secretIsSet ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}>
                         {it.secretIsSet ? '🔒 Şifre ayarlı' : '⚠ Şifre ayarlanmamış'}
@@ -1141,7 +1141,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
   async function handleSave() {
     const r = await persistDraft();
     if (r) {
-      toast({ type: 'success', message: isEdit ? 'Inbox güncellendi.' : 'Inbox eklendi.' });
+      toast({ type: 'success', message: isEdit ? 'Gelen kutusu güncellendi.' : 'Gelen kutusu eklendi.' });
       onSaved();
     }
   }
@@ -1248,7 +1248,7 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
         {/* IMAP credentials — GELEN mail */}
         <div className="rounded-md border border-slate-200 p-3 dark:border-ndark-border">
           <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-ndark-muted">
-            GELEN MAİL (IMAP) — Bu adrese gelen mailler polling ile çekilir
+            GELEN MAİL (IMAP) — Bu adrese gelen mailler otomatik mail kontrolü ile çekilir
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="IMAP sunucusu" hint="Gmail: imap.gmail.com">
@@ -1405,17 +1405,17 @@ function MailInboxEditor({ companyId, mode, initial, teams, onClose, onSaved }: 
         </Field>
 
         {/* Enabled */}
-        <Field label="Polling durumu">
+        <Field label="Otomatik mail kontrolü durumu">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-            <span>Polling aktif (IMAP cron bu inbox'tan mail çeker)</span>
+            <span>Aktif (sistem her 30 saniyede bu gelen kutusundan mail çeker)</span>
           </label>
           <p className="mt-1 text-xs text-slate-500 dark:text-ndark-muted">
-            Kapalıyken inbox tanımı durur; mevcut vakalar etkilenmez.
+            Kapalıyken gelen kutusu tanımı durur; mevcut vakalar etkilenmez.
           </p>
         </Field>
       </div>
