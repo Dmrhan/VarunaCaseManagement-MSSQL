@@ -3543,6 +3543,35 @@ export const caseRepository = {
       });
     }
 
+    // Açık → başka statü: atanmamış vakayı işlemi yapan kişiye otomatik ata.
+    let autoAssignData = {};
+    if (prev.status === 'Acik' && dbNext !== 'Acik' && !prev.assignedPersonId && actorObject?.personId) {
+      const actorPerson = await prisma.person.findUnique({
+        where: { id: actorObject.personId },
+        select: { name: true, teamId: true, team: { select: { name: true } } },
+      });
+      if (actorPerson) {
+        autoAssignData = {
+          assignedPersonId: actorObject.personId,
+          assignedPersonName: actorPerson.name ?? actor,
+          ...(actorPerson.teamId ? {
+            assignedTeamId: actorPerson.teamId,
+            assignedTeamName: actorPerson.team?.name ?? null,
+          } : {}),
+        };
+        historyEntries.push({
+          companyId,
+          action: 'Otomatik atandı',
+          actionType: 'FieldUpdate',
+          fieldName: 'assignedPersonId',
+          fromValue: null,
+          toValue: actorPerson.name ?? actor,
+          actor,
+          actorUserId: stampUid,
+        });
+      }
+    }
+
     const updated = await prisma.case.update({
       where: { id },
       data: {
@@ -3565,6 +3594,7 @@ export const caseRepository = {
           ? { pendingCustomerReply: false }
           : {}),
         ...(mergedCustomFields !== prev.customFields ? { customFields: mergedCustomFields } : {}),
+        ...autoAssignData,
         history: { create: historyEntries },
       },
       include: CASE_INCLUDE,
