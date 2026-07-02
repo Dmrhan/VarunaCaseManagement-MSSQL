@@ -26,7 +26,8 @@ const SETS = {
   etkilenenNesne: o.etkilenen_nesne.values,
   etki: o.etki.values,
   kokNedenGrubu: c.kok_neden.groups.map((g) => g.group),
-  kokNedenDetayi: c.kok_neden.groups.flatMap((g) => g.details),
+  // v4: details artık {label, cozum_tipleri} nesnesi → label'ları çıkar.
+  kokNedenDetayi: c.kok_neden.groups.flatMap((g) => g.details.map((d) => d.label)),
   cozumTipi: c.cozum_tipi.values,
   kaliciOnlem: c.kalici_onlem.values,
 };
@@ -46,6 +47,25 @@ function valid(field, val) {
   const set = SETS[field];
   if (set.includes(val)) return val;
   return NORMMAP[field][normalize(val)] || null;
+}
+
+// ── v4 CASCADE haritaları — detay yalnız grubun altında, çözüm yalnız detayın
+//    izinli setinde geçerli. formatGoldForPrompt("close") ile birebir aynı kural.
+const GRP_DETAILS = {}; // group -> { normLabel: label }
+const DET_COZUM = {};   // `${group}|${detail}` -> { normLabel: label }
+for (const g of c.kok_neden.groups) {
+  GRP_DETAILS[g.group] = {};
+  for (const d of g.details) {
+    GRP_DETAILS[g.group][normalize(d.label)] = d.label;
+    const key = `${g.group}|${d.label}`;
+    DET_COZUM[key] = {};
+    for (const cz of d.cozum_tipleri || []) DET_COZUM[key][normalize(cz)] = cz;
+  }
+}
+/** val'ı kapsam (scope) haritasında normalize eşleştir; yoksa ''. */
+function scopeMatch(map, val) {
+  if (!val || !map) return '';
+  return map[normalize(val)] || '';
 }
 
 // ── alan → CaseTaggingReview kolon ön eki ──
@@ -84,11 +104,23 @@ for (const row of rows) {
   if (sorun.length < 5 || cozum.length < 5) { skippedNoText += 1; continue; }
 
   const ex = { no: row.caseNumber, sorun, cozum, platform: '', isSureci: '', islemTipi: '', etkilenenNesne: '', etki: '', kokNedenGrubu: '', kokNedenDetayi: '', cozumTipi: '', kaliciOnlem: '' };
-  for (const [field, prefix] of Object.entries(FIELD_PREFIX)) {
-    ex[field] = valid(field, groundTruth(row, prefix)) || '';
-  }
-  // few-shot close mode için kök neden grubu + çözüm tipi şart
-  if (!ex.kokNedenGrubu || !ex.cozumTipi) { skippedNoClose += 1; continue; }
+  // Açılış (flat) + kök neden grubu + kalıcı önlem: düz doğrulama.
+  ex.platform = valid('platform', groundTruth(row, FIELD_PREFIX.platform)) || '';
+  ex.isSureci = valid('isSureci', groundTruth(row, FIELD_PREFIX.isSureci)) || '';
+  ex.islemTipi = valid('islemTipi', groundTruth(row, FIELD_PREFIX.islemTipi)) || '';
+  ex.etkilenenNesne = valid('etkilenenNesne', groundTruth(row, FIELD_PREFIX.etkilenenNesne)) || '';
+  ex.etki = valid('etki', groundTruth(row, FIELD_PREFIX.etki)) || '';
+  ex.kokNedenGrubu = valid('kokNedenGrubu', groundTruth(row, FIELD_PREFIX.kokNedenGrubu)) || '';
+  ex.kaliciOnlem = valid('kaliciOnlem', groundTruth(row, FIELD_PREFIX.kaliciOnlem)) || '';
+  // v4 CASCADE: detay yalnız SEÇİLEN grubun altında; çözüm yalnız SEÇİLEN detayın izinli setinde.
+  ex.kokNedenDetayi = ex.kokNedenGrubu
+    ? scopeMatch(GRP_DETAILS[ex.kokNedenGrubu], groundTruth(row, FIELD_PREFIX.kokNedenDetayi))
+    : '';
+  ex.cozumTipi = ex.kokNedenGrubu && ex.kokNedenDetayi
+    ? scopeMatch(DET_COZUM[`${ex.kokNedenGrubu}|${ex.kokNedenDetayi}`], groundTruth(row, FIELD_PREFIX.cozumTipi))
+    : '';
+  // few-shot close mode için tam cascade şart: grup + detay + çözüm tipi.
+  if (!ex.kokNedenGrubu || !ex.kokNedenDetayi || !ex.cozumTipi) { skippedNoClose += 1; continue; }
   built.push(ex);
 }
 
@@ -115,10 +147,13 @@ console.log(`CaseTaggingReview: ${rows.length} | geçerli gold örneği: ${built
 console.log(`  atlanan (sorun/çözüm<5): ${skippedNoText} | atlanan (kök neden/çözüm tipi geçersiz): ${skippedNoClose}`);
 console.log(`mevcut gold: ${gold.length} → YENİ: ${added} | güncellenen: ${overwritten} | >>> TOPLAM: ${merged.length}`);
 
-const dist = {};
-for (const ex of merged) dist[ex.kokNedenGrubu] = (dist[ex.kokNedenGrubu] || 0) + 1;
-console.log('\n=== kök neden grubu dağılımı (yeni gold) ===');
-Object.entries(dist).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => console.log(`  ${String(n).padStart(3)}  ${k}`));
+// Bu run'da review'lardan üretilen v4-CASCADE-uyumlu close örnekleri (asıl sinyal).
+const distV4 = {};
+for (const ex of built) distV4[ex.kokNedenGrubu] = (distV4[ex.kokNedenGrubu] || 0) + 1;
+console.log('\n=== v4-uyumlu kök neden grubu dağılımı (bu run, review kaynaklı) ===');
+Object.entries(distV4).sort((a, b) => b[1] - a[1]).forEach(([k, n]) => console.log(`  ${String(n).padStart(3)}  ${k}`));
+// NOT: cc-gold-examples.json'da eski taksonomi örnekleri de kalır (açılış few-shot'u
+// için geçerli); kapanış few-shot'unda formatGoldForPrompt("close") v4-filtreler.
 
 if (commit) {
   fs.writeFileSync(GOLD, JSON.stringify(merged, null, 1), 'utf8');
