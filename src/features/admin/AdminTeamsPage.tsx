@@ -615,7 +615,7 @@ function TeamMembersModal({ teamId, onClose }: { teamId: string | null; onClose:
       <Modal
         open={open}
         onClose={onClose}
-        size="lg"
+        size="xl"
         title={`${team.name} — Üye Yönetimi`}
         footer={
           <div className="flex items-center justify-between gap-2">
