@@ -129,6 +129,7 @@ import {
   type Case,
   type CaseHistoryActionType,
   type CaseHistoryEntry,
+  type CasePriority,
   type CaseTransferRecord,
   type EscalationLevel,
   type NoteVisibility,
@@ -3132,6 +3133,87 @@ function SlaRow({ label, value }: { label: string; value: string }) {
 
 // KpiCompact + KpiMini kaldırıldı — KPI artık Detay sekmesinin üstünde KpiInlineRow ile gösteriliyor
 
+const PRIORITY_CONFIG: {
+  value: CasePriority;
+  label: string;
+  dot: string;
+  activeBg: string;
+  activeBorder: string;
+  activeText: string;
+}[] = [
+  {
+    value: 'Low',
+    label: 'Düşük',
+    dot: 'bg-slate-400',
+    activeBg: 'bg-slate-100 dark:bg-slate-700/60',
+    activeBorder: 'border-slate-400 dark:border-slate-500',
+    activeText: 'text-slate-700 dark:text-slate-200',
+  },
+  {
+    value: 'Medium',
+    label: 'Orta',
+    dot: 'bg-amber-400',
+    activeBg: 'bg-amber-50 dark:bg-amber-900/30',
+    activeBorder: 'border-amber-400 dark:border-amber-500',
+    activeText: 'text-amber-700 dark:text-amber-300',
+  },
+  {
+    value: 'High',
+    label: 'Yüksek',
+    dot: 'bg-orange-500',
+    activeBg: 'bg-orange-50 dark:bg-orange-900/30',
+    activeBorder: 'border-orange-500 dark:border-orange-400',
+    activeText: 'text-orange-700 dark:text-orange-300',
+  },
+  {
+    value: 'Critical',
+    label: 'Kritik',
+    dot: 'bg-rose-500',
+    activeBg: 'bg-rose-50 dark:bg-rose-900/30',
+    activeBorder: 'border-rose-500 dark:border-rose-400',
+    activeText: 'text-rose-700 dark:text-rose-300',
+  },
+];
+
+function PriorityStrip({
+  value,
+  isDraft,
+  disabled,
+  onChange,
+}: {
+  value: CasePriority;
+  isDraft: boolean;
+  disabled: boolean;
+  onChange: (p: CasePriority) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {PRIORITY_CONFIG.map((p) => {
+        const isActive = value === p.value;
+        return (
+          <button
+            key={p.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => { if (!disabled && !isActive) onChange(p.value); }}
+            className={[
+              'flex items-center gap-1.5 rounded border px-3 py-1 text-xs font-medium transition-colors',
+              isActive
+                ? `${p.activeBg} ${p.activeBorder} ${p.activeText}`
+                : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:bg-ndark-bg',
+              disabled ? 'cursor-default opacity-60' : 'cursor-pointer',
+              isDraft && isActive ? 'ring-1 ring-offset-1 ring-brand-400' : '',
+            ].join(' ')}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden="true" />
+            {p.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Açıklama alanı — uzun metinlerde "Devamını oku" göster; kısa metinlerde
 // buton hiç render edilmez (CaseSolutionStepsPanel'deki overflow-ölçüm
 // pattern'iyle aynı: scrollHeight > clientHeight ise kırpılmış demektir).
@@ -3321,6 +3403,16 @@ function DetailTab({
       {/* Adım-1: KpiInlineRow buradan çıkarıldı — content band'a (status'un
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
           Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
+
+      {/* Öncelik şeridi — Açıklama alanının hemen üstünde, ince segmented control */}
+      {canShowField('priority') && (
+        <PriorityStrip
+          value={(v('priority') as CasePriority) ?? item.priority}
+          isDraft={drafts.priority !== undefined}
+          disabled={!canEditField('priority') || !canReadField('priority') || isMaskedField('priority')}
+          onChange={(p) => onCommitDraft('priority', p)}
+        />
+      )}
 
       {canShowField('description') && (
         <Section title="Açıklama">
