@@ -127,11 +127,22 @@ router.get('/:id/files/:fileId/raw', async (req, res) => {
     const fileName = payload.fileName ?? 'dosya';
     // RFC 5987 — Türkçe karakterli dosya adları için filename* kullan.
     const asciiName = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+    // 2026-07-03 fix — Content-Type gerçek mime'a set. Önceki hard-coded
+    // application/octet-stream mail cid inline render'da kırık img'e sebep
+    // oluyordu (UNV-1000093: <img src=".../raw?token=..."> browser
+    // octet-stream'i image olarak render edemez). payload.mimeType
+    // opsiyonel — caller (mail-eki download / case attachment download)
+    // token oluştururken geçirir; yoksa geriye uyum için octet-stream.
+    //
+    // Content-Disposition: caller `disposition` alanı geçirebilir. Mail
+    // cid inline için 'inline' (browser render için gerekli değil, defensive);
+    // case attachment normal download için 'attachment' (download prompt).
+    const disposition = payload.disposition === 'inline' ? 'inline' : 'attachment';
     res.setHeader('Content-Length', st.size);
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', payload.mimeType || 'application/octet-stream');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
     );
     createObjectStream(payload.path)
       .on('error', (err) => {
@@ -2366,6 +2377,17 @@ router.get(
     }
     // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
     // ile aynı şema; M6.2'de composer için ortak indirme path'i.
+    //
+    // 2026-07-03 Codex R1 fix — disposition att.isInline'a bağlı:
+    //  - Inline attachment (cid image, Ctrl+V yapıştırma) → 'inline'
+    //    → <img src=...> render eder (UNV-1000093 fix)
+    //  - Normal mail-eki (PDF/doc, kullanıcı download butonu) → 'attachment'
+    //    → download prompt (önceki /download kontratı korunur — signed URL
+    //    kopyalanıp doğrudan açılırsa PDF/img inline preview OLMAZ)
+    //
+    // mimeType her iki path'te de payload'a → Content-Type doğru mime
+    // (octet-stream fallback kalır, sadece mimeType tanımlıysa image/pdf).
+    const disposition = att.isInline ? 'inline' : 'attachment';
     const token = signStorageToken(
       {
         typ: 'download',
@@ -2373,6 +2395,8 @@ router.get(
         fileId: att.id,
         path: att.storageKey,
         fileName: att.fileName,
+        mimeType: att.mimeType,
+        disposition,
       },
       60,
     );

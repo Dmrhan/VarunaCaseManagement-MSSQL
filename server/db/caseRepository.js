@@ -3227,7 +3227,9 @@ export const caseRepository = {
     if (!(await assertCaseInScopeForRead(caseId, allowedCompanyIds, actorRole))) return null;
     const target = await prisma.caseAttachment.findUnique({ where: { id: fileId } });
     if (!target || target.caseId !== caseId || !target.fileUrl) return null;
-    const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName);
+    // 2026-07-03 fix — mimeType payload'a geçir; download prompt'ta doğru
+    // MIME (kritik yerin mail cid render'ı olsa da tutarlılık için burada da).
+    const url = createDownloadUrl(caseId, fileId, target.fileUrl, target.fileName, undefined, target.mimeType);
     return { url, fileName: target.fileName };
   },
 

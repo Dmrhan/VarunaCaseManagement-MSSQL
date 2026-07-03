@@ -467,6 +467,10 @@ async function getAttachmentForRaw(emailId, attachmentId, { allowedCompanyIds } 
     fileName: row.fileName,
     mimeType: row.mimeType,
     fileSize: row.fileSize,
+    // 2026-07-03 (Codex R1) — disposition'ı doğru seçmek için gerekli.
+    // isInline true → cid inline render (img src) → 'inline'.
+    // isInline false → normal mail-eki (download butonu) → 'attachment'.
+    isInline: !!row.isInline,
   };
 }
 
