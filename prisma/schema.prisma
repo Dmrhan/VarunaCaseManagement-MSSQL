@@ -560,11 +560,22 @@ model ExternalMailInbox {
   imapHost         String?   @db.NVarChar(Max)
   imapPort         Int?
   imapSecure       Boolean   @default(true)
+  /// SMTP credentials — 2026-07-02: per-inbox tam kredi (Görsel 2 vizyonu).
+  /// Tek App Password (username + secret) SMTP+IMAP paylaşımlı — Gmail/
+  /// Exchange doğal davranışı. NULL alanlar → mailProvider tenant-ortak
+  /// ExternalMailSetting fallback'ine düşer (mevcut yol regresyonsuz).
+  smtpHost         String?   @db.NVarChar(Max)
+  smtpPort         Int?
+  smtpSecure       Boolean?
+  /// Bu inbox'tan gönderilecek mail'in "From" adresi. Boşsa mailProvider
+  /// tenant fallback fromAddress'i kullanır. Backfill migration'da
+  /// inbox.address'ten (displayName+<address>) doldurulur.
+  fromAddress      String?   @db.NVarChar(Max)
   /// IMAP login kullanıcı adı (genelde address ile aynı). Secret DEĞİL,
-  /// plain saklanır.
+  /// plain saklanır. SMTP+IMAP paylaşımlı user.
   username         String?   @db.NVarChar(256)
   /// AES-256-GCM ciphertext (base64). null → secret henüz set edilmedi.
-  /// 'password' modunda IMAP password (App Password).
+  /// 'password' modunda IMAP+SMTP paylaşımlı App Password.
   secretCiphertext String?   @db.NVarChar(Max)
   secretIv         String?   @db.NVarChar(Max)
   secretAuthTag    String?   @db.NVarChar(Max)

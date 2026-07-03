@@ -263,9 +263,10 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy, actor })
     });
   }
 
+  // Tam içerik saklanır (kolon NVarChar(Max)) — Aktivite sekmesi uzun
+  // notları "Devamını göster / Gizle" ile kırparak gösterir.
   const cleanedPreview = (note.content ?? '')
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
-    .slice(0, 200);
+    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
   await prisma.caseActivity.create({
     data: {
       caseId: id,
@@ -2554,6 +2555,8 @@ export const caseRepository = {
     // YALNIZ source='manual' VE case.origin='Eposta' VE customerContactEmail
     // doluysa öğren. Intake'in auto-link çağrısı opts.source='auto' geçer →
     // öğrenmez (zaten exact email match'le tetiklendi, redundant).
+    // Agent/Backoffice linki route'tan source='manual_no_learn' gelir →
+    // vaka bağlanır ama öğrenilmez (yanlış eşleştirme kalıcılaşmasın).
     // Hata kapsanır: öğrenme fail olursa linkAccount başarısı bozulmaz.
     if (opts.source === 'manual') {
       try {

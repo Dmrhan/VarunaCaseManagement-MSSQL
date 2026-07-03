@@ -129,6 +129,7 @@ import {
   type Case,
   type CaseHistoryActionType,
   type CaseHistoryEntry,
+  type CasePriority,
   type CaseTransferRecord,
   type EscalationLevel,
   type NoteVisibility,
@@ -184,8 +185,12 @@ interface CaseDetailPageProps {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
-  // Phase D — Sadece Supervisor+ müşteri eşleştirme aksiyonu görür.
-  const canLinkAccount = !!user && ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
+  // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
+  // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
+  // beslenir; ayrım backend'de link-account route'unda yapılır.
+  const canLinkAccount =
+    !!user &&
+    ['Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(user.role);
   // PR-SD — Soft archive yalnız SystemAdmin yetkisinde.
   const canArchive = user?.role === 'SystemAdmin';
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
@@ -3132,6 +3137,88 @@ function SlaRow({ label, value }: { label: string; value: string }) {
 
 // KpiCompact + KpiMini kaldırıldı — KPI artık Detay sekmesinin üstünde KpiInlineRow ile gösteriliyor
 
+const PRIORITY_CONFIG: {
+  value: CasePriority;
+  label: string;
+  dot: string;
+  activeBg: string;
+  activeBorder: string;
+  activeText: string;
+}[] = [
+  {
+    value: 'Low',
+    label: 'Düşük',
+    dot: 'bg-slate-400',
+    activeBg: 'bg-slate-100 dark:bg-slate-700/60',
+    activeBorder: 'border-slate-400 dark:border-slate-500',
+    activeText: 'text-slate-700 dark:text-slate-200',
+  },
+  {
+    value: 'Medium',
+    label: 'Orta',
+    dot: 'bg-amber-400',
+    activeBg: 'bg-amber-50 dark:bg-amber-900/30',
+    activeBorder: 'border-amber-400 dark:border-amber-500',
+    activeText: 'text-amber-700 dark:text-amber-300',
+  },
+  {
+    value: 'High',
+    label: 'Yüksek',
+    dot: 'bg-orange-500',
+    activeBg: 'bg-orange-50 dark:bg-orange-900/30',
+    activeBorder: 'border-orange-500 dark:border-orange-400',
+    activeText: 'text-orange-700 dark:text-orange-300',
+  },
+  {
+    value: 'Critical',
+    label: 'Kritik',
+    dot: 'bg-rose-500',
+    activeBg: 'bg-rose-50 dark:bg-rose-900/30',
+    activeBorder: 'border-rose-500 dark:border-rose-400',
+    activeText: 'text-rose-700 dark:text-rose-300',
+  },
+];
+
+function PriorityStrip({
+  value,
+  isDraft,
+  disabled,
+  onChange,
+}: {
+  value: CasePriority;
+  isDraft: boolean;
+  disabled: boolean;
+  onChange: (p: CasePriority) => void;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      {PRIORITY_CONFIG.map((p) => {
+        const isActive = value === p.value;
+        return (
+          <button
+            key={p.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => { if (!disabled && !isActive) onChange(p.value); }}
+            title={`Öncelik: ${p.label}`}
+            className={[
+              'flex flex-1 items-center justify-center gap-1.5 rounded border py-1 text-xs font-medium transition-colors',
+              isActive
+                ? `${p.activeBg} ${p.activeBorder} ${p.activeText}`
+                : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-ndark-border dark:bg-ndark-surface dark:text-ndark-muted dark:hover:bg-ndark-bg',
+              disabled ? 'cursor-default opacity-60' : 'cursor-pointer',
+              isDraft && isActive ? 'ring-1 ring-offset-1 ring-brand-400' : '',
+            ].join(' ')}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} aria-hidden="true" />
+            {p.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Açıklama alanı — uzun metinlerde "Devamını oku" göster; kısa metinlerde
 // buton hiç render edilmez (CaseSolutionStepsPanel'deki overflow-ölçüm
 // pattern'iyle aynı: scrollHeight > clientHeight ise kırpılmış demektir).
@@ -3322,21 +3409,36 @@ function DetailTab({
           altına, tab nav'ın üstüne) <KpiSummaryStrip> olarak taşındı.
           Tab içeriğinin ilk öğesi artık Açıklama'ya yaklaşıyor (Adım-2). */}
 
-      {canShowField('description') && (
-        <Section title="Açıklama">
-          <InlineEdit
-            fieldKey="description"
-            type="textarea"
-            value={v('description') ?? ''}
-            editing={editingField === 'description'}
-            isDraft={drafts.description !== undefined}
-            onStart={() => onStartEdit('description')}
-            onCommit={(val) => onCommitDraft('description', val)}
-            onCancel={onCancelEdit}
-            disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
-            renderDisplay={(val) => displayValue('description', <ExpandableDescription text={String(val ?? '—')} />)}
-          />
-        </Section>
+      {/* Öncelik şeridi + Açıklama — sıkı grup (space-y-2).
+          -mt-4: tab wrapper p-6 üst padding'ini 8px'e indirir (alt boşlukla eşit). */}
+      {(canShowField('priority') || canShowField('description')) && (
+        <div className="-mt-4 space-y-2">
+          {canShowField('priority') && (
+            <PriorityStrip
+              value={(v('priority') as CasePriority) ?? item.priority}
+              isDraft={drafts.priority !== undefined}
+              disabled={!canEditField('priority') || !canReadField('priority') || isMaskedField('priority')}
+              onChange={(p) => onCommitDraft('priority', p)}
+            />
+          )}
+
+          {canShowField('description') && (
+            <Section title="Açıklama">
+              <InlineEdit
+                fieldKey="description"
+                type="textarea"
+                value={v('description') ?? ''}
+                editing={editingField === 'description'}
+                isDraft={drafts.description !== undefined}
+                onStart={() => onStartEdit('description')}
+                onCommit={(val) => onCommitDraft('description', val)}
+                onCancel={onCancelEdit}
+                disabled={!canEditField('description') || !canReadField('description') || isMaskedField('description')}
+                renderDisplay={(val) => displayValue('description', <ExpandableDescription text={String(val ?? '—')} />)}
+              />
+            </Section>
+          )}
+        </div>
       )}
 
       {/* Devir Notu — en son "Devret" aktarımının notu, Açıklama'nın hemen
@@ -4722,6 +4824,51 @@ function dotColorFor(h: CaseHistoryEntry): string {
   return def?.dot ?? 'bg-slate-400';
 }
 
+// Aktivite satırındaki not — karakter eşiğini aşan metin kısaltılır,
+// "Devamını göster / Gizle" toggle'ı çıkar. Ekran genişliğinden bağımsız
+// öngörülebilir davranış için satır-ölçümü değil karakter limiti kullanılır
+// (aktivite akışı kompakt kalmalı).
+const ACTIVITY_NOTE_PREVIEW_CHARS = 180;
+
+function ExpandableActivityNote({ text, className }: { text: string; className: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  const isLong = text.length > ACTIVITY_NOTE_PREVIEW_CHARS;
+  // Kelime ortasında kesmemek için eşikten geriye son boşluğa kadar kırp.
+  const preview = useMemo(() => {
+    if (!isLong) return text;
+    const slice = text.slice(0, ACTIVITY_NOTE_PREVIEW_CHARS);
+    const lastSpace = slice.lastIndexOf(' ');
+    return (lastSpace > ACTIVITY_NOTE_PREVIEW_CHARS / 2 ? slice.slice(0, lastSpace) : slice) + '…';
+  }, [text, isLong]);
+
+  return (
+    <div>
+      <p className={`whitespace-pre-wrap ${className}`}>
+        {expanded ? text : preview}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          aria-expanded={expanded}
+          className="mt-0.5 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {expanded ? 'Gizle' : 'Devamını göster'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ActivityTab({ item }: { item: Case }) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
 
@@ -4846,9 +4993,12 @@ function ActivityTab({ item }: { item: Case }) {
                   <span className="font-semibold text-slate-800 dark:text-ndark-text">{h.toValue}</span>
                 </div>
                 {h.note && (
-                  <p className="mt-1 whitespace-pre-wrap text-xs italic text-blue-800 dark:text-blue-300">
-                    {h.note}
-                  </p>
+                  <div className="mt-1">
+                    <ExpandableActivityNote
+                      text={h.note}
+                      className="text-xs italic text-blue-800 dark:text-blue-300"
+                    />
+                  </div>
                 )}
                 <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-ndark-muted">
                   <Calendar size={11} />
@@ -4887,11 +5037,15 @@ function ActivityTab({ item }: { item: Case }) {
             </div>
             {/* PR-T3 — generic note render (Smart Ticket açılış suffix dahil).
                 Backend Case create'te 'Vaka oluşturuldu' + note='Smart Ticket
-                akışıyla açıldı' yazıyor; eski UI bu alanı göstermiyordu. */}
+                akışıyla açıldı' yazıyor; eski UI bu alanı göstermiyordu.
+                NoteAdded dahil uzun notlar 3 satırda kırpılır (Devamını göster). */}
             {h.note && (
-              <p className="mt-0.5 whitespace-pre-wrap text-[11px] italic text-slate-600 dark:text-ndark-muted">
-                {h.note}
-              </p>
+              <div className="mt-0.5">
+                <ExpandableActivityNote
+                  text={h.note}
+                  className="text-[11px] italic text-slate-600 dark:text-ndark-muted"
+                />
+              </div>
             )}
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
               <Calendar size={11} />

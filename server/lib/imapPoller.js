@@ -144,6 +144,223 @@ function isAutoReplyOrBounce(parsed, rawHeaders) {
  *   error?: { code, message }
  * }>}
  */
+/**
+ * IMAP hatalarını admin'e sunulacak 3 kategoriye ayır (2026-07-02):
+ *   auth_failed        → kimlik doğrulama başarısız (kullanıcı/şifre yanlış).
+ *   config_incomplete  → host/username/secret eksik.
+ *   connection_failed  → ağ / sunucu ulaşılamaz / port kapalı.
+ *
+ * ImapFlow sürüm farkı için hem `authenticationFailed`, hem sunucu response
+ * code (AUTHENTICATIONFAILED), hem de mesaj içeriği kontrol edilir.
+ */
+function classifyImapError(err) {
+  if (!err) return 'connection_failed';
+  const msg = String(err?.message ?? '').toLowerCase();
+  const code = String(err?.code ?? '').toUpperCase();
+  const respCode = String(err?.serverResponseCode ?? err?.responseCode ?? '').toUpperCase();
+  if (
+    err?.authenticationFailed === true
+    || respCode === 'AUTHENTICATIONFAILED'
+    || code === 'AUTHENTICATIONFAILED'
+    || msg.includes('invalid credentials')
+    || msg.includes('authentication failed')
+    || msg.includes('logon failed')
+    || msg.includes('login failed')
+  ) {
+    return 'auth_failed';
+  }
+  return 'connection_failed';
+}
+
+/**
+ * Multi-Inbox admin UI için tekil bağlantı testi (2026-07-02).
+ *
+ * REUSE: pollInbox ile AYNI ImapFlow config (host/port/secure/auth/timeout).
+ * FARK: mail ÇEKMEZ, hiçbir şey mutate etmez, sadece connect → INBOX lock
+ * → logout. Amaç: admin yeni App Password/host tanımladıktan sonra
+ * polling cron'unu beklemeden anlık doğrulama.
+ *
+ * Dönen: { ok, code, message, meta }
+ *   code:
+ *     'ok'                 → bağlantı ve INBOX açma başarılı.
+ *     'auth_failed'        → kimlik doğrulama başarısız.
+ *     'connection_failed'  → sunucu / port erişilemiyor.
+ *     'config_incomplete'  → host/username/secret eksik.
+ *     'inbox_disabled'     → inbox pasif (enabled=false).
+ *     'inbox_invalid'      → parametre eksik.
+ *
+ * Secret: RAM'de sadece client oluşturulurken; response'a inmez.
+ */
+async function testImapOnly(inbox, secret) {
+  if (!inbox.imapHost || !inbox.username) {
+    return { ok: false, code: 'config_incomplete', message: 'IMAP host / kullanıcı adı / şifre eksik.' };
+  }
+  if (!secret) {
+    return { ok: false, code: 'config_incomplete', message: 'IMAP host / kullanıcı adı / şifre eksik.' };
+  }
+  const client = new ImapFlow({
+    host: inbox.imapHost,
+    port: inbox.imapPort || 993,
+    secure: inbox.imapSecure !== false,
+    auth: { user: inbox.username, pass: secret },
+    logger: false,
+    socketTimeout: IMAP_CONNECT_TIMEOUT_MS,
+  });
+  client.on('error', () => {});
+  try {
+    await client.connect();
+  } catch (err) {
+    const code = classifyImapError(err);
+    try { await client.logout(); } catch {}
+    return { ok: false, code, message: err?.message ?? 'IMAP hatası.' };
+  }
+  try {
+    const lock = await client.getMailboxLock('INBOX');
+    lock.release();
+  } catch (err) {
+    try { await client.logout(); } catch {}
+    return { ok: false, code: 'connection_failed', message: err?.message ?? 'INBOX açılamadı.' };
+  }
+  try { await client.logout(); } catch {}
+  return { ok: true, code: 'ok', message: 'IMAP bağlantısı başarılı.' };
+}
+
+async function testSmtpOnly(inbox, secret) {
+  // Per-inbox SMTP dolu değilse tenant fallback'in GERÇEKTEN gönderim
+  // yapabildiğini doğrula. Codex P2 R1 fix — önceden `fallbackAvailable:
+  // true` diyip tenant SMTP eksik olsa da admin'e "ready" göstermiş
+  // olurduk; oysa mailProvider'da gönderim yine fail eder.
+  if (!inbox.smtpHost || !inbox.username) {
+    let fallbackOk = false;
+    let fallbackReason = null;
+    try {
+      const repo = (await import('../db/externalMailSettingRepository.js')).externalMailSettingRepo;
+      const cfg = await repo.resolveActiveConfig(inbox.companyId);
+      if (!cfg) fallbackReason = 'tenant setting yok';
+      else if (cfg.enabled === false) fallbackReason = 'tenant setting kapalı';
+      else if (!cfg.smtpHost) fallbackReason = 'tenant smtpHost eksik';
+      else if (!cfg.username) fallbackReason = 'tenant username eksik';
+      else if (!cfg.secret) fallbackReason = 'tenant secret eksik';
+      else fallbackOk = true;
+    } catch (err) {
+      fallbackReason = `tenant config okunamadı (${err?.message ?? 'bilinmeyen'})`;
+    }
+    if (fallbackOk) {
+      return {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Per-inbox SMTP tanımsız — tenant-ortak SMTP fallback devrede.',
+        fallbackAvailable: true,
+      };
+    }
+    return {
+      ok: false,
+      code: 'config_incomplete',
+      message: `Per-inbox SMTP + tenant fallback ikisi de eksik (${fallbackReason ?? 'hepsi boş'}). Gönderim yapılamaz.`,
+      fallbackAvailable: false,
+    };
+  }
+  if (!secret) {
+    return { ok: false, code: 'config_incomplete', message: 'SMTP şifresi (App Password) eksik.' };
+  }
+  // nodemailer lazy import — imapPoller boot'ta ihtiyaç yok.
+  const { default: nodemailer } = await import('nodemailer');
+  const transport = nodemailer.createTransport({
+    host: inbox.smtpHost,
+    port: inbox.smtpPort || 587,
+    secure: inbox.smtpSecure === true,
+    auth: { user: inbox.username, pass: secret },
+    connectionTimeout: IMAP_CONNECT_TIMEOUT_MS,
+    greetingTimeout: IMAP_CONNECT_TIMEOUT_MS,
+  });
+  try {
+    await transport.verify();
+    return { ok: true, code: 'ok', message: 'SMTP bağlantısı başarılı — gönderim için hazır.' };
+  } catch (err) {
+    const msg = String(err?.message ?? '').toLowerCase();
+    const code = String(err?.code ?? '').toUpperCase();
+    if (err?.responseCode === 535 || code === 'EAUTH' || msg.includes('authentication')
+      || msg.includes('invalid') || msg.includes('username and password')) {
+      return { ok: false, code: 'auth_failed', message: err?.message ?? 'SMTP kimlik doğrulama başarısız.' };
+    }
+    return { ok: false, code: 'connection_failed', message: err?.message ?? 'SMTP sunucu erişilemiyor.' };
+  } finally {
+    try { transport.close(); } catch {}
+  }
+}
+
+export async function testInboxConnection(inbox) {
+  const startedAt = new Date().toISOString();
+  if (!inbox || !inbox.id || !inbox.companyId) {
+    return {
+      ok: false,
+      code: 'inbox_invalid',
+      message: 'inbox + companyId zorunlu.',
+      imap: null,
+      smtp: null,
+      meta: { startedAt },
+    };
+  }
+  if (inbox.isActive === false) {
+    return {
+      ok: false,
+      code: 'inbox_disabled',
+      message: 'Inbox pasif — önce aktifleştir.',
+      imap: null,
+      smtp: null,
+      meta: { startedAt },
+    };
+  }
+  const secret = await externalMailInboxRepo.getDecryptedSecret(inbox.companyId, inbox.id);
+
+  // 2026-07-02 (Codex re-run bulgusu) — Secret NULL ise ERKEN config_incomplete
+  // dön; hiçbir kanal için bağlantı denenmez. Aksi halde Promise.all iki
+  // guard'a düşer ama iki bağlantı objesi de gereksiz init edilir + response
+  // shape'i tutarlı olsun diye TEK yerden dönmek daha net.
+  if (!secret) {
+    return {
+      ok: false,
+      code: 'config_incomplete',
+      message: 'IMAP + SMTP için secret (App Password) ayarlanmamış — önce kaydet.',
+      imap: {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Secret ayarlanmamış — bağlantı denenmedi.',
+      },
+      smtp: {
+        ok: false,
+        code: 'config_incomplete',
+        message: 'Secret ayarlanmamış — bağlantı denenmedi.',
+      },
+      meta: { startedAt },
+    };
+  }
+
+  // İkisini paralel çalıştır — bağımsız bağlantılar.
+  const [imap, smtp] = await Promise.all([
+    testImapOnly(inbox, secret),
+    testSmtpOnly(inbox, secret),
+  ]);
+
+  // Toplam ok: ikisi de ok VEYA SMTP config yok (fallback devrede) + IMAP ok.
+  const totalOk = imap.ok && (smtp.ok || smtp.fallbackAvailable === true);
+  const code = totalOk ? 'ok' : (imap.ok ? smtp.code : imap.code);
+  const message = totalOk
+    ? (smtp.fallbackAvailable
+        ? 'IMAP bağlantısı başarılı — SMTP tanımsız, tenant-ortak fallback devrede.'
+        : 'IMAP + SMTP bağlantısı başarılı — bu inbox tam kredi ile hazır.')
+    : (imap.ok ? `SMTP: ${smtp.message}` : `IMAP: ${imap.message}`);
+
+  return {
+    ok: totalOk,
+    code,
+    message,
+    imap,
+    smtp,
+    meta: { startedAt },
+  };
+}
+
 export async function pollInbox(inbox) {
   const startedAt = new Date().toISOString();
   const stats = { fetched: 0, intaken: 0, skipped: 0, failed: 0 };

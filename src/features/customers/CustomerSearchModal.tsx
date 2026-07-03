@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Building2,
+  Check,
   Clock,
   ExternalLink,
   Mail,
@@ -17,7 +18,7 @@ import { StatusPill, CaseTypeBadge } from '@/components/ui/StatusPill';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { caseService } from '@/services/caseService';
-import { accountService, type AccountListItem } from '@/services/accountService';
+import { accountService, type AccountListItem, type AccountSearchField } from '@/services/accountService';
 import { useAuth } from '@/services/AuthContext';
 import { AccountFormModal } from '@/features/accounts/AccountFormModal';
 import type { Case } from '@/features/cases/types';
@@ -46,6 +47,22 @@ interface CustomerSearchModalProps {
    */
   afterCreate?: 'select' | 'openCase';
 }
+
+const SEARCH_FIELD_CHIPS: { value: AccountSearchField; label: string }[] = [
+  { value: 'name',    label: 'Ünvan' },
+  { value: 'vkn',     label: 'VKN / TCKN' },
+  { value: 'phone',   label: 'Telefon' },
+  { value: 'code',    label: 'Müşteri kodu' },
+  { value: 'contact', label: 'Kontak' },
+];
+
+const FIELD_PLACEHOLDER: Record<AccountSearchField, string> = {
+  name:    'Müşteri ünvanı yazın…',
+  vkn:     'VKN veya TCKN yazın…',
+  phone:   'Telefon numarası yazın…',
+  code:    'Müşteri kodu yazın…',
+  contact: 'Kontak e-posta veya telefonu yazın…',
+};
 
 const PAGE_SIZE = 20;
 const RECENT_MAX = 10;
@@ -129,6 +146,7 @@ export function CustomerSearchModal({
 
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
+  const [searchFields, setSearchFields] = useState<AccountSearchField[]>(['name']);
   const [results, setResults] = useState<AccountListItem[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [selected, setSelected] = useState<AccountListItem | null>(null);
@@ -149,6 +167,7 @@ export function CustomerSearchModal({
     if (!open) {
       setQuery('');
       setDebounced('');
+      setSearchFields(['name']);
       setResults([]);
       setSelected(null);
       setOpenCases([]);
@@ -210,11 +229,11 @@ export function CustomerSearchModal({
       return;
     }
     setLoadingResults(true);
-    const out = await accountService.list({ search: debounced, page: 1, limit: PAGE_SIZE });
+    const out = await accountService.list({ search: debounced, searchFields, page: 1, limit: PAGE_SIZE });
     setLoadingResults(false);
     setResults(out?.accounts ?? []);
     setHighlightIdx(0);
-  }, [debounced]);
+  }, [debounced, searchFields]);
 
   useEffect(() => {
     if (open) void fetchResults();
@@ -246,6 +265,20 @@ export function CustomerSearchModal({
   // için doğrudan AccountListItem olarak render edilir.
   const showingRecents = !debounced;
   const listItems: AccountListItem[] = showingRecents ? recents : results;
+
+  function toggleSearchField(field: AccountSearchField) {
+    setSearchFields((prev) => {
+      const has = prev.includes(field);
+      if (has && prev.length === 1) return prev; // son chip kapatılamaz
+      return has ? prev.filter((f) => f !== field) : [...prev, field];
+    });
+  }
+
+  const searchPlaceholder = searchFields.length === 1
+    ? FIELD_PLACEHOLDER[searchFields[0]]
+    : searchFields.length === SEARCH_FIELD_CHIPS.length
+      ? 'Ünvan, VKN, telefon veya müşteri kodu yazın…'
+      : `${searchFields.map((f) => SEARCH_FIELD_CHIPS.find((c) => c.value === f)?.label ?? f).join(' / ')} içinde ara…`;
 
   function selectAccount(account: AccountListItem) {
     setSelected(account);
@@ -314,6 +347,29 @@ export function CustomerSearchModal({
           {/* Sol sütun — arama + sonuç listesi */}
           <div className="flex w-[420px] shrink-0 flex-col border-r border-slate-200 dark:border-ndark-border">
             <div className="shrink-0 border-b border-slate-100 bg-white p-3 dark:border-ndark-border dark:bg-ndark-card">
+              <div className="mb-2 flex flex-wrap gap-1">
+                {SEARCH_FIELD_CHIPS.map((chip) => {
+                  const active = searchFields.includes(chip.value);
+                  const isLast = active && searchFields.length === 1;
+                  return (
+                    <button
+                      key={chip.value}
+                      type="button"
+                      aria-pressed={active}
+                      title={isLast ? 'En az bir alan açık kalmalı' : undefined}
+                      onClick={() => toggleSearchField(chip.value)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                        active
+                          ? 'border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
+                          : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-ndark-border dark:bg-ndark-card dark:text-ndark-muted dark:hover:text-ndark-text'
+                      }`}
+                    >
+                      {active && <Check size={10} />}
+                      {chip.label}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="relative">
                 <Search
                   size={14}
@@ -321,7 +377,7 @@ export function CustomerSearchModal({
                 />
                 <TextInput
                   ref={inputRef}
-                  placeholder="Ad, VKN, müşteri kodu, telefon veya e-posta…"
+                  placeholder={searchPlaceholder}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -353,7 +409,11 @@ export function CustomerSearchModal({
                   size="sm"
                   icon={<Search size={18} />}
                   title="Aramaya başla"
-                  description="Ad, VKN, müşteri kodu, telefon veya e-posta üzerinde arama yapılır."
+                  description={
+                    searchFields.length === SEARCH_FIELD_CHIPS.length
+                      ? 'Tüm desteklenen alanlarda aranır.'
+                      : `Aranan alanlar: ${searchFields.map((f) => SEARCH_FIELD_CHIPS.find((c) => c.value === f)?.label ?? f).join(', ')}.`
+                  }
                 />
               ) : !showingRecents && loadingResults && results.length === 0 ? (
                 <div className="space-y-2">
@@ -367,7 +427,7 @@ export function CustomerSearchModal({
                     size="sm"
                     icon={<Search size={18} />}
                     title="Sonuç yok"
-                    description="Farklı arama terimi deneyin veya yeni bir müşteri oluşturun."
+                    description="Farklı arama terimi veya farklı bir alan chip'i deneyin."
                   />
                   {showCreateCta && (
                     <Button
