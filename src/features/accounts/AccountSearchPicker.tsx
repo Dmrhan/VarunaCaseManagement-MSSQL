@@ -150,6 +150,8 @@ export function AccountSearchPicker({
       companyId: companyId ?? undefined,
       page: 1,
       limit: PAGE_SIZE,
+      // Vaka açma/eşleştirme akışı — pasif müşteriler seçilemesin.
+      activeOnly: true,
     });
     setLoading(false);
     if (!out) {
