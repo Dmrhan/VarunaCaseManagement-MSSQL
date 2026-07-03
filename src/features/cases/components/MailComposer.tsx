@@ -560,17 +560,23 @@ export function MailComposer({
   }, [attachments, bcc, bodyHtml, cc, item.id, onSent, selectedAlias, showBcc, showCc, subject, to, toast]);
 
   // Önizleme: DOMPurify ile sanitize edilmiş bodyHtml.
-  // Codex P2 R1 fix — ALLOWED_URI_REGEXP: composer'da inline paste görselleri
+  // Codex P2 R1 — ALLOWED_URI_REGEXP: composer'da inline paste görselleri
   // blob URL src ile render edilir (editör'de renderable). Preview sanitize'ı
   // default'ta blob: strip eder → kullanıcı önizlemede broken image görürdü.
-  // Whitelist: http/https + blob (paste preview) + cid (backend sonrası) +
-  // mailto/tel + data (bazı imza görselleri).
+  //
+  // Codex P2 R2 (2026-07-03) — `data:` KALDIRILDI.
+  // Neden: DOMPurify ALLOWED_URI_REGEXP TÜM URI-taşıyan attribute'lara
+  // uygulanır (href dahil). Yapıştırılan HTML'de <a href="data:text/html,
+  // <script>..."> kalır ve dangerouslySetInnerHTML ile preview'a girer →
+  // XSS potansiyeli. İmzalar http(s)/cid kullanıyor, inline paste blob:
+  // yeterli; data: pratik ihtiyaç yok.
+  // Whitelist: http/https + blob (paste preview) + cid (backend sonrası) + mailto/tel.
   const previewHtml = useMemo(() => {
     return DOMPurify.sanitize(bodyHtml, {
       USE_PROFILES: { html: true },
       ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
       FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
-      ALLOWED_URI_REGEXP: /^(?:https?|blob|cid|mailto|tel|data):/i,
+      ALLOWED_URI_REGEXP: /^(?:https?|blob|cid|mailto|tel):/i,
     });
   }, [bodyHtml]);
 
