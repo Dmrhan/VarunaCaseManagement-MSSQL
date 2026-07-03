@@ -21,14 +21,21 @@ import Image from '@tiptap/extension-image';
 import { Bold, Image as ImageIcon, Italic, Link as LinkIcon, List, ListOrdered, Quote, Redo2, Undo2 } from 'lucide-react';
 import { useCallback, useEffect } from 'react';
 
+export type PasteImageResult =
+  | { ok: true; cid: string }
+  | { ok: false; error: string };
+
 interface Props {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  // Ctrl+V ile görsel yapıştırma. Composer upload eder ve cid döner
+  // (attachmentId = cid). null → paste özelliği kapalı (URL prompt'u aynen çalışır).
+  onPasteImage?: (file: File) => Promise<PasteImageResult>;
 }
 
-export function RichTextEditor({ value, onChange, placeholder, disabled }: Props) {
+export function RichTextEditor({ value, onChange, placeholder, disabled, onPasteImage }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -55,6 +62,66 @@ export function RichTextEditor({ value, onChange, placeholder, disabled }: Props
     editorProps: {
       attributes: {
         class: 'prose prose-sm dark:prose-invert max-w-none min-h-[180px] px-3 py-2 focus:outline-none',
+      },
+      // Ctrl+V görsel yapıştırma — clipboard'ta image file var mı diye bakar,
+      // varsa blob URL ile ANINDA önizleme insert eder, arka planda upload
+      // eder, sonra o node'un src'ini cid:{attachmentId}'ye çevirir.
+      // Görsel-olmayan paste'te false döner → TipTap default akışı çalışır
+      // (metin/link/HTML aynen yerleşir, davranış değişmez).
+      handlePaste: (view, event) => {
+        if (!onPasteImage) return false;
+        const items = event.clipboardData?.items;
+        if (!items || items.length === 0) return false;
+        const imageFiles: File[] = [];
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.kind === 'file' && it.type.startsWith('image/')) {
+            const f = it.getAsFile();
+            if (f) imageFiles.push(f);
+          }
+        }
+        if (imageFiles.length === 0) return false;
+
+        for (const file of imageFiles) {
+          const blobUrl = URL.createObjectURL(file);
+          const imageType = view.state.schema.nodes.image;
+          if (!imageType) { URL.revokeObjectURL(blobUrl); continue; }
+          const node = imageType.create({ src: blobUrl, alt: file.name });
+          view.dispatch(view.state.tr.replaceSelectionWith(node));
+
+          void (async () => {
+            try {
+              const res = await onPasteImage(file);
+              // Kullanıcı arada görsel silmiş olabilir — bulunamazsa gürültüsüz düş.
+              if (!res.ok) {
+                // Blob URL'li görsel node'unu bul ve kaldır (upload başarısız).
+                view.state.doc.descendants((n, pos) => {
+                  if (n.type === imageType && n.attrs.src === blobUrl) {
+                    view.dispatch(view.state.tr.delete(pos, pos + n.nodeSize));
+                    return false;
+                  }
+                  return true;
+                });
+                return;
+              }
+              // Blob URL'li node'u bul → src'yi cid:{attachmentId} yap.
+              view.state.doc.descendants((n, pos) => {
+                if (n.type === imageType && n.attrs.src === blobUrl) {
+                  const tr = view.state.tr.setNodeMarkup(pos, undefined, {
+                    ...n.attrs,
+                    src: `cid:${res.cid}`,
+                  });
+                  view.dispatch(tr);
+                  return false;
+                }
+                return true;
+              });
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+          })();
+        }
+        return true;
       },
     },
     immediatelyRender: false,
@@ -109,6 +176,11 @@ export function RichTextEditor({ value, onChange, placeholder, disabled }: Props
       <EditorContent editor={editor} />
       {!editor.getText().trim() && placeholder && (
         <div className="pointer-events-none -mt-[170px] px-3 text-sm text-slate-400 dark:text-ndark-muted">{placeholder}</div>
+      )}
+      {onPasteImage && (
+        <div className="border-t border-slate-100 px-3 py-1 text-[11px] text-slate-400 dark:border-ndark-border dark:text-ndark-muted">
+          İpucu: görseli doğrudan yapıştırabilirsin (Ctrl/⌘+V).
+        </div>
       )}
     </div>
   );

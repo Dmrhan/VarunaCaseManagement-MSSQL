@@ -37,8 +37,18 @@ import {
   type ReplyContext,
 } from '@/services/caseEmailService';
 import { ContactPicker } from './ContactPicker';
-import { RichTextEditor } from './RichTextEditor';
+import { RichTextEditor, type PasteImageResult } from './RichTextEditor';
 import type { Case, CaseFile } from '../types';
+
+// Ctrl+V inline görsel için sıkı kısıt (composer-özgü):
+//  - Yalnız raster image mime (SVG hariç — XSS riski, mail istemcileri de
+//    çoğunlukla göstermez)
+//  - Boyut: 10MB (mail istemcisi tarafında büyük gövde riskini azaltır;
+//    mevcut ek limitiyle uyumlu, backend zaten 25MB raw body sınırı uygular)
+const INLINE_PASTE_ALLOWED_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
+]);
+const INLINE_PASTE_MAX_SIZE = 10 * 1024 * 1024;
 
 export interface MailComposerProps {
   item: Case;
@@ -86,6 +96,10 @@ interface UploadedFileRef {
   id: string;
   fileName: string;
   fileSize: number;
+  // Ctrl+V ile eklenmiş inline görsel → bodyHtml'de <img src="cid:{id}">
+  // referansı var. Send öncesi HTML'de referansı kalmayan inline attachment
+  // otomatik listeden düşer ("editörden silinen görsel gönderime girmez" dikişi).
+  inline?: boolean;
 }
 
 type ContactPickerValue = { address: string; name: string | null };
@@ -426,6 +440,41 @@ export function MailComposer({
     setAttachments((cur) => cur.filter((a) => a.id !== id));
   }
 
+  // Ctrl+V ile görsel yapıştırma: RichTextEditor'dan çağrılır.
+  // Guard'lar SUNUCUDA da doğrulanır — bu FE kısıtları UX için
+  // (backend uploadWhitelist.js kesin karar verir).
+  const handlePasteImage = useCallback(async (file: File): Promise<PasteImageResult> => {
+    if (!INLINE_PASTE_ALLOWED_MIME.has(file.type)) {
+      const msg = 'Yalnız PNG/JPG/GIF/WebP görselleri gövde içine yapıştırılabilir.';
+      toast({ type: 'warn', message: msg });
+      return { ok: false, error: msg };
+    }
+    if (file.size > INLINE_PASTE_MAX_SIZE) {
+      const msg = `Görsel boyutu ${Math.round(INLINE_PASTE_MAX_SIZE / (1024 * 1024))}MB sınırını aşıyor.`;
+      toast({ type: 'warn', message: msg });
+      return { ok: false, error: msg };
+    }
+    setUploading(true);
+    try {
+      const r = await caseService.addFile(item.id, file);
+      if (!r) return { ok: false, error: 'upload_failed' };
+      if ('error' in r) {
+        toast({ type: 'error', message: r.error });
+        return { ok: false, error: r.error };
+      }
+      const caseFile: CaseFile = r.file;
+      setAttachments((cur) => [...cur, {
+        id: caseFile.id,
+        fileName: caseFile.fileName,
+        fileSize: caseFile.fileSize,
+        inline: true,
+      }]);
+      return { ok: true, cid: caseFile.id };
+    } finally {
+      setUploading(false);
+    }
+  }, [item.id, toast]);
+
   const canSend = !!selectedAlias && to.length > 0 && !submitting && !uploading;
 
   const handleSubmit = useCallback(async () => {
@@ -443,6 +492,18 @@ export function MailComposer({
     try {
       // DOMPurify ile final pass (defense-in-depth; backend de sanitize eder)
       const safeBody = DOMPurify.sanitize(bodyHtml, { USE_PROFILES: { html: true } });
+
+      // "Editörde silinen görsel gönderime GİRMEZ" dikişi:
+      // safeBody içinde <img src="cid:{id}"> referansı KALMAYAN inline
+      // attachment'ları listeden düşür (kullanıcı yapıştırdı sonra sildi).
+      // Normal (inline: false) ekler her zaman gönderilir.
+      const cidRefs = new Set<string>();
+      const cidRe = /<img[^>]+src=["']cid:([^"']+)["']/gi;
+      for (let m: RegExpExecArray | null; (m = cidRe.exec(safeBody)); ) cidRefs.add(m[1]);
+      const attachmentIds = attachments
+        .filter((a) => (a.inline ? cidRefs.has(a.id) : true))
+        .map((a) => a.id);
+
       const r = await caseEmailService.sendEmail(item.id, {
         fromAddress: selectedAlias.address,
         to,
@@ -450,7 +511,7 @@ export function MailComposer({
         bcc: showBcc ? bcc : [],
         subject,
         bodyHtml: safeBody,
-        attachments: attachments.map((a) => a.id),
+        attachments: attachmentIds,
         // Codex P2 fix — satır içi Yanıtla'da composer'a reply-context'in
         // inReplyTo'su geldi; threading o satıra göre kurulsun.
         // Forward/Yeni mail durumunda null (eski davranış — backend son inbound).
@@ -664,9 +725,18 @@ export function MailComposer({
             </Button>
             <span className="text-[11px] text-slate-500 dark:text-ndark-muted">veya sürükle-bırak</span>
             {attachments.map((a) => (
-              <span key={a.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
+              <span
+                key={a.id}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+                  a.inline
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
+                    : 'bg-slate-100 text-slate-700 dark:bg-ndark-bg dark:text-ndark-text'
+                }`}
+                title={a.inline ? 'Gövde içinde görsel — silmek için editörden görseli sil.' : undefined}
+              >
                 <Paperclip size={11} />
                 {a.fileName}
+                {a.inline && <span className="text-[10px] opacity-70">(gövde)</span>}
                 <button
                   type="button"
                   onClick={() => removeAttachment(a.id)}
@@ -693,7 +763,12 @@ export function MailComposer({
               />
             </div>
           ) : (
-            <RichTextEditor value={bodyHtml} onChange={setBodyHtml} disabled={submitting} />
+            <RichTextEditor
+              value={bodyHtml}
+              onChange={setBodyHtml}
+              disabled={submitting}
+              onPasteImage={handlePasteImage}
+            />
           )}
         </Field>
       </div>
