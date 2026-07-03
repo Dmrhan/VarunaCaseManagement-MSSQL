@@ -109,12 +109,19 @@ export async function createUploadUrl(caseId, attachmentId, fileName, userId) {
   };
 }
 
-/** İndirme için kısa ömürlü token'lı URL. */
-export function createDownloadUrl(caseId, fileId, relPath, fileName, expiresInSec = DOWNLOAD_TOKEN_TTL_SEC) {
-  const token = signStorageToken(
-    { typ: 'download', caseId, fileId, path: relPath, fileName },
-    expiresInSec,
-  );
+/**
+ * İndirme için kısa ömürlü token'lı URL.
+ *
+ * 2026-07-03 — Opsiyonel `mimeType` parametresi eklendi. Verilirse
+ * raw endpoint Content-Type'ı buna set eder (aksi halde octet-stream).
+ * Case attachment normal download akışı için `attachment` disposition
+ * default; mail cid inline render için ayrı yol (routes/cases.js
+ * mail-eki endpoint'i disposition='inline' payload'a koyar).
+ */
+export function createDownloadUrl(caseId, fileId, relPath, fileName, expiresInSec = DOWNLOAD_TOKEN_TTL_SEC, mimeType = null) {
+  const payload = { typ: 'download', caseId, fileId, path: relPath, fileName };
+  if (mimeType) payload.mimeType = mimeType;
+  const token = signStorageToken(payload, expiresInSec);
   return `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(fileId)}/raw?token=${encodeURIComponent(token)}`;
 }
 
