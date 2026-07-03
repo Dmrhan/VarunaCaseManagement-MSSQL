@@ -99,7 +99,13 @@ export function AccountSearchPicker({
   const [error, setError] = useState<string | null>(null);
   const [tcknHint, setTcknHint] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [searchFields, setSearchFields] = useState<AccountSearchField[]>(['name']);
+  // Codex P2 R1 fix (2026-07-03) — Default BOŞ (tüm alanlar aranır).
+  // Önceden default ['name'] idi; kullanıcı bir TCKN/telefon/müşteri kodu
+  // yapıştırdığında backend yalnız name predicate'ini aradığı için sonuç
+  // dönmüyordu (chip'i keşfedip toggle etmeleri beklenir hale gelmişti).
+  // Backend `searchFields=[]` gelirse tüm alanları arar (accountRepository:308
+  // `Array.isArray(searchFields) && searchFields.length > 0` guard'ı).
+  const [searchFields, setSearchFields] = useState<AccountSearchField[]>([]);
   const debounceRef = useRef<number | null>(null);
 
   const useProjectFlow = projectsEnabled && !!onSelectWithProject;
@@ -196,8 +202,10 @@ export function AccountSearchPicker({
   }
 
   const searchPlaceholder = (() => {
+    // Codex P2 R1 fix — length===0 durumu (default "tüm alanlar aranır")
+    // eklendi. Chip seçimi = arama daraltma; hiç seçilmezse hepsi.
     const base =
-      searchFields.length === SEARCH_FIELD_CHIPS.length
+      searchFields.length === 0 || searchFields.length === SEARCH_FIELD_CHIPS.length
         ? 'Müşteri adı, VKN, TCKN, telefon veya müşteri kodu'
         : searchFields.length === 1
           ? FIELD_PLACEHOLDER[searchFields[0]]
@@ -282,7 +290,7 @@ export function AccountSearchPicker({
             </div>
           )}
         </Field>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {SEARCH_FIELD_CHIPS.map((chip) => {
             const active = searchFields.includes(chip.value);
             return (
@@ -301,6 +309,13 @@ export function AccountSearchPicker({
               </button>
             );
           })}
+          {/* Codex P2 R1 fix — Hiç chip seçili değilse kullanıcı "arama alanı
+              yok mu" diye tereddüt etmesin: davranış "tüm alanlarda ara"dır. */}
+          {searchFields.length === 0 && (
+            <span className="text-[11px] italic text-slate-400 dark:text-ndark-muted">
+              seçim yok — tüm alanlarda aranır
+            </span>
+          )}
         </div>
         {allowNullSelection && (
           <Button
