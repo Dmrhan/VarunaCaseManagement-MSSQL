@@ -507,6 +507,13 @@ export async function intakeInboundEmail({
   const tokens = extractCaseTokensFromSubject(parsed.subject);
   // Response `token` alanı için — resolve olan token (yoksa ilk candidate).
   let token = tokens[0] ?? null;
+  // Codex P2 R1 fix (2026-07-03) — Header threading gate flag'i.
+  // ÖNCESINDE `if (!token)` guard'ı vardı ama tokens[0] her zaman set
+  // edildiği için (candidate resolve olmasa bile), dış referanslı Re:
+  // (ör. [ABC-1234567] Varuna'da YOK + In-Reply-To gerçek) senaryosunda
+  // header threading atlanıp mükerrer vaka açılırdı. Gate artık gerçek
+  // resolve durumuna bağlı.
+  let subjectTokenResolvedCase = false;
   if (tokens.length > 0) {
     // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
@@ -525,6 +532,7 @@ export async function intakeInboundEmail({
         }
       }
       if (existing) {
+        subjectTokenResolvedCase = true;
         // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
         // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç
         // (otomatik link YOK; ilişkilendirme mevcut LinksTab ile manuel).
@@ -627,7 +635,15 @@ export async function intakeInboundEmail({
   // - Terminal + k3Enabled → yeni vaka (mevcut K3 davranışı korunur)
   // - En yeni CaseEmail eşleşmesi (birden çok match olursa) — receivedAt/sentAt desc
   let headerMatchedMessageId = null;
-  if (!token) {
+  // Codex P2 R1 fix (2026-07-03): Guard artık `!token` DEĞİL — çünkü
+  // token = tokens[0] ?? null; ilk candidate resolve olmasa bile set
+  // edilir. Dış referanslı Re: ([ABC-1234567] Varuna'da YOK + gerçek
+  // In-Reply-To) senaryosunda önceki guard header threading'i
+  // atlayıp mükerrer vaka açardı. Artık gate gerçek resolve flag'ine
+  // bağlı (token flow eşleşme buldu mu?). Terminal K3 durumunda
+  // subjectTokenResolvedCase = true olduğu için header threading
+  // tekrar çalışmaz (aynı case'e ikinci lookup gereksiz).
+  if (!subjectTokenResolvedCase) {
     const headerIds = collectHeaderMessageIds(parsed);
     if (headerIds.length > 0) {
       try {

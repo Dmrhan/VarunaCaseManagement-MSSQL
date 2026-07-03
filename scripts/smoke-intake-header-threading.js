@@ -49,8 +49,13 @@ expect('1.5 Set ile dedupe',
 console.log('\n── 2) Header threading branch — intake flow ────');
 expect('2.1 A2 branch başlığı (2026-07-03 fix)',
   /A2\) HEADER THREADING \(2026-07-03 fix\)/.test(intake), true);
-expect('2.2 Guard: token yoksa devrede',
-  /if \(!token\) \{[\s\S]{0,300}collectHeaderMessageIds\(parsed\)/.test(intakeCode), true);
+// Codex P2 R1 fix (2026-07-03): Guard artık !token DEĞİL.
+// tokens[0] her zaman set edildiği için (candidate resolve olmasa bile),
+// dış referans + gerçek In-Reply-To senaryosunda !token=false çıkıyordu.
+expect('2.2 Guard: subjectTokenResolvedCase FALSE ise devrede (token flow gerçek eşleşme buldu mu?)',
+  /if \(!subjectTokenResolvedCase\) \{[\s\S]{0,300}collectHeaderMessageIds\(parsed\)/.test(intakeCode), true);
+expect('2.2b Regresyon — `if (!token)` guard\'ı A2 branch\'inden KALDIRILDI',
+  !/A2\) HEADER THREADING[\s\S]{0,600}if \(!token\)/.test(intake), true);
 expect('2.3 companyId scoped lookup (cross-tenant guard)',
   /prisma\.caseEmail\.findFirst\(\{[\s\S]{0,400}where: \{ companyId, messageId: \{ in: headerIds \} \}/.test(intakeCode), true);
 expect('2.4 inbound + outbound satırlar — direction filter YOK (guard: müşteri bizim ACK\'e de cevap verir)',
@@ -97,6 +102,14 @@ expect('6.3 token flow K3 kontrolü korundu',
   /A\) THREAD eşleşmesi[\s\S]{0,3000}K3 OVERRIDE \(M6\.1\)/.test(intake), true);
 expect('6.4 token flow appendInbound korundu',
   /A\) THREAD eşleşmesi[\s\S]{0,4000}caseEmailRepository\.appendInbound/.test(intake), true);
+
+console.log('\n── 6b) Codex P2 R1 — subjectTokenResolvedCase flag ───');
+expect('6b.1 flag declare false (default)',
+  /let subjectTokenResolvedCase = false;/.test(intake), true);
+expect('6b.2 flag TRUE set edilir — token flow existing bulunduysa (K3 dahil)',
+  /if \(existing\) \{\s*subjectTokenResolvedCase = true;/.test(intake), true);
+expect('6b.3 header threading gate — flag üzerinden',
+  /if \(!subjectTokenResolvedCase\)/.test(intake), true);
 
 console.log('\n── 7) Davranış — collectHeaderMessageIds sim ──');
 
@@ -222,6 +235,65 @@ expect('8.6c existing case referansı korundu (headerMatchedMessageId audit)', s
 const s7 = await simulateHeaderThreading({ inReplyTo: '', references: [] }, 'UNIVERA');
 expect('8.7 boş header → new_case', s7.decision, 'new_case');
 expect('8.7b action=no_headers', s7.action, 'no_headers');
+
+console.log('\n── 9) Codex P2 R1 — token candidate resolve OLMADI + header eşleşti ──');
+
+// Bug öncesi senaryo:
+//   Subject: "Re: [ABC-1234567] Konu"   (dış ticket referansı, Varuna'da YOK)
+//   In-Reply-To: <msg-1@ext.com>        (case-alpha'ya ait, gerçek)
+// Önceki guard `if (!token)` — tokens[0] = 'ABC-1234567' set edilirdi
+// (candidate resolve olmasa bile) → !token = false → header threading atlanır
+// → **mükerrer vaka** açılırdı.
+
+function simulateTokenFlow(subject) {
+  const rx = /\[([A-Z]{2,4}-\d{2,})\]/g;
+  const tokens = [];
+  let m;
+  while ((m = rx.exec(subject)) !== null) tokens.push(m[1]);
+  const token = tokens[0] ?? null;
+  const resolvedCaseNumbers = new Set(['UNV-1000042', 'UNV-1000050', 'PRM-1000010']);
+  let subjectTokenResolvedCase = false;
+  for (const cand of tokens) {
+    if (resolvedCaseNumbers.has(cand)) { subjectTokenResolvedCase = true; break; }
+  }
+  return { token, subjectTokenResolvedCase };
+}
+
+// Bug senaryosu — ESKI guard davranışı vs YENİ guard davranışı
+const bug = simulateTokenFlow('Re: [ABC-1234567] Konu');
+expect('9.1 tokens[0] = ABC-1234567 (unresolved external ref)', bug.token, 'ABC-1234567');
+expect('9.2 subjectTokenResolvedCase = false (Varuna\'da yok)', bug.subjectTokenResolvedCase, false);
+expect('9.3 ESKI guard `!token` = false → header threading ATLANIR (BUG)', !bug.token, false);
+expect('9.4 YENİ guard `!subjectTokenResolvedCase` = true → header threading ÇALIŞIR (FIX)',
+  !bug.subjectTokenResolvedCase, true);
+
+// Şimdi header eşleşmesi simülasyonu (In-Reply-To valid)
+const bugFix = await simulateHeaderThreading({ inReplyTo: '<msg-1@ext.com>' }, 'UNIVERA');
+expect('9.5 Header lookup case-alpha bulur (YENİ guard sayesinde çalışır)',
+  bugFix.existingCaseId, 'case-alpha');
+expect('9.6 decision = append (mükerrer vaka önlendi)',
+  bugFix.decision, 'append');
+
+// Karşı-senaryo: token gerçekten resolve → header threading ATLANIR (K3 gereksiz iş)
+const ok = simulateTokenFlow('Re: [UNV-1000042] Konu');
+expect('9.7 tokens[0] = UNV-1000042 (Varuna\'da var)', ok.token, 'UNV-1000042');
+expect('9.8 subjectTokenResolvedCase = true → header threading atlanır (gereksiz DB query yok)',
+  ok.subjectTokenResolvedCase, true);
+expect('9.9 YENİ guard `!subjectTokenResolvedCase` = false → header threading SKIP (doğru)',
+  !ok.subjectTokenResolvedCase, false);
+
+// Çoklu token: dış + Varuna karışık
+const mixed = simulateTokenFlow('Re: [ABC-1234567] [UNV-1000042] Konu');
+expect('9.10 tokens[0] dış (ilk match), ama existing var → resolve = true',
+  mixed.subjectTokenResolvedCase, true);
+expect('9.11 Header threading atlanır (token flow zaten çözdü)',
+  !mixed.subjectTokenResolvedCase, false);
+
+// Hiç token yok + header valid → header threading (klasik senaryo)
+const noToken = simulateTokenFlow('Re: Konu ek unutmuşum');
+expect('9.12 token = null (hiç bracket yok)', noToken.token, null);
+expect('9.13 subjectTokenResolvedCase = false', noToken.subjectTokenResolvedCase, false);
+expect('9.14 Header threading çalışır', !noToken.subjectTokenResolvedCase, true);
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
