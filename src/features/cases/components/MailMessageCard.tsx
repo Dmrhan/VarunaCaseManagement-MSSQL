@@ -112,11 +112,43 @@ export function MailMessageCard({
       const stripped = cid.replace(/^<|>$/g, '');
       const match = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
       if (!match) {
+        // Zarif düşüş (2026-07-03): sessiz gizleme YASAK. Eşleşmeyen cid için
+        // heuristic — SADECE LEGACY senaryo (parser fix'i öncesi kayıtlar,
+        // ör. UNV-1000089): tek inline aday var VE onun contentId'si null
+        // (yani cidMap boş) → gövdedeki cid src'yi o attachment'a yönlendir.
+        //
+        // Codex R1 (2026-07-03) — heuristic contentId dolu aday için
+        // DEVREDE OLMAZ: aksi halde "1 inline resolved cid: X + gövdede
+        // ayrıca unknown cid: Y" senaryosunda Y de X'in URL'ine yönlendirilir
+        // → duplicate/yanlış görsel. contentId var ise cidMap zaten onu
+        // içerir; body'deki ilgili img normal yolda match olur.
+        const inlineCandidates = email.attachments.filter((x) => x.isInline);
+        const canUseLegacyFallback =
+          inlineCandidates.length === 1 && inlineCandidates[0].contentId == null;
+        const fallback = canUseLegacyFallback ? inlineCandidates[0] : null;
+        if (fallback) {
+          cidJobs.push((async () => {
+            const out = await caseEmailService.getAttachmentDownload(caseId, email.id, fallback.id);
+            if (out?.url) {
+              img.setAttribute('src', out.url);
+              if (!img.getAttribute('alt')) img.setAttribute('alt', fallback.fileName);
+            } else {
+              const ph = doc.createElement('span');
+              ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
+              ph.textContent = `🖼 ${escapeHtml(fallback.fileName)}`;
+              img.replaceWith(ph);
+            }
+          })());
+          continue;
+        }
         const placeholder = doc.createElement('span');
         placeholder.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
+        const inlineNames = inlineCandidates.map((x) => x.fileName).join(', ');
         placeholder.textContent = isOldMailNoEmailAtt
           ? `🖼 Eski mail — inline görsel desteklenmiyor`
-          : `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
+          : inlineNames
+            ? `🖼 Gömülü görsel — ekte: ${inlineNames}`
+            : `🖼 ${img.getAttribute('alt') || 'görsel'} (cid eşleşmedi)`;
         img.replaceWith(placeholder);
         continue;
       }

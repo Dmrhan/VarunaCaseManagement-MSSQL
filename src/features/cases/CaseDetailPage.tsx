@@ -755,6 +755,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
             >
               {savingDrafts ? 'Kaydediliyor…' : `Kaydet${Object.keys(drafts).length > 0 ? ` (${Object.keys(drafts).length})` : ''}`}
             </Button>
+            {/* WR-C1 — "Üstlen" butonu Kaydet'in yanına taşındı (LeftPanel'den). */}
+            {!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi' && (
+              <button
+                type="button"
+                onClick={handleClaim}
+                disabled={claiming}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-3 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
+                title="Bu vakayı üstlen"
+              >
+                {claiming ? 'Üstleniliyor…' : 'Üstlen'}
+              </button>
+            )}
             <Button
               size="sm"
               leftIcon={<Phone size={12} />}
@@ -1010,9 +1022,6 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                 }
               : undefined
           }
-          onClaim={handleClaim}
-          claiming={claiming}
-          canClaim={!!user?.personId && !item.assignedPersonId && item.status !== 'Çözüldü' && item.status !== 'İptalEdildi'}
           drawerOpen={leftDrawerOpen}
           onCloseDrawer={() => setLeftDrawerOpen(false)}
           userRole={user?.role}
@@ -1337,9 +1346,6 @@ function LeftPanel({
   canLinkAccount,
   onLinkAccount,
   onConfirmLinkSuggestion,
-  onClaim,
-  claiming,
-  canClaim,
   drawerOpen,
   onCloseDrawer,
   userRole,
@@ -1353,12 +1359,6 @@ function LeftPanel({
   canLinkAccount?: boolean;
   onLinkAccount?: () => void;
   onConfirmLinkSuggestion?: (suggestion: CustomerMatchSuggestion) => Promise<void>;
-  /** WR-C1 — Üstlen click handler (parent state'i günceller). */
-  onClaim: () => void;
-  /** WR-C1 — Claim akışı çalışırken disabled + spinner için. */
-  claiming: boolean;
-  /** WR-C1 — Vaka açık + atanmamış + user.personId varsa true. */
-  canClaim: boolean;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
   /** LBD A6 — Agent rolünde WatchersPanel gizlenir; diğer tüm rollerde görünür. */
@@ -1615,19 +1615,8 @@ function LeftPanel({
       </PanelSection>
 
       {/* "Atama" PanelSection (Vaka Sahibi / Takım / Eskalasyon) görsel
-          arayüzden kaldırıldı. "Üstlen" butonu (WR-C1) bağımsız aksiyon
-          olduğu için korunuyor — artık PanelSection'a sarılı değil. */}
-      {canClaim && (
-        <button
-          type="button"
-          onClick={onClaim}
-          disabled={claiming}
-          className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-700 dark:bg-brand-950/30 dark:text-brand-200 dark:hover:bg-brand-950/50"
-          title="Bu vakayı üstlen"
-        >
-          {claiming ? 'Üstleniliyor…' : 'Üstlen'}
-        </button>
-      )}
+          arayüzden kaldırıldı. "Üstlen" butonu (WR-C1) header'a, Kaydet'in
+          yanına taşındı — artık burada render edilmiyor. */}
 
       {/* FAZ 2 Collab — izleyiciler. LBD A6: Agent rolünde gizli, diğer
           tüm rollerde (Supervisor/Backoffice/CSM/Admin/SystemAdmin) görünür.

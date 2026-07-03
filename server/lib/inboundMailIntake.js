@@ -843,20 +843,23 @@ export async function intakeInboundEmail({
       // iç adres setindeyse auto-link tamamen devre dışı kalır. Öneriler UI'da
       // görünmeye devam eder; vaka Supervisor kuyruğuna düşer.
       //
-      // HOTFIX P1 (2026-07-03) — yerel try/catch: "mail düşürülmez" felsefesi.
-      // isInternalAddress kendi içinde fail-open (boş Set döner) ama cache
-      // dışı bir noktada beklenmedik throw olursa intake pipeline'ı burada
-      // kırılmasın. Koruma devre dışı sayılır (senderIsInternal=false), akış
-      // devam eder → mail case oluşturur. Yüksek sesle log.
+      // HOTFIX P1 R2 (2026-07-03, Codex fail-open bulgu düzeltme):
+      // isInternalAddress artık fail-CLOSED — throw sırasında konservatif
+      // TRUE döner (auto-link iptal + learned atlanır). Wrapper garantili
+      // boolean; defense-in-depth try/catch de aynı davranışı korur
+      // (senderIsInternal=true → Supervisor kuyruğu; case yine oluşur).
       if (pick.auto) {
-        let senderIsInternal = false;
+        let senderIsInternal = true; // fail-closed default
         try {
           senderIsInternal = await isInternalAddress(parsed.from.email, companyId);
         } catch (err) {
+          // isInternalAddress kendi içinde try/catch var; buraya normalde
+          // düşmez. Beklenmedik throw'da konservatif TRUE → auto-link iptal.
           console.error(
-            '[intake] isInternalAddress THROW — F1 devre dışı, akış devam',
+            '[intake] isInternalAddress unexpected THROW — konservatif TRUE (auto-link iptal)',
             { companyId, sender: parsed.from.email, code: err?.code, message: err?.message },
           );
+          senderIsInternal = true;
         }
         if (senderIsInternal) {
           console.info('[intake] iç adres — auto-link devre dışı', parsed.from.email);
