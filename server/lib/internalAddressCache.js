@@ -89,45 +89,56 @@ async function buildInternalAddressSet(companyId) {
 /**
  * companyId için iç adres setini döner (5 dk cache).
  *
- * HOTFIX P1 (2026-07-03): fail-open guard. Prisma sorgusu bir sebeple
- * throw ederse (schema drift, DB down, geçersiz where) koruma SESSİZ
- * devre dışı kalmaz — YÜKSEK SESLE log basar + boş Set döner.
- * "İntake ASLA ölmez" felsefesi: iç-adres dışlaması yapılamıyor →
- * F1 devre dışı, ama mail düşmez; monitörden hemen görülür.
+ * Codex R2 (2026-07-03) — Fail-OPEN kaldırıldı (Codex bulgusu):
+ * Önceki fail-open (throw → boş Set) manuel-link path'inde
+ * learnedSenderAccountRepo.upsert F1 guard'ını atlıyordu → iç adres
+ * (User.email / inbox) learned satırı olarak YAZILIRDI → sonraki
+ * intake learned_personal path'i sender-email guard'ı BYPASS eder
+ * (insan onayı sayılır) → mükerrer yanlış müşteriye auto-link.
+ * Konservatif davranış: throw propagate. Wrapper isInternalAddress
+ * fail-CLOSED (true döner) → auto-link iptal + learned atlanır.
+ * Case Phase D müşterisiz akışla ZATEN oluşuyor (mail düşmez);
+ * yalnız otomatik bağlama iptal → Supervisor kuyruğu.
  *
  * @param {string} companyId
- * @returns {Promise<Set<string>>}
+ * @returns {Promise<Set<string>>} THROW propagate — caller (isInternalAddress) handle eder.
  */
 export async function getInternalAddresses(companyId) {
   const now = Date.now();
   const entry = _cache.get(companyId);
   if (entry && entry.expiresAt > now) return entry.addresses;
-  try {
-    const addresses = await buildInternalAddressSet(companyId);
-    _cache.set(companyId, { addresses, expiresAt: now + CACHE_TTL_MS });
-    return addresses;
-  } catch (err) {
-    // Yüksek sesli log (silent-fail YASAK — koruma kapalı ama görünmez
-    // olmasın). Cache YAZILMAZ → bir sonraki çağrı yeniden deneme
-    // yapar (transient hata iyileşirse otomatik toparlanır).
-    console.error(
-      '[internalAddressCache] BUILD FAIL — koruma devre dışı (fail-open)',
-      { companyId, code: err?.code, message: err?.message },
-    );
-    return new Set();
-  }
+  const addresses = await buildInternalAddressSet(companyId);
+  _cache.set(companyId, { addresses, expiresAt: now + CACHE_TTL_MS });
+  return addresses;
 }
 
 /**
  * Verilen email'in tenant iç adres setinde olup olmadığını döner.
+ *
+ * Codex R2 (2026-07-03) — Fail-CLOSED: getInternalAddresses throw
+ * ederse KONSERVATİF TRUE döner (iç adres SAYILIR):
+ *  - Intake caller: senderIsInternal=true → auto-link devre dışı,
+ *    vaka Supervisor kuyruğuna düşer (mail düşmez, case oluşur).
+ *  - learnedSenderAccountRepo.upsert: F1 guard iç adres kabul eder
+ *    → learned YAZILMAZ (sistem öğrenmesini zehirlemez).
+ *
  * @param {string|null} email   — normalize edilmemiş sender email
  * @param {string}      companyId
- * @returns {Promise<boolean>}
+ * @returns {Promise<boolean>} true → iç adres VEYA cache build failed (konservatif)
  */
 export async function isInternalAddress(email, companyId) {
   if (!email || !companyId) return false;
   const norm = email.trim().toLowerCase();
   if (!norm.includes('@')) return false;
-  const set = await getInternalAddresses(companyId);
-  return set.has(norm);
+  try {
+    const set = await getInternalAddresses(companyId);
+    return set.has(norm);
+  } catch (err) {
+    // YÜKSEK SESLE log (silent-fail YASAK). Monitörden hemen görülür.
+    console.error(
+      '[internalAddressCache] isInternalAddress FAIL — konservatif TRUE (auto-link iptal, learned atlandı)',
+      { companyId, sender: norm, code: err?.code, message: err?.message },
+    );
+    return true;
+  }
 }
