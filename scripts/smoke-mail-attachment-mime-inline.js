@@ -58,13 +58,24 @@ expect('1.4 Content-Disposition header disposition variable\'ı kullanır',
 expect('1.5 REGRESYON: eski `attachment; filename=` hard-code KALKMIŞ',
   !/Content-Disposition['"]\s*,\s*`attachment; filename=/.test(routes), true);
 
-console.log('\n── 2) Mail-eki download endpoint — payload mimeType+disposition ─');
+console.log('\n── 2) Mail-eki download endpoint — payload (Codex R1: att.isInline branch) ─');
 expect('2.1 Mail-eki token payload\'ında mimeType: att.mimeType',
   /signStorageToken\(\s*\{[\s\S]{0,400}mimeType:\s*att\.mimeType/.test(routesCode), true);
-expect('2.2 Mail-eki token payload\'ında disposition: \'inline\'',
-  /signStorageToken\(\s*\{[\s\S]{0,500}disposition:\s*'inline'/.test(routes), true);
-expect('2.3 Mail-eki fileName / caseId / fileId payload\'ta korunur',
-  /signStorageToken\(\s*\{[\s\S]{0,600}fileName:\s*att\.fileName,\s*mimeType:\s*att\.mimeType/.test(routesCode), true);
+// Codex R1 fix — disposition att.isInline'a bağlı; hard-coded 'inline' YOK
+expect('2.2 disposition att.isInline\'a bağlı ternary (inline / attachment)',
+  /const\s+disposition\s*=\s*att\.isInline\s*\?\s*'inline'\s*:\s*'attachment'/.test(routesCode), true);
+expect('2.3 REGRESYON: eski hard-coded `disposition: \'inline\'` KALKMIŞ (mail-eki path\'inde)',
+  !/signStorageToken\(\s*\{[\s\S]{0,600}disposition:\s*'inline'\s*,/.test(routes), true);
+expect('2.4 signStorageToken payload\'a variable disposition geçer',
+  /signStorageToken\(\s*\{[\s\S]{0,700}disposition,\s*\}/.test(routesCode), true);
+expect('2.5 Mail-eki fileName / caseId / fileId payload\'ta korunur',
+  /signStorageToken\(\s*\{[\s\S]{0,700}fileName:\s*att\.fileName,\s*mimeType:\s*att\.mimeType/.test(routesCode), true);
+
+// getAttachmentForRaw isInline döndürüyor mu
+console.log('\n── 2b) getAttachmentForRaw — isInline dönüş alanı ─');
+const emailRepo = read('server/db/caseEmailRepository.js');
+expect('2b.1 getAttachmentForRaw return\'ünde isInline: !!row.isInline',
+  /isInline:\s*!!row\.isInline/.test(emailRepo), true);
 
 console.log('\n── 3) storage.createDownloadUrl — mimeType opsiyonel param ─');
 expect('3.1 createDownloadUrl signature mimeType parametresi (default null)',
@@ -140,6 +151,50 @@ expect('6.3 Case attachment PDF → <img> render etmez (beklenen, bu path\'te im
 expect('6.4 image/jpeg render OK', simulateImgRender('image/jpeg'), true);
 expect('6.5 image/gif render OK', simulateImgRender('image/gif'), true);
 expect('6.6 image/webp render OK', simulateImgRender('image/webp'), true);
+
+console.log('\n── 6b) Davranış — Codex R1: att.isInline branch ─');
+
+function pickDisposition(att) {
+  return att.isInline ? 'inline' : 'attachment';
+}
+
+// cid inline image (Ctrl+V yapıştırma / Outlook inline logo)
+expect('6b.1 isInline=true → \'inline\' (cid render)',
+  pickDisposition({ isInline: true, mimeType: 'image/png' }), 'inline');
+
+// Normal mail-eki (PDF)
+expect('6b.2 isInline=false → \'attachment\' (download prompt)',
+  pickDisposition({ isInline: false, mimeType: 'application/pdf' }), 'attachment');
+
+// Normal image ek (kullanıcı ek olarak eklemiş ama disposition attachment)
+expect('6b.3 isInline=false + image mime → \'attachment\' (yine download)',
+  pickDisposition({ isInline: false, mimeType: 'image/jpeg' }), 'attachment');
+
+// isInline undefined → 'attachment' (defensive)
+expect('6b.4 isInline undefined → \'attachment\' (default konservatif)',
+  pickDisposition({ mimeType: 'image/png' }), 'attachment');
+expect('6b.5 isInline null → \'attachment\'',
+  pickDisposition({ isInline: null, mimeType: 'image/png' }), 'attachment');
+
+console.log('\n── 6c) Codex R1 adversary — /download kontratı korunur ─');
+
+// Codex senaryosu: kullanıcı normal PDF ek için signed URL'i kopyalayıp
+// tarayıcıda açar → browser Content-Disposition'a bakar → 'attachment'
+// olduğu için download prompt. 'inline' olsaydı app origin'de PDF preview
+// olurdu (kontrat ihlali).
+const normalPdf = { isInline: false, mimeType: 'application/pdf' };
+expect('6c.1 Normal PDF ek → disposition attachment (download prompt korunur)',
+  pickDisposition(normalPdf), 'attachment');
+
+// Normal PNG ek (kullanıcı manual ekledi, cid ref bodyHtml'de YOK)
+const normalPng = { isInline: false, mimeType: 'image/png' };
+expect('6c.2 Normal PNG ek → disposition attachment (app origin\'de preview değil, download)',
+  pickDisposition(normalPng), 'attachment');
+
+// Cid inline (Ctrl+V yapıştırma) → app origin preview OK, isInline=true
+const cidImage = { isInline: true, mimeType: 'image/png' };
+expect('6c.3 CID inline image → \'inline\' (mail thread\'de gövde-içi render)',
+  pickDisposition(cidImage), 'inline');
 
 console.log('\n── 7) Regresyon — case attachment normal download ─');
 
