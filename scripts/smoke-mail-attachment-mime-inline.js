@@ -58,18 +58,33 @@ expect('1.4 Content-Disposition header disposition variable\'ı kullanır',
 expect('1.5 REGRESYON: eski `attachment; filename=` hard-code KALKMIŞ',
   !/Content-Disposition['"]\s*,\s*`attachment; filename=/.test(routes), true);
 
-console.log('\n── 2) Mail-eki download endpoint — payload (Codex R1: att.isInline branch) ─');
-expect('2.1 Mail-eki token payload\'ında mimeType: att.mimeType',
-  /signStorageToken\(\s*\{[\s\S]{0,400}mimeType:\s*att\.mimeType/.test(routesCode), true);
-// Codex R1 fix — disposition att.isInline'a bağlı; hard-coded 'inline' YOK
-expect('2.2 disposition att.isInline\'a bağlı ternary (inline / attachment)',
-  /const\s+disposition\s*=\s*att\.isInline\s*\?\s*'inline'\s*:\s*'attachment'/.test(routesCode), true);
-expect('2.3 REGRESYON: eski hard-coded `disposition: \'inline\'` KALKMIŞ (mail-eki path\'inde)',
-  !/signStorageToken\(\s*\{[\s\S]{0,600}disposition:\s*'inline'\s*,/.test(routes), true);
-expect('2.4 signStorageToken payload\'a variable disposition geçer',
-  /signStorageToken\(\s*\{[\s\S]{0,700}disposition,\s*\}/.test(routesCode), true);
-expect('2.5 Mail-eki fileName / caseId / fileId payload\'ta korunur',
-  /signStorageToken\(\s*\{[\s\S]{0,700}fileName:\s*att\.fileName,\s*mimeType:\s*att\.mimeType/.test(routesCode), true);
+console.log('\n── 2) Mail-eki download endpoint — payload (Codex R2 P1: safe MIME allowlist) ─');
+// Codex R2 P1 (GÜVENLİK): inline sadece safe raster-image MIME için
+expect('2.1 INLINE_SAFE_MIME allowlist — 5 raster image mime',
+  /INLINE_SAFE_MIME\s*=\s*new\s+Set\(\[\s*'image\/png',\s*'image\/jpeg',\s*'image\/jpg',\s*'image\/gif',\s*'image\/webp',?\s*\]\)/.test(routesCode), true);
+expect('2.2 INLINE_SAFE_MIME içinde image/svg+xml YOK (script XSS)',
+  !/INLINE_SAFE_MIME[\s\S]{0,300}image\/svg/.test(routesCode), true);
+expect('2.3 INLINE_SAFE_MIME içinde text/html YOK (XSS)',
+  !/INLINE_SAFE_MIME[\s\S]{0,300}text\/html/.test(routesCode), true);
+expect('2.4 mimeLower ile case-insensitive kontrol',
+  /const\s+mimeLower\s*=\s*String\(att\.mimeType\s*\|\|\s*''\)\.toLowerCase\(\)/.test(routesCode), true);
+expect('2.5 isSafeRasterImage = allowlist lookup',
+  /const\s+isSafeRasterImage\s*=\s*INLINE_SAFE_MIME\.has\(mimeLower\)/.test(routesCode), true);
+// Codex R1 (mevcut) — disposition att.isInline branch VE safe MIME
+expect('2.6 isInlineSafe = att.isInline && isSafeRasterImage (İKİ koşul)',
+  /const\s+isInlineSafe\s*=\s*att\.isInline\s*&&\s*isSafeRasterImage/.test(routesCode), true);
+expect('2.7 disposition isInlineSafe\'e bağlı (SAFE ise inline, aksi attachment)',
+  /const\s+disposition\s*=\s*isInlineSafe\s*\?\s*'inline'\s*:\s*'attachment'/.test(routesCode), true);
+// Defensive: inline claim + unsafe MIME → octet-stream fallback
+expect('2.8 tokenMimeType — inline+unsafe → octet-stream fallback',
+  /const\s+tokenMimeType\s*=\s*isInlineSafe[\s\S]{0,200}application\/octet-stream/.test(routesCode), true);
+expect('2.9 signStorageToken payload — tokenMimeType + disposition variables',
+  /signStorageToken\(\s*\{[\s\S]{0,700}mimeType:\s*tokenMimeType,\s*disposition,\s*\}/.test(routesCode), true);
+// REGRESYON — eski (Codex R1 sonrası) att.isInline'a doğrudan bağlı ternary KALKMIŞ
+expect('2.10 REGRESYON: eski `disposition = att.isInline ? \'inline\' : \'attachment\'` (safe check\'siz) KALKMIŞ',
+  !/const\s+disposition\s*=\s*att\.isInline\s*\?\s*'inline'\s*:\s*'attachment'/.test(routesCode), true);
+expect('2.11 REGRESYON: payload\'a `mimeType: att.mimeType` (safe-check\'siz) KALKMIŞ',
+  !/signStorageToken\(\s*\{[\s\S]{0,700}mimeType:\s*att\.mimeType,\s*disposition/.test(routesCode), true);
 
 // getAttachmentForRaw isInline döndürüyor mu
 console.log('\n── 2b) getAttachmentForRaw — isInline dönüş alanı ─');
@@ -152,10 +167,23 @@ expect('6.4 image/jpeg render OK', simulateImgRender('image/jpeg'), true);
 expect('6.5 image/gif render OK', simulateImgRender('image/gif'), true);
 expect('6.6 image/webp render OK', simulateImgRender('image/webp'), true);
 
-console.log('\n── 6b) Davranış — Codex R1: att.isInline branch ─');
+console.log('\n── 6b) Davranış — Codex R2 P1: safe MIME allowlist ─');
+
+const INLINE_SAFE_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
+]);
 
 function pickDisposition(att) {
-  return att.isInline ? 'inline' : 'attachment';
+  const mimeLower = String(att.mimeType || '').toLowerCase();
+  const isSafeRasterImage = INLINE_SAFE_MIME.has(mimeLower);
+  return (att.isInline && isSafeRasterImage) ? 'inline' : 'attachment';
+}
+function pickTokenMime(att) {
+  const mimeLower = String(att.mimeType || '').toLowerCase();
+  const isSafeRasterImage = INLINE_SAFE_MIME.has(mimeLower);
+  const isInlineSafe = att.isInline && isSafeRasterImage;
+  return isInlineSafe ? att.mimeType
+    : (att.isInline ? 'application/octet-stream' : att.mimeType);
 }
 
 // cid inline image (Ctrl+V yapıştırma / Outlook inline logo)
@@ -169,12 +197,77 @@ expect('6b.2 isInline=false → \'attachment\' (download prompt)',
 // Normal image ek (kullanıcı ek olarak eklemiş ama disposition attachment)
 expect('6b.3 isInline=false + image mime → \'attachment\' (yine download)',
   pickDisposition({ isInline: false, mimeType: 'image/jpeg' }), 'attachment');
+// Normal ek — mimeType raw kalır (safe MIME olsa da olmasa da)
+expect('6b.3b isInline=false + image mime → tokenMime gerçek mime kalır',
+  pickTokenMime({ isInline: false, mimeType: 'image/jpeg' }), 'image/jpeg');
+expect('6b.3c isInline=false + PDF → tokenMime application/pdf (normal download)',
+  pickTokenMime({ isInline: false, mimeType: 'application/pdf' }), 'application/pdf');
 
 // isInline undefined → 'attachment' (defensive)
 expect('6b.4 isInline undefined → \'attachment\' (default konservatif)',
   pickDisposition({ mimeType: 'image/png' }), 'attachment');
 expect('6b.5 isInline null → \'attachment\'',
   pickDisposition({ isInline: null, mimeType: 'image/png' }), 'attachment');
+
+console.log('\n── 6b2) Codex R2 P1 attacker senaryoları ─');
+
+// Attacker: dış mail'de text/html contentType + Content-Disposition: inline
+const htmlXssAttack = { isInline: true, mimeType: 'text/html' };
+expect('6b2.1 XSS ATTACK: text/html + inline → disposition attachment (BLOCKED)',
+  pickDisposition(htmlXssAttack), 'attachment');
+expect('6b2.2 XSS ATTACK: text/html → tokenMime octet-stream (browser aktif render EDEMEZ)',
+  pickTokenMime(htmlXssAttack), 'application/octet-stream');
+
+// Attacker: SVG + script (SVG raster değil, script içerebilir)
+const svgXssAttack = { isInline: true, mimeType: 'image/svg+xml' };
+expect('6b2.3 XSS ATTACK: image/svg+xml + inline → disposition attachment (BLOCKED)',
+  pickDisposition(svgXssAttack), 'attachment');
+expect('6b2.4 XSS ATTACK: image/svg+xml → tokenMime octet-stream',
+  pickTokenMime(svgXssAttack), 'application/octet-stream');
+
+// Attacker: application/xhtml+xml (script'li XML)
+const xhtmlAttack = { isInline: true, mimeType: 'application/xhtml+xml' };
+expect('6b2.5 XSS ATTACK: application/xhtml+xml + inline → attachment (BLOCKED)',
+  pickDisposition(xhtmlAttack), 'attachment');
+
+// Attacker: text/javascript
+const jsAttack = { isInline: true, mimeType: 'text/javascript' };
+expect('6b2.6 XSS ATTACK: text/javascript + inline → attachment (BLOCKED)',
+  pickDisposition(jsAttack), 'attachment');
+expect('6b2.7 XSS ATTACK: text/javascript → tokenMime octet-stream',
+  pickTokenMime(jsAttack), 'application/octet-stream');
+
+// Attacker: case sensitivity bypass
+const uppercaseAttack = { isInline: true, mimeType: 'TEXT/HTML' };
+expect('6b2.8 XSS ATTACK: TEXT/HTML case bypass → toLowerCase yakalar, attachment',
+  pickDisposition(uppercaseAttack), 'attachment');
+expect('6b2.9 XSS ATTACK: TEXT/HTML → tokenMime octet-stream',
+  pickTokenMime(uppercaseAttack), 'application/octet-stream');
+
+// Safe: image/png + inline → OK
+const safeImage = { isInline: true, mimeType: 'image/png' };
+expect('6b2.10 SAFE: image/png + inline → inline + gerçek mime',
+  pickDisposition(safeImage), 'inline');
+expect('6b2.11 SAFE: image/png tokenMime image/png',
+  pickTokenMime(safeImage), 'image/png');
+
+// Safe: image/webp inline → OK
+const webpImage = { isInline: true, mimeType: 'image/webp' };
+expect('6b2.12 SAFE: image/webp + inline → inline',
+  pickDisposition(webpImage), 'inline');
+
+// Empty mime + inline flag → attachment (defensive)
+const emptyMime = { isInline: true, mimeType: '' };
+expect('6b2.13 boş mime + inline → attachment (allowlist\'te değil)',
+  pickDisposition(emptyMime), 'attachment');
+expect('6b2.14 boş mime + inline → tokenMime octet-stream',
+  pickTokenMime(emptyMime), 'application/octet-stream');
+
+// Null/undefined mime → attachment
+expect('6b2.15 undefined mime + inline → attachment',
+  pickDisposition({ isInline: true }), 'attachment');
+expect('6b2.16 null mime + inline → attachment',
+  pickDisposition({ isInline: true, mimeType: null }), 'attachment');
 
 console.log('\n── 6c) Codex R1 adversary — /download kontratı korunur ─');
 
