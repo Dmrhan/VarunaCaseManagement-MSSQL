@@ -96,10 +96,12 @@ interface UploadedFileRef {
   id: string;
   fileName: string;
   fileSize: number;
-  // Ctrl+V ile eklenmiş inline görsel → bodyHtml'de <img src="cid:{id}">
-  // referansı var. Send öncesi HTML'de referansı kalmayan inline attachment
-  // otomatik listeden düşer ("editörden silinen görsel gönderime girmez" dikişi).
+  // Ctrl+V ile eklenmiş inline görsel — editörde blob URL src ile render
+  // edilir (browser cid:'yi göstermez). Send öncesi bodyHtml içindeki blobUrl
+  // → cid:{id} REPLACE edilir. Kullanıcı editörden görseli silerse blobUrl
+  // artık bodyHtml'de yok → inline attachment listeden düşer.
   inline?: boolean;
+  blobUrl?: string;
 }
 
 type ContactPickerValue = { address: string; name: string | null };
@@ -283,9 +285,23 @@ export function MailComposer({
   }, [signatureSelection, agentHtml, composedHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
+  // Codex P2 R1 fix: çoklu paste'te uploading boolean tek bit — ilk upload
+  // bitince false'a düşer, diğerleri hâlâ pending. Sayaç ile pendingPastes
+  // === 0 olana kadar canSend disable.
+  const [pendingPastes, setPendingPastes] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Blob URL cleanup — component unmount'ta tüm inline blob URL'leri revoke
+  // et (memory leak guard). Send başarılı olunca onSent callback composer'ı
+  // kapatır → unmount → cleanup.
+  const attachmentsRef = useRef<UploadedFileRef[]>([]);
+  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
+  useEffect(() => () => {
+    for (const a of attachmentsRef.current) {
+      if (a.blobUrl) URL.revokeObjectURL(a.blobUrl);
+    }
+  }, []);
 
   // Suggestions kaynağı — şimdilik vakanın customerContact alanları.
   // Genişletilmiş account contacts öneri listesi M6.3'te.
@@ -443,7 +459,12 @@ export function MailComposer({
   // Ctrl+V ile görsel yapıştırma: RichTextEditor'dan çağrılır.
   // Guard'lar SUNUCUDA da doğrulanır — bu FE kısıtları UX için
   // (backend uploadWhitelist.js kesin karar verir).
-  const handlePasteImage = useCallback(async (file: File): Promise<PasteImageResult> => {
+  //
+  // Codex P2 R1: pendingPastes sayacı — çoklu görsel yapıştırma sırasında
+  // her upload kendi +1/-1'ini yapar. canSend hepsi bitene kadar disable.
+  // "İlk upload bitince Send açılır → diğerleri pending → gönderilmez"
+  // hatasını önler.
+  const handlePasteImage = useCallback(async (file: File, blobUrl: string): Promise<PasteImageResult> => {
     if (!INLINE_PASTE_ALLOWED_MIME.has(file.type)) {
       const msg = 'Yalnız PNG/JPG/GIF/WebP görselleri gövde içine yapıştırılabilir.';
       toast({ type: 'warn', message: msg });
@@ -454,7 +475,7 @@ export function MailComposer({
       toast({ type: 'warn', message: msg });
       return { ok: false, error: msg };
     }
-    setUploading(true);
+    setPendingPastes((n) => n + 1);
     try {
       const r = await caseService.addFile(item.id, file);
       if (!r) return { ok: false, error: 'upload_failed' };
@@ -468,14 +489,18 @@ export function MailComposer({
         fileName: caseFile.fileName,
         fileSize: caseFile.fileSize,
         inline: true,
+        blobUrl,
       }]);
       return { ok: true, cid: caseFile.id };
     } finally {
-      setUploading(false);
+      setPendingPastes((n) => n - 1);
     }
   }, [item.id, toast]);
 
-  const canSend = !!selectedAlias && to.length > 0 && !submitting && !uploading;
+  // Codex P2 R1 fix: pendingPastes === 0 kontrolü — çoklu görsel paste'te
+  // hepsi tamamlanmadan Send tetiklenemez (aksi halde henüz upload olmamış
+  // görsel gönderilmez, mail'de sadece blob URL kalır → müşteride broken img).
+  const canSend = !!selectedAlias && to.length > 0 && !submitting && !uploading && pendingPastes === 0;
 
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current) return;
@@ -490,18 +515,24 @@ export function MailComposer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
+      // Codex P2 R1 fix: bodyHtml içindeki blob URL'leri cid:{id} ile REPLACE
+      // et (editörde blob URL renderable src'ti; mail için standart cid:).
+      // Editörden silinmiş görselin blobUrl'i bodyHtml'de olmaz → inline
+      // attachment listeden düşer ("silinen görsel gönderime girmez" dikişi).
+      let payloadHtml = bodyHtml;
+      const activeInlineIds = new Set<string>();
+      for (const a of attachments) {
+        if (a.inline && a.blobUrl && payloadHtml.includes(a.blobUrl)) {
+          payloadHtml = payloadHtml.split(a.blobUrl).join(`cid:${a.id}`);
+          activeInlineIds.add(a.id);
+        }
+      }
       // DOMPurify ile final pass (defense-in-depth; backend de sanitize eder)
-      const safeBody = DOMPurify.sanitize(bodyHtml, { USE_PROFILES: { html: true } });
+      // Sanitize AFTER replace — cid: allowed default'ta, blob: değil.
+      const safeBody = DOMPurify.sanitize(payloadHtml, { USE_PROFILES: { html: true } });
 
-      // "Editörde silinen görsel gönderime GİRMEZ" dikişi:
-      // safeBody içinde <img src="cid:{id}"> referansı KALMAYAN inline
-      // attachment'ları listeden düşür (kullanıcı yapıştırdı sonra sildi).
-      // Normal (inline: false) ekler her zaman gönderilir.
-      const cidRefs = new Set<string>();
-      const cidRe = /<img[^>]+src=["']cid:([^"']+)["']/gi;
-      for (let m: RegExpExecArray | null; (m = cidRe.exec(safeBody)); ) cidRefs.add(m[1]);
       const attachmentIds = attachments
-        .filter((a) => (a.inline ? cidRefs.has(a.id) : true))
+        .filter((a) => (a.inline ? activeInlineIds.has(a.id) : true))
         .map((a) => a.id);
 
       const r = await caseEmailService.sendEmail(item.id, {
@@ -528,12 +559,18 @@ export function MailComposer({
     }
   }, [attachments, bcc, bodyHtml, cc, item.id, onSent, selectedAlias, showBcc, showCc, subject, to, toast]);
 
-  // Önizleme: DOMPurify ile sanitize edilmiş bodyHtml
+  // Önizleme: DOMPurify ile sanitize edilmiş bodyHtml.
+  // Codex P2 R1 fix — ALLOWED_URI_REGEXP: composer'da inline paste görselleri
+  // blob URL src ile render edilir (editör'de renderable). Preview sanitize'ı
+  // default'ta blob: strip eder → kullanıcı önizlemede broken image görürdü.
+  // Whitelist: http/https + blob (paste preview) + cid (backend sonrası) +
+  // mailto/tel + data (bazı imza görselleri).
   const previewHtml = useMemo(() => {
     return DOMPurify.sanitize(bodyHtml, {
       USE_PROFILES: { html: true },
       ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style', 'class'],
       FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed', 'link', 'meta', 'style'],
+      ALLOWED_URI_REGEXP: /^(?:https?|blob|cid|mailto|tel|data):/i,
     });
   }, [bodyHtml]);
 
@@ -737,14 +774,20 @@ export function MailComposer({
                 <Paperclip size={11} />
                 {a.fileName}
                 {a.inline && <span className="text-[10px] opacity-70">(gövde)</span>}
-                <button
-                  type="button"
-                  onClick={() => removeAttachment(a.id)}
-                  className="text-slate-400 hover:text-rose-500"
-                  title="Kaldır"
-                >
-                  <X size={11} />
-                </button>
+                {/* Codex P2 R1: inline pill'de Kaldır butonu YOK — kullanıcı
+                    click'lerse attachments düşer ama bodyHtml'de <img> kalır
+                    → orphan CID → müşteride broken image. Inline'ı editörden
+                    silsin, send öncesi filter otomatik düşürür. */}
+                {!a.inline && (
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(a.id)}
+                    className="text-slate-400 hover:text-rose-500"
+                    title="Kaldır"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
               </span>
             ))}
           </div>

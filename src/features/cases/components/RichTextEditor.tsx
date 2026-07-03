@@ -30,9 +30,13 @@ interface Props {
   onChange: (html: string) => void;
   placeholder?: string;
   disabled?: boolean;
-  // Ctrl+V ile görsel yapıştırma. Composer upload eder ve cid döner
-  // (attachmentId = cid). null → paste özelliği kapalı (URL prompt'u aynen çalışır).
-  onPasteImage?: (file: File) => Promise<PasteImageResult>;
+  // Ctrl+V ile görsel yapıştırma. Composer upload eder ve cid döner.
+  // Codex P2 R1: blobUrl parametresi eklendi — editör src'yi cid:xxx'a
+  // ÇEVİRMEZ (browser cid: scheme'i render edemez → broken image olurdu).
+  // Blob URL editörde kalır, MailComposer state'te (blobUrl → attachmentId)
+  // eşlemesi tutar; send öncesi bodyHtml içindeki blobUrl'ler cid:{id} ile
+  // REPLACE edilir. Böylece composer'da renderable src, mail'de standart cid.
+  onPasteImage?: (file: File, blobUrl: string) => Promise<PasteImageResult>;
 }
 
 export function RichTextEditor({ value, onChange, placeholder, disabled, onPasteImage }: Props) {
@@ -90,33 +94,25 @@ export function RichTextEditor({ value, onChange, placeholder, disabled, onPaste
           view.dispatch(view.state.tr.replaceSelectionWith(node));
 
           void (async () => {
-            try {
-              const res = await onPasteImage(file);
-              // Kullanıcı arada görsel silmiş olabilir — bulunamazsa gürültüsüz düş.
-              if (!res.ok) {
-                // Blob URL'li görsel node'unu bul ve kaldır (upload başarısız).
-                view.state.doc.descendants((n, pos) => {
-                  if (n.type === imageType && n.attrs.src === blobUrl) {
-                    view.dispatch(view.state.tr.delete(pos, pos + n.nodeSize));
-                    return false;
-                  }
-                  return true;
-                });
-                return;
-              }
-              // Blob URL'li node'u bul → src'yi cid:{attachmentId} yap.
+            const res = await onPasteImage(file, blobUrl);
+            // Codex P2 R1 fix: başarıda src'yi cid:{id} yapmıyoruz — browser
+            // cid: scheme'i render edemez → composer'da broken image olurdu.
+            // Blob URL editörde kalır (renderable), MailComposer state'te
+            // blobUrl→attachmentId eşlemesi tutulur; send öncesi bodyHtml
+            // içindeki blobUrl'ler cid:{id} ile REPLACE edilir.
+            //
+            // Başarısızlıkta: node'u kaldır + blob URL'i revoke et.
+            // Başarıda: blob URL'i editörde bırak; revoke composer send
+            // sonrası veya unmount'ta yapılır (composer bu blob'u kendi
+            // state'inde tutuyor).
+            if (!res.ok) {
               view.state.doc.descendants((n, pos) => {
                 if (n.type === imageType && n.attrs.src === blobUrl) {
-                  const tr = view.state.tr.setNodeMarkup(pos, undefined, {
-                    ...n.attrs,
-                    src: `cid:${res.cid}`,
-                  });
-                  view.dispatch(tr);
+                  view.dispatch(view.state.tr.delete(pos, pos + n.nodeSize));
                   return false;
                 }
                 return true;
               });
-            } finally {
               URL.revokeObjectURL(blobUrl);
             }
           })();
