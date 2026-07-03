@@ -34,8 +34,20 @@ function extractEmail(raw) {
 async function buildInternalAddressSet(companyId) {
   const set = new Set();
 
+  // HOTFIX P1 (2026-07-03): User modelinde companyId alanı YOK.
+  // İlişki: User.companies UserCompany[] (N:M köprü). Önceki sorgu
+  // prisma.user.findMany({where:{companyId}}) her çağrıda
+  // PrismaClientValidationError fırlatıyordu → F1 iç-adres dışlaması
+  // devre dışı + M2.3 öğrenme (learned upsert) ölü. Doğru şekli
+  // UserCompany join'i üzerinden.
   const [users, inboxes, aliases, settings, cs] = await Promise.all([
-    prisma.user.findMany({ where: { companyId }, select: { email: true } }),
+    prisma.user.findMany({
+      where: {
+        isActive: true,
+        companies: { some: { companyId, isActive: true } },
+      },
+      select: { email: true },
+    }),
     prisma.externalMailInbox.findMany({
       where: { companyId },
       select: { address: true, fromAddress: true },
@@ -76,6 +88,13 @@ async function buildInternalAddressSet(companyId) {
 
 /**
  * companyId için iç adres setini döner (5 dk cache).
+ *
+ * HOTFIX P1 (2026-07-03): fail-open guard. Prisma sorgusu bir sebeple
+ * throw ederse (schema drift, DB down, geçersiz where) koruma SESSİZ
+ * devre dışı kalmaz — YÜKSEK SESLE log basar + boş Set döner.
+ * "İntake ASLA ölmez" felsefesi: iç-adres dışlaması yapılamıyor →
+ * F1 devre dışı, ama mail düşmez; monitörden hemen görülür.
+ *
  * @param {string} companyId
  * @returns {Promise<Set<string>>}
  */
@@ -83,9 +102,20 @@ export async function getInternalAddresses(companyId) {
   const now = Date.now();
   const entry = _cache.get(companyId);
   if (entry && entry.expiresAt > now) return entry.addresses;
-  const addresses = await buildInternalAddressSet(companyId);
-  _cache.set(companyId, { addresses, expiresAt: now + CACHE_TTL_MS });
-  return addresses;
+  try {
+    const addresses = await buildInternalAddressSet(companyId);
+    _cache.set(companyId, { addresses, expiresAt: now + CACHE_TTL_MS });
+    return addresses;
+  } catch (err) {
+    // Yüksek sesli log (silent-fail YASAK — koruma kapalı ama görünmez
+    // olmasın). Cache YAZILMAZ → bir sonraki çağrı yeniden deneme
+    // yapar (transient hata iyileşirse otomatik toparlanır).
+    console.error(
+      '[internalAddressCache] BUILD FAIL — koruma devre dışı (fail-open)',
+      { companyId, code: err?.code, message: err?.message },
+    );
+    return new Set();
+  }
 }
 
 /**

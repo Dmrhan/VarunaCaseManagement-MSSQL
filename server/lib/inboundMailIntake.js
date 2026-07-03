@@ -842,8 +842,22 @@ export async function intakeInboundEmail({
       // F1 — İç adres koruması: forward eden Univera çalışanı senderEmail'i
       // iç adres setindeyse auto-link tamamen devre dışı kalır. Öneriler UI'da
       // görünmeye devam eder; vaka Supervisor kuyruğuna düşer.
+      //
+      // HOTFIX P1 (2026-07-03) — yerel try/catch: "mail düşürülmez" felsefesi.
+      // isInternalAddress kendi içinde fail-open (boş Set döner) ama cache
+      // dışı bir noktada beklenmedik throw olursa intake pipeline'ı burada
+      // kırılmasın. Koruma devre dışı sayılır (senderIsInternal=false), akış
+      // devam eder → mail case oluşturur. Yüksek sesle log.
       if (pick.auto) {
-        const senderIsInternal = await isInternalAddress(parsed.from.email, companyId);
+        let senderIsInternal = false;
+        try {
+          senderIsInternal = await isInternalAddress(parsed.from.email, companyId);
+        } catch (err) {
+          console.error(
+            '[intake] isInternalAddress THROW — F1 devre dışı, akış devam',
+            { companyId, sender: parsed.from.email, code: err?.code, message: err?.message },
+          );
+        }
         if (senderIsInternal) {
           console.info('[intake] iç adres — auto-link devre dışı', parsed.from.email);
           pick.auto = false;
