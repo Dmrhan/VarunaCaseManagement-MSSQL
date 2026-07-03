@@ -55,25 +55,61 @@ expect('1.2 select email',
 expect('1.3 REGRESYON: eski `where: { companyId }` KALDIRILDI',
   !/prisma\.user\.findMany\(\{\s*where:\s*\{\s*companyId\s*\}/.test(cacheCode), true);
 
-console.log('\n── 2) Fail-open guard — koruma sessiz değil GÜRÜLTÜLÜ ─');
-expect('2.1 getInternalAddresses gövdesi try/catch',
-  /export async function getInternalAddresses[\s\S]{0,600}try\s*\{[\s\S]{0,400}catch\s*\(err\)/.test(cacheCode), true);
-expect('2.2 YÜKSEK SESLE log — console.error + "koruma devre dışı"',
-  /console\.error\(\s*'\[internalAddressCache\] BUILD FAIL — koruma devre dışı/.test(cache), true);
-expect('2.3 Log context — companyId + code + message',
-  /console\.error[\s\S]{0,400}companyId,[\s\S]{0,200}code:\s*err\?\.code,[\s\S]{0,100}message:\s*err\?\.message/.test(cache), true);
-expect('2.4 Boş Set döner (fail-open, intake ölmez)',
-  /catch\s*\(err\)[\s\S]{0,600}return\s+new\s+Set\(\)/.test(cacheCode), true);
-expect('2.5 Cache YAZILMAZ — bir sonraki çağrı yeniden dener (self-healing)',
-  /try\s*\{[\s\S]{0,600}_cache\.set\(companyId,[\s\S]{0,400}catch/.test(cacheCode), true);
+console.log('\n── 2) Fail-CLOSED guard — Codex R2 fix ───────');
+// Codex R2 (2026-07-03) — fail-open KALDIRILDI. Neden: manuel-link
+// path'inde learnedSenderAccountRepo.upsert F1 guard'ı iç adresi
+// öğrenirdi → sonraki intake learned_personal sender guard bypass
+// → mükerrer yanlış müşteri.
+// Doğrusu: getInternalAddresses throw propagate; isInternalAddress
+// try/catch → konservatif TRUE (auto-link iptal + learned atlanır).
+expect('2.1 REGRESYON: getInternalAddresses fail-open (try/catch + boş Set) KALKMIŞ',
+  !/export async function getInternalAddresses[\s\S]{0,800}catch\s*\(err\)[\s\S]{0,400}return\s+new\s+Set\(\)/.test(cacheCode), true);
+expect('2.2 REGRESYON: eski "BUILD FAIL — koruma devre dışı (fail-open)" log İZİ YOK',
+  !/BUILD FAIL — koruma devre dışı \(fail-open\)/.test(cache), true);
+{
+  // getInternalAddresses gövdesini kapat — sonraki export'a KADAR
+  // (fonksiyon içinde try aramak için).
+  const gimMatch = cacheCode.match(
+    /export async function getInternalAddresses\([^)]*\)\s*\{([\s\S]*?)\}\s*(?=\/\*\*|export)/,
+  );
+  const gimBody = gimMatch?.[1] ?? null;
+  expect('2.3a getInternalAddresses gövdesi capture edildi',
+    typeof gimBody === 'string' && gimBody.length > 0, true);
+  expect('2.3b getInternalAddresses gövdesinde try/catch YOK (throw propagate)',
+    gimBody !== null && !/\btry\s*\{/.test(gimBody), true);
+  expect('2.3c getInternalAddresses gövdesi return addresses ile biter',
+    gimBody !== null && /return addresses;\s*$/.test(gimBody.trim()), true);
+}
+expect('2.4 isInternalAddress try/catch — fail-CLOSED wrapper',
+  /export async function isInternalAddress[\s\S]{0,600}try\s*\{\s*const set\s*=\s*await getInternalAddresses\(companyId\)[\s\S]{0,200}catch\s*\(err\)/.test(cacheCode), true);
+expect('2.5 isInternalAddress catch → return TRUE (konservatif)',
+  /catch\s*\(err\)\s*\{[\s\S]{0,600}return\s+true;\s*\}/.test(cacheCode), true);
+expect('2.6 YÜKSEK SESLE log — "konservatif TRUE" + auto-link iptal + learned atlandı',
+  /console\.error\(\s*'\[internalAddressCache\] isInternalAddress FAIL — konservatif TRUE \(auto-link iptal, learned atlandı\)/.test(cache), true);
+expect('2.7 Log context — companyId + sender + code + message',
+  /console\.error[\s\S]{0,400}companyId,\s*sender:\s*norm,\s*code:\s*err\?\.code,\s*message:\s*err\?\.message/.test(cache), true);
 
-console.log('\n── 3) Intake caller (~846) yerel try/catch ─────');
-expect('3.1 isInternalAddress try/catch ile sarıldı',
-  /let\s+senderIsInternal\s*=\s*false;\s*try\s*\{\s*senderIsInternal\s*=\s*await\s+isInternalAddress\(parsed\.from\.email,\s*companyId\)/.test(intakeCode), true);
-expect('3.2 catch YÜKSEK SESLE log — F1 devre dışı, akış devam',
-  /catch\s*\(err\)\s*\{[\s\S]{0,400}console\.error\(\s*'\[intake\] isInternalAddress THROW — F1 devre dışı, akış devam/.test(intake), true);
-expect('3.3 "mail düşürülmez" — catch sonrası akış if(senderIsInternal) ile devam',
+console.log('\n── 3) Intake caller (~846) — fail-closed default ─');
+expect('3.1 senderIsInternal DEFAULT true (fail-closed)',
+  /let\s+senderIsInternal\s*=\s*true;\s*\/\/[^\n]*fail-closed/.test(intake), true);
+expect('3.2 REGRESYON: eski "let senderIsInternal = false" KALKMIŞ',
+  !/let\s+senderIsInternal\s*=\s*false;\s*try/.test(intake), true);
+expect('3.3 try içinde isInternalAddress atanır',
+  /try\s*\{\s*senderIsInternal\s*=\s*await\s+isInternalAddress\(parsed\.from\.email,\s*companyId\)/.test(intakeCode), true);
+expect('3.4 catch YÜKSEK SESLE log — "konservatif TRUE"',
+  /catch\s*\(err\)\s*\{[\s\S]{0,400}console\.error\(\s*'\[intake\] isInternalAddress unexpected THROW — konservatif TRUE \(auto-link iptal\)/.test(intake), true);
+expect('3.5 catch içinde senderIsInternal = true (fail-closed)',
+  /catch\s*\(err\)[\s\S]{0,600}senderIsInternal\s*=\s*true;/.test(intake), true);
+expect('3.6 catch sonrası akış if(senderIsInternal) ile devam',
   /catch\s*\(err\)[\s\S]{0,600}\}\s*if\s*\(senderIsInternal\)/.test(intake), true);
+
+// Manuel-link path — learnedSenderAccountRepo.upsert F1 guard'ı intakt
+console.log('\n── 3b) Manuel-link path — learnedSenderAccountRepo.upsert F1 guard ─');
+const learnedRepo = read('server/db/learnedSenderAccountRepository.js');
+expect('3b.1 upsert içinde isInternalAddress guard var',
+  /async\s+upsert\([^)]*\)\s*\{[\s\S]{0,800}await isInternalAddress\(norm,\s*companyId\)/.test(learnedRepo), true);
+expect('3b.2 internal === true → return null (learned YAZILMAZ)',
+  /if\s*\(internal\)\s*\{[\s\S]{0,200}return\s+null/.test(learnedRepo), true);
 
 console.log('\n── 4) Davranış — cache + isInternalAddress semantik ─');
 
@@ -96,7 +132,7 @@ expect('4.3 email olmayan girdi → null',
 expect('4.4 null → null',
   extractEmail(null), null);
 
-// isInternalAddress semantik simülasyonu (fail-open olmayan durum)
+// isInternalAddress semantik — Codex R2 fail-CLOSED
 async function isInternalAddressSim(email, companyId, setBuilder) {
   if (!email || !companyId) return false;
   const norm = email.trim().toLowerCase();
@@ -105,7 +141,7 @@ async function isInternalAddressSim(email, companyId, setBuilder) {
     const set = await setBuilder(companyId);
     return set.has(norm);
   } catch {
-    return false;
+    return true;  // fail-CLOSED (Codex R2)
   }
 }
 
@@ -125,12 +161,46 @@ expect('4.7 boş email → false', empty, false);
 const missingCompany = await isInternalAddressSim('a@b.com', '', () => Promise.resolve(internalSet));
 expect('4.8 companyId boş → false', missingCompany, false);
 
-// Fail-open davranışı
-const failOpen = await isInternalAddressSim('hulya.ozbey@univera.com.tr', 'UNIVERA', () => {
+// Codex R2 — fail-CLOSED davranışı
+const failClosedInternal = await isInternalAddressSim('hulya.ozbey@univera.com.tr', 'UNIVERA', () => {
   throw new Error('DB down');
 });
-expect('4.9 fail-open — throw sırasında false döner (koruma devre dışı ama ölmez)',
-  failOpen, false);
+expect('4.9 fail-CLOSED — iç adres throw sırasında TRUE (konservatif)',
+  failClosedInternal, true);
+
+const failClosedExternal = await isInternalAddressSim('musteri@doluca.com.tr', 'UNIVERA', () => {
+  throw new Error('DB down');
+});
+expect('4.10 fail-CLOSED — DIŞ adres bile throw\'da TRUE (learned atlanır, konservatif)',
+  failClosedExternal, true);
+
+// Manuel-link path semantik — learnedSenderAccountRepo.upsert davranış sim
+async function learnedUpsertSim(senderEmail, companyId, setBuilder) {
+  const internal = await isInternalAddressSim(senderEmail, companyId, setBuilder);
+  if (internal) return null;  // learned YAZILMAZ
+  return { written: true, senderEmail };
+}
+
+const okBuilder = () => Promise.resolve(new Set(['hulya.ozbey@univera.com.tr']));
+const failBuilder = () => { throw new Error('DB down'); };
+
+const learnedNormal = await learnedUpsertSim('musteri@doluca.com.tr', 'UNIVERA', okBuilder);
+expect('4.11 Normal koşul — dış adres learned YAZILIR',
+  learnedNormal?.written, true);
+
+const learnedInternalBlock = await learnedUpsertSim('hulya.ozbey@univera.com.tr', 'UNIVERA', okBuilder);
+expect('4.12 Normal koşul — iç adres learned YAZILMAZ (F1 çalışır)',
+  learnedInternalBlock, null);
+
+// Codex R2 kritik senaryo — DB throw'da manuel link iç adresi ÖĞRENMEZ
+const learnedFailClosed = await learnedUpsertSim('hulya.ozbey@univera.com.tr', 'UNIVERA', failBuilder);
+expect('4.13 R2 fix — DB throw + iç adres → learned YAZILMAZ (öğrenme zehirlenmez)',
+  learnedFailClosed, null);
+
+// R2 öncesi eski fail-open davranış: dış adres bile throw'da yazılabilirdi
+const learnedFailClosedExt = await learnedUpsertSim('musteri@doluca.com.tr', 'UNIVERA', failBuilder);
+expect('4.14 R2 fail-closed — DIŞ adres bile throw\'da YAZILMAZ (konservatif — DB döndüğünde tekrar denenir)',
+  learnedFailClosedExt, null);
 
 console.log('\n── 5) GERÇEK RUNTIME — Prisma sorgusu THROW ETMİYOR mu? ──');
 
