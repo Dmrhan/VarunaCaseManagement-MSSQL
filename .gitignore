@@ -25,3 +25,7 @@ deploy/nssm/
 deploy/git/
 /reports/
 deploy/deploy.bat
+
+# Windows literal path artifact — prod IIS attachment kalintisi (backslash escape
+# hatasi ile Mac disk'te literal "C:\apps\..." klasoru olusuyor). Repoya girmesin.
+C:*

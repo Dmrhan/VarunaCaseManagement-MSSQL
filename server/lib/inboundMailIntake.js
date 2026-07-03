@@ -249,6 +249,38 @@ function truncate(s, max) {
 }
 
 /**
+ * Header threading — In-Reply-To + References Message-ID'lerini topla.
+ *
+ * mailparser (imapPoller kaynağı) `parsed.inReplyTo` string, `parsed.references`
+ * genelde string array VEYA space-separated string döner. Defensive: her iki
+ * biçim de handle edilir. Duplicate ID'ler dedupe edilir; boş/whitespace atılır.
+ *
+ * Format: RFC 5322 Message-ID `<...@host>` (angle bracket dahil). CaseEmail
+ * tablosunda messageId aynı formatta saklanır → direkt eşleşme.
+ *
+ * @returns {string[]} Aday Message-ID'ler (dedupe, non-empty)
+ */
+function collectHeaderMessageIds(parsed) {
+  const ids = new Set();
+  if (parsed?.inReplyTo && typeof parsed.inReplyTo === 'string') {
+    const clean = parsed.inReplyTo.trim();
+    if (clean) ids.add(clean);
+  }
+  const refs = parsed?.references;
+  if (Array.isArray(refs)) {
+    for (const r of refs) {
+      if (typeof r === 'string' && r.trim()) ids.add(r.trim());
+    }
+  } else if (typeof refs === 'string' && refs.trim()) {
+    // Bazı parser'lar references'ı space-separated string olarak verir.
+    for (const r of refs.split(/\s+/)) {
+      if (r.trim()) ids.add(r.trim());
+    }
+  }
+  return [...ids];
+}
+
+/**
  * Subject'ten TÜM [PREFIX-xxx] token'larını çıkar (sıralı). Yoksa [].
  *
  * Codex P2 (round 1): tek match yerine tüm match'ler — çoklu bracket'lı
@@ -475,6 +507,13 @@ export async function intakeInboundEmail({
   const tokens = extractCaseTokensFromSubject(parsed.subject);
   // Response `token` alanı için — resolve olan token (yoksa ilk candidate).
   let token = tokens[0] ?? null;
+  // Codex P2 R1 fix (2026-07-03) — Header threading gate flag'i.
+  // ÖNCESINDE `if (!token)` guard'ı vardı ama tokens[0] her zaman set
+  // edildiği için (candidate resolve olmasa bile), dış referanslı Re:
+  // (ör. [ABC-1234567] Varuna'da YOK + In-Reply-To gerçek) senaryosunda
+  // header threading atlanıp mükerrer vaka açılırdı. Gate artık gerçek
+  // resolve durumuna bağlı.
+  let subjectTokenResolvedCase = false;
   if (tokens.length > 0) {
     // Mevcut vakaya CaseEmail olarak ekle — caseNumber ile lookup.
     try {
@@ -493,6 +532,7 @@ export async function intakeInboundEmail({
         }
       }
       if (existing) {
+        subjectTokenResolvedCase = true;
         // ─── K3 OVERRIDE (M6.1) ──────────────────────────────────
         // Plan: kapalı/terminal vakaya gelen yanıt → YENİ vaka aç
         // (otomatik link YOK; ilişkilendirme mevcut LinksTab ile manuel).
@@ -575,6 +615,119 @@ export async function intakeInboundEmail({
         },
         meta: { intakedAt, rawSource: RAW_SOURCE },
       };
+    }
+  }
+
+  // ─── A2) HEADER THREADING (2026-07-03 fix) ────────────────────────
+  // Senaryo: müşteri konu satırında [PREFIX-xxx] token'ı OLMADAN aynı
+  // zincire cevap verir (ör. ek unuttu → Re: kendi mailine ek gönderir;
+  // token bizim ACK'imizde vardı, kendi mailinde yok). Sistem token
+  // bulamayınca MÜKERRER vaka açardı.
+  //
+  // Fix: parsed.inReplyTo + parsed.references içindeki Message-ID'leri
+  // CaseEmail.messageId'de ara. Bulunan case terminal ise K3 (yeni vaka),
+  // değilse mevcut vakaya append.
+  //
+  // Guard'lar:
+  // - companyId scoped lookup (@@unique[companyId, messageId] — cross-tenant sızıntı yok)
+  // - inbound + outbound satırlar taranır (müşteri bizim ACK'imize de cevap verebilir)
+  // - Eşleşen vaka BAŞKA müşteriye bağlıysa müşteri değiştirilmez (accountId dokunulmaz)
+  // - Terminal + k3Enabled → yeni vaka (mevcut K3 davranışı korunur)
+  // - En yeni CaseEmail eşleşmesi (birden çok match olursa) — receivedAt/sentAt desc
+  let headerMatchedMessageId = null;
+  // Codex P2 R1 fix (2026-07-03): Guard artık `!token` DEĞİL — çünkü
+  // token = tokens[0] ?? null; ilk candidate resolve olmasa bile set
+  // edilir. Dış referanslı Re: ([ABC-1234567] Varuna'da YOK + gerçek
+  // In-Reply-To) senaryosunda önceki guard header threading'i
+  // atlayıp mükerrer vaka açardı. Artık gate gerçek resolve flag'ine
+  // bağlı (token flow eşleşme buldu mu?). Terminal K3 durumunda
+  // subjectTokenResolvedCase = true olduğu için header threading
+  // tekrar çalışmaz (aynı case'e ikinci lookup gereksiz).
+  if (!subjectTokenResolvedCase) {
+    const headerIds = collectHeaderMessageIds(parsed);
+    if (headerIds.length > 0) {
+      try {
+        const { prisma } = await import('../db/client.js');
+        const matchedEmail = await prisma.caseEmail.findFirst({
+          where: { companyId, messageId: { in: headerIds } },
+          select: { caseId: true, messageId: true },
+          // En yeni eşleşen — birden fazla ID match olursa deterministic
+          orderBy: { createdAt: 'desc' },
+        });
+        if (matchedEmail) {
+          const existing = await prisma.case.findFirst({
+            where: { id: matchedEmail.caseId, companyId },
+            select: { id: true, status: true, caseNumber: true },
+          });
+          if (existing) {
+            const TERMINAL_STATUSES_DB = new Set(['Cozuldu', 'IptalEdildi']);
+            const k3Enabled = (process.env.M6_K3_NEW_TICKET_ON_TERMINAL ?? 'true') !== 'false';
+
+            if (TERMINAL_STATUSES_DB.has(existing.status) && k3Enabled) {
+              // Terminal vakaya header-eşleşen cevap → K3: yeni vaka aç.
+              // (mevcut token flow'dakiyle aynı davranış; existing kayıtsayar
+              // değil, aşağı düşeriz.)
+              headerMatchedMessageId = matchedEmail.messageId; // audit için
+            } else {
+              // Açık/Çalışan vakaya append — token flow'daki appendInbound
+              // deseninin AYNISI. Ekler + persistAttachments dahil.
+              const sanitizedHtml = sanitizeIncomingEmailHtml(parsed.html || parsed.text || buildDescription(parsed));
+              const inboundEmail = await caseEmailRepository.appendInbound({
+                caseId: existing.id,
+                companyId,
+                from: { address: parsed.from.email, name: parsed.from.name ?? null },
+                to: (parsed.to ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+                cc: (parsed.cc ?? []).map((r) => ({ address: r.email, name: r.name ?? null })),
+                subject: parsed.subject ?? '',
+                bodyHtml: sanitizedHtml,
+                bodyText: parsed.text ?? null,
+                messageId: parsed.messageId ?? null,
+                inReplyTo: parsed.inReplyTo ?? null,
+                refs: Array.isArray(parsed.references)
+                  ? parsed.references.join(' ')
+                  : (parsed.references ?? null),
+                receivedAt: parsed.date instanceof Date ? parsed.date : new Date(),
+                rawSize: typeof parsed.rawSize === 'number' ? parsed.rawSize : null,
+              });
+
+              // Dedup guard — token flow'daki mantıkla aynı; deduped ise ek yazma.
+              let attachmentsResult = { stored: 0, skipped: [], note: 'deduped_skipped' };
+              if (!inboundEmail.deduped) {
+                attachmentsResult = await persistAttachmentsForCase({
+                  caseId: existing.id,
+                  companyId,
+                  attachments: parsed.attachments ?? [],
+                  prisma,
+                  emailId: inboundEmail.id,
+                });
+              }
+
+              return {
+                ok: true,
+                caseId: existing.id,
+                // Teşhis: 'appended_via_header' — token flow'dan ayırt etmek için.
+                action: inboundEmail.deduped ? 'appended_deduped' : 'appended_via_header',
+                match: { confidence: null, accountId: null, reasons: [] },
+                token: null,
+                headerMatch: { messageId: matchedEmail.messageId },
+                attachments: attachmentsResult,
+                caseEmail: { id: inboundEmail.id, deduped: inboundEmail.deduped },
+                meta: { intakedAt, rawSource: RAW_SOURCE },
+              };
+            }
+          }
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          error: {
+            code: 'intake_header_threading_failed',
+            message: err?.message ?? 'Header threading hatası.',
+            status: 500,
+          },
+          meta: { intakedAt, rawSource: RAW_SOURCE },
+        };
+      }
     }
   }
 
@@ -866,6 +1019,9 @@ export async function intakeInboundEmail({
     action: 'created',
     match,
     token: token ?? null,
+    // Header threading K3 branch'i (terminal vakaya header-eşleşen cevap →
+    // yeni vaka) audit için messageId'yi taşır; teşhis kolaylığı.
+    ...(headerMatchedMessageId ? { headerMatch: { messageId: headerMatchedMessageId, k3: true } } : {}),
     attachments: attachmentsResult,
     caseEmail: firstEmail,
     meta: { intakedAt, rawSource: RAW_SOURCE },
