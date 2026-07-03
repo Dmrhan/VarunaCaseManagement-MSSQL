@@ -1490,6 +1490,23 @@ export function SmartTicketNewPage({
       );
       return;
     }
+    // Kapanış analizi zorunluluğu — backend smart_ticket_closure_required
+    // guard'ının aynası: KB analizi en az bir kez yapılmadan (closureSuggestion
+    // alınmadan) veya en az bir etiket elle seçilmeden Çözüldü gönderilmez.
+    // 4 alanın dolu olması şart değil — AI'ın boş bıraktığı alanlar boş
+    // kalabilir (gelişim verisi).
+    const hasAnyClosureField = !!(
+      closure.rootCauseGroup ||
+      closure.rootCauseDetail ||
+      closure.resolutionType ||
+      closure.permanentPrevention
+    );
+    if (!closureSuggestion && !hasAnyClosureField) {
+      setClosureError(
+        'Vaka çözülmeden önce KB kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+      );
+      return;
+    }
     setClosing(true);
     setClosureError(null);
 

@@ -82,6 +82,10 @@ import {
 } from '@/services/caseService';
 import { accountService } from '@/services/accountService';
 import {
+  buildClosureSuggestionTelemetry,
+  type AppliedClosureSelection,
+} from '@/services/closureTelemetry';
+import {
   aiService,
   aiErrorMessage,
   type CategorySuggestion,
@@ -685,11 +689,54 @@ export function QuickCaseModal({
         visibility: 'Internal',
         authorName: 'Hızlı Vaka',
       });
+      // Step 1.5: Kapanış analizi zorunluluğu (smart_ticket_closure_required
+      // guard'ı) — Hızlı Vaka akışında ayrı "KB ile Analiz Et" butonu yok;
+      // analiz otomatik çalıştırılır, öneri etiketleri + telemetri kapanış
+      // payload'ına eklenir. AI'ın boş bıraktığı alanlar boş kalır (bilinçli;
+      // gelişim verisi). Analiz başarısız olursa payload'sız denenir — guard
+      // reddeder, vaka açık kalır ve mevcut resolveFail uyarı yolu kullanıcıyı
+      // Case Detail'e yönlendirir.
+      let quickClosurePayload: Record<string, unknown> | undefined;
+      try {
+        const sug = await lookupService.suggestSmartTicketClosure({
+          companyId: created.companyId,
+          description: created.description,
+          resolution: noteTrimmed,
+        });
+        if (sug) {
+          const s = sug.suggestions;
+          const applied: AppliedClosureSelection = {
+            rootCauseGroup: { code: s.rootCauseGroup?.code, label: s.rootCauseGroup?.label },
+            rootCauseDetail: { code: s.rootCauseDetail?.code, label: s.rootCauseDetail?.label },
+            resolutionType: { code: s.resolutionType?.code, label: s.resolutionType?.label },
+            permanentPrevention: { code: s.permanentPrevention?.code, label: s.permanentPrevention?.label },
+          };
+          quickClosurePayload = {
+            rootCauseGroup: s.rootCauseGroup?.code,
+            rootCauseGroupLabel: s.rootCauseGroup?.label,
+            rootCauseDetail: s.rootCauseDetail?.code,
+            rootCauseDetailLabel: s.rootCauseDetail?.label,
+            resolutionType: s.resolutionType?.code,
+            resolutionTypeLabel: s.resolutionType?.label,
+            permanentPrevention: s.permanentPrevention?.code,
+            permanentPreventionLabel: s.permanentPrevention?.label,
+            closureSuggestion: buildClosureSuggestionTelemetry({
+              suggestion: sug,
+              suggestedAt: new Date().toISOString(),
+              applied,
+            }),
+          };
+        }
+      } catch {
+        // KB servisi erişilemez — aşağıdaki transition guard'a takılırsa
+        // resolveFail yolu devreye girer; vaka kaybolmaz.
+      }
       // Step 2: transition to Çözüldü using the same endpoint
       // StatusTransitionPanel calls. resolutionNote is the same field
       // the panel uses.
       const updated = await caseService.transitionStatus(created.id, 'Çözüldü', {
         resolutionNote: noteTrimmed,
+        smartTicketClosure: quickClosurePayload,
       });
       if (updated) {
         if (updated.status === 'Çözüldü') {

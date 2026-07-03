@@ -534,8 +534,9 @@ function sanitizeRequesterContext(raw) {
 // içinden çağrılır (Cozuldu'ya geçiş guard'ından sonra).
 //
 // Sözleşme:
-//   - prev.customFields.smartTicket var olmalı (Case Smart Ticket intake'ten
-//     açılmış olmalı). Yoksa `smart_ticket_closure_requires_opening` 400.
+//   - Kapanış-tüm-vakalar genişletmesi: smartTicket açılış dalı ŞART DEĞİL.
+//     Klasik (mail/telefon) vakalarda smartTicket dalı closure-only oluşur;
+//     Smart Ticket vakalarında opening alanları aynen korunur.
 //   - Diğer customFields dalları (örn. FieldDefinition tabanlı dinamik
 //     alanlar) AYNEN korunur — sadece smartTicket dalı yeniden yazılır.
 //   - smartTicket içindeki opening alanları (platform/businessProcess/…)
@@ -623,14 +624,14 @@ export function buildSmartTicketClosureMerge(prev, closureInput) {
   }
   const existing =
     prev.customFields && typeof prev.customFields === 'object' ? prev.customFields : {};
+  // Kapanış-tüm-vakalar genişletmesi: eskiden smartTicket açılış dalı yoksa
+  // 400 (smart_ticket_closure_requires_opening) atılırdı. Artık klasik
+  // (mail/telefon vb.) vakalara da kapanış taksonomisi yazılabilir —
+  // smartTicket dalı closure-only oluşturulur (opening alanları olmadan).
+  // Okuyucular buna dayanıklı: SmartTicketMetaSection yalnız dolu chip'leri
+  // basar, raporlar closure altını okur.
   const existingSt =
-    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : null;
-  if (!existingSt) {
-    throw new CaseValidationError(
-      'Smart Ticket kapanış metadata\'sı yalnız Smart Ticket akışıyla açılmış vakalara yazılabilir.',
-      { status: 400, code: 'smart_ticket_closure_requires_opening' },
-    );
-  }
+    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : {};
   // Client'ın gönderebileceği alanları sıkı pickle — başka anahtar persist
   // edilmesin. Hepsi opsiyonel; ama UI submit'inde temel alanlar dolu olur.
   const pick = (k) => {
@@ -3467,6 +3468,42 @@ export const caseRepository = {
           status: blockErr.status,
           code: blockErr.code,
         });
+      }
+    }
+
+    // Kapanış analizi zorunluluğu — vaka (açılış kanalı fark etmeksizin:
+    // Smart Ticket, mail, telefon…) Cozuldu'ya geçerken "KB ile Analiz Et"
+    // en az bir kez çalıştırılmış (closureSuggestion telemetrisi payload'da)
+    // VEYA en az bir kapanış etiketi elle seçilmiş olmalı. Operatörler
+    // analizi atlayıp tamamen etiketsiz kapatıyordu.
+    // 4 alanın dolu olması ŞART DEĞİL — AI kararsız kalıp alan boş
+    // bırakabilir; boş kalması istenir (model gelişim verisi).
+    // Kill-switch: SMART_TICKET_CLOSURE_REQUIRED=false.
+    // Daha önce etiketlenmiş/analiz edilmiş vaka (yeniden açılma → tekrar
+    // çözme) muaf.
+    if (
+      dbNext === 'Cozuldu' &&
+      prev.status !== 'Cozuldu' &&
+      process.env.SMART_TICKET_CLOSURE_REQUIRED !== 'false'
+    ) {
+      const prevClosure = prev.customFields?.smartTicket?.closure;
+      const alreadyAnalyzed = !!(
+        prevClosure?.rootCauseGroup ||
+        prevClosure?.rootCauseGroupLabel ||
+        prevClosure?.closureSuggestion
+      );
+      if (!alreadyAnalyzed) {
+        const cl = payload.smartTicketClosure ?? {};
+        const hasAnyLabel = !!(
+          cl.rootCauseGroup || cl.rootCauseDetail || cl.resolutionType || cl.permanentPrevention
+        );
+        const hasKbAnalysis = !!cl.closureSuggestion;
+        if (!hasAnyLabel && !hasKbAnalysis) {
+          throw new CaseValidationError(
+            'Vaka çözülmeden önce "KB ile Analiz Et" ile kapanış analizi yapılmalı (veya kapanış etiketleri elle seçilmeli).',
+            { status: 400, code: 'smart_ticket_closure_required' },
+          );
+        }
       }
     }
 
