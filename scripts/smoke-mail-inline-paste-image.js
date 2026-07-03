@@ -115,9 +115,33 @@ expect('2.21 Attachment pill — inline title ipucu',
 // Codex P2 R1 #3: inline pill'de Kaldır butonu GİZLİ
 expect('2.22 Kaldır butonu — inline ise gizli (!a.inline guard)',
   /\{!a\.inline\s*&&\s*\(\s*<button[\s\S]{0,400}removeAttachment\(a\.id\)/.test(composer), true);
-// Preview blob: allow
+// Preview blob: allow (Codex P2 R2: data: KALDIRILDI — XSS potansiyeli)
 expect('2.23 previewHtml — ALLOWED_URI_REGEXP blob dahil',
   /previewHtml\s*=[\s\S]{0,600}ALLOWED_URI_REGEXP:\s*\/\^\(\?:https\?\|blob\|cid/.test(composer), true);
+// Codex P2 R2 R2 (2026-07-03) — Konum-bağımsız assertion. Önceki regex
+// sadece `|data)` (son alternative) durumunu yakalıyordu; `data|mailto`
+// gibi ortada olsa reddedemezdi. Şimdi previewHtml scope'undaki gerçek
+// ALLOWED_URI_REGEXP literal'ini extract edip alternative listesini
+// parse eder ve `data`'yı konum-agnostik reddeder.
+{
+  const previewBlockMatch = composer.match(/previewHtml\s*=[\s\S]{0,800}?\}\)/);
+  const previewBlock = previewBlockMatch?.[0] ?? '';
+  const uriRegexMatch = previewBlock.match(/ALLOWED_URI_REGEXP:\s*\/\^\(\?:([^)]+)\):/);
+  const alternatives = uriRegexMatch
+    ? uriRegexMatch[1].split('|').map((s) => s.trim().toLowerCase())
+    : null;
+  expect('2.23b previewHtml — ALLOWED_URI_REGEXP literal extract edildi',
+    Array.isArray(alternatives) && alternatives.length > 0, true);
+  expect('2.23c previewHtml — `data` alternative HİÇBİR KONUMDA yok (Codex R2 R2 XSS fix)',
+    Array.isArray(alternatives) && !alternatives.includes('data'), true);
+  // Ek pozitif guard — beklenen whitelist konum-agnostik
+  expect('2.23d previewHtml — blob/cid/https? alternative\'leri mevcut',
+    Array.isArray(alternatives)
+      && alternatives.includes('blob')
+      && alternatives.includes('cid')
+      && alternatives.includes('https?'),
+    true);
+}
 // Blob URL cleanup — unmount
 expect('2.24 Blob URL cleanup — useEffect return revokeObjectURL',
   /useEffect\(\(\)\s*=>\s*\(\)\s*=>\s*\{[\s\S]{0,300}URL\.revokeObjectURL\(a\.blobUrl\)/.test(composer), true);
@@ -353,22 +377,36 @@ expect('10.6 İlk paste bitti → counter=2 (Send hâlâ disable — eski bug: b
 counter--; counter--;  // Kalan ikisi de bitti
 expect('10.7 Tümü bitti → counter=0 → Send açılabilir', counter === 0, true);
 
-console.log('\n── 11) Davranış — DOMPurify preview blob: allow ──');
+console.log('\n── 11) Davranış — DOMPurify preview URI whitelist (Codex P2 R2) ──');
 
-// DOMPurify ALLOWED_URI_REGEXP regex'i test et
-const previewRegex = /^(?:https?|blob|cid|mailto|tel|data):/i;
+// Codex P2 R2 fix: data: KALDIRILDI — ALLOWED_URI_REGEXP tüm URI attribute'lara
+// (href dahil) uygulanır. <a href="data:text/html,<script>..."> preview'da render
+// edilebilir → XSS. İmzalar http(s)/cid kullanıyor, inline paste blob: yeterli.
+const previewRegex = /^(?:https?|blob|cid|mailto|tel):/i;
 expect('11.1 blob: URL izinli (preview\'da renderable)',
   previewRegex.test('blob:http://localhost/abc'), true);
-expect('11.2 cid: URL izinli (send sonrası fallback)',
+expect('11.2 cid: URL izinli (backend cid render fallback)',
   previewRegex.test('cid:foo'), true);
 expect('11.3 https:// izinli',
   previewRegex.test('https://x.com/y.png'), true);
-expect('11.4 javascript: yasak (XSS)',
+expect('11.4 http:// izinli',
+  previewRegex.test('http://x.com/y.png'), true);
+expect('11.5 mailto: izinli',
+  previewRegex.test('mailto:a@b.com'), true);
+expect('11.6 tel: izinli',
+  previewRegex.test('tel:+905551112233'), true);
+// XSS vektörleri — HEPSİ YASAK
+expect('11.7 javascript: yasak (XSS)',
   previewRegex.test('javascript:alert(1)'), false);
-expect('11.5 vbscript: yasak',
+expect('11.8 vbscript: yasak',
   previewRegex.test('vbscript:xxx'), false);
-expect('11.6 file: yasak',
+expect('11.9 file: yasak',
   previewRegex.test('file:///etc/passwd'), false);
+// Codex P2 R2: data: artık YASAK — <a href="data:text/html,..."> XSS önlendi
+expect('11.10 data:text/html — YASAK (Codex R2 XSS önlendi)',
+  previewRegex.test('data:text/html,<script>alert(1)</script>'), false);
+expect('11.11 data:image/png;base64 — YASAK (data tümüyle blocked)',
+  previewRegex.test('data:image/png;base64,AAAA'), false);
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
