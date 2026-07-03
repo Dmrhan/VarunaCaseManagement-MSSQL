@@ -2378,16 +2378,36 @@ router.get(
     // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
     // ile aynı şema; M6.2'de composer için ortak indirme path'i.
     //
-    // 2026-07-03 Codex R1 fix — disposition att.isInline'a bağlı:
-    //  - Inline attachment (cid image, Ctrl+V yapıştırma) → 'inline'
-    //    → <img src=...> render eder (UNV-1000093 fix)
-    //  - Normal mail-eki (PDF/doc, kullanıcı download butonu) → 'attachment'
-    //    → download prompt (önceki /download kontratı korunur — signed URL
-    //    kopyalanıp doğrudan açılırsa PDF/img inline preview OLMAZ)
+    // 2026-07-03 Codex R2 P1 fix — GÜVENLİK: attacker dış mail'de CID
+    // attachment'ı image/svg+xml veya text/html contentType ile
+    // gönderirse, inboundMailParser inline=true set eder. Önceki kod
+    // "inline + gerçek MIME" mintliyordu → app origin'de attacker-controlled
+    // active content (SVG script / HTML script → cookie & DOM erişimi).
+    // Signed URL 60sn içinde extension/cache/log yoluyla açılabilir.
     //
-    // mimeType her iki path'te de payload'a → Content-Type doğru mime
-    // (octet-stream fallback kalır, sadece mimeType tanımlıysa image/pdf).
-    const disposition = att.isInline ? 'inline' : 'attachment';
+    // Sıkı raster-image allowlist:
+    //  - image/png, image/jpeg, image/jpg, image/gif, image/webp
+    //  - SVG DAHİL DEĞİL (script içerebilir)
+    //  - Diğer her şey (text/html, application, ...) → attachment +
+    //    octet-stream (browser download prompt, active content YOK)
+    //
+    // Normal mail-eki (att.isInline=false) yolunda mimeType raw kalır
+    // (kullanıcı download button → gerçek MIME + attachment prompt).
+    // Sadece "inline claim edilmiş ama unsafe MIME" senaryosu octet-stream'e
+    // düşürülür (defense-in-depth: attacker inline flag'ı da ihlal edemez).
+    const INLINE_SAFE_MIME = new Set([
+      'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp',
+    ]);
+    const mimeLower = String(att.mimeType || '').toLowerCase();
+    const isSafeRasterImage = INLINE_SAFE_MIME.has(mimeLower);
+    const isInlineSafe = att.isInline && isSafeRasterImage;
+    const disposition = isInlineSafe ? 'inline' : 'attachment';
+    // Fallback güvenlik: attacker inline claim etti ama MIME safe list'te
+    // değilse (svg/html vs), mime'i de octet-stream'e düşür → browser
+    // bir daha da active olarak render edemez.
+    const tokenMimeType = isInlineSafe
+      ? att.mimeType
+      : (att.isInline ? 'application/octet-stream' : att.mimeType);
     const token = signStorageToken(
       {
         typ: 'download',
@@ -2395,7 +2415,7 @@ router.get(
         fileId: att.id,
         path: att.storageKey,
         fileName: att.fileName,
-        mimeType: att.mimeType,
+        mimeType: tokenMimeType,
         disposition,
       },
       60,
