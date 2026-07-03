@@ -106,6 +106,9 @@ router.get(
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
       allowedCompanyIds: scopedAllowedCompanyIds,
+      // Vaka açma/eşleştirme picker'ları activeOnly=true gönderir; pasif
+      // hesaplar sonuçtan düşer. Müşteri yönetim listesi göndermez.
+      activeOnly: req.query.activeOnly === 'true',
     });
     res.json(result);
   }),

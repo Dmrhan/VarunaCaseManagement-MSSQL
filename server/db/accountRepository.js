@@ -251,6 +251,10 @@ export async function listAccounts({
   page = 1,
   limit = 25,
   allowedCompanyIds,
+  // Vaka açma/eşleştirme picker'ları için — true ise pasif (isActive=false)
+  // hesaplar sonuçtan düşer. Müşteri yönetim listesi bunu geçmez, pasif
+  // kayıtları görmeye/yönetmeye devam eder.
+  activeOnly = false,
 }) {
   const allowed = ensureArray(allowedCompanyIds);
   const safePage = Math.max(1, Number(page) || 1);
@@ -262,6 +266,10 @@ export async function listAccounts({
   }
 
   const whereAnd = [buildScopeWhere(allowed)];
+
+  if (activeOnly) {
+    whereAnd.push({ isActive: true });
+  }
 
   // C2 recents revalidation: restrict to explicit id set. Tenant scope
   // already enforced by buildScopeWhere → out-of-scope ids drop out.

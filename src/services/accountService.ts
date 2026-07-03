@@ -416,6 +416,14 @@ export interface AccountListParams {
   searchFields?: AccountSearchField[];
   page?: number;
   limit?: number;
+  /**
+   * true ise yalnız isActive=true hesaplar döner. Vaka açma/eşleştirme
+   * picker'ları (AccountSearchPicker) için — pasif müşteriye yanlışlıkla
+   * yeni vaka açılmasın / vaka bağlanmasın. Müşteri yönetim listesi
+   * (AccountsListPage) bu parametreyi göndermez, pasif kayıtları görmeye
+   * devam eder.
+   */
+  activeOnly?: boolean;
 }
 
 export interface AccountCompanyCreateInput {
@@ -610,6 +618,7 @@ function buildQuery(params: AccountListParams): string {
   if (params.status) usp.set('status', params.status);
   if (params.ids && params.ids.length > 0) usp.set('ids', params.ids.join(','));
   if (params.searchFields && params.searchFields.length > 0) usp.set('searchFields', params.searchFields.join(','));
+  if (params.activeOnly) usp.set('activeOnly', 'true');
   if (params.page) usp.set('page', String(params.page));
   if (params.limit) usp.set('limit', String(params.limit));
   const qs = usp.toString();
