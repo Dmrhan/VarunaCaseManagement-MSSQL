@@ -135,6 +135,21 @@ Toplam: 1137 satır dead. Grep ile cross-src import check: 0 hit.
 
 ## P2 — Product Value
 
+### Operasyon Panosu v2 — Müşteri lensi + AI görüş + Ops derinliği
+
+**Spec:** [docs/OPERATIONS_DASHBOARD_V2.md](OPERATIONS_DASHBOARD_V2.md) (2026-07-02)
+
+Bugünkü pano vaka aggregate'lerini gösteriyor ama (a) müşteri gözünden bakılamıyor, (b) RUNA yalnız var olan aggregate'i yorumluyor (KB/akıllı ticket/mail/pattern/QA verisi payload'a HİÇ girmiyor), (c) ortalamalar yanıltıcı (medyan/P90 yok, backlog aging yok). Spec 4 faza ayrılmış — her faz shippable:
+
+- **FAZ 1** (2-3 gün, düşük risk): Müşteri filtresi (backend HAZIR — bülten A4) + byRequestType/byOrigin kartları (aggregate hazır, kart yok)
+- **FAZ 2** (5-7 gün, orta risk): 5 yeni aggregate ailesi (Akıllı Ticket taksonomi / Çözüm kaynağı+KB oranı / Mail ops / Pattern alarm özeti / QA ortalama) + RUNA prompt güncellemesi. **PII yasağı sıkı: sadece count/oran.**
+- **FAZ 3** (3-4 gün): Backlog aging, medyan+P90, agent workload tablosu (yetki paritesi: agent kendi satırı)
+- **FAZ 4** (ayrı onay): SavedView, haftalık zamanlanmış mail, auto-refresh
+
+**Kural sabit:** RUNA commentary-only (taksonomi üretmez), PII AI payload'ına GİRMEZ, aggregate-only, geriye uyumlu (additive).
+
+**Toplam efor:** ~15 gün · **PR seti:** 4 (fazlar arası bağımsız) · **Tetikleyici:** GO-LIVE + 1 hafta sonra kullanıcı "başla" onayı
+
 ### Bundle splitting (önceki #10)
 
 Vite tek eager `index-*.js` ~1.4MB (gzip 370KB). Hiçbir `React.lazy` yok, 17+ page eager. `polished-wondering-waffle.md` planı:

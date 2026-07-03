@@ -98,7 +98,7 @@ export const lookupRepository = {
       throw err;
     }
 
-    const [packages, products, packageItems, accountCompany] = await Promise.all([
+    const [packages, products, productGroups, packageItems, accountCompany] = await Promise.all([
       prisma.package.findMany({
         where: { companyId, isActive: true },
         select: { id: true, code: true, name: true, supportLevel: true },
@@ -113,6 +113,17 @@ export const lookupRepository = {
           supportLevel: true,
           productGroupId: true,
         },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      // Smart Ticket Step 1 (2026-07-02) — Agent-safe productGroups.
+      // NewCaseForm zaten catalog endpoint'i çağırıyor; buraya additive
+      // alan ekleniyor (mevcut çağrıları etkilemez). Ürün Kataloğu
+      // ekranı Admin-gate'li; Agent'lar için burası tek kaynak.
+      // Boş gruplar da listelenir (Quest/ServiceCore gibi grup-only seçim
+      // için — kullanıcı kararı).
+      prisma.productGroup.findMany({
+        where: { companyId, isActive: true },
+        select: { id: true, code: true, name: true },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       }),
       prisma.packageItem.findMany({
@@ -138,6 +149,7 @@ export const lookupRepository = {
       accountId: accountId ?? null,
       packages,
       products,
+      productGroups,
       packageItems: packageItemsMap,
       suggestedPackage: accountCompany?.packageId ?? null,
     };

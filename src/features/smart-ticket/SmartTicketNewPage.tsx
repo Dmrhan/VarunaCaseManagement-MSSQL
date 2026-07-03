@@ -29,7 +29,7 @@ import { CompanySelector } from '@/components/ui/CompanySelector';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/services/AuthContext';
 import { VoiceNoteButton } from '@/components/ui/VoiceNoteButton';
-import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
+import { AccountSearchPicker, type PickedProject } from '@/features/accounts/AccountSearchPicker';
 import {
   caseService,
   lookupService,
@@ -152,11 +152,19 @@ interface SmartTicketFormState {
   // PR-3 — Business review Madde 3. Manual selection (kullanıcı override
   // etti mi) flag'leri ile birlikte tutulur; flag false ise payload
   // mapping derive / fallback yoluna düşer (mevcut davranış korunur).
-  // priority default 'Medium' (Case schema default ile uyumlu). requestType
-  // boş başlar — boş kalırsa mapping derive eder.
-  priority: CasePriority;
+  //
+  // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Her ikisi boş ('') başlar;
+  // kullanıcı seçmezse "İleri" disabled. form.priority '' kabul edilir
+  // (form-level; submit'te canCreate garanti eder).
+  priority: CasePriority | '';
   priorityManual: boolean;
   requestType: CaseRequestType | '';
+  // 2026-07-02 — Ürün Grubu (opsiyonel) → Ürün (opsiyonel, gruba cascade)
+  // NewCaseForm catalog pattern'i reuse (companyId scope + isActive filter).
+  // Grup-only kayıt: Case.productGroup (legacy string) grup adı yazılır;
+  // Ürün seçilirse Case.productId set edilir.
+  productGroupId: string;
+  productId: string;
 }
 
 interface ClosureFormState {
@@ -180,9 +188,12 @@ const emptyForm = (companyId: string): SmartTicketFormState => ({
   operationType: '',
   affectedObject: '',
   impact: '',
-  priority: 'Medium',
+  // 2026-07-02 — Öncelik + Talep Türü ZORUNLU: '' başlar (kullanıcı seçmeli).
+  priority: '',
   priorityManual: false,
   requestType: '',
+  productGroupId: '',
+  productId: '',
 });
 
 const emptyClosure = (): ClosureFormState => ({
@@ -471,7 +482,51 @@ export function SmartTicketNewPage({
       });
   }, [form.accountId]);
 
-  // Şirket değişince müşteri/proje + Smart Ticket taxonomy seçimlerini sıfırla.
+  // 2026-07-02 — Ürün Grubu + Ürün catalog (Agent-safe /api/lookups/catalog).
+  // NewCaseForm reuse; SmartTicket'ta paket kapsam dışı, sadece ProductGroup +
+  // Product tutuyoruz. companyId değişince fetch, boşsa reset.
+  const [catalogProducts, setCatalogProducts] = useState<
+    Array<{
+      id: string;
+      code: string;
+      name: string;
+      productGroupId: string;
+    }>
+  >([]);
+  const [catalogProductGroups, setCatalogProductGroups] = useState<
+    Array<{ id: string; code: string; name: string }>
+  >([]);
+
+  useEffect(() => {
+    if (stage !== 'opening' || !form.companyId) {
+      setCatalogProducts([]);
+      setCatalogProductGroups([]);
+      return;
+    }
+    let alive = true;
+    void lookupService
+      .caseCatalog({ companyId: form.companyId, accountId: form.accountId || null })
+      .then((data) => {
+        if (!alive) return;
+        setCatalogProductGroups(data.productGroups);
+        setCatalogProducts(
+          data.products.map((p) => ({
+            id: p.id,
+            code: p.code,
+            name: p.name,
+            productGroupId: p.productGroupId,
+          })),
+        );
+      })
+      .catch(() => {
+        // Sessiz — apiFetch zaten toast gösterir. Alanlar boş kalır.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [stage, form.companyId, form.accountId]);
+
+  // Şirket değişince müşteri/proje + Smart Ticket taxonomy + Ürün seçimlerini sıfırla.
   // Sadece Stage 1'de geçerli — Case create sonrası şirket değişmez.
   useEffect(() => {
     if (stage !== 'opening') return;
@@ -486,12 +541,24 @@ export function SmartTicketNewPage({
       operationType: '',
       affectedObject: '',
       impact: '',
+      // Ürün Grubu / Ürün — stale seçim kalmasın (KENAR/SIRALAMA spec).
+      productGroupId: '',
+      productId: '',
     }));
     setSuggestion(null);
     setSuggestionError(null);
     setAppliedSuggestionFields(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.companyId]);
+
+  // Grup değişince ürünü sıfırla (uyumsuz kalırsa).
+  useEffect(() => {
+    if (!form.productId) return;
+    const product = catalogProducts.find((p) => p.id === form.productId);
+    if (!product || product.productGroupId !== form.productGroupId) {
+      setForm((f) => ({ ...f, productId: '' }));
+    }
+  }, [form.productGroupId, form.productId, catalogProducts]);
 
   function handleSelectAccount(item: AccountListItem | null) {
     setAccountPickerOpen(false);
@@ -500,6 +567,19 @@ export function SmartTicketNewPage({
       ...f,
       accountId: item.id,
       accountName: item.name ?? '',
+      accountProjectId: '',
+      accountProjectName: '',
+    }));
+  }
+
+  function handleSelectAccountWithProject(item: AccountListItem, project: PickedProject | null) {
+    setAccountPickerOpen(false);
+    setForm((f) => ({
+      ...f,
+      accountId: item.id,
+      accountName: item.name ?? '',
+      accountProjectId: project?.id ?? '',
+      accountProjectName: project?.name ?? '',
     }));
   }
 
@@ -610,6 +690,9 @@ export function SmartTicketNewPage({
     form.title.trim().length > 0 &&
     form.description.trim().length > 0 &&
     projectRequirementSatisfied &&
+    // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. Kullanıcı seçmezse advance yok.
+    !!form.priority &&
+    !!form.requestType &&
     !creating;
 
   const canSuggest =
@@ -748,12 +831,33 @@ export function SmartTicketNewPage({
     //     - değilse → default 'Medium' (mevcut davranış aynen)
     //   Source field'ları customFields.smartTicket içine yazılır — audit
     //   ve future analytics için. Backend enum validation'ı bozulmaz.
+    // 2026-07-02 — Öncelik + Talep Türü ZORUNLU. canCreate garanti eder ki
+    // ikisi de dolu; defansif fallback yalnız TS için.
     const finalRequestType = form.requestType || mapping.requestType;
     const requestTypeSource: 'manual' | 'mapping' = form.requestType ? 'manual' : 'mapping';
-    const finalPriority: CasePriority = form.priorityManual ? form.priority : 'Medium';
-    const prioritySource: 'manual' | 'default' = form.priorityManual ? 'manual' : 'default';
+    const finalPriority: CasePriority = (form.priority || 'Medium') as CasePriority;
+    const prioritySource: 'manual' | 'default' = form.priority ? 'manual' : 'default';
     smartTicket.requestTypeSource = requestTypeSource;
     smartTicket.prioritySource = prioritySource;
+
+    // 2026-07-02 — Grup-only kayıt convention.
+    // NewCaseForm.tsx kardeşi: Case.productGroup serbest metin (legacy SLA),
+    // Case.productId ise catalog FK. Grup seçildiyse grup ADI yazılır; ürün
+    // seçildiyse productId + productName snapshot da eklenir.
+    let finalProductGroup: string | undefined;
+    let finalProductId: string | undefined;
+    let finalProductName: string | undefined;
+    if (form.productGroupId) {
+      const grp = catalogProductGroups.find((g) => g.id === form.productGroupId);
+      finalProductGroup = grp?.name;
+    }
+    if (form.productId) {
+      const prd = catalogProducts.find((p) => p.id === form.productId);
+      if (prd) {
+        finalProductId = prd.id;
+        finalProductName = prd.name;
+      }
+    }
 
     if (suggestion) {
       const perField: Record<string, { matchedBy: string; confidence: number; suggestedCode: string }> = {};
@@ -815,6 +919,12 @@ export function SmartTicketNewPage({
         category: mapping.category,
         subCategory: mapping.subCategory,
         requestType: finalRequestType,
+        // 2026-07-02 — Ürün Grubu (legacy string) + Ürün (catalog FK).
+        // NewCaseForm ile aynı convention.
+        ...(finalProductGroup ? { productGroup: finalProductGroup } : {}),
+        ...(finalProductId
+          ? { productId: finalProductId, productName: finalProductName }
+          : {}),
         customFields: { smartTicket },
       });
       setCreatedCase(created);
@@ -1560,44 +1670,63 @@ export function SmartTicketNewPage({
               {((projectsEnabled && !!form.accountId) || projects.length > 0) && (
                 <Field
                   label="Proje"
-                  required={projectsEnabled && projectsRequired && !!form.accountId}
+                  required={projectsEnabled && projectsRequired && !!form.accountId && !form.accountProjectId}
                   hint={
-                    projectsEnabled && projectsRequired && !!form.accountId
-                      ? 'Bu şirket için proje zorunlu. Kod veya ad ile arayabilirsiniz.'
-                      : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
+                    form.accountProjectId
+                      ? 'Müşteri arama listesinden seçildi. Değiştirmek için müşteriyi tekrar seç.'
+                      : projectsEnabled && projectsRequired && !!form.accountId
+                        ? 'Bu şirket için proje zorunlu. Müşteri arama listesinden seçin.'
+                        : 'Opsiyonel. Kod veya ad ile arayabilirsiniz.'
                   }
                 >
-                  <div className="space-y-1.5">
-                    {/* PR-6 — Search input: name veya code substring filter.
-                        Yalnız 3+ proje varsa göster (1-2 projede gereksiz). */}
-                    {projects.length >= 3 && (
-                      <TextInput
-                        value={projectFilter}
-                        onChange={(e) => setProjectFilter(e.target.value)}
-                        placeholder="Proje kodu veya adı ile ara…"
+                  {form.accountProjectId ? (
+                    // Picker'dan proje seçildi — pasif özet + temizle butonu
+                    <div className="flex items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 dark:border-violet-900/40 dark:bg-violet-950/20">
+                      <span className="flex-1 truncate text-sm font-medium text-violet-800 dark:text-violet-200">
+                        {form.accountProjectName || form.accountProjectId}
+                      </span>
+                      {stage === 'opening' && (
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, accountProjectId: '', accountProjectName: '' }))}
+                          className="shrink-0 rounded p-0.5 text-violet-500 hover:text-violet-700 dark:hover:text-violet-300"
+                          title="Proje seçimini temizle"
+                        >
+                          <XIcon size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {projects.length >= 3 && (
+                        <TextInput
+                          value={projectFilter}
+                          onChange={(e) => setProjectFilter(e.target.value)}
+                          placeholder="Proje kodu veya adı ile ara…"
+                          disabled={stage !== 'opening'}
+                        />
+                      )}
+                      <Select
+                        value={form.accountProjectId}
+                        onChange={(e) => handleSelectProject(e.target.value)}
                         disabled={stage !== 'opening'}
-                      />
-                    )}
-                    <Select
-                      value={form.accountProjectId}
-                      onChange={(e) => handleSelectProject(e.target.value)}
-                      disabled={stage !== 'opening'}
-                    >
-                      <option value="">
-                        {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
-                      </option>
-                      {filteredProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.code ? `${p.code} — ${p.name}` : p.name}
+                      >
+                        <option value="">
+                          {projectsRequired ? 'Proje seç…' : '— Proje yok —'}
                         </option>
-                      ))}
-                    </Select>
-                    {projectFilter.trim() && filteredProjects.length === 0 && (
-                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                        "{projectFilter}" için proje bulunamadı.
-                      </p>
-                    )}
-                  </div>
+                        {filteredProjects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code ? `${p.code} — ${p.name}` : p.name}
+                          </option>
+                        ))}
+                      </Select>
+                      {projectFilter.trim() && filteredProjects.length === 0 && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                          "{projectFilter}" için proje bulunamadı.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </Field>
               )}
               <Field label="Başlık" required>
@@ -1648,19 +1777,15 @@ export function SmartTicketNewPage({
               )}
 
               {/* PR-3 — Business review Madde 3. Talep Türü + Öncelik.
-                  Boş bırakılırsa Talep Türü mapping derive eder; Öncelik
-                  default 'Medium'. Kullanıcı seçim yaparsa override eder
-                  (customFields.smartTicket.requestTypeSource /
-                  prioritySource). Mevcut Case enum validation backend'de
-                  zorunlu — backend sade payload ile uyumlu. */}
+                  2026-07-02 güncelleme: her ikisi ZORUNLU (label *, "— Seçin —"
+                  placeholder, boşken canCreate false → "Vaka Aç" disabled).
+                  customFields.smartTicket.requestTypeSource / prioritySource
+                  audit alanları korundu. */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Talep Türü"
-                  hint={
-                    !form.requestType
-                      ? 'Boş bırakılırsa Akıllı Tanımlar / mapping otomatik seçer.'
-                      : undefined
-                  }
+                  required
+                  hint={!form.requestType ? 'Zorunlu — vakanın niteliğini belirle.' : undefined}
                 >
                   <Select
                     value={form.requestType}
@@ -1668,8 +1793,9 @@ export function SmartTicketNewPage({
                       setForm((f) => ({ ...f, requestType: e.target.value as CaseRequestType | '' }))
                     }
                     disabled={stage !== 'opening'}
+                    required
                   >
-                    <option value="">— Otomatik —</option>
+                    <option value="" disabled>— Seçin —</option>
                     {CASE_REQUEST_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {t}
@@ -1679,10 +1805,11 @@ export function SmartTicketNewPage({
                 </Field>
                 <Field
                   label="Öncelik"
+                  required
                   hint={
-                    form.priorityManual
-                      ? `Seçildi: ${CASE_PRIORITY_LABELS[form.priority]}`
-                      : 'Default: Orta. Devirde değiştirilebilir.'
+                    form.priority
+                      ? `Seçildi: ${CASE_PRIORITY_LABELS[form.priority as CasePriority]}. Devirde değiştirilebilir.`
+                      : 'Zorunlu — vakayı hangi hızda ele alacaksın?'
                   }
                 >
                   <Select
@@ -1690,17 +1817,92 @@ export function SmartTicketNewPage({
                     onChange={(e) =>
                       setForm((f) => ({
                         ...f,
-                        priority: e.target.value as CasePriority,
+                        priority: e.target.value as CasePriority | '',
                         priorityManual: true,
                       }))
                     }
                     disabled={stage !== 'opening'}
+                    required
                   >
+                    <option value="" disabled>— Seçin —</option>
                     {CASE_PRIORITIES.map((p) => (
                       <option key={p} value={p}>
                         {CASE_PRIORITY_LABELS[p]}
                       </option>
                     ))}
+                  </Select>
+                </Field>
+              </div>
+
+              {/* 2026-07-02 — Ürün Grubu + Ürün (opsiyonel, cascade). Grup
+                  seçilince ürün dropdown'ı yalnız o grubun aktif ürünleri.
+                  Grup değişince ürün seçimi otomatik sıfırlanır (useEffect).
+                  Boş gruplar (Quest/ServiceCore) listede kalır — grup-only
+                  seçim anlamlı; Case.productGroup name'e yazılır, productId
+                  ürün seçilirse eklenir. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field
+                  label="Ürün Grubu"
+                  hint={
+                    !form.companyId
+                      ? 'Önce şirket seç.'
+                      : catalogProductGroups.length === 0
+                        ? 'Bu şirkette aktif ürün grubu tanımlı değil.'
+                        : 'Opsiyonel. Vakanın konu ürün grubu; emin değilsen boş bırak.'
+                  }
+                >
+                  <Select
+                    value={form.productGroupId}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, productGroupId: e.target.value }))
+                    }
+                    disabled={
+                      stage !== 'opening' || !form.companyId || catalogProductGroups.length === 0
+                    }
+                  >
+                    <option value="">— Grup seçme —</option>
+                    {catalogProductGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label="Ürün"
+                  hint={
+                    !form.productGroupId
+                      ? 'Önce Ürün Grubu seç.'
+                      : (() => {
+                          const filtered = catalogProducts.filter(
+                            (p) => p.productGroupId === form.productGroupId,
+                          );
+                          if (filtered.length === 0)
+                            return 'Bu grubun aktif ürünü yok — sadece grup kaydedilecek.';
+                          return 'Opsiyonel. Boş bırakırsan yalnız grup kaydedilir.';
+                        })()
+                  }
+                >
+                  <Select
+                    value={form.productId}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, productId: e.target.value }))
+                    }
+                    disabled={
+                      stage !== 'opening' ||
+                      !form.productGroupId ||
+                      catalogProducts.filter((p) => p.productGroupId === form.productGroupId)
+                        .length === 0
+                    }
+                  >
+                    <option value="">— Ürün seçme —</option>
+                    {catalogProducts
+                      .filter((p) => p.productGroupId === form.productGroupId)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.code})
+                        </option>
+                      ))}
                   </Select>
                 </Field>
               </div>
@@ -1816,7 +2018,21 @@ export function SmartTicketNewPage({
                     onClick={() => void handleCreateAndContinue()}
                     disabled={!canCreate}
                     leftIcon={creating ? <Loader2 size={12} className="animate-spin" /> : <ArrowRight size={12} />}
-                    title={undefined}
+                    title={
+                      // 2026-07-02 — Erken uyarı: hangi zorunlu alan eksik?
+                      // Kullanıcı disabled buton üstüne gelince neden açıklanır.
+                      !canCreate
+                        ? (() => {
+                            if (!form.companyId) return 'Önce Şirket seç.';
+                            if (!form.accountId) return 'Önce Müşteri seç.';
+                            if (form.title.trim().length === 0) return 'Başlık boş olamaz.';
+                            if (form.description.trim().length === 0) return 'Açıklama boş olamaz.';
+                            if (!projectRequirementSatisfied) return 'Proje seçimi zorunlu.';
+                            if (!form.priority || !form.requestType) return 'Öncelik ve Talep Türü zorunlu.';
+                            return undefined;
+                          })()
+                        : undefined
+                    }
                   >
                     {creating ? 'Açılıyor…' : 'Vaka Oluştur ve Çözüm Adımlarına Geç'}
                   </Button>
@@ -1943,6 +2159,9 @@ export function SmartTicketNewPage({
         selectedAccountId={form.accountId || null}
         onClose={() => setAccountPickerOpen(false)}
         onSelect={handleSelectAccount}
+        projectsEnabled={projectsEnabled}
+        projectsRequired={projectsRequired}
+        onSelectWithProject={handleSelectAccountWithProject}
       />
 
       {/* Customer Context Drawer — Faz 1 (closed-history first).

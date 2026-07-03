@@ -41,14 +41,23 @@ const HOST = process.env.ALOTECH_TENANT || ''; // param-univera.alo-tech.com
 
 /**
  * İstekteki AloTech agent e-postasını çöz.
- * Eşleştirme User tablosunda DEĞİL — agent kendi AloTech e-postasını softphone
- * widget'ında girer ve `X-Alotech-Email` header'ı ile gönderilir (tarayıcıda
- * localStorage'da kalıcı). Header yoksa env tabanlı test fallback'i kullanılır.
+ * Eşleştirme: giriş yapan Varuna kullanıcısının e-postası = AloTech agent e-postası
+ * (verifyJwt → req.user.email). Böylece her kullanıcı KENDİ AloTech agent'ıyla
+ * bağlanır. Öncelik: `X-Alotech-Email` header (açık override) → `req.user.email`
+ * → (YALNIZ non-prod) `ALOTECH_DEV_AGENT_EMAIL`.
+ * ⚠️ Prod'da paylaşımlı dev fallback'e ASLA düşülmez — aksi halde tüm kullanıcılar
+ * aynı agent (ör. ege.usluer) olarak login olurdu (gömülü SSO session'ı bu e-postayla
+ * üretiliyor).
  */
 function resolveAgentEmail(req) {
   const fromHeader = req?.get?.('x-alotech-email');
   if (fromHeader && fromHeader.includes('@')) return fromHeader.trim().toLowerCase();
-  return process.env.ALOTECH_DEV_AGENT_EMAIL || null;
+  // Giriş yapan Varuna kullanıcısı = AloTech agent (e-postalar aynı).
+  const userEmail = req?.user?.email;
+  if (userEmail && userEmail.includes('@')) return userEmail.trim().toLowerCase();
+  // Son çare YALNIZ geliştirme; prod'da giriş yapan kullanıcının e-postası her zaman vardır.
+  if (process.env.NODE_ENV !== 'production') return process.env.ALOTECH_DEV_AGENT_EMAIL || null;
+  return null;
 }
 
 /**

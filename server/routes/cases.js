@@ -506,13 +506,29 @@ router.get(
     let roleDefaultScope = null;
     const roleDefaultViewOff = f.roleDefaultView === 'off';
     if (req.user.role === 'Agent' && req.user.personId) {
-      roleDefaultScope = {
-        OR: [
-          { assignedPersonId: req.user.personId },
-          { createdByUserId: req.user.id },
-          { assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } },
-        ],
-      };
+      const { prisma: prismaCases } = await import('../db/client.js');
+      const agentPerson = await prismaCases.person.findUnique({
+        where: { id: req.user.personId },
+        select: { teamId: true, isTeamLead: true, supportLevel: true },
+      });
+      const agentTeamId = agentPerson?.teamId ?? null;
+      const canSeeTeamPool = agentPerson?.isTeamLead === true || ['L2', 'L3'].includes(agentPerson?.supportLevel ?? '');
+      const orClauses = [
+        { assignedPersonId: req.user.personId },
+        { createdByUserId: req.user.id },
+      ];
+      if (!agentTeamId) {
+        // Takımı olmayan Agent → mevcut davranış (takımsız + tüm havuz)
+        orClauses.push({ assignedPersonId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      } else if (canSeeTeamPool) {
+        // Takım lideri veya L2/L3 → kendi takım havuzu + takımsız havuz
+        orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      } else {
+        // L1 Agent with team → sadece takımsız havuz, takım havuzu görünmez
+        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+      }
+      roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
       const { prisma } = await import('../db/client.js');
       const myPerson = await prisma.person.findUnique({
@@ -1089,9 +1105,9 @@ router.post(
  * GET /api/cases/:id/customer-match-suggestions — Phase D Step 2
  *
  * customerMatchPending=true vakalar için deterministic eşleştirme önerileri.
- * AI YOK, auto-link YOK; Supervisor/Admin manuel onay verir (PATCH /link-account).
+ * AI YOK, auto-link YOK; manuel onay gerekir (PATCH /link-account).
  *
- * Auth: Supervisor, CSM, Admin, SystemAdmin (Agent + Backoffice 403)
+ * Auth: tüm operasyon rolleri (Agent + Backoffice dahil — link-account ile aynı)
  * Scope:
  *   - Case kullanıcının allowedCompanyIds'inde (route layer guard)
  *   - Önerilen Account'lar case.companyId ile uyumlu (helper guard)
@@ -1100,7 +1116,7 @@ router.post(
  */
 router.get(
   '/:id/customer-match-suggestions',
-  requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
+  requireRole('Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     // Scope verify via existing get (404/403 mantığı reuse).
     const found = await caseRepository.get(req.params.id, req.user.allowedCompanyIds, req.user.role);
@@ -1119,9 +1135,10 @@ router.get(
 /**
  * PATCH /api/cases/:id/link-account — Phase D
  *
- * Müşterisiz açılmış vakaya Supervisor/Admin müşteri eşleştirir.
+ * Müşterisiz açılmış vakaya müşteri eşleştirir.
  * Body: { accountId: string }
- * Auth: Supervisor, CSM, Admin, SystemAdmin (Agent + Backoffice 403)
+ * Auth: tüm operasyon rolleri. Agent/Backoffice bağlayabilir ama learned
+ * sender öğrenmesi yalnız Supervisor/CSM/Admin/SystemAdmin kararından yapılır.
  *
  * Repository scope guard:
  *  - Vaka kullanıcının allowedCompanyIds'inde
@@ -1130,21 +1147,25 @@ router.get(
  */
 router.patch(
   '/:id/link-account',
-  requireRole('Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
+  requireRole('Agent', 'Backoffice', 'Supervisor', 'CSM', 'Admin', 'SystemAdmin'),
   asyncRoute(async (req, res) => {
     await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
     const { accountId } = req.body ?? {};
     if (!accountId || typeof accountId !== 'string') {
       return res.status(400).json({ error: 'validation_error', message: 'accountId zorunlu.' });
     }
+    // M2.3 + Agent/Backoffice genişletmesi — öğrenme (learned sender) yalnız
+    // Supervisor+ kararından beslenir. Agent/Backoffice bağlayabilir ama
+    // kararı ezberlenmez: yanlış eşleştirme tek vakayla sınırlı kalır,
+    // kalıcı auto-link kuralına dönüşmez. source='manual' dışındaki değerler
+    // caseRepository.linkAccount'ta öğrenmeyi tetiklemez.
+    const learnsFromLink = ['Supervisor', 'CSM', 'Admin', 'SystemAdmin'].includes(req.user.role);
     const updated = await caseRepository.linkAccount(
       req.params.id,
       accountId,
       req.user.fullName,
       req.user.allowedCompanyIds,
-      // M2.3 — Manuel link öğrenme tetikleyicisi (intake'in auto-link
-      // çağrısı opts geçmez → öğrenmez).
-      { source: 'manual', actorUserId: req.user.id ?? null },
+      { source: learnsFromLink ? 'manual' : 'manual_no_learn', actorUserId: req.user.id ?? null },
     );
     if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
     res.json(updated);

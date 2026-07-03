@@ -263,9 +263,10 @@ async function _addNoteWriteAndEmit({ id, note, companyId, mentionedBy, actor })
     });
   }
 
+  // Tam içerik saklanır (kolon NVarChar(Max)) — Aktivite sekmesi uzun
+  // notları "Devamını göster / Gizle" ile kırparak gösterir.
   const cleanedPreview = (note.content ?? '')
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
-    .slice(0, 200);
+    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
   await prisma.caseActivity.create({
     data: {
       caseId: id,
@@ -1112,6 +1113,28 @@ export const caseRepository = {
       }
       const personId = user.personId;
       const notSnoozed = notSnoozedClause();
+
+      // Takım havuzu görünürlük kuralı (liste ile tutarlı): Agent için
+      // sadece görebildiği havuzu sayaçlara yansıt.
+      let agentUnassignedWhere;
+      if (role === 'Agent') {
+        const agentPerson = await prisma.person.findUnique({
+          where: { id: personId },
+          select: { teamId: true, isTeamLead: true, supportLevel: true },
+        });
+        const agentTeamId = agentPerson?.teamId ?? null;
+        const canSeeTeamPool = agentPerson?.isTeamLead === true || ['L2', 'L3'].includes(agentPerson?.supportLevel ?? '');
+        if (!agentTeamId) {
+          agentUnassignedWhere = { assignedPersonId: null };
+        } else if (canSeeTeamPool) {
+          agentUnassignedWhere = { assignedPersonId: null, OR: [{ assignedTeamId: agentTeamId }, { assignedTeamId: null }] };
+        } else {
+          agentUnassignedWhere = { assignedPersonId: null, assignedTeamId: null };
+        }
+      } else {
+        agentUnassignedWhere = { assignedPersonId: null };
+      }
+
       const [assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical] = await Promise.all([
         // assignedToMe: open + not snoozed (matches list default)
         prisma.case.count({
@@ -1129,8 +1152,8 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
-        // chip sayıları — scope'taki tüm atanmamış/kritik açık + snooze-dışı vakalar
-        prisma.case.count({ where: scoped({ ...scope, assignedPersonId: null, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
+        // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı
+        prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
@@ -1960,7 +1983,7 @@ export const caseRepository = {
     // ama explicit 400 vs 409 ayrımı için ön bakış.
     const current = await prisma.case.findUnique({
       where: { id: caseId },
-      select: { status: true, assignedPersonId: true, companyId: true, slaResolutionStartedAt: true },
+      select: { status: true, assignedPersonId: true, assignedTeamId: true, companyId: true, slaResolutionStartedAt: true },
     });
     if (!current) return null;
     if (current.status === 'Cozuldu' || current.status === 'IptalEdildi') {
@@ -1978,13 +2001,25 @@ export const caseRepository = {
 
     const person = await prisma.person.findUnique({
       where: { id: user.personId },
-      select: { name: true, teamId: true, team: { select: { name: true } } },
+      select: { name: true, teamId: true, isTeamLead: true, supportLevel: true, team: { select: { name: true } } },
     });
     if (!person) {
       throw new CaseValidationError('Person kaydı bulunamadı.', {
         status: 400,
         code: 'person_not_found',
       });
+    }
+
+    // Takım havuzu guard: assignedTeamId dolu vakalar (maille gelen havuz).
+    // Agent rolü için: kendi takımı olmalı ve takım lideri veya L2/L3 olmalı.
+    // Takımsız havuz (assignedTeamId=null) ve Admin/Supervisor/SystemAdmin kısıtlanmaz.
+    if (current.assignedTeamId !== null && user.role === 'Agent') {
+      const canClaim =
+        person.teamId === current.assignedTeamId &&
+        (person.isTeamLead === true || ['L2', 'L3'].includes(person.supportLevel ?? ''));
+      if (!canClaim) {
+        throw new CaseAccessError('Bu takım havuzunu üstlenme yetkiniz yok.');
+      }
     }
 
     const assignedPersonName = person.name ?? user.fullName ?? user.personId;
@@ -2521,6 +2556,8 @@ export const caseRepository = {
     // YALNIZ source='manual' VE case.origin='Eposta' VE customerContactEmail
     // doluysa öğren. Intake'in auto-link çağrısı opts.source='auto' geçer →
     // öğrenmez (zaten exact email match'le tetiklendi, redundant).
+    // Agent/Backoffice linki route'tan source='manual_no_learn' gelir →
+    // vaka bağlanır ama öğrenilmez (yanlış eşleştirme kalıcılaşmasın).
     // Hata kapsanır: öğrenme fail olursa linkAccount başarısı bozulmaz.
     if (opts.source === 'manual') {
       try {
@@ -3580,6 +3617,41 @@ export const caseRepository = {
       });
     }
 
+    // Açık → başka statü: atanmamış vakayı işlemi yapan kişiye otomatik ata.
+    let autoAssignData = {};
+    let autoAssignedPersonId = null;
+    let autoAssignedTeamId = null;
+    if (prev.status === 'Acik' && dbNext !== 'Acik' && !prev.assignedPersonId && actorObject?.personId) {
+      const actorPerson = await prisma.person.findUnique({
+        where: { id: actorObject.personId },
+        select: { name: true, teamId: true, team: { select: { name: true } } },
+      });
+      if (actorPerson) {
+        autoAssignedPersonId = actorObject.personId;
+        autoAssignedTeamId = actorPerson.teamId ?? null;
+        autoAssignData = {
+          assignedPersonId: autoAssignedPersonId,
+          assignedPersonName: actorPerson.name ?? actor,
+          ...(autoAssignedTeamId ? {
+            assignedTeamId: autoAssignedTeamId,
+            assignedTeamName: actorPerson.team?.name ?? null,
+          } : {}),
+          // İlk atamada çözüm SLA saatini başlat (claim() ile aynı kural).
+          ...(!prev.slaResolutionStartedAt ? { slaResolutionStartedAt: new Date() } : {}),
+        };
+        historyEntries.push({
+          companyId,
+          action: 'Otomatik atandı',
+          actionType: 'FieldUpdate',
+          fieldName: 'assignedPersonId',
+          fromValue: null,
+          toValue: actorPerson.name ?? actor,
+          actor,
+          actorUserId: stampUid,
+        });
+      }
+    }
+
     const updated = await prisma.case.update({
       where: { id },
       data: {
@@ -3602,6 +3674,7 @@ export const caseRepository = {
           ? { pendingCustomerReply: false }
           : {}),
         ...(mergedCustomFields !== prev.customFields ? { customFields: mergedCustomFields } : {}),
+        ...autoAssignData,
         history: { create: historyEntries },
       },
       include: CASE_INCLUDE,
@@ -3615,6 +3688,20 @@ export const caseRepository = {
       message: `${updated.caseNumber}: ${prevStatusTr} → ${nextStatus}`,
       kind,
     });
+
+    // Otomatik atama bildirimi — kişiye inbox'ında görünsün.
+    if (autoAssignedPersonId) {
+      await notifyAssignmentTargets({
+        caseId: id,
+        companyId,
+        assignedPersonId: autoAssignedPersonId,
+        assignedTeamId: autoAssignedTeamId,
+        actorUserId: actorUserIdOf(actorObject),
+        message: `${updated.caseNumber} otomatik olarak atandı.`,
+        eventType: 'watcher_update',
+        kind: 'assignment',
+      });
+    }
 
     // WR-D4 Phase 2 — close / reopen event emission (fire-and-forget).
     if (dbNext === 'Cozuldu' && prev.status !== 'Cozuldu') {
