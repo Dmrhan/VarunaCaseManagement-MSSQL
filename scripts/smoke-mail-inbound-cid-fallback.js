@@ -104,16 +104,21 @@ const hthreadCount = (intakeCode.match(/persistAttachmentsForCase\(\{[\s\S]{0,40
 expect('3.4 Token + Header threading — İKİSİ de emailId geçen persist çağrısı',
   hthreadCount >= 2, true);
 
-console.log('\n── 4) UI — zarif düşüş placeholder ─────────────');
+console.log('\n── 4) UI — zarif düşüş placeholder (Codex R1: legacy-only heuristic) ─');
 expect('4.1 Eşleşmeyen cid için inline aday heuristic',
   /email\.attachments\.filter\(\(x\)\s*=>\s*x\.isInline\)/.test(card), true);
-expect('4.2 Tek inline aday → getAttachmentDownload ile fallback render',
-  /inlineCandidates\.length === 1 \? inlineCandidates\[0\] : null/.test(card), true);
-expect('4.3 Fallback aday yoksa → net placeholder metni ("Gömülü görsel — ekte: {names}")',
+// Codex R1 fix: heuristic sadece contentId==null (legacy) durumda devrede
+expect('4.2 Heuristic guard — canUseLegacyFallback (contentId==null gerekli)',
+  /canUseLegacyFallback\s*=\s*[\s\S]{0,200}inlineCandidates\[0\]\.contentId == null/.test(card), true);
+expect('4.3 REGRESYON: eski koşulsuz `length === 1 ? [0] : null` KALDIRILDI',
+  !/const\s+fallback\s*=\s*inlineCandidates\.length === 1 \? inlineCandidates\[0\] : null/.test(card), true);
+expect('4.4 Fallback flag canUseLegacyFallback\'e bağlanır',
+  /const\s+fallback\s*=\s*canUseLegacyFallback\s*\?\s*inlineCandidates\[0\]\s*:\s*null/.test(card), true);
+expect('4.5 Fallback aday yoksa → net placeholder metni ("Gömülü görsel — ekte: {names}")',
   /Gömülü görsel — ekte: \$\{inlineNames\}/.test(card), true);
-expect('4.4 Regresyon — "Eski mail" placeholder yolu korundu',
+expect('4.6 Regresyon — "Eski mail" placeholder yolu korundu',
   /Eski mail — inline görsel desteklenmiyor/.test(card), true);
-expect('4.5 Regresyon — "cid eşleşmedi" son çare placeholder korundu',
+expect('4.7 Regresyon — "cid eşleşmedi" son çare placeholder korundu',
   /\(cid eşleşmedi\)/.test(card), true);
 
 console.log('\n── 5) Regresyon — sanitize cid img koruyor ─────');
@@ -242,6 +247,93 @@ expect('7.7 BUG öncesi: contentId null → cidMap boş',
   mapBuggy.size, 0);
 expect('7.8 BUG öncesi: hiçbir cid src eşleşmez',
   resolveCid('cid:abc@host', mapBuggy), undefined);
+
+console.log('\n── 8) Davranış — heuristic fallback restriction (Codex R1) ─');
+
+// canUseLegacyFallback semantik — MailMessageCard yeni koşul.
+function canUseLegacyFallback(attachments) {
+  const inline = attachments.filter((a) => a.isInline);
+  return inline.length === 1 && inline[0].contentId == null;
+}
+
+// Legacy senaryo — parser fix'i öncesi (contentId=null yazılmış eski mail)
+expect('8.1 LEGACY: 1 inline aday + contentId null → heuristic AKTİF',
+  canUseLegacyFallback([{ id: 'a1', isInline: true, contentId: null }]), true);
+
+// Yeni kayıt — contentId dolu
+expect('8.2 YENİ: 1 inline aday + contentId dolu → heuristic KAPALI',
+  canUseLegacyFallback([{ id: 'a1', isInline: true, contentId: 'abc@host' }]), false);
+
+// Codex R1 kritik senaryo — 1 resolved inline (X match ediliyor) + gövdede
+// başka unknown cid: Y. Eski heuristic X'i Y için de fallback yapardı →
+// duplicate. Yeni koşul kapatır.
+expect('8.3 R1 KRİTİK: 1 inline contentId dolu (X resolved) → unknown cid:Y için heuristic KAPALI (duplicate önlendi)',
+  canUseLegacyFallback([{ id: 'X', isInline: true, contentId: 'x@host' }]), false);
+
+// Birden fazla inline aday — heuristic zaten kapalı (belirsizlik)
+expect('8.4 2 inline aday → heuristic KAPALI (ambiguous)',
+  canUseLegacyFallback([
+    { id: 'a1', isInline: true, contentId: null },
+    { id: 'a2', isInline: true, contentId: null },
+  ]), false);
+
+// 0 inline aday
+expect('8.5 0 inline aday → heuristic KAPALI',
+  canUseLegacyFallback([{ id: 'a1', isInline: false, contentId: null }]), false);
+
+// Karışık: 1 inline legacy + 1 inline yeni → toplam 2 → kapalı
+expect('8.6 1 legacy + 1 yeni inline → toplam 2 → KAPALI',
+  canUseLegacyFallback([
+    { id: 'legacy', isInline: true, contentId: null },
+    { id: 'yeni', isInline: true, contentId: 'yeni@host' },
+  ]), false);
+
+console.log('\n── 9) Davranış — end-to-end: yeni resolved + unknown = duplicate önlenir ─');
+
+// Senaryo: mail'de 2 img — src="cid:X" (contentId=X ile eşleşir) + src="cid:Y" (unknown).
+// cidMap X'i içerir; Y için canUseLegacyFallback FALSE (X'in contentId'si dolu).
+// Sonuç: X normal render, Y → placeholder ("Gömülü görsel — ekte: X.png").
+// R1 fix ÖNCESİ: Y de X'in URL'ine yönlendirilirdi (duplicate).
+
+const attachments = [{ id: 'X', isInline: true, contentId: 'x@host', fileName: 'ss.png' }];
+const cidMap = new Map();
+for (const a of attachments) {
+  if (!a.contentId) continue;
+  const raw = a.contentId.trim();
+  const stripped = raw.replace(/^<|>$/g, '');
+  cidMap.set(raw, { id: a.id });
+  cidMap.set(stripped, { id: a.id });
+  cidMap.set(stripped.toLowerCase(), { id: a.id });
+}
+
+function renderCid(cidSrc, cidMap, attachments) {
+  const cid = cidSrc.slice(4).trim();
+  const stripped = cid.replace(/^<|>$/g, '');
+  const match = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
+  if (match) return { kind: 'resolved', id: match.id };
+  const inline = attachments.filter((a) => a.isInline);
+  const canLegacy = inline.length === 1 && inline[0].contentId == null;
+  if (canLegacy) return { kind: 'legacy_fallback', id: inline[0].id };
+  return { kind: 'placeholder' };
+}
+
+const r1 = renderCid('cid:x@host', cidMap, attachments);
+expect('9.1 X (resolved) → normal render att X', r1.id, 'X');
+
+const r2 = renderCid('cid:y@unknown', cidMap, attachments);
+expect('9.2 Y (unknown) → PLACEHOLDER (R1 fix — duplicate önlendi)',
+  r2.kind, 'placeholder');
+expect('9.2b Y için X\'in URL\'ine YÖNLENDİRME YOK (kritik)',
+  r2.id, undefined);
+
+// Karşı-senaryo: LEGACY mail (contentId=null) + unknown cid → heuristic devrede
+const legacyAtt = [{ id: 'LEG', isInline: true, contentId: null, fileName: 'ss.png' }];
+const legacyMap = new Map();
+const r3 = renderCid('cid:whatever@host', legacyMap, legacyAtt);
+expect('9.3 LEGACY mail (contentId=null) + unknown cid → heuristic AKTİF',
+  r3.kind, 'legacy_fallback');
+expect('9.3b Fallback attachment = tek inline aday',
+  r3.id, 'LEG');
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
