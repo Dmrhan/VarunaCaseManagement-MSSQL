@@ -195,7 +195,34 @@ if (!process.env.DATABASE_URL) {
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}  SKIP=${skip}`);
-if (skip > 0) {
-  console.log('⚠️  SKIP > 0 → PASS demez. Runtime doğrulaması için DATABASE_URL ile tekrar çalıştır.');
+
+// Codex P2 R1 (2026-07-03): Exit code semantiği — SKIP ≠ PASS.
+// Runtime prisma testleri (Section 5) DB gerektiriyor; DATABASE_URL yoksa
+// SKIP loglanıyordu ama exit 0 dönerdi → CI/CD hotfix gate "başarılı"
+// diye geçirebilirdi. Bu smoke özellikle **gerçek prisma sorgusunu**
+// doğrulamak için yazıldı; runtime yapılmadan gate açık geçmesin.
+//
+// Exit codes:
+//   0 = tüm testler PASS, hiç SKIP yok
+//   1 = FAIL var
+//   2 = FAIL yok ama SKIP > 0 (runtime doğrulaması yapılmadı)
+//
+// Bilerek atlamak için: node scripts/... --allow-skip (dev workflow'unda
+// pattern kontrolleri için hızlı çalıştırma). CI/CD bayrağı KOYMAZ.
+if (fail > 0) {
+  console.log('❌ FAIL — testler başarısız.');
+  process.exit(1);
 }
-process.exit(fail === 0 ? 0 : 1);
+if (skip > 0) {
+  const allowSkip = process.argv.includes('--allow-skip');
+  if (allowSkip) {
+    console.log('⚠️  SKIP > 0 ancak --allow-skip verildi → exit 0 (dev override).');
+    process.exit(0);
+  }
+  console.log('❌ SKIP > 0 → runtime doğrulaması yapılmadı (gate PASS DEĞİL, exit 2).');
+  console.log('   Runtime için: DATABASE_URL=... node scripts/smoke-internal-address-cache-hotfix.js');
+  console.log('   Dev override:  node scripts/... --allow-skip');
+  process.exit(2);
+}
+console.log('✅ PASS — runtime dahil tüm testler geçti.');
+process.exit(0);
