@@ -118,8 +118,30 @@ expect('2.22 Kaldır butonu — inline ise gizli (!a.inline guard)',
 // Preview blob: allow (Codex P2 R2: data: KALDIRILDI — XSS potansiyeli)
 expect('2.23 previewHtml — ALLOWED_URI_REGEXP blob dahil',
   /previewHtml\s*=[\s\S]{0,600}ALLOWED_URI_REGEXP:\s*\/\^\(\?:https\?\|blob\|cid/.test(composer), true);
-expect('2.23b previewHtml — data: KALKMIŞ (Codex P2 R2 XSS fix)',
-  !/ALLOWED_URI_REGEXP:\s*\/\^\(\?:[^/]*\|data\)/.test(composer), true);
+// Codex P2 R2 R2 (2026-07-03) — Konum-bağımsız assertion. Önceki regex
+// sadece `|data)` (son alternative) durumunu yakalıyordu; `data|mailto`
+// gibi ortada olsa reddedemezdi. Şimdi previewHtml scope'undaki gerçek
+// ALLOWED_URI_REGEXP literal'ini extract edip alternative listesini
+// parse eder ve `data`'yı konum-agnostik reddeder.
+{
+  const previewBlockMatch = composer.match(/previewHtml\s*=[\s\S]{0,800}?\}\)/);
+  const previewBlock = previewBlockMatch?.[0] ?? '';
+  const uriRegexMatch = previewBlock.match(/ALLOWED_URI_REGEXP:\s*\/\^\(\?:([^)]+)\):/);
+  const alternatives = uriRegexMatch
+    ? uriRegexMatch[1].split('|').map((s) => s.trim().toLowerCase())
+    : null;
+  expect('2.23b previewHtml — ALLOWED_URI_REGEXP literal extract edildi',
+    Array.isArray(alternatives) && alternatives.length > 0, true);
+  expect('2.23c previewHtml — `data` alternative HİÇBİR KONUMDA yok (Codex R2 R2 XSS fix)',
+    Array.isArray(alternatives) && !alternatives.includes('data'), true);
+  // Ek pozitif guard — beklenen whitelist konum-agnostik
+  expect('2.23d previewHtml — blob/cid/https? alternative\'leri mevcut',
+    Array.isArray(alternatives)
+      && alternatives.includes('blob')
+      && alternatives.includes('cid')
+      && alternatives.includes('https?'),
+    true);
+}
 // Blob URL cleanup — unmount
 expect('2.24 Blob URL cleanup — useEffect return revokeObjectURL',
   /useEffect\(\(\)\s*=>\s*\(\)\s*=>\s*\{[\s\S]{0,300}URL\.revokeObjectURL\(a\.blobUrl\)/.test(composer), true);
