@@ -75,11 +75,32 @@ function normalizeRecipients(list) {
 }
 
 /**
+ * bodyHtml içindeki `<img src="cid:xxx">` referanslarından CID setini çıkar.
+ * FE composer ile SİMETRİK regex — composer bu tam pattern'i insert eder,
+ * backend aynı pattern'i tanır. Sanitize `img[src^="cid:"]`'i zaten allow
+ * ediyor (htmlSanitizer.js allowedSchemesByTag) → strip yok.
+ */
+function extractInlineCidsFromHtml(html) {
+  const set = new Set();
+  if (typeof html !== 'string' || !html) return set;
+  const re = /<img[^>]+src=["']cid:([^"']+)["']/gi;
+  for (let m; (m = re.exec(html)); ) {
+    const cid = m[1]?.trim();
+    if (cid) set.add(cid);
+  }
+  return set;
+}
+
+/**
  * CaseAttachment.id[] → mailProvider attachments[].
  * SCOPE: attachment.caseId === caseId olmayan satır filtrelenir
  * (cross-case ek bağlama engellenir).
+ *
+ * @param {Set<string>} [inlineCids] — bodyHtml'de cid:xxx olarak referans
+ *   verilmiş attachment id'leri. Bu set'te olan ekler nodemailer'a `cid`
+ *   field ile geçer → gövde içinde render edilir (Ctrl+V paste image).
  */
-async function loadAttachmentsForCase(caseId, attachmentIds) {
+async function loadAttachmentsForCase(caseId, attachmentIds, inlineCids) {
   if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) {
     return { ok: true, items: [], rows: [] };
   }
@@ -98,6 +119,7 @@ async function loadAttachmentsForCase(caseId, attachmentIds) {
   if (rows.length !== attachmentIds.length) {
     return { ok: false, code: 'attachment_scope_mismatch' };
   }
+  const inlineSet = inlineCids instanceof Set ? inlineCids : new Set();
   const items = [];
   for (const r of rows) {
     if (!r.fileUrl) {
@@ -107,11 +129,18 @@ async function loadAttachmentsForCase(caseId, attachmentIds) {
     if (!st) {
       return { ok: false, code: 'attachment_missing', meta: { id: r.id } };
     }
-    items.push({
+    const entry = {
       filename: r.fileName,
       content: createObjectStream(r.fileUrl),
       contentType: r.mimeType,
-    });
+    };
+    // nodemailer: cid alanı → Content-ID header + Content-Disposition inline.
+    // Mail istemcisi (Gmail/Outlook) gövde içindeki <img src="cid:xxx">'yi
+    // bu ek ile eşleştirir ve INLINE render eder.
+    if (inlineSet.has(r.id)) {
+      entry.cid = r.id;
+    }
+    items.push(entry);
   }
   // rows döner — appendOutbound sonrası CaseEmailAttachment yazımı için
   // (Codex review fix: thread'de ek görünür + indirilebilir).
@@ -254,8 +283,15 @@ async function sendCaseEmail(params, opts = {}) {
     ? bodyText
     : safeHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
+  // ─── 5b. Inline CID seti (Ctrl+V paste image) ───
+  // Sanitize SONRASINDA extract — sanitize cid img'i strip etmemeli
+  // (htmlSanitizer.js allowedSchemesByTag.img: ['http','https','cid']).
+  // Eğer strip olursa inlineCids boş çıkar, ekler normal (non-inline)
+  // gönderilir — kullanıcı görseli mail'de göremez ama akış kırılmaz.
+  const inlineCids = extractInlineCidsFromHtml(safeHtml);
+
   // ─── 6. Ekler ───
-  const att = await loadAttachmentsForCase(caseId, attachments ?? []);
+  const att = await loadAttachmentsForCase(caseId, attachments ?? [], inlineCids);
   if (!att.ok) return { ok: false, code: att.code, message: 'Ek erişimi başarısız.' };
 
   // ─── 7. mailProvider.sendMail ───
@@ -327,15 +363,22 @@ async function sendCaseEmail(params, opts = {}) {
   if (emailRecord?.id && Array.isArray(att.rows) && att.rows.length) {
     try {
       await prisma.caseEmailAttachment.createMany({
-        data: att.rows.map((r) => ({
-          emailId: emailRecord.id,
-          storageKey: r.fileUrl,
-          fileName: r.fileName,
-          mimeType: r.mimeType,
-          fileSize: r.fileSize,
-          contentId: null,
-          isInline: false,
-        })),
+        data: att.rows.map((r) => {
+          const isInline = inlineCids.has(r.id);
+          return {
+            emailId: emailRecord.id,
+            storageKey: r.fileUrl,
+            fileName: r.fileName,
+            mimeType: r.mimeType,
+            fileSize: r.fileSize,
+            // Inline (Ctrl+V paste) → contentId = attachmentId (FE cid ile
+            // simetrik). Outbound thread render'ı (MailMessageCard
+            // processBodyHtml) contentId → attachmentId lookup ile gövde
+            // içindeki <img src="cid:xxx">'i signed URL'e çeviriyor.
+            contentId: isInline ? r.id : null,
+            isInline,
+          };
+        }),
       });
     } catch (err) {
       console.warn('[sender] caseEmailAttachment persistence failed',
