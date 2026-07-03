@@ -2378,10 +2378,16 @@ router.get(
     // 60 saniyelik token. Raw endpoint mevcut /:id/files/:fileId/raw
     // ile aynı şema; M6.2'de composer için ortak indirme path'i.
     //
-    // 2026-07-03 fix — Mail cid inline render için payload'a mimeType +
-    // disposition='inline' eklendi. Raw endpoint bu ipuçlarını kullanarak
-    // Content-Type'ı gerçek mime'a set eder → <img> render eder.
-    // Önce: octet-stream + attachment → kırık img (UNV-1000093).
+    // 2026-07-03 Codex R1 fix — disposition att.isInline'a bağlı:
+    //  - Inline attachment (cid image, Ctrl+V yapıştırma) → 'inline'
+    //    → <img src=...> render eder (UNV-1000093 fix)
+    //  - Normal mail-eki (PDF/doc, kullanıcı download butonu) → 'attachment'
+    //    → download prompt (önceki /download kontratı korunur — signed URL
+    //    kopyalanıp doğrudan açılırsa PDF/img inline preview OLMAZ)
+    //
+    // mimeType her iki path'te de payload'a → Content-Type doğru mime
+    // (octet-stream fallback kalır, sadece mimeType tanımlıysa image/pdf).
+    const disposition = att.isInline ? 'inline' : 'attachment';
     const token = signStorageToken(
       {
         typ: 'download',
@@ -2390,7 +2396,7 @@ router.get(
         path: att.storageKey,
         fileName: att.fileName,
         mimeType: att.mimeType,
-        disposition: 'inline',
+        disposition,
       },
       60,
     );
