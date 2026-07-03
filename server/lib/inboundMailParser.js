@@ -53,6 +53,28 @@ function normalizeAddressList(addr) {
 }
 
 /**
+ * Content-ID normalize — mailparser'dan gelen cid / contentId değerini
+ * MailMessageCard.cidMap ile aynı formata düşür.
+ *
+ * mailparser sürüm/sürücü'ye göre iki farklı alan set eder:
+ *   - a.cid       — bracket-strip shortcut (bazen yok)
+ *   - a.contentId — RFC 2392 formatlı (`<abc@host>`)
+ *
+ * cidMap raw + stripped + stripped.toLowerCase() varyantlarını tutuyor,
+ * yani hangi format yazılırsa yazılsın lookup yakalar; ama biz DB'ye tek
+ * bir değer yazıyoruz → stripped versiyonu tercih (bracket'sız), 3
+ * varyant lookup zaten toleranslı. Boş/whitespace → null.
+ *
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function normalizeCid(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim().replace(/^<|>$/g, '').trim();
+  return s.length > 0 ? s : null;
+}
+
+/**
  * References header — boşlukla ayrılmış Message-ID listesi.
  * M4 tam threading için — M2'de parse edilir ama eşleştirme YAPILMAZ
  * (Case.threadMessageId field'ı yok; eklenmesi M4 işi).
@@ -158,8 +180,14 @@ export async function parseInboundEml(raw) {
         content: Buffer.isBuffer(a.content)
           ? a.content
           : (a.content ? Buffer.from(a.content) : null),
-        cid: a.cid ? String(a.cid) : null,
-        inline: a.contentDisposition === 'inline' || !!a.cid,
+        // M6.3a fix (2026-07-03) — mailparser bazı sürümlerde `a.cid`
+        // (bracket-strip shortcut) set etmez; sadece `a.contentId` (`<...@..>`
+        // formatında) döner. Önceki `a.cid ? ... : null` bu durumda cid=null
+        // yazar → intake CaseEmailAttachment.contentId=null → MailMessageCard
+        // cidMap boş → gövde-içi görsel render başarısız (canlı repro
+        // UNV-1000089, 2026-07-03). Fallback ile ve angle bracket strip.
+        cid: normalizeCid(a.cid ?? a.contentId),
+        inline: a.contentDisposition === 'inline' || !!(a.cid ?? a.contentId),
       })),
     },
     meta: { parsedAt, rawSource: RAW_SOURCE },
