@@ -302,6 +302,12 @@ export async function listAccounts({
     const nameVariants = generateTurkishSearchVariants(q);
     const nameOR = nameVariants.map((v) => ({ name: { contains: v } }));
     const contactEmailOR = nameVariants.map((v) => ({ email: { contains: v } }));
+    // Codex P2 R1 fix (2026-07-03) — Contact chip için AccountContact.fullName
+    // predicate'i eklendi. Önceden yalnız phone + email vardı; UI placeholder
+    // "Kontak adı, telefon veya e-posta" derken kontak ADIYLA arama sonuçsuz
+    // dönerdi. Turkish-aware nameVariants kullanılır (İ/i, Ş, Ç, Ğ, Ö, Ü, ı
+    // varyantları).
+    const contactNameOR = nameVariants.map((v) => ({ fullName: { contains: v } }));
     const projectNameOR = nameVariants.map((v) => ({ name: { contains: v } }));
 
     // searchFields: belirli alanları seç; boş/undefined → tüm alanlar (geriye uyum).
@@ -312,7 +318,7 @@ export async function listAccounts({
     // Phase 3 — 3 phone slot E.164 search predicate genişletildi.
     if (!sf || sf.has('phone'))   orBranches.push({ phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } });
     if (!sf || sf.has('code'))    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } });
-    if (!sf || sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR] } } });
+    if (!sf || sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } });
     // Proje adı veya kodu ile arama — chip'lere bağlı değil, her zaman aktif.
     orBranches.push({ companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } });
     if (orBranches.length > 0) {
