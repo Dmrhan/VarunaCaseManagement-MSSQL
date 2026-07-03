@@ -226,11 +226,12 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
-  // Smart Ticket → Çözüldü kararı seçildiğinde taxonomy listelerini çek.
-  // Endpoint per-tenant; companyId bilgisi Case üzerinde mevcut.
+  // Çözüldü kararı seçildiğinde taxonomy listelerini çek. Kapanış-tüm-vakalar
+  // genişletmesi: klasik (mail/telefon) vakalarda da kapanış etiketi yazılır;
+  // dropdown'lar herkese görünür. Endpoint per-tenant; companyId Case'de var.
   useEffect(() => {
     let alive = true;
-    if (!isSmartTicket || pending !== 'Çözüldü' || closureTax) return;
+    if (pending !== 'Çözüldü' || closureTax) return;
     setClosureTaxLoading(true);
     void lookupService
       .smartTicketTaxonomies(item.companyId)
@@ -322,11 +323,11 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
       }
       setKbSuggestion(res);
       kbSuggestedAtRef.current = new Date().toISOString();
-      // Smart Ticket: dropdown'lara pre-fill (yalnız boş alanlar).
-      // Klasik: pre-fill YOK — info-only kart kullanıcı kararı bekler.
+      // Dropdown'lara pre-fill (yalnız boş alanlar) — kapanış-tüm-vakalar
+      // genişletmesiyle klasik vakalarda da (dropdown'lar artık herkese açık).
       // P1.2 — AI emin değilse (needsClarification) pre-fill ETME; operatör
       // soruları cevaplayınca gelen zenginleşmiş öneri pre-fill eder.
-      if (isSmartTicket && !res.needsClarification) {
+      if (!res.needsClarification) {
         const s = res.suggestions;
         if (s.rootCauseGroup && !closureRcg) {
           setClosureRcg(s.rootCauseGroup.code);
@@ -344,29 +345,6 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         setKbSuggesting(false);
       }
     }
-  }
-
-  /**
-   * PR-8 — Klasik vaka için "Çözüm Notuna Ekle". Suggestion'daki 4
-   * label'ı parantezli özet olarak resolutionNote'a append eder. Persist
-   * tetikletmez; kullanıcı sonra normal kapanış akışında submit eder.
-   */
-  function handleAppendSuggestionToNote() {
-    if (!kbSuggestion) return;
-    const s = kbSuggestion.suggestions;
-    const parts: string[] = [];
-    if (s.rootCauseGroup) parts.push(`Kök Neden: ${s.rootCauseGroup.label}`);
-    if (s.rootCauseDetail) parts.push(`Detay: ${s.rootCauseDetail.label}`);
-    if (s.resolutionType) parts.push(`Çözüm Tipi: ${s.resolutionType.label}`);
-    if (s.permanentPrevention) parts.push(`Kalıcı Önlem: ${s.permanentPrevention.label}`);
-    if (parts.length === 0) return;
-    const addendum = '\n\n[KB Önerisi] ' + parts.join(' · ');
-    setResolutionNote((t) => (t ? `${t}${addendum}` : addendum.trimStart()));
-    toast({
-      type: 'success',
-      message: 'KB önerisi çözüm notuna eklendi.',
-      duration: 2000,
-    });
   }
 
   async function handleDraftResolution() {
@@ -420,10 +398,30 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
   const requiredChecklistPending =
     item.checklistItems?.filter((it) => it.required && !it.checked) ?? [];
 
+  // Kapanış analizi zorunluluğu — backend'deki smart_ticket_closure_required
+  // guard'ının aynası. Vaka (açılış kanalı fark etmeksizin) Çözüldü'ye
+  // geçerken "KB ile Analiz Et" en az bir kez çalıştırılmış (kbSuggestion
+  // alınmış) VEYA en az bir kapanış etiketi elle seçilmiş olmalı. 4 alanın
+  // dolu olması şart değil — AI kararsız kalıp boş bırakabilir; boş kalması
+  // istenir (gelişim verisi). Daha önce analiz edilmiş vaka muaf.
+  const prevClosureCf = (
+    item.customFields as {
+      smartTicket?: { closure?: { rootCauseGroup?: string; rootCauseGroupLabel?: string; closureSuggestion?: unknown } };
+    } | undefined
+  )?.smartTicket?.closure;
+  const closureAlreadyAnalyzed = !!(
+    prevClosureCf?.rootCauseGroup || prevClosureCf?.rootCauseGroupLabel || prevClosureCf?.closureSuggestion
+  );
+  const kbAnalysisPending =
+    !closureAlreadyAnalyzed &&
+    !kbSuggestion &&
+    !(closureRcg || closureRcd || closureRt || closurePp);
+
   function applyDisabled(): boolean {
     if (!pending) return true;
     if (pending === 'Çözüldü' && !resolutionNote.trim()) return true;
     if (pending === 'Çözüldü' && requiredChecklistPending.length > 0) return true;
+    if (pending === 'Çözüldü' && kbAnalysisPending) return true;
     if (pending === 'İptalEdildi' && !cancelReason.trim()) return true;
     if (pending === '3rdPartyBekleniyor' && !thirdPartyId) return true;
     if (pending === 'Eskalasyon' && (!escalationLevel || !escalationReason.trim())) return true;
@@ -456,10 +454,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
         permanentPreventionLabel: pp?.label,
       };
     })();
+    // Payload, en az bir alan seçiliyse VEYA KB analizi yapıldıysa gönderilir
+    // (kapanış-tüm-vakalar: klasik vakalarda da). KB analizi tüm alanları boş
+    // bıraksa bile closureSuggestion telemetrisi persist edilir — backend
+    // guard'ı "analiz yapıldı" kanıtı olarak bunu arar; boş alanlar bilinçli
+    // boş kalır (model gelişim verisi).
     const closureHasAnyField =
-      isSmartTicket &&
       pending === 'Çözüldü' &&
-      (closureRcg || closureRcd || closureRt || closurePp);
+      (closureRcg || closureRcd || closureRt || closurePp || kbSuggestion);
 
     // Telemetry — Smart Ticket kapanışında AI önerisi alındıysa ai_suggested /
     // human_applied attribution'ı persist et (prompt'a beslenmez; yalnız
@@ -678,31 +680,40 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                   dropdown pre-fill (kullanıcı onayıyla). Approval /
                   checklist guard'ları bypass edilmez. */}
               <KbClosureSuggestionPanel
-                isSmartTicket={isSmartTicket}
                 resolutionNote={resolutionNote}
                 kbSuggesting={kbSuggesting}
                 kbSuggestion={kbSuggestion}
                 kbSuggestionError={kbSuggestionError}
                 onSuggest={() => void handleKbSuggest()}
-                onAppendToNote={handleAppendSuggestionToNote}
                 onClarifyAnswer={(answer) => void handleKbSuggest(answer)}
               />
 
-              {/* WR-Smart-Ticket Phase 1e — yapılandırılmış kapanış alanları.
-                  Yalnız Smart Ticket Case'lerinde gösterilir. Hepsi opsiyonel
-                  — taxonomy boş olabilir; close bloke olmaz. Submit'te
-                  smartTicketClosure payload backend deep-merge ile
-                  customFields.smartTicket.closure'a yazar. */}
-              {isSmartTicket && (
-                <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
-                      Akıllı Ticket Kapanış Bilgileri (opsiyonel)
-                    </span>
+              {/* WR-Smart-Ticket Phase 1e + kapanış-tüm-vakalar genişletmesi —
+                  yapılandırılmış kapanış alanları TÜM vakalarda gösterilir
+                  (mail/telefon dahil; klasik vakada smartTicket dalı
+                  closure-only oluşur). Kapanış analizi zorunluluğu: "KB ile
+                  Analiz Et" bir kez çalıştırılmadan (veya elle etiket
+                  seçilmeden) Çözüldü uygulanamaz — backend
+                  smart_ticket_closure_required guard'ı ile aynı kural. AI'ın
+                  boş bıraktığı alanlar boş kalabilir (bilinçli; gelişim
+                  verisi). Submit'te smartTicketClosure payload backend
+                  deep-merge ile customFields.smartTicket.closure'a yazar. */}
+              <div className="rounded-md border border-brand-100 bg-brand-50/40 p-3 dark:border-brand-900/30 dark:bg-brand-950/20">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-brand-700 dark:text-brand-200">
+                    Kapanış Bilgileri (Kök Neden){closureAlreadyAnalyzed ? '' : ' — KB analizi zorunlu'}
+                  </span>
                     {closureTaxLoading && (
                       <span className="text-[11px] text-slate-500">yükleniyor…</span>
                     )}
                   </div>
+                  {kbAnalysisPending && (
+                    <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                      Vakayı çözmeden önce çözüm notunu yazıp{' '}
+                      <strong>KB ile Analiz Et</strong> butonuna bir kez basın (veya etiketleri
+                      elle seçin). AI&apos;ın boş bıraktığı alanlar boş kalabilir.
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Field label="Kök Neden Grubu">
                       <Select
@@ -762,13 +773,14 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
                     </Field>
                   </div>
                   <p className="mt-2 text-[11px] text-slate-500 dark:text-ndark-muted">
-                    Bu alanlar opsiyoneldir ve vaka kapatma için zorunlu
-                    değildir. Doldurulursa kapanışla aynı transaction içinde
+                    {closureAlreadyAnalyzed
+                      ? 'Bu vaka daha önce analiz edilmiş; alanlar boş bırakılırsa mevcut etiketler korunur.'
+                      : 'Vaka kapatmadan önce KB analizi zorunludur; AI\'ın boş bıraktığı alanlar boş kalabilir.'}{' '}
+                    Kapanışla aynı transaction içinde
                     <code className="ml-1 font-mono">customFields.smartTicket.closure</code> alanına
                     yazılır; mevcut Smart Ticket açılış bilgileri korunur.
                   </p>
                 </div>
-              )}
             </>
           )}
 
@@ -921,34 +933,26 @@ export function StatusTransitionPanel({ item, onApplied, initialPending, compact
 // KbClosureSuggestionPanel — PR-8 (Business review Madde 7)
 //
 // Çözüm Notu'nun altında yer alır; "Cozuldu" pending iken render edilir.
-// Davranış:
+// Davranış (kapanış-tüm-vakalar genişletmesi sonrası TÜM vakalarda aynı):
 //   - Buton: "KB ile Kapanış Önerisi Sor". resolutionNote >= 5 char
 //     iken aktif; aksi halde disabled + hint.
-//   - Smart Ticket vakası: suggestion alındıktan sonra parent component
-//     dropdown'lara pre-fill yapar (yalnız boş alanlar). Panel sadece
-//     başarı bildirimi gösterir.
-//   - Klasik vaka: 4 alan label/code info kartı + "Çözüm Notuna Ekle"
-//     buton. Persist YOK; kullanıcı isterse metin olarak resolutionNote'a
-//     ekler.
+//   - Suggestion alındıktan sonra parent component dropdown'lara pre-fill
+//     yapar (yalnız boş alanlar). Panel başarı bildirimi gösterir.
 // ─────────────────────────────────────────────────────────────────
 
 function KbClosureSuggestionPanel({
-  isSmartTicket,
   resolutionNote,
   kbSuggesting,
   kbSuggestion,
   kbSuggestionError,
   onSuggest,
-  onAppendToNote,
   onClarifyAnswer,
 }: {
-  isSmartTicket: boolean;
   resolutionNote: string;
   kbSuggesting: boolean;
   kbSuggestion: SuggestClosureResponse | null;
   kbSuggestionError: string | null;
   onSuggest: () => void;
-  onAppendToNote: () => void;
   /** P1.2 — operatör clarifying sorularını cevaplayınca (zenginleşmiş re-run tetikler). */
   onClarifyAnswer: (answer: string) => void;
 }) {
@@ -962,9 +966,7 @@ function KbClosureSuggestionPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[11px] font-medium text-violet-800 dark:text-violet-200">
           <Sparkles size={11} />
-          {isSmartTicket
-            ? 'KB önerisi: kapanış alanlarına pre-fill'
-            : 'KB önerisi: kapanış bağlamı (bilgi amaçlı)'}
+          KB önerisi: kapanış alanlarına pre-fill
         </div>
         <Button
           size="sm"
@@ -1076,24 +1078,9 @@ function KbClosureSuggestionPanel({
               )}
             </ul>
           )}
-          {/* Smart Ticket'ta dropdown'lar zaten pre-fill edildi; bu
-              not aşağıda zaten görünür. Klasik vakada kullanıcı isterse
-              çözüm notuna ekleyebilir (persist YOK). */}
-          {!isSmartTicket && suggestionCount > 0 && (
-            <div className="pt-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={onAppendToNote}
-                title="KB öneri özetini çözüm notuna metin olarak ekle"
-              >
-                Çözüm Notuna Ekle
-              </Button>
-            </div>
-          )}
-          {isSmartTicket && suggestionCount > 0 && (
+          {suggestionCount > 0 && (
             <p className="text-[10px] text-violet-600 dark:text-violet-400">
-              Aşağıdaki Akıllı Ticket Kapanış Bilgileri alanları boşsa öneri otomatik dolduruldu — gözden geçirip değiştirebilirsiniz.
+              Aşağıdaki Kapanış Bilgileri alanları boşsa öneri otomatik dolduruldu — gözden geçirip değiştirebilirsiniz.
             </p>
           )}
         </div>
