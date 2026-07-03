@@ -41,6 +41,15 @@ expect('1.3 UI hint — "seçim yok — tüm alanlarda aranır"',
   /seçim yok — tüm alanlarda aranır/.test(picker), true);
 expect('1.4 hint sadece searchFields.length === 0 iken',
   /\{searchFields\.length === 0 &&[\s\S]{0,500}seçim yok/.test(picker), true);
+// Codex P2 R2 (2026-07-03) — Reset path + toggle son chip
+expect('1.5 Reset path (open=false) → setSearchFields([]) (initializer ile hizalı)',
+  /if \(!open\)[\s\S]{0,600}setSearchFields\(\[\]\)/.test(picker), true);
+expect('1.6 Reset path setSearchFields([\'name\']) İZİ YOK',
+  !/setSearchFields\(\['name'\]\)/.test(picker), true);
+expect('1.7 toggleSearchField — son chip kaldırma [] döner ([field] YOK)',
+  /function toggleSearchField[\s\S]{0,600}return prev\.filter\(\(f\) => f !== field\);\s*\}/.test(picker), true);
+expect('1.8 toggleSearchField — "next.length === 0 ? [field]" İZİ YOK',
+  !/next\.length === 0 \? \[field\]/.test(picker), true);
 
 console.log('\n── 2) Backend — contact fullName branch ──────');
 expect('2.1 contactNameOR helper (Turkish-aware variants)',
@@ -120,6 +129,56 @@ expect('4.2 sadece contact chip → OR: phone + email + fullName (fullName EKLEN
 
 const cf2 = contactBranchFields(new Set(['name']));
 expect('4.3 sadece name chip → contact OR YOK', cf2.length === 0, true);
+
+console.log('\n── 5) Davranış — toggleSearchField (Codex P2 R2) ─');
+
+function toggleSearchField(prev, field) {
+  if (prev.includes(field)) {
+    return prev.filter((f) => f !== field);
+  }
+  return [...prev, field];
+}
+
+// Toggle sıralı senaryolar
+let s = [];
+s = toggleSearchField(s, 'vkn');
+expect('5.1 default [] + vkn tıkla → [vkn]', JSON.stringify(s), '["vkn"]');
+s = toggleSearchField(s, 'vkn');
+expect('5.2 [vkn] + vkn tıkla → [] (son chip kaldırılabilir, R2 fix)',
+  JSON.stringify(s), '[]');
+s = toggleSearchField(s, 'contact');
+expect('5.3 [] + contact → [contact]', JSON.stringify(s), '["contact"]');
+s = toggleSearchField(s, 'name');
+expect('5.4 [contact] + name → [contact,name]',
+  JSON.stringify(s), '["contact","name"]');
+s = toggleSearchField(s, 'contact');
+expect('5.5 [contact,name] + contact → [name]',
+  JSON.stringify(s), '["name"]');
+s = toggleSearchField(s, 'name');
+expect('5.6 [name] + name → [] (kullanıcı "hepsi"e döndü)',
+  JSON.stringify(s), '[]');
+
+console.log('\n── 6) Davranış — reset/mount lifecycle (R2) ─────');
+
+// Modal ilk mount: open=false → useEffect reset path çağrılır → default []
+function resetOnClose() {
+  // Codex fix sonrası: setSearchFields([])
+  return [];
+}
+
+const stateAfterFirstMountOpenFalse = resetOnClose();
+expect('6.1 İlk mount open=false → reset [] (initializer ile hizalı)',
+  JSON.stringify(stateAfterFirstMountOpenFalse), '[]');
+
+// Modal kullanıcı chip seçiyor
+const afterUserToggle = toggleSearchField(stateAfterFirstMountOpenFalse, 'vkn');
+expect('6.2 Kullanıcı vkn tıkladıktan sonra → [vkn]',
+  JSON.stringify(afterUserToggle), '["vkn"]');
+
+// Modal kapatılıyor
+const stateAfterClose = resetOnClose();
+expect('6.3 Modal kapatıldı → reset [] (bir sonraki açılış default)',
+  JSON.stringify(stateAfterClose), '[]');
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

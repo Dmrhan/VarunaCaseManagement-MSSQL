@@ -118,7 +118,10 @@ export function AccountSearchPicker({
       setError(null);
       setTcknHint(null);
       setExpandedId(null);
-      setSearchFields(['name']);
+      // Codex P2 R2 (2026-07-03) — Reset path da default'a hizalanmalı;
+      // aksi halde ilk mount (open=false) sonrası ilk açılışta ['name']
+      // set ediliyor ve initializer'ın [] default'u konuşulmuyordu.
+      setSearchFields([]);
       return;
     }
   }, [open]);
@@ -194,8 +197,11 @@ export function AccountSearchPicker({
   function toggleSearchField(field: AccountSearchField) {
     setSearchFields((prev) => {
       if (prev.includes(field)) {
-        const next = prev.filter((f) => f !== field);
-        return next.length === 0 ? [field] : next;
+        // Codex P2 R2 (2026-07-03) — Son chip'i kaldırma [] dönmeli;
+        // önceden [field] set edilerek kullanıcı "hepsi (default)"
+        // moduna hiç dönemiyordu. Yeni davranış: seçim yoksa tüm alanlar
+        // aranır (UI hint + placeholder logic buna göre).
+        return prev.filter((f) => f !== field);
       }
       return [...prev, field];
     });
