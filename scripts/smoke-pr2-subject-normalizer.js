@@ -139,6 +139,61 @@ expect('4.4 Boş → false',
 expect('4.5 null → false',
   isSubjectNormalized(null), false);
 
+console.log('\n── 4b) Composer subject initializer — reply/forward açılışı ──');
+
+const composer = read('src/features/cases/components/MailComposer.tsx');
+expectTrue('4b.1 MailComposer normalizeSubject import',
+  /import \{ normalizeSubject \} from '@\/lib\/subjectNormalizer'/.test(composer));
+expectTrue('4b.2 Subject initializer function — raw → normalize',
+  /useState<string>\(\(\)\s*=>\s*\{[\s\S]{0,400}normalizeSubject\(raw\)/.test(composer));
+expectTrue('4b.3 initialReplyContext varsa "RE: " prefix (tek başında)',
+  /initialReplyContext\)[\s\S]{0,200}clean\.startsWith\('RE:'\)[\s\S]{0,100}`RE: \$\{clean\}`/.test(composer));
+expectTrue('4b.4 initialForwardContext varsa "Fwd: " prefix',
+  /initialForwardContext\)[\s\S]{0,200}clean\.startsWith\('Fwd:'\)[\s\S]{0,100}`Fwd: \$\{clean\}`/.test(composer));
+
+// Davranış sim: composer subject initializer
+function composerSubjectInit(replyCtx, forwardCtx) {
+  const raw = replyCtx?.subject ?? forwardCtx?.subject ?? '';
+  if (!raw) return '';
+  const clean = normalizeSubject(raw);
+  if (!clean) return raw;
+  if (replyCtx) return clean.startsWith('RE:') ? clean : `RE: ${clean}`;
+  if (forwardCtx) return clean.startsWith('Fwd:') ? clean : `Fwd: ${clean}`;
+  return clean;
+}
+
+// Yığın konu — tek RE: + [UNV-x] korunmalı (kullanıcı direktifi)
+expect('4b.5 Yığın: "Re: Re: [EXTERNAL] RE: [UNV-1000066] Konu" → "RE: [UNV-1000066] Konu"',
+  composerSubjectInit({ subject: 'Re: Re: [EXTERNAL] RE: [UNV-1000066] Konu' }, null),
+  'RE: [UNV-1000066] Konu');
+
+expect('4b.6 Sekiz kat RE: + [EXT] + Gib → "RE: Gib Gönderim Hatası"',
+  composerSubjectInit({ subject: 'RE: [EXTERNAL]RE: RE: RE: RE: RE: RE: RE: Gib Gönderim Hatası' }, null),
+  'RE: Gib Gönderim Hatası');
+
+expect('4b.7 Reply token\'sız temiz konu → "RE: Konu"',
+  composerSubjectInit({ subject: 'Re: Konu' }, null),
+  'RE: Konu');
+
+expect('4b.8 Forward: "Fwd: RE: Konu" → "Fwd: Konu"',
+  composerSubjectInit(null, { subject: 'Fwd: RE: Konu' }),
+  'Fwd: Konu');
+
+expect('4b.9 Forward token korunur: "Fw: [PRM-100] Konu" → "Fwd: [PRM-100] Konu"',
+  composerSubjectInit(null, { subject: 'Fw: [PRM-100] Konu' }),
+  'Fwd: [PRM-100] Konu');
+
+expect('4b.10 New mail (context yok) → boş',
+  composerSubjectInit(null, null), '');
+
+expect('4b.11 Reply prefix zaten var → tek "RE: "',
+  composerSubjectInit({ subject: 'RE: [UNV-100] X' }, null),
+  'RE: [UNV-100] X');
+
+expect('4b.12 Sadece prefix konu → orijinal (anlamlı içerik yok)',
+  composerSubjectInit({ subject: 'RE: FW:' }, null),
+  'RE: FW:');
+
 console.log('\n── 5) Kullanım noktaları — 4 render yeri entegrasyonu ─');
 expectTrue('5.1 CaseTitleEditable — normalize + tooltip',
   /normalizeSubject\(item\.title\)/.test(read('src/features/cases/components/CaseTitleEditable.tsx')));

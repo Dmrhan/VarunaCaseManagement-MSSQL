@@ -38,6 +38,7 @@ import {
 } from '@/services/caseEmailService';
 import { ContactPicker } from './ContactPicker';
 import { RichTextEditor, type PasteImageResult } from './RichTextEditor';
+import { normalizeSubject } from '@/lib/subjectNormalizer';
 import type { Case, CaseFile } from '../types';
 
 // Ctrl+V inline görsel için sıkı kısıt (composer-özgü):
@@ -167,9 +168,21 @@ export function MailComposer({
   // Codex P2 fix — body'de o an "etkin" imzayı takip et. Dropdown değişiminde
   // body'deki ESKİ imzayı yeni seçimle SWAP edebilelim diye ref'te tut.
   const currentSignatureHtmlRef = useRef<string | null>(initialSelectedSignatureHtml);
-  const [subject, setSubject] = useState<string>(
-    initialReplyContext?.subject ?? initialForwardContext?.subject ?? '',
-  );
+  // 2026-07-04 PR-2 — Reply/forward açılışında subject normalize (yığın
+  // "RE: Re: [EXTERNAL] RE: RE:" gürültüsü tek RE:'ye iner; [UNV-x]
+  // token korunur — backend applyCaseTokenToSubject de idempotent).
+  // Header threading (In-Reply-To/References) subject'ten bağımsız →
+  // dış istemci threading'i etkilenmez. Kullanıcı manuel editleyebilir
+  // (state ilk mount initializer'da; sonraki edit'ler ham).
+  const [subject, setSubject] = useState<string>(() => {
+    const raw = initialReplyContext?.subject ?? initialForwardContext?.subject ?? '';
+    if (!raw) return '';
+    const clean = normalizeSubject(raw);
+    if (!clean) return raw;
+    if (initialReplyContext) return clean.startsWith('RE:') ? clean : `RE: ${clean}`;
+    if (initialForwardContext) return clean.startsWith('Fwd:') ? clean : `Fwd: ${clean}`;
+    return clean;
+  });
   // Composer açıldıktan SONRA gelen imza için (slow network):
   // useState initializer prop güncellenince yeniden çağrılmaz; o yüzden
   // baseline body'yi ref'te tutarız ve effect ile imza bir kez append edilir.
