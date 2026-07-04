@@ -75,6 +75,56 @@ function normalizeCid(raw) {
 }
 
 /**
+ * 2026-07-04 — KRİTİK: mailparser inline CID attachment'ları HTML'e
+ * `data:image/png;base64,<content>` olarak GÖMÜYOR (cid: referansını
+ * kendisi çözüyor). sanitizeIncomingEmailHtml `data:` şemasını (doğru
+ * olarak, XSS + MB'larca base64 şişkinliği) yasakladığı için src'ler
+ * SÖKÜLÜYOR → DB'ye src'siz <img> yazılıyor → thread'de kırık img.
+ *
+ * Deneyle kanıtlandı: multipart/related + Content-ID'li png ham MIME
+ * → simpleParser çıktısı `parsed.html` içinde `data:image/png;base64,...`.
+ * `p.attachments[0]` cid='img1@test' contentType='image/png' related=true.
+ *
+ * Fix: Ters eşleme. Sanitize'dan ÖNCE parsed.html'de her related+cid'li
+ * ek için:
+ *   needle      = `data:${contentType};base64,${content.toString('base64')}`
+ *   replacement = `cid:${normalizedCid}`
+ * mailparser data-URI'yi AYNI Buffer'dan ürettiği için base64 birebir
+ * eşleşir. SONRA sanitize → cid: allowedSchemesByTag.img izinli → src
+ * KORUNUR → mevcut render zinciri (contentId map + getAttachmentDownload)
+ * çalışır. data:'yı sanitizer'da SERBEST BIRAKMA (XSS yüzeyi + gövde
+ * şişkinliği).
+ *
+ * @param {string|null} html
+ * @param {Array} mpAttachments — ham mailparser attachments (content Buffer + cid + contentType)
+ * @returns {string|null}
+ */
+function rewriteDataUrisToCids(html, mpAttachments) {
+  if (typeof html !== 'string' || !html) return html;
+  if (!Array.isArray(mpAttachments) || mpAttachments.length === 0) return html;
+  let out = html;
+  for (const a of mpAttachments) {
+    if (!a) continue;
+    // cid ?? contentId fallback (a.cid bazı sürümlerde yok — sabahki fix ile
+    // simetrik). related=true şart değil; inline CID yeterli (bazı istemciler
+    // related header'ı koymayabilir).
+    const rawCid = a.cid ?? a.contentId;
+    const cid = normalizeCid(rawCid);
+    if (!cid) continue;
+    if (!Buffer.isBuffer(a.content) || a.content.length === 0) continue;
+    const contentType = String(a.contentType ?? '').trim();
+    if (!contentType) continue;
+    // needle: mailparser tam bu şekilde üretir (data:CT;base64,B64).
+    // Base64 encoding deterministic; aynı buffer → aynı string.
+    const base64 = a.content.toString('base64');
+    const needle = `data:${contentType};base64,${base64}`;
+    if (out.indexOf(needle) === -1) continue;
+    out = out.split(needle).join(`cid:${cid}`);
+  }
+  return out;
+}
+
+/**
  * References header — boşlukla ayrılmış Message-ID listesi.
  * M4 tam threading için — M2'de parse edilir ama eşleştirme YAPILMAZ
  * (Case.threadMessageId field'ı yok; eklenmesi M4 işi).
@@ -156,6 +206,12 @@ export async function parseInboundEml(raw) {
   // (inboundMailIntake.js writeCaseFile). isAcceptedUpload + boyut limiti
   // uygulamaları intake'te.
 
+  // 2026-07-04 — mailparser inline CID'i data:base64'e gömüyor; sanitize
+  // data:'yı yasaklıyor → src siliniyor. Ters eşleme ile data-URI'leri
+  // cid:'e geri çevir; SONRA sanitize cid'i preserve eder.
+  const rawHtml = parsed.html === false ? null : (parsed.html ?? null);
+  const html = rewriteDataUrisToCids(rawHtml, attachments);
+
   return {
     ok: true,
     data: {
@@ -165,7 +221,7 @@ export async function parseInboundEml(raw) {
       replyTo: normalizeAddress(parsed.replyTo),
       subject: (parsed.subject ?? '').trim() || null,
       text: parsed.text ?? null,
-      html: parsed.html === false ? null : (parsed.html ?? null),
+      html,
       messageId: (parsed.messageId ?? '').trim() || null,
       inReplyTo: (parsed.inReplyTo ?? '').trim() || null,
       references: parseReferences(parsed.references),
