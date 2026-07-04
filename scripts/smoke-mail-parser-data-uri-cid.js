@@ -221,10 +221,11 @@ expectTrue('5.4 isAttachmentCidReferenced helper',
   /const isAttachmentCidReferenced\s*=[\s\S]{0,600}cidReferencedKeys\.has\(raw\)[\s\S]{0,200}\|\|\s*cidReferencedKeys\.has\(stripped\)/.test(card));
 expectTrue('5.5 src\'siz filter — 3 katman (isInline + !consumed + !cidReferenced)',
   /isEmptySrc[\s\S]{0,600}email\.attachments\.filter\([\s\S]{0,400}x\.isInline[\s\S]{0,200}!consumedAttachmentIds\.has\(x\.id\)[\s\S]{0,200}!isAttachmentCidReferenced\(x\)/.test(card));
-expectTrue('5.6 src\'siz path — tek aday (contentId==null şartı YOK)',
-  /!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*\)\s*\{/.test(card));
-expectTrue('5.7 REGRESYON: eski `contentId == null` şartı src\'siz path\'inden KALKMIŞ',
-  !/!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*&&\s*inlineCandidates\[0\]\.contentId == null/.test(card));
+// Codex P2 R4: tek-aday fallback SADECE legacy (contentId==null)
+expectTrue('5.6 src\'siz tek-aday fallback — contentId==null şartı GERİ (R4)',
+  /!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*&&\s*inlineCandidates\[0\]\.contentId == null/.test(card));
+expectTrue('5.7 REGRESYON: R2\'nin şartsız tek-aday fallback\'i KALKMIŞ',
+  !/!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*\)\s*\{[\s\S]{0,150}inlineCandidates\[0\]\.id/.test(card));
 expectTrue('5.8 src\'siz heuristicMatch bulundukta consumedAttachmentIds.add',
   /if \(heuristicMatch\)[\s\S]{0,200}consumedAttachmentIds\.add\(m\.id\)/.test(card));
 expectTrue('5.9 cid: match bulundukta consumedAttachmentIds.add',
@@ -284,8 +285,8 @@ function simulateRender(imgs, attachments) {
         const byName = candidates.find((x) => x.fileName === alt);
         if (byName) match = byName;
       }
-      if (!match && candidates.length === 1) {
-        // contentId dolu OLSA bile (Codex P2 R2 fix)
+      // Codex R4: tek-aday fallback SADECE legacy (contentId==null)
+      if (!match && candidates.length === 1 && candidates[0].contentId == null) {
         match = candidates[0];
       }
       if (match) {
@@ -318,24 +319,37 @@ function simulateRender(imgs, attachments) {
   return results;
 }
 
-// Fixture F: contentId DOLU tek-inline + src'siz img → RENDER (UNV-1000093)
+// Fixture F: contentId DOLU tek-inline + src'siz img + ALT EŞLEŞİR → RENDER (UNV-1000093 tipik hali)
+// mailparser genelde alt="filename" koyar; byName match uniquely attributable.
 {
   const r = simulateRender(
     [{ src: '', alt: 'image.png' }],
     [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'image.png' }],
   );
-  expect('6.1 UNV-1000093: contentId dolu tek-inline + src\'siz + alt eşleşir → render',
+  expect('6.1 contentId dolu tek-inline + src\'siz + alt EŞLEŞİR → render (byName)',
     r[0].kind, 'heuristic_render');
   expect('6.1b render eki A1', r[0].id, 'A1');
 }
 
-// Fixture F2: contentId DOLU tek-inline + src'siz + alt YOK → yine render (tek aday)
+// Fixture F2: Codex R4 — contentId DOLU tek-inline + alt YOK → PLACEHOLDER
+// Tek aday olsa da img'e uniquely attributable olduğu garanti değil.
 {
   const r = simulateRender(
     [{ src: '', alt: '' }],
     [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'ss.png' }],
   );
-  expect('6.2 contentId dolu tek-inline + alt yok → tek-aday fallback',
+  expect('6.2 Codex R4: contentId dolu + alt yok → PLACEHOLDER (tek-aday şartsız fallback KAPALI)',
+    r[0].kind, 'placeholder');
+}
+
+// Fixture F3: LEGACY (contentId==null) tek-inline + alt YOK → RENDER
+// UNV-1000089 gibi eski kayıtlar — legacy fallback devrede.
+{
+  const r = simulateRender(
+    [{ src: '', alt: '' }],
+    [{ id: 'A1', isInline: true, contentId: null, fileName: 'image.png' }],
+  );
+  expect('6.2b LEGACY tek-inline + alt yok → heuristic_render (Codex R4 fallback şartı MET)',
     r[0].kind, 'heuristic_render');
 }
 
@@ -495,6 +509,79 @@ console.log('\n── 7) Codex P2 R3 kritik — src\'siz ÖNCE + cid: SONRA (dup
   );
   expect('7.9 case bypass: cid:X@HOST → cidReferencedKeys lowercase → A1 filter dışı',
     r[0].kind, 'placeholder');
+}
+
+console.log('\n── 8) Codex P2 R4 KRİTİK — pre-scan sonrası kalan tek aday img\'e AİT DEĞİL ─');
+
+// CODEX R4 SENARYOSU (birebir): src'siz alt="logo.png" + cid:B img
+// Attachment: A1 (cid ref) + A2 (signature.png, contentId dolu, unrelated)
+// Pre-scan A1'i exclude eder, kalan tek aday A2.
+// Eski davranış: A2 tek-aday fallback → YANLIŞ görsel (signature.png ≠ logo.png)
+// R4 fix: A2.contentId dolu → legacy şart FAIL → PLACEHOLDER
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'logo.png' },
+      { src: 'cid:B@x', alt: 'b.png' },
+    ],
+    [
+      { id: 'A1', isInline: true, contentId: 'B@x', fileName: 'b.png' },
+      { id: 'A2', isInline: true, contentId: 'X@y', fileName: 'signature.png' },
+    ],
+  );
+  expect('8.1 src\'siz alt=logo.png, A1 cid ref exclude → A2 (signature.png) tek aday KALSA da:',
+    r[0].kind, 'placeholder');
+  expect('8.1b Codex R4: A2.contentId dolu → tek-aday fallback KAPALI (yanlış görsel önlendi)',
+    r[0].id ?? null, null);
+  expect('8.2 cid:B → A1 normal render (otoriter yol)',
+    r[1].kind, 'cid_render');
+  expect('8.2b render eki A1', r[1].id, 'A1');
+}
+
+// R4 karşı-senaryo: src'siz alt="signature.png" (aynı senaryo ama alt eşleşir)
+// byName MATCH → A2 render (uniquely attributable via name)
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'signature.png' },
+      { src: 'cid:B@x', alt: 'b.png' },
+    ],
+    [
+      { id: 'A1', isInline: true, contentId: 'B@x', fileName: 'b.png' },
+      { id: 'A2', isInline: true, contentId: 'X@y', fileName: 'signature.png' },
+    ],
+  );
+  expect('8.3 Alt=signature.png ile A2 byName MATCH → A2 render (isim netliği güvenli)',
+    r[0].kind, 'heuristic_render');
+  expect('8.3b render eki A2', r[0].id, 'A2');
+}
+
+// R4 karşı-senaryo 2: legacy tek-aday (contentId=null) → fallback devrede
+// UNV-1000089 tipi — alt yok, tek görsel, contentId=null
+{
+  const r = simulateRender(
+    [{ src: '', alt: '' }],
+    [{ id: 'A1', isInline: true, contentId: null, fileName: 'image.png' }],
+  );
+  expect('8.4 LEGACY tek-aday (contentId=null) + alt yok → fallback DEVREDE (regresyon guard)',
+    r[0].kind, 'heuristic_render');
+}
+
+// R4 kombine: pre-scan sonrası TEK legacy aday kalırsa fallback devrede
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: '' },
+      { src: 'cid:B@x', alt: 'b.png' },
+    ],
+    [
+      { id: 'A1', isInline: true, contentId: 'B@x', fileName: 'b.png' },
+      { id: 'A2', isInline: true, contentId: null, fileName: 'legacy.png' },
+    ],
+  );
+  expect('8.5 Pre-scan A1 exclude → A2 (legacy, contentId=null) tek aday → fallback OK',
+    r[0].kind, 'heuristic_render');
+  expect('8.5b Legacy aday render — A2', r[0].id, 'A2');
 }
 
 console.log('\n────────────────────────────────────────────────');
