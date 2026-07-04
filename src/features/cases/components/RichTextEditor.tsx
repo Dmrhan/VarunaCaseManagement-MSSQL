@@ -19,7 +19,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import { Bold, Image as ImageIcon, Italic, Link as LinkIcon, List, ListOrdered, Quote, Redo2, Undo2 } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 export type PasteImageResult =
   | { ok: true; cid: string }
@@ -37,9 +37,15 @@ interface Props {
   // eşlemesi tutar; send öncesi bodyHtml içindeki blobUrl'ler cid:{id} ile
   // REPLACE edilir. Böylece composer'da renderable src, mail'de standart cid.
   onPasteImage?: (file: File, blobUrl: string) => Promise<PasteImageResult>;
+  /**
+   * R10.1 — İlk mount'ta editör'e autofocus (Gmail inline yanıt paritesi).
+   * Parent (MailComposer dock modu) `true` verir; overlay/tab-içi'ne
+   * dokunmaz (default false).
+   */
+  autoFocus?: boolean;
 }
 
-export function RichTextEditor({ value, onChange, placeholder, disabled, onPasteImage }: Props) {
+export function RichTextEditor({ value, onChange, placeholder, disabled, onPasteImage, autoFocus = false }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -129,6 +135,18 @@ export function RichTextEditor({ value, onChange, placeholder, disabled, onPaste
     const cur = editor.getHTML();
     if (cur !== value) editor.commands.setContent(value, { emitUpdate: false });
   }, [value, editor]);
+
+  // R10.1 — İlk mount'ta autofocus: dock composer'da kullanıcı doğrudan
+  // yazmaya başlar (Gmail inline yanıt paritesi). Editor hazır olunca 1 kez.
+  const autoFocusAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!autoFocus) return;
+    if (!editor) return;
+    if (autoFocusAppliedRef.current) return;
+    autoFocusAppliedRef.current = true;
+    // Baseline body sonuna ("</p>") konumlan (imza/quote üstünde yaz).
+    editor.commands.focus('start');
+  }, [autoFocus, editor]);
 
   const promptLink = useCallback(() => {
     if (!editor) return;

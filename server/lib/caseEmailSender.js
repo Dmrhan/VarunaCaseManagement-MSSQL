@@ -423,42 +423,36 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   });
   if (!caseRow) return null;
 
-  // Codex P2 fix — emailId verilmişse O satırı kaynak al; yoksa son inbound.
-  // Satır içi "Yanıtla" tıklandığında agent'ın seçtiği mail referans olur;
-  // üst toolbar "Yanıtla" çağrısında (eski akış) emailId yok → davranış aynı.
-  let lastInbound;
+  // R13 (2026-07-04) — Yanıtla referans çözümü, direction-aware:
+  //   1) emailId verilmişse O SATIRI ref al (direction fark etmez); yoksa
+  //   2) son inbound (klasik "karşı tarafa Re:" akışı); yoksa
+  //   3) son outbound (outbound-yalnız thread — kullanıcı repro UNV-1000111
+  //      Otomatik ACK'e "Yanıtla" tıklaması burada prefill üretir).
+  // Codex P2 (outbound emailId → sessizce inbound fallback) davranışı
+  // KALDIRILDI — outbound satıra doğrudan yanıt kullanıcı niyeti.
+  let refRow = null;
+  const REPLY_FIELDS = {
+    fromAddress: true, fromName: true, toAddresses: true, ccAddresses: true,
+    subject: true, messageId: true, direction: true,
+  };
   if (emailId) {
-    lastInbound = await prisma.caseEmail.findFirst({
-      where: { id: emailId, caseId, direction: 'inbound' },
-      select: {
-        fromAddress: true,
-        fromName: true,
-        toAddresses: true,
-        ccAddresses: true,
-        subject: true,
-        messageId: true,
-      },
+    refRow = await prisma.caseEmail.findFirst({
+      where: { id: emailId, caseId },
+      select: REPLY_FIELDS,
     });
-    // Yanlış emailId / outbound / cross-case → null fallback yerine son
-    // inbound'a düş (UX: agent yine de Reply alabilsin).
-    if (!lastInbound) {
-      lastInbound = await prisma.caseEmail.findFirst({
-        where: { caseId, direction: 'inbound' },
-        orderBy: { receivedAt: 'desc' },
-        select: {
-          fromAddress: true, fromName: true, toAddresses: true,
-          ccAddresses: true, subject: true, messageId: true,
-        },
-      });
-    }
-  } else {
-    lastInbound = await prisma.caseEmail.findFirst({
+  }
+  if (!refRow) {
+    refRow = await prisma.caseEmail.findFirst({
       where: { caseId, direction: 'inbound' },
       orderBy: { receivedAt: 'desc' },
-      select: {
-        fromAddress: true, fromName: true, toAddresses: true,
-        ccAddresses: true, subject: true, messageId: true,
-      },
+      select: REPLY_FIELDS,
+    });
+  }
+  if (!refRow) {
+    refRow = await prisma.caseEmail.findFirst({
+      where: { caseId, direction: 'outbound' },
+      orderBy: [{ sentAt: 'desc' }, { createdAt: 'desc' }],
+      select: REPLY_FIELDS,
     });
   }
 
@@ -505,17 +499,26 @@ async function buildReplyContext(caseId, { emailId } = {}) {
   let cc = [];
   let subject = '';
   let inReplyTo = null;
-  if (lastInbound) {
-    const inboundTo = parse(lastInbound.toAddresses);
-    const inboundCc = parse(lastInbound.ccAddresses);
-    // K6 reply-all: To = [inbound.from] + inbound.to; Cc = inbound.cc
-    const senderEntry = { address: lastInbound.fromAddress, name: lastInbound.fromName ?? null };
-    to = filterAlias(uniq([senderEntry, ...inboundTo]));
-    cc = filterAlias(uniq(inboundCc));
+  if (refRow) {
+    const refTo = parse(refRow.toAddresses);
+    const refCc = parse(refRow.ccAddresses);
+    if (refRow.direction === 'inbound') {
+      // K6 reply-all: To = [inbound.from] + inbound.to; Cc = inbound.cc
+      const senderEntry = { address: refRow.fromAddress, name: refRow.fromName ?? null };
+      to = filterAlias(uniq([senderEntry, ...refTo]));
+      cc = filterAlias(uniq(refCc));
+    } else {
+      // R13 outbound-ref: agent giden mail'e yanıt yazıyor → hedef = o
+      // mailin alıcıları. Kendi from adresini eklemek self-loop yaratır
+      // (fromAddress alias listesinde zaten var → filterAlias düşürürdü,
+      // ama niyet net: sadece to/cc).
+      to = filterAlias(uniq(refTo));
+      cc = filterAlias(uniq(refCc));
+    }
     // Subject: token korunur; "Re: " yoksa ekle
-    const baseSubject = lastInbound.subject ?? '';
+    const baseSubject = refRow.subject ?? '';
     subject = /^re:\s*/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
-    inReplyTo = lastInbound.messageId;
+    inReplyTo = refRow.messageId;
   }
 
   return {

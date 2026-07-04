@@ -44,6 +44,7 @@ export interface CaseEmailItem {
   refs: string | null;
   visibility: string;
   sentByUserId: string | null;
+  sentByName: string | null;
   dispatchId: string | null;
   sentAt: string | null;
   receivedAt: string | null;
