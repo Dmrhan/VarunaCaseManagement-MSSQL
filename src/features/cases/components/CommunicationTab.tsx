@@ -404,6 +404,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                       selectedId={selectedId}
                       onSelect={setSelectedId}
                       className="h-full"
+                      caseTitle={item.title}
                     />
                   </div>
 
@@ -483,6 +484,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 onSelect={setSelectedId}
                 className="h-full"
                 variant="fullscreen"
+                caseTitle={item.title}
               />
             </div>
 

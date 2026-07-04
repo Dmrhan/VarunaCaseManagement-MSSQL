@@ -75,8 +75,8 @@ expectTrue('5.2 Fullscreen: bg-slate-50 zemin',
   /fs \? 'bg-slate-50/.test(listPane));
 expectTrue('5.3 Fullscreen seçili: border-l-4 border-brand-600 + bg-white (sol iç vurgu)',
   /border-l-4 border-brand-600 bg-white/.test(listPane));
-expectTrue('5.4 Fullscreen satır aralığı ferah — min-h-[44px] px-3 py-2.5',
-  /min-h-\[44px\] px-3 py-2\.5/.test(listPane));
+expectTrue('5.4 Fullscreen satır aralığı ferah — min-h-[52px] px-3 py-2 (R9 2-satır)',
+  /min-h-\[52px\] px-3 py-2/.test(listPane));
 expectTrue('5.5 CommunicationTab fullscreen için variant="fullscreen" verir',
   /<MailThreadListPane[\s\S]{0,600}variant="fullscreen"/.test(tab));
 

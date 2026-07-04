@@ -36,11 +36,18 @@ const CASE_TOKEN_RE = /^\s*(\[[A-Z]{2,5}-\d+\])\s*/;
  *  2. Kalan kısımdan Re:/Fw:/Fwd:/Ynt:/[EXTERNAL] gibi tekrarlı gürültüyü temizle
  *  3. Sonuç boş kalırsa → orijinal (ham) döndür (agent bilgisi kaybolmasın)
  *  4. Token varsa: `${token} ${cleaned}` şeklinde geri koy
+ *     (stripCaseToken=true ise token da atlanır — vaka-içi mod)
  *
  * @param raw — CaseEmail.subject veya Case.title
+ * @param options — {stripCaseToken?: boolean} vaka-içi listelerde token gürültüsü.
+ *   R9 (2026-07-04): İletişim listesinde ve subject-changed karşılaştırmasında
+ *   token'ı gizlemek için.
  * @returns görüntü katmanına uygun temizlenmiş string
  */
-export function normalizeSubject(raw: string | null | undefined): string {
+export function normalizeSubject(
+  raw: string | null | undefined,
+  options?: { stripCaseToken?: boolean },
+): string {
   if (raw == null) return '';
   const input = String(raw);
   if (!input.trim()) return input;
@@ -67,12 +74,16 @@ export function normalizeSubject(raw: string | null | undefined): string {
   }
   cleaned = cleaned.trim();
 
-  // 3) Sonuç boş kalırsa → orijinali (token'sız) döndür — anlamlı içerik yoktu
+  const strip = options?.stripCaseToken === true;
+
+  // 3) Sonuç boş kalırsa → orijinali döndür (anlamlı içerik yoktu)
   if (!cleaned) {
+    if (strip) return rest.trim();
     return token ? `${token} ${rest.trim()}`.trim() : input.trim();
   }
 
-  // 4) Token varsa geri koy
+  // 4) Token varsa geri koy (stripCaseToken=true ise token atlanır)
+  if (strip) return cleaned;
   return token ? `${token} ${cleaned}` : cleaned;
 }
 

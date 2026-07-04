@@ -26,8 +26,8 @@ function read(p) { return readFileSync(p, 'utf8'); }
 const norm = read('src/lib/subjectNormalizer.ts');
 
 console.log('── 1) Util yapısı ─────────────────────────────');
-expectTrue('1.1 normalizeSubject export',
-  /export function normalizeSubject\(raw:\s*string \| null \| undefined\)/.test(norm));
+expectTrue('1.1 normalizeSubject export (raw + optional options)',
+  /export function normalizeSubject\(\s*raw:\s*string \| null \| undefined,\s*options\?:\s*\{[\s\S]{0,100}stripCaseToken\?/.test(norm));
 expectTrue('1.2 isSubjectNormalized export (tooltip için)',
   /export function isSubjectNormalized/.test(norm));
 expectTrue('1.3 PREFIX_RE — re|fw|fwd|ynt|yanıt|yanit (tekrarlı, case-insensitive)',
@@ -203,8 +203,8 @@ expectTrue('5.3 CasesListPage — normalize + tooltip',
   /normalizeSubject\(c\.title\)/.test(read('src/features/cases/CasesListPage.tsx')));
 expectTrue('5.4 MailMessageCard — normalize subject',
   /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailMessageCard.tsx')));
-expectTrue('5.5 MailThreadListPane (ortak liste bileşeni) — normalize subject',
-  /normalizeSubject\(e\.subject\)/.test(read('src/features/cases/components/MailThreadListPane.tsx')));
+expectTrue('5.5 MailThreadListPane — normalize subject stripCaseToken=true (R9 vaka-içi mod)',
+  /normalizeSubject\(e\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(read('src/features/cases/components/MailThreadListPane.tsx')));
 // Reader'da da mail konusu normalize
 expectTrue('5.6 MailThreadReader — normalize subject',
   /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailThreadReader.tsx')));

@@ -116,10 +116,10 @@ expectTrue('8.4 Signature bundle akışı korundu (getEmailSignatureBundle)',
 
 console.log('\n── 9) Liste — MailThreadListPane\'a çıkarıldı (R4) ─');
 const listPane = read('src/features/cases/components/MailThreadListPane.tsx');
-expectTrue('9.1 MailThreadListPane satır button min-h-[40px]',
-  /min-h-\[40px\]/.test(listPane));
-expectTrue('9.2 MailThreadListPane subject normalize + ham tooltip',
-  /title=\{e\.subject\}/.test(listPane) && /normalizeSubject\(e\.subject\)/.test(listPane));
+expectTrue('9.1 MailThreadListPane satır button min-h-[48px]/[52px] (R9 2-satır)',
+  /min-h-\[48px\]/.test(listPane) || /min-h-\[52px\]/.test(listPane));
+expectTrue('9.2 MailThreadListPane subject normalize + ham tooltip (stripCaseToken=true)',
+  /title=\{e\.subject[\s\S]{0,80}\}/.test(listPane) && /normalizeSubject\(e\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(listPane));
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
