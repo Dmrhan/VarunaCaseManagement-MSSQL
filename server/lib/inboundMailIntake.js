@@ -99,20 +99,16 @@ async function writeCaseFile({ caseId, companyId, filename, contentType, content
       uploadedByUserId: null,
     },
   });
-  // CaseActivity 'Dosya yüklendi' — finalizeUpload deseni
-  // (caseRepository.js:~2920; "history" relation Case.history → CaseActivity model).
-  await prisma.caseActivity.create({
-    data: {
-      caseId,
-      companyId,
-      action: 'Dosya yüklendi',
-      actionType: 'FileUploaded',
-      fieldName: 'files',
-      toValue: row.fileName,
-      actor: SYSTEM_UPLOADER,
-      actorUserId: null,
-    },
-  });
+  // 2026-07-04 UX FIX PAKETİ PR-1 — per-file CaseActivity yazımı
+  // KALDIRILDI. Aktivite kaydı caller (persistAttachmentsForCase) tarafından
+  // TOPLU olarak yazılır (N ek = 1 aktivite: "E-posta ile N dosya eklendi"
+  // + note'ta dosya adları). Tekil ek durumunda (stored.length === 1)
+  // mevcut per-file davranış caller'da korunur.
+  //
+  // Manuel upload path (caseRepository.finalizeUpload) writeCaseFile'ı
+  // KULLANMAZ — kendi history.create'ini yazar; bu değişiklik manuel
+  // akışı ETKİLEMEZ.
+  //
   // M6.3a — storageKey (relPath) caller'a döner; CaseEmailAttachment
   // yazımı için.
   return { attachmentId, fileName: row.fileName, size: row.fileSize, storageKey: relPath };
@@ -207,6 +203,60 @@ async function persistAttachmentsForCase({ caseId, companyId, attachments, prism
       skipped.push({ filename, reason: 'write_failed' });
     }
   }
+
+  // 2026-07-04 UX FIX PAKETİ PR-1 — Toplu CaseActivity yazımı.
+  // Aktivite gruplama: N ek = 1 satır ("E-posta ile N dosya eklendi").
+  // Tekil ek (N=1): mevcut per-file davranışa uyumlu ("Dosya yüklendi" +
+  // toValue=fileName). Sıfır ek (N=0, tüm ekler skipped) → aktivite
+  // YAZILMAZ (mevcut hata davranışı; kullanıcı skipped listesinden görür).
+  if (stored.length > 0) {
+    try {
+      const isMulti = stored.length > 1;
+      const fileNames = stored.map((s) => s.fileName);
+      // Note: max ~180 karakter — ExpandableActivityNote preview limitine
+      // uyumlu. Aşan kısım "... +N daha" ile kısaltılır.
+      let note = null;
+      if (isMulti) {
+        const joined = fileNames.join(', ');
+        if (joined.length <= 180) {
+          note = joined;
+        } else {
+          // Karakter sınırına kadar dolduran ek sayısını bul.
+          let acc = '';
+          let count = 0;
+          for (const n of fileNames) {
+            const next = acc.length === 0 ? n : `${acc}, ${n}`;
+            if (next.length > 160) break;
+            acc = next;
+            count += 1;
+          }
+          const remainingCount = fileNames.length - count;
+          note = remainingCount > 0
+            ? `${acc}, +${remainingCount} daha`
+            : acc;
+        }
+      }
+      await prisma.caseActivity.create({
+        data: {
+          caseId,
+          companyId,
+          action: isMulti
+            ? `E-posta ile ${stored.length} dosya eklendi`
+            : 'Dosya yüklendi',
+          actionType: 'FileUploaded',
+          fieldName: 'files',
+          toValue: isMulti ? `${stored.length} dosya` : fileNames[0],
+          note,
+          actor: SYSTEM_UPLOADER,
+          actorUserId: null,
+        },
+      });
+    } catch (err) {
+      // Aktivite yazımı fail → dosyalar zaten disk+DB'de; kritik değil.
+      console.warn('[intake] group caseActivity failed', err?.message ?? err);
+    }
+  }
+
   return { stored: stored.length, skipped };
 }
 
