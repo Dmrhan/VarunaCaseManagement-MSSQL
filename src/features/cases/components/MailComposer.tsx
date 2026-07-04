@@ -695,7 +695,7 @@ export function MailComposer({
         <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
           <h3 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h3>
           {item.caseNumber && (
-            <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
+            <span className={`${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>
               [{item.caseNumber}]
             </span>
           )}
@@ -739,7 +739,7 @@ export function MailComposer({
             (gönderim engelini gizleme). Kısa versiyon: bar/link/mesaj tek satır. */}
         {compactDock && noAliasesConfigured && (
           <div
-            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+            className={`rounded-md border border-amber-300 bg-amber-50 px-2 py-1 ${MAIL_TYPE.t1} text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200`}
             role="alert"
           >
             <b>Kimden tanımsız:</b> "{item.companyName}" için gönderen adresi yok
@@ -929,7 +929,7 @@ export function MailComposer({
             >
               {uploading ? 'Yükleniyor…' : 'Dosya Ekle'}
             </Button>
-            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">veya sürükle-bırak</span>
+            <span className={`${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>veya sürükle-bırak</span>
             {attachments.map((a) => (
               <span
                 key={a.id}
@@ -942,7 +942,7 @@ export function MailComposer({
               >
                 <Paperclip size={11} />
                 {a.fileName}
-                {a.inline && <span className="text-[10px] opacity-70">(gövde)</span>}
+                {a.inline && <span className={`${MAIL_TYPE.t1} opacity-70`}>(gövde)</span>}
                 {/* Codex P2 R1: inline pill'de Kaldır butonu YOK — kullanıcı
                     click'lerse attachments düşer ama bodyHtml'de <img> kalır
                     → orphan CID → müşteride broken image. Inline'ı editörden
@@ -966,7 +966,7 @@ export function MailComposer({
         <Field label="Metin">
           {previewing ? (
             <div className="rounded-md border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
-              <div className="border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
+              <div className={`border-b border-slate-100 px-3 py-1.5 ${MAIL_TYPE.t1} text-slate-500 dark:border-ndark-border dark:text-ndark-muted`}>
                 Önizleme (sanitize edilmiş)
               </div>
               <div
@@ -1088,7 +1088,7 @@ export function MailComposer({
                 <p className="mt-1 font-mono">
                   {pendingTemplate.missing.map((m) => `{{${m}}}`).join(', ')}
                 </p>
-                <p className="mt-1 text-[10px] opacity-80">
+                <p className={`mt-1 ${MAIL_TYPE.t1} opacity-80`}>
                   Şablonu uyguladıktan sonra metinde boşluk varsa kontrol edin.
                 </p>
               </div>

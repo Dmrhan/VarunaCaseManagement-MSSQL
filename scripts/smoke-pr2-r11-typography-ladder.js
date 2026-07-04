@@ -122,17 +122,22 @@ expectTrue('7.1 RichTextEditor prose-sm (T3 14px, DOKUNULMADI)',
 expectTrue('7.2 Reader body prose-sm (T3 14px)',
   /className="prose prose-sm/.test(reader));
 
-console.log('\n── 8) Sapma grep\'i — hardcode YASAK ────────');
-// ListPane/Reader/Tab/Composer'da text-[10px]/text-[11px] literal
-// KALMAMALI; sadece token dosyasında ve smoke içinde bulunur.
-expectTrue('8.1 ListPane\'de literal text-[10px]/text-[11px] KALKMIŞ',
-  !/text-\[10px\]/.test(listPane)
-  && !/text-\[11px\]/.test(listPane));
-expectTrue('8.2 Reader\'da literal text-lg KALKMIŞ (konu artık T4 token)',
-  !/text-lg/.test(reader));
-expectTrue('8.3 Tab bar\'da literal text-[13px] KALKMIŞ (token barCustomer üzerinden)',
+console.log('\n── 8) Sapma grep\'i — 4 bileşen × 3 pattern GERÇEK kapsama ─');
+// R11.1 (advisor commit-grep bulgusu): 4 bileşen dosyasında text-[10px] +
+// text-[11px] + text-lg literal KALMAMALI. 10px KULLANIM YASAK (T1=11px
+// taban). Drag tooltip'leri de token'a bağlı; bilinçli istisna gerekirse
+// token dosyasında AÇIK yorumla tanımlanmalı — gizli istisna olmasın.
+const files = { ListPane: listPane, Reader: reader, Tab: tab, Composer: composer };
+const patterns = { 'text-[10px]': /text-\[10px\]/, 'text-[11px]': /text-\[11px\]/, 'text-lg': /text-lg/ };
+for (const [fname, src] of Object.entries(files)) {
+  for (const [pname, re] of Object.entries(patterns)) {
+    expectTrue(`8.[${fname}]/${pname} literal KALKMIŞ (token'dan geçer)`, !re.test(src));
+  }
+}
+// Ek regresyon: fs bar özel literal'ler + composer kompakt özet
+expectTrue('8.X Tab bar\'da literal text-[13px] KALKMIŞ (token barCustomer üzerinden)',
   !/shrink-0 truncate text-\[13px\]/.test(tab));
-expectTrue('8.4 Composer kompakt özet satırında literal text-sm KALKMIŞ',
+expectTrue('8.Y Composer kompakt özet satırında literal text-sm KALKMIŞ',
   !/compactDock && \(\s*<div className="flex items-center gap-2 text-sm"/.test(composer));
 
 console.log('\n── 9) Boyut mapping (behavior kontrol) ──────');

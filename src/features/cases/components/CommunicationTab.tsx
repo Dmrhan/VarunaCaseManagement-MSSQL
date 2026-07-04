@@ -472,7 +472,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                           <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
                         </span>
                         {!handleHintSeen && (
-                          <div className="pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
+                          <div className={`pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 ${MAIL_TYPE.t1} text-white shadow-lg`}>
                             Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
                           </div>
                         )}
@@ -606,7 +606,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
               </span>
               {!handleHintSeen && (
-                <div className="pointer-events-none absolute left-full ml-2 top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
+                <div className={`pointer-events-none absolute left-full ml-2 top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 ${MAIL_TYPE.t1} text-white shadow-lg`}>
                   Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
                 </div>
               )}

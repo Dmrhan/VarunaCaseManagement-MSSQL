@@ -464,7 +464,7 @@ export function MailThreadReader({
                     >
                       <Paperclip size={11} />
                       <span className="max-w-[220px] truncate">{a.fileName}</span>
-                      <span className="text-[10px] opacity-60">{formatBytes(a.fileSize)}</span>
+                      <span className={`${MAIL_TYPE.t1} opacity-60`}>{formatBytes(a.fileSize)}</span>
                     </button>
                   </HoverPreview>
                 );
