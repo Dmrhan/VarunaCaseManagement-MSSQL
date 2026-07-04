@@ -317,8 +317,10 @@ export function MailThreadReader({
 
   const readerBody = (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Header — subject + ayrıntılar toggle + meta */}
-      <div className="shrink-0 border-b border-slate-200 px-4 py-3 dark:border-ndark-border">
+      {/* Header — subject + ayrıntılar toggle + meta.
+          R14 M2 — mode='inline' kompakt padding: py-2 (dar bağlamda dikey
+          yer okuma alanına). Fullscreen py-3 aynen. */}
+      <div className={`shrink-0 border-b border-slate-200 px-4 ${mode === 'fullscreen' ? 'py-3' : 'py-2'} dark:border-ndark-border`}>
         <div className="flex items-start gap-2">
           <span
             className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${
@@ -331,14 +333,17 @@ export function MailThreadReader({
             {isInbound ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
           </span>
           <div className="min-w-0 flex-1">
-            {/* R6 → R11 → R13 — Konu T4 (17px) medium; meta T2 (13px) muted tek satır.
-                İçerik başlığı TEK yer — bar başlığı 14px ile yarışmaz.
+            {/* R6 → R11 → R13 → R14 — Konu mode-aware:
+                  mode='inline' (sekme-içi dar bağlam) → T4Inline 15px medium
+                  mode='fullscreen' (geniş bağlam)      → T4 17px medium
+                Meta T2 (13px) muted, değişmez. İçerik başlığı TEK yer — fs
+                bar başlığı 14px ile yarışmaz.
                 R13 M2 — Vaka içi görüntüde [XXX-NNNN] token GİZLİ (liste ile
                 aynı kural: stripCaseToken:true). Ham konu tooltip ve "ayrıntılar ▾"
                 Konu satırında zaten var; fs barda ayrıca caseNumber badge.
                 Composer subject GİZLEMEZ — outbound threading token'a bağlı. */}
             <h3
-              className={`truncate ${MAIL_TYPE.t4} font-medium text-slate-900 dark:text-ndark-text`}
+              className={`truncate ${mode === 'fullscreen' ? MAIL_TYPE.t4 : MAIL_TYPE.t4Inline} font-medium text-slate-900 dark:text-ndark-text`}
               title={email.subject}
             >
               {normalizeSubject(email.subject, { stripCaseToken: true }) || '(konusuz)'}

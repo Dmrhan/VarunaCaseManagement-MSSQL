@@ -1120,7 +1120,16 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
             />
           </nav>
 
-          <div className="flex-1 overflow-y-auto p-6">
+          {/* R14 M1 — Sekme paneli yükseklik disiplini:
+              İletişim'de dış scroll YOK — flex zinciri (flex-1 min-h-0) ile
+              CommunicationTab iç scroll'unu (liste + gövde) kontrol eder.
+              Diğer sekmelerde (Detay/Aktivite/Notlar/...) mevcut sayfa-scroll
+              davranışı AYNEN korunur (overflow-y-auto + p-6). */}
+          <div className={
+            tab === 'communication'
+              ? 'flex min-h-0 flex-1 flex-col p-4'
+              : 'flex-1 overflow-y-auto p-6'
+          }>
             {tab === 'detail' && (
               <DetailTab
                 item={item}

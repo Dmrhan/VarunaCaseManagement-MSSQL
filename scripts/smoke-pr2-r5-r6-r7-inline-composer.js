@@ -63,8 +63,8 @@ expectTrue('4.1 Body max-w-[760px] mx-auto p-6',
   /flex-1 overflow-auto p-6[\s\S]{0,200}mx-auto max-w-\[760px\]/.test(reader));
 expectTrue('4.2 REGRESYON: max-w-[680px] KALKMIŞ (R6 yeni değer 760)',
   !/max-w-\[680px\]/.test(reader));
-expectTrue('4.3 R11: Reader konu MAIL_TYPE.t4 (17px) font-medium (R6 text-lg\'den token\'a taşındı)',
-  /truncate \$\{MAIL_TYPE\.t4\} font-medium/.test(reader));
+expectTrue('4.3 R11+R14: Reader konu mode-aware — fs T4 (17px) / inline T4Inline (15px)',
+  /truncate \$\{mode === 'fullscreen' \? MAIL_TYPE\.t4 : MAIL_TYPE\.t4Inline\} font-medium/.test(reader));
 expectTrue('4.4 R11: Meta MAIL_TYPE.t2 muted (13px, tokenle)',
   /\$\{MAIL_TYPE\.t2\} text-slate-500/.test(reader));
 

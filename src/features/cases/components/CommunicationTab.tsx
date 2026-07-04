@@ -385,9 +385,12 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   }, []);
 
   return (
-    <div className="space-y-3">
+    // R14 M1 — Viewport-sabit yükseklik zinciri: parent flex-1 min-h-0 verir;
+    // burada flex-col ile kanal chip'leri shrink-0, çalışma alanı flex-1 min-h-0.
+    // Split kabı dolgudan doğal yüksekliği alır (ResizeObserver ölçer).
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Kanal chips */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
         {CHANNELS.map((c) => {
           const isActive = c.key === channel;
           return (
@@ -466,8 +469,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
               ) : (
                 <div
                   ref={setContainerRef}
-                  className="relative flex min-h-[560px] flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
-                  style={{ height: 'calc(100vh - 320px)', minHeight: 560 }}
+                  className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
                 >
                   {/* R12 — Default: hiçbir mail açık değil (selectedEmail null)
                       → liste tam yüksekliği kullanır, divider+reader RENDER
@@ -498,10 +500,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                     />
                   </div>
 
-                  {selectedEmail && atCap && (
+                  {selectedEmail && listSizeMeasured && atCap && (
                     <>
                       {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük.
-                          R13 M1: yalnız cap'te görünür (işlevsiz sürükleme çizgisi olmasın). */}
+                          R13 M1: yalnız cap'te görünür (işlevsiz sürükleme çizgisi olmasın).
+                          R13.2 mikro-fix: ölçüm-yok fallback dalında GÖSTERME
+                          (tek mesajlı vakada gizli); yalnız listSizeMeasured
+                          && atCap'te gerçek "cap'e dayandı" anlamı taşır. */}
                       <div
                         role="separator"
                         aria-orientation="horizontal"

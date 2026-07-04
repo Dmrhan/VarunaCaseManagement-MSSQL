@@ -31,6 +31,13 @@ export const MAIL_TYPE = {
   t3: 'text-sm',
   /** T4 17px (reader konu — TEK yer) */
   t4: 'text-[17px]',
+  /**
+   * R14 M2 (2026-07-04) — Merdiven ara kademesi: sekme-içi (mode='inline')
+   * Reader konusu. 17px dar bağlamda büyük kaçıyordu (kullanıcı direktifi).
+   * 15px medium ile fs T4 (17px) arasında konforlu okunuşluk sağlar.
+   * BİLİNÇLİ istisna — açık yorum + tek tüketici (MailThreadReader inline).
+   */
+  t4Inline: 'text-[15px]',
   /** Bar bağlam — vaka no badge (12px mono) */
   barCaseNo: 'font-mono text-xs',
   /** Bar bağlam — başlık (14px semibold) */

@@ -42,8 +42,8 @@ expectTrue('1.5 setContainerRef: el=null → setContainerH(0) + erken dönüş',
   /setContainerRef = useCallback[\s\S]{0,600}if \(!el\) \{\s*setContainerH\(0\);\s*return;\s*\}/.test(tab));
 expectTrue('1.6 setContainerRef: el varsa yeni ResizeObserver + observe',
   /setContainerRef = useCallback[\s\S]{0,900}new ResizeObserver[\s\S]{0,200}ro\.observe\(el\)[\s\S]{0,100}containerObsRef\.current = ro/.test(tab));
-expectTrue('1.7 Split kapsayıcısında ref={setContainerRef} (containerRef yerine)',
-  /ref=\{setContainerRef\}\s*\n\s*className="relative flex min-h-\[560px\] flex-col/.test(tab));
+expectTrue('1.7 Split kapsayıcısında ref={setContainerRef} (R14 M1 sonrası flex-1 min-h-0 zinciri)',
+  /ref=\{setContainerRef\}\s*\n\s*className="relative flex min-h-0 flex-1 flex-col/.test(tab));
 expectTrue('1.8 REGRESYON: eski useEffect([containerRef]) KALKMIŞ',
   !/\}, \[containerRef\]\)/.test(tab));
 
@@ -111,8 +111,8 @@ expect('3.7 Yalnız container gecikti → güvenli düşüş %35',
 console.log('\n── 4) Regresyon — R13 diğer davranışı KORUNDU ─');
 expectTrue('4.1 Reader SEPARATE conditional (selectedEmail iken her durumda)',
   /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
-expectTrue('4.2 Divider yalnız atCap',
-  /\{selectedEmail && atCap && \(/.test(tab));
+expectTrue('4.2 R14 M3: Divider yalnız selectedEmail && listSizeMeasured && atCap',
+  /\{selectedEmail && listSizeMeasured && atCap && \(/.test(tab));
 expectTrue('4.3 R12 katlı: selectedEmail=null → flex 1 1 0%',
   /:\s*\{ flex: '1 1 0%' \}\}/.test(tab));
 expectTrue('4.4 R11.1 kaçak yok (drag tooltip token\'da)',

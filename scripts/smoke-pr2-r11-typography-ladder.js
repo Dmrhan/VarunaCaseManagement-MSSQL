@@ -76,8 +76,8 @@ expectTrue('3.5 📎N rozeti MAIL_TYPE.t1',
   /inline-flex shrink-0 items-center gap-0\.5 \$\{MAIL_TYPE\.t1\}/.test(listPane));
 
 console.log('\n── 4) Reader — T4 konu + T2 gövde-altı ───────');
-expectTrue('4.1 Konu MAIL_TYPE.t4 font-medium (17px, TEK yer)',
-  /truncate \$\{MAIL_TYPE\.t4\} font-medium text-slate-900/.test(reader));
+expectTrue('4.1 R14 M2: Konu mode-aware — fs T4 (17px) / inline T4Inline (15px) font-medium',
+  /truncate \$\{mode === 'fullscreen' \? MAIL_TYPE\.t4 : MAIL_TYPE\.t4Inline\} font-medium text-slate-900/.test(reader));
 expectTrue('4.2 Meta satırı MAIL_TYPE.t2 muted',
   /mt-0\.5 flex flex-wrap items-baseline gap-x-2 \$\{MAIL_TYPE\.t2\}/.test(reader));
 expectTrue('4.3 Aksiyon butonları (Yanıtla/İlet/Genişlet/Küçült) MAIL_TYPE.t2 (12px→13px)',
