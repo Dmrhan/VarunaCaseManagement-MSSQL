@@ -33,6 +33,12 @@ interface Props<T extends HoverPreviewItem> {
   children: ReactNode;
   /** MIME image mi diye kontrol (caller'dan gelir; helper reuse kolaylığı). */
   isImage?: (item: T) => boolean;
+  /**
+   * Dış span'e uygulanacak className — caller flex-item layout'unda
+   * sarmalayıcının kendisini büyütmek için (`flex-1 min-w-0` gibi).
+   * 2026-07-04 fix: satır bazlı buton hizası için gerekli.
+   */
+  className?: string;
 }
 
 // Modül-scope oturum cache (sayfa reload'a kadar yaşar).
@@ -71,6 +77,7 @@ export function HoverPreview<T extends HoverPreviewItem>({
   getPreviewUrl,
   children,
   isImage,
+  className,
 }: Props<T>) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -138,7 +145,7 @@ export function HoverPreview<T extends HoverPreviewItem>({
   return (
     <span
       ref={wrapperRef}
-      className="hover-preview-wrap"
+      className={`hover-preview-wrap${className ? ` ${className}` : ''}`}
       onMouseEnter={(e) => scheduleOpen(e.clientX, e.clientY)}
       onMouseMove={(e) => {
         if (open || openTimer.current) return; // Yalnız ilk enter'da zamanla

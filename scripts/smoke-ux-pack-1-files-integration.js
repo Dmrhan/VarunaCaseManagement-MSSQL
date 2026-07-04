@@ -56,6 +56,13 @@ expectTrue('3.2 Dosya adı buton min-h-[40px] (≥40px hit target)',
   /min-h-\[40px\]/.test(files));
 expectTrue('3.3 HoverPreview<CaseFile> wrap',
   /<HoverPreview<CaseFile>[\s\S]{0,400}getPreviewUrl=\{getPreviewUrlHover\}[\s\S]{0,200}isImage=\{isImageAttachment\}/.test(files));
+// 2026-07-04 mini-fix: buton hizası + uploadedBy
+expectTrue('3.4 HoverPreview wrap className "flex min-w-0 flex-1" (sarmalayıcı büyür)',
+  /<HoverPreview<CaseFile>[\s\S]{0,400}className="flex min-w-0 flex-1 items-center"/.test(files));
+expectTrue('3.5 uploadedBy render — muted md:inline conditional (boş/null → basılmaz)',
+  /\{f\.uploadedBy && \(\s*<span[\s\S]{0,300}md:inline[\s\S]{0,100}·\s*\{f\.uploadedBy\}/.test(files));
+expectTrue('3.6 REGRESYON: eski truncate flex-1 iç button (sarmalayıcısız) KALKMIŞ',
+  !/<button[\s\S]{0,200}flex min-h-\[40px\] flex-1 items-center truncate text-left/.test(files));
 
 console.log('\n── 4) Aksiyon ikonları ≥36px ──────────────────');
 // h-9 w-9 = 36px (tailwind: 4px * 9)

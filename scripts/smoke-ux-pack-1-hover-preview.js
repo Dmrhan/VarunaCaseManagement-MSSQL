@@ -62,6 +62,14 @@ console.log('\n── 4) Touch devre dışı — @media hover:hover ────
 expectTrue('4.1 Kart className: [@media(hover:hover)]:block + hidden default',
   /hidden[\s\S]{0,200}\[@media\(hover:hover\)\]:block/.test(hp));
 
+console.log('\n── 4b) className prop — dış sarmalayıcı flex-item control (mini-fix) ─');
+expectTrue('4b.1 Props tanımında className?: string',
+  /className\?: string/.test(hp));
+expectTrue('4b.2 Component signature className destructure eder',
+  /export function HoverPreview<[\s\S]{0,300}className,\s*\}: Props/.test(hp));
+expectTrue('4b.3 Dış span className\'e class merge — hover-preview-wrap${className}',
+  /className=\{`hover-preview-wrap\$\{className \? ` \$\{className\}` : ''\}`\}/.test(hp));
+
 console.log('\n── 5) Non-image kart 5 satır ───────────────────');
 expectTrue('5.1 shouldFetch true (image) → thumbnail render alanı',
   /shouldFetch &&[\s\S]{0,600}<Loader2/.test(hp));

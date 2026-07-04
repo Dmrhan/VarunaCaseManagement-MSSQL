@@ -321,16 +321,22 @@ export function FilesTab({
               : void caseService.downloadFile(item.id, f.id));
             return (
               <li key={f.id} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                <Paperclip size={14} className="text-slate-400" />
+                <Paperclip size={14} className="shrink-0 text-slate-400" />
+                {/* 2026-07-04 mini-fix: HoverPreview sarmalayıcı flex-1 min-w-0
+                    — satırın adı bloğu esneyerek büyür, İndir/Sil butonları
+                    sağ kenara sabitlenir. Önceki halde flex-1 iç butondaydı;
+                    span kendisi flex-item olduğu için grow=0 kalıyor, uzun
+                    dosya adlarında butonlar sola kayıyordu. */}
                 <HoverPreview<CaseFile>
                   item={f}
                   getPreviewUrl={getPreviewUrlHover}
                   isImage={isImageAttachment}
+                  className="flex min-w-0 flex-1 items-center"
                 >
                   <button
                     type="button"
                     onClick={nameClick}
-                    className="flex min-h-[40px] flex-1 items-center truncate text-left text-slate-800 hover:text-brand-700 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500"
+                    className="flex min-h-[40px] min-w-0 flex-1 items-center text-left text-slate-800 hover:text-brand-700 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500"
                     title={previewable ? 'Önizle' : 'İndir'}
                   >
                     <span className="truncate">{f.fileName}</span>
@@ -342,6 +348,13 @@ export function FilesTab({
                 <span className="hidden shrink-0 text-xs text-slate-500 md:inline">
                   {formatDateTime(f.uploadedAt)}
                 </span>
+                {/* 2026-07-04 mini-fix: uploadedBy muted metin, tarihle aynı
+                    responsive kurala uyumlu; null/boş → basılmaz. */}
+                {f.uploadedBy && (
+                  <span className="hidden shrink-0 text-xs text-slate-400 md:inline">
+                    · {f.uploadedBy}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => void caseService.downloadFile(item.id, f.id)}
