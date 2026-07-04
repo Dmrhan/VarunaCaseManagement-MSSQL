@@ -49,8 +49,8 @@ expectTrue('1.5 Tab: container ResizeObserver ölçümü — containerRef + setC
   && /setContainerH\(el\.clientHeight\)/.test(tab));
 expectTrue('1.6 Tab: capPx/atCap/listPx türetilmiş',
   /const capPx = containerH \* splitRatio[\s\S]{0,300}const atCap = [\s\S]{0,200}listContentH >= capPx - 1[\s\S]{0,150}const listPx = atCap \? capPx : listContentH/.test(tab));
-expectTrue('1.7 Tab: liste div style height={listPx}px (selectedEmail iken)',
-  /style=\{selectedEmail\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ flex: '1 1 0%' \}\}/.test(tab));
+expectTrue('1.7 R13.1: Liste style — listSizeMeasured ? listPx px : splitRatio% (savunma guard)',
+  /selectedEmail\s*\?\s*\(listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\)/.test(tab));
 expectTrue('1.8 Tab: divider YALNIZ atCap iken render (işlevsiz çizgi olmasın)',
   /\{selectedEmail && atCap && \(\s*<>[\s\S]{0,600}role="separator"/.test(tab));
 expectTrue('1.9 Tab: reader SEPARATE conditional (atCap değilse de görünür — kalan alanı doldurur)',

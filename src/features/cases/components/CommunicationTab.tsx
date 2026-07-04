@@ -137,7 +137,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   );
   const [draggingH, setDraggingH] = useState(false); // horizontal (sekme içi)
   const [draggingV, setDraggingV] = useState(false); // vertical (fullscreen)
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const fsContainerRef = useRef<HTMLDivElement>(null);
   // R13 M1 — Okuma-alanı-öncelikli sekme-içi liste ölçümleri:
   //   containerH  — split kapsayıcının canlı yüksekliği (window resize + tab)
@@ -153,25 +153,36 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     saveHandleHintSeen();
   }, [handleHintSeen]);
 
-  // R13 M1 — Container yüksekliği ölçümü (ResizeObserver). Kapsayıcı window
-  // resize'da veya sekme değişiminde boyut değiştirebilir.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const measure = () => setContainerH(el.clientHeight);
-    measure();
-    const ro = new ResizeObserver(() => measure());
+  // R13.1 HOTFIX — Container ResizeObserver'ı CALLBACK REF ile bağla.
+  // useEffect([containerRef]) mount'ta 1 kez tetikleniyor + ref sabit; split
+  // kapsayıcısı emails.length===0 branch'ından sonra sonradan mount olduğunda
+  // effect tekrar çalışmıyor → containerH=0 kalıcı → listPx=0 → liste çöker
+  // (E2E kanıtlı repro). Callback ref element mount/unmount'ta otomatik
+  // çağrılır → observer garanti bağlanır.
+  const containerObsRef = useRef<ResizeObserver | null>(null);
+  const setContainerRef = useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el;
+    containerObsRef.current?.disconnect();
+    containerObsRef.current = null;
+    if (!el) {
+      setContainerH(0);
+      return;
+    }
+    setContainerH(el.clientHeight);
+    const ro = new ResizeObserver(() => {
+      setContainerH(el.clientHeight);
+    });
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [containerRef]);
+    containerObsRef.current = ro;
+  }, []);
 
-  // R13 M1 — Türetilmiş değerler:
-  //   capPx  — splitRatio üst sınırı (piksel)
-  //   atCap  — ölçüm henüz gelmediyse cap'e ulaşılmış say (drag akışı bozulmasın)
-  //   listPx — az mesajda içerik, çok mesajda cap
-  //   showDivider — yalnız cap'te (işlevsiz sürükleme çizgisi olmasın)
+  // R13.1 SAVUNMA GUARD — ölçüm yokken inline height UYGULAMA:
+  // containerH/listContentH henüz gelmediyse eski oran davranışına düş
+  // (splitRatio*100%). "Ölçüm yoksa cap say" varsayımı ters çalışıp
+  // liste'yi 0px yapıyordu; ölçüm yoksa GÜVENLİ düşüş = eski flex/oran.
+  const listSizeMeasured = containerH > 0 && listContentH > 0;
   const capPx = containerH * splitRatio;
-  const atCap = containerH === 0 || listContentH === 0 || listContentH >= capPx - 1;
+  const atCap = !listSizeMeasured || listContentH >= capPx - 1;
   const listPx = atCap ? capPx : listContentH;
 
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
@@ -454,7 +465,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 </div>
               ) : (
                 <div
-                  ref={containerRef}
+                  ref={setContainerRef}
                   className="relative flex min-h-[560px] flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
                   style={{ height: 'calc(100vh - 320px)', minHeight: 560 }}
                 >
@@ -463,11 +474,16 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                       EDİLMEZ. Satıra tıklayınca split geri gelir.
                       R13 M1 — Az mesajda liste = içerik kadar; kalan alan
                       reader'a. Cap'e (splitRatio * containerH) ulaşılınca
-                      normal oran davranışı + divider görünür. */}
+                      normal oran davranışı + divider görünür.
+                      R13.1 HOTFIX — Ölçüm yoksa (listSizeMeasured=false)
+                      eski oran davranışına düş (splitRatio*100%). Aksi halde
+                      liste 0px'e çöker. */}
                   <div
                     className="min-h-0"
                     style={selectedEmail
-                      ? { height: `${listPx}px`, flexShrink: 0 }
+                      ? (listSizeMeasured
+                          ? { height: `${listPx}px`, flexShrink: 0 }
+                          : { height: `${splitRatio * 100}%`, flexShrink: 0 })
                       : { flex: '1 1 0%' }}
                   >
                     <MailThreadListPane
