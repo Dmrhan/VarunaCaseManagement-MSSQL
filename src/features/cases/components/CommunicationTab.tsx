@@ -139,6 +139,12 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   const [draggingV, setDraggingV] = useState(false); // vertical (fullscreen)
   const containerRef = useRef<HTMLDivElement>(null);
   const fsContainerRef = useRef<HTMLDivElement>(null);
+  // R13 M1 — Okuma-alanı-öncelikli sekme-içi liste ölçümleri:
+  //   containerH  — split kapsayıcının canlı yüksekliği (window resize + tab)
+  //   listContentH — ListPane içeriğinin natural yüksekliği (ResizeObserver)
+  //   capPx / atCap / listPx — türetilir (splitRatio + guard'lar)
+  const [containerH, setContainerH] = useState(0);
+  const [listContentH, setListContentH] = useState(0);
   // Handle görünürlük hint — ilk sürüklemede kapanır
   const [handleHintSeen, setHandleHintSeen] = useState<boolean>(() => loadHandleHintSeen());
   const dismissHandleHint = useCallback(() => {
@@ -146,6 +152,27 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     setHandleHintSeen(true);
     saveHandleHintSeen();
   }, [handleHintSeen]);
+
+  // R13 M1 — Container yüksekliği ölçümü (ResizeObserver). Kapsayıcı window
+  // resize'da veya sekme değişiminde boyut değiştirebilir.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setContainerH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
+
+  // R13 M1 — Türetilmiş değerler:
+  //   capPx  — splitRatio üst sınırı (piksel)
+  //   atCap  — ölçüm henüz gelmediyse cap'e ulaşılmış say (drag akışı bozulmasın)
+  //   listPx — az mesajda içerik, çok mesajda cap
+  //   showDivider — yalnız cap'te (işlevsiz sürükleme çizgisi olmasın)
+  const capPx = containerH * splitRatio;
+  const atCap = containerH === 0 || listContentH === 0 || listContentH >= capPx - 1;
+  const listPx = atCap ? capPx : listContentH;
 
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -433,11 +460,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 >
                   {/* R12 — Default: hiçbir mail açık değil (selectedEmail null)
                       → liste tam yüksekliği kullanır, divider+reader RENDER
-                      EDİLMEZ. Satıra tıklayınca split geri gelir. */}
+                      EDİLMEZ. Satıra tıklayınca split geri gelir.
+                      R13 M1 — Az mesajda liste = içerik kadar; kalan alan
+                      reader'a. Cap'e (splitRatio * containerH) ulaşılınca
+                      normal oran davranışı + divider görünür. */}
                   <div
                     className="min-h-0"
                     style={selectedEmail
-                      ? { height: `${splitRatio * 100}%`, flexShrink: 0 }
+                      ? { height: `${listPx}px`, flexShrink: 0 }
                       : { flex: '1 1 0%' }}
                   >
                     <MailThreadListPane
@@ -448,12 +478,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                       caseTitle={item.title}
                       currentUserId={currentUserId}
                       onNewEmail={openNew}
+                      onContentHeightChange={setListContentH}
                     />
                   </div>
 
-                  {selectedEmail && (
+                  {selectedEmail && atCap && (
                     <>
-                      {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük */}
+                      {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük.
+                          R13 M1: yalnız cap'te görünür (işlevsiz sürükleme çizgisi olmasın). */}
                       <div
                         role="separator"
                         aria-orientation="horizontal"
@@ -477,23 +509,27 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                           </div>
                         )}
                       </div>
-
-                      {/* ALT — okuma alanı */}
-                      <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
-                        <MailThreadReader
-                          email={selectedEmail}
-                          caseId={item.id}
-                          mode="inline"
-                          onExpand={() => setReaderMode('fullscreen')}
-                          onCollapse={() => setReaderMode('inline')}
-                          onReply={(e) => void openReply(e)}
-                          onForward={(e) => void openForward(e)}
-                          bottomSlot={renderReaderBottom(selectedEmail)}
-                          currentUserId={currentUserId}
-                          escEnabled={!composerOpen}
-                        />
-                      </div>
                     </>
+                  )}
+
+                  {/* ALT — okuma alanı. R13 M1: selectedEmail iken her durumda
+                      görünür (atCap false ise sadece divider gizli, reader
+                      kalan alanı doldurur → az mesajda daha fazla okuma alanı). */}
+                  {selectedEmail && (
+                    <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
+                      <MailThreadReader
+                        email={selectedEmail}
+                        caseId={item.id}
+                        mode="inline"
+                        onExpand={() => setReaderMode('fullscreen')}
+                        onCollapse={() => setReaderMode('inline')}
+                        onReply={(e) => void openReply(e)}
+                        onForward={(e) => void openForward(e)}
+                        bottomSlot={renderReaderBottom(selectedEmail)}
+                        currentUserId={currentUserId}
+                        escEnabled={!composerOpen}
+                      />
+                    </div>
                   )}
                 </div>
               )}

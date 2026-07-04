@@ -331,13 +331,17 @@ export function MailThreadReader({
             {isInbound ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
           </span>
           <div className="min-w-0 flex-1">
-            {/* R6 → R11 — Konu T4 (17px) medium; meta T2 (13px) muted tek satır.
-                İçerik başlığı TEK yer — bar başlığı 14px ile yarışmaz. */}
+            {/* R6 → R11 → R13 — Konu T4 (17px) medium; meta T2 (13px) muted tek satır.
+                İçerik başlığı TEK yer — bar başlığı 14px ile yarışmaz.
+                R13 M2 — Vaka içi görüntüde [XXX-NNNN] token GİZLİ (liste ile
+                aynı kural: stripCaseToken:true). Ham konu tooltip ve "ayrıntılar ▾"
+                Konu satırında zaten var; fs barda ayrıca caseNumber badge.
+                Composer subject GİZLEMEZ — outbound threading token'a bağlı. */}
             <h3
               className={`truncate ${MAIL_TYPE.t4} font-medium text-slate-900 dark:text-ndark-text`}
               title={email.subject}
             >
-              {normalizeSubject(email.subject) || '(konusuz)'}
+              {normalizeSubject(email.subject, { stripCaseToken: true }) || '(konusuz)'}
             </h3>
             <div className={`mt-0.5 flex flex-wrap items-baseline gap-x-2 ${MAIL_TYPE.t2} text-slate-500 dark:text-ndark-muted`}>
               {/* R9.1 — Gönderen adı ListPane ile AYNI util (tek kaynak).
@@ -415,6 +419,9 @@ export function MailThreadReader({
         </button>
         {detailsOpen && (
           <div className={`mt-1 space-y-0.5 rounded bg-slate-50 px-2 py-1.5 ${MAIL_TYPE.t2} text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted`}>
+            {/* R13 M2 — Konu ham hâli (token dahil). Üst başlık token'sız gösterir;
+                buradan ve tooltip'ten ham hale ulaşılır. */}
+            <div><span className="font-medium">Konu:</span> {email.subject || '(konusuz)'}</div>
             <div><span className="font-medium">Kime:</span> {joinAddresses(email.to) || '—'}</div>
             {email.cc.length > 0 && <div><span className="font-medium">Cc:</span> {joinAddresses(email.cc)}</div>}
             {email.bcc.length > 0 && <div><span className="font-medium">Bcc:</span> {joinAddresses(email.bcc)}</div>}

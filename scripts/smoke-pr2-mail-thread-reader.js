@@ -112,8 +112,8 @@ expectTrue('9.2 R5 REGRESYON: reader\'da quick-reply-suggestions slot KALKMIŞ (
 console.log('\n── 10) subject normalize entegrasyonu ─────────');
 expectTrue('10.1 normalizeSubject import',
   /import \{ normalizeSubject \} from '@\/lib\/subjectNormalizer'/.test(r));
-expectTrue('10.2 Reader header subject → normalize',
-  /normalizeSubject\(email\.subject\)/.test(r));
+expectTrue('10.2 R13 M2: Reader header subject → normalizeSubject(..., {stripCaseToken:true}) — token gizli',
+  /normalizeSubject\(email\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(r));
 expectTrue('10.3 title\'da ham subject (tooltip)',
   /title=\{email\.subject\}[\s\S]{0,200}normalizeSubject/.test(r));
 

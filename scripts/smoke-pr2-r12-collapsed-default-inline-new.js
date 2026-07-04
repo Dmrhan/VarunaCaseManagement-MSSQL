@@ -33,7 +33,7 @@ console.log('── 1) ListPane onNewEmail prop + kompakt buton ─');
 expectTrue('1.1 onNewEmail?: () => void prop',
   /onNewEmail\?:\s*\(\)\s*=>\s*void/.test(listPane));
 expectTrue('1.2 destructure onNewEmail',
-  /variant = 'default'[\s\S]{0,300}onNewEmail,\s*\n\s*\}: Props/.test(listPane));
+  /variant = 'default'[\s\S]{0,600}onNewEmail,\s*\n\s*[^}]*\}: Props/.test(listPane));
 expectTrue('1.3 Plus icon import',
   /import \{[^}]*Plus[^}]*\} from 'lucide-react'/.test(listPane));
 expectTrue('1.4 Buton başlık çubuğunda render (onNewEmail && <button>)',
@@ -66,10 +66,11 @@ expectTrue('4.2 REGRESYON: eski "items[items.length - 1].id" auto-select KALKMI�
   !/items\[items\.length - 1\]\.id/.test(tab));
 
 console.log('\n── 5) Split conditional — reader+divider yalnız seçim varken ─');
-expectTrue('5.1 Liste yükseklik: selectedEmail ? splitRatio%: 1 1 0% (kaplama)',
-  /style=\{selectedEmail\s*\?\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\s*:\s*\{ flex: '1 1 0%' \}\}/.test(tab));
-expectTrue('5.2 Divider + reader YALNIZ selectedEmail iken render',
-  /\{selectedEmail && \(\s*<>[\s\S]{0,1500}role="separator"[\s\S]{0,3500}<MailThreadReader/.test(tab));
+expectTrue('5.1 R13 M1: Liste yükseklik selectedEmail ? listPx (içerik/cap türeti) : 1 1 0%',
+  /style=\{selectedEmail\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ flex: '1 1 0%' \}\}/.test(tab));
+expectTrue('5.2 R13 M1: Divider yalnız atCap, reader SEPARATE conditional (selectedEmail iken her durumda)',
+  /\{selectedEmail && atCap && \(\s*<>[\s\S]{0,1500}role="separator"/.test(tab)
+  && /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
 expectTrue('5.3 REGRESYON: "Bir mesaj seçin" placeholder KALKMIŞ (split yok → placeholder yok)',
   !/Bir mesaj seçin/.test(tab));
 expectTrue('5.4 REGRESYON: eski "min-h-0 shrink-0" liste div KALKMIŞ (conditional style ile)',

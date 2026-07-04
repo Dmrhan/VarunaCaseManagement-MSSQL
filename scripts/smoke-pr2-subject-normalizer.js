@@ -213,8 +213,8 @@ expectTrue('5.4 MailMessageCard — normalize subject',
 expectTrue('5.5 MailThreadListPane — normalize subject stripCaseToken=true (R9 vaka-içi mod)',
   /normalizeSubject\(e\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(read('src/features/cases/components/MailThreadListPane.tsx')));
 // Reader'da da mail konusu normalize
-expectTrue('5.6 MailThreadReader — normalize subject',
-  /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailThreadReader.tsx')));
+expectTrue('5.6 R13 M2: MailThreadReader normalize subject + stripCaseToken:true (liste ile aynı kural)',
+  /normalizeSubject\(email\.subject,\s*\{\s*stripCaseToken:\s*true\s*\}\)/.test(read('src/features/cases/components/MailThreadReader.tsx')));
 
 console.log('\n── 6) R10 B4 — Token konum-bağımsız (gerçek trafik) ─');
 // stripCaseToken=true (ListPane vaka-içi mod) — hepsi "E-BELGE GÖNDERİM"
