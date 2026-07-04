@@ -146,13 +146,11 @@ export function MailMessageCard({
       // Parser fix'i öncesi kayıtlarda sanitize `data:` src'yi söktü →
       // <img> src'siz DB'de. Bu img'ler için alt attribute (mailparser
       // "image.png" alt'ı koyabilir) + isInline aday eşleştirmesi:
-      //   1. Alt attribute'ta fileName eşleşen inline aday varsa → onu render
-      //   2. Tek inline aday varsa (contentId dolu bile olabilir) → onu render
-      //      Codex P2 R2 fix: `contentId == null` şartı KALDIRILDI. src'siz
-      //      img'de cidMap zaten devreye giremez (src yok, lookup yapılamaz),
-      //      dolayısıyla çift-render belirsizliği YOK. UNV-1000093 birebir
-      //      senaryosu (contentId dolu ama sanitize öncesi parser fix'i
-      //      olmadığı için src silinmiş) burada iyileşir.
+      //   1. Alt attribute'ta fileName eşleşen inline aday → onu render
+      //      (isim eşleşmesi her koşulda uniquely attributable)
+      //   2. Legacy fallback (Codex R4 fix): SADECE contentId==null tek
+      //      aday. Yeni contentId dolu ekler pre-scan sonrası kalan tek
+      //      aday olsa bile bu img'e ait olduğu garanti değil (Codex bulgu).
       //   3. Yoksa net placeholder "Gömülü görsel — ekte: {names}"
       if (isEmptySrc) {
         const alt = (img.getAttribute('alt') ?? '').trim();
@@ -171,7 +169,20 @@ export function MailMessageCard({
           const byName = inlineCandidates.find((x) => x.fileName === alt);
           if (byName) heuristicMatch = { id: byName.id, fileName: byName.fileName };
         }
-        if (!heuristicMatch && inlineCandidates.length === 1) {
+        // Codex P2 R4 (2026-07-04) — Tek-aday fallback SADECE legacy
+        // senaryo (contentId==null). R2'de bu şart kaldırılmıştı ama R3
+        // pre-scan sonrası kalan tek aday BU IMG'E ilgisiz olabilir:
+        // ör. src'siz alt="logo.png" + cid:B img → pre-scan A1'i (cid ref)
+        // exclude eder, geriye A2 (signature.png) kalır. Alt eşleşmezse
+        // A2'yi "tek aday" diye render etmek = YANLIŞ görsel.
+        //
+        // Legacy senaryo (UNV-1000093 gibi): mail tek görselli, parser
+        // fix'i öncesi contentId=null yazılmış → tek aday ile uniquely
+        // attributable, güvenli.
+        //
+        // byName match yolu değişmedi — alt=fileName ile eşleşme her
+        // koşulda güvenli (isim netliği).
+        if (!heuristicMatch && inlineCandidates.length === 1 && inlineCandidates[0].contentId == null) {
           heuristicMatch = { id: inlineCandidates[0].id, fileName: inlineCandidates[0].fileName };
         }
         if (heuristicMatch) {
