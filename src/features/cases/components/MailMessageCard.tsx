@@ -107,9 +107,35 @@ export function MailMessageCard({
     const cidJobs: Array<Promise<void>> = [];
     // Codex P2 R2 (2026-07-04) — Tüketilen-ek kontrolü: bir img (cid: veya
     // src'siz) bir attachment ile eşleşti mi kaydet. Sonraki fallback'ler
-    // aynı eki tekrar kullanmasın → aynı mailde hem cid'li hem src'siz img
-    // varsa çift render engellenir.
+    // aynı eki tekrar kullanmasın.
     const consumedAttachmentIds = new Set<string>();
+    // Codex P2 R3 (2026-07-04) — Pre-scan: gövdedeki TÜM cid: ref'leri
+    // önceden topla. Src'siz img fallback bu cid'lere referans edilen
+    // ekleri HARİÇ TUTAR — aksi halde "src'siz img önce, cid:X img sonra"
+    // sırasında src'siz X'i tüketir, cid:X yine X'i render eder → duplicate.
+    // Loop-sıra bağımlılığı ortadan kalkar (cid ref'li ekler otoriter cid
+    // yoluna ait).
+    const cidReferencedKeys = new Set<string>();
+    for (const img of imgs) {
+      const s = (img.getAttribute('src') ?? '').trim();
+      if (!s.toLowerCase().startsWith('cid:')) continue;
+      const cidRaw = s.slice(4).trim();
+      const cidStripped = cidRaw.replace(/^<|>$/g, '');
+      cidReferencedKeys.add(cidRaw);
+      cidReferencedKeys.add(cidStripped);
+      cidReferencedKeys.add(cidStripped.toLowerCase());
+    }
+    // Attachment cid ref'li mi? cidMap'in koyduğu 3 anahtar formatının
+    // (raw, stripped, stripped.toLowerCase) herhangi biri cidReferencedKeys'te
+    // varsa evet.
+    const isAttachmentCidReferenced = (a: { contentId: string | null }) => {
+      if (!a.contentId) return false;
+      const raw = a.contentId.trim();
+      const stripped = raw.replace(/^<|>$/g, '');
+      return cidReferencedKeys.has(raw)
+        || cidReferencedKeys.has(stripped)
+        || cidReferencedKeys.has(stripped.toLowerCase());
+    };
     for (const img of imgs) {
       const src = (img.getAttribute('src') ?? '').trim();
       const isCidSrc = src.toLowerCase().startsWith('cid:');
@@ -130,10 +156,15 @@ export function MailMessageCard({
       //   3. Yoksa net placeholder "Gömülü görsel — ekte: {names}"
       if (isEmptySrc) {
         const alt = (img.getAttribute('alt') ?? '').trim();
-        // Tüketilen-ek kontrolü: bu img'e önce cid'li img'in eşleştiği ek
-        // atanmasın (çift görsel önleme).
+        // Codex P2 R2/R3 (2026-07-04) — Filter iki katmanlı:
+        //  1. Tüketilen-ek YOK: önce eşleşmiş ek tekrar kullanılmasın
+        //  2. Cid ref'li ek YOK: gövdede cid:X img'i varsa X'i src'siz
+        //     fallback'e vermeyiz. cid:X yolu otoriter — X'i O RENDER EDER.
+        //     Loop sırası bağımsız garanti.
         const inlineCandidates = email.attachments.filter(
-          (x) => x.isInline && !consumedAttachmentIds.has(x.id),
+          (x) => x.isInline
+            && !consumedAttachmentIds.has(x.id)
+            && !isAttachmentCidReferenced(x),
         );
         let heuristicMatch: { id: string; fileName: string } | null = null;
         if (alt) {
