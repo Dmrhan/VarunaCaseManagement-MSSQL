@@ -39,6 +39,7 @@ import { caseEmailService } from '@/services/caseEmailService';
 import { Lightbox, type LightboxItem } from '@/components/attachments/Lightbox';
 import { HoverPreview } from '@/components/attachments/HoverPreview';
 import { formatBytes, formatDateTime } from '@/lib/format';
+import { computeSenderDisplay } from '../lib/mailSender';
 
 export type MailThreadReaderMode = 'inline' | 'fullscreen';
 
@@ -61,6 +62,12 @@ interface Props {
    * Hızlı-yanıt çubuğu artık reader tarafında sabit DEĞİL — parent kararı.
    */
   bottomSlot?: React.ReactNode;
+  /**
+   * R9.1 — Oturumdaki kullanıcının id'si (Gmail 'ben' paritesi). Header'da
+   * gönderen adı ListPane ile AYNI util üstünden hesaplanır. Verilmezse
+   * "Siz" hiçbir zaman tetiklenmez.
+   */
+  currentUserId?: string | null;
 }
 
 function joinAddresses(arr: CaseEmailItem['to']): string {
@@ -210,6 +217,7 @@ export function MailThreadReader({
   onReply,
   onForward,
   bottomSlot,
+  currentUserId = null,
 }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [renderedHtml, setRenderedHtml] = useState<string | null>(null);
@@ -314,10 +322,9 @@ export function MailThreadReader({
               {normalizeSubject(email.subject) || '(konusuz)'}
             </h3>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[13px] text-slate-500 dark:text-ndark-muted">
-              <span className="font-medium">{email.from.name || email.from.address}</span>
-              {email.from.name && (
-                <span className="opacity-70">&lt;{email.from.address}&gt;</span>
-              )}
+              {/* R9.1 — Gönderen adı ListPane ile AYNI util (tek kaynak).
+                  Teknik email adresi "ayrıntılar ▾" içinde. */}
+              <span className="font-medium">{computeSenderDisplay(email, currentUserId)}</span>
               <span>·</span>
               <span>{formatDateTime(timestamp)}</span>
             </div>

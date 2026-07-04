@@ -23,6 +23,7 @@ import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader'
 import { MailThreadListPane } from './MailThreadListPane';
 import { Button } from '@/components/ui/Button';
 import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { useAuth } from '@/services/AuthContext';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -87,6 +88,11 @@ interface Props {
 }
 
 export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
+  // R9.1 — Oturumdaki kullanıcının id'si (Gmail "ben" paritesi için ListPane
+  // + Reader'a geçilir; kendi mail'inde "Siz" yalnız burada tetiklenir).
+  // REUSE: mevcut auth context; yeni fetch yok.
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? null;
   const [channel, setChannel] = useState<Channel>('email');
   const [composerOpen, setComposerOpen] = useState(false);
   // 2026-07-04 PR-2 R5 — Composer layout modu:
@@ -405,6 +411,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                       onSelect={setSelectedId}
                       className="h-full"
                       caseTitle={item.title}
+                      currentUserId={currentUserId}
                     />
                   </div>
 
@@ -450,6 +457,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                         onReply={(e) => void openReply(e)}
                         onForward={(e) => void openForward(e)}
                         bottomSlot={renderReaderBottom(selectedEmail)}
+                        currentUserId={currentUserId}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -485,6 +493,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 className="h-full"
                 variant="fullscreen"
                 caseTitle={item.title}
+                currentUserId={currentUserId}
               />
             </div>
 
@@ -529,6 +538,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 onReply={(e) => void openReply(e)}
                 onForward={(e) => void openForward(e)}
                 bottomSlot={renderReaderBottom(selectedEmail)}
+                currentUserId={currentUserId}
               />
             </div>
           </div>

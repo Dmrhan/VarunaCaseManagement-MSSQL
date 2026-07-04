@@ -24,6 +24,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Paperclip } from 'lucide-react';
 import type { CaseEmailItem } from '@/services/caseEmailService';
 import { normalizeSubject } from '@/lib/subjectNormalizer';
 import { formatSmartDate, formatSmartDateFull } from '@/lib/smartDate';
+import { computeSenderDisplay } from '../lib/mailSender';
 
 interface Props {
   emails: CaseEmailItem[];
@@ -36,6 +37,13 @@ interface Props {
    * istisnası). Verilmezse "Konu değişti" öneki üretilmez.
    */
   caseTitle?: string;
+  /**
+   * R9.1: Oturumdaki kullanıcının id'si. Giden mailde
+   * sentByUserId === currentUserId ise "Siz" gösterilir (Gmail 'ben'
+   * paritesi). Verilmezse "Siz" hiçbir zaman tetiklenmez (agent adı ya da
+   * fallback).
+   */
+  currentUserId?: string | null;
 }
 
 type SortOrder = 'newest' | 'oldest';
@@ -51,20 +59,6 @@ function saveSortOrder(v: SortOrder): void {
   try { localStorage.setItem(SORT_STORAGE_KEY, v); } catch { /* no-op */ }
 }
 
-/** Gönderen adı gösterimi — R9 kuralları */
-function computeSenderDisplay(email: CaseEmailItem): string {
-  if (email.direction === 'inbound') {
-    const name = email.from.name?.trim();
-    if (name) return name;
-    // Ad yoksa adresin local kısmı
-    return email.from.address.split('@')[0] || email.from.address;
-  }
-  // Giden
-  if (email.source === 'notification_dispatch') return 'Varuna · Otomatik';
-  const label = email.from.name?.trim() || 'Agent';
-  return `Siz · ${label}`;
-}
-
 /** İlk satır snippet — bodyText'in ilk satır \n ile split, trim, empty→''. */
 function computeSnippet(email: CaseEmailItem): string {
   const raw = (email.bodyText ?? '').split('\n')[0]?.trim() ?? '';
@@ -78,6 +72,7 @@ export function MailThreadListPane({
   className,
   variant = 'default',
   caseTitle,
+  currentUserId = null,
 }: Props) {
   const fs = variant === 'fullscreen';
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => loadSortOrder());
@@ -125,7 +120,7 @@ export function MailThreadListPane({
             const ts = e.receivedAt ?? e.sentAt ?? e.createdAt;
             const isSelected = e.id === selectedId;
 
-            const senderDisplay = computeSenderDisplay(e);
+            const senderDisplay = computeSenderDisplay(e, currentUserId);
             const rawSnippet = computeSnippet(e);
             // Konu değişti istisnası — normalize edilmiş konu vaka title'ından farklı mı?
             const subjectClean = normalizeSubject(e.subject, { stripCaseToken: true }).trim();

@@ -122,37 +122,43 @@ expectTrue('5.2 sortOrder state ("newest" | "oldest") + localStorage',
   /type SortOrder\s*=\s*'newest'\s*\|\s*'oldest'[\s\S]{0,300}SORT_STORAGE_KEY\s*=\s*'pr2\.commTab\.listSortOrder'/.test(listPane));
 expectTrue('5.3 Default YENİ→ESKİ',
   /return v === 'oldest' \? 'oldest' : 'newest'/.test(listPane));
-expectTrue('5.4 computeSenderDisplay helper',
-  /function computeSenderDisplay\(email:\s*CaseEmailItem\)/.test(listPane));
+expectTrue('5.4 R9.1: computeSenderDisplay ortak util\'den import (yerel tanım YOK)',
+  /import \{ computeSenderDisplay \} from '\.\.\/lib\/mailSender'/.test(listPane)
+  && !/function computeSenderDisplay\(email:\s*CaseEmailItem\)/.test(listPane));
 expectTrue('5.5 computeSnippet helper (bodyText ilk satır)',
   /function computeSnippet[\s\S]{0,200}bodyText[\s\S]{0,100}\.split\('\\n'\)\[0\]/.test(listPane));
 
-console.log('\n── 6) Sender davranış sim ────────────────────');
-function computeSenderDisplay(email) {
+console.log('\n── 6) Sender davranış sim (R9.1 kural setine göre) ─');
+// R9.1 sonrası kural — detay smoke: smoke-pr2-r9-1-sender-name-chain.js
+// Burada sadece 2 kritik satır: inbound/outbound ayrımı hâlâ ListPane'in
+// gösterim satırında canlı — ortak util üstünden.
+function computeSenderDisplay(email, currentUserId) {
   if (email.direction === 'inbound') {
     const name = email.from.name?.trim();
     if (name) return name;
     return email.from.address.split('@')[0] || email.from.address;
   }
   if (email.source === 'notification_dispatch') return 'Varuna · Otomatik';
-  const label = email.from.name?.trim() || 'Agent';
-  return `Siz · ${label}`;
+  if (email.sentByUserId && currentUserId && email.sentByUserId === currentUserId) return 'Siz';
+  const sentByName = email.sentByName?.trim();
+  if (sentByName) return sentByName;
+  return email.from.name?.trim() || 'Varuna';
 }
 
 expect('6.1 Gelen ad var → ad',
-  computeSenderDisplay({ direction: 'inbound', from: { name: 'Burçin Başaran', address: 'burcin@x.com' } }),
+  computeSenderDisplay({ direction: 'inbound', from: { name: 'Burçin Başaran', address: 'burcin@x.com' } }, 'u-me'),
   'Burçin Başaran');
 expect('6.2 Gelen ad yok → adres local kısmı',
-  computeSenderDisplay({ direction: 'inbound', from: { name: null, address: 'hulya.ozbey@univera.com.tr' } }),
+  computeSenderDisplay({ direction: 'inbound', from: { name: null, address: 'hulya.ozbey@univera.com.tr' } }, 'u-me'),
   'hulya.ozbey');
-expect('6.3 Giden manuel → "Siz · <name>"',
-  computeSenderDisplay({ direction: 'outbound', source: 'manual_send', from: { name: 'Demirhan', address: 'agent@x.com' } }),
-  'Siz · Demirhan');
-expect('6.4 Giden manuel (from.name yok) → "Siz · Agent"',
-  computeSenderDisplay({ direction: 'outbound', source: 'manual_send', from: { name: null, address: 'x@y' } }),
-  'Siz · Agent');
+expect('6.3 R9.1: Giden + kendi mailim → "Siz" (label DÜŞTÜ)',
+  computeSenderDisplay({ direction: 'outbound', source: 'manual_send', from: { name: 'Varuna', address: 'agent@x.com' }, sentByUserId: 'u-me', sentByName: 'Demirhan' }, 'u-me'),
+  'Siz');
+expect('6.4 R9.1: Giden + başka agent → agent adı düz',
+  computeSenderDisplay({ direction: 'outbound', source: 'manual_send', from: { name: 'Varuna', address: 'x@y' }, sentByUserId: 'u-other', sentByName: 'Ayşe Yılmaz' }, 'u-me'),
+  'Ayşe Yılmaz');
 expect('6.5 Giden otomatik/sistem → "Varuna · Otomatik"',
-  computeSenderDisplay({ direction: 'outbound', source: 'notification_dispatch', from: { name: 'X', address: 'y@z' } }),
+  computeSenderDisplay({ direction: 'outbound', source: 'notification_dispatch', from: { name: 'X', address: 'y@z' }, sentByUserId: null, sentByName: null }, 'u-me'),
   'Varuna · Otomatik');
 
 console.log('\n── 7) UI — 2-satırlı anatomi + token yok + snippet ─');
