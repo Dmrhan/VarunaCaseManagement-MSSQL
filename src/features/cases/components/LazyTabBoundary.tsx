@@ -22,6 +22,14 @@ interface Props {
   children: ReactNode;
   /** Boundary tetiklendiğinde gösterilecek özel label. */
   label?: string;
+  /**
+   * R14.1 HOTFIX (2026-07-04) — Sınıfsız <div key=...> wrapper flex zincirini
+   * kırıyordu (E2E: İletişim'de min-h-0/flex-1 taşımayan wrapper içerik
+   * boyutuna büyüyüp ana MAIN overflow-hidden'da kesiliyordu → gövde alt
+   * kısmı erişilemez). İletişim tüketicisi 'flex min-h-0 flex-1 flex-col'
+   * zincirini geçirir; diğer tüketiciler prop'suz → mevcut davranış birebir.
+   */
+  className?: string;
 }
 
 interface State {
@@ -70,6 +78,8 @@ export class LazyTabBoundary extends Component<Props, State> {
     }
 
     // resetKey değişince children re-mount (lazy chunk yeniden tetiklenir).
-    return <div key={this.state.resetKey}>{this.props.children}</div>;
+    // R14.1 — className opsiyonel: verilirse flex zincirini taşır (İletişim
+    // viewport-sabit yerleşimi için); verilmezse eski davranış (sınıfsız div).
+    return <div key={this.state.resetKey} className={this.props.className}>{this.props.children}</div>;
   }
 }

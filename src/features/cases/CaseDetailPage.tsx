@@ -1182,7 +1182,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               // yakalar (network fail / stale index.js sonrası kaldırılmış
               // chunk request'i). Aksi halde hata yukarı fırlar ve case
               // sayfasını çökertir (uygulamada üst error boundary yok).
-              <LazyTabBoundary label="İletişim sekmesi yüklenemedi.">
+              <LazyTabBoundary
+                label="İletişim sekmesi yüklenemedi."
+                className="flex min-h-0 flex-1 flex-col"
+              >
                 <Suspense
                   fallback={
                     <div className="space-y-2 p-4">
