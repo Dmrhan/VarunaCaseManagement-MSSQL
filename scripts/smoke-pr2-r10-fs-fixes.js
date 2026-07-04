@@ -115,10 +115,10 @@ expectTrue('B4.6 R10 açıklama: notification_dispatch + agent yanıtı doğal f
   /notification_dispatch[\s\S]{0,200}g[üu]r[üu]lt[üu]/.test(listPane));
 
 console.log('\n── B5) Tam-ekran üst başlık barı ────────────');
-expectTrue('B5.1 CommunicationTab Props onOpenAccount?: (accountId: string) => void',
-  /onOpenAccount\?:\s*\(accountId:\s*string\)\s*=>\s*void/.test(tab));
-expectTrue('B5.2 CommunicationTab destructure onOpenAccount',
-  /export function CommunicationTab\(\{ item, onCaseShouldRefresh, onOpenAccount \}: Props\)/.test(tab));
+expectTrue('B5.1 CommunicationTab Props onShowCustomer (R10.3 swap: popup, navigasyon değil)',
+  /onShowCustomer\?:\s*\(accountId:\s*string\)\s*=>\s*void/.test(tab));
+expectTrue('B5.2 CommunicationTab destructure onShowCustomer',
+  /export function CommunicationTab\(\{ item, onCaseShouldRefresh, onShowCustomer \}: Props\)/.test(tab));
 expectTrue('B5.3 fs overlay flex flex-col (bar üstte)',
   /className="fixed inset-0 z-40 flex flex-col bg-white/.test(tab));
 expectTrue('B5.4 Bar h-14 + border-b',
@@ -127,8 +127,8 @@ expectTrue('B5.5 Bar caseNumber badge (font-mono)',
   /rounded bg-slate-100 px-2 py-0\.5 font-mono text-xs[\s\S]{0,100}\{item\.caseNumber\}/.test(tab));
 expectTrue('B5.6 Bar title (font-semibold + truncate)',
   /min-w-0 flex-1 truncate text-sm font-semibold[\s\S]{0,150}\{item\.title\}/.test(tab));
-expectTrue('B5.7 Bar accountName tıklanabilir → onOpenAccount(item.accountId)',
-  /onOpenAccount && item\.accountId[\s\S]{0,200}onClick=\{\(\) => onOpenAccount\(item\.accountId\)\}[\s\S]{0,200}\{item\.accountName\}/.test(tab));
+expectTrue('B5.7 Bar accountName tıklanabilir → onShowCustomer (R10.3: CustomerCardModal popup)',
+  /onShowCustomer && item\.accountId[\s\S]{0,200}onClick=\{\(\) => onShowCustomer\(item\.accountId\)\}[\s\S]{0,200}\{item\.accountName\}/.test(tab));
 expectTrue('B5.8 Bar customerContactName muted',
   /truncate text-xs text-slate-500[\s\S]{0,200}\{item\.customerContactName\}/.test(tab));
 expectTrue('B5.9 Bar X kapat — setReaderMode(\'inline\') → aria-label="Kapat" → <X size={18}/>',
@@ -136,8 +136,8 @@ expectTrue('B5.9 Bar X kapat — setReaderMode(\'inline\') → aria-label="Kapat
   && /onClick=\{\(\) => setReaderMode\('inline'\)\}[\s\S]{0,400}aria-label="Kapat"/.test(tab));
 expectTrue('B5.10 Body flex-1 min-h-0 (bar altında liste+reader row)',
   /<div ref=\{fsContainerRef\} className="flex min-h-0 w-full flex-1">/.test(tab));
-expectTrue('B5.11 CaseDetailPage → CommunicationTab onOpenAccount geçilir',
-  /<CommunicationTab[\s\S]{0,500}onOpenAccount=\{onOpenAccount\}/.test(detail));
+expectTrue('B5.11 CaseDetailPage → CommunicationTab onShowCustomer geçilir (R10.3)',
+  /<CommunicationTab[\s\S]{0,500}onShowCustomer=\{onShowCustomer\}/.test(detail));
 
 console.log('\n── Regresyon — R9 + R9.1 + R8 ───────────────');
 expectTrue('R.1 R8 KORUNDU: composer instance sayısı === 1',

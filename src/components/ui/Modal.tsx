@@ -35,11 +35,21 @@ export function Modal({
   height,
   bodyClassName,
 }: ModalProps) {
+  // R10.3 (2026-07-04) — ESC katman sahipliği: modal açıkken ESC yalnız
+  // modalı kapatır. capture:true → window bubble listener'larından ÖNCE
+  // çalışır; Escape dalında stopPropagation + stopImmediatePropagation ile
+  // aynı tuş composer/reader ESC listener'larına ULAŞMAZ.
+  // (Lightbox ile aynı sahiplik deseni — R10.2 pattern.)
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [open, onClose]);
 
   if (!open) return null;

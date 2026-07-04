@@ -180,10 +180,11 @@ interface CaseDetailPageProps {
   onOpenAccount?: (accountId: string) => void;
 }
 
-// onShowCustomer prop'u header müşteri butonu kaldırıldı; başka yerden çağrılırsa
-// caller'da etkisi yok (opsiyonel kalır). Şu an iç kullanım yok — sessizce alındı.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+// R10.3 (2026-07-04) — onShowCustomer yeniden aktif tüketici: CommunicationTab
+// tam-ekran başlık barı müşteri linki App'in CustomerCardModal'ını açar
+// (Detay sekmesindeki kardeş kullanım deseni — accounts sayfası navigasyonu
+// DEĞİL). eslint yorumu ve _prefix kaldırıldı.
+export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
   // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
@@ -1191,7 +1192,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                         if (c) setItem(c);
                       });
                     }}
-                    onOpenAccount={onOpenAccount}
+                    onShowCustomer={onShowCustomer}
                   />
                 </Suspense>
               </LazyTabBoundary>

@@ -86,14 +86,16 @@ interface Props {
   item: Case;
   onCaseShouldRefresh?: () => void;
   /**
-   * R10 B5 — Tam-ekran üst başlık barı müşteri butonu tıklandığında.
-   * CaseDetailPage aynı prop'u kartlar için de kullanır (mevcut desen).
+   * R10.3 (2026-07-04) — Tam-ekran üst başlık barı müşteri adı tıklaması.
+   * App'in CustomerCardModal popup'ını açar (Detay sekmesindeki kardeş
+   * desen — accounts sayfası navigasyonu DEĞİL). R10 B5'te yanlışlıkla
+   * onOpenAccount'a bağlanmıştı → tam-ekran + İletişim bağlamı kayboluyordu.
    * Verilmezse müşteri adı düz metin gösterilir.
    */
-  onOpenAccount?: (accountId: string) => void;
+  onShowCustomer?: (accountId: string) => void;
 }
 
-export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: Props) {
+export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: Props) {
   // R9.1 — Oturumdaki kullanıcının id'si (Gmail "ben" paritesi için ListPane
   // + Reader'a geçilir; kendi mail'inde "Siz" yalnız burada tetiklenir).
   // REUSE: mevcut auth context; yeni fetch yok.
@@ -510,9 +512,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: P
           aria-label="Mail thread (genişletilmiş)"
           className="fixed inset-0 z-40 flex flex-col bg-white dark:bg-ndark-bg"
         >
-          {/* R10 B5 — Tam-ekran üst başlık barı. Vaka context taşıyıcı:
+          {/* R10 B5 + R10.3 — Tam-ekran üst başlık barı. Vaka context taşıyıcı:
               caseNumber (mono badge) + title (semibold truncate) + · Müşteri
-              (tıklanabilir → onOpenAccount) + · İletişim kişisi (muted) + X. */}
+              (tıklanabilir → onShowCustomer = CustomerCardModal popup, Detay
+              sekmesindeki kardeş desen) + · İletişim kişisi (muted) + X. */}
           <div className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
             <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
               {item.caseNumber}
@@ -526,10 +529,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: P
             {item.accountName && (
               <>
                 <span className="shrink-0 text-slate-300 dark:text-ndark-muted">·</span>
-                {onOpenAccount && item.accountId ? (
+                {onShowCustomer && item.accountId ? (
                   <button
                     type="button"
-                    onClick={() => onOpenAccount(item.accountId)}
+                    onClick={() => onShowCustomer(item.accountId)}
                     className="shrink-0 truncate text-sm text-brand-700 hover:underline dark:text-brand-300"
                     title={`Müşteri kartını aç: ${item.accountName}`}
                   >
