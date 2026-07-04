@@ -1120,16 +1120,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
             />
           </nav>
 
-          {/* R14 M1 — Sekme paneli yükseklik disiplini:
-              İletişim'de dış scroll YOK — flex zinciri (flex-1 min-h-0) ile
-              CommunicationTab iç scroll'unu (liste + gövde) kontrol eder.
-              Diğer sekmelerde (Detay/Aktivite/Notlar/...) mevcut sayfa-scroll
-              davranışı AYNEN korunur (overflow-y-auto + p-6). */}
-          <div className={
-            tab === 'communication'
-              ? 'flex min-h-0 flex-1 flex-col p-2'
-              : 'flex-1 overflow-y-auto p-6'
-          }>
+          {/* R15 M1 — Tum sekmeler ayni wrapper (overflow-y-auto p-6). */}
+          <div className="flex-1 overflow-y-auto p-6">
             {tab === 'detail' && (
               <DetailTab
                 item={item}
@@ -1182,10 +1174,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               // yakalar (network fail / stale index.js sonrası kaldırılmış
               // chunk request'i). Aksi halde hata yukarı fırlar ve case
               // sayfasını çökertir (uygulamada üst error boundary yok).
-              <LazyTabBoundary
-                label="İletişim sekmesi yüklenemedi."
-                className="flex min-h-0 flex-1 flex-col"
-              >
+              // R15 M1 — className geçmez (sayfa akışına döndü).
+              <LazyTabBoundary label="İletişim sekmesi yüklenemedi.">
                 <Suspense
                   fallback={
                     <div className="space-y-2 p-4">

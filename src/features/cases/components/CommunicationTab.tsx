@@ -43,20 +43,18 @@ const CHANNELS: ChannelConfig[] = [
   { key: 'incoming-call', label: 'Gelen Aramalar', icon: <Phone size={14} />,            enabled: false },
 ];
 
-// Sekme içi (horizontal) split ratio — üst list % / alt reader
-const SPLIT_STORAGE_KEY = 'pr2.commTab.splitRatio';
-const SPLIT_DEFAULT = 0.35;
-const SPLIT_MIN = 0.20;
-const SPLIT_MAX = 0.60;
-
-// Fullscreen (vertical, Gmail düzeni) split ratio — sol list % / sağ reader
-// Kullanıcı direktifi: min %18 / max %40, ayrı localStorage anahtarı
+// R15 (2026-07-04) — Sekme-içi drag/ölçüm makinesi TAMAMEN silindi
+// (3 layout regresyonun kaynağıydı: 0px liste, kesilen gövde, feedback loop).
+// Sekme-içi liste = başlık + 3 tam satır sabit + liste-içi scroll. Gövde
+// doğal yükseklik → sayfa akışına serbest.
+//
+// KALDI: Fullscreen (Gmail düzeni) sol drag — tam ekran deneyimi bozulmasın.
 const FS_SPLIT_STORAGE_KEY = 'pr2.commTab.fullscreenListRatio';
 const FS_SPLIT_DEFAULT = 0.28;
 const FS_SPLIT_MIN = 0.18;
 const FS_SPLIT_MAX = 0.40;
 
-// Handle görünürlük hint — 1 kerelik (ilk sürüklemede kapanır)
+// Handle görünürlük hint — 1 kerelik (fs drag için)
 const HANDLE_HINT_STORAGE_KEY = 'pr2.commTab.handleHintSeen';
 
 function loadRatio(key: string, def: number, min: number, max: number): number {
@@ -128,73 +126,19 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readerMode, setReaderMode] = useState<MailThreadReaderMode>('inline');
 
-  // Drag-to-resize state — sekme içi (horizontal) VE fullscreen (vertical)
-  const [splitRatio, setSplitRatio] = useState<number>(
-    () => loadRatio(SPLIT_STORAGE_KEY, SPLIT_DEFAULT, SPLIT_MIN, SPLIT_MAX),
-  );
+  // R15 — Sekme-içi drag/ölçüm makinesi TAMAMEN silindi. Kalan: fs drag.
   const [fsSplitRatio, setFsSplitRatio] = useState<number>(
     () => loadRatio(FS_SPLIT_STORAGE_KEY, FS_SPLIT_DEFAULT, FS_SPLIT_MIN, FS_SPLIT_MAX),
   );
-  const [draggingH, setDraggingH] = useState(false); // horizontal (sekme içi)
   const [draggingV, setDraggingV] = useState(false); // vertical (fullscreen)
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const fsContainerRef = useRef<HTMLDivElement>(null);
-  // R13 M1 — Okuma-alanı-öncelikli sekme-içi liste ölçümleri:
-  //   containerH  — split kapsayıcının canlı yüksekliği (window resize + tab)
-  //   listContentH — ListPane içeriğinin natural yüksekliği (ResizeObserver)
-  //   capPx / atCap / listPx — türetilir (splitRatio + guard'lar)
-  const [containerH, setContainerH] = useState(0);
-  const [listContentH, setListContentH] = useState(0);
-  // Handle görünürlük hint — ilk sürüklemede kapanır
+  // Handle görünürlük hint — ilk sürüklemede kapanır (fs drag için)
   const [handleHintSeen, setHandleHintSeen] = useState<boolean>(() => loadHandleHintSeen());
   const dismissHandleHint = useCallback(() => {
     if (handleHintSeen) return;
     setHandleHintSeen(true);
     saveHandleHintSeen();
   }, [handleHintSeen]);
-
-  // R13.1 HOTFIX — Container ResizeObserver'ı CALLBACK REF ile bağla.
-  // useEffect([containerRef]) mount'ta 1 kez tetikleniyor + ref sabit; split
-  // kapsayıcısı emails.length===0 branch'ından sonra sonradan mount olduğunda
-  // effect tekrar çalışmıyor → containerH=0 kalıcı → listPx=0 → liste çöker
-  // (E2E kanıtlı repro). Callback ref element mount/unmount'ta otomatik
-  // çağrılır → observer garanti bağlanır.
-  const containerObsRef = useRef<ResizeObserver | null>(null);
-  const setContainerRef = useCallback((el: HTMLDivElement | null) => {
-    containerRef.current = el;
-    containerObsRef.current?.disconnect();
-    containerObsRef.current = null;
-    if (!el) {
-      setContainerH(0);
-      return;
-    }
-    setContainerH(el.clientHeight);
-    const ro = new ResizeObserver(() => {
-      setContainerH(el.clientHeight);
-    });
-    ro.observe(el);
-    containerObsRef.current = ro;
-  }, []);
-
-  // R13.1 SAVUNMA GUARD — ölçüm yokken inline height UYGULAMA:
-  // containerH/listContentH henüz gelmediyse eski oran davranışına düş
-  // (splitRatio*100%). "Ölçüm yoksa cap say" varsayımı ters çalışıp
-  // liste'yi 0px yapıyordu; ölçüm yoksa GÜVENLİ düşüş = eski flex/oran.
-  const listSizeMeasured = containerH > 0 && listContentH > 0;
-  // R14.2 M2 — Liste cap = başlık + 3 tam satır (yüzde değil, satırdan türet).
-  // Default cap = rowsCap; KULLANICI DRAG İLE splitRatio'yu değiştirdiyse
-  // (SPLIT_DEFAULT'tan sapma) tercihine saygı = Math.max(rowsCap, ratioCap).
-  // Drag üst sınırı %60 (SPLIT_MAX) aynı.
-  const LIST_HEADER_H = 30;   // border-b + px-3 py-1.5 header ~29-30px
-  const LIST_ROW_H = 48;      // default satır min-h-[48px]
-  const rowsCapPx = LIST_HEADER_H + LIST_ROW_H * 3;
-  const ratioCapPx = containerH * splitRatio;
-  const isCustomRatio = Math.abs(splitRatio - SPLIT_DEFAULT) > 1e-6;
-  const capPx = isCustomRatio ? Math.max(rowsCapPx, ratioCapPx) : rowsCapPx;
-  // R14.2 M3 — atCap eşiği cap-1'e KATIYYEN dayanmalı; ölçüm-yok fallback
-  // dalında divider görünmez (aşağıdaki listSizeMeasured koşulu ile).
-  const atCap = listSizeMeasured && listContentH >= capPx - 1;
-  const listPx = atCap ? capPx : listContentH;
 
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -330,7 +274,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
       <button
         type="button"
         onClick={() => void openReply(email)}
-        className={`flex w-full min-h-[28px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-left ${MAIL_TYPE.t2} text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted`}
+        className={`flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left ${MAIL_TYPE.t2} text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted`}
       >
         <Send size={12} />
         <span>Hızlı yanıt yaz… (Yanıtla ile aynı bileşen)</span>
@@ -338,31 +282,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     );
   }, [composerOpen, openReply]);
 
-  // Horizontal (sekme içi) drag effect
-  useEffect(() => {
-    if (!draggingH) return;
-    const onMove = (e: MouseEvent) => {
-      const el = containerRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const ratio = y / rect.height;
-      const clamped = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, ratio));
-      setSplitRatio(clamped);
-    };
-    const onUp = () => {
-      setDraggingH(false);
-      setSplitRatio((v) => { saveRatio(SPLIT_STORAGE_KEY, v); return v; });
-    };
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      document.body.style.userSelect = '';
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [draggingH]);
+  // R15 — Sekme-içi drag/ölçüm makinesi tamamen silindi (uygun yorumu 3. maddede).
 
   // Vertical (fullscreen Gmail düzeni) drag effect
   useEffect(() => {
@@ -390,22 +310,17 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     };
   }, [draggingV]);
 
-  const resetSplit = useCallback(() => {
-    setSplitRatio(SPLIT_DEFAULT);
-    saveRatio(SPLIT_STORAGE_KEY, SPLIT_DEFAULT);
-  }, []);
+  // R15 — resetSplit KALDIRILDI (sekme-içi drag yok).
   const resetFsSplit = useCallback(() => {
     setFsSplitRatio(FS_SPLIT_DEFAULT);
     saveRatio(FS_SPLIT_STORAGE_KEY, FS_SPLIT_DEFAULT);
   }, []);
 
   return (
-    // R14 M1 — Viewport-sabit yükseklik zinciri: parent flex-1 min-h-0 verir;
-    // burada flex-col ile kanal chip'leri shrink-0, çalışma alanı flex-1 min-h-0.
-    // Split kabı dolgudan doğal yüksekliği alır (ResizeObserver ölçer).
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    // R15 — Doğal akış: viewport-sabit zincir kaldırıldı; sayfa scroll'una döndü.
+    <div className="space-y-3">
       {/* Kanal chips */}
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-1 dark:border-ndark-border">
+      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
         {CHANNELS.map((c) => {
           const isActive = c.key === channel;
           return (
@@ -482,19 +397,15 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   </div>
                 </div>
               ) : (
-                <div
-                  ref={setContainerRef}
-                  className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
-                >
-                  {/* R14.2 — R12 katlı-başlangıçtan vazgeçildi. Split her zaman
-                      aktif (auto-select R9); liste ihtiyaç kadar + reader kalan
-                      alan. Ölçüm-yok fallback dalı splitRatio% (0px koruma). */}
-                  <div
-                    className="min-h-0"
-                    style={listSizeMeasured
-                      ? { height: `${listPx}px`, flexShrink: 0 }
-                      : { height: `${splitRatio * 100}%`, flexShrink: 0 }}
-                  >
+                // R15 — Sekme-içi doğal akış: liste sabit (rowsCap 174 + kendi
+                // scroll'u) + reader AYRI KART yüzey (ring/rounded + nefes
+                // payı) doğal yükseklikte. Sayfa scroll'u serbest.
+                <div className="flex flex-col gap-3">
+                  {/* ÜST — liste kartı (başlık + 3 tam satır; liste-içi scroll).
+                      SABİT yükseklik (h-[174px]): max-h + h-full çocuk zincirinde
+                      parent auto ile döngüye giriyordu (child natural expand).
+                      Sabit height → clamp temiz, ListPane iç scroll çalışır. */}
+                  <div className="h-[174px] overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border">
                     <MailThreadListPane
                       emails={emails}
                       selectedId={selectedId}
@@ -503,47 +414,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                       caseTitle={item.title}
                       currentUserId={currentUserId}
                       onNewEmail={openNew}
-                      onContentHeightChange={setListContentH}
                     />
                   </div>
 
-                  {listSizeMeasured && atCap && (
-                    <>
-                      {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük.
-                          R14.2 M3 — atCap tanımı listSizeMeasured'ı içerir; buradaki
-                          çift kontrol savunma. Tek mesajda içerik << cap → atCap
-                          false → divider gizli. Ölçüm-yok fallback'te de gizli. */}
-                      <div
-                        role="separator"
-                        aria-orientation="horizontal"
-                        aria-valuemin={SPLIT_MIN * 100}
-                        aria-valuemax={SPLIT_MAX * 100}
-                        aria-valuenow={Math.round(splitRatio * 100)}
-                        tabIndex={0}
-                        onMouseDown={() => { setDraggingH(true); dismissHandleHint(); }}
-                        onDoubleClick={resetSplit}
-                        className="group relative flex h-3 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-300 bg-slate-100 hover:bg-slate-200 dark:border-ndark-border dark:bg-ndark-border/60 dark:hover:bg-slate-700"
-                        title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (35/65)"
-                      >
-                        <span className="pointer-events-none flex gap-1">
-                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                        </span>
-                        {!handleHintSeen && (
-                          <div className={`pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 ${MAIL_TYPE.t1} text-white shadow-lg`}>
-                            Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {/* ALT — okuma alanı. R13 M1: selectedEmail iken her durumda
-                      görünür (atCap false ise sadece divider gizli, reader
-                      kalan alanı doldurur → az mesajda daha fazla okuma alanı). */}
+                  {/* ALT — Reader AYRI KART (R15 M4 görsel hiyerarşi:
+                      "üstte liste, altta AÇIK MAİL" okunmalı). */}
                   {selectedEmail && (
-                    <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
+                    <div className="rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-ndark-card dark:ring-ndark-border">
                       <MailThreadReader
                         email={selectedEmail}
                         caseId={item.id}

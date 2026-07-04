@@ -19,7 +19,7 @@
  *   7. Sıralama toggle: default YENİ→ESKİ (en son üstte); tercih localStorage
  *   8. Başlık: "Yazışma · N mesaj" + toggle
  */
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Paperclip, Plus } from 'lucide-react';
 import type { CaseEmailItem } from '@/services/caseEmailService';
 import { normalizeSubject } from '@/lib/subjectNormalizer';
@@ -51,14 +51,6 @@ interface Props {
    * Ayrı tam-genişlik satır YARATMAZ; dikeyde yer kazanılır.
    */
   onNewEmail?: () => void;
-  /**
-   * R13 M1 — Okuma-alanı-öncelikli liste yüksekliği (sekme-içi):
-   * içeriğin GERÇEK natural yüksekliğini parent'a bildirir. Parent az
-   * mesaj durumunda liste'yi bu değere sıkıştırır → kalan alan okuma
-   * paneline gider; cap'e ulaşılınca divider görünür + drag akışı normal.
-   * Verilmezse ölçüm devre dışı (fs mount + regresyonsuz).
-   */
-  onContentHeightChange?: (px: number) => void;
 }
 
 type SortOrder = 'newest' | 'oldest';
@@ -89,37 +81,9 @@ export function MailThreadListPane({
   caseTitle,
   currentUserId = null,
   onNewEmail,
-  onContentHeightChange,
 }: Props) {
   const fs = variant === 'fullscreen';
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => loadSortOrder());
-
-  // R13 M1 — Content-height ölçüm: root wrapper içindeki header + list body
-  // toplam natural yüksekliği ResizeObserver ile takip et; parent'a bildir.
-  // Sadece onContentHeightChange verildiğinde çalışır (fs'de dokunulmaz).
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    if (!onContentHeightChange) return;
-    const el = rootRef.current;
-    if (!el) return;
-    const measure = () => {
-      const header = el.querySelector<HTMLElement>('[data-mail-list-header]');
-      const body = el.querySelector<HTMLElement>('[data-mail-list-body]');
-      if (!header || !body) return;
-      // R14.2 fix — body flex-1 overflow-auto olduğu için scrollHeight parent'ın
-      // verdiği yüksekliği yansıtır (feedback loop!). <ul> natural height ölçülür
-      // → gerçek içerik. body içinde tek çocuk <ul> vardır.
-      const ul = body.firstElementChild as HTMLElement | null;
-      const bodyNatural = ul?.scrollHeight ?? body.scrollHeight;
-      onContentHeightChange(header.offsetHeight + bodyNatural);
-    };
-    measure();
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(el);
-    const body = el.querySelector<HTMLElement>('[data-mail-list-body]');
-    if (body) ro.observe(body);
-    return () => ro.disconnect();
-  }, [onContentHeightChange, emails.length, sortOrder]);
 
   // Backend kronolojik (eskiden yeniye); yeni→eski için reverse.
   const sortedEmails = useMemo(() => {
@@ -140,7 +104,7 @@ export function MailThreadListPane({
   );
 
   return (
-    <div ref={rootRef} className={`flex flex-col overflow-hidden ${fs ? 'bg-slate-50 dark:bg-ndark-bg' : 'bg-white dark:bg-ndark-card'} ${className ?? ''}`}>
+    <div className={`flex h-full flex-col overflow-hidden ${fs ? 'bg-slate-50 dark:bg-ndark-bg' : 'bg-white dark:bg-ndark-card'} ${className ?? ''}`}>
       {/* Başlık — R9: "Yazışma · N mesaj" + sıralama toggle.
           R12: sağa hizalı kompakt "+ Yeni e-posta" butonu (onNewEmail verilirse).
           Ayrı tam-genişlik satır YOK — dikeyde yer kazanılır. */}

@@ -80,11 +80,11 @@ expectTrue('5.4 Bırakınca localStorage kaydet',
   /setDraggingV\(false\)[\s\S]{0,200}setFsSplitRatio\(\(v\)\s*=>\s*\{\s*saveRatio\(FS_SPLIT_STORAGE_KEY, v\)/.test(tab));
 
 console.log('\n── 6) R3 Handle görünürlük (her iki bölücü) ──');
-// Yatay (sekme içi)
-expectTrue('6.1 Yatay: cursor-row-resize + border-y (sınır her zaman görünür)',
-  /cursor-row-resize[\s\S]{0,200}border-y border-slate-300/.test(tab));
-expectTrue('6.2 Yatay: 3 nokta tutamaç pattern',
-  /cursor-row-resize[\s\S]{0,500}h-1 w-1 rounded-full bg-slate-400[\s\S]{0,200}h-1 w-1 rounded-full bg-slate-400[\s\S]{0,200}h-1 w-1 rounded-full bg-slate-400/.test(tab));
+// R15: Yatay (sekme içi) drag KALDIRILDI. Dikey (fs) korunmuş.
+expectTrue('6.1 R15: Yatay drag (cursor-row-resize) SİLİNDİ',
+  !/cursor-row-resize/.test(tab));
+expectTrue('6.2 R15: Dikey (fs) 3 nokta tutamaç pattern hâlâ mevcut',
+  /cursor-col-resize[\s\S]{0,500}h-1 w-1 rounded-full bg-slate-400[\s\S]{0,200}h-1 w-1 rounded-full bg-slate-400[\s\S]{0,200}h-1 w-1 rounded-full bg-slate-400/.test(tab));
 // Dikey (fullscreen)
 expectTrue('6.3 Dikey: cursor-col-resize (sekme içi\'nden FARKLI — direktif)',
   /cursor-col-resize/.test(tab));
@@ -103,14 +103,13 @@ expectTrue('7.2 loadHandleHintSeen + saveHandleHintSeen helpers',
   /function loadHandleHintSeen[\s\S]{0,200}function saveHandleHintSeen/.test(tab));
 expectTrue('7.3 handleHintSeen state — mount\'ta loadHandleHintSeen',
   /const \[handleHintSeen, setHandleHintSeen\]\s*=\s*useState[\s\S]{0,200}loadHandleHintSeen\(\)/.test(tab));
-expectTrue('7.4 dismissHandleHint useCallback + her iki handle onMouseDown içinden çağrılır',
+expectTrue('7.4 R15: dismissHandleHint useCallback + Fs handle onMouseDown içinden çağrılır (yatay silindi)',
   /const dismissHandleHint\s*=\s*useCallback/.test(tab)
-  && /setDraggingH\(true\);\s*dismissHandleHint\(\)/.test(tab)
   && /setDraggingV\(true\);\s*dismissHandleHint\(\)/.test(tab));
-expectTrue('7.5 Tooltip conditional: !handleHintSeen && (...)',
-  (tab.match(/\{!handleHintSeen && \(/g) ?? []).length === 2);
-expectTrue('7.6 Tooltip metni "Sürükleyerek yeniden boyutlandır"',
-  (tab.match(/Sürükleyerek yeniden boyutlandır/g) ?? []).length === 2);
+expectTrue('7.5 R15: Tooltip conditional (yalnız fs handle için) — !handleHintSeen && (...)',
+  (tab.match(/\{!handleHintSeen && \(/g) ?? []).length === 1);
+expectTrue('7.6 R15: Tooltip metni (yalnız fs)',
+  (tab.match(/Sürükleyerek yeniden boyutlandır/g) ?? []).length === 1);
 
 console.log('\n── 8) Davranış — split guard\'lar sim ────────');
 

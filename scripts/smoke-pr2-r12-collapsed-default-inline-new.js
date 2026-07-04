@@ -66,11 +66,11 @@ expectTrue('4.2 R14.2: items[items.length - 1].id auto-select MEVCUT (R12 regres
   /items\[items\.length - 1\]\.id/.test(tab));
 
 console.log('\n── 5) Split conditional — reader+divider yalnız seçim varken ─');
-expectTrue('5.1 R14.2: Liste yükseklik listSizeMeasured ? listPx : splitRatio% (selectedEmail? ölü dalı temizlendi)',
-  /style=\{listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\}/.test(tab));
-expectTrue('5.2 R14.2: Divider listSizeMeasured && atCap; reader SEPARATE conditional (selectedEmail iken)',
-  /\{listSizeMeasured && atCap && \(\s*<>[\s\S]{0,1500}role="separator"/.test(tab)
-  && /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
+expectTrue('5.1 R15: Sekme-içi wrapper "flex flex-col gap-3" (doğal akış; splitRatio/listPx makinesi silindi)',
+  /<div className="flex flex-col gap-3">/.test(tab));
+expectTrue('5.2 R15: Liste kartı h-[174px] + Reader kart ayrışması (rounded-lg bg-white shadow-sm ring-1)',
+  /h-\[174px\] overflow-hidden rounded-lg ring-1 ring-slate-200/.test(tab)
+  && /rounded-lg bg-white shadow-sm ring-1 ring-slate-200/.test(tab));
 expectTrue('5.3 REGRESYON: "Bir mesaj seçin" placeholder KALKMIŞ (split yok → placeholder yok)',
   !/Bir mesaj seçin/.test(tab));
 expectTrue('5.4 REGRESYON: eski "min-h-0 shrink-0" liste div KALKMIŞ (conditional style ile)',

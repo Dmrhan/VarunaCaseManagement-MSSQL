@@ -66,8 +66,8 @@ expectTrue('3.9 Header shrink-0 → uzun mail scroll\'da sabit görünür',
   /Header[\s\S]{0,50}subject[\s\S]{0,50}ayrıntılar[\s\S]{0,200}shrink-0 border-b/.test(r));
 
 console.log('\n── 4) R14.2: Reader aksiyon butonları kompakt (min-h-[28px]) ─');
-expectTrue('4.1 R14.2: Aksiyon butonları min-h-[28px] (reading area kazancı)',
-  (r.match(/min-h-\[28px\]/g) ?? []).length >= 3);
+expectTrue('4.1 R15: Aksiyon butonları min-h-[36px] geri (tıklama hedefi standardı)',
+  (r.match(/min-h-\[36px\]/g) ?? []).length >= 3);
 expectTrue('4.2 R5 REGRESYON: reader iç Hızlı-yanıt sabit button KALKMIŞ (bottomSlot parent karar)',
   !/Hızlı yanıt yaz/.test(r));
 

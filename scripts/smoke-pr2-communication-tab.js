@@ -32,44 +32,44 @@ expectTrue('2.1 loadEmails callback — caseEmailService.listEmails',
 expectTrue('2.2 R14.2: Auto-select geri — mevcut seçim listede varsa koru, aksi son mesaj (R12 katlı-başlangıçtan vazgeçildi)',
   /setSelectedId\(\(cur\) => \{\s*if \(cur && items\.some[\s\S]{0,150}return items\.length > 0 \? items\[items\.length - 1\]\.id : null;\s*\}\)/.test(t));
 
-console.log('\n── 3) Split ratio — guard\'lar ────────────────');
-expectTrue('3.1 SPLIT_STORAGE_KEY (localStorage kullanıcı bazlı)',
-  /const SPLIT_STORAGE_KEY\s*=\s*'pr2\.commTab\.splitRatio'/.test(t));
-expectTrue('3.2 SPLIT_DEFAULT=0.35',
-  /const SPLIT_DEFAULT\s*=\s*0\.35/.test(t));
-expectTrue('3.3 SPLIT_MIN=0.20 (liste min ~%20)',
-  /const SPLIT_MIN\s*=\s*0\.20/.test(t));
-expectTrue('3.4 SPLIT_MAX=0.60 (liste max ~%60)',
-  /const SPLIT_MAX\s*=\s*0\.60/.test(t));
-expectTrue('3.5 loadRatio ortak helper — bozuk/aralık-dışı → default',
+console.log('\n── 3) R15: Sekme-içi split makinesi silindi ─');
+expectTrue('3.1 R15: SPLIT_STORAGE_KEY (sekme-içi) SİLİNDİ',
+  !/const SPLIT_STORAGE_KEY/.test(t));
+expectTrue('3.2 R15: SPLIT_DEFAULT SİLİNDİ',
+  !/const SPLIT_DEFAULT\s*=/.test(t));
+expectTrue('3.3 R15: SPLIT_MIN / SPLIT_MAX SİLİNDİ',
+  !/const SPLIT_MIN\s*=/.test(t) && !/const SPLIT_MAX\s*=/.test(t));
+expectTrue('3.4 R15: Fs yönü hâlâ FS_SPLIT_STORAGE_KEY korunmuş',
+  /const FS_SPLIT_STORAGE_KEY = 'pr2\.commTab\.fullscreenListRatio'/.test(t));
+expectTrue('3.5 loadRatio ortak helper (fs için) korunmuş',
   /function loadRatio[\s\S]{0,400}!Number\.isFinite\(v\) \|\| v < min \|\| v > max/.test(t));
-expectTrue('3.6 saveRatio ortak helper — try/catch (private mode guard)',
+expectTrue('3.6 saveRatio ortak helper (fs için) korunmuş',
   /function saveRatio[\s\S]{0,200}try\s*\{[\s\S]{0,200}catch/.test(t));
 
-console.log('\n── 4) Drag mekanizması ──────────────────────');
-expectTrue('4.1 draggingH state (horizontal, sekme içi)',
-  /const \[draggingH, setDraggingH\]\s*=\s*useState\(false\)/.test(t));
-expectTrue('4.2 mousemove listener — clamped ratio (SPLIT_MIN/MAX)',
-  /Math\.max\(SPLIT_MIN,\s*Math\.min\(SPLIT_MAX,\s*ratio\)\)/.test(t));
-expectTrue('4.3 mouseup → draggingH=false + persist (saveRatio)',
-  /const onUp\s*=[\s\S]{0,300}setDraggingH\(false\)[\s\S]{0,300}saveRatio\(SPLIT_STORAGE_KEY,\s*v\)/.test(t));
-expectTrue('4.4 Sürükleme sırasında user-select: none',
+console.log('\n── 4) R15: Sekme-içi drag SİLİNDİ, fs drag korunmuş ─');
+expectTrue('4.1 R15: draggingH state SİLİNDİ',
+  !/\[draggingH, setDraggingH\]/.test(t));
+expectTrue('4.2 R15: Fs draggingV state korunmuş',
+  /\[draggingV, setDraggingV\]\s*=\s*useState\(false\)/.test(t));
+expectTrue('4.3 Fs mousemove: fsSplitRatio clamped FS_SPLIT_MIN/MAX',
+  /Math\.max\(FS_SPLIT_MIN,\s*Math\.min\(FS_SPLIT_MAX,\s*ratio\)\)/.test(t));
+expectTrue('4.4 Sürükleme sırasında user-select: none (fs)',
   /document\.body\.style\.userSelect\s*=\s*'none'/.test(t));
 expectTrue('4.5 Cleanup: userSelect geri açılır',
   /document\.body\.style\.userSelect\s*=\s*''/.test(t));
 
-console.log('\n── 5) Handle — görünür + çift-tık → default ──');
-expectTrue('5.1 role="separator" + aria-orientation="horizontal"',
-  /role="separator"[\s\S]{0,200}aria-orientation="horizontal"/.test(t));
-expectTrue('5.2 aria-valuenow (accessibility)',
-  /aria-valuenow=\{Math\.round\(splitRatio \* 100\)\}/.test(t));
-expectTrue('5.3 onDoubleClick → resetSplit (default)',
-  /onDoubleClick=\{resetSplit\}/.test(t));
-expectTrue('5.4 cursor-row-resize',
-  /cursor-row-resize/.test(t));
-expectTrue('5.5 Handle görünür — h-3 (≥8px tutma alanı, R3 iyileştirmesi)',
-  /className="[^"]*h-3[^"]*cursor-row-resize/.test(t)
-  || /cursor-row-resize[^"]*h-3/.test(t));
+console.log('\n── 5) R15: Sekme-içi handle SİLİNDİ; fs vertical handle korunmuş ─');
+expectTrue('5.1 R15: aria-orientation="vertical" (fs) mevcut; horizontal (sekme-içi) YOK',
+  /aria-orientation="vertical"/.test(t)
+  && !/aria-orientation="horizontal"/.test(t));
+expectTrue('5.2 Fs handle aria-valuenow (fsSplitRatio)',
+  /aria-valuenow=\{Math\.round\(fsSplitRatio \* 100\)\}/.test(t));
+expectTrue('5.3 onDoubleClick → resetFsSplit (fs default)',
+  /onDoubleClick=\{resetFsSplit\}/.test(t));
+expectTrue('5.4 Fs handle cursor-col-resize (dikey ayırıcı)',
+  /cursor-col-resize/.test(t));
+expectTrue('5.5 Fs handle w-3 (dikey handle, R3 iyileştirmesi)',
+  /className="[^"]*w-3[^"]*cursor-col-resize/.test(t));
 expectTrue('5.6 Hover\'da belirginleşir — hover:bg-slate-200 + tutamaç renk değişimi',
   /hover:bg-slate-200[\s\S]{0,600}group-hover:bg-slate-600/.test(t));
 

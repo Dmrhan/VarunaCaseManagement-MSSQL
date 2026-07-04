@@ -100,8 +100,8 @@ expectTrue('5.4 Bar accountName fallback span MAIL_TYPE.barCustomer',
   /shrink-0 truncate \$\{MAIL_TYPE\.barCustomer\} text-slate-700/.test(tab));
 expectTrue('5.5 Bar customerContactName MAIL_TYPE.barCustomer muted',
   /shrink-0 truncate \$\{MAIL_TYPE\.barCustomer\} text-slate-500/.test(tab));
-expectTrue('5.6 Hızlı-yanıt çubuğu MAIL_TYPE.t2 (R14.2 kompakt padding py-1)',
-  /rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-left \$\{MAIL_TYPE\.t2\}/.test(tab));
+expectTrue('5.6 R15: Hızlı-yanıt çubuğu MAIL_TYPE.t2 + py-2 (tıklama hedefi standardı)',
+  /rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left \$\{MAIL_TYPE\.t2\}/.test(tab));
 expectTrue('5.7 REGRESYON: fs bar\'da hardcode text-xs/text-sm literal KALKMIŞ (accountName/customerContactName)',
   !/shrink-0 truncate text-sm text-brand-700/.test(tab)
   && !/shrink-0 truncate text-xs text-slate-500 dark:text-ndark-muted"\s*\n\s*title="İletişim/.test(tab));
