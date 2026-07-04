@@ -101,6 +101,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: P
   const currentUserId = user?.id ?? null;
   const [channel, setChannel] = useState<Channel>('email');
   const [composerOpen, setComposerOpen] = useState(false);
+  // R10.1 — Composer'ın "ESC ile Vazgeç" imperative handle'ı. Composer
+  // içindeki requestCancel; parent ESC dinleyicisi bu ref üzerinden tetikler.
+  // Dirty ise composer confirm modal açar, temizse doğrudan onCancel'a döner.
+  const composerCancelRef = useRef<(() => void) | null>(null);
   // 2026-07-04 PR-2 R5 — Composer layout modu:
   //   - 'inline': Reader body altında satır-içi (Yanıtla + hızlı-yanıt)
   //   - 'overlay': Fullscreen alan (Yeni e-posta + İlet + Büyüt)
@@ -234,6 +238,25 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: P
     setReplyCtx(null);
     setForwardCtx(null);
   }, []);
+
+  // R10.1 — ESC katman zinciri: lightbox > composer > fullscreen.
+  //   - Composer açıkken parent ESC yakalar → composerCancelRef.current?.()
+  //     (composer içi: dirty → confirm modal / temiz → onCancel / modal
+  //     açıksa modal kapan).
+  //   - Composer kapanınca fullscreen AÇIK KALIR (Reader ESC bir sonraki
+  //     tuşta onCollapse eder).
+  //   - Sekme-içi inline'da da aynı davranış (Reader ESC yok, tab dışı).
+  //   - Lightbox açıkken Reader ESC listener zaten pas geçiyor; Lightbox
+  //     kendi window listener'ı ile onClose'u yönetir.
+  useEffect(() => {
+    if (!composerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      composerCancelRef.current?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [composerOpen]);
 
   const selectedEmail = useMemo(
     () => emails.find((e) => e.id === selectedId) ?? null,
@@ -643,6 +666,8 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: P
             onCancel={handleCancel}
             layoutMode={composerLayout}
             onGrow={growComposer}
+            compactDock={composerLayout === 'inline' && readerMode === 'fullscreen'}
+            cancelRequestRef={composerCancelRef}
           />
         </div>
       )}

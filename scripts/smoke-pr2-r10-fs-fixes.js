@@ -75,8 +75,11 @@ expect('B2.7 Lightbox açık: fs kapanmaz',
   readerEscHandler({ mode: 'fullscreen', lightboxActiveId: 'att-1', escEnabled: true }),
   'no-op-lightbox');
 
-// Composer açık, fs açık, lightbox yok → fs kapanmaz (taslak korunur)
-expect('B3.1 Composer açık: fs kapanmaz (taslak korunur)',
+// Composer açık, fs açık, lightbox yok → Reader ESC pas geçer; composer
+// kapatma sorumluluğu R10.1 ile PARENT'a devredildi (Tab'daki ESC listener'ı
+// composerCancelRef'i çağırır → dirty ise confirm, temizse onCancel).
+// Reader'ın kendi davranışı: no-op-composer (fs kapanmaz).
+expect('B3.1 Composer açık: Reader ESC pas geçer (fs kapatma sorumluluğu Parent\'ta — R10.1)',
   readerEscHandler({ mode: 'fullscreen', lightboxActiveId: null, escEnabled: false }),
   'no-op-composer');
 
