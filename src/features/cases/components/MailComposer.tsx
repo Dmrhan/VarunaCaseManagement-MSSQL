@@ -25,6 +25,7 @@
  *  - Cc/Bcc → varsayılan gizli (toggle ile aç)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { MAIL_TYPE } from '../lib/mailTypography';
 import DOMPurify from 'dompurify';
 import { Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -705,7 +706,7 @@ export function MailComposer({
         {/* R10.1 — Dock kompakt özet satırı: verb + Kime chip'ler + ayrıntılar
             toggle. Kime düzenlenmek istenirse Ayrıntılar açılır. */}
         {compactDock && (
-          <div className="flex items-center gap-2 text-sm">
+          <div className={`flex items-center gap-2 ${MAIL_TYPE.t2}`}>
             <span className="shrink-0 font-medium text-slate-500 dark:text-ndark-muted">{summaryVerb}</span>
             <div className="min-w-0 flex-1 truncate">
               {to.length === 0 ? (
@@ -714,7 +715,7 @@ export function MailComposer({
                 to.map((r, i) => (
                   <span
                     key={`${r.address}-${i}`}
-                    className="mr-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text"
+                    className={`mr-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 ${MAIL_TYPE.t2} text-slate-700 dark:bg-ndark-bg dark:text-ndark-text`}
                     title={r.address}
                   >
                     {r.name || r.address}
@@ -725,7 +726,7 @@ export function MailComposer({
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
-              className="shrink-0 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-ndark-muted"
+              className={`shrink-0 inline-flex items-center gap-1 ${MAIL_TYPE.t2} text-slate-500 hover:text-slate-700 dark:text-ndark-muted`}
               aria-expanded={showAdvanced}
               title="Müşteri / Kimden / Kime / Cc / Bcc / Konu / İmza / Şablon"
             >

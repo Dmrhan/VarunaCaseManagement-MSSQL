@@ -21,6 +21,7 @@ import { AtSign, Globe, Info, MessageSquare, Phone, Plus, Send, X } from 'lucide
 import { MailComposer } from './MailComposer';
 import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader';
 import { MailThreadListPane } from './MailThreadListPane';
+import { MAIL_TYPE } from '../lib/mailTypography';
 import { Button } from '@/components/ui/Button';
 import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
 import { useAuth } from '@/services/AuthContext';
@@ -278,7 +279,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
       <button
         type="button"
         onClick={() => void openReply(email)}
-        className="flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
+        className={`flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left ${MAIL_TYPE.t2} text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted`}
       >
         <Send size={12} />
         <span>Hızlı yanıt yaz… (Yanıtla ile aynı bileşen)</span>
@@ -517,11 +518,11 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
               (tıklanabilir → onShowCustomer = CustomerCardModal popup, Detay
               sekmesindeki kardeş desen) + · İletişim kişisi (muted) + X. */}
           <div className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
-            <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
+            <span className={`shrink-0 rounded bg-slate-100 px-2 py-0.5 ${MAIL_TYPE.barCaseNo} text-slate-700 dark:bg-ndark-bg dark:text-ndark-text`}>
               {item.caseNumber}
             </span>
             <h2
-              className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900 dark:text-ndark-text"
+              className={`min-w-0 flex-1 truncate ${MAIL_TYPE.barTitle} text-slate-900 dark:text-ndark-text`}
               title={item.title}
             >
               {item.title}
@@ -533,13 +534,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   <button
                     type="button"
                     onClick={() => onShowCustomer(item.accountId)}
-                    className="shrink-0 truncate text-sm text-brand-700 hover:underline dark:text-brand-300"
+                    className={`shrink-0 truncate ${MAIL_TYPE.barCustomer} text-brand-700 hover:underline dark:text-brand-300`}
                     title={`Müşteri kartını aç: ${item.accountName}`}
                   >
                     {item.accountName}
                   </button>
                 ) : (
-                  <span className="shrink-0 truncate text-sm text-slate-700 dark:text-ndark-text">
+                  <span className={`shrink-0 truncate ${MAIL_TYPE.barCustomer} text-slate-700 dark:text-ndark-text`}>
                     {item.accountName}
                   </span>
                 )}
@@ -549,7 +550,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
               <>
                 <span className="shrink-0 text-slate-300 dark:text-ndark-muted">·</span>
                 <span
-                  className="shrink-0 truncate text-xs text-slate-500 dark:text-ndark-muted"
+                  className={`shrink-0 truncate ${MAIL_TYPE.barCustomer} text-slate-500 dark:text-ndark-muted`}
                   title="İletişim kişisi"
                 >
                   {item.customerContactName}

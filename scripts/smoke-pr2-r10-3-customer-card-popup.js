@@ -141,9 +141,9 @@ expectTrue('8.2 R10.1: composer compactDock + cancelRequestRef',
   && /cancelRequestRef=\{composerCancelRef\}/.test(tab));
 expectTrue('8.3 R9.1: currentUserId 4 wiring',
   (tab.match(/currentUserId=\{currentUserId\}/g) ?? []).length === 4);
-expectTrue('8.4 R10 B5: bar h-14 + caseNumber badge hâlâ mevcut',
+expectTrue('8.4 R10 B5 + R11: bar h-14 + caseNumber badge (MAIL_TYPE.barCaseNo) hâlâ mevcut',
   /flex h-14 shrink-0 items-center gap-3 border-b/.test(tab)
-  && /font-mono text-xs[\s\S]{0,100}\{item\.caseNumber\}/.test(tab));
+  && /\$\{MAIL_TYPE\.barCaseNo\}[\s\S]{0,100}\{item\.caseNumber\}/.test(tab));
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

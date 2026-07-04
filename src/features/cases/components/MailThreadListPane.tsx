@@ -25,6 +25,7 @@ import type { CaseEmailItem } from '@/services/caseEmailService';
 import { normalizeSubject } from '@/lib/subjectNormalizer';
 import { formatSmartDate, formatSmartDateFull } from '@/lib/smartDate';
 import { computeSenderDisplay } from '../lib/mailSender';
+import { MAIL_TYPE } from '../lib/mailTypography';
 
 interface Props {
   emails: CaseEmailItem[];
@@ -98,7 +99,7 @@ export function MailThreadListPane({
   return (
     <div className={`flex flex-col overflow-hidden ${fs ? 'bg-slate-50 dark:bg-ndark-bg' : 'bg-white dark:bg-ndark-card'} ${className ?? ''}`}>
       {/* Başlık — R9: "Yazışma · N mesaj" + sıralama toggle */}
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-3 py-1.5 text-[11px] text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
+      <div className={`flex shrink-0 items-center justify-between border-b border-slate-200 px-3 py-1.5 ${MAIL_TYPE.t1} text-slate-500 dark:border-ndark-border dark:text-ndark-muted`}>
         <span>
           Yazışma · <span className="font-medium">{emails.length}</span> mesaj
         </span>
@@ -172,11 +173,11 @@ export function MailThreadListPane({
                     >
                       {inbound ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-800 dark:text-ndark-text">
+                    <span className={`min-w-0 flex-1 truncate ${MAIL_TYPE.t2} font-medium text-slate-800 dark:text-ndark-text`}>
                       {senderDisplay}
                     </span>
                     <span
-                      className="shrink-0 text-[11px] text-slate-500 dark:text-ndark-muted"
+                      className={`shrink-0 ${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}
                       title={smartDateFull}
                     >
                       {smartDate}
@@ -184,7 +185,7 @@ export function MailThreadListPane({
                   </div>
                   {/* 2. satır: snippet + ek rozeti */}
                   <div className="mt-0.5 flex w-full items-baseline gap-2 pl-7">
-                    <span className={`min-w-0 flex-1 truncate text-[11px] ${
+                    <span className={`min-w-0 flex-1 truncate ${MAIL_TYPE.t2} ${
                       subjectChanged
                         ? 'text-amber-700 dark:text-amber-300'
                         : 'text-slate-500 dark:text-ndark-muted'
@@ -192,7 +193,7 @@ export function MailThreadListPane({
                       {snippet || <span className="italic opacity-60">(içerik yok)</span>}
                     </span>
                     {e.attachments.length > 0 && (
-                      <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-slate-500 dark:text-ndark-muted">
+                      <span className={`inline-flex shrink-0 items-center gap-0.5 ${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>
                         <Paperclip size={10} />
                         <span>{e.attachments.length}</span>
                       </span>

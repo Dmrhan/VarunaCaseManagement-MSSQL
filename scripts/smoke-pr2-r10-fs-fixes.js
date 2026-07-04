@@ -123,14 +123,14 @@ expectTrue('B5.3 fs overlay flex flex-col (bar üstte)',
   /className="fixed inset-0 z-40 flex flex-col bg-white/.test(tab));
 expectTrue('B5.4 Bar h-14 + border-b',
   /className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200/.test(tab));
-expectTrue('B5.5 Bar caseNumber badge (font-mono)',
-  /rounded bg-slate-100 px-2 py-0\.5 font-mono text-xs[\s\S]{0,100}\{item\.caseNumber\}/.test(tab));
-expectTrue('B5.6 Bar title (font-semibold + truncate)',
-  /min-w-0 flex-1 truncate text-sm font-semibold[\s\S]{0,150}\{item\.title\}/.test(tab));
+expectTrue('B5.5 R11: Bar caseNumber MAIL_TYPE.barCaseNo (12px mono)',
+  /rounded bg-slate-100 px-2 py-0\.5 \$\{MAIL_TYPE\.barCaseNo\}[\s\S]{0,100}\{item\.caseNumber\}/.test(tab));
+expectTrue('B5.6 R11: Bar title MAIL_TYPE.barTitle (14px semibold) + truncate',
+  /min-w-0 flex-1 truncate \$\{MAIL_TYPE\.barTitle\}[\s\S]{0,150}\{item\.title\}/.test(tab));
 expectTrue('B5.7 Bar accountName tıklanabilir → onShowCustomer (R10.3: CustomerCardModal popup)',
   /onShowCustomer && item\.accountId[\s\S]{0,200}onClick=\{\(\) => onShowCustomer\(item\.accountId\)\}[\s\S]{0,200}\{item\.accountName\}/.test(tab));
-expectTrue('B5.8 Bar customerContactName muted',
-  /truncate text-xs text-slate-500[\s\S]{0,200}\{item\.customerContactName\}/.test(tab));
+expectTrue('B5.8 R11: Bar customerContactName MAIL_TYPE.barCustomer (13px muted)',
+  /truncate \$\{MAIL_TYPE\.barCustomer\}[\s\S]{0,200}\{item\.customerContactName\}/.test(tab));
 expectTrue('B5.9 Bar X kapat — setReaderMode(\'inline\') → aria-label="Kapat" → <X size={18}/>',
   /aria-label="Kapat"[\s\S]{0,200}<X size=\{18\}/.test(tab)
   && /onClick=\{\(\) => setReaderMode\('inline'\)\}[\s\S]{0,400}aria-label="Kapat"/.test(tab));

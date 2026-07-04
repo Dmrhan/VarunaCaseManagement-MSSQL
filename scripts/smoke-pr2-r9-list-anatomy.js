@@ -168,8 +168,8 @@ expectTrue('7.2 Konu değişti istisnası — "Konu değişti: ${subjectClean}"'
   /Konu değişti: \$\{subjectClean\}/.test(listPane));
 expectTrue('7.3 subjectChanged: subject !== caseTitle (both non-empty, tr-TR case-insensitive)',
   /subjectChanged\s*=[\s\S]{0,200}subjectClean\.length > 0[\s\S]{0,200}caseTitleClean\.length > 0[\s\S]{0,200}toLocaleLowerCase\('tr-TR'\)/.test(listPane));
-expectTrue('7.4 1. satır: senderDisplay flex-1 + smartDate sağa',
-  /senderDisplay[\s\S]{0,400}shrink-0 text-\[11px\][\s\S]{0,200}smartDate\}/.test(listPane));
+expectTrue('7.4 R11: 1. satır senderDisplay flex-1 + smartDate MAIL_TYPE.t1 sağa',
+  /senderDisplay[\s\S]{0,400}shrink-0 \$\{MAIL_TYPE\.t1\}[\s\S]{0,200}smartDate\}/.test(listPane));
 expectTrue('7.5 2. satır: snippet flex-1 + 📎N shrink-0',
   /snippet[\s\S]{0,400}Paperclip[\s\S]{0,100}attachments\.length/.test(listPane));
 expectTrue('7.6 Tooltip smartDateFull',

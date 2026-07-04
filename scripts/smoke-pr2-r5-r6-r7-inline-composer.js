@@ -63,10 +63,10 @@ expectTrue('4.1 Body max-w-[760px] mx-auto p-6',
   /flex-1 overflow-auto p-6[\s\S]{0,200}mx-auto max-w-\[760px\]/.test(reader));
 expectTrue('4.2 REGRESYON: max-w-[680px] KALKMIŞ (R6 yeni değer 760)',
   !/max-w-\[680px\]/.test(reader));
-expectTrue('4.3 Header konu tipografi text-lg font-medium (R6)',
-  /truncate text-lg font-medium/.test(reader));
-expectTrue('4.4 Meta text-[13px] muted',
-  /text-\[13px\] text-slate-500/.test(reader));
+expectTrue('4.3 R11: Reader konu MAIL_TYPE.t4 (17px) font-medium (R6 text-lg\'den token\'a taşındı)',
+  /truncate \$\{MAIL_TYPE\.t4\} font-medium/.test(reader));
+expectTrue('4.4 R11: Meta MAIL_TYPE.t2 muted (13px, tokenle)',
+  /\$\{MAIL_TYPE\.t2\} text-slate-500/.test(reader));
 
 console.log('\n── 5) R6 MailThreadListPane variant="fullscreen" ─');
 expectTrue('5.1 Props: variant?: "default" | "fullscreen"',

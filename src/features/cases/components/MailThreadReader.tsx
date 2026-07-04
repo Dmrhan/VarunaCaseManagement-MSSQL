@@ -40,6 +40,7 @@ import { Lightbox, type LightboxItem } from '@/components/attachments/Lightbox';
 import { HoverPreview } from '@/components/attachments/HoverPreview';
 import { formatBytes, formatDateTime } from '@/lib/format';
 import { computeSenderDisplay } from '../lib/mailSender';
+import { MAIL_TYPE } from '../lib/mailTypography';
 
 export type MailThreadReaderMode = 'inline' | 'fullscreen';
 
@@ -330,14 +331,15 @@ export function MailThreadReader({
             {isInbound ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
           </span>
           <div className="min-w-0 flex-1">
-            {/* R6 — Konu 18-20px medium (text-lg), meta 13px muted tek satır */}
+            {/* R6 → R11 — Konu T4 (17px) medium; meta T2 (13px) muted tek satır.
+                İçerik başlığı TEK yer — bar başlığı 14px ile yarışmaz. */}
             <h3
-              className="truncate text-lg font-medium text-slate-900 dark:text-ndark-text"
+              className={`truncate ${MAIL_TYPE.t4} font-medium text-slate-900 dark:text-ndark-text`}
               title={email.subject}
             >
               {normalizeSubject(email.subject) || '(konusuz)'}
             </h3>
-            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[13px] text-slate-500 dark:text-ndark-muted">
+            <div className={`mt-0.5 flex flex-wrap items-baseline gap-x-2 ${MAIL_TYPE.t2} text-slate-500 dark:text-ndark-muted`}>
               {/* R9.1 — Gönderen adı ListPane ile AYNI util (tek kaynak).
                   Teknik email adresi "ayrıntılar ▾" içinde. */}
               <span className="font-medium">{computeSenderDisplay(email, currentUserId)}</span>
@@ -354,7 +356,7 @@ export function MailThreadReader({
             <button
               type="button"
               onClick={() => onReply(email)}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-white hover:bg-brand-700`}
               title="Yanıtla"
             >
               <Reply size={13} /> Yanıtla
@@ -362,7 +364,7 @@ export function MailThreadReader({
             <button
               type="button"
               onClick={() => onForward(email)}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
               title="İlet"
             >
               <Forward size={13} /> İlet
@@ -371,7 +373,7 @@ export function MailThreadReader({
               <button
                 type="button"
                 onClick={onExpand}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
                 title="Genişlet"
               >
                 <Maximize2 size={13} /> Genişlet
@@ -380,7 +382,7 @@ export function MailThreadReader({
               <button
                 type="button"
                 onClick={onCollapse}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
                 title="Küçült"
               >
                 <Minimize2 size={13} /> Küçült
@@ -405,14 +407,14 @@ export function MailThreadReader({
         <button
           type="button"
           onClick={() => setDetailsOpen((v) => !v)}
-          className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-ndark-muted"
+          className={`mt-1 inline-flex items-center gap-1 ${MAIL_TYPE.t2} text-slate-500 hover:text-slate-700 dark:text-ndark-muted`}
           aria-expanded={detailsOpen}
         >
           {detailsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           ayrıntılar
         </button>
         {detailsOpen && (
-          <div className="mt-1 space-y-0.5 rounded bg-slate-50 px-2 py-1.5 text-xs text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted">
+          <div className={`mt-1 space-y-0.5 rounded bg-slate-50 px-2 py-1.5 ${MAIL_TYPE.t2} text-slate-600 dark:bg-ndark-bg dark:text-ndark-muted`}>
             <div><span className="font-medium">Kime:</span> {joinAddresses(email.to) || '—'}</div>
             {email.cc.length > 0 && <div><span className="font-medium">Cc:</span> {joinAddresses(email.cc)}</div>}
             {email.bcc.length > 0 && <div><span className="font-medium">Bcc:</span> {joinAddresses(email.bcc)}</div>}
