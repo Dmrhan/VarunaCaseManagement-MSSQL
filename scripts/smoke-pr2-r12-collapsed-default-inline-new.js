@@ -60,16 +60,16 @@ expectTrue('3.1 emails.length === 0 branch\'ında Button görünür (kart içi C
   /emails\.length === 0[\s\S]{0,600}<Button type="button" variant="primary" leftIcon=\{<Plus size=\{13\} \/>\} onClick=\{openNew\}>\s*\n?\s*Yeni e-posta/.test(tab));
 
 console.log('\n── 4) Default selectedId=null — katlı başlangıç ─');
-expectTrue('4.1 R9 auto-select KALKMIŞ: loadEmails sadece MEVCUT seçim listede kaldıysa korur',
-  /setSelectedId\(\(cur\) => \(cur && items\.some\(\(e\) => e\.id === cur\)\) \? cur : null\)/.test(tab));
-expectTrue('4.2 REGRESYON: eski "items[items.length - 1].id" auto-select KALKMIŞ',
-  !/items\[items\.length - 1\]\.id/.test(tab));
+expectTrue('4.1 R14.2: auto-select GERİ (R12 katlı-başlangıçtan vazgeçildi) — items[last]',
+  /if \(cur && items\.some\(\(e\) => e\.id === cur\)\) return cur;\s*return items\.length > 0 \? items\[items\.length - 1\]\.id : null;/.test(tab));
+expectTrue('4.2 R14.2: items[items.length - 1].id auto-select MEVCUT (R12 regresyonu geri alındı)',
+  /items\[items\.length - 1\]\.id/.test(tab));
 
 console.log('\n── 5) Split conditional — reader+divider yalnız seçim varken ─');
-expectTrue('5.1 R13.1: Liste yükseklik listSizeMeasured ? listPx px : splitRatio% (savunma guard) · selectedEmail=null → flex 1 1 0%',
-  /selectedEmail\s*\?\s*\(listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\)\s*:\s*\{ flex: '1 1 0%' \}/.test(tab));
-expectTrue('5.2 R14 M3: Divider selectedEmail && listSizeMeasured && atCap, reader SEPARATE conditional (selectedEmail iken her durumda)',
-  /\{selectedEmail && listSizeMeasured && atCap && \(\s*<>[\s\S]{0,1500}role="separator"/.test(tab)
+expectTrue('5.1 R14.2: Liste yükseklik listSizeMeasured ? listPx : splitRatio% (selectedEmail? ölü dalı temizlendi)',
+  /style=\{listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\}/.test(tab));
+expectTrue('5.2 R14.2: Divider listSizeMeasured && atCap; reader SEPARATE conditional (selectedEmail iken)',
+  /\{listSizeMeasured && atCap && \(\s*<>[\s\S]{0,1500}role="separator"/.test(tab)
   && /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
 expectTrue('5.3 REGRESYON: "Bir mesaj seçin" placeholder KALKMIŞ (split yok → placeholder yok)',
   !/Bir mesaj seçin/.test(tab));

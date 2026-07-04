@@ -71,13 +71,13 @@ expectTrue('3.3 O tüketicide className="flex min-h-0 flex-1 flex-col" var',
   /className="flex min-h-0 flex-1 flex-col"/.test(consumers[0]?.tag ?? ''));
 
 console.log('\n── 4) Zincir bütünlüğü — CaseDetailPage → LazyTabBoundary → CommunicationTab ─');
-expectTrue('4.1 CaseDetailPage sekme wrapper flex-1 min-h-0 flex-col (İletişim durumunda)',
-  /tab === 'communication'\s*\?\s*'flex min-h-0 flex-1 flex-col p-4'/.test(detail));
+expectTrue('4.1 R14.2: CaseDetailPage sekme wrapper flex-1 min-h-0 flex-col p-2 (reading area kazancı)',
+  /tab === 'communication'\s*\?\s*'flex min-h-0 flex-1 flex-col p-2'/.test(detail));
 expectTrue('4.2 LazyTabBoundary zincir class\'ını geçirir (2.1 doğrulaması)',
   /<LazyTabBoundary[\s\S]{0,200}className="flex min-h-0 flex-1 flex-col"/.test(detail));
 const tab = read('src/features/cases/components/CommunicationTab.tsx');
-expectTrue('4.3 CommunicationTab root flex-1 min-h-0 flex-col',
-  /<div className="flex min-h-0 flex-1 flex-col gap-3">/.test(tab));
+expectTrue('4.3 R14.2: CommunicationTab root flex-col min-h-0 flex-1 gap-2 (kompakt gap)',
+  /<div className="flex min-h-0 flex-1 flex-col gap-2">/.test(tab));
 expectTrue('4.4 Split kabı flex-1 min-h-0 (zincirin son halkası)',
   /ref=\{setContainerRef\}\s*\n\s*className="relative flex min-h-0 flex-1 flex-col overflow-hidden/.test(tab));
 
@@ -86,8 +86,8 @@ expectTrue('5.1 R14 M1: diğer sekmeler overflow-y-auto p-6',
   /flex-1 overflow-y-auto p-6/.test(detail));
 expectTrue('5.2 R14 M2: Reader konu mode-aware',
   /truncate \$\{mode === 'fullscreen' \? MAIL_TYPE\.t4 : MAIL_TYPE\.t4Inline\}/.test(read('src/features/cases/components/MailThreadReader.tsx')));
-expectTrue('5.3 R14 M3: divider selectedEmail && listSizeMeasured && atCap',
-  /\{selectedEmail && listSizeMeasured && atCap && \(/.test(tab));
+expectTrue('5.3 R14.2: divider listSizeMeasured && atCap (selectedEmail ölü dalı temizlendi)',
+  /\{listSizeMeasured && atCap && \(/.test(tab));
 expectTrue('5.4 R13.1: setContainerRef callback ref hâlâ',
   /const setContainerRef = useCallback/.test(tab));
 expectTrue('5.5 R11.1: text-[10px] literal yok',

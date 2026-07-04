@@ -181,8 +181,19 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
   // (splitRatio*100%). "Ölçüm yoksa cap say" varsayımı ters çalışıp
   // liste'yi 0px yapıyordu; ölçüm yoksa GÜVENLİ düşüş = eski flex/oran.
   const listSizeMeasured = containerH > 0 && listContentH > 0;
-  const capPx = containerH * splitRatio;
-  const atCap = !listSizeMeasured || listContentH >= capPx - 1;
+  // R14.2 M2 — Liste cap = başlık + 3 tam satır (yüzde değil, satırdan türet).
+  // Default cap = rowsCap; KULLANICI DRAG İLE splitRatio'yu değiştirdiyse
+  // (SPLIT_DEFAULT'tan sapma) tercihine saygı = Math.max(rowsCap, ratioCap).
+  // Drag üst sınırı %60 (SPLIT_MAX) aynı.
+  const LIST_HEADER_H = 30;   // border-b + px-3 py-1.5 header ~29-30px
+  const LIST_ROW_H = 48;      // default satır min-h-[48px]
+  const rowsCapPx = LIST_HEADER_H + LIST_ROW_H * 3;
+  const ratioCapPx = containerH * splitRatio;
+  const isCustomRatio = Math.abs(splitRatio - SPLIT_DEFAULT) > 1e-6;
+  const capPx = isCustomRatio ? Math.max(rowsCapPx, ratioCapPx) : rowsCapPx;
+  // R14.2 M3 — atCap eşiği cap-1'e KATIYYEN dayanmalı; ölçüm-yok fallback
+  // dalında divider görünmez (aşağıdaki listSizeMeasured koşulu ile).
+  const atCap = listSizeMeasured && listContentH >= capPx - 1;
   const listPx = atCap ? capPx : listContentH;
 
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
@@ -216,10 +227,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     const items = await caseEmailService.listEmails(item.id);
     setEmails(items);
     setEmailsLoading(false);
-    // R12 (2026-07-04) — Default: HİÇBİR mail açık değil (hepsi katlı).
-    // R9'daki "en yeni otomatik seçili" davranışı KALDIRILDI. Yalnız
-    // MEVCUT seçim listede kaldıysa korunur (refresh sonrası kayıp yok).
-    setSelectedId((cur) => (cur && items.some((e) => e.id === cur)) ? cur : null);
+    // R14.2 (2026-07-04) — Otomatik açılış GERİ (R9 davranışı).
+    // Mevcut seçim listede kaldıysa korunur (refresh persistence); aksi
+    // halde en yeni mesaj (array son elemanı) auto-select. R12 katlı
+    // başlangıçtan kullanıcı kararıyla vazgeçildi.
+    setSelectedId((cur) => {
+      if (cur && items.some((e) => e.id === cur)) return cur;
+      return items.length > 0 ? items[items.length - 1].id : null;
+    });
   }, [item.id]);
 
   useEffect(() => {
@@ -315,7 +330,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
       <button
         type="button"
         onClick={() => void openReply(email)}
-        className={`flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left ${MAIL_TYPE.t2} text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted`}
+        className={`flex w-full min-h-[28px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-left ${MAIL_TYPE.t2} text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted`}
       >
         <Send size={12} />
         <span>Hızlı yanıt yaz… (Yanıtla ile aynı bileşen)</span>
@@ -388,9 +403,9 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     // R14 M1 — Viewport-sabit yükseklik zinciri: parent flex-1 min-h-0 verir;
     // burada flex-col ile kanal chip'leri shrink-0, çalışma alanı flex-1 min-h-0.
     // Split kabı dolgudan doğal yüksekliği alır (ResizeObserver ölçer).
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {/* Kanal chips */}
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-1 dark:border-ndark-border">
         {CHANNELS.map((c) => {
           const isActive = c.key === channel;
           return (
@@ -471,22 +486,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   ref={setContainerRef}
                   className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
                 >
-                  {/* R12 — Default: hiçbir mail açık değil (selectedEmail null)
-                      → liste tam yüksekliği kullanır, divider+reader RENDER
-                      EDİLMEZ. Satıra tıklayınca split geri gelir.
-                      R13 M1 — Az mesajda liste = içerik kadar; kalan alan
-                      reader'a. Cap'e (splitRatio * containerH) ulaşılınca
-                      normal oran davranışı + divider görünür.
-                      R13.1 HOTFIX — Ölçüm yoksa (listSizeMeasured=false)
-                      eski oran davranışına düş (splitRatio*100%). Aksi halde
-                      liste 0px'e çöker. */}
+                  {/* R14.2 — R12 katlı-başlangıçtan vazgeçildi. Split her zaman
+                      aktif (auto-select R9); liste ihtiyaç kadar + reader kalan
+                      alan. Ölçüm-yok fallback dalı splitRatio% (0px koruma). */}
                   <div
                     className="min-h-0"
-                    style={selectedEmail
-                      ? (listSizeMeasured
-                          ? { height: `${listPx}px`, flexShrink: 0 }
-                          : { height: `${splitRatio * 100}%`, flexShrink: 0 })
-                      : { flex: '1 1 0%' }}
+                    style={listSizeMeasured
+                      ? { height: `${listPx}px`, flexShrink: 0 }
+                      : { height: `${splitRatio * 100}%`, flexShrink: 0 }}
                   >
                     <MailThreadListPane
                       emails={emails}
@@ -500,13 +507,12 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                     />
                   </div>
 
-                  {selectedEmail && listSizeMeasured && atCap && (
+                  {listSizeMeasured && atCap && (
                     <>
                       {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük.
-                          R13 M1: yalnız cap'te görünür (işlevsiz sürükleme çizgisi olmasın).
-                          R13.2 mikro-fix: ölçüm-yok fallback dalında GÖSTERME
-                          (tek mesajlı vakada gizli); yalnız listSizeMeasured
-                          && atCap'te gerçek "cap'e dayandı" anlamı taşır. */}
+                          R14.2 M3 — atCap tanımı listSizeMeasured'ı içerir; buradaki
+                          çift kontrol savunma. Tek mesajda içerik << cap → atCap
+                          false → divider gizli. Ölçüm-yok fallback'te de gizli. */}
                       <div
                         role="separator"
                         aria-orientation="horizontal"

@@ -34,10 +34,11 @@ const backend = read('server/lib/caseEmailSender.js');
 console.log('── 1) M1 — Okuma-alanı-öncelikli liste yüksekliği ─');
 expectTrue('1.1 ListPane onContentHeightChange prop',
   /onContentHeightChange\?:\s*\(px:\s*number\)\s*=>\s*void/.test(listPane));
-expectTrue('1.2 ListPane useLayoutEffect + ResizeObserver + measure(header+body.scrollHeight)',
+expectTrue('1.2 R14.2 fix: measure = header.offsetHeight + ul.scrollHeight (feedback loop\'tan kaçış)',
   /useLayoutEffect/.test(listPane)
   && /new ResizeObserver/.test(listPane)
-  && /header\.offsetHeight \+ body\.scrollHeight/.test(listPane));
+  && /header\.offsetHeight \+ bodyNatural/.test(listPane)
+  && /ul\?\.scrollHeight \?\? body\.scrollHeight/.test(listPane));
 expectTrue('1.3 data-mail-list-header + data-mail-list-body query selector\'ları',
   /data-mail-list-header/.test(listPane) && /data-mail-list-body/.test(listPane));
 
@@ -47,12 +48,12 @@ expectTrue('1.5 Tab: container ResizeObserver ölçümü — containerRef + setC
   /containerRef\.current/.test(tab)
   && /new ResizeObserver/.test(tab)
   && /setContainerH\(el\.clientHeight\)/.test(tab));
-expectTrue('1.6 Tab: capPx/atCap/listPx türetilmiş',
-  /const capPx = containerH \* splitRatio[\s\S]{0,300}const atCap = [\s\S]{0,200}listContentH >= capPx - 1[\s\S]{0,150}const listPx = atCap \? capPx : listContentH/.test(tab));
-expectTrue('1.7 R13.1: Liste style — listSizeMeasured ? listPx px : splitRatio% (savunma guard)',
-  /selectedEmail\s*\?\s*\(listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\)/.test(tab));
-expectTrue('1.8 R14 M3: Divider koşulu selectedEmail && listSizeMeasured && atCap',
-  /\{selectedEmail && listSizeMeasured && atCap && \(\s*<>[\s\S]{0,600}role="separator"/.test(tab));
+expectTrue('1.6 R14.2: capPx = isCustomRatio ? Math.max(rows, ratio) : rowsCap; atCap listSizeMeasured tabanlı',
+  /const rowsCapPx = LIST_HEADER_H \+ LIST_ROW_H \* 3[\s\S]{0,400}const capPx = isCustomRatio \? Math\.max\(rowsCapPx, ratioCapPx\) : rowsCapPx[\s\S]{0,400}const atCap = listSizeMeasured && listContentH >= capPx - 1/.test(tab));
+expectTrue('1.7 R14.2: Liste style listSizeMeasured ? listPx : splitRatio% (selectedEmail ölü dalı temizlendi)',
+  /style=\{listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\}/.test(tab));
+expectTrue('1.8 R14.2: Divider koşulu listSizeMeasured && atCap',
+  /\{listSizeMeasured && atCap && \(\s*<>[\s\S]{0,600}role="separator"/.test(tab));
 expectTrue('1.9 Tab: reader SEPARATE conditional (atCap değilse de görünür — kalan alanı doldurur)',
   /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
 expectTrue('1.10 Tab: sekme-içi ListPane onContentHeightChange={setListContentH}',
@@ -211,8 +212,8 @@ expectTrue('7.4 openReply setComposeKey artırır (yeni composer init)',
   /const openReply\s*=\s*useCallback[\s\S]{0,500}setComposeKey\(\(k\) => k \+ 1\)/.test(tab));
 
 console.log('\n── 8) Regresyon — R11/R12/R10.x KORUNDU ────────');
-expectTrue('8.1 R12: selectedId=null katlı başlangıç (auto-select yok)',
-  /setSelectedId\(\(cur\) => \(cur && items\.some\(\(e\) => e\.id === cur\)\) \? cur : null\)/.test(tab));
+expectTrue('8.1 R14.2: auto-select GERİ (R9 davranışı) — mevcut seçim listede varsa koru, aksi son mesaj',
+  /if \(cur && items\.some[\s\S]{0,100}return items\.length > 0 \? items\[items\.length - 1\]\.id : null/.test(tab));
 expectTrue('8.2 R12: ListPane onNewEmail={openNew} 2 mount',
   (tab.match(/onNewEmail=\{openNew\}/g) ?? []).length === 2);
 expectTrue('8.3 R11: MAIL_TYPE tokenle çalışır',

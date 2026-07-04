@@ -50,10 +50,10 @@ expectTrue('1.8 REGRESYON: eski useEffect([containerRef]) KALKMIŞ',
 console.log('\n── 2) Katman 2 — savunma guard (0px koruma) ──');
 expectTrue('2.1 listSizeMeasured = containerH > 0 && listContentH > 0',
   /const listSizeMeasured = containerH > 0 && listContentH > 0/.test(tab));
-expectTrue('2.2 atCap ölçümsüz durumda !listSizeMeasured ile true (drag akışı hazır)',
-  /const atCap = !listSizeMeasured \|\| listContentH >= capPx - 1/.test(tab));
-expectTrue('2.3 Liste div style: listSizeMeasured ? {height:listPx px} : {height:splitRatio%}',
-  /selectedEmail\s*\?\s*\(listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\)\s*:\s*\{ flex: '1 1 0%' \}/.test(tab));
+expectTrue('2.2 R14.2: atCap = listSizeMeasured && content>=cap-1 (fallback dalında divider gizli)',
+  /const atCap = listSizeMeasured && listContentH >= capPx - 1/.test(tab));
+expectTrue('2.3 R14.2: Liste div style listSizeMeasured ? listPx : splitRatio% (selectedEmail? ölü dalı temizlendi)',
+  /style=\{listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}\}/.test(tab));
 
 console.log('\n── 3) Davranış simülasyonu — E2E senaryoları ─');
 
@@ -111,10 +111,10 @@ expect('3.7 Yalnız container gecikti → güvenli düşüş %35',
 console.log('\n── 4) Regresyon — R13 diğer davranışı KORUNDU ─');
 expectTrue('4.1 Reader SEPARATE conditional (selectedEmail iken her durumda)',
   /\{selectedEmail && \(\s*<div className="min-h-0 flex-1 bg-white/.test(tab));
-expectTrue('4.2 R14 M3: Divider yalnız selectedEmail && listSizeMeasured && atCap',
-  /\{selectedEmail && listSizeMeasured && atCap && \(/.test(tab));
-expectTrue('4.3 R12 katlı: selectedEmail=null → flex 1 1 0%',
-  /:\s*\{ flex: '1 1 0%' \}\}/.test(tab));
+expectTrue('4.2 R14.2: Divider yalnız listSizeMeasured && atCap (selectedEmail guard\'ı ölü dal kalktı)',
+  /\{listSizeMeasured && atCap && \(/.test(tab));
+expectTrue('4.3 R14.2: R12 katlı-başlangıç ölü dalı temizlendi (auto-select GERİ)',
+  !/\{ flex: '1 1 0%' \}\}/.test(tab));
 expectTrue('4.4 R11.1 kaçak yok (drag tooltip token\'da)',
   !/text-\[10px\]/.test(tab));
 expectTrue('4.5 R8: MailComposer instance=1',

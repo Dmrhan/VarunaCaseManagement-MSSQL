@@ -318,9 +318,9 @@ export function MailThreadReader({
   const readerBody = (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header — subject + ayrıntılar toggle + meta.
-          R14 M2 — mode='inline' kompakt padding: py-2 (dar bağlamda dikey
-          yer okuma alanına). Fullscreen py-3 aynen. */}
-      <div className={`shrink-0 border-b border-slate-200 px-4 ${mode === 'fullscreen' ? 'py-3' : 'py-2'} dark:border-ndark-border`}>
+          R14/R14.2 — mode='inline' kompakt padding: py-1.5 (dar bağlamda
+          dikey yer okuma alanına). Fullscreen py-3 aynen. */}
+      <div className={`shrink-0 border-b border-slate-200 px-4 ${mode === 'fullscreen' ? 'py-3' : 'py-1'} dark:border-ndark-border`}>
         <div className="flex items-start gap-2">
           <span
             className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${
@@ -365,7 +365,7 @@ export function MailThreadReader({
             <button
               type="button"
               onClick={() => onReply(email)}
-              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-white hover:bg-brand-700`}
+              className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-white hover:bg-brand-700`}
               title="Yanıtla"
             >
               <Reply size={13} /> Yanıtla
@@ -373,7 +373,7 @@ export function MailThreadReader({
             <button
               type="button"
               onClick={() => onForward(email)}
-              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
+              className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
               title="İlet"
             >
               <Forward size={13} /> İlet
@@ -382,7 +382,7 @@ export function MailThreadReader({
               <button
                 type="button"
                 onClick={onExpand}
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
+                className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
                 title="Genişlet"
               >
                 <Maximize2 size={13} /> Genişlet
@@ -391,7 +391,7 @@ export function MailThreadReader({
               <button
                 type="button"
                 onClick={onCollapse}
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
+                className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-md px-2.5 py-1.5 ${MAIL_TYPE.t2} font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg`}
                 title="Küçült"
               >
                 <Minimize2 size={13} /> Küçült
@@ -435,9 +435,10 @@ export function MailThreadReader({
         )}
       </div>
 
-      {/* Body — 2026-07-04 PR-2 R6 cilası: max-w-[760px] mx-auto p-6, rahat
-          okuma. Sağdaki dev boşluk hissi biter, tipografi ferahlar. */}
-      <div className="flex-1 overflow-auto p-6">
+      {/* Body — 2026-07-04 PR-2 R6 cilası: max-w-[760px] mx-auto padding.
+          R14.2 — inline mode kompakt padding (p-4); fullscreen p-6 rahat.
+          Dar bağlamda dikey/yatay yer gövdeye. */}
+      <div className={`flex-1 overflow-auto ${mode === 'fullscreen' ? 'p-6' : 'p-4'}`}>
         <div className="mx-auto max-w-[760px]">
           {rewriting && (
             <div className="text-xs text-slate-400">Görseller çözülüyor…</div>
@@ -491,7 +492,7 @@ export function MailThreadReader({
           Kapalı: parent hızlı-yanıt çubuğu verir (aynı bileşen, kapalı hali).
           bottomSlot yoksa alt bölge gizli. Yanıtla/İlet üst başlıkta (R2). */}
       {bottomSlot && (
-        <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
+        <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-1 dark:border-ndark-border dark:bg-ndark-card">
           {bottomSlot}
         </div>
       )}

@@ -1127,7 +1127,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
               davranışı AYNEN korunur (overflow-y-auto + p-6). */}
           <div className={
             tab === 'communication'
-              ? 'flex min-h-0 flex-1 flex-col p-4'
+              ? 'flex min-h-0 flex-1 flex-col p-2'
               : 'flex-1 overflow-y-auto p-6'
           }>
             {tab === 'detail' && (

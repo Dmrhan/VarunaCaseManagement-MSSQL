@@ -29,8 +29,8 @@ expectTrue('1.3 emails state (list) + selectedId + readerMode',
 console.log('\n── 2) loadEmails + default selection ─────────');
 expectTrue('2.1 loadEmails callback — caseEmailService.listEmails',
   /const loadEmails\s*=\s*useCallback[\s\S]{0,300}caseEmailService\.listEmails\(item\.id\)/.test(t));
-expectTrue('2.2 R12: Default seçim YOK (katlı) — mevcut seçim listede kaldıysa korunur, aksi null',
-  /setSelectedId\(\(cur\) => \(cur && items\.some\(\(e\) => e\.id === cur\)\) \? cur : null\)/.test(t));
+expectTrue('2.2 R14.2: Auto-select geri — mevcut seçim listede varsa koru, aksi son mesaj (R12 katlı-başlangıçtan vazgeçildi)',
+  /setSelectedId\(\(cur\) => \{\s*if \(cur && items\.some[\s\S]{0,150}return items\.length > 0 \? items\[items\.length - 1\]\.id : null;\s*\}\)/.test(t));
 
 console.log('\n── 3) Split ratio — guard\'lar ────────────────');
 expectTrue('3.1 SPLIT_STORAGE_KEY (localStorage kullanıcı bazlı)',

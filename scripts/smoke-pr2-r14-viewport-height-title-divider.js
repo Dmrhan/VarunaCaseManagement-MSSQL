@@ -28,12 +28,12 @@ const reader = read('src/features/cases/components/MailThreadReader.tsx');
 const token = read('src/features/cases/lib/mailTypography.ts');
 
 console.log('── 1) M1 — Viewport-sabit yükseklik zinciri ─');
-expectTrue('1.1 CaseDetailPage sekme wrapper conditional: İletişim flex-1 min-h-0 flex-col p-4; diğer sekmeler flex-1 overflow-y-auto p-6',
-  /tab === 'communication'\s*\?\s*'flex min-h-0 flex-1 flex-col p-4'\s*:\s*'flex-1 overflow-y-auto p-6'/.test(detail));
-expectTrue('1.2 CommunicationTab root flex-col min-h-0 flex-1 (parent zincirini alır)',
-  /<div className="flex min-h-0 flex-1 flex-col gap-3">/.test(tab));
-expectTrue('1.3 Kanal chips shrink-0 (viewport disiplini)',
-  /flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-2/.test(tab));
+expectTrue('1.1 R14.2: CaseDetailPage sekme wrapper conditional (İletişim p-2 kompakt)',
+  /tab === 'communication'\s*\?\s*'flex min-h-0 flex-1 flex-col p-2'\s*:\s*'flex-1 overflow-y-auto p-6'/.test(detail));
+expectTrue('1.2 R14.2: CommunicationTab root flex-col min-h-0 flex-1 gap-2 (kompakt gap)',
+  /<div className="flex min-h-0 flex-1 flex-col gap-2">/.test(tab));
+expectTrue('1.3 R14.2: Kanal chips shrink-0 + pb-1 (kompakt)',
+  /flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-200 pb-1/.test(tab));
 expectTrue('1.4 Split kabı flex-1 min-h-0 (dolgu → containerH doğal ölçüm)',
   /ref=\{setContainerRef\}\s*\n\s*className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"/.test(tab));
 expectTrue('1.5 REGRESYON: eski calc(100vh-320px) magic KALKMIŞ',
@@ -52,12 +52,12 @@ expectTrue('2.3 Reader konu mode ternary: fs → t4, inline → t4Inline',
   /\$\{mode === 'fullscreen' \? MAIL_TYPE\.t4 : MAIL_TYPE\.t4Inline\}/.test(reader));
 expectTrue('2.4 REGRESYON: eski sabit MAIL_TYPE.t4 KALKMIŞ (mode fark etmeden)',
   !/truncate \$\{MAIL_TYPE\.t4\} font-medium text-slate-900/.test(reader));
-expectTrue('2.5 Reader header padding mode-aware: fs py-3 / inline py-2',
-  /shrink-0 border-b border-slate-200 px-4 \$\{mode === 'fullscreen' \? 'py-3' : 'py-2'\}/.test(reader));
+expectTrue('2.5 R14.2: Reader header padding mode-aware — fs py-3 / inline py-1 (agresif kompakt)',
+  /shrink-0 border-b border-slate-200 px-4 \$\{mode === 'fullscreen' \? 'py-3' : 'py-1'\}/.test(reader));
 
 console.log('\n── 3) M3 — Divider mikro-fix (R13.2) ────────');
-expectTrue('3.1 Divider koşulu: selectedEmail && listSizeMeasured && atCap',
-  /\{selectedEmail && listSizeMeasured && atCap && \(/.test(tab));
+expectTrue('3.1 R14.2: Divider koşulu listSizeMeasured && atCap (selectedEmail guard\'ı ölü dal kalktı)',
+  /\{listSizeMeasured && atCap && \(/.test(tab));
 expectTrue('3.2 REGRESYON: eski "selectedEmail && atCap" KALKMIŞ (ölçüm-yok fallback\'te de göstermiyordu)',
   !/\{selectedEmail && atCap && \(\s*<>[\s\S]{0,200}role="separator"/.test(tab));
 
@@ -112,8 +112,8 @@ expectTrue('5.2 R13.1: guard listSizeMeasured hâlâ',
   /const listSizeMeasured = containerH > 0 && listContentH > 0/.test(tab));
 expectTrue('5.3 R13 M1: liste style listSizeMeasured ? listPx : splitRatio%',
   /listSizeMeasured\s*\?\s*\{ height: `\$\{listPx\}px`, flexShrink: 0 \}\s*:\s*\{ height: `\$\{splitRatio \* 100\}%`, flexShrink: 0 \}/.test(tab));
-expectTrue('5.4 R12: katlı başlangıç selectedId=null',
-  /setSelectedId\(\(cur\) => \(cur && items\.some\(\(e\) => e\.id === cur\)\) \? cur : null\)/.test(tab));
+expectTrue('5.4 R14.2: auto-select GERİ (R12 katlı-başlangıçtan vazgeçildi — kararlı davranış)',
+  /return items\.length > 0 \? items\[items\.length - 1\]\.id : null/.test(tab));
 expectTrue('5.5 R11: MAIL_TYPE tokenlarla çalışır (reader)',
   /import \{ MAIL_TYPE \} from '\.\.\/lib\/mailTypography'/.test(reader));
 expectTrue('5.6 R11.1: text-[10px] kaçak yok',

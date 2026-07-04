@@ -106,8 +106,12 @@ export function MailThreadListPane({
       const header = el.querySelector<HTMLElement>('[data-mail-list-header]');
       const body = el.querySelector<HTMLElement>('[data-mail-list-body]');
       if (!header || !body) return;
-      const px = header.offsetHeight + body.scrollHeight;
-      onContentHeightChange(px);
+      // R14.2 fix — body flex-1 overflow-auto olduğu için scrollHeight parent'ın
+      // verdiği yüksekliği yansıtır (feedback loop!). <ul> natural height ölçülür
+      // → gerçek içerik. body içinde tek çocuk <ul> vardır.
+      const ul = body.firstElementChild as HTMLElement | null;
+      const bodyNatural = ul?.scrollHeight ?? body.scrollHeight;
+      onContentHeightChange(header.offsetHeight + bodyNatural);
     };
     measure();
     const ro = new ResizeObserver(() => measure());
