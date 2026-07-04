@@ -268,20 +268,12 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
 
       {channel === 'email' && mailConfigState === 'configured' && (
         <>
-          {composerOpen ? (
-            <MailComposer
-              key={composeKey}
-              item={item}
-              initialReplyContext={replyCtx}
-              initialForwardContext={forwardCtx}
-              initialTenantSignatureHtml={tenantSignatureHtml}
-              initialAgentSignatureHtml={agentSignatureHtml}
-              initialComposedSignatureHtml={composedSignatureHtml}
-              onSent={handleSent}
-              onCancel={handleCancel}
-            />
-          ) : (
-            <>
+          {/* 2026-07-04 PR-2 (görsel tur R1) — Composer artık OVERLAY (fixed
+              inset-0 z-50). Reader/liste her zaman render; composer üstünde
+              katmandır. Kapat/Gönder → composerOpen=false → arkada mode
+              korunan reader (inline veya fullscreen) tekrar görünür.
+              Eski sekme-içi conditional swap KALDIRILDI — "Yeni e-posta"
+              dahil TÜM composer akışları overlay üzerinden gider. */}
               {/* Toolbar — sadece Yeni e-posta */}
               <div className="flex justify-end">
                 <Button type="button" variant="primary" leftIcon={<Plus size={13} />} onClick={openNew}>
@@ -402,9 +394,24 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                   </div>
                 </div>
               )}
-            </>
-          )}
         </>
+      )}
+
+      {/* R1: Composer overlay — fixed inset-0 z-50 (fullscreen reader z-40'ın üstünde) */}
+      {composerOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg">
+          <MailComposer
+            key={composeKey}
+            item={item}
+            initialReplyContext={replyCtx}
+            initialForwardContext={forwardCtx}
+            initialTenantSignatureHtml={tenantSignatureHtml}
+            initialAgentSignatureHtml={agentSignatureHtml}
+            initialComposedSignatureHtml={composedSignatureHtml}
+            onSent={handleSent}
+            onCancel={handleCancel}
+          />
+        </div>
       )}
 
       {channel !== 'email' && (

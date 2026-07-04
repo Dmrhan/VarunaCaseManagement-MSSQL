@@ -317,29 +317,61 @@ export function MailThreadReader({
               <span>{formatDateTime(timestamp)}</span>
             </div>
           </div>
-          {/* Aksiyon barı slot'ları: RUNA (structural, boş) → gelecek yanıt önerisi chip'leri */}
-          <div data-runa-slot="reader-actions" className="hidden shrink-0" />
-          {mode === 'inline' ? (
+          {/* 2026-07-04 PR-2 (görsel tur R2) — Aksiyon barı ÜST başlığa
+              taşındı: Yanıtla · İlet · Genişlet/Küçült + X (fullscreen)
+              + RUNA slot. Header shrink-0 flex row olduğu için uzun mail
+              scroll'da SABIT görünür (sticky davranışı). Alt bar YALNIZ
+              hızlı-yanıt (aşağıda). */}
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={onExpand}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-bg"
-              aria-label="Genişlet"
-              title="Genişlet"
+              onClick={() => onReply(email)}
+              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              title="Yanıtla"
             >
-              <Maximize2 size={16} />
+              <Reply size={13} /> Yanıtla
             </button>
-          ) : (
             <button
               type="button"
-              onClick={onCollapse}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-bg"
-              aria-label="Kapat"
-              title="Kapat (Esc)"
+              onClick={() => onForward(email)}
+              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+              title="İlet"
             >
-              <X size={16} />
+              <Forward size={13} /> İlet
             </button>
-          )}
+            {mode === 'inline' ? (
+              <button
+                type="button"
+                onClick={onExpand}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+                title="Genişlet"
+              >
+                <Maximize2 size={13} /> Genişlet
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onCollapse}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
+                title="Küçült"
+              >
+                <Minimize2 size={13} /> Küçült
+              </button>
+            )}
+            {/* RUNA yanıt önerileri slot'u — structural, boş */}
+            <div data-runa-slot="reader-actions" className="ml-1 flex items-center gap-1" />
+            {mode === 'fullscreen' && (
+              <button
+                type="button"
+                onClick={onCollapse}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-bg"
+                aria-label="Kapat"
+                title="Kapat (Esc)"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
         {/* ayrıntılar ▾ — CC/BCC/tam adresler */}
         <button
@@ -411,53 +443,21 @@ export function MailThreadReader({
         </div>
       </div>
 
-      {/* Sabit aksiyon barı */}
-      <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onReply(email)}
-            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
-          >
-            <Reply size={13} /> Yanıtla
-          </button>
-          <button
-            type="button"
-            onClick={() => onForward(email)}
-            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md text-slate-700 ring-1 ring-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
-          >
-            <Forward size={13} /> İlet
-          </button>
-          {mode === 'inline' ? (
-            <button
-              type="button"
-              onClick={onExpand}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md text-slate-700 ring-1 ring-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
-            >
-              <Maximize2 size={13} /> Genişlet
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onCollapse}
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md text-slate-700 ring-1 ring-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100 dark:text-ndark-text dark:ring-ndark-border dark:hover:bg-ndark-bg"
-            >
-              <Minimize2 size={13} /> Küçült
-            </button>
-          )}
-          {/* RUNA yanıt önerileri slot'u — structural, boş */}
-          <div data-runa-slot="quick-reply-suggestions" className="ml-auto flex items-center gap-1" />
-        </div>
-
+      {/* 2026-07-04 PR-2 (görsel tur R2) — Alt kenarda YALNIZ hızlı-yanıt.
+          Yanıtla/İlet/Genişlet üst başlığa taşındı (yukarıda). RUNA slot
+          hızlı-yanıt yanında (structural, boş). */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
         {/* Hızlı-yanıt çubuğu */}
         <button
           type="button"
           onClick={() => onQuickReply(email)}
-          className="mt-2 flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
+          className="flex min-h-[40px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
         >
           <Send size={12} />
           <span>Hızlı yanıt yaz…</span>
         </button>
+        {/* RUNA yanıt önerileri slot'u — hızlı-yanıt yanında (structural, boş) */}
+        <div data-runa-slot="quick-reply-suggestions" className="flex items-center gap-1" />
       </div>
     </div>
   );

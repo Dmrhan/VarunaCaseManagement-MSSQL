@@ -84,12 +84,22 @@ expectTrue('6.4 onReply/onForward parent composer akışı',
 expectTrue('6.5 onQuickReply → openReply (Yanıtla ile aynı)',
   /onQuickReply=\{\(e\)\s*=>\s*void openReply\(e\)\}/.test(t));
 
-console.log('\n── 7) Composer flow — bulunduğu görünüme dön ─');
+console.log('\n── 7) Composer flow — R1: overlay + bulunduğu görünüme dön ─');
 expectTrue('7.1 handleSent — readerMode DOKUNULMAZ (kullanıcı direktifi)',
   /const handleSent\s*=\s*useCallback[\s\S]{0,400}setComposerOpen\(false\)/.test(t)
     && !/handleSent[\s\S]{0,600}setReaderMode/.test(t));
 expectTrue('7.2 loadEmails çağrılır (thread refresh)',
   /handleSent[\s\S]{0,500}void loadEmails\(\)/.test(t));
+
+// R1: Composer OVERLAY — fixed inset-0 z-50; reader/liste her zaman render
+expectTrue('7.3 R1: Composer overlay — fixed inset-0 z-50',
+  /composerOpen && \([\s\S]{0,600}fixed inset-0 z-50/.test(t));
+expectTrue('7.4 R1 REGRESYON: eski `composerOpen ? MailComposer : liste` swap KALKMIŞ',
+  !/composerOpen \? \(\s*<MailComposer/.test(t));
+expectTrue('7.5 R1: Composer overlay MailComposer içerir',
+  /composerOpen && \([\s\S]{0,800}<MailComposer/.test(t));
+expectTrue('7.6 R1: overlay z-50 > fullscreen reader z-40 (composer üstte)',
+  /z-50/.test(t) && /z-40/.test(read('src/features/cases/components/MailThreadReader.tsx')));
 
 console.log('\n── 8) Boş-durum + tek mesaj + regresyonlar ───');
 expectTrue('8.1 emails.length === 0 → boş-durum kartı',

@@ -36,7 +36,7 @@ expectTrue('2.2 Wrapper switch: mode==="inline" vs fullscreen',
 expectTrue('2.3 Kod çatallaması YASAK — readerBody sadece 2 defa yazılı (const + wrapper içine)',
   (r.match(/\{readerBody\}/g) ?? []).length === 2);
 
-console.log('\n── 3) Aksiyon barı — Yanıtla · İlet · Genişlet + hızlı-yanıt ─');
+console.log('\n── 3) Aksiyon barı — R2: header sağında (üstte) + alt yalnız hızlı-yanıt ─');
 expectTrue('3.1 Yanıtla button → onReply(email)',
   /onClick=\{\(\)\s*=>\s*onReply\(email\)\}/.test(r));
 expectTrue('3.2 İlet button → onForward(email)',
@@ -47,6 +47,17 @@ expectTrue('3.4 Küçült fullscreen modda → onCollapse',
   /onClick=\{onCollapse\}[\s\S]{0,300}Küçült/.test(r));
 expectTrue('3.5 Hızlı-yanıt çubuğu → onQuickReply(email)',
   /onClick=\{\(\)\s*=>\s*onQuickReply\(email\)\}[\s\S]{0,300}Hızlı yanıt yaz/.test(r));
+
+// R2: aksiyon barı ÜST başlığa taşındı; alt kenarda YALNIZ hızlı-yanıt
+expectTrue('3.6 R2: Yanıtla button header sağında (Genişlet ile aynı flex row)',
+  /R2[\s\S]{0,600}Yanıtla[\s\S]{0,400}İlet[\s\S]{0,400}Genişlet/.test(r));
+expectTrue('3.7 R2 REGRESYON: alt kenar yorumu "YALNIZ hızlı-yanıt"',
+  /R2[\s\S]{0,300}YALNIZ hızlı-yanıt/.test(r));
+expectTrue('3.8 R2 REGRESYON: alt kenar Yanıtla/İlet BUTONLARI KALKMIŞ',
+  // Alt bar bloğunda "Yanıtla" bulunmamalı — sadece "Hızlı yanıt yaz"
+  !/border-t border-slate-200 bg-white px-3 py-2[\s\S]{0,400}Yanıtla/.test(r));
+expectTrue('3.9 Header shrink-0 → uzun mail scroll\'da sabit görünür',
+  /Header[\s\S]{0,50}subject[\s\S]{0,50}ayrıntılar[\s\S]{0,200}shrink-0 border-b/.test(r));
 
 console.log('\n── 4) Hit target ≥36px (aksiyon) / ≥40px (hızlı-yanıt) ─');
 expectTrue('4.1 Aksiyon butonları min-h-[36px]',
