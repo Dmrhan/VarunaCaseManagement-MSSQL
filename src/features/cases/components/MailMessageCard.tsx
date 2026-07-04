@@ -107,7 +107,56 @@ export function MailMessageCard({
     const cidJobs: Array<Promise<void>> = [];
     for (const img of imgs) {
       const src = (img.getAttribute('src') ?? '').trim();
-      if (!src.toLowerCase().startsWith('cid:')) continue;
+      const isCidSrc = src.toLowerCase().startsWith('cid:');
+      const isEmptySrc = !src;
+      if (!isCidSrc && !isEmptySrc) continue;
+
+      // FIX 2 (2026-07-04) — Eski mailler için zarif iyileşme.
+      // Parser fix'i öncesi kayıtlarda sanitize `data:` src'yi söktü →
+      // <img> src'siz DB'de. Bu img'ler için alt attribute (mailparser
+      // "image.png" alt'ı koyabilir) + isInline aday eşleştirmesi:
+      //   1. Alt attribute'ta fileName eşleşen inline aday varsa → onu render
+      //   2. Tek inline aday (legacy, contentId==null) varsa → onu render
+      //   3. Yoksa net placeholder "Gömülü görsel — ekte: {names}"
+      if (isEmptySrc) {
+        const alt = (img.getAttribute('alt') ?? '').trim();
+        const inlineCandidates = email.attachments.filter((x) => x.isInline);
+        let heuristicMatch: { id: string; fileName: string } | null = null;
+        if (alt) {
+          const byName = inlineCandidates.find((x) => x.fileName === alt);
+          if (byName) heuristicMatch = { id: byName.id, fileName: byName.fileName };
+        }
+        if (!heuristicMatch && inlineCandidates.length === 1 && inlineCandidates[0].contentId == null) {
+          heuristicMatch = { id: inlineCandidates[0].id, fileName: inlineCandidates[0].fileName };
+        }
+        if (heuristicMatch) {
+          const m = heuristicMatch;
+          cidJobs.push((async () => {
+            const out = await caseEmailService.getAttachmentDownload(caseId, email.id, m.id);
+            if (out?.url) {
+              img.setAttribute('src', out.url);
+              if (!img.getAttribute('alt')) img.setAttribute('alt', m.fileName);
+            } else {
+              const ph = doc.createElement('span');
+              ph.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500');
+              ph.textContent = `🖼 ${escapeHtml(m.fileName)}`;
+              img.replaceWith(ph);
+            }
+          })());
+          continue;
+        }
+        const placeholder = doc.createElement('span');
+        placeholder.setAttribute('class', 'inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700');
+        const inlineNames = inlineCandidates.map((x) => x.fileName).join(', ');
+        placeholder.textContent = isOldMailNoEmailAtt
+          ? `🖼 Eski mail — inline görsel desteklenmiyor`
+          : inlineNames
+            ? `🖼 Gömülü görsel — ekte: ${inlineNames}`
+            : `🖼 ${alt || 'görsel'} (kaynak bulunamadı)`;
+        img.replaceWith(placeholder);
+        continue;
+      }
+
       const cid = src.slice(4).trim();
       const stripped = cid.replace(/^<|>$/g, '');
       const match = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
