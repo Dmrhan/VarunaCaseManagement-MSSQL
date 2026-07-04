@@ -4,6 +4,7 @@ import type { Case } from '../types';
 import { caseService } from '@/services/caseService';
 import { useAuth } from '@/services/AuthContext';
 import { useToast } from '@/components/ui/Toast';
+import { isSubjectNormalized, normalizeSubject } from '@/lib/subjectNormalizer';
 
 const MAX_LEN = 200;
 const CLOSED_STATUSES: ReadonlyArray<Case['status']> = ['Çözüldü', 'İptalEdildi'];
@@ -81,10 +82,17 @@ export function CaseTitleEditable({ item, onUpdated }: Props) {
   }
 
   if (!editing) {
+    // 2026-07-04 PR-2 — Görüntü normalize (Re:/Fw:/[EXTERNAL] temizle);
+    // ham başlık tooltip'te. Edit modunda ham (aşağıda draft = item.title).
+    const displayTitle = normalizeSubject(item.title);
+    const showTooltip = isSubjectNormalized(item.title);
     return (
       <div className="mt-0.5 flex items-start gap-1.5">
-        <h1 className="truncate text-lg font-semibold text-slate-900 dark:text-ndark-text">
-          {item.title}
+        <h1
+          className="truncate text-lg font-semibold text-slate-900 dark:text-ndark-text"
+          title={showTooltip ? item.title : undefined}
+        >
+          {displayTitle}
         </h1>
         {canEdit && (
           <button

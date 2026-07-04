@@ -24,7 +24,8 @@
  *  - From tek alias → dropdown YOK + default seçili
  *  - Cc/Bcc → varsayılan gizli (toggle ile aç)
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { MAIL_TYPE } from '../lib/mailTypography';
 import DOMPurify from 'dompurify';
 import { Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -38,6 +39,7 @@ import {
 } from '@/services/caseEmailService';
 import { ContactPicker } from './ContactPicker';
 import { RichTextEditor, type PasteImageResult } from './RichTextEditor';
+import { normalizeSubject } from '@/lib/subjectNormalizer';
 import type { Case, CaseFile } from '../types';
 
 // Ctrl+V inline görsel için sıkı kısıt (composer-özgü):
@@ -90,6 +92,39 @@ export interface MailComposerProps {
   onSent?: () => void;
   /** Vazgeç butonu. */
   onCancel?: () => void;
+  /**
+   * 2026-07-04 PR-2 R5+R7 — Layout modu:
+   *  - 'overlay' (default) → fullscreen mail yazma alanı (Yeni e-posta,
+   *    İlet, inline'dan Büyüt). MailComposer'ın kendi CSS wrapper'ı
+   *    yerine parent'ın verdiği alan; ancak buton alt satırı sabit.
+   *  - 'inline' → Reader body altında kompakt satır-içi Yanıtla
+   *    (Gmail paritesi). Kompakt üst özet + Ayrıntılar toggle + editör +
+   *    Gönder/Vazgeç/Ek/Büyüt.
+   * TEK bileşen kuralı: mod prop'u DEĞİŞTİĞİNDE state korunur
+   * (component instance aynı); "Büyüt" tıklamada taslak otomatik taşınır.
+   */
+  layoutMode?: 'overlay' | 'inline';
+  /** Inline'dan overlay'a taşı ("Büyüt" ikonu). layoutMode='inline' için. */
+  onGrow?: () => void;
+  /**
+   * R10.1 — Dock görünüm varyantı (fs+inline). true iken:
+   *  - Header (E-Postayı Yanıtla) + Müşteri/Kimden/Konu alanları ayrıntılara alınır
+   *  - Üstte tek satır özet: "Yanıtla → [Kime chip'leri] · ayrıntılar ▾"
+   *  - Editor mount'ta autofocus
+   *  - Kimden alias tanımsız uyarısı özet satırında kompakt kalır (gönderim engelini gizleme)
+   * Aynı MailComposer instance — sadece görünüm varyantı.
+   */
+  compactDock?: boolean;
+  /**
+   * R10.1 — ESC ile composer'dan çıkış zinciri. Parent (CommunicationTab)
+   * ESC yakalar → ref.current?.() çağırır → composer içi:
+   *   - onay modalı açıksa modalı kapatır (ikinci ESC = vazgeç)
+   *   - DIRTY ise onay modalı açar
+   *   - temizse doğrudan onCancel çağırır
+   * Parent kontrol için imperative ref alır. Verilmezse composer eskisi
+   * gibi Vazgeç butonu + onCancel'a bağlı kalır.
+   */
+  cancelRequestRef?: MutableRefObject<(() => void) | null>;
 }
 
 interface UploadedFileRef {
@@ -116,8 +151,15 @@ export function MailComposer({
   initialComposedSignatureHtml = null,
   onSent,
   onCancel,
+  layoutMode = 'overlay',
+  onGrow,
+  compactDock = false,
+  cancelRequestRef,
 }: MailComposerProps) {
   const { toast } = useToast();
+  // R7 (2026-07-04) — Advanced toggle: Cc/Bcc/İmza/Şablon kompakt gizli
+  // (kullanıcı direktifi tutarlılık — inline & overlay AYNI desen).
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [aliases, setAliases] = useState<FromAliasOption[]>([]);
   const [fromId, setFromId] = useState<string>('');
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
@@ -167,9 +209,21 @@ export function MailComposer({
   // Codex P2 fix — body'de o an "etkin" imzayı takip et. Dropdown değişiminde
   // body'deki ESKİ imzayı yeni seçimle SWAP edebilelim diye ref'te tut.
   const currentSignatureHtmlRef = useRef<string | null>(initialSelectedSignatureHtml);
-  const [subject, setSubject] = useState<string>(
-    initialReplyContext?.subject ?? initialForwardContext?.subject ?? '',
-  );
+  // 2026-07-04 PR-2 — Reply/forward açılışında subject normalize (yığın
+  // "RE: Re: [EXTERNAL] RE: RE:" gürültüsü tek RE:'ye iner; [UNV-x]
+  // token korunur — backend applyCaseTokenToSubject de idempotent).
+  // Header threading (In-Reply-To/References) subject'ten bağımsız →
+  // dış istemci threading'i etkilenmez. Kullanıcı manuel editleyebilir
+  // (state ilk mount initializer'da; sonraki edit'ler ham).
+  const [subject, setSubject] = useState<string>(() => {
+    const raw = initialReplyContext?.subject ?? initialForwardContext?.subject ?? '';
+    if (!raw) return '';
+    const clean = normalizeSubject(raw);
+    if (!clean) return raw;
+    if (initialReplyContext) return clean.startsWith('RE:') ? clean : `RE: ${clean}`;
+    if (initialForwardContext) return clean.startsWith('Fwd:') ? clean : `Fwd: ${clean}`;
+    return clean;
+  });
   // Composer açıldıktan SONRA gelen imza için (slow network):
   // useState initializer prop güncellenince yeniden çağrılmaz; o yüzden
   // baseline body'yi ref'te tutarız ve effect ile imza bir kez append edilir.
@@ -285,6 +339,42 @@ export function MailComposer({
   }, [signatureSelection, agentHtml, composedHtml, initialForwardContext]);
   const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
   const [uploading, setUploading] = useState(false);
+
+  // R10.1 — ESC ile Vazgeç zinciri: dirty baseline + confirm modal.
+  const initialToRef = useRef<ContactPickerValue[]>(initialReplyContext?.to ?? []);
+  const initialCcRef = useRef<ContactPickerValue[]>(initialReplyContext?.cc ?? []);
+  const initialBccRef = useRef<ContactPickerValue[]>(initialReplyContext?.bcc ?? []);
+  const initialSubjectRef = useRef<string>(subject);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  const isDirty = useMemo(() => {
+    if (bodyHtml !== initialBaselineBodyRef.current) return true;
+    if (attachments.length > 0) return true;
+    if (subject !== initialSubjectRef.current) return true;
+    const eqList = (a: ContactPickerValue[], b: ContactPickerValue[]) =>
+      a.length === b.length && a.every((x, i) => x.address === b[i]?.address);
+    if (!eqList(to, initialToRef.current)) return true;
+    if (!eqList(cc, initialCcRef.current)) return true;
+    if (!eqList(bcc, initialBccRef.current)) return true;
+    return false;
+  }, [bodyHtml, attachments, subject, to, cc, bcc]);
+
+  const requestCancel = useCallback(() => {
+    // 3-durum:
+    //   (a) confirm modalı zaten açık → modal kapan (ikinci ESC = vazgeç)
+    //   (b) dirty → modal aç
+    //   (c) temiz → doğrudan onCancel
+    if (showCancelConfirm) { setShowCancelConfirm(false); return; }
+    if (isDirty) { setShowCancelConfirm(true); return; }
+    onCancel?.();
+  }, [showCancelConfirm, isDirty, onCancel]);
+
+  useEffect(() => {
+    if (!cancelRequestRef) return;
+    cancelRequestRef.current = requestCancel;
+    return () => { if (cancelRequestRef) cancelRequestRef.current = null; };
+  }, [cancelRequestRef, requestCancel]);
+
   // Codex P2 R1 fix: çoklu paste'te uploading boolean tek bit — ilk upload
   // bitince false'a düşer, diğerleri hâlâ pending. Sayaç ile pendingPastes
   // === 0 olana kadar canSend disable.
@@ -591,31 +681,84 @@ export function MailComposer({
       ? 'E-Postayı İlet'
       : 'Yeni E-posta';
 
+  const summaryVerb = mode === 'reply' ? 'Yanıtla →' : mode === 'forward' ? 'İlet →' : 'Yeni mail →';
+  const closeAndCancel = () => { setShowCancelConfirm(false); onCancel?.(); };
+
   return (
     // M6.3-realign — TAM EKRAN composer. Parent (CommunicationTab)
     // composer açıkken thread'i gizler; bu container thread alanını
     // doldurur.
-    <div className="rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h3>
-        {item.caseNumber && (
-          <span className="text-[10px] text-slate-500 dark:text-ndark-muted">
-            [{item.caseNumber}]
-          </span>
-        )}
-      </div>
+    // R10.1 — relative: iç confirm modalı absolute inset-0 ile bunun içinde açılır.
+    <div className="relative rounded-lg border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
+      {/* Header — compactDock modunda gizli (fs bar zaten context taşır) */}
+      {!compactDock && (
+        <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 dark:border-ndark-border">
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h3>
+          {item.caseNumber && (
+            <span className={`${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>
+              [{item.caseNumber}]
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-3 p-3">
-        {/* Müşteri (read-only — vaka context'i) */}
+        {/* R10.1 — Dock kompakt özet satırı: verb + Kime chip'ler + ayrıntılar
+            toggle. Kime düzenlenmek istenirse Ayrıntılar açılır. */}
+        {compactDock && (
+          <div className={`flex items-center gap-2 ${MAIL_TYPE.t2}`}>
+            <span className="shrink-0 font-medium text-slate-500 dark:text-ndark-muted">{summaryVerb}</span>
+            <div className="min-w-0 flex-1 truncate">
+              {to.length === 0 ? (
+                <span className="italic text-slate-400 dark:text-ndark-muted">(alıcı yok — Ayrıntılar'dan ekleyin)</span>
+              ) : (
+                to.map((r, i) => (
+                  <span
+                    key={`${r.address}-${i}`}
+                    className={`mr-1 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 ${MAIL_TYPE.t2} text-slate-700 dark:bg-ndark-bg dark:text-ndark-text`}
+                    title={r.address}
+                  >
+                    {r.name || r.address}
+                  </span>
+                ))
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className={`shrink-0 inline-flex items-center gap-1 ${MAIL_TYPE.t2} text-slate-500 hover:text-slate-700 dark:text-ndark-muted`}
+              aria-expanded={showAdvanced}
+              title="Müşteri / Kimden / Kime / Cc / Bcc / Konu / İmza / Şablon"
+            >
+              <span>{showAdvanced ? '▾' : '▸'}</span>
+              ayrıntılar
+            </button>
+          </div>
+        )}
+        {/* R10.1 — Alias tanımsız uyarısı kompakt özette de görünür kalır
+            (gönderim engelini gizleme). Kısa versiyon: bar/link/mesaj tek satır. */}
+        {compactDock && noAliasesConfigured && (
+          <div
+            className={`rounded-md border border-amber-300 bg-amber-50 px-2 py-1 ${MAIL_TYPE.t1} text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200`}
+            role="alert"
+          >
+            <b>Kimden tanımsız:</b> "{item.companyName}" için gönderen adresi yok
+            (Ayrıntılar → Kimden altında yönlendirme).
+          </div>
+        )}
+
+        {/* Müşteri — compactDock'ta yalnız Ayrıntılar altında */}
+        {(!compactDock || showAdvanced) && (
         <Field label="Müşteri">
           <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-700 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-text">
             {item.accountName || item.customerCompanyName || item.customerContactName || item.customerContactEmail || '—'}
           </div>
         </Field>
+        )}
 
         {/* From — Codex fix: HER ZAMAN görünür (n4b paritesi). Boş ise net
-            uyarı + Send pasif. */}
+            uyarı + Send pasif. R10.1 — compactDock'ta Ayrıntılar altında. */}
+        {(!compactDock || showAdvanced) && (
         <Field label="Kimden">
           {noAliasesConfigured ? (
             <div
@@ -648,8 +791,11 @@ export function MailComposer({
             </select>
           )}
         </Field>
+        )}
 
-        {/* To/Cc/Bcc — n4b: 3'ü de görünür */}
+        {/* Kime — kompakt dock DIŞINDA her zaman görünür; dock modunda
+            özet satırında chip'ler var + Ayrıntılar altında düzenlenir. */}
+        {(!compactDock || showAdvanced) && (
         <ContactPicker
           label="Kime"
           values={to}
@@ -657,31 +803,45 @@ export function MailComposer({
           suggestions={suggestions}
           disabled={submitting}
         />
-        <ContactPicker
-          label="Kopya (Cc)"
-          values={cc}
-          onChange={setCc}
-          suggestions={suggestions}
-          disabled={submitting}
-        />
-        <ContactPicker
-          label="Gizli Kopya (Bcc)"
-          values={bcc}
-          onChange={setBcc}
-          suggestions={suggestions}
-          disabled={submitting}
-        />
+        )}
+        {/* R7 + R10.1 — Ayrıntılar toggle: dock'ta özet satırında zaten var,
+            gizli. Overlay/tab-içi'nde satır-içi toggle mevcut kalır. */}
+        {!compactDock && (
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-ndark-muted"
+          aria-expanded={showAdvanced}
+        >
+          <span>{showAdvanced ? '▾' : '▸'}</span>
+          ayrıntılar (Cc / Bcc / İmza / Şablon)
+        </button>
+        )}
+        {showAdvanced && (
+          <>
+            <ContactPicker
+              label="Kopya (Cc)"
+              values={cc}
+              onChange={setCc}
+              suggestions={suggestions}
+              disabled={submitting}
+            />
+            <ContactPicker
+              label="Gizli Kopya (Bcc)"
+              values={bcc}
+              onChange={setBcc}
+              suggestions={suggestions}
+              disabled={submitting}
+            />
+          </>
+        )}
         {/* Visibility toggles geri uyumluluk için sessizce mantıkta;
             UI'da herzaman görünür. */}
         <input type="hidden" value={showCc ? '1' : '0'} onChange={() => undefined} />
         <input type="hidden" value={showBcc ? '1' : '0'} onChange={() => undefined} />
 
-        {/* Compose-Signature F3 — Kompoze imza, 2-opsiyon dropdown.
-            "İmzam" = override (User.signatureHtml) ?? composedHtml
-            (şirket şablonu + Person.name + Person.title).
-            "İmzasız" = imzayı gönderme.
-            Tenant raw seçeneği KALDIRILDI (composed zaten şirket bloğunu
-            içerir; ikinci yer kafa karıştırırdı). */}
+        {/* Compose-Signature F3 — Kompoze imza (Ayrıntılar altında, R7). */}
+        {showAdvanced && (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="İmza">
             <select
@@ -726,8 +886,10 @@ export function MailComposer({
             </select>
           </Field>
         </div>
+        )}
 
-        {/* Subject */}
+        {/* Subject — compactDock'ta Ayrıntılar altında (reply RE: otomatik değeri korunur). */}
+        {(!compactDock || showAdvanced) && (
         <Field label="Konu">
           <TextInput
             value={subject}
@@ -742,6 +904,7 @@ export function MailComposer({
             }
           />
         </Field>
+        )}
 
         {/* Attachments */}
         <Field label="Eklentiler">
@@ -766,7 +929,7 @@ export function MailComposer({
             >
               {uploading ? 'Yükleniyor…' : 'Dosya Ekle'}
             </Button>
-            <span className="text-[11px] text-slate-500 dark:text-ndark-muted">veya sürükle-bırak</span>
+            <span className={`${MAIL_TYPE.t1} text-slate-500 dark:text-ndark-muted`}>veya sürükle-bırak</span>
             {attachments.map((a) => (
               <span
                 key={a.id}
@@ -779,7 +942,7 @@ export function MailComposer({
               >
                 <Paperclip size={11} />
                 {a.fileName}
-                {a.inline && <span className="text-[10px] opacity-70">(gövde)</span>}
+                {a.inline && <span className={`${MAIL_TYPE.t1} opacity-70`}>(gövde)</span>}
                 {/* Codex P2 R1: inline pill'de Kaldır butonu YOK — kullanıcı
                     click'lerse attachments düşer ama bodyHtml'de <img> kalır
                     → orphan CID → müşteride broken image. Inline'ı editörden
@@ -803,7 +966,7 @@ export function MailComposer({
         <Field label="Metin">
           {previewing ? (
             <div className="rounded-md border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
-              <div className="border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
+              <div className={`border-b border-slate-100 px-3 py-1.5 ${MAIL_TYPE.t1} text-slate-500 dark:border-ndark-border dark:text-ndark-muted`}>
                 Önizleme (sanitize edilmiş)
               </div>
               <div
@@ -817,6 +980,7 @@ export function MailComposer({
               onChange={setBodyHtml}
               disabled={submitting}
               onPasteImage={handlePasteImage}
+              autoFocus={compactDock}
             />
           )}
         </Field>
@@ -824,8 +988,21 @@ export function MailComposer({
 
       {/* Footer */}
       <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 dark:border-ndark-border">
+        {/* R5 — Büyüt (yalnız inline mode): tam alan overlay'a taşı, taslak korunur. */}
+        {layoutMode === 'inline' && onGrow && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onGrow}
+            disabled={submitting}
+            title="Tam ekran composer'a taşı (taslak korunur)"
+            className="mr-auto"
+          >
+            Büyüt ↗
+          </Button>
+        )}
         {onCancel && (
-          <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
+          <Button type="button" variant="ghost" onClick={requestCancel} disabled={submitting}>
             Vazgeç
           </Button>
         )}
@@ -849,6 +1026,47 @@ export function MailComposer({
         </Button>
       </div>
 
+      {/* R10.1 — Vazgeç onay modalı. ESC ile veya Vazgeç butonuyla tetiklenir;
+          composer dirty ise buradan geçer. İkinci ESC modalı kapatır (composer
+          açık kalır, taslak durur). "Kapat" onaylanırsa onCancel çalışır. */}
+      {showCancelConfirm && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowCancelConfirm(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Vazgeç onayı"
+            className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl dark:bg-ndark-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-ndark-text">
+              Taslak kaydedilmez. Kapatılsın mı?
+            </h3>
+            <p className="mb-3 text-xs text-slate-500 dark:text-ndark-muted">
+              Yazdıklarınız kaybolacak. ESC ile vazgeç, "Kapat" ile taslağı bırak.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowCancelConfirm(false)}
+              >
+                Vazgeç
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={closeAndCancel}
+              >
+                Kapat
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* M6.3b Faz 3 — Şablon uygulama onay modalı.
           n4b S11 endüstri parite: subject replace onayı.
           Codex P2 fix: missing placeholder uyarısı. */}
@@ -870,7 +1088,7 @@ export function MailComposer({
                 <p className="mt-1 font-mono">
                   {pendingTemplate.missing.map((m) => `{{${m}}}`).join(', ')}
                 </p>
-                <p className="mt-1 text-[10px] opacity-80">
+                <p className={`mt-1 ${MAIL_TYPE.t1} opacity-80`}>
                   Şablonu uyguladıktan sonra metinde boşluk varsa kontrol edin.
                 </p>
               </div>

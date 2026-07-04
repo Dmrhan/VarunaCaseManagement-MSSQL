@@ -92,6 +92,7 @@ function shape(row) {
     refs: row.refs,
     visibility: row.visibility,
     sentByUserId: row.sentByUserId,
+    sentByName: row.sentBy?.fullName ?? null,
     dispatchId: row.dispatchId,
     sentAt: row.sentAt,
     receivedAt: row.receivedAt,
@@ -403,6 +404,7 @@ async function listForCase(caseId, { allowedCompanyIds } = {}) {
       attachments: {
         select: { id: true, fileName: true, mimeType: true, fileSize: true, contentId: true, isInline: true },
       },
+      sentBy: { select: { fullName: true } },
     },
   });
   // Codex review fix — ASIL sıra coalesce(receivedAt, sentAt); createdAt
@@ -432,6 +434,7 @@ async function getById(id, { allowedCompanyIds } = {}) {
     where: { id },
     include: {
       attachments: true,
+      sentBy: { select: { fullName: true } },
     },
   });
   if (!row) return null;

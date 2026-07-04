@@ -180,10 +180,11 @@ interface CaseDetailPageProps {
   onOpenAccount?: (accountId: string) => void;
 }
 
-// onShowCustomer prop'u header müşteri butonu kaldırıldı; başka yerden çağrılırsa
-// caller'da etkisi yok (opsiyonel kalır). Şu an iç kullanım yok — sessizce alındı.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
+// R10.3 (2026-07-04) — onShowCustomer yeniden aktif tüketici: CommunicationTab
+// tam-ekran başlık barı müşteri linki App'in CustomerCardModal'ını açar
+// (Detay sekmesindeki kardeş kullanım deseni — accounts sayfası navigasyonu
+// DEĞİL). eslint yorumu ve _prefix kaldırıldı.
+export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }: CaseDetailPageProps) {
   const { user } = useAuth();
   // Phase D + Agent/Backoffice genişletmesi — tüm operasyon rolleri müşteri
   // eşleştirebilir. Öğrenme (learned sender) yalnız Supervisor+ kararından
@@ -207,6 +208,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
   const [navStack, setNavStack] = useState<{ id: string; caseNumber: string; accountName: string }[]>([]);
 
   const [tab, setTab] = useState<TabKey>('detail');
+  // 2026-07-04 PR-2 — Mail-kaynaklı vakada default sekme = İletişim.
+  // Guard (kullanıcı direktifi): OTURUM içinde kullanıcının sekme seçimi
+  // ezilmez. Ref bir kez apply eder; kullanıcı manuel değiştirdiyse
+  // sonraki item update'lerinde re-apply YOK.
+  const initialTabAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!item || initialTabAppliedRef.current) return;
+    initialTabAppliedRef.current = true;
+    if (item.origin === 'E-posta') {
+      setTab('communication');
+    }
+  }, [item]);
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
@@ -1107,6 +1120,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
             />
           </nav>
 
+          {/* R15 M1 — Tum sekmeler ayni wrapper (overflow-y-auto p-6). */}
           <div className="flex-1 overflow-y-auto p-6">
             {tab === 'detail' && (
               <DetailTab
@@ -1160,6 +1174,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
               // yakalar (network fail / stale index.js sonrası kaldırılmış
               // chunk request'i). Aksi halde hata yukarı fırlar ve case
               // sayfasını çökertir (uygulamada üst error boundary yok).
+              // R15 M1 — className geçmez (sayfa akışına döndü).
               <LazyTabBoundary label="İletişim sekmesi yüklenemedi.">
                 <Suspense
                   fallback={
@@ -1179,6 +1194,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                         if (c) setItem(c);
                       });
                     }}
+                    onShowCustomer={onShowCustomer}
                   />
                 </Suspense>
               </LazyTabBoundary>

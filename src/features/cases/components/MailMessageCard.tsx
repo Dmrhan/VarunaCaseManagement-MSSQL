@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, Download, Eye, Paperclip, Reply } from 'lucide-react';
 import { sanitizeMailHtml } from '@/lib/sanitizeMailHtml';
+import { normalizeSubject } from '@/lib/subjectNormalizer';
 import type { CaseEmailItem } from '../../../services/caseEmailService';
 import { caseEmailService } from '../../../services/caseEmailService';
 
@@ -360,8 +361,9 @@ export function MailMessageCard({
         </td>
         <td className="max-w-[280px] truncate px-2 py-2 align-top">
           <div className="flex items-center gap-1">
+            {/* 2026-07-04 PR-2 — normalize + ham konu tooltip'te */}
             <span className="truncate font-medium text-slate-800 dark:text-ndark-text" title={email.subject}>
-              {email.subject || '(konusuz)'}
+              {normalizeSubject(email.subject) || '(konusuz)'}
             </span>
             {email.attachments.length > 0 && (
               <span
