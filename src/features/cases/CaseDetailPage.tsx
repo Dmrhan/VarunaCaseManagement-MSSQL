@@ -207,6 +207,18 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
   const [navStack, setNavStack] = useState<{ id: string; caseNumber: string; accountName: string }[]>([]);
 
   const [tab, setTab] = useState<TabKey>('detail');
+  // 2026-07-04 PR-2 — Mail-kaynaklı vakada default sekme = İletişim.
+  // Guard (kullanıcı direktifi): OTURUM içinde kullanıcının sekme seçimi
+  // ezilmez. Ref bir kez apply eder; kullanıcı manuel değiştirdiyse
+  // sonraki item update'lerinde re-apply YOK.
+  const initialTabAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!item || initialTabAppliedRef.current) return;
+    initialTabAppliedRef.current = true;
+    if (item.origin === 'E-posta') {
+      setTab('communication');
+    }
+  }, [item]);
   const [previousCases, setPreviousCases] = useState<Case[]>([]);
   const [callActive, setCallActive] = useState(false);
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);

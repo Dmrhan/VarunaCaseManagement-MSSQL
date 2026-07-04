@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkey } from '@/lib/useHotkey';
+import { isSubjectNormalized, normalizeSubject } from '@/lib/subjectNormalizer';
 import { featureFlags } from '@/config/featureFlags';
 import {
   AlertCircle,
@@ -1426,8 +1427,12 @@ export function CasesListPage({
                     <Td className="font-mono text-xs text-slate-600 dark:text-ndark-muted">{c.caseNumber}</Td>
                     <Td className="max-w-[360px]">
                       <div className="flex items-center gap-1.5">
-                        <div className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text">
-                          {c.title}
+                        {/* 2026-07-04 PR-2 — subject normalize + tooltip */}
+                        <div
+                          className="truncate text-sm font-medium text-slate-900 dark:text-ndark-text"
+                          title={isSubjectNormalized(c.title) ? c.title : undefined}
+                        >
+                          {normalizeSubject(c.title)}
                         </div>
                         {(c.linkCount ?? 0) > 0 && (
                           <span

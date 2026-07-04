@@ -1,21 +1,29 @@
 /**
- * Mail M6.1 + M6.2b + M6.3-realign — Case Detail "İletişim" sekmesi.
+ * Case Detail "İletişim" sekmesi — PR-2 Aşama A yeniden tasarım.
  *
- * n4b paritesi (M6.3-realign):
- *  - E-Posta sekmesi = TABLO (yön / from / to / cc / bcc / tarih /
- *    konu+ek / aksiyonlar).
- *  - Üstte SADECE "+ Yeni e-posta" — "Yanıtla" KALDIRILDI (satır içi
- *    aksiyona taşındı).
- *  - Composer = TAM EKRAN: thread'in yerini alır; Vazgeç ile thread'e
- *    döner.
- *  - Satır ikonları: Görüntüle / Yanıtla (reply-all) / İlet (forward).
+ * ESKİ: 8 kolonlu tablo (MailThread) + tam-ekran composer.
+ * YENİ: dikey usta-detay (üst kompakt liste + alt MailThreadReader) +
+ *   Genişlet aksiyon → aynı reader fullscreen overlay.
+ *
+ * Yerleşim grameri DEĞİŞMEDİ (3 kolon + sekmeler aynen); yalnız
+ * İletişim sekmesinin İÇİ.
+ *
+ * TEK BİLEŞEN İKİ BOYUTTA (kod çatallaması yasak):
+ *   readerMode='inline'     → dikey usta-detay altında
+ *   readerMode='fullscreen' → MailThreadReader kendi overlay'ini açar
+ *
+ * Composer flow (kullanıcı direktifi):
+ *   - Composer açık → composer görünür, reader/liste gizli
+ *   - Gönderim sonrası → BULUNDUĞU görünüme dönüş (readerMode korunur)
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
-import { MailThread, type MailThreadHandle } from './MailThread';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, AtSign, Globe, Info, MessageSquare, Paperclip, Phone, Plus } from 'lucide-react';
 import { MailComposer } from './MailComposer';
+import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader';
 import { Button } from '@/components/ui/Button';
 import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
+import { normalizeSubject } from '@/lib/subjectNormalizer';
+import { formatDateTime } from '@/lib/format';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -34,15 +42,30 @@ const CHANNELS: ChannelConfig[] = [
   { key: 'incoming-call', label: 'Gelen Aramalar', icon: <Phone size={14} />,            enabled: false },
 ];
 
+// Split ratio localStorage kuralı — kullanıcı direktifi guard'ları:
+const SPLIT_STORAGE_KEY = 'pr2.commTab.splitRatio';
+const SPLIT_DEFAULT = 0.35;
+const SPLIT_MIN = 0.20;
+const SPLIT_MAX = 0.60;
+
+function loadSplitRatio(): number {
+  try {
+    const raw = localStorage.getItem(SPLIT_STORAGE_KEY);
+    if (!raw) return SPLIT_DEFAULT;
+    const v = Number.parseFloat(raw);
+    if (!Number.isFinite(v) || v < SPLIT_MIN || v > SPLIT_MAX) return SPLIT_DEFAULT;
+    return v;
+  } catch {
+    return SPLIT_DEFAULT;
+  }
+}
+
+function saveSplitRatio(v: number): void {
+  try { localStorage.setItem(SPLIT_STORAGE_KEY, String(v)); } catch { /* no-op */ }
+}
+
 interface Props {
   item: Case;
-  /**
-   * Codex P2 fix (M6.3b Faz 1) — Send sonrası parent Case yeniden
-   * çekilmeli. Backend appendOutbound K4 mantığını günceller
-   * (pendingCustomerReply=false yapar), ama header badge stale item'dan
-   * render edildiği için reload olmadan kaybolmaz. Parent caseService.get
-   * + setItem yapsın diye callback.
-   */
   onCaseShouldRefresh?: () => void;
 }
 
@@ -51,32 +74,27 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
   const [forwardCtx, setForwardCtx] = useState<ForwardContext | null>(null);
-  // M6.3b Faz 2 — composer artık tenant + agent imza ayrı alır.
   const [tenantSignatureHtml, setTenantSignatureHtml] = useState<string | null>(null);
   const [agentSignatureHtml, setAgentSignatureHtml] = useState<string | null>(null);
-  // Compose-Signature F3 — Tenant şablonu Person.name + Person.title ile
-  // render edilmiş "effective" şirket imzası. Composer dropdown'unda
-  // "İmzam" varsayılanı override (agent) yoksa bunu kullanır.
   const [composedSignatureHtml, setComposedSignatureHtml] = useState<string | null>(null);
-  // Codex fix — Reply/Forward konu prefill: composer açıkken mode değişirse
-  // (örn. reply açıkken forward'a geç) initialReplyContext/initialForwardContext
-  // prop değişiyor ama composer'ın internal state'i (subject vs.) ilk
-  // mount'ta sabitlendiği için yenilenmiyordu. composeKey her openX'te
-  // değişir → composer remount → useState initializer subject'i yeni
-  // ctx.subject ile doldurur.
   const [composeKey, setComposeKey] = useState(0);
-  // M6.3-realign — config-yok hali. mailConfigState:
-  //   'loading'   → aliases fetch'i bekleniyor (ilk render)
-  //   'configured'→ 1+ alias var, normal akış
-  //   'missing'   → 0 alias, "Mail entegrasyonu yapılandırılmamış" banner
   const [mailConfigState, setMailConfigState] = useState<'loading' | 'configured' | 'missing'>('loading');
-  // Banner mesajını "kapalı" vs "yapılandırılmamış" ayırt etmek için reason'ı tutuyoruz
   const [missingReason, setMissingReason] = useState<EmailConfigReason | null>(null);
-  const threadRef = useRef<MailThreadHandle>(null);
+
+  // Mail listesi + seçim + reader modu (Aşama A yeni state)
+  const [emails, setEmails] = useState<CaseEmailItem[]>([]);
+  const [emailsLoading, setEmailsLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [readerMode, setReaderMode] = useState<MailThreadReaderMode>('inline');
+
+  // Drag-to-resize state
+  const [splitRatio, setSplitRatio] = useState<number>(() => loadSplitRatio());
+  const [dragging, setDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
-  // İmzayı sessizce yükle (silent fetch — config-yok şirketlerde 404 →
-  // toast yok, null döner). M6.3b Faz 2: bundle (tenant + agent).
+  // İmzayı sessizce yükle
   useEffect(() => {
     let alive = true;
     void caseEmailService.getEmailSignatureBundle(item.id).then((b) => {
@@ -88,11 +106,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     return () => { alive = false; };
   }, [item.id]);
 
-  // M6.3-realign (revize) — dedicated email-config endpoint'i.
-  // configured kararı backend'de listActiveWithSettingFallback'e dayanır
-  // → composer dropdown ile aynı kaynak. UNIVERA gibi config TAM +
-  // manuel FromAlias YOK senaryosunda configured=true döner
-  // (reason='fallback-from-address').
+  // Config
   useEffect(() => {
     let alive = true;
     void caseEmailService.getEmailConfig(item.id).then((cfg) => {
@@ -103,11 +117,27 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     return () => { alive = false; };
   }, [item.id]);
 
+  // Mail listesi — refresh callback
+  const loadEmails = useCallback(async () => {
+    setEmailsLoading(true);
+    const items = await caseEmailService.listEmails(item.id);
+    setEmails(items);
+    setEmailsLoading(false);
+    // Default seçim: en son mesaj (backend kronolojik → array son elemanı)
+    if (items.length > 0) {
+      setSelectedId((cur) => (cur && items.some((e) => e.id === cur)) ? cur : items[items.length - 1].id);
+    } else {
+      setSelectedId(null);
+    }
+  }, [item.id]);
+
+  useEffect(() => {
+    if (channel === 'email' && mailConfigState === 'configured') {
+      void loadEmails();
+    }
+  }, [channel, mailConfigState, loadEmails]);
+
   const openReply = useCallback(async (email?: CaseEmailItem) => {
-    // Codex P2 fix — satır içi "Yanıtla" agent'ın tıkladığı maili
-    // pass eder; backend o satırı baz alır (eski thread'de aşağıdaki
-    // mail seçilmişse o ön-doldurulur). Üst toolbar/diğer akışlardan
-    // çağrı email'siz gelirse: son inbound (eski davranış).
     const ctx = await caseEmailService.getReplyContext(item.id, email?.id);
     setReplyCtx(ctx ?? null);
     setForwardCtx(null);
@@ -131,16 +161,13 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   }, []);
 
   const handleSent = useCallback(() => {
+    // Kullanıcı direktifi: BULUNDUĞU görünüme dön — readerMode DOKUNULMAZ.
     setComposerOpen(false);
     setReplyCtx(null);
     setForwardCtx(null);
-    threadRef.current?.refresh({ scrollToLast: true });
-    // Codex P2 fix (M6.3b Faz 1) — parent Case re-fetch:
-    // appendOutbound K4 pendingCustomerReply=false yapar; header
-    // badge (CaseDetailPage) stale item'dan render edildiği için
-    // reload olmadan kaybolmaz.
+    void loadEmails();
     onCaseShouldRefresh?.();
-  }, [onCaseShouldRefresh]);
+  }, [loadEmails, onCaseShouldRefresh]);
 
   const handleCancel = useCallback(() => {
     setComposerOpen(false);
@@ -148,9 +175,46 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     setForwardCtx(null);
   }, []);
 
+  const selectedEmail = useMemo(
+    () => emails.find((e) => e.id === selectedId) ?? null,
+    [emails, selectedId],
+  );
+
+  // Drag-resize handlers
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const ratio = y / rect.height;
+      const clamped = Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, ratio));
+      setSplitRatio(clamped);
+    };
+    const onUp = () => {
+      setDragging(false);
+      // Sürükleme sonu → localStorage'a kaydet (final değer)
+      setSplitRatio((v) => { saveSplitRatio(v); return v; });
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragging]);
+
+  const resetSplit = useCallback(() => {
+    setSplitRatio(SPLIT_DEFAULT);
+    saveSplitRatio(SPLIT_DEFAULT);
+  }, []);
+
   return (
     <div className="space-y-3">
-      {/* K5 iskelet — çok-kanal tab. E-Posta dışındakiler disabled. */}
+      {/* Kanal chips */}
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-2 dark:border-ndark-border">
         {CHANNELS.map((c) => {
           const isActive = c.key === channel;
@@ -168,10 +232,6 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                     : 'text-slate-400 dark:text-ndark-muted opacity-60'
               }`}
               aria-current={isActive ? 'page' : undefined}
-              aria-label={c.enabled ? c.label : `${c.label} (yakında)`}
-              // Polish — inline "Yakında" badge KALDIRILDI; bilgi
-              // tooltip'te (title) korunur. Pasif sekmeler muted + disabled
-              // (zaten cursor-not-allowed) görsel olarak yeterince ayrışır.
               title={c.enabled ? c.label : `${c.label} — Yakında`}
             >
               {c.icon}
@@ -182,14 +242,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
       </div>
 
       {channel === 'email' && mailConfigState === 'loading' && (
-        <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">
-          Yükleniyor…
-        </div>
+        <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">Yükleniyor…</div>
       )}
 
       {channel === 'email' && mailConfigState === 'missing' && (
-        // M6.3-realign — config-yok hali. Toast yağmuru YOK; tek temiz
-        // banner. Mesaj backend'in döndürdüğü reason'a göre hassaslaşır.
         <div
           className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
           role="status"
@@ -213,7 +269,6 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
       {channel === 'email' && mailConfigState === 'configured' && (
         <>
           {composerOpen ? (
-            // M6.3-realign — TAM EKRAN composer; thread'i değiştirir.
             <MailComposer
               key={composeKey}
               item={item}
@@ -227,24 +282,126 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
             />
           ) : (
             <>
-              {/* Toolbar — n4b paritesi: sadece "+ Yeni e-posta". */}
+              {/* Toolbar — sadece Yeni e-posta */}
               <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="primary"
-                  leftIcon={<Plus size={13} />}
-                  onClick={openNew}
-                >
+                <Button type="button" variant="primary" leftIcon={<Plus size={13} />} onClick={openNew}>
                   Yeni e-posta
                 </Button>
               </div>
 
-              <MailThread
-                ref={threadRef}
-                caseId={item.id}
-                onReply={(email) => void openReply(email)}
-                onForward={(email) => void openForward(email)}
-              />
+              {emailsLoading ? (
+                <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">Yükleniyor…</div>
+              ) : emails.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-ndark-border dark:bg-ndark-card">
+                  <p className="text-sm text-slate-600 dark:text-ndark-muted">Henüz mesaj yok.</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Bu vakada gelen/giden mail bulunmuyor. "Yeni e-posta" ile yazabilirsiniz.
+                  </p>
+                </div>
+              ) : (
+                <div
+                  ref={containerRef}
+                  className="relative flex min-h-[560px] flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
+                  style={{ height: 'calc(100vh - 320px)', minHeight: 560 }}
+                >
+                  {/* ÜST — kompakt mesaj listesi */}
+                  <div
+                    className="min-h-0 shrink-0 overflow-auto bg-white dark:bg-ndark-card"
+                    style={{ height: `${splitRatio * 100}%` }}
+                  >
+                    <ul className="divide-y divide-slate-100 dark:divide-ndark-border">
+                      {emails.map((e) => {
+                        const inbound = e.direction === 'inbound';
+                        const ts = e.receivedAt ?? e.sentAt ?? e.createdAt;
+                        const isSelected = e.id === selectedId;
+                        return (
+                          <li key={e.id}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedId(e.id)}
+                              className={`flex w-full min-h-[40px] items-center gap-2 px-3 py-2 text-left text-xs transition ${
+                                isSelected
+                                  ? 'bg-brand-50 text-brand-900 dark:bg-brand-900/20 dark:text-brand-100'
+                                  : 'hover:bg-slate-50 dark:hover:bg-ndark-bg'
+                              }`}
+                              title={e.subject}
+                            >
+                              <span
+                                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                                  inbound
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                                }`}
+                                aria-label={inbound ? 'Gelen' : 'Giden'}
+                              >
+                                {inbound ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-baseline gap-1.5">
+                                  <span className="truncate font-medium text-slate-800 dark:text-ndark-text">
+                                    {e.from.name || e.from.address}
+                                  </span>
+                                  <span className="truncate text-slate-500 dark:text-ndark-muted">
+                                    {normalizeSubject(e.subject) || '(konusuz)'}
+                                    {e.bodyText && ` — ${e.bodyText.slice(0, 80)}`}
+                                  </span>
+                                </span>
+                              </span>
+                              {e.attachments.length > 0 && (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 text-slate-500 dark:text-ndark-muted">
+                                  <Paperclip size={11} />
+                                  <span>{e.attachments.length}</span>
+                                </span>
+                              )}
+                              <span className="shrink-0 text-slate-400 dark:text-ndark-muted">
+                                {formatDateTime(ts)}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+
+                  {/* Drag handle — sürükleyerek yeniden boyutlandır. Direktif:
+                      görünür (ince çizgi + hover'da belirginleşen tutamaç),
+                      ≥8px tutma alanı, cursor: row-resize, çift-tık → varsayılan. */}
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-valuemin={SPLIT_MIN * 100}
+                    aria-valuemax={SPLIT_MAX * 100}
+                    aria-valuenow={Math.round(splitRatio * 100)}
+                    tabIndex={0}
+                    onMouseDown={() => setDragging(true)}
+                    onDoubleClick={resetSplit}
+                    className="group relative flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-ndark-border dark:hover:bg-slate-700"
+                    title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (35/65)"
+                  >
+                    <span className="pointer-events-none h-0.5 w-8 rounded-full bg-slate-400 group-hover:w-12 group-hover:bg-slate-500 dark:bg-ndark-muted" />
+                  </div>
+
+                  {/* ALT — okuma alanı */}
+                  <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
+                    {selectedEmail ? (
+                      <MailThreadReader
+                        email={selectedEmail}
+                        caseId={item.id}
+                        mode={readerMode}
+                        onExpand={() => setReaderMode('fullscreen')}
+                        onCollapse={() => setReaderMode('inline')}
+                        onReply={(e) => void openReply(e)}
+                        onForward={(e) => void openForward(e)}
+                        onQuickReply={(e) => void openReply(e)}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                        Bir mesaj seçin
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </>
@@ -252,9 +409,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
 
       {channel !== 'email' && (
         <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-ndark-border dark:bg-ndark-card">
-          <p className="text-sm text-slate-600 dark:text-ndark-muted">
-            {active.label} kanalı yakında eklenecek.
-          </p>
+          <p className="text-sm text-slate-600 dark:text-ndark-muted">{active.label} kanalı yakında eklenecek.</p>
         </div>
       )}
     </div>
