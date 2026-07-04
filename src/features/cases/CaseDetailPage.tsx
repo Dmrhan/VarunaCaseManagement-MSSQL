@@ -4858,6 +4858,105 @@ function ExpandableActivityNote({ text, className }: { text: string; className: 
   );
 }
 
+// 2026-07-04 UX FIX PAKETİ PR-1 — Legacy per-file FileUploaded satırlarını
+// görünümde katlanabilir gruba düşür. Yeni intake (2026-07-04+) zaten tek
+// satır yazıyor; grouping SADECE ESKİ kayıtlarda "14 tane Dosya yüklendi"
+// selini görünüşte düzeltir. Kural: ardışık FileUploaded satırları, aynı
+// actor + ≤60sn zaman farkı → 1 grup.
+const ACTIVITY_GROUP_WINDOW_MS = 60_000;
+interface FileUploadGroupItem {
+  __group: true;
+  groupId: string;
+  items: CaseHistoryEntry[];
+  at: string;
+  actor: string;
+}
+type ActivityRenderItem = CaseHistoryEntry | FileUploadGroupItem;
+function isGroup(x: ActivityRenderItem): x is FileUploadGroupItem {
+  return (x as FileUploadGroupItem).__group === true;
+}
+function groupFileUploadedRuns(items: CaseHistoryEntry[]): ActivityRenderItem[] {
+  const out: ActivityRenderItem[] = [];
+  let buf: CaseHistoryEntry[] = [];
+  const flush = () => {
+    if (buf.length === 0) return;
+    if (buf.length === 1) {
+      out.push(buf[0]);
+    } else {
+      out.push({
+        __group: true,
+        groupId: `grp-${buf[0].id}`,
+        items: buf,
+        at: buf[0].at,
+        actor: buf[0].actor,
+      });
+    }
+    buf = [];
+  };
+  for (const h of items) {
+    if (h.actionType !== 'FileUploaded') {
+      flush();
+      out.push(h);
+      continue;
+    }
+    if (buf.length === 0) {
+      buf.push(h);
+      continue;
+    }
+    const last = buf[buf.length - 1];
+    const sameActor = last.actor === h.actor;
+    const delta = Math.abs(new Date(last.at).getTime() - new Date(h.at).getTime());
+    if (sameActor && delta <= ACTIVITY_GROUP_WINDOW_MS) {
+      buf.push(h);
+    } else {
+      flush();
+      buf.push(h);
+    }
+  }
+  flush();
+  return out;
+}
+
+function FileUploadGroupRow({ group }: { group: FileUploadGroupItem }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="relative">
+      <span className="absolute -left-[22px] top-1.5 inline-block h-3 w-3 rounded-full bg-blue-500 ring-4 ring-white" />
+      <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-baseline gap-x-1.5 text-left text-sm hover:opacity-80"
+          aria-expanded={open}
+        >
+          <Paperclip size={12} className="text-blue-700" />
+          <span className="font-medium text-blue-900">Dosya yüklendi:</span>
+          <span className="font-semibold text-slate-800">{group.items.length} dosya</span>
+          <span className="ml-auto text-[11px] text-blue-700">
+            {open ? '▾ gizle' : '▸ göster'}
+          </span>
+        </button>
+        {open && (
+          <ul className="mt-1 space-y-0.5 pl-4 text-xs text-slate-700">
+            {group.items.map((it) => (
+              <li key={it.id} className="truncate">
+                <Paperclip size={10} className="inline-block text-blue-500" />{' '}
+                <span className="font-medium">{it.toValue ?? '—'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+          <Calendar size={11} />
+          <span>{formatDateTime(group.at)}</span>
+          <span>·</span>
+          <span>{group.actor}</span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function ActivityTab({ item }: { item: Case }) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
 
@@ -4882,6 +4981,11 @@ function ActivityTab({ item }: { item: Case }) {
     if (!def) return item.history;
     return item.history.filter((h) => matchesFilter(h, def));
   }, [item.history, filter]);
+
+  // 2026-07-04 UX FIX PAKETİ PR-1 — Filtrelenmiş listeyi legacy gruplama
+  // ile view-modeline dönüştür (yeni intake tek satır yazıyor, bu no-op
+  // olur; ESKİ per-file kayıtlar tek gruba düşer).
+  const rendered = useMemo(() => groupFileUploadedRuns(filtered), [filtered]);
 
   return (
     <div className="space-y-3">
@@ -4918,13 +5022,17 @@ function ActivityTab({ item }: { item: Case }) {
         })}
       </div>
 
-      {filtered.length === 0 ? (
+      {rendered.length === 0 ? (
         <p className="py-8 text-center text-sm text-slate-500">
           Bu filtreyle eşleşen kayıt yok.
         </p>
       ) : (
         <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
-          {filtered.map((h) => {
+          {rendered.map((h) => {
+        // 2026-07-04 UX FIX PAKETİ PR-1 — Legacy FileUploaded grubu
+        if (isGroup(h)) {
+          return <FileUploadGroupRow key={h.groupId} group={h} />;
+        }
         // Dosya yüklendi/silindi — özel render: kâğıt ikonu, dosya adı vurgulu.
         if (h.actionType === 'FileUploaded' || h.actionType === 'FileRemoved') {
           const isUpload = h.actionType === 'FileUploaded';

@@ -1,3 +1,14 @@
+/**
+ * @deprecated 2026-07-04 (UX FIX PAKETİ PR-1) — CaseFiles taşındı, artık
+ * `src/components/attachments/Lightbox.tsx` (görsel + nav + zoom + Yeni
+ * Sekmede Aç + İndir) kullanılıyor. Bu dialog SADECE `CaseListDrawer.tsx`
+ * için geçici olarak kalır — o kullanım yeri de ileride Lightbox'a taşınacak
+ * (ayrı minor PR olarak sıraya girer; iki önizleme bileşeni yan yana
+ * yaşamamalı).
+ *
+ * `isImageAttachment` helper YENİ kod tarafından da import edilir; helper
+ * ayrı bir modüle taşındığında bu dosya tamamen silinecek.
+ */
 import { useEffect, useState } from 'react';
 import { Download, AlertTriangle, Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';

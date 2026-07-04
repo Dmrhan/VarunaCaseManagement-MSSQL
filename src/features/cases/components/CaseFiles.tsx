@@ -17,8 +17,8 @@
  * old CaseDetailPage used them.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Download, Eye, Paperclip, Trash2, UploadCloud } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Paperclip, Trash2, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { caseService } from '@/services/caseService';
@@ -29,10 +29,13 @@ import {
   type Case,
   type CaseFile,
 } from '../types';
-import {
-  AttachmentImagePreviewDialog,
-  isImageAttachment,
-} from './AttachmentImagePreviewDialog';
+// 2026-07-04 UX FIX PAKETİ PR-1 — AttachmentImagePreviewDialog kullanımı
+// KALDIRILDI; Lightbox + HoverPreview'a geçildi. Dialog CaseListDrawer'da
+// kaldığı için dosya silinmedi (deprecated yorumu düşüldü — bkz. dialog dosyası).
+// isImageAttachment helper reuse için import edildi.
+import { isImageAttachment } from './AttachmentImagePreviewDialog';
+import { Lightbox } from '@/components/attachments/Lightbox';
+import { HoverPreview } from '@/components/attachments/HoverPreview';
 
 interface UploadProgress {
   fileName: string;
@@ -60,7 +63,22 @@ export function FilesTab({
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
-  const [previewFile, setPreviewFile] = useState<CaseFile | null>(null);
+  // 2026-07-04 UX FIX PAKETİ PR-1 — Lightbox aktif id'si. items = sadece görsel
+  // olan ekler (nav ← → arasında gezinir); PDF ve diğerleri Lightbox'a
+  // GİRMEZ, doğrudan downloadFile.
+  const [lightboxActiveId, setLightboxActiveId] = useState<string | null>(null);
+  const imageFiles = useMemo(() => item.files.filter(isImageAttachment), [item.files]);
+  const getPreviewUrl = useCallback(async (f: CaseFile) => {
+    const out = await caseService.getFileDownloadUrl(item.id, f.id);
+    return out ? { url: out.url, fileName: out.fileName } : null;
+  }, [item.id]);
+  const getPreviewUrlHover = useCallback(async (f: CaseFile) => {
+    const out = await caseService.getFileDownloadUrl(item.id, f.id);
+    return out ? { url: out.url } : null;
+  }, [item.id]);
+  const openLightbox = (fileId: string) => setLightboxActiveId(fileId);
+  const closeLightbox = () => setLightboxActiveId(null);
+  const handleLightboxDownload = (f: CaseFile) => void caseService.downloadFile(item.id, f.id);
 
   useEffect(() => {
     onUploadingChange?.(uploading);
@@ -296,44 +314,51 @@ export function FilesTab({
         <ul className="divide-y divide-slate-100 rounded-md ring-1 ring-slate-200">
           {item.files.map((f) => {
             const previewable = isImageAttachment(f);
+            // 2026-07-04 UX FIX PAKETİ PR-1 — Dosya adı tıklanabilir buton:
+            // görsel → Lightbox (min ≥40px hit target); değilse doğrudan download.
+            const nameClick = () => (previewable
+              ? openLightbox(f.id)
+              : void caseService.downloadFile(item.id, f.id));
             return (
-              <li key={f.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <li key={f.id} className="flex items-center gap-3 px-3 py-1.5 text-sm">
                 <Paperclip size={14} className="text-slate-400" />
-                <span className="flex-1 truncate text-slate-800" title={f.fileName}>
-                  {f.fileName}
-                </span>
-                <span className="hidden text-xs text-slate-500 sm:inline">
-                  {formatBytes(f.fileSize)}
-                </span>
-                <span className="hidden text-xs text-slate-500 md:inline">
-                  {formatDateTime(f.uploadedAt)}
-                </span>
-                {previewable && (
+                <HoverPreview<CaseFile>
+                  item={f}
+                  getPreviewUrl={getPreviewUrlHover}
+                  isImage={isImageAttachment}
+                >
                   <button
                     type="button"
-                    onClick={() => setPreviewFile(f)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
-                    title="Önizle"
-                    aria-label="Önizle"
+                    onClick={nameClick}
+                    className="flex min-h-[40px] flex-1 items-center truncate text-left text-slate-800 hover:text-brand-700 hover:underline focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500"
+                    title={previewable ? 'Önizle' : 'İndir'}
                   >
-                    <Eye size={12} />
+                    <span className="truncate">{f.fileName}</span>
                   </button>
-                )}
+                </HoverPreview>
+                <span className="hidden shrink-0 text-xs text-slate-500 sm:inline">
+                  {formatBytes(f.fileSize)}
+                </span>
+                <span className="hidden shrink-0 text-xs text-slate-500 md:inline">
+                  {formatDateTime(f.uploadedAt)}
+                </span>
                 <button
                   type="button"
                   onClick={() => void caseService.downloadFile(item.id, f.id)}
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100 hover:text-slate-700"
                   title="İndir"
+                  aria-label="İndir"
                 >
-                  <Download size={12} />
+                  <Download size={14} />
                 </button>
                 <button
                   type="button"
                   onClick={() => handleRemove(f)}
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-rose-600 ring-1 ring-rose-200 hover:bg-rose-50"
                   title="Sil"
+                  aria-label="Sil"
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={14} />
                 </button>
               </li>
             );
@@ -341,11 +366,14 @@ export function FilesTab({
         </ul>
       )}
     </div>
-    <AttachmentImagePreviewDialog
-      open={previewFile != null}
-      caseId={item.id}
-      file={previewFile}
-      onClose={() => setPreviewFile(null)}
+    <Lightbox<CaseFile>
+      open={lightboxActiveId != null}
+      onClose={closeLightbox}
+      items={imageFiles}
+      activeId={lightboxActiveId ?? ''}
+      onNavigate={setLightboxActiveId}
+      getPreviewUrl={getPreviewUrl}
+      onDownload={handleLightboxDownload}
     />
     </>
   );
