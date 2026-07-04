@@ -103,15 +103,25 @@ export function Lightbox<T extends LightboxItem>({
   }, [open, active, getPreviewUrl]);
 
   // Keyboard: Esc/←/→
+  // R10.2 (2026-07-04) — Katman sahipliği: Lightbox açıkken ESC'yi TAM
+  // tüketir. capture: true → window bubble listener'larından ÖNCE çalışır;
+  // Escape dalında stopPropagation + stopImmediatePropagation → aynı tuş
+  // composer/reader ESC listener'larına ULAŞMAZ. Tek tuş = tek katman
+  // (kullanıcı direktifi R10.2). Ok/Arrow tuşları bubble akışında kalır.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onClose();
+        return;
+      }
       if (e.key === 'ArrowLeft') { goPrev(); return; }
       if (e.key === 'ArrowRight') { goNext(); return; }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [open, onClose, goPrev, goNext]);
 
   // Focus trap — açılınca kapat butonuna odak
