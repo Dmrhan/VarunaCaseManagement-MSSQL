@@ -228,28 +228,15 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     [emails, selectedId],
   );
 
-  // R5 — Reader alt bölge (bottomSlot) parent kararı:
-  //   composerOpen && layout='inline' → inline MailComposer (aynı bileşen)
-  //   Diğer durum → hızlı-yanıt çubuğu (composer'ın "kapalı" hali)
-  // Overlay composer (layout='overlay') Reader dışında, sayfa altında render.
+  // R5+R8 — Reader alt bölge (bottomSlot) YALNIZ hızlı-yanıt button
+  // (composer kapalı iken). Composer AÇIK ise bottomSlot=null: composer
+  // asla reader.bottomSlot'ta render EDİLMEZ. Böylece composer TEK JSX
+  // yerde (aşağıda kök seviyesinde) tanımlı → mode değişiminde React
+  // fiber tree'de konum sabit → state korunur (R8 fix).
+  //
+  // Hızlı-yanıt = composer'ın "kapalı hali" (aynı akış: openReply çağrır).
   const renderReaderBottom = useCallback((email: CaseEmailItem): ReactNode => {
-    if (composerOpen && composerLayout === 'inline') {
-      return (
-        <MailComposer
-          key={composeKey}
-          item={item}
-          initialReplyContext={replyCtx}
-          initialForwardContext={forwardCtx}
-          initialTenantSignatureHtml={tenantSignatureHtml}
-          initialAgentSignatureHtml={agentSignatureHtml}
-          initialComposedSignatureHtml={composedSignatureHtml}
-          onSent={handleSent}
-          onCancel={handleCancel}
-          layoutMode="inline"
-          onGrow={growComposer}
-        />
-      );
-    }
+    if (composerOpen) return null;
     return (
       <button
         type="button"
@@ -260,11 +247,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
         <span>Hızlı yanıt yaz… (Yanıtla ile aynı bileşen)</span>
       </button>
     );
-  }, [
-    composerOpen, composerLayout, composeKey, item, replyCtx, forwardCtx,
-    tenantSignatureHtml, agentSignatureHtml, composedSignatureHtml,
-    handleSent, handleCancel, growComposer, openReply,
-  ]);
+  }, [composerOpen, openReply]);
 
   // Horizontal (sekme içi) drag effect
   useEffect(() => {
@@ -550,11 +533,20 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
         </div>
       )}
 
-      {/* R1+R5: Composer overlay — fixed inset-0 z-50 (fullscreen reader z-40'ın üstünde).
-          layoutMode='overlay' iken render (Yeni e-posta, İlet, inline'dan Büyüt).
-          Inline mode (Yanıtla, hızlı-yanıt) reader body altında (renderReaderBottom). */}
-      {composerOpen && composerLayout === 'overlay' && (
-        <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg">
+      {/* R8 (2026-07-04) — Composer TEK JSX yerde (fiber tree'de konum sabit).
+          Wrapper class layoutMode'a göre değişir; MailComposer instance'ı
+          aynı kalır → mode geçişinde state korunur (subject/body/Kime/Cc
+          hepsi doğal olarak taşınır).
+          Reader'daki mode çözümüyle AYNI desen: iç içerik sabit, dış
+          wrapper mode conditional. */}
+      {composerOpen && (
+        <div
+          className={
+            composerLayout === 'overlay'
+              ? 'fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg'
+              : 'mt-3 rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border'
+          }
+        >
           <MailComposer
             key={composeKey}
             item={item}
@@ -565,7 +557,8 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
             initialComposedSignatureHtml={composedSignatureHtml}
             onSent={handleSent}
             onCancel={handleCancel}
-            layoutMode="overlay"
+            layoutMode={composerLayout}
+            onGrow={growComposer}
           />
         </div>
       )}

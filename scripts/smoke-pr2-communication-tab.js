@@ -93,13 +93,14 @@ expectTrue('7.1 handleSent — readerMode DOKUNULMAZ (kullanıcı direktifi)',
 expectTrue('7.2 loadEmails çağrılır (thread refresh)',
   /handleSent[\s\S]{0,500}void loadEmails\(\)/.test(t));
 
-// R1+R5: Composer OVERLAY conditional (composerOpen && composerLayout==="overlay")
-expectTrue('7.3 R1+R5: Composer overlay — composerOpen && composerLayout === "overlay" + fixed inset-0 z-50',
-  /composerOpen && composerLayout === 'overlay' && \([\s\S]{0,300}fixed inset-0 z-50/.test(t));
+// R1+R5+R8: Composer TEK JSX site (composerOpen && wrapper class conditional)
+expectTrue('7.3 R8: Composer TEK site — composerOpen && wrapper class (overlay: fixed inset-0)',
+  /composerOpen && \(\s*<div\s+className=\{\s*composerLayout === 'overlay'\s*\?\s*'fixed inset-0 z-50/.test(t));
 expectTrue('7.4 R1 REGRESYON: eski `composerOpen ? MailComposer : liste` swap KALKMIŞ',
   !/composerOpen \? \(\s*<MailComposer/.test(t));
-expectTrue('7.5 R1+R5: Overlay MailComposer içerir + layoutMode="overlay"',
-  /composerOpen && composerLayout === 'overlay'[\s\S]{0,800}<MailComposer[\s\S]{0,600}layoutMode="overlay"/.test(t));
+expectTrue('7.5 R8: MailComposer instance TEK + layoutMode dinamik',
+  (t.match(/<MailComposer\b/g) ?? []).length === 1
+  && /layoutMode=\{composerLayout\}/.test(t));
 expectTrue('7.6 R1: overlay z-50 > fullscreen Gmail z-40 (composer üstte)',
   /z-50/.test(t) && /z-40/.test(t));
 

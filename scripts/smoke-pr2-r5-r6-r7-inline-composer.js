@@ -92,25 +92,32 @@ expectTrue('6.4 openNew → setComposerLayout("overlay")',
 expectTrue('6.5 growComposer → setComposerLayout("overlay") (Büyüt)',
   /const growComposer\s*=\s*useCallback[\s\S]{0,300}setComposerLayout\('overlay'\)/.test(tab));
 
-console.log('\n── 7) R5 renderReaderBottom — inline composer VE hızlı-yanıt ─');
+console.log('\n── 7) R5+R8 renderReaderBottom — YALNIZ hızlı-yanıt (composer TEK JSX yerde) ─');
 expectTrue('7.1 renderReaderBottom callback',
   /const renderReaderBottom\s*=\s*useCallback/.test(tab));
-expectTrue('7.2 composerOpen && layout==="inline" → MailComposer inline',
-  /composerOpen && composerLayout === 'inline'[\s\S]{0,600}<MailComposer[\s\S]{0,600}layoutMode="inline"/.test(tab));
-expectTrue('7.3 onGrow={growComposer} (Büyüt tıklama parent\'a bildirir)',
-  /onGrow=\{growComposer\}/.test(tab));
-expectTrue('7.4 Kapalı hal (else) → hızlı-yanıt button → openReply',
+expectTrue('7.2 R8: composer bottomSlot\'ta DEĞİL (state korunması için)',
+  /if \(composerOpen\)\s*return null/.test(tab));
+expectTrue('7.3 REGRESYON: renderReaderBottom sadece hızlı-yanıt button döner (MailComposer YOK içinde)',
+  /const renderReaderBottom\s*=\s*useCallback[\s\S]{0,600}if \(composerOpen\)\s*return null[\s\S]{0,200}return \(\s*<button/.test(tab));
+expectTrue('7.4 Kapalı hal → hızlı-yanıt button → openReply',
   /return \(\s*<button[\s\S]{0,400}Hızlı yanıt yaz[\s\S]{0,100}Yanıtla ile aynı bileşen/.test(tab));
 expectTrue('7.5 Her iki reader (inline + fullscreen) bottomSlot alır',
   (tab.match(/bottomSlot=\{renderReaderBottom\(selectedEmail\)\}/g) ?? []).length === 2);
 
-console.log('\n── 8) R5 Overlay composer — YALNIZ layout="overlay" ─');
-expectTrue('8.1 Overlay conditional: composerOpen && composerLayout === "overlay"',
-  /composerOpen && composerLayout === 'overlay' && \(/.test(tab));
-expectTrue('8.2 Overlay MailComposer layoutMode="overlay"',
-  /composerOpen && composerLayout === 'overlay'[\s\S]{0,800}<MailComposer[\s\S]{0,600}layoutMode="overlay"/.test(tab));
-expectTrue('8.3 REGRESYON: eski `composerOpen && (` (layout-check\'siz) KALKMIŞ',
-  !/composerOpen && \(\s*<div className="fixed inset-0 z-50/.test(tab));
+console.log('\n── 8) R8 TEK JSX site — composer wrapper conditional (state korunur) ─');
+expectTrue('8.1 R8: Composer TEK JSX yerde (composerOpen && iç içe conditional yok)',
+  /composerOpen && \(\s*<div\s+className=\{\s*composerLayout === 'overlay'/.test(tab));
+expectTrue('8.2 R8: Wrapper conditional class (overlay: fixed inset-0; inline: rounded-lg ring)',
+  /composerLayout === 'overlay'\s*\?\s*'fixed inset-0 z-50[\s\S]{0,200}'mt-3 rounded-lg ring-1/.test(tab));
+expectTrue('8.3 R8: MailComposer instance TEK (layoutMode={composerLayout} — dinamik prop)',
+  /<MailComposer[\s\S]{0,500}layoutMode=\{composerLayout\}/.test(tab));
+expectTrue('8.4 R8: MailComposer sayımı = 1 (bir instance; iki JSX site birleşti)',
+  (tab.match(/<MailComposer\b/g) ?? []).length === 1);
+expectTrue('8.5 R8: onGrow={growComposer} tek yerde (composer instance dinamik)',
+  /onGrow=\{growComposer\}/.test(tab));
+expectTrue('8.6 REGRESYON: eski iki-site pattern (layoutMode="overlay" ve layoutMode="inline" ayrı ayrı JSX) KALKMIŞ',
+  !/layoutMode="inline"/.test(tab)
+  && !/layoutMode="overlay"/.test(tab));
 
 console.log('\n── 9) Davranış — composer akış sim ────────────');
 
