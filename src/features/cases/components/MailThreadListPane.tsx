@@ -20,7 +20,7 @@
  *   8. Başlık: "Yazışma · N mesaj" + toggle
  */
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Paperclip } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Paperclip, Plus } from 'lucide-react';
 import type { CaseEmailItem } from '@/services/caseEmailService';
 import { normalizeSubject } from '@/lib/subjectNormalizer';
 import { formatSmartDate, formatSmartDateFull } from '@/lib/smartDate';
@@ -45,6 +45,12 @@ interface Props {
    * fallback).
    */
   currentUserId?: string | null;
+  /**
+   * R12 (2026-07-04): Başlık çubuğunda kompakt "+ Yeni e-posta" butonu
+   * tetikleyicisi. Verilmezse buton render edilmez (kompakt, geriye uyumlu).
+   * Ayrı tam-genişlik satır YARATMAZ; dikeyde yer kazanılır.
+   */
+  onNewEmail?: () => void;
 }
 
 type SortOrder = 'newest' | 'oldest';
@@ -74,6 +80,7 @@ export function MailThreadListPane({
   variant = 'default',
   caseTitle,
   currentUserId = null,
+  onNewEmail,
 }: Props) {
   const fs = variant === 'fullscreen';
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => loadSortOrder());
@@ -98,20 +105,35 @@ export function MailThreadListPane({
 
   return (
     <div className={`flex flex-col overflow-hidden ${fs ? 'bg-slate-50 dark:bg-ndark-bg' : 'bg-white dark:bg-ndark-card'} ${className ?? ''}`}>
-      {/* Başlık — R9: "Yazışma · N mesaj" + sıralama toggle */}
-      <div className={`flex shrink-0 items-center justify-between border-b border-slate-200 px-3 py-1.5 ${MAIL_TYPE.t1} text-slate-500 dark:border-ndark-border dark:text-ndark-muted`}>
-        <span>
+      {/* Başlık — R9: "Yazışma · N mesaj" + sıralama toggle.
+          R12: sağa hizalı kompakt "+ Yeni e-posta" butonu (onNewEmail verilirse).
+          Ayrı tam-genişlik satır YOK — dikeyde yer kazanılır. */}
+      <div className={`flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 ${MAIL_TYPE.t1} text-slate-500 dark:border-ndark-border dark:text-ndark-muted`}>
+        <span className="shrink-0">
           Yazışma · <span className="font-medium">{emails.length}</span> mesaj
         </span>
-        <button
-          type="button"
-          onClick={toggleSort}
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-slate-100 dark:hover:bg-ndark-bg"
-          title={sortOrder === 'newest' ? 'Yeni → Eski (en son üstte). Değiştirmek için tıkla.' : 'Eski → Yeni. Değiştirmek için tıkla.'}
-        >
-          <ArrowUpDown size={11} />
-          <span>{sortOrder === 'newest' ? 'Yeni → Eski' : 'Eski → Yeni'}</span>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleSort}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-slate-100 dark:hover:bg-ndark-bg"
+            title={sortOrder === 'newest' ? 'Yeni → Eski (en son üstte). Değiştirmek için tıkla.' : 'Eski → Yeni. Değiştirmek için tıkla.'}
+          >
+            <ArrowUpDown size={11} />
+            <span>{sortOrder === 'newest' ? 'Yeni → Eski' : 'Eski → Yeni'}</span>
+          </button>
+          {onNewEmail && (
+            <button
+              type="button"
+              onClick={onNewEmail}
+              className={`inline-flex items-center gap-1 rounded bg-brand-600 px-2 py-0.5 ${MAIL_TYPE.t1} font-medium text-white hover:bg-brand-700`}
+              title="Yeni e-posta yaz (bu vakada)"
+            >
+              <Plus size={11} />
+              <span>Yeni e-posta</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">

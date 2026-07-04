@@ -178,12 +178,10 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
     const items = await caseEmailService.listEmails(item.id);
     setEmails(items);
     setEmailsLoading(false);
-    // Default seçim: en son mesaj (backend kronolojik → array son elemanı)
-    if (items.length > 0) {
-      setSelectedId((cur) => (cur && items.some((e) => e.id === cur)) ? cur : items[items.length - 1].id);
-    } else {
-      setSelectedId(null);
-    }
+    // R12 (2026-07-04) — Default: HİÇBİR mail açık değil (hepsi katlı).
+    // R9'daki "en yeni otomatik seçili" davranışı KALDIRILDI. Yalnız
+    // MEVCUT seçim listede kaldıysa korunur (refresh sonrası kayıp yok).
+    setSelectedId((cur) => (cur && items.some((e) => e.id === cur)) ? cur : null);
   }, [item.id]);
 
   useEffect(() => {
@@ -409,22 +407,23 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
               katmandır. Kapat/Gönder → composerOpen=false → arkada mode
               korunan reader (inline veya fullscreen) tekrar görünür.
               Eski sekme-içi conditional swap KALDIRILDI — "Yeni e-posta"
-              dahil TÜM composer akışları overlay üzerinden gider. */}
-              {/* Toolbar — sadece Yeni e-posta */}
-              <div className="flex justify-end">
-                <Button type="button" variant="primary" leftIcon={<Plus size={13} />} onClick={openNew}>
-                  Yeni e-posta
-                </Button>
-              </div>
-
+              dahil TÜM composer akışları overlay üzerinden gider.
+              R12 (2026-07-04) — Tam-genişlik "Yeni e-posta" toolbar satırı
+              KALDIRILDI; buton ListPane başlık çubuğuna kompakt olarak
+              taşındı (onNewEmail prop). Dikey yer listeye kazandırıldı. */}
               {emailsLoading ? (
                 <div className="py-8 text-center text-sm text-slate-500 dark:text-ndark-muted">Yükleniyor…</div>
               ) : emails.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-10 text-center dark:border-ndark-border dark:bg-ndark-card">
                   <p className="text-sm text-slate-600 dark:text-ndark-muted">Henüz mesaj yok.</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    Bu vakada gelen/giden mail bulunmuyor. "Yeni e-posta" ile yazabilirsiniz.
+                    Bu vakada gelen/giden mail bulunmuyor.
                   </p>
+                  <div className="mt-3 flex justify-center">
+                    <Button type="button" variant="primary" leftIcon={<Plus size={13} />} onClick={openNew}>
+                      Yeni e-posta
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -432,10 +431,14 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                   className="relative flex min-h-[560px] flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
                   style={{ height: 'calc(100vh - 320px)', minHeight: 560 }}
                 >
-                  {/* ÜST — kompakt mesaj listesi (ortak MailThreadListPane) */}
+                  {/* R12 — Default: hiçbir mail açık değil (selectedEmail null)
+                      → liste tam yüksekliği kullanır, divider+reader RENDER
+                      EDİLMEZ. Satıra tıklayınca split geri gelir. */}
                   <div
-                    className="min-h-0 shrink-0"
-                    style={{ height: `${splitRatio * 100}%` }}
+                    className="min-h-0"
+                    style={selectedEmail
+                      ? { height: `${splitRatio * 100}%`, flexShrink: 0 }
+                      : { flex: '1 1 0%' }}
                   >
                     <MailThreadListPane
                       emails={emails}
@@ -444,60 +447,54 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                       className="h-full"
                       caseTitle={item.title}
                       currentUserId={currentUserId}
+                      onNewEmail={openNew}
                     />
                   </div>
 
-                  {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük:
-                      - Sınır çizgisi (border-y) her zaman görünür
-                      - Ortada nokta tutamaç (3 dot pattern)
-                      - Hover'da tutamaç genişler + arka plan koyulaşır
-                      - cursor: row-resize
-                      - İlk kullanımda 1 kerelik tooltip */}
-                  <div
-                    role="separator"
-                    aria-orientation="horizontal"
-                    aria-valuemin={SPLIT_MIN * 100}
-                    aria-valuemax={SPLIT_MAX * 100}
-                    aria-valuenow={Math.round(splitRatio * 100)}
-                    tabIndex={0}
-                    onMouseDown={() => { setDraggingH(true); dismissHandleHint(); }}
-                    onDoubleClick={resetSplit}
-                    className="group relative flex h-3 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-300 bg-slate-100 hover:bg-slate-200 dark:border-ndark-border dark:bg-ndark-border/60 dark:hover:bg-slate-700"
-                    title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (35/65)"
-                  >
-                    <span className="pointer-events-none flex gap-1">
-                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
-                    </span>
-                    {!handleHintSeen && (
-                      <div className="pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
-                        Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
+                  {selectedEmail && (
+                    <>
+                      {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük */}
+                      <div
+                        role="separator"
+                        aria-orientation="horizontal"
+                        aria-valuemin={SPLIT_MIN * 100}
+                        aria-valuemax={SPLIT_MAX * 100}
+                        aria-valuenow={Math.round(splitRatio * 100)}
+                        tabIndex={0}
+                        onMouseDown={() => { setDraggingH(true); dismissHandleHint(); }}
+                        onDoubleClick={resetSplit}
+                        className="group relative flex h-3 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-300 bg-slate-100 hover:bg-slate-200 dark:border-ndark-border dark:bg-ndark-border/60 dark:hover:bg-slate-700"
+                        title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (35/65)"
+                      >
+                        <span className="pointer-events-none flex gap-1">
+                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                          <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                        </span>
+                        {!handleHintSeen && (
+                          <div className="pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
+                            Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* ALT — okuma alanı */}
-                  <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
-                    {selectedEmail ? (
-                      <MailThreadReader
-                        email={selectedEmail}
-                        caseId={item.id}
-                        mode="inline"
-                        onExpand={() => setReaderMode('fullscreen')}
-                        onCollapse={() => setReaderMode('inline')}
-                        onReply={(e) => void openReply(e)}
-                        onForward={(e) => void openForward(e)}
-                        bottomSlot={renderReaderBottom(selectedEmail)}
-                        currentUserId={currentUserId}
-                        escEnabled={!composerOpen}
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                        Bir mesaj seçin
+                      {/* ALT — okuma alanı */}
+                      <div className="min-h-0 flex-1 bg-white dark:bg-ndark-card">
+                        <MailThreadReader
+                          email={selectedEmail}
+                          caseId={item.id}
+                          mode="inline"
+                          onExpand={() => setReaderMode('fullscreen')}
+                          onCollapse={() => setReaderMode('inline')}
+                          onReply={(e) => void openReply(e)}
+                          onForward={(e) => void openForward(e)}
+                          bottomSlot={renderReaderBottom(selectedEmail)}
+                          currentUserId={currentUserId}
+                          escEnabled={!composerOpen}
+                        />
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
               )}
         </>
@@ -581,6 +578,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh, onShowCustomer }: 
                 variant="fullscreen"
                 caseTitle={item.title}
                 currentUserId={currentUserId}
+                onNewEmail={openNew}
               />
             </div>
 
