@@ -17,7 +17,7 @@
  *   - Gönderim sonrası → BULUNDUĞU görünüme dönüş (readerMode korunur)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AtSign, Globe, Info, MessageSquare, Phone, Plus, Send } from 'lucide-react';
+import { AtSign, Globe, Info, MessageSquare, Phone, Plus, Send, X } from 'lucide-react';
 import { MailComposer } from './MailComposer';
 import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader';
 import { MailThreadListPane } from './MailThreadListPane';
@@ -85,9 +85,15 @@ function saveHandleHintSeen(): void {
 interface Props {
   item: Case;
   onCaseShouldRefresh?: () => void;
+  /**
+   * R10 B5 — Tam-ekran üst başlık barı müşteri butonu tıklandığında.
+   * CaseDetailPage aynı prop'u kartlar için de kullanır (mevcut desen).
+   * Verilmezse müşteri adı düz metin gösterilir.
+   */
+  onOpenAccount?: (accountId: string) => void;
 }
 
-export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
+export function CommunicationTab({ item, onCaseShouldRefresh, onOpenAccount }: Props) {
   // R9.1 — Oturumdaki kullanıcının id'si (Gmail "ben" paritesi için ListPane
   // + Reader'a geçilir; kendi mail'inde "Siz" yalnız burada tetiklenir).
   // REUSE: mevcut auth context; yeni fetch yok.
@@ -458,6 +464,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                         onForward={(e) => void openForward(e)}
                         bottomSlot={renderReaderBottom(selectedEmail)}
                         currentUserId={currentUserId}
+                        escEnabled={!composerOpen}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -478,9 +485,62 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
           role="dialog"
           aria-modal="true"
           aria-label="Mail thread (genişletilmiş)"
-          className="fixed inset-0 z-40 flex bg-white dark:bg-ndark-bg"
+          className="fixed inset-0 z-40 flex flex-col bg-white dark:bg-ndark-bg"
         >
-          <div ref={fsContainerRef} className="flex h-full w-full">
+          {/* R10 B5 — Tam-ekran üst başlık barı. Vaka context taşıyıcı:
+              caseNumber (mono badge) + title (semibold truncate) + · Müşteri
+              (tıklanabilir → onOpenAccount) + · İletişim kişisi (muted) + X. */}
+          <div className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-ndark-border dark:bg-ndark-card">
+            <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 dark:bg-ndark-bg dark:text-ndark-text">
+              {item.caseNumber}
+            </span>
+            <h2
+              className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900 dark:text-ndark-text"
+              title={item.title}
+            >
+              {item.title}
+            </h2>
+            {item.accountName && (
+              <>
+                <span className="shrink-0 text-slate-300 dark:text-ndark-muted">·</span>
+                {onOpenAccount && item.accountId ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenAccount(item.accountId)}
+                    className="shrink-0 truncate text-sm text-brand-700 hover:underline dark:text-brand-300"
+                    title={`Müşteri kartını aç: ${item.accountName}`}
+                  >
+                    {item.accountName}
+                  </button>
+                ) : (
+                  <span className="shrink-0 truncate text-sm text-slate-700 dark:text-ndark-text">
+                    {item.accountName}
+                  </span>
+                )}
+              </>
+            )}
+            {item.customerContactName && (
+              <>
+                <span className="shrink-0 text-slate-300 dark:text-ndark-muted">·</span>
+                <span
+                  className="shrink-0 truncate text-xs text-slate-500 dark:text-ndark-muted"
+                  title="İletişim kişisi"
+                >
+                  {item.customerContactName}
+                </span>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setReaderMode('inline')}
+              className="ml-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-ndark-muted dark:hover:bg-ndark-bg"
+              aria-label="Kapat"
+              title="Kapat (Esc)"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div ref={fsContainerRef} className="flex min-h-0 w-full flex-1">
             {/* SOL — mesaj listesi */}
             <div
               className="min-h-0 shrink-0 border-r border-slate-200 dark:border-ndark-border"
@@ -539,6 +599,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 onForward={(e) => void openForward(e)}
                 bottomSlot={renderReaderBottom(selectedEmail)}
                 currentUserId={currentUserId}
+                escEnabled={!composerOpen}
               />
             </div>
           </div>
@@ -550,13 +611,24 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
           aynı kalır → mode geçişinde state korunur (subject/body/Kime/Cc
           hepsi doğal olarak taşınır).
           Reader'daki mode çözümüyle AYNI desen: iç içerik sabit, dış
-          wrapper mode conditional. */}
+          wrapper mode conditional.
+          R10 B1 (2026-07-04) — 3. durum: readerMode='fullscreen' && layoutMode='inline'
+          → sağ okuma panelinin altına DOCK et (Gmail-inline hissi). Wrapper
+          sabit-pozisyon, sol kenar dinamik (fsSplitRatio → drag ratio değişince
+          left güncellenir). Composer instance yine TEK. */}
       {composerOpen && (
         <div
           className={
             composerLayout === 'overlay'
               ? 'fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg'
-              : 'mt-3 rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border'
+              : readerMode === 'fullscreen'
+                ? 'fixed bottom-0 right-0 z-50 max-h-[55%] overflow-auto border-t border-l border-slate-200 bg-white shadow-2xl dark:border-ndark-border dark:bg-ndark-bg'
+                : 'mt-3 rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border'
+          }
+          style={
+            composerLayout === 'inline' && readerMode === 'fullscreen'
+              ? { left: `${fsSplitRatio * 100}%` }
+              : undefined
           }
         >
           <MailComposer

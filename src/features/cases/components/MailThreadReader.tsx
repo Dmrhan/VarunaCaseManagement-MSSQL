@@ -68,6 +68,13 @@ interface Props {
    * "Siz" hiçbir zaman tetiklenmez.
    */
   currentUserId?: string | null;
+  /**
+   * R10 B2+B3 — ESC katman sahipliği. Parent (CommunicationTab) EN ÜSTTEKİ
+   * katmanı bilir (composer açıksa false → composer taslağı kaybolmaz;
+   * lightbox açıkken bu prop true olsa dahi iç guard fs kapatmayı engeller).
+   * Default true → geriye uyum.
+   */
+  escEnabled?: boolean;
 }
 
 function joinAddresses(arr: CaseEmailItem['to']): string {
@@ -218,6 +225,7 @@ export function MailThreadReader({
   onForward,
   bottomSlot,
   currentUserId = null,
+  escEnabled = true,
 }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [renderedHtml, setRenderedHtml] = useState<string | null>(null);
@@ -254,13 +262,21 @@ export function MailThreadReader({
     return () => { alive = false; };
   }, [email, caseId, cidMap]);
 
-  // ESC kapanış (fullscreen)
+  // R10 B2+B3 — ESC katman sahipliği: tek tuş = tek katman.
+  //   - Lightbox açıksa fs kapatma (Lightbox kendi ESC'ini tüketir)
+  //   - Composer açıksa (escEnabled=false) fs kapatma (taslak koruması)
+  //   - Aksi halde (üstteki katman fs ise) ESC fs'i kapatır
   useEffect(() => {
     if (mode !== 'fullscreen') return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCollapse();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (lightboxActiveId != null) return;
+      if (!escEnabled) return;
+      onCollapse();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, onCollapse]);
+  }, [mode, onCollapse, escEnabled, lightboxActiveId]);
 
   const isInbound = email.direction === 'inbound';
   const timestamp = email.receivedAt ?? email.sentAt ?? email.createdAt;

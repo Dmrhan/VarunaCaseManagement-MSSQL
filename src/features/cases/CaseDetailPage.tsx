@@ -1191,6 +1191,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer: _onShowCustomer
                         if (c) setItem(c);
                       });
                     }}
+                    onOpenAccount={onOpenAccount}
                   />
                 </Suspense>
               </LazyTabBoundary>

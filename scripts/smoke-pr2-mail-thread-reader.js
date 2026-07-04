@@ -72,8 +72,8 @@ expectTrue('4.2 R5 REGRESYON: reader iç Hızlı-yanıt sabit button KALKMIŞ (b
   !/Hızlı yanıt yaz/.test(r));
 
 console.log('\n── 5) ESC kapanış (fullscreen) ─────────────────');
-expectTrue('5.1 ESC listener sadece fullscreen modda',
-  /if \(mode !== 'fullscreen'\) return[\s\S]{0,200}e\.key === 'Escape' && onCollapse\(\)/.test(r));
+expectTrue('5.1 R10 B2+B3: ESC katman guard\'ları (fs + !lightbox + escEnabled)',
+  /if \(mode !== 'fullscreen'\) return[\s\S]{0,400}if \(e\.key !== 'Escape'\) return[\s\S]{0,200}if \(lightboxActiveId != null\) return[\s\S]{0,200}if \(!escEnabled\) return[\s\S]{0,100}onCollapse\(\)/.test(r));
 expectTrue('5.2 keydown add/remove cleanup',
   /window\.addEventListener\('keydown', onKey\)[\s\S]{0,200}return \(\)\s*=>\s*window\.removeEventListener\('keydown', onKey\)/.test(r));
 

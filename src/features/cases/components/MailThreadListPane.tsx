@@ -122,9 +122,13 @@ export function MailThreadListPane({
 
             const senderDisplay = computeSenderDisplay(e, currentUserId);
             const rawSnippet = computeSnippet(e);
-            // Konu değişti istisnası — normalize edilmiş konu vaka title'ından farklı mı?
+            // R10 B4 — Konu değişti istisnası YALNIZ inbound satırlarda.
+            // Otomatik bildirim (notification_dispatch) ve agent yanıtları
+            // doğal olarak vaka title'ından farklı konu üretir; her giden
+            // satırda amber rozet = gürültü.
             const subjectClean = normalizeSubject(e.subject, { stripCaseToken: true }).trim();
             const subjectChanged =
+              inbound &&
               subjectClean.length > 0 &&
               caseTitleClean.length > 0 &&
               subjectClean.toLocaleLowerCase('tr-TR') !== caseTitleClean;

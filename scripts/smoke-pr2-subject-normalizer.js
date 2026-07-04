@@ -34,21 +34,23 @@ expectTrue('1.3 PREFIX_RE — re|fw|fwd|ynt|yanıt|yanit (tekrarlı, case-insens
   /PREFIX_RE\s*=[\s\S]{0,80}re\|fw\|fwd\|ynt\|yanıt\|yanit/.test(norm));
 expectTrue('1.4 BRACKET_NOISE_RE — external|ext + Türkçe char class (d[ıi][şs])',
   /BRACKET_NOISE_RE[\s\S]{0,150}external\|ext[\s\S]{0,50}d\[ıi\]\[şs\]/.test(norm));
-expectTrue('1.5 CASE_TOKEN_RE — [XX-NNNN] koruma',
-  /CASE_TOKEN_RE[\s\S]{0,200}\[A-Z\]\{2,5\}-\\d\+/.test(norm));
+expectTrue('1.5 R10 B4: CASE_TOKEN_GLOBAL_RE (g) + CASE_TOKEN_FIRST_RE (konum-bağımsız)',
+  /CASE_TOKEN_GLOBAL_RE[\s\S]{0,150}\[A-Z\]\{2,5\}-\\d\+[\s\S]{0,100}\/g[\s\S]{0,200}CASE_TOKEN_FIRST_RE/.test(norm));
 
 console.log('\n── 2) Davranış — normalize sim ────────────────');
 
-function normalizeSubject(raw) {
+function normalizeSubject(raw, options) {
   if (raw == null) return '';
   const input = String(raw);
   if (!input.trim()) return input;
-  const CASE_TOKEN_RE = /^\s*(\[[A-Z]{2,5}-\d+\])\s*/;
+  // R10 B4 — konum-bağımsız token
+  const CASE_TOKEN_GLOBAL_RE = /\s*\[[A-Z]{2,5}-\d+\]\s*/g;
+  const CASE_TOKEN_FIRST_RE = /\[[A-Z]{2,5}-\d+\]/;
   const PREFIX_RE = /^\s*(?:re|fw|fwd|ynt|yanıt|yanit)\s*:\s*/i;
   const BRACKET_NOISE_RE = /^\s*\[(?:external|ext|d[ıi][şs]|har[ıi]c[ıi])\]\s*/i;
-  const t = input.match(CASE_TOKEN_RE);
-  let token = '', rest = input;
-  if (t) { token = t[1]; rest = input.slice(t[0].length); }
+  const firstMatch = input.match(CASE_TOKEN_FIRST_RE);
+  const token = firstMatch ? firstMatch[0] : '';
+  const rest = token ? input.replace(CASE_TOKEN_GLOBAL_RE, ' ') : input;
   let prev = '', cleaned = rest, iter = 0;
   while (cleaned !== prev && iter < 32) {
     prev = cleaned;
@@ -56,7 +58,12 @@ function normalizeSubject(raw) {
     iter++;
   }
   cleaned = cleaned.trim();
-  if (!cleaned) return token ? `${token} ${rest.trim()}`.trim() : input.trim();
+  const strip = options?.stripCaseToken === true;
+  if (!cleaned) {
+    if (strip) return rest.trim();
+    return token ? `${token} ${rest.trim()}`.trim() : input.trim();
+  }
+  if (strip) return cleaned;
   return token ? `${token} ${cleaned}` : cleaned;
 }
 
@@ -208,6 +215,37 @@ expectTrue('5.5 MailThreadListPane — normalize subject stripCaseToken=true (R9
 // Reader'da da mail konusu normalize
 expectTrue('5.6 MailThreadReader — normalize subject',
   /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailThreadReader.tsx')));
+
+console.log('\n── 6) R10 B4 — Token konum-bağımsız (gerçek trafik) ─');
+// stripCaseToken=true (ListPane vaka-içi mod) — hepsi "E-BELGE GÖNDERİM"
+expect('6.1 "E-BELGE GÖNDERİM" (token yok)',
+  normalizeSubject('E-BELGE GÖNDERİM', { stripCaseToken: true }),
+  'E-BELGE GÖNDERİM');
+expect('6.2 "[UNV-1000058] Re: E-BELGE GÖNDERİM" (baş token)',
+  normalizeSubject('[UNV-1000058] Re: E-BELGE GÖNDERİM', { stripCaseToken: true }),
+  'E-BELGE GÖNDERİM');
+expect('6.3 "Re: [UNV-1000058] Re: E-BELGE GÖNDERİM" (token ortada!)',
+  normalizeSubject('Re: [UNV-1000058] Re: E-BELGE GÖNDERİM', { stripCaseToken: true }),
+  'E-BELGE GÖNDERİM');
+expect('6.4 "RE: [UNV-1000058] Re: E-BELGE GÖNDERİM" (RE upper + orta token)',
+  normalizeSubject('RE: [UNV-1000058] Re: E-BELGE GÖNDERİM', { stripCaseToken: true }),
+  'E-BELGE GÖNDERİM');
+
+// stripCaseToken=false (default) — token varsa başa geri konur
+expect('6.5 "Re: [UNV-1000058] Re: E-BELGE GÖNDERİM" (strip=false) → başa token',
+  normalizeSubject('Re: [UNV-1000058] Re: E-BELGE GÖNDERİM'),
+  '[UNV-1000058] E-BELGE GÖNDERİM');
+expect('6.6 Çoklu occurrence: "[UNV-1] Re: [UNV-1] X" (aynı token 2 kez)',
+  normalizeSubject('[UNV-1] Re: [UNV-1] X'),
+  '[UNV-1] X');
+expect('6.7 Immutability korunur: giriş "Re: [UNV-x] Y" bozulmaz',
+  (() => {
+    const src = 'Re: [UNV-1000058] Re: E-BELGE GÖNDERİM';
+    const cpy = String(src);
+    normalizeSubject(src, { stripCaseToken: true });
+    normalizeSubject(src);
+    return src === cpy;
+  })(), true);
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);

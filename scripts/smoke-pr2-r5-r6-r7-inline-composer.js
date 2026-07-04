@@ -107,8 +107,8 @@ expectTrue('7.5 Her iki reader (inline + fullscreen) bottomSlot alır',
 console.log('\n── 8) R8 TEK JSX site — composer wrapper conditional (state korunur) ─');
 expectTrue('8.1 R8: Composer TEK JSX yerde (composerOpen && iç içe conditional yok)',
   /composerOpen && \(\s*<div\s+className=\{\s*composerLayout === 'overlay'/.test(tab));
-expectTrue('8.2 R8: Wrapper conditional class (overlay: fixed inset-0; inline: rounded-lg ring)',
-  /composerLayout === 'overlay'\s*\?\s*'fixed inset-0 z-50[\s\S]{0,200}'mt-3 rounded-lg ring-1/.test(tab));
+expectTrue('8.2 R8/R10 B1: Wrapper üçlü ternary (overlay | fs+inline dock | tab-içi inline)',
+  /composerLayout === 'overlay'\s*\?\s*'fixed inset-0 z-50[\s\S]{0,400}readerMode === 'fullscreen'\s*\?\s*'fixed bottom-0 right-0[\s\S]{0,400}'mt-3 rounded-lg ring-1/.test(tab));
 expectTrue('8.3 R8: MailComposer instance TEK (layoutMode={composerLayout} — dinamik prop)',
   /<MailComposer[\s\S]{0,500}layoutMode=\{composerLayout\}/.test(tab));
 expectTrue('8.4 R8: MailComposer sayımı = 1 (bir instance; iki JSX site birleşti)',

@@ -26,7 +26,10 @@ const PREFIX_RE = /^\s*(?:re|fw|fwd|ynt|yanıt|yanit)\s*:\s*/i;
 const BRACKET_NOISE_RE = /^\s*\[(?:external|ext|d[ıi][şs]|har[ıi]c[ıi])\]\s*/i;
 
 // Case token formatı: [UNV-1000042], [PRM-100], [FR-999999] gibi (2-5 harf + tire + rakam)
-const CASE_TOKEN_RE = /^\s*(\[[A-Z]{2,5}-\d+\])\s*/;
+// R10 (2026-07-04) B4: token KONUMDAN BAĞIMSIZ. Gerçek trafik "Re: [UNV-x] Re: X"
+// gibi token ortada. Global (g) — tüm occurrence'ları sil, ilk bulunanı sakla.
+const CASE_TOKEN_GLOBAL_RE = /\s*\[[A-Z]{2,5}-\d+\]\s*/g;
+const CASE_TOKEN_FIRST_RE = /\[[A-Z]{2,5}-\d+\]/;
 
 /**
  * Görüntülenecek konu string'ini üretir. Ham input değişmez.
@@ -52,14 +55,11 @@ export function normalizeSubject(
   const input = String(raw);
   if (!input.trim()) return input;
 
-  // 1) Case token'ı önden yakala
-  const tokenMatch = input.match(CASE_TOKEN_RE);
-  let token = '';
-  let rest = input;
-  if (tokenMatch) {
-    token = tokenMatch[1];
-    rest = input.slice(tokenMatch[0].length);
-  }
+  // 1) R10 B4 — Case token'ını KONUMDAN BAĞIMSIZ yakala (ilk occurrence sakla,
+  //    tüm occurrence'ları sil). "Re: [UNV-x] Re: X" gerçek trafiği.
+  const firstMatch = input.match(CASE_TOKEN_FIRST_RE);
+  const token = firstMatch ? firstMatch[0] : '';
+  const rest = token ? input.replace(CASE_TOKEN_GLOBAL_RE, ' ') : input;
 
   // 2) Tekrarlı Re/Fw/Ynt + [EXTERNAL] gürültüsünü temizle (loop — herhangi bir
   //    kombinasyonu, herhangi bir sırada)

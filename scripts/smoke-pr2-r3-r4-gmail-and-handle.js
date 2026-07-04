@@ -43,8 +43,8 @@ expectTrue('2.3 Reader fullscreen için kendi overlay YAPMAZ (parent Communicati
 console.log('\n── 3) R4 Fullscreen Gmail düzeni ─────────────');
 expectTrue('3.1 Fullscreen guard: readerMode==="fullscreen" && emails.length > 0 && selectedEmail',
   /readerMode === 'fullscreen' && emails\.length > 0 && selectedEmail/.test(tab));
-expectTrue('3.2 Fullscreen overlay fixed inset-0 z-40 (composer z-50 altında)',
-  /fixed inset-0 z-40 flex bg-white/.test(tab));
+expectTrue('3.2 Fullscreen overlay fixed inset-0 z-40 flex-col (R10 B5: bar üstte, composer z-50 altta)',
+  /fixed inset-0 z-40 flex flex-col bg-white/.test(tab));
 expectTrue('3.3 role="dialog" + aria-modal="true" + aria-label',
   /role="dialog"[\s\S]{0,200}aria-modal="true"[\s\S]{0,300}Mail thread \(genişletilmiş\)/.test(tab));
 expectTrue('3.4 SOL pane genişliği fsSplitRatio ile bağlı',
@@ -127,8 +127,8 @@ expect('8.5 FS %50 → clamp %40', clamp(0.50, 0.18, 0.40), 0.40);
 expect('8.6 FS %28 → aynen (default)', clamp(0.28, 0.18, 0.40), 0.28);
 
 console.log('\n── 9) ESC — fullscreen → sekme dönüş ────────');
-expectTrue('9.1 Reader ESC listener sadece mode==="fullscreen"',
-  /if \(mode !== 'fullscreen'\) return[\s\S]{0,200}e\.key === 'Escape' && onCollapse\(\)/.test(reader));
+expectTrue('9.1 R10 B2+B3: Reader ESC katman guard\'lı (fs + !lightbox + escEnabled)',
+  /if \(mode !== 'fullscreen'\) return[\s\S]{0,400}if \(lightboxActiveId != null\) return[\s\S]{0,200}if \(!escEnabled\) return[\s\S]{0,100}onCollapse\(\)/.test(reader));
 expectTrue('9.2 onCollapse → setReaderMode("inline") (sekme dönüş)',
   /onCollapse=\{\(\)\s*=>\s*setReaderMode\('inline'\)\}/.test(tab));
 
