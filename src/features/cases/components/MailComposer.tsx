@@ -91,6 +91,20 @@ export interface MailComposerProps {
   onSent?: () => void;
   /** Vazgeç butonu. */
   onCancel?: () => void;
+  /**
+   * 2026-07-04 PR-2 R5+R7 — Layout modu:
+   *  - 'overlay' (default) → fullscreen mail yazma alanı (Yeni e-posta,
+   *    İlet, inline'dan Büyüt). MailComposer'ın kendi CSS wrapper'ı
+   *    yerine parent'ın verdiği alan; ancak buton alt satırı sabit.
+   *  - 'inline' → Reader body altında kompakt satır-içi Yanıtla
+   *    (Gmail paritesi). Kompakt üst özet + Ayrıntılar toggle + editör +
+   *    Gönder/Vazgeç/Ek/Büyüt.
+   * TEK bileşen kuralı: mod prop'u DEĞİŞTİĞİNDE state korunur
+   * (component instance aynı); "Büyüt" tıklamada taslak otomatik taşınır.
+   */
+  layoutMode?: 'overlay' | 'inline';
+  /** Inline'dan overlay'a taşı ("Büyüt" ikonu). layoutMode='inline' için. */
+  onGrow?: () => void;
 }
 
 interface UploadedFileRef {
@@ -117,8 +131,13 @@ export function MailComposer({
   initialComposedSignatureHtml = null,
   onSent,
   onCancel,
+  layoutMode = 'overlay',
+  onGrow,
 }: MailComposerProps) {
   const { toast } = useToast();
+  // R7 (2026-07-04) — Advanced toggle: Cc/Bcc/İmza/Şablon kompakt gizli
+  // (kullanıcı direktifi tutarlılık — inline & overlay AYNI desen).
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [aliases, setAliases] = useState<FromAliasOption[]>([]);
   const [fromId, setFromId] = useState<string>('');
   const [to, setTo] = useState<ContactPickerValue[]>(initialReplyContext?.to ?? []);
@@ -662,7 +681,7 @@ export function MailComposer({
           )}
         </Field>
 
-        {/* To/Cc/Bcc — n4b: 3'ü de görünür */}
+        {/* Kime — her zaman görünür */}
         <ContactPicker
           label="Kime"
           values={to}
@@ -670,31 +689,43 @@ export function MailComposer({
           suggestions={suggestions}
           disabled={submitting}
         />
-        <ContactPicker
-          label="Kopya (Cc)"
-          values={cc}
-          onChange={setCc}
-          suggestions={suggestions}
-          disabled={submitting}
-        />
-        <ContactPicker
-          label="Gizli Kopya (Bcc)"
-          values={bcc}
-          onChange={setBcc}
-          suggestions={suggestions}
-          disabled={submitting}
-        />
+        {/* 2026-07-04 PR-2 R7 — Ayrıntılar toggle: Cc/Bcc/İmza/Şablon kompakt
+            gizli (inline & overlay AYNI desen — tutarlılık). Kullanıcı
+            direktifi. */}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-ndark-muted"
+          aria-expanded={showAdvanced}
+        >
+          <span>{showAdvanced ? '▾' : '▸'}</span>
+          ayrıntılar (Cc / Bcc / İmza / Şablon)
+        </button>
+        {showAdvanced && (
+          <>
+            <ContactPicker
+              label="Kopya (Cc)"
+              values={cc}
+              onChange={setCc}
+              suggestions={suggestions}
+              disabled={submitting}
+            />
+            <ContactPicker
+              label="Gizli Kopya (Bcc)"
+              values={bcc}
+              onChange={setBcc}
+              suggestions={suggestions}
+              disabled={submitting}
+            />
+          </>
+        )}
         {/* Visibility toggles geri uyumluluk için sessizce mantıkta;
             UI'da herzaman görünür. */}
         <input type="hidden" value={showCc ? '1' : '0'} onChange={() => undefined} />
         <input type="hidden" value={showBcc ? '1' : '0'} onChange={() => undefined} />
 
-        {/* Compose-Signature F3 — Kompoze imza, 2-opsiyon dropdown.
-            "İmzam" = override (User.signatureHtml) ?? composedHtml
-            (şirket şablonu + Person.name + Person.title).
-            "İmzasız" = imzayı gönderme.
-            Tenant raw seçeneği KALDIRILDI (composed zaten şirket bloğunu
-            içerir; ikinci yer kafa karıştırırdı). */}
+        {/* Compose-Signature F3 — Kompoze imza (Ayrıntılar altında, R7). */}
+        {showAdvanced && (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="İmza">
             <select
@@ -739,6 +770,7 @@ export function MailComposer({
             </select>
           </Field>
         </div>
+        )}
 
         {/* Subject */}
         <Field label="Konu">
@@ -837,6 +869,19 @@ export function MailComposer({
 
       {/* Footer */}
       <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 dark:border-ndark-border">
+        {/* R5 — Büyüt (yalnız inline mode): tam alan overlay'a taşı, taslak korunur. */}
+        {layoutMode === 'inline' && onGrow && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onGrow}
+            disabled={submitting}
+            title="Tam ekran composer'a taşı (taslak korunur)"
+            className="mr-auto"
+          >
+            Büyüt ↗
+          </Button>
+        )}
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
             Vazgeç

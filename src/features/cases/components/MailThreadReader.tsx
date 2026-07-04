@@ -29,7 +29,6 @@ import {
   Minimize2,
   Paperclip,
   Reply,
-  Send,
   Forward,
   X,
 } from 'lucide-react';
@@ -55,8 +54,13 @@ interface Props {
   onReply: (email: CaseEmailItem) => void;
   /** İlet tıklaması — parent composer'ı forward mode ile açar. */
   onForward: (email: CaseEmailItem) => void;
-  /** Hızlı-yanıt çubuğu tıklaması — parent composer'ı reply mode ile açar (Yanıtla ile aynı). */
-  onQuickReply: (email: CaseEmailItem) => void;
+  /**
+   * 2026-07-04 PR-2 R5 — Reader body altında render edilecek özel içerik.
+   * Parent (CommunicationTab) inline composer açık ise MailComposer node'u,
+   * kapalı ise hızlı-yanıt çubuğu verir. Yoksa alt bölge gizli.
+   * Hızlı-yanıt çubuğu artık reader tarafında sabit DEĞİL — parent kararı.
+   */
+  bottomSlot?: React.ReactNode;
 }
 
 function joinAddresses(arr: CaseEmailItem['to']): string {
@@ -205,7 +209,7 @@ export function MailThreadReader({
   onCollapse,
   onReply,
   onForward,
-  onQuickReply,
+  bottomSlot,
 }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [renderedHtml, setRenderedHtml] = useState<string | null>(null);
@@ -302,13 +306,14 @@ export function MailThreadReader({
             {isInbound ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
           </span>
           <div className="min-w-0 flex-1">
+            {/* R6 — Konu 18-20px medium (text-lg), meta 13px muted tek satır */}
             <h3
-              className="truncate text-sm font-semibold text-slate-900 dark:text-ndark-text"
+              className="truncate text-lg font-medium text-slate-900 dark:text-ndark-text"
               title={email.subject}
             >
               {normalizeSubject(email.subject) || '(konusuz)'}
             </h3>
-            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-slate-500 dark:text-ndark-muted">
+            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[13px] text-slate-500 dark:text-ndark-muted">
               <span className="font-medium">{email.from.name || email.from.address}</span>
               {email.from.name && (
                 <span className="opacity-70">&lt;{email.from.address}&gt;</span>
@@ -393,9 +398,10 @@ export function MailThreadReader({
         )}
       </div>
 
-      {/* Body — rahat okuma; max-w-[680px] center */}
-      <div className="flex-1 overflow-auto px-4 py-4">
-        <div className="mx-auto max-w-[680px]">
+      {/* Body — 2026-07-04 PR-2 R6 cilası: max-w-[760px] mx-auto p-6, rahat
+          okuma. Sağdaki dev boşluk hissi biter, tipografi ferahlar. */}
+      <div className="flex-1 overflow-auto p-6">
+        <div className="mx-auto max-w-[760px]">
           {rewriting && (
             <div className="text-xs text-slate-400">Görseller çözülüyor…</div>
           )}
@@ -443,22 +449,15 @@ export function MailThreadReader({
         </div>
       </div>
 
-      {/* 2026-07-04 PR-2 (görsel tur R2) — Alt kenarda YALNIZ hızlı-yanıt.
-          Yanıtla/İlet/Genişlet üst başlığa taşındı (yukarıda). RUNA slot
-          hızlı-yanıt yanında (structural, boş). */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
-        {/* Hızlı-yanıt çubuğu */}
-        <button
-          type="button"
-          onClick={() => onQuickReply(email)}
-          className="flex min-h-[40px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
-        >
-          <Send size={12} />
-          <span>Hızlı yanıt yaz…</span>
-        </button>
-        {/* RUNA yanıt önerileri slot'u — hızlı-yanıt yanında (structural, boş) */}
-        <div data-runa-slot="quick-reply-suggestions" className="flex items-center gap-1" />
-      </div>
+      {/* 2026-07-04 PR-2 R5 — Alt bölge parent kararı (bottomSlot).
+          Inline composer açık: parent MailComposer node'u verir.
+          Kapalı: parent hızlı-yanıt çubuğu verir (aynı bileşen, kapalı hali).
+          bottomSlot yoksa alt bölge gizli. Yanıtla/İlet üst başlıkta (R2). */}
+      {bottomSlot && (
+        <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2 dark:border-ndark-border dark:bg-ndark-card">
+          {bottomSlot}
+        </div>
+      )}
     </div>
   );
 

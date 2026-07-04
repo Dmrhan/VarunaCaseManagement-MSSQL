@@ -20,12 +20,20 @@ interface Props {
   onSelect: (id: string) => void;
   /** Dış wrapper stili (boyut, border) caller kontrolünde. */
   className?: string;
+  /**
+   * 2026-07-04 PR-2 R6 — Görsel varyant:
+   *  - 'default'    (sekme içi ÜST): mevcut beyaz zemin
+   *  - 'fullscreen' (Gmail SOL):     bg-slate-50 zemin, seçili sol vurgu,
+   *                                   satır aralığı ferah (iki bölge görsel ayrışır)
+   */
+  variant?: 'default' | 'fullscreen';
 }
 
-export function MailThreadListPane({ emails, selectedId, onSelect, className }: Props) {
+export function MailThreadListPane({ emails, selectedId, onSelect, className, variant = 'default' }: Props) {
+  const fs = variant === 'fullscreen';
   return (
-    <div className={`overflow-auto bg-white dark:bg-ndark-card ${className ?? ''}`}>
-      <ul className="divide-y divide-slate-100 dark:divide-ndark-border">
+    <div className={`overflow-auto ${fs ? 'bg-slate-50 dark:bg-ndark-bg' : 'bg-white dark:bg-ndark-card'} ${className ?? ''}`}>
+      <ul className={fs ? 'space-y-0.5 py-1' : 'divide-y divide-slate-100 dark:divide-ndark-border'}>
         {emails.map((e) => {
           const inbound = e.direction === 'inbound';
           const ts = e.receivedAt ?? e.sentAt ?? e.createdAt;
@@ -35,10 +43,16 @@ export function MailThreadListPane({ emails, selectedId, onSelect, className }: 
               <button
                 type="button"
                 onClick={() => onSelect(e.id)}
-                className={`flex w-full min-h-[40px] items-center gap-2 px-3 py-2 text-left text-xs transition ${
+                className={`flex w-full items-center gap-2 text-left text-xs transition ${
+                  fs ? 'min-h-[44px] px-3 py-2.5' : 'min-h-[40px] px-3 py-2'
+                } ${
                   isSelected
-                    ? 'bg-brand-50 text-brand-900 dark:bg-brand-900/20 dark:text-brand-100'
-                    : 'hover:bg-slate-50 dark:hover:bg-ndark-bg'
+                    ? fs
+                      ? 'border-l-4 border-brand-600 bg-white pl-2 font-medium text-brand-900 dark:bg-ndark-card dark:text-brand-100'
+                      : 'bg-brand-50 text-brand-900 dark:bg-brand-900/20 dark:text-brand-100'
+                    : fs
+                      ? 'border-l-4 border-transparent pl-2 hover:bg-white dark:hover:bg-ndark-card'
+                      : 'hover:bg-slate-50 dark:hover:bg-ndark-bg'
                 }`}
                 title={e.subject}
               >

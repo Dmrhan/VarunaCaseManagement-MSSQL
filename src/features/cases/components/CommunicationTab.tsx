@@ -16,8 +16,8 @@
  *   - Composer açık → composer görünür, reader/liste gizli
  *   - Gönderim sonrası → BULUNDUĞU görünüme dönüş (readerMode korunur)
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AtSign, Globe, Info, MessageSquare, Phone, Plus, Send } from 'lucide-react';
 import { MailComposer } from './MailComposer';
 import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader';
 import { MailThreadListPane } from './MailThreadListPane';
@@ -89,6 +89,11 @@ interface Props {
 export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const [channel, setChannel] = useState<Channel>('email');
   const [composerOpen, setComposerOpen] = useState(false);
+  // 2026-07-04 PR-2 R5 — Composer layout modu:
+  //   - 'inline': Reader body altında satır-içi (Yanıtla + hızlı-yanıt)
+  //   - 'overlay': Fullscreen alan (Yeni e-posta + İlet + Büyüt)
+  // "Büyüt" tıklama → inline'dan overlay'a, taslak korunur (state lifted).
+  const [composerLayout, setComposerLayout] = useState<'inline' | 'overlay'>('overlay');
   const [replyCtx, setReplyCtx] = useState<ReplyContext | null>(null);
   const [forwardCtx, setForwardCtx] = useState<ForwardContext | null>(null);
   const [tenantSignatureHtml, setTenantSignatureHtml] = useState<string | null>(null);
@@ -168,27 +173,39 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     }
   }, [channel, mailConfigState, loadEmails]);
 
+  // R5 — Yanıtla + hızlı-yanıt → INLINE composer (reader body altında)
   const openReply = useCallback(async (email?: CaseEmailItem) => {
     const ctx = await caseEmailService.getReplyContext(item.id, email?.id);
     setReplyCtx(ctx ?? null);
     setForwardCtx(null);
+    setComposerLayout('inline');
     setComposerOpen(true);
     setComposeKey((k) => k + 1);
   }, [item.id]);
 
+  // R5 — İlet → OVERLAY composer (tam alan)
   const openForward = useCallback(async (email: CaseEmailItem) => {
     const ctx = await caseEmailService.getForwardContext(item.id, email.id);
     setForwardCtx(ctx ?? null);
     setReplyCtx(null);
+    setComposerLayout('overlay');
     setComposerOpen(true);
     setComposeKey((k) => k + 1);
   }, [item.id]);
 
+  // R5 — Yeni e-posta → OVERLAY composer
   const openNew = useCallback(() => {
     setReplyCtx(null);
     setForwardCtx(null);
+    setComposerLayout('overlay');
     setComposerOpen(true);
     setComposeKey((k) => k + 1);
+  }, []);
+
+  // R5 — Büyüt: inline → overlay (aynı composer instance, state korunur —
+  // MailComposer prop değişimi state kaybettirmez).
+  const growComposer = useCallback(() => {
+    setComposerLayout('overlay');
   }, []);
 
   const handleSent = useCallback(() => {
@@ -210,6 +227,44 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     () => emails.find((e) => e.id === selectedId) ?? null,
     [emails, selectedId],
   );
+
+  // R5 — Reader alt bölge (bottomSlot) parent kararı:
+  //   composerOpen && layout='inline' → inline MailComposer (aynı bileşen)
+  //   Diğer durum → hızlı-yanıt çubuğu (composer'ın "kapalı" hali)
+  // Overlay composer (layout='overlay') Reader dışında, sayfa altında render.
+  const renderReaderBottom = useCallback((email: CaseEmailItem): ReactNode => {
+    if (composerOpen && composerLayout === 'inline') {
+      return (
+        <MailComposer
+          key={composeKey}
+          item={item}
+          initialReplyContext={replyCtx}
+          initialForwardContext={forwardCtx}
+          initialTenantSignatureHtml={tenantSignatureHtml}
+          initialAgentSignatureHtml={agentSignatureHtml}
+          initialComposedSignatureHtml={composedSignatureHtml}
+          onSent={handleSent}
+          onCancel={handleCancel}
+          layoutMode="inline"
+          onGrow={growComposer}
+        />
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => void openReply(email)}
+        className="flex w-full min-h-[40px] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:border-ndark-border dark:bg-ndark-bg dark:text-ndark-muted"
+      >
+        <Send size={12} />
+        <span>Hızlı yanıt yaz… (Yanıtla ile aynı bileşen)</span>
+      </button>
+    );
+  }, [
+    composerOpen, composerLayout, composeKey, item, replyCtx, forwardCtx,
+    tenantSignatureHtml, agentSignatureHtml, composedSignatureHtml,
+    handleSent, handleCancel, growComposer, openReply,
+  ]);
 
   // Horizontal (sekme içi) drag effect
   useEffect(() => {
@@ -410,7 +465,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                         onCollapse={() => setReaderMode('inline')}
                         onReply={(e) => void openReply(e)}
                         onForward={(e) => void openForward(e)}
-                        onQuickReply={(e) => void openReply(e)}
+                        bottomSlot={renderReaderBottom(selectedEmail)}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -444,6 +499,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 className="h-full"
+                variant="fullscreen"
               />
             </div>
 
@@ -487,15 +543,17 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 onCollapse={() => setReaderMode('inline')}
                 onReply={(e) => void openReply(e)}
                 onForward={(e) => void openForward(e)}
-                onQuickReply={(e) => void openReply(e)}
+                bottomSlot={renderReaderBottom(selectedEmail)}
               />
             </div>
           </div>
         </div>
       )}
 
-      {/* R1: Composer overlay — fixed inset-0 z-50 (fullscreen reader z-40'ın üstünde) */}
-      {composerOpen && (
+      {/* R1+R5: Composer overlay — fixed inset-0 z-50 (fullscreen reader z-40'ın üstünde).
+          layoutMode='overlay' iken render (Yeni e-posta, İlet, inline'dan Büyüt).
+          Inline mode (Yanıtla, hızlı-yanıt) reader body altında (renderReaderBottom). */}
+      {composerOpen && composerLayout === 'overlay' && (
         <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-white dark:bg-ndark-bg">
           <MailComposer
             key={composeKey}
@@ -507,6 +565,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
             initialComposedSignatureHtml={composedSignatureHtml}
             onSent={handleSent}
             onCancel={handleCancel}
+            layoutMode="overlay"
           />
         </div>
       )}
