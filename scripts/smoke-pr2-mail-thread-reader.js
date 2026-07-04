@@ -27,14 +27,15 @@ expectTrue('1.1 MailThreadReaderMode export ("inline"|"fullscreen")',
 expectTrue('1.2 Props: mode + onExpand + onCollapse + onReply + onForward + onQuickReply',
   /mode:\s*MailThreadReaderMode[\s\S]{0,400}onExpand:[\s\S]{0,200}onCollapse:[\s\S]{0,200}onReply:[\s\S]{0,200}onForward:[\s\S]{0,200}onQuickReply:/.test(r));
 
-console.log('\n── 2) TEK bileşen iki boyut — readerBody paylaşılır ─');
-// readerBody sabit const olarak tanımlı; mode wrapper switch
-expectTrue('2.1 readerBody const — mode\'dan bağımsız',
+console.log('\n── 2) TEK bileşen — readerBody sabit, wrapper PARENT yönetir (R4) ─');
+// R4 refactor: reader kendi wrapper'ını yönetmiyor; parent (CommunicationTab)
+// hem inline hem fullscreen dış layout'u yönetir. Reader iç yapısı sabit.
+expectTrue('2.1 readerBody const — mode\'dan bağımsız (kod çatallaması YOK)',
   /const readerBody\s*=\s*\(/.test(r));
-expectTrue('2.2 Wrapper switch: mode==="inline" vs fullscreen',
-  /mode === 'inline' \? \([\s\S]{0,400}readerBody[\s\S]{0,400}fixed inset-0[\s\S]{0,200}readerBody/.test(r));
-expectTrue('2.3 Kod çatallaması YASAK — readerBody sadece 2 defa yazılı (const + wrapper içine)',
-  (r.match(/\{readerBody\}/g) ?? []).length === 2);
+expectTrue('2.2 Reader tek wrapper div (parent yönetir; kendi overlay YOK)',
+  /<div className="flex h-full min-h-0 flex-col bg-white[\s\S]{0,200}\{readerBody\}/.test(r));
+expectTrue('2.3 REGRESYON: eski mode-switch (rounded-md border VS fixed inset-0) KALKMIŞ',
+  !/mode === 'inline' \? \(\s*<div[\s\S]{0,200}rounded-md border[\s\S]{0,200}\) : \(\s*<div[\s\S]{0,200}fixed inset-0/.test(r));
 
 console.log('\n── 3) Aksiyon barı — R2: header sağında (üstte) + alt yalnız hızlı-yanıt ─');
 expectTrue('3.1 Yanıtla button → onReply(email)',

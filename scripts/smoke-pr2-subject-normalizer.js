@@ -203,8 +203,8 @@ expectTrue('5.3 CasesListPage — normalize + tooltip',
   /normalizeSubject\(c\.title\)/.test(read('src/features/cases/CasesListPage.tsx')));
 expectTrue('5.4 MailMessageCard — normalize subject',
   /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailMessageCard.tsx')));
-expectTrue('5.5 CommunicationTab (İletişim listesi) — normalize subject',
-  /normalizeSubject\(e\.subject\)/.test(read('src/features/cases/components/CommunicationTab.tsx')));
+expectTrue('5.5 MailThreadListPane (ortak liste bileşeni) — normalize subject',
+  /normalizeSubject\(e\.subject\)/.test(read('src/features/cases/components/MailThreadListPane.tsx')));
 // Reader'da da mail konusu normalize
 expectTrue('5.6 MailThreadReader — normalize subject',
   /normalizeSubject\(email\.subject\)/.test(read('src/features/cases/components/MailThreadReader.tsx')));

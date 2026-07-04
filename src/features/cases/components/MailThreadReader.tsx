@@ -464,20 +464,15 @@ export function MailThreadReader({
 
   return (
     <>
-      {mode === 'inline' ? (
-        <div className="flex h-full min-h-0 flex-col rounded-md border border-slate-200 bg-white dark:border-ndark-border dark:bg-ndark-card">
-          {readerBody}
-        </div>
-      ) : (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Mail okuma (genişletilmiş)"
-          className="fixed inset-0 z-40 flex flex-col bg-white dark:bg-ndark-bg"
-        >
-          {readerBody}
-        </div>
-      )}
+      {/* 2026-07-04 PR-2 (görsel tur R4) — Wrapper switch KALDIRILDI.
+          Reader iç yapısı sabit; dış layout parent (CommunicationTab)
+          yönetir. Sekme içi: reader inline mode (üst liste + reader alt).
+          Fullscreen: reader mode='fullscreen' Gmail düzeni içinde
+          (sol liste + reader sağda). Kod çatallaması yok — readerBody
+          hâlâ TEK yerde tanımlı. */}
+      <div className="flex h-full min-h-0 flex-col bg-white dark:bg-ndark-card">
+        {readerBody}
+      </div>
 
       {/* Lightbox — mode'dan bağımsız (üstünde katman) */}
       <Lightbox<LightboxItem>

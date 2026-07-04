@@ -17,13 +17,12 @@
  *   - Gönderim sonrası → BULUNDUĞU görünüme dönüş (readerMode korunur)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, AtSign, Globe, Info, MessageSquare, Paperclip, Phone, Plus } from 'lucide-react';
+import { AtSign, Globe, Info, MessageSquare, Phone, Plus } from 'lucide-react';
 import { MailComposer } from './MailComposer';
 import { MailThreadReader, type MailThreadReaderMode } from './MailThreadReader';
+import { MailThreadListPane } from './MailThreadListPane';
 import { Button } from '@/components/ui/Button';
 import { caseEmailService, type CaseEmailItem, type EmailConfigReason, type ReplyContext, type ForwardContext } from '@/services/caseEmailService';
-import { normalizeSubject } from '@/lib/subjectNormalizer';
-import { formatDateTime } from '@/lib/format';
 import type { Case } from '../types';
 
 type Channel = 'email' | 'web' | 'sms' | 'incoming-call';
@@ -42,26 +41,44 @@ const CHANNELS: ChannelConfig[] = [
   { key: 'incoming-call', label: 'Gelen Aramalar', icon: <Phone size={14} />,            enabled: false },
 ];
 
-// Split ratio localStorage kuralı — kullanıcı direktifi guard'ları:
+// Sekme içi (horizontal) split ratio — üst list % / alt reader
 const SPLIT_STORAGE_KEY = 'pr2.commTab.splitRatio';
 const SPLIT_DEFAULT = 0.35;
 const SPLIT_MIN = 0.20;
 const SPLIT_MAX = 0.60;
 
-function loadSplitRatio(): number {
+// Fullscreen (vertical, Gmail düzeni) split ratio — sol list % / sağ reader
+// Kullanıcı direktifi: min %18 / max %40, ayrı localStorage anahtarı
+const FS_SPLIT_STORAGE_KEY = 'pr2.commTab.fullscreenListRatio';
+const FS_SPLIT_DEFAULT = 0.28;
+const FS_SPLIT_MIN = 0.18;
+const FS_SPLIT_MAX = 0.40;
+
+// Handle görünürlük hint — 1 kerelik (ilk sürüklemede kapanır)
+const HANDLE_HINT_STORAGE_KEY = 'pr2.commTab.handleHintSeen';
+
+function loadRatio(key: string, def: number, min: number, max: number): number {
   try {
-    const raw = localStorage.getItem(SPLIT_STORAGE_KEY);
-    if (!raw) return SPLIT_DEFAULT;
+    const raw = localStorage.getItem(key);
+    if (!raw) return def;
     const v = Number.parseFloat(raw);
-    if (!Number.isFinite(v) || v < SPLIT_MIN || v > SPLIT_MAX) return SPLIT_DEFAULT;
+    if (!Number.isFinite(v) || v < min || v > max) return def;
     return v;
   } catch {
-    return SPLIT_DEFAULT;
+    return def;
   }
 }
 
-function saveSplitRatio(v: number): void {
-  try { localStorage.setItem(SPLIT_STORAGE_KEY, String(v)); } catch { /* no-op */ }
+function saveRatio(key: string, v: number): void {
+  try { localStorage.setItem(key, String(v)); } catch { /* no-op */ }
+}
+
+function loadHandleHintSeen(): boolean {
+  try { return localStorage.getItem(HANDLE_HINT_STORAGE_KEY) === '1'; } catch { return true; }
+}
+
+function saveHandleHintSeen(): void {
+  try { localStorage.setItem(HANDLE_HINT_STORAGE_KEY, '1'); } catch { /* no-op */ }
 }
 
 interface Props {
@@ -87,10 +104,24 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readerMode, setReaderMode] = useState<MailThreadReaderMode>('inline');
 
-  // Drag-to-resize state
-  const [splitRatio, setSplitRatio] = useState<number>(() => loadSplitRatio());
-  const [dragging, setDragging] = useState(false);
+  // Drag-to-resize state — sekme içi (horizontal) VE fullscreen (vertical)
+  const [splitRatio, setSplitRatio] = useState<number>(
+    () => loadRatio(SPLIT_STORAGE_KEY, SPLIT_DEFAULT, SPLIT_MIN, SPLIT_MAX),
+  );
+  const [fsSplitRatio, setFsSplitRatio] = useState<number>(
+    () => loadRatio(FS_SPLIT_STORAGE_KEY, FS_SPLIT_DEFAULT, FS_SPLIT_MIN, FS_SPLIT_MAX),
+  );
+  const [draggingH, setDraggingH] = useState(false); // horizontal (sekme içi)
+  const [draggingV, setDraggingV] = useState(false); // vertical (fullscreen)
   const containerRef = useRef<HTMLDivElement>(null);
+  const fsContainerRef = useRef<HTMLDivElement>(null);
+  // Handle görünürlük hint — ilk sürüklemede kapanır
+  const [handleHintSeen, setHandleHintSeen] = useState<boolean>(() => loadHandleHintSeen());
+  const dismissHandleHint = useCallback(() => {
+    if (handleHintSeen) return;
+    setHandleHintSeen(true);
+    saveHandleHintSeen();
+  }, [handleHintSeen]);
 
   const active = CHANNELS.find((c) => c.key === channel) ?? CHANNELS[0];
 
@@ -180,9 +211,9 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
     [emails, selectedId],
   );
 
-  // Drag-resize handlers
+  // Horizontal (sekme içi) drag effect
   useEffect(() => {
-    if (!dragging) return;
+    if (!draggingH) return;
     const onMove = (e: MouseEvent) => {
       const el = containerRef.current;
       if (!el) return;
@@ -193,9 +224,8 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
       setSplitRatio(clamped);
     };
     const onUp = () => {
-      setDragging(false);
-      // Sürükleme sonu → localStorage'a kaydet (final değer)
-      setSplitRatio((v) => { saveSplitRatio(v); return v; });
+      setDraggingH(false);
+      setSplitRatio((v) => { saveRatio(SPLIT_STORAGE_KEY, v); return v; });
     };
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onMove);
@@ -205,11 +235,41 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [dragging]);
+  }, [draggingH]);
+
+  // Vertical (fullscreen Gmail düzeni) drag effect
+  useEffect(() => {
+    if (!draggingV) return;
+    const onMove = (e: MouseEvent) => {
+      const el = fsContainerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = x / rect.width;
+      const clamped = Math.max(FS_SPLIT_MIN, Math.min(FS_SPLIT_MAX, ratio));
+      setFsSplitRatio(clamped);
+    };
+    const onUp = () => {
+      setDraggingV(false);
+      setFsSplitRatio((v) => { saveRatio(FS_SPLIT_STORAGE_KEY, v); return v; });
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [draggingV]);
 
   const resetSplit = useCallback(() => {
     setSplitRatio(SPLIT_DEFAULT);
-    saveSplitRatio(SPLIT_DEFAULT);
+    saveRatio(SPLIT_STORAGE_KEY, SPLIT_DEFAULT);
+  }, []);
+  const resetFsSplit = useCallback(() => {
+    setFsSplitRatio(FS_SPLIT_DEFAULT);
+    saveRatio(FS_SPLIT_STORAGE_KEY, FS_SPLIT_DEFAULT);
   }, []);
 
   return (
@@ -296,68 +356,25 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                   className="relative flex min-h-[560px] flex-col overflow-hidden rounded-lg ring-1 ring-slate-200 dark:ring-ndark-border"
                   style={{ height: 'calc(100vh - 320px)', minHeight: 560 }}
                 >
-                  {/* ÜST — kompakt mesaj listesi */}
+                  {/* ÜST — kompakt mesaj listesi (ortak MailThreadListPane) */}
                   <div
-                    className="min-h-0 shrink-0 overflow-auto bg-white dark:bg-ndark-card"
+                    className="min-h-0 shrink-0"
                     style={{ height: `${splitRatio * 100}%` }}
                   >
-                    <ul className="divide-y divide-slate-100 dark:divide-ndark-border">
-                      {emails.map((e) => {
-                        const inbound = e.direction === 'inbound';
-                        const ts = e.receivedAt ?? e.sentAt ?? e.createdAt;
-                        const isSelected = e.id === selectedId;
-                        return (
-                          <li key={e.id}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedId(e.id)}
-                              className={`flex w-full min-h-[40px] items-center gap-2 px-3 py-2 text-left text-xs transition ${
-                                isSelected
-                                  ? 'bg-brand-50 text-brand-900 dark:bg-brand-900/20 dark:text-brand-100'
-                                  : 'hover:bg-slate-50 dark:hover:bg-ndark-bg'
-                              }`}
-                              title={e.subject}
-                            >
-                              <span
-                                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                                  inbound
-                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                                }`}
-                                aria-label={inbound ? 'Gelen' : 'Giden'}
-                              >
-                                {inbound ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="flex items-baseline gap-1.5">
-                                  <span className="truncate font-medium text-slate-800 dark:text-ndark-text">
-                                    {e.from.name || e.from.address}
-                                  </span>
-                                  <span className="truncate text-slate-500 dark:text-ndark-muted">
-                                    {normalizeSubject(e.subject) || '(konusuz)'}
-                                    {e.bodyText && ` — ${e.bodyText.slice(0, 80)}`}
-                                  </span>
-                                </span>
-                              </span>
-                              {e.attachments.length > 0 && (
-                                <span className="inline-flex shrink-0 items-center gap-0.5 text-slate-500 dark:text-ndark-muted">
-                                  <Paperclip size={11} />
-                                  <span>{e.attachments.length}</span>
-                                </span>
-                              )}
-                              <span className="shrink-0 text-slate-400 dark:text-ndark-muted">
-                                {formatDateTime(ts)}
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <MailThreadListPane
+                      emails={emails}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                      className="h-full"
+                    />
                   </div>
 
-                  {/* Drag handle — sürükleyerek yeniden boyutlandır. Direktif:
-                      görünür (ince çizgi + hover'da belirginleşen tutamaç),
-                      ≥8px tutma alanı, cursor: row-resize, çift-tık → varsayılan. */}
+                  {/* Sekme içi HORIZONTAL drag handle — R3 iyileştirilmiş görünürlük:
+                      - Sınır çizgisi (border-y) her zaman görünür
+                      - Ortada nokta tutamaç (3 dot pattern)
+                      - Hover'da tutamaç genişler + arka plan koyulaşır
+                      - cursor: row-resize
+                      - İlk kullanımda 1 kerelik tooltip */}
                   <div
                     role="separator"
                     aria-orientation="horizontal"
@@ -365,12 +382,21 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                     aria-valuemax={SPLIT_MAX * 100}
                     aria-valuenow={Math.round(splitRatio * 100)}
                     tabIndex={0}
-                    onMouseDown={() => setDragging(true)}
+                    onMouseDown={() => { setDraggingH(true); dismissHandleHint(); }}
                     onDoubleClick={resetSplit}
-                    className="group relative flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-ndark-border dark:hover:bg-slate-700"
+                    className="group relative flex h-3 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-300 bg-slate-100 hover:bg-slate-200 dark:border-ndark-border dark:bg-ndark-border/60 dark:hover:bg-slate-700"
                     title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (35/65)"
                   >
-                    <span className="pointer-events-none h-0.5 w-8 rounded-full bg-slate-400 group-hover:w-12 group-hover:bg-slate-500 dark:bg-ndark-muted" />
+                    <span className="pointer-events-none flex gap-1">
+                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                      <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                    </span>
+                    {!handleHintSeen && (
+                      <div className="pointer-events-none absolute -top-9 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
+                        Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
+                      </div>
+                    )}
                   </div>
 
                   {/* ALT — okuma alanı */}
@@ -379,7 +405,7 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                       <MailThreadReader
                         email={selectedEmail}
                         caseId={item.id}
-                        mode={readerMode}
+                        mode="inline"
                         onExpand={() => setReaderMode('fullscreen')}
                         onCollapse={() => setReaderMode('inline')}
                         onReply={(e) => void openReply(e)}
@@ -395,6 +421,77 @@ export function CommunicationTab({ item, onCaseShouldRefresh }: Props) {
                 </div>
               )}
         </>
+      )}
+
+      {/* R4: Fullscreen Gmail düzeni — SOL liste + dikey handle + SAĞ reader.
+          MailThreadListPane sekme içi ÜST pane ile AYNI bileşen (yeniden yazma yok).
+          Composer overlay z-50 bunun üstünde açılır. ESC → sekme görünümüne dön. */}
+      {readerMode === 'fullscreen' && emails.length > 0 && selectedEmail && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mail thread (genişletilmiş)"
+          className="fixed inset-0 z-40 flex bg-white dark:bg-ndark-bg"
+        >
+          <div ref={fsContainerRef} className="flex h-full w-full">
+            {/* SOL — mesaj listesi */}
+            <div
+              className="min-h-0 shrink-0 border-r border-slate-200 dark:border-ndark-border"
+              style={{ width: `${fsSplitRatio * 100}%` }}
+            >
+              <MailThreadListPane
+                emails={emails}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                className="h-full"
+              />
+            </div>
+
+            {/* R3+R4 VERTICAL drag handle — Gmail dikey ayırıcı:
+                - Sınır çizgisi her zaman görünür (border-x)
+                - Ortada nokta tutamaç (3 dot dikey)
+                - Hover'da tutamaç genişler + arka plan koyulaşır
+                - cursor: col-resize (sekme içi'nden farklı — direktif)
+                - Aynı 1 kerelik hint mekanizması */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={FS_SPLIT_MIN * 100}
+              aria-valuemax={FS_SPLIT_MAX * 100}
+              aria-valuenow={Math.round(fsSplitRatio * 100)}
+              tabIndex={0}
+              onMouseDown={() => { setDraggingV(true); dismissHandleHint(); }}
+              onDoubleClick={resetFsSplit}
+              className="group relative flex w-3 shrink-0 cursor-col-resize items-center justify-center border-x border-slate-300 bg-slate-100 hover:bg-slate-200 dark:border-ndark-border dark:bg-ndark-border/60 dark:hover:bg-slate-700"
+              title="Sürükle: yeniden boyutlandır · Çift-tık: varsayılan (28/72)"
+            >
+              <span className="pointer-events-none flex flex-col gap-1">
+                <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+                <span className="h-1 w-1 rounded-full bg-slate-400 group-hover:bg-slate-600" />
+              </span>
+              {!handleHintSeen && (
+                <div className="pointer-events-none absolute left-full ml-2 top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg">
+                  Sürükleyerek yeniden boyutlandır · Çift-tık: varsayılan
+                </div>
+              )}
+            </div>
+
+            {/* SAĞ — okuma alanı (aynı reader, mode='fullscreen') */}
+            <div className="min-w-0 flex-1">
+              <MailThreadReader
+                email={selectedEmail}
+                caseId={item.id}
+                mode="fullscreen"
+                onExpand={() => setReaderMode('fullscreen')}
+                onCollapse={() => setReaderMode('inline')}
+                onReply={(e) => void openReply(e)}
+                onForward={(e) => void openForward(e)}
+                onQuickReply={(e) => void openReply(e)}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* R1: Composer overlay — fixed inset-0 z-50 (fullscreen reader z-40'ın üstünde) */}

@@ -41,18 +41,18 @@ expectTrue('3.3 SPLIT_MIN=0.20 (liste min ~%20)',
   /const SPLIT_MIN\s*=\s*0\.20/.test(t));
 expectTrue('3.4 SPLIT_MAX=0.60 (liste max ~%60)',
   /const SPLIT_MAX\s*=\s*0\.60/.test(t));
-expectTrue('3.5 loadSplitRatio — bozuk/aralık-dışı → default',
-  /!Number\.isFinite\(v\) \|\| v < SPLIT_MIN \|\| v > SPLIT_MAX/.test(t));
-expectTrue('3.6 saveSplitRatio — try/catch (private mode guard)',
-  /function saveSplitRatio[\s\S]{0,200}try\s*\{[\s\S]{0,200}catch/.test(t));
+expectTrue('3.5 loadRatio ortak helper — bozuk/aralık-dışı → default',
+  /function loadRatio[\s\S]{0,400}!Number\.isFinite\(v\) \|\| v < min \|\| v > max/.test(t));
+expectTrue('3.6 saveRatio ortak helper — try/catch (private mode guard)',
+  /function saveRatio[\s\S]{0,200}try\s*\{[\s\S]{0,200}catch/.test(t));
 
 console.log('\n── 4) Drag mekanizması ──────────────────────');
-expectTrue('4.1 dragging state',
-  /const \[dragging, setDragging\]\s*=\s*useState\(false\)/.test(t));
+expectTrue('4.1 draggingH state (horizontal, sekme içi)',
+  /const \[draggingH, setDraggingH\]\s*=\s*useState\(false\)/.test(t));
 expectTrue('4.2 mousemove listener — clamped ratio (SPLIT_MIN/MAX)',
   /Math\.max\(SPLIT_MIN,\s*Math\.min\(SPLIT_MAX,\s*ratio\)\)/.test(t));
-expectTrue('4.3 mouseup → dragging=false + persist',
-  /const onUp\s*=[\s\S]{0,300}setDragging\(false\)[\s\S]{0,300}saveSplitRatio\(v\)/.test(t));
+expectTrue('4.3 mouseup → draggingH=false + persist (saveRatio)',
+  /const onUp\s*=[\s\S]{0,300}setDraggingH\(false\)[\s\S]{0,300}saveRatio\(SPLIT_STORAGE_KEY,\s*v\)/.test(t));
 expectTrue('4.4 Sürükleme sırasında user-select: none',
   /document\.body\.style\.userSelect\s*=\s*'none'/.test(t));
 expectTrue('4.5 Cleanup: userSelect geri açılır',
@@ -67,14 +67,16 @@ expectTrue('5.3 onDoubleClick → resetSplit (default)',
   /onDoubleClick=\{resetSplit\}/.test(t));
 expectTrue('5.4 cursor-row-resize',
   /cursor-row-resize/.test(t));
-expectTrue('5.5 Handle görünür — h-2 (≥8px tutma alanı)',
-  /className="[^"]*h-2[^"]*cursor-row-resize/.test(t));
-expectTrue('5.6 Hover\'da belirginleşir — hover:bg + group-hover:w-12',
-  /hover:bg-slate-200[\s\S]{0,300}group-hover:w-12/.test(t));
+expectTrue('5.5 Handle görünür — h-3 (≥8px tutma alanı, R3 iyileştirmesi)',
+  /className="[^"]*h-3[^"]*cursor-row-resize/.test(t)
+  || /cursor-row-resize[^"]*h-3/.test(t));
+expectTrue('5.6 Hover\'da belirginleşir — hover:bg-slate-200 + tutamaç renk değişimi',
+  /hover:bg-slate-200[\s\S]{0,600}group-hover:bg-slate-600/.test(t));
 
 console.log('\n── 6) Reader entegrasyonu ────────────────────');
-expectTrue('6.1 MailThreadReader mode={readerMode}',
-  /mode=\{readerMode\}/.test(t));
+expectTrue('6.1 MailThreadReader mode="inline" (sekme içi) + mode="fullscreen" (Gmail) — iki instance',
+  /<MailThreadReader\b/.test(t)
+  && /mode="inline"/.test(t) && /mode="fullscreen"/.test(t));
 expectTrue('6.2 onExpand → setReaderMode("fullscreen")',
   /onExpand=\{\(\)\s*=>\s*setReaderMode\('fullscreen'\)\}/.test(t));
 expectTrue('6.3 onCollapse → setReaderMode("inline")',
@@ -98,8 +100,8 @@ expectTrue('7.4 R1 REGRESYON: eski `composerOpen ? MailComposer : liste` swap KA
   !/composerOpen \? \(\s*<MailComposer/.test(t));
 expectTrue('7.5 R1: Composer overlay MailComposer içerir',
   /composerOpen && \([\s\S]{0,800}<MailComposer/.test(t));
-expectTrue('7.6 R1: overlay z-50 > fullscreen reader z-40 (composer üstte)',
-  /z-50/.test(t) && /z-40/.test(read('src/features/cases/components/MailThreadReader.tsx')));
+expectTrue('7.6 R1: overlay z-50 > fullscreen Gmail z-40 (composer üstte, ikisi de CommunicationTab\'de)',
+  /z-50/.test(t) && /z-40/.test(t));
 
 console.log('\n── 8) Boş-durum + tek mesaj + regresyonlar ───');
 expectTrue('8.1 emails.length === 0 → boş-durum kartı',
@@ -111,11 +113,12 @@ expectTrue('8.3 Config missing banner korundu',
 expectTrue('8.4 Signature bundle akışı korundu (getEmailSignatureBundle)',
   /getEmailSignatureBundle/.test(t));
 
-console.log('\n── 9) Liste satırı ≥40px hit target + normalize ─');
-expectTrue('9.1 Liste button min-h-[40px]',
-  /min-h-\[40px\]/.test(t));
-expectTrue('9.2 Liste subject normalize + ham tooltip (title=e.subject)',
-  /title=\{e\.subject\}/.test(t) && /normalizeSubject\(e\.subject\)/.test(t));
+console.log('\n── 9) Liste — MailThreadListPane\'a çıkarıldı (R4) ─');
+const listPane = read('src/features/cases/components/MailThreadListPane.tsx');
+expectTrue('9.1 MailThreadListPane satır button min-h-[40px]',
+  /min-h-\[40px\]/.test(listPane));
+expectTrue('9.2 MailThreadListPane subject normalize + ham tooltip',
+  /title=\{e\.subject\}/.test(listPane) && /normalizeSubject\(e\.subject\)/.test(listPane));
 
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
