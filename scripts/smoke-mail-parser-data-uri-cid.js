@@ -209,6 +209,181 @@ function buildRelated(html, imgs) {
   expectTrue('E.2 cid:jpg1@x var', html.includes('cid:jpg1@x'));
 }
 
+console.log('\n── 5) UI FIX 2 pattern — Codex P2 R2 iyileştirmeleri ─');
+expectTrue('5.1 consumedAttachmentIds Set tanımlı',
+  /const\s+consumedAttachmentIds\s*=\s*new\s+Set<string>\(\)/.test(card));
+expectTrue('5.2 src\'siz path — inlineCandidates filter consumed hariç',
+  /isEmptySrc[\s\S]{0,400}email\.attachments\.filter\([\s\S]{0,200}!consumedAttachmentIds\.has\(x\.id\)/.test(card));
+expectTrue('5.3 src\'siz path — tek aday (contentId==null şartı YOK)',
+  /!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*\)\s*\{/.test(card));
+expectTrue('5.4 REGRESYON: eski `contentId == null` şartı src\'siz path\'inden KALKMIŞ',
+  !/!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*&&\s*inlineCandidates\[0\]\.contentId == null/.test(card));
+expectTrue('5.5 src\'siz heuristicMatch bulundukta consumedAttachmentIds.add',
+  /if \(heuristicMatch\)[\s\S]{0,200}consumedAttachmentIds\.add\(m\.id\)/.test(card));
+expectTrue('5.6 cid: match bulundukta consumedAttachmentIds.add',
+  /consumedAttachmentIds\.add\(match\.id\)[\s\S]{0,400}cidJobs\.push/.test(card));
+expectTrue('5.7 cid: legacy fallback\'te de consumed filter uygulanır',
+  /if \(!match\)[\s\S]{0,1200}email\.attachments\.filter\([\s\S]{0,300}!consumedAttachmentIds\.has\(x\.id\)/.test(card));
+expectTrue('5.8 Legacy fallback bulundukta consumed.add',
+  /const fallback\s*=\s*canUseLegacyFallback[\s\S]{0,200}consumedAttachmentIds\.add\(fallback\.id\)/.test(card));
+
+console.log('\n── 6) Davranış sim — Codex P2 R2 senaryoları ─');
+
+function simulateRender(imgs, attachments) {
+  const consumed = new Set();
+  const cidMap = new Map();
+  for (const a of attachments) {
+    if (!a.contentId) continue;
+    const raw = a.contentId.trim();
+    const stripped = raw.replace(/^<|>$/g, '');
+    cidMap.set(raw, a);
+    cidMap.set(stripped, a);
+    cidMap.set(stripped.toLowerCase(), a);
+  }
+  const results = [];
+  for (const img of imgs) {
+    const src = (img.src ?? '').trim();
+    const isCidSrc = src.toLowerCase().startsWith('cid:');
+    const isEmptySrc = !src;
+    if (!isCidSrc && !isEmptySrc) continue;
+
+    if (isEmptySrc) {
+      const alt = (img.alt ?? '').trim();
+      const candidates = attachments.filter((x) => x.isInline && !consumed.has(x.id));
+      let match = null;
+      if (alt) {
+        const byName = candidates.find((x) => x.fileName === alt);
+        if (byName) match = byName;
+      }
+      if (!match && candidates.length === 1) {
+        // contentId dolu OLSA bile (Codex P2 R2 fix)
+        match = candidates[0];
+      }
+      if (match) {
+        consumed.add(match.id);
+        results.push({ kind: 'heuristic_render', id: match.id, alt });
+      } else {
+        results.push({ kind: 'placeholder', alt, inlineNames: candidates.map((x) => x.fileName).join(', ') });
+      }
+      continue;
+    }
+
+    // cid: yolu
+    const cid = src.slice(4).trim();
+    const stripped = cid.replace(/^<|>$/g, '');
+    const cidMatch = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
+    if (cidMatch) {
+      consumed.add(cidMatch.id);
+      results.push({ kind: 'cid_render', id: cidMatch.id });
+      continue;
+    }
+    // Legacy fallback (Codex R1) — freshInline + contentId==null şartı DEVAM
+    const candidates = attachments.filter((x) => x.isInline && !consumed.has(x.id));
+    if (candidates.length === 1 && candidates[0].contentId == null) {
+      consumed.add(candidates[0].id);
+      results.push({ kind: 'legacy_fallback', id: candidates[0].id });
+    } else {
+      results.push({ kind: 'placeholder' });
+    }
+  }
+  return results;
+}
+
+// Fixture F: contentId DOLU tek-inline + src'siz img → RENDER (UNV-1000093)
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'image.png' }],
+    [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'image.png' }],
+  );
+  expect('6.1 UNV-1000093: contentId dolu tek-inline + src\'siz + alt eşleşir → render',
+    r[0].kind, 'heuristic_render');
+  expect('6.1b render eki A1', r[0].id, 'A1');
+}
+
+// Fixture F2: contentId DOLU tek-inline + src'siz + alt YOK → yine render (tek aday)
+{
+  const r = simulateRender(
+    [{ src: '', alt: '' }],
+    [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'ss.png' }],
+  );
+  expect('6.2 contentId dolu tek-inline + alt yok → tek-aday fallback',
+    r[0].kind, 'heuristic_render');
+}
+
+// Fixture G: çoklu-inline + src'siz + alt eşleşmiyor → placeholder (belirsizlik)
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'unknown.png' }],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.3 Çoklu-inline + alt eşleşmiyor → placeholder (regresyon)',
+    r[0].kind, 'placeholder');
+}
+
+// Fixture G2: çoklu-inline + alt eşleşiyor → fileName eşleşen ek
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'b.png' }],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.4 Çoklu-inline + alt fileName eşleşir → o attachment',
+    r[0].id, 'A2');
+}
+
+// Fixture H: hem cid'li hem src'siz aynı mailde
+// cid:X match → A1 consumed → src'siz için başka aday YOK → placeholder
+{
+  const r = simulateRender(
+    [
+      { src: 'cid:x@host', alt: 'a.png' },
+      { src: '', alt: 'src\'siz' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('6.5 cid:X match → cid_render', r[0].kind, 'cid_render');
+  expect('6.5b cid:X eki A1', r[0].id, 'A1');
+  expect('6.6 Aynı mailde src\'siz img → A1 consumed → placeholder (çift render önlendi)',
+    r[1].kind, 'placeholder');
+}
+
+// Fixture H2: iki inline + biri cid match + biri src'siz → src'siz kalan eki alır
+{
+  const r = simulateRender(
+    [
+      { src: 'cid:a@x', alt: 'a.png' },
+      { src: '', alt: 'b.png' },
+    ],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.7 cid:A match → A1', r[0].id, 'A1');
+  expect('6.7b src\'siz alt=b.png → A2 (A1 consumed, filter dışı)',
+    r[1].id, 'A2');
+  expect('6.7c src\'siz kind heuristic_render', r[1].kind, 'heuristic_render');
+}
+
+// Fixture I: 2 src'siz img — ilki tek aday alır, ikinci placeholder
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'image.png' },
+      { src: '', alt: 'image.png' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'image.png' }],
+  );
+  expect('6.8 İlk src\'siz → A1 alır', r[0].id, 'A1');
+  expect('6.8b İkinci src\'siz → placeholder (A1 consumed)',
+    r[1].kind, 'placeholder');
+}
+
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
