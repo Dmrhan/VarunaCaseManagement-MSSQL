@@ -105,6 +105,37 @@ export function MailMessageCard({
     // için placeholder mesajı "Eski mail" diye açıklayalım.
     const isOldMailNoEmailAtt = email.attachments.length === 0;
     const cidJobs: Array<Promise<void>> = [];
+    // Codex P2 R2 (2026-07-04) — Tüketilen-ek kontrolü: bir img (cid: veya
+    // src'siz) bir attachment ile eşleşti mi kaydet. Sonraki fallback'ler
+    // aynı eki tekrar kullanmasın.
+    const consumedAttachmentIds = new Set<string>();
+    // Codex P2 R3 (2026-07-04) — Pre-scan: gövdedeki TÜM cid: ref'leri
+    // önceden topla. Src'siz img fallback bu cid'lere referans edilen
+    // ekleri HARİÇ TUTAR — aksi halde "src'siz img önce, cid:X img sonra"
+    // sırasında src'siz X'i tüketir, cid:X yine X'i render eder → duplicate.
+    // Loop-sıra bağımlılığı ortadan kalkar (cid ref'li ekler otoriter cid
+    // yoluna ait).
+    const cidReferencedKeys = new Set<string>();
+    for (const img of imgs) {
+      const s = (img.getAttribute('src') ?? '').trim();
+      if (!s.toLowerCase().startsWith('cid:')) continue;
+      const cidRaw = s.slice(4).trim();
+      const cidStripped = cidRaw.replace(/^<|>$/g, '');
+      cidReferencedKeys.add(cidRaw);
+      cidReferencedKeys.add(cidStripped);
+      cidReferencedKeys.add(cidStripped.toLowerCase());
+    }
+    // Attachment cid ref'li mi? cidMap'in koyduğu 3 anahtar formatının
+    // (raw, stripped, stripped.toLowerCase) herhangi biri cidReferencedKeys'te
+    // varsa evet.
+    const isAttachmentCidReferenced = (a: { contentId: string | null }) => {
+      if (!a.contentId) return false;
+      const raw = a.contentId.trim();
+      const stripped = raw.replace(/^<|>$/g, '');
+      return cidReferencedKeys.has(raw)
+        || cidReferencedKeys.has(stripped)
+        || cidReferencedKeys.has(stripped.toLowerCase());
+    };
     for (const img of imgs) {
       const src = (img.getAttribute('src') ?? '').trim();
       const isCidSrc = src.toLowerCase().startsWith('cid:');
@@ -116,21 +147,36 @@ export function MailMessageCard({
       // <img> src'siz DB'de. Bu img'ler için alt attribute (mailparser
       // "image.png" alt'ı koyabilir) + isInline aday eşleştirmesi:
       //   1. Alt attribute'ta fileName eşleşen inline aday varsa → onu render
-      //   2. Tek inline aday (legacy, contentId==null) varsa → onu render
+      //   2. Tek inline aday varsa (contentId dolu bile olabilir) → onu render
+      //      Codex P2 R2 fix: `contentId == null` şartı KALDIRILDI. src'siz
+      //      img'de cidMap zaten devreye giremez (src yok, lookup yapılamaz),
+      //      dolayısıyla çift-render belirsizliği YOK. UNV-1000093 birebir
+      //      senaryosu (contentId dolu ama sanitize öncesi parser fix'i
+      //      olmadığı için src silinmiş) burada iyileşir.
       //   3. Yoksa net placeholder "Gömülü görsel — ekte: {names}"
       if (isEmptySrc) {
         const alt = (img.getAttribute('alt') ?? '').trim();
-        const inlineCandidates = email.attachments.filter((x) => x.isInline);
+        // Codex P2 R2/R3 (2026-07-04) — Filter iki katmanlı:
+        //  1. Tüketilen-ek YOK: önce eşleşmiş ek tekrar kullanılmasın
+        //  2. Cid ref'li ek YOK: gövdede cid:X img'i varsa X'i src'siz
+        //     fallback'e vermeyiz. cid:X yolu otoriter — X'i O RENDER EDER.
+        //     Loop sırası bağımsız garanti.
+        const inlineCandidates = email.attachments.filter(
+          (x) => x.isInline
+            && !consumedAttachmentIds.has(x.id)
+            && !isAttachmentCidReferenced(x),
+        );
         let heuristicMatch: { id: string; fileName: string } | null = null;
         if (alt) {
           const byName = inlineCandidates.find((x) => x.fileName === alt);
           if (byName) heuristicMatch = { id: byName.id, fileName: byName.fileName };
         }
-        if (!heuristicMatch && inlineCandidates.length === 1 && inlineCandidates[0].contentId == null) {
+        if (!heuristicMatch && inlineCandidates.length === 1) {
           heuristicMatch = { id: inlineCandidates[0].id, fileName: inlineCandidates[0].fileName };
         }
         if (heuristicMatch) {
           const m = heuristicMatch;
+          consumedAttachmentIds.add(m.id);
           cidJobs.push((async () => {
             const out = await caseEmailService.getAttachmentDownload(caseId, email.id, m.id);
             if (out?.url) {
@@ -171,11 +217,17 @@ export function MailMessageCard({
         // ayrıca unknown cid: Y" senaryosunda Y de X'in URL'ine yönlendirilir
         // → duplicate/yanlış görsel. contentId var ise cidMap zaten onu
         // içerir; body'deki ilgili img normal yolda match olur.
-        const inlineCandidates = email.attachments.filter((x) => x.isInline);
+        //
+        // Codex P2 R2 (2026-07-04) — Tüketilen-ek filtresi: cid'siz path
+        // fallback için de consumedAttachmentIds hariç adayları kullan.
+        const inlineCandidates = email.attachments.filter(
+          (x) => x.isInline && !consumedAttachmentIds.has(x.id),
+        );
         const canUseLegacyFallback =
           inlineCandidates.length === 1 && inlineCandidates[0].contentId == null;
         const fallback = canUseLegacyFallback ? inlineCandidates[0] : null;
         if (fallback) {
+          consumedAttachmentIds.add(fallback.id);
           cidJobs.push((async () => {
             const out = await caseEmailService.getAttachmentDownload(caseId, email.id, fallback.id);
             if (out?.url) {
@@ -201,6 +253,9 @@ export function MailMessageCard({
         img.replaceWith(placeholder);
         continue;
       }
+      // Codex P2 R2 (2026-07-04) — cid: match bulundu → attachment consumed.
+      // Aynı mailde src'siz başka img varsa bu eki tekrar kullanamayacak.
+      consumedAttachmentIds.add(match.id);
       cidJobs.push((async () => {
         const out = await caseEmailService.getAttachmentDownload(caseId, email.id, match.id);
         if (out?.url) {

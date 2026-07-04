@@ -209,6 +209,294 @@ function buildRelated(html, imgs) {
   expectTrue('E.2 cid:jpg1@x var', html.includes('cid:jpg1@x'));
 }
 
+console.log('\n── 5) UI FIX 2 pattern — Codex P2 R2/R3 iyileştirmeleri ─');
+expectTrue('5.1 consumedAttachmentIds Set tanımlı',
+  /const\s+consumedAttachmentIds\s*=\s*new\s+Set<string>\(\)/.test(card));
+// Codex R3: cid ref pre-scan
+expectTrue('5.2 cidReferencedKeys Set — pre-scan tanımlı',
+  /const\s+cidReferencedKeys\s*=\s*new\s+Set<string>\(\)/.test(card));
+expectTrue('5.3 Pre-scan loop: gövdedeki tüm cid: src\'leri toplar',
+  /for \(const img of imgs\)[\s\S]{0,400}s\.toLowerCase\(\)\.startsWith\('cid:'\)[\s\S]{0,300}cidReferencedKeys\.add\(cidRaw\)/.test(card));
+expectTrue('5.4 isAttachmentCidReferenced helper',
+  /const isAttachmentCidReferenced\s*=[\s\S]{0,600}cidReferencedKeys\.has\(raw\)[\s\S]{0,200}\|\|\s*cidReferencedKeys\.has\(stripped\)/.test(card));
+expectTrue('5.5 src\'siz filter — 3 katman (isInline + !consumed + !cidReferenced)',
+  /isEmptySrc[\s\S]{0,600}email\.attachments\.filter\([\s\S]{0,400}x\.isInline[\s\S]{0,200}!consumedAttachmentIds\.has\(x\.id\)[\s\S]{0,200}!isAttachmentCidReferenced\(x\)/.test(card));
+expectTrue('5.6 src\'siz path — tek aday (contentId==null şartı YOK)',
+  /!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*\)\s*\{/.test(card));
+expectTrue('5.7 REGRESYON: eski `contentId == null` şartı src\'siz path\'inden KALKMIŞ',
+  !/!heuristicMatch\s*&&\s*inlineCandidates\.length === 1\s*&&\s*inlineCandidates\[0\]\.contentId == null/.test(card));
+expectTrue('5.8 src\'siz heuristicMatch bulundukta consumedAttachmentIds.add',
+  /if \(heuristicMatch\)[\s\S]{0,200}consumedAttachmentIds\.add\(m\.id\)/.test(card));
+expectTrue('5.9 cid: match bulundukta consumedAttachmentIds.add',
+  /consumedAttachmentIds\.add\(match\.id\)[\s\S]{0,400}cidJobs\.push/.test(card));
+expectTrue('5.10 cid: legacy fallback\'te de consumed filter uygulanır',
+  /if \(!match\)[\s\S]{0,1200}email\.attachments\.filter\([\s\S]{0,300}!consumedAttachmentIds\.has\(x\.id\)/.test(card));
+expectTrue('5.11 Legacy fallback bulundukta consumed.add',
+  /const fallback\s*=\s*canUseLegacyFallback[\s\S]{0,200}consumedAttachmentIds\.add\(fallback\.id\)/.test(card));
+
+console.log('\n── 6) Davranış sim — Codex P2 R2 senaryoları ─');
+
+function simulateRender(imgs, attachments) {
+  const consumed = new Set();
+  const cidMap = new Map();
+  for (const a of attachments) {
+    if (!a.contentId) continue;
+    const raw = a.contentId.trim();
+    const stripped = raw.replace(/^<|>$/g, '');
+    cidMap.set(raw, a);
+    cidMap.set(stripped, a);
+    cidMap.set(stripped.toLowerCase(), a);
+  }
+  // Codex R3: Pre-scan cid referanslarını topla
+  const cidReferencedKeys = new Set();
+  for (const img of imgs) {
+    const s = (img.src ?? '').trim();
+    if (!s.toLowerCase().startsWith('cid:')) continue;
+    const cidRaw = s.slice(4).trim();
+    const cidStripped = cidRaw.replace(/^<|>$/g, '');
+    cidReferencedKeys.add(cidRaw);
+    cidReferencedKeys.add(cidStripped);
+    cidReferencedKeys.add(cidStripped.toLowerCase());
+  }
+  const isAttCidRef = (a) => {
+    if (!a.contentId) return false;
+    const raw = a.contentId.trim();
+    const stripped = raw.replace(/^<|>$/g, '');
+    return cidReferencedKeys.has(raw)
+      || cidReferencedKeys.has(stripped)
+      || cidReferencedKeys.has(stripped.toLowerCase());
+  };
+  const results = [];
+  for (const img of imgs) {
+    const src = (img.src ?? '').trim();
+    const isCidSrc = src.toLowerCase().startsWith('cid:');
+    const isEmptySrc = !src;
+    if (!isCidSrc && !isEmptySrc) continue;
+
+    if (isEmptySrc) {
+      const alt = (img.alt ?? '').trim();
+      // Codex R2 (consumed) + R3 (cid ref) çift filter
+      const candidates = attachments.filter(
+        (x) => x.isInline && !consumed.has(x.id) && !isAttCidRef(x),
+      );
+      let match = null;
+      if (alt) {
+        const byName = candidates.find((x) => x.fileName === alt);
+        if (byName) match = byName;
+      }
+      if (!match && candidates.length === 1) {
+        // contentId dolu OLSA bile (Codex P2 R2 fix)
+        match = candidates[0];
+      }
+      if (match) {
+        consumed.add(match.id);
+        results.push({ kind: 'heuristic_render', id: match.id, alt });
+      } else {
+        results.push({ kind: 'placeholder', alt, inlineNames: candidates.map((x) => x.fileName).join(', ') });
+      }
+      continue;
+    }
+
+    // cid: yolu
+    const cid = src.slice(4).trim();
+    const stripped = cid.replace(/^<|>$/g, '');
+    const cidMatch = cidMap.get(cid) ?? cidMap.get(stripped) ?? cidMap.get(stripped.toLowerCase());
+    if (cidMatch) {
+      consumed.add(cidMatch.id);
+      results.push({ kind: 'cid_render', id: cidMatch.id });
+      continue;
+    }
+    // Legacy fallback (Codex R1) — freshInline + contentId==null şartı DEVAM
+    const candidates = attachments.filter((x) => x.isInline && !consumed.has(x.id));
+    if (candidates.length === 1 && candidates[0].contentId == null) {
+      consumed.add(candidates[0].id);
+      results.push({ kind: 'legacy_fallback', id: candidates[0].id });
+    } else {
+      results.push({ kind: 'placeholder' });
+    }
+  }
+  return results;
+}
+
+// Fixture F: contentId DOLU tek-inline + src'siz img → RENDER (UNV-1000093)
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'image.png' }],
+    [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'image.png' }],
+  );
+  expect('6.1 UNV-1000093: contentId dolu tek-inline + src\'siz + alt eşleşir → render',
+    r[0].kind, 'heuristic_render');
+  expect('6.1b render eki A1', r[0].id, 'A1');
+}
+
+// Fixture F2: contentId DOLU tek-inline + src'siz + alt YOK → yine render (tek aday)
+{
+  const r = simulateRender(
+    [{ src: '', alt: '' }],
+    [{ id: 'A1', isInline: true, contentId: 'abc@host', fileName: 'ss.png' }],
+  );
+  expect('6.2 contentId dolu tek-inline + alt yok → tek-aday fallback',
+    r[0].kind, 'heuristic_render');
+}
+
+// Fixture G: çoklu-inline + src'siz + alt eşleşmiyor → placeholder (belirsizlik)
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'unknown.png' }],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.3 Çoklu-inline + alt eşleşmiyor → placeholder (regresyon)',
+    r[0].kind, 'placeholder');
+}
+
+// Fixture G2: çoklu-inline + alt eşleşiyor → fileName eşleşen ek
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'b.png' }],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.4 Çoklu-inline + alt fileName eşleşir → o attachment',
+    r[0].id, 'A2');
+}
+
+// Fixture H: hem cid'li hem src'siz aynı mailde
+// cid:X match → A1 consumed → src'siz için başka aday YOK → placeholder
+{
+  const r = simulateRender(
+    [
+      { src: 'cid:x@host', alt: 'a.png' },
+      { src: '', alt: 'src\'siz' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('6.5 cid:X match → cid_render', r[0].kind, 'cid_render');
+  expect('6.5b cid:X eki A1', r[0].id, 'A1');
+  expect('6.6 Aynı mailde src\'siz img → A1 consumed → placeholder (çift render önlendi)',
+    r[1].kind, 'placeholder');
+}
+
+// Fixture H2: iki inline + biri cid match + biri src'siz → src'siz kalan eki alır
+{
+  const r = simulateRender(
+    [
+      { src: 'cid:a@x', alt: 'a.png' },
+      { src: '', alt: 'b.png' },
+    ],
+    [
+      { id: 'A1', isInline: true, contentId: 'a@x', fileName: 'a.png' },
+      { id: 'A2', isInline: true, contentId: 'b@x', fileName: 'b.png' },
+    ],
+  );
+  expect('6.7 cid:A match → A1', r[0].id, 'A1');
+  expect('6.7b src\'siz alt=b.png → A2 (A1 consumed, filter dışı)',
+    r[1].id, 'A2');
+  expect('6.7c src\'siz kind heuristic_render', r[1].kind, 'heuristic_render');
+}
+
+// Fixture I: 2 src'siz img — ilki tek aday alır, ikinci placeholder
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'image.png' },
+      { src: '', alt: 'image.png' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'image.png' }],
+  );
+  expect('6.8 İlk src\'siz → A1 alır', r[0].id, 'A1');
+  expect('6.8b İkinci src\'siz → placeholder (A1 consumed)',
+    r[1].kind, 'placeholder');
+}
+
+console.log('\n── 7) Codex P2 R3 kritik — src\'siz ÖNCE + cid: SONRA (duplicate önleme) ─');
+
+// CODEX R3 SENARYOSU: src'siz img önce, cid:X img sonra, aynı A1 ek.
+// Öncesi (R2): src'siz A1'i consumed'a alırdı, cid:X yine A1 match ederdi
+// → duplicate render. R3 fix ile: src'siz filter cid ref'li A1'i exclude
+// eder → placeholder; cid:X yine A1 render eder → tek görsel (doğru).
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'a.png' },        // src'siz ÖNCE
+      { src: 'cid:x@host', alt: 'a.png' }, // cid: SONRA
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('7.1 src\'siz ÖNCE → cid ref\'li A1 filter dışı → placeholder (duplicate önlendi)',
+    r[0].kind, 'placeholder');
+  expect('7.2 cid:x → A1 normal render (otoriter yol)',
+    r[1].kind, 'cid_render');
+  expect('7.2b render eki A1', r[1].id, 'A1');
+}
+
+// R3 karşı-senaryo: sadece src'siz (cid'li img YOK, UNV-1000093) → heuristic devrede
+{
+  const r = simulateRender(
+    [{ src: '', alt: 'a.png' }],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('7.3 Sadece src\'siz + cid\'li img YOK → heuristic AKTİF (UNV-1000093 korunur)',
+    r[0].kind, 'heuristic_render');
+  expect('7.3b render eki A1', r[0].id, 'A1');
+}
+
+// R3 karma: cid:B (unknown, cidMap'te yok) + src'siz (alt=a.png match A1)
+// A1 cid ref'li DEĞİL (referans B'ye) → src'siz heuristic A1 alabilir
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'a.png' },
+      { src: 'cid:unknown@x', alt: 'unknown' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  // Pre-scan cidReferencedKeys = { 'unknown@x' vs. }
+  // A1.contentId='x@host' → cid ref'li DEĞİL (unknown@x ≠ x@host)
+  // src'siz filter A1'i dahil eder → heuristic A1 alır
+  expect('7.4 cid:unknown ref A1\'i tetiklemez → src\'siz A1 heuristic OK',
+    r[0].kind, 'heuristic_render');
+  expect('7.4b render eki A1', r[0].id, 'A1');
+  // cid:unknown match yok → legacy fallback contentId==null şart, A1 contentId dolu → placeholder
+  expect('7.5 cid:unknown eşleşmez + A1 legacy fallback şartı FAİL → placeholder',
+    r[1].kind, 'placeholder');
+}
+
+// R3 çoklu: 2 src'siz + cid:A (aynı ek) → cid:A otoriter, ikisi de placeholder
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'a.png' },
+      { src: '', alt: 'a.png' },
+      { src: 'cid:x@host', alt: 'a.png' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('7.6 İlk src\'siz → A1 cid ref\'li → placeholder',
+    r[0].kind, 'placeholder');
+  expect('7.7 İkinci src\'siz → yine placeholder',
+    r[1].kind, 'placeholder');
+  expect('7.8 cid:x → A1 render (otoriter)',
+    r[2].kind, 'cid_render');
+}
+
+// R3 case-insensitive: cid:X (uppercase) + src'siz (att.contentId lower) → filter yakalar
+{
+  const r = simulateRender(
+    [
+      { src: '', alt: 'a.png' },
+      { src: 'cid:X@HOST', alt: 'a.png' },
+    ],
+    [{ id: 'A1', isInline: true, contentId: 'x@host', fileName: 'a.png' }],
+  );
+  expect('7.9 case bypass: cid:X@HOST → cidReferencedKeys lowercase → A1 filter dışı',
+    r[0].kind, 'placeholder');
+}
+
 console.log('\n────────────────────────────────────────────────');
 console.log(`PASS=${pass}  FAIL=${fail}`);
 process.exit(fail === 0 ? 0 : 1);
