@@ -563,6 +563,18 @@ export function buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, cust
     rowCount,
     topRows: safeRows,
     overviewKpis: snapshot.kpis,
+    // Ops Pano v2 FAZ 2 — drilldown asistanı da AI görüş verilerini görür
+    // (özellikle 'Kök neden' + 'Aksiyon öner' modları için: KB-destekli
+    // çözüm oranı, aktif örüntü alarmı, mail operasyonu). Aggregate-only.
+    kbAssistedResolutionRate: snapshot.kbAssistedResolutionRate ?? null,
+    patternAlerts: snapshot.patternAlerts ?? null,
+    mailOps: snapshot.mailOps ?? null,
+    smartTicketTop: snapshot.smartTicket
+      ? {
+          platform: (snapshot.smartTicket.platform ?? []).slice(0, 3),
+          businessProcess: (snapshot.smartTicket.businessProcess ?? []).slice(0, 3),
+        }
+      : null,
     minSampleViolations: snapshot.minSampleViolations,
     notAvailable: snapshot.notAvailable,
   }, null, 2);
@@ -572,6 +584,11 @@ export function buildDrilldownAssistPrompt({ scope, snapshot, bucket, mode, cust
     lensText,
     '',
     COMMON_RULES,
+    '',
+    'EK BAGLAM: kbAssistedResolutionRate / patternAlerts / mailOps / smartTicketTop',
+    'alanlari varsa Kök neden ve Aksiyon önerilerinde SAYIYLA kullan',
+    '(örn. KB-destekli çözüm oranı düşükse "KB adımı önerin" aksiyonu). Yeni',
+    'kategori/taksonomi ÖNERME — sadece mevcut dağılımı yorumla.',
     '',
     'BU GOREVDEKI EK KURALLAR:',
     '- AI yalnizca verilen evidence/snapshot uzerinden konusur. Liste disindaki vakalardan veya verilmeyen alanlardan emin gibi bahsetme.',

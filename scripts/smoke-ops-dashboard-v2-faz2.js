@@ -87,6 +87,9 @@ expectTrue('3.3 kbAssistedResolutionRate fiili sayıyla atıf talimatı (kabul k
   analyst.includes('CÜMLE İÇİNDE fiili sayıyla söyle'));
 expectTrue('3.4 commentary-only kural (yeni kategori ÖNERME)',
   analyst.includes('Yeni kategori ÖNERME'));
+expectTrue('3.5 drilldown asistanı FAZ 2 verilerini görür (kbRate/alarm/mailOps/taksonomi)',
+  /buildDrilldownAssistPrompt[\s\S]{0,1500}kbAssistedResolutionRate: snapshot/.test(analyst)
+  && /buildDrilldownAssistPrompt[\s\S]{0,2500}smartTicketTop/.test(analyst));
 
 console.log('── 4) UI — AI Görüş bölümü ──');
 expectTrue('4.1 aiDataGroup section key + operations lens sırasında',
