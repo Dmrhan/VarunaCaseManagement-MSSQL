@@ -358,6 +358,19 @@ export function CasesListPage({
   const myTeamSupportLevel = myTeam?.defaultSupportLevel ?? 'L1';
   const poolVisiblePersonal = Boolean(myTeamId) && myTeamSupportLevel !== 'L1';
 
+  // Supervisor Takım Havuzu — yalnız "kendi takımım" değil, kendi takımıyla
+  // AYNI defaultSupportLevel'a sahip TÜM (aynı şirketteki, aktif) takımların
+  // havuzu. Örn. "Univera L2" ve "Uzman Destek" ikisi de L2 ise, bu iki
+  // takımın lideri (Supervisor) her ikisinin de havuzunu birlikte görür.
+  // Agent/Backoffice/CSM tarafı bundan etkilenmez — onlar hâlâ yalnız
+  // kendi tek takımlarının havuzunu görür (myTeamId, üstte).
+  const sameLevelTeamIds = useMemo(() => {
+    if (!myTeam) return [];
+    return teams
+      .filter((t) => t.isActive && t.companyId === myTeam.companyId && t.defaultSupportLevel === myTeamSupportLevel)
+      .map((t) => t.id);
+  }, [teams, myTeam, myTeamSupportLevel]);
+
   // Havuz sayacı — kart tıklandığında listelenecek sayıyla birebir aynı
   // olmalı (client-side/pagination'a bağlı tahmini sayım riskli). Bu yüzden
   // mevcut liste endpoint'i aynı filtrelerle limit=1 çağrılıp gerçek
@@ -366,9 +379,9 @@ export function CasesListPage({
   useEffect(() => {
     let cancelled = false;
     async function loadPoolCount() {
-      if (caseStats?.mode === 'team') {
+      if (caseStats?.mode === 'team' && sameLevelTeamIds.length > 0) {
         const { total } = await caseService.list(
-          { teamScope: true, unassigned: true },
+          { teamIds: sameLevelTeamIds, unassigned: true },
           { page: 1, pageSize: 1 },
         );
         if (!cancelled) setPoolCount(total);
@@ -388,7 +401,7 @@ export function CasesListPage({
     // her çağrıldığında (Üstlen sonrası, Yenile butonu, bulk action) yeni
     // bir caseStats referansı üretir; poolCount da diğer KPI sayılarıyla
     // aynı anda tazelensin diye bu tetikleyiciyi paylaşıyor.
-  }, [caseStats, poolVisiblePersonal, myTeamId]);
+  }, [caseStats, poolVisiblePersonal, myTeamId, sameLevelTeamIds]);
 
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
@@ -866,7 +879,9 @@ export function CasesListPage({
           // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
           // gerçekten uygular. İkisini birden set etmezsek atanmış
           // kayıtlar da listeye sızar.
-          setFilters({ ...initialFilters, teamScope: true });
+          // teamIds (tekil teamScope değil) — kendi takımımla aynı
+          // defaultSupportLevel'daki TÜM takımların havuzu.
+          setFilters({ ...initialFilters, teamIds: sameLevelTeamIds });
           setQuickQueueFilter('unassigned');
           setInboxTab('open');
           setQuickFilter(null);
@@ -1121,25 +1136,25 @@ export function CasesListPage({
             label="Tümü"
             icon={<Layers size={13} />}
             active={inboxTab === 'all'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('all'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('all'); }}
           />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
             active={inboxTab === 'open'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('open'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('open'); }}
           />
           <InboxTabButton
             label="Ertelendi"
             icon={<Clock3 size={13} />}
             active={inboxTab === 'later'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('later'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('later'); }}
           />
           <InboxTabButton
             label="Kapalı"
             icon={<Check size={13} />}
             active={inboxTab === 'closed'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('closed'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('closed'); }}
           />
         </div>
 
