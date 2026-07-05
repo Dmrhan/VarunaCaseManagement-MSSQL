@@ -385,7 +385,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   }
 
   // ---- AI command handlers (Phase 4a) ----
-  // Filtre değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  // Filtre/müşteri seçimi değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
   useEffect(() => {
     setBrief(null);
     setBriefError(null);
@@ -394,7 +394,7 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     setInsightsError(null);
     setReport(null);
     setReportError(null);
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey]);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey, selectedAccount?.id]);
 
   function runBrief() {
     setBriefLoading(true);
