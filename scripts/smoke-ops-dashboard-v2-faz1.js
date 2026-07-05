@@ -23,9 +23,10 @@ const lens = readFileSync('src/features/analytics/operationsLensConfig.ts', 'utf
 const svc = readFileSync('src/services/analyticsService.ts', 'utf8');
 
 console.log('── 1) Backend — accountId guard + filtre ──');
-expectTrue('1.1 checkAccountInScope helper (404/403)',
-  routes.includes('async function checkAccountInScope')
-  && routes.includes("'account_not_found'") && routes.includes("'account_out_of_scope'"));
+expectTrue('1.1 checkAccountInScope guard (paylaşılan modülden; 404/403 kodları)',
+  routes.includes("from '../analytics/accountScopeGuard.js'")
+  && readFileSync('server/analytics/accountScopeGuard.js', 'utf8').includes("'account_not_found'")
+  && readFileSync('server/analytics/accountScopeGuard.js', 'utf8').includes("'account_out_of_scope'"));
 expectTrue('1.2 overview: accountId guard + filters spread',
   /cases\/overview[\s\S]{0,1600}checkAccountInScope\(body\.accountId, scope\)/.test(routes)
   && /cases\/overview[\s\S]{0,2400}\.\.\.\(accountId \? \{ accountId \} : \{\}\)/.test(routes));
