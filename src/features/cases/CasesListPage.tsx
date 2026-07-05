@@ -812,7 +812,7 @@ export function CasesListPage({
       // kendi işini yönetir). En başa, "Bana Atanan"ın önüne konur.
       if (poolVisiblePersonal && myTeamId) {
         tiles.push(
-          tile('personal.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+          tile('personal.pool', 'Takım Havuzu', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
             // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
             // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
             // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
@@ -860,7 +860,7 @@ export function CasesListPage({
       return [
         // Havuz — Supervisor takım lideri persona kabul edilir, seviyeden
         // bağımsız her zaman görünür. En başa, "Ekibimde Açık"ın önüne konur.
-        tile('team.pool', 'Havuz', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+        tile('team.pool', 'Takım Havuzu', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
           // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
           // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
           // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
