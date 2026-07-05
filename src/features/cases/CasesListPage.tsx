@@ -124,6 +124,16 @@ interface CasesListPageProps {
    * Flag kapalıyken prop verilmez → button render edilmez (zero-cost guard).
    */
   onOpenSmartTicket?: () => void;
+  /**
+   * App.tsx bu sayfayı case-detail açıkken unmount etmiyor, CSS ile
+   * gizliyor (`hidden` class) — component her zaman mount'lu kalıyor.
+   * Bu yüzden "vaka detayından üstlen → listeye dön" sonrası mount-only
+   * efektler (stats/liste fetch) tekrar tetiklenmiyordu. isVisible, App
+   * seviyesinden "şu an gerçekten görünürüm" sinyalini taşır; false→true
+   * geçişinde stats + liste tazelenir. Verilmezse (varsayılan true) eski
+   * davranış korunur.
+   */
+  isVisible?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -209,6 +219,7 @@ export function CasesListPage({
   onClearPatternFilter,
   onShowPatterns,
   onOpenSmartTicket,
+  isVisible = true,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
@@ -482,6 +493,20 @@ export function CasesListPage({
     void refreshStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
+
+  // Bu sayfa vaka detayı açıkken unmount olmuyor (App.tsx CSS ile gizliyor),
+  // yani "Vaka Detay → Üstlen → listeye dön" akışında normal mount-effect'ler
+  // tekrar tetiklenmiyordu (stats/liste eski kalıyordu, Yenile'ye basmak
+  // gerekiyordu). isVisible false→true geçişinde stats + liste tazelenir.
+  const wasVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    if (!wasVisibleRef.current && isVisible) {
+      void refreshStats();
+      void load();
+    }
+    wasVisibleRef.current = isVisible;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible]);
 
   // Briefing — örüntü alarmları yalnızca Supervisor+ için. Endpoint frontline'a 403 dönüyor.
   useEffect(() => {
