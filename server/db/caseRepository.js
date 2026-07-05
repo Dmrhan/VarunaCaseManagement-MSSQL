@@ -1315,6 +1315,10 @@ export const caseRepository = {
       // Takım havuzu görünürlük kuralı (liste ile tutarlı): Agent için
       // sadece görebildiği havuzu sayaçlara yansıt.
       let agentUnassignedWhere;
+      // L1 Agent (takımı var, takım lideri değil, L2/L3 değil) — üzerine
+      // kayıt yalnız L1 takım liderinin (Supervisor) elinde. Hiçbir sahipsiz
+      // havuz görmez; "Atanmamış" sayacı da 0 sabitlenir (liste ile tutarlı).
+      let agentBlockedFromPool = false;
       if (role === 'Agent') {
         const agentPerson = await prisma.person.findUnique({
           where: { id: personId },
@@ -1327,6 +1331,7 @@ export const caseRepository = {
         } else if (canSeeTeamPool) {
           agentUnassignedWhere = { assignedPersonId: null, OR: [{ assignedTeamId: agentTeamId }, { assignedTeamId: null }] };
         } else {
+          agentBlockedFromPool = true;
           agentUnassignedWhere = { assignedPersonId: null, assignedTeamId: null };
         }
       } else {
@@ -1350,8 +1355,12 @@ export const caseRepository = {
         prisma.case.count({
           where: scoped({ ...scope, assignedPersonId: personId, snoozeUntil: { gt: new Date() }, status: { in: STATS_OPEN_STATUSES } }),
         }),
-        // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı
-        prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
+        // unassigned chip: liste görünürlüğüyle tutarlı havuz sayısı.
+        // L1 Agent (agentBlockedFromPool) hiç sahipsiz kayıt görmediği için
+        // sorgu bile atılmadan 0 sabitlenir.
+        agentBlockedFromPool
+          ? Promise.resolve(0)
+          : prisma.case.count({ where: scoped({ ...scope, ...agentUnassignedWhere, status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
         prisma.case.count({ where: scoped({ ...scope, priority: 'Critical', status: { in: STATS_OPEN_STATUSES }, AND: [notSnoozed] }) }),
       ]);
       return { mode: 'personal', assignedToMe, slaRiskMine, resolvedToday, snoozedMine, unassigned, critical };
@@ -2208,14 +2217,22 @@ export const caseRepository = {
       });
     }
 
-    // Takım havuzu guard: assignedTeamId dolu vakalar (maille gelen havuz).
-    // Agent rolü için: kendi takımı olmalı ve takım lideri veya L2/L3 olmalı.
-    // Takımsız havuz (assignedTeamId=null) ve Admin/Supervisor/SystemAdmin kısıtlanmaz.
-    if (current.assignedTeamId !== null && user.role === 'Agent') {
-      const canClaim =
-        person.teamId === current.assignedTeamId &&
-        (person.isTeamLead === true || ['L2', 'L3'].includes(person.supportLevel ?? ''));
-      if (!canClaim) {
+    // Havuz guard'ı — Agent rolü için:
+    //  1) L1 Agent (takımı var, takım lideri veya L2/L3 DEĞİL) — hiçbir
+    //     sahipsiz kaydı üstleyemez: ne kendi takımının havuzunu ne
+    //     takımsız/genel havuzu. Atama yalnız L1 takım liderinin (Supervisor)
+    //     elinde — liste görünürlüğüyle aynı kural (bkz. routes/cases.js
+    //     roleDefaultScope).
+    //  2) Takım lideri veya L2/L3 olan Agent, yalnız KENDİ takımının
+    //     havuzunu üstleyebilir — başka bir takımın havuzu (assignedTeamId
+    //     dolu ve kendi takımından farklı) engellenir.
+    // Takımsız Agent, Admin/Supervisor/SystemAdmin kısıtlanmaz.
+    if (user.role === 'Agent') {
+      const canSeeTeamPool = person.isTeamLead === true || ['L2', 'L3'].includes(person.supportLevel ?? '');
+      if (person.teamId && !canSeeTeamPool) {
+        throw new CaseAccessError('Bu vakayı üstlenme yetkiniz yok — atama takım liderinizde.');
+      }
+      if (current.assignedTeamId !== null && person.teamId !== current.assignedTeamId) {
         throw new CaseAccessError('Bu takım havuzunu üstlenme yetkiniz yok.');
       }
     }
@@ -2726,8 +2743,13 @@ export const caseRepository = {
 
     const before = await prisma.case.findUnique({
       where: { id: caseId },
-      select: { accountName: true },
+      select: { accountId: true, accountName: true },
     });
+
+    // Hesap gerçekten değişiyorsa (ilk bağlama dahil), eski müşteriye ait
+    // proje referansı sarkan kalmasın diye temizlenir. Aynı hesaba tekrar
+    // bağlanılıyorsa (relink no-op) proje alanlarına dokunulmaz.
+    const accountChanging = before?.accountId !== account.id;
 
     const updated = await prisma.case.update({
       where: { id: caseId },
@@ -2735,6 +2757,7 @@ export const caseRepository = {
         accountId: account.id,
         accountName: account.name,
         customerMatchPending: false,
+        ...(accountChanging ? { accountProjectId: null, accountProjectName: null } : {}),
         history: {
           create: {
             companyId,
@@ -3762,16 +3785,24 @@ export const caseRepository = {
         // thirdPartyId yoksa geri uyumluluk: SLA dursun.
         nextSlaPausedAt = new Date();
       }
-    } else if (leavingPause && prev.slaPausedAt) {
-      const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
-      nextPausedDurationMin += pausedMin;
-      nextThirdPartyWaitMin += pausedMin;
-      if (prev.slaResolutionDueAt) {
-        nextResolutionDueAt = new Date(
-          new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
-        );
+    } else if (leavingPause) {
+      if (prev.slaPausedAt) {
+        const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
+        nextPausedDurationMin += pausedMin;
+        nextThirdPartyWaitMin += pausedMin;
+        if (prev.slaResolutionDueAt) {
+          nextResolutionDueAt = new Date(
+            new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
+          );
+        }
+        nextSlaPausedAt = null;
       }
-      nextSlaPausedAt = null;
+      // 3rdPartyBekleniyor'dan çıkılınca 3. parti ataması temizlenir —
+      // vaka üzerinde artık görünmez, yalnız history'den (aşağıdaki
+      // FieldUpdate kaydı) takip edilebilir. Tekrar 3rdPartyBekleniyor'a
+      // girilirse (enteringPause) o anda seçilen tanım yeniden set edilir.
+      resolvedThirdPartyId = null;
+      resolvedThirdPartyName = null;
     }
 
     // Yanıt SLA karşılandı mı? İncelemede'ye ilk geçişte slaResponseMetAt stamp'la.
@@ -3800,6 +3831,23 @@ export const caseRepository = {
         actorUserId: stampUid,
       },
     ];
+
+    // 3rdPartyBekleniyor'a girilirken hangi 3. parti tanımına gönderildiği
+    // history'ye düşer. Alanın kendisi (thirdPartyId/thirdPartyName) bu
+    // statüden çıkılınca sessizce temizlenir (bkz. leavingPause bloğu) —
+    // geriye dönük kayıt yalnız bu history satırından okunur.
+    if (enteringPause && resolvedThirdPartyId) {
+      historyEntries.push({
+        companyId,
+        action: '3. Parti seçildi',
+        actionType: 'FieldUpdate',
+        fieldName: 'thirdPartyId',
+        fromValue: null,
+        toValue: resolvedThirdPartyName,
+        actor,
+        actorUserId: stampUid,
+      });
+    }
 
     if (enteringEscalation && payload.escalationLevel) {
       const prevLevelTr = fromDb({ escalationLevel: prev.escalationLevel }).escalationLevel;
@@ -3867,8 +3915,11 @@ export const caseRepository = {
         status: dbNext,
         resolutionNote: payload.resolutionNote ?? prev.resolutionNote,
         cancellationReason: payload.cancellationReason ?? prev.cancellationReason,
-        thirdPartyId: enteringPause ? resolvedThirdPartyId : prev.thirdPartyId,
-        thirdPartyName: enteringPause ? resolvedThirdPartyName : prev.thirdPartyName,
+        // resolvedThirdPartyId/Name üç durumu da kapsar: enteringPause'da
+        // yeni seçilen tanım, leavingPause'da null (temizlendi), diğer
+        // geçişlerde prev ile aynı (init değeri prev.thirdPartyId'ydi).
+        thirdPartyId: resolvedThirdPartyId,
+        thirdPartyName: resolvedThirdPartyName,
         escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,
@@ -5671,6 +5722,11 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   if (f.caseType && f.caseType !== 'Tümü') where.caseType = f.caseType;
   if (f.priorities?.length) where.priority = { in: f.priorities };
   if (f.teamId) where.assignedTeamId = f.teamId;
+  // Takım Havuzu (Supervisor) — kendi takımıyla aynı defaultSupportLevel'a
+  // sahip TÜM takımların havuzunu görmek için. teamId (tekil) ile ayrı
+  // tutuluyor; ikisi aynı anda gelmez (frontend ya birini ya diğerini
+  // gönderir), ama gelirse teamIds öncelikli (daha spesifik/son eklenen).
+  if (f.teamIds?.length) where.assignedTeamId = { in: f.teamIds };
   if (f.personId) where.assignedPersonId = f.personId;
   if (f.dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(f.dateFrom) };
   if (f.dateTo) {

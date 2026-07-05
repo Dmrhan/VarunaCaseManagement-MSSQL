@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  Boxes,
   Globe,
   Mail,
   MessageSquare,
@@ -123,6 +124,16 @@ interface CasesListPageProps {
    * Flag kapalıyken prop verilmez → button render edilmez (zero-cost guard).
    */
   onOpenSmartTicket?: () => void;
+  /**
+   * App.tsx bu sayfayı case-detail açıkken unmount etmiyor, CSS ile
+   * gizliyor (`hidden` class) — component her zaman mount'lu kalıyor.
+   * Bu yüzden "vaka detayından üstlen → listeye dön" sonrası mount-only
+   * efektler (stats/liste fetch) tekrar tetiklenmiyordu. isVisible, App
+   * seviyesinden "şu an gerçekten görünürüm" sinyalini taşır; false→true
+   * geçişinde stats + liste tazelenir. Verilmezse (varsayılan true) eski
+   * davranış korunur.
+   */
+  isVisible?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -208,6 +219,7 @@ export function CasesListPage({
   onClearPatternFilter,
   onShowPatterns,
   onOpenSmartTicket,
+  isVisible = true,
 }: CasesListPageProps) {
   const [allFiltered, setAllFiltered] = useState<Case[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
@@ -329,6 +341,73 @@ export function CasesListPage({
     [filters.teamId, personsAll],
   );
 
+  // Havuz kartı — kullanıcının kendi takımı + KİŞİNİN kendi destek seviyesi/
+  // takım liderliği. Backend guard'ıyla (routes/cases.js roleDefaultScope +
+  // caseRepository.js claim()) birebir aynı kural kullanılmalı: ikisi de
+  // Person.isTeamLead / Person.supportLevel'a bakıyor, Team.defaultSupportLevel'a
+  // DEĞİL. Önceden burada yanlışlıkla myTeam.defaultSupportLevel kullanılıyordu
+  // — kişinin kendi seviyesi takımınkinden farklıysa (ör. L1 takımda L2/lider
+  // bir kişi, veya L2 takımda L1 bir kişi), kart ya backend izin verdiği halde
+  // gizli kalıyordu ya da backend'in engellediği bir kullanıcıya boş/0 sonuçlu
+  // olarak gösteriliyordu.
+  const myPerson = useMemo(
+    () => (user?.personId ? personsAll.find((p) => p.id === user.personId) ?? null : null),
+    [personsAll, user?.personId],
+  );
+  const myTeamId = myPerson?.teamId ?? null;
+  const myTeam = useMemo(
+    () => (myTeamId ? teams.find((t) => t.id === myTeamId) ?? null : null),
+    [teams, myTeamId],
+  );
+  const myTeamSupportLevel = myTeam?.defaultSupportLevel ?? 'L1';
+  const canSeeTeamPool = myPerson?.isTeamLead === true || ['L2', 'L3'].includes(myPerson?.supportLevel ?? '');
+  const poolVisiblePersonal = Boolean(myTeamId) && canSeeTeamPool;
+
+  // Supervisor Takım Havuzu — yalnız "kendi takımım" değil, kendi takımıyla
+  // AYNI defaultSupportLevel'a sahip TÜM (aynı şirketteki, aktif) takımların
+  // havuzu. Örn. "Univera L2" ve "Uzman Destek" ikisi de L2 ise, bu iki
+  // takımın lideri (Supervisor) her ikisinin de havuzunu birlikte görür.
+  // Agent/Backoffice/CSM tarafı bundan etkilenmez — onlar hâlâ yalnız
+  // kendi tek takımlarının havuzunu görür (myTeamId, üstte).
+  const sameLevelTeamIds = useMemo(() => {
+    if (!myTeam) return [];
+    return teams
+      .filter((t) => t.isActive && t.companyId === myTeam.companyId && t.defaultSupportLevel === myTeamSupportLevel)
+      .map((t) => t.id);
+  }, [teams, myTeam, myTeamSupportLevel]);
+
+  // Havuz sayacı — kart tıklandığında listelenecek sayıyla birebir aynı
+  // olmalı (client-side/pagination'a bağlı tahmini sayım riskli). Bu yüzden
+  // mevcut liste endpoint'i aynı filtrelerle limit=1 çağrılıp gerçek
+  // '@odata.count' okunuyor — yeni endpoint yok, tek ek istek.
+  const [poolCount, setPoolCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPoolCount() {
+      if (caseStats?.mode === 'team' && sameLevelTeamIds.length > 0) {
+        const { total } = await caseService.list(
+          { teamIds: sameLevelTeamIds, unassigned: true },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setPoolCount(total);
+      } else if (caseStats?.mode === 'personal' && poolVisiblePersonal && myTeamId) {
+        const { total } = await caseService.list(
+          { teamId: myTeamId, unassigned: true },
+          { page: 1, pageSize: 1 },
+        );
+        if (!cancelled) setPoolCount(total);
+      } else {
+        setPoolCount(null);
+      }
+    }
+    void loadPoolCount();
+    return () => { cancelled = true; };
+    // caseStats'ın tamamına (yalnız .mode'a değil) bağımlı — refreshStats()
+    // her çağrıldığında (Üstlen sonrası, Yenile butonu, bulk action) yeni
+    // bir caseStats referansı üretir; poolCount da diğer KPI sayılarıyla
+    // aynı anda tazelensin diye bu tetikleyiciyi paylaşıyor.
+  }, [caseStats, poolVisiblePersonal, myTeamId, sameLevelTeamIds]);
+
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
     const p = targetPage ?? page;
@@ -380,6 +459,7 @@ export function CasesListPage({
     filters.caseType,
     filters.priorities,
     filters.teamId,
+    filters.teamIds,
     filters.personId,
     filters.dateFrom,
     filters.dateTo,
@@ -432,6 +512,20 @@ export function CasesListPage({
     void refreshStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
+
+  // Bu sayfa vaka detayı açıkken unmount olmuyor (App.tsx CSS ile gizliyor),
+  // yani "Vaka Detay → Üstlen → listeye dön" akışında normal mount-effect'ler
+  // tekrar tetiklenmiyordu (stats/liste eski kalıyordu, Yenile'ye basmak
+  // gerekiyordu). isVisible false→true geçişinde stats + liste tazelenir.
+  const wasVisibleRef = useRef(isVisible);
+  useEffect(() => {
+    if (!wasVisibleRef.current && isVisible) {
+      void refreshStats();
+      void load();
+    }
+    wasVisibleRef.current = isVisible;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible]);
 
   // Briefing — örüntü alarmları yalnızca Supervisor+ için. Endpoint frontline'a 403 dönüyor.
   useEffect(() => {
@@ -677,9 +771,203 @@ export function CasesListPage({
       void load();
     }
   }
-  /** WR-C1 — Claim koşulu: kapalı değil, atanmamış, kullanıcının personId'si var. */
+  /** WR-C1 — Claim koşulu: kapalı değil, atanmamış, kullanıcının personId'si var.
+   * L1 agent guard — takımı olup canSeeTeamPool=false olan Agent, kendi
+   * oluşturduğu kayıt dahil hiçbir havuz vakasını claim edemez (backend
+   * caseRepository.js claim() aynı kuralı uygular — "atama takım liderinizde"
+   * hatası). Buton burada gizlenmezse kullanıcı her tıklamada 403 alır;
+   * görünürlük backend kuralıyla birebir eşleşmeli. */
   const canClaimCase = (c: { status: CaseStatus; assignedPersonId?: string | null }) =>
-    !!user?.personId && !c.assignedPersonId && !CLOSED_STATUSES.includes(c.status);
+    !!user?.personId &&
+    !c.assignedPersonId &&
+    !CLOSED_STATUSES.includes(c.status) &&
+    !(user?.role === 'Agent' && !!myTeamId && !canSeeTeamPool);
+
+  // Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
+  // Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
+  // operations (Admin/SystemAdmin). Tile click → list filter intent + seçili
+  // tile görsel hint. JSX dışına alındı ki tile sayısı (4 veya Havuz'lu 5)
+  // grid kolon sayısını belirleyebilsin.
+  const kpiTiles: React.ReactNode[] = (() => {
+    // Color band per card category (spec: blue/red/green/amber)
+    const TILE_BORDER = {
+      blue: 'border-t-2 border-t-blue-500 dark:border-t-blue-600',
+      red: 'border-t-2 border-t-rose-500 dark:border-t-rose-600',
+      green: 'border-t-2 border-t-emerald-500 dark:border-t-emerald-600',
+      amber: 'border-t-2 border-t-amber-500 dark:border-t-amber-600',
+    } as const;
+    type Color = keyof typeof TILE_BORDER;
+
+    const tile = (
+      id: string,
+      label: string,
+      value: number,
+      color: Color,
+      icon: React.ReactNode,
+      onClick: () => void,
+    ) => (
+      <KpiTile
+        key={id}
+        label={label}
+        value={value}
+        icon={icon}
+        tone={value === 0 ? 'slate' : (color === 'red' ? 'rose' : color === 'green' ? 'emerald' : color === 'amber' ? 'amber' : 'brand')}
+        selected={selectedKpi === id}
+        extraClassName={TILE_BORDER[color]}
+        onClick={() => {
+          setSelectedKpi(id);
+          onClick();
+        }}
+      />
+    );
+
+    if (statsLoading && !caseStats) {
+      return [0, 1, 2, 3].map((i) => (
+        <div
+          key={`skel-${i}`}
+          className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
+        />
+      ));
+    }
+
+    // PERSONAL (Agent/Backoffice/CSM)
+    if (caseStats?.mode === 'personal' && user?.personId) {
+      const s = caseStats;
+      const me = user.personId;
+      const tiles: React.ReactNode[] = [];
+      // Havuz — yalnız kullanıcının kendi takımı L2/L3 ise görünür (L1 zaten
+      // kendi işini yönetir). En başa, "Bana Atanan"ın önüne konur.
+      if (poolVisiblePersonal && myTeamId) {
+        tiles.push(
+          tile('personal.pool', 'Takım Havuzu', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+            // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
+            // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
+            // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
+            // gerçekten uygular. İkisini birden set etmezsek atanmış
+            // kayıtlar da listeye sızar.
+            setFilters({ ...initialFilters, teamId: myTeamId });
+            setQuickQueueFilter('unassigned');
+            setInboxTab('open');
+            setQuickFilter(null);
+          }),
+        );
+      }
+      tiles.push(
+        tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me, slaViolation: true });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('personal.resolvedToday', 'Bugün Çözdüm', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, personId: me, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+        tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
+          setFilters(initialFilters);
+          setQuickQueueFilter('all');
+          setInboxTab('later');
+          setQuickFilter(null);
+        }),
+      );
+      return tiles;
+    }
+
+    // TEAM (Supervisor)
+    if (caseStats?.mode === 'team') {
+      const s = caseStats;
+      return [
+        // Havuz — Supervisor takım lideri persona kabul edilir, seviyeden
+        // bağımsız her zaman görünür. En başa, "Ekibimde Açık"ın önüne konur.
+        tile('team.pool', 'Takım Havuzu', poolCount ?? 0, 'blue', <Boxes size={16} />, () => {
+          // NOT: unassigned=true asıl olarak quickQueueFilter state'inden
+          // okunuyor (bkz. load()) — filters.unassigned load()'da hiç
+          // kullanılmıyor, sadece quickQueueFilter='unassigned' filtreyi
+          // gerçekten uygular. İkisini birden set etmezsek atanmış
+          // kayıtlar da listeye sızar.
+          // teamIds (tekil teamScope değil) — kendi takımımla aynı
+          // defaultSupportLevel'daki TÜM takımların havuzu.
+          setFilters({ ...initialFilters, teamIds: sameLevelTeamIds });
+          setQuickQueueFilter('unassigned');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('team.resolvedToday', 'Bugün Çözülen', s.teamResolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+      ];
+    }
+
+    // OPERATIONS (Admin/SystemAdmin)
+    if (caseStats?.mode === 'operations') {
+      const s = caseStats;
+      return [
+        tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
+          setFilters(initialFilters);
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
+          setFilters({ ...initialFilters, slaViolation: true });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
+          setFilters({ ...initialFilters, priorities: ['Critical'] });
+          setQuickQueueFilter('all');
+          setInboxTab('open');
+          setQuickFilter(null);
+        }),
+        tile('ops.resolvedToday', 'Bugün Çözülen', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
+          setFilters({ ...initialFilters, resolvedToday: true });
+          setInboxTab('closed');
+          setQuickFilter(null);
+          setQuickQueueFilter('all');
+        }),
+      ];
+    }
+
+    // Stats fetch failed / empty scope — placeholder cards with "—".
+    return [0, 1, 2, 3].map((i) => (
+      <div
+        key={`empty-${i}`}
+        className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
+      >
+        —
+      </div>
+    ));
+  })();
 
   return (
     <div className="space-y-4">
@@ -765,149 +1053,12 @@ export function CasesListPage({
 
       {/*
         Role-aware KPI cards — backend tek truth source (GET /api/cases/stats).
-        Mode rol bazlı: personal (Agent/Backoffice/CSM), team (Supervisor),
-        operations (Admin/SystemAdmin). Tile click → list filter intent +
-        seçili tile görsel hint. Card sayısı ile click sonrası liste sayısı
-        eşleşir (pagination hariç).
+        Havuz kartı dahilse (personal L2/L3 veya team/Supervisor) 5 kart olur;
+        grid kolon sayısı buna göre genişler (kpiTiles component'in üstünde
+        hesaplanır, bkz. yukarı).
       */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {(() => {
-          // Color band per card category (spec: blue/red/green/amber)
-          const TILE_BORDER = {
-            blue: 'border-t-2 border-t-blue-500 dark:border-t-blue-600',
-            red: 'border-t-2 border-t-rose-500 dark:border-t-rose-600',
-            green: 'border-t-2 border-t-emerald-500 dark:border-t-emerald-600',
-            amber: 'border-t-2 border-t-amber-500 dark:border-t-amber-600',
-          } as const;
-          type Color = keyof typeof TILE_BORDER;
-
-          const tile = (
-            id: string,
-            label: string,
-            value: number,
-            color: Color,
-            icon: React.ReactNode,
-            onClick: () => void,
-          ) => (
-            <KpiTile
-              key={id}
-              label={label}
-              value={value}
-              icon={icon}
-              tone={value === 0 ? 'slate' : (color === 'red' ? 'rose' : color === 'green' ? 'emerald' : color === 'amber' ? 'amber' : 'brand')}
-              selected={selectedKpi === id}
-              extraClassName={TILE_BORDER[color]}
-              onClick={() => {
-                setSelectedKpi(id);
-                onClick();
-              }}
-            />
-          );
-
-          if (statsLoading && !caseStats) {
-            return [0, 1, 2, 3].map((i) => (
-              <div
-                key={`skel-${i}`}
-                className="h-[64px] animate-pulse rounded-xl bg-slate-100 dark:bg-ndark-card"
-              />
-            ));
-          }
-
-          // PERSONAL (Agent/Backoffice/CSM)
-          if (caseStats?.mode === 'personal' && user?.personId) {
-            const s = caseStats;
-            const me = user.personId;
-            return [
-              tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('personal.resolvedToday', 'Bugün Çözdüm', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, personId: me, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-              tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
-                setFilters(initialFilters);
-                setInboxTab('later');
-                setQuickFilter(null);
-              }),
-            ];
-          }
-
-          // TEAM (Supervisor)
-          if (caseStats?.mode === 'team') {
-            const s = caseStats;
-            return [
-              tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('team.resolvedToday', 'Bugün Çözülen', s.teamResolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, teamScope: true, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-            ];
-          }
-
-          // OPERATIONS (Admin/SystemAdmin)
-          if (caseStats?.mode === 'operations') {
-            const s = caseStats;
-            return [
-              tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
-                setFilters(initialFilters);
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
-                setFilters({ ...initialFilters, slaViolation: true });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
-                setFilters({ ...initialFilters, priorities: ['Critical'] });
-                setInboxTab('open');
-                setQuickFilter(null);
-              }),
-              tile('ops.resolvedToday', 'Bugün Çözülen', s.resolvedToday, 'green', <CheckCircle2 size={16} />, () => {
-                setFilters({ ...initialFilters, resolvedToday: true });
-                setInboxTab('closed');
-                setQuickFilter(null);
-                setQuickQueueFilter('all');
-              }),
-            ];
-          }
-
-          // Stats fetch failed / empty scope — placeholder cards with "—".
-          return [0, 1, 2, 3].map((i) => (
-            <div
-              key={`empty-${i}`}
-              className="flex h-[64px] items-center justify-center rounded-xl bg-white text-sm text-slate-400 ring-1 ring-slate-200 dark:bg-ndark-card dark:text-ndark-muted dark:ring-ndark-border"
-            >
-              —
-            </div>
-          ));
-        })()}
+      <div className={cn('grid grid-cols-2 gap-3', kpiTiles.length >= 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4')}>
+        {kpiTiles}
       </div>
 
       {/*
@@ -999,25 +1150,25 @@ export function CasesListPage({
             label="Tümü"
             icon={<Layers size={13} />}
             active={inboxTab === 'all'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('all'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('all'); }}
           />
           <InboxTabButton
             label="Açık"
             icon={<Inbox size={13} />}
             active={inboxTab === 'open'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('open'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('open'); }}
           />
           <InboxTabButton
             label="Ertelendi"
             icon={<Clock3 size={13} />}
             active={inboxTab === 'later'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('later'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('later'); }}
           />
           <InboxTabButton
             label="Kapalı"
             icon={<Check size={13} />}
             active={inboxTab === 'closed'}
-            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, slaViolation: false, resolvedToday: false })); setInboxTab('closed'); }}
+            onClick={() => { setFilters((f) => ({ ...f, personId: undefined, assignedToMe: false, teamScope: false, teamIds: undefined, slaViolation: false, resolvedToday: false })); setQuickQueueFilter('all'); setInboxTab('closed'); }}
           />
         </div>
 

@@ -883,6 +883,10 @@ export interface CaseFilters {
   caseType?: CaseType | 'Tümü';
   priorities?: CasePriority[];      // multi-select
   teamId?: string;
+  /** Takım Havuzu (Supervisor) — kendi takımıyla aynı defaultSupportLevel'a
+   *  sahip tüm takımların id listesi. teamId (tekil) ile ayrı; yalnız
+   *  Havuz kartı bunu kullanır. */
+  teamIds?: string[];
   personId?: string;
   dateFrom?: string;                // ISO date (YYYY-MM-DD)
   dateTo?: string;                  // ISO date

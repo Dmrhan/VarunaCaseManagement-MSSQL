@@ -509,6 +509,14 @@ router.get(
       });
       if (sup?.teamId) teamId = sup.teamId;
     }
+    // Takım Havuzu (Supervisor) — ?teamIds=id1,id2 CSV. Client, kendi
+    // takımıyla aynı defaultSupportLevel'a sahip takımların id'lerini
+    // bootstrap'te zaten yüklü teams listesinden çıkarıp gönderiyor.
+    // Ek bir sızıntı yok: sonuç yine de companyId scope + roleDefaultScope
+    // ile AND'lenir (tenant dışı/erişimsiz takım id'si boş sonuç verir).
+    const teamIds = typeof f.teamIds === 'string'
+      ? f.teamIds.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
 
     // Rol bazlı varsayılan liste kapsamı (sadece liste ekranı, güvenlik kısıtı değil).
     // Agent: her zaman uygulanır. Supervisor/Backoffice: roleDefaultView=off gelmediği sürece uygulanır.
@@ -536,8 +544,12 @@ router.get(
         orClauses.push({ assignedPersonId: null, assignedTeamId: agentTeamId, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
         orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
       } else {
-        // L1 Agent with team → sadece takımsız havuz, takım havuzu görünmez
-        orClauses.push({ assignedPersonId: null, assignedTeamId: null, status: { in: ROLE_DEFAULT_SCOPE_OPEN } });
+        // L1 Agent with team → hiçbir sahipsiz/atanmamış havuz görünmez
+        // (ne kendi takımının ne takımsız/genel havuzun). Kayıt üzerine
+        // atama yalnız L1 takım liderinin (Supervisor) elinde — L1 Agent
+        // kendi kendine "Üstlen" ile sahipsiz bir kayıt alamaz. Yalnız
+        // kendine atanmış + kendi açtığı vakaları görür (üstteki ortak
+        // orClauses zaten bunları kapsıyor).
       }
       roleDefaultScope = { OR: orClauses };
     } else if (['Supervisor', 'Backoffice'].includes(req.user.role) && req.user.personId && !roleDefaultViewOff) {
@@ -574,6 +586,7 @@ router.get(
       caseType: f.caseType,
       priorities: f.priorities ? f.priorities.split(',') : undefined,
       teamId,
+      teamIds: teamIds && teamIds.length > 0 ? teamIds : undefined,
       personId,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,

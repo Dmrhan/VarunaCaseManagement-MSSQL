@@ -406,6 +406,7 @@ export const caseService = {
     if (filters?.caseType && filters.caseType !== 'Tümü') params.set('caseType', filters.caseType);
     if (filters?.priorities?.length) params.set('priorities', filters.priorities.join(','));
     if (filters?.teamId)   params.set('teamId', filters.teamId);
+    if (filters?.teamIds?.length) params.set('teamIds', filters.teamIds.join(','));
     if (filters?.personId) params.set('personId', filters.personId);
     if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
     if (filters?.dateTo)   params.set('dateTo', filters.dateTo);

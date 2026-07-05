@@ -120,6 +120,9 @@ export default function App() {
   // Vaka detayına hangi view'dan girildiği — geri dönüşte oraya yönlendirmek için.
   const [caseDetailOrigin, setCaseDetailOrigin] = useState<View>('cases');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  // Müşteri detayına hangi view'dan girildiği (ör. vaka detayından "Detay →")
+  // — geri dönüşte oraya yönlendirmek için. caseDetailOrigin ile aynı desen.
+  const [accountDetailOrigin, setAccountDetailOrigin] = useState<View>('accounts');
   // Gelen çağrı screen pop'u: yanıtlanınca müşteri ön-seçili Akıllı Ticket için.
   const [smartTicketAccount, setSmartTicketAccount] = useState<{ id: string; name: string } | null>(null);
   const [customerCardId, setCustomerCardId] = useState<string | null>(null);
@@ -389,12 +392,13 @@ export default function App() {
   );
 
   function openAccount(id: string) {
+    setAccountDetailOrigin(view);
     setSelectedAccountId(id);
     setView('account-detail');
   }
 
   function backToAccounts() {
-    setView('accounts');
+    setView(accountDetailOrigin);
     setSelectedAccountId(null);
   }
 
@@ -1000,6 +1004,7 @@ export default function App() {
                     ? () => setView('smart-ticket-new')
                     : undefined
                 }
+                isVisible={!isDetail}
               />
             </div>
           )}
