@@ -828,11 +828,13 @@ export function CasesListPage({
       tiles.push(
         tile('personal.assigned', 'Bana Atanan', s.assignedToMe, 'blue', <User size={16} />, () => {
           setFilters({ ...initialFilters, personId: me });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
         tile('personal.slaRiskMine', 'SLA Riskimde', s.slaRiskMine, 'red', <AlertCircle size={16} />, () => {
           setFilters({ ...initialFilters, personId: me, slaViolation: true });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
@@ -844,6 +846,7 @@ export function CasesListPage({
         }),
         tile('personal.snoozed', 'Ertelenenlerim', s.snoozedMine, 'amber', <Clock size={16} />, () => {
           setFilters(initialFilters);
+          setQuickQueueFilter('all');
           setInboxTab('later');
           setQuickFilter(null);
         }),
@@ -870,16 +873,19 @@ export function CasesListPage({
         }),
         tile('team.open', 'Ekibimde Açık', s.teamOpenCount, 'blue', <Inbox size={16} />, () => {
           setFilters({ ...initialFilters, teamScope: true });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
         tile('team.sla', 'Ekibimde SLA', s.teamSlaRisk, 'red', <ShieldAlert size={16} />, () => {
           setFilters({ ...initialFilters, teamScope: true, slaViolation: true });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
         tile('team.escalation', 'Eskale Edildi', s.teamEscalation, 'amber', <AlertCircle size={16} />, () => {
           setFilters({ ...initialFilters, teamScope: true, statuses: ['Eskalasyon'] });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
@@ -898,16 +904,19 @@ export function CasesListPage({
       return [
         tile('ops.totalOpen', 'Toplam Açık', s.totalOpen, 'blue', <Inbox size={16} />, () => {
           setFilters(initialFilters);
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
         tile('ops.slaViolation', 'SLA İhlali', s.slaViolation, 'red', <ShieldAlert size={16} />, () => {
           setFilters({ ...initialFilters, slaViolation: true });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
         tile('ops.critical', 'Kritik', s.critical, 'red', <Flag size={16} />, () => {
           setFilters({ ...initialFilters, priorities: ['Critical'] });
+          setQuickQueueFilter('all');
           setInboxTab('open');
           setQuickFilter(null);
         }),
