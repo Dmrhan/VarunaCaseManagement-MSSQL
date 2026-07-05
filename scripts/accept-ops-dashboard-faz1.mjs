@@ -156,8 +156,7 @@ if (!pickerInput) {
 const searchInput = pickerInput;
 await searchInput.click();
 await searchInput.pressSequentially(ACCOUNT_NAME, { delay: 60 });
-await page.keyboard.press('Enter');
-await page.waitForTimeout(3000);
+await page.waitForTimeout(5000); // debounce 300ms + server arama + render (yarışa pay)
 // picker sonuç satırına tıkla — modal içi text match (satır elementi tipten bağımsız)
 const resultRow = page.locator(`.fixed:has-text("Müşteri Ara") >> text=${ACCOUNT_NAME}`).first();
 const rowVisible = await resultRow.isVisible().catch(() => false);
@@ -188,12 +187,18 @@ await page.evaluate(() => window.scrollTo(0, 0));
 const dateInputs = page.locator('input[type="date"]');
 await dateInputs.nth(0).fill('2015-01-01');
 await dateInputs.nth(1).fill('2015-01-02');
-await page.waitForTimeout(3500);
-const emptyText = await page.evaluate(() => document.body.innerText);
-// NOT: AI brief kartı Anthropic kredisi yüzünden hata gösterebilir — o ayrı
-// yüzey; yalnız PANO yükleme hatasını ara.
-const hasError = /Operasyon panosu yüklenemedi/i.test(emptyText);
-log('E1 boş dönem: pano hatası YOK', !hasError);
+// İki fill arasındaki geçici >90 gün durumu meşru bir 400 toast'ı üretir
+// (uygulama davranışı doğru); toast sönümlensin diye bekleyip KALICI hata
+// kartına bak (retry butonlu Card — toast değil).
+await page.waitForTimeout(8000);
+const persistentError = await page.evaluate(() => {
+  const cards = Array.from(document.querySelectorAll('section, div'));
+  return cards.some((c) =>
+    c.childElementCount > 0 && c.childElementCount < 6
+    && /Operasyon panosu yüklenemedi/.test(c.innerText)
+    && /Tekrar dene/.test(c.innerText));
+});
+log('E1 boş dönem: KALICI pano hata kartı YOK', !persistentError);
 const totalEmpty = await readTotal();
 log('E2 boş dönem: kart 0/boş', totalEmpty === 0, `toplam=${totalEmpty}`);
 
