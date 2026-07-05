@@ -2297,7 +2297,7 @@ export const caseService = {
     caseId: string,
     payload: UpdateSmartClassificationRequest,
   ): Promise<Case | undefined> {
-    return apiFetch<Case>(
+    const result = await apiFetch<Case>(
       `/api/cases/${caseId}/smart-classification`,
       {
         method: 'PATCH',
@@ -2306,6 +2306,10 @@ export const caseService = {
       },
       'Akıllı Tanımlar kaydedilemedi',
     );
+    // Codex R1 P2 — diğer case mutation'larıyla parite (WR-H2): 30sn TTL
+    // cache'i temizlenmezse geri dönüşte kayıt-öncesi sınıflandırma görünür.
+    if (result) invalidateCaseDetail(caseId);
+    return result;
   },
 
   async importAiSuggestedSolutionSteps(

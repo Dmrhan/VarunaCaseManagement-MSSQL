@@ -1,5 +1,5 @@
 import { prisma } from './client.js';
-import { fromDb, toDb, toDbFilters } from './enumMap.js';
+import { fromDb, toDb, toDbFilters, M_REQUEST } from './enumMap.js';
 import { createUploadUrl, createDownloadUrl, removeObject, verifyStorageToken } from './storage.js';
 import { isAcceptedUpload } from '../lib/uploadWhitelist.js';
 import { checkCloseAllowed as checkApprovalCloseAllowed } from './approvalRepository.js';
@@ -1257,6 +1257,13 @@ export const caseRepository = {
     }
     if (typeof mapping.subCategory === 'string' && mapping.subCategory.trim()) {
       categoryUpdate.subCategory = mapping.subCategory.trim();
+    }
+    // Codex R1 P2 — requestType da Case kolonuna yazılır (category ile aynı
+    // parite; aksi halde appliedMapping yeniyi, Case.requestType eskiyi
+    // gösterir — liste/rapor/SLA tutarsız kalır). M_REQUEST allowlist +
+    // normal case update'lerle AYNI ASCII normalize (toDb yolu, enumMap).
+    if (typeof mapping.requestType === 'string' && M_REQUEST[mapping.requestType.trim()]) {
+      categoryUpdate.requestType = M_REQUEST[mapping.requestType.trim()];
     }
 
     const updated = await prisma.case.update({

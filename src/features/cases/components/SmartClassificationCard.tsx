@@ -26,7 +26,7 @@
  * farklıysa/elle girildiyse "elle seçildi" — persist edilen
  * classificationSuggestion.perField sayesinde sayfa yenilense de korunur.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Box, Flame, Layers, Pencil, Settings2, Sparkles, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Field';
@@ -116,13 +116,28 @@ export function SmartClassificationCard({
   const [saving, setSaving] = useState(false);
   const [suggestion, setSuggestion] = useState<SuggestClassificationResponse | null>(null);
 
+  // Codex R1 P2 (+ aynı aile, kendi bulgumuz) — CaseDetailPage key'siz reuse
+  // edilir (default-tab dersinin aynısı): vaka/şirket değişince bileşen
+  // İÇİ state'ler sıfırlanmalı. taxonomies ŞİRKETE, values/suggestion/editing
+  // VAKAYA bağlı — aksi halde önceki kiracının taxonomy'siyle yanlış kod
+  // yazılabilir, önceki vakanın taslak values'ü yeni vakaya taban olur.
+  const taxCompanyRef = useRef<string | null>(null);
+  const caseIdRef = useRef<string>(item.id);
+  if (caseIdRef.current !== item.id) {
+    caseIdRef.current = item.id;
+    setEditing(false);
+    setSuggestion(null);
+    setValues(readStoredValues(item));
+  }
+
   const stored = readStoredValues(item);
   const hasData = FIELDS.some((f) => stored[f.key]);
   const persistedSug = readPersistedSuggestion(item);
 
   const ensureTaxonomies = useCallback(async () => {
-    if (taxonomies) return taxonomies;
+    if (taxonomies && taxCompanyRef.current === item.companyId) return taxonomies;
     const res = await lookupService.smartTicketTaxonomies(item.companyId);
+    taxCompanyRef.current = item.companyId;
     setTaxonomies(res.taxonomies);
     return res.taxonomies;
   }, [taxonomies, item.companyId]);

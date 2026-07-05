@@ -160,5 +160,16 @@ expectTrue('7.8 pickKbFailure en spesifik sınıfı seçer (v2 kota + fallback j
 expectTrue('7.9 pickKbFailure hepsi jenerikse jenerik döner',
   pickKbFailure({ error: { code: 'external_kb_http_error' } }, null).code === 'external_kb_failed');
 
+console.log('── 8) Codex R1 fix\'leri ──');
+const repo = readFileSync('server/db/caseRepository.js', 'utf8');
+expectTrue('8.1 requestType M_REQUEST allowlist ile Case kolonuna yazılır',
+  repo.includes('categoryUpdate.requestType = M_REQUEST[mapping.requestType.trim()]'));
+expectTrue('8.2 taxonomy cache ŞİRKETE bağlı (taxCompanyRef)',
+  card.includes('taxCompanyRef.current === item.companyId'));
+expectTrue('8.3 vaka değişiminde kart state reset (caseIdRef)',
+  card.includes('caseIdRef.current !== item.id') && /caseIdRef[\s\S]{0,200}setValues\(readStoredValues\(item\)\)/.test(card));
+expectTrue('8.4 mutation sonrası invalidateCaseDetail (WR-H2 paritesi)',
+  /updateSmartClassification[\s\S]{0,600}invalidateCaseDetail\(caseId\)/.test(service));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
