@@ -109,6 +109,9 @@ router.get(
       // Vaka açma/eşleştirme picker'ları activeOnly=true gönderir; pasif
       // hesaplar sonuçtan düşer. Müşteri yönetim listesi göndermez.
       activeOnly: req.query.activeOnly === 'true',
+      // Proje-etkin picker'lar (projectsEnabled) gönderir — chip seçiliyken
+      // bile proje adı/kodu araması devre dışı kalmasın.
+      includeProjectSearch: req.query.includeProjectSearch === 'true',
     });
     res.json(result);
   }),
