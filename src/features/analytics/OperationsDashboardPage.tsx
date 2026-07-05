@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  Sparkles,
   Tag,
   X,
   Building2,
@@ -751,6 +752,11 @@ function SectionRenderer({
           onOpenDrilldown={openDrilldown}
         />
       );
+    case 'aiDataGroup':
+      // Ops Pano v2 FAZ 2 — AI görüş mini kartları. RUNA brief/insights bu
+      // aggregate'leri yorumlar; kartlar sayının kendisini gösterir
+      // (deterministic; UI hesaplamaz, sadece formatlar).
+      return <AiDataGroupSection loading={loading} data={data} />;
     case 'requestOriginGroup':
       // Ops Pano v2 FAZ 1 (1b) — aggregate'ler hazırdı (Bülten A1), UI'a
       // bağlandı. Drilldown bucket'ı yok (bilinçli — mini kart + dağılım).
@@ -1428,6 +1434,149 @@ function mapCaseTypeItems(rows: { key: string; count: number }[]): DrilldownBarI
     color: CASE_TYPE_COLOR[r.key] ?? 'bg-slate-500',
     bucket: { kind: 'caseType', key: r.key, label: CASE_TYPE_LABEL[r.key] ?? r.key },
   }));
+}
+
+// ═══ Ops Pano v2 FAZ 2 — AI Görüş mini kartları ═══════════════════════
+const SOLUTION_SOURCE_LABEL: Record<string, string> = {
+  ai_suggested_step: 'AI Önerisi',
+  external_kb: 'Bilgi Bankası',
+  similar_case: 'Benzer Vaka',
+  manual: 'Manuel',
+};
+
+function MiniStatRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 px-4 py-1.5 text-sm">
+      <span className="text-slate-500 dark:text-ndark-muted">{label}</span>
+      <span className="font-semibold text-slate-800 dark:text-ndark-text">{value}</span>
+    </div>
+  );
+}
+
+function MiniListRows({ rows }: { rows: Array<{ key: string; label: string; count: number }> }) {
+  if (rows.length === 0) {
+    return <div className="px-4 py-3 text-xs text-slate-400 dark:text-ndark-muted">Veri yok.</div>;
+  }
+  return (
+    <div className="py-1">
+      {rows.slice(0, 3).map((r) => (
+        <div key={r.key} className="flex items-baseline justify-between gap-2 px-4 py-1 text-sm">
+          <span className="min-w-0 truncate text-slate-600 dark:text-ndark-muted">{r.label}</span>
+          <span className="shrink-0 font-semibold text-slate-800 dark:text-ndark-text">{r.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AiMiniCard({
+  title,
+  loading,
+  children,
+}: {
+  title: string;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} className="text-violet-500" />
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h2>
+        </div>
+      </CardHeader>
+      <CardBody className="!p-0">
+        {loading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton height={12} />
+            <Skeleton height={12} />
+          </div>
+        ) : (
+          children
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function AiDataGroupSection({
+  loading,
+  data,
+}: {
+  loading: boolean;
+  data: OperationsOverviewResponse | null;
+}) {
+  const kbRate = data?.kbAssistedResolutionRate;
+  const mail = data?.mailOps;
+  const pat = data?.patternAlerts;
+  const qa = data?.qaAverages;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+          AI Görüş Verileri
+        </span>
+        <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
+          RUNA özet/görüşleri bu verileri yorumlar
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <AiMiniCard title="Akıllı Sınıflandırma" loading={loading}>
+          <div className="px-4 pt-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-muted">Platform</div>
+          <MiniListRows rows={data?.bySmartTicketPlatform ?? []} />
+          <div className="px-4 pt-1 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-muted">İş Süreci</div>
+          <MiniListRows rows={data?.bySmartTicketBusinessProcess ?? []} />
+        </AiMiniCard>
+        <AiMiniCard title="Çözüm Kaynağı" loading={loading}>
+          <div className="px-4 pt-2">
+            <span className="text-2xl font-semibold text-slate-800 dark:text-ndark-text">
+              {kbRate === null || kbRate === undefined ? '—' : `%${Math.round(kbRate * 100)}`}
+            </span>
+            <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">KB-destekli çözüm</span>
+          </div>
+          <MiniListRows
+            rows={(data?.bySolutionStepSource ?? []).map((r) => ({
+              key: r.key,
+              label: SOLUTION_SOURCE_LABEL[r.key] ?? r.key,
+              count: r.count,
+            }))}
+          />
+        </AiMiniCard>
+        <AiMiniCard title="Mail Operasyonu" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Yanıt bekleyen" value={String(mail?.pendingCustomerReply ?? 0)} />
+            <MiniStatRow label="Gelen (dönem)" value={String(mail?.inboundVolume ?? 0)} />
+            <MiniStatRow label="Giden (dönem)" value={String(mail?.outboundVolume ?? 0)} />
+            <MiniStatRow
+              label="İlk yanıt medyanı"
+              value={mail?.firstResponseMedianMin === null || mail?.firstResponseMedianMin === undefined ? '—' : `${mail.firstResponseMedianMin} dk`}
+            />
+          </div>
+        </AiMiniCard>
+        <AiMiniCard title="Örüntü Alarmları" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Aktif alarm" value={String(pat?.activeCount ?? 0)} />
+            {pat?.largestSpike ? (
+              <div className="px-4 py-1.5 text-xs text-slate-600 dark:text-ndark-muted">
+                En büyük küme: <span className="font-medium text-slate-800 dark:text-ndark-text">{pat.largestSpike.category}</span> ({pat.largestSpike.caseCount} vaka)
+              </div>
+            ) : (
+              <div className="px-4 py-1.5 text-xs text-slate-400 dark:text-ndark-muted">Aktif küme yok.</div>
+            )}
+          </div>
+        </AiMiniCard>
+        <AiMiniCard title="QA Ortalamaları" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Empati" value={qa?.empathy === null || qa?.empathy === undefined ? '—' : String(qa.empathy)} />
+            <MiniStatRow label="Netlik" value={qa?.clarity === null || qa?.clarity === undefined ? '—' : String(qa.clarity)} />
+            <MiniStatRow label="Hız" value={qa?.speed === null || qa?.speed === undefined ? '—' : String(qa.speed)} />
+            <MiniStatRow label="Örneklem" value={`${qa?.sampleCount ?? 0} vaka`} />
+          </div>
+        </AiMiniCard>
+      </div>
+    </div>
+  );
 }
 
 // Ops Pano v2 FAZ 1 — DB'de ASCII-normalize enum (Sikayet/Oneri), UI'da TR

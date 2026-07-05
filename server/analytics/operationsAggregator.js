@@ -98,6 +98,16 @@ export async function computeOperationsOverview({ scope, filters }) {
     byRequestType,
     byOrigin,
     topAtRiskAccounts,
+    // Ops Pano v2 FAZ 2 — AI görüş aggregate'leri (aggregate-only, PII yok)
+    bySmartTicketPlatform,
+    bySmartTicketBusinessProcess,
+    bySmartTicketOperationType,
+    bySmartTicketAffectedObject,
+    bySmartTicketImpact,
+    solutionStepSource,
+    mailOps,
+    patternAlerts,
+    qaAverages,
   ] = await Promise.all([
     queryOpenSnapshot(scope, filters, baseWhere),
     queryPeriodMetrics(scope, filters, periodFrom, periodTo, baseWhere),
@@ -113,6 +123,16 @@ export async function computeOperationsOverview({ scope, filters }) {
     queryByRequestType(scope, filters, periodFrom, periodTo, baseWhere),
     queryByOrigin(scope, filters, periodFrom, periodTo, baseWhere),
     queryTopAtRiskAccounts(scope, filters, baseWhere),
+    // Ops Pano v2 FAZ 2
+    queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'platform'),
+    queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'businessProcess'),
+    queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'operationType'),
+    queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'affectedObject'),
+    queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'impact'),
+    queryBySolutionStepSource(scope, filters, periodFrom, periodTo, baseWhere),
+    queryMailOps(scope, filters, periodFrom, periodTo, baseWhere),
+    queryPatternAlertSummary(scope, filters),
+    queryQaAverages(scope, filters, periodFrom, periodTo, baseWhere),
   ]);
 
   // KPI'lari topla
@@ -155,6 +175,24 @@ export async function computeOperationsOverview({ scope, filters }) {
     byRequestType,
     byOrigin,
     topAtRiskAccounts,
+    // Ops Pano v2 FAZ 2 — AI görüş alanı (aggregate-only; PII yok).
+    // qaAverages minSample: n < MIN_SAMPLE.qaScore ise değerler null döner
+    // ve violation kaydı düşülür (mevcut desen).
+    bySmartTicketPlatform,
+    bySmartTicketBusinessProcess,
+    bySmartTicketOperationType,
+    bySmartTicketAffectedObject,
+    bySmartTicketImpact,
+    bySolutionStepSource: solutionStepSource.rows,
+    kbAssistedResolutionRate: solutionStepSource.kbAssistedResolutionRate,
+    mailOps,
+    patternAlerts,
+    qaAverages: (() => {
+      if (qaAverages.sampleCount > 0 && qaAverages.sampleCount < MIN_SAMPLE.qaScore) {
+        minSampleViolations.push(minSampleNote('qaAverages', qaAverages.sampleCount, 'qaScore'));
+      }
+      return qaAverages;
+    })(),
     durationMs: Date.now() - t0,
   };
 }
@@ -566,6 +604,221 @@ async function queryByOrigin(scope, filters, from, to, baseWhere) {
   `;
   const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
   return rows.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Ops Pano v2 FAZ 2 — AI görüş alanı aggregate'leri (2026-07-05)
+// Spec: docs/OPERATIONS_DASHBOARD_V2.md FAZ 2. TÜMÜ aggregate-only
+// (count/oran/dakika) — PII YOK (🔒 Sabit Kural 1: customerContact*,
+// başlık, kişi adı, mail içeriği HİÇBİR alanda yer almaz).
+// Scope guard paritesi: hepsi baseWhere (companyIds + team/person) üstünden.
+// ══════════════════════════════════════════════════════════════════
+
+const SMART_TICKET_TAXONOMY_FIELDS = [
+  'platform',
+  'businessProcess',
+  'operationType',
+  'affectedObject',
+  'impact',
+];
+
+/**
+ * 2a — Akıllı Ticket taksonomi dağılımı (tek alan, top-8).
+ * customFields NVarChar JSON → JSON_VALUE ile code + Label snapshot okunur
+ * (Label yazım anında snapshot'landığı için TaxonomyDef join'ine gerek yok —
+ * tenant-safe ve tek sorgu).
+ */
+async function queryBySmartTicketTaxonomy(scope, filters, from, to, baseWhere, field) {
+  if (scope.companyIds.length === 0) return [];
+  if (!SMART_TICKET_TAXONOMY_FIELDS.includes(field)) return [];
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const sql = `
+    SELECT TOP 8
+      JSON_VALUE([customFields], '$.smartTicket.${field}') AS [key],
+      MAX(JSON_VALUE([customFields], '$.smartTicket.${field}Label')) AS [label],
+      COUNT(*) AS cnt
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      AND JSON_VALUE([customFields], '$.smartTicket.${field}') IS NOT NULL
+    GROUP BY JSON_VALUE([customFields], '$.smartTicket.${field}')
+    ORDER BY cnt DESC;
+  `;
+  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  return rows.map((r) => ({ key: r.key, label: r.label ?? r.key, count: Number(r.cnt) }));
+}
+
+/**
+ * 2b — Çözüm kaynağı dağılımı. Dönemde ÇÖZÜLEN vakaların solution-step
+ * kaynakları (persisted enum: ai_suggested_step / external_kb /
+ * similar_case / manual). Join yerine subquery — baseWhere kolonları
+ * [Case] tablosuna göre yazıldığından ambiguity çıkmasın.
+ */
+async function queryBySolutionStepSource(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return { rows: [], kbAssistedResolutionRate: null };
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const sql = `
+    SELECT s.[source] AS [key], COUNT(*) AS cnt
+    FROM [CaseSolutionStep] s
+    WHERE s.[caseId] IN (
+      SELECT [id] FROM [Case]
+      WHERE ${baseWhere.sql}
+        AND [resolvedAt] >= @P${p1.idx} AND [resolvedAt] < @P${p2.idx}
+    )
+    GROUP BY s.[source]
+    ORDER BY cnt DESC;
+  `;
+  const raw = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  const rows = raw.map((r) => ({ key: r.key, count: Number(r.cnt) }));
+  const total = rows.reduce((a, r) => a + r.count, 0);
+  const kb = rows.find((r) => r.key === 'external_kb')?.count ?? 0;
+  return {
+    rows,
+    kbAssistedResolutionRate: total > 0 ? Number((kb / total).toFixed(3)) : null,
+  };
+}
+
+/**
+ * 2c — Mail operasyonu: pending snapshot + dönem hacmi + first response
+ * MEDYAN dakika (PERCENTILE_CONT — MSSQL native; window func olduğu için
+ * DISTINCT hilesi).
+ */
+async function queryMailOps(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) {
+    return { pendingCustomerReply: 0, inboundVolume: 0, outboundVolume: 0, firstResponseMedianMin: null };
+  }
+  const pendingSql = `
+    SELECT COUNT(*) AS cnt FROM [Case]
+    WHERE ${baseWhere.sql} AND [pendingCustomerReply] = 1;
+  `;
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const volumeSql = `
+    SELECT
+      SUM(CASE WHEN e.[direction] = 'inbound'  AND e.[receivedAt] >= @P${p1.idx} AND e.[receivedAt] < @P${p2.idx} THEN 1 ELSE 0 END) AS inboundCnt,
+      SUM(CASE WHEN e.[direction] = 'outbound' AND e.[sentAt]     >= @P${p1.idx} AND e.[sentAt]     < @P${p2.idx} THEN 1 ELSE 0 END) AS outboundCnt
+    FROM [CaseEmail] e
+    WHERE e.[caseId] IN (SELECT [id] FROM [Case] WHERE ${baseWhere.sql});
+  `;
+  const medianSql = `
+    SELECT DISTINCT
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY DATEDIFF(minute, [createdAt], [slaResponseMetAt])) OVER () AS med
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [createdAt] >= @P${p1.idx} AND [createdAt] < @P${p2.idx}
+      AND [slaResponseMetAt] IS NOT NULL;
+  `;
+  const [pendingRows, volumeRows, medianRows] = await Promise.all([
+    prisma.$queryRawUnsafe(pendingSql, ...baseWhere.params),
+    prisma.$queryRawUnsafe(volumeSql, ...p2.params),
+    prisma.$queryRawUnsafe(medianSql, ...p2.params),
+  ]);
+  const med = medianRows[0]?.med;
+  return {
+    pendingCustomerReply: Number(pendingRows[0]?.cnt ?? 0),
+    inboundVolume: Number(volumeRows[0]?.inboundCnt ?? 0),
+    outboundVolume: Number(volumeRows[0]?.outboundCnt ?? 0),
+    firstResponseMedianMin: med === null || med === undefined ? null : Math.round(Number(med)),
+  };
+}
+
+/**
+ * 2d — Pattern alarm özeti. Alan adı `status` (state DEĞİL — spec Codex R1).
+ * Spec sapma notu: "kaç kat" (multiplier) PatternAlert tablosunda persist
+ * EDİLMİYOR (patternInsight runtime hesaplıyor) — deterministic aggregate
+ * olarak caseCount döndürülür; UI/RUNA "N vakalık küme" der.
+ */
+async function queryPatternAlertSummary(scope, filters) {
+  if (scope.companyIds.length === 0) return { activeCount: 0, largestSpike: null };
+  const alerts = await prisma.patternAlert.findMany({
+    where: { companyId: { in: scope.companyIds }, status: 'active' },
+    select: { category: true, caseCount: true, caseIds: true },
+  });
+  if (alerts.length === 0) return { activeCount: 0, largestSpike: null };
+
+  // Codex R1 P2 (PR #418) — kapsam takım/kişi/müşteri ile DARALTILMIŞSA
+  // alarm yalnız tetikleyici vakalarından EN AZ BİRİ scoped kümede ise
+  // sayılır; sayı da scoped kesişim adedidir. Aksi halde daraltılmış pano
+  // şirket genelindeki alakasız kümeyi gösterir (kapsam-dışı aggregate
+  // sızıntısı). Şirket-geneli görünümde davranış değişmez.
+  const narrowed =
+    (scope.teamIds && scope.teamIds.length > 0) ||
+    (scope.personIds && scope.personIds.length > 0) ||
+    (filters && typeof filters.accountId === 'string' && filters.accountId);
+  const parseIds = (raw) => {
+    try {
+      const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+
+  if (!narrowed) {
+    const largest = alerts.reduce((a, b) => (b.caseCount > (a?.caseCount ?? -1) ? b : a), null);
+    return {
+      activeCount: alerts.length,
+      largestSpike: largest ? { category: largest.category, caseCount: largest.caseCount } : null,
+    };
+  }
+
+  const withIds = alerts.map((a) => ({ ...a, ids: parseIds(a.caseIds) }));
+  const allIds = [...new Set(withIds.flatMap((a) => a.ids))];
+  if (allIds.length === 0) return { activeCount: 0, largestSpike: null };
+  const scopedRows = await prisma.case.findMany({
+    where: {
+      id: { in: allIds },
+      companyId: { in: scope.companyIds },
+      ...(scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+      ...(scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+      ...(filters?.accountId ? { accountId: filters.accountId } : {}),
+    },
+    select: { id: true },
+  });
+  const scopedSet = new Set(scopedRows.map((r) => r.id));
+  const visible = withIds
+    .map((a) => ({ category: a.category, scopedCount: a.ids.filter((id) => scopedSet.has(id)).length }))
+    .filter((a) => a.scopedCount > 0);
+  const largest = visible.reduce((a, b) => (b.scopedCount > (a?.scopedCount ?? -1) ? b : a), null);
+  return {
+    activeCount: visible.length,
+    largestSpike: largest ? { category: largest.category, caseCount: largest.scopedCount } : null,
+  };
+}
+
+/**
+ * 2e — QA ortalamaları. Min sample (qaScore=10) altında değerler NULL döner
+ * (mevcut minSample deseni; violation kaydını compute tarafı düşer).
+ */
+async function queryQaAverages(scope, filters, from, to, baseWhere) {
+  if (scope.companyIds.length === 0) return { empathy: null, clarity: null, speed: null, sampleCount: 0 };
+  const p1 = withParam(baseWhere, from);
+  const p2 = withParam(p1, to);
+  const sql = `
+    SELECT
+      COUNT(*) AS n,
+      AVG(CAST([qaEmpathyScore] AS FLOAT)) AS emp,
+      AVG(CAST([qaClarityScore] AS FLOAT)) AS cla,
+      AVG(CAST([qaSpeedScore]   AS FLOAT)) AS spd
+    FROM [Case]
+    WHERE ${baseWhere.sql}
+      AND [qaScoredAt] >= @P${p1.idx} AND [qaScoredAt] < @P${p2.idx}
+      AND [qaEmpathyScore] IS NOT NULL;
+  `;
+  const rows = await prisma.$queryRawUnsafe(sql, ...p2.params);
+  const n = Number(rows[0]?.n ?? 0);
+  if (n < MIN_SAMPLE.qaScore) {
+    return { empathy: null, clarity: null, speed: null, sampleCount: n };
+  }
+  const r1 = (v) => (v === null || v === undefined ? null : Math.round(Number(v) * 10) / 10);
+  return {
+    empathy: r1(rows[0]?.emp),
+    clarity: r1(rows[0]?.cla),
+    speed: r1(rows[0]?.spd),
+    sampleCount: n,
+  };
 }
 
 /**
