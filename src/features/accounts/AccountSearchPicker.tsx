@@ -152,6 +152,9 @@ export function AccountSearchPicker({
       limit: PAGE_SIZE,
       // Vaka açma/eşleştirme akışı — pasif müşteriler seçilemesin.
       activeOnly: true,
+      // Proje-etkin akış — placeholder "... veya proje adı/kodu" diyor,
+      // chip seçili olsa bile bu vaadi tutmak için proje araması dahil edilir.
+      includeProjectSearch: useProjectFlow,
     });
     setLoading(false);
     if (!out) {
@@ -159,7 +162,7 @@ export function AccountSearchPicker({
       return;
     }
     setItems(out.accounts);
-  }, [debounced, companyId, searchFields]);
+  }, [debounced, companyId, searchFields, useProjectFlow]);
 
   useEffect(() => {
     if (open) void load();

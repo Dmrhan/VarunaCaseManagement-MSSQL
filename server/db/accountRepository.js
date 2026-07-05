@@ -255,6 +255,14 @@ export async function listAccounts({
   // hesaplar sonuçtan düşer. Müşteri yönetim listesi bunu geçmez, pasif
   // kayıtları görmeye/yönetmeye devam eder.
   activeOnly = false,
+  // Proje-etkin picker'lar (AccountSearchPicker projectsEnabled=true) için —
+  // true ise proje adı/kodu araması, chip seçimi (sf) ne olursa olsun DAHİL
+  // edilir. Bu picker'ın placeholder'ı zaten "... veya proje adı/kodu"
+  // diye söz veriyor; chip seçiliyken bu sözü tutmalı. Diğer tüm caller'lar
+  // (Müşteriler listesi, proje seçimi olmayan picker'lar) bunu geçmez —
+  // onlarda chip seçiliyken proje araması hâlâ devre dışı kalır (bkz.
+  // "Nestle" fix'i: chip'e daralt + proje eşleşmesi karışmasın).
+  includeProjectSearch = false,
 }) {
   const allowed = ensureArray(allowedCompanyIds);
   const safePage = Math.max(1, Number(page) || 1);
@@ -335,6 +343,11 @@ export async function listAccounts({
       if (sf.has('phone'))   orBranches.push({ phoneE164: { contains: q } }, { phone2E164: { contains: q } }, { phone3E164: { contains: q } });
       if (sf.has('code'))    orBranches.push({ companies: { some: { companyId: externalCodeAcScope, externalCustomerCode: { contains: q } } } });
       if (sf.has('contact')) orBranches.push({ contacts: { some: { OR: [{ phone: { contains: q } }, ...contactEmailOR, ...contactNameOR] } } });
+      // Proje-etkin picker'lar: chip seçimi ne olursa olsun proje adı/kodu
+      // araması dahil edilir (bkz. yukarıdaki includeProjectSearch notu).
+      if (includeProjectSearch) {
+        orBranches.push({ companies: { some: { companyId: externalCodeAcScope, projects: { some: { isActive: true, OR: [...projectNameOR, { code: { contains: q } }] } } } } });
+      }
       if (orBranches.length > 0) {
         whereAnd.push({ OR: orBranches });
       }

@@ -424,6 +424,14 @@ export interface AccountListParams {
    * devam eder.
    */
   activeOnly?: boolean;
+  /**
+   * true ise proje adı/kodu araması, seçili arama chip'i (searchFields) ne
+   * olursa olsun dahil edilir. Yalnız proje-etkin AccountSearchPicker
+   * (projectsEnabled=true) gönderir — o picker'ın placeholder'ı zaten proje
+   * aramasını vaat ediyor. Diğer caller'larda chip seçiliyken proje
+   * araması hâlâ hariç tutulur (bkz. Nestle arama fix'i).
+   */
+  includeProjectSearch?: boolean;
 }
 
 export interface AccountCompanyCreateInput {
@@ -619,6 +627,7 @@ function buildQuery(params: AccountListParams): string {
   if (params.ids && params.ids.length > 0) usp.set('ids', params.ids.join(','));
   if (params.searchFields && params.searchFields.length > 0) usp.set('searchFields', params.searchFields.join(','));
   if (params.activeOnly) usp.set('activeOnly', 'true');
+  if (params.includeProjectSearch) usp.set('includeProjectSearch', 'true');
   if (params.page) usp.set('page', String(params.page));
   if (params.limit) usp.set('limit', String(params.limit));
   const qs = usp.toString();
