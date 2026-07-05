@@ -17,6 +17,7 @@ import {
   accountService,
   canReadAccounts,
   canWriteAccounts,
+  CUSTOMER_ROLE_LABELS,
   type AccountListItem,
   type AccountListResponse,
   type AccountListParams,
@@ -293,6 +294,7 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 dark:text-ndark-muted">
                 <th className="px-3 py-2.5">Müşteri</th>
+                <th className="px-3 py-2.5">Tür</th>
                 <th className="px-3 py-2.5">Tip</th>
                 <th className="px-3 py-2.5">VKN</th>
                 <th className="px-3 py-2.5">V.D.</th>
@@ -305,9 +307,9 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
               </tr>
             </thead>
             <tbody>
-              <TableRowSkeleton cols={isWriter ? 10 : 9} />
-              <TableRowSkeleton cols={isWriter ? 10 : 9} />
-              <TableRowSkeleton cols={isWriter ? 10 : 9} />
+              <TableRowSkeleton cols={isWriter ? 11 : 10} />
+              <TableRowSkeleton cols={isWriter ? 11 : 10} />
+              <TableRowSkeleton cols={isWriter ? 11 : 10} />
             </tbody>
           </table>
         </div>
@@ -340,6 +342,7 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
           <thead>
             <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:border-ndark-border dark:text-ndark-muted">
               <th className="px-3 py-2.5 font-medium">Müşteri Adı</th>
+              <th className="px-3 py-2.5 font-medium">Tür</th>
               <th className="px-3 py-2.5 font-medium">Tip</th>
               <th className="px-3 py-2.5 font-medium">VKN</th>
               <th className="px-3 py-2.5 font-medium">V.D.</th>
@@ -363,6 +366,13 @@ function AccountsTable({ loading, rows, isWriter, onSelect }: AccountsTableProps
                     {row.name}
                   </div>
                   <AccountIdInline id={row.id} />
+                </td>
+                <td className="px-3 py-2.5 text-xs text-slate-700 dark:text-ndark-text">
+                  {row.customerRole ? (
+                    CUSTOMER_ROLE_LABELS[row.customerRole]
+                  ) : (
+                    <span className="text-slate-400 dark:text-ndark-dim">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   <CustomerTypeBadge type={row.customerType} />
