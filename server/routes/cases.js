@@ -10,7 +10,7 @@ import {
   SolutionStepError,
   extractAiDrafts,
 } from '../db/solutionStepRepository.js';
-import { externalKbClient } from '../lib/externalKbClient.js';
+import { externalKbClient, classifyKbFailure } from '../lib/externalKbClient.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import { markInProgressForCase } from '../db/actionItemRepository.js';
 import { accountRepository } from '../db/accountRepository.js';
@@ -1893,6 +1893,33 @@ router.patch(
 );
 
 /**
+ * L2-Smart-Flow FAZ 1 — PATCH /api/cases/:id/smart-classification
+ * Body: {
+ *   fields: { platform?: {code,label}, businessProcess?, operationType?,
+ *             affectedObject?, impact? }   — TAM SET (boş gelen silinir)
+ *   classificationSuggestion?: { appliedAt, appliedFields, perField, unmatched }
+ *   appliedMapping?: { source, category, subCategory, requestType, trace }
+ * }
+ * Yetki: case update (Agent+). KB kapısı FE'de (settings-status); bu uç
+ * KB'siz kiracıda da elle düzenlemeye izin verir (veri zaten varsa).
+ * Audit: CaseActivity actionType='SmartClassificationUpdate'.
+ */
+router.patch(
+  '/:id/smart-classification',
+  asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
+    const updated = await caseRepository.updateSmartClassification(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+      req.user.fullName,
+    );
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
  * Adım 1 — POST /api/cases/:id/files/upload-url
  * Body: { fileName, fileSize, mimeType }
  * Yanıt: { uploadUrl, path, attachmentId }
@@ -2113,19 +2140,16 @@ router.post(
             kbResult.error?.code ?? 'unknown',
             kbResult.error?.status ?? '',
           );
-          return res.status(502).json({
-            error: 'external_kb_failed',
-            message:
-              kbResult.error?.message ??
-              'External KB çağrısı başarısız. Manuel adım ekleyebilirsiniz.',
+          const cls = classifyKbFailure(kbResult);
+          return res.status(cls.status).json({
+            error: cls.code,
+            message: cls.message.replace('elle seçimle devam edebilirsiniz', 'manuel adım ekleyebilirsiniz'),
           });
         }
         analyzeResponse = kbResult?.data ?? kbResult ?? null;
       } catch (err) {
-        return res.status(502).json({
-          error: 'external_kb_failed',
-          message: err?.message ?? 'External KB çağrısı başarısız.',
-        });
+        const cls = classifyKbFailure({ error: { message: err?.message } });
+        return res.status(cls.status).json({ error: cls.code, message: cls.message });
       }
     }
     // Madde 2 — KB analyze cevabından engineeringHandoff + customerReplyDraft

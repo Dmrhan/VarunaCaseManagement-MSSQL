@@ -25,7 +25,7 @@
 import { Router } from 'express';
 import { verifyJwt } from '../db/auth.js';
 import { prisma } from '../db/client.js';
-import { externalKbClient } from '../lib/externalKbClient.js';
+import { externalKbClient, classifyKbFailure, pickKbFailure } from '../lib/externalKbClient.js';
 import { externalKbSettingRepo } from '../db/externalKbSettingRepository.js';
 import {
   extractClassificationFromKb,
@@ -150,10 +150,8 @@ router.post('/suggest-classification', async (req, res) => {
             '[smart-ticket/suggest-classification] both categorize-v2 and analyze returned ok:false',
             a.error?.code ?? 'unknown',
           );
-          return res.status(502).json({
-            error: 'external_kb_failed',
-            message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-          });
+          const cls = pickKbFailure(v2, a);
+          return res.status(cls.status).json({ error: cls.code, message: cls.message });
         }
         kbResponse = a;
         usedEndpoint = 'analyze';
@@ -175,10 +173,8 @@ router.post('/suggest-classification', async (req, res) => {
             '[smart-ticket/suggest-classification] analyze fallback ok:false',
             a.error?.code ?? 'unknown',
           );
-          return res.status(502).json({
-            error: 'external_kb_failed',
-            message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-          });
+          const cls = pickKbFailure({ error: { message: err?.message } }, a);
+          return res.status(cls.status).json({ error: cls.code, message: cls.message });
         }
         kbResponse = a;
         usedEndpoint = 'analyze';
@@ -187,10 +183,8 @@ router.post('/suggest-classification', async (req, res) => {
           '[smart-ticket/suggest-classification] both categorize-v2 and analyze failed',
           fallbackErr?.message ?? fallbackErr,
         );
-        return res.status(502).json({
-          error: 'external_kb_failed',
-          message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-        });
+        const cls = classifyKbFailure({ error: { message: fallbackErr?.message } });
+        return res.status(cls.status).json({ error: cls.code, message: cls.message });
       }
     }
 
@@ -553,10 +547,8 @@ router.post('/suggest-closure', async (req, res) => {
         '[smart-ticket/suggest-closure] suggest-close failed',
         closeSettled.reason?.message ?? closeSettled.reason,
       );
-      return res.status(502).json({
-        error: 'external_kb_failed',
-        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-      });
+      const cls = classifyKbFailure({ error: { message: closeSettled.reason?.message } });
+      return res.status(cls.status).json({ error: cls.code, message: cls.message });
     }
     kbResponse = closeSettled.value;
 
@@ -570,10 +562,8 @@ router.post('/suggest-closure', async (req, res) => {
         kbResponse.error?.code ?? 'unknown',
         kbResponse.error?.status ?? '',
       );
-      return res.status(502).json({
-        error: 'external_kb_failed',
-        message: 'External KB çağrısı başarısız oldu. Manuel seçim yapılabilir.',
-      });
+      const cls = classifyKbFailure(kbResponse);
+      return res.status(cls.status).json({ error: cls.code, message: cls.message });
     }
 
     const payload =

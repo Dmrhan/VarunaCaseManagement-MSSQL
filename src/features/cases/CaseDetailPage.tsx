@@ -57,6 +57,8 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Field, Select, TextArea, TextInput } from '@/components/ui/Field';
 import { PendingReplyBadge } from './components/PendingReplyBadge';
+import { SmartClassificationCard } from './components/SmartClassificationCard';
+import { externalKbService } from '@/services/externalKbService';
 import { Modal } from '@/components/ui/Modal';
 import { Popover } from '@/components/ui/Popover';
 import { ActiveCallBanner } from '@/components/ui/ActiveCallBanner';
@@ -288,6 +290,31 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setDrafts({});
     setEditingField(null);
   }, [caseId]);
+
+  // L2-Smart-Flow FAZ 1 — tenant KB kapısı. Akıllı Tanımlar kartı +
+  // "AI Önerilen Adımlar" butonu yalnız KB entegrasyonu AKTİF şirkette
+  // görünür (kullanıcı kararı: PARAM gibi KB'siz kiracılarda ekran
+  // karışıklığı olmasın). null = henüz yüklenmedi.
+  const [kbEnabled, setKbEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const companyId = item?.companyId;
+    if (!companyId) {
+      setKbEnabled(null);
+      return;
+    }
+    void externalKbService
+      .settingsStatus(companyId)
+      .then((s) => {
+        if (alive) setKbEnabled(s?.enabled === true);
+      })
+      .catch(() => {
+        if (alive) setKbEnabled(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [item?.companyId]);
 
   useEffect(() => {
     let alive = true;
@@ -1144,6 +1171,8 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
                 onCancelEdit={cancelEdit}
                 onCommitDraft={commitDraft}
                 onTransitionApplied={(updated) => setItem(updated)}
+                kbEnabled={kbEnabled}
+                onCaseUpdated={(updated) => setItem(updated)}
               />
             )}
             {tab === 'activity' && <ActivityTab item={item} />}
@@ -1214,6 +1243,7 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
             {tab === 'solution-steps' && (
               <CaseSolutionStepsPanel
                 item={item}
+                kbEnabled={kbEnabled}
                 onChange={() => {
                   void caseService.get(item.id).then((c) => {
                     if (c) setItem(c);
@@ -3305,6 +3335,8 @@ function DetailTab({
   onCancelEdit,
   onCommitDraft,
   onTransitionApplied,
+  kbEnabled,
+  onCaseUpdated,
 }: {
   item: Case;
   offeredSolutions: { id: string; name: string }[];
@@ -3329,6 +3361,10 @@ function DetailTab({
   onCancelEdit: () => void;
   onCommitDraft: (field: keyof Case, value: unknown) => void;
   onTransitionApplied: (updated: Case) => void;
+  /** L2-Smart-Flow FAZ 1 — tenant KB kapısı (null = yükleniyor). */
+  kbEnabled: boolean | null;
+  /** Akıllı Tanımlar kaydı sonrası güncel Case'i üst state'e yaz. */
+  onCaseUpdated: (updated: Case) => void;
 }) {
   // PR-D3 — case-write yetkili rol set'i. DevOps section'da Bağla/Kaldır
   // gating'i için kullanılır. Backend'de PATCH /:id ile aynı kapı
@@ -3474,6 +3510,19 @@ function DetailTab({
         </Section>
       )}
 
+      {/* L2-Smart-Flow FAZ 1 — Akıllı Tanımlar kartı (Devir Notu'nun altı,
+          kullanıcı kararı). 5'li açılış sınıflandırması: göster + düzenle +
+          KB analiz. Tenant kapısı kart içinde (kbEnabled); açılış chip'leri
+          artık BURADA yaşar — SmartTicketMetaSection kapanış-only oldu. */}
+      {canShowField('smartTicketMeta') && canReadField('smartTicketMeta') && !isMaskedField('smartTicketMeta') && (
+        <SmartClassificationCard
+          item={item}
+          kbEnabled={kbEnabled}
+          canEdit={canWriteCase && canEditField('smartTicketMeta')}
+          onUpdated={onCaseUpdated}
+        />
+      )}
+
       {/* Adım-2 — Çözüm Notu Açıklama'nın hemen ALTINDA (problem → çözüm).
           Yeni stil: emerald sol-şerit + nötr arka plan (PR-B sakin dili).
           Boşsa render edilmez. */}
@@ -3491,13 +3540,12 @@ function DetailTab({
         </Section>
       )}
 
-      {/* Business review Madde 4 (PR-4) — Smart Ticket açılış kategorileri
-          chip görünümü. Yalnız customFields.smartTicket varsa render edilir;
-          klasik vakalarda null döner. L1 Devir Özeti kartı (Çözüm Adımları
-          sekmesinde) farklı bir tab'da gösterir; Detay sekmesindeki bu
-          panel her açılışta görünür, devir öncesi de bağlam sağlar. */}
+      {/* Business review Madde 4 (PR-4) → L2-Smart-Flow FAZ 1 revizyonu:
+          açılış kategorileri artık SmartClassificationCard'da (yukarıda,
+          düzenlenebilir). Bu bölüm KAPANIŞ etiketleri chip'lerini gösterir
+          (hideOpening) — FAZ 2'de kapanış da düzenlenebilir olacak. */}
       {canShowField('smartTicketMeta') && canReadField('smartTicketMeta') && !isMaskedField('smartTicketMeta') && (
-        <SmartTicketMetaSection item={item} />
+        <SmartTicketMetaSection item={item} hideOpening />
       )}
 
       {/* Adım-3: Müşteri geçmiş vakaları tam liste — ilk 10 + "Hepsini gör" toggle.
@@ -5543,7 +5591,19 @@ function KbDraftSection({ item }: { item: Case }) {
  * Detay sekmesinde her zaman görünür; iki tab farklı amaç (devir bağlamı
  * vs. Detay özet) — duplicate değil, kasıtlı bilgi tekrarı.
  */
-function SmartTicketMetaSection({ item }: { item: Case }) {
+function SmartTicketMetaSection({
+  item,
+  hideOpening = false,
+}: {
+  item: Case;
+  /**
+   * L2-Smart-Flow FAZ 1 — açılış chip'leri SmartClassificationCard'a taşındı;
+   * true iken bu bölüm yalnız KAPANIŞ etiketlerini gösterir (başlık da
+   * "Kapanış Etiketleri" olur). FAZ 2 kapanışı düzenlenebilir yapana kadar
+   * salt-okunur.
+   */
+  hideOpening?: boolean;
+}) {
   const cf = item.customFields;
   const st = cf && typeof cf === 'object' ? (cf as Record<string, unknown>).smartTicket : null;
   if (!st || typeof st !== 'object') return null;
@@ -5585,7 +5645,7 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
     { key: 'permanentPrevention', label: 'Kalıcı Önlem',     value: pickClosure('permanentPrevention', 'permanentPreventionLabel'), Icon: ShieldAlert },
   ];
 
-  const visibleOpening = openingFields.filter((f) => f.value);
+  const visibleOpening = hideOpening ? [] : openingFields.filter((f) => f.value);
   const visibleClosure = closureFields.filter((f) => f.value);
   if (visibleOpening.length === 0 && visibleClosure.length === 0) return null;
 
@@ -5609,7 +5669,7 @@ function SmartTicketMetaSection({ item }: { item: Case }) {
     });
 
   return (
-    <Section title="Akıllı Ticket Kategorileri" tint="violet">
+    <Section title={hideOpening ? 'Kapanış Etiketleri' : 'Akıllı Ticket Kategorileri'} tint="violet">
       {visibleOpening.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {renderChips(
