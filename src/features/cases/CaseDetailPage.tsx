@@ -294,6 +294,15 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setNavStack([]);
     setDrafts({});
     setEditingField(null);
+    // P2 fix — pendingAccountChange bu effect'te unutulmuştu: kullanıcı
+    // "Değiştir" ile yeni müşteri seçip Kaydet'e basmadan başka bir vakaya
+    // geçerse, taslak eski vakanın seçimini taşımaya devam ediyordu. Sonraki
+    // Kaydet tıklaması item.id artık YENİ vaka olduğu için o vakayı yanlış
+    // müşteriye bağlıyordu. linkAccountOpen/changeAccountMode da aynı
+    // sebeple sıfırlanır (eski vaka için açık kalmış picker/mod).
+    setPendingAccountChange(null);
+    setLinkAccountOpen(false);
+    setChangeAccountMode(false);
   }, [caseId]);
 
   // L2-Smart-Flow FAZ 1 — tenant KB kapısı. Akıllı Tanımlar kartı +
@@ -535,6 +544,14 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setActiveId(targetId);
     setDrafts({});
     setEditingField(null);
+    // P2 fix — bu iki fonksiyon caseId prop'unu değil doğrudan activeId'yi
+    // set ediyor, yani [caseId]'ye bağlı reset effect'i tetiklenmiyor. Aynı
+    // pendingAccountChange sızıntısı burada da var: eski vaka için seçilmiş
+    // müşteri, Kaydet'e basılmadan breadcrumb'tan başka vakaya geçilince
+    // taşınmaya devam ediyordu.
+    setPendingAccountChange(null);
+    setLinkAccountOpen(false);
+    setChangeAccountMode(false);
     setTab('detail');
   }
 
@@ -545,6 +562,10 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
     setNavStack((prev) => prev.slice(0, index));
     setDrafts({});
     setEditingField(null);
+    // P2 fix — bkz. navigateToCase'teki aynı not.
+    setPendingAccountChange(null);
+    setLinkAccountOpen(false);
+    setChangeAccountMode(false);
     setTab('detail');
   }
 
@@ -638,13 +659,24 @@ export function CaseDetailPage({ caseId, onBack, onShowCustomer, onOpenAccount }
       if (updated) {
         setItem(updated);
         savedCount += Object.keys(drafts).length;
+        setDrafts({});
+        setEditingField(null);
       }
-      setDrafts({});
-      setEditingField(null);
+      // updated undefined ise: apiFetch zaten hata toast'unu gösterdi.
+      // Taslaklar KORUNUR — aksi halde kullanıcı reddedilmiş bir
+      // güncellemeyi kaydedilmiş sanıp kaydedilmemiş değişikliklerini
+      // kaybederdi.
     }
 
     setSavingDrafts(false);
-    toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${savedCount} alan kaydedildi.` });
+    // Yalnız gerçekten bir şey kaydedildiyse (savedCount > 0) başarı
+    // bildirimi gösterilir — müşteri değişimi başarılı olup alan
+    // güncellemesi başarısız olursa bile başarılı kısım doğru raporlanır;
+    // hiçbir şey kaydedilmediyse (savedCount === 0) sahte "0 alan
+    // kaydedildi" bildirimi gösterilmez, apiFetch'in kendi hata mesajı yeterli.
+    if (savedCount > 0) {
+      toast({ type: 'success', title: 'Vaka güncellendi ✓', message: `${savedCount} alan kaydedildi.` });
+    }
   }
 
   function handleDiscardDrafts() {
