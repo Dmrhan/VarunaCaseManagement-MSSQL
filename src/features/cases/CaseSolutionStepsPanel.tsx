@@ -44,6 +44,12 @@ interface CaseSolutionStepsPanelProps {
   item: Case;
   /** Üst component'a değişiklik haber ver (CaseDetailPage cache invalidation). */
   onChange?: () => void;
+  /**
+   * L2-Smart-Flow FAZ 1 — tenant KB kapısı. false ise "AI Önerilen Adımlar Al"
+   * butonu GİZLENİR (KB'siz kiracıda — örn. PARAM — hata + kafa karışıklığı
+   * olmasın). undefined/null = eski davranış (görünür; geriye uyum).
+   */
+  kbEnabled?: boolean | null;
 }
 
 type PendingOutcome = 'worked' | 'not_worked' | 'skipped' | null;
@@ -67,7 +73,7 @@ const STATUS_TINT: Record<
   skipped: 'slate',
 };
 
-export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPanelProps) {
+export function CaseSolutionStepsPanel({ item, onChange, kbEnabled }: CaseSolutionStepsPanelProps) {
   const [steps, setSteps] = useState<CaseSolutionStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -289,16 +295,18 @@ export function CaseSolutionStepsPanel({ item, onChange }: CaseSolutionStepsPane
             </p>
           </div>
           <div className="flex items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Sparkles size={12} className="text-brand-500" />}
-              onClick={() => void handleImportAi()}
-              disabled={importing}
-              title="External KB'den AI Önerilen Adımlar al"
-            >
-              {importing ? 'Alınıyor…' : 'AI Önerilen Adımlar Al'}
-            </Button>
+            {kbEnabled !== false && (
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={<Sparkles size={12} className="text-brand-500" />}
+                onClick={() => void handleImportAi()}
+                disabled={importing}
+                title="External KB'den AI Önerilen Adımlar al"
+              >
+                {importing ? 'Alınıyor…' : 'AI Önerilen Adımlar Al'}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

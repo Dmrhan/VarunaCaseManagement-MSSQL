@@ -700,6 +700,133 @@ export function buildSmartTicketClosureMerge(prev, closureInput) {
   };
 }
 
+// L2-Smart-Flow FAZ 1 (2026-07-05) — açılış sınıflandırmasının (5 taxonomy
+// alanı) MEVCUT vaka üzerinde güncellenmesi. buildSmartTicketClosureMerge'in
+// açılış kardeşi; Case Detail'deki Akıllı Tanımlar kartından çağrılır.
+//
+// Sözleşme:
+//   - Diğer customFields dalları AYNEN korunur; smartTicket içindeki
+//     closure/aiDrafts/transferContext vb. alt-dallar AYNEN korunur.
+//   - 5 açılış alanı TAM SET yazılır (kullanıcı kararı: analiz/kayıt
+//     mevcut değerleri EZER): payload'da dolu gelen set edilir, boş/null
+//     gelen SİLİNİR (code + Label çifti birlikte).
+//   - classificationSuggestion meta'sı SmartTicketNewPage create şekliyle
+//     BİREBİR aynı formda persist edilir (source/appliedAt/appliedFields/
+//     perField{matchedBy,confidence,suggestedCode}/unmatched) — raporlama
+//     ve Tagging Review tek dil konuşur. Raw KB cevabı persist EDİLMEZ.
+//   - appliedMapping (category/subCategory türetimi) opsiyonel; verilirse
+//     smartTicket.appliedMapping güncellenir (L1 create paritesi).
+const SMART_TICKET_OPENING_FIELD_KEYS = [
+  'platform',
+  'businessProcess',
+  'operationType',
+  'affectedObject',
+  'impact',
+];
+
+export function buildSmartTicketOpeningMerge(prev, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new CaseValidationError('Geçersiz Akıllı Tanımlar payload.', {
+      status: 400,
+      code: 'smart_classification_invalid',
+    });
+  }
+  const fields = input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields)
+    ? input.fields
+    : null;
+  if (!fields) {
+    throw new CaseValidationError('fields zorunlu.', {
+      status: 400,
+      code: 'smart_classification_fields_required',
+    });
+  }
+  const existing =
+    prev.customFields && typeof prev.customFields === 'object' ? prev.customFields : {};
+  const existingSt =
+    existing.smartTicket && typeof existing.smartTicket === 'object' ? existing.smartTicket : {};
+
+  const nextSt = { ...existingSt };
+  const pickStr = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  for (const key of SMART_TICKET_OPENING_FIELD_KEYS) {
+    const entry = fields[key];
+    const code = entry && typeof entry === 'object' ? pickStr(entry.code) : undefined;
+    const label = entry && typeof entry === 'object' ? pickStr(entry.label) : undefined;
+    if (code) {
+      nextSt[key] = code;
+      if (label) nextSt[`${key}Label`] = label;
+      else delete nextSt[`${key}Label`];
+    } else {
+      delete nextSt[key];
+      delete nextSt[`${key}Label`];
+    }
+  }
+
+  // KB öneri telemetrisi — SmartTicketNewPage create formatıyla birebir.
+  if (
+    input.classificationSuggestion &&
+    typeof input.classificationSuggestion === 'object' &&
+    !Array.isArray(input.classificationSuggestion)
+  ) {
+    const cs = input.classificationSuggestion;
+    const meta = { source: 'external_kb' };
+    meta.appliedAt = typeof cs.appliedAt === 'string' ? cs.appliedAt : new Date().toISOString();
+    if (Array.isArray(cs.appliedFields)) {
+      meta.appliedFields = cs.appliedFields.filter(
+        (x) => typeof x === 'string' && SMART_TICKET_OPENING_FIELD_KEYS.includes(x),
+      );
+    }
+    if (cs.perField && typeof cs.perField === 'object' && !Array.isArray(cs.perField)) {
+      const pf = {};
+      for (const [field, v] of Object.entries(cs.perField)) {
+        if (!SMART_TICKET_OPENING_FIELD_KEYS.includes(field) || !v || typeof v !== 'object') continue;
+        const e = {};
+        if (typeof v.matchedBy === 'string') e.matchedBy = v.matchedBy;
+        if (typeof v.confidence === 'number') e.confidence = v.confidence;
+        if (typeof v.suggestedCode === 'string') e.suggestedCode = v.suggestedCode;
+        pf[field] = e;
+      }
+      meta.perField = pf;
+    }
+    if (Array.isArray(cs.unmatched)) {
+      meta.unmatched = cs.unmatched
+        .filter((u) => u && typeof u === 'object' && typeof u.taxonomyType === 'string')
+        .map((u) => ({ taxonomyType: u.taxonomyType, rawValue: typeof u.rawValue === 'string' ? u.rawValue : '' }));
+    }
+    nextSt.classificationSuggestion = meta;
+  }
+
+  // appliedMapping — L1 create paritesi (kategori türetim izi).
+  if (
+    input.appliedMapping &&
+    typeof input.appliedMapping === 'object' &&
+    !Array.isArray(input.appliedMapping)
+  ) {
+    const am = input.appliedMapping;
+    const mapping = {};
+    for (const k of ['source', 'category', 'subCategory', 'requestType']) {
+      const v = pickStr(am[k]);
+      if (v) mapping[k] = v;
+    }
+    // trace — SmartTicketNewPage paritesi: {category, subCategory, requestType}
+    // string alanlı obje (resolveSmartTicketMapping çıktısı). Bounded pick.
+    if (am.trace && typeof am.trace === 'object' && !Array.isArray(am.trace)) {
+      const trace = {};
+      for (const k of ['category', 'subCategory', 'requestType']) {
+        if (typeof am.trace[k] === 'string') trace[k] = am.trace[k];
+      }
+      if (Object.keys(trace).length > 0) mapping.trace = trace;
+    }
+    if (Object.keys(mapping).length > 0) nextSt.appliedMapping = mapping;
+  }
+
+  nextSt.classificationUpdatedAt = new Date().toISOString();
+
+  return {
+    ...existing,
+    smartTicket: nextSt,
+  };
+}
+
 // WR-Smart-Ticket Phase T1 — L1 → L2 devir akışında L2 agent'a görünür
 // "devir bağlamı" Case.customFields üzerine deep-merge edilir. Yalnız
 // transferCase içinden çağrılır (Smart Ticket akışıyla açılmış
@@ -1088,6 +1215,70 @@ export const caseRepository = {
       data: { customFields: merged },
     });
     return { persisted: true };
+  },
+
+  /**
+   * L2-Smart-Flow FAZ 1 — Akıllı Tanımlar (açılış 5 taxonomy alanı)
+   * güncellemesi. Case Detail kartından çağrılır; buildSmartTicketOpeningMerge
+   * sözleşmesi geçerlidir (diğer customFields dalları + smartTicket alt-dalları
+   * AYNEN korunur). appliedMapping.category/subCategory verilirse Case
+   * kolonları da güncellenir (L1 create paritesi — raporlama tutarlılığı).
+   * Audit: CaseActivity actionType='SmartClassificationUpdate'.
+   */
+  async updateSmartClassification(caseId, input, allowedCompanyIds, actor) {
+    assertActor(actor, 'caseRepository.updateSmartClassification');
+    const companyId = await assertCaseInScope(caseId, allowedCompanyIds);
+    if (!companyId) return null;
+    const prev = await prisma.case.findUnique({
+      where: { id: caseId },
+      select: { customFields: true, category: true, subCategory: true },
+    });
+    if (!prev) return null;
+    const merged = buildSmartTicketOpeningMerge({ customFields: prev.customFields }, input);
+
+    const st = merged.smartTicket ?? {};
+    const labelSummary = SMART_TICKET_OPENING_FIELD_KEYS
+      .map((k) => st[`${k}Label`] ?? st[k])
+      .filter(Boolean)
+      .join(' · ');
+    const prevSt =
+      prev.customFields && typeof prev.customFields === 'object' && prev.customFields.smartTicket
+        ? prev.customFields.smartTicket
+        : {};
+    const prevSummary = SMART_TICKET_OPENING_FIELD_KEYS
+      .map((k) => prevSt[`${k}Label`] ?? prevSt[k])
+      .filter(Boolean)
+      .join(' · ');
+
+    const mapping = input?.appliedMapping ?? {};
+    const categoryUpdate = {};
+    if (typeof mapping.category === 'string' && mapping.category.trim()) {
+      categoryUpdate.category = mapping.category.trim();
+    }
+    if (typeof mapping.subCategory === 'string' && mapping.subCategory.trim()) {
+      categoryUpdate.subCategory = mapping.subCategory.trim();
+    }
+
+    const updated = await prisma.case.update({
+      where: { id: caseId },
+      data: {
+        customFields: merged,
+        ...categoryUpdate,
+        history: {
+          create: {
+            companyId,
+            action: 'Akıllı Tanımlar güncellendi',
+            actionType: 'SmartClassificationUpdate',
+            fieldName: 'smartTicket',
+            fromValue: prevSummary || undefined,
+            toValue: labelSummary || '(temizlendi)',
+            actor,
+          },
+        },
+      },
+      include: CASE_INCLUDE,
+    });
+    return shape(updated);
   },
 
   /**

@@ -1893,6 +1893,33 @@ router.patch(
 );
 
 /**
+ * L2-Smart-Flow FAZ 1 — PATCH /api/cases/:id/smart-classification
+ * Body: {
+ *   fields: { platform?: {code,label}, businessProcess?, operationType?,
+ *             affectedObject?, impact? }   — TAM SET (boş gelen silinir)
+ *   classificationSuggestion?: { appliedAt, appliedFields, perField, unmatched }
+ *   appliedMapping?: { source, category, subCategory, requestType, trace }
+ * }
+ * Yetki: case update (Agent+). KB kapısı FE'de (settings-status); bu uç
+ * KB'siz kiracıda da elle düzenlemeye izin verir (veri zaten varsa).
+ * Audit: CaseActivity actionType='SmartClassificationUpdate'.
+ */
+router.patch(
+  '/:id/smart-classification',
+  asyncRoute(async (req, res) => {
+    await assertCaseResourcePolicy(req, { resourceKey: 'case', action: 'update' });
+    const updated = await caseRepository.updateSmartClassification(
+      req.params.id,
+      req.body ?? {},
+      req.user.allowedCompanyIds,
+      req.user.fullName,
+    );
+    if (!updated) return res.status(404).json({ error: 'Vaka bulunamadı' });
+    res.json(updated);
+  }),
+);
+
+/**
  * Adım 1 — POST /api/cases/:id/files/upload-url
  * Body: { fileName, fileSize, mimeType }
  * Yanıt: { uploadUrl, path, attachmentId }
