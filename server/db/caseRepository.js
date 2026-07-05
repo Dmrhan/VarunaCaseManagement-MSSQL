@@ -3809,16 +3809,18 @@ export const caseRepository = {
       },
     ];
 
-    // 3rdPartyBekleniyor'dan çıkılırken 3. parti alanı temizleniyor — hangi
-    // tanıma gönderilmiş olduğu yalnız bu history kaydından okunabilir.
-    if (leavingPause && prev.thirdPartyId) {
+    // 3rdPartyBekleniyor'a girilirken hangi 3. parti tanımına gönderildiği
+    // history'ye düşer. Alanın kendisi (thirdPartyId/thirdPartyName) bu
+    // statüden çıkılınca sessizce temizlenir (bkz. leavingPause bloğu) —
+    // geriye dönük kayıt yalnız bu history satırından okunur.
+    if (enteringPause && resolvedThirdPartyId) {
       historyEntries.push({
         companyId,
-        action: '3. Parti kaydı temizlendi',
+        action: '3. Parti seçildi',
         actionType: 'FieldUpdate',
         fieldName: 'thirdPartyId',
-        fromValue: prev.thirdPartyName,
-        toValue: null,
+        fromValue: null,
+        toValue: resolvedThirdPartyName,
         actor,
         actorUserId: stampUid,
       });
