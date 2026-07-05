@@ -35,6 +35,10 @@ expectTrue('1.4 queryMailOps: pending + hacim + PERCENTILE_CONT medyan',
   aggr.includes('async function queryMailOps') && aggr.includes('PERCENTILE_CONT(0.5)'));
 expectTrue('1.5 queryPatternAlertSummary: status alanı (state DEĞİL) + spec sapma notu',
   aggr.includes("status: 'active'") && aggr.includes('largestSpike'));
+expectTrue('1.5b Codex R1 P2: daraltılmış kapsamda alarm caseIds kesişimi (takım/kişi/müşteri)',
+  aggr.includes('const narrowed =')
+  && /queryPatternAlertSummary\(scope, filters\)/.test(aggr)
+  && aggr.includes('a.ids.filter((id) => scopedSet.has(id))'));
 expectTrue('1.6 queryQaAverages: MIN_SAMPLE.qaScore altında null',
   aggr.includes('n < MIN_SAMPLE.qaScore'));
 expectTrue('1.7 response yeni alanlar + qa minSample violation',

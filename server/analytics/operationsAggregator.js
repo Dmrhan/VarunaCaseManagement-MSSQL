@@ -131,7 +131,7 @@ export async function computeOperationsOverview({ scope, filters }) {
     queryBySmartTicketTaxonomy(scope, filters, periodFrom, periodTo, baseWhere, 'impact'),
     queryBySolutionStepSource(scope, filters, periodFrom, periodTo, baseWhere),
     queryMailOps(scope, filters, periodFrom, periodTo, baseWhere),
-    queryPatternAlertSummary(scope),
+    queryPatternAlertSummary(scope, filters),
     queryQaAverages(scope, filters, periodFrom, periodTo, baseWhere),
   ]);
 
@@ -730,21 +730,61 @@ async function queryMailOps(scope, filters, from, to, baseWhere) {
  * EDİLMİYOR (patternInsight runtime hesaplıyor) — deterministic aggregate
  * olarak caseCount döndürülür; UI/RUNA "N vakalık küme" der.
  */
-async function queryPatternAlertSummary(scope) {
+async function queryPatternAlertSummary(scope, filters) {
   if (scope.companyIds.length === 0) return { activeCount: 0, largestSpike: null };
-  const [activeCount, largest] = await Promise.all([
-    prisma.patternAlert.count({
-      where: { companyId: { in: scope.companyIds }, status: 'active' },
-    }),
-    prisma.patternAlert.findFirst({
-      where: { companyId: { in: scope.companyIds }, status: 'active' },
-      orderBy: { caseCount: 'desc' },
-      select: { category: true, caseCount: true },
-    }),
-  ]);
+  const alerts = await prisma.patternAlert.findMany({
+    where: { companyId: { in: scope.companyIds }, status: 'active' },
+    select: { category: true, caseCount: true, caseIds: true },
+  });
+  if (alerts.length === 0) return { activeCount: 0, largestSpike: null };
+
+  // Codex R1 P2 (PR #418) — kapsam takım/kişi/müşteri ile DARALTILMIŞSA
+  // alarm yalnız tetikleyici vakalarından EN AZ BİRİ scoped kümede ise
+  // sayılır; sayı da scoped kesişim adedidir. Aksi halde daraltılmış pano
+  // şirket genelindeki alakasız kümeyi gösterir (kapsam-dışı aggregate
+  // sızıntısı). Şirket-geneli görünümde davranış değişmez.
+  const narrowed =
+    (scope.teamIds && scope.teamIds.length > 0) ||
+    (scope.personIds && scope.personIds.length > 0) ||
+    (filters && typeof filters.accountId === 'string' && filters.accountId);
+  const parseIds = (raw) => {
+    try {
+      const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+
+  if (!narrowed) {
+    const largest = alerts.reduce((a, b) => (b.caseCount > (a?.caseCount ?? -1) ? b : a), null);
+    return {
+      activeCount: alerts.length,
+      largestSpike: largest ? { category: largest.category, caseCount: largest.caseCount } : null,
+    };
+  }
+
+  const withIds = alerts.map((a) => ({ ...a, ids: parseIds(a.caseIds) }));
+  const allIds = [...new Set(withIds.flatMap((a) => a.ids))];
+  if (allIds.length === 0) return { activeCount: 0, largestSpike: null };
+  const scopedRows = await prisma.case.findMany({
+    where: {
+      id: { in: allIds },
+      companyId: { in: scope.companyIds },
+      ...(scope.teamIds && scope.teamIds.length > 0 ? { assignedTeamId: { in: scope.teamIds } } : {}),
+      ...(scope.personIds && scope.personIds.length > 0 ? { assignedPersonId: { in: scope.personIds } } : {}),
+      ...(filters?.accountId ? { accountId: filters.accountId } : {}),
+    },
+    select: { id: true },
+  });
+  const scopedSet = new Set(scopedRows.map((r) => r.id));
+  const visible = withIds
+    .map((a) => ({ category: a.category, scopedCount: a.ids.filter((id) => scopedSet.has(id)).length }))
+    .filter((a) => a.scopedCount > 0);
+  const largest = visible.reduce((a, b) => (b.scopedCount > (a?.scopedCount ?? -1) ? b : a), null);
   return {
-    activeCount,
-    largestSpike: largest ? { category: largest.category, caseCount: largest.caseCount } : null,
+    activeCount: visible.length,
+    largestSpike: largest ? { category: largest.category, caseCount: largest.scopedCount } : null,
   };
 }
 
