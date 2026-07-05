@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
+import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
@@ -721,35 +722,9 @@ const MAX_DRILLDOWN_PAGE_SIZE = 200;
  *  - minSampleViolations, notAvailable, approximations
  *  - metricAuditId
  */
-/**
- * Ops Pano v2 FAZ 1 — accountId scope guard (Aylık Bülten guard'ının tek-kaynak
- * hali; spec §Sabit Kurallar 4: bülten account-scope guard REUSE).
- * Account'un bağlı olduğu şirketlerden EN AZ BİRİ kullanıcının scope'unda
- * olmalı; aksi halde cross-tenant erişim engellenir.
- * Dönüş: { ok:true } | { ok:false, status, body }.
- */
-async function checkAccountInScope(accountId, scope) {
-  const account = await prisma.account.findUnique({
-    where: { id: accountId },
-    select: {
-      id: true,
-      companyId: true, // legacy ana companyId
-      companies: { select: { companyId: true } },
-    },
-  });
-  if (!account) {
-    return { ok: false, status: 404, body: { error: 'account_not_found' } };
-  }
-  const accountCompanyIds = [
-    account.companyId,
-    ...account.companies.map((ac) => ac.companyId),
-  ].filter(Boolean);
-  const intersection = accountCompanyIds.filter((cid) => scope.companyIds.includes(cid));
-  if (intersection.length === 0) {
-    return { ok: false, status: 403, body: { error: 'account_out_of_scope' } };
-  }
-  return { ok: true };
-}
+// Ops Pano v2 FAZ 1 — accountId scope guard: Codex R1 P1 (PR #417) sonrası
+// server/analytics/accountScopeGuard.js'e TEK KAYNAK olarak taşındı (AI
+// uçları da kullanır).
 
 router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   const t0 = Date.now();

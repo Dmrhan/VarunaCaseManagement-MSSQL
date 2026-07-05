@@ -78,5 +78,18 @@ expectTrue('5.1 OverviewRequest.accountId', /accountId\?: string;/.test(svc));
 expectTrue('5.2 Response byRequestType + byOrigin',
   svc.includes('byRequestType: OverviewCountPair[]') && svc.includes('byOrigin: OverviewCountPair[]'));
 
+console.log('── 6) Codex R1 P1 — AI snapshot müşteri lensi ──');
+const guard = readFileSync('server/analytics/accountScopeGuard.js', 'utf8');
+const ai = readFileSync('server/routes/ai.js', 'utf8');
+expectTrue('6.1 guard TEK KAYNAK modülde (analytics + ai paylaşır)',
+  guard.includes('export async function checkAccountInScope')
+  && routes.includes("from '../analytics/accountScopeGuard.js'")
+  && ai.includes("from '../analytics/accountScopeGuard.js'"));
+expectTrue('6.2 buildScopedSnapshot accountId parse + guard + filters',
+  /buildScopedSnapshot[\s\S]{0,1400}checkAccountInScope\(body\.accountId, scope\)/.test(ai)
+  && /buildScopedSnapshot[\s\S]{0,2200}\.\.\.\(accountId \? \{ accountId \} : \{\}\)/.test(ai));
+expectTrue('6.3 analytics.js\'te yerel guard kopyası KALMADI (tek kaynak)',
+  !routes.includes('async function checkAccountInScope'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
