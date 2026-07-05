@@ -184,5 +184,11 @@ expectTrue('9.4 Kapanış Bilgileri bölümü KB kapalıyken gizli',
 expectTrue('9.5 backend guard tenant-farkında (externalKbSetting enabled kontrolü)',
   /SMART_TICKET_CLOSURE_REQUIRED[\s\S]{0,700}externalKbSetting[\s\S]{0,200}enabled === true/.test(repo));
 
+console.log('── 10) Codex R2 fix\'leri ──');
+expectTrue('10.1 analyze stale-response guard (reqId + targetCaseId)',
+  card.includes('analyzeReqIdRef.current || caseIdRef.current !== targetCaseId'));
+expectTrue('10.2 boş seçimde appliedMapping GÖNDERİLMEZ',
+  /hasAnySelection[\s\S]{0,80}if \(hasAnySelection\)/.test(card) || card.includes('if (hasAnySelection) {'));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);

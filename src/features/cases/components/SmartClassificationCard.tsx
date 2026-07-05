@@ -122,6 +122,7 @@ export function SmartClassificationCard({
   // VAKAYA bağlı — aksi halde önceki kiracının taxonomy'siyle yanlış kod
   // yazılabilir, önceki vakanın taslak values'ü yeni vakaya taban olur.
   const taxCompanyRef = useRef<string | null>(null);
+  const analyzeReqIdRef = useRef(0);
   const caseIdRef = useRef<string>(item.id);
   if (caseIdRef.current !== item.id) {
     caseIdRef.current = item.id;
@@ -162,12 +163,20 @@ export function SmartClassificationCard({
       return;
     }
     setAnalyzing(true);
+    // Codex R2 P2 — stale-response guard (StatusTransitionPanel
+    // kbSuggestReqIdRef deseni): KB yavaşken A→B vaka geçişinde geç gelen
+    // cevap yeni vakanın kartına yazılmasın.
+    const reqId = ++analyzeReqIdRef.current;
+    const targetCaseId = item.id;
     try {
       await ensureTaxonomies();
       const res = await lookupService.suggestSmartTicketClassification({
         companyId: item.companyId,
         description,
       });
+      if (reqId !== analyzeReqIdRef.current || caseIdRef.current !== targetCaseId) {
+        return; // stale — başka vaka/istek aktif
+      }
       if (!res) {
         // Sebep toast'ı apiFetch katmanından gelir (sınıflandırılmış:
         // kota/erişim/zaman aşımı). Burada yalnız EYLEM yolunu göster.
@@ -245,20 +254,25 @@ export function SmartClassificationCard({
       }
 
       // Kategori türetimi — L1 create paritesi (raporlama tek dil).
-      const mapping = resolveSmartTicketMapping(tax, {
-        platform: values.platform || undefined,
-        businessProcess: values.businessProcess || undefined,
-        operationType: values.operationType || undefined,
-        affectedObject: values.affectedObject || undefined,
-        impact: values.impact || undefined,
-      });
-      payload.appliedMapping = {
-        source: mapping.source,
-        category: mapping.category,
-        subCategory: mapping.subCategory,
-        requestType: mapping.requestType,
-        trace: mapping.trace as unknown as string[],
-      };
+      // Codex R2 P2 — HİÇ seçim yoksa mapping GÖNDERİLMEZ: temizleme eylemi
+      // fallback kategoriyle Case kolonlarını yeniden sınıflandırmamalı.
+      const hasAnySelection = FIELDS.some((f) => values[f.key]);
+      if (hasAnySelection) {
+        const mapping = resolveSmartTicketMapping(tax, {
+          platform: values.platform || undefined,
+          businessProcess: values.businessProcess || undefined,
+          operationType: values.operationType || undefined,
+          affectedObject: values.affectedObject || undefined,
+          impact: values.impact || undefined,
+        });
+        payload.appliedMapping = {
+          source: mapping.source,
+          category: mapping.category,
+          subCategory: mapping.subCategory,
+          requestType: mapping.requestType,
+          trace: mapping.trace as unknown as string[],
+        };
+      }
 
       const updated = await caseService.updateSmartClassification(item.id, payload);
       if (updated) {
