@@ -126,6 +126,43 @@ if (await stepsTab.isVisible().catch(() => false)) {
   log('C2 KB-kapalı: AI Önerilen Adımlar butonu YOK', !aiBtnOff);
 }
 
+// ── E: FAZ 1.1 — kapanış zorunluluğu tenant kapısı (canlı modal) ─────
+// PARAM (KB kapalı): Çöz modalında KB bölümleri YOK + Uygula çözüm notuyla açılır.
+// NOT: Uygula'ya BASILMAZ (gerçek kapanış yapılmaz).
+const openSolveModal = async () => {
+  const cozBtn = page.locator('button:not([disabled])', { hasText: /^Çöz\s*⚠?$/ }).first();
+  if (!(await cozBtn.isVisible().catch(() => false))) return false;
+  await cozBtn.click();
+  await page.waitForTimeout(1500);
+  return page.evaluate(() => document.body.innerText.includes('Çözüm Notu'));
+};
+// (hâlâ PARAM vakasındayız — C bloğundan)
+if (await openSolveModal()) {
+  const t = await page.evaluate(() => document.body.innerText);
+  log('E1 PARAM: Kapanış Bilgileri bölümü YOK', !t.includes('Kapanış Bilgileri (Kök Neden)'));
+  log('E2 PARAM: KB önerisi paneli YOK', !t.includes('Bilgi Bankası Önerisi Sor'));
+  // çözüm notu yaz → Uygula enabled olmalı (KB zorunluluğu yok)
+  const ta = page.locator('textarea').first();
+  await ta.fill('Tenant kapısı kabul testi — uygulanmayacak');
+  await page.waitForTimeout(600);
+  const applyDisabled = await page.locator('button:has-text("Uygula")').first().isDisabled().catch(() => null);
+  log('E3 PARAM: Uygula çözüm notuyla AÇIK (KB zorunluluğu uygulanmaz)', applyDisabled === false, `disabled=${applyDisabled}`);
+  await page.locator('button:has-text("Vazgeç")').first().click().catch(() => {});
+  await page.waitForTimeout(600);
+} else {
+  log('E1-E3 PARAM çöz modalı açılamadı (stepper Çöz kilitli olabilir)', false);
+}
+// UNIVERA regresyonu: bölümler VAR
+await gotoCase(CASE_KB_ON, null);
+if (await openSolveModal()) {
+  const t2 = await page.evaluate(() => document.body.innerText);
+  log('E4 UNIVERA: Kapanış Bilgileri bölümü VAR', t2.includes('Kapanış Bilgileri (Kök Neden)'));
+  log('E5 UNIVERA: KB önerisi paneli VAR', t2.includes('Bilgi Bankası Önerisi Sor'));
+  await page.locator('button:has-text("Vazgeç")').first().click().catch(() => {});
+} else {
+  log('E4-E5 UNIVERA çöz modalı açılamadı', false);
+}
+
 await browser.close();
 const failCount = results.filter((r) => !r).length;
 console.log(`\nTOPLAM: ${results.length - failCount}/${results.length} PASS`);

@@ -171,5 +171,18 @@ expectTrue('8.3 vaka değişiminde kart state reset (caseIdRef)',
 expectTrue('8.4 mutation sonrası invalidateCaseDetail (WR-H2 paritesi)',
   /updateSmartClassification[\s\S]{0,600}invalidateCaseDetail\(caseId\)/.test(service));
 
+console.log('── 9) FAZ 1.1 — kapanış zorunluluğu tenant kapısı ──');
+const stp = readFileSync('src/features/cases/StatusTransitionPanel.tsx', 'utf8');
+expectTrue('9.1 panel kbEnabled settings-status ile yüklüyor',
+  stp.includes('externalKbService') && stp.includes('settingsStatus'));
+expectTrue('9.2 kbAnalysisPending kapıya bağlı (kbEnabled !== false)',
+  /kbAnalysisPending =\s*kbEnabled !== false &&/.test(stp));
+expectTrue('9.3 KB öneri paneli KB kapalıyken gizli',
+  /\{kbEnabled !== false && \(\s*<KbClosureSuggestionPanel/.test(stp));
+expectTrue('9.4 Kapanış Bilgileri bölümü KB kapalıyken gizli',
+  /\{kbEnabled !== false && \(\s*<div className="rounded-md border border-brand-100/.test(stp));
+expectTrue('9.5 backend guard tenant-farkında (externalKbSetting enabled kontrolü)',
+  /SMART_TICKET_CLOSURE_REQUIRED[\s\S]{0,700}externalKbSetting[\s\S]{0,200}enabled === true/.test(repo));
+
 console.log(`\nPASS=${pass}  FAIL=${fail}`);
 process.exit(fail ? 1 : 0);
