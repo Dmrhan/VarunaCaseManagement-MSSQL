@@ -79,6 +79,11 @@ export function buildDrilldownWhere({ scope, filters, from, to, bucket }) {
   if (filters.statuses && filters.statuses.length > 0) {
     and.push({ status: { in: filters.statuses } });
   }
+  // Ops Pano v2 FAZ 1 — müşteri lensi: accountId filtresi (route scope-guard'lı
+  // gönderir; aggregator paritesi — drilldown listesi de aynı daraltmayı görür).
+  if (typeof filters.accountId === 'string' && filters.accountId) {
+    and.push({ accountId: filters.accountId });
+  }
 
   const periodCreated = { createdAt: { gte: from, lt: to } };
   const periodResolved = { resolvedAt: { gte: from, lt: to } };

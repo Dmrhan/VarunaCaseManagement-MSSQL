@@ -113,6 +113,12 @@ export interface OverviewRequest {
   caseTypes?: string[];
   statuses?: string[];
   granularity?: OverviewGranularity;
+  /**
+   * Ops Pano v2 FAZ 1 — müşteri lensi. Verilirse tüm kart/kırılım/trend
+   * yalnız bu müşterinin vakalarını sayar. Backend scope-guard'lıdır
+   * (scope dışı account → 403 account_out_of_scope).
+   */
+  accountId?: string;
 }
 
 export type DrilldownBucket =
@@ -230,6 +236,10 @@ export interface OperationsOverviewResponse {
   byStatus: OverviewCountPair[];
   byPriority: OverviewCountPair[];
   byCaseType: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 1 — Talep Türü kırılımı (aggregate hazırdı, UI'a bağlandı). */
+  byRequestType: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 1 — Kanal (origin) kırılımı. */
+  byOrigin: OverviewCountPair[];
   byCompany: OverviewCompanyRow[] | null;
   byTeam: OverviewTeamRow[];
   byCategory: OverviewCategoryRow[];
