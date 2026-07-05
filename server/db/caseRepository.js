@@ -5705,6 +5705,11 @@ function buildWhere(f, allowedCompanyIds, securityWhere = null, roleDefaultScope
   if (f.caseType && f.caseType !== 'Tümü') where.caseType = f.caseType;
   if (f.priorities?.length) where.priority = { in: f.priorities };
   if (f.teamId) where.assignedTeamId = f.teamId;
+  // Takım Havuzu (Supervisor) — kendi takımıyla aynı defaultSupportLevel'a
+  // sahip TÜM takımların havuzunu görmek için. teamId (tekil) ile ayrı
+  // tutuluyor; ikisi aynı anda gelmez (frontend ya birini ya diğerini
+  // gönderir), ama gelirse teamIds öncelikli (daha spesifik/son eklenen).
+  if (f.teamIds?.length) where.assignedTeamId = { in: f.teamIds };
   if (f.personId) where.assignedPersonId = f.personId;
   if (f.dateFrom) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(f.dateFrom) };
   if (f.dateTo) {

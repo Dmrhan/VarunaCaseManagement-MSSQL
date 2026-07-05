@@ -509,6 +509,14 @@ router.get(
       });
       if (sup?.teamId) teamId = sup.teamId;
     }
+    // Takım Havuzu (Supervisor) — ?teamIds=id1,id2 CSV. Client, kendi
+    // takımıyla aynı defaultSupportLevel'a sahip takımların id'lerini
+    // bootstrap'te zaten yüklü teams listesinden çıkarıp gönderiyor.
+    // Ek bir sızıntı yok: sonuç yine de companyId scope + roleDefaultScope
+    // ile AND'lenir (tenant dışı/erişimsiz takım id'si boş sonuç verir).
+    const teamIds = typeof f.teamIds === 'string'
+      ? f.teamIds.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
 
     // Rol bazlı varsayılan liste kapsamı (sadece liste ekranı, güvenlik kısıtı değil).
     // Agent: her zaman uygulanır. Supervisor/Backoffice: roleDefaultView=off gelmediği sürece uygulanır.
@@ -574,6 +582,7 @@ router.get(
       caseType: f.caseType,
       priorities: f.priorities ? f.priorities.split(',') : undefined,
       teamId,
+      teamIds: teamIds && teamIds.length > 0 ? teamIds : undefined,
       personId,
       dateFrom: f.dateFrom,
       dateTo: f.dateTo,
