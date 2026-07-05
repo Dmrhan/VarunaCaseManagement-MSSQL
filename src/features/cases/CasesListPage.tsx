@@ -373,7 +373,11 @@ export function CasesListPage({
     }
     void loadPoolCount();
     return () => { cancelled = true; };
-  }, [caseStats?.mode, poolVisiblePersonal, myTeamId]);
+    // caseStats'ın tamamına (yalnız .mode'a değil) bağımlı — refreshStats()
+    // her çağrıldığında (Üstlen sonrası, Yenile butonu, bulk action) yeni
+    // bir caseStats referansı üretir; poolCount da diğer KPI sayılarıyla
+    // aynı anda tazelensin diye bu tetikleyiciyi paylaşıyor.
+  }, [caseStats, poolVisiblePersonal, myTeamId]);
 
   // targetPage: undefined = mevcut page state'i kullan; sayı = o sayfayı yükle.
   const load = async (targetPage?: number, queueFilter?: QuickQueueFilter) => {
