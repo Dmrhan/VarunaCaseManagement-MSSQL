@@ -3762,16 +3762,24 @@ export const caseRepository = {
         // thirdPartyId yoksa geri uyumluluk: SLA dursun.
         nextSlaPausedAt = new Date();
       }
-    } else if (leavingPause && prev.slaPausedAt) {
-      const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
-      nextPausedDurationMin += pausedMin;
-      nextThirdPartyWaitMin += pausedMin;
-      if (prev.slaResolutionDueAt) {
-        nextResolutionDueAt = new Date(
-          new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
-        );
+    } else if (leavingPause) {
+      if (prev.slaPausedAt) {
+        const pausedMin = Math.round((Date.now() - new Date(prev.slaPausedAt).getTime()) / 60000);
+        nextPausedDurationMin += pausedMin;
+        nextThirdPartyWaitMin += pausedMin;
+        if (prev.slaResolutionDueAt) {
+          nextResolutionDueAt = new Date(
+            new Date(prev.slaResolutionDueAt).getTime() + pausedMin * 60000,
+          );
+        }
+        nextSlaPausedAt = null;
       }
-      nextSlaPausedAt = null;
+      // 3rdPartyBekleniyor'dan çıkılınca 3. parti ataması temizlenir —
+      // vaka üzerinde artık görünmez, yalnız history'den (aşağıdaki
+      // FieldUpdate kaydı) takip edilebilir. Tekrar 3rdPartyBekleniyor'a
+      // girilirse (enteringPause) o anda seçilen tanım yeniden set edilir.
+      resolvedThirdPartyId = null;
+      resolvedThirdPartyName = null;
     }
 
     // Yanıt SLA karşılandı mı? İncelemede'ye ilk geçişte slaResponseMetAt stamp'la.
@@ -3800,6 +3808,21 @@ export const caseRepository = {
         actorUserId: stampUid,
       },
     ];
+
+    // 3rdPartyBekleniyor'dan çıkılırken 3. parti alanı temizleniyor — hangi
+    // tanıma gönderilmiş olduğu yalnız bu history kaydından okunabilir.
+    if (leavingPause && prev.thirdPartyId) {
+      historyEntries.push({
+        companyId,
+        action: '3. Parti kaydı temizlendi',
+        actionType: 'FieldUpdate',
+        fieldName: 'thirdPartyId',
+        fromValue: prev.thirdPartyName,
+        toValue: null,
+        actor,
+        actorUserId: stampUid,
+      });
+    }
 
     if (enteringEscalation && payload.escalationLevel) {
       const prevLevelTr = fromDb({ escalationLevel: prev.escalationLevel }).escalationLevel;
@@ -3867,8 +3890,11 @@ export const caseRepository = {
         status: dbNext,
         resolutionNote: payload.resolutionNote ?? prev.resolutionNote,
         cancellationReason: payload.cancellationReason ?? prev.cancellationReason,
-        thirdPartyId: enteringPause ? resolvedThirdPartyId : prev.thirdPartyId,
-        thirdPartyName: enteringPause ? resolvedThirdPartyName : prev.thirdPartyName,
+        // resolvedThirdPartyId/Name üç durumu da kapsar: enteringPause'da
+        // yeni seçilen tanım, leavingPause'da null (temizlendi), diğer
+        // geçişlerde prev ile aynı (init değeri prev.thirdPartyId'ydi).
+        thirdPartyId: resolvedThirdPartyId,
+        thirdPartyName: resolvedThirdPartyName,
         escalationLevel: newEscalationLevel,
         slaPausedAt: nextSlaPausedAt,
         slaPausedDurationMin: nextPausedDurationMin,
