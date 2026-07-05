@@ -1444,16 +1444,31 @@ function LeftPanel({
                     </div>
                   )}
                 </div>
-                {onOpenAccount && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenAccount(item.accountId as string)}
-                    title="Müşteri Detayı'na git"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
-                  >
-                    Detay →
-                  </button>
-                )}
+                <div className="flex shrink-0 items-center gap-1">
+                  {onOpenAccount && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAccount(item.accountId as string)}
+                      title="Müşteri Detayı'na git"
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/30"
+                    >
+                      Detay →
+                    </button>
+                  )}
+                  {/* Müşteriyi değiştir — mevcut linkAccount picker'ını
+                      selectedAccountId=item.accountId ile açar; backend
+                      linkAccount zaten overwrite ediyor (bkz. caseRepository.js). */}
+                  {canLinkAccount && onLinkAccount && (
+                    <button
+                      type="button"
+                      onClick={onLinkAccount}
+                      title="Bu vakayı başka bir müşteriye bağla"
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-100 dark:text-ndark-muted dark:hover:bg-ndark-card"
+                    >
+                      Değiştir
+                    </button>
+                  )}
+                </div>
               </div>
               {/* LBD baseline 1+5 — Çip çorbası → sönük tek satır metin.
                   Tek vurgu: priority Critical olduğunda küçük rose dot inline.
