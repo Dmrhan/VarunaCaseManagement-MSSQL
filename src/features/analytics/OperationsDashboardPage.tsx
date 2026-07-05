@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  Sparkles,
+  Tag,
+  X,
   Building2,
   CheckCircle2,
   ChevronLeft,
@@ -60,6 +63,7 @@ import {
   type LensKey,
 } from './operationsLensConfig';
 import { useAuth } from '@/services/AuthContext';
+import { AccountSearchPicker } from '@/features/accounts/AccountSearchPicker';
 
 /**
  * Operations Intelligence — Dashboard (Phase 2 UI)
@@ -216,6 +220,10 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   const [statuses, setStatuses] = useState<string[]>([]);
   const [caseTypes, setCaseTypes] = useState<string[]>([]);
   const [companies, setCompanies] = useState<string[]>([]);
+  // Ops Pano v2 FAZ 1 — müşteri lensi. Seçilince TÜM kart/kırılım/trend
+  // yalnız bu müşterinin vakalarını sayar (backend scope-guard'lı).
+  const [selectedAccount, setSelectedAccount] = useState<{ id: string; name: string } | null>(null);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   // Mevcut kapsam icindeki sirket listesi — overview response'larindan birlestirilerek
   // toplanir; user PARAM'a daraltinca byCompany kuculur ama allCompanies kuculmesin
   // diye ayri tutuyoruz. SystemAdmin disindaki rollerde byCompany null → bos kalir.
@@ -266,7 +274,10 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
     statuses: statuses.length > 0 ? statuses : undefined,
     caseTypes: caseTypes.length > 0 ? caseTypes : undefined,
     granularity: 'day',
-  }), [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey]);
+    // Müşteri lensi — drilldown istekleri de overviewBody'yi spread ettiği
+    // için accountId oraya da otomatik akar.
+    accountId: selectedAccount?.id,
+  }), [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, selectedAccount?.id]);
 
   useEffect(() => {
     let alive = true;
@@ -374,41 +385,57 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
   }
 
   // ---- AI command handlers (Phase 4a) ----
-  // Filtre değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  // Filtre/müşteri seçimi değişince mevcut AI çıktıları artık eski kapsama ait — temizle.
+  // Codex #420 P2: temizlik tek başına yetmez; uçuştaki RUNA çağrısı kapsam
+  // değiştikten SONRA dönerse bayat yanıtı yeni kapsamın altına yazar. Effect
+  // her kapsam değişiminde id'yi ilerletir; run* yalnız kendi id'si hâlâ
+  // güncelse state yazar. Bayat yanıt düşürüldüğü için loading'ler de burada
+  // kapatılır (yoksa spinner sonsuza takılır).
+  const aiScopeReqIdRef = useRef(0);
   useEffect(() => {
+    aiScopeReqIdRef.current += 1;
     setBrief(null);
     setBriefError(null);
+    setBriefLoading(false);
     setBriefDismissed(false);
     setInsights(null);
     setInsightsError(null);
+    setInsightsLoading(false);
     setReport(null);
     setReportError(null);
-  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey]);
+    setReportLoading(false);
+  }, [dateFrom, dateTo, statusesKey, caseTypesKey, companiesKey, lensKey, selectedAccount?.id]);
 
   function runBrief() {
+    const reqId = aiScopeReqIdRef.current;
     setBriefLoading(true);
     setBriefError(null);
     setBriefDismissed(false);
     void aiService.operationsBrief({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return; // kapsam değişti — bayat yanıt
       if (r.ok) setBrief(r.data);
       else setBriefError(r.error);
       setBriefLoading(false);
     });
   }
   function runInsights() {
+    const reqId = aiScopeReqIdRef.current;
     setInsightsLoading(true);
     setInsightsError(null);
     void aiService.operationsInsights({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return;
       if (r.ok) setInsights(r.data.insights);
       else setInsightsError(r.error);
       setInsightsLoading(false);
     });
   }
   function runReport() {
+    const reqId = aiScopeReqIdRef.current;
     setReportOpen(true);
     setReportLoading(true);
     setReportError(null);
     void aiService.operationsReportDraft({ ...overviewBody, lens: lensKey }).then((r) => {
+      if (aiScopeReqIdRef.current !== reqId) return;
       if (r.ok) setReport(r.data);
       else setReportError(r.error);
       setReportLoading(false);
@@ -460,13 +487,29 @@ export function OperationsDashboardPage({ onSelectCase }: { onSelectCase?: (case
         caseTypes={caseTypes}
         companies={companies}
         availableCompanies={allCompanies}
+        selectedAccountName={selectedAccount?.name ?? null}
+        onOpenAccountPicker={() => setAccountPickerOpen(true)}
+        onClearAccount={() => setSelectedAccount(null)}
         onToggleStatus={toggleStatus}
         onToggleCaseType={toggleCaseType}
         onToggleCompany={toggleCompany}
         onClear={() => {
           setStatuses([]);
           setCaseTypes([]);
+          setSelectedAccount(null);
           setCompanies([]);
+        }}
+      />
+
+      {/* Ops Pano v2 FAZ 1 — müşteri seçici (server-side arama; SmartTicket
+          picker REUSE). Seçim state'e düşer, overviewBody + drilldown scoped. */}
+      <AccountSearchPicker
+        open={accountPickerOpen}
+        selectedAccountId={selectedAccount?.id ?? null}
+        onClose={() => setAccountPickerOpen(false)}
+        onSelect={(account) => {
+          setSelectedAccount(account ? { id: account.id, name: account.name } : null);
+          setAccountPickerOpen(false);
         }}
       />
 
@@ -725,6 +768,34 @@ function SectionRenderer({
           onOpenDrilldown={openDrilldown}
         />
       );
+    case 'aiDataGroup':
+      // Ops Pano v2 FAZ 2 — AI görüş mini kartları. RUNA brief/insights bu
+      // aggregate'leri yorumlar; kartlar sayının kendisini gösterir
+      // (deterministic; UI hesaplamaz, sadece formatlar).
+      return <AiDataGroupSection loading={loading} data={data} />;
+    case 'requestOriginGroup':
+      // Ops Pano v2 FAZ 1 (1b) — aggregate'ler hazırdı (Bülten A1), UI'a
+      // bağlandı. Drilldown bucket'ı yok (bilinçli — mini kart + dağılım).
+      return (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <BreakdownCard
+            title="Talep Türü"
+            icon={<Tag size={16} />}
+            loading={loading}
+            items={mapRequestTypeItems(data?.byRequestType ?? [])}
+            emptyHint="Bu dönemde vaka oluşturulmamış."
+            onOpenDrilldown={openDrilldown}
+          />
+          <BreakdownCard
+            title="Kanal"
+            icon={<Inbox size={16} />}
+            loading={loading}
+            items={mapOriginItems(data?.byOrigin ?? [])}
+            emptyHint="Bu dönemde vaka oluşturulmamış."
+            onOpenDrilldown={openDrilldown}
+          />
+        </div>
+      );
     case 'byCompany':
       // byCompany sadece backend null degilse render — scope guard server-side.
       if (!data?.byCompany || data.byCompany.length === 0) return null;
@@ -869,6 +940,9 @@ function FilterBar({
   caseTypes,
   companies,
   availableCompanies,
+  selectedAccountName,
+  onOpenAccountPicker,
+  onClearAccount,
   onToggleStatus,
   onToggleCaseType,
   onToggleCompany,
@@ -878,18 +952,49 @@ function FilterBar({
   caseTypes: string[];
   companies: string[];
   availableCompanies: Array<{ id: string; name: string }>;
+  /** Ops Pano v2 FAZ 1 — müşteri lensi (null = tüm müşteriler). */
+  selectedAccountName: string | null;
+  onOpenAccountPicker: () => void;
+  onClearAccount: () => void;
   onToggleStatus: (s: string) => void;
   onToggleCaseType: (t: string) => void;
   onToggleCompany: (id: string) => void;
   onClear: () => void;
 }) {
-  const anyActive = statuses.length > 0 || caseTypes.length > 0 || companies.length > 0;
+  const anyActive =
+    statuses.length > 0 || caseTypes.length > 0 || companies.length > 0 || selectedAccountName !== null;
   // Tek sirket icin chip gostermek anlamsiz (zaten daraltma yapilamaz).
   const showCompanies = availableCompanies.length > 1;
   return (
     <div className="space-y-1.5 rounded-md border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-ndark-border dark:bg-ndark-bg/30">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
+        <span className="text-xs font-medium text-slate-500 dark:text-ndark-muted">Müşteri:</span>
+        {selectedAccountName ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200">
+            {selectedAccountName}
+            <button
+              type="button"
+              onClick={onClearAccount}
+              className="rounded-full hover:bg-brand-200 dark:hover:bg-brand-800"
+              title="Müşteri filtresini temizle"
+              aria-label="Müşteri filtresini temizle"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpenAccountPicker}
+            className="rounded-full border border-dashed border-slate-300 px-2.5 py-0.5 text-xs text-slate-500 transition hover:border-brand-400 hover:text-brand-700 dark:border-ndark-border dark:text-ndark-muted"
+          >
+            + Müşteri seç
+          </button>
+        )}
+        <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
+          Müşteri seçince tüm görseller yalnız o müşterinin vakalarını sayar.
+        </span>
+        <span className="ml-2 text-xs font-medium text-slate-500 dark:text-ndark-muted">Statü:</span>
         {STATUS_ORDER.map((s) => (
           <FilterChip
             key={s}
@@ -1344,6 +1449,200 @@ function mapCaseTypeItems(rows: { key: string; count: number }[]): DrilldownBarI
     value: r.count,
     color: CASE_TYPE_COLOR[r.key] ?? 'bg-slate-500',
     bucket: { kind: 'caseType', key: r.key, label: CASE_TYPE_LABEL[r.key] ?? r.key },
+  }));
+}
+
+// ═══ Ops Pano v2 FAZ 2 — AI Görüş mini kartları ═══════════════════════
+const SOLUTION_SOURCE_LABEL: Record<string, string> = {
+  ai_suggested_step: 'AI Önerisi',
+  external_kb: 'Bilgi Bankası',
+  similar_case: 'Benzer Vaka',
+  manual: 'Manuel',
+};
+
+function MiniStatRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 px-4 py-1.5 text-sm">
+      <span className="text-slate-500 dark:text-ndark-muted">{label}</span>
+      <span className="font-semibold text-slate-800 dark:text-ndark-text">{value}</span>
+    </div>
+  );
+}
+
+function MiniListRows({ rows }: { rows: Array<{ key: string; label: string; count: number }> }) {
+  if (rows.length === 0) {
+    return <div className="px-4 py-3 text-xs text-slate-400 dark:text-ndark-muted">Veri yok.</div>;
+  }
+  return (
+    <div className="py-1">
+      {rows.slice(0, 3).map((r) => (
+        <div key={r.key} className="flex items-baseline justify-between gap-2 px-4 py-1 text-sm">
+          <span className="min-w-0 truncate text-slate-600 dark:text-ndark-muted">{r.label}</span>
+          <span className="shrink-0 font-semibold text-slate-800 dark:text-ndark-text">{r.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AiMiniCard({
+  title,
+  loading,
+  children,
+}: {
+  title: string;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} className="text-violet-500" />
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-ndark-text">{title}</h2>
+        </div>
+      </CardHeader>
+      <CardBody className="!p-0">
+        {loading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton height={12} />
+            <Skeleton height={12} />
+          </div>
+        ) : (
+          children
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function AiDataGroupSection({
+  loading,
+  data,
+}: {
+  loading: boolean;
+  data: OperationsOverviewResponse | null;
+}) {
+  const kbRate = data?.kbAssistedResolutionRate;
+  const mail = data?.mailOps;
+  const pat = data?.patternAlerts;
+  const qa = data?.qaAverages;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+          AI Görüş Verileri
+        </span>
+        <span className="text-[11px] text-slate-400 dark:text-ndark-muted">
+          RUNA özet/görüşleri bu verileri yorumlar
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <AiMiniCard title="Akıllı Sınıflandırma" loading={loading}>
+          <div className="px-4 pt-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-muted">Platform</div>
+          <MiniListRows rows={data?.bySmartTicketPlatform ?? []} />
+          <div className="px-4 pt-1 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-ndark-muted">İş Süreci</div>
+          <MiniListRows rows={data?.bySmartTicketBusinessProcess ?? []} />
+        </AiMiniCard>
+        <AiMiniCard title="Çözüm Kaynağı" loading={loading}>
+          <div className="px-4 pt-2">
+            <span className="text-2xl font-semibold text-slate-800 dark:text-ndark-text">
+              {kbRate === null || kbRate === undefined ? '—' : `%${Math.round(kbRate * 100)}`}
+            </span>
+            <span className="ml-1 text-xs text-slate-500 dark:text-ndark-muted">KB-destekli çözüm</span>
+          </div>
+          <MiniListRows
+            rows={(data?.bySolutionStepSource ?? []).map((r) => ({
+              key: r.key,
+              label: SOLUTION_SOURCE_LABEL[r.key] ?? r.key,
+              count: r.count,
+            }))}
+          />
+        </AiMiniCard>
+        <AiMiniCard title="Mail Operasyonu" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Yanıt bekleyen" value={String(mail?.pendingCustomerReply ?? 0)} />
+            <MiniStatRow label="Gelen (dönem)" value={String(mail?.inboundVolume ?? 0)} />
+            <MiniStatRow label="Giden (dönem)" value={String(mail?.outboundVolume ?? 0)} />
+            <MiniStatRow
+              label="İlk yanıt medyanı"
+              value={mail?.firstResponseMedianMin === null || mail?.firstResponseMedianMin === undefined ? '—' : `${mail.firstResponseMedianMin} dk`}
+            />
+          </div>
+        </AiMiniCard>
+        <AiMiniCard title="Örüntü Alarmları" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Aktif alarm" value={String(pat?.activeCount ?? 0)} />
+            {pat?.largestSpike ? (
+              <div className="px-4 py-1.5 text-xs text-slate-600 dark:text-ndark-muted">
+                En büyük küme: <span className="font-medium text-slate-800 dark:text-ndark-text">{pat.largestSpike.category}</span> ({pat.largestSpike.caseCount} vaka)
+              </div>
+            ) : (
+              <div className="px-4 py-1.5 text-xs text-slate-400 dark:text-ndark-muted">Aktif küme yok.</div>
+            )}
+          </div>
+        </AiMiniCard>
+        <AiMiniCard title="QA Ortalamaları" loading={loading}>
+          <div className="py-1">
+            <MiniStatRow label="Empati" value={qa?.empathy === null || qa?.empathy === undefined ? '—' : String(qa.empathy)} />
+            <MiniStatRow label="Netlik" value={qa?.clarity === null || qa?.clarity === undefined ? '—' : String(qa.clarity)} />
+            <MiniStatRow label="Hız" value={qa?.speed === null || qa?.speed === undefined ? '—' : String(qa.speed)} />
+            <MiniStatRow label="Örneklem" value={`${qa?.sampleCount ?? 0} vaka`} />
+          </div>
+        </AiMiniCard>
+      </div>
+    </div>
+  );
+}
+
+// Ops Pano v2 FAZ 1 — DB'de ASCII-normalize enum (Sikayet/Oneri), UI'da TR
+// (server/db/enumMap.js M_REQUEST + M_ORIGIN'in görüntü karşılığı).
+const REQUEST_TYPE_LABEL: Record<string, string> = {
+  Bilgi: 'Bilgi',
+  Oneri: 'Öneri',
+  Talep: 'Talep',
+  Sikayet: 'Şikayet',
+  Hata: 'Hata',
+};
+const REQUEST_TYPE_COLOR: Record<string, string> = {
+  Bilgi: 'bg-sky-500',
+  Oneri: 'bg-emerald-500',
+  Talep: 'bg-brand-500',
+  Sikayet: 'bg-rose-500',
+  Hata: 'bg-amber-500',
+};
+const ORIGIN_LABEL: Record<string, string> = {
+  Telefon: 'Telefon',
+  Eposta: 'E-posta',
+  Web: 'Web',
+  Chatbot: 'Chatbot',
+  Diger: 'Diğer',
+};
+const ORIGIN_COLOR: Record<string, string> = {
+  Telefon: 'bg-violet-500',
+  Eposta: 'bg-brand-500',
+  Web: 'bg-emerald-500',
+  Chatbot: 'bg-amber-500',
+  Diger: 'bg-slate-500',
+};
+
+function mapRequestTypeItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
+  return rows.map((r) => ({
+    key: r.key,
+    label: REQUEST_TYPE_LABEL[r.key] ?? r.key,
+    value: r.count,
+    color: REQUEST_TYPE_COLOR[r.key] ?? 'bg-slate-500',
+    // bucket YOK — drilldown bilinçli kapalı (FAZ 1 kapsamı; BreakdownCard
+    // bucket'sız item'ı tıklanamaz düz metin basar).
+  }));
+}
+
+function mapOriginItems(rows: { key: string; count: number }[]): DrilldownBarItem[] {
+  return rows.map((r) => ({
+    key: r.key,
+    label: ORIGIN_LABEL[r.key] ?? r.key,
+    value: r.count,
+    color: ORIGIN_COLOR[r.key] ?? 'bg-slate-500',
   }));
 }
 

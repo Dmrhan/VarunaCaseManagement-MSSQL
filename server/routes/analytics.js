@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '../db/client.js';
+import { checkAccountInScope } from '../analytics/accountScopeGuard.js';
 import { verifyJwt, requireRole } from '../db/auth.js';
 import { computeOperationsOverview } from '../analytics/operationsAggregator.js';
 import { computeMonthlyBulletin } from '../analytics/bulletinAggregator.js';
@@ -721,6 +722,10 @@ const MAX_DRILLDOWN_PAGE_SIZE = 200;
  *  - minSampleViolations, notAvailable, approximations
  *  - metricAuditId
  */
+// Ops Pano v2 FAZ 1 — accountId scope guard: Codex R1 P1 (PR #417) sonrası
+// server/analytics/accountScopeGuard.js'e TEK KAYNAK olarak taşındı (AI
+// uçları da kullanır).
+
 router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
   const t0 = Date.now();
   try {
@@ -736,6 +741,19 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
     // 2) Scope derivation (§2.2A) — server-side, body filter genisletemez
     const scope = deriveAnalyticsScope(req.user, body);
 
+    // Ops Pano v2 FAZ 1 — müşteri lensi. accountId opsiyonel; verilirse
+    // scope guard'dan geçer (404/403), sonra aggregator filtresine iner
+    // (aggregator accountId'yi zaten biliyor — bülten A4).
+    let accountId;
+    if (body.accountId !== undefined && body.accountId !== null && body.accountId !== '') {
+      if (typeof body.accountId !== 'string') {
+        return res.status(400).json({ error: 'invalid_input', message: 'accountId string olmalı.' });
+      }
+      const check = await checkAccountInScope(body.accountId, scope);
+      if (!check.ok) return res.status(check.status).json(check.body);
+      accountId = body.accountId;
+    }
+
     const filters = {
       from: from.toISOString(),
       to: to.toISOString(),
@@ -743,6 +761,7 @@ router.post('/cases/overview', requireOverviewAnalytics, async (req, res) => {
       caseTypes:     sanitizeStringArray(body.caseTypes),
       statuses:      sanitizeStringArray(body.statuses),
       granularity:   body.granularity === 'hour' ? 'hour' : 'day',
+      ...(accountId ? { accountId } : {}),
     };
 
     // 3) Aggregator cagrisi (deterministic)
@@ -831,6 +850,18 @@ router.post('/cases/drilldown', requireOverviewAnalytics, async (req, res) => {
 
     const { from, to } = validation;
     const scope = deriveAnalyticsScope(req.user, body);
+
+    // Ops Pano v2 FAZ 1 — müşteri lensi (overview ile AYNI guard).
+    let drillAccountId;
+    if (body.accountId !== undefined && body.accountId !== null && body.accountId !== '') {
+      if (typeof body.accountId !== 'string') {
+        return res.status(400).json({ error: 'invalid_input', message: 'accountId string olmalı.' });
+      }
+      const check = await checkAccountInScope(body.accountId, scope);
+      if (!check.ok) return res.status(check.status).json(check.body);
+      drillAccountId = body.accountId;
+    }
+
     const filters = {
       from: from.toISOString(),
       to: to.toISOString(),
@@ -838,6 +869,7 @@ router.post('/cases/drilldown', requireOverviewAnalytics, async (req, res) => {
       caseTypes:     sanitizeStringArray(body.caseTypes),
       statuses:      sanitizeStringArray(body.statuses),
       granularity:   body.granularity === 'hour' ? 'hour' : 'day',
+      ...(drillAccountId ? { accountId: drillAccountId } : {}),
     };
     const page = sanitizePositiveInt(body.page, 1);
     const pageSize = Math.min(sanitizePositiveInt(body.pageSize, 50), MAX_DRILLDOWN_PAGE_SIZE);

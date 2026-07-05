@@ -113,6 +113,12 @@ export interface OverviewRequest {
   caseTypes?: string[];
   statuses?: string[];
   granularity?: OverviewGranularity;
+  /**
+   * Ops Pano v2 FAZ 1 — müşteri lensi. Verilirse tüm kart/kırılım/trend
+   * yalnız bu müşterinin vakalarını sayar. Backend scope-guard'lıdır
+   * (scope dışı account → 403 account_out_of_scope).
+   */
+  accountId?: string;
 }
 
 export type DrilldownBucket =
@@ -207,6 +213,12 @@ export interface OverviewScope {
   effectiveScopeReason: string;
 }
 
+export interface OverviewTaxonomyRow {
+  key: string;
+  label: string;
+  count: number;
+}
+
 export interface OperationsOverviewResponse {
   asOf: string;
   asOfLocal: string;
@@ -230,6 +242,35 @@ export interface OperationsOverviewResponse {
   byStatus: OverviewCountPair[];
   byPriority: OverviewCountPair[];
   byCaseType: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 1 — Talep Türü kırılımı (aggregate hazırdı, UI'a bağlandı). */
+  byRequestType: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 1 — Kanal (origin) kırılımı. */
+  byOrigin: OverviewCountPair[];
+  /** Ops Pano v2 FAZ 2 — AI görüş alanı (aggregate-only; PII yok). */
+  bySmartTicketPlatform: OverviewTaxonomyRow[];
+  bySmartTicketBusinessProcess: OverviewTaxonomyRow[];
+  bySmartTicketOperationType: OverviewTaxonomyRow[];
+  bySmartTicketAffectedObject: OverviewTaxonomyRow[];
+  bySmartTicketImpact: OverviewTaxonomyRow[];
+  bySolutionStepSource: OverviewCountPair[];
+  /** external_kb adım oranı 0-1; hiç adım yoksa null. */
+  kbAssistedResolutionRate: number | null;
+  mailOps: {
+    pendingCustomerReply: number;
+    inboundVolume: number;
+    outboundVolume: number;
+    firstResponseMedianMin: number | null;
+  };
+  patternAlerts: {
+    activeCount: number;
+    largestSpike: { category: string; caseCount: number } | null;
+  };
+  qaAverages: {
+    empathy: number | null;
+    clarity: number | null;
+    speed: number | null;
+    sampleCount: number;
+  };
   byCompany: OverviewCompanyRow[] | null;
   byTeam: OverviewTeamRow[];
   byCategory: OverviewCategoryRow[];
